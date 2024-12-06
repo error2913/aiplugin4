@@ -28,6 +28,16 @@ export function repeatDetection(s: string, messages: Message[]): boolean {
 export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string): { s: string, reply: string, commands: string[] } {
     const { maxChar, cut, replymsg } = Config.getHandleReplyConfig();
 
+    let commands: string[] | null = s.match(/<\$(.+?)\$>/g);
+
+    if (commands !== null) {
+        commands = commands.map(item => {
+            return item.replace(/<\$|\$>/g, '');
+        });
+    } else {
+        commands = [];
+    }
+
     if (cut) {
         s = s.split('\n')[0];
     }
@@ -38,16 +48,6 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string):
     s = s
         .replace(/<[\|｜].*?[\|｜]>/g, '')
         .slice(0, maxChar)
-
-    let commands: string[] | null = s.match(/<\$(.+?)\$>/g);
-
-    if (commands !== null) {
-        commands = commands.map(item => {
-            return item.replace(/<\$|\$>/g, '');
-        });
-    } else {
-        commands = [];
-    }
 
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}]` : ``;
     const reply = prefix + s.replace(/<\$(.+?)\$>/g, '');

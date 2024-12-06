@@ -1,9 +1,44 @@
 import { Config } from "./configUtils";
 
 export class Command {
-    static cmdArgs: seal.CmdArgs = null;
+    name: string;
+    command: string;
+    args: string[];
+    prompt: string;
+    solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, ...extraArgs: string[]) => void;
 
-    static HandleCommands(ctx: seal.MsgContext, msg: seal.Message, commands: string[]) {
+    constructor(name: string, command: string, ...args: string[]) {
+        this.name = name;
+        this.command = command;
+        this.args = args;
+        this.prompt = '';
+    }
+
+    handleCmdArgs(cmdArgs: seal.CmdArgs, ...extraArgs: string[]) {
+        cmdArgs.command = this.command;
+        cmdArgs.args = this.args.concat(extraArgs);
+        cmdArgs.kwargs = [];
+        cmdArgs.at = [];
+        cmdArgs.rawArgs = cmdArgs.args.join(' ');
+        cmdArgs.amIBeMentioned = false;
+        cmdArgs.amIBeMentionedFirst = false;
+        cmdArgs.cleanArgs = cmdArgs.args.join(' ');
+    }
+}
+
+export class CommandManager {
+    static cmdArgs: seal.CmdArgs = null;
+    static cmdMap: { [key: string]: Command } = {};
+
+    static registerCommand(cmd: Command) {
+        this.cmdMap[cmd.name] = cmd;
+    }
+
+    static getCommandsPrompt() {
+        return Object.values(this.cmdMap).map(item => item.prompt).join(',');
+    }
+
+    static handleCommands(ctx: seal.MsgContext, msg: seal.Message, commands: string[]) {
         if (commands.length !== 0) {
             Config.printLog(`AI命令:`, JSON.stringify(commands));
         }
@@ -30,146 +65,94 @@ export class Command {
 
         for (const cmd of Object.keys(commandMap)) {
             const arg = commandMap[cmd];
-            switch (cmd) {
-                case 'deck': {
-                    this.draw(ctx, msg, arg);
-                    break;
-                }
-                case 'rename': {
-                    this.setGroupCard(ctx, msg, arg);
-                    break;
-                }
-                case '随机模组': {
-                    this.modu_roll(ctx, msg);
-                    break;
-                }
-                case '查询模组': {
-                    this.modu_search(ctx, msg, arg);
-                    break;
-                }
-                case '检定': {
-                    this.ra(ctx, msg, arg);
-                    break;
-                }
-                case 'show': {
-                    this.st_show(ctx, msg);
-                    break;
-                }
-                case '今日人品': {
-                    this.jrrp(ctx, msg);
-                    break;
-                }
-                case 'face': {
-                    this.face(ctx, msg, arg);
-                    break;
-                }
-                default: {
-                    console.error(`AI命令${cmd}不存在`);
-                    break;
-                }
+            if (this.cmdMap.hasOwnProperty(cmd)) {
+                this.cmdMap[cmd].solve(ctx, msg, this.cmdArgs, arg);
+            } else {
+                console.error(`AI命令${cmd}不存在`);
             }
         }
     }
+}
 
-    static draw(ctx: seal.MsgContext, msg: seal.Message, name: string) {
-        const dr = seal.deck.draw(ctx, name, true);
-        if (!dr.exists) {
-            console.error(`牌堆${name}不存在:${dr.err}`);
-        }
-
-        const result = dr.result;
-        if (result == null) {
-            console.error(`牌堆${name}结果为空:${dr.err}`);
-        }
-
-        seal.replyToSender(ctx, msg, result);
+const cmdDraw = new Command('deck', '');
+cmdDraw.prompt = '抽取牌堆的命令:<$deck#牌堆的名字$>';
+cmdDraw.solve = (ctx, msg, _, name) => {
+    const dr = seal.deck.draw(ctx, name, true);
+    if (!dr.exists) {
+        console.error(`牌堆${name}不存在:${dr.err}`);
     }
 
-    static setGroupCard(ctx: seal.MsgContext, msg: seal.Message, name: string) {
-        try {
-            seal.setPlayerGroupCard(ctx, name);
-            seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${name}>`);
-        } catch (e) {
-            console.error(e);
-        }
+    const result = dr.result;
+    if (result == null) {
+        console.error(`牌堆${name}结果为空:${dr.err}`);
     }
 
-    static modu_roll(ctx: seal.MsgContext, msg: seal.Message) {
-        this.cmdArgs.command = 'modu';
-        this.cmdArgs.args = ['roll'];
-        this.cmdArgs.kwargs = [];
-        this.cmdArgs.at = [];
-        this.cmdArgs.rawArgs = 'roll';
-        this.cmdArgs.amIBeMentioned = false;
-        this.cmdArgs.amIBeMentionedFirst = false;
-        this.cmdArgs.cleanArgs = 'roll';
+    seal.replyToSender(ctx, msg, result);
+}
+CommandManager.registerCommand(cmdDraw);
 
-        const ext = seal.ext.find('story');
-        ext.cmdMap['modu'].solve(ctx, msg, this.cmdArgs);
+const cmdRename = new Command('rename', '');
+cmdRename.prompt = '设置群名片的命令:<$rename#要设置的名字$>';
+cmdRename.solve = (ctx, msg, _, name) => {
+    try {
+        seal.setPlayerGroupCard(ctx, name);
+        seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${name}>`);
+    } catch (e) {
+        console.error(e);
     }
+}
+CommandManager.registerCommand(cmdRename);
 
-    static modu_search(ctx: seal.MsgContext, msg: seal.Message, name: string) {
-        this.cmdArgs.command = 'modu';
-        this.cmdArgs.args = ['search', name];
-        this.cmdArgs.kwargs = [];
-        this.cmdArgs.at = [];
-        this.cmdArgs.rawArgs = `search ${name}`;
-        this.cmdArgs.amIBeMentioned = false;
-        this.cmdArgs.amIBeMentionedFirst = false;
-        this.cmdArgs.cleanArgs = `search ${name}`;
+const cmdModuRoll = new Command('随机模组', 'modu', 'roll');
+cmdModuRoll.prompt = '随机模组的命令:<$随机模组$>';
+cmdModuRoll.solve = (ctx, msg, cmdArgs) => {
+    cmdModuRoll.handleCmdArgs(cmdArgs);
+    const ext = seal.ext.find('story');
+    ext.cmdMap['modu'].solve(ctx, msg, cmdArgs);
+}
+CommandManager.registerCommand(cmdModuRoll);
 
-        const ext = seal.ext.find('story');
-        ext.cmdMap['modu'].solve(ctx, msg, this.cmdArgs);
-    }
+const cmdModuSearch = new Command('查询模组','modu', 'show');
+cmdModuSearch.prompt = '查询模组的命令:<$查询模组#要查询的关键词$>';
+cmdModuSearch.solve = (ctx, msg, cmdArgs, name) => {
+    cmdModuSearch.handleCmdArgs(cmdArgs, name);
+    const ext = seal.ext.find('story');
+    ext.cmdMap['modu'].solve(ctx, msg, cmdArgs);
+}
+CommandManager.registerCommand(cmdModuSearch);
 
-    static ra(ctx: seal.MsgContext, msg: seal.Message, name: string) {
-        this.cmdArgs.command = 'ra';
-        this.cmdArgs.args = [name];
-        this.cmdArgs.kwargs = [];
-        this.cmdArgs.at = [];
-        this.cmdArgs.rawArgs = name;
-        this.cmdArgs.amIBeMentioned = false;
-        this.cmdArgs.amIBeMentionedFirst = false;
-        this.cmdArgs.cleanArgs = name;
+const cmdRa = new Command('检定','ra');
+cmdRa.prompt = '进行检定的命令:<$检定#检定目的或技能名$>';
+cmdRa.solve = (ctx, msg, cmdArgs, name) => {
+    cmdRa.handleCmdArgs(cmdArgs, name);
+    const ext = seal.ext.find('coc7');
+    ext.cmdMap['ra'].solve(ctx, msg, cmdArgs);
+}
+CommandManager.registerCommand(cmdRa);
 
-        const ext = seal.ext.find('coc7');
-        ext.cmdMap['ra'].solve(ctx, msg, this.cmdArgs);
-    }
+const cmdStShow = new Command('show', 'st', 'show');
+cmdStShow.prompt = '展示属性的指令:<$show$>';
+cmdStShow.solve = (ctx, msg, cmdArgs) => {
+    cmdStShow.handleCmdArgs(cmdArgs);
+    const ext = seal.ext.find('coc7');
+    ext.cmdMap['st'].solve(ctx, msg, cmdArgs);
+}
 
-    static st_show(ctx: seal.MsgContext, msg: seal.Message) {
-        this.cmdArgs.command = 'st';
-        this.cmdArgs.args = ['show'];
-        this.cmdArgs.kwargs = [];
-        this.cmdArgs.at = [];
-        this.cmdArgs.rawArgs = 'show';
-        this.cmdArgs.amIBeMentioned = false;
-        this.cmdArgs.amIBeMentionedFirst = false;
-        this.cmdArgs.cleanArgs = 'show';
+const cmdJrrp = new Command('今日人品','jrrp');
+cmdJrrp.prompt = '查看今日人品的指令:<$今日人品$>';
+cmdJrrp.solve = (ctx, msg, cmdArgs) => {
+    cmdJrrp.handleCmdArgs(cmdArgs);
+    const ext = seal.ext.find('fun');
+    ext.cmdMap['jrrp'].solve(ctx, msg, cmdArgs);
+}
 
-        const ext = seal.ext.find('coc7');
-        ext.cmdMap['st'].solve(ctx, msg, this.cmdArgs);
-    }
-
-    static jrrp(ctx: seal.MsgContext, msg: seal.Message) {
-        this.cmdArgs.command = 'jrrp';
-        this.cmdArgs.args = [];
-        this.cmdArgs.kwargs = [];
-        this.cmdArgs.at = [];
-        this.cmdArgs.rawArgs = '';
-        this.cmdArgs.amIBeMentioned = false;
-        this.cmdArgs.amIBeMentionedFirst = false;
-        this.cmdArgs.cleanArgs = '';
-
-        const ext = seal.ext.find('fun');
-        ext.cmdMap['jrrp'].solve(ctx, msg, this.cmdArgs);
-    }
-
-    static face(ctx: seal.MsgContext, msg: seal.Message, name: string) {
-        const { localImages } = Config.getLocalImageConfig();
-        if (localImages.hasOwnProperty(name)) {
-            seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);
-        } else {
-            console.error(`本地图片${name}不存在`);
-        }
+const cmdFace = new Command('face','');
+cmdFace.prompt = '';
+cmdFace.solve = (ctx, msg, _, name) => {
+    const { localImages } = Config.getLocalImageConfig();
+    if (localImages.hasOwnProperty(name)) {
+        seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);
+    } else {
+        console.error(`本地图片${name}不存在`);
     }
 }

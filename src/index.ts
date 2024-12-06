@@ -1,5 +1,5 @@
 import { AIManager } from "./AI/AIManager";
-import { Command } from "./utils/commandUtils";
+import { CommandManager } from "./utils/commandUtils";
 import { Config } from "./utils/configUtils";
 import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 
@@ -586,8 +586,8 @@ function main() {
 
   //接受的指令
   ext.onCommandReceived = async (ctx, msg, cmdArgs) => {
-    if (Command.cmdArgs === null) {
-      Command.cmdArgs = cmdArgs;
+    if (CommandManager.cmdArgs === null) {
+      CommandManager.cmdArgs = cmdArgs;
     }
 
     const { allcmd } = Config.getMonitorCommandConfig();

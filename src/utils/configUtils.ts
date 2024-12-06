@@ -1,3 +1,5 @@
+import { CommandManager } from "./commandUtils";
+
 export class Config {
     static ext: seal.ExtInfo;
 
@@ -73,19 +75,11 @@ export class Config {
             role: "system",
             content: roleSetting + `\n当前群聊:${groupName}`
         };
-        const { localImages } = this.getLocalImageConfig();
-        const commands = [
-            '抽取牌堆的命令:<$deck#牌堆的名字$>',
-            '设置群名片的命令:<$rename#要设置的名字$>',
-            '随机模组的命令:<$随机模组$>',
-            '查询模组的命令:<$查询模组#要查询的关键词$>',
-            '进行检定的命令:<$检定#检定目的或技能名$>',
-            '展示属性的指令:<$show$>',
-            '查看今日人品的指令:<$今日人品$>',
-            `发送表情的指令:<$face#表情名称$>,表情名称有:${Object.keys(localImages).join('，')}`
-        ]
         if (isCmd) {
-            systemMessage.content += `\n\n在对话中你可以使用以下命令：${commands.join('，')}`;
+            const commandsPrompt = CommandManager.getCommandsPrompt();
+            const { localImages } = Config.getLocalImageConfig();
+            const facePrompt = `发送表情的指令:<$face#表情名称$>,表情名称有:${Object.keys(localImages).join('，')}`;
+            systemMessage.content += `\n\n在对话中你可以使用以下命令：${commandsPrompt},${facePrompt}`;
         }
 
         return { systemMessage, isCmd };
