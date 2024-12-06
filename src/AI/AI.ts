@@ -1,5 +1,5 @@
 import { ImageManager } from "../image/imageManager";
-import { Command } from "../utils/commandUtils";
+import { CommandManager } from "../utils/commandUtils";
 import { Config } from "../utils/configUtils";
 import { handleReply, repeatDetection } from "../utils/handleReplyUtils";
 import { getRespose, sendRequest } from "../utils/requestUtils";
@@ -257,7 +257,7 @@ export class AI {
 
         // commands相关处理
         if (isCmd && commands.length !== 0) {
-            Command.HandleCommands(ctx, msg, commands);
+            CommandManager.handleCommands(ctx, msg, commands);
         }
 
         //发送图片
