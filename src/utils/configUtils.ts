@@ -86,13 +86,16 @@ export class Config {
             const facePrompt = `发送表情的指令:<$face#表情名称$>,表情名称有:${Object.keys(localImages).join('，')}`;
             systemMessage.content += `\n\n在对话中你可以使用以下命令：${commandsPrompt},${facePrompt}`;
         }
-        const samplesMessages = samples.map((item, index) => {
-            const role = index % 2 === 0? "user" : "assistant";
-            return {
-                role,
-                content: item
-            };
-        });
+        const samplesMessages = samples
+            .map((item, index) => {
+                const role = index % 2 === 0 ? "user" : "assistant";
+                if (item == "") {
+                    return null;
+                } else {
+                    return { role, content: item };
+                }
+            })
+            .filter((item) => item !== null);
         const systemMessages = [systemMessage, ...samplesMessages];
 
         return { systemMessages, isCmd };
