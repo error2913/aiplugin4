@@ -1,8 +1,9 @@
 import { Message } from "../AI/AI";
 import { Config } from "./configUtils";
+import { calculateSimilarity } from "./utils";
 
 export function repeatDetection(s: string, messages: Message[]): boolean {
-    const { stopRepeat } = Config.getRepeatConfig();
+    const { stopRepeat, similarityLimit } = Config.getRepeatConfig();
     if (!stopRepeat) {
         return false;
     }
@@ -15,8 +16,10 @@ export function repeatDetection(s: string, messages: Message[]): boolean {
 
     if (assContents.length > 0) {
         const { index, content } = assContents[assContents.length - 1];
-        const clearText = content.replace(/<[\|｜\$].*[\|｜\$]>/g, '');
-        if (clearText.trim() === s.trim()) {
+        const clearText = content.replace(/<[\|｜].*?[\|｜]>/g, '');
+        const similarity = calculateSimilarity(clearText.trim(), s.trim());
+        Config.printLog(`复读相似度：${similarity}`);
+        if (similarity > similarityLimit) {
             messages.splice(index, 1);
             return true;
         }

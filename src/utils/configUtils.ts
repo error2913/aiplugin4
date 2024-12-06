@@ -188,10 +188,12 @@ export class Config {
 
     static registerRepeatConfig() {
         seal.ext.registerBoolConfig(this.ext, "禁止AI复读", false, "");
+        seal.ext.registerFloatConfig(this.ext, "视作复读的最低相似度", 0.8, "");
     }
     static getRepeatConfig() {
         const stopRepeat = seal.ext.getBoolConfig(this.ext, "禁止AI复读");
-        return { stopRepeat };
+        const similarityLimit = seal.ext.getFloatConfig(this.ext, "视作复读的最低相似度");
+        return { stopRepeat, similarityLimit };
     }
 
     static registerInterruptConfig() {
