@@ -7,6 +7,6 @@
 // 2024-12-05 16:27:59
 // @license      MIT
 // @homepageURL  https://github.com/error2913/sealdice-js/
-// @updateUrl    https://mirror.ghproxy.com/https://raw.githubusercontent.com/error2913/sealdice-js/main/release/xxx.js
-// @updateUrl    https://raw.githubusercontent.com/error2913/sealdice-js/main/release/xxx.js
+// @updateUrl    https://mirror.ghproxy.com/https://raw.githubusercontent.com/baiyu-yu/plug-in/main/aiplugin4.js
+// @updateUrl    https://raw.githubusercontent.com//baiyu-yu/plug-in/main/aiplugin4.js
 // ==/UserScript==
