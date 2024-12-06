@@ -479,7 +479,7 @@ function main() {
       if (ai.image.stealStatus) {
         const urls = getUrlsInCQCode(message);
         if (urls.length !== 0) {
-          ai.image.images.concat(urls).slice(-maxImageNum);
+          ai.image.images = ai.image.images.concat(urls).slice(-maxImageNum);
           ai.image.saveImage();
         }
       }
@@ -587,14 +587,6 @@ function main() {
   //接受的指令
   ext.onCommandReceived = async (ctx, msg, cmdArgs) => {
     if (Command.cmdArgs === null) {
-      cmdArgs.command = '';
-      cmdArgs.args = [];
-      cmdArgs.kwargs = [];
-      cmdArgs.at = [];
-      cmdArgs.rawArgs = '';
-      cmdArgs.amIBeMentioned = false;
-      cmdArgs.amIBeMentionedFirst = false;
-      cmdArgs.cleanArgs = '';
       Command.cmdArgs = cmdArgs;
     }
 

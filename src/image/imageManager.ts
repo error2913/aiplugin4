@@ -114,7 +114,7 @@ export class ImageManager {
 
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition == 0) {
-          return '';
+          return '图片';
         }
 
         const messages = [{
