@@ -130,6 +130,7 @@ cmdStShow.solve = (ctx, msg, cmdArgs) => {
     const ext = seal.ext.find('coc7');
     ext.cmdMap['st'].solve(ctx, msg, cmdArgs);
 }
+CommandManager.registerCommand(cmdStShow);
 
 const cmdJrrp = new Command('今日人品','jrrp');
 cmdJrrp.prompt = '查看今日人品的指令:<$今日人品$>';
@@ -138,6 +139,7 @@ cmdJrrp.solve = (ctx, msg, cmdArgs) => {
     const ext = seal.ext.find('fun');
     ext.cmdMap['jrrp'].solve(ctx, msg, cmdArgs);
 }
+CommandManager.registerCommand(cmdJrrp);
 
 const cmdFace = new Command('face','');
 cmdFace.prompt = '';
@@ -149,3 +151,4 @@ cmdFace.solve = (ctx, msg, _, name) => {
         console.error(`本地图片${name}不存在`);
     }
 }
+CommandManager.registerCommand(cmdFace);

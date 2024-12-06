@@ -211,8 +211,8 @@ export class AI {
         }
     }
 
-    async getReply(ctx: seal.MsgContext, msg: seal.Message, systemMessage: Message, retry = 0): Promise<{ s: string, reply: string, commands: string[] }> {
-        const messages = [systemMessage, ...this.context.messages];
+    async getReply(ctx: seal.MsgContext, msg: seal.Message, systemMessages: Message[], retry = 0): Promise<{ s: string, reply: string, commands: string[] }> {
+        const messages = [...systemMessages, ...this.context.messages];
 
         //获取处理后的回复
         const raw_reply = await sendRequest(messages);
@@ -231,7 +231,7 @@ export class AI {
 
             //等待一秒后进行重试
             await new Promise(resolve => setTimeout(resolve, 1000));
-            return await this.getReply(ctx, msg, systemMessage, retry);
+            return await this.getReply(ctx, msg, systemMessages, retry);
         }
 
         return { s, reply, commands };
@@ -248,8 +248,8 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const { systemMessage, isCmd } = Config.getSystemMessageConfig(ctx.group.groupName);
-        const { s, reply, commands } = await this.getReply(ctx, msg, systemMessage);
+        const { systemMessages, isCmd } = Config.getSystemMessageConfig(ctx.group.groupName);
+        const { s, reply, commands } = await this.getReply(ctx, msg, systemMessages);
 
         result.push(reply);
         this.context.lastReply = reply;
