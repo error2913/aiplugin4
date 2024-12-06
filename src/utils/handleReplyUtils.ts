@@ -47,6 +47,7 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string):
 
     s = s
         .replace(/<[\|｜].*?[\|｜]>/g, '')
+        .replace(/<br>/g, '\n')
         .slice(0, maxChar)
 
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}]` : ``;

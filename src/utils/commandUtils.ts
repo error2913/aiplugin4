@@ -105,7 +105,7 @@ cmdModuRoll.solve = (ctx, msg, cmdArgs) => {
 }
 CommandManager.registerCommand(cmdModuRoll);
 
-const cmdModuSearch = new Command('查询模组','modu', 'show');
+const cmdModuSearch = new Command('查询模组','modu', 'search');
 cmdModuSearch.prompt = '查询模组的命令:<$查询模组#要查询的关键词$>';
 cmdModuSearch.solve = (ctx, msg, cmdArgs, name) => {
     cmdModuSearch.handleCmdArgs(cmdArgs, name);
