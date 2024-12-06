@@ -182,9 +182,16 @@ export class Config {
         seal.ext.registerStringConfig(this.ext, "插嘴url地址", "无", "为“无”的时候自动使用前面填写的url地址和API Key");
         seal.ext.registerStringConfig(this.ext, "插嘴API Key", "你的API Key", "");
         seal.ext.registerTemplateConfig(this.ext, "插嘴body", [
+            `"messages":null`,
             `"model":"deepseek-chat"`,
-            `"max_tokens":2`
-        ], "")
+            `"max_tokens":2`,
+            `"stop":null`,
+            `"stream":false`,
+            `"frequency_penalty":0`,
+            `"presence_penalty":0`,
+            `"temperature":1`,
+            `"top_p":1`
+        ], "messages将会自动替换")
 
         seal.ext.registerIntConfig(this.ext, "参与插嘴检测的上下文轮数", 8, "");;
         seal.ext.registerStringConfig(this.ext, "进行插嘴检测的话题", "吃饭、跑团、大成功、大失败、模组、AI、骰娘", "");
