@@ -1,0 +1,12 @@
+// ==UserScript==
+// @name         AI骰娘4
+// @author       错误、白鱼
+// @version      4.0.0
+// @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。
+// @timestamp    1733387279
+// 2024-12-05 16:27:59
+// @license      MIT
+// @homepageURL  https://github.com/error2913/sealdice-js/
+// @updateUrl    https://mirror.ghproxy.com/https://raw.githubusercontent.com/error2913/sealdice-js/main/release/xxx.js
+// @updateUrl    https://raw.githubusercontent.com/error2913/sealdice-js/main/release/xxx.js
+// ==/UserScript==
