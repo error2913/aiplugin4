@@ -268,7 +268,7 @@ export class AI {
                 result.push(`[CQ:image,file=${file}]`);
             }
         }
-        console.log(result);
+        
         this.isChatting = false;
         return result;
     }
