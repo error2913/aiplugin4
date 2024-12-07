@@ -237,13 +237,12 @@ export class AI {
         return { s, reply, commands };
     }
 
-    async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<string[]> {
+    async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         if (this.isChatting) {
             ConfigManager.printLog(this.id, `正在处理消息，跳过`);
-            return [];
+            return;
         }
         this.isChatting = true;
-        const result: string[] = [];
 
         //清空数据
         this.clearData();
@@ -251,9 +250,11 @@ export class AI {
         const { systemMessages, isCmd } = ConfigManager.getSystemMessageConfig(ctx.group.groupName);
         const { s, reply, commands } = await this.getReply(ctx, msg, systemMessages);
 
-        result.push(reply);
         this.context.lastReply = reply;
         await this.iteration(ctx, s, 'assistant');
+
+        // 发送回复
+        seal.replyToSender(ctx, msg, reply);
 
         // commands相关处理
         if (isCmd && commands.length !== 0) {
@@ -265,12 +266,11 @@ export class AI {
         if (Math.random() <= p) {
             const file = await this.image.drawImage();
             if (file) {
-                result.push(`[CQ:image,file=${file}]`);
+                seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
             }
         }
         
         this.isChatting = false;
-        return result;
     }
 
     async getAct(): Promise<number> {

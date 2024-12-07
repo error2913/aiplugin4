@@ -515,11 +515,7 @@ function main() {
         await ai.iteration(ctx, message, 'user');
 
         ConfigManager.printLog('非指令触发回复');
-        const result = await ai.chat(ctx, msg);
-        for (let i = 0; i < result.length; i++) {
-          seal.replyToSender(ctx, msg, result[i]);
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
+        await ai.chat(ctx, msg);
         aim.saveAI(id);
         return;
       }
@@ -538,11 +534,7 @@ function main() {
             ConfigManager.printLog('计数器触发回复');
             ai.data.counter = 0;
 
-            const result = await ai.chat(ctx, msg);
-            for (let i = 0; i < result.length; i++) {
-              seal.replyToSender(ctx, msg, result[i]);
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
+            await ai.chat(ctx, msg);
             aim.saveAI(id);
             return;
           }
@@ -554,11 +546,7 @@ function main() {
           if (ran <= pr.prob) {
             ConfigManager.printLog('概率触发回复');
 
-            const result = await ai.chat(ctx, msg);
-            for (let i = 0; i < result.length; i++) {
-              seal.replyToSender(ctx, msg, result[i]);
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
+            await ai.chat(ctx, msg);
             aim.saveAI(id);
             return;
           }
@@ -571,11 +559,7 @@ function main() {
             ConfigManager.printLog(`插嘴触发回复:${act}`);
             ai.data.interrupt.act = 0;
 
-            const result = await ai.chat(ctx, msg);
-            for (let i = 0; i < result.length; i++) {
-              seal.replyToSender(ctx, msg, result[i]);
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
+            await ai.chat(ctx, msg);
             aim.saveAI(id);
             return;
           }
@@ -586,11 +570,7 @@ function main() {
             ConfigManager.printLog('计时器触发回复');
 
             ai.data.timer = null;
-            const result = await ai.chat(ctx, msg);
-            for (let i = 0; i < result.length; i++) {
-              seal.replyToSender(ctx, msg, result[i]);
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
+            await ai.chat(ctx, msg);
             aim.saveAI(id);
           }, pr.timer * 1000 + Math.floor(Math.random() * 500));
         }
