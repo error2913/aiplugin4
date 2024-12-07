@@ -10,9 +10,9 @@ function main() {
     seal.ext.register(ext);
   }
 
-  CommandManager.init();
   Config.ext = ext;
   Config.register();
+  CommandManager.init();
   const aim = new AIManager();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
