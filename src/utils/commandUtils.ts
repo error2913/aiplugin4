@@ -5,9 +5,22 @@ export class Command {
     command: string;
     args: string[];
     prompt: string;
+    
+    /**
+     * 处理命令的函数
+     * @param ctx 
+     * @param msg 
+     * @param cmdArgs 
+     * @param extraArgs 额外参数，即在命令中使用#分割的部分
+     */
     solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, ...extraArgs: string[]) => void;
 
-    constructor(name: string, command: string, ...args: string[]) {
+    /**
+     * @param name 命令的名字，<$这一部分#参数1#参数2$>
+     * @param command 指令，如 .st show 的st，没有可以不写
+     * @param args 命令的参数
+     */
+    constructor(name: string, command: string = '', ...args: string[]) {
         this.name = name;
         this.command = command;
         this.args = args;
@@ -67,7 +80,7 @@ export class CommandManager {
     }
 }
 
-const cmdDraw = new Command('deck', '');
+const cmdDraw = new Command('deck');
 cmdDraw.prompt = '抽取牌堆的命令:<$deck#牌堆的名字$>';
 cmdDraw.solve = (ctx, msg, _, name) => {
     const dr = seal.deck.draw(ctx, name, true);
@@ -84,7 +97,7 @@ cmdDraw.solve = (ctx, msg, _, name) => {
 }
 CommandManager.registerCommand(cmdDraw);
 
-const cmdRename = new Command('rename', '');
+const cmdRename = new Command('rename');
 cmdRename.prompt = '设置群名片的命令:<$rename#要设置的名字$>';
 cmdRename.solve = (ctx, msg, _, name) => {
     try {
@@ -141,7 +154,7 @@ cmdJrrp.solve = (ctx, msg, cmdArgs) => {
 }
 CommandManager.registerCommand(cmdJrrp);
 
-const cmdFace = new Command('face','');
+const cmdFace = new Command('face');
 cmdFace.prompt = '';
 cmdFace.solve = (ctx, msg, _, name) => {
     const { localImages } = Config.getLocalImageConfig();
