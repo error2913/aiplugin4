@@ -1,5 +1,5 @@
 import { ImageManager } from "../image/imageManager";
-import { CommandManager } from "../utils/commandUtils";
+import { CommandManager } from "../command/commandManager";
 import { Config } from "../utils/configUtils";
 import { handleReply, repeatDetection } from "../utils/handleReplyUtils";
 import { getRespose, sendRequest } from "../utils/requestUtils";

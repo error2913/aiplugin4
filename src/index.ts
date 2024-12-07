@@ -1,15 +1,16 @@
 import { AIManager } from "./AI/AIManager";
-import { CommandManager } from "./utils/commandUtils";
+import { CommandManager } from "./command/commandManager";
 import { Config } from "./utils/configUtils";
 import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.0.2');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.0.3');
     seal.ext.register(ext);
   }
 
+  CommandManager.init();
   Config.ext = ext;
   Config.register();
   const aim = new AIManager();
@@ -517,6 +518,7 @@ function main() {
           seal.replyToSender(ctx, msg, result[i]);
           await new Promise(resolve => setTimeout(resolve, 500));
         }
+        aim.saveAI(id);
         return;
       }
 
@@ -543,6 +545,7 @@ function main() {
               seal.replyToSender(ctx, msg, result[i]);
               await new Promise(resolve => setTimeout(resolve, 500));
             }
+            aim.saveAI(id);
             return;
           }
         }
@@ -558,6 +561,7 @@ function main() {
               seal.replyToSender(ctx, msg, result[i]);
               await new Promise(resolve => setTimeout(resolve, 500));
             }
+            aim.saveAI(id);
             return;
           }
         }
@@ -574,6 +578,7 @@ function main() {
               seal.replyToSender(ctx, msg, result[i]);
               await new Promise(resolve => setTimeout(resolve, 500));
             }
+            aim.saveAI(id);
             return;
           }
         }
@@ -588,6 +593,7 @@ function main() {
               seal.replyToSender(ctx, msg, result[i]);
               await new Promise(resolve => setTimeout(resolve, 500));
             }
+            aim.saveAI(id);
           }, pr.timer * 1000 + Math.floor(Math.random() * 500));
           return;
         }

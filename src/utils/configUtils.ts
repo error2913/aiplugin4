@@ -1,4 +1,4 @@
-import { CommandManager } from "./commandUtils";
+import { CommandManager } from "../command/commandManager";
 
 export class Config {
     static ext: seal.ExtInfo;
@@ -71,6 +71,7 @@ export class Config {
             "我不好<$今日人品$>"
         ], "顺序为user和assistant轮流出现")
         seal.ext.registerBoolConfig(this.ext, "是否开启AI调用命令功能", true, "");
+        seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", CommandManager.getCommandNames());
     }
     static getSystemMessageConfig(groupName: string) {
         const roleSetting = seal.ext.getTemplateConfig(this.ext, "角色设定")[0];
@@ -81,10 +82,9 @@ export class Config {
             content: roleSetting + `\n当前群聊:${groupName}`
         };
         if (isCmd) {
-            const commandsPrompt = CommandManager.getCommandsPrompt();
-            const { localImages } = Config.getLocalImageConfig();
-            const facePrompt = `发送表情的指令:<$face#表情名称$>,表情名称有:${Object.keys(localImages).join('，')}`;
-            systemMessage.content += `\n\n在对话中你可以使用以下命令：${commandsPrompt},${facePrompt}`;
+            const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");
+            const commandsPrompts = CommandManager.getCommandsPrompts(cmdAllow);
+            systemMessage.content += `\n\n在对话中你可以使用以下命令：${commandsPrompts.join(',')}`;
         }
         const samplesMessages = samples
             .map((item, index) => {
