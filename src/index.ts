@@ -10,9 +10,9 @@ function main() {
     seal.ext.register(ext);
   }
 
+  CommandManager.init();// 先初始化才能根据注册的命令注册对应的配置项
   Config.ext = ext;
   Config.register();
-  CommandManager.init();
   const aim = new AIManager();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
