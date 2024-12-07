@@ -1,7 +1,7 @@
 import { Command, CommandManager } from "./commandManager";
 
 export function registerCmdModu() {
-    const cmdModu = new Command('随机模组', 'modu', 'roll');
+    const cmdModu = new Command('模组', 'modu');
     cmdModu.buildPrompt = () => {
         return `随机模组的命令:<$模组#随机$>,
 查询模组的命令:<$模组#查询#要查询的关键词$>`;
