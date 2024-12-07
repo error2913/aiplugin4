@@ -1,9 +1,9 @@
 import { Message } from "../AI/AI";
-import { Config } from "./configUtils";
+import { ConfigManager } from "./configUtils";
 import { calculateSimilarity } from "./utils";
 
 export function repeatDetection(s: string, messages: Message[]): boolean {
-    const { stopRepeat, similarityLimit } = Config.getRepeatConfig();
+    const { stopRepeat, similarityLimit } = ConfigManager.getRepeatConfig();
     if (!stopRepeat) {
         return false;
     }
@@ -18,7 +18,7 @@ export function repeatDetection(s: string, messages: Message[]): boolean {
         const { index, content } = assContents[assContents.length - 1];
         const clearText = content.replace(/<[\|｜].*?[\|｜]>/g, '');
         const similarity = calculateSimilarity(clearText.trim(), s.trim());
-        Config.printLog(`复读相似度：${similarity}`);
+        ConfigManager.printLog(`复读相似度：${similarity}`);
         if (similarity > similarityLimit) {
             messages.splice(index, 1);
             return true;
@@ -29,7 +29,7 @@ export function repeatDetection(s: string, messages: Message[]): boolean {
 }
 
 export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string): { s: string, reply: string, commands: string[] } {
-    const { maxChar, cut, replymsg } = Config.getHandleReplyConfig();
+    const { maxChar, cut, replymsg } = ConfigManager.getHandleReplyConfig();
 
     let commands: string[] | null = s.match(/<\$(.+?)\$>/g);
 

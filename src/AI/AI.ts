@@ -1,6 +1,6 @@
 import { ImageManager } from "../image/imageManager";
 import { CommandManager } from "../command/commandManager";
-import { Config } from "../utils/configUtils";
+import { ConfigManager } from "../utils/configUtils";
 import { handleReply, repeatDetection } from "../utils/handleReplyUtils";
 import { getRespose, sendRequest } from "../utils/requestUtils";
 import { getCQTypes, getNameById, getUrlsInCQCode, parseBody } from "../utils/utils";
@@ -145,7 +145,7 @@ export class AI {
         const messages = this.context.messages;
         const contextTs = this.context.timestamp;
 
-        const { maxRounds, isPrefix, ctxCacheTime } = Config.getStorageConfig();
+        const { maxRounds, isPrefix, ctxCacheTime } = ConfigManager.getStorageConfig();
 
         // 检查是否超过缓存时间，超过则清空上下文
         const timestamp = parseInt(seal.format(ctx, "{$tTimestamp}"))
@@ -221,13 +221,13 @@ export class AI {
         //禁止AI复读
         if (repeatDetection(reply, this.context.messages) && reply !== '') {
             if (retry == 3) {
-                Config.printLog(`发现复读，已达到最大重试次数，清除AI上下文`);
+                ConfigManager.printLog(`发现复读，已达到最大重试次数，清除AI上下文`);
                 this.context.messages = messages.filter(item => item.role != 'assistant');
                 return { s: '', reply: '', commands: [] };
             }
 
             retry++;
-            Config.printLog(`发现复读，一秒后进行重试:[${retry}/3]`);
+            ConfigManager.printLog(`发现复读，一秒后进行重试:[${retry}/3]`);
 
             //等待一秒后进行重试
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -239,7 +239,7 @@ export class AI {
 
     async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<string[]> {
         if (this.isChatting) {
-            Config.printLog(this.id, `正在处理消息，跳过`);
+            ConfigManager.printLog(this.id, `正在处理消息，跳过`);
             return [];
         }
         this.isChatting = true;
@@ -248,7 +248,7 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const { systemMessages, isCmd } = Config.getSystemMessageConfig(ctx.group.groupName);
+        const { systemMessages, isCmd } = ConfigManager.getSystemMessageConfig(ctx.group.groupName);
         const { s, reply, commands } = await this.getReply(ctx, msg, systemMessages);
 
         result.push(reply);
@@ -261,7 +261,7 @@ export class AI {
         }
 
         //发送图片
-        const { p } = Config.getImageProbabilityConfig();
+        const { p } = ConfigManager.getImageProbabilityConfig();
         if (Math.random() <= p) {
             const file = await this.image.drawImage();
             if (file) {
@@ -274,7 +274,7 @@ export class AI {
     }
 
     async getAct(): Promise<number> {
-        const { url, apiKey, bodyTemplate, ctxLength, topics, maxChar, cacheTime } = Config.getInterruptConfig();
+        const { url, apiKey, bodyTemplate, ctxLength, topics, maxChar, cacheTime } = ConfigManager.getInterruptConfig();
 
         const timestamp = Math.floor(Date.now() / 1000);
         if (timestamp < this.data.interrupt.timestamp) {
@@ -323,7 +323,7 @@ export class AI {
             if (data_response.choices && data_response.choices.length > 0) {
                 const reply = data_response.choices[0].message.content;
 
-                Config.printLog(`返回活跃度:`, reply);
+                ConfigManager.printLog(`返回活跃度:`, reply);
 
                 // 解析 AI 返回的数字
                 const act = parseInt(reply.replace('<｜end▁of▁sentence｜>', '').trim());

@@ -1,10 +1,10 @@
-import { Config } from "../utils/configUtils";
+import { ConfigManager } from "../utils/configUtils";
 import { Command, CommandManager } from "./commandManager";
 
 export function registerCmdFace() {
     const cmdFace = new Command('表情');
     cmdFace.buildPrompt = () => {
-        const { localImages } = Config.getLocalImageConfig();
+        const { localImages } = ConfigManager.getLocalImageConfig();
         const imagesNames = Object.keys(localImages);
         if (imagesNames.length == 0) {
             return '暂无本地表情';
@@ -18,7 +18,7 @@ export function registerCmdFace() {
             return;
         }
 
-        const { localImages } = Config.getLocalImageConfig();
+        const { localImages } = ConfigManager.getLocalImageConfig();
         if (localImages.hasOwnProperty(arg1)) {
             seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[arg1]}]`);
         } else {

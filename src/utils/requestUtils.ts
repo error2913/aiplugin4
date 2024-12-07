@@ -1,5 +1,5 @@
 import { Message } from "../AI/AI";
-import { Config } from "./configUtils";
+import { ConfigManager } from "./configUtils";
 import { parseBody } from "./utils";
 
 export async function getRespose(url: string, apiKey: string, bodyObject: any): Promise<Response> {
@@ -12,7 +12,7 @@ export async function getRespose(url: string, apiKey: string, bodyObject: any): 
         }
         return value;
     });
-    Config.printLog(`请求发送前的上下文:\n`, s);
+    ConfigManager.printLog(`请求发送前的上下文:\n`, s);
 
     const response = await fetch(url, {
         method: 'POST',
@@ -32,7 +32,7 @@ export async function getRespose(url: string, apiKey: string, bodyObject: any): 
 }
 
 export async function sendRequest(messages: Message[]): Promise<string> {
-    const { url, apiKey, bodyTemplate } = Config.getRequestConfig();
+    const { url, apiKey, bodyTemplate } = ConfigManager.getRequestConfig();
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages);
@@ -46,7 +46,7 @@ export async function sendRequest(messages: Message[]): Promise<string> {
 
         if (data_response.choices && data_response.choices.length > 0) {
             const reply = data_response.choices[0].message.content;
-            Config.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+            ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
             return reply;
         } else {
             throw new Error("服务器响应中没有choices或choices为空");

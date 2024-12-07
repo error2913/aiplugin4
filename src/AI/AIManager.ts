@@ -1,4 +1,4 @@
-import { Config } from "../utils/configUtils";
+import { ConfigManager } from "../utils/configUtils";
 import { AI } from "./AI";
 
 export class AIManager {
@@ -17,7 +17,7 @@ export class AIManager {
             let data = {};
 
             try {
-                data = JSON.parse(Config.ext.storageGet(`AI_${id}`) || '{}');
+                data = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}');
             } catch (error) {
                 console.error(`从数据库中获取${`AI_${id}`}失败:`, error);
             }
@@ -30,7 +30,7 @@ export class AIManager {
 
     saveAI(id: string) {
         if (this.cache.hasOwnProperty(id)) {
-            Config.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
+            ConfigManager.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
         }
     }
 }

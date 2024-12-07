@@ -1,4 +1,4 @@
-import { Config } from "../utils/configUtils";
+import { ConfigManager } from "../utils/configUtils";
 import { registerCmdDraw } from "./cmd_draw";
 import { registerCmdFace } from "./cmd_face";
 import { registerCmdJrrp } from "./cmd_jrrp";
@@ -92,11 +92,11 @@ export class CommandManager {
 
     static handleCommands(ctx: seal.MsgContext, msg: seal.Message, commands: string[]) {
         if (commands.length !== 0) {
-            Config.printLog(`AI命令:`, JSON.stringify(commands));
+            ConfigManager.printLog(`AI命令:`, JSON.stringify(commands));
         }
 
         if (this.cmdArgs == null) {
-            Config.printLog(`暂时无法使用AI命令，请先使用任意指令`);
+            ConfigManager.printLog(`暂时无法使用AI命令，请先使用任意指令`);
             return;
         }
 

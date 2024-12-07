@@ -1,6 +1,6 @@
 import { CommandManager } from "../command/commandManager";
 
-export class Config {
+export class ConfigManager {
     static ext: seal.ExtInfo;
 
     static register() {
@@ -21,13 +21,14 @@ export class Config {
         this.registerImageProbabilityConfig();
         this.registerImageRequestConfig();
         this.registerImageTriggerConfig();
+        this.registerImageStorageConfig();
     }
 
     static registerPrintLogConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否打印日志细节", true, "");
     }
     static printLog(...data: any[]) {
-        const printlog = seal.ext.getBoolConfig(Config.ext, "是否打印日志细节");
+        const printlog = seal.ext.getBoolConfig(ConfigManager.ext, "是否打印日志细节");
 
         if (printlog) {
             console.log(...data);

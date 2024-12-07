@@ -1,4 +1,4 @@
-import { Config } from "../utils/configUtils";
+import { ConfigManager } from "../utils/configUtils";
 import { parseBody } from "../utils/utils";
 
 export class ImageManager {
@@ -14,7 +14,7 @@ export class ImageManager {
         let data: any = {};
 
         try {
-            data = JSON.parse(Config.ext.storageGet(`image_${id}`) || '{}');
+            data = JSON.parse(ConfigManager.ext.storageGet(`image_${id}`) || '{}');
         } catch (error) {
             console.error(`从数据库中获取${`image_${id}`}失败:`, error);
         }
@@ -33,11 +33,11 @@ export class ImageManager {
     }
 
     saveImage() {
-        Config.ext.storageSet(`image_${this.id}`, JSON.stringify(this));
+        ConfigManager.ext.storageSet(`image_${this.id}`, JSON.stringify(this));
     }
 
     drawLocalImage(): string {
-        const { localImages } = Config.getLocalImageConfig();
+        const { localImages } = ConfigManager.getLocalImageConfig();
         const keys = Object.keys(localImages);
         if (keys.length == 0) {
             return '';
@@ -64,7 +64,7 @@ export class ImageManager {
     }
 
     async drawImage(): Promise<string> {
-        const { localImages } = Config.getLocalImageConfig();
+        const { localImages } = ConfigManager.getLocalImageConfig();
         const values = Object.values(localImages);
         if (this.images.length == 0 && values.length == 0) {
             return '';
@@ -112,7 +112,7 @@ export class ImageManager {
     }
 
     async imageToText(ctx: seal.MsgContext, imageUrl: string, text = ''): Promise<string> {
-        const { condition } = Config.getImageConditionConfig();
+        const { condition } = ConfigManager.getImageConditionConfig();
 
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition == 0) {
@@ -132,7 +132,7 @@ export class ImageManager {
             ]
         }]
 
-        const { url, apiKey, maxChars, bodyTemplate } = Config.getImageRequestConfig();
+        const { url, apiKey, maxChars, bodyTemplate } = ConfigManager.getImageRequestConfig();
 
         try {
             const bodyObject = parseBody(bodyTemplate, messages);

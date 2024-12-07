@@ -1,6 +1,6 @@
 import { AIManager } from "./AI/AIManager";
 import { CommandManager } from "./command/commandManager";
-import { Config } from "./utils/configUtils";
+import { ConfigManager } from "./utils/configUtils";
 import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 
 function main() {
@@ -11,8 +11,8 @@ function main() {
   }
 
   CommandManager.init();// 先初始化才能根据注册的命令注册对应的配置项
-  Config.ext = ext;
-  Config.register();
+  ConfigManager.ext = ext;
+  ConfigManager.register();
   const aim = new AIManager();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
@@ -443,7 +443,7 @@ function main() {
 
   //接受非指令消息
   ext.onNotCommandReceived = async (ctx, msg) => {
-    const { canPrivate } = Config.getPrivateConfig();
+    const { canPrivate } = ConfigManager.getPrivateConfig();
     if (ctx.isPrivate && !canPrivate) {
       return;
     }
@@ -456,7 +456,7 @@ function main() {
     const ai = aim.getAI(id);
 
     // 非指令清除上下文
-    const { clearWords, clearReplys } = Config.getForgetConfig();
+    const { clearWords, clearReplys } = ConfigManager.getForgetConfig();
     if (clearWords.some(item => message === item)) {
       const pr = ai.privilege;
       if (ctx.privilegeLevel < pr.limit) {
@@ -474,7 +474,7 @@ function main() {
     }
 
     // 非指令触发图片回复
-    const { condition, trigger } = Config.getImageTriggerConfig(message);
+    const { condition, trigger } = ConfigManager.getImageTriggerConfig(message);
     if (trigger) {
       const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
       if (fmtCondition !== 0) {
@@ -491,7 +491,7 @@ function main() {
 
     // 非指令触发图片偷取
     if (CQTypes.includes('image') && ai.image.stealStatus) {
-      const { maxImageNum } = Config.getImageStorageConfig();
+      const { maxImageNum } = ConfigManager.getImageStorageConfig();
       const urls = getUrlsInCQCode(message);
       if (urls.length !== 0) {
         ai.image.images = ai.image.images.concat(urls).slice(-maxImageNum);
@@ -500,7 +500,7 @@ function main() {
     }
 
     if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
-      const { trigger, condition } = Config.getTriggerConfig(message);
+      const { trigger, condition } = ConfigManager.getTriggerConfig(message);
 
       clearTimeout(ai.data.timer);
       ai.data.timer = null;
@@ -514,7 +514,7 @@ function main() {
 
         await ai.iteration(ctx, message, 'user');
 
-        Config.printLog('非指令触发回复');
+        ConfigManager.printLog('非指令触发回复');
         const result = await ai.chat(ctx, msg);
         for (let i = 0; i < result.length; i++) {
           seal.replyToSender(ctx, msg, result[i]);
@@ -535,7 +535,7 @@ function main() {
           ai.data.counter += 1;
 
           if (ai.data.counter >= pr.counter) {
-            Config.printLog('计数器触发回复');
+            ConfigManager.printLog('计数器触发回复');
             ai.data.counter = 0;
 
             const result = await ai.chat(ctx, msg);
@@ -552,7 +552,7 @@ function main() {
           const ran = Math.random() * 100;
 
           if (ran <= pr.prob) {
-            Config.printLog('概率触发回复');
+            ConfigManager.printLog('概率触发回复');
 
             const result = await ai.chat(ctx, msg);
             for (let i = 0; i < result.length; i++) {
@@ -568,7 +568,7 @@ function main() {
           const act = await ai.getAct();
 
           if (act >= pr.interrupt) {
-            Config.printLog(`插嘴触发回复:${act}`);
+            ConfigManager.printLog(`插嘴触发回复:${act}`);
             ai.data.interrupt.act = 0;
 
             const result = await ai.chat(ctx, msg);
@@ -583,7 +583,7 @@ function main() {
 
         if (pr.timer > -1) {
           ai.data.timer = setTimeout(async () => {
-            Config.printLog('计时器触发回复');
+            ConfigManager.printLog('计时器触发回复');
 
             ai.data.timer = null;
             const result = await ai.chat(ctx, msg);
@@ -604,7 +604,7 @@ function main() {
       CommandManager.cmdArgs = cmdArgs;
     }
 
-    const { allcmd } = Config.getMonitorCommandConfig();
+    const { allcmd } = ConfigManager.getMonitorCommandConfig();
     if (allcmd) {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
@@ -626,7 +626,7 @@ function main() {
 
   //骰子发送的消息
   ext.onMessageSend = async (ctx, msg) => {
-    const { allmsg } = Config.getMonitorAllMessageConfig();
+    const { allmsg } = ConfigManager.getMonitorAllMessageConfig();
     if (allmsg) {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
