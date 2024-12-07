@@ -104,11 +104,11 @@ function main() {
         const ai2 = aim.getAI(id2);
 
         const pr = ai2.privilege;
-        
+
         const counter = pr.counter > -1 ? `${pr.counter}条` : '关闭';
         const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
-        const prob = pr.prob > -1? `${pr.prob}%` : '关闭';
-        const interrupt = pr.interrupt > -1? `${pr.interrupt}` : '关闭';
+        const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
+        const interrupt = pr.interrupt > -1 ? `${pr.interrupt}` : '关闭';
         const standby = pr.standby ? '开启' : '关闭';
         const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n插嘴模式(i):${interrupt}\n待机模式:${standby}`;
         seal.replyToSender(ctx, msg, s);
@@ -123,8 +123,8 @@ function main() {
 
         const counter = pr.counter > -1 ? `${pr.counter}条` : '关闭';
         const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
-        const prob = pr.prob > -1? `${pr.prob}%` : '关闭';
-        const interrupt = pr.interrupt > -1? `${pr.interrupt}` : '关闭';
+        const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
+        const interrupt = pr.interrupt > -1 ? `${pr.interrupt}` : '关闭';
         const standby = pr.standby ? '开启' : '关闭';
         const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n插嘴模式(i):${interrupt}\n待机模式:${standby}`;
         seal.replyToSender(ctx, msg, s);
@@ -344,6 +344,7 @@ function main() {
           case 'local': {
             const image = ai.image.drawLocalImage();
             if (!image) {
+              seal.replyToSender(ctx, msg, '暂无本地图片');
               return ret;
             }
             seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
@@ -351,16 +352,18 @@ function main() {
           }
           case 'stl':
           case 'stolen': {
-            const image = ai.image.drawStolenImage();
+            const image = await ai.image.drawStolenImage();
             if (!image) {
+              seal.replyToSender(ctx, msg, '暂无偷取图片');
               return ret;
             }
             seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
             return ret;
           }
           case 'all': {
-            const image = ai.image.drawImage();
+            const image = await ai.image.drawImage();
             if (!image) {
+              seal.replyToSender(ctx, msg, '暂无图片');
               return ret;
             }
             seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
@@ -470,30 +473,29 @@ function main() {
       return;
     }
 
-    // 检查CQ码
-    const CQTypes = getCQTypes(message);
-    if (CQTypes.includes('image')) {
-      const { condition, trigger, maxImageNum } = Config.getImageTriggerConfig(message);
-
-      // 非指令触发
-      if (trigger) {
-        const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-        if (fmtCondition !== 0) {
-          const image = await ai.image.drawImage();
-          if (image !== '') {
-            seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
-            return;
-          }
+    // 非指令触发图片回复
+    const { condition, trigger } = Config.getImageTriggerConfig(message);
+    if (trigger) {
+      const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
+      if (fmtCondition !== 0) {
+        const image = await ai.image.drawImage();
+        if (image !== '') {
+          seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+          return;
         }
       }
+    }
 
-      //偷
-      if (ai.image.stealStatus) {
-        const urls = getUrlsInCQCode(message);
-        if (urls.length !== 0) {
-          ai.image.images = ai.image.images.concat(urls).slice(-maxImageNum);
-          ai.image.saveImage();
-        }
+    // 检查CQ码
+    const CQTypes = getCQTypes(message);
+
+    // 非指令触发图片偷取
+    if (CQTypes.includes('image') && ai.image.stealStatus) {
+      const { maxImageNum } = Config.getImageStorageConfig();
+      const urls = getUrlsInCQCode(message);
+      if (urls.length !== 0) {
+        ai.image.images = ai.image.images.concat(urls).slice(-maxImageNum);
+        ai.image.saveImage();
       }
     }
 
@@ -525,10 +527,6 @@ function main() {
       // 开启任一模式时
       else {
         const pr = ai.privilege;
-        if (ctx.privilegeLevel < pr.limit) {
-          return;
-        }
-
         if (pr.standby) {
           await ai.iteration(ctx, message, 'user');
         }
@@ -595,7 +593,6 @@ function main() {
             }
             aim.saveAI(id);
           }, pr.timer * 1000 + Math.floor(Math.random() * 500));
-          return;
         }
       }
     }

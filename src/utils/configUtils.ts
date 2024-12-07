@@ -293,15 +293,21 @@ export class Config {
     static registerImageTriggerConfig() {
         seal.ext.registerStringConfig(this.ext, "图片非指令触发需要满足的条件", '1', "使用豹语表达式，例如：$t群号_RAW=='2001'");
         seal.ext.registerTemplateConfig(this.ext, "图片非指令关键词", ["咪"], "包含关键词将进行回复");
-        seal.ext.registerIntConfig(this.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
     }
     static getImageTriggerConfig(s: string) {
         const condition = seal.ext.getStringConfig(this.ext, "图片非指令触发需要满足的条件");
         const keyWords = seal.ext.getTemplateConfig(this.ext, "图片非指令关键词");
         const trigger = keyWords.some(item => s.includes(item));
-        const maxImageNum = seal.ext.getIntConfig(this.ext, "偷取图片存储上限");
 
-        return { condition, trigger, maxImageNum };
+        return { condition, trigger };
+    }
+
+    static registerImageStorageConfig() {
+        seal.ext.registerIntConfig(this.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
+    }
+    static getImageStorageConfig() {
+        const maxImageNum = seal.ext.getIntConfig(this.ext, "偷取图片存储上限");
+        return { maxImageNum };
     }
 }
 

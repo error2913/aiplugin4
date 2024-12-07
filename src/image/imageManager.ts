@@ -39,6 +39,9 @@ export class ImageManager {
     drawLocalImage(): string {
         const { localImages } = Config.getLocalImageConfig();
         const keys = Object.keys(localImages);
+        if (keys.length == 0) {
+            return '';
+        }
         const index = Math.floor(Math.random() * keys.length);
         return localImages[keys[index]];
     }
@@ -61,12 +64,11 @@ export class ImageManager {
     }
 
     async drawImage(): Promise<string> {
-        if (this.images.length == 0) {
-            return this.drawLocalImage();
-        }
-
         const { localImages } = Config.getLocalImageConfig();
         const values = Object.values(localImages);
+        if (this.images.length == 0 && values.length == 0) {
+            return '';
+        }
 
         const index = Math.floor(Math.random() * (values.length + this.images.length));
 

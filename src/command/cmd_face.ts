@@ -5,7 +5,12 @@ export function registerCmdFace() {
     const cmdFace = new Command('表情');
     cmdFace.buildPrompt = () => {
         const { localImages } = Config.getLocalImageConfig();
-        return `发送表情的指令:<$表情#表情名称$>,表情名称有:${Object.keys(localImages).join('，')}。`;
+        const imagesNames = Object.keys(localImages);
+        if (imagesNames.length == 0) {
+            return '暂无本地表情';
+        }
+
+        return `发送表情的指令:<$表情#表情名称$>,表情名称有:${imagesNames.join('，')}。`;
     };
     cmdFace.solve = (ctx, msg, _, arg1) => {
         if (!arg1) {
