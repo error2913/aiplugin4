@@ -7,6 +7,7 @@ export class ConfigManager {
         this.registerPrintLogConfig();
         this.registerRequestConfig();
         this.registerSystemMessageConfig();
+        this.registerDeckConfig();
         this.registerStorageConfig();
         this.registerMonitorCommandConfig();
         this.registerMonitorAllMessageConfig();
@@ -102,6 +103,14 @@ export class ConfigManager {
         const systemMessages = [systemMessage, ...samplesMessages];
 
         return { systemMessages, isCmd };
+    }
+
+    static registerDeckConfig() {
+        seal.ext.registerTemplateConfig(this.ext, "提供给AI的牌堆名称", ["牌堆1", "牌堆2"], "");
+    }
+    static getDeckConfig() {
+        const decks = seal.ext.getTemplateConfig(this.ext, "提供给AI的牌堆名称");
+        return { decks };
     }
 
     static registerStorageConfig() {
