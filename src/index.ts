@@ -22,6 +22,7 @@ function main() {
   cmdAI.help = `帮助:
 【.ai st】修改权限(仅骰主可用)
 【.ai ck】检查权限(仅骰主可用)
+【.ai prompt】检查当前prompt(仅骰主可用)
 【.ai pr】查看当前群聊权限
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
@@ -112,6 +113,17 @@ function main() {
         const standby = pr.standby ? '开启' : '关闭';
         const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n插嘴模式(i):${interrupt}\n待机模式:${standby}`;
         seal.replyToSender(ctx, msg, s);
+        return ret;
+      }
+      case 'prompt': {
+        if (ctx.privilegeLevel < 100) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx.group.groupName);
+
+        seal.replyToSender(ctx, msg, systemMessages[0].content);
         return ret;
       }
       case 'pr': {

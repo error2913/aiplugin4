@@ -31,30 +31,34 @@ export function repeatDetection(s: string, messages: Message[]): boolean {
 export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string): { s: string, reply: string, commands: string[] } {
     const { maxChar, cut, replymsg } = ConfigManager.getHandleReplyConfig();
 
-    let commands: string[] | null = s.match(/<\$(.+?)\$>/g);
-
+    // 处理命令
+    let commands: string[] | null = s.match(/<\$(.+?)\$?>/g);
     if (commands !== null) {
         commands = commands.map(item => {
-            return item.replace(/<\$|\$>/g, '');
+            return item.replace(/<\$|\$?>/g, '');
         });
     } else {
         commands = [];
     }
 
+    // 处理分割
     if (cut) {
         s = s.split('\n')[0];
     }
 
-    const segments = s.split(/<[\|｜]from.*?[\|｜]>/);
-    s = segments[0] ? segments[0] : (segments[1] ? segments[1] : s);
+    const segments = s
+        .split(/<[\|｜]from.*?[\|｜]>/)
+        .filter(item => item !== '');
+    if (segments.length === 0) {
+        return { s: '', reply: '', commands: [] };
+    }
 
-    s = s
+    s = segments[0]
         .replace(/<[\|｜].*?[\|｜]>/g, '')
         .replace(/<br>/g, '\n')
         .slice(0, maxChar)
-
-    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}]` : ``;
-    const reply = prefix + s.replace(/<\$(.+?)\$>/g, '');
+    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    const reply = prefix + s.replace(/<\$(.+?)\$?>/g, '');
 
     return { s, reply, commands };
 }

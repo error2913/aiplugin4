@@ -3,7 +3,7 @@ import { Command, CommandManager } from "./commandManager";
 export function registerCmdRename() {
     const cmdRename = new Command('改名');
     cmdRename.buildPrompt = () => {
-        return '设置群名片的命令:<$改名#要设置的名字$>';
+        return '设置群名片的命令:<$改名#要设置的名字>';
     }
     cmdRename.solve = (ctx, msg, _, arg1) => {
         if (!arg1) {

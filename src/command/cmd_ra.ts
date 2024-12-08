@@ -3,7 +3,7 @@ import { Command, CommandManager } from "./commandManager";
 export function registerCmdRa() {
     const cmdRa = new Command('检定', 'ra');
     cmdRa.buildPrompt = () => {
-        return '进行检定的命令:<$检定#检定目的或技能名$>';
+        return '进行检定的命令:<$检定#检定目的或技能名>';
     }
     cmdRa.solve = (ctx, msg, cmdArgs, arg1) => {
         if (!arg1) {

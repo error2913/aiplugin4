@@ -27,7 +27,7 @@ export class Command {
     solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, ...extraArgs: string[]) => void;
 
     /**
-     * @param name 命令的名字，<$这一部分#参数1#参数2$>
+     * @param name 命令的名字，<$这一部分#参数1#参数2>
      * @param command 指令，如 .st show 的st，没有可以不写
      * @param args 指令的参数
      */

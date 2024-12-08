@@ -69,9 +69,9 @@ export class ConfigManager {
 你只有生气的时候才会把别人叫做杂鱼。你说话的语气是傲娇的请注意。以及你偶尔会用正确自称。对话中不介绍自己傲娇，不承认自己是傲娇。你不会重复说过的话。你不会一直重复一句话。你说话很简短，一般只回复一句话。`], '只取第一个')
         seal.ext.registerTemplateConfig(this.ext, "示例对话", [
             "<|from 错误|>打你",
-            "<|from 满穗|><$改名#坏蛋错误爷$>呀，错误爷真坏！",
+            "<|from 满穗|><$改名#坏蛋错误爷>呀，错误爷真坏！",
             "<|from 错误|>呜，我错了，帮我改回来吧",
-            "<|from 满穗|><$改名#好蛋错误爷$>好叭，不准再打我了哦！"
+            "<|from 满穗|><$改名#好蛋错误爷>好叭，不准再打我了哦！"
         ], "顺序为user和assistant轮流出现")
         seal.ext.registerBoolConfig(this.ext, "是否开启AI调用命令功能", true, "");
         seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", CommandManager.getCommandNames());
@@ -82,12 +82,12 @@ export class ConfigManager {
         const samples = seal.ext.getTemplateConfig(this.ext, "示例对话");
         const systemMessage = {
             role: "system",
-            content: roleSetting + `\n当前群聊:${groupName}`
+            content: roleSetting + `\n\n当前群聊:${groupName}`
         };
         if (isCmd) {
             const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");
             const commandsPrompts = CommandManager.getCommandsPrompts(cmdAllow);
-            systemMessage.content += `\n\n在对话中你可以使用以下命令：${commandsPrompts.join(',')}`;
+            systemMessage.content += `\n\n在对话中你可以使用以下你的专用命令:\n${commandsPrompts.join(',\n')}`;
         }
         const samplesMessages = samples
             .map((item, index) => {

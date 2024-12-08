@@ -3,7 +3,7 @@ import { Command, CommandManager } from "./commandManager";
 export function registerCmdDraw() {
     const cmdDraw = new Command('抽取');
     cmdDraw.buildPrompt = () => {
-        return '抽取牌堆的命令:<$抽取#牌堆的名字$>';
+        return '抽取牌堆的命令:<$抽取#牌堆的名字>';
     }
     cmdDraw.solve = (ctx, msg, _, arg1) => {
         if (!arg1) {
