@@ -6,7 +6,7 @@ export function registerCmdModu() {
         return `随机模组的命令:<$模组#随机>,
 查询模组的命令:<$模组#查询#要查询的关键词>`;
     }
-    cmdModu.solve = (ctx, msg, cmdArgs, arg1, arg2) => {
+    cmdModu.solve = (ctx, msg, cmdArgs, _, arg1, arg2) => {
         if (!arg1) {
             console.error(`随机模组需要一个指令`);
             return;

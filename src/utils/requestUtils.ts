@@ -1,4 +1,3 @@
-import { Message } from "../AI/AI";
 import { ConfigManager } from "./configUtils";
 import { parseBody } from "./utils";
 
@@ -31,7 +30,7 @@ export async function getRespose(url: string, apiKey: string, bodyObject: any): 
     return response;
 }
 
-export async function sendRequest(messages: Message[]): Promise<string> {
+export async function sendRequest(messages: { role: string, content: string }[]): Promise<string> {
     const { url, apiKey, bodyTemplate } = ConfigManager.getRequestConfig();
 
     try {

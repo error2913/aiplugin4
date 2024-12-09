@@ -6,7 +6,7 @@ import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.0.4');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.1.0');
     seal.ext.register(ext);
   }
 
@@ -464,7 +464,7 @@ function main() {
     const groupId = ctx.group.groupId;
     const id = ctx.isPrivate ? userId : groupId;
 
-    const message = msg.message;
+    let message = msg.message;
     const ai = aim.getAI(id);
 
     // 非指令清除上下文
@@ -500,22 +500,16 @@ function main() {
 
     // 检查CQ码
     const CQTypes = getCQTypes(message);
-
-    // 非指令触发图片偷取
-    if (CQTypes.includes('image') && ai.image.stealStatus) {
-      const { maxImageNum } = ConfigManager.getImageStorageConfig();
-      const urls = getUrlsInCQCode(message);
-      if (urls.length !== 0) {
-        ai.image.images = ai.image.images.concat(urls).slice(-maxImageNum);
-        ai.image.saveImage();
-      }
-    }
-
     if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
+      // 非指令触发图片偷取，以及图片转文字
+      if (CQTypes.includes('image') && ai.image.stealStatus) {
+        message = await ai.image.handleImageMessage(ctx, message);
+      }
+
       const { trigger, condition } = ConfigManager.getTriggerConfig(message);
 
-      clearTimeout(ai.data.timer);
-      ai.data.timer = null;
+      clearTimeout(ai.context.timer);
+      ai.context.timer = null;
 
       // 非指令触发
       if (trigger) {
@@ -524,7 +518,7 @@ function main() {
           return;
         }
 
-        await ai.iteration(ctx, message, 'user');
+        await ai.context.iteration(ctx, message, 'user');
 
         ConfigManager.printLog('非指令触发回复');
         await ai.chat(ctx, msg);
@@ -536,15 +530,15 @@ function main() {
       else {
         const pr = ai.privilege;
         if (pr.standby) {
-          await ai.iteration(ctx, message, 'user');
+          await ai.context.iteration(ctx, message, 'user');
         }
 
         if (pr.counter > -1) {
-          ai.data.counter += 1;
+          ai.context.counter += 1;
 
-          if (ai.data.counter >= pr.counter) {
+          if (ai.context.counter >= pr.counter) {
             ConfigManager.printLog('计数器触发回复');
-            ai.data.counter = 0;
+            ai.context.counter = 0;
 
             await ai.chat(ctx, msg);
             aim.saveAI(id);
@@ -569,7 +563,7 @@ function main() {
 
           if (act >= pr.interrupt) {
             ConfigManager.printLog(`插嘴触发回复:${act}`);
-            ai.data.interrupt.act = 0;
+            ai.context.interrupt.act = 0;
 
             await ai.chat(ctx, msg);
             aim.saveAI(id);
@@ -578,10 +572,10 @@ function main() {
         }
 
         if (pr.timer > -1) {
-          ai.data.timer = setTimeout(async () => {
+          ai.context.timer = setTimeout(async () => {
             ConfigManager.printLog('计时器触发回复');
 
-            ai.data.timer = null;
+            ai.context.timer = null;
             await ai.chat(ctx, msg);
             aim.saveAI(id);
           }, pr.timer * 1000 + Math.floor(Math.random() * 500));
@@ -610,7 +604,7 @@ function main() {
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
-          await ai.iteration(ctx, message, 'user');
+          await ai.context.iteration(ctx, message, 'user');
         }
       }
     }
@@ -637,7 +631,7 @@ function main() {
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
-          await ai.iteration(ctx, message, 'assistant');
+          await ai.context.iteration(ctx, message, 'assistant');
           return;
         }
       }

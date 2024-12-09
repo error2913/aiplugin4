@@ -1,5 +1,5 @@
 import { ConfigManager } from "../utils/configUtils";
-import { parseBody } from "../utils/utils";
+import { getUrlsInCQCode, parseBody } from "../utils/utils";
 
 export class ImageManager {
     id: string;
@@ -34,6 +34,30 @@ export class ImageManager {
 
     saveImage() {
         ConfigManager.ext.storageSet(`image_${this.id}`, JSON.stringify(this));
+    }
+
+    async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<string> {
+        const { maxImageNum } = ConfigManager.getImageStorageConfig();
+        const urls = getUrlsInCQCode(message);
+  
+        try {
+          const url = urls[0];
+          const reply = await this.imageToText(ctx, url);
+          if (reply) {
+            message = message.replace(/\[CQ:image,file=http.*?\]/, `<|图片:${reply}|>`);
+          }
+        } catch (error) {
+          console.error('Error in imageToText:', error);
+        }
+  
+        message = message.replace(/\[CQ:image,file=.*?\]/, '<|图片|>');
+  
+        if (urls.length !== 0) {
+          this.images = this.images.concat(urls).slice(-maxImageNum);
+          this.saveImage();
+        }
+
+        return message;
     }
 
     drawLocalImage(): string {

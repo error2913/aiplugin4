@@ -1,29 +1,10 @@
 import { ImageManager } from "../image/imageManager";
 import { CommandManager } from "../command/commandManager";
 import { ConfigManager } from "../utils/configUtils";
-import { handleReply, repeatDetection } from "../utils/handleReplyUtils";
+import { handleReply } from "../utils/handleReplyUtils";
 import { getRespose, sendRequest } from "../utils/requestUtils";
-import { getCQTypes, getNameById, getUrlsInCQCode, parseBody } from "../utils/utils";
-
-export interface Message {
-    role: string;
-    content: string;
-}
-
-export interface Context {
-    messages: Message[];
-    timestamp: number;
-    lastReply: string;
-}
-
-export interface AIData {
-    counter: number,
-    timer: number;
-    interrupt: {
-        act: number;
-        timestamp: number;
-    }
-}
+import { parseBody } from "../utils/utils";
+import { Context, Message } from "./context";
 
 export interface Privilege {
     limit: number,
@@ -37,7 +18,6 @@ export interface Privilege {
 export class AI {
     id: string;
     context: Context;
-    data: AIData;
     privilege: Privilege;
     isChatting: boolean;
     isGettingAct: boolean;
@@ -45,19 +25,7 @@ export class AI {
 
     constructor(id: string) {
         this.id = id;
-        this.context = {
-            messages: [],
-            timestamp: 0,
-            lastReply: ''
-        };
-        this.data = {
-            counter: 0,
-            timer: null,
-            interrupt: {
-                act: 0,
-                timestamp: 0
-            }
-        };
+        this.context = new Context();
         this.privilege = {
             limit: 100,
             counter: -1,
@@ -79,35 +47,7 @@ export class AI {
         const ai = new AI(id);
 
         if (data.hasOwnProperty('context') && typeof data.context === 'object' && !Array.isArray(data.context)) {
-            if (data.context.hasOwnProperty('messages') && Array.isArray(data.context.messages)) {
-                ai.context.messages = data.context.messages;
-            }
-
-            if (data.context.hasOwnProperty('timestamp') && typeof data.context.timestamp === 'number') {
-                ai.context.timestamp = data.context.timestamp;
-            }
-
-            if (data.context.hasOwnProperty('lastReply') && typeof data.context.lastReply === 'string') {
-                ai.context.lastReply = data.context.lastReply;
-            }
-        }
-
-        if (data.hasOwnProperty('data') && typeof data.data === 'object' && !Array.isArray(data.data)) {
-            if (data.data.hasOwnProperty('counter') && typeof data.data.counter === 'number') {
-                ai.data.counter = data.data.counter;
-            }
-
-            if (data.data.hasOwnProperty('timer') && typeof data.data.timer === 'number') {
-                ai.data.timer = data.data.timer;
-            }
-            if (data.data.hasOwnProperty('interrupt') && typeof data.data.interrupt === 'object' && !Array.isArray(data.data.interrupt)) {
-                if (data.data.interrupt.hasOwnProperty('act') && typeof data.data.interrupt.act === 'number') {
-                    ai.data.interrupt.act = data.data.interrupt.act;
-                }
-                if (data.data.interrupt.hasOwnProperty('timestamp') && typeof data.data.interrupt.timestamp === 'number') {
-                    ai.data.interrupt.timestamp = data.data.interrupt.timestamp;
-                }
-            }
+            ai.context = Context.parse(data.context);
         }
 
         if (data.hasOwnProperty('privilege') && typeof data.privilege === 'object' && !Array.isArray(data.privilege)) {
@@ -135,91 +75,41 @@ export class AI {
     }
 
     clearData() {
-        clearTimeout(this.data.timer);
-        this.data.timer = null;
-        this.data.counter = 0;
-        this.data.interrupt.act = 0;
-    }
-
-    async iteration(ctx: seal.MsgContext, s: string, role: 'user' | 'assistant') {
-        const messages = this.context.messages;
-        const contextTs = this.context.timestamp;
-
-        const { maxRounds, isPrefix, ctxCacheTime } = ConfigManager.getStorageConfig();
-
-        // 检查是否超过缓存时间，超过则清空上下文
-        const timestamp = parseInt(seal.format(ctx, "{$tTimestamp}"))
-        if (timestamp - contextTs > ctxCacheTime * 60) {
-            this.context.messages = [];
-        }
-
-        this.context.timestamp = timestamp;
-
-        const CQTypes = getCQTypes(s);
-
-        //检查有无图片
-        if (CQTypes.includes('image')) {
-            const urls = getUrlsInCQCode(s);
-            const url = urls[0];
-
-            try {
-                const reply = await this.image.imageToText(ctx, url);
-                s = s.replace(/\[CQ:image,file=http.*?\]/, `<|${reply}|>`);
-            } catch (error) {
-                console.error('Error in imageToText:', error);
-            }
-
-            //剩下的图片
-            s = s.replace(/\[CQ:image,file=.*?\]/, '<|图片|>');
-        }
-
-        //处理文本
-        if (role === 'assistant') {
-            s = s
-                .replace(/\[图:.*?\]/g, '')
-                .replace(/\[语音:.*?\]/g, '')
-                .replace(/\[视频:.*?\]/g, '')
-        }
-        s = s
-            .replace(/\[CQ:reply,id=-?\d+\]\[CQ:at,qq=\d+\]/g, '')
-            .replace(/\[CQ:at,qq=(\d+)\]/g, (_, p1) => {
-                const epId = ctx.endPoint.userId;
-                const gid = ctx.group.groupId;
-                const uid = `QQ:${p1}`;
-                const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
-
-                return `@${getNameById(epId, gid, uid, dice_name)}`;
-            })
-            .replace(/\[CQ:.*?\]/g, '')
-
-        //更新上下文
-        const senderName = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
-        const rounds = messages.length;
-        if (rounds !== 0 && messages[rounds - 1].content.includes(`<|from ${senderName}|>`)) {
-            this.context.messages[rounds - 1].content += ' ' + s;
-        } else {
-            const prefix = isPrefix ? `<|from ${senderName}|> ` : ``;
-            s = prefix + s;
-
-            const message = { role: role, content: s };
-            messages.push(message);
-        }
-
-        //删除多余的上下文
-        if (rounds > maxRounds) {
-            this.context.messages = messages.slice(-maxRounds);
-        }
+        clearTimeout(this.context.timer);
+        this.context.timer = null;
+        this.context.counter = 0;
+        this.context.interrupt.act = 0;
     }
 
     async getReply(ctx: seal.MsgContext, msg: seal.Message, systemMessages: Message[], retry = 0): Promise<{ s: string, reply: string, commands: string[] }> {
         const messages = [...systemMessages, ...this.context.messages];
 
+        // 处理messages
+        let processedMessages: { role: string, content: string }[] = [];
+        const isPrefix = ConfigManager.getPrefixConfig();
+        if (isPrefix) {
+            processedMessages = messages.map(message => {
+                const prefix = `<|from:${message.name}|>`;
+                return {
+                    role: message.role,
+                    content: prefix + message.content
+                }
+            })
+        } else {
+            processedMessages = messages.map(message => {
+                return {
+                    role: message.role,
+                    content: message.content
+                }
+            })
+        }
+
         //获取处理后的回复
-        const raw_reply = await sendRequest(messages);
-        const { s, reply, commands } = handleReply(ctx, msg, raw_reply);
+        const raw_reply = await sendRequest(processedMessages);
+        const { s, reply, commands, isRepeat } = handleReply(ctx, msg, raw_reply, this.context);
 
         //禁止AI复读
-        if (repeatDetection(reply, this.context.messages) && reply !== '') {
+        if (isRepeat && reply !== '') {
             if (retry == 3) {
                 ConfigManager.printLog(`发现复读，已达到最大重试次数，清除AI上下文`);
                 this.context.messages = messages.filter(item => item.role != 'assistant');
@@ -251,14 +141,14 @@ export class AI {
         const { s, reply, commands } = await this.getReply(ctx, msg, systemMessages);
 
         this.context.lastReply = reply;
-        await this.iteration(ctx, s, 'assistant');
+        await this.context.iteration(ctx, s, 'assistant');
 
         // 发送回复
         seal.replyToSender(ctx, msg, reply);
 
         // commands相关处理
         if (isCmd && commands.length !== 0) {
-            CommandManager.handleCommands(ctx, msg, commands);
+            CommandManager.handleCommands(ctx, msg, commands, this.context);
         }
 
         //发送图片
@@ -269,7 +159,7 @@ export class AI {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
             }
         }
-        
+
         this.isChatting = false;
     }
 
@@ -277,10 +167,10 @@ export class AI {
         const { url, apiKey, bodyTemplate, ctxLength, topics, maxChar, cacheTime } = ConfigManager.getInterruptConfig();
 
         const timestamp = Math.floor(Date.now() / 1000);
-        if (timestamp < this.data.interrupt.timestamp) {
+        if (timestamp < this.context.interrupt.timestamp) {
             return 0;
         }
-        this.data.interrupt.timestamp = timestamp + cacheTime;
+        this.context.interrupt.timestamp = timestamp + cacheTime;
 
         if (this.isGettingAct) {
             return 0;
@@ -288,8 +178,8 @@ export class AI {
         this.isGettingAct = true;
 
         //清除定时器
-        clearTimeout(this.data.timer)
-        this.data.timer = null;
+        clearTimeout(this.context.timer)
+        this.context.timer = null;
 
         const systemMessage = {
             role: "system",
@@ -331,10 +221,10 @@ export class AI {
                     throw new Error("AI 返回的积极性数值无效");
                 }
 
-                if (this.data.interrupt.act === 0) {
-                    this.data.interrupt.act = act;
+                if (this.context.interrupt.act === 0) {
+                    this.context.interrupt.act = act;
                 } else {
-                    this.data.interrupt.act = (this.data.interrupt.act * 0.2) + (act * 0.8);
+                    this.context.interrupt.act = (this.context.interrupt.act * 0.2) + (act * 0.8);
                 }
             } else {
                 throw new Error("服务器响应中没有choices或choices为空");
@@ -344,6 +234,6 @@ export class AI {
         }
 
         this.isGettingAct = false;
-        return this.data.interrupt.act;
+        return this.context.interrupt.act;
     }
 }

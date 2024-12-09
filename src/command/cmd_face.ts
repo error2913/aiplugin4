@@ -12,7 +12,7 @@ export function registerCmdFace() {
 
         return `发送表情的指令:<$表情#表情名称>,表情名称有:${imagesNames.join('、')}。`;
     };
-    cmdFace.solve = (ctx, msg, _, arg1) => {
+    cmdFace.solve = (ctx, msg, _, __, arg1) => {
         if (!arg1) {
             console.error(`发送表情需要一个表情名称`);
             return;

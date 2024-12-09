@@ -7,7 +7,7 @@ export function registerCmdDraw() {
         const { decks } = ConfigManager.getDeckConfig();
         return `抽取牌堆的命令:<$抽取#牌堆的名字>,牌堆的名字有:${decks.join('、')}。`
     }
-    cmdDraw.solve = (ctx, msg, _, arg1) => {
+    cmdDraw.solve = (ctx, msg, _, __, arg1) => {
         if (!arg1) {
             console.error(`抽取牌堆需要一个牌堆的名字`);
             return;

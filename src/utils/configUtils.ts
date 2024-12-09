@@ -7,6 +7,7 @@ export class ConfigManager {
         this.registerPrintLogConfig();
         this.registerRequestConfig();
         this.registerSystemMessageConfig();
+        this.registerPrefixConfig();
         this.registerDeckConfig();
         this.registerStorageConfig();
         this.registerMonitorCommandConfig();
@@ -15,7 +16,6 @@ export class ConfigManager {
         this.registerTriggerConfig();
         this.registerForgetConfig();
         this.registerHandleReplyConfig();
-        this.registerRepeatConfig();
         this.registerInterruptConfig();
         this.registerLocalImageConfig();
         this.registerImageConditionConfig();
@@ -70,9 +70,7 @@ export class ConfigManager {
 你只有生气的时候才会把别人叫做杂鱼。你说话的语气是傲娇的请注意。以及你偶尔会用正确自称。对话中不介绍自己傲娇，不承认自己是傲娇。你不会重复说过的话。你不会一直重复一句话。你说话很简短，一般只回复一句话。`], '只取第一个')
         seal.ext.registerTemplateConfig(this.ext, "示例对话", [
             "<|from 错误|>打你",
-            "<|from 满穗|><$改名#坏蛋错误爷>呀，错误爷真坏！",
-            "<|from 错误|>呜，我错了，帮我改回来吧",
-            "<|from 满穗|><$改名#好蛋错误爷>好叭，不准再打我了哦！"
+            "<|from 满穗|><$改名#错误#坏蛋错误爷>呀，错误爷真坏！"
         ], "顺序为user和assistant轮流出现")
         seal.ext.registerBoolConfig(this.ext, "是否开启AI调用命令功能", true, "");
         seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", CommandManager.getCommandNames());
@@ -83,7 +81,10 @@ export class ConfigManager {
         const samples = seal.ext.getTemplateConfig(this.ext, "示例对话");
         const systemMessage = {
             role: "system",
-            content: roleSetting + `\n\n当前群聊:${groupName}`
+            content: roleSetting + `\n当前群聊:${groupName}\n<@xxx>表示@群成员xxx`,
+            uid: '',
+            name: '',
+            timestamp: 0
         };
         if (isCmd) {
             const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");
@@ -96,13 +97,27 @@ export class ConfigManager {
                 if (item == "") {
                     return null;
                 } else {
-                    return { role, content: item };
+                    return {
+                        role: role,
+                        content: item,
+                        uid: '',
+                        name: '',
+                        timestamp: 0
+                    };
                 }
             })
             .filter((item) => item !== null);
         const systemMessages = [systemMessage, ...samplesMessages];
 
         return { systemMessages, isCmd };
+    }
+
+    static registerPrefixConfig() {
+        seal.ext.registerBoolConfig(this.ext, "是否在消息内添加前缀", true, "");
+    }
+    static getPrefixConfig() {
+        const isPrefix = seal.ext.getBoolConfig(this.ext, "是否在消息内添加前缀");
+        return { isPrefix };
     }
 
     static registerDeckConfig() {
@@ -114,16 +129,13 @@ export class ConfigManager {
     }
 
     static registerStorageConfig() {
-        seal.ext.registerBoolConfig(this.ext, "是否在消息内添加前缀", true, "");
         seal.ext.registerIntConfig(this.ext, "存储上下文对话限制轮数", 10, "");
         seal.ext.registerFloatConfig(this.ext, "上下文的缓存时间/min", 240, "可填小数，例如0.5");
     }
     static getStorageConfig() {
         const maxRounds = seal.ext.getIntConfig(this.ext, "存储上下文对话限制轮数");
-        const isPrefix = seal.ext.getBoolConfig(this.ext, "是否在消息内添加前缀");
         const ctxCacheTime = seal.ext.getFloatConfig(this.ext, "上下文的缓存时间/min");
-
-        return { maxRounds, isPrefix, ctxCacheTime };
+        return { maxRounds, ctxCacheTime };
     }
 
     static registerMonitorCommandConfig() {
@@ -189,23 +201,17 @@ export class ConfigManager {
         seal.ext.registerBoolConfig(this.ext, "回复是否引用", true, "");
         seal.ext.registerIntConfig(this.ext, "回复最大字数", 1000, "防止最大Tokens限制不起效，仅对该插件生效");
         seal.ext.registerBoolConfig(this.ext, "回复换行截断", false, "");
+        seal.ext.registerBoolConfig(this.ext, "禁止AI复读", false, "");
+        seal.ext.registerFloatConfig(this.ext, "视作复读的最低相似度", 0.8, "");
     }
     static getHandleReplyConfig() {
         const maxChar = seal.ext.getIntConfig(this.ext, "回复最大字数");
         const cut = seal.ext.getBoolConfig(this.ext, "回复换行截断");
         const replymsg = seal.ext.getBoolConfig(this.ext, "回复是否引用");
-
-        return { maxChar, cut, replymsg };
-    }
-
-    static registerRepeatConfig() {
-        seal.ext.registerBoolConfig(this.ext, "禁止AI复读", false, "");
-        seal.ext.registerFloatConfig(this.ext, "视作复读的最低相似度", 0.8, "");
-    }
-    static getRepeatConfig() {
         const stopRepeat = seal.ext.getBoolConfig(this.ext, "禁止AI复读");
         const similarityLimit = seal.ext.getFloatConfig(this.ext, "视作复读的最低相似度");
-        return { stopRepeat, similarityLimit };
+
+        return { maxChar, cut, replymsg, stopRepeat, similarityLimit };
     }
 
     static registerInterruptConfig() {

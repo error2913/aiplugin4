@@ -1,3 +1,4 @@
+import { Context } from "../AI/context";
 import { ConfigManager } from "../utils/configUtils";
 import { registerCmdDraw } from "./cmd_draw";
 import { registerCmdFace } from "./cmd_face";
@@ -24,7 +25,7 @@ export class Command {
      * @param cmdArgs 
      * @param extraArgs 额外参数，即在命令中使用#分割的部分
      */
-    solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, ...extraArgs: string[]) => void;
+    solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, context: Context, ...extraArgs: string[]) => void;
 
     /**
      * @param name 命令的名字，<$这一部分#参数1#参数2>
@@ -36,7 +37,7 @@ export class Command {
         this.command = command;
         this.args = args;
         this.buildPrompt = () => '';
-        this.solve = (_, __, ___) => { };
+        this.solve = (_, __, ___, ____) => { };
     }
 
     /**
@@ -90,7 +91,7 @@ export class CommandManager {
             .filter(item => item !== null);
     }
 
-    static handleCommands(ctx: seal.MsgContext, msg: seal.Message, commands: string[]) {
+    static handleCommands(ctx: seal.MsgContext, msg: seal.Message, commands: string[], context: Context) {
         if (commands.length !== 0) {
             ConfigManager.printLog(`AI命令:`, JSON.stringify(commands));
         }
@@ -111,7 +112,7 @@ export class CommandManager {
             const cmd = cmds[i][0];
             const args = cmds[i].slice(1);
             if (this.cmdMap.hasOwnProperty(cmd)) {
-                this.cmdMap[cmd].solve(ctx, msg, this.cmdArgs, ...args);
+                this.cmdMap[cmd].solve(ctx, msg, this.cmdArgs, context, ...args);
             } else {
                 console.error(`AI命令${cmd}不存在`);
             }

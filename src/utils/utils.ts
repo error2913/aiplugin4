@@ -73,7 +73,7 @@ export function getUrlsInCQCode(s: string): string[] {
     }
 }
 
-function levenshteinDistance(s1: string, s2: string): number {
+export function levenshteinDistance(s1: string, s2: string): number {
     const len1 = s1.length;
     const len2 = s2.length;
     const dp = Array.from({ length: len1 + 1 }, () => Array(len2 + 1).fill(0));
