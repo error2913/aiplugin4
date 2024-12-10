@@ -6,13 +6,13 @@ import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.1.0');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.1.1');
     seal.ext.register(ext);
   }
 
-  CommandManager.init();// 先初始化才能根据注册的命令注册对应的配置项
   ConfigManager.ext = ext;
   ConfigManager.register();
+  CommandManager.init();
   const aim = new AIManager();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
@@ -24,6 +24,7 @@ function main() {
 【.ai ck】检查权限(仅骰主可用)
 【.ai prompt】检查当前prompt(仅骰主可用)
 【.ai pr】查看当前群聊权限
+【.ai ctxn】查看上下文里的名字
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
@@ -139,6 +140,18 @@ function main() {
         const interrupt = pr.interrupt > -1 ? `${pr.interrupt}` : '关闭';
         const standby = pr.standby ? '开启' : '关闭';
         const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n插嘴模式(i):${interrupt}\n待机模式:${standby}`;
+        seal.replyToSender(ctx, msg, s);
+        return ret;
+      }
+      case 'ctxn': {
+        const pr = ai.privilege;
+        if (ctx.privilegeLevel < pr.limit) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        const names = ai.context.getNames();
+        const s = `上下文里的名字有：\n<${names.join('>\n<')}>`;
         seal.replyToSender(ctx, msg, s);
         return ret;
       }

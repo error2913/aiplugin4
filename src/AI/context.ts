@@ -44,7 +44,7 @@ export class Context {
                     message.hasOwnProperty('content') && typeof message.content === 'string' &&
                     message.hasOwnProperty('uid') && typeof message.uid === 'string' &&
                     message.hasOwnProperty('name') && typeof message.name === 'string' &&
-                    message.hasOwnProperty('timestamp') && typeof message.timestamp ==='number'
+                    message.hasOwnProperty('timestamp') && typeof message.timestamp === 'number'
                 ) {
                     context.messages.push({
                         role: message.role,
@@ -114,7 +114,7 @@ export class Context {
 
         //更新上下文
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
-        const uid = role == 'user'? ctx.player.userId : ctx.endPoint.userId;
+        const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const rounds = messages.length;
         if (rounds !== 0 && messages[rounds - 1].name === name) {
             this.messages[rounds - 1].content += ' ' + s;
@@ -150,5 +150,15 @@ export class Context {
             }
         }
         return null;
+    }
+
+    getNames(): string[] {
+        const names = [];
+        for (const message of this.messages) {
+            if (message.role === 'user' && message.name && !names.includes(message.name)) {
+                names.push(message.name);
+            }
+        }
+        return names;
     }
 }

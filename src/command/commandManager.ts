@@ -75,10 +75,6 @@ export class CommandManager {
         this.cmdMap[cmd.name] = cmd;
     }
 
-    static getCommandNames(): string[] {
-        return Object.keys(this.cmdMap);
-    }
-
     static getCommandsPrompts(cmdAllow: string[]): string[] {
         return Object.values(this.cmdMap)
             .map(item => {
@@ -101,8 +97,8 @@ export class CommandManager {
             return;
         }
 
-        if (commands.length > 10) {
-            console.error(`AI命令数量过多，请限制在10个以内`);
+        if (commands.length > 5) {
+            console.error(`AI命令数量过多，请限制在5个以内`);
             return;
         }
 

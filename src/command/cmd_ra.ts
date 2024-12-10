@@ -14,9 +14,15 @@ export function registerCmdRa() {
 
         if (arg2) {
             const uid = context.findUid(arg1);
-            if (uid !== null) {
-                msg = getMsg(msg.messageType, uid, ctx.group.groupId);
-                ctx = getCtx(ctx.endPoint.userId, msg);
+            if (uid === null) {
+                console.error(`未找到<${arg1}>`);
+            }
+
+            msg = getMsg(msg.messageType, uid, ctx.group.groupId);
+            ctx = getCtx(ctx.endPoint.userId, msg);
+
+            if (uid === ctx.endPoint.userId) {
+                ctx.player.name = arg1;
             }
         } else {
             arg2 = arg1;

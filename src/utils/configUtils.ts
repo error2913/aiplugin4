@@ -69,7 +69,15 @@ export class ConfigManager {
             "<|from:满穗|><$改名#错误#坏蛋错误爷>呀，错误爷真坏！"
         ], "顺序为user和assistant轮流出现")
         seal.ext.registerBoolConfig(this.ext, "是否开启AI调用命令功能", true, "");
-        seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", CommandManager.getCommandNames());
+        seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", [
+            '抽取',
+            '表情',
+            '今日人品',
+            '模组',
+            '检定',
+            '改名',
+            '展示'
+        ]);
     }
     static getSystemMessageConfig(groupName: string) {
         const roleSetting = seal.ext.getTemplateConfig(this.ext, "角色设定")[0];
