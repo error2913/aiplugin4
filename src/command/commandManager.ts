@@ -1,5 +1,6 @@
 import { Context } from "../AI/context";
 import { ConfigManager } from "../utils/configUtils";
+import { registerCmdBan } from "./cmd_ban";
 import { registerCmdDraw } from "./cmd_draw";
 import { registerCmdFace } from "./cmd_face";
 import { registerCmdJrrp } from "./cmd_jrrp";
@@ -69,6 +70,7 @@ export class CommandManager {
         registerCmdRa();
         registerCmdRename();
         registerCmdSt();
+        registerCmdBan();
     }
 
     static registerCommand(cmd: Command) {
