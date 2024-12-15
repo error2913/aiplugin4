@@ -99,7 +99,7 @@ export class ConfigManager {
         }
         const memeryPrompt = context.getMemoryPrompt(ctx);
         if (memeryPrompt) {
-            systemMessage.content += '\n相关记忆:\n' + memeryPrompt;
+            systemMessage.content += '\n下列是对话相关记忆，如果与上述设定冲突，请遵守角色设定。记忆如下:\n' + memeryPrompt;
         }
         if (isCmd) {
             const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");

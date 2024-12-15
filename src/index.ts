@@ -341,9 +341,13 @@ function main() {
         const ai2 = AIManager.getAI(uid);
         const val2 = cmdArgs.getArgN(2);
         switch (val2) {
-          case 'add': {
+          case 'st': {
             const s = cmdArgs.getRestArgsFrom(3);
-            ai2.context.addMemory(ctx.group.groupName, s);
+            if (s.length > 20) {
+              seal.replyToSender(ctx, msg, '记忆过长，请控制在20字以内');
+              return ret;
+            }
+            ai2.context.setSystemMemory(s);
             seal.replyToSender(ctx, msg, '记忆已添加');
             AIManager.saveAI(uid);
             return ret;
@@ -361,7 +365,7 @@ function main() {
           }
           default: {
             const s = `帮助:
-【.ai memo add <内容>】添加记忆
+【.ai memo st <内容>】设置记忆
 【.ai memo clr】清除记忆
 【.ai memo show】展示记忆`;
 

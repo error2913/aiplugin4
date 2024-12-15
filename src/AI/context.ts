@@ -20,6 +20,7 @@ export class Context {
         timestamp: number
     }
     memories: {
+        system: string[],
         [key: string]: string[]
     }
 
@@ -32,7 +33,9 @@ export class Context {
             act: 0,
             timestamp: 0
         }
-        this.memories = {};
+        this.memories = {
+            system: []
+        };
     }
 
     static parse(data: any): Context {
@@ -73,7 +76,7 @@ export class Context {
         if (data.hasOwnProperty('timer') && typeof data.timer === 'number') {
             context.timer = data.timer;
         }
-        
+
         if (data.hasOwnProperty('interrupt') && typeof data.interrupt === 'object' && !Array.isArray(data.interrupt)) {
             if (data.interrupt.hasOwnProperty('act') && typeof data.interrupt.act === 'number') {
                 context.interrupt.act = data.interrupt.act;
@@ -83,7 +86,7 @@ export class Context {
             }
         }
 
-        if (data.hasOwnProperty('memories') && typeof data.memories === 'object' &&!Array.isArray(data.memories)) {
+        if (data.hasOwnProperty('memories') && typeof data.memories === 'object' && !Array.isArray(data.memories)) {
             for (const k in data.memories) {
                 if (data.memories.hasOwnProperty(k) && Array.isArray(data.memories[k])) {
                     context.memories[k] = data.memories[k];
@@ -149,6 +152,10 @@ export class Context {
         }
     }
 
+    setSystemMemory(s: string) {
+        this.memories.system = [s];
+    }
+
     getMemoryLength(): number {
         let length = 0;
         for (const k in this.memories) {
@@ -195,7 +202,14 @@ export class Context {
     getPrivateMemoryPrompt(): string {
         let s = '';
         for (const key in this.memories) {
-            s += `\n- 在<${key}>中的记忆:${this.memories[key].join('、')}`;
+            if (this.memories[key].length === 0) {
+                continue;
+            }
+            if (key === 'system') {
+                s += `\n- 设定记忆:${this.memories.system.join('、')}`;
+            } else {
+                s += `\n- 在<${key}>中的记忆:${this.memories[key].join('、')}`;
+            }
         }
         return s;
     }
@@ -224,7 +238,9 @@ export class Context {
     }
 
     clearMemory() {
-        this.memories = {};
+        this.memories = {
+            system: []
+        };
     }
 
     findUid(name: string): string {
