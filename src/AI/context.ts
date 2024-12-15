@@ -73,12 +73,21 @@ export class Context {
         if (data.hasOwnProperty('timer') && typeof data.timer === 'number') {
             context.timer = data.timer;
         }
+        
         if (data.hasOwnProperty('interrupt') && typeof data.interrupt === 'object' && !Array.isArray(data.interrupt)) {
             if (data.interrupt.hasOwnProperty('act') && typeof data.interrupt.act === 'number') {
                 context.interrupt.act = data.interrupt.act;
             }
             if (data.interrupt.hasOwnProperty('timestamp') && typeof data.interrupt.timestamp === 'number') {
                 context.interrupt.timestamp = data.interrupt.timestamp;
+            }
+        }
+
+        if (data.hasOwnProperty('memories') && typeof data.memories === 'object' &&!Array.isArray(data.memories)) {
+            for (const k in data.memories) {
+                if (data.memories.hasOwnProperty(k) && Array.isArray(data.memories[k])) {
+                    context.memories[k] = data.memories[k];
+                }
             }
         }
 
@@ -159,6 +168,7 @@ export class Context {
             this.memories[k] = [];
         }
 
+        s = s.slice(0, 100);
         this.memories[k].push(s);
 
         // 超过上限时，从最长的记忆处弹出
@@ -191,7 +201,7 @@ export class Context {
     }
 
     getMemoryPrompt(ctx: seal.MsgContext): string {
-        let s = '\n相关记忆:'
+        let s = '';
         if (ctx.isPrivate) {
             s += this.getPrivateMemoryPrompt();
         } else {
@@ -211,6 +221,10 @@ export class Context {
         }
 
         return s;
+    }
+
+    clearMemory() {
+        this.memories = {};
     }
 
     findUid(name: string): string {

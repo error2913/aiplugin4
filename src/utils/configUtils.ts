@@ -97,7 +97,10 @@ export class ConfigManager {
         if (!ctx.isPrivate) {
             systemMessage.content += `\n当前群聊:${ctx.group.groupName}\n<@xxx>表示@群成员xxx`;
         }
-        systemMessage.content += context.getMemoryPrompt(ctx);
+        const memeryPrompt = context.getMemoryPrompt(ctx);
+        if (memeryPrompt) {
+            systemMessage.content += '\n相关记忆:\n' + memeryPrompt;
+        }
         if (isCmd) {
             const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");
             const commandsPrompts = CommandManager.getCommandsPrompts(cmdAllow);

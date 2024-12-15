@@ -5,7 +5,7 @@ import { Command, CommandManager } from "./commandManager";
 export function registerCmdMemory() {
     const cmdStShow = new Command('记忆');
     cmdStShow.buildPrompt = () => {
-        return '添加记忆的指令:<$记忆#被记忆者的名字#记忆的内容>';
+        return '添加记忆或者留下对别人印象的指令:<$记忆#被记忆者的名字#记忆的内容>';
     }
     cmdStShow.solve = (ctx, msg, __, context, arg1, arg2) => {
         if (!arg1) {
@@ -16,7 +16,7 @@ export function registerCmdMemory() {
         if (arg2) {
             const uid = context.findUid(arg1);
             if (uid === null) {
-                console.error(`未找到<${arg1}>`);
+                console.log(`未找到<${arg1}>`);
                 return;
             }
 
@@ -32,6 +32,7 @@ export function registerCmdMemory() {
             //记忆相关处理
             const ai = AIManager.getAI(uid);
             ai.context.addMemory(ctx.group.groupName, arg2);
+            AIManager.saveAI(uid);
         } else {
             console.error(`添加记忆需要一个内容`);
             return;

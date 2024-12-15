@@ -6,7 +6,7 @@ import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.1.1');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.2.0');
     seal.ext.register(ext);
   }
 
@@ -27,7 +27,8 @@ function main() {
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
-【.ai fgt】遗忘上下文`;
+【.ai fgt】遗忘上下文
+【.ai memo】修改AI的记忆`;
   cmdAI.solve = (ctx, msg, cmdArgs) => {
     const val = cmdArgs.getArgN(1);
     const uid = ctx.player.userId;
@@ -332,6 +333,39 @@ function main() {
             ai.context.messages = []
             seal.replyToSender(ctx, msg, '上下文已清除');
             AIManager.saveAI(id);
+            return ret;
+          }
+        }
+      }
+      case 'memo': {
+        const ai2 = AIManager.getAI(uid);
+        const val2 = cmdArgs.getArgN(2);
+        switch (val2) {
+          case 'add': {
+            const s = cmdArgs.getRestArgsFrom(3);
+            ai2.context.addMemory(ctx.group.groupName, s);
+            seal.replyToSender(ctx, msg, '记忆已添加');
+            AIManager.saveAI(uid);
+            return ret;
+          }
+          case 'clr': {
+            ai2.context.clearMemory();
+            seal.replyToSender(ctx, msg, '记忆已清除');
+            AIManager.saveAI(uid);
+            return ret;
+          }
+          case 'show': {
+            const s = ai2.context.getPrivateMemoryPrompt();
+            seal.replyToSender(ctx, msg, s || '暂无记忆');
+            return ret;
+          }
+          default: {
+            const s = `帮助:
+【.ai memo add <内容>】添加记忆
+【.ai memo clr】清除记忆
+【.ai memo show】展示记忆`;
+
+            seal.replyToSender(ctx, msg, s);
             return ret;
           }
         }
