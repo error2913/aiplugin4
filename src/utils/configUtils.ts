@@ -25,6 +25,8 @@ export class ConfigManager {
         this.registerImageRequestConfig();
         this.registerImageTriggerConfig();
         this.registerImageStorageConfig();
+        this.AittsCharacterConfig();
+        this.getAittsCharacterConfig();
     }
 
     static registerPrintLogConfig() {
@@ -79,7 +81,10 @@ export class ConfigManager {
             '模组',
             '检定',
             '改名',
-            '展示'
+            '展示',
+            '记忆',
+            '语音',
+            '戳',
         ]);
     }
     static getSystemMessageConfig(ctx: seal.MsgContext, context: Context) {
@@ -347,6 +352,15 @@ export class ConfigManager {
     static getImageStorageConfig() {
         const maxImageNum = seal.ext.getIntConfig(this.ext, "偷取图片存储上限");
         return { maxImageNum };
+    }
+
+    static AittsCharacterConfig() {
+        seal.ext.registerOptionConfig(this.ext, "ai语音使用的音色", '小新', ["小新", "猴哥", "四郎", "东北老妹儿", "广西大表哥", "妲己", "霸道总裁", "酥心御姐", "说书先生", "憨憨小弟", "憨厚老哥", "吕布", "元气少女", "文艺少女", "磁性大叔", "邻家小妹", "低沉男声", "傲娇少女", "爹系男友", "暖心姐姐", "温柔妹妹", "书香少女"], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange");
+    }
+
+    static getAittsCharacterConfig() {
+        const character = seal.ext.getOptionConfig(this.ext, "ai语音使用的音色");
+        return { character };
     }
 }
 
