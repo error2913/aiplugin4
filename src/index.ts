@@ -13,7 +13,6 @@ function main() {
   ConfigManager.ext = ext;
   ConfigManager.register();
   CommandManager.init();
-  const aim = new AIManager();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
 
@@ -36,7 +35,7 @@ function main() {
     const id = ctx.isPrivate ? uid : gid;
 
     const ret = seal.ext.newCmdExecuteResult(true);
-    const ai = aim.getAI(id);
+    const ai = AIManager.getAI(id);
 
     switch (val) {
       case 'st': {
@@ -74,12 +73,12 @@ function main() {
         }
 
         const id2 = val2 === 'now' ? id : val2;
-        const ai2 = aim.getAI(id2);
+        const ai2 = AIManager.getAI(id2);
 
         ai2.privilege.limit = limit;
 
         seal.replyToSender(ctx, msg, '权限修改完成');
-        aim.saveAI(id2);
+        AIManager.saveAI(id2);
         return ret;
       }
       case 'ck': {
@@ -103,7 +102,7 @@ function main() {
         }
 
         const id2 = val2 === 'now' ? id : val2;
-        const ai2 = aim.getAI(id2);
+        const ai2 = AIManager.getAI(id2);
 
         const pr = ai2.privilege;
 
@@ -122,7 +121,7 @@ function main() {
           return ret;
         }
 
-        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx.group.groupName);
+        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx, ai.context);
 
         seal.replyToSender(ctx, msg, systemMessages[0].content);
         return ret;
@@ -220,7 +219,7 @@ function main() {
         pr.standby = true;
 
         seal.replyToSender(ctx, msg, text);
-        aim.saveAI(id);
+        AIManager.saveAI(id);
         return ret;
       }
       case 'sb': {
@@ -239,7 +238,7 @@ function main() {
         ai.clearData();
 
         seal.replyToSender(ctx, msg, 'AI已开启待机模式');
-        aim.saveAI(id);
+        AIManager.saveAI(id);
         return ret;
       }
       case 'off': {
@@ -260,7 +259,7 @@ function main() {
           ai.clearData();
 
           seal.replyToSender(ctx, msg, 'AI已关闭');
-          aim.saveAI(id);
+          AIManager.saveAI(id);
           return ret;
         }
 
@@ -299,7 +298,7 @@ function main() {
         ai.clearData();
 
         seal.replyToSender(ctx, msg, text);
-        aim.saveAI(id);
+        AIManager.saveAI(id);
         return ret;
       }
       case 'f':
@@ -320,19 +319,19 @@ function main() {
           case 'assistant': {
             ai.context.messages = messages.filter(item => item.role !== 'assistant');
             seal.replyToSender(ctx, msg, 'ai上下文已清除');
-            aim.saveAI(id);
+            AIManager.saveAI(id);
             return ret;
           }
           case 'user': {
             ai.context.messages = messages.filter(item => item.role !== 'user');
             seal.replyToSender(ctx, msg, '用户上下文已清除');
-            aim.saveAI(id);
+            AIManager.saveAI(id);
             return ret;
           }
           default: {
             ai.context.messages = []
             seal.replyToSender(ctx, msg, '上下文已清除');
-            aim.saveAI(id);
+            AIManager.saveAI(id);
             return ret;
           }
         }
@@ -359,7 +358,7 @@ function main() {
     const id = ctx.isPrivate ? uid : gid;
 
     const ret = seal.ext.newCmdExecuteResult(true);
-    const ai = aim.getAI(id);
+    const ai = AIManager.getAI(id);
 
     switch (val) {
       case 'draw': {
@@ -478,7 +477,7 @@ function main() {
     const id = ctx.isPrivate ? userId : groupId;
 
     let message = msg.message;
-    const ai = aim.getAI(id);
+    const ai = AIManager.getAI(id);
 
     // 非指令清除上下文
     const { clearWords, clearReplys } = ConfigManager.getForgetConfig();
@@ -494,7 +493,7 @@ function main() {
       const s = clearReplys[Math.floor(Math.random() * clearReplys.length)];
 
       seal.replyToSender(ctx, msg, s);
-      aim.saveAI(id);
+      AIManager.saveAI(id);
       return;
     }
 
@@ -535,7 +534,7 @@ function main() {
 
         ConfigManager.printLog('非指令触发回复');
         await ai.chat(ctx, msg);
-        aim.saveAI(id);
+        AIManager.saveAI(id);
         return;
       }
 
@@ -554,7 +553,7 @@ function main() {
             ai.context.counter = 0;
 
             await ai.chat(ctx, msg);
-            aim.saveAI(id);
+            AIManager.saveAI(id);
             return;
           }
         }
@@ -566,7 +565,7 @@ function main() {
             ConfigManager.printLog('概率触发回复');
 
             await ai.chat(ctx, msg);
-            aim.saveAI(id);
+            AIManager.saveAI(id);
             return;
           }
         }
@@ -579,7 +578,7 @@ function main() {
             ai.context.interrupt.act = 0;
 
             await ai.chat(ctx, msg);
-            aim.saveAI(id);
+            AIManager.saveAI(id);
             return;
           }
         }
@@ -590,7 +589,7 @@ function main() {
 
             ai.context.timer = null;
             await ai.chat(ctx, msg);
-            aim.saveAI(id);
+            AIManager.saveAI(id);
           }, pr.timer * 1000 + Math.floor(Math.random() * 500));
         }
       }
@@ -609,7 +608,7 @@ function main() {
       const gid = ctx.group.groupId;
       const id = ctx.isPrivate ? uid : gid;
 
-      const ai = aim.getAI(id);
+      const ai = AIManager.getAI(id);
 
       const message = msg.message;
 
@@ -631,7 +630,7 @@ function main() {
       const gid = ctx.group.groupId;
       const id = ctx.isPrivate ? uid : gid;
 
-      const ai = aim.getAI(id);
+      const ai = AIManager.getAI(id);
 
       const message = msg.message;
 

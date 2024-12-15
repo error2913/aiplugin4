@@ -1,3 +1,4 @@
+import { Context } from "../AI/context";
 import { CommandManager } from "../command/commandManager";
 
 export class ConfigManager {
@@ -9,6 +10,7 @@ export class ConfigManager {
         this.registerSystemMessageConfig();
         this.registerPrefixConfig();
         this.registerDeckConfig();
+        this.registerMemoryConfig();
         this.registerStorageConfig();
         this.registerMonitorCommandConfig();
         this.registerMonitorAllMessageConfig();
@@ -70,6 +72,7 @@ export class ConfigManager {
         ], "顺序为user和assistant轮流出现")
         seal.ext.registerBoolConfig(this.ext, "是否开启AI调用命令功能", true, "");
         seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", [
+            '记忆',
             '抽取',
             '表情',
             '今日人品',
@@ -79,22 +82,28 @@ export class ConfigManager {
             '展示'
         ]);
     }
-    static getSystemMessageConfig(groupName: string) {
+    static getSystemMessageConfig(ctx: seal.MsgContext, context: Context) {
         const roleSetting = seal.ext.getTemplateConfig(this.ext, "角色设定")[0];
         const isCmd = seal.ext.getBoolConfig(this.ext, "是否开启AI调用命令功能");
         const samples = seal.ext.getTemplateConfig(this.ext, "示例对话");
+
         const systemMessage = {
             role: "system",
-            content: roleSetting + `\n当前群聊:${groupName}\n<@xxx>表示@群成员xxx`,
+            content: roleSetting,
             uid: '',
             name: '',
             timestamp: 0
         };
+        if (!ctx.isPrivate) {
+            systemMessage.content += `\n当前群聊:${ctx.group.groupName}\n<@xxx>表示@群成员xxx`;
+        }
+        systemMessage.content += context.getMemoryPrompt(ctx);
         if (isCmd) {
             const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");
             const commandsPrompts = CommandManager.getCommandsPrompts(cmdAllow);
             systemMessage.content += `\n\n在对话中你可以使用以下你的专用命令:\n${commandsPrompts.join(',\n')}`;
         }
+
         const samplesMessages = samples
             .map((item, index) => {
                 const role = index % 2 === 0 ? "user" : "assistant";
@@ -130,6 +139,14 @@ export class ConfigManager {
     static getDeckConfig() {
         const decks = seal.ext.getTemplateConfig(this.ext, "提供给AI的牌堆名称");
         return { decks };
+    }
+
+    static registerMemoryConfig() {
+        seal.ext.registerIntConfig(this.ext, "额外记忆上限", 5, "");
+    }
+    static getMemoryConfig() {
+        const extraMemory = seal.ext.getIntConfig(this.ext, "额外记忆上限");
+        return { extraMemory };
     }
 
     static registerStorageConfig() {

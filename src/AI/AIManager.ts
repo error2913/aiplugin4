@@ -2,17 +2,13 @@ import { ConfigManager } from "../utils/configUtils";
 import { AI } from "./AI";
 
 export class AIManager {
-    cache: { [key: string]: AI };
+    static cache: { [key: string]: AI } = {};
 
-    constructor() {
+    static clearCache() {
         this.cache = {};
     }
 
-    clearCache() {
-        this.cache = {};
-    }
-
-    getAI(id: string) {
+    static getAI(id: string) {
         if (!this.cache.hasOwnProperty(id)) {
             let data = {};
 
@@ -28,7 +24,7 @@ export class AIManager {
         return this.cache[id];
     }
 
-    saveAI(id: string) {
+    static saveAI(id: string) {
         if (this.cache.hasOwnProperty(id)) {
             ConfigManager.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
         }
