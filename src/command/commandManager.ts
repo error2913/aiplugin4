@@ -4,6 +4,7 @@ import { registerCmdBan } from "./cmd_ban";
 import { registerCmdDraw } from "./cmd_draw";
 import { registerCmdFace } from "./cmd_face";
 import { registerCmdJrrp } from "./cmd_jrrp";
+import { registerCmdMemory } from "./cmd_memory";
 import { registerCmdModu } from "./cmd_modu";
 import { registerCmdRa } from "./cmd_ra";
 import { registerCmdRename } from "./cmd_rename";
@@ -24,6 +25,7 @@ export class Command {
      * @param ctx 
      * @param msg 
      * @param cmdArgs 
+     * @param context 上下文
      * @param extraArgs 额外参数，即在命令中使用#分割的部分
      */
     solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, context: Context, ...extraArgs: string[]) => void;
@@ -71,6 +73,7 @@ export class CommandManager {
         registerCmdRename();
         registerCmdSt();
         registerCmdBan();
+        registerCmdMemory();
     }
 
     static registerCommand(cmd: Command) {

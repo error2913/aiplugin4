@@ -18,14 +18,15 @@ export interface Privilege {
 export class AI {
     id: string;
     context: Context;
+    image: ImageManager;
     privilege: Privilege;
     isChatting: boolean;
     isGettingAct: boolean;
-    image: ImageManager;
 
     constructor(id: string) {
         this.id = id;
         this.context = new Context();
+        this.image = new ImageManager(id);
         this.privilege = {
             limit: 100,
             counter: -1,
@@ -36,7 +37,6 @@ export class AI {
         };
         this.isChatting = false;
         this.isGettingAct = false;
-        this.image = new ImageManager(id);
     }
 
     static parse(data: any, id: string): AI {
@@ -137,7 +137,7 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const { systemMessages, isCmd } = ConfigManager.getSystemMessageConfig(ctx.group.groupName);
+        const { systemMessages, isCmd } = ConfigManager.getSystemMessageConfig(ctx, this.context);
         const { s, reply, commands } = await this.getReply(ctx, msg, systemMessages);
 
         this.context.lastReply = reply;

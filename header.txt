@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.1.1
+// @version      4.2.0
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\n新增了AI命令功能，AI可以使用的命令有:抽取牌堆、设置群名片、随机模组、查询模组、进行检定、展示属性、今日人品、发送表情
 // @timestamp    1733387279
 // 2024-12-05 16:27:59

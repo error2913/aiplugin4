@@ -10,7 +10,7 @@ export function registerCmdJrrp() {
         if (arg1) {
             const uid = context.findUid(arg1);
             if (uid === null) {
-                console.error(`未找到<${arg1}>`);
+                console.log(`未找到<${arg1}>`);
                 return;
             }
 
