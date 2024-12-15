@@ -1,5 +1,6 @@
 import { Context } from "../AI/context";
 import { ConfigManager } from "../utils/configUtils";
+import { registerCmdAitts } from "./cmd_aitts";
 import { registerCmdBan } from "./cmd_ban";
 import { registerCmdDraw } from "./cmd_draw";
 import { registerCmdFace } from "./cmd_face";
@@ -9,6 +10,7 @@ import { registerCmdModu } from "./cmd_modu";
 import { registerCmdRa } from "./cmd_ra";
 import { registerCmdRename } from "./cmd_rename";
 import { registerCmdSt } from "./cmd_st";
+import { registerCmdPoke } from "./cmd_poke";
 
 export class Command {
     name: string;
@@ -74,6 +76,8 @@ export class CommandManager {
         registerCmdSt();
         registerCmdBan();
         registerCmdMemory();
+        registerCmdAitts();
+        registerCmdPoke();
     }
 
     static registerCommand(cmd: Command) {
@@ -120,14 +124,3 @@ export class CommandManager {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
