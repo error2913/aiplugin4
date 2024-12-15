@@ -82,7 +82,6 @@ export class ConfigManager {
             '检定',
             '改名',
             '展示',
-            '记忆',
             '语音',
             '戳',
         ]);
