@@ -153,6 +153,9 @@ export class Context {
     }
 
     setSystemMemory(s: string) {
+        if (!s) {
+            this.memories.system = [];
+        }
         this.memories.system = [s];
     }
 
@@ -245,7 +248,7 @@ export class Context {
 
     clearMemory() {
         this.memories = {
-            system: []
+            system: this.memories.system
         };
     }
 

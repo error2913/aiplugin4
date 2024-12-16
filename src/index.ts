@@ -6,7 +6,7 @@ import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.2.0');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.2.2');
     seal.ext.register(ext);
   }
 
@@ -29,6 +29,7 @@ function main() {
 【.ai off】关闭AI，此时仍能用关键词触发
 【.ai fgt】遗忘上下文
 【.ai memo】修改AI的记忆`;
+  cmdAI.allowDelegate = true;
   cmdAI.solve = (ctx, msg, cmdArgs) => {
     const val = cmdArgs.getArgN(1);
     const uid = ctx.player.userId;
@@ -338,7 +339,15 @@ function main() {
         }
       }
       case 'memo': {
-        const ai2 = AIManager.getAI(uid);
+        const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
+        const muid = mctx.player.userId;
+
+        if (ctx.privilegeLevel < 100 && muid !== uid) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        const ai2 = AIManager.getAI(muid);
         const val2 = cmdArgs.getArgN(2);
         switch (val2) {
           case 'st': {
@@ -349,13 +358,13 @@ function main() {
             }
             ai2.context.setSystemMemory(s);
             seal.replyToSender(ctx, msg, '记忆已添加');
-            AIManager.saveAI(uid);
+            AIManager.saveAI(muid);
             return ret;
           }
           case 'clr': {
             ai2.context.clearMemory();
             seal.replyToSender(ctx, msg, '记忆已清除');
-            AIManager.saveAI(uid);
+            AIManager.saveAI(muid);
             return ret;
           }
           case 'show': {
