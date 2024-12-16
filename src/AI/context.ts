@@ -159,6 +159,9 @@ export class Context {
     getMemoryLength(): number {
         let length = 0;
         for (const k in this.memories) {
+            if (k === 'system') {
+                continue;
+            }
             length += this.memories[k].length;
         }
         return length;
@@ -184,6 +187,9 @@ export class Context {
             let maxLength = 0;
             let maxKey = '';
             for (const k in this.memories) {
+                if (k ==='system') {
+                    continue;
+                }
                 if (this.memories[k].length > maxLength) {
                     maxLength = this.memories[k].length;
                     maxKey = k;
