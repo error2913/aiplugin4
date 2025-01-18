@@ -6,7 +6,7 @@ import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.2.2');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.2.3');
     seal.ext.register(ext);
   }
 

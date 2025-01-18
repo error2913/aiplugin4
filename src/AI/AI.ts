@@ -153,7 +153,7 @@ export class AI {
 
         //发送图片
         const { p } = ConfigManager.getImageProbabilityConfig();
-        if (Math.random() <= p) {
+        if (Math.random() * 100 <= p) {
             const file = await this.image.drawImage();
             if (file) {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
