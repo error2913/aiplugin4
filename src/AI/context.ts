@@ -129,6 +129,10 @@ export class Context {
             })
             .replace(/\[CQ:.*?\]/g, '')
 
+        if (s === '') {
+            return;
+        }
+
         //更新上下文
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;

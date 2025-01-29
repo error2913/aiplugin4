@@ -1,7 +1,7 @@
 import { ConfigManager } from "./configUtils";
 import { parseBody } from "./utils";
 
-export async function getRespose(url: string, apiKey: string, bodyObject: any): Promise<Response> {
+export async function FetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
     // 打印请求发送前的上下文
     const s = JSON.stringify(bodyObject.messages, (key, value) => {
         if (key === "" && Array.isArray(value)) {
@@ -27,7 +27,17 @@ export async function getRespose(url: string, apiKey: string, bodyObject: any): 
         throw new Error(`HTTP错误! 状态码: ${response.status}`);
     }
 
-    return response;
+    const text = await response.text();
+    if (!text) {
+        throw new Error(`响应体为空!`);
+    }
+
+    const data = await response.json();
+    if (data.error) {
+        throw new Error(`请求失败：${JSON.stringify(data.error)}`);
+    }
+
+    return data;
 }
 
 export async function sendRequest(messages: { role: string, content: string }[]): Promise<string> {
@@ -37,14 +47,10 @@ export async function sendRequest(messages: { role: string, content: string }[])
         const bodyObject = parseBody(bodyTemplate, messages);
         const time = Date.now();
 
-        const response = await getRespose(url, apiKey, bodyObject);
-        const data_response = await response.json();
-        if (data_response.error) {
-            throw new Error(`请求失败：${JSON.stringify(data_response.error)}`);
-        }
+        const data = await FetchData(url, apiKey, bodyObject);
 
-        if (data_response.choices && data_response.choices.length > 0) {
-            const reply = data_response.choices[0].message.content;
+        if (data.choices && data.choices.length > 0) {
+            const reply = data.choices[0].message.content;
             ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
             return reply;
         } else {

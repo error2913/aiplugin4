@@ -2,7 +2,7 @@ import { ImageManager } from "../image/imageManager";
 import { CommandManager } from "../command/commandManager";
 import { ConfigManager } from "../utils/configUtils";
 import { handleReply } from "../utils/handleReplyUtils";
-import { getRespose, sendRequest } from "../utils/requestUtils";
+import { FetchData, sendRequest } from "../utils/requestUtils";
 import { parseBody } from "../utils/utils";
 import { Context, Message } from "./context";
 
@@ -133,6 +133,10 @@ export class AI {
             return;
         }
         this.isChatting = true;
+        const timeout = setTimeout(() => {
+            this.isChatting = false;
+            ConfigManager.printLog(this.id, `处理消息超时`);
+        }, 60 * 1000);
 
         //清空数据
         this.clearData();
@@ -160,6 +164,7 @@ export class AI {
             }
         }
 
+        clearTimeout(timeout);
         this.isChatting = false;
     }
 
@@ -176,6 +181,10 @@ export class AI {
             return 0;
         }
         this.isGettingAct = true;
+        const timeout = setTimeout(() => {
+            this.isGettingAct = false;
+            ConfigManager.printLog(this.id, `获取活跃度超时`);
+        }, 60 * 1000);
 
         //清除定时器
         clearTimeout(this.context.timer)
@@ -202,16 +211,10 @@ export class AI {
         try {
             const bodyObject = parseBody(bodyTemplate, messages);
 
-            const response = await getRespose(url, apiKey, bodyObject);
+            const data = await FetchData(url, apiKey, bodyObject);
 
-            const data_response = await response.json();
-
-            if (data_response.error) {
-                throw new Error(`请求失败：${JSON.stringify(data_response.error)}`);
-            }
-
-            if (data_response.choices && data_response.choices.length > 0) {
-                const reply = data_response.choices[0].message.content;
+            if (data.choices && data.choices.length > 0) {
+                const reply = data.choices[0].message.content;
 
                 ConfigManager.printLog(`返回活跃度:`, reply);
 
@@ -233,6 +236,7 @@ export class AI {
             console.error("在getAct中出错：", error);
         }
 
+        clearTimeout(timeout);
         this.isGettingAct = false;
         return this.context.interrupt.act;
     }
