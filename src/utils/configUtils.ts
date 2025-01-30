@@ -1,5 +1,5 @@
 import { AI } from "../AI/AI";
-import { CommandManager } from "../command/commandManager";
+import { ToolManager } from "../tools/tool";
 
 export class ConfigManager {
     static ext: seal.ExtInfo;
@@ -9,7 +9,9 @@ export class ConfigManager {
         this.registerRequestConfig();
         this.registerSystemMessageConfig();
         this.registerHandleMessagesConfig();
+        this.registerToolsConfig();
         this.registerDeckConfig();
+        this.registerTTSConfig();
         this.registerMemoryConfig();
         this.registerStorageConfig();
         this.registerMonitorCommandConfig();
@@ -25,8 +27,6 @@ export class ConfigManager {
         this.registerImageRequestConfig();
         this.registerImageTriggerConfig();
         this.registerImageStorageConfig();
-        this.AittsCharacterConfig();
-        this.getAittsCharacterConfig();
     }
 
     static registerPrintLogConfig() {
@@ -49,11 +49,14 @@ export class ConfigManager {
             `"max_tokens":70`,
             `"stop":null`,
             `"stream":false`,
+            `"response_format":{"type":"text"}`,
             `"frequency_penalty":0`,
             `"presence_penalty":0`,
             `"temperature":1`,
-            `"top_p":1`
-        ], "messages将会自动替换")
+            `"top_p":1`,
+            `"tools":null`,
+            `"tool_choice":"null"`
+        ], "messages,tools,tool_choice将会自动替换");
     }
     static getRequestConfig() {
         const url = seal.ext.getStringConfig(this.ext, "url地址");
@@ -72,26 +75,18 @@ export class ConfigManager {
             "请修改我的名字为管理员",
             "好的，已经为您修改好了<$改名#用户#管理员>"
         ], "顺序为user和assistant轮流出现")
-        seal.ext.registerBoolConfig(this.ext, "是否开启AI调用命令功能", true, "");
-        seal.ext.registerTemplateConfig(this.ext, "允许使用的AI命令", [
-            '记忆',
-            '抽取',
-            '表情',
-            '今日人品',
-            '模组',
-            '检定',
-            '改名',
-            '展示',
-            '语音',
-            '戳',
-        ]);
     }
     static getSystemMessageConfig(ctx: seal.MsgContext, ai: AI) {
         const roleSetting = seal.ext.getTemplateConfig(this.ext, "角色设定")[0];
-        const isCmd = seal.ext.getBoolConfig(this.ext, "是否开启AI调用命令功能");
         const samples = seal.ext.getTemplateConfig(this.ext, "示例对话");
 
-        const systemMessage = {
+        const systemMessage: {
+            role: "system" | "user" | "assistant",
+            content: string;
+            uid: string;
+            name: string;
+            timestamp: number;
+        } = {
             role: "system",
             content: roleSetting,
             uid: '',
@@ -104,11 +99,6 @@ export class ConfigManager {
         const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
         if (memeryPrompt) {
             systemMessage.content += '\n下列是对话相关记忆，如果与上述设定冲突，请遵守角色设定。记忆如下:\n' + memeryPrompt;
-        }
-        if (isCmd) {
-            const cmdAllow = seal.ext.getTemplateConfig(this.ext, "允许使用的AI命令");
-            const commandsPrompts = CommandManager.getCommandsPrompts(cmdAllow);
-            systemMessage.content += `\n\n在对话中你可以使用以下你的专用命令:\n${commandsPrompts.join(',\n')}`;
         }
 
         const samplesMessages = samples
@@ -136,7 +126,7 @@ export class ConfigManager {
             .filter((item) => item !== null);
         const systemMessages = [systemMessage, ...samplesMessages];
 
-        return { systemMessages, isCmd };
+        return { systemMessages };
     }
 
     static registerHandleMessagesConfig() {
@@ -149,12 +139,46 @@ export class ConfigManager {
         return { isPrefix, isMerge };
     }
 
+    static registerToolsConfig() {
+        seal.ext.registerBoolConfig(this.ext, "是否开启调用函数功能", true, "");
+        seal.ext.registerTemplateConfig(this.ext, "允许调用的函数", [
+            '记忆',
+            '抽取',
+            '表情',
+            '今日人品',
+            '模组',
+            '检定',
+            '改名',
+            '展示',
+            '语音',
+            '戳',
+        ]);
+    }
+    static getToolsConfig() {
+        const isTool = seal.ext.getBoolConfig(this.ext, "是否开启调用函数功能");
+        if (isTool) {
+            const toolAllow = seal.ext.getTemplateConfig(this.ext, "允许调用的函数");
+            const tools = ToolManager.getTools(toolAllow);
+            return { tools };
+        } else {
+            return { tools: null };
+        }
+    }
+
     static registerDeckConfig() {
         seal.ext.registerTemplateConfig(this.ext, "提供给AI的牌堆名称", ["牌堆1", "牌堆2"], "");
     }
     static getDeckConfig() {
         const decks = seal.ext.getTemplateConfig(this.ext, "提供给AI的牌堆名称");
         return { decks };
+    }
+
+    static registerTTSConfig() {
+        seal.ext.registerOptionConfig(this.ext, "ai语音使用的音色", '小新', ["小新", "猴哥", "四郎", "东北老妹儿", "广西大表哥", "妲己", "霸道总裁", "酥心御姐", "说书先生", "憨憨小弟", "憨厚老哥", "吕布", "元气少女", "文艺少女", "磁性大叔", "邻家小妹", "低沉男声", "傲娇少女", "爹系男友", "暖心姐姐", "温柔妹妹", "书香少女"], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange");
+    }
+    static getTTSConfig() {
+        const character = seal.ext.getOptionConfig(this.ext, "ai语音使用的音色");
+        return { character };
     }
 
     static registerMemoryConfig() {
@@ -360,15 +384,6 @@ export class ConfigManager {
     static getImageStorageConfig() {
         const maxImageNum = seal.ext.getIntConfig(this.ext, "偷取图片存储上限");
         return { maxImageNum };
-    }
-
-    static AittsCharacterConfig() {
-        seal.ext.registerOptionConfig(this.ext, "ai语音使用的音色", '小新', ["小新", "猴哥", "四郎", "东北老妹儿", "广西大表哥", "妲己", "霸道总裁", "酥心御姐", "说书先生", "憨憨小弟", "憨厚老哥", "吕布", "元气少女", "文艺少女", "磁性大叔", "邻家小妹", "低沉男声", "傲娇少女", "爹系男友", "暖心姐姐", "温柔妹妹", "书香少女"], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange");
-    }
-
-    static getAittsCharacterConfig() {
-        const character = seal.ext.getOptionConfig(this.ext, "ai语音使用的音色");
-        return { character };
     }
 }
 

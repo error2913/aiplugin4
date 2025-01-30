@@ -143,7 +143,7 @@ export class ImageManager {
         const { url, apiKey, maxChars, bodyTemplate } = ConfigManager.getImageRequestConfig();
 
         try {
-            const bodyObject = parseBody(bodyTemplate, messages);
+            const bodyObject = parseBody(bodyTemplate, messages, null, null);
 
             const response = await fetch(url, {
                 method: 'POST',

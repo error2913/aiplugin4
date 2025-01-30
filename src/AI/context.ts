@@ -1,9 +1,13 @@
+import { ToolCall } from "../tools/tool";
 import { ConfigManager } from "../utils/configUtils";
 import { getNameById, levenshteinDistance } from "../utils/utils";
 
 export interface Message {
     role: string;
     content: string;
+    tool_calls?: ToolCall[];
+    tool_call_id?: string;
+
     uid: string;
     name: string;
     timestamp: number;
@@ -82,9 +86,9 @@ export class Context {
         //更新上下文
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
-        const rounds = messages.length;
-        if (rounds !== 0 && messages[rounds - 1].name === name) {
-            this.messages[rounds - 1].content += ' ' + s;
+        const length = messages.length;
+        if (length !== 0 && messages[length - 1].name === name) {
+            messages[length - 1].content += ' ' + s;
         } else {
             const message = {
                 role: role,
@@ -97,8 +101,46 @@ export class Context {
         }
 
         //删除多余的上下文
-        if (rounds > maxRounds) {
-            this.messages = messages.slice(-maxRounds);
+        if (role === 'assistant') {
+            this.trimMessages(maxRounds);
+        }
+    }
+
+    async toolCallsIteration(tool_calls: ToolCall[]) {
+        const message = {
+            role: 'assistant',
+            content: '',
+            tool_calls: tool_calls,
+            uid: '',
+            name: '',
+            timestamp: Math.floor(Date.now() / 1000)
+        };
+        this.messages.push(message);
+    }
+
+    async toolIteration(tool_call_id: string, s: string) {
+        const message = {
+            role: 'tool',
+            content: s,
+            tool_call_id: tool_call_id,
+            uid: '',
+            name: '',
+            timestamp: Math.floor(Date.now() / 1000)
+        };
+        this.messages.push(message);
+    }
+
+    async trimMessages(maxRounds: number) {
+        const messages = this.messages;
+        let round = 0;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'user') {
+                round++;
+            }
+            if (round > maxRounds) {
+                messages.splice(0, i);
+                break;
+            }
         }
     }
 

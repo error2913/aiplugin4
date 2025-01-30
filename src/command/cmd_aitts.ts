@@ -44,7 +44,7 @@ export function registerCmdAitts() {
         }
 
         try {
-            const { character } = ConfigManager.getAittsCharacterConfig();
+            const { character } = ConfigManager.getTTSConfig();
             const characterId = characterMap[character]; // 获取对应的 character_id
             if (!characterId) {
                 console.error(`未找到对应的 character_id: ${character}`);

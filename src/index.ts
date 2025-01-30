@@ -1,5 +1,5 @@
 import { AIManager } from "./AI/AI";
-import { CommandManager } from "./command/commandManager";
+import { ToolManager } from "./tools/tool";
 import { ConfigManager } from "./utils/configUtils";
 import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
 
@@ -12,7 +12,7 @@ function main() {
 
   ConfigManager.ext = ext;
   ConfigManager.register();
-  CommandManager.init();
+  ToolManager.init();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
 
@@ -645,8 +645,8 @@ function main() {
 
   //接受的指令
   ext.onCommandReceived = async (ctx, msg, cmdArgs) => {
-    if (CommandManager.cmdArgs === null) {
-      CommandManager.cmdArgs = cmdArgs;
+    if (ToolManager.cmdArgs === null) {
+      ToolManager.cmdArgs = cmdArgs;
     }
 
     const { allcmd } = ConfigManager.getMonitorCommandConfig();

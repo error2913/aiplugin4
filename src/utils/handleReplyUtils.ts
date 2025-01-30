@@ -2,18 +2,8 @@ import { Context } from "../AI/context";
 import { ConfigManager } from "./configUtils";
 import { calculateSimilarity } from "./utils";
 
-export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): { s: string, reply: string, commands: string[], isRepeat: boolean } {
+export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): { s: string, reply: string, isRepeat: boolean } {
     const { maxChar, cut, replymsg, stopRepeat, similarityLimit } = ConfigManager.getHandleReplyConfig();
-
-    // 处理命令
-    let commands: string[] | null = s.match(/<\$(.+?)\$?>/g);
-    if (commands !== null) {
-        commands = commands.map(item => {
-            return item.replace(/<\$|\$?>/g, '');
-        });
-    } else {
-        commands = [];
-    }
 
     // 处理分割
     if (cut) {
@@ -24,7 +14,7 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, 
         .split(/<[\|｜].*?[\|｜]?>/)
         .filter(item => item.trim() !== '');
     if (segments.length === 0) {
-        return { s: '', reply: '', commands: [], isRepeat: false };
+        return { s: '', reply: '', isRepeat: false };
     }
 
     s = segments[0]
@@ -63,5 +53,5 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, 
         }
     }
 
-    return { s, reply, commands, isRepeat };
+    return { s, reply, isRepeat };
 }

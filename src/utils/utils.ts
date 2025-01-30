@@ -1,3 +1,4 @@
+import { ToolInfo } from "../tools/tool";
 
 export function getCQTypes(s: string): string[] {
     const match = s.match(/\[CQ:([^,]*?),.*?\]/g);
@@ -44,7 +45,7 @@ export function getNameById(epId: string, gid: string, uid: string, diceName: st
     return ctx.player.name || '未知用户';
 }
 
-export function parseBody(template: string[], messages: any[]) {
+export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: "none" | "auto" | "required") {
     try {
         const bodyObject = JSON.parse(`{${template.join(',')}}`);
 
@@ -55,6 +56,14 @@ export function parseBody(template: string[], messages: any[]) {
         if (bodyObject.stream !== false) {
             console.error(`不支持流式传输，请将stream设置为false`);
             bodyObject.stream = false;
+        }
+
+        if (bodyObject.tools === null) {
+            bodyObject.tools = tools;
+        }
+
+        if (bodyObject.tool_choice === null) {
+            bodyObject.tool_choice = tool_choice;
         }
 
         return bodyObject;
