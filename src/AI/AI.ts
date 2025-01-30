@@ -26,7 +26,7 @@ export class AI {
     constructor(id: string) {
         this.id = id;
         this.context = new Context();
-        this.image = new ImageManager(id);
+        this.image = new ImageManager();
         this.privilege = {
             limit: 100,
             counter: -1,
@@ -39,35 +39,13 @@ export class AI {
         this.isGettingAct = false;
     }
 
-    static parse(data: any, id: string): AI {
-        if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-            data = {};
-        }
-
+    static reviver(value: any, id: string): AI{
         const ai = new AI(id);
+        const validKeys = ['context', 'image', 'privilege'];
 
-        if (data.hasOwnProperty('context') && typeof data.context === 'object' && !Array.isArray(data.context)) {
-            ai.context = Context.parse(data.context);
-        }
-
-        if (data.hasOwnProperty('privilege') && typeof data.privilege === 'object' && !Array.isArray(data.privilege)) {
-            if (data.privilege.hasOwnProperty('limit') && typeof data.privilege.limit === 'number') {
-                ai.privilege.limit = data.privilege.limit;
-            }
-            if (data.privilege.hasOwnProperty('counter') && typeof data.privilege.counter === 'number') {
-                ai.privilege.counter = data.privilege.counter;
-            }
-            if (data.privilege.hasOwnProperty('timer') && typeof data.privilege.timer === 'number') {
-                ai.privilege.timer = data.privilege.timer;
-            }
-            if (data.privilege.hasOwnProperty('prob') && typeof data.privilege.prob === 'number') {
-                ai.privilege.prob = data.privilege.prob;
-            }
-            if (data.privilege.hasOwnProperty('interrupt') && typeof data.privilege.interrupt === 'number') {
-                ai.privilege.interrupt = data.privilege.interrupt;
-            }
-            if (data.privilege.hasOwnProperty('standby') && typeof data.privilege.standby === 'boolean') {
-                ai.privilege.standby = data.privilege.standby;
+        for (const k of validKeys) {
+            if (value.hasOwnProperty(k)) {
+                ai[k] = value[k];
             }
         }
 
@@ -238,5 +216,49 @@ export class AI {
         clearTimeout(timeout);
         this.isGettingAct = false;
         return this.context.interrupt.act;
+    }
+}
+
+export class AIManager {
+    static cache: { [key: string]: AI } = {};
+
+    static clearCache() {
+        this.cache = {};
+    }
+
+    static getAI(id: string) {
+        if (!this.cache.hasOwnProperty(id)) {
+            let data = new AI(id);
+
+            try {
+                data = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
+                    if (key === "") {
+                        return AI.reviver(value, id);
+                    }
+
+                    if (key === "context") {
+                        return Context.reviver(value);
+                    }
+
+                    if (key === "image") {
+                        return ImageManager.reviver(value);
+                    }
+
+                    return value;
+                });
+            } catch (error) {
+                console.error(`从数据库中获取${`AI_${id}`}失败:`, error);
+            }
+
+            this.cache[id] = data;
+        }
+
+        return this.cache[id];
+    }
+
+    static saveAI(id: string) {
+        if (this.cache.hasOwnProperty(id)) {
+            ConfigManager.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
+        }
     }
 }

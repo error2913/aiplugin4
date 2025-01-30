@@ -2,38 +2,25 @@ import { ConfigManager } from "../utils/configUtils";
 import { getUrlsInCQCode, parseBody } from "../utils/utils";
 
 export class ImageManager {
-    id: string;
     images: string[];
     stealStatus: boolean;
 
-    constructor(id: string) {
-        this.id = id;
+    constructor() {
         this.images = [];
         this.stealStatus = false;
-
-        let data: any = {};
-
-        try {
-            data = JSON.parse(ConfigManager.ext.storageGet(`image_${id}`) || '{}');
-        } catch (error) {
-            console.error(`从数据库中获取${`image_${id}`}失败:`, error);
-        }
-
-        if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-            data = {};
-        }
-
-        if (data.hasOwnProperty('images') && Array.isArray(data.images)) {
-            this.images = data.images;
-        }
-
-        if (data.hasOwnProperty('stealStatus') && typeof data.stealStatus === 'boolean') {
-            this.stealStatus = data.stealStatus;
-        }
     }
 
-    saveImage() {
-        ConfigManager.ext.storageSet(`image_${this.id}`, JSON.stringify(this));
+    static reviver(value: any): ImageManager {
+        const im = new ImageManager();
+        const validKeys = ['images', 'stealStatus'];
+
+        for (const k of validKeys) {
+            if (value.hasOwnProperty(k)) {
+                im[k] = value[k];
+            }
+        }
+
+        return im;
     }
 
     async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<string> {
@@ -54,7 +41,6 @@ export class ImageManager {
   
         if (urls.length !== 0) {
           this.images = this.images.concat(urls).slice(-maxImageNum);
-          this.saveImage();
         }
 
         return message;
@@ -83,7 +69,6 @@ export class ImageManager {
             return await this.drawStolenImage();
         }
 
-        this.saveImage();
         return url;
     }
 
@@ -106,7 +91,6 @@ export class ImageManager {
                 return await this.drawImage();
             }
 
-            this.saveImage();
             return url;
         }
     }

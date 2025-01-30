@@ -1,4 +1,4 @@
-import { AIManager } from "../AI/AIManager";
+import { AIManager } from "../AI/AI";
 import { getMsg, getCtx } from "../utils/utils";
 import { Command, CommandManager } from "./commandManager";
 

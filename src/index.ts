@@ -1,4 +1,4 @@
-import { AIManager } from "./AI/AIManager";
+import { AIManager } from "./AI/AI";
 import { CommandManager } from "./command/commandManager";
 import { ConfigManager } from "./utils/configUtils";
 import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
@@ -453,13 +453,13 @@ function main() {
           case 'on': {
             ai.image.stealStatus = true;
             seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.images.length}`);
-            ai.image.saveImage();
+            AIManager.saveAI(id);
             return ret;
           }
           case 'off': {
             ai.image.stealStatus = false;
             seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.images.length}`);
-            ai.image.saveImage();
+            AIManager.saveAI(id);
             return ret;
           }
           default: {
@@ -473,7 +473,7 @@ function main() {
       case 'forget': {
         ai.image.images = [];
         seal.replyToSender(ctx, msg, '图片已遗忘');
-        ai.image.saveImage();
+        AIManager.saveAI(id);
         return ret;
       }
       case 'itt': {

@@ -1,6 +1,6 @@
 import { ConfigManager } from "../utils/configUtils";
 import { getNameById, levenshteinDistance } from "../utils/utils";
-import { AIManager } from "./AIManager";
+import { AIManager } from "./AI";
 
 export interface Message {
     role: string;
@@ -38,59 +38,13 @@ export class Context {
         };
     }
 
-    static parse(data: any): Context {
-        if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-            data = {};
-        }
-
+    static reviver(value: any): Context {
         const context = new Context();
+        const validKeys = ['messages', 'lastReply', 'counter', 'timer', 'interrupt', 'memories'];
 
-        if (data.hasOwnProperty('messages') && Array.isArray(data.messages)) {
-            for (const message of data.messages) {
-                if (
-                    message.hasOwnProperty('role') && typeof message.role === 'string' &&
-                    message.hasOwnProperty('content') && typeof message.content === 'string' &&
-                    message.hasOwnProperty('uid') && typeof message.uid === 'string' &&
-                    message.hasOwnProperty('name') && typeof message.name === 'string' &&
-                    message.hasOwnProperty('timestamp') && typeof message.timestamp === 'number'
-                ) {
-                    context.messages.push({
-                        role: message.role,
-                        content: message.content,
-                        uid: message.uid,
-                        name: message.name,
-                        timestamp: message.timestamp
-                    });
-                }
-            }
-        }
-
-        if (data.hasOwnProperty('lastReply') && typeof data.lastReply === 'string') {
-            context.lastReply = data.lastReply;
-        }
-
-        if (data.hasOwnProperty('counter') && typeof data.counter === 'number') {
-            context.counter = data.counter;
-        }
-
-        if (data.hasOwnProperty('timer') && typeof data.timer === 'number') {
-            context.timer = data.timer;
-        }
-
-        if (data.hasOwnProperty('interrupt') && typeof data.interrupt === 'object' && !Array.isArray(data.interrupt)) {
-            if (data.interrupt.hasOwnProperty('act') && typeof data.interrupt.act === 'number') {
-                context.interrupt.act = data.interrupt.act;
-            }
-            if (data.interrupt.hasOwnProperty('timestamp') && typeof data.interrupt.timestamp === 'number') {
-                context.interrupt.timestamp = data.interrupt.timestamp;
-            }
-        }
-
-        if (data.hasOwnProperty('memories') && typeof data.memories === 'object' && !Array.isArray(data.memories)) {
-            for (const k in data.memories) {
-                if (data.memories.hasOwnProperty(k) && Array.isArray(data.memories[k])) {
-                    context.memories[k] = data.memories[k];
-                }
+        for (const k of validKeys) {
+            if (value.hasOwnProperty(k)) {
+                context[k] = value[k];
             }
         }
 
