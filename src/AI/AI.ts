@@ -85,23 +85,22 @@ export class AI {
         const messages = [...systemMessages, ...this.context.messages];
 
         // 处理messages
+        const { isPrefix, isMerge} = ConfigManager.getHandleMessagesConfig();
         let processedMessages: { role: string, content: string }[] = [];
-        const isPrefix = ConfigManager.getPrefixConfig();
-        if (isPrefix) {
-            processedMessages = messages.map(message => {
-                const prefix = `<|from:${message.name}|>`;
-                return {
+        let last_role = '';
+        for (let i = 0; i < messages.length; i++) {
+            const message = messages[i];
+            const prefix = isPrefix ? `<|from:${message.name}|>`: '';
+
+            if (isMerge && message.role === last_role) {
+                processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;
+            } else {
+                processedMessages.push({
                     role: message.role,
                     content: prefix + message.content
-                }
-            })
-        } else {
-            processedMessages = messages.map(message => {
-                return {
-                    role: message.role,
-                    content: message.content
-                }
-            })
+                });
+                last_role = message.role;
+            }
         }
 
         //获取处理后的回复

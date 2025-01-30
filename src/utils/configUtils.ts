@@ -8,7 +8,7 @@ export class ConfigManager {
         this.registerPrintLogConfig();
         this.registerRequestConfig();
         this.registerSystemMessageConfig();
-        this.registerPrefixConfig();
+        this.registerHandleMessagesConfig();
         this.registerDeckConfig();
         this.registerMemoryConfig();
         this.registerStorageConfig();
@@ -139,12 +139,14 @@ export class ConfigManager {
         return { systemMessages, isCmd };
     }
 
-    static registerPrefixConfig() {
+    static registerHandleMessagesConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否在消息内添加前缀", true, "");
+        seal.ext.registerBoolConfig(this.ext, "是否合并user content", false, "用于适配deepseek-reasoner");
     }
-    static getPrefixConfig() {
+    static getHandleMessagesConfig() {
         const isPrefix = seal.ext.getBoolConfig(this.ext, "是否在消息内添加前缀");
-        return { isPrefix };
+        const isMerge = seal.ext.getBoolConfig(this.ext, "是否合并user content");
+        return { isPrefix, isMerge };
     }
 
     static registerDeckConfig() {

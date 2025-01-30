@@ -51,6 +51,9 @@ export async function sendRequest(messages: { role: string, content: string }[])
 
         if (data.choices && data.choices.length > 0) {
             const reply = data.choices[0].message.content;
+            if (data.choices[0].message.hasOwnProperty('reasoning_content')) {
+                ConfigManager.printLog(`思维链内容:`, data.choices[0].message.reasoning_content);
+            }
             ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
             return reply;
         } else {
