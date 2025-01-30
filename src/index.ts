@@ -123,7 +123,7 @@ function main() {
           return ret;
         }
 
-        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx, ai.context);
+        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx, ai);
 
         seal.replyToSender(ctx, msg, systemMessages[0].content);
         return ret;
@@ -356,19 +356,19 @@ function main() {
               seal.replyToSender(ctx, msg, '记忆过长，请控制在20字以内');
               return ret;
             }
-            ai2.context.setSystemMemory(s);
+            ai2.memory.setSystemMemory(s);
             seal.replyToSender(ctx, msg, '记忆已添加');
             AIManager.saveAI(muid);
             return ret;
           }
           case 'clr': {
-            ai2.context.clearMemory();
+            ai2.memory.clearMemory();
             seal.replyToSender(ctx, msg, '记忆已清除');
             AIManager.saveAI(muid);
             return ret;
           }
           case 'show': {
-            const s = ai2.context.getPrivateMemoryPrompt();
+            const s = ai2.memory.getPrivateMemoryPrompt();
             seal.replyToSender(ctx, msg, s || '暂无记忆');
             return ret;
           }

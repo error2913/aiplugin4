@@ -22,7 +22,7 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, 
 
     const segments = s
         .split(/<[\|｜].*?[\|｜]?>/)
-        .filter(item => item !== '');
+        .filter(item => item.trim() !== '');
     if (segments.length === 0) {
         return { s: '', reply: '', commands: [], isRepeat: false };
     }

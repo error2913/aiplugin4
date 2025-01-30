@@ -1,4 +1,4 @@
-import { Context } from "../AI/context";
+import { AI } from "../AI/AI";
 import { CommandManager } from "../command/commandManager";
 
 export class ConfigManager {
@@ -86,7 +86,7 @@ export class ConfigManager {
             '戳',
         ]);
     }
-    static getSystemMessageConfig(ctx: seal.MsgContext, context: Context) {
+    static getSystemMessageConfig(ctx: seal.MsgContext, ai: AI) {
         const roleSetting = seal.ext.getTemplateConfig(this.ext, "角色设定")[0];
         const isCmd = seal.ext.getBoolConfig(this.ext, "是否开启AI调用命令功能");
         const samples = seal.ext.getTemplateConfig(this.ext, "示例对话");
@@ -101,7 +101,7 @@ export class ConfigManager {
         if (!ctx.isPrivate) {
             systemMessage.content += `\n当前群聊:${ctx.group.groupName}\n<@xxx>表示@群成员xxx`;
         }
-        const memeryPrompt = context.getMemoryPrompt(ctx);
+        const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
         if (memeryPrompt) {
             systemMessage.content += '\n下列是对话相关记忆，如果与上述设定冲突，请遵守角色设定。记忆如下:\n' + memeryPrompt;
         }

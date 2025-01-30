@@ -5,6 +5,7 @@ import { handleReply } from "../utils/handleReplyUtils";
 import { FetchData, sendRequest } from "../utils/requestUtils";
 import { parseBody } from "../utils/utils";
 import { Context, Message } from "./context";
+import { Memory } from "./memory";
 
 export interface Privilege {
     limit: number,
@@ -18,6 +19,7 @@ export interface Privilege {
 export class AI {
     id: string;
     context: Context;
+    memory: Memory;
     image: ImageManager;
     privilege: Privilege;
     isChatting: boolean;
@@ -26,6 +28,7 @@ export class AI {
     constructor(id: string) {
         this.id = id;
         this.context = new Context();
+        this.memory = new Memory();
         this.image = new ImageManager();
         this.privilege = {
             limit: 100,
@@ -41,7 +44,7 @@ export class AI {
 
     static reviver(value: any, id: string): AI{
         const ai = new AI(id);
-        const validKeys = ['context', 'image', 'privilege'];
+        const validKeys = ['context', 'memory', 'image', 'privilege'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -118,7 +121,7 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const { systemMessages, isCmd } = ConfigManager.getSystemMessageConfig(ctx, this.context);
+        const { systemMessages, isCmd } = ConfigManager.getSystemMessageConfig(ctx, this);
         const { s, reply, commands } = await this.getReply(ctx, msg, systemMessages);
 
         this.context.lastReply = reply;
@@ -239,7 +242,9 @@ export class AIManager {
                     if (key === "context") {
                         return Context.reviver(value);
                     }
-
+                    if (key === "memory") {
+                        return Memory.reviver(value);
+                    }
                     if (key === "image") {
                         return ImageManager.reviver(value);
                     }
