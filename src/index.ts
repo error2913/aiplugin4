@@ -123,9 +123,9 @@ function main() {
           return ret;
         }
 
-        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx, ai);
+        const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, ai);
 
-        seal.replyToSender(ctx, msg, systemMessages[0].content);
+        seal.replyToSender(ctx, msg, messages[0].content);
         return ret;
       }
       case 'pr': {

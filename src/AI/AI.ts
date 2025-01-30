@@ -1,10 +1,9 @@
 import { ImageManager } from "../image/imageManager";
-import { ToolCall } from "../tools/tool";
 import { ConfigManager } from "../utils/configUtils";
 import { handleReply } from "../utils/handleReplyUtils";
 import { FetchData, sendRequest } from "../utils/requestUtils";
 import { parseBody } from "../utils/utils";
-import { Context, Message } from "./context";
+import { Context } from "./context";
 import { Memory } from "./memory";
 
 export interface Privilege {
@@ -62,44 +61,19 @@ export class AI {
         this.context.interrupt.act = 0;
     }
 
-    async getReply(ctx: seal.MsgContext, msg: seal.Message, systemMessages: Message[], retry = 0): Promise<{ s: string, reply: string}> {
-        const messages = [...systemMessages, ...this.context.messages];
-
+    async getReply(ctx: seal.MsgContext, msg: seal.Message, retry = 0): Promise<{ s: string, reply: string}> {
         // 处理messages
-        const { isPrefix, isMerge} = ConfigManager.getHandleMessagesConfig();
-        let processedMessages: {
-            role: string,
-            content: string,
-            tool_calls?: ToolCall[],
-            tool_call_id?: string
-        }[] = [];
-        let last_role = '';
-        for (let i = 0; i < messages.length; i++) {
-            const message = messages[i];
-            const prefix = isPrefix && message.name ? `<|from:${message.name}|>`: '';
-
-            if (isMerge && message.role === last_role && message.role !== 'tool') {
-                processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;
-            } else {
-                processedMessages.push({
-                    role: message.role,
-                    content: prefix + message.content,
-                    tool_calls: message?.tool_calls ? message.tool_calls: undefined,
-                    tool_call_id: message?.tool_call_id? message.tool_call_id: undefined
-                });
-                last_role = message.role;
-            }
-        }
+        const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, this);
 
         //获取处理后的回复
-        const raw_reply = await sendRequest(ctx, msg, this, processedMessages, "auto");
+        const raw_reply = await sendRequest(ctx, msg, this, messages, "auto");
         const { s, reply, isRepeat } = handleReply(ctx, msg, raw_reply, this.context);
 
         //禁止AI复读
         if (isRepeat && reply !== '') {
             if (retry == 3) {
                 ConfigManager.printLog(`发现复读，已达到最大重试次数，清除AI上下文`);
-                this.context.messages = messages.filter(item => item.role != 'assistant');
+                this.context.messages = this.context.messages.filter(item => item.role !== 'assistant' && item.role !== 'tool');
                 return { s: '', reply: '' };
             }
 
@@ -108,7 +82,7 @@ export class AI {
 
             //等待一秒后进行重试
             await new Promise(resolve => setTimeout(resolve, 1000));
-            return await this.getReply(ctx, msg, systemMessages, retry);
+            return await this.getReply(ctx, msg, retry);
         }
 
         return { s, reply };
@@ -128,8 +102,7 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const { systemMessages } = ConfigManager.getSystemMessageConfig(ctx, this);
-        const { s, reply } = await this.getReply(ctx, msg, systemMessages);
+        const { s, reply } = await this.getReply(ctx, msg);
 
         this.context.lastReply = reply;
         await this.context.iteration(ctx, s, 'assistant');

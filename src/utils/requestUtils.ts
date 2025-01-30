@@ -67,7 +67,8 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
             if (message.hasOwnProperty('tool_calls')) {
                 ConfigManager.printLog(`触发工具调用`);
                 ai.context.toolCallsIteration(message.tool_calls);
-                await ToolManager.handleTools(ctx, msg, ai, message.tool_calls)
+                await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+                const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, ai);
                 return await sendRequest(ctx, msg, ai, messages, "none");
             }
             return reply;

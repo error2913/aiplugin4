@@ -1,5 +1,6 @@
 import { AI } from "../AI/AI"
 import { ConfigManager } from "../utils/configUtils"
+import { registerDraw } from "./tool_draw"
 
 export interface ToolInfo {
     type: "function",
@@ -69,11 +70,11 @@ export class ToolManager {
     static toolMap: { [key: string]: Tool } = {};
 
     static init() {
-
+        registerDraw();
     }
 
     static getTools(toolAllow: string[]): ToolInfo[] {
-        return Object.values(this.toolMap)
+        const tools =  Object.values(this.toolMap)
             .map(item => {
                 if (toolAllow.includes(item.info.function.name)) {
                     return item.info;
@@ -82,6 +83,12 @@ export class ToolManager {
                 }
             })
             .filter(item => item !== null);
+
+        if (tools.length === 0) {
+            return null;
+        } else {
+            return tools;
+        }
     }
 
     /**
@@ -114,14 +121,14 @@ export class ToolManager {
             ConfigManager.printLog(`调用函数:`, names);
         }
 
-        if (this.cmdArgs == null) {
-            ConfigManager.printLog(`暂时无法调用函数，请先使用任意指令`);
-            ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
-            return;
-        }
-
         try {
             for (let i = 0; i < names.length; i++) {
+                if (this.cmdArgs == null) {
+                    ConfigManager.printLog(`暂时无法调用函数，请先使用任意指令`);
+                    ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
+                    continue;
+                }
+
                 const name = names[i];
                 if (this.toolMap.hasOwnProperty(name)) {
                     const tool = this.toolMap[name];

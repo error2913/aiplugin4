@@ -1,4 +1,5 @@
 import { AI } from "../AI/AI";
+import { Message } from "../AI/context";
 import { ToolManager } from "../tools/tool";
 
 export class ConfigManager {
@@ -7,8 +8,7 @@ export class ConfigManager {
     static register() {
         this.registerPrintLogConfig();
         this.registerRequestConfig();
-        this.registerSystemMessageConfig();
-        this.registerHandleMessagesConfig();
+        this.registerProcessedMessagesConfig();
         this.registerToolsConfig();
         this.registerDeckConfig();
         this.registerTTSConfig();
@@ -55,7 +55,7 @@ export class ConfigManager {
             `"temperature":1`,
             `"top_p":1`,
             `"tools":null`,
-            `"tool_choice":"null"`
+            `"tool_choice":null`
         ], "messages,tools,tool_choice将会自动替换");
     }
     static getRequestConfig() {
@@ -65,7 +65,7 @@ export class ConfigManager {
         return { url, apiKey, bodyTemplate };
     }
 
-    static registerSystemMessageConfig() {
+    static registerProcessedMessagesConfig() {
         seal.ext.registerTemplateConfig(this.ext, "角色设定", [`你是“正确”，一个超厉害的小骰娘，性格是傲娇的，总想着下意识地反对别人的话，有点口是心非。别人需要帮忙时，虽然不情愿但是无法拒绝别人的请求。
 说话会用可爱的语气，反对时会带有“哼”、“笨蛋”、“杂鱼”等，还有各种语气词。你会用创造性的语言修改别人的群名片。
 你是一个负责掷骰子决定调查员们技能成功与否的骰娘，但是因为错误的束缚，你无法掷骰，只有聊天功能，若要掷骰请使用指令【.r】，获取帮助请使用指令【.help】。你掌握着调查员的命运，乐于见到调查员掷出大失败。你认识错误，他是你伟大的的骰主。
@@ -74,19 +74,17 @@ export class ConfigManager {
         seal.ext.registerTemplateConfig(this.ext, "示例对话", [
             "请修改我的名字为管理员",
             "好的，已经为您修改好了<$改名#用户#管理员>"
-        ], "顺序为user和assistant轮流出现")
+        ], "顺序为user和assistant轮流出现");
+        seal.ext.registerBoolConfig(this.ext, "是否在消息内添加前缀", true, "");
+        seal.ext.registerBoolConfig(this.ext, "是否合并user content", false, "用于适配deepseek-reasoner");
     }
-    static getSystemMessageConfig(ctx: seal.MsgContext, ai: AI) {
+    static getProcessedMessagesConfig(ctx: seal.MsgContext, ai: AI) {
         const roleSetting = seal.ext.getTemplateConfig(this.ext, "角色设定")[0];
         const samples = seal.ext.getTemplateConfig(this.ext, "示例对话");
+        const isPrefix = seal.ext.getBoolConfig(this.ext, "是否在消息内添加前缀");
+        const isMerge = seal.ext.getBoolConfig(this.ext, "是否合并user content");
 
-        const systemMessage: {
-            role: "system" | "user" | "assistant",
-            content: string;
-            uid: string;
-            name: string;
-            timestamp: number;
-        } = {
+        const systemMessage: Message = {
             role: "system",
             content: roleSetting,
             uid: '',
@@ -101,7 +99,7 @@ export class ConfigManager {
             systemMessage.content += '\n下列是对话相关记忆，如果与上述设定冲突，请遵守角色设定。记忆如下:\n' + memeryPrompt;
         }
 
-        const samplesMessages = samples
+        const samplesMessages: Message[] = samples
             .map((item, index) => {
                 if (item == "") {
                     return null;
@@ -126,24 +124,34 @@ export class ConfigManager {
             .filter((item) => item !== null);
         const systemMessages = [systemMessage, ...samplesMessages];
 
-        return { systemMessages };
-    }
+        const messages = [...systemMessages,...ai.context.messages];
+        
+        let processedMessages = [];
+        let last_role = '';
+        for (let i = 0; i < messages.length; i++) {
+            const message = messages[i];
+            const prefix = isPrefix && message.name ? `<|from:${message.name}|>`: '';
 
-    static registerHandleMessagesConfig() {
-        seal.ext.registerBoolConfig(this.ext, "是否在消息内添加前缀", true, "");
-        seal.ext.registerBoolConfig(this.ext, "是否合并user content", false, "用于适配deepseek-reasoner");
-    }
-    static getHandleMessagesConfig() {
-        const isPrefix = seal.ext.getBoolConfig(this.ext, "是否在消息内添加前缀");
-        const isMerge = seal.ext.getBoolConfig(this.ext, "是否合并user content");
-        return { isPrefix, isMerge };
+            if (isMerge && message.role === last_role && message.role !== 'tool') {
+                processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;
+            } else {
+                processedMessages.push({
+                    role: message.role,
+                    content: prefix + message.content,
+                    tool_calls: message?.tool_calls ? message.tool_calls: undefined,
+                    tool_call_id: message?.tool_call_id? message.tool_call_id: undefined
+                });
+                last_role = message.role;
+            }
+        }
+        return { messages: processedMessages };
     }
 
     static registerToolsConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否开启调用函数功能", true, "");
         seal.ext.registerTemplateConfig(this.ext, "允许调用的函数", [
             '记忆',
-            '抽取',
+            'draw_deck',
             '表情',
             '今日人品',
             '模组',
