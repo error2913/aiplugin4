@@ -1,32 +1,31 @@
-import { getCtx, getMsg } from "../utils/utils";
+import { getMsg, getCtx } from "../utils/utils";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerJrrp() {
+export function registerRename() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "jrrp",
-            description: `查看今日人品`,
+            name: "rename",
+            description: `设置群名片`,
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被查看的人的名字"
+                        description: "要修改的名字"
+                    },
+                    new_name: {
+                        type: 'string',
+                        description: "新的名字"
                     }
                 },
-                required: ["name"]
+                required: ['name', 'new_name']
             }
         }
     }
 
     const tool = new Tool(info);
-    tool.cmdInfo = {
-        ext: 'fun',
-        name: 'jrrp',
-        fixedArgs: []
-    }
-    tool.solve = async (ctx, msg, ai, name) => {
+    tool.solve = async (ctx, msg, ai, name, new_name) => {
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -40,12 +39,14 @@ export function registerJrrp() {
             ctx.player.name = name;
         }
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
-        if (!success) {
-            return '今日人品查询成功'
+        try {
+            seal.setPlayerGroupCard(ctx, new_name);
+            seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
+            return '设置成功';
+        } catch (e) {
+            console.error(e);
+            return '设置失败';
         }
-
-        return s;
     }
 
     ToolManager.toolMap[info.function.name] = tool;

@@ -1,6 +1,6 @@
 import { ImageManager } from "../image/imageManager";
 import { ConfigManager } from "../utils/configUtils";
-import { handleReply } from "../utils/handleReplyUtils";
+import { handleReply } from "../utils/utils";
 import { FetchData, sendRequest } from "../utils/requestUtils";
 import { parseBody } from "../utils/utils";
 import { Context } from "./context";

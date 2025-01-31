@@ -1,5 +1,4 @@
 import { ConfigManager } from "../utils/configUtils";
-import { levenshteinDistance } from "../utils/utils";
 import { AIManager } from "./AI";
 import { Context } from "./context";
 
@@ -60,12 +59,7 @@ export class Memory {
 
         s = s.slice(0, 100);
 
-        // 相似内容则替换
-        if (s.length > 4 && levenshteinDistance(s, this.memories[k][this.memories[k].length - 1]) < 5) {
-            this.memories[k][this.memories[k].length - 1] = s;
-        } else {
-            this.memories[k].push(s);
-        }
+        this.memories[k].push(s);
 
         // 超过上限时，从最长的记忆处弹出
         while (this.getMemoryLength() > extraMemory) {

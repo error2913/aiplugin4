@@ -22,12 +22,7 @@ export function registerFace() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, __, name) => {
-        if (!name) {
-            console.error(`发送表情需要一个表情名称`);
-            return `发送表情需要一个表情名称`;
-        }
-
+    tool.solve = async (ctx, msg, _, name) => {
         const { localImages } = ConfigManager.getLocalImageConfig();
         if (localImages.hasOwnProperty(name)) {
             seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);

@@ -22,12 +22,7 @@ export function registerDrawDeck() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, __, name) => {
-        if (!name) {
-            console.error(`抽取牌堆需要一个牌堆的名字`);
-            return `抽取牌堆需要一个牌堆的名字`;
-        }
-
+    tool.solve = async (ctx, msg, _, name) => {
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
             console.error(`牌堆${name}不存在:${dr.err}`);

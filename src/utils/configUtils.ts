@@ -149,16 +149,18 @@ export class ConfigManager {
     static registerToolsConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否开启调用函数功能", true, "");
         seal.ext.registerTemplateConfig(this.ext, "允许调用的函数", [
+            'memory',
             'draw_deck',
             'face',
             'jrrp',
-            '记忆',
-            '模组',
-            '检定',
-            '改名',
-            '展示',
-            '语音',
-            '戳',
+            'modu_roll',
+            'modu_search',
+            'roll_check',
+            'rename',
+            'attr_show',
+            'ban',
+            'tts',
+            'poke',
         ]);
     }
     static getToolsConfig() {
@@ -320,7 +322,7 @@ export class ConfigManager {
     }
 
     static registerLocalImageConfig() {
-        seal.ext.registerTemplateConfig(this.ext, "本地图片路径", ['<海豹>data/images/sealdice.png'], "如不需要可以不填写，尖括号内是图片的名称，便于AI调用");
+        seal.ext.registerTemplateConfig(this.ext, "本地图片路径", ['<海豹>data/images/sealdice.png'], "如不需要可以不填写，尖括号内是图片的名称，便于AI调用，修改完需要重载js");
     }
     static getLocalImageConfig() {
         const images = seal.ext.getTemplateConfig(this.ext, "本地图片路径");

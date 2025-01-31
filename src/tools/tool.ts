@@ -1,8 +1,16 @@
 import { AI } from "../AI/AI"
 import { ConfigManager } from "../utils/configUtils"
+import { registerAttrShow } from "./tool_attr"
+import { registerBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
 import { registerFace } from "./tool_face"
 import { registerJrrp } from "./tool_jrrp"
+import { registerMemory } from "./tool_memory"
+import { registerModuRoll, registerModuSearch } from "./tool_modu"
+import { registerPoke } from "./tool_poke"
+import { registerRename } from "./tool_rename"
+import { registerRollCheck } from "./tool_roll_check"
+import { registerTTS } from "./tool_tts"
 
 export interface ToolInfo {
     type: "function",
@@ -33,6 +41,7 @@ export interface ToolCall {
 }
 
 export interface CmdInfo {
+    ext: string,
     name: string,
     fixedArgs: string[]
 }
@@ -44,12 +53,11 @@ export class Tool {
     /**
      * 
      * @param ctx 
-     * @param msg 
-     * @param cmdArgs 
+     * @param msg
      * @param ai
      * @param args
      */
-    solve: (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs, ai: AI, ...args: string[]) => Promise<string>;
+    solve: (ctx: seal.MsgContext, msg: seal.Message, ai: AI, ...args: string[]) => Promise<string>;
 
     /**
      * @param name 命令的名字，<$这一部分#参数1#参数2>
@@ -59,6 +67,7 @@ export class Tool {
     constructor(info: ToolInfo) {
         this.info = info;
         this.cmdInfo = {
+            ext: '',
             name: '',
             fixedArgs: []
         }
@@ -72,10 +81,28 @@ export class ToolManager {
     static toolMap: { [key: string]: Tool } = {};
 
     static init() {
+        registerMemory();
         registerDrawDeck();
         registerFace();
         registerJrrp();
+        registerModuRoll();
+        registerModuSearch();
+        registerRollCheck();
+        registerRename();
+        registerAttrShow();
+        registerBan();
+        registerTTS();
+        registerPoke();
     }
+
+    /** TODO
+     * 撤回消息
+     * 获取精华消息
+     * 设置精华消息
+     * 删除精华消息
+     * 发送群公告
+     * 获取群公告
+     */
 
     static getTools(toolAllow: string[]): ToolInfo[] {
         const tools =  Object.values(this.toolMap)
@@ -96,11 +123,12 @@ export class ToolManager {
     }
 
     /**
-     * 利用预存的指令信息和额外输入的参数构建一个cmdArgs
+     * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
      * @param cmdArgs
      * @param args
      */
-    static handleCmdArgs(cmdArgs: seal.CmdArgs, cmdInfo: CmdInfo, ...args: string[]) {
+    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, ai: AI, cmdInfo: CmdInfo, ...args: string[]): Promise<[string, boolean]> {
+        const cmdArgs = this.cmdArgs;
         cmdArgs.command = cmdInfo.name;
         cmdArgs.args = cmdInfo.fixedArgs.concat(args);
         cmdArgs.kwargs = [];
@@ -109,6 +137,20 @@ export class ToolManager {
         cmdArgs.amIBeMentioned = false;
         cmdArgs.amIBeMentionedFirst = false;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
+
+        ai.listen.status = true;
+
+        const ext = seal.ext.find(cmdInfo.ext);
+        ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
+
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        if (ai.listen.status) {
+            ai.listen.status = false;
+            return ['', false];
+        }
+        
+        return [ai.listen.content, true];
     }
 
     static async handleTools(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: {
@@ -120,26 +162,28 @@ export class ToolManager {
             arguments: string
         }
     }[]) {
-        const names = tool_calls.map(item => item.function.name).splice(0, 5);
-        if (names.length !== 0) {
-            ConfigManager.printLog(`调用函数:`, names);
+        tool_calls.splice(5); // 最多调用5个函数
+        if (tool_calls.length !== 0) {
+            ConfigManager.printLog(`调用函数:`, tool_calls.map((item, i) => {
+                return `(${i}) ${item.function.name}:${item.function.arguments}`;
+            }).join('\n'));
         }
 
         try {
-            for (let i = 0; i < names.length; i++) {
+            for (let i = 0; i < tool_calls.length; i++) {
                 if (this.cmdArgs == null) {
                     ConfigManager.printLog(`暂时无法调用函数，请先使用任意指令`);
                     ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
                     continue;
                 }
 
-                const name = names[i];
+                const name = tool_calls[i].function.name;
                 if (this.toolMap.hasOwnProperty(name)) {
                     const tool = this.toolMap[name];
                     const args_obj = JSON.parse(tool_calls[i].function.arguments);
                     const order = Object.keys(tool.info.function.parameters.properties);
                     const args = order.map(item => args_obj?.[item]);
-                    const s = await tool.solve(ctx, msg, this.cmdArgs, ai,...args);
+                    const s = await tool.solve(ctx, msg, ai,...args);
 
                     ai.context.toolIteration(tool_calls[i].id, s);
                 } else {

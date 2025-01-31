@@ -1,30 +1,30 @@
-import { getCtx, getMsg } from "../utils/utils";
+import { getMsg, getCtx } from "../utils/utils";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerJrrp() {
+export function registerAttrShow() {
     const info: ToolInfo = {
-        type: "function",
+        type: 'function',
         function: {
-            name: "jrrp",
-            description: `查看今日人品`,
+            name: 'attr_show',
+            description: '展示指定玩家的全部个人属性',
             parameters: {
-                type: "object",
+                type: 'object',
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被查看的人的名字"
+                        description: '玩家名称'
                     }
                 },
-                required: ["name"]
+                required: ['name']
             }
         }
     }
 
     const tool = new Tool(info);
     tool.cmdInfo = {
-        ext: 'fun',
-        name: 'jrrp',
-        fixedArgs: []
+        ext: 'coc7',
+        name: 'st',
+        fixedArgs: ['show']
     }
     tool.solve = async (ctx, msg, ai, name) => {
         const uid = ai.context.findUid(name);
@@ -42,11 +42,13 @@ export function registerJrrp() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
         if (!success) {
-            return '今日人品查询成功'
+            return '展示完成';
         }
 
         return s;
     }
-
+    
     ToolManager.toolMap[info.function.name] = tool;
 }
+
+// TODO: 批量查看指定属性，批量设置属性
