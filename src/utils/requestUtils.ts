@@ -47,7 +47,7 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
     content: string,
     tool_calls?: ToolCall[],
     tool_call_id?: string
-}[], tool_choice: "none" | "auto" | "required"): Promise<string> {
+}[], tool_choice: string): Promise<string> {
     const { url, apiKey, bodyTemplate } = ConfigManager.getRequestConfig();
     const { tools } = ConfigManager.getToolsConfig();
 
@@ -67,9 +67,9 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
             if (message.hasOwnProperty('tool_calls')) {
                 ConfigManager.printLog(`触发工具调用`);
                 ai.context.toolCallsIteration(message.tool_calls);
-                await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+                const tool_choice = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
                 const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, ai);
-                return await sendRequest(ctx, msg, ai, messages, "none");
+                return await sendRequest(ctx, msg, ai, messages, tool_choice);
             }
             return reply;
         } else {

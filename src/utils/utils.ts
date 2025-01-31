@@ -47,7 +47,7 @@ export function getNameById(epId: string, gid: string, uid: string, diceName: st
     return ctx.player.name || '未知用户';
 }
 
-export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: "none" | "auto" | "required") {
+export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
     try {
         const bodyObject = JSON.parse(`{${template.join(',')}}`);
 

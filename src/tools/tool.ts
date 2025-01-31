@@ -49,6 +49,7 @@ export interface CmdInfo {
 export class Tool {
     info: ToolInfo;
     cmdInfo: CmdInfo;
+    tool_choice: string; // 是否可以继续调用函数："none" | "auto" | "required"
 
     /**
      * 
@@ -71,6 +72,7 @@ export class Tool {
             name: '',
             fixedArgs: []
         }
+        this.tool_choice = 'none';
         this.solve = async (_, __, ___) => "函数未实现";
     }
 
@@ -105,7 +107,7 @@ export class ToolManager {
      */
 
     static getTools(toolAllow: string[]): ToolInfo[] {
-        const tools =  Object.values(this.toolMap)
+        const tools = Object.values(this.toolMap)
             .map(item => {
                 if (toolAllow.includes(item.info.function.name)) {
                     return item.info;
@@ -149,7 +151,7 @@ export class ToolManager {
             ai.listen.status = false;
             return ['', false];
         }
-        
+
         return [ai.listen.content, true];
     }
 
@@ -161,7 +163,7 @@ export class ToolManager {
             name: string,
             arguments: string
         }
-    }[]) {
+    }[]): Promise<string> {
         tool_calls.splice(5); // 最多调用5个函数
         if (tool_calls.length !== 0) {
             ConfigManager.printLog(`调用函数:`, tool_calls.map((item, i) => {
@@ -169,8 +171,9 @@ export class ToolManager {
             }).join('\n'));
         }
 
-        try {
-            for (let i = 0; i < tool_calls.length; i++) {
+        let tool_choice = 'none';
+        for (let i = 0; i < tool_calls.length; i++) {
+            try {
                 if (this.cmdArgs == null) {
                     ConfigManager.printLog(`暂时无法调用函数，请先使用任意指令`);
                     ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
@@ -180,19 +183,28 @@ export class ToolManager {
                 const name = tool_calls[i].function.name;
                 if (this.toolMap.hasOwnProperty(name)) {
                     const tool = this.toolMap[name];
+
+                    if (tool.tool_choice === 'required') {
+                        tool_choice = 'required';
+                    } else if (tool_choice !== 'required' && tool.tool_choice === 'auto') {
+                        tool_choice = 'auto';
+                    }
+
                     const args_obj = JSON.parse(tool_calls[i].function.arguments);
                     const order = Object.keys(tool.info.function.parameters.properties);
                     const args = order.map(item => args_obj?.[item]);
-                    const s = await tool.solve(ctx, msg, ai,...args);
+                    const s = await tool.solve(ctx, msg, ai, ...args);
 
                     ai.context.toolIteration(tool_calls[i].id, s);
                 } else {
                     console.error(`函数${name}不存在`);
                 }
+            } catch (e) {
+                const s = `调用函数 (${tool_calls[i].function.name}:${tool_calls[i].function.arguments}) 失败:${e.message}`;
+                console.error(s);
             }
-        } catch (e) {
-            const s = `调用函数失败:` + e.message;
-            console.error(s);
         }
+
+        return tool_choice;
     }
 }
