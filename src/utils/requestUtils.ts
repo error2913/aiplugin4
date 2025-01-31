@@ -8,7 +8,7 @@ export async function FetchData(url: string, apiKey: string, bodyObject: any): P
     const s = JSON.stringify(bodyObject.messages, (key, value) => {
         if (key === "" && Array.isArray(value)) {
             return value.filter(item => {
-                return item.role === "user" || item.role === "assistant";
+                return item.role !== "system";
             });
         }
         return value;
