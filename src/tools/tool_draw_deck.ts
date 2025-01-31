@@ -1,7 +1,7 @@
 import { ConfigManager } from "../utils/configUtils";
 import { Tool, ToolInfo, ToolManager } from "./tool"
 
-export function registerDraw() {
+export function registerDrawDeck() {
     const { decks } = ConfigManager.getDeckConfig();
     const info: ToolInfo = {
         type: "function",

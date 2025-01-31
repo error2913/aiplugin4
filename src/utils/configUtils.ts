@@ -149,10 +149,10 @@ export class ConfigManager {
     static registerToolsConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否开启调用函数功能", true, "");
         seal.ext.registerTemplateConfig(this.ext, "允许调用的函数", [
-            '记忆',
             'draw_deck',
-            '表情',
-            '今日人品',
+            'face',
+            'jrrp',
+            '记忆',
             '模组',
             '检定',
             '改名',

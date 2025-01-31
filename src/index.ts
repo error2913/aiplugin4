@@ -671,16 +671,22 @@ function main() {
 
   //骰子发送的消息
   ext.onMessageSend = async (ctx, msg) => {
+    const message = msg.message;
+
+    const uid = ctx.player.userId;
+    const gid = ctx.group.groupId;
+    const id = ctx.isPrivate ? uid : gid;
+
+    const ai = AIManager.getAI(id);
+
+    if (ai.listen.status) {
+      ai.listen.status = false;
+      ai.listen.content = message;
+      return;
+    }
+
     const { allmsg } = ConfigManager.getMonitorAllMessageConfig();
     if (allmsg) {
-      const uid = ctx.player.userId;
-      const gid = ctx.group.groupId;
-      const id = ctx.isPrivate ? uid : gid;
-
-      const ai = AIManager.getAI(id);
-
-      const message = msg.message;
-
       if (message === ai.context.lastReply) {
         ai.context.lastReply = '';
         return;

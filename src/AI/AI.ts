@@ -21,6 +21,10 @@ export class AI {
     memory: Memory;
     image: ImageManager;
     privilege: Privilege;
+    listen: {
+        status: boolean,
+        content: string
+    }
     isChatting: boolean;
     isGettingAct: boolean;
 
@@ -36,6 +40,10 @@ export class AI {
             prob: -1,
             interrupt: -1,
             standby: false
+        };
+        this.listen = { // 监听调用函数发送的内容
+            status: false,
+            content: ''
         };
         this.isChatting = false;
         this.isGettingAct = false;

@@ -1,6 +1,8 @@
 import { AI } from "../AI/AI"
 import { ConfigManager } from "../utils/configUtils"
-import { registerDraw } from "./tool_draw"
+import { registerDrawDeck } from "./tool_draw_deck"
+import { registerFace } from "./tool_face"
+import { registerJrrp } from "./tool_jrrp"
 
 export interface ToolInfo {
     type: "function",
@@ -70,7 +72,9 @@ export class ToolManager {
     static toolMap: { [key: string]: Tool } = {};
 
     static init() {
-        registerDraw();
+        registerDrawDeck();
+        registerFace();
+        registerJrrp();
     }
 
     static getTools(toolAllow: string[]): ToolInfo[] {
