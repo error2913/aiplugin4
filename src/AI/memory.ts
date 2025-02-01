@@ -2,22 +2,32 @@ import { ConfigManager } from "../utils/configUtils";
 import { AIManager } from "./AI";
 import { Context } from "./context";
 
+export interface MemoryInfo {
+    isPrivate: boolean;
+    group: {
+        groupId: string;
+        groupName: string;
+    }
+    time: string;
+    content: string;
+}
+
 export class Memory {
-    system: string;
-    memories: { [key: string]: string[] };
+    persona: string;
+    memoryList: MemoryInfo[];
 
     constructor() {
         if (Math.random() < 0.5) {
-            this.system = '好人';
+            this.persona = '好人';
         } else {
-            this.system = '坏人';
+            this.persona = '坏人';
         }
-        this.memories = {};
+        this.memoryList = [];
     }
 
     static reviver(value: any): Memory {
         const memory = new Memory();
-        const validKeys = ['system', 'memories'];
+        const validKeys = ['system', 'memoryList'];
 
         for (const k in value) {
             if (validKeys.includes(k)) {
@@ -37,85 +47,60 @@ export class Memory {
             }
         }
 
-        this.system = s;
+        this.persona = s;
     }
 
-    getMemoryLength(): number {
-        let length = 0;
-        for (const k in this.memories) {
-            length += this.memories[k].length;
-        }
-        return length;
+    addMemory(gid: string, gn: string, content: string) {
+        const { memoryLimit } = ConfigManager.getMemoryConfig();
+
+        content = content.slice(0, 100);
+
+        this.memoryList.push({
+            isPrivate: gn ? true : false,
+            group: {
+                groupId: gid,
+                groupName: gn
+            },
+            time: new Date().toLocaleString(),
+            content: content
+        });
+
+        this.memoryList.splice(0, this.memoryList.length - memoryLimit);
     }
 
-    addMemory(k: string, s: string) {
-        const { extraMemory } = ConfigManager.getMemoryConfig();
-
-        k = k ? k.trim() : '私聊';
-
-        if (!this.memories.hasOwnProperty(k)) {
-            this.memories[k] = [];
-        }
-
-        s = s.slice(0, 100);
-
-        this.memories[k].push(s);
-
-        // 超过上限时，从最长的记忆处弹出
-        while (this.getMemoryLength() > extraMemory) {
-            let maxLength = 0;
-            let maxKey = '';
-            for (const k in this.memories) {
-                if (this.memories[k].length > maxLength) {
-                    maxLength = this.memories[k].length;
-                    maxKey = k;
-                }
-            }
-
-            this.memories[maxKey].shift();
-            if (this.memories[maxKey].length === 0) {
-                delete this.memories[maxKey];
-            }
-        }
-    }
-
-    getPrivateMemoryPrompt(): string {
-        let s = `\n- 设定记忆:${this.system}`;
-        for (const k in this.memories) {
-            if (this.memories[k].length === 0) {
-                delete this.memories[k];
-                continue;
-            }
-
-            s += `\n- 在<${k}>中的记忆:${this.memories[k].join('、')}`;
-        }
+    getPlayerMemoryPrompt(): string {
+        let s = `\n- 设定:${this.persona}`;
+        s += `\n- 记忆:`;
+        s += this.memoryList.map((item, i) => {
+            return `\n${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>`}: ${item.content}`;
+        }).join('\n');
         return s;
     }
 
     getMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
-        let s = '';
         if (ctx.isPrivate) {
-            s += this.getPrivateMemoryPrompt();
+            return this.getPlayerMemoryPrompt();
         } else {
+            let s = '';
             const arr = [];
             for (const message of context.messages) {
                 if (!arr.includes(message.uid) && message.role === 'user') {
                     const name = message.name;
                     const uid = message.uid;
                     const ai = AIManager.getAI(uid);
-                    const text = ai.memory.getPrivateMemoryPrompt();
+                    const text = ai.memory.getPlayerMemoryPrompt();
                     if (text) {
                         s += `\n关于<${name}>:${text}`;
                     }
                     arr.push(uid);
                 }
             }
-        }
 
-        return s;
+            return s;
+        }
     }
 
     clearMemory() {
-        this.memories = {};
+        this.memoryList = [];
     }
 }

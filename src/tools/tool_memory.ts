@@ -50,7 +50,7 @@ export function registerMemory() {
 
         //记忆相关处理
         ai = AIManager.getAI(uid);
-        ai.memory.addMemory(ctx.group.groupName, content);
+        ai.memory.addMemory(ctx.group.groupId, ctx.group.groupName, content);
         AIManager.saveAI(uid);
 
         return `添加记忆成功`;

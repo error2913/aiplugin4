@@ -192,11 +192,11 @@ export class ConfigManager {
     }
 
     static registerMemoryConfig() {
-        seal.ext.registerIntConfig(this.ext, "额外记忆上限", 5, "");
+        seal.ext.registerIntConfig(this.ext, "长期记忆上限", 5, "");
     }
     static getMemoryConfig() {
-        const extraMemory = seal.ext.getIntConfig(this.ext, "额外记忆上限");
-        return { extraMemory };
+        const memoryLimit = seal.ext.getIntConfig(this.ext, "长期记忆上限");
+        return { memoryLimit };
     }
 
     static registerStorageConfig() {
