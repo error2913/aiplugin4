@@ -36,7 +36,7 @@ export class Context {
 
     static reviver(value: any): Context {
         const context = new Context();
-        const validKeys = ['messages', 'lastReply', 'counter', 'timer', 'interrupt'];
+        const validKeys = ['messages'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
