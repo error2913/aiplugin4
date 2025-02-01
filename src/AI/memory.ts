@@ -56,7 +56,7 @@ export class Memory {
         content = content.slice(0, 100);
 
         this.memoryList.push({
-            isPrivate: gn ? true : false,
+            isPrivate: gn ? false : true,
             group: {
                 groupId: gid,
                 groupName: gn

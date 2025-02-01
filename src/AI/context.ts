@@ -106,9 +106,7 @@ export class Context {
         }
 
         //删除多余的上下文
-        if (role === 'assistant') {
-            this.limitMessages(maxRounds);
-        }
+        this.limitMessages(maxRounds);
     }
 
     async toolCallsIteration(tool_calls: ToolCall[]) {
