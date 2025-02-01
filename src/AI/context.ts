@@ -51,7 +51,7 @@ export class Context {
         const messages = this.messages;
 
         // 如果是assistant，且最后一条消息是tool_calls，则不处理，防止在处理tool_calls时插入user消息
-        if (role === 'user' && messages?.[messages.length - 1]?.role === 'assistant' && messages?.[messages.length - 1]?.tool_calls) {
+        if (role === 'user' && messages.length !== 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1]?.tool_calls) {
             return;
         }
 
