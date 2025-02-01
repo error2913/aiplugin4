@@ -50,6 +50,11 @@ export class Context {
     async iteration(ctx: seal.MsgContext, s: string, role: 'user' | 'assistant') {
         const messages = this.messages;
 
+        // 如果是assistant，且最后一条消息是tool_calls，则不处理，防止在处理tool_calls时插入user消息
+        if (role === 'user' && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1]?.tool_calls) {
+            return;
+        }
+
         const { maxRounds, ctxCacheTime } = ConfigManager.getStorageConfig();
 
         // 从尾部开始检查是否超过缓存时间，超过则清理掉
