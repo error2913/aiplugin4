@@ -64,11 +64,19 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
             if (message.hasOwnProperty('reasoning_content')) {
                 ConfigManager.printLog(`思维链内容:`, message.reasoning_content);
             }
+
             ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+
             if (message.hasOwnProperty('tool_calls')) {
                 ConfigManager.printLog(`触发工具调用`);
+
                 ai.context.toolCallsIteration(message.tool_calls);
                 const tool_choice = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+
+                if (reply) { // 如果reply不为空，直接返回reply
+                    return reply;
+                }
+
                 const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, ai);
                 return await sendRequest(ctx, msg, ai, messages, tool_choice);
             }
