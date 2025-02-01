@@ -161,6 +161,7 @@ export class ConfigManager {
             'ban',
             'tts',
             'poke',
+            'get_time'
         ]);
     }
     static getToolsConfig() {

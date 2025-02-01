@@ -4,6 +4,7 @@ import { registerAttrShow } from "./tool_attr"
 import { registerBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
 import { registerFace } from "./tool_face"
+import { registerGetTime } from "./tool_get_time"
 import { registerJrrp } from "./tool_jrrp"
 import { registerMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
@@ -95,6 +96,7 @@ export class ToolManager {
         registerBan();
         registerTTS();
         registerPoke();
+        registerGetTime();
     }
 
     /** TODO
@@ -155,6 +157,14 @@ export class ToolManager {
         return [ai.listen.content, true];
     }
 
+    /**
+     * 
+     * @param ctx 
+     * @param msg 
+     * @param ai 
+     * @param tool_calls 
+     * @returns tool_choice
+     */
     static async handleTools(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: {
         index: number,
         id: string,
