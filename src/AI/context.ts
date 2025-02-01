@@ -102,7 +102,7 @@ export class Context {
 
         //删除多余的上下文
         if (role === 'assistant') {
-            this.trimMessages(maxRounds);
+            this.limitMessages(maxRounds);
         }
     }
 
@@ -130,7 +130,7 @@ export class Context {
         this.messages.push(message);
     }
 
-    async trimMessages(maxRounds: number) {
+    async limitMessages(maxRounds: number) {
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {

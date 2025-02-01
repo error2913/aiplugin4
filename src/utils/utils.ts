@@ -121,12 +121,7 @@ export function calculateSimilarity(s1: string, s2: string): number {
 }
 
 export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): { s: string, reply: string, isRepeat: boolean } {
-    const { maxChar, cut, replymsg, stopRepeat, similarityLimit } = ConfigManager.getHandleReplyConfig();
-
-    // 处理分割
-    if (cut) {
-        s = s.split('\n')[0];
-    }
+    const { maxChar, replymsg, stopRepeat, similarityLimit } = ConfigManager.getHandleReplyConfig();
 
     const segments = s
         .split(/<[\|｜].*?[\|｜]?>/)

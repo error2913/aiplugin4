@@ -271,18 +271,16 @@ export class ConfigManager {
     static registerHandleReplyConfig() {
         seal.ext.registerBoolConfig(this.ext, "回复是否引用", true, "");
         seal.ext.registerIntConfig(this.ext, "回复最大字数", 1000, "防止最大Tokens限制不起效，仅对该插件生效");
-        seal.ext.registerBoolConfig(this.ext, "回复换行截断", false, "");
         seal.ext.registerBoolConfig(this.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(this.ext, "视作复读的最低相似度", 0.8, "");
     }
     static getHandleReplyConfig() {
         const maxChar = seal.ext.getIntConfig(this.ext, "回复最大字数");
-        const cut = seal.ext.getBoolConfig(this.ext, "回复换行截断");
         const replymsg = seal.ext.getBoolConfig(this.ext, "回复是否引用");
         const stopRepeat = seal.ext.getBoolConfig(this.ext, "禁止AI复读");
         const similarityLimit = seal.ext.getFloatConfig(this.ext, "视作复读的最低相似度");
 
-        return { maxChar, cut, replymsg, stopRepeat, similarityLimit };
+        return { maxChar, replymsg, stopRepeat, similarityLimit };
     }
 
     static registerInterruptConfig() {

@@ -26,7 +26,8 @@ export async function FetchData(url: string, apiKey: string, bodyObject: any): P
     });
 
     if (!response.ok) {
-        throw new Error(`HTTP错误! 状态码: ${response.status}`);
+        const data = await response.json();
+        throw new Error(`HTTP错误! 状态码: ${response.status}，内容: ${response.statusText}，错误信息: ${data.error.message}`);
     }
 
     const text = await response.text();
