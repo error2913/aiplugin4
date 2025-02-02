@@ -55,16 +55,7 @@ export class Context {
             return;
         }
 
-        const { maxRounds, ctxCacheTime } = ConfigManager.getStorageConfig();
-
-        // 从尾部开始检查是否超过缓存时间，超过则清理掉
-        const timestamp = Math.floor(Date.now() / 1000);
-        for (let i = messages.length - 1; i >= 0; i--) {
-            if (timestamp - messages[i].timestamp > ctxCacheTime) {
-                messages.splice(0, i + 1);
-                break;
-            }
-        }
+        const { maxRounds } = ConfigManager.getStorageConfig();
 
         //处理文本
         if (role === 'assistant') {
@@ -100,7 +91,7 @@ export class Context {
                 content: s,
                 uid: uid,
                 name: name,
-                timestamp: timestamp
+                timestamp: Math.floor(Date.now() / 1000)
             };
             messages.push(message);
         }
@@ -128,6 +119,17 @@ export class Context {
             tool_call_id: tool_call_id,
             uid: '',
             name: '',
+            timestamp: Math.floor(Date.now() / 1000)
+        };
+        this.messages.push(message);
+    }
+
+    async systemUserIteration(name: string, s: string) {
+        const message = {
+            role: 'user',
+            content: s,
+            uid: '',
+            name: name,
             timestamp: Math.floor(Date.now() / 1000)
         };
         this.messages.push(message);

@@ -1,13 +1,23 @@
 import { AIManager } from "./AI/AI";
 import { ToolManager } from "./tools/tool";
+import { timerQueue } from "./tools/tool_set_timer";
 import { ConfigManager } from "./utils/configUtils";
-import { getCQTypes, getUrlsInCQCode } from "./utils/utils";
+import { getCQTypes, getCtx, getMsg, getUrlsInCQCode } from "./utils/utils";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
     ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.3.0');
     seal.ext.register(ext);
+  }
+
+  try {
+    JSON.parse(ext.storageGet(`timerQueue`) || '[]').
+      forEach((item: any) => {
+        timerQueue.push(item);
+      });
+  } catch (e) {
+    console.error('在获取timerQueue时出错', e);
   }
 
   ConfigManager.ext = ext;
@@ -512,6 +522,11 @@ function main() {
     }
   }
 
+  // 将命令注册到扩展中
+  ext.cmdMap['AI'] = cmdAI;
+  ext.cmdMap['ai'] = cmdAI;
+  ext.cmdMap['img'] = cmdImage;
+
   //接受非指令消息
   ext.onNotCommandReceived = async (ctx, msg) => {
     const { canPrivate } = ConfigManager.getPrivateConfig();
@@ -703,10 +718,62 @@ function main() {
     }
   }
 
-  // 将命令注册到扩展中
-  ext.cmdMap['AI'] = cmdAI;
-  ext.cmdMap['ai'] = cmdAI;
-  ext.cmdMap['img'] = cmdImage;
+
+
+  let isTaskRunning = false;
+  seal.ext.registerTask(ext, "cron", "* * * * *", async () => {
+    if (timerQueue.length === 0) {
+      return;
+    }
+
+    if (isTaskRunning) {
+      ConfigManager.printLog('定时器任务正在运行，跳过');
+      return;
+    }
+
+    isTaskRunning = true;
+    ConfigManager.printLog('定时器任务开始');
+
+    for (let i = 0; i < timerQueue.length && i >= 0; i++) {
+      const timestamp = timerQueue[i].timestamp;
+      if (timestamp > Math.floor(Date.now() / 1000)) {
+        continue;
+      }
+
+      const setTime = timerQueue[i].setTime;
+      const content = timerQueue[i].content;
+      const id = timerQueue[i].id;
+      const messageType = timerQueue[i].messageType;
+      const uid = timerQueue[i].uid;
+      const gid = timerQueue[i].gid;
+      const epId = timerQueue[i].epId;
+      const msg = getMsg(messageType, uid, gid);
+      const ctx = getCtx(epId, msg);
+      const ai = AIManager.getAI(id);
+
+      const s = `你设置的定时器触发了，请按照以下内容发送回复：
+定时器设定时间：${setTime}
+当前触发时间：${new Date().toLocaleString()}
+提示内容：${content}`;
+
+      await ai.context.systemUserIteration("_定时器触发提示", s);
+
+      ConfigManager.printLog('定时任务触发回复');
+      ai.isChatting = false;
+      await ai.chat(ctx, msg);
+      AIManager.saveAI(id);
+      
+      timerQueue.splice(i, 1);
+      i--;
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
+
+    isTaskRunning = false;
+    ConfigManager.printLog('定时器任务结束');
+  })
 }
 
 main();

@@ -199,7 +199,8 @@ export class ConfigManager {
             'ban',
             'tts',
             'poke',
-            'get_time'
+            'get_time',
+            'set_timer'
         ]);
     }
     static getToolsConfig() {
@@ -239,12 +240,10 @@ export class ConfigManager {
 
     static registerStorageConfig() {
         seal.ext.registerIntConfig(this.ext, "存储上下文对话限制轮数", 10, "");
-        seal.ext.registerFloatConfig(this.ext, "上下文的缓存时间/min", 240, "可填小数，例如0.5");
     }
     static getStorageConfig() {
         const maxRounds = seal.ext.getIntConfig(this.ext, "存储上下文对话限制轮数");
-        const ctxCacheTime = seal.ext.getFloatConfig(this.ext, "上下文的缓存时间/min") * 60;
-        return { maxRounds, ctxCacheTime };
+        return { maxRounds };
     }
 
     static registerMonitorCommandConfig() {

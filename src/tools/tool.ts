@@ -11,6 +11,7 @@ import { registerModuRoll, registerModuSearch } from "./tool_modu"
 import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
 import { registerRollCheck } from "./tool_roll_check"
+import { registerSetTimer } from "./tool_set_timer"
 import { registerTTS } from "./tool_tts"
 
 export interface ToolInfo {
@@ -97,6 +98,7 @@ export class ToolManager {
         registerTTS();
         registerPoke();
         registerGetTime();
+        registerSetTimer();
     }
 
     /** TODO
