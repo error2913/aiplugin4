@@ -1,4 +1,5 @@
 import { Context } from "../AI/context";
+import { ImageManager } from "../AI/image";
 import { ToolInfo } from "../tools/tool";
 import { ConfigManager } from "./configUtils";
 
@@ -41,7 +42,7 @@ export function getNameById(epId: string, gid: string, uid: string, diceName: st
         return diceName;
     }
 
-    const msg = getMsg(gid === '' ? 'private': 'group', uid, gid);
+    const msg = getMsg(gid === '' ? 'private' : 'group', uid, gid);
     const ctx = getCtx(epId, msg);
 
     return ctx.player.name || '未知用户';
@@ -71,16 +72,6 @@ export function parseBody(template: string[], messages: any[], tools: ToolInfo[]
         return bodyObject;
     } catch (err) {
         throw new Error(`解析body时出现错误:${err}`);
-    }
-}
-
-export function getUrlsInCQCode(s: string): string[] {
-    const match = s.match(/\[CQ:image,file=(http.*?)\]/g);
-    if (match !== null) {
-        const urls = match.map(item => item.match(/\[CQ:image,file=(http.*?)\]/)[1]);
-        return urls;
-    } else {
-        return [];
     }
 }
 
@@ -114,26 +105,48 @@ export function calculateSimilarity(s1: string, s2: string): number {
     if (s1.length === 0 || s2.length === 0) {
         return 0;
     }
-    
+
     const distance = levenshteinDistance(s1, s2);
     const maxLength = Math.max(s1.length, s2.length);
     return 1 - distance / maxLength;
 }
 
-export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): { s: string, reply: string, isRepeat: boolean } {
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, reply: string, isRepeat: boolean }> {
     const { maxChar, replymsg, stopRepeat, similarityLimit } = ConfigManager.getHandleReplyConfig();
 
     const segments = s
-        .split(/<[\|｜].*?[\|｜]?>/)
+        .split(/<[\|｜]from.*?[\|｜]?>/)
         .filter(item => item.trim() !== '');
     if (segments.length === 0) {
         return { s: '', reply: '', isRepeat: false };
     }
 
+    // 处理图片发送
+    const match = s.match(/<[\|｜]图片.+?[\|｜]?>/g);
+    if (match) {
+        for (let i = 0; i < match.length; i++) {
+            const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+            const image = context.findImage(id);
+
+            if (image) {
+                const file = image.file;
+
+                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(file))) {
+                    s = s.replace(match[i], `[CQ:image,file=${file}]`);
+                    continue;
+                }
+            }
+
+            s = s.replace(match[i], ``);
+        }
+    }
+
     s = segments[0]
         .replace(/<br>/g, '\n')
         .slice(0, maxChar)
+
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+
     const reply = prefix + s
         .replace(/<@(.+?)>/g, (_, p1) => {
             const uid = context.findUid(p1);
@@ -143,7 +156,7 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, 
                 return ` @${p1} `;
             }
         })
-        .replace(/<\$(.+?)\$?>/g, '');
+        .replace(/<[\|｜].*?[\|｜]?>/g, '');
 
     // 检查复读
     let isRepeat = false;
@@ -162,9 +175,9 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, 
 
                     let start = i;
                     let count = 1;
-                    for (let j = i -1; j >= 0; j--) {
+                    for (let j = i - 1; j >= 0; j--) {
                         const message = messages[j];
-                        if (message.role === 'tool'|| (message.role === 'assistant' && message?.tool_calls)) {
+                        if (message.role === 'tool' || (message.role === 'assistant' && message?.tool_calls)) {
                             start = j;
                             count++;
                         } else {
@@ -181,4 +194,10 @@ export function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, 
     }
 
     return { s, reply, isRepeat };
+}
+
+export function generateId() {
+    const timestamp = Date.now().toString(36); // 将时间戳转换为36进制字符串
+    const random = Math.random().toString(36).substring(2, 6); // 随机数部分
+    return (timestamp + random).slice(-6); // 截取最后6位
 }

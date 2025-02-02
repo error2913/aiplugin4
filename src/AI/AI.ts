@@ -1,4 +1,4 @@
-import { ImageManager } from "../image/imageManager";
+import { ImageManager } from "./image";
 import { ConfigManager } from "../utils/configUtils";
 import { handleReply } from "../utils/utils";
 import { FetchData, sendRequest } from "../utils/requestUtils";
@@ -75,7 +75,7 @@ export class AI {
 
         //获取处理后的回复
         const raw_reply = await sendRequest(ctx, msg, this, messages, "auto");
-        const { s, reply, isRepeat } = handleReply(ctx, msg, raw_reply, this.context);
+        const { s, reply, isRepeat } = await handleReply(ctx, msg, raw_reply, this.context);
 
         //禁止AI复读
         if (isRepeat && reply !== '') {
@@ -110,10 +110,12 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const { s, reply } = await this.getReply(ctx, msg);
+        let { s, reply } = await this.getReply(ctx, msg);
+        const {message, images} = await ImageManager.handleImageMessage(ctx, s);
+        s = message;
 
         this.context.lastReply = reply;
-        await this.context.iteration(ctx, s, 'assistant');
+        await this.context.iteration(ctx, s, images, 'assistant');
 
         // 发送回复
         seal.replyToSender(ctx, msg, reply);
@@ -121,7 +123,7 @@ export class AI {
         //发送偷来的图片
         const { p } = ConfigManager.getImageProbabilityConfig();
         if (Math.random() * 100 <= p) {
-            const file = await this.image.drawImage();
+            const file = await this.image.drawImageFile();
             if (file) {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
             }

@@ -25,7 +25,6 @@ export class ConfigManager {
         this.registerImageConditionConfig();
         this.registerImageProbabilityConfig();
         this.registerImageRequestConfig();
-        this.registerImageTriggerConfig();
         this.registerImageStorageConfig();
     }
 
@@ -126,14 +125,22 @@ export class ConfigManager {
             content: roleSetting,
             uid: '',
             name: '',
-            timestamp: 0
+            timestamp: 0,
+            images: []
         };
         if (!ctx.isPrivate) {
-            systemMessage.content += `\n当前群聊:${ctx.group.groupName}\n<@xxx>表示@群成员xxx`;
+            systemMessage.content += `
+**平台信息**
+- 当前群聊:${ctx.group.groupName}
+- <@xxx>表示@群成员xxx
+- <|图片xxx:yyy|>为图片，其中xxx为图片id，yyy为图片描述（可能没有），如果要使用出现过的图片请使用<|图片xxx|>的格式`;
         }
         const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
         if (memeryPrompt) {
-            systemMessage.content += '\n下列是对话相关记忆，如果与上述设定冲突，请遵守角色设定。记忆如下:\n' + memeryPrompt;
+            systemMessage.content += `
+**记忆**
+如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
+${memeryPrompt}`;
         }
 
         const samplesMessages: Message[] = samples
@@ -146,7 +153,8 @@ export class ConfigManager {
                         content: item,
                         uid: '',
                         name: "用户",
-                        timestamp: 0
+                        timestamp: 0,
+                        images: []
                     };
                 } else {
                     return {
@@ -154,7 +162,8 @@ export class ConfigManager {
                         content: item,
                         uid: ctx.endPoint.userId,
                         name: seal.formatTmpl(ctx, "核心:骰子名字"),
-                        timestamp: 0
+                        timestamp: 0,
+                        images: []
                     };
                 }
             })
@@ -408,18 +417,6 @@ export class ConfigManager {
         const bodyTemplate = seal.ext.getTemplateConfig(this.ext, "图片body");
 
         return { url, apiKey, maxChars, bodyTemplate };
-    }
-
-    static registerImageTriggerConfig() {
-        seal.ext.registerStringConfig(this.ext, "图片非指令触发需要满足的条件", '1', "使用豹语表达式，例如：$t群号_RAW=='2001'");
-        seal.ext.registerTemplateConfig(this.ext, "图片非指令关键词", ["咪"], "包含关键词将进行回复");
-    }
-    static getImageTriggerConfig(s: string) {
-        const condition = seal.ext.getStringConfig(this.ext, "图片非指令触发需要满足的条件");
-        const keyWords = seal.ext.getTemplateConfig(this.ext, "图片非指令关键词");
-        const trigger = keyWords.some(item => s.includes(item));
-
-        return { condition, trigger };
     }
 
     static registerImageStorageConfig() {

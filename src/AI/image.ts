@@ -1,18 +1,32 @@
 import { ConfigManager } from "../utils/configUtils";
-import { getUrlsInCQCode, parseBody } from "../utils/utils";
+import { generateId, parseBody } from "../utils/utils";
+
+export class Image {
+    id: string;
+    isUrl: boolean;
+    file: string;
+    content: string;
+
+    constructor(file: string) {
+        this.id = generateId();
+        this.isUrl = file.startsWith('http');
+        this.file = file;
+        this.content = '';
+    }
+}
 
 export class ImageManager {
-    images: string[];
+    imageList: Image[];
     stealStatus: boolean;
 
     constructor() {
-        this.images = [];
+        this.imageList = [];
         this.stealStatus = false;
     }
 
     static reviver(value: any): ImageManager {
         const im = new ImageManager();
-        const validKeys = ['images', 'stealStatus'];
+        const validKeys = ['imageList', 'stealStatus'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -23,30 +37,12 @@ export class ImageManager {
         return im;
     }
 
-    async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<string> {
+    updateImageList(images: Image[]) {
         const { maxImageNum } = ConfigManager.getImageStorageConfig();
-        const urls = getUrlsInCQCode(message);
-  
-        try {
-          const url = urls[0];
-          const reply = await this.imageToText(ctx, url);
-          if (reply) {
-            message = message.replace(/\[CQ:image,file=http.*?\]/, `<|图片:${reply}|>`);
-          }
-        } catch (error) {
-          console.error('Error in imageToText:', error);
-        }
-  
-        message = message.replace(/\[CQ:image,file=.*?\]/, '<|图片|>');
-  
-        if (urls.length !== 0) {
-          this.images = this.images.concat(urls).slice(-maxImageNum);
-        }
-
-        return message;
+        this.imageList = this.imageList.concat(images.filter(item => item.isUrl)).slice(-maxImageNum);
     }
 
-    drawLocalImage(): string {
+    drawLocalImageFile(): string {
         const { localImages } = ConfigManager.getLocalImageConfig();
         const keys = Object.keys(localImages);
         if (keys.length == 0) {
@@ -56,46 +52,78 @@ export class ImageManager {
         return localImages[keys[index]];
     }
 
-    async drawStolenImage(): Promise<string> {
-        if (this.images.length == 0) {
+    async drawStolenImageFile(): Promise<string> {
+        if (this.imageList.length == 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * this.images.length);
-        const url = this.images.splice(index, 1)[0];
+        const index = Math.floor(Math.random() * this.imageList.length);
+        const image = this.imageList.splice(index, 1)[0];
+        const url = image.file;
 
-        if (!await this.checkImageUrl(url)) {
+        if (!await ImageManager.checkImageUrl(url)) {
             await new Promise(resolve => setTimeout(resolve, 500));
-            return await this.drawStolenImage();
+            return await this.drawStolenImageFile();
         }
 
         return url;
     }
 
-    async drawImage(): Promise<string> {
+    async drawImageFile(): Promise<string> {
         const { localImages } = ConfigManager.getLocalImageConfig();
         const values = Object.values(localImages);
-        if (this.images.length == 0 && values.length == 0) {
+        if (this.imageList.length == 0 && values.length == 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * (values.length + this.images.length));
+        const index = Math.floor(Math.random() * (values.length + this.imageList.length));
 
         if (index < values.length) {
             return values[index];
         } else {
-            const url = this.images.splice(index - values.length, 1)[0];
+            const image = this.imageList.splice(index - values.length, 1)[0];
+            const url = image.file;
 
-            if (!await this.checkImageUrl(url)) {
+            if (!await ImageManager.checkImageUrl(url)) {
                 await new Promise(resolve => setTimeout(resolve, 500));
-                return await this.drawImage();
+                return await this.drawImageFile();
             }
 
             return url;
         }
     }
 
-    async checkImageUrl(url: string): Promise<boolean> {
+    static async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<{message: string, images: Image[]}>  {
+        const images: Image[] = [];
+
+        const match = message.match(/\[CQ:image,file=(.*?)\]/g);
+        if (match !== null) {
+            for (let i = 0; i < match.length; i++) {
+                try {
+                    const file = match[i].match(/\[CQ:image,file=(.*?)\]/)[1];
+                    const image = new Image(file);
+
+                    message = message.replace(`[CQ:image,file=${file}]`, `<|图片${image.id}|>`);
+
+                    if (image.isUrl) {
+                        const reply = await ImageManager.imageToText(ctx, file);
+                        if (reply) {
+                            image.content = reply;
+                            message = message.replace(`<|图片${image.id}|>`, `<|图片${image.id}:${reply}|>`);
+                        }
+                    }
+
+                    images.push(image);
+                } catch (error) {
+                    console.error('Error in imageToText:', error);
+                }
+            }
+        }
+
+        return { message, images };
+    }
+
+    static async checkImageUrl(url: string): Promise<boolean> {
         let isValid = false;
 
         try {
@@ -119,12 +147,12 @@ export class ImageManager {
         return isValid;
     }
 
-    async imageToText(ctx: seal.MsgContext, imageUrl: string, text = ''): Promise<string> {
+    static async imageToText(ctx: seal.MsgContext, imageUrl: string, text = ''): Promise<string> {
         const { condition } = ConfigManager.getImageConditionConfig();
 
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition == 0) {
-          return '图片';
+            return '';
         }
 
         const messages = [{
@@ -173,7 +201,7 @@ export class ImageManager {
             }
         } catch (error) {
             console.error("在imageToText中请求出错：", error);
-            return '图片';
+            return '';
         }
     }
 }

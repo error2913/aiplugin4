@@ -1,13 +1,14 @@
 import { AIManager } from "./AI/AI";
+import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tools/tool";
 import { timerQueue } from "./tools/tool_set_timer";
 import { ConfigManager } from "./utils/configUtils";
-import { getCQTypes, getCtx, getMsg, getUrlsInCQCode } from "./utils/utils";
+import { getCQTypes, getCtx, getMsg } from "./utils/utils";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.3.0');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.3.1');
     seal.ext.register(ext);
   }
 
@@ -423,7 +424,7 @@ function main() {
         switch (type) {
           case 'lcl':
           case 'local': {
-            const image = ai.image.drawLocalImage();
+            const image = ai.image.drawLocalImageFile();
             if (!image) {
               seal.replyToSender(ctx, msg, '暂无本地图片');
               return ret;
@@ -433,7 +434,7 @@ function main() {
           }
           case 'stl':
           case 'stolen': {
-            const image = await ai.image.drawStolenImage();
+            const image = await ai.image.drawStolenImageFile();
             if (!image) {
               seal.replyToSender(ctx, msg, '暂无偷取图片');
               return ret;
@@ -442,7 +443,7 @@ function main() {
             return ret;
           }
           case 'all': {
-            const image = await ai.image.drawImage();
+            const image = await ai.image.drawImageFile();
             if (!image) {
               seal.replyToSender(ctx, msg, '暂无图片');
               return ret;
@@ -462,18 +463,18 @@ function main() {
         switch (op) {
           case 'on': {
             ai.image.stealStatus = true;
-            seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.images.length}`);
+            seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.imageList.length}`);
             AIManager.saveAI(id);
             return ret;
           }
           case 'off': {
             ai.image.stealStatus = false;
-            seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.images.length}`);
+            seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.imageList.length}`);
             AIManager.saveAI(id);
             return ret;
           }
           default: {
-            seal.replyToSender(ctx, msg, `图片偷取状态:${ai.image.stealStatus},当前偷取数量:${ai.image.images.length}`);
+            seal.replyToSender(ctx, msg, `图片偷取状态:${ai.image.stealStatus},当前偷取数量:${ai.image.imageList.length}`);
             return ret;
           }
         }
@@ -481,7 +482,7 @@ function main() {
       case 'f':
       case 'fgt':
       case 'forget': {
-        ai.image.images = [];
+        ai.image.imageList = [];
         seal.replyToSender(ctx, msg, '图片已遗忘');
         AIManager.saveAI(id);
         return ret;
@@ -495,23 +496,23 @@ function main() {
 
         let url = '';
         if (val2 == 'ran') {
-          url = await ai.image.drawStolenImage();
+          url = await ai.image.drawStolenImageFile();
           if (!url) {
             seal.replyToSender(ctx, msg, '图片偷取为空');
             return ret;
           }
         } else {
-          const urls = getUrlsInCQCode(val2);
-          if (urls.length == 0) {
+          const match = val2.match(/\[CQ:image,file=(.*?)\]/);
+          if (!match) {
             seal.replyToSender(ctx, msg, '请附带图片');
             return ret;
           }
 
-          url = urls[0];
+          url = match[1];
         }
 
         const text = cmdArgs.getRestArgsFrom(3);
-        const s = await ai.image.imageToText(ctx, url, text);
+        const s = await ImageManager.imageToText(ctx, url, text);
         seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s);
         return ret;
       }
@@ -539,6 +540,7 @@ function main() {
     const id = ctx.isPrivate ? userId : groupId;
 
     let message = msg.message;
+    let images: Image[] = [];
     const ai = AIManager.getAI(id);
 
     // 非指令清除上下文
@@ -559,25 +561,17 @@ function main() {
       return;
     }
 
-    // 非指令触发图片回复
-    const { condition, trigger } = ConfigManager.getImageTriggerConfig(message);
-    if (trigger) {
-      const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-      if (fmtCondition !== 0) {
-        const image = await ai.image.drawImage();
-        if (image !== '') {
-          seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
-          return;
-        }
-      }
-    }
-
     // 检查CQ码
     const CQTypes = getCQTypes(message);
     if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
       // 非指令触发图片偷取，以及图片转文字
-      if (CQTypes.includes('image') && ai.image.stealStatus) {
-        message = await ai.image.handleImageMessage(ctx, message);
+      if (CQTypes.includes('image')) {
+        const result = await ImageManager.handleImageMessage(ctx, message);
+        message = result.message;
+        images = result.images;
+        if (ai.image.stealStatus) {
+          ai.image.updateImageList(images);
+        }
       }
 
       const { trigger, condition } = ConfigManager.getTriggerConfig(message);
@@ -592,7 +586,7 @@ function main() {
           return;
         }
 
-        await ai.context.iteration(ctx, message, 'user');
+        await ai.context.iteration(ctx, message, images, 'user');
 
         ConfigManager.printLog('非指令触发回复');
         await ai.chat(ctx, msg);
@@ -604,7 +598,7 @@ function main() {
       else {
         const pr = ai.privilege;
         if (pr.standby) {
-          await ai.context.iteration(ctx, message, 'user');
+          await ai.context.iteration(ctx, message, images, 'user');
         }
 
         if (pr.counter > -1) {
@@ -672,13 +666,17 @@ function main() {
 
       const ai = AIManager.getAI(id);
 
-      const message = msg.message;
+      let message = msg.message;
+      let images: Image[] = [];
 
       const CQTypes = getCQTypes(message);
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
-          await ai.context.iteration(ctx, message, 'user');
+          const result = await ImageManager.handleImageMessage(ctx, message);
+          message = result.message;
+          images = result.images;
+          await ai.context.iteration(ctx, message, images, 'user');
         }
       }
     }
@@ -686,13 +684,14 @@ function main() {
 
   //骰子发送的消息
   ext.onMessageSend = async (ctx, msg) => {
-    const message = msg.message;
-
     const uid = ctx.player.userId;
     const gid = ctx.group.groupId;
     const id = ctx.isPrivate ? uid : gid;
 
     const ai = AIManager.getAI(id);
+
+    let message = msg.message;
+    let images: Image[] = [];
 
     if (ai.listen.status) {
       ai.listen.status = false;
@@ -711,7 +710,10 @@ function main() {
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
-          await ai.context.iteration(ctx, message, 'assistant');
+          const result = await ImageManager.handleImageMessage(ctx, message);
+          message = result.message;
+          images = result.images;
+          await ai.context.iteration(ctx, message, images, 'assistant');
           return;
         }
       }
@@ -762,7 +764,7 @@ function main() {
       ai.isChatting = false;
       await ai.chat(ctx, msg);
       AIManager.saveAI(id);
-      
+
       timerQueue.splice(i, 1);
       i--;
 

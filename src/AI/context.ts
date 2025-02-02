@@ -1,6 +1,7 @@
 import { ToolCall } from "../tools/tool";
 import { ConfigManager } from "../utils/configUtils";
 import { getNameById, levenshteinDistance } from "../utils/utils";
+import { Image } from "./image";
 
 export interface Message {
     role: string;
@@ -11,6 +12,7 @@ export interface Message {
     uid: string;
     name: string;
     timestamp: number;
+    images: Image[];
 }
 
 export class Context {
@@ -47,7 +49,7 @@ export class Context {
         return context;
     }
 
-    async iteration(ctx: seal.MsgContext, s: string, role: 'user' | 'assistant') {
+    async iteration(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant') {
         const messages = this.messages;
 
         // 如果是assistant，且最后一条消息是tool_calls，则不处理，防止在处理tool_calls时插入user消息
@@ -85,13 +87,16 @@ export class Context {
         const length = messages.length;
         if (length !== 0 && messages[length - 1].name === name) {
             messages[length - 1].content += ' ' + s;
+            messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
+            messages[length - 1].images.push(...images);
         } else {
             const message = {
                 role: role,
                 content: s,
                 uid: uid,
                 name: name,
-                timestamp: Math.floor(Date.now() / 1000)
+                timestamp: Math.floor(Date.now() / 1000),
+                images: images
             };
             messages.push(message);
         }
@@ -107,7 +112,8 @@ export class Context {
             tool_calls: tool_calls,
             uid: '',
             name: '',
-            timestamp: Math.floor(Date.now() / 1000)
+            timestamp: Math.floor(Date.now() / 1000),
+            images: []
         };
         this.messages.push(message);
     }
@@ -119,7 +125,8 @@ export class Context {
             tool_call_id: tool_call_id,
             uid: '',
             name: '',
-            timestamp: Math.floor(Date.now() / 1000)
+            timestamp: Math.floor(Date.now() / 1000),
+            images: []
         };
         this.messages.push(message);
     }
@@ -130,7 +137,8 @@ export class Context {
             content: s,
             uid: '',
             name: name,
-            timestamp: Math.floor(Date.now() / 1000)
+            timestamp: Math.floor(Date.now() / 1000),
+            images: []
         };
         this.messages.push(message);
     }
@@ -174,5 +182,16 @@ export class Context {
             }
         }
         return names;
+    }
+
+    findImage(id: string): Image {
+        const messages = this.messages;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const image = messages[i].images.find(item => item.id === id);
+            if (image) {
+                return image;
+            }
+        }
+        return null;
     }
 }
