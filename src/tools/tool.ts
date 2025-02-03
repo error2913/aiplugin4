@@ -13,6 +13,7 @@ import { registerRename } from "./tool_rename"
 import { registerRollCheck } from "./tool_roll_check"
 import { registerSetTimer } from "./tool_set_timer"
 import { registerTTS } from "./tool_tts"
+import { registerWebSearch } from "./tool_web_search"
 
 export interface ToolInfo {
     type: "function",
@@ -24,7 +25,8 @@ export interface ToolInfo {
             properties: {
                 [key: string]: {
                     type: string,
-                    description: string
+                    description: string,
+                    enum?: string[]
                 }
             },
             required: string[]
@@ -99,6 +101,7 @@ export class ToolManager {
         registerPoke();
         registerGetTime();
         registerSetTimer();
+        registerWebSearch();
     }
 
     /** TODO

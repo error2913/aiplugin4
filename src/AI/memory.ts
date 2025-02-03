@@ -70,7 +70,7 @@ export class Memory {
 
     getPlayerMemoryPrompt(): string {
         let s = `\n- 设定:${this.persona}`;
-        s += `\n- 记忆:`;
+        s += `\n- 记忆:\n`;
         s += this.memoryList.map((item, i) => {
             return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>`}: ${item.content}`;
         }).join('\n');

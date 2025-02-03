@@ -133,7 +133,7 @@ export class ConfigManager {
 **平台信息**
 - 当前群聊:${ctx.group.groupName}
 - <@xxx>表示@群成员xxx
-- <|图片xxx:yyy|>为图片，其中xxx为图片id，yyy为图片描述（可能没有），如果要使用出现过的图片请使用<|图片xxx|>的格式`;
+- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
         }
         const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
         if (memeryPrompt) {
@@ -209,7 +209,8 @@ ${memeryPrompt}`;
             'tts',
             'poke',
             'get_time',
-            'set_timer'
+            'set_timer',
+            'web_search'
         ]);
     }
     static getToolsConfig() {

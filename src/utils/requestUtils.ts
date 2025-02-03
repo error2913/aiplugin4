@@ -37,7 +37,7 @@ export async function FetchData(url: string, apiKey: string, bodyObject: any): P
 
     const data = await response.json();
     if (data.error) {
-        throw new Error(`请求失败：${JSON.stringify(data.error)}`);
+        throw new Error(`请求失败：${JSON.stringify(data.error.message)}`);
     }
 
     return data;

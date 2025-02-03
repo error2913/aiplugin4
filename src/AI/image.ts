@@ -189,7 +189,7 @@ export class ImageManager {
             const data = await response.json();
 
             if (data.error) {
-                throw new Error(`请求失败：${JSON.stringify(data.error)}`);
+                throw new Error(`请求失败：${JSON.stringify(data.error.message)}`);
             }
 
             if (data.choices && data.choices.length > 0) {

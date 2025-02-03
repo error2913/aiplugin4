@@ -734,7 +734,6 @@ function main() {
     }
 
     isTaskRunning = true;
-    ConfigManager.printLog('定时器任务开始');
 
     for (let i = 0; i < timerQueue.length && i >= 0; i++) {
       const timestamp = timerQueue[i].timestamp;
@@ -774,7 +773,6 @@ function main() {
     ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
 
     isTaskRunning = false;
-    ConfigManager.printLog('定时器任务结束');
   })
 }
 
