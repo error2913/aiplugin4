@@ -1,7 +1,7 @@
 import { ImageManager } from "./image";
 import { ConfigManager } from "../utils/configUtils";
 import { handleReply } from "../utils/utils";
-import { FetchData, sendRequest } from "../utils/requestUtils";
+import { fetchData, sendRequest } from "../utils/requestUtils";
 import { parseBody } from "../utils/utils";
 import { Context } from "./context";
 import { Memory } from "./memory";
@@ -49,7 +49,7 @@ export class AI {
         this.isGettingAct = false;
     }
 
-    static reviver(value: any, id: string): AI{
+    static reviver(value: any, id: string): AI {
         const ai = new AI(id);
         const validKeys = ['context', 'memory', 'image', 'privilege'];
 
@@ -69,13 +69,13 @@ export class AI {
         this.context.interrupt.act = 0;
     }
 
-    async getReply(ctx: seal.MsgContext, msg: seal.Message, retry = 0): Promise<{ s: string, reply: string}> {
+    async getReply(ctx: seal.MsgContext, msg: seal.Message, retry = 0): Promise<{ s: string, reply: string }> {
         // 处理messages
         const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, this);
 
         //获取处理后的回复
         const raw_reply = await sendRequest(ctx, msg, this, messages, "auto");
-        const { s, reply, isRepeat } = await handleReply(ctx, msg, raw_reply, this.context);
+        const { s, isRepeat, reply } = await handleReply(ctx, msg, raw_reply, this.context);
 
         //禁止AI复读
         if (isRepeat && reply !== '') {
@@ -111,7 +111,7 @@ export class AI {
         this.clearData();
 
         let { s, reply } = await this.getReply(ctx, msg);
-        const {message, images} = await ImageManager.handleImageMessage(ctx, s);
+        const { message, images } = await ImageManager.handleImageMessage(ctx, s);
         s = message;
 
         this.context.lastReply = reply;
@@ -176,7 +176,7 @@ export class AI {
         try {
             const bodyObject = parseBody(bodyTemplate, messages, null, null);
 
-            const data = await FetchData(url, apiKey, bodyObject);
+            const data = await fetchData(url, apiKey, bodyObject);
 
             if (data.choices && data.choices.length > 0) {
                 const reply = data.choices[0].message.content;

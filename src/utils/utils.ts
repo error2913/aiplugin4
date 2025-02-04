@@ -111,7 +111,7 @@ export function calculateSimilarity(s1: string, s2: string): number {
     return 1 - distance / maxLength;
 }
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, reply: string, isRepeat: boolean }> {
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, isRepeat: boolean, reply: string }> {
     const { maxChar, replymsg, stopRepeat, similarityLimit } = ConfigManager.getHandleReplyConfig();
 
     const segments = s
@@ -121,42 +121,9 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         return { s: '', reply: '', isRepeat: false };
     }
 
-    // 处理图片发送
-    const match = s.match(/<[\|｜]图片.+?[\|｜]?>/g);
-    if (match) {
-        for (let i = 0; i < match.length; i++) {
-            const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
-            const image = context.findImage(id);
-
-            if (image) {
-                const file = image.file;
-
-                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(file))) {
-                    s = s.replace(match[i], `[CQ:image,file=${file}]`);
-                    continue;
-                }
-            }
-
-            s = s.replace(match[i], ``);
-        }
-    }
-
     s = segments[0]
         .replace(/<br>/g, '\n')
         .slice(0, maxChar)
-
-    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
-
-    const reply = prefix + s
-        .replace(/<@(.+?)>/g, (_, p1) => {
-            const uid = context.findUid(p1);
-            if (uid !== null) {
-                return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
-            } else {
-                return ` @${p1} `;
-            }
-        })
-        .replace(/<[\|｜].*?[\|｜]?>/g, '');
 
     // 检查复读
     let isRepeat = false;
@@ -193,7 +160,40 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     }
 
-    return { s, reply, isRepeat };
+    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    let reply = prefix + s
+        .replace(/<@(.+?)>/g, (_, p1) => {
+            const uid = context.findUid(p1);
+            if (uid !== null) {
+                return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
+            } else {
+                return ` @${p1} `;
+            }
+        })
+
+    // 处理图片发送
+    const match = s.match(/<[\|｜]图片.+?[\|｜]?>/g);
+    if (match) {
+        for (let i = 0; i < match.length; i++) {
+            const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+            const image = context.findImage(id);
+
+            if (image) {
+                const file = image.file;
+
+                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(file))) {
+                    reply = s.replace(match[i], `[CQ:image,file=${file}]`);
+                    continue;
+                }
+            }
+
+            reply = s.replace(match[i], ``);
+        }
+    }
+
+    reply = reply.replace(/<[\|｜].*?[\|｜]?>/g, '');
+
+    return { s, isRepeat, reply };
 }
 
 export function generateId() {

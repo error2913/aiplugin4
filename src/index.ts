@@ -512,7 +512,7 @@ function main() {
         }
 
         const text = cmdArgs.getRestArgsFrom(3);
-        const s = await ImageManager.imageToText(ctx, url, text);
+        const s = await ImageManager.imageToText(url, text);
         seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s);
         return ret;
       }
@@ -582,16 +582,14 @@ function main() {
       // 非指令触发
       if (trigger) {
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-        if (fmtCondition == 0) {
+        if (fmtCondition === 1) {
+          await ai.context.iteration(ctx, message, images, 'user');
+
+          ConfigManager.printLog('非指令触发回复');
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
           return;
         }
-
-        await ai.context.iteration(ctx, message, images, 'user');
-
-        ConfigManager.printLog('非指令触发回复');
-        await ai.chat(ctx, msg);
-        AIManager.saveAI(id);
-        return;
       }
 
       // 开启任一模式时

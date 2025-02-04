@@ -170,13 +170,13 @@ ${memeryPrompt}`;
             .filter((item) => item !== null);
         const systemMessages = [systemMessage, ...samplesMessages];
 
-        const messages = [...systemMessages,...ai.context.messages];
-        
+        const messages = [...systemMessages, ...ai.context.messages];
+
         let processedMessages = [];
         let last_role = '';
         for (let i = 0; i < messages.length; i++) {
             const message = messages[i];
-            const prefix = isPrefix && message.name ? `<|from:${message.name}|>`: '';
+            const prefix = isPrefix && message.name ? `<|from:${message.name}|>` : '';
 
             if (isMerge && message.role === last_role && message.role !== 'tool') {
                 processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;
@@ -184,8 +184,8 @@ ${memeryPrompt}`;
                 processedMessages.push({
                     role: message.role,
                     content: prefix + message.content,
-                    tool_calls: message?.tool_calls ? message.tool_calls: undefined,
-                    tool_call_id: message?.tool_call_id? message.tool_call_id: undefined
+                    tool_calls: message?.tool_calls ? message.tool_calls : undefined,
+                    tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
                 });
                 last_role = message.role;
             }
@@ -210,7 +210,8 @@ ${memeryPrompt}`;
             'poke',
             'get_time',
             'set_timer',
-            'web_search'
+            'web_search',
+            'image_to_text'
         ]);
     }
     static getToolsConfig() {
@@ -405,7 +406,7 @@ ${memeryPrompt}`;
         seal.ext.registerTemplateConfig(this.ext, "图片body", [
             `"messages":null`,
             `"model":"glm-4v"`,
-            `"max_tokens":100`,
+            `"max_tokens":20`,
             `"stop":null`,
             `"stream":false`,
         ], "messages将会自动替换")

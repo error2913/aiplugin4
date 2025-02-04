@@ -1,4 +1,5 @@
 import { ConfigManager } from "../utils/configUtils";
+import { fetchData } from "../utils/requestUtils";
 import { generateId, parseBody } from "../utils/utils";
 
 export class Image {
@@ -93,7 +94,7 @@ export class ImageManager {
         }
     }
 
-    static async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<{message: string, images: Image[]}>  {
+    static async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<{ message: string, images: Image[] }> {
         const images: Image[] = [];
 
         const match = message.match(/\[CQ:image,file=(.*?)\]/g);
@@ -106,10 +107,15 @@ export class ImageManager {
                     message = message.replace(`[CQ:image,file=${file}]`, `<|图片${image.id}|>`);
 
                     if (image.isUrl) {
-                        const reply = await ImageManager.imageToText(ctx, file);
-                        if (reply) {
-                            image.content = reply;
-                            message = message.replace(`<|图片${image.id}|>`, `<|图片${image.id}:${reply}|>`);
+                        const { condition } = ConfigManager.getImageConditionConfig();
+
+                        const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
+                        if (fmtCondition === 1) {
+                            const reply = await ImageManager.imageToText(file);
+                            if (reply) {
+                                image.content = reply;
+                                message = message.replace(`<|图片${image.id}|>`, `<|图片${image.id}:${reply}|>`);
+                            }
                         }
                     }
 
@@ -132,13 +138,18 @@ export class ImageManager {
             if (response.ok) {
                 const contentType = response.headers.get('Content-Type');
                 if (contentType && contentType.startsWith('image')) {
-                    console.log('URL is valid and not expired.');
+                    ConfigManager.printLog('URL有效且未过期');
                     isValid = true;
                 } else {
-                    console.log(`URL is valid but does not return an image. Content-Type: ${contentType}`);
+                    ConfigManager.printLog(`URL有效但未返回图片 Content-Type: ${contentType}`);
                 }
             } else {
-                console.log(`URL is expired or invalid. Status: ${response.status}`);
+                if (response.status === 500) {
+                    ConfigManager.printLog(`URL不知道有没有效 状态码: ${response.status}`);
+                    isValid = true;
+                } else {
+                    ConfigManager.printLog(`URL无效或过期 状态码: ${response.status}`);
+                }
             }
         } catch (error) {
             console.error('Error checking URL:', error);
@@ -147,14 +158,7 @@ export class ImageManager {
         return isValid;
     }
 
-    static async imageToText(ctx: seal.MsgContext, imageUrl: string, text = ''): Promise<string> {
-        const { condition } = ConfigManager.getImageConditionConfig();
-
-        const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-        if (fmtCondition == 0) {
-            return '';
-        }
-
+    static async imageToText(imageUrl: string, text = ''): Promise<string> {
         const messages = [{
             role: "user",
             content: [
@@ -163,7 +167,7 @@ export class ImageManager {
                     "image_url": { "url": imageUrl }
                 }, {
                     "type": "text",
-                    "text": text ? text : "请帮我分析这张图片，简短地输出文字描述。"
+                    "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题等信息"
                 }
             ]
         }]
@@ -172,29 +176,16 @@ export class ImageManager {
 
         try {
             const bodyObject = parseBody(bodyTemplate, messages, null, null);
+            const time = Date.now();
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify(bodyObject)
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            if (data.error) {
-                throw new Error(`请求失败：${JSON.stringify(data.error.message)}`);
-            }
+            const data = await fetchData(url, apiKey, bodyObject);
 
             if (data.choices && data.choices.length > 0) {
-                const reply = data.choices[0].message.content;
-                console.log("AI返回图片内容：", reply);
+                const message = data.choices[0].message;
+                const reply = message.content;
+
+                ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+
                 return reply.slice(0, maxChars);
             } else {
                 throw new Error("服务器响应中没有choices或choices为空");

@@ -5,6 +5,7 @@ import { registerBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
 import { registerFace } from "./tool_face"
 import { registerGetTime } from "./tool_get_time"
+import { registerImageToText } from "./tool_image_to_text"
 import { registerJrrp } from "./tool_jrrp"
 import { registerMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
@@ -102,6 +103,7 @@ export class ToolManager {
         registerGetTime();
         registerSetTimer();
         registerWebSearch();
+        registerImageToText();
     }
 
     /** TODO

@@ -3,7 +3,7 @@ import { ToolCall, ToolManager } from "../tools/tool";
 import { ConfigManager } from "./configUtils";
 import { parseBody } from "./utils";
 
-export async function FetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
+export async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
     // 打印请求发送前的上下文
     const s = JSON.stringify(bodyObject.messages, (key, value) => {
         if (key === "" && Array.isArray(value)) {
@@ -56,7 +56,7 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
         const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);
         const time = Date.now();
 
-        const data = await FetchData(url, apiKey, bodyObject);
+        const data = await fetchData(url, apiKey, bodyObject);
 
         if (data.choices && data.choices.length > 0) {
             const message = data.choices[0].message;
