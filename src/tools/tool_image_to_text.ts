@@ -27,7 +27,7 @@ export function registerImageToText() {
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, id, content) => {
         const image = ai.context.findImage(id);
-        const text = `请帮我用简短的语言概括这张图片中出现的:${content}`;
+        const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
         if (image.isUrl) {
             const reply = await ImageManager.imageToText(image.file, text);
