@@ -205,6 +205,8 @@ ${memeryPrompt}`;
             'roll_check',
             'rename',
             'attr_show',
+            'attr_get',
+            'attr_set',
             'ban',
             'tts',
             'poke',

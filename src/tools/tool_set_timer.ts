@@ -55,7 +55,7 @@ export function registerSetTimer() {
 
         ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
 
-        return `设置定时器成功，将在${time}分钟后触发`;
+        return `设置定时器成功，请等待`;
     }
 
     ToolManager.toolMap[info.function.name] = tool;

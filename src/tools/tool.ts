@@ -1,6 +1,6 @@
 import { AI } from "../AI/AI"
 import { ConfigManager } from "../utils/configUtils"
-import { registerAttrShow } from "./tool_attr"
+import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
 import { registerBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
 import { registerFace } from "./tool_face"
@@ -97,6 +97,8 @@ export class ToolManager {
         registerRollCheck();
         registerRename();
         registerAttrShow();
+        registerAttrGet();
+        registerAttrSet();
         registerBan();
         registerTTS();
         registerPoke();
