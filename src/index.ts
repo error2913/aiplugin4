@@ -8,7 +8,7 @@ import { getCQTypes, getCtx, getMsg } from "./utils/utils";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.3.1');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.3.2');
     seal.ext.register(ext);
   }
 
