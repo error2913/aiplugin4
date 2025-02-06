@@ -12,6 +12,7 @@ import { registerModuRoll, registerModuSearch } from "./tool_modu"
 import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
 import { registerRollCheck } from "./tool_roll_check"
+import { registerSanCheck } from "./tool_san_check"
 import { registerSetTimer } from "./tool_set_timer"
 import { registerTTS } from "./tool_tts"
 import { registerWebSearch } from "./tool_web_search"
@@ -106,6 +107,7 @@ export class ToolManager {
         registerSetTimer();
         registerWebSearch();
         registerImageToText();
+        registerSanCheck();
     }
 
     /** TODO
@@ -156,7 +158,7 @@ export class ToolManager {
         const ext = seal.ext.find(cmdInfo.ext);
         ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
 
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         if (ai.listen.status) {
             ai.listen.status = false;

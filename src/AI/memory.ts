@@ -27,7 +27,7 @@ export class Memory {
 
     static reviver(value: any): Memory {
         const memory = new Memory();
-        const validKeys = ['system', 'memoryList'];
+        const validKeys = ['persona', 'memoryList'];
 
         for (const k in value) {
             if (validKeys.includes(k)) {

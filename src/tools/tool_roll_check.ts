@@ -14,16 +14,29 @@ export function registerRollCheck() {
                         type: 'string',
                         description: "被检定的人的名称",
                     },
-                    attr: {
+                    expr: {
                         type: "string",
-                        description: "被检定的技能或属性",
+                        description: "属性表达式，例如：敏捷、体质/2、意志-20",
+                    },
+                    rank : {
+                        type: "string",
+                        description: "难度等级，若无特殊说明则为空字符串",
+                        enum: ["", "困难", "极难", "大成功"]
+                    },
+                    times: {
+                        type: "integer",
+                        description: "检定的次数，若无特殊说明一般为1",
+                    },
+                    additional_dice: {
+                        type: "string",
+                        description: `额外的奖励骰或惩罚骰和数量，b代表奖励骰，p代表惩罚骰，若有多个，请在后面附加数字，例如：b、b2、p3，若没有奖励骰或惩罚骰则为空字符串`
                     },
                     reason: {
                         type: "string",
                         description: "检定的原因，默认为空"
                     }
                 },
-                required: ["name", "attr"]
+                required: ["name", "expr", "rank", "times", "additional_dice"]
             }
         }
     }
@@ -31,10 +44,10 @@ export function registerRollCheck() {
     const tool = new Tool(info);
     tool.cmdInfo = {
         ext: 'coc7',
-        name: 'rc',
+        name: 'ra',
         fixedArgs: []
     }
-    tool.solve = async (ctx, msg, ai, name, attr, reason = '') => {
+    tool.solve = async (ctx, msg, ai, name, expr, rank, times, additional_dice, reason = '') => {
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -48,12 +61,26 @@ export function registerRollCheck() {
             ctx.player.name = name;
         }
 
-        const [v, _] = seal.vars.intGet(ctx, attr);
-        if (v == 0) {
-            attr += '50';
+        const args = [];
+
+        if (additional_dice) {
+            args.push(additional_dice);
         }
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, attr, reason);
+        args.push(rank + expr);
+
+        if (reason) {
+            args.push(reason);
+        }
+
+        if (parseInt(times) !== 1 && !isNaN(parseInt(times))) {
+            ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
+        }
+
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args);
+
+        ToolManager.cmdArgs.specialExecuteTimes = 1;
+
         if (!success) {
             return '检定完成';
         }

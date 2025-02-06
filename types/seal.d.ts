@@ -203,7 +203,7 @@ declare namespace seal {
     /** 一种格式化后的参数，也就是中间所有分隔符都用一个空格替代 */
     cleanArgs: string;
     // 暂不提供，未来可能有变化
-    // specialExecuteTimes: number;
+    specialExecuteTimes: number;
     // 但是额外指出， `ra10#50` 时此项 = 10，并且 argv[0] 会被处理为 50；请注意这一点
 
     /** 获取关键字参数，如“.ra 50 --key=20 --asm”时，有两个kwarg，一个叫key，一个叫asm */

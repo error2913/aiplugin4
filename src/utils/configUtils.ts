@@ -213,7 +213,8 @@ ${memeryPrompt}`;
             'get_time',
             'set_timer',
             'web_search',
-            'image_to_text'
+            'image_to_text',
+            'san_check'
         ]);
     }
     static getToolsConfig() {
