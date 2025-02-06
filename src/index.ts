@@ -39,7 +39,8 @@ function main() {
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
 【.ai fgt】遗忘上下文
-【.ai memo】修改AI的记忆`;
+【.ai memo】修改AI的记忆
+【.ai tool】AI的工具相关`;
   cmdAI.allowDelegate = true;
   cmdAI.solve = (ctx, msg, cmdArgs) => {
     const val = cmdArgs.getArgN(1);
@@ -388,6 +389,57 @@ function main() {
 【.ai memo st <内容>】设置记忆
 【.ai memo clr】清除记忆
 【.ai memo show】展示记忆`;
+
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+        }
+      }
+      case 'tool': {
+        const val2 = cmdArgs.getArgN(2);
+        switch (val2) {
+          case '':
+          case 'help': {
+            const s = `帮助:
+【.ai tool lst】列出所有工具
+【.ai tool <函数名>】查看工具详情
+`;
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+          case 'lst':
+          case 'list': {
+            const { toolsAllow } = ConfigManager.getToolsAllowConfig();
+            const toolMap = ToolManager.toolMap;
+
+            let i = 1;
+            let s = '工具函数如下:';
+            Object.keys(toolMap).forEach(key => {
+              const tool = toolMap[key];
+              const status = toolsAllow.includes(key) ? '开' : '关';
+              s += `\n${i++}. ${tool.info.function.name}[${status}]`;
+            });
+
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+          default: {
+            if (!ToolManager.toolMap.hasOwnProperty(val2)) {
+              seal.replyToSender(ctx, msg, '没有这个工具函数');
+              return ret;
+            }
+
+            const tool = ToolManager.toolMap[val2];
+            const s = `${tool.info.function.name}
+描述:${tool.info.function.description}
+
+参数:
+${Object.keys(tool.info.function.parameters.properties).map(key => {
+  const property = tool.info.function.parameters.properties[key];
+  return `【${key}】${property.description}`;
+}).join('\n')}
+
+必需参数:${tool.info.function.parameters.required.join(',')}`;
 
             seal.replyToSender(ctx, msg, s);
             return ret;

@@ -1,6 +1,5 @@
 import { AI } from "../AI/AI";
 import { Message } from "../AI/context";
-import { ToolManager } from "../tools/tool";
 
 export class ConfigManager {
     static ext: seal.ExtInfo;
@@ -217,14 +216,13 @@ ${memeryPrompt}`;
             'san_check'
         ]);
     }
-    static getToolsConfig() {
+    static getToolsAllowConfig() {
         const isTool = seal.ext.getBoolConfig(this.ext, "是否开启调用函数功能");
+        const toolsAllow = seal.ext.getTemplateConfig(this.ext, "允许调用的函数");
         if (isTool) {
-            const toolAllow = seal.ext.getTemplateConfig(this.ext, "允许调用的函数");
-            const tools = ToolManager.getTools(toolAllow);
-            return { tools };
+            return { toolsAllow };
         } else {
-            return { tools: null };
+            return { toolsAllow: [] };
         }
     }
 

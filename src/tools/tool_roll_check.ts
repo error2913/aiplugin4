@@ -14,7 +14,7 @@ export function registerRollCheck() {
                         type: 'string',
                         description: "被检定的人的名称",
                     },
-                    expr: {
+                    expression: {
                         type: "string",
                         description: "属性表达式，例如：敏捷、体质/2、意志-20",
                     },
@@ -36,7 +36,7 @@ export function registerRollCheck() {
                         description: "检定的原因，默认为空"
                     }
                 },
-                required: ["name", "expr", "rank", "times", "additional_dice"]
+                required: ["name", "expression", "rank", "times", "additional_dice"]
             }
         }
     }
@@ -47,7 +47,7 @@ export function registerRollCheck() {
         name: 'ra',
         fixedArgs: []
     }
-    tool.solve = async (ctx, msg, ai, name, expr, rank, times, additional_dice, reason = '') => {
+    tool.solve = async (ctx, msg, ai, name, expression, rank, times, additional_dice, reason = '') => {
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -67,7 +67,7 @@ export function registerRollCheck() {
             args.push(additional_dice);
         }
 
-        args.push(rank + expr);
+        args.push(rank + expression);
 
         if (reason) {
             args.push(reason);

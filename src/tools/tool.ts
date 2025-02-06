@@ -119,10 +119,10 @@ export class ToolManager {
      * 获取群公告
      */
 
-    static getTools(toolAllow: string[]): ToolInfo[] {
+    static getTools(toolsAllow: string[]): ToolInfo[] {
         const tools = Object.values(this.toolMap)
             .map(item => {
-                if (toolAllow.includes(item.info.function.name)) {
+                if (toolsAllow.includes(item.info.function.name)) {
                     return item.info;
                 } else {
                     return null;

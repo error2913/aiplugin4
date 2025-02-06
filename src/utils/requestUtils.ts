@@ -50,7 +50,8 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
     tool_call_id?: string
 }[], tool_choice: string): Promise<string> {
     const { url, apiKey, bodyTemplate } = ConfigManager.getRequestConfig();
-    const { tools } = ConfigManager.getToolsConfig();
+    const { toolsAllow } = ConfigManager.getToolsAllowConfig();
+    const tools = ToolManager.getTools(toolsAllow);
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);
