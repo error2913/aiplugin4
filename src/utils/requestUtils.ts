@@ -68,7 +68,7 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
 
             ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
 
-            if (message.hasOwnProperty('tool_calls')) {
+            if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
                 ConfigManager.printLog(`触发工具调用`);
 
                 ai.context.toolCallsIteration(message.tool_calls);
