@@ -134,8 +134,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
             // 寻找最后一条文本消息
             if (message.role === 'assistant' && !message?.tool_calls) {
                 const content = message.content;
-                const clearText = content.replace(/<[\|｜].*?[\|｜]>/g, '');
-                const similarity = calculateSimilarity(clearText.trim(), s.trim());
+                const similarity = calculateSimilarity(content.trim(), s.trim());
                 ConfigManager.printLog(`复读相似度：${similarity}`);
                 if (similarity > similarityLimit) {
                     isRepeat = true;
