@@ -190,7 +190,7 @@ ${memeryPrompt}`;
             }
         }
         return { messages: processedMessages };
-    }
+    }  
 
     static registerToolsConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否开启调用函数功能", true, "");
@@ -321,14 +321,18 @@ ${memeryPrompt}`;
         seal.ext.registerIntConfig(this.ext, "回复最大字数", 1000, "防止最大Tokens限制不起效");
         seal.ext.registerBoolConfig(this.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(this.ext, "视作复读的最低相似度", 0.8, "");
+        seal.ext.registerTemplateConfig(this.ext, "净化回复正则表达式", [
+            "^\<think>.*?</think>\s*"
+        ], "用于将输出内容中符合正则表达式的内容删掉");
     }
     static getHandleReplyConfig() {
         const maxChar = seal.ext.getIntConfig(this.ext, "回复最大字数");
         const replymsg = seal.ext.getBoolConfig(this.ext, "回复是否引用");
         const stopRepeat = seal.ext.getBoolConfig(this.ext, "禁止AI复读");
         const similarityLimit = seal.ext.getFloatConfig(this.ext, "视作复读的最低相似度");
+        const cleanReplyPatterns = seal.ext.getTemplateConfig(this.ext, "净化回复正则表达式");
 
-        return { maxChar, replymsg, stopRepeat, similarityLimit };
+        return { maxChar, replymsg, stopRepeat, similarityLimit, cleanReplyPatterns};
     }
 
     static registerInterruptConfig() {
