@@ -58,29 +58,8 @@ export class Context {
         }
 
         const { maxRounds } = ConfigManager.getStorageConfig();
-        const { cleanReplyPatterns } = ConfigManager.getHandleReplyConfig();
 
         //处理文本
-        if (role === 'assistant') {
-            // 应用净化回复正则表达式
-            if (cleanReplyPatterns && cleanReplyPatterns.length > 0) {
-                try {
-                    cleanReplyPatterns.forEach(pattern => {
-                        if (pattern && pattern.trim()) {
-                            const regex = new RegExp(pattern, 'gs');
-                            s = s.replace(regex, '');
-                        }
-                    });
-                } catch (error) {
-                    ConfigManager.printLog(`净化回复时出错: ${error}`);
-                }
-            }
-
-            s = s
-                .replace(/\[图:.*?\]/g, '')
-                .replace(/\[语音:.*?\]/g, '')
-                .replace(/\[视频:.*?\]/g, '')
-        }
         s = s
             .replace(/\[CQ:reply,id=-?\d+\]\[CQ:at,qq=\d+\]/g, '')
             .replace(/\[CQ:at,qq=(\d+)\]/g, (_, p1) => {

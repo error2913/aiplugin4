@@ -114,26 +114,11 @@ export class AI {
         const { message, images } = await ImageManager.handleImageMessage(ctx, s);
         s = message;
 
-        // 应用净化回复正则表达式
-        const { cleanReplyPatterns } = ConfigManager.getHandleReplyConfig();
-        if (cleanReplyPatterns && cleanReplyPatterns.length > 0) {
-            try {
-                cleanReplyPatterns.forEach(pattern => {
-                    if (pattern && pattern.trim()) {
-                        const regex = new RegExp(pattern, 'gs'); 
-                        reply = reply.replace(regex, '');
-                    }
-                });
-            } catch (error) {
-                ConfigManager.printLog(this.id, `净化回复时出错: ${error}`);
-            }
-        }
-
         this.context.lastReply = reply;
         await this.context.iteration(ctx, s, images, 'assistant');
 
         // 发送回复
-        seal.replyToSender(ctx, msg, reply.trim());
+        seal.replyToSender(ctx, msg, reply);
 
         //发送偷来的图片
         const { p } = ConfigManager.getImageProbabilityConfig();
@@ -199,7 +184,7 @@ export class AI {
                 ConfigManager.printLog(`返回活跃度:`, reply);
 
                 // 解析 AI 返回的数字
-                const act = parseInt(reply.replace('', '').trim());
+                const act = parseInt(reply.replace('<｜end▁of▁sentence｜>', '').trim());
                 if (isNaN(act) || act < 1 || act > 10) {
                     throw new Error("AI 返回的积极性数值无效");
                 }

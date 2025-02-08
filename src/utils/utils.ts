@@ -112,8 +112,9 @@ export function calculateSimilarity(s1: string, s2: string): number {
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, isRepeat: boolean, reply: string }> {
-    const { maxChar, replymsg, stopRepeat, similarityLimit } = ConfigManager.getHandleReplyConfig();
+    const { maxChar, replymsg, stopRepeat, similarityLimit, filterContextRegexes, filterReplyRegexes } = ConfigManager.getHandleReplyConfig();
 
+    // 分离AI臆想出来的多轮对话
     const segments = s
         .split(/<[\|｜]from.*?[\|｜]?>/)
         .filter(item => item.trim() !== '');
@@ -122,8 +123,17 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     }
 
     s = segments[0]
-        .replace(/<br>/g, '\n')
+        .replace(/<br>/g, '\n') // 我又不是浏览器，为什么要帮你替换这个
         .slice(0, maxChar)
+        .trim();
+
+    let reply = s; // 回复消息和上下文在此分开处理
+
+    // 应用过滤上下文正则表达式
+    for (let i = 0; i < filterContextRegexes.length; i++) {
+        const regex = filterContextRegexes[i];
+        s = s.replace(regex, '');
+    }
 
     // 检查复读
     let isRepeat = false;
@@ -136,9 +146,11 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
                 const content = message.content;
                 const similarity = calculateSimilarity(content.trim(), s.trim());
                 ConfigManager.printLog(`复读相似度：${similarity}`);
+
                 if (similarity > similarityLimit) {
                     isRepeat = true;
 
+                    // 找到最近的一块assistant消息全部删除，防止触发tool相关的bug
                     let start = i;
                     let count = 1;
                     for (let j = i - 1; j >= 0; j--) {
@@ -159,18 +171,17 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     }
 
-    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
-    let reply = prefix + s
-        .replace(/<@(.+?)>/g, (_, p1) => {
-            const uid = context.findUid(p1);
-            if (uid !== null) {
-                return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
-            } else {
-                return ` @${p1} `;
-            }
-        })
+    // 检查艾特，并替换为CQ码
+    reply = reply.replace(/<@(.+?)>/g, (_, p1) => {
+        const uid = context.findUid(p1);
+        if (uid !== null) {
+            return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
+        } else {
+            return ` @${p1} `;
+        }
+    })
 
-    // 处理图片发送
+    // 检查是否有图片，并替换为CQ码，因为replace不支持异步函数，所以用for循环
     const match = s.match(/<[\|｜]图片.+?[\|｜]?>/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
@@ -190,7 +201,14 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     }
 
-    reply = reply.replace(/<[\|｜].*?[\|｜]?>/g, '');
+    // 应用过滤回复正则表达式
+    for (let i = 0; i < filterReplyRegexes.length; i++) {
+        const regex = filterReplyRegexes[i];
+        reply = reply.replace(regex, '');
+    }
+
+    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    reply = prefix + reply.trim();
 
     return { s, isRepeat, reply };
 }

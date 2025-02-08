@@ -190,7 +190,7 @@ ${memeryPrompt}`;
             }
         }
         return { messages: processedMessages };
-    }  
+    }
 
     static registerToolsConfig() {
         seal.ext.registerBoolConfig(this.ext, "是否开启调用函数功能", true, "");
@@ -321,18 +321,42 @@ ${memeryPrompt}`;
         seal.ext.registerIntConfig(this.ext, "回复最大字数", 1000, "防止最大Tokens限制不起效");
         seal.ext.registerBoolConfig(this.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(this.ext, "视作复读的最低相似度", 0.8, "");
-        seal.ext.registerTemplateConfig(this.ext, "净化回复正则表达式", [
-            "^\<think>.*?</think>\s*"
-        ], "用于将输出内容中符合正则表达式的内容删掉");
+        seal.ext.registerTemplateConfig(this.ext, "过滤上下文正则表达式", [
+            "<[\\|｜].*?[\\|｜]?>",
+            "^<think>.*?</think>"
+        ], "回复加入上下文时，将符合正则表达式的内容删掉");
+        seal.ext.registerTemplateConfig(this.ext, "过滤回复正则表达式", [
+            "<[\\|｜].*?[\\|｜]?>",
+            "^<think>.*?</think>"
+        ], "回复时，将符合正则表达式的内容删掉");
     }
     static getHandleReplyConfig() {
         const maxChar = seal.ext.getIntConfig(this.ext, "回复最大字数");
         const replymsg = seal.ext.getBoolConfig(this.ext, "回复是否引用");
         const stopRepeat = seal.ext.getBoolConfig(this.ext, "禁止AI复读");
         const similarityLimit = seal.ext.getFloatConfig(this.ext, "视作复读的最低相似度");
-        const cleanReplyPatterns = seal.ext.getTemplateConfig(this.ext, "净化回复正则表达式");
+        const filterContextRegexes = seal.ext.getTemplateConfig(this.ext, "过滤上下文正则表达式")
+          .map(item => {
+                try {
+                    return new RegExp(item, 'g');
+                } catch (error) {
+                    console.error('Error in RegExp:', error);
+                    return null;
+                }
+            })
+          .filter(item => item!== null);
+        const filterReplyRegexes = seal.ext.getTemplateConfig(this.ext, "过滤回复正则表达式")
+            .map(item => {
+                try {
+                    return new RegExp(item, 'g');
+                } catch (error) {
+                    console.error('Error in RegExp:', error);
+                    return null;
+                }
+            })
+            .filter(item => item !== null);
 
-        return { maxChar, replymsg, stopRepeat, similarityLimit, cleanReplyPatterns};
+        return { maxChar, replymsg, stopRepeat, similarityLimit, filterContextRegexes, filterReplyRegexes };
     }
 
     static registerInterruptConfig() {
