@@ -1,4 +1,4 @@
-import { ConfigManager } from "../utils/configUtils";
+import { log } from "../utils/utils";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerWebSearch() {
@@ -45,7 +45,7 @@ export function registerWebSearch() {
 
         const url = `http://110.41.69.149:8080/search?q=${q}&format=json${pageno ? `&pageno=${pageno}` : ''}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
         try {
-            ConfigManager.printLog(`使用搜索引擎搜索:${url}`);
+            log(`使用搜索引擎搜索:${url}`);
 
             const response = await fetch(url, {
                 method: "GET",

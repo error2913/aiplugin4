@@ -1,4 +1,4 @@
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 const characterMap = {
@@ -54,7 +54,7 @@ export function registerTTS() {
         }
 
         try {
-            const { character } = ConfigManager.getTTSConfig();
+            const { character } = ConfigManager.tool;
             const characterId = characterMap[character];
 
             const epId = ctx.endPoint.userId;

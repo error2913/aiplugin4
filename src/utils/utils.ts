@@ -1,7 +1,16 @@
-import { Context } from "../AI/context";
+import { Context, Message } from "../AI/context";
 import { ImageManager } from "../AI/image";
 import { ToolInfo } from "../tools/tool";
-import { ConfigManager } from "./configUtils";
+import { ConfigManager } from "../config/config";
+import { AI } from "../AI/AI";
+
+export function log(...data: any[]) {
+    const { isLog } = ConfigManager.log;
+
+    if (isLog) {
+        console.log(...data);
+    }
+}
 
 export function getCQTypes(s: string): string[] {
     const match = s.match(/\[CQ:([^,]*?),.*?\]/g);
@@ -75,6 +84,90 @@ export function parseBody(template: string[], messages: any[], tools: ToolInfo[]
     }
 }
 
+export function handleMessages(ctx: seal.MsgContext, ai: AI) {
+    const { roleSetting, samples, isPrefix, isMerge } = ConfigManager.message;
+
+    let content = roleSetting;
+
+    // 群聊信息
+    if (!ctx.isPrivate) {
+        content += `
+**相关信息**
+- 当前群聊:${ctx.group.groupName}
+- <@xxx>表示@群成员xxx`;
+    }
+
+    content += `- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
+
+    // 记忆
+    const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
+    if (memeryPrompt) {
+        content += `
+**记忆**
+如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
+${memeryPrompt}`;
+    }
+
+    const systemMessage: Message = {
+        role: "system",
+        content: content,
+        uid: '',
+        name: '',
+        timestamp: 0,
+        images: []
+    };
+
+    const samplesMessages: Message[] = samples
+        .map((item, index) => {
+            if (item == "") {
+                return null;
+            } else if (index % 2 === 0) {
+                return {
+                    role: "user",
+                    content: item,
+                    uid: '',
+                    name: "用户",
+                    timestamp: 0,
+                    images: []
+                };
+            } else {
+                return {
+                    role: "assistant",
+                    content: item,
+                    uid: ctx.endPoint.userId,
+                    name: seal.formatTmpl(ctx, "核心:骰子名字"),
+                    timestamp: 0,
+                    images: []
+                };
+            }
+        })
+        .filter((item) => item !== null);
+
+    const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
+
+    // 处理前缀并合并消息（如果有）
+    let processedMessages = [];
+    let last_role = '';
+    for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+        const prefix = isPrefix && message.name ? `<|from:${message.name}|>` : '';
+
+        if (isMerge && message.role === last_role && message.role !== 'tool') {
+            processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;
+        } else {
+            processedMessages.push({
+                role: message.role,
+                content: prefix + message.content,
+                tool_calls: message?.tool_calls ? message.tool_calls : undefined,
+                tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
+            });
+            last_role = message.role;
+        }
+    }
+
+    return processedMessages;
+}
+
 export function levenshteinDistance(s1: string, s2: string): number {
     const len1 = s1.length;
     const len2 = s2.length;
@@ -112,7 +205,7 @@ export function calculateSimilarity(s1: string, s2: string): number {
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, isRepeat: boolean, reply: string }> {
-    const { maxChar, replymsg, stopRepeat, similarityLimit, filterContextRegexes, filterReplyRegexes } = ConfigManager.getHandleReplyConfig();
+    const { maxChar, replymsg, stopRepeat, similarityLimit, filterContextTemplate, filterReplyTemplate } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
@@ -130,10 +223,14 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     let reply = s; // 回复消息和上下文在此分开处理
 
     // 应用过滤上下文正则表达式
-    for (let i = 0; i < filterContextRegexes.length; i++) {
-        const regex = filterContextRegexes[i];
-        s = s.replace(regex, '');
-    }
+    filterContextTemplate.forEach(item => {
+        try {
+            const regex = new RegExp(item, 'g');
+            s = s.replace(regex, '');
+        } catch (error) {
+            console.error('Error in RegExp:', error);
+        }
+    })
 
     // 检查复读
     let isRepeat = false;
@@ -145,7 +242,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
             if (message.role === 'assistant' && !message?.tool_calls) {
                 const content = message.content;
                 const similarity = calculateSimilarity(content.trim(), s.trim());
-                ConfigManager.printLog(`复读相似度：${similarity}`);
+                log(`复读相似度：${similarity}`);
 
                 if (similarity > similarityLimit) {
                     isRepeat = true;
@@ -202,10 +299,14 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     }
 
     // 应用过滤回复正则表达式
-    for (let i = 0; i < filterReplyRegexes.length; i++) {
-        const regex = filterReplyRegexes[i];
-        reply = reply.replace(regex, '');
-    }
+    filterReplyTemplate.forEach(item => {
+        try {
+            const regex = new RegExp(item, 'g');
+            s = s.replace(regex, '');
+        } catch (error) {
+            console.error('Error in RegExp:', error);
+        }
+    })
 
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
     reply = prefix + reply.trim();

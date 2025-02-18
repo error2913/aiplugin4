@@ -1,5 +1,5 @@
 import { AI } from "../AI/AI"
-import { ConfigManager } from "../utils/configUtils"
+import { log } from "../utils/utils"
 import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
 import { registerBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
@@ -187,7 +187,7 @@ export class ToolManager {
     }[]): Promise<string> {
         tool_calls.splice(5); // 最多调用5个函数
         if (tool_calls.length !== 0) {
-            ConfigManager.printLog(`调用函数:`, tool_calls.map((item, i) => {
+            log(`调用函数:`, tool_calls.map((item, i) => {
                 return `(${i}) ${item.function.name}:${item.function.arguments}`;
             }).join('\n'));
         }
@@ -197,7 +197,7 @@ export class ToolManager {
             const name = tool_calls[i].function.name;
             try {
                 if (this.cmdArgs == null) {
-                    ConfigManager.printLog(`暂时无法调用函数，请先使用任意指令`);
+                    log(`暂时无法调用函数，请先使用任意指令`);
                     ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
                     continue;
                 }

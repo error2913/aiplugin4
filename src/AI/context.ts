@@ -1,5 +1,5 @@
 import { ToolCall } from "../tools/tool";
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { getNameById, levenshteinDistance } from "../utils/utils";
 import { Image } from "./image";
 
@@ -20,20 +20,12 @@ export class Context {
     lastReply: string;
     counter: number;
     timer: number;
-    interrupt: {
-        act: number,
-        timestamp: number
-    }
 
     constructor() {
         this.messages = [];
         this.lastReply = '';
         this.counter = 0;
         this.timer = null;
-        this.interrupt = {
-            act: 0,
-            timestamp: 0
-        }
     }
 
     static reviver(value: any): Context {
@@ -57,7 +49,7 @@ export class Context {
             return;
         }
 
-        const { maxRounds } = ConfigManager.getStorageConfig();
+        const { maxRounds } = ConfigManager.message;
 
         //处理文本
         s = s

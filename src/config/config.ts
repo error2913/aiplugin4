@@ -25,7 +25,7 @@ export class ConfigManager {
         ImageConfig.register();
     }
 
-    static getCache(key: string, getFunc: () => any): any {
+    static getCache(key: string, getFunc: () => any) {
         const timestamp = Date.now()
         if (this.cache?.[key] && timestamp - this.cache[key].timestamp < 3000) {
             return this.cache[key].data;

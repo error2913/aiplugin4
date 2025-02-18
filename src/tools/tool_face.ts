@@ -1,8 +1,17 @@
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerFace() {
-    const { localImages } = ConfigManager.getLocalImageConfig();
+    const { localImagesTemplate } = ConfigManager.image;
+    const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
+        const match = item.match(/<(.+)>.*/);
+        if (match !== null) {
+            const key = match[1];
+            acc[key] = item.replace(/<.*>/g, '');
+        }
+        return acc;
+    }, {});
+    
     const info: ToolInfo = {
         type: "function",
         function: {
@@ -23,7 +32,16 @@ export function registerFace() {
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, _, name) => {
-        const { localImages } = ConfigManager.getLocalImageConfig();
+        const { localImagesTemplate } = ConfigManager.image;
+        const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
+            const match = item.match(/<(.+)>.*/);
+            if (match !== null) {
+                const key = match[1];
+                acc[key] = item.replace(/<.*>/g, '');
+            }
+            return acc;
+        }, {});
+
         if (localImages.hasOwnProperty(name)) {
             seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);
             return '发送成功';

@@ -1,4 +1,4 @@
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { AIManager } from "./AI";
 import { Context } from "./context";
 
@@ -51,7 +51,7 @@ export class Memory {
     }
 
     addMemory(gid: string, gn: string, content: string) {
-        const { memoryLimit } = ConfigManager.getMemoryConfig();
+        const { memoryLimit } = ConfigManager.tool;
 
         content = content.slice(0, 100);
 

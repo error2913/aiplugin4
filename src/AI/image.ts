@@ -1,6 +1,6 @@
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { fetchData } from "../utils/requestUtils";
-import { generateId, parseBody } from "../utils/utils";
+import { generateId, log, parseBody } from "../utils/utils";
 
 export class Image {
     id: string;
@@ -39,12 +39,21 @@ export class ImageManager {
     }
 
     updateImageList(images: Image[]) {
-        const { maxImageNum } = ConfigManager.getImageStorageConfig();
+        const { maxImageNum } = ConfigManager.image;
         this.imageList = this.imageList.concat(images.filter(item => item.isUrl)).slice(-maxImageNum);
     }
 
     drawLocalImageFile(): string {
-        const { localImages } = ConfigManager.getLocalImageConfig();
+        const { localImagesTemplate } = ConfigManager.image;
+        const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
+            const match = item.match(/<(.+)>.*/);
+            if (match !== null) {
+                const key = match[1];
+                acc[key] = item.replace(/<.*>/g, '');
+            }
+            return acc;
+        }, {});
+
         const keys = Object.keys(localImages);
         if (keys.length == 0) {
             return '';
@@ -71,7 +80,16 @@ export class ImageManager {
     }
 
     async drawImageFile(): Promise<string> {
-        const { localImages } = ConfigManager.getLocalImageConfig();
+        const { localImagesTemplate } = ConfigManager.image;
+        const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
+            const match = item.match(/<(.+)>.*/);
+            if (match !== null) {
+                const key = match[1];
+                acc[key] = item.replace(/<.*>/g, '');
+            }
+            return acc;
+        }, {});
+
         const values = Object.values(localImages);
         if (this.imageList.length == 0 && values.length == 0) {
             return '';
@@ -107,7 +125,7 @@ export class ImageManager {
                     message = message.replace(`[CQ:image,file=${file}]`, `<|图片${image.id}|>`);
 
                     if (image.isUrl) {
-                        const { condition } = ConfigManager.getImageConditionConfig();
+                        const { condition } = ConfigManager.image;
 
                         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
                         if (fmtCondition === 1) {
@@ -138,17 +156,17 @@ export class ImageManager {
             if (response.ok) {
                 const contentType = response.headers.get('Content-Type');
                 if (contentType && contentType.startsWith('image')) {
-                    ConfigManager.printLog('URL有效且未过期');
+                    log('URL有效且未过期');
                     isValid = true;
                 } else {
-                    ConfigManager.printLog(`URL有效但未返回图片 Content-Type: ${contentType}`);
+                    log(`URL有效但未返回图片 Content-Type: ${contentType}`);
                 }
             } else {
                 if (response.status === 500) {
-                    ConfigManager.printLog(`URL不知道有没有效 状态码: ${response.status}`);
+                    log(`URL不知道有没有效 状态码: ${response.status}`);
                     isValid = true;
                 } else {
-                    ConfigManager.printLog(`URL无效或过期 状态码: ${response.status}`);
+                    log(`URL无效或过期 状态码: ${response.status}`);
                 }
             }
         } catch (error) {
@@ -172,7 +190,7 @@ export class ImageManager {
             ]
         }]
 
-        const { url, apiKey, maxChars, bodyTemplate } = ConfigManager.getImageRequestConfig();
+        const { url, apiKey, maxChars, bodyTemplate } = ConfigManager.image;
 
         try {
             const bodyObject = parseBody(bodyTemplate, messages, null, null);
@@ -184,7 +202,7 @@ export class ImageManager {
                 const message = data.choices[0].message;
                 const reply = message.content;
 
-                ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+                log(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
 
                 return reply.slice(0, maxChars);
             } else {

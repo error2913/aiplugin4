@@ -1,4 +1,4 @@
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export const timerQueue: {

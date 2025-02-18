@@ -1,7 +1,7 @@
 import { AI } from "../AI/AI";
 import { ToolCall, ToolManager } from "../tools/tool";
-import { ConfigManager } from "./configUtils";
-import { parseBody } from "./utils";
+import { ConfigManager } from "../config/config";
+import { handleMessages, log, parseBody } from "./utils";
 
 export async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
     // 打印请求发送前的上下文
@@ -13,7 +13,7 @@ export async function fetchData(url: string, apiKey: string, bodyObject: any): P
         }
         return value;
     });
-    ConfigManager.printLog(`请求发送前的上下文:\n`, s);
+    log(`请求发送前的上下文:\n`, s);
 
     const response = await fetch(url, {
         method: 'POST',
@@ -49,9 +49,10 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
     tool_calls?: ToolCall[],
     tool_call_id?: string
 }[], tool_choice: string): Promise<string> {
-    const { url, apiKey, bodyTemplate } = ConfigManager.getRequestConfig();
-    const { toolsAllow } = ConfigManager.getToolsAllowConfig();
-    const tools = ToolManager.getTools(toolsAllow);
+    const { url, apiKey, bodyTemplate } = ConfigManager.request;
+    const { isTool, toolsAllow } = ConfigManager.tool;
+    const toolsAllow2 = isTool ? toolsAllow : [];
+    const tools = ToolManager.getTools(toolsAllow2);
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);
@@ -63,13 +64,13 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
             const message = data.choices[0].message;
             const reply = message.content;
             if (message.hasOwnProperty('reasoning_content')) {
-                ConfigManager.printLog(`思维链内容:`, message.reasoning_content);
+                log(`思维链内容:`, message.reasoning_content);
             }
 
-            ConfigManager.printLog(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+            log(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
 
             if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                ConfigManager.printLog(`触发工具调用`);
+                log(`触发工具调用`);
 
                 ai.context.toolCallsIteration(message.tool_calls);
                 const tool_choice = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
@@ -78,7 +79,7 @@ export async function sendRequest(ctx: seal.MsgContext, msg: seal.Message, ai: A
                     return reply;
                 }
 
-                const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, ai);
+                const messages = handleMessages(ctx, ai);
                 return await sendRequest(ctx, msg, ai, messages, tool_choice);
             }
             return reply;

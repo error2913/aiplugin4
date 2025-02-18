@@ -1,8 +1,8 @@
-import { ConfigManager } from "../utils/configUtils";
+import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool"
 
 export function registerDrawDeck() {
-    const { decks } = ConfigManager.getDeckConfig();
+    const { decks } = ConfigManager.tool;
     const info: ToolInfo = {
         type: "function",
         function: {

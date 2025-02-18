@@ -2,8 +2,8 @@ import { AIManager } from "./AI/AI";
 import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tools/tool";
 import { timerQueue } from "./tools/tool_set_timer";
-import { ConfigManager } from "./utils/configUtils";
-import { getCQTypes, getCtx, getMsg } from "./utils/utils";
+import { ConfigManager } from "./config/config";
+import { getCQTypes, getCtx, getMsg, handleMessages, log } from "./utils/utils";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
@@ -123,9 +123,8 @@ function main() {
         const counter = pr.counter > -1 ? `${pr.counter}条` : '关闭';
         const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
         const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
-        const interrupt = pr.interrupt > -1 ? `${pr.interrupt}` : '关闭';
         const standby = pr.standby ? '开启' : '关闭';
-        const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n插嘴模式(i):${interrupt}\n待机模式:${standby}`;
+        const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
         seal.replyToSender(ctx, msg, s);
         return ret;
       }
@@ -135,7 +134,7 @@ function main() {
           return ret;
         }
 
-        const { messages } = ConfigManager.getProcessedMessagesConfig(ctx, ai);
+        const messages = handleMessages(ctx, ai);
 
         seal.replyToSender(ctx, msg, messages[0].content);
         return ret;
@@ -150,9 +149,8 @@ function main() {
         const counter = pr.counter > -1 ? `${pr.counter}条` : '关闭';
         const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
         const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
-        const interrupt = pr.interrupt > -1 ? `${pr.interrupt}` : '关闭';
         const standby = pr.standby ? '开启' : '关闭';
-        const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n插嘴模式(i):${interrupt}\n待机模式:${standby}`;
+        const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
         seal.replyToSender(ctx, msg, s);
         return ret;
       }
@@ -187,10 +185,8 @@ function main() {
 单位/秒，默认60秒
 【p】概率模式，每条消息按概率触发
 单位/%，默认10%
-【i】插嘴模式，插嘴活跃度超过时触发
-取值0-10，默认8
 
-【.ai on --i --p=42】使用示例`
+【.ai on --t --p=42】使用示例`
 
           seal.replyToSender(ctx, msg, s);
           return ret;
@@ -221,12 +217,6 @@ function main() {
               text += `\n概率模式:${pr.prob}%`;
               break;
             }
-            case 'i':
-            case 'interrupt': {
-              pr.interrupt = exist && !isNaN(value) ? value : 8;
-              text += `\n插嘴模式:${pr.interrupt}`;
-              break;
-            }
           }
         });
 
@@ -246,7 +236,6 @@ function main() {
         pr.counter = -1;
         pr.timer = -1;
         pr.prob = -1;
-        pr.interrupt = -1;
         pr.standby = true;
 
         ai.clearData();
@@ -267,7 +256,6 @@ function main() {
           pr.counter = -1;
           pr.timer = -1;
           pr.prob = -1;
-          pr.interrupt = -1;
           pr.standby = false;
 
           ai.clearData();
@@ -298,12 +286,6 @@ function main() {
             case 'prob': {
               pr.prob = -1;
               text += `\n概率模式`
-              break;
-            }
-            case 'i':
-            case 'interrupt': {
-              pr.interrupt = -1;
-              text += `\n插嘴模式`
               break;
             }
           }
@@ -409,14 +391,15 @@ function main() {
           }
           case 'lst':
           case 'list': {
-            const { toolsAllow } = ConfigManager.getToolsAllowConfig();
+            const { isTool, toolsAllow } = ConfigManager.tool;
+            const toolsAllow2 = isTool ? toolsAllow : [];
             const toolMap = ToolManager.toolMap;
 
             let i = 1;
             let s = '工具函数如下:';
             Object.keys(toolMap).forEach(key => {
               const tool = toolMap[key];
-              const status = toolsAllow.includes(key) ? '开' : '关';
+              const status = toolsAllow2.includes(key) ? '开' : '关';
               s += `\n${i++}. ${tool.info.function.name}[${status}]`;
             });
 
@@ -435,9 +418,9 @@ function main() {
 
 参数:
 ${Object.keys(tool.info.function.parameters.properties).map(key => {
-  const property = tool.info.function.parameters.properties[key];
-  return `【${key}】${property.description}`;
-}).join('\n')}
+              const property = tool.info.function.parameters.properties[key];
+              return `【${key}】${property.description}`;
+            }).join('\n')}
 
 必需参数:${tool.info.function.parameters.required.join(',')}`;
 
@@ -582,8 +565,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
   //接受非指令消息
   ext.onNotCommandReceived = async (ctx, msg) => {
-    const { canPrivate } = ConfigManager.getPrivateConfig();
-    if (ctx.isPrivate && !canPrivate) {
+    const { disabledInPrivate, keyWords, condition } = ConfigManager.received;
+    if (ctx.isPrivate && disabledInPrivate) {
       return;
     }
 
@@ -594,24 +577,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     let message = msg.message;
     let images: Image[] = [];
     const ai = AIManager.getAI(id);
-
-    // 非指令清除上下文
-    const { clearWords, clearReplys } = ConfigManager.getForgetConfig();
-    if (clearWords.some(item => message === item)) {
-      const pr = ai.privilege;
-      if (ctx.privilegeLevel < pr.limit) {
-        return;
-      }
-
-      ai.clearData();
-      ai.context.messages = [];
-
-      const s = clearReplys[Math.floor(Math.random() * clearReplys.length)];
-
-      seal.replyToSender(ctx, msg, s);
-      AIManager.saveAI(id);
-      return;
-    }
 
     // 检查CQ码
     const CQTypes = getCQTypes(message);
@@ -626,18 +591,24 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         }
       }
 
-      const { trigger, condition } = ConfigManager.getTriggerConfig(message);
-
       clearTimeout(ai.context.timer);
       ai.context.timer = null;
 
       // 非指令触发
-      if (trigger) {
+      if (keyWords.some(item => {
+        try {
+          const pattern = new RegExp(item);
+          return pattern.test(message);
+        } catch (error) {
+          console.error('Error in RegExp:', error);
+          return false;
+        }
+      })) {
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition === 1) {
           await ai.context.iteration(ctx, message, images, 'user');
 
-          ConfigManager.printLog('非指令触发回复');
+          log('非指令触发回复');
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -655,7 +626,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           ai.context.counter += 1;
 
           if (ai.context.counter >= pr.counter) {
-            ConfigManager.printLog('计数器触发回复');
+            log('计数器触发回复');
             ai.context.counter = 0;
 
             await ai.chat(ctx, msg);
@@ -668,20 +639,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const ran = Math.random() * 100;
 
           if (ran <= pr.prob) {
-            ConfigManager.printLog('概率触发回复');
-
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
-          }
-        }
-
-        if (pr.interrupt > -1) {
-          const act = await ai.getAct();
-
-          if (act >= pr.interrupt) {
-            ConfigManager.printLog(`插嘴触发回复:${act}`);
-            ai.context.interrupt.act = 0;
+            log('概率触发回复');
 
             await ai.chat(ctx, msg);
             AIManager.saveAI(id);
@@ -691,7 +649,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         if (pr.timer > -1) {
           ai.context.timer = setTimeout(async () => {
-            ConfigManager.printLog('计时器触发回复');
+            log('计时器触发回复');
 
             ai.context.timer = null;
             await ai.chat(ctx, msg);
@@ -708,7 +666,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       ToolManager.cmdArgs = cmdArgs;
     }
 
-    const { allcmd } = ConfigManager.getMonitorCommandConfig();
+    const { allcmd } = ConfigManager.received;
     if (allcmd) {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
@@ -749,7 +707,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       return;
     }
 
-    const { allmsg } = ConfigManager.getMonitorAllMessageConfig();
+    const { allmsg } = ConfigManager.received;
     if (allmsg) {
       if (message === ai.context.lastReply) {
         ai.context.lastReply = '';
@@ -779,7 +737,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     }
 
     if (isTaskRunning) {
-      ConfigManager.printLog('定时器任务正在运行，跳过');
+      log('定时器任务正在运行，跳过');
       return;
     }
 
@@ -809,7 +767,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       await ai.context.systemUserIteration("_定时器触发提示", s);
 
-      ConfigManager.printLog('定时任务触发回复');
+      log('定时任务触发回复');
       ai.isChatting = false;
       await ai.chat(ctx, msg);
       AIManager.saveAI(id);
