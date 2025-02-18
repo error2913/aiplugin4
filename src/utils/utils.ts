@@ -302,7 +302,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     filterReplyTemplate.forEach(item => {
         try {
             const regex = new RegExp(item, 'g');
-            s = s.replace(regex, '');
+            reply = reply.replace(regex, '');
         } catch (error) {
             console.error('Error in RegExp:', error);
         }

@@ -7,7 +7,7 @@ export class ReplyConfig {
         seal.ext.registerBoolConfig(ConfigManager.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ConfigManager.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤上下文正则表达式", [
-            "<[\\|｜].*?[\\|｜]?>",
+            "<[\\|｜]from.*?[\\|｜]?>",
             "^<think>.*?</think>"
         ], "回复加入上下文时，将符合正则表达式的内容删掉");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤回复正则表达式", [
