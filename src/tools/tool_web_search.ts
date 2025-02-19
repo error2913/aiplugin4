@@ -26,7 +26,7 @@ export function registerWebSearch() {
                     time_range: {
                         type: "string",
                         description: "时间范围",
-                        enum: ["", "day", "week", "month", "year"]
+                        enum: ["day", "week", "month", "year"]
                     }
                 },
                 required: ["q"]
@@ -36,7 +36,7 @@ export function registerWebSearch() {
 
     const tool = new Tool(info);
     tool.solve = async (_, __, ___, args) => {
-        const { q, page, categories, time_range } = args;
+        const { q, page, categories, time_range = '' } = args;
         
         let part = 1;
         let pageno = '';
