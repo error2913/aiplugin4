@@ -46,7 +46,9 @@ export function registerTTS() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, text) => {
+    tool.solve = async (ctx, _, __, args) => {
+        const { text } = args;
+
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
             console.error(`未找到HTTP依赖`);

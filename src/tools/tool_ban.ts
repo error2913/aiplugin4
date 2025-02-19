@@ -25,7 +25,9 @@ export function registerBan() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, name, duration) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, duration } = args;
+
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
             console.error(`未找到HTTP依赖`);

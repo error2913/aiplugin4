@@ -64,7 +64,7 @@ export class Tool {
      * @param ai
      * @param args
      */
-    solve: (ctx: seal.MsgContext, msg: seal.Message, ai: AI, ...args: string[]) => Promise<string>;
+    solve: (ctx: seal.MsgContext, msg: seal.Message, ai: AI, args: { [key: string]: any }) => Promise<string>;
 
     /**
      * @param name 命令的名字，<$这一部分#参数1#参数2>
@@ -79,7 +79,7 @@ export class Tool {
             fixedArgs: []
         }
         this.tool_choice = 'none';
-        this.solve = async (_, __, ___) => "函数未实现";
+        this.solve = async (_, __, ___, ____) => "函数未实现";
     }
 
 }
@@ -210,10 +210,12 @@ export class ToolManager {
                     tool_choice = 'auto';
                 }
 
-                const args_obj = JSON.parse(tool_calls[i].function.arguments);
-                const order = Object.keys(tool.info.function.parameters.properties);
-                const args = order.map(item => args_obj?.[item]);
-                const s = await tool.solve(ctx, msg, ai, ...args);
+                const args = JSON.parse(tool_calls[i].function.arguments);
+                if (args !== null && typeof args !== 'object') {
+                    throw new Error(`arguement不是一个object`);
+                }
+
+                const s = await tool.solve(ctx, msg, ai, args);
 
                 ai.context.toolIteration(tool_calls[i].id, s);
             } catch (e) {

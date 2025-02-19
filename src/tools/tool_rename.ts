@@ -25,7 +25,9 @@ export function registerRename() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, name, new_name) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, new_name } = args;
+
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);

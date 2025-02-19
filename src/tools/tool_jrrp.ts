@@ -26,7 +26,9 @@ export function registerJrrp() {
         name: 'jrrp',
         fixedArgs: []
     }
-    tool.solve = async (ctx, msg, ai, name) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name } = args;
+
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);

@@ -11,7 +11,7 @@ export function registerFace() {
         }
         return acc;
     }, {});
-    
+
     const info: ToolInfo = {
         type: "function",
         function: {
@@ -31,7 +31,9 @@ export function registerFace() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, name) => {
+    tool.solve = async (ctx, msg, _, args) => {
+        const { name } = args;
+
         const { localImagesTemplate } = ConfigManager.image;
         const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
             const match = item.match(/<(.+)>.*/);

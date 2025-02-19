@@ -16,7 +16,7 @@ export function registerGetTime() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (_, __, ___) => {
+    tool.solve = async (_, __, ___, ____) => {
         return new Date().toLocaleString();
     }
 

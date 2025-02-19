@@ -29,14 +29,16 @@ export function registerSanCheck() {
         name: 'sc',
         fixedArgs: []
     }
-    tool.solve = async (ctx, msg, ai, expression, additional_dice) => {
-        const args = [];
-        if (additional_dice) {
-            args.push(additional_dice);
-        }
-        args.push(expression);
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { expression, additional_dice } = args;
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args);
+        const args2 = [];
+        if (additional_dice) {
+            args2.push(additional_dice);
+        }
+        args2.push(expression);
+
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args2);
         if (!success) {
             return 'san check已执行';
         }

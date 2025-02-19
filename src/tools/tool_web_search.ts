@@ -35,12 +35,14 @@ export function registerWebSearch() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (_, __, ___, q, page, categories, time_range) => {
+    tool.solve = async (_, __, ___, args) => {
+        const { q, page, categories, time_range } = args;
+        
         let part = 1;
         let pageno = '';
         if (page) {
             part = parseInt(page) % 2;
-            pageno = page? Math.ceil(parseInt(page) / 2).toString() : '';
+            pageno = page ? Math.ceil(parseInt(page) / 2).toString() : '';
         }
 
         const url = `http://110.41.69.149:8080/search?q=${q}&format=json${pageno ? `&pageno=${pageno}` : ''}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;

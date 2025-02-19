@@ -26,7 +26,9 @@ export function registerMemory() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, name, content) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, content } = args;
+
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
             console.error(`未找到HTTP依赖`);

@@ -18,25 +18,25 @@ export function registerRollCheck() {
                         type: "string",
                         description: "属性表达式，例如：敏捷、体质/2、意志-20",
                     },
-                    rank : {
+                    rank: {
                         type: "string",
-                        description: "难度等级，若无特殊说明则为空字符串",
-                        enum: ["", "困难", "极难", "大成功"]
+                        description: "难度等级，若无特殊说明则忽略",
+                        enum: ["困难", "极难", "大成功"]
                     },
                     times: {
                         type: "integer",
-                        description: "检定的次数，若无特殊说明一般为1",
+                        description: "检定的次数，若无特殊说明则忽略",
                     },
                     additional_dice: {
                         type: "string",
-                        description: `额外的奖励骰或惩罚骰和数量，b代表奖励骰，p代表惩罚骰，若有多个，请在后面附加数字，例如：b、b2、p3，若没有奖励骰或惩罚骰则为空字符串`
+                        description: `额外的奖励骰或惩罚骰和数量，b代表奖励骰，p代表惩罚骰，若有多个，请在后面附加数字，例如：b、b2、p3，若没有奖励骰或惩罚骰则忽略`
                     },
                     reason: {
                         type: "string",
-                        description: "检定的原因，默认为空"
+                        description: "检定的原因"
                     }
                 },
-                required: ["name", "expression", "rank", "times", "additional_dice"]
+                required: ["name", "expression"]
             }
         }
     }
@@ -47,7 +47,9 @@ export function registerRollCheck() {
         name: 'ra',
         fixedArgs: []
     }
-    tool.solve = async (ctx, msg, ai, name, expression, rank, times, additional_dice, reason = '') => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, expression, rank = '', times = 1, additional_dice = '', reason = '' } = args;
+
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -61,23 +63,23 @@ export function registerRollCheck() {
             ctx.player.name = name;
         }
 
-        const args = [];
+        const args2 = [];
 
         if (additional_dice) {
-            args.push(additional_dice);
+            args2.push(additional_dice);
         }
 
-        args.push(rank + expression);
+        args2.push(rank + expression);
 
         if (reason) {
-            args.push(reason);
+            args2.push(reason);
         }
 
         if (parseInt(times) !== 1 && !isNaN(parseInt(times))) {
             ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
         }
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args2);
 
         ToolManager.cmdArgs.specialExecuteTimes = 1;
 

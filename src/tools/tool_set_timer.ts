@@ -36,7 +36,9 @@ export function registerSetTimer() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, time, content) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { time, content } = args;
+
         const t = parseInt(time);
         if (isNaN(t)) {
             return '时间应为数字';

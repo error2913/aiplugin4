@@ -22,7 +22,9 @@ export function registerDrawDeck() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, name) => {
+    tool.solve = async (ctx, msg, _, args) => {
+        const { name } = args;
+
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
             console.error(`牌堆${name}不存在:${dr.err}`);

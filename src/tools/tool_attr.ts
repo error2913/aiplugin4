@@ -26,7 +26,9 @@ export function registerAttrShow() {
         name: 'st',
         fixedArgs: ['show']
     }
-    tool.solve = async (ctx, msg, ai, name) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name } = args;
+
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -47,7 +49,7 @@ export function registerAttrShow() {
 
         return s;
     }
-    
+
     ToolManager.toolMap[info.function.name] = tool;
 }
 
@@ -65,7 +67,7 @@ export function registerAttrGet() {
                         description: '玩家名称'
                     },
                     attr: {
-                        type:'string',
+                        type: 'string',
                         description: '属性名称'
                     }
                 },
@@ -75,7 +77,9 @@ export function registerAttrGet() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, name, attr) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, attr } = args;
+
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -92,7 +96,7 @@ export function registerAttrGet() {
         const value = seal.vars.intGet(ctx, attr)[0];
         return `${attr}: ${value}`;
     }
-    
+
     ToolManager.toolMap[info.function.name] = tool;
 }
 
@@ -110,7 +114,7 @@ export function registerAttrSet() {
                         description: '玩家名称'
                     },
                     expression: {
-                        type:'string',
+                        type: 'string',
                         description: '修改表达式，例如`hp=hp+1d6`就是将hp的值修改为hp+1d6'
                     }
                 },
@@ -120,7 +124,9 @@ export function registerAttrSet() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, name, expression) => {
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, expression } = args;
+
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -160,6 +166,6 @@ export function registerAttrSet() {
         seal.replyToSender(ctx, msg, `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`);
         return `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`;
     }
-    
+
     ToolManager.toolMap[info.function.name] = tool;
 }
