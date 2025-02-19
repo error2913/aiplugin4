@@ -56,21 +56,8 @@ export class Tool {
     info: ToolInfo;
     cmdInfo: CmdInfo;
     tool_choice: string; // 是否可以继续调用函数："none" | "auto" | "required"
-
-    /**
-     * 
-     * @param ctx 
-     * @param msg
-     * @param ai
-     * @param args
-     */
     solve: (ctx: seal.MsgContext, msg: seal.Message, ai: AI, args: { [key: string]: any }) => Promise<string>;
 
-    /**
-     * @param name 命令的名字，<$这一部分#参数1#参数2>
-     * @param command 指令，如 .st show 的st，没有可以不写
-     * @param args 指令的参数
-     */
     constructor(info: ToolInfo) {
         this.info = info;
         this.cmdInfo = {
@@ -110,15 +97,6 @@ export class ToolManager {
         registerCheckAvatar();
         registerSanCheck();
     }
-
-    /** TODO
-     * 撤回消息
-     * 获取精华消息
-     * 设置精华消息
-     * 删除精华消息
-     * 发送群公告
-     * 获取群公告
-     */
 
     static getTools(toolsAllow: string[]): ToolInfo[] {
         const tools = Object.values(this.toolMap)
