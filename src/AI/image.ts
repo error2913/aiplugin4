@@ -1,6 +1,6 @@
 import { ConfigManager } from "../config/config";
-import { fetchData } from "../utils/requestUtils";
-import { generateId, log, parseBody } from "../utils/utils";
+import { sendITTRequest } from "./service";
+import { generateId, log } from "../utils/utils";
 
 export class Image {
     id: string;
@@ -190,27 +190,11 @@ export class ImageManager {
             ]
         }]
 
-        const { url, apiKey, maxChars, bodyTemplate } = ConfigManager.image;
+        const { maxChars } = ConfigManager.image;
 
-        try {
-            const bodyObject = parseBody(bodyTemplate, messages, null, null);
-            const time = Date.now();
+        const raw_reply = await sendITTRequest(messages);
+        const reply = raw_reply.slice(0, maxChars);
 
-            const data = await fetchData(url, apiKey, bodyObject);
-
-            if (data.choices && data.choices.length > 0) {
-                const message = data.choices[0].message;
-                const reply = message.content;
-
-                log(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
-
-                return reply.slice(0, maxChars);
-            } else {
-                throw new Error("服务器响应中没有choices或choices为空");
-            }
-        } catch (error) {
-            console.error("在imageToText中请求出错：", error);
-            return '';
-        }
+        return reply;
     }
 }

@@ -3,7 +3,10 @@ import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tools/tool";
 import { timerQueue } from "./tools/tool_set_timer";
 import { ConfigManager } from "./config/config";
-import { getCQTypes, getCtx, getMsg, handleMessages, log } from "./utils/utils";
+import { log } from "./utils/utils";
+import { createMsg, createCtx } from "./utils/utils_seal";
+import { getCQTypes } from "./utils/utils_string";
+import { buildSystemMessage } from "./utils/utils_message";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
@@ -134,9 +137,9 @@ function main() {
           return ret;
         }
 
-        const messages = handleMessages(ctx, ai);
+        const systemMessage = buildSystemMessage(ctx, ai);
 
-        seal.replyToSender(ctx, msg, messages[0].content);
+        seal.replyToSender(ctx, msg, systemMessage.content);
         return ret;
       }
       case 'pr': {
@@ -756,8 +759,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       const uid = timerQueue[i].uid;
       const gid = timerQueue[i].gid;
       const epId = timerQueue[i].epId;
-      const msg = getMsg(messageType, uid, gid);
-      const ctx = getCtx(epId, msg);
+      const msg = createMsg(messageType, uid, gid);
+      const ctx = createCtx(epId, msg);
       const ai = AIManager.getAI(id);
 
       const s = `你设置的定时器触发了，请按照以下内容发送回复：

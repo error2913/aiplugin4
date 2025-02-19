@@ -1,4 +1,4 @@
-import { getMsg, getCtx } from "../utils/utils";
+import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerPoke() {
@@ -34,8 +34,8 @@ export function registerPoke() {
             return `未找到<${name}>`;
         }
 
-        msg = getMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = getCtx(ctx.endPoint.userId, msg);
+        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
+        ctx = createCtx(ctx.endPoint.userId, msg);
 
         if (uid === ctx.endPoint.userId) {
             ctx.player.name = name;

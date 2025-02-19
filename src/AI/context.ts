@@ -1,7 +1,8 @@
 import { ToolCall } from "../tools/tool";
 import { ConfigManager } from "../config/config";
-import { getNameById, levenshteinDistance } from "../utils/utils";
 import { Image } from "./image";
+import { getNameById } from "../utils/utils_seal";
+import { levenshteinDistance } from "../utils/utils_string";
 
 export interface Message {
     role: string;

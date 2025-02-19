@@ -1,9 +1,11 @@
 import { ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
-import { handleMessages, handleReply, log } from "../utils/utils";
-import { sendRequest } from "../utils/requestUtils";
+import { log } from "../utils/utils";
+import { sendChatRequest } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
+import { handleMessages } from "../utils/utils_message";
+import { handleReply } from "../utils/utils_reply";
 
 export interface Privilege {
     limit: number,
@@ -70,7 +72,7 @@ export class AI {
         const messages = handleMessages(ctx, this);
 
         //获取处理后的回复
-        const raw_reply = await sendRequest(ctx, msg, this, messages, "auto");
+        const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
         const { s, isRepeat, reply } = await handleReply(ctx, msg, raw_reply, this.context);
 
         //禁止AI复读
