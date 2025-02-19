@@ -1,4 +1,5 @@
 import { ImageManager } from "../AI/image";
+import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerImageToText() {
@@ -40,6 +41,60 @@ export function registerImageToText() {
             }
         } else {
             return '本地图片暂时无法识别';
+        }
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
+}
+
+export function registerCheckAvatar() {
+    const info: ToolInfo = {
+        type: "function",
+        function: {
+            name: "check_avatar",
+            description: `查看指定用户的头像，可指定需要特别关注的内容`,
+            parameters: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string",
+                        description: `用户名称`
+                    },
+                    content: {
+                        type: "string",
+                        description: `需要特别关注的内容`
+                    }
+                },
+                required: ["name"]
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { name, content } = args;
+
+        const uid = ai.context.findUid(name);
+        if (uid === null) {
+            console.log(`未找到<${name}>`);
+            return `未找到<${name}>`;
+        }
+
+        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
+        ctx = createCtx(ctx.endPoint.userId, msg);
+
+        if (uid === ctx.endPoint.userId) {
+            ctx.player.name = name;
+        }
+
+        const url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, '')}&s=640`;
+        const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
+
+        const reply = await ImageManager.imageToText(url, text);
+        if (reply) {
+            return reply;
+        } else {
+            return '头像识别失败';
         }
     }
 

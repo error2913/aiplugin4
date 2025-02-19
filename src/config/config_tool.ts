@@ -22,6 +22,7 @@ export class ToolConfig {
             'set_timer',
             'web_search',
             'image_to_text',
+            'check_avatar',
             'san_check'
         ]);
         seal.ext.registerIntConfig(ConfigManager.ext, "长期记忆上限", 5, "");
