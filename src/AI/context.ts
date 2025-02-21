@@ -50,7 +50,7 @@ export class Context {
             return;
         }
 
-        const { maxRounds } = ConfigManager.message;
+        const { showQQ, maxRounds } = ConfigManager.message;
 
         //处理文本
         s = s
@@ -60,7 +60,17 @@ export class Context {
                 const gid = ctx.group.groupId;
                 const uid = `QQ:${p1}`;
                 const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
-                return `<@${getNameById(epId, gid, uid, dice_name)}>`;
+                const name = getNameById(epId, gid, uid, dice_name);
+
+                // 防止重名问题
+                if (showQQ) {
+                    const index = messages.findIndex(item => item.name === name && item.uid !== uid);
+                    if (index !== -1) {
+                        return `<@${uid.replace(/\D+/g, '')}）`;
+                    }
+                }
+
+                return `<@${name}>`;
             })
             .replace(/\[CQ:.*?\]/g, '')
 
@@ -158,7 +168,9 @@ export class Context {
                 }
             }
         }
-        return null;
+
+        const raw_uid = name.replace(/\D+/g, '');
+        return raw_uid ? `QQ:${raw_uid}` : null;
     }
 
     getNames(): string[] {

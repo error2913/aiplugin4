@@ -1,3 +1,5 @@
+import { ConfigManager } from "../config/config";
+import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerSanCheck() {
@@ -9,6 +11,10 @@ export function registerSanCheck() {
             parameters: {
                 type: "object",
                 properties: {
+                    name: {
+                        type: 'string',
+                        description: "进行sancheck的人的名称" + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
+                    },
                     expression: {
                         type: "string",
                         description: `san check的表达式，格式为 成功时掉san/失败时掉san ,例如：1/1d6、0/1`
@@ -18,7 +24,7 @@ export function registerSanCheck() {
                         description: `额外的奖励骰或惩罚骰和数量，b代表奖励骰，p代表惩罚骰，若有多个，请在后面附加数字，例如：b、b2、p3`
                     }
                 },
-                required: ['expression']
+                required: ['name', 'expression']
             }
         }
     }
@@ -30,7 +36,20 @@ export function registerSanCheck() {
         fixedArgs: []
     }
     tool.solve = async (ctx, msg, ai, args) => {
-        const { expression, additional_dice } = args;
+        const { name, expression, additional_dice } = args;
+
+        const uid = ai.context.findUid(name);
+        if (uid === null) {
+            console.log(`未找到<${name}>`);
+            return `未找到<${name}>`;
+        }
+
+        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
+        ctx = createCtx(ctx.endPoint.userId, msg);
+
+        if (uid === ctx.endPoint.userId) {
+            ctx.player.name = name;
+        }
 
         const args2 = [];
         if (additional_dice) {

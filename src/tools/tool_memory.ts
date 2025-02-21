@@ -1,4 +1,5 @@
 import { AIManager } from "../AI/AI";
+import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -13,7 +14,7 @@ export function registerMemory() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称'
+                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     },
                     content: {
                         type: 'string',

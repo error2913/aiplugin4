@@ -1,3 +1,4 @@
+import { ConfigManager } from "../config/config";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -6,13 +7,13 @@ export function registerJrrp() {
         type: "function",
         function: {
             name: "jrrp",
-            description: `查看今日人品`,
+            description: `查看指定用户的今日人品`,
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被查看的人的名字"
+                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     }
                 },
                 required: ["name"]

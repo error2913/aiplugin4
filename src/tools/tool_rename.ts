@@ -1,3 +1,4 @@
+import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -12,7 +13,7 @@ export function registerRename() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "要修改的名字"
+                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     },
                     new_name: {
                         type: 'string',

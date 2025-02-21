@@ -1,3 +1,4 @@
+import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -12,7 +13,7 @@ export function registerRollCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被检定的人的名称",
+                        description: "被检定的人的名称"  + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     },
                     expression: {
                         type: "string",

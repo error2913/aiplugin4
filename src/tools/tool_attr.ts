@@ -1,3 +1,4 @@
+import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -12,7 +13,7 @@ export function registerAttrShow() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '玩家名称'
+                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     }
                 },
                 required: ['name']
@@ -64,7 +65,7 @@ export function registerAttrGet() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '玩家名称'
+                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     },
                     attr: {
                         type: 'string',
@@ -111,7 +112,7 @@ export function registerAttrSet() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '玩家名称'
+                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
                     },
                     expression: {
                         type: 'string',
