@@ -6,6 +6,7 @@ import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages } from "../utils/utils_message";
 import { handleReply } from "../utils/utils_reply";
+import { ToolManager } from "../tools/tool";
 
 export interface Privilege {
     limit: number,
@@ -18,6 +19,7 @@ export interface Privilege {
 export class AI {
     id: string;
     context: Context;
+    tool: ToolManager;
     memory: Memory;
     image: ImageManager;
     privilege: Privilege;
@@ -31,6 +33,7 @@ export class AI {
     constructor(id: string) {
         this.id = id;
         this.context = new Context();
+        this.tool = new ToolManager();
         this.memory = new Memory();
         this.image = new ImageManager();
         this.privilege = {
@@ -50,7 +53,7 @@ export class AI {
 
     static reviver(value: any, id: string): AI {
         const ai = new AI(id);
-        const validKeys = ['context', 'memory', 'image', 'privilege'];
+        const validKeys = ['context', 'tool', 'memory', 'image', 'privilege'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -151,6 +154,9 @@ export class AIManager {
 
                     if (key === "context") {
                         return Context.reviver(value);
+                    }
+                    if (key === "tool") {
+                        return ToolManager.reviver(value);
                     }
                     if (key === "memory") {
                         return Memory.reviver(value);

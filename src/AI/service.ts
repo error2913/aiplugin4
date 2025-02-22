@@ -11,9 +11,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
     tool_call_id?: string
 }[], tool_choice: string): Promise<string> {
     const { url, apiKey, bodyTemplate } = ConfigManager.request;
-    const { isTool, toolsAllow } = ConfigManager.tool;
-    const toolsAllow2 = isTool ? toolsAllow : [];
-    const tools = ToolManager.getTools(toolsAllow2);
+    const tools = ai.tool.getToolsInfo();
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);

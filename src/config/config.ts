@@ -15,7 +15,7 @@ export class ConfigManager {
         }
     } = {}
 
-    static register() {
+    static registerConfig() {
         LogConfig.register();
         RequestConfig.register();
         MessageConfig.register();

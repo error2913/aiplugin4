@@ -11,7 +11,7 @@ import { buildSystemMessage } from "./utils/utils_message";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.4.0');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.4.1');
     seal.ext.register(ext);
   }
 
@@ -25,8 +25,8 @@ function main() {
   }
 
   ConfigManager.ext = ext;
-  ConfigManager.register();
-  ToolManager.init();
+  ConfigManager.registerConfig();
+  ToolManager.registerTool();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
 
@@ -45,7 +45,7 @@ function main() {
 【.ai memo】修改AI的记忆
 【.ai tool】AI的工具相关`;
   cmdAI.allowDelegate = true;
-  cmdAI.solve = (ctx, msg, cmdArgs) => {
+  cmdAI.solve = async (ctx, msg, cmdArgs) => {
     const val = cmdArgs.getArgN(1);
     const uid = ctx.player.userId;
     const gid = ctx.group.groupId;
@@ -383,39 +383,25 @@ function main() {
       case 'tool': {
         const val2 = cmdArgs.getArgN(2);
         switch (val2) {
-          case '':
           case 'help': {
-            const s = `帮助:
-【.ai tool lst】列出所有工具
-【.ai tool <函数名>】查看工具详情
+            const val3 = cmdArgs.getArgN(3);
+            if (!val3) {
+              const s = `帮助:
+【.ai tool】列出所有工具
+【.ai tool help <函数名>】查看工具详情
+【.ai tool <函数名> [on/off]】开启或关闭工具函数
+【.ai tool <函数名> --参数名=具体参数】试用工具函数
 `;
-            seal.replyToSender(ctx, msg, s);
-            return ret;
-          }
-          case 'lst':
-          case 'list': {
-            const { isTool, toolsAllow } = ConfigManager.tool;
-            const toolsAllow2 = isTool ? toolsAllow : [];
-            const toolMap = ToolManager.toolMap;
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
 
-            let i = 1;
-            let s = '工具函数如下:';
-            Object.keys(toolMap).forEach(key => {
-              const tool = toolMap[key];
-              const status = toolsAllow2.includes(key) ? '开' : '关';
-              s += `\n${i++}. ${tool.info.function.name}[${status}]`;
-            });
-
-            seal.replyToSender(ctx, msg, s);
-            return ret;
-          }
-          default: {
-            if (!ToolManager.toolMap.hasOwnProperty(val2)) {
+            if (!ToolManager.toolMap.hasOwnProperty(val3)) {
               seal.replyToSender(ctx, msg, '没有这个工具函数');
               return ret;
             }
 
-            const tool = ToolManager.toolMap[val2];
+            const tool = ToolManager.toolMap[val3];
             const s = `${tool.info.function.name}
 描述:${tool.info.function.description}
 
@@ -430,11 +416,78 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             seal.replyToSender(ctx, msg, s);
             return ret;
           }
+          case '': {
+            const toolStatus = ai.tool.toolStatus;
+
+            let i = 1;
+            let s = '工具函数如下:';
+            Object.keys(toolStatus).forEach(key => {
+              const status = toolStatus[key] ? '开' : '关';
+              s += `\n${i++}. ${key}[${status}]`;
+            });
+
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+          default: {
+            if (!ToolManager.toolMap.hasOwnProperty(val2)) {
+              seal.replyToSender(ctx, msg, '没有这个工具函数');
+              return ret;
+            }
+
+            // 开启或关闭工具函数
+            const val3 = cmdArgs.getArgN(3);
+            if (val3 === 'on') {
+              const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
+              if (toolsNotAllow.includes(val2)) {
+                seal.replyToSender(ctx, msg, `工具函数 ${val2} 不被允许开启`);
+                return ret;
+              }
+
+              ai.tool.toolStatus[val2] = true;
+              seal.replyToSender(ctx, msg, `已开启工具函数 ${val2}`);
+              AIManager.saveAI(id);
+              return ret;
+            } else if (val3 === 'off') {
+              ai.tool.toolStatus[val2] = false;
+              seal.replyToSender(ctx, msg, `已关闭工具函数 ${val2}`);
+              AIManager.saveAI(id);
+              return ret;
+            }
+
+            // 调用工具函数
+            try {
+              if (ToolManager.cmdArgs == null) {
+                seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意指令`);
+                return ret;
+              }
+
+              const tool = ToolManager.toolMap[val2];
+
+              const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
+                const valueString = kwarg.value;
+                try {
+                  acc[kwarg.name] = JSON.parse(`[${valueString}]`)[0];
+                } catch (e) {
+                  acc[kwarg.name] = valueString;
+                }
+                return acc;
+              }, {});
+
+              const s = await tool.solve(ctx, msg, ai, args);
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            } catch (e) {
+              const s = `调用函数 (${val2}) 失败:${e.message}`;
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
+          }
         }
       }
       case 'help':
       default: {
-        ret.showHelp = true;
+        seal.replyToSender(ctx, msg, cmdAI.help);
         return ret;
       }
     }

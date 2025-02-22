@@ -1,4 +1,5 @@
 import { AI } from "../AI/AI"
+import { ConfigManager } from "../config/config"
 import { log } from "../utils/utils"
 import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
 import { registerBan } from "./tool_ban"
@@ -74,8 +75,56 @@ export class Tool {
 export class ToolManager {
     static cmdArgs: seal.CmdArgs = null;
     static toolMap: { [key: string]: Tool } = {};
+    toolStatus: { [key: string]: boolean };
 
-    static init() {
+    constructor() {
+        const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
+        this.toolStatus = Object.keys(ToolManager.toolMap).reduce((acc, key) => {
+            acc[key] = !toolsNotAllow.includes(key) && !toolsDefaultClosed.includes(key);
+            return acc;
+        }, {});
+    }
+
+    static reviver(value: any): ToolManager {
+        const tm = new ToolManager();
+        const validKeys = ['toolStatus'];
+
+        for (const k of validKeys) {
+            if (value.hasOwnProperty(k)) {
+                tm[k] = value[k];
+
+                if (k === 'toolStatus') {
+                    const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
+                    tm[k] = Object.keys(ToolManager.toolMap).reduce((acc, key) => {
+                        acc[key] = !toolsNotAllow.includes(key) && (value[k].hasOwnProperty(key) ? value[k][key] : !toolsDefaultClosed.includes(key));
+                        return acc;
+                    }, {});
+                }
+            }
+        }
+
+        return tm;
+    }
+
+    getToolsInfo(): ToolInfo[] {
+        const tools = Object.keys(this.toolStatus)
+            .map(key => {
+                if (this.toolStatus[key]) {
+                    return ToolManager.toolMap[key].info;
+                } else {
+                    return null;
+                }
+            })
+            .filter(item => item !== null);
+
+        if (tools.length === 0) {
+            return null;
+        } else {
+            return tools;
+        }
+    }
+
+    static registerTool() {
         registerMemory();
         registerDrawDeck();
         registerFace();
@@ -96,24 +145,6 @@ export class ToolManager {
         registerImageToText();
         registerCheckAvatar();
         registerSanCheck();
-    }
-
-    static getTools(toolsAllow: string[]): ToolInfo[] {
-        const tools = Object.values(this.toolMap)
-            .map(item => {
-                if (toolsAllow.includes(item.info.function.name)) {
-                    return item.info;
-                } else {
-                    return null;
-                }
-            })
-            .filter(item => item !== null);
-
-        if (tools.length === 0) {
-            return null;
-        } else {
-            return tools;
-        }
     }
 
     /**
@@ -148,7 +179,7 @@ export class ToolManager {
     }
 
     /**
-     * 
+     * 调用函数并返回tool_choice
      * @param ctx 
      * @param msg 
      * @param ai 
