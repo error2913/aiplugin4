@@ -1,7 +1,7 @@
 import { AIManager } from "./AI/AI";
 import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tools/tool";
-import { timerQueue } from "./tools/tool_set_timer";
+import { timerQueue } from "./tools/tool_timer";
 import { ConfigManager } from "./config/config";
 import { log } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";

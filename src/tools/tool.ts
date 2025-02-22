@@ -14,7 +14,7 @@ import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
 import { registerRollCheck } from "./tool_roll_check"
 import { registerSanCheck } from "./tool_san_check"
-import { registerSetTimer } from "./tool_set_timer"
+import { registerCancelTimer, registerSetTimer, registerShowTimerList } from "./tool_timer"
 import { registerTTS } from "./tool_tts"
 import { registerWebSearch } from "./tool_web_search"
 
@@ -29,6 +29,9 @@ export interface ToolInfo {
                 [key: string]: {
                     type: string,
                     description: string,
+                    items?: {
+                        type: string
+                    },
                     enum?: string[]
                 }
             },
@@ -141,6 +144,8 @@ export class ToolManager {
         registerPoke();
         registerGetTime();
         registerSetTimer();
+        registerShowTimerList();
+        registerCancelTimer();
         registerWebSearch();
         registerImageToText();
         registerCheckAvatar();
