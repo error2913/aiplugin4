@@ -3,11 +3,11 @@ import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerMemory() {
+export function registerAddMemory() {
     const info: ToolInfo = {
         type: 'function',
         function: {
-            name: 'memory',
+            name: 'add_memory',
             description: '添加记忆或者留下对别人印象，尽量不要重复',
             parameters: {
                 type: 'object',
@@ -30,12 +30,6 @@ export function registerMemory() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, content } = args;
 
-        const ext = seal.ext.find('HTTP依赖');
-        if (!ext) {
-            console.error(`未找到HTTP依赖`);
-            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
-        }
-
         const uid = ai.context.findUid(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
@@ -57,6 +51,54 @@ export function registerMemory() {
         AIManager.saveAI(uid);
 
         return `添加记忆成功`;
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
+}
+
+export function registerShowMemory() {
+    // 如果不显示QQ号，就不注册这个函数
+    if (!ConfigManager.message.showQQ) {
+        return;
+    }
+
+    const info: ToolInfo = {
+        type: 'function',
+        function: {
+            name: 'show_memory',
+            description: '查看记忆',
+            parameters: {
+                type: 'object',
+                properties: {
+                    user_id: {
+                        type: 'string',
+                        description: '纯数字QQ号'
+                    }
+                },
+                required: ['user_id']
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, ai, args) => {
+        const { user_id } = args;
+
+        if (isNaN(parseInt(user_id))) {
+            console.error(`<${user_id}>不是一个合法的QQ号`);
+            return `<${user_id}>不是一个合法的QQ号`;
+        }
+
+        const uid = `QQ:${user_id}`;
+
+        if (uid === ctx.endPoint.userId) {
+            console.error('不能添加自己的记忆');
+            return `不能添加自己的记忆`;
+        }
+
+        //记忆相关处理
+        ai = AIManager.getAI(uid);
+        return ai.memory.getPlayerMemoryPrompt();
     }
 
     ToolManager.toolMap[info.function.name] = tool;

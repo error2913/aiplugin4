@@ -8,7 +8,7 @@ import { registerFace } from "./tool_face"
 import { registerGetTime } from "./tool_get_time"
 import { registerCheckAvatar, registerImageToText } from "./tool_image_to_text"
 import { registerJrrp } from "./tool_jrrp"
-import { registerMemory } from "./tool_memory"
+import { registerAddMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
 import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
@@ -128,7 +128,8 @@ export class ToolManager {
     }
 
     static registerTool() {
-        registerMemory();
+        registerAddMemory();
+        registerShowMemory();
         registerDrawDeck();
         registerFace();
         registerJrrp();

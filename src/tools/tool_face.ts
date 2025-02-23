@@ -16,7 +16,7 @@ export function registerFace() {
         type: "function",
         function: {
             name: "face",
-            description: `发送表情包，表情名称有:${Object.keys(localImages).length === 0 ? '暂无表情' : Object.keys(localImages).join("、")}`,
+            description: `发送表情包，${Object.keys(localImages).length === 0 ? '目前暂无可使用表情' : `表情名称有:${Object.keys(localImages).join("、")}`}`,
             parameters: {
                 type: "object",
                 properties: {
