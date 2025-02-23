@@ -11,5 +11,4 @@ yarn.lock
 *.xlsx
 package-lock.json
 .dev/
-dist/
 dev/
