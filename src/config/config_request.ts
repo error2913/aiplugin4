@@ -17,7 +17,7 @@ export class RequestConfig {
             `"top_p":1`,
             `"tools":null`,
             `"tool_choice":null`
-        ], "messages,tools,tool_choice为null时，将会自动替换");
+        ], "messages,tools,tool_choice为null时，将会自动替换。具体参数请参考你所使用模型的接口文档");
     }
 
     static get() {

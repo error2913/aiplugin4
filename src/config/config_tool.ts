@@ -3,7 +3,7 @@ import { ConfigManager } from "./config";
 export class ToolConfig {
     static register() {
         seal.ext.registerBoolConfig(ConfigManager.ext, "是否开启调用函数功能", true, "");
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "可能会不稳定");
+        seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "API在不支持function calling功能的时候开启");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "不允许调用的函数", [
             '填写不允许调用的函数名称，例如：get_time'
         ], "修改后保存并重载js");
@@ -37,7 +37,7 @@ export class ToolConfig {
             "温柔妹妹",
             "书香少女",
             "自定义"
-        ], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange，自定义需要aitts依赖插件和ffmpeg");
+        ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg");
     }
 
     static get() {

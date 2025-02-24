@@ -2,8 +2,8 @@ import { ConfigManager } from "./config";
 
 export class ReplyConfig {
     static register() {
-        seal.ext.registerBoolConfig(ConfigManager.ext, "回复是否引用", false, "");
-        seal.ext.registerIntConfig(ConfigManager.ext, "回复最大字数", 1000, "防止最大Tokens限制不起效");
+        seal.ext.registerBoolConfig(ConfigManager.ext, "回复是否引用", false, "开启将会引用触发该条回复的消息");
+        seal.ext.registerIntConfig(ConfigManager.ext, "回复最大字数", 1000, "防止最大tokens限制不起效");
         seal.ext.registerBoolConfig(ConfigManager.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ConfigManager.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤上下文正则表达式", [

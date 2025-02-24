@@ -48,10 +48,10 @@ export class MessageConfig {
         seal.ext.registerTemplateConfig(ConfigManager.ext, "示例对话", [
             "请写点什么，或者删掉这句话"
         ], "role顺序为user和assistant轮流出现");
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "");
+        seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
         seal.ext.registerBoolConfig(ConfigManager.ext, "是否给AI展示QQ号", false, "");
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "用于适配deepseek-reasoner");
-        seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "");
+        seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
+        seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
     }
 
     static get() {

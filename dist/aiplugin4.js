@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.4.1
+// @version      4.5.0
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，原有的基于解析返回文本的AI命令已经被完全替换。选用模型是否支持该功能请查看相应接口文档。
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -105,10 +105,10 @@
       seal.ext.registerTemplateConfig(ConfigManager.ext, "示例对话", [
         "请写点什么，或者删掉这句话"
       ], "role顺序为user和assistant轮流出现");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "");
+      seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
       seal.ext.registerBoolConfig(ConfigManager.ext, "是否给AI展示QQ号", false, "");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "用于适配deepseek-reasoner");
-      seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "");
+      seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
+      seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
     }
     static get() {
       return {
@@ -148,8 +148,8 @@
   // src/config/config_reply.ts
   var ReplyConfig = class {
     static register() {
-      seal.ext.registerBoolConfig(ConfigManager.ext, "回复是否引用", false, "");
-      seal.ext.registerIntConfig(ConfigManager.ext, "回复最大字数", 1e3, "防止最大Tokens限制不起效");
+      seal.ext.registerBoolConfig(ConfigManager.ext, "回复是否引用", false, "开启将会引用触发该条回复的消息");
+      seal.ext.registerIntConfig(ConfigManager.ext, "回复最大字数", 1e3, "防止最大tokens限制不起效");
       seal.ext.registerBoolConfig(ConfigManager.ext, "禁止AI复读", false, "");
       seal.ext.registerFloatConfig(ConfigManager.ext, "视作复读的最低相似度", 0.8, "");
       seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤上下文正则表达式", [
@@ -192,7 +192,7 @@
         `"top_p":1`,
         `"tools":null`,
         `"tool_choice":null`
-      ], "messages,tools,tool_choice为null时，将会自动替换");
+      ], "messages,tools,tool_choice为null时，将会自动替换。具体参数请参考你所使用模型的接口文档");
     }
     static get() {
       return {
@@ -207,7 +207,7 @@
   var ToolConfig = class {
     static register() {
       seal.ext.registerBoolConfig(ConfigManager.ext, "是否开启调用函数功能", true, "");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "可能会不稳定");
+      seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "API在不支持function calling功能的时候开启");
       seal.ext.registerTemplateConfig(ConfigManager.ext, "不允许调用的函数", [
         "填写不允许调用的函数名称，例如：get_time"
       ], "修改后保存并重载js");
@@ -241,7 +241,7 @@
         "温柔妹妹",
         "书香少女",
         "自定义"
-      ], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange，自定义需要aitts依赖插件和ffmpeg");
+      ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg");
     }
     static get() {
       return {
@@ -1358,17 +1358,17 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
             return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
           }
           await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
-          return `发送语音成功`;
+        } else {
+          const ext = seal.ext.find("HTTP依赖");
+          if (!ext) {
+            console.error(`未找到HTTP依赖`);
+            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+          }
+          const characterId = characterMap[character];
+          const epId = ctx.endPoint.userId;
+          const group_id = ctx.group.groupId.replace(/\D+/g, "");
+          globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
         }
-        const ext = seal.ext.find("HTTP依赖");
-        if (!ext) {
-          console.error(`未找到HTTP依赖`);
-          return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
-        }
-        const characterId = characterMap[character];
-        const epId = ctx.endPoint.userId;
-        const group_id = ctx.group.groupId.replace(/\D+/g, "");
-        globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
         return `发送语音成功`;
       } catch (e) {
         console.error(e);
@@ -1872,7 +1872,7 @@ ${memeryPrompt}`;
         console.error(`不支持流式传输，请将stream设置为false`);
         bodyObject.stream = false;
       }
-      if (isTool && usePromptEngineering) {
+      if (isTool && !usePromptEngineering) {
         if ((bodyObject == null ? void 0 : bodyObject.tools) === null) {
           bodyObject.tools = tools;
         }
@@ -2545,7 +2545,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.4.1");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.0");
       seal.ext.register(ext);
     }
     try {

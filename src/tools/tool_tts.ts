@@ -60,19 +60,19 @@ export function registerTTS() {
                 }
                 
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
-                return `发送语音成功`;
-            }
-            
-            const ext = seal.ext.find('HTTP依赖');
-            if (!ext) {
-                console.error(`未找到HTTP依赖`);
-                return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+            } else {
+                const ext = seal.ext.find('HTTP依赖');
+                if (!ext) {
+                    console.error(`未找到HTTP依赖`);
+                    return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+                }
+
+                const characterId = characterMap[character];
+                const epId = ctx.endPoint.userId;
+                const group_id = ctx.group.groupId.replace(/\D+/g, '');
+                globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
             }
 
-            const characterId = characterMap[character];
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
             return `发送语音成功`;
         } catch (e) {
             console.error(e);

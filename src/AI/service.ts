@@ -158,7 +158,7 @@ function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_
             bodyObject.stream = false;
         }
 
-        if (isTool && usePromptEngineering) {
+        if (isTool && !usePromptEngineering) {
             if (bodyObject?.tools === null) {
                 bodyObject.tools = tools;
             }
