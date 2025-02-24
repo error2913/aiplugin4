@@ -35,8 +35,9 @@ export class ToolConfig {
             "爹系男友",
             "暖心姐姐",
             "温柔妹妹",
-            "书香少女"
-        ], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange");
+            "书香少女",
+            "自定义"
+        ], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange，自定义需要aitts依赖插件和ffmpeg");
     }
 
     static get() {

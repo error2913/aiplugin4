@@ -239,8 +239,9 @@
         "爹系男友",
         "暖心姐姐",
         "温柔妹妹",
-        "书香少女"
-      ], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange");
+        "书香少女",
+        "自定义"
+      ], "需要http依赖，需要可以调用ai语音api版本的napcat/lagrange，自定义需要aitts依赖插件和ffmpeg");
     }
     static get() {
       return {
@@ -1346,15 +1347,24 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       }
     };
     const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, args) => {
+    tool.solve = async (ctx, msg, _, args) => {
       const { text } = args;
-      const ext = seal.ext.find("HTTP依赖");
-      if (!ext) {
-        console.error(`未找到HTTP依赖`);
-        return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
-      }
       try {
         const { character } = ConfigManager.tool;
+        if (character === "自定义") {
+          const aittsExt = seal.ext.find("AITTS");
+          if (!aittsExt) {
+            console.error(`未找到AITTS依赖`);
+            return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
+          }
+          await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
+          return `发送语音成功`;
+        }
+        const ext = seal.ext.find("HTTP依赖");
+        if (!ext) {
+          console.error(`未找到HTTP依赖`);
+          return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+        }
         const characterId = characterMap[character];
         const epId = ctx.endPoint.userId;
         const group_id = ctx.group.groupId.replace(/\D+/g, "");
