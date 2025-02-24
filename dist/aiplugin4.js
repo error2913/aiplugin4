@@ -154,11 +154,12 @@
       seal.ext.registerFloatConfig(ConfigManager.ext, "视作复读的最低相似度", 0.8, "");
       seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤上下文正则表达式", [
         "<[\\|｜]from.*?[\\|｜]?>",
-        "^<think>.*?</think>"
+        "^<think>[\\s\\S]*?</think>"
       ], "回复加入上下文时，将符合正则表达式的内容删掉");
       seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤回复正则表达式", [
         "<[\\|｜].*?[\\|｜]?>",
-        "^<think>.*?</think>"
+        "^<think>[\\s\\S]*?</think>",
+        "<function_call>[\\s\\S]*?</function_call>"
       ], "发送回复时，将符合正则表达式的内容删掉");
     }
     static get() {
@@ -206,6 +207,7 @@
   var ToolConfig = class {
     static register() {
       seal.ext.registerBoolConfig(ConfigManager.ext, "是否开启调用函数功能", true, "");
+      seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "可能会不稳定");
       seal.ext.registerTemplateConfig(ConfigManager.ext, "不允许调用的函数", [
         "填写不允许调用的函数名称，例如：get_time"
       ], "修改后保存并重载js");
@@ -243,6 +245,7 @@
     static get() {
       return {
         isTool: seal.ext.getBoolConfig(ConfigManager.ext, "是否开启调用函数功能"),
+        usePromptEngineering: seal.ext.getBoolConfig(ConfigManager.ext, "是否切换为提示词工程"),
         toolsNotAllow: seal.ext.getTemplateConfig(ConfigManager.ext, "不允许调用的函数"),
         toolsDefaultClosed: seal.ext.getTemplateConfig(ConfigManager.ext, "默认关闭的函数"),
         memoryLimit: seal.ext.getIntConfig(ConfigManager.ext, "长期记忆上限"),
@@ -1580,7 +1583,14 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
           }
           const args = JSON.parse(tool_calls[i].function.arguments);
           if (args !== null && typeof args !== "object") {
-            throw new Error(`arguement不是一个object`);
+            log(`调用函数失败:arguement不是一个object`);
+            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
+            continue;
+          }
+          if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
+            log(`调用函数失败:缺少必需参数`);
+            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
+            continue;
           }
           const s = await tool.solve(ctx, msg, ai, args);
           ai.context.toolIteration(tool_calls[i].id, s);
@@ -1592,6 +1602,38 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       }
       return tool_choice;
     }
+    static async handlePromptTool(ctx, msg, ai, tool_call) {
+      if (!tool_call.hasOwnProperty("name") || !tool_call.hasOwnProperty("arguments")) {
+        log(`调用函数失败:缺少name或arguments`);
+        ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`);
+      }
+      const name = tool_call.name;
+      try {
+        if (this.cmdArgs == null) {
+          log(`暂时无法调用函数，请先使用任意指令`);
+          ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`);
+          return;
+        }
+        const tool = this.toolMap[name];
+        const args = tool_call.arguments;
+        if (args !== null && typeof args !== "object") {
+          log(`调用函数失败:arguement不是一个object`);
+          ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`);
+          return;
+        }
+        if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
+          log(`调用函数失败:缺少必需参数`);
+          ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数`);
+          return;
+        }
+        const s = await tool.solve(ctx, msg, ai, args);
+        ai.context.systemUserIteration("_调用函数返回", s);
+      } catch (e) {
+        const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
+        console.error(s);
+        ai.context.systemUserIteration("_调用函数返回", s);
+      }
+    }
   };
   _ToolManager.cmdArgs = null;
   _ToolManager.toolMap = {};
@@ -1600,6 +1642,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
   // src/utils/utils_message.ts
   function buildSystemMessage(ctx, ai) {
     const { roleSetting, showQQ } = ConfigManager.message;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
     let content = roleSetting;
     if (!ctx.isPrivate) {
       content += `
@@ -1615,6 +1658,32 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
 **记忆**
 如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
 ${memeryPrompt}`;
+    }
+    if (isTool && usePromptEngineering) {
+      const tools = ai.tool.getToolsInfo();
+      const toolsPrompt = tools.map((item, index) => {
+        return `${index + 1}. 名称:${item.function.name}
+- 描述:${item.function.description}
+- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
+- 必需参数:${item.function.parameters.required.join("\n")}`;
+      });
+      content += `
+**调用函数**
+当需要调用函数功能时，请严格使用以下格式：
+\`\`\`
+<function_call>
+{
+    "name": "函数名",
+    "arguments": {
+        "参数1": "值1",
+        "参数2": "值2"
+    }
+}
+</function_call>
+\`\`\`
+不要附带其他文本，且只能调用一次函数
+
+可用函数列表: ${toolsPrompt}`;
     }
     const systemMessage = {
       role: "system",
@@ -1681,6 +1750,7 @@ ${memeryPrompt}`;
   // src/AI/service.ts
   async function sendChatRequest(ctx, msg, ai, messages, tool_choice) {
     const { url, apiKey, bodyTemplate } = ConfigManager.request;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
     const tools = ai.tool.getToolsInfo();
     try {
       const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);
@@ -1693,15 +1763,31 @@ ${memeryPrompt}`;
           log(`思维链内容:`, message.reasoning_content);
         }
         log(`响应内容:`, reply, "\nlatency", Date.now() - time, "ms");
-        if (message.hasOwnProperty("tool_calls") && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-          log(`触发工具调用`);
-          ai.context.toolCallsIteration(message.tool_calls);
-          const tool_choice2 = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
-          if (reply) {
-            return reply;
+        if (isTool) {
+          if (usePromptEngineering) {
+            const match = reply.match(/<function_call>([\s\S]*?)<\/function_call>/);
+            if (match) {
+              try {
+                ai.context.iteration(ctx, match[0], [], "assistant");
+                const tool_call = JSON.parse(match[1]);
+                await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
+                const messages2 = handleMessages(ctx, ai);
+                return await sendChatRequest(ctx, msg, ai, messages2, tool_choice);
+              } catch (error) {
+              }
+            }
+          } else {
+            if (message.hasOwnProperty("tool_calls") && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+              log(`触发工具调用`);
+              ai.context.toolCallsIteration(message.tool_calls);
+              const tool_choice2 = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+              if (reply) {
+                return reply;
+              }
+              const messages2 = handleMessages(ctx, ai);
+              return await sendChatRequest(ctx, msg, ai, messages2, tool_choice2);
+            }
           }
-          const messages2 = handleMessages(ctx, ai);
-          return await sendChatRequest(ctx, msg, ai, messages2, tool_choice2);
         }
         return reply;
       } else {
@@ -1766,20 +1852,26 @@ ${memeryPrompt}`;
     return data;
   }
   function parseBody(template, messages, tools, tool_choice) {
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
     try {
       const bodyObject = JSON.parse(`{${template.join(",")}}`);
-      if (bodyObject.messages === null) {
+      if ((bodyObject == null ? void 0 : bodyObject.messages) === null) {
         bodyObject.messages = messages;
       }
-      if (bodyObject.stream !== false) {
+      if ((bodyObject == null ? void 0 : bodyObject.stream) !== false) {
         console.error(`不支持流式传输，请将stream设置为false`);
         bodyObject.stream = false;
       }
-      if (bodyObject.tools === null) {
-        bodyObject.tools = tools;
-      }
-      if (bodyObject.tool_choice === null) {
-        bodyObject.tool_choice = tool_choice;
+      if (isTool && usePromptEngineering) {
+        if ((bodyObject == null ? void 0 : bodyObject.tools) === null) {
+          bodyObject.tools = tools;
+        }
+        if ((bodyObject == null ? void 0 : bodyObject.tool_choice) === null) {
+          bodyObject.tool_choice = tool_choice;
+        }
+      } else {
+        bodyObject == null ? true : delete bodyObject.tools;
+        bodyObject == null ? true : delete bodyObject.tool_choice;
       }
       return bodyObject;
     } catch (err) {

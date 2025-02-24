@@ -11,6 +11,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
     tool_call_id?: string
 }[], tool_choice: string): Promise<string> {
     const { url, apiKey, bodyTemplate } = ConfigManager.request;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
     const tools = ai.tool.getToolsInfo();
 
     try {
@@ -28,19 +29,39 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 
             log(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
 
-            if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                log(`触发工具调用`);
+            if (isTool) {
+                if (usePromptEngineering) {
+                    const match = reply.match(/<function_call>([\s\S]*?)<\/function_call>/);
+                    if (match) {
+                        try {
+                            ai.context.iteration(ctx, match[0], [], "assistant");
+                            const tool_call = JSON.parse(match[1]);
+                            await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
 
-                ai.context.toolCallsIteration(message.tool_calls);
-                const tool_choice = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+                            const messages = handleMessages(ctx, ai);
+                            return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
+                        } catch (error) {
 
-                if (reply) { // 如果reply不为空，直接返回reply
-                    return reply;
+                        }
+                    }
+
+                } else {
+                    if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+                        log(`触发工具调用`);
+
+                        ai.context.toolCallsIteration(message.tool_calls);
+                        const tool_choice = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+
+                        if (reply) { // 如果reply不为空，直接返回reply
+                            return reply;
+                        }
+
+                        const messages = handleMessages(ctx, ai);
+                        return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
+                    }
                 }
-
-                const messages = handleMessages(ctx, ai);
-                return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
             }
+
             return reply;
         } else {
             throw new Error("服务器响应中没有choices或choices为空");
@@ -124,24 +145,30 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
 }
 
 function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
     try {
         const bodyObject = JSON.parse(`{${template.join(',')}}`);
 
-        if (bodyObject.messages === null) {
+        if (bodyObject?.messages === null) {
             bodyObject.messages = messages;
         }
 
-        if (bodyObject.stream !== false) {
+        if (bodyObject?.stream !== false) {
             console.error(`不支持流式传输，请将stream设置为false`);
             bodyObject.stream = false;
         }
 
-        if (bodyObject.tools === null) {
-            bodyObject.tools = tools;
-        }
-
-        if (bodyObject.tool_choice === null) {
-            bodyObject.tool_choice = tool_choice;
+        if (isTool && usePromptEngineering) {
+            if (bodyObject?.tools === null) {
+                bodyObject.tools = tools;
+            }
+            
+            if (bodyObject?.tool_choice === null) {
+                bodyObject.tool_choice = tool_choice;
+            }
+        } else {
+            delete bodyObject?.tools;
+            delete bodyObject?.tool_choice;
         }
 
         return bodyObject;

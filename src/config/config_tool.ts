@@ -3,6 +3,7 @@ import { ConfigManager } from "./config";
 export class ToolConfig {
     static register() {
         seal.ext.registerBoolConfig(ConfigManager.ext, "是否开启调用函数功能", true, "");
+        seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "可能会不稳定");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "不允许调用的函数", [
             '填写不允许调用的函数名称，例如：get_time'
         ], "修改后保存并重载js");
@@ -41,6 +42,7 @@ export class ToolConfig {
     static get() {
         return {
             isTool: seal.ext.getBoolConfig(ConfigManager.ext, "是否开启调用函数功能"),
+            usePromptEngineering: seal.ext.getBoolConfig(ConfigManager.ext, "是否切换为提示词工程"),
             toolsNotAllow: seal.ext.getTemplateConfig(ConfigManager.ext, "不允许调用的函数"),
             toolsDefaultClosed: seal.ext.getTemplateConfig(ConfigManager.ext, "默认关闭的函数"),
             memoryLimit: seal.ext.getIntConfig(ConfigManager.ext, "长期记忆上限"),

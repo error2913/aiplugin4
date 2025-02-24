@@ -4,6 +4,7 @@ import { ConfigManager } from "../config/config";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSetting, showQQ }: { roleSetting: string, showQQ: boolean } = ConfigManager.message;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
 
     let content = roleSetting;
 
@@ -25,6 +26,35 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
 **记忆**
 如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
 ${memeryPrompt}`;
+    }
+
+    // 调用函数
+    if (isTool && usePromptEngineering) {
+        const tools = ai.tool.getToolsInfo();
+        const toolsPrompt = tools.map((item, index) => {
+            return `${index + 1}. 名称:${item.function.name}
+- 描述:${item.function.description}
+- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
+- 必需参数:${item.function.parameters.required.join('\n')}`;
+        });
+
+        content += `
+**调用函数**
+当需要调用函数功能时，请严格使用以下格式：
+\`\`\`
+<function_call>
+{
+    "name": "函数名",
+    "arguments": {
+        "参数1": "值1",
+        "参数2": "值2"
+    }
+}
+</function_call>
+\`\`\`
+不要附带其他文本，且只能调用一次函数
+
+可用函数列表: ${toolsPrompt}`;
     }
 
     const systemMessage: Message = {
