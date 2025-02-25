@@ -15,7 +15,7 @@ import { registerRename } from "./tool_rename"
 import { registerRollCheck } from "./tool_roll_check"
 import { registerSanCheck } from "./tool_san_check"
 import { registerCancelTimer, registerSetTimer, registerShowTimerList } from "./tool_timer"
-import { registerTTS } from "./tool_tts"
+import { registerTextToSound } from "./tool_text_to_sound"
 import { registerWebSearch } from "./tool_web_search"
 
 export interface ToolInfo {
@@ -143,7 +143,7 @@ export class ToolManager {
         registerAttrGet();
         registerAttrSet();
         registerBan();
-        registerTTS();
+        registerTextToSound();
         registerPoke();
         registerGetTime();
         registerSetTimer();

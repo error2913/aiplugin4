@@ -26,11 +26,11 @@ const characterMap = {
     "书香少女": "lucy-voice-f34"
 };
 
-export function registerTTS() {
+export function registerTextToSound() {
     const info: ToolInfo = {
         type: 'function',
         function: {
-            name: 'tts',
+            name: 'text_to_sound',
             description: '发送AI声聊合成语音',
             parameters: {
                 type: 'object',
