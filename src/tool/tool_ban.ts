@@ -52,7 +52,7 @@ export function registerBan() {
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/\D+/g, '');
             const user_id = ctx.player.userId.replace(/\D+/g, '');
-            globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
+            await globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
             return `已禁言<${name}> ${duration}秒`;
         } catch (e) {
             console.error(e);

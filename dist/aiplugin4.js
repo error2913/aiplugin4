@@ -337,14 +337,6 @@
     }
     return void 0;
   }
-  function getNameById(epId, gid, uid, diceName) {
-    if (epId === uid) {
-      return diceName;
-    }
-    const msg = createMsg(gid === "" ? "private" : "group", uid, gid);
-    const ctx = createCtx(epId, msg);
-    return ctx.player.name || "未知用户";
-  }
 
   // src/tool/tool_attr.ts
   function registerAttrShow() {
@@ -535,7 +527,7 @@ ${attr}: ${value}=>${result}`;
         const epId = ctx.endPoint.userId;
         const group_id = ctx.group.groupId.replace(/\D+/g, "");
         const user_id = ctx.player.userId.replace(/\D+/g, "");
-        globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
+        await globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
         return `已禁言<${name}> ${duration}秒`;
       } catch (e) {
         console.error(e);
@@ -1012,7 +1004,7 @@ ${attr}: ${value}=>${result}`;
         const epId = ctx.endPoint.userId;
         const group_id = ctx.group.groupId.replace(/\D+/g, "");
         const user_id = ctx.player.userId.replace(/\D+/g, "");
-        globalThis.http.getData(epId, `group_poke?group_id=${group_id}&user_id=${user_id}`);
+        await globalThis.http.getData(epId, `group_poke?group_id=${group_id}&user_id=${user_id}`);
         return `已向<${name}>发送戳一戳`;
       } catch (e) {
         console.error(e);
@@ -1336,7 +1328,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_tts.ts
+  // src/tool/tool_text_to_sound.ts
   var characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
     "猴哥": "lucy-voice-houge",
@@ -1361,11 +1353,11 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     "温柔妹妹": "lucy-voice-f36",
     "书香少女": "lucy-voice-f34"
   };
-  function registerTTS() {
+  function registerTextToSound() {
     const info = {
       type: "function",
       function: {
-        name: "tts",
+        name: "text_to_sound",
         description: "发送AI声聊合成语音",
         parameters: {
           type: "object",
@@ -1400,7 +1392,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
           const characterId = characterMap[character];
           const epId = ctx.endPoint.userId;
           const group_id = ctx.group.groupId.replace(/\D+/g, "");
-          globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
+          await globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
         }
         return `发送语音成功`;
       } catch (e) {
@@ -1492,6 +1484,128 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
+  // src/tool/tool_group_sign.ts
+  function registerGroupSign() {
+    const info = {
+      type: "function",
+      function: {
+        name: "group_sign",
+        description: "发送群打卡",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, __, ___) => {
+      if (ctx.isPrivate) {
+        return `群打卡只能在群聊中使用`;
+      }
+      const ext = seal.ext.find("HTTP依赖");
+      if (!ext) {
+        console.error(`未找到HTTP依赖`);
+        return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+      }
+      try {
+        const epId = ctx.endPoint.userId;
+        const group_id = ctx.group.groupId.replace(/\D+/g, "");
+        await globalThis.http.getData(epId, `send_group_sign?group_id=${group_id.replace(/\D+/, "")}`);
+        return `已发送群打卡，若无响应可能今日已打卡`;
+      } catch (e) {
+        console.error(e);
+        return `发送群打卡失败`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
+  // src/tool/tool_get_person_info.ts
+  var constellations = ["水瓶座", "双鱼座", "白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座"];
+  var shengXiao = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
+  function registerGetPersonInfo() {
+    const info = {
+      type: "function",
+      function: {
+        name: "get_person_info",
+        description: "获取用户信息",
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+            }
+          },
+          required: ["name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, ai, args) => {
+      const { name } = args;
+      const ext = seal.ext.find("HTTP依赖");
+      if (!ext) {
+        console.error(`未找到HTTP依赖`);
+        return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+      }
+      const uid = ai.context.findUid(name);
+      if (uid === null) {
+        console.log(`未找到<${name}>`);
+        return `未找到<${name}>`;
+      }
+      msg = createMsg(msg.messageType, uid, ctx.group.groupId);
+      ctx = createCtx(ctx.endPoint.userId, msg);
+      if (uid === ctx.endPoint.userId) {
+        ctx.player.name = name;
+      }
+      try {
+        const epId = ctx.endPoint.userId;
+        const user_id = ctx.player.userId.replace(/\D+/g, "");
+        const data = await globalThis.http.getData(epId, `get_stranger_info?user_id=${user_id}`);
+        let s = `昵称: ${data.nickname}
+QQ号: ${data.user_id}
+性别: ${data.sex}
+QQ等级: ${data.qqLevel}
+是否为VIP: ${data.is_vip}
+是否为年费会员: ${data.is_years_vip}`;
+        if (data.remark && data.remark !== "") s += `
+备注: ${data.remark}`;
+        if (data.birthday_year && data.birthday_year !== 0) {
+          s += `
+年龄: ${data.age}
+生日: ${data.birthday_year}-${data.birthday_month}-${data.birthday_day}
+星座: ${constellations[data.constellation - 1]}
+生肖: ${shengXiao[data.shengXiao - 1]}`;
+        }
+        if (data.homeTown && data.homeTown !== "0-0-0") s += `
+故乡: ${data.homeTown}`;
+        if (data.pos && data.pos !== "") s += `
+位置: ${data.pos}`;
+        if (data.country && data.country !== "") s += `
+所在地: ${data.country} ${data.province} ${data.city}`;
+        if (data.address && data.address !== "") s += `
+地址: ${data.address}`;
+        if (data.eMail && data.eMail !== "") s += `
+邮箱: ${data.eMail}`;
+        if (data.phoneNum && data.phoneNum !== "-") s += `
+手机号码: ${data.phoneNum}`;
+        if (data.interest && data.interest !== "") s += `
+兴趣: ${data.interest}`;
+        if (data.labels && data.labels.length > 0) s += `
+标签: ${data.labels.join(",")}`;
+        if (data.long_nick && data.long_nick !== "") s += `
+个性签名: ${data.long_nick}`;
+        return s;
+      } catch (e) {
+        console.error(e);
+        return `获取用户信息失败`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
   // src/tool/tool.ts
   var Tool = class {
     constructor(info) {
@@ -1560,7 +1674,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       registerAttrGet();
       registerAttrSet();
       registerBan();
-      registerTTS();
+      registerTextToSound();
       registerPoke();
       registerGetTime();
       registerSetTimer();
@@ -1570,6 +1684,8 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       registerImageToText();
       registerCheckAvatar();
       registerSanCheck();
+      registerGroupSign();
+      registerGetPersonInfo();
     }
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
@@ -2158,14 +2274,16 @@ ${memeryPrompt}`;
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
         const uid2 = `QQ:${p1}`;
-        const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
-        const name2 = getNameById(epId, gid, uid2, dice_name);
         if (showQQ) {
-          const index = messages.findIndex((item) => item.name === name2 && item.uid !== uid2);
-          if (index !== -1) {
-            return `<@${uid2.replace(/\D+/g, "")}）`;
-          }
+          return `<@${uid2.replace(/\D+/g, "")}）`;
         }
+        const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
+        const mmsg = createMsg(gid === "" ? "private" : "group", uid2, gid);
+        const mctx = createCtx(epId, mmsg);
+        if (epId === uid2) {
+          mctx.player.name = dice_name;
+        }
+        const name2 = mctx.player.name || "未知用户";
         return `<@${name2}>`;
       }).replace(/\[CQ:.*?\]/g, "");
       if (s === "") {

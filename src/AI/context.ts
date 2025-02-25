@@ -1,7 +1,7 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { Image } from "./image";
-import { getNameById } from "../utils/utils_seal";
+import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 
 export interface Message {
@@ -59,16 +59,20 @@ export class Context {
                 const epId = ctx.endPoint.userId;
                 const gid = ctx.group.groupId;
                 const uid = `QQ:${p1}`;
-                const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
-                const name = getNameById(epId, gid, uid, dice_name);
 
-                // 防止重名问题
                 if (showQQ) {
-                    const index = messages.findIndex(item => item.name === name && item.uid !== uid);
-                    if (index !== -1) {
-                        return `<@${uid.replace(/\D+/g, '')}）`;
-                    }
+                    return `<@${uid.replace(/\D+/g, '')}）`;
                 }
+
+                const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
+                const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                const mctx = createCtx(epId, mmsg);
+
+                if (epId === uid) {
+                    mctx.player.name = dice_name;
+                }
+
+                const name = mctx.player.name || '未知用户';
 
                 return `<@${name}>`;
             })

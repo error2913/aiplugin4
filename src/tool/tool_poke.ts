@@ -48,7 +48,7 @@ export function registerPoke() {
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/\D+/g, '');
             const user_id = ctx.player.userId.replace(/\D+/g, '');
-            globalThis.http.getData(epId, `group_poke?group_id=${group_id}&user_id=${user_id}`);
+            await globalThis.http.getData(epId, `group_poke?group_id=${group_id}&user_id=${user_id}`);
             return `已向<${name}>发送戳一戳`;
         } catch (e) {
             console.error(e);

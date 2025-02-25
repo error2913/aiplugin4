@@ -22,14 +22,3 @@ export function createCtx(epId: string, msg: seal.Message): seal.MsgContext | un
 
     return undefined;
 }
-
-export function getNameById(epId: string, gid: string, uid: string, diceName: string) {
-    if (epId === uid) {
-        return diceName;
-    }
-
-    const msg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-    const ctx = createCtx(epId, msg);
-
-    return ctx.player.name || '未知用户';
-}

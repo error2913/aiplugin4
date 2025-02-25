@@ -17,6 +17,8 @@ import { registerSanCheck } from "./tool_san_check"
 import { registerCancelTimer, registerSetTimer, registerShowTimerList } from "./tool_timer"
 import { registerTextToSound } from "./tool_text_to_sound"
 import { registerWebSearch } from "./tool_web_search"
+import { registerGroupSign } from "./tool_group_sign"
+import { registerGetPersonInfo } from "./tool_get_person_info"
 
 export interface ToolInfo {
     type: "function",
@@ -153,6 +155,8 @@ export class ToolManager {
         registerImageToText();
         registerCheckAvatar();
         registerSanCheck();
+        registerGroupSign();
+        registerGetPersonInfo();
     }
 
     /**
