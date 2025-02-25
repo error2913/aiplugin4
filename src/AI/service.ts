@@ -1,5 +1,5 @@
 import { AI } from "./AI";
-import { ToolCall, ToolInfo, ToolManager } from "../tools/tool";
+import { ToolCall, ToolInfo, ToolManager } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { log } from "../utils/utils";
 import { handleMessages } from "../utils/utils_message";

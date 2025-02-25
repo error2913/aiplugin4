@@ -346,7 +346,7 @@
     return ctx.player.name || "未知用户";
   }
 
-  // src/tools/tool_attr.ts
+  // src/tool/tool_attr.ts
   function registerAttrShow() {
     const info = {
       type: "function",
@@ -490,7 +490,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_ban.ts
+  // src/tool/tool_ban.ts
   function registerBan() {
     const info = {
       type: "function",
@@ -545,7 +545,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_draw_deck.ts
+  // src/tool/tool_draw_deck.ts
   function registerDrawDeck() {
     const { decks } = ConfigManager.tool;
     const info = {
@@ -584,7 +584,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_face.ts
+  // src/tool/tool_face.ts
   function registerFace() {
     const { localImagesTemplate } = ConfigManager.image;
     const localImages = localImagesTemplate.reduce((acc, item) => {
@@ -635,7 +635,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_get_time.ts
+  // src/tool/tool_get_time.ts
   function registerGetTime() {
     const info = {
       type: "function",
@@ -656,7 +656,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_image_to_text.ts
+  // src/tool/tool_image_to_text.ts
   function registerImageToText() {
     const info = {
       type: "function",
@@ -744,7 +744,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_jrrp.ts
+  // src/tool/tool_jrrp.ts
   function registerJrrp() {
     const info = {
       type: "function",
@@ -790,7 +790,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_memory.ts
+  // src/tool/tool_memory.ts
   function registerAddMemory() {
     const info = {
       type: "function",
@@ -874,7 +874,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_modu.ts
+  // src/tool/tool_modu.ts
   function registerModuRoll() {
     const info = {
       type: "function",
@@ -938,7 +938,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_poke.ts
+  // src/tool/tool_poke.ts
   function registerPoke() {
     const info = {
       type: "function",
@@ -989,7 +989,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_rename.ts
+  // src/tool/tool_rename.ts
   function registerRename() {
     const info = {
       type: "function",
@@ -1037,7 +1037,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_roll_check.ts
+  // src/tool/tool_roll_check.ts
   function registerRollCheck() {
     const info = {
       type: "function",
@@ -1116,7 +1116,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_san_check.ts
+  // src/tool/tool_san_check.ts
   function registerSanCheck() {
     const info = {
       type: "function",
@@ -1175,7 +1175,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_timer.ts
+  // src/tool/tool_timer.ts
   var timerQueue = [];
   function registerSetTimer() {
     const info = {
@@ -1303,7 +1303,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_tts.ts
+  // src/tool/tool_tts.ts
   var characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
     "猴哥": "lucy-voice-houge",
@@ -1378,7 +1378,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool_web_search.ts
+  // src/tool/tool_web_search.ts
   function registerWebSearch() {
     const info = {
       type: "function",
@@ -1459,7 +1459,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tools/tool.ts
+  // src/tool/tool.ts
   var Tool = class {
     constructor(info) {
       this.info = info;

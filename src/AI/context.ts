@@ -1,4 +1,4 @@
-import { ToolCall } from "../tools/tool";
+import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { getNameById } from "../utils/utils_seal";

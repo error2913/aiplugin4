@@ -6,7 +6,7 @@ import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages } from "../utils/utils_message";
 import { handleReply } from "../utils/utils_reply";
-import { ToolManager } from "../tools/tool";
+import { ToolManager } from "../tool/tool";
 
 export interface Privilege {
     limit: number,
