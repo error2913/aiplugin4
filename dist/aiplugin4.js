@@ -791,12 +791,12 @@ ${attr}: ${value}=>${result}`;
   }
 
   // src/tool/tool_memory.ts
-  function registerAddMemory() {
+  function registerAddPersonMemory() {
     const info = {
       type: "function",
       function: {
-        name: "add_memory",
-        description: "添加记忆或者留下对别人印象，尽量不要重复",
+        name: "add_person_memory",
+        description: "添加个人记忆，尽量不要重复记忆",
         parameters: {
           type: "object",
           properties: {
@@ -829,21 +829,52 @@ ${attr}: ${value}=>${result}`;
         return `不能添加自己的记忆`;
       }
       ai = AIManager.getAI(uid);
-      ai.memory.addMemory(ctx.group.groupId, ctx.group.groupName, content);
+      ai.memory.addMemory(ctx, content);
       AIManager.saveAI(uid);
       return `添加记忆成功`;
     };
     ToolManager.toolMap[info.function.name] = tool;
   }
-  function registerShowMemory() {
+  function registerAddGroupMemory() {
+    const info = {
+      type: "function",
+      function: {
+        name: "add_group_memory",
+        description: "添加群聊记忆，尽量不要重复记忆",
+        parameters: {
+          type: "object",
+          properties: {
+            content: {
+              type: "string",
+              description: "记忆内容"
+            }
+          },
+          required: ["content"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, ai, args) => {
+      const { content } = args;
+      if (ctx.isPrivate) {
+        console.error("不能在私聊中添加群聊记忆");
+        return `不能在私聊中添加群聊记忆`;
+      }
+      ai.memory.addMemory(ctx, content);
+      AIManager.saveAI(ai.id);
+      return `添加记忆成功`;
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerShowPersonMemory() {
     if (!ConfigManager.message.showQQ) {
       return;
     }
     const info = {
       type: "function",
       function: {
-        name: "show_memory",
-        description: "查看记忆",
+        name: "show_person_memory",
+        description: "查看个人记忆",
         parameters: {
           type: "object",
           properties: {
@@ -865,13 +896,15 @@ ${attr}: ${value}=>${result}`;
       }
       const uid = `QQ:${user_id}`;
       if (uid === ctx.endPoint.userId) {
-        console.error("不能添加自己的记忆");
-        return `不能添加自己的记忆`;
+        console.error("不能查看自己的记忆");
+        return `不能查看自己的记忆`;
       }
       ai = AIManager.getAI(uid);
-      return ai.memory.getPlayerMemoryPrompt();
+      return ai.memory.buildPersonMemoryPrompt();
     };
     ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerShowGroupMemory() {
   }
 
   // src/tool/tool_modu.ts
@@ -1512,8 +1545,10 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       }
     }
     static registerTool() {
-      registerAddMemory();
-      registerShowMemory();
+      registerAddPersonMemory();
+      registerAddGroupMemory();
+      registerShowPersonMemory();
+      registerShowGroupMemory();
       registerDrawDeck();
       registerFace();
       registerJrrp();
@@ -1662,7 +1697,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
 - <@xxx>表示@某个群成员，xxx为名字${showQQ ? `或者纯数字QQ号` : ``}`;
     }
     content += `- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
-    const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
+    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
     if (memeryPrompt) {
       content += `
 **记忆**
@@ -2271,47 +2306,72 @@ ${memeryPrompt}`;
       }
       this.persona = s;
     }
-    addMemory(gid, gn, content) {
+    addMemory(ctx, content) {
       const { memoryLimit } = ConfigManager.tool;
       content = content.slice(0, 100);
       this.memoryList.push({
-        isPrivate: gn ? false : true,
+        isPrivate: ctx.group.groupName ? false : true,
+        player: {
+          userId: ctx.player.userId,
+          name: ctx.player.name
+        },
         group: {
-          groupId: gid,
-          groupName: gn
+          groupId: ctx.group.groupId,
+          groupName: ctx.group.groupName
         },
         time: (/* @__PURE__ */ new Date()).toLocaleString(),
         content
       });
       this.memoryList.splice(0, this.memoryList.length - memoryLimit);
     }
-    getPlayerMemoryPrompt() {
+    buildPersonMemoryPrompt() {
       let s = `
-- 设定:${this.persona}`;
-      s += `
+- 设定:${this.persona}
 - 记忆:
 `;
-      s += this.memoryList.map((item, i) => {
-        return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>`}: ${item.content}`;
-      }).join("\n");
+      if (this.memoryList.length === 0) {
+        s += "无";
+      } else {
+        s += this.memoryList.map((item, i) => {
+          return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>`}: ${item.content}`;
+        }).join("\n");
+      }
       return s;
     }
-    getMemoryPrompt(ctx, context) {
-      if (ctx.isPrivate) {
-        return this.getPlayerMemoryPrompt();
+    buildGroupMemoryPrompt() {
+      let s = `
+- 记忆:
+`;
+      if (this.memoryList.length === 0) {
+        s += "无";
       } else {
-        let s = "";
+        s += this.memoryList.map((item, i) => {
+          return `${i + 1}. (${item.time}) ${item.content}`;
+        }).join("\n");
+      }
+      return s;
+    }
+    buildMemoryPrompt(ctx, context) {
+      const { showQQ } = ConfigManager.message;
+      if (ctx.isPrivate) {
+        return this.buildPersonMemoryPrompt();
+      } else {
+        let s = `
+- 关于群聊:<${ctx.group.groupName}>:`;
+        s += this.buildGroupMemoryPrompt();
         const arr = [];
         for (const message of context.messages) {
           if (!arr.includes(message.uid) && message.role === "user") {
-            const name = message.name;
             const uid = message.uid;
-            const ai = AIManager.getAI(uid);
-            const text = ai.memory.getPlayerMemoryPrompt();
-            if (text) {
-              s += `
-关于<${name}>:${text}`;
+            const name = message.name;
+            if (name.startsWith("_")) {
+              continue;
             }
+            const ai = AIManager.getAI(uid);
+            s += `
+
+关于<${name}>${showQQ ? `(${uid.replace(/\D+/g, "")})` : ``}:`;
+            s += ai.memory.buildPersonMemoryPrompt();
             arr.push(uid);
           }
         }
@@ -2873,7 +2933,7 @@ ${memeryPrompt}`;
               return ret;
             }
             case "show": {
-              const s = ai2.memory.getPlayerMemoryPrompt();
+              const s = ai2.memory.buildPersonMemoryPrompt();
               seal.replyToSender(ctx, msg, s || "暂无记忆");
               return ret;
             }

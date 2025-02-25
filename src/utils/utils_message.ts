@@ -20,7 +20,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     content += `- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
 
     // 记忆
-    const memeryPrompt = ai.memory.getMemoryPrompt(ctx, ai.context);
+    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
     if (memeryPrompt) {
         content += `
 **记忆**

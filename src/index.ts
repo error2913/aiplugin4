@@ -365,7 +365,7 @@ function main() {
             return ret;
           }
           case 'show': {
-            const s = ai2.memory.getPlayerMemoryPrompt();
+            const s = ai2.memory.buildPersonMemoryPrompt();
             seal.replyToSender(ctx, msg, s || '暂无记忆');
             return ret;
           }
