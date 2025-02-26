@@ -1830,8 +1830,8 @@ QQ等级: ${data.qqLevel}
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
-        if (uid === ctx.player.userId && ctx.isPrivate) {
-          return `向自己发送消息无需调用函数`;
+        if (uid === ctx.endPoint.userId) {
+          return `禁止向自己发送消息`;
         }
         msg = createMsg("private", uid, "");
         ctx = createCtx(ctx.endPoint.userId, msg);
