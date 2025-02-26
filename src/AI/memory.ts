@@ -94,7 +94,7 @@ export class Memory {
         let s = `\n- 记忆:\n`;
 
         if (this.memoryList.length === 0) {
-            s += '无'; 
+            s += '无';
         } else {
             s += this.memoryList.map((item, i) => {
                 return `${i + 1}. (${item.time}) ${item.content}`;
@@ -105,34 +105,35 @@ export class Memory {
     }
 
     buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
-        const { showQQ } = ConfigManager.message;
+        const { showNumber } = ConfigManager.message;
 
         if (ctx.isPrivate) {
             return this.buildPersonMemoryPrompt();
         } else {
             // 群聊记忆
-            let s = `\n- 关于群聊:<${ctx.group.groupName}>:`;
+            const gid = ctx.group.groupId;
+            let s = `\n- 关于群聊:<${ctx.group.groupName}>${showNumber ? `(${gid.replace(/\D+/g, '')})` : ``}:`;
             s += this.buildGroupMemoryPrompt();
 
             // 群内用户的个人记忆
             const arr = [];
             for (const message of context.messages) {
-                if (!arr.includes(message.uid) && message.role === 'user') {
-                    const uid = message.uid;
-                    const name = message.name;
-
-                    // 过滤掉系统消息
-                    if (name.startsWith('_')) {
-                        continue;
-                    }
-
-                    const ai = AIManager.getAI(uid);
-
-                    s += `\n\n关于<${name}>${showQQ ? `(${uid.replace(/\D+/g, '')})` : ``}:`;
-                    s += ai.memory.buildPersonMemoryPrompt();
-
-                    arr.push(uid);
+                const uid = message.uid;
+                if (arr.includes(uid) || message.role !== 'user') {
+                    continue;
                 }
+
+                const name = message.name;
+                if (name.startsWith('_')) {
+                    continue;
+                }
+
+                const ai = AIManager.getAI(uid);
+
+                s += `\n\n关于<${name}>${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}:`;
+                s += ai.memory.buildPersonMemoryPrompt();
+
+                arr.push(uid);
             }
 
             return s;

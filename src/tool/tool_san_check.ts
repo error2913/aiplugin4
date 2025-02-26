@@ -13,7 +13,7 @@ export function registerSanCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "进行sancheck的人的名称" + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
+                        description: "进行sancheck的人的名称" + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
                     },
                     expression: {
                         type: "string",
@@ -38,7 +38,7 @@ export function registerSanCheck() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, expression, additional_dice } = args;
 
-        const uid = ai.context.findUid(name);
+        const uid = ai.context.findUserId(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
@@ -48,7 +48,7 @@ export function registerSanCheck() {
         ctx = createCtx(ctx.endPoint.userId, msg);
 
         if (uid === ctx.endPoint.userId) {
-            ctx.player.name = name;
+            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
         }
 
         const args2 = [];

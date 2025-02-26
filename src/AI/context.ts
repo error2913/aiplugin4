@@ -3,6 +3,7 @@ import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
+import { AIManager } from "./AI";
 
 export interface Message {
     role: string;
@@ -50,7 +51,7 @@ export class Context {
             return;
         }
 
-        const { showQQ, maxRounds } = ConfigManager.message;
+        const { showNumber, maxRounds } = ConfigManager.message;
 
         //处理文本
         s = s
@@ -60,7 +61,7 @@ export class Context {
                 const gid = ctx.group.groupId;
                 const uid = `QQ:${p1}`;
 
-                if (showQQ) {
+                if (showNumber) {
                     return `<@${uid.replace(/\D+/g, '')}）`;
                 }
 
@@ -158,7 +159,7 @@ export class Context {
         }
     }
 
-    findUid(name: string): string {
+    findUserId(name: string): string {
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (name === messages[i].name) {
@@ -173,8 +174,45 @@ export class Context {
             }
         }
 
-        const raw_uid = name.replace(/\D+/g, '');
-        return raw_uid ? `QQ:${raw_uid}` : null;
+        const raw_uid = parseInt(name);
+        return isNaN(raw_uid) ? null : `QQ:${raw_uid}`;
+    }
+
+    findGroupId(groupName: string): string {
+        const messages = this.messages;
+        let arr = [];
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const uid = messages[i].uid;
+            if (arr.includes(uid) || messages[i].role !== 'user') {
+                continue;
+            }
+
+            const name = messages[i].name;
+            if (name.startsWith('_')) {
+                continue;
+            }
+
+            const ai = AIManager.getAI(uid);
+            const memoryList = ai.memory.memoryList;
+
+            for (const memory of memoryList) {
+                if (memory.group.groupName === groupName) {
+                    return memory.group.groupId;
+                }
+
+                if (memory.group.groupName.length > 5) {
+                    const distance = levenshteinDistance(groupName, memory.group.groupName);
+                    if (distance <= 2) {
+                        return memory.group.groupId;
+                    }
+                }
+            }
+
+            arr.push(uid);
+        }
+
+        const raw_gid = parseInt(groupName);
+        return isNaN(raw_gid) ? null : `QQ-Group:${raw_gid}`;
     }
 
     getNames(): string[] {

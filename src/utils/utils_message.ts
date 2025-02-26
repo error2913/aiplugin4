@@ -3,7 +3,7 @@ import { Message } from "../AI/context";
 import { ConfigManager } from "../config/config";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSetting, showQQ }: { roleSetting: string, showQQ: boolean } = ConfigManager.message;
+    const { roleSetting, showNumber }: { roleSetting: string, showNumber: boolean } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
 
     let content = roleSetting;
@@ -12,9 +12,9 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     if (!ctx.isPrivate) {
         content += `
 **相关信息**
-- 当前群聊:${ctx.group.groupName}
-- <|from:xxx${showQQ ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showQQ ? `，yyy为纯数字QQ号` : ``}
-- <@xxx>表示@某个群成员，xxx为名字${showQQ ? `或者纯数字QQ号` : ``}`;
+- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
+- <|from:xxx${showNumber ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showNumber ? `，yyy为纯数字QQ号` : ``}
+- <@xxx>表示@某个群成员，xxx为名字${showNumber ? `或者纯数字QQ号` : ``}`;
     }
 
     content += `- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
@@ -102,7 +102,7 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
 }
 
 export function handleMessages(ctx: seal.MsgContext, ai: AI) {
-    const { isPrefix, showQQ, isMerge } = ConfigManager.message;
+    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
 
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -114,12 +114,7 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
     let last_role = '';
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
-        const prefix = isPrefix && message.name ?
-            (showQQ ?
-                `<|from:${message.name}(${message.uid.replace(/\D+/g, '')})|>` :
-                `<|from:${message.name}|>`
-            ) :
-            '';
+        const prefix = isPrefix && message.name ? `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>` : '';
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;

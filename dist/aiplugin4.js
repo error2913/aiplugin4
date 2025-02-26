@@ -106,7 +106,7 @@
         "请写点什么，或者删掉这句话"
       ], "role顺序为user和assistant轮流出现");
       seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否给AI展示QQ号", false, "");
+      seal.ext.registerBoolConfig(ConfigManager.ext, "是否给AI展示数字号码", false, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
       seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
       seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
     }
@@ -115,7 +115,7 @@
         roleSetting: seal.ext.getTemplateConfig(ConfigManager.ext, "角色设定")[0],
         samples: seal.ext.getTemplateConfig(ConfigManager.ext, "示例对话"),
         isPrefix: seal.ext.getBoolConfig(ConfigManager.ext, "是否在消息内添加前缀"),
-        showQQ: seal.ext.getBoolConfig(ConfigManager.ext, "是否给AI展示QQ号"),
+        showNumber: seal.ext.getBoolConfig(ConfigManager.ext, "是否给AI展示数字号码"),
         isMerge: seal.ext.getBoolConfig(ConfigManager.ext, "是否合并user content"),
         maxRounds: seal.ext.getIntConfig(ConfigManager.ext, "存储上下文对话限制轮数")
       };
@@ -350,7 +350,7 @@
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             }
           },
           required: ["name"]
@@ -365,7 +365,7 @@
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -373,7 +373,7 @@
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
       if (!success) {
@@ -394,7 +394,7 @@
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             attr: {
               type: "string",
@@ -408,7 +408,7 @@
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, attr } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -416,7 +416,7 @@
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const value = seal.vars.intGet(ctx, attr)[0];
       return `${attr}: ${value}`;
@@ -434,7 +434,7 @@
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             expression: {
               type: "string",
@@ -448,7 +448,7 @@
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, expression } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -456,7 +456,7 @@
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const [attr, expr] = expression.split("=");
       if (expr === void 0) {
@@ -494,7 +494,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             duration: {
               type: "integer",
@@ -513,7 +513,7 @@ ${attr}: ${value}=>${result}`;
         console.error(`未找到HTTP依赖`);
         return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
       }
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -521,7 +521,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       try {
         const epId = ctx.endPoint.userId;
@@ -700,7 +700,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             content: {
               type: "string",
@@ -714,7 +714,7 @@ ${attr}: ${value}=>${result}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, content } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -722,7 +722,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, "")}&s=640`;
       const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
@@ -748,7 +748,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             }
           },
           required: ["name"]
@@ -763,7 +763,7 @@ ${attr}: ${value}=>${result}`;
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -771,7 +771,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
       if (!success) {
@@ -794,7 +794,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             content: {
               type: "string",
@@ -808,7 +808,7 @@ ${attr}: ${value}=>${result}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, content } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -816,7 +816,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
         console.error("不能添加自己的记忆");
         return `不能添加自己的记忆`;
       }
@@ -859,7 +859,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
   function registerShowPersonMemory() {
-    if (!ConfigManager.message.showQQ) {
+    if (!ConfigManager.message.showNumber) {
       return;
     }
     const info = {
@@ -897,6 +897,35 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
   function registerShowGroupMemory() {
+    const info = {
+      type: "function",
+      function: {
+        name: "show_group_memory",
+        description: "查看群聊记忆",
+        parameters: {
+          type: "object",
+          properties: {
+            group_name: {
+              type: "string",
+              description: "群聊名称" + ConfigManager.message.showNumber ? "或纯数字群号" : ""
+            }
+          },
+          required: ["group_name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (_, __, ai, args) => {
+      const { group_name } = args;
+      const gid = ai.context.findGroupId(group_name);
+      if (gid === null) {
+        console.log(`未找到<${group_name}>`);
+        return `未找到<${group_name}>`;
+      }
+      ai = AIManager.getAI(gid);
+      return ai.memory.buildGroupMemoryPrompt();
+    };
+    ToolManager.toolMap[info.function.name] = tool;
   }
 
   // src/tool/tool_modu.ts
@@ -975,7 +1004,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             }
           },
           required: ["name"]
@@ -990,7 +1019,7 @@ ${attr}: ${value}=>${result}`;
         console.error(`未找到HTTP依赖`);
         return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
       }
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -998,7 +1027,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       try {
         const epId = ctx.endPoint.userId;
@@ -1026,7 +1055,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             new_name: {
               type: "string",
@@ -1040,7 +1069,7 @@ ${attr}: ${value}=>${result}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, new_name } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1048,7 +1077,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       try {
         seal.setPlayerGroupCard(ctx, new_name);
@@ -1074,7 +1103,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "被检定的人的名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "被检定的人的名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             expression: {
               type: "string",
@@ -1110,7 +1139,7 @@ ${attr}: ${value}=>${result}`;
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, expression, rank = "", times = 1, additional_dice = "", reason = "" } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1118,7 +1147,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const args2 = [];
       if (additional_dice) {
@@ -1153,7 +1182,7 @@ ${attr}: ${value}=>${result}`;
           properties: {
             name: {
               type: "string",
-              description: "进行sancheck的人的名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "进行sancheck的人的名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             },
             expression: {
               type: "string",
@@ -1176,7 +1205,7 @@ ${attr}: ${value}=>${result}`;
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, expression, additional_dice } = args;
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1184,7 +1213,7 @@ ${attr}: ${value}=>${result}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       const args2 = [];
       if (additional_dice) {
@@ -1535,7 +1564,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
           properties: {
             name: {
               type: "string",
-              description: "用户名称" + ConfigManager.message.showQQ ? "或纯数字QQ号" : ""
+              description: "用户名称" + ConfigManager.message.showNumber ? "或纯数字QQ号" : ""
             }
           },
           required: ["name"]
@@ -1550,7 +1579,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
         console.error(`未找到HTTP依赖`);
         return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
       }
-      const uid = ai.context.findUid(name);
+      const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1558,7 +1587,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = name;
+        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
       }
       try {
         const epId = ctx.endPoint.userId;
@@ -1802,15 +1831,15 @@ QQ等级: ${data.qqLevel}
 
   // src/utils/utils_message.ts
   function buildSystemMessage(ctx, ai) {
-    const { roleSetting, showQQ } = ConfigManager.message;
+    const { roleSetting, showNumber } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     let content = roleSetting;
     if (!ctx.isPrivate) {
       content += `
 **相关信息**
-- 当前群聊:${ctx.group.groupName}
-- <|from:xxx${showQQ ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showQQ ? `，yyy为纯数字QQ号` : ``}
-- <@xxx>表示@某个群成员，xxx为名字${showQQ ? `或者纯数字QQ号` : ``}`;
+- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}
+- <|from:xxx${showNumber ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showNumber ? `，yyy为纯数字QQ号` : ``}
+- <@xxx>表示@某个群成员，xxx为名字${showNumber ? `或者纯数字QQ号` : ``}`;
     }
     content += `- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
     const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
@@ -1884,7 +1913,7 @@ ${memeryPrompt}`;
     return samplesMessages;
   }
   function handleMessages(ctx, ai) {
-    const { isPrefix, showQQ, isMerge } = ConfigManager.message;
+    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
     const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
@@ -1892,7 +1921,7 @@ ${memeryPrompt}`;
     let last_role = "";
     for (let i = 0; i < messages.length; i++) {
       const message = messages[i];
-      const prefix = isPrefix && message.name ? showQQ ? `<|from:${message.name}(${message.uid.replace(/\D+/g, "")})|>` : `<|from:${message.name}|>` : "";
+      const prefix = isPrefix && message.name ? `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, "")})` : ``}|>` : "";
       if (isMerge && message.role === last_role && message.role !== "tool") {
         processedMessages[processedMessages.length - 1].content += "\n" + prefix + message.content;
       } else {
@@ -2269,12 +2298,12 @@ ${memeryPrompt}`;
       if (role === "user" && messages.length !== 0 && messages[messages.length - 1].role === "assistant" && ((_a = messages[messages.length - 1]) == null ? void 0 : _a.tool_calls)) {
         return;
       }
-      const { showQQ, maxRounds } = ConfigManager.message;
+      const { showNumber, maxRounds } = ConfigManager.message;
       s = s.replace(/\[CQ:reply,id=-?\d+\]\[CQ:at,qq=\d+\]/g, "").replace(/\[CQ:at,qq=(\d+)\]/g, (_, p1) => {
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
         const uid2 = `QQ:${p1}`;
-        if (showQQ) {
+        if (showNumber) {
           return `<@${uid2.replace(/\D+/g, "")}）`;
         }
         const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
@@ -2357,7 +2386,7 @@ ${memeryPrompt}`;
         }
       }
     }
-    findUid(name) {
+    findUserId(name) {
       const messages = this.messages;
       for (let i = messages.length - 1; i >= 0; i--) {
         if (name === messages[i].name) {
@@ -2370,8 +2399,38 @@ ${memeryPrompt}`;
           }
         }
       }
-      const raw_uid = name.replace(/\D+/g, "");
-      return raw_uid ? `QQ:${raw_uid}` : null;
+      const raw_uid = parseInt(name);
+      return isNaN(raw_uid) ? null : `QQ:${raw_uid}`;
+    }
+    findGroupId(groupName) {
+      const messages = this.messages;
+      let arr = [];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const uid = messages[i].uid;
+        if (arr.includes(uid) || messages[i].role !== "user") {
+          continue;
+        }
+        const name = messages[i].name;
+        if (name.startsWith("_")) {
+          continue;
+        }
+        const ai = AIManager.getAI(uid);
+        const memoryList = ai.memory.memoryList;
+        for (const memory of memoryList) {
+          if (memory.group.groupName === groupName) {
+            return memory.group.groupId;
+          }
+          if (memory.group.groupName.length > 5) {
+            const distance = levenshteinDistance(groupName, memory.group.groupName);
+            if (distance <= 2) {
+              return memory.group.groupId;
+            }
+          }
+        }
+        arr.push(uid);
+      }
+      const raw_gid = parseInt(groupName);
+      return isNaN(raw_gid) ? null : `QQ-Group:${raw_gid}`;
     }
     getNames() {
       const names = [];
@@ -2470,28 +2529,30 @@ ${memeryPrompt}`;
       return s;
     }
     buildMemoryPrompt(ctx, context) {
-      const { showQQ } = ConfigManager.message;
+      const { showNumber } = ConfigManager.message;
       if (ctx.isPrivate) {
         return this.buildPersonMemoryPrompt();
       } else {
+        const gid = ctx.group.groupId;
         let s = `
-- 关于群聊:<${ctx.group.groupName}>:`;
+- 关于群聊:<${ctx.group.groupName}>${showNumber ? `(${gid.replace(/\D+/g, "")})` : ``}:`;
         s += this.buildGroupMemoryPrompt();
         const arr = [];
         for (const message of context.messages) {
-          if (!arr.includes(message.uid) && message.role === "user") {
-            const uid = message.uid;
-            const name = message.name;
-            if (name.startsWith("_")) {
-              continue;
-            }
-            const ai = AIManager.getAI(uid);
-            s += `
-
-关于<${name}>${showQQ ? `(${uid.replace(/\D+/g, "")})` : ``}:`;
-            s += ai.memory.buildPersonMemoryPrompt();
-            arr.push(uid);
+          const uid = message.uid;
+          if (arr.includes(uid) || message.role !== "user") {
+            continue;
           }
+          const name = message.name;
+          if (name.startsWith("_")) {
+            continue;
+          }
+          const ai = AIManager.getAI(uid);
+          s += `
+
+关于<${name}>${showNumber ? `(${uid.replace(/\D+/g, "")})` : ``}:`;
+          s += ai.memory.buildPersonMemoryPrompt();
+          arr.push(uid);
         }
         return s;
       }
@@ -2567,7 +2628,7 @@ ${memeryPrompt}`;
   }
   function replaceMentions(context, reply) {
     return reply.replace(/<@(.+?)>/g, (_, p1) => {
-      const uid = context.findUid(p1);
+      const uid = context.findUserId(p1);
       if (uid !== null) {
         return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
       } else {

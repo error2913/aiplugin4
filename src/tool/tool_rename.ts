@@ -13,7 +13,7 @@ export function registerRename() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
+                        description: '用户名称' + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
                     },
                     new_name: {
                         type: 'string',
@@ -29,7 +29,7 @@ export function registerRename() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
 
-        const uid = ai.context.findUid(name);
+        const uid = ai.context.findUserId(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
@@ -39,7 +39,7 @@ export function registerRename() {
         ctx = createCtx(ctx.endPoint.userId, msg);
 
         if (uid === ctx.endPoint.userId) {
-            ctx.player.name = name;
+            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
         }
 
         try {

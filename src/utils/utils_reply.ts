@@ -103,7 +103,7 @@ function checkRepeat(context: Context, s: string) {
  */
 function replaceMentions(context: Context, reply: string) {
     return reply.replace(/<@(.+?)>/g, (_, p1) => {
-        const uid = context.findUid(p1);
+        const uid = context.findUserId(p1);
         if (uid !== null) {
             return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
         } else {

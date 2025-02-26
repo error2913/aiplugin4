@@ -14,7 +14,7 @@ export function registerAddPersonMemory() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + ConfigManager.message.showQQ ? '或纯数字QQ号' : ''
+                        description: '用户名称' + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
                     },
                     content: {
                         type: 'string',
@@ -30,7 +30,7 @@ export function registerAddPersonMemory() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, content } = args;
 
-        const uid = ai.context.findUid(name);
+        const uid = ai.context.findUserId(name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
@@ -40,7 +40,7 @@ export function registerAddPersonMemory() {
         ctx = createCtx(ctx.endPoint.userId, msg);
 
         if (uid === ctx.endPoint.userId) {
-            ctx.player.name = name;
+            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
             console.error('不能添加自己的记忆');
             return `不能添加自己的记忆`;
         }
@@ -95,8 +95,8 @@ export function registerAddGroupMemory() {
 }
 
 export function registerShowPersonMemory() {
-    // 如果不显示QQ号，就不注册这个函数
-    if (!ConfigManager.message.showQQ) {
+    // 如果不显示QQ号，就不注册这个函数，因为名称对应的记忆已经在system prompt中添加
+    if (!ConfigManager.message.showNumber) {
         return;
     }
 
@@ -143,5 +143,40 @@ export function registerShowPersonMemory() {
 }
 
 export function registerShowGroupMemory() {
-    // 后续添加
+    // 如果不显示QQ号，也注册这个函数，因为可以通过名称查找群号
+
+    const info: ToolInfo = {
+        type: 'function',
+        function: {
+            name: 'show_group_memory',
+            description: '查看群聊记忆',
+            parameters: {
+                type: 'object',
+                properties: {
+                    group_name: {
+                        type: 'string',
+                        description: '群聊名称' + ConfigManager.message.showNumber ? '或纯数字群号' : ''
+                    }
+                },
+                required: ['group_name']
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (_, __, ai, args) => {
+        const { group_name } = args;
+
+        const gid = ai.context.findGroupId(group_name);
+        if (gid === null) {
+            console.log(`未找到<${group_name}>`);
+            return `未找到<${group_name}>`;
+        }
+
+        //记忆相关处理
+        ai = AIManager.getAI(gid);
+        return ai.memory.buildGroupMemoryPrompt();
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
 }
