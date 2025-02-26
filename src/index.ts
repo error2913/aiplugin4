@@ -11,7 +11,7 @@ import { buildSystemMessage } from "./utils/utils_message";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.1');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.2');
     seal.ext.register(ext);
   }
 
@@ -383,6 +383,19 @@ function main() {
       case 'tool': {
         const val2 = cmdArgs.getArgN(2);
         switch (val2) {
+          case '': {
+            const toolStatus = ai.tool.toolStatus;
+
+            let i = 1;
+            let s = '工具函数如下:';
+            Object.keys(toolStatus).forEach(key => {
+              const status = toolStatus[key] ? '开' : '关';
+              s += `\n${i++}. ${key}[${status}]`;
+            });
+
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
           case 'help': {
             const val3 = cmdArgs.getArgN(3);
             if (!val3) {
@@ -434,19 +447,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             AIManager.saveAI(id);
             return ret;
           }
-          case '': {
-            const toolStatus = ai.tool.toolStatus;
-
-            let i = 1;
-            let s = '工具函数如下:';
-            Object.keys(toolStatus).forEach(key => {
-              const status = toolStatus[key] ? '开' : '关';
-              s += `\n${i++}. ${key}[${status}]`;
-            });
-
-            seal.replyToSender(ctx, msg, s);
-            return ret;
-          }
           default: {
             if (!ToolManager.toolMap.hasOwnProperty(val2)) {
               seal.replyToSender(ctx, msg, '没有这个工具函数');
@@ -474,14 +474,19 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             }
 
             // 调用工具函数
+            if (ctx.privilegeLevel < 100) {
+              seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+              return ret;
+            }
+
+            if (ToolManager.cmdArgs == null) {
+              seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意指令`);
+              return ret;
+            }
+
+            const tool = ToolManager.toolMap[val2];
+
             try {
-              if (ToolManager.cmdArgs == null) {
-                seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意指令`);
-                return ret;
-              }
-
-              const tool = ToolManager.toolMap[val2];
-
               const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
                 const valueString = kwarg.value;
                 try {
@@ -491,6 +496,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 }
                 return acc;
               }, {});
+
+              if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
+                log(`调用函数失败:缺少必需参数`);
+                seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数`);
+                return ret;
+              }
 
               const s = await tool.solve(ctx, msg, ai, args);
               seal.replyToSender(ctx, msg, s);

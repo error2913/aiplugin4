@@ -155,7 +155,7 @@ export class Context {
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'user') {
+            if (messages[i].role === 'user' && !messages[i].name.startsWith('_')) {
                 round++;
             }
             if (round > maxRounds) {

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.1
-// @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，原有的基于解析返回文本的AI命令已经被完全替换。选用模型是否支持该功能请查看相应接口文档。
+// @version      4.5.2
+// @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，原有的基于解析返回文本的AI命令已经被完全替换。选用模型是否支持该功能请查看相应接口文档。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
 // @license      MIT
@@ -1830,6 +1830,9 @@ QQ等级: ${data.qqLevel}
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
+        if (uid === ctx.player.userId && ctx.isPrivate) {
+          return `向当前私聊发送消息无需调用函数`;
+        }
         if (uid === ctx.endPoint.userId) {
           return `禁止向自己发送消息`;
         }
@@ -2571,7 +2574,7 @@ ${memeryPrompt}`;
       const messages = this.messages;
       let round = 0;
       for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
+        if (messages[i].role === "user" && !messages[i].name.startsWith("_")) {
           round++;
         }
         if (round > maxRounds) {
@@ -2883,7 +2886,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.1");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.2");
       seal.ext.register(ext);
     }
     try {
@@ -3228,6 +3231,18 @@ ${memeryPrompt}`;
         case "tool": {
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
+            case "": {
+              const toolStatus = ai.tool.toolStatus;
+              let i = 1;
+              let s = "工具函数如下:";
+              Object.keys(toolStatus).forEach((key) => {
+                const status = toolStatus[key] ? "开" : "关";
+                s += `
+${i++}. ${key}[${status}]`;
+              });
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
             case "help": {
               const val3 = cmdArgs.getArgN(3);
               if (!val3) {
@@ -3276,18 +3291,6 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
               AIManager.saveAI(id);
               return ret;
             }
-            case "": {
-              const toolStatus = ai.tool.toolStatus;
-              let i = 1;
-              let s = "工具函数如下:";
-              Object.keys(toolStatus).forEach((key) => {
-                const status = toolStatus[key] ? "开" : "关";
-                s += `
-${i++}. ${key}[${status}]`;
-              });
-              seal.replyToSender(ctx, msg, s);
-              return ret;
-            }
             default: {
               if (!ToolManager.toolMap.hasOwnProperty(val2)) {
                 seal.replyToSender(ctx, msg, "没有这个工具函数");
@@ -3310,12 +3313,16 @@ ${i++}. ${key}[${status}]`;
                 AIManager.saveAI(id);
                 return ret;
               }
+              if (ctx.privilegeLevel < 100) {
+                seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+                return ret;
+              }
+              if (ToolManager.cmdArgs == null) {
+                seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意指令`);
+                return ret;
+              }
+              const tool = ToolManager.toolMap[val2];
               try {
-                if (ToolManager.cmdArgs == null) {
-                  seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意指令`);
-                  return ret;
-                }
-                const tool = ToolManager.toolMap[val2];
                 const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
                   const valueString = kwarg.value;
                   try {
@@ -3325,6 +3332,11 @@ ${i++}. ${key}[${status}]`;
                   }
                   return acc;
                 }, {});
+                if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
+                  log(`调用函数失败:缺少必需参数`);
+                  seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数`);
+                  return ret;
+                }
                 const s = await tool.solve(ctx, msg, ai, args);
                 seal.replyToSender(ctx, msg, s);
                 return ret;
