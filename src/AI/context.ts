@@ -115,6 +115,17 @@ export class Context {
     }
 
     async toolIteration(tool_call_id: string, s: string) {
+        const index = this.messages.findIndex(item => {
+            if (item?.tool_calls) {
+                return item.tool_calls.some(item => item.id === tool_call_id);
+            } else {
+                return false;
+            }
+        });
+        if (index === -1) {
+            return; 
+        }
+
         const message = {
             role: 'tool',
             content: s,
@@ -124,7 +135,8 @@ export class Context {
             timestamp: Math.floor(Date.now() / 1000),
             images: []
         };
-        this.messages.push(message);
+
+        this.messages.splice(index + 1, 0, message);
     }
 
     async systemUserIteration(name: string, s: string) {

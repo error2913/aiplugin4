@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.0
+// @version      4.5.1
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，原有的基于解析返回文本的AI命令已经被完全替换。选用模型是否支持该功能请查看相应接口文档。
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -1644,6 +1644,223 @@ QQ等级: ${data.qqLevel}
     ToolManager.toolMap[info.function.name] = tool;
   }
 
+  // src/utils/utils_string.ts
+  function getCQTypes(s) {
+    const match = s.match(/\[CQ:([^,]*?),.*?\]/g);
+    if (match) {
+      return match.map((item) => item.match(/\[CQ:([^,]*?),/)[1]);
+    } else {
+      return [];
+    }
+  }
+  function levenshteinDistance(s1, s2) {
+    const len1 = s1.length;
+    const len2 = s2.length;
+    const dp = Array.from({ length: len1 + 1 }, () => Array(len2 + 1).fill(0));
+    for (let i = 0; i <= len1; i++) {
+      dp[i][0] = i;
+    }
+    for (let j = 0; j <= len2; j++) {
+      dp[0][j] = j;
+    }
+    for (let i = 1; i <= len1; i++) {
+      for (let j = 1; j <= len2; j++) {
+        if (s1[i - 1] === s2[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1];
+        } else {
+          dp[i][j] = Math.min(
+            dp[i - 1][j] + 1,
+            // 删除
+            dp[i][j - 1] + 1,
+            // 插入
+            dp[i - 1][j - 1] + 1
+            // 替换
+          );
+        }
+      }
+    }
+    return dp[len1][len2];
+  }
+  function calculateSimilarity(s1, s2) {
+    if (s1.length === 0 || s2.length === 0) {
+      return 0;
+    }
+    const distance = levenshteinDistance(s1, s2);
+    const maxLength = Math.max(s1.length, s2.length);
+    return 1 - distance / maxLength;
+  }
+
+  // src/utils/utils_reply.ts
+  async function handleReply(ctx, msg, s, context) {
+    const { maxChar, replymsg, filterContextTemplate, filterReplyTemplate } = ConfigManager.reply;
+    const segments = s.split(/<[\|｜]from.*?[\|｜]?>/).filter((item) => item.trim() !== "");
+    if (segments.length === 0) {
+      return { s: "", reply: "", isRepeat: false, images: [] };
+    }
+    s = segments[0].replace(/<br>/g, "\n").slice(0, maxChar).trim();
+    let reply = s;
+    filterContextTemplate.forEach((item) => {
+      try {
+        const regex = new RegExp(item, "g");
+        s = s.replace(regex, "");
+      } catch (error) {
+        console.error("Error in RegExp:", error);
+      }
+    });
+    const isRepeat = checkRepeat(context, s);
+    reply = replaceMentions(context, reply);
+    const { result, images } = await replaceImages(context, reply);
+    reply = result;
+    filterReplyTemplate.forEach((item) => {
+      try {
+        const regex = new RegExp(item, "g");
+        reply = reply.replace(regex, "");
+      } catch (error) {
+        console.error("Error in RegExp:", error);
+      }
+    });
+    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    reply = prefix + reply.trim();
+    return { s, isRepeat, reply, images };
+  }
+  function checkRepeat(context, s) {
+    const { stopRepeat, similarityLimit } = ConfigManager.reply;
+    if (!stopRepeat) {
+      return false;
+    }
+    const messages = context.messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role === "assistant" && !(message == null ? void 0 : message.tool_calls)) {
+        const content = message.content;
+        const similarity = calculateSimilarity(content.trim(), s.trim());
+        log(`复读相似度：${similarity}`);
+        if (similarity > similarityLimit) {
+          let start = i;
+          let count = 1;
+          for (let j = i - 1; j >= 0; j--) {
+            const message2 = messages[j];
+            if (message2.role === "tool" || message2.role === "assistant" && (message2 == null ? void 0 : message2.tool_calls)) {
+              start = j;
+              count++;
+            } else {
+              break;
+            }
+          }
+          messages.splice(start, count);
+          return true;
+        }
+        break;
+      }
+    }
+    return false;
+  }
+  function replaceMentions(context, reply) {
+    return reply.replace(/<@(.+?)>/g, (_, p1) => {
+      const uid = context.findUserId(p1);
+      if (uid !== null) {
+        return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
+      } else {
+        return ` @${p1} `;
+      }
+    });
+  }
+  async function replaceImages(context, reply) {
+    let result = reply;
+    const images = [];
+    const match = reply.match(/<[\|｜]图片.+?[\|｜]?>/g);
+    if (match) {
+      for (let i = 0; i < match.length; i++) {
+        const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+        const image = context.findImage(id);
+        if (image) {
+          const file = image.file;
+          images.push(image);
+          if (!image.isUrl || image.isUrl && await ImageManager.checkImageUrl(file)) {
+            result = result.replace(match[i], `[CQ:image,file=${file}]`);
+            continue;
+          }
+        }
+        result = result.replace(match[i], ``);
+      }
+    }
+    return { result, images };
+  }
+
+  // src/tool/tool_send_msg.ts
+  function registerSendMsg() {
+    const info = {
+      type: "function",
+      function: {
+        name: "send_msg",
+        description: `向指定私聊发送消息`,
+        parameters: {
+          type: "object",
+          properties: {
+            msg_type: {
+              type: "string",
+              description: "消息类型，私聊或群聊",
+              enum: ["private", "group"]
+            },
+            name: {
+              type: "string",
+              description: "用户名称或群聊名称" + ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : ""
+            },
+            content: {
+              type: "string",
+              description: "消息内容"
+            },
+            reason: {
+              type: "string",
+              description: "发送原因"
+            }
+          },
+          required: ["msg_type", "name", "content"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, ai, args) => {
+      const { msg_type, name, content, reason = "" } = args;
+      const { showNumber } = ConfigManager.message;
+      const source = ctx.isPrivate ? `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}` : `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}`;
+      if (msg_type === "private") {
+        const uid = ai.context.findUserId(name);
+        if (uid === null) {
+          console.log(`未找到<${name}>`);
+          return `未找到<${name}>`;
+        }
+        if (uid === ctx.player.userId && ctx.isPrivate) {
+          return `向自己发送消息无需调用函数`;
+        }
+        msg = createMsg("private", uid, "");
+        ctx = createCtx(ctx.endPoint.userId, msg);
+        ai = AIManager.getAI(uid);
+      } else if (msg_type === "group") {
+        const gid = ai.context.findGroupId(name);
+        if (gid === null) {
+          console.log(`未找到<${name}>`);
+          return `未找到<${name}>`;
+        }
+        if (gid === ctx.group.groupId) {
+          return `向当前群聊发送消息无需调用函数`;
+        }
+        msg = createMsg("group", ctx.player.userId, gid);
+        ctx = createCtx(ctx.endPoint.userId, msg);
+        ai = AIManager.getAI(gid);
+      } else {
+        return `未知的消息类型<${msg_type}>`;
+      }
+      await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || "无"}`);
+      const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
+      ai.context.lastReply = reply;
+      await ai.context.iteration(ctx, s, images, "assistant");
+      seal.replyToSender(ctx, msg, reply);
+      return "消息发送成功";
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
   // src/tool/tool.ts
   var Tool = class {
     constructor(info) {
@@ -1725,6 +1942,7 @@ QQ等级: ${data.qqLevel}
       registerGroupSign();
       registerGetPersonInfo();
       registerRecord();
+      registerSendMsg();
     }
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
@@ -1793,7 +2011,7 @@ QQ等级: ${data.qqLevel}
             continue;
           }
           const s = await tool.solve(ctx, msg, ai, args);
-          ai.context.toolIteration(tool_calls[i].id, s);
+          await ai.context.toolIteration(tool_calls[i].id, s);
         } catch (e) {
           const s = `调用函数 (${name}:${tool_calls[i].function.arguments}) 失败:${e.message}`;
           console.error(s);
@@ -1805,33 +2023,33 @@ QQ等级: ${data.qqLevel}
     static async handlePromptTool(ctx, msg, ai, tool_call) {
       if (!tool_call.hasOwnProperty("name") || !tool_call.hasOwnProperty("arguments")) {
         log(`调用函数失败:缺少name或arguments`);
-        ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`);
+        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`);
       }
       const name = tool_call.name;
       try {
         if (this.cmdArgs == null) {
           log(`暂时无法调用函数，请先使用任意指令`);
-          ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`);
+          await ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`);
           return;
         }
         const tool = this.toolMap[name];
         const args = tool_call.arguments;
         if (args !== null && typeof args !== "object") {
           log(`调用函数失败:arguement不是一个object`);
-          ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`);
+          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`);
           return;
         }
         if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
           log(`调用函数失败:缺少必需参数`);
-          ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数`);
+          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数`);
           return;
         }
         const s = await tool.solve(ctx, msg, ai, args);
-        ai.context.systemUserIteration("_调用函数返回", s);
+        await ai.context.systemUserIteration("_调用函数返回", s);
       } catch (e) {
         const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
         console.error(s);
-        ai.context.systemUserIteration("_调用函数返回", s);
+        await ai.context.systemUserIteration("_调用函数返回", s);
       }
     }
   };
@@ -2080,7 +2298,7 @@ ${memeryPrompt}`;
   }
 
   // src/AI/image.ts
-  var Image = class {
+  var Image2 = class {
     constructor(file) {
       this.id = generateId();
       this.isUrl = file.startsWith("http");
@@ -2164,6 +2382,12 @@ ${memeryPrompt}`;
         return url;
       }
     }
+    /**
+     * 提取并替换CQ码中的图片
+     * @param ctx 
+     * @param message 
+     * @returns 
+     */
     static async handleImageMessage(ctx, message) {
       const images = [];
       const match = message.match(/\[CQ:image,file=(.*?)\]/g);
@@ -2171,7 +2395,7 @@ ${memeryPrompt}`;
         for (let i = 0; i < match.length; i++) {
           try {
             const file = match[i].match(/\[CQ:image,file=(.*?)\]/)[1];
-            const image = new Image(file);
+            const image = new Image2(file);
             message = message.replace(`[CQ:image,file=${file}]`, `<|图片${image.id}|>`);
             if (image.isUrl) {
               const { condition } = ConfigManager.image;
@@ -2237,52 +2461,6 @@ ${memeryPrompt}`;
       return reply;
     }
   };
-
-  // src/utils/utils_string.ts
-  function getCQTypes(s) {
-    const match = s.match(/\[CQ:([^,]*?),.*?\]/g);
-    if (match) {
-      return match.map((item) => item.match(/\[CQ:([^,]*?),/)[1]);
-    } else {
-      return [];
-    }
-  }
-  function levenshteinDistance(s1, s2) {
-    const len1 = s1.length;
-    const len2 = s2.length;
-    const dp = Array.from({ length: len1 + 1 }, () => Array(len2 + 1).fill(0));
-    for (let i = 0; i <= len1; i++) {
-      dp[i][0] = i;
-    }
-    for (let j = 0; j <= len2; j++) {
-      dp[0][j] = j;
-    }
-    for (let i = 1; i <= len1; i++) {
-      for (let j = 1; j <= len2; j++) {
-        if (s1[i - 1] === s2[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1];
-        } else {
-          dp[i][j] = Math.min(
-            dp[i - 1][j] + 1,
-            // 删除
-            dp[i][j - 1] + 1,
-            // 插入
-            dp[i - 1][j - 1] + 1
-            // 替换
-          );
-        }
-      }
-    }
-    return dp[len1][len2];
-  }
-  function calculateSimilarity(s1, s2) {
-    if (s1.length === 0 || s2.length === 0) {
-      return 0;
-    }
-    const distance = levenshteinDistance(s1, s2);
-    const maxLength = Math.max(s1.length, s2.length);
-    return 1 - distance / maxLength;
-  }
 
   // src/AI/context.ts
   var Context = class _Context {
@@ -2357,6 +2535,16 @@ ${memeryPrompt}`;
       this.messages.push(message);
     }
     async toolIteration(tool_call_id, s) {
+      const index = this.messages.findIndex((item) => {
+        if (item == null ? void 0 : item.tool_calls) {
+          return item.tool_calls.some((item2) => item2.id === tool_call_id);
+        } else {
+          return false;
+        }
+      });
+      if (index === -1) {
+        return;
+      }
       const message = {
         role: "tool",
         content: s,
@@ -2366,7 +2554,7 @@ ${memeryPrompt}`;
         timestamp: Math.floor(Date.now() / 1e3),
         images: []
       };
-      this.messages.push(message);
+      this.messages.splice(index + 1, 0, message);
     }
     async systemUserIteration(name, s) {
       const message = {
@@ -2508,6 +2696,7 @@ ${memeryPrompt}`;
       this.memoryList.splice(0, this.memoryList.length - memoryLimit);
     }
     buildPersonMemoryPrompt() {
+      const { showNumber } = ConfigManager.message;
       let s = `
 - 设定:${this.persona}
 - 记忆:
@@ -2516,7 +2705,7 @@ ${memeryPrompt}`;
         s += "无";
       } else {
         s += this.memoryList.map((item, i) => {
-          return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>`}: ${item.content}`;
+          return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/\D+/g, "")})` : ``}`}: ${item.content}`;
         }).join("\n");
       }
       return s;
@@ -2568,100 +2757,6 @@ ${memeryPrompt}`;
     }
   };
 
-  // src/utils/utils_reply.ts
-  async function handleReply(ctx, msg, s, context) {
-    const { maxChar, replymsg, filterContextTemplate, filterReplyTemplate } = ConfigManager.reply;
-    const segments = s.split(/<[\|｜]from.*?[\|｜]?>/).filter((item) => item.trim() !== "");
-    if (segments.length === 0) {
-      return { s: "", reply: "", isRepeat: false };
-    }
-    s = segments[0].replace(/<br>/g, "\n").slice(0, maxChar).trim();
-    let reply = s;
-    filterContextTemplate.forEach((item) => {
-      try {
-        const regex = new RegExp(item, "g");
-        s = s.replace(regex, "");
-      } catch (error) {
-        console.error("Error in RegExp:", error);
-      }
-    });
-    const isRepeat = checkRepeat(context, s);
-    reply = replaceMentions(context, reply);
-    reply = await replaceImages(context, reply);
-    filterReplyTemplate.forEach((item) => {
-      try {
-        const regex = new RegExp(item, "g");
-        reply = reply.replace(regex, "");
-      } catch (error) {
-        console.error("Error in RegExp:", error);
-      }
-    });
-    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
-    reply = prefix + reply.trim();
-    return { s, isRepeat, reply };
-  }
-  function checkRepeat(context, s) {
-    const { stopRepeat, similarityLimit } = ConfigManager.reply;
-    if (!stopRepeat) {
-      return false;
-    }
-    const messages = context.messages;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      if (message.role === "assistant" && !(message == null ? void 0 : message.tool_calls)) {
-        const content = message.content;
-        const similarity = calculateSimilarity(content.trim(), s.trim());
-        log(`复读相似度：${similarity}`);
-        if (similarity > similarityLimit) {
-          let start = i;
-          let count = 1;
-          for (let j = i - 1; j >= 0; j--) {
-            const message2 = messages[j];
-            if (message2.role === "tool" || message2.role === "assistant" && (message2 == null ? void 0 : message2.tool_calls)) {
-              start = j;
-              count++;
-            } else {
-              break;
-            }
-          }
-          messages.splice(start, count);
-          return true;
-        }
-        break;
-      }
-    }
-    return false;
-  }
-  function replaceMentions(context, reply) {
-    return reply.replace(/<@(.+?)>/g, (_, p1) => {
-      const uid = context.findUserId(p1);
-      if (uid !== null) {
-        return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
-      } else {
-        return ` @${p1} `;
-      }
-    });
-  }
-  async function replaceImages(context, reply) {
-    let result = reply;
-    const match = reply.match(/<[\|｜]图片.+?[\|｜]?>/g);
-    if (match) {
-      for (let i = 0; i < match.length; i++) {
-        const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
-        const image = context.findImage(id);
-        if (image) {
-          const file = image.file;
-          if (!image.isUrl || image.isUrl && await ImageManager.checkImageUrl(file)) {
-            result = result.replace(match[i], `[CQ:image,file=${file}]`);
-            continue;
-          }
-        }
-        result = result.replace(match[i], ``);
-      }
-    }
-    return result;
-  }
-
   // src/AI/AI.ts
   var AI = class _AI {
     constructor(id) {
@@ -2703,19 +2798,19 @@ ${memeryPrompt}`;
     async getReply(ctx, msg, retry = 0) {
       const messages = handleMessages(ctx, this);
       const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
-      const { s, isRepeat, reply } = await handleReply(ctx, msg, raw_reply, this.context);
+      const { s, isRepeat, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
       if (isRepeat && reply !== "") {
         if (retry == 3) {
           log(`发现复读，已达到最大重试次数，清除AI上下文`);
           this.context.messages = this.context.messages.filter((item) => item.role !== "assistant" && item.role !== "tool");
-          return { s: "", reply: "" };
+          return { s: "", reply: "", images: [] };
         }
         retry++;
         log(`发现复读，一秒后进行重试:[${retry}/3]`);
         await new Promise((resolve) => setTimeout(resolve, 1e3));
         return await this.getReply(ctx, msg, retry);
       }
-      return { s, reply };
+      return { s, reply, images };
     }
     async chat(ctx, msg) {
       if (this.isChatting) {
@@ -2728,9 +2823,7 @@ ${memeryPrompt}`;
         log(this.id, `处理消息超时`);
       }, 60 * 1e3);
       this.clearData();
-      let { s, reply } = await this.getReply(ctx, msg);
-      const { message, images } = await ImageManager.handleImageMessage(ctx, s);
-      s = message;
+      let { s, reply, images } = await this.getReply(ctx, msg);
       this.context.lastReply = reply;
       await this.context.iteration(ctx, s, images, "assistant");
       seal.replyToSender(ctx, msg, reply);
@@ -2790,7 +2883,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.0");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.1");
       seal.ext.register(ext);
     }
     try {

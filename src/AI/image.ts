@@ -112,6 +112,12 @@ export class ImageManager {
         }
     }
 
+    /**
+     * 提取并替换CQ码中的图片
+     * @param ctx 
+     * @param message 
+     * @returns 
+     */
     static async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<{ message: string, images: Image[] }> {
         const images: Image[] = [];
 

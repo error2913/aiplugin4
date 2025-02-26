@@ -1,10 +1,10 @@
 import { Context } from "../AI/context";
-import { ImageManager } from "../AI/image";
+import { Image, ImageManager } from "../AI/image";
 import { ConfigManager } from "../config/config";
 import { log } from "./utils";
 import { calculateSimilarity } from "./utils_string";
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, isRepeat: boolean, reply: string }> {
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, isRepeat: boolean, reply: string, images: Image[] }> {
     const { maxChar, replymsg, filterContextTemplate, filterReplyTemplate } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
@@ -12,7 +12,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         .split(/<[\|｜]from.*?[\|｜]?>/)
         .filter(item => item.trim() !== '');
     if (segments.length === 0) {
-        return { s: '', reply: '', isRepeat: false };
+        return { s: '', reply: '', isRepeat: false, images: [] };
     }
 
     s = segments[0]
@@ -36,7 +36,8 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     const isRepeat = checkRepeat(context, s);
 
     reply = replaceMentions(context, reply);
-    reply = await replaceImages(context, reply);
+    const { result, images } = await replaceImages(context, reply);
+    reply = result;
 
     // 应用过滤回复正则表达式
     filterReplyTemplate.forEach(item => {
@@ -51,7 +52,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
     reply = prefix + reply.trim();
 
-    return { s, isRepeat, reply };
+    return { s, isRepeat, reply, images };
 }
 
 function checkRepeat(context: Context, s: string) {
@@ -120,6 +121,7 @@ function replaceMentions(context: Context, reply: string) {
  */
 async function replaceImages(context: Context, reply: string) {
     let result = reply;
+    const images = [];
 
     const match = reply.match(/<[\|｜]图片.+?[\|｜]?>/g);
     if (match) {
@@ -129,6 +131,7 @@ async function replaceImages(context: Context, reply: string) {
 
             if (image) {
                 const file = image.file;
+                images.push(image);
 
                 if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(file))) {
                     result = result.replace(match[i], `[CQ:image,file=${file}]`);
@@ -140,5 +143,5 @@ async function replaceImages(context: Context, reply: string) {
         }
     }
 
-    return result;
+    return { result, images };
 }

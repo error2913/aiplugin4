@@ -77,13 +77,15 @@ export class Memory {
     }
 
     buildPersonMemoryPrompt(): string {
+        const { showNumber } = ConfigManager.message;
+        
         let s = `\n- 设定:${this.persona}\n- 记忆:\n`;
 
         if (this.memoryList.length === 0) {
             s += '无';
         } else {
             s += this.memoryList.map((item, i) => {
-                return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>`}: ${item.content}`;
+                return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/\D+/g, '')})` : ``}`}: ${item.content}`;
             }).join('\n');
         }
 
