@@ -3099,6 +3099,7 @@ ${memeryPrompt}`;
                 const s2 = `帮助:
 【.ai tool】列出所有工具
 【.ai tool help <函数名>】查看工具详情
+【.ai tool [on/off]】开启或关闭全部工具函数
 【.ai tool <函数名> [on/off]】开启或关闭工具函数
 【.ai tool <函数名> --参数名=具体参数】试用工具函数
 `;
@@ -3121,6 +3122,23 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
 
 必需参数:${tool.info.function.parameters.required.join(",")}`;
               seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
+            case "on": {
+              const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
+              for (const key in ai.tool.toolStatus) {
+                ai.tool.toolStatus[key] = toolsNotAllow.includes(key) ? false : true;
+              }
+              seal.replyToSender(ctx, msg, "已开启全部工具函数");
+              AIManager.saveAI(id);
+              return ret;
+            }
+            case "off": {
+              for (const key in ai.tool.toolStatus) {
+                ai.tool.toolStatus[key] = false;
+              }
+              seal.replyToSender(ctx, msg, "已关闭全部工具函数");
+              AIManager.saveAI(id);
               return ret;
             }
             case "": {
