@@ -242,6 +242,7 @@
         "书香少女",
         "自定义"
       ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg");
+      seal.ext.registerTemplateConfig(ConfigManager.ext, "本地语音路径", ["<钢管落地>data/records/钢管落地.mp3"], "如不需要可以不填写，尖括号内是语音的名称，便于AI调用，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中");
     }
     static get() {
       return {
@@ -251,7 +252,8 @@
         toolsDefaultClosed: seal.ext.getTemplateConfig(ConfigManager.ext, "默认关闭的函数"),
         memoryLimit: seal.ext.getIntConfig(ConfigManager.ext, "长期记忆上限"),
         decks: seal.ext.getTemplateConfig(ConfigManager.ext, "提供给AI的牌堆名称"),
-        character: seal.ext.getOptionConfig(ConfigManager.ext, "ai语音使用的音色")
+        character: seal.ext.getOptionConfig(ConfigManager.ext, "ai语音使用的音色"),
+        recordsTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "本地语音路径")
       };
     }
   };
@@ -579,11 +581,14 @@ ${attr}: ${value}=>${result}`;
       }
       return acc;
     }, {});
+    if (Object.keys(localImages).length === 0) {
+      return;
+    }
     const info = {
       type: "function",
       function: {
         name: "face",
-        description: `发送表情包，${Object.keys(localImages).length === 0 ? "目前暂无可使用表情" : `表情名称有:${Object.keys(localImages).join("、")}`}`,
+        description: `发送表情包，表情名称有:${Object.keys(localImages).join("、")}`,
         parameters: {
           type: "object",
           properties: {
@@ -599,17 +604,8 @@ ${attr}: ${value}=>${result}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, _, args) => {
       const { name } = args;
-      const { localImagesTemplate: localImagesTemplate2 } = ConfigManager.image;
-      const localImages2 = localImagesTemplate2.reduce((acc, item) => {
-        const match = item.match(/<(.+)>.*/);
-        if (match !== null) {
-          const key = match[1];
-          acc[key] = item.replace(/<.*>/g, "");
-        }
-        return acc;
-      }, {});
-      if (localImages2.hasOwnProperty(name)) {
-        seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages2[name]}]`);
+      if (localImages.hasOwnProperty(name)) {
+        seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);
         return "发送成功";
       } else {
         console.error(`本地图片${name}不存在`);
@@ -1603,6 +1599,51 @@ QQ等级: ${data.qqLevel}
     ToolManager.toolMap[info.function.name] = tool;
   }
 
+  // src/tool/tool_record.ts
+  function registerRecord() {
+    const { recordsTemplate } = ConfigManager.tool;
+    const records = recordsTemplate.reduce((acc, item) => {
+      const match = item.match(/<(.+)>.*/);
+      if (match !== null) {
+        const key = match[1];
+        acc[key] = item.replace(/<.*>/g, "");
+      }
+      return acc;
+    }, {});
+    if (Object.keys(records).length === 0) {
+      return;
+    }
+    const info = {
+      type: "function",
+      function: {
+        name: "record",
+        description: `发送语音，语音名称有:${Object.keys(records).join("、")}`,
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "语音名称"
+            }
+          },
+          required: ["name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, _, args) => {
+      const { name } = args;
+      if (records.hasOwnProperty(name)) {
+        seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
+        return "发送成功";
+      } else {
+        console.error(`本地语音${name}不存在`);
+        return `本地语音${name}不存在`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
   // src/tool/tool.ts
   var Tool = class {
     constructor(info) {
@@ -1683,6 +1724,7 @@ QQ等级: ${data.qqLevel}
       registerSanCheck();
       registerGroupSign();
       registerGetPersonInfo();
+      registerRecord();
     }
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数

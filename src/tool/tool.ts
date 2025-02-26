@@ -19,6 +19,7 @@ import { registerTextToSound } from "./tool_text_to_sound"
 import { registerWebSearch } from "./tool_web_search"
 import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_get_person_info"
+import { registerRecord } from "./tool_record"
 
 export interface ToolInfo {
     type: "function",
@@ -157,6 +158,7 @@ export class ToolManager {
         registerSanCheck();
         registerGroupSign();
         registerGetPersonInfo();
+        registerRecord();
     }
 
     /**

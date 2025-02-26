@@ -38,6 +38,7 @@ export class ToolConfig {
             "书香少女",
             "自定义"
         ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg");
+        seal.ext.registerTemplateConfig(ConfigManager.ext, "本地语音路径", ['<钢管落地>data/records/钢管落地.mp3'], "如不需要可以不填写，尖括号内是语音的名称，便于AI调用，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中");
     }
 
     static get() {
@@ -48,7 +49,8 @@ export class ToolConfig {
             toolsDefaultClosed: seal.ext.getTemplateConfig(ConfigManager.ext, "默认关闭的函数"),
             memoryLimit: seal.ext.getIntConfig(ConfigManager.ext, "长期记忆上限"),
             decks: seal.ext.getTemplateConfig(ConfigManager.ext, "提供给AI的牌堆名称"),
-            character: seal.ext.getOptionConfig(ConfigManager.ext, "ai语音使用的音色")
+            character: seal.ext.getOptionConfig(ConfigManager.ext, "ai语音使用的音色"),
+            recordsTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "本地语音路径")
         }
     }
 }
