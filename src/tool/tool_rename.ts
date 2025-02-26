@@ -38,10 +38,6 @@ export function registerRename() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         try {
             seal.setPlayerGroupCard(ctx, new_name);
             seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);

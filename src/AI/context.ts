@@ -65,14 +65,8 @@ export class Context {
                     return `<@${uid.replace(/\D+/g, '')}）`;
                 }
 
-                const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
                 const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
                 const mctx = createCtx(epId, mmsg);
-
-                if (epId === uid) {
-                    mctx.player.name = dice_name;
-                }
-
                 const name = mctx.player.name || '未知用户';
 
                 return `<@${name}>`;

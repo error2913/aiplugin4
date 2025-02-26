@@ -47,10 +47,6 @@ export function registerSanCheck() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         const args2 = [];
         if (additional_dice) {
             args2.push(additional_dice);

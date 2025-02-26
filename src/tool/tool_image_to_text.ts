@@ -84,10 +84,6 @@ export function registerCheckAvatar() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         const url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, '')}&s=640`;
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 

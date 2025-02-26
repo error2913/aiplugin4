@@ -40,10 +40,6 @@ export function registerPoke() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         try {
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/\D+/g, '');

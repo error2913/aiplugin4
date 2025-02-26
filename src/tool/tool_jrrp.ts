@@ -39,10 +39,6 @@ export function registerJrrp() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
         if (!success) {
             return '今日人品查询成功'

@@ -39,10 +39,6 @@ export function registerAttrShow() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
         if (!success) {
             return '展示完成';
@@ -90,10 +86,6 @@ export function registerAttrGet() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
-
         const value = seal.vars.intGet(ctx, attr)[0];
         return `${attr}: ${value}`;
     }
@@ -136,10 +128,6 @@ export function registerAttrSet() {
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
-
-        if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-        }
 
         const [attr, expr] = expression.split('=');
         if (expr === undefined) {

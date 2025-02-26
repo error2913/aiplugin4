@@ -1,6 +1,5 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
-import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerAddPersonMemory() {
@@ -27,7 +26,7 @@ export function registerAddPersonMemory() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    tool.solve = async (ctx, _, ai, args) => {
         const { name, content } = args;
 
         const uid = ai.context.findUserId(name);
@@ -36,11 +35,7 @@ export function registerAddPersonMemory() {
             return `未找到<${name}>`;
         }
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
-
         if (uid === ctx.endPoint.userId) {
-            ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
             console.error('不能添加自己的记忆');
             return `不能添加自己的记忆`;
         }

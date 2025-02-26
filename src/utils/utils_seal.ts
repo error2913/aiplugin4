@@ -16,7 +16,13 @@ export function createCtx(epId: string, msg: seal.Message): seal.MsgContext | un
 
     for (let i = 0; i < eps.length; i++) {
         if (eps[i].userId === epId) {
-            return seal.createTempCtx(eps[i], msg);
+            const ctx = seal.createTempCtx(eps[i], msg);
+
+            if (ctx.player.userId === epId) {
+                ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
+            }
+
+            return ctx;
         }
     }
 

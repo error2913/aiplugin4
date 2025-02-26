@@ -332,7 +332,11 @@
     const eps = seal.getEndPoints();
     for (let i = 0; i < eps.length; i++) {
       if (eps[i].userId === epId) {
-        return seal.createTempCtx(eps[i], msg);
+        const ctx = seal.createTempCtx(eps[i], msg);
+        if (ctx.player.userId === epId) {
+          ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
+        }
+        return ctx;
       }
     }
     return void 0;
@@ -372,9 +376,6 @@
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
       if (!success) {
         return "展示完成";
@@ -415,9 +416,6 @@
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const value = seal.vars.intGet(ctx, attr)[0];
       return `${attr}: ${value}`;
     };
@@ -455,9 +453,6 @@
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const [attr, expr] = expression.split("=");
       if (expr === void 0) {
         return `修改失败，表达式 ${expression} 格式错误`;
@@ -520,9 +515,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       try {
         const epId = ctx.endPoint.userId;
         const group_id = ctx.group.groupId.replace(/\D+/g, "");
@@ -721,9 +713,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, "")}&s=640`;
       const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
       const reply = await ImageManager.imageToText(url, text);
@@ -770,9 +759,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
       if (!success) {
         return "今日人品查询成功";
@@ -806,17 +792,14 @@ ${attr}: ${value}=>${result}`;
       }
     };
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    tool.solve = async (ctx, _, ai, args) => {
       const { name, content } = args;
       const uid = ai.context.findUserId(name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
-      msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-      ctx = createCtx(ctx.endPoint.userId, msg);
       if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
         console.error("不能添加自己的记忆");
         return `不能添加自己的记忆`;
       }
@@ -1026,9 +1009,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       try {
         const epId = ctx.endPoint.userId;
         const group_id = ctx.group.groupId.replace(/\D+/g, "");
@@ -1076,9 +1056,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       try {
         seal.setPlayerGroupCard(ctx, new_name);
         seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
@@ -1146,9 +1123,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const args2 = [];
       if (additional_dice) {
         args2.push(additional_dice);
@@ -1212,9 +1186,6 @@ ${attr}: ${value}=>${result}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       const args2 = [];
       if (additional_dice) {
         args2.push(additional_dice);
@@ -1586,9 +1557,6 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
       ctx = createCtx(ctx.endPoint.userId, msg);
-      if (uid === ctx.endPoint.userId) {
-        ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
-      }
       try {
         const epId = ctx.endPoint.userId;
         const user_id = ctx.player.userId.replace(/\D+/g, "");
@@ -2306,12 +2274,8 @@ ${memeryPrompt}`;
         if (showNumber) {
           return `<@${uid2.replace(/\D+/g, "")}）`;
         }
-        const dice_name = seal.formatTmpl(ctx, "核心:骰子名字");
         const mmsg = createMsg(gid === "" ? "private" : "group", uid2, gid);
         const mctx = createCtx(epId, mmsg);
-        if (epId === uid2) {
-          mctx.player.name = dice_name;
-        }
         const name2 = mctx.player.name || "未知用户";
         return `<@${name2}>`;
       }).replace(/\[CQ:.*?\]/g, "");
