@@ -3291,15 +3291,34 @@ ${memeryPrompt}`;
               return ret;
             }
             case "show": {
+              const val3 = cmdArgs.getArgN(3);
+              if (val3 === "group") {
+                if (ctx.isPrivate) {
+                  seal.replyToSender(ctx, msg, "群聊记忆仅在群聊可用");
+                  return ret;
+                }
+                if (ai.memory.memoryList.length === 0) {
+                  seal.replyToSender(ctx, msg, "暂无群聊记忆");
+                  return ret;
+                }
+                const s2 = ai.memory.buildGroupMemoryPrompt();
+                seal.replyToSender(ctx, msg, s2);
+                return ret;
+              }
+              if (ai2.memory.memoryList.length === 0) {
+                seal.replyToSender(ctx, msg, "暂无记忆");
+                return ret;
+              }
               const s = ai2.memory.buildPersonMemoryPrompt();
-              seal.replyToSender(ctx, msg, s || "暂无记忆");
+              seal.replyToSender(ctx, msg, s);
               return ret;
             }
             default: {
               const s = `帮助:
 【.ai memo st <内容>】设置记忆
 【.ai memo clr】清除记忆
-【.ai memo show】展示记忆`;
+【.ai memo show】展示个人记忆
+【.ai memo show group】展示群聊记忆`;
               seal.replyToSender(ctx, msg, s);
               return ret;
             }
