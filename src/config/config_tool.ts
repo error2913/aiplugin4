@@ -5,11 +5,13 @@ export class ToolConfig {
         seal.ext.registerBoolConfig(ConfigManager.ext, "是否开启调用函数功能", true, "");
         seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "API在不支持function calling功能的时候开启");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "不允许调用的函数", [
-            '填写不允许调用的函数名称，例如：get_time'
+            '在这里填写你不允许AI调用的函数名称'
         ], "修改后保存并重载js");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "默认关闭的函数", [
             'ban',
-            'rename'
+            'rename',
+            'web_search',
+            'check_list'
         ], "");
         seal.ext.registerIntConfig(ConfigManager.ext, "长期记忆上限", 5, "");
         seal.ext.registerTemplateConfig(ConfigManager.ext, "提供给AI的牌堆名称", ["没有的话请去上面把draw_deck这个函数删掉"], "");
