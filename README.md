@@ -289,9 +289,12 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 | [openAI](https://openai.com/api/)|`https://api.openai.com/v1/chat/completions`|[openAI API 文档](https://platform.openai.com/docs/quickstart)|`gpt-4o`,`gpt-4o-mini`,`o1`,`o3-mini`,`gpt-4-turbo`,`gpt-3.5-turbo`|`gpt-4-turbo`,`gpt-4o`,`o1`,`gpt-4o-mini`|
 
 > 注：×为不支持function call。▲为需要开启合并user消息开关。
-> 注：视觉模型不一定支持QQ图床识别，可使用中转插件。
-> 注：仅列出部分官方的我知道的该插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。
-> 注：国外大模型网络问题请自行解决。
+
+> 视觉模型不一定支持QQ图床识别，可使用中转插件。
+
+> 仅列出部分官方的我知道的该插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。
+
+> 国外大模型网络问题请自行解决。
 
 ---
 
