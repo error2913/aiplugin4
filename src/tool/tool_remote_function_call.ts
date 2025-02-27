@@ -40,14 +40,14 @@ export function registerRemoteFunctionCall() {
                         description: '发送原因' 
                     }
                 },
-                required: ["msg_type", "name", "function_name", "arguments"]
+                required: ["msg_type", "name", "function"]
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-        const { msg_type, name, function_name, arguments: functions_args, reason = '' } = args;
+        const { msg_type, name, function: tool_call, reason = '' } = args;
 
         const { showNumber } = ConfigManager.message;
         const source = ctx.isPrivate ?
@@ -92,10 +92,6 @@ export function registerRemoteFunctionCall() {
 
         await ai.context.systemUserIteration("_来自其他对话的函数调用", `${source}: 原因: ${reason || '无'}`);
 
-        const tool_call = {
-            name: function_name,
-            arguments: functions_args
-        }
         await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
         
         AIManager.saveAI(ai.id);
