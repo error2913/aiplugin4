@@ -22,6 +22,7 @@ import { registerGetPersonInfo } from "./tool_get_person_info"
 import { registerRecord } from "./tool_record"
 import { registerSendMsg } from "./tool_send_msg"
 import { registerCheckCtx } from "./tool_check_ctx"
+import { registerRemoteFunctionCall } from "./tool_remote_function_call"
 
 export interface ToolInfo {
     type: "function",
@@ -34,6 +35,7 @@ export interface ToolInfo {
                 [key: string]: {
                     type: string,
                     description: string,
+                    properties?: object,
                     items?: {
                         type: string
                     },
@@ -160,6 +162,7 @@ export class ToolManager {
         registerGetPersonInfo();
         registerRecord();
         registerSendMsg();
+        registerRemoteFunctionCall();
         registerCheckCtx();
     }
 
@@ -222,6 +225,11 @@ export class ToolManager {
         for (let i = 0; i < tool_calls.length; i++) {
             const name = tool_calls[i].function.name;
             try {
+                if (!ToolManager.toolMap.hasOwnProperty(name)) {
+                    log(`调用函数失败:未注册的函数:${name}`);
+                    ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
+                    continue;
+                }
                 if (this.cmdArgs == null) {
                     log(`暂时无法调用函数，请先使用任意指令`);
                     ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
@@ -274,6 +282,11 @@ export class ToolManager {
 
         const name = tool_call.name;
         try {
+            if (!ToolManager.toolMap.hasOwnProperty(name)) {
+                log(`调用函数失败:未注册的函数:${name}`);
+                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:未注册的函数:${name}`);
+                return; 
+            }
             if (this.cmdArgs == null) {
                 log(`暂时无法调用函数，请先使用任意指令`);
                 await ai.context.systemUserIteration('_调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`);

@@ -118,7 +118,11 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
     let last_role = '';
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
-        const prefix = isPrefix && message.name ? `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>` : '';
+        const prefix = isPrefix && message.name ? (
+            message.name.startsWith('_') ?
+                `<|${message.name}|>` :
+                `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
+        ) : '';
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\n' + prefix + message.content;

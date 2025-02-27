@@ -33,16 +33,12 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                 if (usePromptEngineering) {
                     const match = reply.match(/<function_call>([\s\S]*?)<\/function_call>/);
                     if (match) {
-                        try {
-                            ai.context.iteration(ctx, match[0], [], "assistant");
-                            const tool_call = JSON.parse(match[1]);
-                            await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
+                        ai.context.iteration(ctx, match[0], [], "assistant");
+                        const tool_call = JSON.parse(match[1]);
+                        await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
 
-                            const messages = handleMessages(ctx, ai);
-                            return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
-                        } catch (error) {
-
-                        }
+                        const messages = handleMessages(ctx, ai);
+                        return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
                     }
 
                 } else {
@@ -51,10 +47,6 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 
                         ai.context.toolCallsIteration(message.tool_calls);
                         const tool_choice = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
-
-                        if (reply) { // 如果reply不为空，直接返回reply
-                            return reply;
-                        }
 
                         const messages = handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
@@ -162,7 +154,7 @@ function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_
             if (bodyObject?.tools === null) {
                 bodyObject.tools = tools;
             }
-            
+
             if (bodyObject?.tool_choice === null) {
                 bodyObject.tool_choice = tool_choice;
             }

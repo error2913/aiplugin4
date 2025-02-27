@@ -13,7 +13,7 @@ export function registerSanCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "进行sancheck的人的名称" + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
+                        description: "进行sancheck的人的名称" + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: "string",

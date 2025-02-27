@@ -13,7 +13,7 @@ export function registerAttrShow() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
+                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                     }
                 },
                 required: ['name']
@@ -61,7 +61,7 @@ export function registerAttrGet() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
+                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                     },
                     attr: {
                         type: 'string',
@@ -104,7 +104,7 @@ export function registerAttrSet() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
+                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: 'string',

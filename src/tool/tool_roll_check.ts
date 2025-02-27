@@ -13,7 +13,7 @@ export function registerRollCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被检定的人的名称"  + ConfigManager.message.showNumber ? '或纯数字QQ号' : ''
+                        description: "被检定的人的名称"  + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: "string",

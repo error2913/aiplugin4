@@ -20,7 +20,7 @@ export function registerCheckCtx() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : ''
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
                     }
                 },
                 required: ["msg_type", "name"]

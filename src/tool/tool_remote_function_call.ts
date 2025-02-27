@@ -1,15 +1,14 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
-import { handleReply } from "../utils/utils_reply";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerSendMsg() {
+export function registerRemoteFunctionCall() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "send_msg",
-            description: `向指定私聊或群聊发送消息，如果要向其调用函数，请使用远程函数：remote_function_call`,
+            name: "remote_function_call",
+            description: `对指定私聊或群聊调用函数`,
             parameters: {
                 type: "object",
                 properties: {
@@ -22,23 +21,33 @@ export function registerSendMsg() {
                         type: 'string',
                         description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
                     },
-                    content: {
-                        type: 'string',
-                        description: '消息内容'
+                    function: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type:'string',
+                                description: '函数名称'
+                            },
+                            arguments: {
+                                type:'object',
+                                description: '函数参数，按照要调用的函数的参数定义填写'
+                            }
+                        },
+                        description: '函数调用'
                     },
                     reason: {
-                        type: 'string',
-                        description: '发送原因'
+                        type:'string',
+                        description: '发送原因' 
                     }
                 },
-                required: ["msg_type", "name", "content"]
+                required: ["msg_type", "name", "function_name", "arguments"]
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-        const { msg_type, name, content, reason = '' } = args;
+        const { msg_type, name, function_name, arguments: functions_args, reason = '' } = args;
 
         const { showNumber } = ConfigManager.message;
         const source = ctx.isPrivate ?
@@ -81,16 +90,17 @@ export function registerSendMsg() {
         }
 
 
-        await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`);
+        await ai.context.systemUserIteration("_来自其他对话的函数调用", `${source}: 原因: ${reason || '无'}`);
 
-        const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
-        ai.context.lastReply = reply;
-        await ai.context.iteration(ctx, s, images, "assistant");
-
-        seal.replyToSender(ctx, msg, reply);
+        const tool_call = {
+            name: function_name,
+            arguments: functions_args
+        }
+        await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
+        
         AIManager.saveAI(ai.id);
 
-        return "消息发送成功";
+        return "函数调用成功";
     }
 
     ToolManager.toolMap[info.function.name] = tool;
