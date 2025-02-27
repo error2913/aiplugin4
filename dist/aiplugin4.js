@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.3
+// @version      4.5.4
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，选用模型若不支持该功能，可以开启迁移到提示词工程的开关，即可使用调用函数功能。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -2114,6 +2114,238 @@ ${memeryPrompt}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
+  // src/tool/tool_check_list.ts
+  function registerCheckList() {
+    const info = {
+      type: "function",
+      function: {
+        name: "check_list",
+        description: `查看当前好友列表或群聊列表`,
+        parameters: {
+          type: "object",
+          properties: {
+            msg_type: {
+              type: "string",
+              description: "消息类型，私聊或群聊",
+              enum: ["private", "group"]
+            }
+          },
+          required: ["msg_type"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, __, args) => {
+      const { msg_type } = args;
+      if (msg_type === "private") {
+        try {
+          const epId = ctx.endPoint.userId;
+          const data = await globalThis.http.getData(epId, `get_friend_list`);
+          const s = `好友数量: ${data.length}
+` + data.slice(0, 50).map((item, index) => {
+            return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ""}`;
+          }).join("\n");
+          return s;
+        } catch (e) {
+          console.error(e);
+          return `获取好友列表失败`;
+        }
+      } else if (msg_type === "group") {
+        try {
+          const epId = ctx.endPoint.userId;
+          const data = await globalThis.http.getData(epId, `get_group_list`);
+          const s = `群聊数量: ${data.length}
+` + data.slice(0, 50).map((item, index) => {
+            return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
+          }).join("\n");
+          return s;
+        } catch (e) {
+          console.error(e);
+          return `获取好友列表失败`;
+        }
+      } else {
+        return `未知的消息类型<${msg_type}>`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerCheckGroupMemberList() {
+    const info = {
+      type: "function",
+      function: {
+        name: "check_group_member_list",
+        description: `查看群聊成员列表`,
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "群聊名称" + (ConfigManager.message.showNumber ? "或纯数字群号" : "")
+            }
+          },
+          required: ["name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, ai, args) => {
+      const { name } = args;
+      const gid = ai.context.findGroupId(ctx, name);
+      if (gid === null) {
+        console.log(`未找到<${name}>`);
+        return `未找到<${name}>`;
+      }
+      try {
+        const epId = ctx.endPoint.userId;
+        const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, "")}`);
+        const s = `群成员数量: ${data.length}
+` + data.slice(0, 50).map((item, index) => {
+          return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ""}`;
+        }).join("\n");
+        return s;
+      } catch (e) {
+        console.error(e);
+        return `获取群成员列表失败`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
+  // src/tool/tool_search_chat.ts
+  function registerSearchChat() {
+    const info = {
+      type: "function",
+      function: {
+        name: "search_chat",
+        description: `搜索好友或群聊`,
+        parameters: {
+          type: "object",
+          properties: {
+            msg_type: {
+              type: "string",
+              description: "消息类型，私聊或群聊",
+              enum: ["private", "group"]
+            },
+            q: {
+              type: "string",
+              description: "搜索关键字"
+            }
+          },
+          required: ["q"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, __, args) => {
+      const { msg_type, q } = args;
+      if (msg_type === "private") {
+        try {
+          const epId = ctx.endPoint.userId;
+          const data = await globalThis.http.getData(epId, `get_friend_list`);
+          const arr = data.filter((item) => {
+            return item.nickname.includes(q) || item.remark.includes(q);
+          });
+          const s = `搜索结果好友数量: ${arr.length}
+` + arr.slice(0, 50).map((item, index) => {
+            return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ""}`;
+          }).join("\n");
+          return s;
+        } catch (e) {
+          console.error(e);
+          return `获取好友列表失败`;
+        }
+      } else if (msg_type === "group") {
+        try {
+          const epId = ctx.endPoint.userId;
+          const data = await globalThis.http.getData(epId, `get_group_list`);
+          const arr = data.filter((item) => {
+            return item.group_name.includes(q);
+          });
+          const s = `搜索结果群聊数量: ${arr.length}
+` + arr.slice(0, 50).map((item, index) => {
+            return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
+          }).join("\n");
+          return s;
+        } catch (e) {
+          console.error(e);
+          return `获取好友列表失败`;
+        }
+      } else {
+        const epId = ctx.endPoint.userId;
+        const data1 = await globalThis.http.getData(epId, `get_friend_list`);
+        const arr1 = data1.filter((item) => {
+          return item.nickname.includes(q) || item.remark.includes(q);
+        });
+        const data2 = await globalThis.http.getData(epId, `get_group_list`);
+        const arr2 = data2.filter((item) => {
+          return item.group_name.includes(q);
+        });
+        const s = `搜索结果好友数量: ${arr1.length}
+` + arr1.slice(0, 50).map((item, index) => {
+          return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ""}`;
+        }).join("\n") + `
+搜索结果群聊数量: ${arr2.length}
+` + arr2.slice(0, 50).map((item, index) => {
+          return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
+        }).join("\n");
+        return s;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerSearchCommonGroup() {
+    const info = {
+      type: "function",
+      function: {
+        name: "search_common_group",
+        description: `搜索共同群聊`,
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "用户名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号" : "")
+            }
+          },
+          required: ["name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, ai, args) => {
+      const { name } = args;
+      const uid = ai.context.findUserId(ctx, name);
+      if (uid === null) {
+        console.log(`未找到<${name}>`);
+        return `未找到<${name}>`;
+      }
+      if (uid === ctx.endPoint.userId) {
+        return `禁止搜索自己`;
+      }
+      try {
+        const epId = ctx.endPoint.userId;
+        const data = await globalThis.http.getData(epId, `get_group_list`);
+        const arr = [];
+        for (const group_info of data) {
+          const data2 = await globalThis.http.getData(epId, `get_group_member_list?group_id=${group_info.group_id}`);
+          const user_info = data2.find((user_info2) => user_info2.user_id.toString() === uid.replace(/\D+/g, ""));
+          if (user_info) {
+            arr.push({ group_info, user_info });
+          }
+        }
+        const s = `共群数量: ${arr.length}
+` + arr.slice(0, 50).map((item, index) => {
+          return `${index + 1}. ${item.group_info.group_name}(${item.group_info.group_id}) 人数: ${item.group_info.member_count}/${item.group_info.max_member_count} ${item.user_info.card && item.user_info.card !== item.user_info.nickname ? `群名片: ${item.user_info.card}` : ""}`;
+        }).join("\n");
+        return s;
+      } catch (e) {
+        console.error(e);
+        return `获取共群列表失败`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
   // src/tool/tool.ts
   var Tool = class {
     constructor(info) {
@@ -2196,6 +2428,10 @@ ${memeryPrompt}`;
       registerSendMsg();
       registerRemoteFunctionCall();
       registerCheckCtx();
+      registerCheckList();
+      registerCheckGroupMemberList();
+      registerSearchChat();
+      registerSearchCommonGroup();
     }
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
@@ -3060,7 +3296,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.3");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.4");
       seal.ext.register(ext);
     }
     try {
@@ -3158,7 +3394,7 @@ ${memeryPrompt}`;
           const timer = pr.timer > -1 ? `${pr.timer}秒` : "关闭";
           const prob = pr.prob > -1 ? `${pr.prob}%` : "关闭";
           const standby = pr.standby ? "开启" : "关闭";
-          const s = `${id}
+          const s = `${id2}
 权限限制:${pr.limit}
 计数器模式(c):${counter}
 计时器模式(t):${timer}
@@ -3382,6 +3618,17 @@ ${memeryPrompt}`;
               return ret;
             }
             case "clr": {
+              const val3 = cmdArgs.getArgN(3);
+              if (val3 === "group") {
+                if (ctx.isPrivate) {
+                  seal.replyToSender(ctx, msg, "群聊记忆仅在群聊可用");
+                  return ret;
+                }
+                ai.memory.clearMemory();
+                seal.replyToSender(ctx, msg, "群聊记忆已清除");
+                AIManager.saveAI(id);
+                return ret;
+              }
               ai2.memory.clearMemory();
               seal.replyToSender(ctx, msg, "记忆已清除");
               AIManager.saveAI(muid);
@@ -3414,6 +3661,7 @@ ${memeryPrompt}`;
               const s = `帮助:
 【.ai memo st <内容>】设置记忆
 【.ai memo clr】清除记忆
+【.ai memo clr group】清除群聊记忆
 【.ai memo show】展示个人记忆
 【.ai memo show group】展示群聊记忆`;
               seal.replyToSender(ctx, msg, s);

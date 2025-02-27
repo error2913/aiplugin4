@@ -11,7 +11,7 @@ import { buildSystemMessage } from "./utils/utils_message";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.3');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.4');
     seal.ext.register(ext);
   }
 
@@ -127,7 +127,7 @@ function main() {
         const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
         const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
         const standby = pr.standby ? '开启' : '关闭';
-        const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
+        const s = `${id2}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
         seal.replyToSender(ctx, msg, s);
         return ret;
       }
@@ -359,6 +359,17 @@ function main() {
             return ret;
           }
           case 'clr': {
+            const val3 = cmdArgs.getArgN(3);
+            if (val3 === 'group') {
+              if (ctx.isPrivate) {
+                seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
+                return ret;
+              }
+              ai.memory.clearMemory();
+              seal.replyToSender(ctx, msg, '群聊记忆已清除');
+              AIManager.saveAI(id);
+              return ret;
+            }
             ai2.memory.clearMemory();
             seal.replyToSender(ctx, msg, '记忆已清除');
             AIManager.saveAI(muid);
@@ -392,6 +403,7 @@ function main() {
             const s = `帮助:
 【.ai memo st <内容>】设置记忆
 【.ai memo clr】清除记忆
+【.ai memo clr group】清除群聊记忆
 【.ai memo show】展示个人记忆
 【.ai memo show group】展示群聊记忆`;
 

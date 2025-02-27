@@ -23,6 +23,8 @@ import { registerRecord } from "./tool_record"
 import { registerSendMsg } from "./tool_send_msg"
 import { registerCheckCtx } from "./tool_check_ctx"
 import { registerRemoteFunctionCall } from "./tool_remote_function_call"
+import { registerCheckGroupMemberList, registerCheckList } from "./tool_check_list"
+import { registerSearchChat, registerSearchCommonGroup } from "./tool_search_chat"
 
 export interface ToolInfo {
     type: "function",
@@ -164,6 +166,10 @@ export class ToolManager {
         registerSendMsg();
         registerRemoteFunctionCall();
         registerCheckCtx();
+        registerCheckList();
+        registerCheckGroupMemberList();
+        registerSearchChat();
+        registerSearchCommonGroup();
     }
 
     /**
