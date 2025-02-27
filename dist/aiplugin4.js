@@ -2246,6 +2246,11 @@ ${memeryPrompt}`;
             ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
             continue;
           }
+          if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+            log(`调用函数失败:禁止调用的函数:${name}`);
+            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
+            continue;
+          }
           if (this.cmdArgs == null) {
             log(`暂时无法调用函数，请先使用任意指令`);
             ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
@@ -2288,6 +2293,11 @@ ${memeryPrompt}`;
         if (!_ToolManager.toolMap.hasOwnProperty(name)) {
           log(`调用函数失败:未注册的函数:${name}`);
           await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:未注册的函数:${name}`);
+          return;
+        }
+        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+          log(`调用函数失败:禁止调用的函数:${name}`);
+          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:禁止调用的函数:${name}`);
           return;
         }
         if (this.cmdArgs == null) {
