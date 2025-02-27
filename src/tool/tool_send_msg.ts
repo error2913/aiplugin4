@@ -46,7 +46,7 @@ export function registerSendMsg() {
             `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}`;
 
         if (msg_type === "private") {
-            const uid = ai.context.findUserId(name);
+            const uid = ai.context.findUserId(ctx, name);
             if (uid === null) {
                 console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
@@ -63,7 +63,7 @@ export function registerSendMsg() {
     
             ai = AIManager.getAI(uid);
         } else if (msg_type === "group") {
-            const gid = ai.context.findGroupId(name);
+            const gid = ai.context.findGroupId(ctx, name);
             if (gid === null) {
                 console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;

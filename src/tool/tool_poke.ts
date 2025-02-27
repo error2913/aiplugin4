@@ -31,7 +31,7 @@ export function registerPoke() {
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
-        const uid = ai.context.findUserId(name);
+        const uid = ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

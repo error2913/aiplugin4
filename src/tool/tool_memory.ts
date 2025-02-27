@@ -29,7 +29,7 @@ export function registerAddPersonMemory() {
     tool.solve = async (ctx, _, ai, args) => {
         const { name, content } = args;
 
-        const uid = ai.context.findUserId(name);
+        const uid = ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
@@ -159,10 +159,10 @@ export function registerShowGroupMemory() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (_, __, ai, args) => {
+    tool.solve = async (ctx, __, ai, args) => {
         const { group_name } = args;
 
-        const gid = ai.context.findGroupId(group_name);
+        const gid = ai.context.findGroupId(ctx, group_name);
         if (gid === null) {
             console.log(`未找到<${group_name}>`);
             return `未找到<${group_name}>`;

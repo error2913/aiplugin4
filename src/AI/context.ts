@@ -165,13 +165,12 @@ export class Context {
         }
     }
 
-    findUserId(name: string): string {
+    findUserId(ctx: seal.MsgContext, name: string): string {
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (name === messages[i].name) {
                 return messages[i].uid;
             }
-
             if (name.length > 5) {
                 const distance = levenshteinDistance(name, messages[i].name);
                 if (distance <= 2) {
@@ -180,11 +179,21 @@ export class Context {
             }
         }
 
+        if (name === ctx.player.name) {
+            return ctx.player.userId; 
+        }
+        if (name.length > 5) {
+            const distance = levenshteinDistance(name, ctx.player.name);
+            if (distance <= 2) {
+                return ctx.player.userId;
+            } 
+        }
+
         const raw_uid = parseInt(name);
         return isNaN(raw_uid) ? null : `QQ:${raw_uid}`;
     }
 
-    findGroupId(groupName: string): string {
+    findGroupId(ctx: seal.MsgContext, groupName: string): string {
         const messages = this.messages;
         let arr = [];
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -205,7 +214,6 @@ export class Context {
                 if (memory.group.groupName === groupName) {
                     return memory.group.groupId;
                 }
-
                 if (memory.group.groupName.length > 5) {
                     const distance = levenshteinDistance(groupName, memory.group.groupName);
                     if (distance <= 2) {
@@ -215,6 +223,16 @@ export class Context {
             }
 
             arr.push(uid);
+        }
+
+        if (groupName === ctx.group.groupName) {
+            return ctx.group.groupId; 
+        }
+        if (groupName.length > 5) {
+            const distance = levenshteinDistance(groupName, ctx.group.groupName);
+            if (distance <= 2) {
+                return ctx.group.groupId;
+            } 
         }
 
         const raw_gid = parseInt(groupName);

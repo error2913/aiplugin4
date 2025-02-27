@@ -75,7 +75,7 @@ export function registerCheckAvatar() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, content } = args;
 
-        const uid = ai.context.findUserId(name);
+        const uid = ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

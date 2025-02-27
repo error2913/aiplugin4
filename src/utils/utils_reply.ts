@@ -35,7 +35,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     // 检查复读
     const isRepeat = checkRepeat(context, s);
 
-    reply = replaceMentions(context, reply);
+    reply = replaceMentions(ctx, context, reply);
     const { result, images } = await replaceImages(context, reply);
     reply = result;
 
@@ -102,9 +102,9 @@ function checkRepeat(context: Context, s: string) {
  * @param reply 
  * @returns 
  */
-function replaceMentions(context: Context, reply: string) {
+function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
     return reply.replace(/<@(.+?)>/g, (_, p1) => {
-        const uid = context.findUserId(p1);
+        const uid = context.findUserId(ctx, p1);
         if (uid !== null) {
             return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
         } else {

@@ -30,7 +30,7 @@ export function registerAttrShow() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const uid = ai.context.findUserId(name);
+        const uid = ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
@@ -77,7 +77,7 @@ export function registerAttrGet() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, attr } = args;
 
-        const uid = ai.context.findUserId(name);
+        const uid = ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
@@ -120,7 +120,7 @@ export function registerAttrSet() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, expression } = args;
 
-        const uid = ai.context.findUserId(name);
+        const uid = ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
