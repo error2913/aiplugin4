@@ -88,6 +88,7 @@ export function registerSendMsg() {
         await ai.context.iteration(ctx, s, images, "assistant");
 
         seal.replyToSender(ctx, msg, reply);
+        AIManager.saveAI(ai.id);
 
         return "消息发送成功";
     }
