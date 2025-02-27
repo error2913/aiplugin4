@@ -62,7 +62,7 @@ export class Context {
                 const uid = `QQ:${p1}`;
 
                 if (showNumber) {
-                    return `<@${uid.replace(/\D+/g, '')}）`;
+                    return `<@${uid.replace(/\D+/g, '')}>`;
                 }
 
                 const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);

@@ -2651,7 +2651,7 @@ ${memeryPrompt}`;
         const gid = ctx.group.groupId;
         const uid2 = `QQ:${p1}`;
         if (showNumber) {
-          return `<@${uid2.replace(/\D+/g, "")}）`;
+          return `<@${uid2.replace(/\D+/g, "")}>`;
         }
         const mmsg = createMsg(gid === "" ? "private" : "group", uid2, gid);
         const mctx = createCtx(epId, mmsg);
