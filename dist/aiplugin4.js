@@ -1793,7 +1793,7 @@ QQ等级: ${data.qqLevel}
       type: "function",
       function: {
         name: "send_msg",
-        description: `向指定私聊发送消息`,
+        description: `向指定私聊或群聊发送消息`,
         parameters: {
           type: "object",
           properties: {
@@ -1860,6 +1860,190 @@ QQ等级: ${data.qqLevel}
       await ai.context.iteration(ctx, s, images, "assistant");
       seal.replyToSender(ctx, msg, reply);
       return "消息发送成功";
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
+  // src/utils/utils_message.ts
+  function buildSystemMessage(ctx, ai) {
+    const { roleSetting, showNumber } = ConfigManager.message;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
+    let content = roleSetting;
+    if (!ctx.isPrivate) {
+      content += `
+**相关信息**
+- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}
+- <@xxx>表示@某个群成员，xxx为名字${showNumber ? `或者纯数字QQ号` : ``}`;
+    } else {
+      content += `
+**相关信息**
+- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}`;
+    }
+    content += `- <|from:xxx${showNumber ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showNumber ? `，yyy为纯数字QQ号` : ``}
+- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
+    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
+    if (memeryPrompt) {
+      content += `
+**记忆**
+如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
+${memeryPrompt}`;
+    }
+    if (isTool && usePromptEngineering) {
+      const tools = ai.tool.getToolsInfo();
+      const toolsPrompt = tools.map((item, index) => {
+        return `${index + 1}. 名称:${item.function.name}
+- 描述:${item.function.description}
+- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
+- 必需参数:${item.function.parameters.required.join("\n")}`;
+      });
+      content += `
+**调用函数**
+当需要调用函数功能时，请严格使用以下格式：
+\`\`\`
+<function_call>
+{
+    "name": "函数名",
+    "arguments": {
+        "参数1": "值1",
+        "参数2": "值2"
+    }
+}
+</function_call>
+\`\`\`
+不要附带其他文本，且只能调用一次函数
+
+可用函数列表: ${toolsPrompt}`;
+    }
+    const systemMessage = {
+      role: "system",
+      content,
+      uid: "",
+      name: "",
+      timestamp: 0,
+      images: []
+    };
+    return systemMessage;
+  }
+  function buildSamplesMessages(ctx) {
+    const { samples } = ConfigManager.message;
+    const samplesMessages = samples.map((item, index) => {
+      if (item == "") {
+        return null;
+      } else if (index % 2 === 0) {
+        return {
+          role: "user",
+          content: item,
+          uid: "",
+          name: "用户",
+          timestamp: 0,
+          images: []
+        };
+      } else {
+        return {
+          role: "assistant",
+          content: item,
+          uid: ctx.endPoint.userId,
+          name: seal.formatTmpl(ctx, "核心:骰子名字"),
+          timestamp: 0,
+          images: []
+        };
+      }
+    }).filter((item) => item !== null);
+    return samplesMessages;
+  }
+  function handleMessages(ctx, ai) {
+    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
+    const systemMessage = buildSystemMessage(ctx, ai);
+    const samplesMessages = buildSamplesMessages(ctx);
+    const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
+    let processedMessages = [];
+    let last_role = "";
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const prefix = isPrefix && message.name ? `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, "")})` : ``}|>` : "";
+      if (isMerge && message.role === last_role && message.role !== "tool") {
+        processedMessages[processedMessages.length - 1].content += "\n" + prefix + message.content;
+      } else {
+        processedMessages.push({
+          role: message.role,
+          content: prefix + message.content,
+          tool_calls: (message == null ? void 0 : message.tool_calls) ? message.tool_calls : void 0,
+          tool_call_id: (message == null ? void 0 : message.tool_call_id) ? message.tool_call_id : void 0
+        });
+        last_role = message.role;
+      }
+    }
+    return processedMessages;
+  }
+
+  // src/tool/tool_check_ctx.ts
+  function registerCheckCtx() {
+    const info = {
+      type: "function",
+      function: {
+        name: "check_ctx",
+        description: `查看指定私聊或群聊的上下文`,
+        parameters: {
+          type: "object",
+          properties: {
+            msg_type: {
+              type: "string",
+              description: "消息类型，私聊或群聊",
+              enum: ["private", "group"]
+            },
+            name: {
+              type: "string",
+              description: "用户名称或群聊名称" + ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : ""
+            }
+          },
+          required: ["msg_type", "name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, ai, args) => {
+      const { msg_type, name } = args;
+      if (msg_type === "private") {
+        const uid = ai.context.findUserId(name);
+        if (uid === null) {
+          console.log(`未找到<${name}>`);
+          return `未找到<${name}>`;
+        }
+        if (uid === ctx.player.userId && ctx.isPrivate) {
+          return `向当前私聊发送消息无需调用函数`;
+        }
+        if (uid === ctx.endPoint.userId) {
+          return `禁止向自己发送消息`;
+        }
+        msg = createMsg("private", uid, "");
+        ctx = createCtx(ctx.endPoint.userId, msg);
+        ai = AIManager.getAI(uid);
+      } else if (msg_type === "group") {
+        const gid = ai.context.findGroupId(name);
+        if (gid === null) {
+          console.log(`未找到<${name}>`);
+          return `未找到<${name}>`;
+        }
+        if (gid === ctx.group.groupId) {
+          return `向当前群聊发送消息无需调用函数`;
+        }
+        msg = createMsg("group", ctx.player.userId, gid);
+        ctx = createCtx(ctx.endPoint.userId, msg);
+        ai = AIManager.getAI(gid);
+      } else {
+        return `未知的消息类型<${msg_type}>`;
+      }
+      const messages = handleMessages(ctx, ai);
+      const s = messages.map((item) => {
+        if (item.role === "system") {
+          return "";
+        }
+        if (item.role === "assistant" && (item == null ? void 0 : item.tool_calls)) {
+          return `[function_call]: ${item.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join("\n")}`;
+        }
+        return `[${item.role}]: ${item.content}`;
+      }).join("\n");
+      return s;
     };
     ToolManager.toolMap[info.function.name] = tool;
   }
@@ -1946,6 +2130,7 @@ QQ等级: ${data.qqLevel}
       registerGetPersonInfo();
       registerRecord();
       registerSendMsg();
+      registerCheckCtx();
     }
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
@@ -2059,114 +2244,6 @@ QQ等级: ${data.qqLevel}
   _ToolManager.cmdArgs = null;
   _ToolManager.toolMap = {};
   var ToolManager = _ToolManager;
-
-  // src/utils/utils_message.ts
-  function buildSystemMessage(ctx, ai) {
-    const { roleSetting, showNumber } = ConfigManager.message;
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
-    let content = roleSetting;
-    if (!ctx.isPrivate) {
-      content += `
-**相关信息**
-- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}
-- <|from:xxx${showNumber ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showNumber ? `，yyy为纯数字QQ号` : ``}
-- <@xxx>表示@某个群成员，xxx为名字${showNumber ? `或者纯数字QQ号` : ``}`;
-    }
-    content += `- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
-    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
-    if (memeryPrompt) {
-      content += `
-**记忆**
-如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
-${memeryPrompt}`;
-    }
-    if (isTool && usePromptEngineering) {
-      const tools = ai.tool.getToolsInfo();
-      const toolsPrompt = tools.map((item, index) => {
-        return `${index + 1}. 名称:${item.function.name}
-- 描述:${item.function.description}
-- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
-- 必需参数:${item.function.parameters.required.join("\n")}`;
-      });
-      content += `
-**调用函数**
-当需要调用函数功能时，请严格使用以下格式：
-\`\`\`
-<function_call>
-{
-    "name": "函数名",
-    "arguments": {
-        "参数1": "值1",
-        "参数2": "值2"
-    }
-}
-</function_call>
-\`\`\`
-不要附带其他文本，且只能调用一次函数
-
-可用函数列表: ${toolsPrompt}`;
-    }
-    const systemMessage = {
-      role: "system",
-      content,
-      uid: "",
-      name: "",
-      timestamp: 0,
-      images: []
-    };
-    return systemMessage;
-  }
-  function buildSamplesMessages(ctx) {
-    const { samples } = ConfigManager.message;
-    const samplesMessages = samples.map((item, index) => {
-      if (item == "") {
-        return null;
-      } else if (index % 2 === 0) {
-        return {
-          role: "user",
-          content: item,
-          uid: "",
-          name: "用户",
-          timestamp: 0,
-          images: []
-        };
-      } else {
-        return {
-          role: "assistant",
-          content: item,
-          uid: ctx.endPoint.userId,
-          name: seal.formatTmpl(ctx, "核心:骰子名字"),
-          timestamp: 0,
-          images: []
-        };
-      }
-    }).filter((item) => item !== null);
-    return samplesMessages;
-  }
-  function handleMessages(ctx, ai) {
-    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
-    const systemMessage = buildSystemMessage(ctx, ai);
-    const samplesMessages = buildSamplesMessages(ctx);
-    const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
-    let processedMessages = [];
-    let last_role = "";
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-      const prefix = isPrefix && message.name ? `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, "")})` : ``}|>` : "";
-      if (isMerge && message.role === last_role && message.role !== "tool") {
-        processedMessages[processedMessages.length - 1].content += "\n" + prefix + message.content;
-      } else {
-        processedMessages.push({
-          role: message.role,
-          content: prefix + message.content,
-          tool_calls: (message == null ? void 0 : message.tool_calls) ? message.tool_calls : void 0,
-          tool_call_id: (message == null ? void 0 : message.tool_call_id) ? message.tool_call_id : void 0
-        });
-        last_role = message.role;
-      }
-    }
-    return processedMessages;
-  }
 
   // src/AI/service.ts
   async function sendChatRequest(ctx, msg, ai, messages, tool_choice) {

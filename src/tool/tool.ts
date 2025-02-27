@@ -21,6 +21,7 @@ import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_get_person_info"
 import { registerRecord } from "./tool_record"
 import { registerSendMsg } from "./tool_send_msg"
+import { registerCheckCtx } from "./tool_check_ctx"
 
 export interface ToolInfo {
     type: "function",
@@ -161,6 +162,7 @@ export class ToolManager {
         registerGetPersonInfo();
         registerRecord();
         registerSendMsg();
+        registerCheckCtx();
     }
 
     /**

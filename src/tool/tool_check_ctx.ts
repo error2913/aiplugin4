@@ -1,15 +1,15 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
-import { handleReply } from "../utils/utils_reply";
+import { handleMessages } from "../utils/utils_message";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerSendMsg() {
+export function registerCheckCtx() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "send_msg",
-            description: `向指定私聊或群聊发送消息`,
+            name: "check_ctx",
+            description: `查看指定私聊或群聊的上下文`,
             parameters: {
                 type: "object",
                 properties: {
@@ -21,29 +21,16 @@ export function registerSendMsg() {
                     name: {
                         type: 'string',
                         description: '用户名称或群聊名称' + ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : ''
-                    },
-                    content: {
-                        type: 'string',
-                        description: '消息内容'
-                    },
-                    reason: {
-                        type: 'string',
-                        description: '发送原因'
                     }
                 },
-                required: ["msg_type", "name", "content"]
+                required: ["msg_type", "name"]
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-        const { msg_type, name, content, reason = '' } = args;
-
-        const { showNumber } = ConfigManager.message;
-        const source = ctx.isPrivate ?
-            `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
-            `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}`;
+        const { msg_type, name } = args;
 
         if (msg_type === "private") {
             const uid = ai.context.findUserId(name);
@@ -80,16 +67,18 @@ export function registerSendMsg() {
             return `未知的消息类型<${msg_type}>`;
         }
 
+        const messages = handleMessages(ctx, ai);
+        const s = messages.map(item => {
+            if (item.role === 'system') {
+                return '';
+            }
+            if (item.role === 'assistant' && item?.tool_calls) {
+                return `[function_call]: ${item.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
+            }
+            return `[${item.role}]: ${item.content}`;
+        }).join('\n');
 
-        await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`);
-
-        const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
-        ai.context.lastReply = reply;
-        await ai.context.iteration(ctx, s, images, "assistant");
-
-        seal.replyToSender(ctx, msg, reply);
-
-        return "消息发送成功";
+        return s;
     }
 
     ToolManager.toolMap[info.function.name] = tool;
