@@ -1,36 +1,46 @@
-# AI骰娘4 - 海豹骰子智能交互插件
+# 🎲 AI骰娘4 - SealDice AI插件
+- 让你的骰娘活起来
 
-![license](https://img.shields.io/badge/license-MIT-green)
-![version](https://img.shields.io/badge/version-4.4.0-blue)
-
-## 部分开放平台地址
-* [DeepSeek](https://platform.deepseek.com/)
-* [Moonshot AI](https://platform.moonshot.cn/)
-* [阿里云百炼](https://www.aliyun.com/product/bailian)
-* [智谱AI](https://bigmodel.cn/)
-* [讯飞星火](https://www.xfyun.cn/)
-* [豆包大模型](https://www.volcengine.com/product/doubao)
+![License](https://img.shields.io/badge/License-MIT-blue)
+![Version](https://img.shields.io/badge/Version-4.5.1-green)
 
 ## 目录
 
-- [项目概述](#项目概述)
-- [功能特性](#功能特性)
-- [安装与使用](#安装与使用)
-  - [环境要求](#环境要求)
-  - [安装步骤](#安装步骤)
-  - [基础使用](#基础使用)
-- [配置说明](#配置说明)
-  - [核心配置项](#核心配置项)
-  - [功能开关](#功能开关)
-  - [图片配置](#图片配置)
-- [项目结构](#项目结构)
-- [核心模块](#核心模块)
-- [扩展](#扩展)
-- [注意事项](#注意事项)
-- [版权信息](#版权信息)
-- [致谢](#致谢)
+- [🎲 AI骰娘4 - SealDice AI插件](#-ai骰娘4---sealdice-ai插件)
+  - [目录](#目录)
+  - [🌟 核心特性](#-核心特性)
+  - [🛠️ 完整安装指南](#️-完整安装指南)
+    - [环境要求](#环境要求)
+    - [下载](#下载)
+    - [依赖下载](#依赖下载)
+    - [安装](#安装)
+  - [⚙️ 配置手册](#️-配置手册)
+    - [打印日志设置](#打印日志设置)
+    - [基础文本大模型请求设置](#基础文本大模型请求设置)
+    - [基础对话设置](#基础对话设置)
+    - [函数调用设置](#函数调用设置)
+    - [接收消息和触发相关设置](#接收消息和触发相关设置)
+    - [回复相关设置](#回复相关设置)
+    - [图片相关设置](#图片相关设置)
+  - [💻 完整命令手册](#-完整命令手册)
+    - [基础控制命令](#基础控制命令)
+    - [工具管理命令](#工具管理命令)
+    - [记忆管理命令](#记忆管理命令)
+    - [图片相关命令](#图片相关命令)
+    - [管理员命令](#管理员命令)
+    - [可用工具函数示例](#可用工具函数示例)
+  - [🚨 注意事项](#-注意事项)
+    - [常见问题处理](#常见问题处理)
+  - [可用AI大模型开放平台列表](#可用ai大模型开放平台列表)
+  - [📜 开发文档](#-开发文档)
+    - [项目结构](#项目结构)
+    - [添加新功能](#添加新功能)
+    - [添加新配置](#添加新配置)
+  - [版权信息](#版权信息)
+  - [致谢](#致谢)
+  - [📞 技术支持](#-技术支持)
 
-## 项目概述
+## 🌟 核心特性
 
 AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于OpenAI兼容API开发。本插件深度整合了海豹骰子核心功能，提供以下核心能力：
 
@@ -38,54 +48,256 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 - **多功能集成**：内置20+实用功能（属性检定、牌堆抽取、记忆管理等），并且持续更新
 - **图像处理**：支持图片识别、表情包管理和盗图功能
 - **权限系统**：多维度权限控制体系
+---
 
-## 功能特性
-
-### 核心功能
-- 上下文感知的智能对话
-- 基于正则表达式的关键词触发
-- 多模式响应机制（计数器/计时器/概率触发）
-- 支持函数调用
-
-### 扩展功能
-- 🎲 属性检定系统（COC7规则）
-- 🃏 智能牌堆抽取
-- 🧠 长期记忆管理
-- 📷 图片识别与处理
-- ⏰ 定时提醒系统
-- 🔧 权限管理系统
-- ...
-
-## 安装与使用
+## 🛠️ 完整安装指南
 
 ### 环境要求
-- 海豹骰子核心v1.4.6+
-- 支持的AI平台：
-  - Deepseek
-  - 智谱AI
-  - 其他兼容OpenAI API的平台
+- SealDice v1.4.6+ 
+  - 1.4.6分离部署使用napcat和llonebot协议图片相关功能存在问题，SealDice v1.5.0+ 正常使用
+- 支持的AI API：
+  - OpenAI API兼容
 
-### 安装步骤
-1. 在海豹核心webui-扩展功能-JS扩展-插件列表-上传JS处上传该js文件
-2. 执行重载JS插件命令
-3. 在插件设置配置API密钥等等
+### 下载
+- 通过GitHub下载最新稳定版：[下载链接](https://github.com/baiyu-yu/plug-in/blob/main/aiplugin4.js)
+- 通过GitHub下载最新开发版：[下载链接](https://github.com/baiyu-yu/plug-in/blob/main/aiplugin4/dist/aiplugin4.js)
+- 通过GitHub下载后自编译最新开发版：[下载链接](https://github.com/baiyu-yu/plug-in/blob/main/aiplugin4)
+    - 需要node.js环境，在下载后文件夹执行npm install命令安装依赖，执行npm run build命令编译为aiplugin4.js文件,在dist文件夹中可找到
+- 在QQ群中获取插件文件
+### 依赖下载
+- 通过GitHub下载最新版：[aitts依赖插件](https://github.com/baiyu-yu/plug-in/blob/main/AITTS.js) 
+- 通过GitHub下载最新版：[http依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)
+- 在QQ群中获取插件文件
 
-### 基础使用
-```海豹指令
-# 查看帮助文档
-.ai help
-```
+### 安装
+- 参考[海豹手册](https://docs.sealdice.com/config/jsscript.html)进行插件上传安装
+---
 
-## 配置说明
+## ⚙️ 配置手册
+### 打印日志设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+|是否打印日志细节 | 布尔 | true | 是否打印日志，反馈问题建议开启 |
 
-### 图片配置
+### 基础文本大模型请求设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| url地址 | 字符串 | https://api.deepseek.com/v1/chat/completions | 大语言模型的请求地址，一般在大模型平台的文档中会写出，或者参考下面列出的场景大模型请求地址 |
+| API Key | 字符串 | 你的API Key | 在ai的开放平台中获取，请注意个别开放平台会有多个API Key用于不同情况，请注意选择HTTP调用的API Key，未说明可能没做区分，直接完整复制入 |
+| body | 模板 | 见下框 | 请求体设置 |
+
 ```javascript
-// 本地图片路径配置示例
-<sealdice>data/images/dice.png
-<表情包1>http://example.com/emoji1.jpg
-```
+[
+            `"messages":null`,                  //消息体，为null时会自动替换，不用更改
+            `"model":"deepseek-chat"`,          //模型名
+            `"max_tokens":70`,                  //最大token，值越大回复越长
+            `"stop":null`,                      //一个 string 或最多包含 16 个 string 的 list，在遇到这些词时，API 将停止生成更多的 token
+            `"stream":false`,                   //是否流式输出，暂不支持更改
+            `"response_format":{"type":"text"}`,//响应格式，不用更改
+            `"frequency_penalty":0`,            //如果该值为正，那么新 token 会根据其在已有文本中的出现频率受到相应的惩罚，降低模型重复相同内容的可能性。
+            `"presence_penalty":0`,             //如果该值为正，那么新 token 会根据其是否已在已有文本中出现受到相应的惩罚，从而增加模型谈论新主题的可能性
+            `"temperature":1`,                  //更高的值，如 0.8，会使输出更随机，而更低的值，如 0.2，会使其更加集中和确定。 我们通常建议可以更改这个值或者更改 top_p，但不建议同时对两者进行修改。
+            `"top_p":1`,                        //作为调节采样温度的替代方案，模型会考虑前 top_p 概率的 token 的结果。所以 0.1 就意味着只有包括在最高 10% 概率中的 token 会被考虑。 我们通常建议修改这个值或者更改 temperature，但不建议同时对两者进行修改。
+            `"tools":null`,                     //调用工具相关参数，为null时会自动替换，不需要更改,如果出现function call相关报错可以尝试删除
+            `"tool_choice":null`                //调用工具相关参数，为null时会自动替换，不需要更改,如果出现function call相关报错可以尝试删除
+        ]
 
-## 项目结构
+//可以根据文档添加更多的参数
+```
+---
+
+### 基础对话设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 角色设定     | 模板   | 太长了不粘贴 | ai的扮演设定，当前只会取第一个 |
+| 示例对话     | 模板   | 请写点什么，或者删掉这句话 | 顺序为用户和AI回复轮流出现，可用于提供扮演示例，位于上下文最前面，不会被上下文机制删除 |
+| 是否在消息内添加前缀    | 布尔    | true | 添加消息来源，如 from:土豆  |
+| 是否给AI展示数字号码    | 布尔    | false | 添加消息来源的数字ID，如 from:土豆(114514)  |
+| 是否合并user content    | 布尔    | false | 在不支持连续多个role为user的情况下开启，比如 deepseek-reasoner 模型  |
+| 存储上下文对话限制轮数    | 整数    | 10 | 出现一次user视作一轮，超过轮数会遗忘除了示例对话之外最早的对话，越长消耗的token越多  |
+
+---
+
+### 函数调用设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 是否开启调用函数功能   | 布尔值 | true | 开启后AI可使用函数来进行除了文本对话之外的功能 |
+| 是否切换为提示词工程   | 布尔值 | false | 当API不支持function calling时开启,将函数调用介绍加入到prompt中 |
+| 不允许调用的函数     | 模板 | 填写不允许调用的函数名称，例如：get_time | 修改后保存并重载js,设置后将不被允许开启，函数名参考上表或对骰娘发送.ai tool 查看 |
+| 默认关闭的函数      | 模板   | ban、rename | AI默认关闭对该函数调用，在开启后才能调用的函数，函数名参考上表或对骰娘发送.ai tool 查看 |
+| 长期记忆上限      | 整数  | 5 | AI通过指令记忆信息的条数上限，超过上限会遗忘最早的记忆，越长消耗的token越多 |
+| 提供给AI的牌堆名称     | 模板  | 没有的话请去上面把draw_deck这个函数加入不允许调用的函数 | 提供给AI可用于函数调用的牌堆名称 |
+| ai语音使用的音色     | 选项  | 小新 | 该功能在选择预设音色时，需要安装[http依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要[aitts依赖插件](https://github.com/baiyu-yu/plug-in/blob/main/AITTS.js)和ffmpeg |
+| 本地语音路径     | 模板  | <钢管落地>data/records/钢管落地.mp3 | 如不需要可以不填写，尖括号内是语音的名称，提供给AI用于选择，后面是语音文件的路径，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中 |
+
+---
+
+### 接收消息和触发相关设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 是否录入指令消息    | 布尔   | false | 是否将指令消息写入上下文，指令消息包括指令前缀开头的所有消息，例如指令前缀为.则所有.开头的消息在改选项关闭状态下都不会被AI看到 |
+| 是否录入所有骰子发送的消息     | 布尔   | false | 若开启，则除了AI返回的文本外，骰点之类的所有骰子发送的消息都会被录入上下文 |
+| 非指令触发需要满足的条件   | 字符串    | 1 | 保持原样为可无限制非指令触发，即只要符合你的触发条件，AI就会回复，若需要限制只可在指定群或指定用户非指令触发，使用[豹语表达式](https://docs.sealdice.com/advanced/script.html)，例如：\$t群号_RAW=='114514' \| $t账号ID_RAW=='123456789'表示允许群号为114514的群或者QQ号为123456789的用户触发AI回复|
+| 非指令消息触发正则表达式    | 模板    | `\\[CQ:at,qq=748569109\\]`,`^正确正确确` | 用于匹配符合特定正则表达式的消息用于强制触发AI回复，示例中第一个为@骰娘，数字部分可改为你骰娘的QQ号，第二个为以"正确正确确"开头的句子触发，[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html)  |
+
+---
+
+### 回复相关设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 回复是否引用    | 布尔    | false | AI在回复时是否引用触发的消息 |
+| 回复最大字数    | 整数    | 1000 | 防止最大tokens限制不起效导致回复过长  |
+| 禁止AI复读    | 布尔    | false | 开启后检测到AI返回文本和前一次相似度太高时，尝试再次请求以获得相似度较低的文本 |
+| 视作复读的最低相似度  | 浮点数   | 0.8 | 在禁止AI复读开关打开后，高于该相似度时，尝试再次请求以获得相似度较低的文本 |
+| 过滤上下文正则表达式   | 模板   | |`<[\\\|｜]from.*?[\\\|｜]?>`,`^<think>[\\s\\S]*?</think>` | 回复加入上下文时，将符合正则表达式的内容删掉，默认为删除AI模仿的消息来源和以<think></think>包裹的内容删掉 |
+| 过滤回复正则表达式   | 模板    | |`<[\\\|｜].*?[\\\|｜]?>`,`^<think>[\\s\\S]*?</think>`,`<function_call>[\\s\\S]*?</function_call>` |回复输出时，将符合正则表达式的内容删掉，默认为删除AI模仿的消息来源、以<think></think>包裹的内容和<function_call></function_call>包裹的内容删掉 |
+
+---
+
+### 图片相关设置
+| 设置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| 本地图片路径 | 模板 | <海豹>data/images/sealdice.png | 如不需要可以不填写，尖括号内是提供给AI发送的图片的名称，后面是本地图片的路径，修改完需要重载js |
+| 图片识别需要满足的条件  | 字符串 | 1 | 保持原样为在所有群中，AI调用识别图片指令可正常使用，若需要限制只可在指定群或指定用户发出的图片可被AI通过图片识别指令识别，使用[豹语表达式](https://docs.sealdice.com/advanced/script.html)，例如：\$t群号_RAW=='114514'\|$t账号ID_RAW=='123456789'表示允许在群号为114514的群或者QQ号为123456789的用户触发图片识别  |
+| 发送图片的概率/%  | 整数  | 100 | 在AI触发回复后随机抽取一张本地或偷取的图片发送的概率 |
+| 图片大模型URL  | 字符串   | https://open.bigmodel.cn/api/paas/v4/chat/completions | 视觉大模型的请求URL，填写后可使用image_to_text或check_avatar识别图片内容 |
+| 图片API key   | 字符串   | yours | 视觉大模型的API key |
+| 图片body | 模板 | 见下框 | 视觉大模型请求体设置 |
+| 图片最大回复字符数   | 字符串   | 100 | 超过该字符数会自动截断，防止max_tokens不起效 |
+| 偷取图片存储上限 | 整数 | 30 | 偷取图片存储上限，每个群聊或私聊单独储存 |
+
+```javascript
+[
+            `"messages":null`,                  //消息体，为null时会自动替换，不用更改
+            `"model":"glm-4v"`,                 //模型名
+            `"max_tokens":20`,                  //最大token，值越大回复越长
+            `"stop":null`,                      //一个 string 或最多包含 16 个 string 的 list，在遇到这些词时，API 将停止生成更多的 token
+            `"stream":false`,                   //是否流式输出，暂不支持更改
+        ]
+
+//可以根据文档添加更多的参数
+```
+---
+
+## 💻 完整命令手册
+
+### 基础控制命令
+| 命令                    | 使用示例                  | 说明                               |
+|-------------------------|---------------------------|------------------------------------|
+| `.ai on --<参数>=<数字>` | `.ai on --c=10 --t=60`每收到十条消息触发一次或每60s触发一次     | 开启AI，参数有计数器模式(c)，计时器模式(t)和概率模式(p)，可同时开启多个模式 |
+| `.ai off`               | -                         | 关闭AI（仍可通过关键词触发）       |
+| `.ai sb`                | -                         | 待机模式（仅录入上下文，但不主动发言，只有非指令关键词触发才发言）       |
+| `.ai f [assistant/user]` | -                         | 遗忘当前上下文，不加参数为遗忘全部上下文，assistant为遗忘AI调用函数和发言，user为遗忘用户发言和函数返回|
+| `.ai ctxn`              | -                         | 查看上下文中的名字 |
+| `.ai pr`                | -                         | 查看当前群聊权限和触发设定                   |
+
+### 工具管理命令
+| 命令                    | 使用示例                  | 说明                               |
+|-------------------------|---------------------------|------------------------------------|
+| `.ai tool`              | -                         | 列出所有可用工具                   |
+| `.ai tool help <name>`  | `.ai tool help get_time`          | 查看指定工具的详细说明和参数需求 |
+| `.ai tool [on/off]`       | -                         | 开启/关闭全部工具函数              |
+| `.ai tool <name> [on/off]`| `.ai tool jrrp on`           | 开启/关闭指定工具函数              |
+| `.ai tool <name>`       | `.ai tool jrrp --name=错误` 调用一次查看错误今日人品，输出会包括今日人品函数的输出和调用函数返回结果输出| 试用指定工具函数，会输出调用函数返回信息，多个参数用空格或换行隔开，可使用上下文中名字或QQ号，数字需要引号包裹 |
+
+### 记忆管理命令
+| 命令                    | 使用示例                  | 说明                               |
+|-------------------------|---------------------------|------------------------------------|
+| `.ai memo st`              | `.ai memo st 西瓜` 将自己的设定记忆设定为西瓜| 修改AI的设定记忆，不能超过20字           |
+| `.ai memo clr`          | -                         | 清除当前个人所有记忆，骰主可通过@其他人替他人删除     |
+| `.ai memo clr group`          | -                         | 清除当前群聊记忆，骰主可通过@其他人替他人删除     |
+| `.ai memo show`          | -                         | 展示当前个人所有记忆，骰主可通过@其他人查看他人记忆|
+| `.ai memo show group`          | -                         | 展示当前群聊记忆|
+
+> 注：个人记忆是跨群的，群聊记忆是群内的，在刚初始化的时候每个人会等概率随机或者“好人”或“坏人”一个设定记忆，可以清除或覆盖，记忆会写入prompt
+
+### 图片相关命令
+| 命令                    | 使用示例                  | 说明                               |
+|-------------------------|---------------------------|------------------------------------|
+| `.img stl [on/off]`     | -                         | 开启/关闭图片盗取功能，开启后会随机偷取群内发送的图片，然后按照配置项设置的概率在触发ai回复后随机抽取一张发送。不带on/off参数为查看当前偷取图片状态和数量 |
+| `.img draw [stl/lcl/all]` | `.img itt stl` 随机抽取一张偷取的图片| 随机抽取图片(偷取/本地/全部)       |
+| `.img f`     | -                         | 遗忘图片                           |
+| `.img itt [图片/ran] [提示词]`| `.img itt ran 看看这图里人物是什么` 抽取一张盗取的图片，并询问AI是什么人物| 使用视觉大模型进行一次图片转文字，图片为一张发送的图片，ran为抽取的随机图片(可带提示词)             |
+
+### 管理员命令
+| 命令                    | 使用示例                  | 说明                               |
+|-------------------------|---------------------------|------------------------------------|
+| `.ai st`                | `.ai st QQ-Group:1234 60`设置群1234的权限限制是群主或群主以上，即群主、骰娘白名单、骰主可使用基础控制命令 | 设置群组操作基础控制命令需要的权限等级|
+| `.ai ck`                | `.ai ck QQ-Group:1234` 查看群1234的权限设置 | 检查指定群或私聊的权限等级需求和触发设定  |
+| `.ai prompt`            | -                         | 检查当前prompt，需要注意如果打开了将AI命令写入提示词开关，这条输出会很长 |
+
+### 可用工具函数示例
+以下是一些常用的工具函数，可通过`.ai tool help <name>`查看详细用法：
+
+| 函数名               | 描述                      | 特殊说明                  |
+|----------------------|--------------------------|---------------------------|
+| add_memory           | 添加记忆                   |
+| show_memory          | 查看记忆                  |
+| draw_deck            | 抽取牌堆                  |
+| jrrp                 | 查看今日人品              |
+| modu_roll            | 随机抽取COC模组           |
+| modu_search          | 搜索COC模组               |
+| roll_check           | 技能/属性检定             |
+| rename               | 设置群名片                |
+| attr_show            | 展示用户全部属性         |
+| attr_get             | 获取用户指定属性         |
+| attr_set             | 修改用户属性             |
+| ban                  | 禁言用户                 |需要http依赖                 |
+| text_to_sound        | AI文本转语音              |预设音色需要http依赖，自定义音色需要AITTS依赖和ffmpeg |
+| poke                 | 发送戳一戳               |需要http依赖                 |
+| get_time             | 获取当前时间             |
+| set_timer            | 设置定时器用于触发对话     |
+| show_timer_list      | 查看当前聊天定时器列表      |
+| cancel_timer         | 取消当前聊天指定定时器      |
+| web_search           | 搜索引擎搜索             |
+| image_to_text        | 图片内容识别，可指定特别关注的内容            |需要设置视觉大模型相关配置项，需要支持QQ图床的视觉大模型或使用中转插件 |
+| check_avatar         | 查看指定用户头像，可指定特别关注的内容       |需要设置视觉大模型相关配置项 |
+| san_check            | San值检定               |
+| group_sign           | 发送群打卡               |需要http依赖         |
+| get_person_info      | 获取用户信息             |需要http依赖         |
+| record               | 发送本地语音             |需要配置ffmpeg       |
+| send_msg             | 向指定私聊或群聊发送消息   |
+| remote_function_call | 在指定私聊或群聊调用函数   |函数包括其它工具函数，部分需要依赖，见其它工具函数说明|
+| check_ctx            | 查看指定私聊或群聊的上下文 |
+| check_list           | 查看当前好友列表或群聊列表 |需要http依赖         |
+| check_group_member_list|查看群聊成员列表         |需要http依赖         |
+| search_chat           |搜索好友或群聊             |需要http依赖         |
+| search_common_group   |搜索共同群聊             |需要http依赖         |
+
+> 注：部分工具函数需要额外依赖或权限，请在依赖下载一节中获取。
+
+---
+
+## 🚨 注意事项
+
+### 常见问题处理
+- `请求出错：Error:HTTP error! status 数字` —— HTTP请求错误，可自行翻译日志中错误信息，以及在对应大模型文档中查找错误码对应问题自行解决，若找不到可以直接百度"HTTP错误码***"。常见问题：url填错，api填错，模型名填错，不支持工具调用，余额不足，请求频繁等；
+- `图片识别异常`：确认图片URL有效性
+
+---
+
+## 可用AI大模型开放平台列表
+| 大模型平台                 | 调用url                          | 文档地址                          | 支持语言大模型                          |支持视觉大模型                      |
+|---------------------------|----------------------------------|----------------------------------|----------------------------------|----------------------------------|
+| [deepseek](https://platform.deepseek.com)| `https://api.deepseek.com/chat/completions`    |[deepseek API文档](https://api-docs.deepseek.com/zh-cn)|`deepseek-chat`,`deepseek-reasoner`×▲|-|
+| [kimi](https://platform.moonshot.cn/console)| `https://api.moonshot.cn/v1/chat/completions`|[Moonshot AI 使用手册](https://platform.moonshot.cn/docs)|`moonshot-v1-8k`,`moonshot-v1-32k`,`moonshot-v1-128k`,`moonshot-v1-auto`|-|
+| [百炼大模型](https://www.aliyun.com/product/bailian/getting-started)|`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | [大模型服务平台百炼产品文档](https://help.aliyun.com/zh/model-studio/getting-started/what-is-model-studio)|`qwen-max`,`qwen-plus`,`qwen-turbo`,`qwen-long`,`deepseek-r1`×▲,`deepseek-v3`×|`qwen-vl-max`,`qwen-vl-plus`|
+| [智谱AI](https://www.bigmodel.cn/console/overview)|`https://open.bigmodel.cn/api/paas/v4/chat/completions`|[BigModel 接口文档](https://www.bigmodel.cn/dev/api)|`glm-4-plus`,`glm-4-air`,`glm-4-air-0111`,`glm-4-airx`,`glm-4-long`,`glm-4-flashx`,`glm-4-flash`,`glm-zero-preview`×,`charglm-4`×|`glm-4v-plus-0111`,`glm-4v-plus`,`glm-4v`,`glm-4v-flash`|
+| [百度千帆大模型平台](https://console.bce.baidu.com/qianfan/overview)|`https://qianfan.baidubce.com/v2/chat/completions`|[千帆大模型服务与开发平台ModelBuilder文档](https://cloud.baidu.com/doc/WENXINWORKSHOP/s/Zm2ycv77m)|`ernie-4.0-8k`▲,`ernie-4.0-turbo-8k`▲,`ernie-3.5-8k`▲,`deepseek-v3`×▲,`deepseek-r1`×▲|`deepseek-vl2`|
+| [讯飞星火大模型](https://console.xfyun.cn/services)|`https://spark-api-open.xf-yun.com/v1/chat/completions`|[讯飞开放平台文档中心](https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html#_1-%E6%8E%A5%E5%8F%A3%E8%AF%B4%E6%98%8E)|`lite`×,`generalv3`×,`pro-128k`×,`generalv3.5`×,`max-32k`,`4.0Ultra`|
+| [google AI](https://ai.google.dev/)|`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`|[gemini API 文档](https://ai.google.dev/api)|`gemini-2.0-flash`,`gemini-1.5-flash`,`gemini-1.5-pro`|
+| [openAI](https://openai.com/api/)|`https://api.openai.com/v1/chat/completions`|[openAI API 文档](https://platform.openai.com/docs/quickstart)|`gpt-4o`,`gpt-4o-mini`,`o1`,`o3-mini`,`gpt-4-turbo`,`gpt-3.5-turbo`|`gpt-4-turbo`,`gpt-4o`,`o1`,`gpt-4o-mini`|
+
+> 注：×为不支持function call。▲为需要开启合并user消息开关。
+> 注：视觉模型不一定支持QQ图床识别，可使用中转插件。
+> 注：仅列出部分官方的我知道的该插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。
+> 注：国外大模型网络问题请自行解决。
+
+---
+
+## 📜 开发文档
+
+### 项目结构
 
 ```
 aiplugin4/
@@ -106,23 +318,6 @@ aiplugin4/
 └── package.json       # 项目依赖
 ```
 
-## 核心模块
-
-### 1. 对话管理系统
-- 上下文管理（Context）
-- 记忆持久化（Memory）
-- 多轮对话处理
-
-### 2. 功能调用系统
-- ...
-
-### 3. 图像处理引擎
-- 图片盗取系统
-- 本地图片管理
-- 视觉模型集成
-
-## 扩展
-
 ### 添加新功能
 1. 在`src/tools/`目录创建新工具
 2. 实现工具接口
@@ -133,17 +328,11 @@ aiplugin4/
 2. 实现`register`方法和`get`方法
 3. 注册到配置管理系统
 
-## 注意事项
-
-### 常见问题
-1. **API调用失败**：检查网络连接和API密钥
-2. **图片识别异常**：确认图片URL有效性
-3. **权限问题**：使用`.ai pr`检查当前权限设置
+---
 
 ## 版权信息
 
 本项目采用MIT开源协议，欢迎二次开发。原创作者保留署名权。
-
 ```text
 Copyright 2024 错误、白鱼
 
@@ -155,8 +344,9 @@ Permission is hereby granted...
 - 海豹骰子开发团队
 - 开源社区贡献者
 
----
+## 📞 技术支持
 
-> 项目维护：错误、白鱼  
-> 问题反馈：https://github.com/baiyu-yu/plug-in/issues
-> 更新日期：2024-12-05
+- GitHub Issues: [问题提交](https://github.com/baiyu-yu/plug-in/issues)
+- QQ交流群: 940049120
+
+> "才、才不是专门给你写的文档呢！只是...只是顺便而已！(///ω///)" —— 正确·改
