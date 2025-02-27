@@ -305,12 +305,41 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 ```
 aiplugin4/
 ├── src/
-│   ├── config/        # 配置相关
+│   ├── config/        # 配置项相关
 │   │   ├── config.ts  # 配置管理
-│   │   └── ...
+│   │   ├── config_image.ts  # 图片配置管理
+│   │   ├── config_log.ts  # 日志配置管理
+│   │   ├── config_message.ts  # 基础对话配置管理
+│   │   ├── config_receive.ts  # 接收消息和触发配置管理
+│   │   ├── config_reply.ts  # 回复配置管理
+│   │   ├── config_request.ts  # 基础文本大模型请求配置管理
+│   │   └── config_tool.ts  # 函数调用配置管理
 │   ├── tools/         # 调用函数扩展
 │   │   ├── tool.ts     # 工具管理
-│   │   └──...
+│   │   ├── tool_attr.ts     # 属性工具管理
+│   │   ├── tool_ban.ts     # 禁言工具管理
+│   │   ├── tool_check_ctx.ts     # 查看上下文工具管理
+│   │   ├── tool_check_list.ts     # 查看群聊成员和好友列表工具管理
+│   │   ├── tool_draw_deck.ts     # 抽取牌堆工具管理
+│   │   ├── tool_face.ts     # 图片发送工具管理
+│   │   ├── tool_get_person_info.ts     # 获取用户信息工具管理
+│   │   ├── tool_get_time.ts     # 获取当前时间工具管理
+│   │   ├── tool_group_sign.ts     # 工群打卡具管理
+│   │   ├── tool_image_to_text.ts     # 图片识别工具管理
+│   │   ├── tool_jrrp.ts     # 今日人品工具管理
+│   │   ├── tool_memory.ts     # 记忆工具管理
+│   │   ├── tool_modu.ts     # 魔都工具管理
+│   │   ├── tool_poke.ts     # 戳戳工具管理
+│   │   ├── tool_record.ts     # 发送本地语音工具管理
+│   │   ├── tool_remote_function_call.ts     # 远程调用工具管理
+│   │   ├── tool_rename.ts     # 修改群名片工具管理
+│   │   ├── tool_roll_check.ts     # 鉴定工具管理
+│   │   ├── tool_san_check.ts     # sc工具管理
+│   │   ├── tool_search_chat.ts     # 聊天记录搜索工具管理
+│   │   ├── tool_send_msg.ts     # 发送消息工具管理
+│   │   ├── tool_text_to_sound.ts     # tts工具管理
+│   │   ├── tool_timer.ts     # 设置定时任务工具管理
+│   │   └── tool_web_search.ts     # 网络搜索工具管理
 │   ├── AI/            # 核心逻辑
 │   │   ├── AI.ts       # 核心AI逻辑
 │   │   ├── context.ts  # 上下文管理
@@ -318,6 +347,11 @@ aiplugin4/
 │   │   ├── image.ts    # 图片处理
 │   │   └── service.ts  # 服务管理，包括API调用
 │   └── utils/         # 工具函数
+│       ├── utils.ts   # 记忆管理
+│       ├── utils_message.ts       # prompt和消息拼接
+│       ├── utils_reply.ts  # 回复处理
+│       ├── utils_seal.ts   # msg和ctx制作
+│       └── utils_string.ts    # 看不懂
 └── package.json       # 项目依赖
 ```
 
