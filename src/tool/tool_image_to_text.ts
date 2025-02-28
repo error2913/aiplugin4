@@ -1,6 +1,5 @@
 import { ImageManager } from "../AI/image";
 import { ConfigManager } from "../config/config";
-import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerImageToText() {
@@ -57,35 +56,52 @@ export function registerCheckAvatar() {
             parameters: {
                 type: "object",
                 properties: {
-                    name: {
+                    msg_type: {
                         type: "string",
-                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: "消息类型，个人头像或群聊头像",
+                        enum: ["private", "group"]
+                    },
+                    name: {
+                        type: 'string',
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
                     },
                     content: {
                         type: "string",
                         description: `需要特别关注的内容`
                     }
                 },
-                required: ["name"]
+                required: ["msg_type", "name"]
             }
         }
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
-        const { name, content } = args;
+    tool.solve = async (ctx, _, ai, args) => {
+        const { msg_type, name, content = '' } = args;
 
-        const uid = await ai.context.findUserId(ctx, name, true);
-        if (uid === null) {
-            console.log(`未找到<${name}>`);
-            return `未找到<${name}>`;
+        let url = '';
+        const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
+
+        if (msg_type === "private") {
+            const uid = await ai.context.findUserId(ctx, name, true);
+            if (uid === null) {
+                console.log(`未找到<${name}>`);
+                return `未找到<${name}>`;
+            }
+
+            url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, '')}&s=640`;
+        } else if (msg_type === "group") {
+            const gid = await ai.context.findGroupId(ctx, name);
+            if (gid === null) {
+                console.log(`未找到<${name}>`);
+                return `未找到<${name}>`;
+            }
+
+            url = `https://p.qlogo.cn/gh/${gid.replace(/\D+/g, '')}/${gid.replace(/\D+/g, '')}/640`;
+        } else {
+            return `未知的消息类型<${msg_type}>`;
         }
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
-
-        const url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, '')}&s=640`;
-        const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
         const reply = await ImageManager.imageToText(url, text);
         if (reply) {
