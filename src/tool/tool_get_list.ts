@@ -1,11 +1,10 @@
-import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerCheckList() {
+export function registerGetList() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "check_list",
+            name: "get_list",
             description: `查看当前好友列表或群聊列表`,
             parameters: {
                 type: "object",
@@ -61,43 +60,64 @@ export function registerCheckList() {
     ToolManager.toolMap[info.function.name] = tool;
 }
 
-export function registerCheckGroupMemberList() {
+export function registerGetGroupMemberList() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "check_group_member_list",
+            name: "get_group_member_list",
             description: `查看群聊成员列表`,
             parameters: {
                 type: "object",
                 properties: {
-                    name: {
-                        type: 'string',
-                        description: '群聊名称' + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
-                    },
+                    role: {
+                        type: "string",
+                        description: "成员角色，群主或管理员",
+                        enum: ["owner", "admin", "robot"]
+                    }
                 },
-                required: ["name"]
+                required: []
             }
         }
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, _, ai, args) => {
-        const { name } = args;
-
-        const gid = await ai.context.findGroupId(ctx, name);
-        if (gid === null) {
-            console.log(`未找到<${name}>`);
-            return `未找到<${name}>`;
-        }
+    tool.solve = async (ctx, _, __, args) => {
+        const { role = '' } = args;
 
         try {
             const epId = ctx.endPoint.userId;
+            const gid = ctx.group.groupId;
             const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, '')}`);
 
-            const s = `群成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`;
-            }).join('\n');
+            if (role === 'owner') {
+                const owner = data.find((item: any) => item.role === role);
+                if (!owner) {
+                    return `未找到群主`;
+                }
+                return `群主: ${owner.nickname}(${owner.user_id}) ${owner.card && owner.card !== owner.nickname ? `群名片: ${owner.card}` : ''}`;
+            } else if (role === 'admin') {
+                const admins = data.filter((item: any) => item.role === role);
+                if (admins.length === 0) {
+                    return `未找到管理员`;
+                }
+                const s = `管理员数量: ${admins.length}\n` + admins.slice(0, 50).map((item: any, index: number) => {
+                    return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`;
+                }).join('\n');
+                return s;
+            } else if (role === 'robot') {
+                const robots = data.filter((item: any) => item.is_robot);
+                if (robots.length === 0) {
+                    return `未找到机器人`;
+                }
+                const s = `机器人数量: ${robots.length}\n` + robots.slice(0, 50).map((item: any, index: number) => {
+                    return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`;
+                }).join('\n');
+                return s;
+            }
 
+            const s = `群成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
+                return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''} ${item.role === 'owner' ? '【群主】' : item.role === 'admin' ? '【管理员】' : item.is_robot ? '【机器人】' : ''}`;
+            }).join('\n');
             return s;
         } catch (e) {
             console.error(e);

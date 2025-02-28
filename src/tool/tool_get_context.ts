@@ -4,11 +4,11 @@ import { handleMessages } from "../utils/utils_message";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerCheckCtx() {
+export function registerGetContext() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "check_ctx",
+            name: "get_context",
             description: `查看指定私聊或群聊的上下文`,
             parameters: {
                 type: "object",
