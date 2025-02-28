@@ -13,29 +13,28 @@ export function registerGetContext() {
             parameters: {
                 type: "object",
                 properties: {
-                    msg_type: {
+                    ctx_type: {
                         type: "string",
-                        description: "消息类型，私聊或群聊",
+                        description: "上下文类型，私聊或群聊",
                         enum: ["private", "group"]
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与上下文类型对应'
                     }
                 },
-                required: ["msg_type", "name"]
+                required: ["ctx_type", "name"]
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-        const { msg_type, name } = args;
+        const { ctx_type, name } = args;
 
-        if (msg_type === "private") {
+        if (ctx_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (uid === ctx.player.userId && ctx.isPrivate) {
@@ -49,10 +48,9 @@ export function registerGetContext() {
             ctx = createCtx(ctx.endPoint.userId, msg);
     
             ai = AIManager.getAI(uid);
-        } else if (msg_type === "group") {
+        } else if (ctx_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (gid === ctx.group.groupId) {
@@ -64,7 +62,7 @@ export function registerGetContext() {
     
             ai = AIManager.getAI(gid);
         } else {
-            return `未知的消息类型<${msg_type}>`;
+            return `未知的上下文类型<${ctx_type}>`;
         }
 
         const messages = handleMessages(ctx, ai);

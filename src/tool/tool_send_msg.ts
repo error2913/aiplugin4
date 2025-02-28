@@ -9,7 +9,7 @@ export function registerSendMsg() {
         type: "function",
         function: {
             name: "send_msg",
-            description: `向指定私聊或群聊发送消息或调用函数`,
+            description: `向当前聊天以外的指定私聊或群聊发送消息或调用函数`,
             parameters: {
                 type: "object",
                 properties: {
@@ -20,7 +20,7 @@ export function registerSendMsg() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
                     },
                     content: {
                         type: 'string',
@@ -60,10 +60,22 @@ export function registerSendMsg() {
             `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
             `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}`;
 
+        const originalImages = [];
+        const match = content.match(/<[\|｜]图片.+?[\|｜]?>/g);
+        if (match) {
+            for (let i = 0; i < match.length; i++) {
+                const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+                const image = ai.context.findImage(id);
+
+                if (image) {
+                    originalImages.push(image);
+                }
+            }
+        }
+
         if (msg_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (uid === ctx.player.userId && ctx.isPrivate) {
@@ -80,7 +92,6 @@ export function registerSendMsg() {
         } else if (msg_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (gid === ctx.group.groupId) {
@@ -95,8 +106,7 @@ export function registerSendMsg() {
             return `未知的消息类型<${msg_type}>`;
         }
 
-
-        await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`);
+        await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
         const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
         ai.context.lastReply = reply;
@@ -127,14 +137,14 @@ export function registerSendMsg() {
                 }
 
                 const s = await tool.solve(ctx, msg, ai, args);
-                await ai.context.systemUserIteration('_调用函数返回', s);
+                await ai.context.systemUserIteration('_调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return `函数调用成功，返回值:${s}`;
             } catch (e) {
                 const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
                 console.error(s);
-                await ai.context.systemUserIteration('_调用函数返回', s);
+                await ai.context.systemUserIteration('_调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return s;

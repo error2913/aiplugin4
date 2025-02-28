@@ -116,7 +116,6 @@ export function registerSearchCommonGroup() {
 
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-            console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
         }
         if (uid === ctx.endPoint.userId) {

@@ -290,24 +290,24 @@ export class ToolManager {
     }): Promise<void> {
         if (!tool_call.hasOwnProperty('name') || !tool_call.hasOwnProperty('arguments')) {
             log(`调用函数失败:缺少name或arguments`);
-            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少name或arguments`);
+            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少name或arguments`, []);
         }
 
         const name = tool_call.name;
 
         if (!this.toolMap.hasOwnProperty(name)) {
             log(`调用函数失败:未注册的函数:${name}`);
-            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:未注册的函数:${name}`);
+            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:未注册的函数:${name}`, []);
             return;
         }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {
             log(`调用函数失败:禁止调用的函数:${name}`);
-            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:禁止调用的函数:${name}`);
+            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:禁止调用的函数:${name}`, []);
             return;
         }
         if (this.cmdArgs == null) {
             log(`暂时无法调用函数，请先使用任意指令`);
-            await ai.context.systemUserIteration('_调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`);
+            await ai.context.systemUserIteration('_调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`, []);
             return;
         }
 
@@ -317,22 +317,22 @@ export class ToolManager {
             const args = tool_call.arguments;
             if (args !== null && typeof args !== 'object') {
                 log(`调用函数失败:arguement不是一个object`);
-                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:arguement不是一个object`);
+                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:arguement不是一个object`, []);
                 return;
             }
             if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
                 log(`调用函数失败:缺少必需参数`);
-                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少必需参数`);
+                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少必需参数`, []);
                 return;
             }
 
             const s = await tool.solve(ctx, msg, ai, args);
 
-            await ai.context.systemUserIteration('_调用函数返回', s);
+            await ai.context.systemUserIteration('_调用函数返回', s, []);
         } catch (e) {
             const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
             console.error(s);
-            await ai.context.systemUserIteration('_调用函数返回', s);
+            await ai.context.systemUserIteration('_调用函数返回', s, []);
         }
     }
 }

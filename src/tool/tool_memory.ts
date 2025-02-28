@@ -14,12 +14,12 @@ export function registerAddMemory() {
                 properties: {
                     memory_type: {
                         type: "string",
-                        description: "记忆类型，个人或群聊",
+                        description: "记忆类型，个人或群聊。",
                         enum: ["private", "group"]
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
                     },
                     content: {
                         type: 'string',
@@ -38,7 +38,6 @@ export function registerAddMemory() {
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (uid === ctx.endPoint.userId) {
@@ -52,7 +51,6 @@ export function registerAddMemory() {
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
     
@@ -61,7 +59,7 @@ export function registerAddMemory() {
     
             ai = AIManager.getAI(gid);
         } else {
-            return `未知的消息类型<${memory_type}>`;
+            return `未知的记忆类型<${memory_type}>`;
         }
 
         //记忆相关处理
@@ -90,7 +88,7 @@ export function registerShowMemory() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '')
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
                     }
                 },
                 required: ['memory_type', 'name']
@@ -105,7 +103,6 @@ export function registerShowMemory() {
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (uid === ctx.player.userId) {
@@ -123,7 +120,6 @@ export function registerShowMemory() {
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
             }
             if (gid === ctx.group.groupId) {
@@ -136,7 +132,7 @@ export function registerShowMemory() {
             ai = AIManager.getAI(gid);
             return ai.memory.buildGroupMemoryPrompt();
         } else {
-            return `未知的消息类型<${memory_type}>`;
+            return `未知的记忆类型<${memory_type}>`;
         }
     }
 

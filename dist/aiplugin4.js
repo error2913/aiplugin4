@@ -375,7 +375,6 @@
       const { name } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -415,7 +414,6 @@
       const { name, attr } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -452,7 +450,6 @@
       const { name, expression } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -514,7 +511,6 @@ ${attr}: ${value}=>${result}`;
       }
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -762,45 +758,43 @@ ${attr}: ${value}=>${result}`;
         parameters: {
           type: "object",
           properties: {
-            msg_type: {
+            avatar_type: {
               type: "string",
-              description: "消息类型，个人头像或群聊头像",
+              description: "头像类型，个人头像或群聊头像",
               enum: ["private", "group"]
             },
             name: {
               type: "string",
-              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "")
+              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "") + "，实际使用时与头像类型对应"
             },
             content: {
               type: "string",
               description: `需要特别关注的内容`
             }
           },
-          required: ["msg_type", "name"]
+          required: ["avatar_type", "name"]
         }
       }
     };
     const tool = new Tool(info);
     tool.solve = async (ctx, _, ai, args) => {
-      const { msg_type, name, content = "" } = args;
+      const { avatar_type, name, content = "" } = args;
       let url = "";
       const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
-      if (msg_type === "private") {
+      if (avatar_type === "private") {
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, "")}&s=640`;
-      } else if (msg_type === "group") {
+      } else if (avatar_type === "group") {
         const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         url = `https://p.qlogo.cn/gh/${gid.replace(/\D+/g, "")}/${gid.replace(/\D+/g, "")}/640`;
       } else {
-        return `未知的消息类型<${msg_type}>`;
+        return `未知的头像类型<${avatar_type}>`;
       }
       const reply = await ImageManager.imageToText(url, text);
       if (reply) {
@@ -841,7 +835,6 @@ ${attr}: ${value}=>${result}`;
       const { name } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -867,12 +860,12 @@ ${attr}: ${value}=>${result}`;
           properties: {
             memory_type: {
               type: "string",
-              description: "记忆类型，个人或群聊",
+              description: "记忆类型，个人或群聊。",
               enum: ["private", "group"]
             },
             name: {
               type: "string",
-              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "")
+              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "") + "，实际使用时与记忆类型对应"
             },
             content: {
               type: "string",
@@ -889,7 +882,6 @@ ${attr}: ${value}=>${result}`;
       if (memory_type === "private") {
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (uid === ctx.endPoint.userId) {
@@ -901,14 +893,13 @@ ${attr}: ${value}=>${result}`;
       } else if (memory_type === "group") {
         const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         msg = createMsg("group", ctx.player.userId, gid);
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(gid);
       } else {
-        return `未知的消息类型<${memory_type}>`;
+        return `未知的记忆类型<${memory_type}>`;
       }
       ai.memory.addMemory(ctx, content);
       AIManager.saveAI(ai.id);
@@ -932,7 +923,7 @@ ${attr}: ${value}=>${result}`;
             },
             name: {
               type: "string",
-              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "")
+              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "") + "，实际使用时与记忆类型对应"
             }
           },
           required: ["memory_type", "name"]
@@ -945,7 +936,6 @@ ${attr}: ${value}=>${result}`;
       if (memory_type === "private") {
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (uid === ctx.player.userId) {
@@ -961,7 +951,6 @@ ${attr}: ${value}=>${result}`;
       } else if (memory_type === "group") {
         const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (gid === ctx.group.groupId) {
@@ -972,7 +961,7 @@ ${attr}: ${value}=>${result}`;
         ai = AIManager.getAI(gid);
         return ai.memory.buildGroupMemoryPrompt();
       } else {
-        return `未知的消息类型<${memory_type}>`;
+        return `未知的记忆类型<${memory_type}>`;
       }
     };
     ToolManager.toolMap[info.function.name] = tool;
@@ -1071,7 +1060,6 @@ ${attr}: ${value}=>${result}`;
       }
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -1118,7 +1106,6 @@ ${attr}: ${value}=>${result}`;
       const { name, new_name } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -1185,7 +1172,6 @@ ${attr}: ${value}=>${result}`;
       const { name, expression, rank = "", times = 1, additional_dice = "", reason = "" } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -1248,7 +1234,6 @@ ${attr}: ${value}=>${result}`;
       const { name, expression, additional_dice } = args;
       const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -1619,7 +1604,6 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
       }
       const uid = await ai.context.findUserId(ctx, name, true);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -1869,7 +1853,7 @@ QQ等级: ${data.qqLevel}
       type: "function",
       function: {
         name: "send_msg",
-        description: `向指定私聊或群聊发送消息或调用函数`,
+        description: `向当前聊天以外的指定私聊或群聊发送消息或调用函数`,
         parameters: {
           type: "object",
           properties: {
@@ -1880,7 +1864,7 @@ QQ等级: ${data.qqLevel}
             },
             name: {
               type: "string",
-              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "")
+              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "") + "，实际使用时与消息类型对应"
             },
             content: {
               type: "string",
@@ -1915,10 +1899,20 @@ QQ等级: ${data.qqLevel}
       const { msg_type, name, content, function: tool_call, reason = "" } = args;
       const { showNumber } = ConfigManager.message;
       const source = ctx.isPrivate ? `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}` : `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}`;
+      const originalImages = [];
+      const match = content.match(/<[\|｜]图片.+?[\|｜]?>/g);
+      if (match) {
+        for (let i = 0; i < match.length; i++) {
+          const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+          const image = ai.context.findImage(id);
+          if (image) {
+            originalImages.push(image);
+          }
+        }
+      }
       if (msg_type === "private") {
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (uid === ctx.player.userId && ctx.isPrivate) {
@@ -1933,7 +1927,6 @@ QQ等级: ${data.qqLevel}
       } else if (msg_type === "group") {
         const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (gid === ctx.group.groupId) {
@@ -1945,7 +1938,7 @@ QQ等级: ${data.qqLevel}
       } else {
         return `未知的消息类型<${msg_type}>`;
       }
-      await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || "无"}`);
+      await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || "无"}`, originalImages);
       const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
       ai.context.lastReply = reply;
       await ai.context.iteration(ctx, s, images, "assistant");
@@ -1970,13 +1963,13 @@ QQ等级: ${data.qqLevel}
             return `调用函数失败:缺少必需参数`;
           }
           const s2 = await tool2.solve(ctx, msg, ai, args2);
-          await ai.context.systemUserIteration("_调用函数返回", s2);
+          await ai.context.systemUserIteration("_调用函数返回", s2, []);
           AIManager.saveAI(ai.id);
           return `函数调用成功，返回值:${s2}`;
         } catch (e) {
           const s2 = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
           console.error(s2);
-          await ai.context.systemUserIteration("_调用函数返回", s2);
+          await ai.context.systemUserIteration("_调用函数返回", s2, []);
           AIManager.saveAI(ai.id);
           return s2;
         }
@@ -2133,27 +2126,26 @@ ${memeryPrompt}`;
         parameters: {
           type: "object",
           properties: {
-            msg_type: {
+            ctx_type: {
               type: "string",
-              description: "消息类型，私聊或群聊",
+              description: "上下文类型，私聊或群聊",
               enum: ["private", "group"]
             },
             name: {
               type: "string",
-              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "")
+              description: "用户名称或群聊名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号、群号" : "") + "，实际使用时与上下文类型对应"
             }
           },
-          required: ["msg_type", "name"]
+          required: ["ctx_type", "name"]
         }
       }
     };
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-      const { msg_type, name } = args;
-      if (msg_type === "private") {
+      const { ctx_type, name } = args;
+      if (ctx_type === "private") {
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (uid === ctx.player.userId && ctx.isPrivate) {
@@ -2165,10 +2157,9 @@ ${memeryPrompt}`;
         msg = createMsg("private", uid, "");
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(uid);
-      } else if (msg_type === "group") {
+      } else if (ctx_type === "group") {
         const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
-          console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
         }
         if (gid === ctx.group.groupId) {
@@ -2178,7 +2169,7 @@ ${memeryPrompt}`;
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(gid);
       } else {
-        return `未知的消息类型<${msg_type}>`;
+        return `未知的上下文类型<${ctx_type}>`;
       }
       const messages = handleMessages(ctx, ai);
       const s = messages.map((item) => {
@@ -2421,7 +2412,6 @@ ${memeryPrompt}`;
       const { name } = args;
       const uid = await ai.context.findUserId(ctx, name, true);
       if (uid === null) {
-        console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
       }
       if (uid === ctx.endPoint.userId) {
@@ -2628,22 +2618,22 @@ ${memeryPrompt}`;
     static async handlePromptTool(ctx, msg, ai, tool_call) {
       if (!tool_call.hasOwnProperty("name") || !tool_call.hasOwnProperty("arguments")) {
         log(`调用函数失败:缺少name或arguments`);
-        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`);
+        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`, []);
       }
       const name = tool_call.name;
       if (!this.toolMap.hasOwnProperty(name)) {
         log(`调用函数失败:未注册的函数:${name}`);
-        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:未注册的函数:${name}`);
+        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:未注册的函数:${name}`, []);
         return;
       }
       if (ConfigManager.tool.toolsNotAllow.includes(name)) {
         log(`调用函数失败:禁止调用的函数:${name}`);
-        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:禁止调用的函数:${name}`);
+        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:禁止调用的函数:${name}`, []);
         return;
       }
       if (this.cmdArgs == null) {
         log(`暂时无法调用函数，请先使用任意指令`);
-        await ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`);
+        await ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`, []);
         return;
       }
       try {
@@ -2651,20 +2641,20 @@ ${memeryPrompt}`;
         const args = tool_call.arguments;
         if (args !== null && typeof args !== "object") {
           log(`调用函数失败:arguement不是一个object`);
-          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`);
+          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`, []);
           return;
         }
         if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
           log(`调用函数失败:缺少必需参数`);
-          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数`);
+          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数`, []);
           return;
         }
         const s = await tool.solve(ctx, msg, ai, args);
-        await ai.context.systemUserIteration("_调用函数返回", s);
+        await ai.context.systemUserIteration("_调用函数返回", s, []);
       } catch (e) {
         const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
         console.error(s);
-        await ai.context.systemUserIteration("_调用函数返回", s);
+        await ai.context.systemUserIteration("_调用函数返回", s, []);
       }
     }
   };
@@ -3054,14 +3044,14 @@ ${memeryPrompt}`;
       }
       console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
-    async systemUserIteration(name, s) {
+    async systemUserIteration(name, s, images) {
       const message = {
         role: "user",
         content: s,
         uid: "",
         name,
         timestamp: Math.floor(Date.now() / 1e3),
-        images: []
+        images
       };
       this.messages.push(message);
     }
@@ -3128,6 +3118,7 @@ ${memeryPrompt}`;
           return ctx.player.userId;
         }
       }
+      log(`未找到用户<${name}>`);
       return null;
     }
     async findGroupId(ctx, groupName) {
@@ -3183,6 +3174,7 @@ ${memeryPrompt}`;
           return ctx.group.groupId;
         }
       }
+      log(`未找到群聊<${groupName}>`);
       return null;
     }
     getNames() {
@@ -4220,7 +4212,7 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
 定时器设定时间：${setTime}
 当前触发时间：${(/* @__PURE__ */ new Date()).toLocaleString()}
 提示内容：${content}`;
-        await ai.context.systemUserIteration("_定时器触发提示", s);
+        await ai.context.systemUserIteration("_定时器触发提示", s, []);
         log("定时任务触发回复");
         ai.isChatting = false;
         await ai.chat(ctx, msg);

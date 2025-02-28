@@ -32,7 +32,6 @@ export function registerJrrp() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            console.log(`未找到<${name}>`);
             return `未找到<${name}>`;
         }
 

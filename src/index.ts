@@ -882,7 +882,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 当前触发时间：${new Date().toLocaleString()}
 提示内容：${content}`;
 
-      await ai.context.systemUserIteration("_定时器触发提示", s);
+      await ai.context.systemUserIteration("_定时器触发提示", s, []);
 
       log('定时任务触发回复');
       ai.isChatting = false;

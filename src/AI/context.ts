@@ -4,6 +4,7 @@ import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AIManager } from "./AI";
+import { log } from "../utils/utils";
 
 export interface Message {
     role: string;
@@ -135,14 +136,14 @@ export class Context {
         console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
 
-    async systemUserIteration(name: string, s: string) {
+    async systemUserIteration(name: string, s: string, images: Image[]) {
         const message = {
             role: 'user',
             content: s,
             uid: '',
             name: name,
             timestamp: Math.floor(Date.now() / 1000),
-            images: []
+            images: images
         };
         this.messages.push(message);
     }
@@ -221,6 +222,7 @@ export class Context {
             }
         }
 
+        log(`未找到用户<${name}>`);
         return null;
     }
 
@@ -289,6 +291,7 @@ export class Context {
             }
         }
 
+        log(`未找到群聊<${groupName}>`);
         return null;
     }
 
