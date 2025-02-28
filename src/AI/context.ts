@@ -115,17 +115,6 @@ export class Context {
     }
 
     async toolIteration(tool_call_id: string, s: string) {
-        const index = this.messages.findIndex(item => {
-            if (item?.tool_calls) {
-                return item.tool_calls.some(item => item.id === tool_call_id);
-            } else {
-                return false;
-            }
-        });
-        if (index === -1) {
-            return; 
-        }
-
         const message = {
             role: 'tool',
             content: s,
@@ -136,7 +125,14 @@ export class Context {
             images: []
         };
 
-        this.messages.splice(index + 1, 0, message);
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+            if (this.messages[i]?.tool_calls && this.messages[i].tool_calls.some(tool_call => tool_call.id === tool_call_id)) {
+                this.messages.splice(i + 1, 0, message);
+                return;
+            }
+        }
+
+        console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
 
     async systemUserIteration(name: string, s: string) {
@@ -165,13 +161,27 @@ export class Context {
         }
     }
 
-    findUserId(ctx: seal.MsgContext, name: string): string {
+    async findUserId(ctx: seal.MsgContext, name: string, findInFriendList: boolean = false): Promise<string> {
+        if (name.length > 4 && !isNaN(parseInt(name))) {
+            return `QQ:${name}`;
+        }
+
+        const match = name.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
+        if (match) {
+            name = match[1] || match[2];
+        }
+
+        if (name === ctx.player.name) {
+            return ctx.player.userId;
+        }
+
+        // 在上下文中查找用户
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (name === messages[i].name) {
                 return messages[i].uid;
             }
-            if (name.length > 5) {
+            if (name.length > 4) {
                 const distance = levenshteinDistance(name, messages[i].name);
                 if (distance <= 2) {
                     return messages[i].uid;
@@ -179,26 +189,61 @@ export class Context {
             }
         }
 
-        if (name === ctx.player.name) {
-            return ctx.player.userId; 
+        // 在群成员列表、好友列表中查找用户
+        const ext = seal.ext.find('HTTP依赖');
+        if (ext) {
+            const epId = ctx.endPoint.userId;
+
+            if (!ctx.isPrivate) {
+                const gid = ctx.group.groupId;
+                const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, '')}`);
+                for (let i = 0; i < data.length; i++) {
+                    if (name === data[i].card || name === data[i].nickname) {
+                        return `QQ:${data[i].user_id}`;
+                    }
+                }
+            }
+
+            if (findInFriendList) {
+                const data = await globalThis.http.getData(epId, 'get_friend_list');
+                for (let i = 0; i < data.length; i++) {
+                    if (name === data[i].nickname || name === data[i].remark) {
+                        return `QQ:${data[i].user_id}`;
+                    }
+                }
+            }
         }
-        if (name.length > 5) {
+
+        if (name.length > 4) {
             const distance = levenshteinDistance(name, ctx.player.name);
             if (distance <= 2) {
                 return ctx.player.userId;
-            } 
+            }
         }
 
-        const raw_uid = parseInt(name);
-        return isNaN(raw_uid) ? null : `QQ:${raw_uid}`;
+        return null;
     }
 
-    findGroupId(ctx: seal.MsgContext, groupName: string): string {
+    async findGroupId(ctx: seal.MsgContext, groupName: string): Promise<string> {
+        if (groupName.length > 5 && !isNaN(parseInt(groupName))) {
+            return `QQ-Group:${groupName}`;
+        }
+
+        const match = groupName.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
+        if (match) {
+            groupName = match[1] || match[2];
+        }
+
+        if (groupName === ctx.group.groupName) {
+            return ctx.group.groupId;
+        }
+
+        // 在上下文中用户的记忆中查找群聊
         const messages = this.messages;
-        let arr = [];
+        const userSet = new Set<string>();
         for (let i = messages.length - 1; i >= 0; i--) {
             const uid = messages[i].uid;
-            if (arr.includes(uid) || messages[i].role !== 'user') {
+            if (userSet.has(uid) || messages[i].role !== 'user') {
                 continue;
             }
 
@@ -214,7 +259,7 @@ export class Context {
                 if (memory.group.groupName === groupName) {
                     return memory.group.groupId;
                 }
-                if (memory.group.groupName.length > 5) {
+                if (memory.group.groupName.length > 4) {
                     const distance = levenshteinDistance(groupName, memory.group.groupName);
                     if (distance <= 2) {
                         return memory.group.groupId;
@@ -222,21 +267,29 @@ export class Context {
                 }
             }
 
-            arr.push(uid);
+            userSet.add(uid);
         }
 
-        if (groupName === ctx.group.groupName) {
-            return ctx.group.groupId; 
+        // 在群聊列表中查找用户
+        const ext = seal.ext.find('HTTP依赖');
+        if (ext) {
+            const epId = ctx.endPoint.userId;
+            const data = await globalThis.http.getData(epId, 'get_group_list');
+            for (let i = 0; i < data.length; i++) {
+                if (groupName === data[i].group_name) {
+                    return `QQ-Group:${data[i].group_id}`;
+                }
+            }
         }
-        if (groupName.length > 5) {
+
+        if (groupName.length > 4) {
             const distance = levenshteinDistance(groupName, ctx.group.groupName);
             if (distance <= 2) {
                 return ctx.group.groupId;
-            } 
+            }
         }
 
-        const raw_gid = parseInt(groupName);
-        return isNaN(raw_gid) ? null : `QQ-Group:${raw_gid}`;
+        return null;
     }
 
     getNames(): string[] {

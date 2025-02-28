@@ -84,7 +84,7 @@ export function registerCheckGroupMemberList() {
     tool.solve = async (ctx, _, ai, args) => {
         const { name } = args;
 
-        const gid = ai.context.findGroupId(ctx, name);
+        const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

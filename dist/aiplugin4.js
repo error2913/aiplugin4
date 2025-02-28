@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.4
+// @version      4.5.5
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，选用模型若不支持该功能，可以开启迁移到提示词工程的开关，即可使用调用函数功能。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -373,7 +373,7 @@
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -413,7 +413,7 @@
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, attr } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -450,7 +450,7 @@
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, expression } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -512,7 +512,7 @@ ${attr}: ${value}=>${result}`;
         console.error(`未找到HTTP依赖`);
         return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
       }
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -704,7 +704,7 @@ ${attr}: ${value}=>${result}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, content } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name, true);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -750,7 +750,7 @@ ${attr}: ${value}=>${result}`;
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -798,7 +798,7 @@ ${attr}: ${value}=>${result}`;
     tool.solve = async (ctx, msg, ai, args) => {
       const { memory_type, name, content } = args;
       if (memory_type === "private") {
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -810,7 +810,7 @@ ${attr}: ${value}=>${result}`;
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(uid);
       } else if (memory_type === "group") {
-        const gid = ai.context.findGroupId(ctx, name);
+        const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -854,7 +854,7 @@ ${attr}: ${value}=>${result}`;
     tool.solve = async (ctx, msg, ai, args) => {
       const { memory_type, name } = args;
       if (memory_type === "private") {
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -870,7 +870,7 @@ ${attr}: ${value}=>${result}`;
         ai = AIManager.getAI(uid);
         return ai.memory.buildPersonMemoryPrompt();
       } else if (memory_type === "group") {
-        const gid = ai.context.findGroupId(ctx, name);
+        const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -980,7 +980,7 @@ ${attr}: ${value}=>${result}`;
         console.error(`未找到HTTP依赖`);
         return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
       }
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1027,7 +1027,7 @@ ${attr}: ${value}=>${result}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, new_name } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1094,7 +1094,7 @@ ${attr}: ${value}=>${result}`;
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, expression, rank = "", times = 1, additional_dice = "", reason = "" } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1157,7 +1157,7 @@ ${attr}: ${value}=>${result}`;
     };
     tool.solve = async (ctx, msg, ai, args) => {
       const { name, expression, additional_dice } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1528,7 +1528,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
         console.error(`未找到HTTP依赖`);
         return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
       }
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name, true);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -1690,7 +1690,7 @@ QQ等级: ${data.qqLevel}
       }
     });
     const isRepeat = checkRepeat(context, s);
-    reply = replaceMentions(ctx, context, reply);
+    reply = await replaceMentions(ctx, context, reply);
     const { result, images } = await replaceImages(context, reply);
     reply = result;
     filterReplyTemplate.forEach((item) => {
@@ -1737,15 +1737,20 @@ QQ等级: ${data.qqLevel}
     }
     return false;
   }
-  function replaceMentions(ctx, context, reply) {
-    return reply.replace(/<@(.+?)>/g, (_, p1) => {
-      const uid = context.findUserId(ctx, p1);
-      if (uid !== null) {
-        return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
-      } else {
-        return ` @${p1} `;
+  async function replaceMentions(ctx, context, reply) {
+    const match = reply.match(/<@(.+?)>/g);
+    if (match) {
+      for (let i = 0; i < match.length; i++) {
+        const name = match[i].replace(/^<@|>$/g, "");
+        const uid = await context.findUserId(ctx, name);
+        if (uid !== null) {
+          reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
+        } else {
+          reply = reply.replace(match[i], ` @${name} `);
+        }
       }
-    });
+    }
+    return reply;
   }
   async function replaceImages(context, reply) {
     let result = reply;
@@ -1807,7 +1812,7 @@ QQ等级: ${data.qqLevel}
       const { showNumber } = ConfigManager.message;
       const source = ctx.isPrivate ? `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}` : `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}`;
       if (msg_type === "private") {
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -1822,7 +1827,7 @@ QQ等级: ${data.qqLevel}
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(uid);
       } else if (msg_type === "group") {
-        const gid = ai.context.findGroupId(ctx, name);
+        const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -1939,6 +1944,30 @@ ${memeryPrompt}`;
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
     const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      if (!(message == null ? void 0 : message.tool_calls)) {
+        continue;
+      }
+      const tool_call_id_set = /* @__PURE__ */ new Set();
+      for (let j = i + 1; j < messages.length; j++) {
+        if (messages[j].role !== "tool") {
+          break;
+        }
+        tool_call_id_set.add(messages[j].tool_call_id);
+      }
+      for (let j = 0; j < message.tool_calls.length; j++) {
+        const tool_call = message.tool_calls[j];
+        if (!tool_call_id_set.has(tool_call.id)) {
+          message.tool_calls.splice(j, 1);
+          j--;
+        }
+      }
+      if (message.tool_calls.length === 0) {
+        messages.splice(i, 1);
+        i--;
+      }
+    }
     let processedMessages = [];
     let last_role = "";
     for (let i = 0; i < messages.length; i++) {
@@ -1987,7 +2016,7 @@ ${memeryPrompt}`;
     tool.solve = async (ctx, msg, ai, args) => {
       const { msg_type, name } = args;
       if (msg_type === "private") {
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -2002,7 +2031,7 @@ ${memeryPrompt}`;
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(uid);
       } else if (msg_type === "group") {
-        const gid = ai.context.findGroupId(ctx, name);
+        const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -2079,7 +2108,7 @@ ${memeryPrompt}`;
       const { showNumber } = ConfigManager.message;
       const source = ctx.isPrivate ? `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}` : `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}`;
       if (msg_type === "private") {
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -2094,7 +2123,7 @@ ${memeryPrompt}`;
         ctx = createCtx(ctx.endPoint.userId, msg);
         ai = AIManager.getAI(uid);
       } else if (msg_type === "group") {
-        const gid = ai.context.findGroupId(ctx, name);
+        const gid = await ai.context.findGroupId(ctx, name);
         if (gid === null) {
           console.log(`未找到<${name}>`);
           return `未找到<${name}>`;
@@ -2192,7 +2221,7 @@ ${memeryPrompt}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, _, ai, args) => {
       const { name } = args;
-      const gid = ai.context.findGroupId(ctx, name);
+      const gid = await ai.context.findGroupId(ctx, name);
       if (gid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -2316,7 +2345,7 @@ ${memeryPrompt}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, _, ai, args) => {
       const { name } = args;
-      const uid = ai.context.findUserId(ctx, name);
+      const uid = await ai.context.findUserId(ctx, name, true);
       if (uid === null) {
         console.log(`未找到<${name}>`);
         return `未找到<${name}>`;
@@ -2478,22 +2507,22 @@ ${memeryPrompt}`;
       let tool_choice = "none";
       for (let i = 0; i < tool_calls.length; i++) {
         const name = tool_calls[i].function.name;
+        if (!_ToolManager.toolMap.hasOwnProperty(name)) {
+          log(`调用函数失败:未注册的函数:${name}`);
+          await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
+          continue;
+        }
+        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+          log(`调用函数失败:禁止调用的函数:${name}`);
+          await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
+          continue;
+        }
+        if (this.cmdArgs == null) {
+          log(`暂时无法调用函数，请先使用任意指令`);
+          await ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
+          continue;
+        }
         try {
-          if (!_ToolManager.toolMap.hasOwnProperty(name)) {
-            log(`调用函数失败:未注册的函数:${name}`);
-            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
-            continue;
-          }
-          if (ConfigManager.tool.toolsNotAllow.includes(name)) {
-            log(`调用函数失败:禁止调用的函数:${name}`);
-            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
-            continue;
-          }
-          if (this.cmdArgs == null) {
-            log(`暂时无法调用函数，请先使用任意指令`);
-            ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
-            continue;
-          }
           const tool = this.toolMap[name];
           if (tool.tool_choice === "required") {
             tool_choice = "required";
@@ -2503,12 +2532,12 @@ ${memeryPrompt}`;
           const args = JSON.parse(tool_calls[i].function.arguments);
           if (args !== null && typeof args !== "object") {
             log(`调用函数失败:arguement不是一个object`);
-            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
+            await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
             continue;
           }
           if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
             log(`调用函数失败:缺少必需参数`);
-            ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
+            await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
             continue;
           }
           const s = await tool.solve(ctx, msg, ai, args);
@@ -2516,7 +2545,7 @@ ${memeryPrompt}`;
         } catch (e) {
           const s = `调用函数 (${name}:${tool_calls[i].function.arguments}) 失败:${e.message}`;
           console.error(s);
-          ai.context.toolIteration(tool_calls[i].id, s);
+          await ai.context.toolIteration(tool_calls[i].id, s);
         }
       }
       return tool_choice;
@@ -2527,22 +2556,22 @@ ${memeryPrompt}`;
         await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`);
       }
       const name = tool_call.name;
+      if (!_ToolManager.toolMap.hasOwnProperty(name)) {
+        log(`调用函数失败:未注册的函数:${name}`);
+        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:未注册的函数:${name}`);
+        return;
+      }
+      if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+        log(`调用函数失败:禁止调用的函数:${name}`);
+        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:禁止调用的函数:${name}`);
+        return;
+      }
+      if (this.cmdArgs == null) {
+        log(`暂时无法调用函数，请先使用任意指令`);
+        await ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`);
+        return;
+      }
       try {
-        if (!_ToolManager.toolMap.hasOwnProperty(name)) {
-          log(`调用函数失败:未注册的函数:${name}`);
-          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:未注册的函数:${name}`);
-          return;
-        }
-        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
-          log(`调用函数失败:禁止调用的函数:${name}`);
-          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:禁止调用的函数:${name}`);
-          return;
-        }
-        if (this.cmdArgs == null) {
-          log(`暂时无法调用函数，请先使用任意指令`);
-          await ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`);
-          return;
-        }
         const tool = this.toolMap[name];
         const args = tool_call.arguments;
         if (args !== null && typeof args !== "object") {
@@ -2932,16 +2961,7 @@ ${memeryPrompt}`;
       this.messages.push(message);
     }
     async toolIteration(tool_call_id, s) {
-      const index = this.messages.findIndex((item) => {
-        if (item == null ? void 0 : item.tool_calls) {
-          return item.tool_calls.some((item2) => item2.id === tool_call_id);
-        } else {
-          return false;
-        }
-      });
-      if (index === -1) {
-        return;
-      }
+      var _a;
       const message = {
         role: "tool",
         content: s,
@@ -2951,7 +2971,13 @@ ${memeryPrompt}`;
         timestamp: Math.floor(Date.now() / 1e3),
         images: []
       };
-      this.messages.splice(index + 1, 0, message);
+      for (let i = this.messages.length - 1; i >= 0; i--) {
+        if (((_a = this.messages[i]) == null ? void 0 : _a.tool_calls) && this.messages[i].tool_calls.some((tool_call) => tool_call.id === tool_call_id)) {
+          this.messages.splice(i + 1, 0, message);
+          return;
+        }
+      }
+      console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
     async systemUserIteration(name, s) {
       const message = {
@@ -2977,37 +3003,74 @@ ${memeryPrompt}`;
         }
       }
     }
-    findUserId(ctx, name) {
+    async findUserId(ctx, name, findInFriendList = false) {
+      if (name.length > 4 && !isNaN(parseInt(name))) {
+        return `QQ:${name}`;
+      }
+      const match = name.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
+      if (match) {
+        name = match[1] || match[2];
+      }
+      if (name === ctx.player.name) {
+        return ctx.player.userId;
+      }
       const messages = this.messages;
       for (let i = messages.length - 1; i >= 0; i--) {
         if (name === messages[i].name) {
           return messages[i].uid;
         }
-        if (name.length > 5) {
+        if (name.length > 4) {
           const distance = levenshteinDistance(name, messages[i].name);
           if (distance <= 2) {
             return messages[i].uid;
           }
         }
       }
-      if (name === ctx.player.name) {
-        return ctx.player.userId;
+      const ext = seal.ext.find("HTTP依赖");
+      if (ext) {
+        const epId = ctx.endPoint.userId;
+        if (!ctx.isPrivate) {
+          const gid = ctx.group.groupId;
+          const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, "")}`);
+          for (let i = 0; i < data.length; i++) {
+            if (name === data[i].card || name === data[i].nickname) {
+              return `QQ:${data[i].user_id}`;
+            }
+          }
+        }
+        if (findInFriendList) {
+          const data = await globalThis.http.getData(epId, "get_friend_list");
+          for (let i = 0; i < data.length; i++) {
+            if (name === data[i].nickname || name === data[i].remark) {
+              return `QQ:${data[i].user_id}`;
+            }
+          }
+        }
       }
-      if (name.length > 5) {
+      if (name.length > 4) {
         const distance = levenshteinDistance(name, ctx.player.name);
         if (distance <= 2) {
           return ctx.player.userId;
         }
       }
-      const raw_uid = parseInt(name);
-      return isNaN(raw_uid) ? null : `QQ:${raw_uid}`;
+      return null;
     }
-    findGroupId(ctx, groupName) {
+    async findGroupId(ctx, groupName) {
+      if (groupName.length > 5 && !isNaN(parseInt(groupName))) {
+        return `QQ-Group:${groupName}`;
+      }
+      const match = groupName.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
+      if (match) {
+        groupName = match[1] || match[2];
+      }
+      if (groupName === ctx.group.groupName) {
+        return ctx.group.groupId;
+      }
       const messages = this.messages;
-      let arr = [];
+      const userSet = /* @__PURE__ */ new Set();
       for (let i = messages.length - 1; i >= 0; i--) {
         const uid = messages[i].uid;
-        if (arr.includes(uid) || messages[i].role !== "user") {
+        if (userSet.has(uid) || messages[i].role !== "user") {
           continue;
         }
         const name = messages[i].name;
@@ -3020,26 +3083,32 @@ ${memeryPrompt}`;
           if (memory.group.groupName === groupName) {
             return memory.group.groupId;
           }
-          if (memory.group.groupName.length > 5) {
+          if (memory.group.groupName.length > 4) {
             const distance = levenshteinDistance(groupName, memory.group.groupName);
             if (distance <= 2) {
               return memory.group.groupId;
             }
           }
         }
-        arr.push(uid);
+        userSet.add(uid);
       }
-      if (groupName === ctx.group.groupName) {
-        return ctx.group.groupId;
+      const ext = seal.ext.find("HTTP依赖");
+      if (ext) {
+        const epId = ctx.endPoint.userId;
+        const data = await globalThis.http.getData(epId, "get_group_list");
+        for (let i = 0; i < data.length; i++) {
+          if (groupName === data[i].group_name) {
+            return `QQ-Group:${data[i].group_id}`;
+          }
+        }
       }
-      if (groupName.length > 5) {
+      if (groupName.length > 4) {
         const distance = levenshteinDistance(groupName, ctx.group.groupName);
         if (distance <= 2) {
           return ctx.group.groupId;
         }
       }
-      const raw_gid = parseInt(groupName);
-      return isNaN(raw_gid) ? null : `QQ-Group:${raw_gid}`;
+      return null;
     }
     getNames() {
       const names = [];
@@ -3298,7 +3367,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.4");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.5");
       seal.ext.register(ext);
     }
     try {

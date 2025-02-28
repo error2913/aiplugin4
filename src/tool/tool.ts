@@ -230,23 +230,24 @@ export class ToolManager {
         let tool_choice = 'none';
         for (let i = 0; i < tool_calls.length; i++) {
             const name = tool_calls[i].function.name;
-            try {
-                if (!ToolManager.toolMap.hasOwnProperty(name)) {
-                    log(`调用函数失败:未注册的函数:${name}`);
-                    ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
-                    continue;
-                }
-                if (ConfigManager.tool.toolsNotAllow.includes(name)) {
-                    log(`调用函数失败:禁止调用的函数:${name}`);
-                    ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
-                    continue;
-                }
-                if (this.cmdArgs == null) {
-                    log(`暂时无法调用函数，请先使用任意指令`);
-                    ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
-                    continue;
-                }
 
+            if (!ToolManager.toolMap.hasOwnProperty(name)) {
+                log(`调用函数失败:未注册的函数:${name}`);
+                await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
+                continue;
+            }
+            if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+                log(`调用函数失败:禁止调用的函数:${name}`);
+                await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
+                continue;
+            }
+            if (this.cmdArgs == null) {
+                log(`暂时无法调用函数，请先使用任意指令`);
+                await ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
+                continue;
+            }
+
+            try {
                 const tool = this.toolMap[name];
 
                 if (tool.tool_choice === 'required') {
@@ -258,12 +259,12 @@ export class ToolManager {
                 const args = JSON.parse(tool_calls[i].function.arguments);
                 if (args !== null && typeof args !== 'object') {
                     log(`调用函数失败:arguement不是一个object`);
-                    ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
+                    await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
                     continue;
                 }
                 if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
                     log(`调用函数失败:缺少必需参数`);
-                    ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
+                    await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
                     continue;
                 }
 
@@ -273,7 +274,7 @@ export class ToolManager {
             } catch (e) {
                 const s = `调用函数 (${name}:${tool_calls[i].function.arguments}) 失败:${e.message}`;
                 console.error(s);
-                ai.context.toolIteration(tool_calls[i].id, s);
+                await ai.context.toolIteration(tool_calls[i].id, s);
             }
         }
 
@@ -292,23 +293,24 @@ export class ToolManager {
         }
 
         const name = tool_call.name;
-        try {
-            if (!ToolManager.toolMap.hasOwnProperty(name)) {
-                log(`调用函数失败:未注册的函数:${name}`);
-                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:未注册的函数:${name}`);
-                return;
-            }
-            if (ConfigManager.tool.toolsNotAllow.includes(name)) {
-                log(`调用函数失败:禁止调用的函数:${name}`);
-                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:禁止调用的函数:${name}`);
-                return;
-            }
-            if (this.cmdArgs == null) {
-                log(`暂时无法调用函数，请先使用任意指令`);
-                await ai.context.systemUserIteration('_调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`);
-                return;
-            }
 
+        if (!ToolManager.toolMap.hasOwnProperty(name)) {
+            log(`调用函数失败:未注册的函数:${name}`);
+            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:未注册的函数:${name}`);
+            return;
+        }
+        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+            log(`调用函数失败:禁止调用的函数:${name}`);
+            await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:禁止调用的函数:${name}`);
+            return;
+        }
+        if (this.cmdArgs == null) {
+            log(`暂时无法调用函数，请先使用任意指令`);
+            await ai.context.systemUserIteration('_调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`);
+            return;
+        }
+
+        try {
             const tool = this.toolMap[name];
 
             const args = tool_call.arguments;

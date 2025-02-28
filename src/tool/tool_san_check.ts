@@ -38,7 +38,7 @@ export function registerSanCheck() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, expression, additional_dice } = args;
 
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

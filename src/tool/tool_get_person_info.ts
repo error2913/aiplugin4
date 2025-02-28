@@ -34,7 +34,7 @@ export function registerGetPersonInfo() {
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

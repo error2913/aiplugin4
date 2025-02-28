@@ -51,7 +51,7 @@ export function registerRollCheck() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, expression, rank = '', times = 1, additional_dice = '', reason = '' } = args;
 
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

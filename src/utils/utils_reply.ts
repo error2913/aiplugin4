@@ -35,7 +35,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     // 检查复读
     const isRepeat = checkRepeat(context, s);
 
-    reply = replaceMentions(ctx, context, reply);
+    reply = await replaceMentions(ctx, context, reply);
     const { result, images } = await replaceImages(context, reply);
     reply = result;
 
@@ -102,15 +102,21 @@ function checkRepeat(context: Context, s: string) {
  * @param reply 
  * @returns 
  */
-function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
-    return reply.replace(/<@(.+?)>/g, (_, p1) => {
-        const uid = context.findUserId(ctx, p1);
-        if (uid !== null) {
-            return `[CQ:at,qq=${uid.replace(/\D+/g, "")}] `;
-        } else {
-            return ` @${p1} `;
+async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
+    const match = reply.match(/<@(.+?)>/g);
+    if (match) {
+        for (let i = 0; i < match.length; i++) {
+            const name = match[i].replace(/^<@|>$/g, '');
+            const uid = await context.findUserId(ctx, name);
+            if (uid!== null) {
+                reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
+            } else {
+                reply = reply.replace(match[i], ` @${name} `);
+            }
         }
-    });
+    }
+
+    return reply;
 }
 
 /**

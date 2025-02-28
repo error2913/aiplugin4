@@ -113,6 +113,38 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
 
     const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
 
+    // 处理 tool_calls 并过滤无效项
+    for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+        if (!message?.tool_calls) {
+            continue;
+        }
+
+        // 获取tool_calls消息后面的所有tool_call_id
+        const tool_call_id_set = new Set<string>();
+        for (let j = i + 1; j < messages.length; j++) {
+            if (messages[j].role !== 'tool') {
+                break;
+            }
+            tool_call_id_set.add(messages[j].tool_call_id);
+        }
+
+        // 过滤无对应 tool_call_id 的 tool_calls
+        for (let j = 0; j < message.tool_calls.length; j++) {
+            const tool_call = message.tool_calls[j];
+            if (!tool_call_id_set.has(tool_call.id)) {
+                message.tool_calls.splice(j, 1);
+                j--; // 调整索引
+            }
+        }
+
+        // 如果 tool_calls 为空则移除消息
+        if (message.tool_calls.length === 0) {
+            messages.splice(i, 1);
+            i--; // 调整索引
+        }
+    }
+
     // 处理前缀并合并消息（如果有）
     let processedMessages = [];
     let last_role = '';

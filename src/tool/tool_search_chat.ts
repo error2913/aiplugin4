@@ -114,7 +114,7 @@ export function registerSearchCommonGroup() {
     tool.solve = async (ctx, _, ai, args) => {
         const { name } = args;
 
-        const uid = ai.context.findUserId(ctx, name);
+        const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
             console.log(`未找到<${name}>`);
             return `未找到<${name}>`;

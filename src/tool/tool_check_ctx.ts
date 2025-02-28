@@ -33,7 +33,7 @@ export function registerCheckCtx() {
         const { msg_type, name } = args;
 
         if (msg_type === "private") {
-            const uid = ai.context.findUserId(ctx, name);
+            const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
                 console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
@@ -50,7 +50,7 @@ export function registerCheckCtx() {
     
             ai = AIManager.getAI(uid);
         } else if (msg_type === "group") {
-            const gid = ai.context.findGroupId(ctx, name);
+            const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
                 console.log(`未找到<${name}>`);
                 return `未找到<${name}>`;
