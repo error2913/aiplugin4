@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.5
+// @version      4.5.6
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，选用模型若不支持该功能，可以开启迁移到提示词工程的开关，即可使用调用函数功能。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -528,6 +528,80 @@ ${attr}: ${value}=>${result}`;
       } catch (e) {
         console.error(e);
         return `禁言失败`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerWholeBan() {
+    const info = {
+      type: "function",
+      function: {
+        name: "whole_ban",
+        description: "全员禁言",
+        parameters: {
+          type: "object",
+          properties: {
+            enable: {
+              type: "boolean",
+              description: "开启还是关闭全员禁言"
+            }
+          },
+          required: ["enable"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, __, args) => {
+      const { enable } = args;
+      const ext = seal.ext.find("HTTP依赖");
+      if (!ext) {
+        console.error(`未找到HTTP依赖`);
+        return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+      }
+      try {
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+        await globalThis.http.getData(epId, `set_group_whole_ban?group_id=${gid.replace(/\D+/g, "")}&enable=${enable}`);
+        return `已${enable ? "开启" : "关闭"}全员禁言`;
+      } catch (e) {
+        console.error(e);
+        return `全员禁言失败`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerGetBanList() {
+    const info = {
+      type: "function",
+      function: {
+        name: "get_ban_list",
+        description: "获取群内禁言列表",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, __, ___) => {
+      const ext = seal.ext.find("HTTP依赖");
+      if (!ext) {
+        console.error(`未找到HTTP依赖`);
+        return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+      }
+      try {
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+        const data = await globalThis.http.getData(epId, `get_group_shut_list?group_id=${gid.replace(/\D+/g, "")}`);
+        const s = `被禁言成员数量: ${data.length}
+` + data.slice(0, 50).map((item, index) => {
+          return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ""} 被禁言时间: ${new Date(item.shutUpTime * 1e3).toLocaleString()}`;
+        }).join("\n");
+        return s;
+      } catch (e) {
+        console.error(e);
+        return `获取禁言列表失败`;
       }
     };
     ToolManager.toolMap[info.function.name] = tool;
@@ -2049,12 +2123,12 @@ ${memeryPrompt}`;
     return processedMessages;
   }
 
-  // src/tool/tool_check_ctx.ts
-  function registerCheckCtx() {
+  // src/tool/tool_get_context.ts
+  function registerGetContext() {
     const info = {
       type: "function",
       function: {
-        name: "check_ctx",
+        name: "get_context",
         description: `查看指定私聊或群聊的上下文`,
         parameters: {
           type: "object",
@@ -2121,12 +2195,12 @@ ${memeryPrompt}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_check_list.ts
-  function registerCheckList() {
+  // src/tool/tool_get_list.ts
+  function registerGetList() {
     const info = {
       type: "function",
       function: {
-        name: "check_list",
+        name: "get_list",
         description: `查看当前好友列表或群聊列表`,
         parameters: {
           type: "object",
@@ -2176,38 +2250,62 @@ ${memeryPrompt}`;
     };
     ToolManager.toolMap[info.function.name] = tool;
   }
-  function registerCheckGroupMemberList() {
+  function registerGetGroupMemberList() {
     const info = {
       type: "function",
       function: {
-        name: "check_group_member_list",
+        name: "get_group_member_list",
         description: `查看群聊成员列表`,
         parameters: {
           type: "object",
           properties: {
-            name: {
+            role: {
               type: "string",
-              description: "群聊名称" + (ConfigManager.message.showNumber ? "或纯数字群号" : "")
+              description: "成员角色，群主或管理员",
+              enum: ["owner", "admin", "robot"]
             }
           },
-          required: ["name"]
+          required: []
         }
       }
     };
     const tool = new Tool(info);
-    tool.solve = async (ctx, _, ai, args) => {
-      const { name } = args;
-      const gid = await ai.context.findGroupId(ctx, name);
-      if (gid === null) {
-        console.log(`未找到<${name}>`);
-        return `未找到<${name}>`;
-      }
+    tool.solve = async (ctx, _, __, args) => {
+      const { role = "" } = args;
       try {
         const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
         const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, "")}`);
+        if (role === "owner") {
+          const owner = data.find((item) => item.role === role);
+          if (!owner) {
+            return `未找到群主`;
+          }
+          return `群主: ${owner.nickname}(${owner.user_id}) ${owner.card && owner.card !== owner.nickname ? `群名片: ${owner.card}` : ""}`;
+        } else if (role === "admin") {
+          const admins = data.filter((item) => item.role === role);
+          if (admins.length === 0) {
+            return `未找到管理员`;
+          }
+          const s2 = `管理员数量: ${admins.length}
+` + admins.slice(0, 50).map((item, index) => {
+            return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ""}`;
+          }).join("\n");
+          return s2;
+        } else if (role === "robot") {
+          const robots = data.filter((item) => item.is_robot);
+          if (robots.length === 0) {
+            return `未找到机器人`;
+          }
+          const s2 = `机器人数量: ${robots.length}
+` + robots.slice(0, 50).map((item, index) => {
+            return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ""}`;
+          }).join("\n");
+          return s2;
+        }
         const s = `群成员数量: ${data.length}
 ` + data.slice(0, 50).map((item, index) => {
-          return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ""}`;
+          return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ""} ${item.role === "owner" ? "【群主】" : item.role === "admin" ? "【管理员】" : item.is_robot ? "【机器人】" : ""}`;
         }).join("\n");
         return s;
       } catch (e) {
@@ -2419,6 +2517,8 @@ ${memeryPrompt}`;
       registerAttrGet();
       registerAttrSet();
       registerBan();
+      registerWholeBan();
+      registerGetBanList();
       registerTextToSound();
       registerPoke();
       registerGetTime();
@@ -2433,9 +2533,9 @@ ${memeryPrompt}`;
       registerGetPersonInfo();
       registerRecord();
       registerSendMsg();
-      registerCheckCtx();
-      registerCheckList();
-      registerCheckGroupMemberList();
+      registerGetContext();
+      registerGetList();
+      registerGetGroupMemberList();
       registerSearchChat();
       registerSearchCommonGroup();
     }
@@ -3342,7 +3442,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.5");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.6");
       seal.ext.register(ext);
     }
     try {

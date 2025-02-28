@@ -2,7 +2,7 @@ import { AI } from "../AI/AI"
 import { ConfigManager } from "../config/config"
 import { log } from "../utils/utils"
 import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
-import { registerBan } from "./tool_ban"
+import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
 import { registerFace } from "./tool_face"
 import { registerGetTime } from "./tool_get_time"
@@ -21,8 +21,8 @@ import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_get_person_info"
 import { registerRecord } from "./tool_record"
 import { registerSendMsg } from "./tool_send_msg"
-import { registerCheckCtx } from "./tool_check_ctx"
-import { registerCheckGroupMemberList, registerCheckList } from "./tool_check_list"
+import { registerGetContext } from "./tool_get_context"
+import { registerGetGroupMemberList, registerGetList } from "./tool_get_list"
 import { registerSearchChat, registerSearchCommonGroup } from "./tool_search_chat"
 
 export interface ToolInfo {
@@ -150,6 +150,8 @@ export class ToolManager {
         registerAttrGet();
         registerAttrSet();
         registerBan();
+        registerWholeBan();
+        registerGetBanList();
         registerTextToSound();
         registerPoke();
         registerGetTime();
@@ -164,9 +166,9 @@ export class ToolManager {
         registerGetPersonInfo();
         registerRecord();
         registerSendMsg();
-        registerCheckCtx();
-        registerCheckList();
-        registerCheckGroupMemberList();
+        registerGetContext();
+        registerGetList();
+        registerGetGroupMemberList();
         registerSearchChat();
         registerSearchCommonGroup();
     }

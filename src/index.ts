@@ -11,7 +11,7 @@ import { buildSystemMessage } from "./utils/utils_message";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.5');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.6');
     seal.ext.register(ext);
   }
 
