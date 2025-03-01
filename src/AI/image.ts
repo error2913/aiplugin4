@@ -183,24 +183,79 @@ export class ImageManager {
     }
 
     static async imageToText(imageUrl: string, text = ''): Promise<string> {
+        const { urlToBase64 } = ConfigManager.image;
+
+        let useBase64 = false;
+        let imageContent = {
+            "type": "image_url",
+            "image_url": { "url": imageUrl }
+        }
+        if (urlToBase64 == '总是') {
+            const { base64, format } = await ImageManager.imageUrlToBase64(imageUrl);
+            if (!base64 || !format) {
+                log(`转换为base64失败`);
+                return '';
+            }
+
+            useBase64 = true;
+            imageContent = {
+                "type": "image_url",
+                "image_url": { "url": `data:image/${format};base64,${base64}` }
+            }
+        }
+
+        const textContent = {
+            "type": "text",
+            "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题等信息"
+        }
+
         const messages = [{
             role: "user",
-            content: [
-                {
-                    "type": "image_url",
-                    "image_url": { "url": imageUrl }
-                }, {
-                    "type": "text",
-                    "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题等信息"
-                }
-            ]
+            content: [imageContent, textContent]
         }]
 
         const { maxChars } = ConfigManager.image;
 
-        const raw_reply = await sendITTRequest(messages);
+        const raw_reply = await sendITTRequest(messages, useBase64);
         const reply = raw_reply.slice(0, maxChars);
 
         return reply;
+    }
+
+    static async imageUrlToBase64(imageUrl: string): Promise<{ base64: string, format: string }> {
+        const url = 'http://110.41.69.149:46678/image-to-base64';
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
+                body: JSON.stringify({ url: imageUrl })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                let s = `请求失败! 状态码: ${response.status}`;
+                if (data.error) {
+                    s += `\n错误信息: ${data.error.message}`;
+                }
+
+                s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
+
+                throw new Error(s);
+            }
+
+            if (!data.base64 || !data.format) {
+                throw new Error(`响应体中缺少base64或format字段`);
+            }
+
+            return data;
+        } catch (error) {
+            console.error("在imageUrlToBase64中请求出错：", error);
+            return { base64: '', format: '' };
+        }
     }
 }

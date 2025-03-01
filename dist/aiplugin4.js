@@ -27,6 +27,7 @@
         `"stop":null`,
         `"stream":false`
       ], "messages将会自动替换");
+      seal.ext.registerOptionConfig(ConfigManager.ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题");
       seal.ext.registerIntConfig(ConfigManager.ext, "图片最大回复字符数", 100);
       seal.ext.registerIntConfig(ConfigManager.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
     }
@@ -37,8 +38,9 @@
         p: seal.ext.getIntConfig(ConfigManager.ext, "发送图片的概率/%"),
         url: seal.ext.getStringConfig(ConfigManager.ext, "图片大模型URL"),
         apiKey: seal.ext.getStringConfig(ConfigManager.ext, "图片API key"),
-        maxChars: seal.ext.getIntConfig(ConfigManager.ext, "图片最大回复字符数"),
         bodyTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "图片body"),
+        urlToBase64: seal.ext.getOptionConfig(ConfigManager.ext, "识别图片时将url转换为base64"),
+        maxChars: seal.ext.getIntConfig(ConfigManager.ext, "图片最大回复字符数"),
         maxImageNum: seal.ext.getIntConfig(ConfigManager.ext, "偷取图片存储上限")
       };
     }
@@ -2730,8 +2732,8 @@ ${memeryPrompt}`;
       return "";
     }
   }
-  async function sendITTRequest(messages) {
-    const { url, apiKey, bodyTemplate } = ConfigManager.image;
+  async function sendITTRequest(messages, useBase64) {
+    const { url, apiKey, bodyTemplate, urlToBase64 } = ConfigManager.image;
     try {
       const bodyObject = parseBody(bodyTemplate, messages, null, null);
       const time = Date.now();
@@ -2746,6 +2748,24 @@ ${memeryPrompt}`;
       }
     } catch (error) {
       console.error("在imageToText中请求出错：", error);
+      if (urlToBase64 === "总是" && !useBase64) {
+        log(`自动尝试使用转换为base64`);
+        for (let i = 0; i < messages.length; i++) {
+          const message = messages[i];
+          for (let j = 0; j < message.content.length; j++) {
+            const content = message.content[j];
+            if (content.type === "image_url") {
+              const { base64, format } = await ImageManager.imageUrlToBase64(content.image_url.url);
+              if (!base64 || !format) {
+                log(`转换为base64失败`);
+                return "";
+              }
+              message.content[j].image_url.url = `data:image/${format};base64,${base64}`;
+            }
+          }
+        }
+        return await sendITTRequest(messages, true);
+      }
       return "";
     }
   }
@@ -2959,23 +2979,67 @@ ${memeryPrompt}`;
       return isValid;
     }
     static async imageToText(imageUrl, text = "") {
+      const { urlToBase64 } = ConfigManager.image;
+      let useBase64 = false;
+      let imageContent = {
+        "type": "image_url",
+        "image_url": { "url": imageUrl }
+      };
+      if (urlToBase64 == "总是") {
+        const { base64, format } = await _ImageManager.imageUrlToBase64(imageUrl);
+        if (!base64 || !format) {
+          log(`转换为base64失败`);
+          return "";
+        }
+        useBase64 = true;
+        imageContent = {
+          "type": "image_url",
+          "image_url": { "url": `data:image/${format};base64,${base64}` }
+        };
+      }
+      const textContent = {
+        "type": "text",
+        "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题等信息"
+      };
       const messages = [{
         role: "user",
-        content: [
-          {
-            "type": "image_url",
-            "image_url": { "url": imageUrl }
-          },
-          {
-            "type": "text",
-            "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题等信息"
-          }
-        ]
+        content: [imageContent, textContent]
       }];
       const { maxChars } = ConfigManager.image;
-      const raw_reply = await sendITTRequest(messages);
+      const raw_reply = await sendITTRequest(messages, useBase64);
       const reply = raw_reply.slice(0, maxChars);
       return reply;
+    }
+    static async imageUrlToBase64(imageUrl) {
+      const url = "http://110.41.69.149:46678/image-to-base64";
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ url: imageUrl })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          let s = `请求失败! 状态码: ${response.status}`;
+          if (data.error) {
+            s += `
+错误信息: ${data.error.message}`;
+          }
+          s += `
+响应体: ${JSON.stringify(data, null, 2)}`;
+          throw new Error(s);
+        }
+        if (!data.base64 || !data.format) {
+          throw new Error(`响应体中缺少base64或format字段`);
+        }
+        return data;
+      } catch (error) {
+        console.error("在imageUrlToBase64中请求出错：", error);
+        return { base64: "", format: "" };
+      }
     }
   };
 
