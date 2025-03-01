@@ -1506,13 +1506,12 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
             "Content-Type": "application/json"
           }
         });
-        if (!response.ok) {
-          const data2 = await response.json();
-          throw new Error(`HTTP错误! 状态码: ${response.status}，内容: ${response.statusText}，错误信息: ${data2.error.message}`);
-        }
         const data = await response.json();
         if (data.error) {
-          throw new Error(`请求失败：${JSON.stringify(data.error.message)}`);
+          throw new Error(`请求失败! 状态码: ${response.status}，内容: ${response.statusText}，错误信息: ${data.error.message}`);
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP错误! 状态码: ${response.status}，内容: ${response.statusText}`);
         }
         const number_of_results = data.number_of_results;
         const results_length = data.results.length;
@@ -2673,11 +2672,12 @@ ${memeryPrompt}`;
       const data = await fetchData(url, apiKey, bodyObject);
       if (data.choices && data.choices.length > 0) {
         const message = data.choices[0].message;
+        const finish_reason = data.choices[0].finish_reason;
         const reply = message.content;
         if (message.hasOwnProperty("reasoning_content")) {
           log(`思维链内容:`, message.reasoning_content);
         }
-        log(`响应内容:`, reply, "\nlatency", Date.now() - time, "ms");
+        log(`响应内容:`, reply, "\nlatency:", Date.now() - time, "ms", "\nfinish_reason:", finish_reason);
         if (isTool) {
           if (usePromptEngineering) {
             const match = reply.match(/<function_call>([\s\S]*?)<\/function_call>/);
@@ -2746,17 +2746,20 @@ ${memeryPrompt}`;
       },
       body: JSON.stringify(bodyObject)
     });
+    const data = await response.json();
     if (!response.ok) {
-      const data2 = await response.json();
-      throw new Error(`HTTP错误! 状态码: ${response.status}，内容: ${response.statusText}，错误信息: ${data2.error.message}`);
+      let s2 = `请求失败! 状态码: ${response.status}`;
+      if (data.error) {
+        s2 += `
+错误信息: ${data.error.message}`;
+      }
+      s2 += `
+响应体: ${JSON.stringify(data, null, 2)}`;
+      throw new Error(s2);
     }
     const text = await response.text();
     if (!text) {
       throw new Error(`响应体为空!`);
-    }
-    const data = await response.json();
-    if (data.error) {
-      throw new Error(`请求失败：${JSON.stringify(data.error.message)}`);
     }
     return data;
   }

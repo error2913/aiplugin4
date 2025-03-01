@@ -56,14 +56,17 @@ export function registerWebSearch() {
                 }
             });
 
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(`HTTP错误! 状态码: ${response.status}，内容: ${response.statusText}，错误信息: ${data.error.message}`);
-            }
-
             const data = await response.json();
-            if (data.error) {
-                throw new Error(`请求失败：${JSON.stringify(data.error.message)}`);
+
+            if (!response.ok) {
+                let s = `请求失败! 状态码: ${response.status}`;
+                if (data.error) {
+                    s += `\n错误信息: ${data.error.message}`;
+                }
+        
+                s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
+                
+                throw new Error(s);
             }
 
             const number_of_results = data.number_of_results;
