@@ -1,6 +1,5 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
-import { handleMessages } from "../utils/utils_message";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -31,6 +30,8 @@ export function registerGetContext() {
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
         const { ctx_type, name } = args;
+
+        const originalAI = ai;
 
         if (ctx_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
@@ -65,16 +66,31 @@ export function registerGetContext() {
             return `未知的上下文类型<${ctx_type}>`;
         }
 
-        const messages = handleMessages(ctx, ai);
-        const s = messages.map(item => {
-            if (item.role === 'system') {
-                return '';
+        const { isPrefix, showNumber } = ConfigManager.message;
+
+        const messages = ai.context.messages;
+        const images = [];
+        let s = '';
+        for (let i = 0; i < messages.length; i++) {
+            const message = messages[i];
+
+            images.push(...message.images);
+
+            if (message.role === 'assistant' && message?.tool_calls) {
+                s += `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
             }
-            if (item.role === 'assistant' && item?.tool_calls) {
-                return `[function_call]: ${item.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
-            }
-            return `[${item.role}]: ${item.content}`;
-        }).join('\n');
+
+            const prefix = isPrefix && message.name ? (
+                message.name.startsWith('_') ?
+                    `<|${message.name}|>` :
+                    `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
+            ) : '';
+
+            s += `\n[${message.role}]: ${prefix}${message.content}`;
+        }
+
+        // 将images添加到最后一条消息，以便使用
+        originalAI.context.messages[originalAI.context.messages.length - 1].images.push(...images);
 
         return s;
     }
