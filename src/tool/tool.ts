@@ -279,7 +279,7 @@ export class ToolManager {
                 await ai.context.toolIteration(tool_call.id, `调用函数失败:arguement不是一个object`);
                 return "none";
             }
-            for (const key in tool.info.function.parameters.required) {
+            for (const key of tool.info.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                     log(`调用函数失败:缺少必需参数 ${key}`);
                     await ai.context.toolIteration(tool_call.id, `调用函数失败:缺少必需参数 ${key}`);
@@ -338,7 +338,7 @@ export class ToolManager {
                 await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:arguement不是一个object`, []);
                 return;
             }
-            for (const key in tool.info.function.parameters.required) {
+            for (const key of tool.info.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                     log(`调用函数失败:缺少必需参数 ${key}`);
                     await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少必需参数 ${key}`, []);

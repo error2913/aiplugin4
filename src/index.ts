@@ -529,7 +529,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 return acc;
               }, {});
 
-              for (const key in tool.info.function.parameters.required) {
+              for (const key of tool.info.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                   log(`调用函数失败:缺少必需参数 ${key}`);
                   seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
