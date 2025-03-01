@@ -212,7 +212,7 @@ export class ToolManager {
      * @param tool_calls 
      * @returns tool_choice
      */
-    static async handleTools(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: {
+    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: {
         index: number,
         id: string,
         type: "function",
@@ -230,59 +230,77 @@ export class ToolManager {
 
         let tool_choice = 'none';
         for (let i = 0; i < tool_calls.length; i++) {
-            const name = tool_calls[i].function.name;
+            const tool_call = tool_calls[i];
+            const tool_choice2 = await this.handleToolCall(ctx, msg, ai, tool_call);
 
-            if (!this.toolMap.hasOwnProperty(name)) {
-                log(`调用函数失败:未注册的函数:${name}`);
-                await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
-                continue;
-            }
-            if (ConfigManager.tool.toolsNotAllow.includes(name)) {
-                log(`调用函数失败:禁止调用的函数:${name}`);
-                await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
-                continue;
-            }
-            if (this.cmdArgs == null) {
-                log(`暂时无法调用函数，请先使用任意指令`);
-                await ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
-                continue;
-            }
-
-            try {
-                const tool = this.toolMap[name];
-
-                if (tool.tool_choice === 'required') {
-                    tool_choice = 'required';
-                } else if (tool_choice !== 'required' && tool.tool_choice === 'auto') {
-                    tool_choice = 'auto';
-                }
-
-                const args = JSON.parse(tool_calls[i].function.arguments);
-                if (args !== null && typeof args !== 'object') {
-                    log(`调用函数失败:arguement不是一个object`);
-                    await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
-                    continue;
-                }
-                if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
-                    log(`调用函数失败:缺少必需参数`);
-                    await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
-                    continue;
-                }
-
-                const s = await tool.solve(ctx, msg, ai, args);
-
-                await ai.context.toolIteration(tool_calls[i].id, s);
-            } catch (e) {
-                const s = `调用函数 (${name}:${tool_calls[i].function.arguments}) 失败:${e.message}`;
-                console.error(s);
-                await ai.context.toolIteration(tool_calls[i].id, s);
+            if (tool_choice2 === 'required') {
+                tool_choice = 'required';
+            } else if (tool_choice === 'none' && tool_choice2 === 'auto') {
+                tool_choice = 'auto';
             }
         }
 
         return tool_choice;
     }
 
-    static async handlePromptTool(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call: {
+    static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call: {
+        index: number,
+        id: string,
+        type: "function",
+        function: {
+            name: string,
+            arguments: string
+        }
+    }): Promise<string> {
+        const name = tool_call.function.name;
+
+        if (!this.toolMap.hasOwnProperty(name)) {
+            log(`调用函数失败:未注册的函数:${name}`);
+            await ai.context.toolIteration(tool_call.id, `调用函数失败:未注册的函数:${name}`);
+            return "none";
+        }
+        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+            log(`调用函数失败:禁止调用的函数:${name}`);
+            await ai.context.toolIteration(tool_call.id, `调用函数失败:禁止调用的函数:${name}`);
+            return "none";
+        }
+        if (this.cmdArgs == null) {
+            log(`暂时无法调用函数，请先使用任意指令`);
+            await ai.context.toolIteration(tool_call.id, `暂时无法调用函数，请先提示用户使用任意指令`);
+            return "none";
+        }
+
+        try {
+            const tool = this.toolMap[name];
+
+            const args = JSON.parse(tool_call.function.arguments);
+            if (args !== null && typeof args !== 'object') {
+                log(`调用函数失败:arguement不是一个object`);
+                await ai.context.toolIteration(tool_call.id, `调用函数失败:arguement不是一个object`);
+                return "none";
+            }
+            for (const key in tool.info.function.parameters.required) {
+                if (!args.hasOwnProperty(key)) {
+                    log(`调用函数失败:缺少必需参数 ${key}`);
+                    await ai.context.toolIteration(tool_call.id, `调用函数失败:缺少必需参数 ${key}`);
+                    return "none";
+                }
+            }
+
+            const s = await tool.solve(ctx, msg, ai, args);
+
+            await ai.context.toolIteration(tool_call.id, s);
+
+            return tool.tool_choice;
+        } catch (e) {
+            const s = `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`;
+            console.error(s);
+            await ai.context.toolIteration(tool_call.id, s);
+            return "none";
+        }
+    }
+
+    static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call: {
         name: string,
         arguments: {
             [key: string]: any
@@ -320,10 +338,12 @@ export class ToolManager {
                 await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:arguement不是一个object`, []);
                 return;
             }
-            if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
-                log(`调用函数失败:缺少必需参数`);
-                await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少必需参数`, []);
-                return;
+            for (const key in tool.info.function.parameters.required) {
+                if (!args.hasOwnProperty(key)) {
+                    log(`调用函数失败:缺少必需参数 ${key}`);
+                    await ai.context.systemUserIteration('_调用函数返回', `调用函数失败:缺少必需参数 ${key}`, []);
+                    return;
+                }
             }
 
             const s = await tool.solve(ctx, msg, ai, args);

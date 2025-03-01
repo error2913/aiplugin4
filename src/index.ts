@@ -529,10 +529,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 return acc;
               }, {});
 
-              if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
-                log(`调用函数失败:缺少必需参数`);
-                seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数`);
-                return ret;
+              for (const key in tool.info.function.parameters.required) {
+                if (!args.hasOwnProperty(key)) {
+                  log(`调用函数失败:缺少必需参数 ${key}`);
+                  seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
+                  return ret;
+                }
               }
 
               const s = await tool.solve(ctx, msg, ai, args);

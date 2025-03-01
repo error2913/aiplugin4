@@ -132,8 +132,10 @@ export function registerSendMsg() {
                 if (args !== null && typeof args !== 'object') {
                     return `调用函数失败:arguement不是一个object`;
                 }
-                if (tool.info.function.parameters.required.some(key => !args.hasOwnProperty(key))) {
-                    return `调用函数失败:缺少必需参数`;
+                for (const key in tool.info.function.parameters.required) {
+                    if (!args.hasOwnProperty(key)) {
+                        return `调用函数失败:缺少必需参数 ${key}`;
+                    }
                 }
 
                 const s = await tool.solve(ctx, msg, ai, args);
