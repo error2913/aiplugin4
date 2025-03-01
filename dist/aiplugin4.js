@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.7
+// @version      4.5.8
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，选用模型若不支持该功能，可以开启迁移到提示词工程的开关，即可使用调用函数功能。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -1507,11 +1507,15 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
           }
         });
         const data = await response.json();
-        if (data.error) {
-          throw new Error(`请求失败! 状态码: ${response.status}，内容: ${response.statusText}，错误信息: ${data.error.message}`);
-        }
         if (!response.ok) {
-          throw new Error(`HTTP错误! 状态码: ${response.status}，内容: ${response.statusText}`);
+          let s2 = `请求失败! 状态码: ${response.status}`;
+          if (data.error) {
+            s2 += `
+错误信息: ${data.error.message}`;
+          }
+          s2 += `
+响应体: ${JSON.stringify(data, null, 2)}`;
+          throw new Error(s2);
         }
         const number_of_results = data.number_of_results;
         const results_length = data.results.length;
@@ -1958,8 +1962,10 @@ QQ等级: ${data.qqLevel}
           if (args2 !== null && typeof args2 !== "object") {
             return `调用函数失败:arguement不是一个object`;
           }
-          if (tool2.info.function.parameters.required.some((key) => !args2.hasOwnProperty(key))) {
-            return `调用函数失败:缺少必需参数`;
+          for (const key in tool2.info.function.parameters.required) {
+            if (!args2.hasOwnProperty(key)) {
+              return `调用函数失败:缺少必需参数 ${key}`;
+            }
           }
           const s2 = await tool2.solve(ctx, msg, ai, args2);
           await ai.context.systemUserIteration("_调用函数返回", s2, []);
@@ -1977,142 +1983,6 @@ QQ等级: ${data.qqLevel}
       return "消息发送成功";
     };
     ToolManager.toolMap[info.function.name] = tool;
-  }
-
-  // src/utils/utils_message.ts
-  function buildSystemMessage(ctx, ai) {
-    const { roleSetting, showNumber } = ConfigManager.message;
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
-    let content = roleSetting;
-    if (!ctx.isPrivate) {
-      content += `
-**相关信息**
-- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}
-- <@xxx>表示@某个群成员，xxx为名字${showNumber ? `或者纯数字QQ号` : ``}`;
-    } else {
-      content += `
-**相关信息**
-- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}`;
-    }
-    content += `- <|from:xxx${showNumber ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showNumber ? `，yyy为纯数字QQ号` : ``}
-- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
-    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
-    if (memeryPrompt) {
-      content += `
-**记忆**
-如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
-${memeryPrompt}`;
-    }
-    if (isTool && usePromptEngineering) {
-      const tools = ai.tool.getToolsInfo();
-      const toolsPrompt = tools.map((item, index) => {
-        return `${index + 1}. 名称:${item.function.name}
-- 描述:${item.function.description}
-- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
-- 必需参数:${item.function.parameters.required.join("\n")}`;
-      });
-      content += `
-**调用函数**
-当需要调用函数功能时，请严格使用以下格式：
-\`\`\`
-<function_call>
-{
-    "name": "函数名",
-    "arguments": {
-        "参数1": "值1",
-        "参数2": "值2"
-    }
-}
-</function_call>
-\`\`\`
-不要附带其他文本，且只能调用一次函数
-
-可用函数列表: ${toolsPrompt}`;
-    }
-    const systemMessage = {
-      role: "system",
-      content,
-      uid: "",
-      name: "",
-      timestamp: 0,
-      images: []
-    };
-    return systemMessage;
-  }
-  function buildSamplesMessages(ctx) {
-    const { samples } = ConfigManager.message;
-    const samplesMessages = samples.map((item, index) => {
-      if (item == "") {
-        return null;
-      } else if (index % 2 === 0) {
-        return {
-          role: "user",
-          content: item,
-          uid: "",
-          name: "用户",
-          timestamp: 0,
-          images: []
-        };
-      } else {
-        return {
-          role: "assistant",
-          content: item,
-          uid: ctx.endPoint.userId,
-          name: seal.formatTmpl(ctx, "核心:骰子名字"),
-          timestamp: 0,
-          images: []
-        };
-      }
-    }).filter((item) => item !== null);
-    return samplesMessages;
-  }
-  function handleMessages(ctx, ai) {
-    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
-    const systemMessage = buildSystemMessage(ctx, ai);
-    const samplesMessages = buildSamplesMessages(ctx);
-    const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-      if (!(message == null ? void 0 : message.tool_calls)) {
-        continue;
-      }
-      const tool_call_id_set = /* @__PURE__ */ new Set();
-      for (let j = i + 1; j < messages.length; j++) {
-        if (messages[j].role !== "tool") {
-          break;
-        }
-        tool_call_id_set.add(messages[j].tool_call_id);
-      }
-      for (let j = 0; j < message.tool_calls.length; j++) {
-        const tool_call = message.tool_calls[j];
-        if (!tool_call_id_set.has(tool_call.id)) {
-          message.tool_calls.splice(j, 1);
-          j--;
-        }
-      }
-      if (message.tool_calls.length === 0) {
-        messages.splice(i, 1);
-        i--;
-      }
-    }
-    let processedMessages = [];
-    let last_role = "";
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-      const prefix = isPrefix && message.name ? message.name.startsWith("_") ? `<|${message.name}|>` : `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, "")})` : ``}|>` : "";
-      if (isMerge && message.role === last_role && message.role !== "tool") {
-        processedMessages[processedMessages.length - 1].content += "\n" + prefix + message.content;
-      } else {
-        processedMessages.push({
-          role: message.role,
-          content: prefix + message.content,
-          tool_calls: (message == null ? void 0 : message.tool_calls) ? message.tool_calls : void 0,
-          tool_call_id: (message == null ? void 0 : message.tool_call_id) ? message.tool_call_id : void 0
-        });
-        last_role = message.role;
-      }
-    }
-    return processedMessages;
   }
 
   // src/tool/tool_get_context.ts
@@ -2142,6 +2012,7 @@ ${memeryPrompt}`;
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
       const { ctx_type, name } = args;
+      const originalAI = ai;
       if (ctx_type === "private") {
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
@@ -2170,16 +2041,22 @@ ${memeryPrompt}`;
       } else {
         return `未知的上下文类型<${ctx_type}>`;
       }
-      const messages = handleMessages(ctx, ai);
-      const s = messages.map((item) => {
-        if (item.role === "system") {
-          return "";
+      const { isPrefix, showNumber } = ConfigManager.message;
+      const messages = ai.context.messages;
+      const images = [];
+      let s = "";
+      for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+        images.push(...message.images);
+        if (message.role === "assistant" && (message == null ? void 0 : message.tool_calls)) {
+          s += `
+[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join("\n")}`;
         }
-        if (item.role === "assistant" && (item == null ? void 0 : item.tool_calls)) {
-          return `[function_call]: ${item.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join("\n")}`;
-        }
-        return `[${item.role}]: ${item.content}`;
-      }).join("\n");
+        const prefix = isPrefix && message.name ? message.name.startsWith("_") ? `<|${message.name}|>` : `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, "")})` : ``}|>` : "";
+        s += `
+[${message.role}]: ${prefix}${message.content}`;
+      }
+      originalAI.context.messages[originalAI.context.messages.length - 1].images.push(...images);
       return s;
     };
     ToolManager.toolMap[info.function.name] = tool;
@@ -2561,7 +2438,7 @@ ${memeryPrompt}`;
      * @param tool_calls 
      * @returns tool_choice
      */
-    static async handleTools(ctx, msg, ai, tool_calls) {
+    static async handleToolCalls(ctx, msg, ai, tool_calls) {
       tool_calls.splice(5);
       if (tool_calls.length !== 0) {
         log(`调用函数:`, tool_calls.map((item, i) => {
@@ -2570,51 +2447,59 @@ ${memeryPrompt}`;
       }
       let tool_choice = "none";
       for (let i = 0; i < tool_calls.length; i++) {
-        const name = tool_calls[i].function.name;
-        if (!this.toolMap.hasOwnProperty(name)) {
-          log(`调用函数失败:未注册的函数:${name}`);
-          await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:未注册的函数:${name}`);
-          continue;
-        }
-        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
-          log(`调用函数失败:禁止调用的函数:${name}`);
-          await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:禁止调用的函数:${name}`);
-          continue;
-        }
-        if (this.cmdArgs == null) {
-          log(`暂时无法调用函数，请先使用任意指令`);
-          await ai.context.toolIteration(tool_calls[0].id, `暂时无法调用函数，请先提示用户使用任意指令`);
-          continue;
-        }
-        try {
-          const tool = this.toolMap[name];
-          if (tool.tool_choice === "required") {
-            tool_choice = "required";
-          } else if (tool_choice !== "required" && tool.tool_choice === "auto") {
-            tool_choice = "auto";
-          }
-          const args = JSON.parse(tool_calls[i].function.arguments);
-          if (args !== null && typeof args !== "object") {
-            log(`调用函数失败:arguement不是一个object`);
-            await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:arguement不是一个object`);
-            continue;
-          }
-          if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
-            log(`调用函数失败:缺少必需参数`);
-            await ai.context.toolIteration(tool_calls[i].id, `调用函数失败:缺少必需参数`);
-            continue;
-          }
-          const s = await tool.solve(ctx, msg, ai, args);
-          await ai.context.toolIteration(tool_calls[i].id, s);
-        } catch (e) {
-          const s = `调用函数 (${name}:${tool_calls[i].function.arguments}) 失败:${e.message}`;
-          console.error(s);
-          await ai.context.toolIteration(tool_calls[i].id, s);
+        const tool_call = tool_calls[i];
+        const tool_choice2 = await this.handleToolCall(ctx, msg, ai, tool_call);
+        if (tool_choice2 === "required") {
+          tool_choice = "required";
+        } else if (tool_choice === "none" && tool_choice2 === "auto") {
+          tool_choice = "auto";
         }
       }
       return tool_choice;
     }
-    static async handlePromptTool(ctx, msg, ai, tool_call) {
+    static async handleToolCall(ctx, msg, ai, tool_call) {
+      const name = tool_call.function.name;
+      if (!this.toolMap.hasOwnProperty(name)) {
+        log(`调用函数失败:未注册的函数:${name}`);
+        await ai.context.toolIteration(tool_call.id, `调用函数失败:未注册的函数:${name}`);
+        return "none";
+      }
+      if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+        log(`调用函数失败:禁止调用的函数:${name}`);
+        await ai.context.toolIteration(tool_call.id, `调用函数失败:禁止调用的函数:${name}`);
+        return "none";
+      }
+      if (this.cmdArgs == null) {
+        log(`暂时无法调用函数，请先使用任意指令`);
+        await ai.context.toolIteration(tool_call.id, `暂时无法调用函数，请先提示用户使用任意指令`);
+        return "none";
+      }
+      try {
+        const tool = this.toolMap[name];
+        const args = JSON.parse(tool_call.function.arguments);
+        if (args !== null && typeof args !== "object") {
+          log(`调用函数失败:arguement不是一个object`);
+          await ai.context.toolIteration(tool_call.id, `调用函数失败:arguement不是一个object`);
+          return "none";
+        }
+        for (const key in tool.info.function.parameters.required) {
+          if (!args.hasOwnProperty(key)) {
+            log(`调用函数失败:缺少必需参数 ${key}`);
+            await ai.context.toolIteration(tool_call.id, `调用函数失败:缺少必需参数 ${key}`);
+            return "none";
+          }
+        }
+        const s = await tool.solve(ctx, msg, ai, args);
+        await ai.context.toolIteration(tool_call.id, s);
+        return tool.tool_choice;
+      } catch (e) {
+        const s = `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`;
+        console.error(s);
+        await ai.context.toolIteration(tool_call.id, s);
+        return "none";
+      }
+    }
+    static async handlePromptToolCall(ctx, msg, ai, tool_call) {
       if (!tool_call.hasOwnProperty("name") || !tool_call.hasOwnProperty("arguments")) {
         log(`调用函数失败:缺少name或arguments`);
         await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`, []);
@@ -2643,10 +2528,12 @@ ${memeryPrompt}`;
           await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`, []);
           return;
         }
-        if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
-          log(`调用函数失败:缺少必需参数`);
-          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数`, []);
-          return;
+        for (const key in tool.info.function.parameters.required) {
+          if (!args.hasOwnProperty(key)) {
+            log(`调用函数失败:缺少必需参数 ${key}`);
+            await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数 ${key}`, []);
+            return;
+          }
         }
         const s = await tool.solve(ctx, msg, ai, args);
         await ai.context.systemUserIteration("_调用函数返回", s, []);
@@ -2660,6 +2547,142 @@ ${memeryPrompt}`;
   _ToolManager.cmdArgs = null;
   _ToolManager.toolMap = {};
   var ToolManager = _ToolManager;
+
+  // src/utils/utils_message.ts
+  function buildSystemMessage(ctx, ai) {
+    const { roleSetting, showNumber } = ConfigManager.message;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
+    let content = roleSetting;
+    if (!ctx.isPrivate) {
+      content += `
+**相关信息**
+- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, "")})` : ``}
+- <@xxx>表示@某个群成员，xxx为名字${showNumber ? `或者纯数字QQ号` : ``}`;
+    } else {
+      content += `
+**相关信息**
+- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, "")})` : ``}`;
+    }
+    content += `- <|from:xxx${showNumber ? `(yyy)` : ``}|>表示消息来源，xxx为用户名字${showNumber ? `，yyy为纯数字QQ号` : ``}
+- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
+    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
+    if (memeryPrompt) {
+      content += `
+**记忆**
+如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
+${memeryPrompt}`;
+    }
+    if (isTool && usePromptEngineering) {
+      const tools = ai.tool.getToolsInfo();
+      const toolsPrompt = tools.map((item, index) => {
+        return `${index + 1}. 名称:${item.function.name}
+- 描述:${item.function.description}
+- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
+- 必需参数:${item.function.parameters.required.join("\n")}`;
+      });
+      content += `
+**调用函数**
+当需要调用函数功能时，请严格使用以下格式：
+\`\`\`
+<function_call>
+{
+    "name": "函数名",
+    "arguments": {
+        "参数1": "值1",
+        "参数2": "值2"
+    }
+}
+</function_call>
+\`\`\`
+不要附带其他文本，且只能调用一次函数
+
+可用函数列表: ${toolsPrompt}`;
+    }
+    const systemMessage = {
+      role: "system",
+      content,
+      uid: "",
+      name: "",
+      timestamp: 0,
+      images: []
+    };
+    return systemMessage;
+  }
+  function buildSamplesMessages(ctx) {
+    const { samples } = ConfigManager.message;
+    const samplesMessages = samples.map((item, index) => {
+      if (item == "") {
+        return null;
+      } else if (index % 2 === 0) {
+        return {
+          role: "user",
+          content: item,
+          uid: "",
+          name: "用户",
+          timestamp: 0,
+          images: []
+        };
+      } else {
+        return {
+          role: "assistant",
+          content: item,
+          uid: ctx.endPoint.userId,
+          name: seal.formatTmpl(ctx, "核心:骰子名字"),
+          timestamp: 0,
+          images: []
+        };
+      }
+    }).filter((item) => item !== null);
+    return samplesMessages;
+  }
+  function handleMessages(ctx, ai) {
+    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
+    const systemMessage = buildSystemMessage(ctx, ai);
+    const samplesMessages = buildSamplesMessages(ctx);
+    const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      if (!(message == null ? void 0 : message.tool_calls)) {
+        continue;
+      }
+      const tool_call_id_set = /* @__PURE__ */ new Set();
+      for (let j = i + 1; j < messages.length; j++) {
+        if (messages[j].role !== "tool") {
+          break;
+        }
+        tool_call_id_set.add(messages[j].tool_call_id);
+      }
+      for (let j = 0; j < message.tool_calls.length; j++) {
+        const tool_call = message.tool_calls[j];
+        if (!tool_call_id_set.has(tool_call.id)) {
+          message.tool_calls.splice(j, 1);
+          j--;
+        }
+      }
+      if (message.tool_calls.length === 0) {
+        messages.splice(i, 1);
+        i--;
+      }
+    }
+    let processedMessages = [];
+    let last_role = "";
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const prefix = isPrefix && message.name ? message.name.startsWith("_") ? `<|${message.name}|>` : `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, "")})` : ``}|>` : "";
+      if (isMerge && message.role === last_role && message.role !== "tool") {
+        processedMessages[processedMessages.length - 1].content += "\n" + prefix + message.content;
+      } else {
+        processedMessages.push({
+          role: message.role,
+          content: prefix + message.content,
+          tool_calls: (message == null ? void 0 : message.tool_calls) ? message.tool_calls : void 0,
+          tool_call_id: (message == null ? void 0 : message.tool_call_id) ? message.tool_call_id : void 0
+        });
+        last_role = message.role;
+      }
+    }
+    return processedMessages;
+  }
 
   // src/AI/service.ts
   async function sendChatRequest(ctx, msg, ai, messages, tool_choice) {
@@ -2684,7 +2707,7 @@ ${memeryPrompt}`;
             if (match) {
               ai.context.iteration(ctx, match[0], [], "assistant");
               const tool_call = JSON.parse(match[1]);
-              await ToolManager.handlePromptTool(ctx, msg, ai, tool_call);
+              await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
               const messages2 = handleMessages(ctx, ai);
               return await sendChatRequest(ctx, msg, ai, messages2, tool_choice);
             }
@@ -2692,7 +2715,7 @@ ${memeryPrompt}`;
             if (message.hasOwnProperty("tool_calls") && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
               log(`触发工具调用`);
               ai.context.toolCallsIteration(message.tool_calls);
-              const tool_choice2 = await ToolManager.handleTools(ctx, msg, ai, message.tool_calls);
+              const tool_choice2 = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
               const messages2 = handleMessages(ctx, ai);
               return await sendChatRequest(ctx, msg, ai, messages2, tool_choice2);
             }
@@ -3437,7 +3460,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.7");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.8");
       seal.ext.register(ext);
     }
     try {
@@ -3914,10 +3937,12 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
                   }
                   return acc;
                 }, {});
-                if (tool.info.function.parameters.required.some((key) => !args.hasOwnProperty(key))) {
-                  log(`调用函数失败:缺少必需参数`);
-                  seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数`);
-                  return ret;
+                for (const key in tool.info.function.parameters.required) {
+                  if (!args.hasOwnProperty(key)) {
+                    log(`调用函数失败:缺少必需参数 ${key}`);
+                    seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
+                    return ret;
+                  }
                 }
                 const s = await tool.solve(ctx, msg, ai, args);
                 seal.replyToSender(ctx, msg, s);
