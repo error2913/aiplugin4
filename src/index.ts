@@ -12,7 +12,7 @@ import { triggerConditionMap } from "./tool/tool_set_trigger_condition";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.10');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.11');
     seal.ext.register(ext);
   }
 
@@ -738,23 +738,25 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       }
 
       // AI自己设定的触发条件触发
-      for (let i = 0; i < triggerConditionMap[id].length; i++) {
-        const condition = triggerConditionMap[id][i];
-        if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
-          continue;
+      if (triggerConditionMap.hasOwnProperty(id) && triggerConditionMap[id].length !== 0) {
+        for (let i = 0; i < triggerConditionMap[id].length; i++) {
+          const condition = triggerConditionMap[id][i];
+          if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
+            continue;
+          }
+          if (condition.uid && condition.uid !== userId) {
+            continue;
+          }
+  
+          await ai.context.iteration(ctx, message, images, 'user');
+          await ai.context.systemUserIteration('触发原因提示', condition.reason, []);
+          triggerConditionMap[id].splice(i, 1);
+  
+          log('AI设定触发条件触发回复');
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
+          return;
         }
-        if (condition.uid && condition.uid !== userId) {
-          continue;
-        }
-
-        await ai.context.iteration(ctx, message, images, 'user');
-        await ai.context.systemUserIteration('触发原因提示', condition.reason, []);
-        triggerConditionMap[id].splice(i, 1);
-
-        log('AI设定触发条件触发回复');
-        await ai.chat(ctx, msg);
-        AIManager.saveAI(id);
-        return;
       }
 
       // 开启任一模式时

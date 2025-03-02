@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.10
+// @version      4.5.11
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，选用模型若不支持该功能，可以开启迁移到提示词工程的开关，即可使用调用函数功能。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -3594,7 +3594,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.10");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.11");
       seal.ext.register(ext);
     }
     try {
@@ -4257,21 +4257,23 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
             return;
           }
         }
-        for (let i = 0; i < triggerConditionMap[id].length; i++) {
-          const condition2 = triggerConditionMap[id][i];
-          if (condition2.keyword && !new RegExp(condition2.keyword).test(message)) {
-            continue;
+        if (triggerConditionMap.hasOwnProperty(id) && triggerConditionMap[id].length !== 0) {
+          for (let i = 0; i < triggerConditionMap[id].length; i++) {
+            const condition2 = triggerConditionMap[id][i];
+            if (condition2.keyword && !new RegExp(condition2.keyword).test(message)) {
+              continue;
+            }
+            if (condition2.uid && condition2.uid !== userId) {
+              continue;
+            }
+            await ai.context.iteration(ctx, message, images, "user");
+            await ai.context.systemUserIteration("触发原因提示", condition2.reason, []);
+            triggerConditionMap[id].splice(i, 1);
+            log("AI设定触发条件触发回复");
+            await ai.chat(ctx, msg);
+            AIManager.saveAI(id);
+            return;
           }
-          if (condition2.uid && condition2.uid !== userId) {
-            continue;
-          }
-          await ai.context.iteration(ctx, message, images, "user");
-          await ai.context.systemUserIteration("触发原因提示", condition2.reason, []);
-          triggerConditionMap[id].splice(i, 1);
-          log("AI设定触发条件触发回复");
-          await ai.chat(ctx, msg);
-          AIManager.saveAI(id);
-          return;
         }
         const pr = ai.privilege;
         if (pr.standby) {
