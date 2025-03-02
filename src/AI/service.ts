@@ -94,8 +94,9 @@ export async function sendITTRequest(messages: {
         }
     } catch (error) {
         console.error("在imageToText中请求出错：", error);
-        if (urlToBase64 === '总是' && !useBase64) {
+        if (urlToBase64 === '自动' && !useBase64) {
             log(`自动尝试使用转换为base64`);
+
             for (let i = 0; i < messages.length; i++) {
                 const message = messages[i];
                 for (let j = 0; j < message.content.length; j++) {
