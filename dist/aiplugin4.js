@@ -594,7 +594,7 @@ ${attr}: ${value}=>${result}`;
         const data = await globalThis.http.getData(epId, `get_group_shut_list?group_id=${gid.replace(/\D+/g, "")}`);
         const s = `被禁言成员数量: ${data.length}
 ` + data.slice(0, 50).map((item, index) => {
-          return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ""} 被禁言时间: ${new Date(item.shutUpTime * 1e3).toLocaleString()}`;
+          return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ""} 禁言结束时间: ${new Date(item.shutUpTime * 1e3).toLocaleString()}`;
         }).join("\n");
         return s;
       } catch (e) {
@@ -1943,7 +1943,7 @@ QQ等级: ${data.qqLevel}
       } else {
         return `未知的消息类型<${msg_type}>`;
       }
-      await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || "无"}`, originalImages);
+      await ai.context.systemUserIteration("来自其他对话的消息发送提示", `${source}: 原因: ${reason || "无"}`, originalImages);
       const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
       ai.context.lastReply = reply;
       await ai.context.iteration(ctx, s, images, "assistant");
@@ -1970,13 +1970,13 @@ QQ等级: ${data.qqLevel}
             }
           }
           const s2 = await tool2.solve(ctx, msg, ai, args2);
-          await ai.context.systemUserIteration("_调用函数返回", s2, []);
+          await ai.context.systemUserIteration("调用函数返回", s2, []);
           AIManager.saveAI(ai.id);
           return `函数调用成功，返回值:${s2}`;
         } catch (e) {
           const s2 = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
           console.error(s2);
-          await ai.context.systemUserIteration("_调用函数返回", s2, []);
+          await ai.context.systemUserIteration("调用函数返回", s2, []);
           AIManager.saveAI(ai.id);
           return s2;
         }
@@ -2319,6 +2319,69 @@ QQ等级: ${data.qqLevel}
     ToolManager.toolMap[info.function.name] = tool;
   }
 
+  // src/tool/tool_set_trigger_condition.ts
+  var triggerConditionMap = {};
+  function registerSetTriggerCondition() {
+    const info = {
+      type: "function",
+      function: {
+        name: "set_trigger_condition",
+        description: `设置一个触发条件，当触发条件满足时，会自动进行一次对话`,
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: {
+              type: "string",
+              description: "触发关键词，可使用正则表达式，为空时任意消息都可触发"
+            },
+            name: {
+              type: "string",
+              description: "指定触发必须满足的用户名称" + (ConfigManager.message.showNumber ? "或纯数字QQ号" : "") + "，为空时任意用户均可触发"
+            },
+            reason: {
+              type: "string",
+              description: "触发原因"
+            }
+          },
+          required: ["reason"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, ai, args) => {
+      const { keyword = "", name = "", reason } = args;
+      const condition = {
+        keyword: "",
+        uid: "",
+        reason
+      };
+      if (keyword) {
+        try {
+          new RegExp(keyword);
+          condition.keyword = keyword;
+        } catch (e) {
+          return `触发关键词格式错误`;
+        }
+      }
+      if (name) {
+        const uid = await ai.context.findUserId(ctx, name, true);
+        if (uid === null) {
+          return `未找到<${name}>`;
+        }
+        if (uid === ctx.endPoint.userId) {
+          return `禁止将自己设置为触发条件`;
+        }
+        condition.uid = uid;
+      }
+      if (!triggerConditionMap.hasOwnProperty(ai.id)) {
+        triggerConditionMap[ai.id] = [];
+      }
+      triggerConditionMap[ai.id].push(condition);
+      return "触发条件设置成功";
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+
   // src/tool/tool.ts
   var Tool = class {
     constructor(info) {
@@ -2406,6 +2469,7 @@ QQ等级: ${data.qqLevel}
       registerGetGroupMemberList();
       registerSearchChat();
       registerSearchCommonGroup();
+      registerSetTriggerCondition();
     }
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
@@ -2504,22 +2568,22 @@ QQ等级: ${data.qqLevel}
     static async handlePromptToolCall(ctx, msg, ai, tool_call) {
       if (!tool_call.hasOwnProperty("name") || !tool_call.hasOwnProperty("arguments")) {
         log(`调用函数失败:缺少name或arguments`);
-        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少name或arguments`, []);
+        await ai.context.systemUserIteration("调用函数返回", `调用函数失败:缺少name或arguments`, []);
       }
       const name = tool_call.name;
       if (!this.toolMap.hasOwnProperty(name)) {
         log(`调用函数失败:未注册的函数:${name}`);
-        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:未注册的函数:${name}`, []);
+        await ai.context.systemUserIteration("调用函数返回", `调用函数失败:未注册的函数:${name}`, []);
         return;
       }
       if (ConfigManager.tool.toolsNotAllow.includes(name)) {
         log(`调用函数失败:禁止调用的函数:${name}`);
-        await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:禁止调用的函数:${name}`, []);
+        await ai.context.systemUserIteration("调用函数返回", `调用函数失败:禁止调用的函数:${name}`, []);
         return;
       }
       if (this.cmdArgs == null) {
         log(`暂时无法调用函数，请先使用任意指令`);
-        await ai.context.systemUserIteration("_调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`, []);
+        await ai.context.systemUserIteration("调用函数返回", `暂时无法调用函数，请先提示用户使用任意指令`, []);
         return;
       }
       try {
@@ -2527,22 +2591,22 @@ QQ等级: ${data.qqLevel}
         const args = tool_call.arguments;
         if (args !== null && typeof args !== "object") {
           log(`调用函数失败:arguement不是一个object`);
-          await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:arguement不是一个object`, []);
+          await ai.context.systemUserIteration("调用函数返回", `调用函数失败:arguement不是一个object`, []);
           return;
         }
         for (const key of tool.info.function.parameters.required) {
           if (!args.hasOwnProperty(key)) {
             log(`调用函数失败:缺少必需参数 ${key}`);
-            await ai.context.systemUserIteration("_调用函数返回", `调用函数失败:缺少必需参数 ${key}`, []);
+            await ai.context.systemUserIteration("调用函数返回", `调用函数失败:缺少必需参数 ${key}`, []);
             return;
           }
         }
         const s = await tool.solve(ctx, msg, ai, args);
-        await ai.context.systemUserIteration("_调用函数返回", s, []);
+        await ai.context.systemUserIteration("调用函数返回", s, []);
       } catch (e) {
         const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
         console.error(s);
-        await ai.context.systemUserIteration("_调用函数返回", s, []);
+        await ai.context.systemUserIteration("调用函数返回", s, []);
       }
     }
   };
@@ -3139,7 +3203,7 @@ ${memeryPrompt}`;
         role: "user",
         content: s,
         uid: "",
-        name,
+        name: `_${name}`,
         timestamp: Math.floor(Date.now() / 1e3),
         images
       };
@@ -4168,15 +4232,16 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
         }
         clearTimeout(ai.context.timer);
         ai.context.timer = null;
-        if (keyWords.some((item) => {
+        for (const keyword of keyWords) {
           try {
-            const pattern = new RegExp(item);
-            return pattern.test(message);
+            const pattern = new RegExp(keyword);
+            if (!pattern.test(message)) {
+              continue;
+            }
           } catch (error) {
             console.error("Error in RegExp:", error);
-            return false;
+            continue;
           }
-        })) {
           const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
           if (fmtCondition === 1) {
             await ai.context.iteration(ctx, message, images, "user");
@@ -4185,38 +4250,53 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
             AIManager.saveAI(id);
             return;
           }
-        } else {
-          const pr = ai.privilege;
-          if (pr.standby) {
-            await ai.context.iteration(ctx, message, images, "user");
+        }
+        for (let i = 0; i < triggerConditionMap[id].length; i++) {
+          const condition2 = triggerConditionMap[id][i];
+          if (condition2.keyword && !new RegExp(condition2.keyword).test(message)) {
+            continue;
           }
-          if (pr.counter > -1) {
-            ai.context.counter += 1;
-            if (ai.context.counter >= pr.counter) {
-              log("计数器触发回复");
-              ai.context.counter = 0;
-              await ai.chat(ctx, msg);
-              AIManager.saveAI(id);
-              return;
-            }
+          if (condition2.uid && condition2.uid !== userId) {
+            continue;
           }
-          if (pr.prob > -1) {
-            const ran = Math.random() * 100;
-            if (ran <= pr.prob) {
-              log("概率触发回复");
-              await ai.chat(ctx, msg);
-              AIManager.saveAI(id);
-              return;
-            }
+          await ai.context.iteration(ctx, message, images, "user");
+          await ai.context.systemUserIteration("触发原因提示", condition2.reason, []);
+          triggerConditionMap[id].splice(i, 1);
+          log("AI设定触发条件触发回复");
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
+          return;
+        }
+        const pr = ai.privilege;
+        if (pr.standby) {
+          await ai.context.iteration(ctx, message, images, "user");
+        }
+        if (pr.counter > -1) {
+          ai.context.counter += 1;
+          if (ai.context.counter >= pr.counter) {
+            log("计数器触发回复");
+            ai.context.counter = 0;
+            await ai.chat(ctx, msg);
+            AIManager.saveAI(id);
+            return;
           }
-          if (pr.timer > -1) {
-            ai.context.timer = setTimeout(async () => {
-              log("计时器触发回复");
-              ai.context.timer = null;
-              await ai.chat(ctx, msg);
-              AIManager.saveAI(id);
-            }, pr.timer * 1e3 + Math.floor(Math.random() * 500));
+        }
+        if (pr.prob > -1) {
+          const ran = Math.random() * 100;
+          if (ran <= pr.prob) {
+            log("概率触发回复");
+            await ai.chat(ctx, msg);
+            AIManager.saveAI(id);
+            return;
           }
+        }
+        if (pr.timer > -1) {
+          ai.context.timer = setTimeout(async () => {
+            log("计时器触发回复");
+            ai.context.timer = null;
+            await ai.chat(ctx, msg);
+            AIManager.saveAI(id);
+          }, pr.timer * 1e3 + Math.floor(Math.random() * 500));
         }
       }
     };
@@ -4304,7 +4384,7 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
 定时器设定时间：${setTime}
 当前触发时间：${(/* @__PURE__ */ new Date()).toLocaleString()}
 提示内容：${content}`;
-        await ai.context.systemUserIteration("_定时器触发提示", s, []);
+        await ai.context.systemUserIteration("定时器触发提示", s, []);
         log("定时任务触发回复");
         ai.isChatting = false;
         await ai.chat(ctx, msg);

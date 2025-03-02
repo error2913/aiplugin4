@@ -130,7 +130,7 @@ export function registerGetBanList() {
             const data = await globalThis.http.getData(epId, `get_group_shut_list?group_id=${gid.replace(/\D+/g, '')}`);
 
             const s = `被禁言成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 被禁言时间: ${new Date(item.shutUpTime * 1000).toLocaleString()}`;
+                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${new Date(item.shutUpTime * 1000).toLocaleString()}`;
             }).join('\n');
 
             return s;

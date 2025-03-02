@@ -7,6 +7,7 @@ import { log } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
 import { getCQTypes } from "./utils/utils_string";
 import { buildSystemMessage } from "./utils/utils_message";
+import { triggerConditionMap } from "./tool/tool_set_trigger_condition";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
@@ -714,15 +715,17 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       ai.context.timer = null;
 
       // 非指令触发
-      if (keyWords.some(item => {
+      for (const keyword of keyWords) {
         try {
-          const pattern = new RegExp(item);
-          return pattern.test(message);
+          const pattern = new RegExp(keyword);
+          if (!pattern.test(message)) {
+            continue;
+          }
         } catch (error) {
           console.error('Error in RegExp:', error);
-          return false;
+          continue;
         }
-      })) {
+
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition === 1) {
           await ai.context.iteration(ctx, message, images, 'user');
@@ -734,47 +737,65 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         }
       }
 
+      // AI自己设定的触发条件触发
+      for (let i = 0; i < triggerConditionMap[id].length; i++) {
+        const condition = triggerConditionMap[id][i];
+        if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
+          continue;
+        }
+        if (condition.uid && condition.uid !== userId) {
+          continue;
+        }
+
+        await ai.context.iteration(ctx, message, images, 'user');
+        await ai.context.systemUserIteration('触发原因提示', condition.reason, []);
+        triggerConditionMap[id].splice(i, 1);
+
+        log('AI设定触发条件触发回复');
+        await ai.chat(ctx, msg);
+        AIManager.saveAI(id);
+        return;
+      }
+
       // 开启任一模式时
-      else {
-        const pr = ai.privilege;
-        if (pr.standby) {
-          await ai.context.iteration(ctx, message, images, 'user');
+      const pr = ai.privilege;
+      if (pr.standby) {
+        await ai.context.iteration(ctx, message, images, 'user');
+      }
+
+      if (pr.counter > -1) {
+        ai.context.counter += 1;
+
+        if (ai.context.counter >= pr.counter) {
+          log('计数器触发回复');
+          ai.context.counter = 0;
+
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
+          return;
         }
+      }
 
-        if (pr.counter > -1) {
-          ai.context.counter += 1;
+      if (pr.prob > -1) {
+        const ran = Math.random() * 100;
 
-          if (ai.context.counter >= pr.counter) {
-            log('计数器触发回复');
-            ai.context.counter = 0;
+        if (ran <= pr.prob) {
+          log('概率触发回复');
 
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
-          }
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
+          return;
         }
+      }
 
-        if (pr.prob > -1) {
-          const ran = Math.random() * 100;
+      if (pr.timer > -1) {
+        ai.context.timer = setTimeout(async () => {
+          log('计时器触发回复');
 
-          if (ran <= pr.prob) {
-            log('概率触发回复');
-
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
-          }
-        }
-
-        if (pr.timer > -1) {
-          ai.context.timer = setTimeout(async () => {
-            log('计时器触发回复');
-
-            ai.context.timer = null;
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-          }, pr.timer * 1000 + Math.floor(Math.random() * 500));
-        }
+          ai.context.timer = null;
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
+        }, pr.timer * 1000 + Math.floor(Math.random() * 500));
       }
     }
   }
@@ -884,7 +905,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 当前触发时间：${new Date().toLocaleString()}
 提示内容：${content}`;
 
-      await ai.context.systemUserIteration("_定时器触发提示", s, []);
+      await ai.context.systemUserIteration("定时器触发提示", s, []);
 
       log('定时任务触发回复');
       ai.isChatting = false;

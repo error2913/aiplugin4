@@ -141,7 +141,7 @@ export class Context {
             role: 'user',
             content: s,
             uid: '',
-            name: name,
+            name: `_${name}`,
             timestamp: Math.floor(Date.now() / 1000),
             images: images
         };

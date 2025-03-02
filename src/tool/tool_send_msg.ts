@@ -106,7 +106,7 @@ export function registerSendMsg() {
             return `未知的消息类型<${msg_type}>`;
         }
 
-        await ai.context.systemUserIteration("_来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
+        await ai.context.systemUserIteration("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
         const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
         ai.context.lastReply = reply;
@@ -139,14 +139,14 @@ export function registerSendMsg() {
                 }
 
                 const s = await tool.solve(ctx, msg, ai, args);
-                await ai.context.systemUserIteration('_调用函数返回', s, []);
+                await ai.context.systemUserIteration('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return `函数调用成功，返回值:${s}`;
             } catch (e) {
                 const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
                 console.error(s);
-                await ai.context.systemUserIteration('_调用函数返回', s, []);
+                await ai.context.systemUserIteration('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return s;
