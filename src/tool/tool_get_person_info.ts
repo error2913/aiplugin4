@@ -66,7 +66,6 @@ QQ等级: ${data.qqLevel}
             if (data.country && data.country !== '') s += `\n所在地: ${data.country} ${data.province} ${data.city}`;
             if (data.address && data.address !== '') s += `\n地址: ${data.address}`;
             if (data.eMail && data.eMail !== '') s += `\n邮箱: ${data.eMail}`;
-            if (data.phoneNum && data.phoneNum !== '-') s += `\n手机号码: ${data.phoneNum}`;
             if (data.interest && data.interest !== '') s += `\n兴趣: ${data.interest}`;
             if (data.labels && data.labels.length > 0) s += `\n标签: ${data.labels.join(',')}`;
             if (data.long_nick && data.long_nick !== '') s += `\n个性签名: ${data.long_nick}`;
