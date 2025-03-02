@@ -49,11 +49,11 @@
   // src/config/config_log.ts
   var LogConfig = class {
     static register() {
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否打印日志细节", true, "");
+      seal.ext.registerOptionConfig(ConfigManager.ext, "日志打印方式", "简短", ["永不", "简短", "详细"]);
     }
     static get() {
       return {
-        isLog: seal.ext.getBoolConfig(ConfigManager.ext, "是否打印日志细节")
+        logLevel: seal.ext.getOptionConfig(ConfigManager.ext, "日志打印方式")
       };
     }
   };
@@ -312,10 +312,18 @@
 
   // src/utils/utils.ts
   function log(...data) {
-    const { isLog } = ConfigManager.log;
-    if (isLog) {
-      console.log(...data);
+    const { logLevel } = ConfigManager.log;
+    if (logLevel === "永不") {
+      return;
     }
+    if (logLevel === "简短") {
+      const s = data.map((item) => `${item}`).join(" ");
+      if (s.length > 1e3) {
+        console.log(s.substring(0, 500), "\n...\n", s.substring(s.length - 500));
+        return;
+      }
+    }
+    console.log(...data);
   }
   function generateId() {
     const timestamp = Date.now().toString(36);

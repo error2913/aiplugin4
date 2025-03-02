@@ -2,12 +2,12 @@ import { ConfigManager } from "./config";
 
 export class LogConfig {
     static register() {
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否打印日志细节", true, "");
+        seal.ext.registerOptionConfig(ConfigManager.ext, "日志打印方式", "简短", ["永不", "简短", "详细"]);
     }
 
     static get() {
         return {
-            isLog: seal.ext.getBoolConfig(ConfigManager.ext, "是否打印日志细节")
+            logLevel: seal.ext.getOptionConfig(ConfigManager.ext, "日志打印方式")
         }
     }
 }

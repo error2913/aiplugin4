@@ -1,11 +1,21 @@
 import { ConfigManager } from "../config/config";
 
 export function log(...data: any[]) {
-    const { isLog } = ConfigManager.log;
+    const { logLevel } = ConfigManager.log;
 
-    if (isLog) {
-        console.log(...data);
+    if (logLevel === "永不") {
+        return;
     }
+
+    if (logLevel === "简短") {
+        const s = data.map(item => `${item}`).join(" ");
+        if (s.length > 1000) {
+            console.log(s.substring(0, 500), "\n...\n", s.substring(s.length - 500));
+            return;
+        }
+    }
+
+    console.log(...data);
 }
 
 export function generateId() {
