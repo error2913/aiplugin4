@@ -3,6 +3,7 @@ import { ToolCall, ToolInfo, ToolManager } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { log } from "../utils/utils";
 import { handleMessages } from "../utils/utils_message";
+import { ImageManager } from "./image";
 
 export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messages: {
     role: string,
@@ -72,8 +73,8 @@ export async function sendITTRequest(messages: {
         image_url?: { url: string }
         text?: string
     }[]
-}[]): Promise<string> {
-    const { url, apiKey, bodyTemplate } = ConfigManager.image;
+}[], useBase64: boolean): Promise<string> {
+    const { url, apiKey, bodyTemplate, urlToBase64 } = ConfigManager.image;
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, null, null);
@@ -93,6 +94,27 @@ export async function sendITTRequest(messages: {
         }
     } catch (error) {
         console.error("在imageToText中请求出错：", error);
+        if (urlToBase64 === '自动' && !useBase64) {
+            log(`自动尝试使用转换为base64`);
+
+            for (let i = 0; i < messages.length; i++) {
+                const message = messages[i];
+                for (let j = 0; j < message.content.length; j++) {
+                    const content = message.content[j];
+                    if (content.type === 'image_url') {
+                        const { base64, format } = await ImageManager.imageUrlToBase64(content.image_url.url);
+                        if (!base64 || !format) {
+                            log(`转换为base64失败`);
+                            return '';
+                        }
+
+                        message.content[j].image_url.url = `data:image/${format};base64,${base64}`;
+                    }
+                }
+            }
+
+            return await sendITTRequest(messages, true);
+        }
         return '';
     }
 }
@@ -116,11 +138,11 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
             "Content-Type": "application/json",
             "Accept": "application/json"
         },
-        body: JSON.stringify(bodyObject),
+        body: JSON.stringify(bodyObject)
     });
 
     // console.log("响应体", JSON.stringify(response, null, 2));
-    
+
     const data = await response.json();
 
     if (!response.ok) {
@@ -130,7 +152,7 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
         }
 
         s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-        
+
         throw new Error(s);
     }
 
