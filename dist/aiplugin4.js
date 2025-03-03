@@ -1640,8 +1640,6 @@ QQ等级: ${data.qqLevel}
 星座: ${constellations[data.constellation - 1]}
 生肖: ${shengXiao[data.shengXiao - 1]}`;
         }
-        if (data.homeTown && data.homeTown !== "0-0-0") s += `
-故乡: ${data.homeTown}`;
         if (data.pos && data.pos !== "") s += `
 位置: ${data.pos}`;
         if (data.country && data.country !== "") s += `
