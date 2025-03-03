@@ -135,10 +135,16 @@ export class AI {
 export class AIManager {
     static cache: { [key: string]: AI } = {};
     static usageMap: {
-        [key: string]: {
-            prompt_tokens: number,
-            completion_tokens: number,
-            total_tokens: number
+        [key: string]: { // 模型名
+            [key: number]: { // 月份
+                year: number,
+                data: {
+                    [key: number]: { // 日期
+                        prompt_tokens: number,
+                        completion_tokens: number
+                    }
+                }
+            }
         }
     } = {};
 
@@ -209,18 +215,79 @@ export class AIManager {
         completion_tokens: number,
         total_tokens: number
     }) {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const day = now.getDate();
         if (!this.usageMap.hasOwnProperty(model)) {
             this.usageMap[model] = {
+                [month]: {
+                    year,
+                    data: {
+                        [day]: {
+                            prompt_tokens: usage.prompt_tokens || 0,
+                            completion_tokens: usage.completion_tokens || 0
+                        }
+                    }
+                }
+            };
+        } else if (!this.usageMap[model].hasOwnProperty(month)) {
+            this.usageMap[model][month] = {
+                year,
+                data: {
+                    [day]: {
+                        prompt_tokens: usage.prompt_tokens || 0,
+                        completion_tokens: usage.completion_tokens || 0
+                    }
+                }
+            };
+        } else if (this.usageMap[model][month].year !== year) {
+            this.usageMap[model][month] = {
+                year,
+                data: {
+                    [day]: {
+                        prompt_tokens: usage.prompt_tokens || 0,
+                        completion_tokens: usage.completion_tokens || 0
+                    }
+                }
+            };
+        } else if (!this.usageMap[model][month].data.hasOwnProperty(day)) {
+            this.usageMap[model][month].data[day] = {
+                prompt_tokens: usage.prompt_tokens || 0,
+                completion_tokens: usage.completion_tokens || 0
+            };
+        } else {
+            this.usageMap[model][month].data[day].prompt_tokens += usage.prompt_tokens || 0;
+            this.usageMap[model][month].data[day].completion_tokens += usage.completion_tokens || 0;
+        }
+
+        this.saveUsageMap();
+    }
+
+    static getMonthUsage(model: string, month: number): {
+        year: number,
+        prompt_tokens: number,
+        completion_tokens: number
+    } {
+        if (!this.usageMap.hasOwnProperty(model) || !this.usageMap[model].hasOwnProperty(month)) {
+            return {
+                year: -1,
                 prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0
+                completion_tokens: 0
             };
         }
 
-        this.usageMap[model].prompt_tokens += usage.prompt_tokens || 0;
-        this.usageMap[model].completion_tokens += usage.completion_tokens || 0;
-        this.usageMap[model].total_tokens += usage.total_tokens || 0;
+        const usage = {
+            year: this.usageMap[model][month].year,
+            prompt_tokens: 0,
+            completion_tokens: 0
+        }
 
-        this.saveUsageMap();
+        for (const day in this.usageMap[model][month].data) {
+            usage.prompt_tokens += this.usageMap[model][month].data[day].prompt_tokens;
+            usage.completion_tokens += this.usageMap[model][month].data[day].completion_tokens;
+        }
+
+        return usage;
     }
 }

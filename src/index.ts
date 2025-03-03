@@ -565,33 +565,135 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             return ret;
           }
           case 'sum': {
-            const usage = Object.keys(AIManager.usageMap).map((key) => {
-              return AIManager.usageMap[key];
-            }).reduce((acc, usage) => {
-              acc.prompt_tokens += usage.prompt_tokens;
-              acc.completion_tokens += usage.completion_tokens;
-              acc.total_tokens += usage.total_tokens;
-              return acc;
-            }, {
+            const usage = {
               prompt_tokens: 0,
-              completion_tokens: 0,
-              total_tokens: 0
-            });
+              completion_tokens: 0
+            };
+
+            for (const model in AIManager.usageMap) {
+              const modelUsage = AIManager.usageMap[model];
+              for (const month in modelUsage) {
+                const monthUsage = AIManager.getMonthUsage(model, parseInt(month));
+                usage.prompt_tokens += monthUsage.prompt_tokens;
+                usage.completion_tokens += monthUsage.completion_tokens;
+              }
+            }
+
+            if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+              seal.replyToSender(ctx, msg, `没有使用记录`);
+              return ret;
+            }
 
             const s = `输入token:${usage.prompt_tokens}
 输出token:${usage.completion_tokens}
-总token:${usage.total_tokens}`;
+总token:${usage.prompt_tokens + usage.completion_tokens}`;
             seal.replyToSender(ctx, msg, s);
             return ret;
           }
           case 'all': {
-            const s = Object.keys(AIManager.usageMap).map((key, index) => {
-              const usage = AIManager.usageMap[key];
-              return `${index + 1}. ${key}:
-输入token:${usage.prompt_tokens}
-输出token:${usage.completion_tokens}
-总token:${usage.total_tokens}`;
+            const s = Object.keys(AIManager.usageMap).map((model, index) => {
+              const usage = {
+                prompt_tokens: 0,
+                completion_tokens: 0
+              };
+              const modelUsage = AIManager.usageMap[model];
+              for (const month in modelUsage) {
+                const monthUsage = AIManager.getMonthUsage(model, parseInt(month));
+                usage.prompt_tokens += monthUsage.prompt_tokens;
+                usage.completion_tokens += monthUsage.completion_tokens;
+              }
+
+              if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+                return `${index + 1}. ${model}: 没有使用记录`;
+              }
+
+              return `${index + 1}. ${model}:
+  输入token:${usage.prompt_tokens}
+  输出token:${usage.completion_tokens}
+  总token:${usage.prompt_tokens + usage.completion_tokens}`;
             }).join('\n');
+            seal.replyToSender(ctx, msg, `使用记录如下:\n${s}`);
+            return ret;
+          }
+          case 'y': {
+            const obj: {
+              [key: string]: {
+                year: number;
+                prompt_tokens: number;
+                completion_tokens: number;
+              }
+            } = {};
+            for (const model in AIManager.usageMap) {
+              const modelUsage = AIManager.usageMap[model];
+              for (const month in modelUsage) {
+                const monthUsage = AIManager.getMonthUsage(model, parseInt(month));
+                if (monthUsage.year === -1) {
+                  continue;
+                }
+
+                obj[month] = monthUsage;
+              }
+            }
+
+            const months = Object.keys(obj).sort((a, b) => obj[a].year - obj[b].year || parseInt(a) - parseInt(b));
+
+            const s = months.map(month => {
+              const usage = obj[month];
+              if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+                return ``;
+              }
+
+              return `${usage.year}年${month}月:
+  输入token:${usage.prompt_tokens}
+  输出token:${usage.completion_tokens}
+  总token:${usage.prompt_tokens + usage.completion_tokens}`;
+            });
+
+            seal.replyToSender(ctx, msg, `使用记录如下:\n${s}`);
+            return ret;
+          }
+          case 'm': {
+            const obj: {
+              [key: string]: {
+                prompt_tokens: number;
+                completion_tokens: number;
+              }
+            } = {};
+            const year = new Date().getFullYear();
+            const month = new Date().getMonth();
+            for (const model in AIManager.usageMap) {
+              const modelUsage = AIManager.usageMap[model];
+              if (!modelUsage.hasOwnProperty(month) || modelUsage[month].year !== year) {
+                continue;
+              }
+              const monthUsage = modelUsage[month];
+              for (const day in monthUsage.data) {
+                if (!obj.hasOwnProperty(day)) {
+                  obj[day] = {
+                    prompt_tokens: 0,
+                    completion_tokens: 0
+                  };
+                }
+                const dayUsage = monthUsage.data[day];
+                obj[day].prompt_tokens += dayUsage.prompt_tokens;
+                obj[day].completion_tokens += dayUsage.completion_tokens;
+              }
+            }
+
+            const days = Object.keys(obj).sort((a, b) => parseInt(a) - parseInt(b));
+
+            const s = days.map(day => {
+              const usage = obj[day];
+              if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+                return ``;
+              }
+
+              return `${day}日:
+  输入token:${usage.prompt_tokens}
+  输出token:${usage.completion_tokens}
+  总token:${usage.prompt_tokens + usage.completion_tokens}`;
+            });
+
             seal.replyToSender(ctx, msg, `使用记录如下:\n${s}`);
             return ret;
           }
@@ -619,7 +721,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 【.ai tk lst】查看所有模型
 【.ai tk sum】查看所有模型的token使用记录总和
 【.ai tk all】查看所有模型的token使用记录
+【.ai tk [y/m]】查看所有模型今年/这个月的token使用记录
 【.ai tk <模型名称>】查看模型的token使用记录
+【.ai tk <模型名称> [y/m]】查看模型今年/这个月的token使用记录
 【.ai tk clr all】清除token使用记录
 【.ai tk clr <模型名称>】清除token使用记录`;
             seal.replyToSender(ctx, msg, s);
@@ -631,12 +735,111 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               return ret;
             }
 
-            const usage = AIManager.usageMap[val2];
-            const s = `输入token:${usage.prompt_tokens}
+            const val3 = cmdArgs.getArgN(3);
+            switch (val3) {
+              case 'y': {
+                const obj: {
+                  [key: string]: {
+                    year: number;
+                    prompt_tokens: number;
+                    completion_tokens: number;
+                  }
+                } = {};
+                const modelUsage = AIManager.usageMap[val2];
+                for (const month in modelUsage) {
+                  const monthUsage = AIManager.getMonthUsage(val2, parseInt(month));
+                  if (monthUsage.year === -1) {
+                    continue;
+                  }
+
+                  obj[month] = monthUsage;
+                }
+
+                const months = Object.keys(obj).sort((a, b) => obj[a].year - obj[b].year || parseInt(a) - parseInt(b));
+
+                const s = months.map(month => {
+                  const usage = obj[month];
+                  if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+                    return ``;
+                  }
+
+                  return `${usage}年${month}月:
+  输入token:${usage.prompt_tokens}
+  输出token:${usage.completion_tokens}
+  总token:${usage.prompt_tokens + usage.completion_tokens}`;
+                });
+
+                seal.replyToSender(ctx, msg, `使用记录如下:\n${s}`);
+                return ret;
+              }
+              case 'm': {
+                const obj: {
+                  [key: string]: {
+                    prompt_tokens: number;
+                    completion_tokens: number;
+                  }
+                } = {};
+                const year = new Date().getFullYear();
+                const month = new Date().getMonth();
+                const modelUsage = AIManager.usageMap[val2];
+                if (!modelUsage.hasOwnProperty(month) || modelUsage[month].year !== year) {
+                  seal.replyToSender(ctx, msg, '没有这个月的token使用记录');
+                  return ret;
+                }
+                const monthUsage = modelUsage[month];
+                for (const day in monthUsage.data) {
+                  if (!obj.hasOwnProperty(day)) {
+                    obj[day] = {
+                      prompt_tokens: 0,
+                      completion_tokens: 0
+                    };
+                  }
+                  const dayUsage = monthUsage.data[day];
+                  obj[day].prompt_tokens += dayUsage.prompt_tokens;
+                  obj[day].completion_tokens += dayUsage.completion_tokens;
+                }
+
+                const days = Object.keys(obj).sort((a, b) => parseInt(a) - parseInt(b));
+
+                const s = days.map(day => {
+                  const usage = obj[day];
+                  if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+                    return ``;
+                  }
+
+                  return `${day}日:
+  输入token:${usage.prompt_tokens}
+  输出token:${usage.completion_tokens}
+  总token:${usage.prompt_tokens + usage.completion_tokens}`;
+                });
+
+                seal.replyToSender(ctx, msg, `使用记录如下:\n${s}`);
+                return ret;
+              }
+              default: {
+                const usage = {
+                  prompt_tokens: 0,
+                  completion_tokens: 0
+                };
+                const modelUsage = AIManager.usageMap[val2];
+                for (const month in modelUsage) {
+                  const monthUsage = AIManager.getMonthUsage(val2, parseInt(month));
+                  usage.prompt_tokens += monthUsage.prompt_tokens;
+                  usage.completion_tokens += monthUsage.completion_tokens;
+                }
+
+                if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
+                  seal.replyToSender(ctx, msg, `没有使用记录`);
+                  return ret;
+                }
+
+                const s = `输入token:${usage.prompt_tokens}
 输出token:${usage.completion_tokens}
-总token:${usage.total_tokens}`;
-            seal.replyToSender(ctx, msg, s);
-            return ret;
+总token:${usage.prompt_tokens + usage.completion_tokens}`;
+                seal.replyToSender(ctx, msg, s);
+                return ret;
+              }
+            }
           }
         }
       }
