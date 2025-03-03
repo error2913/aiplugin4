@@ -1,4 +1,4 @@
-import { AI } from "./AI";
+import { AI, AIManager } from "./AI";
 import { ToolCall, ToolInfo, ToolManager } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { log } from "../utils/utils";
@@ -22,12 +22,18 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
         const data = await fetchData(url, apiKey, bodyObject);
 
         if (data.choices && data.choices.length > 0) {
+            const model = data.model;
+            const usage = data.usage;
+            AIManager.updateUsage(model, usage);
+
             const message = data.choices[0].message;
             const finish_reason = data.choices[0].finish_reason;
-            const reply = message.content;
+
             if (message.hasOwnProperty('reasoning_content')) {
                 log(`思维链内容:`, message.reasoning_content);
             }
+
+            const reply = message.content;
 
             log(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
@@ -83,6 +89,10 @@ export async function sendITTRequest(messages: {
         const data = await fetchData(url, apiKey, bodyObject);
 
         if (data.choices && data.choices.length > 0) {
+            const model = data.model;
+            const usage = data.usage;
+            AIManager.updateUsage(model, usage);
+            
             const message = data.choices[0].message;
             const reply = message.content;
 

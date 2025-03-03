@@ -134,6 +134,13 @@ export class AI {
 
 export class AIManager {
     static cache: { [key: string]: AI } = {};
+    static usageMap: {
+        [key: string]: {
+            prompt_tokens: number,
+            completion_tokens: number,
+            total_tokens: number
+        }
+    } = {};
 
     static clearCache() {
         this.cache = {};
@@ -178,5 +185,42 @@ export class AIManager {
         if (this.cache.hasOwnProperty(id)) {
             ConfigManager.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
         }
+    }
+
+    static clearUsageMap() {
+        this.usageMap = {};
+    }
+
+    static getUsageMap() {
+        try {
+            const usage = JSON.parse(ConfigManager.ext.storageGet('usageMap') || '{}');
+            this.usageMap = usage;
+        } catch (error) {
+            console.error(`从数据库中获取usageMap失败:`, error);
+        }
+    }
+
+    static saveUsageMap() {
+        ConfigManager.ext.storageSet('usageMap', JSON.stringify(this.usageMap));
+    }
+
+    static updateUsage(model: string, usage: {
+        prompt_tokens: number,
+        completion_tokens: number,
+        total_tokens: number
+    }) {
+        if (!this.usageMap.hasOwnProperty(model)) {
+            this.usageMap[model] = {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0
+            };
+        }
+
+        this.usageMap[model].prompt_tokens += usage.prompt_tokens || 0;
+        this.usageMap[model].completion_tokens += usage.completion_tokens || 0;
+        this.usageMap[model].total_tokens += usage.total_tokens || 0;
+
+        this.saveUsageMap();
     }
 }

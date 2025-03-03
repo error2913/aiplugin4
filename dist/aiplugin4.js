@@ -2766,12 +2766,15 @@ ${memeryPrompt}`;
       const time = Date.now();
       const data = await fetchData(url, apiKey, bodyObject);
       if (data.choices && data.choices.length > 0) {
+        const model = data.model;
+        const usage = data.usage;
+        AIManager.updateUsage(model, usage);
         const message = data.choices[0].message;
         const finish_reason = data.choices[0].finish_reason;
-        const reply = message.content;
         if (message.hasOwnProperty("reasoning_content")) {
           log(`思维链内容:`, message.reasoning_content);
         }
+        const reply = message.content;
         log(`响应内容:`, reply, "\nlatency:", Date.now() - time, "ms", "\nfinish_reason:", finish_reason);
         if (isTool) {
           if (usePromptEngineering) {
@@ -2809,6 +2812,9 @@ ${memeryPrompt}`;
       const time = Date.now();
       const data = await fetchData(url, apiKey, bodyObject);
       if (data.choices && data.choices.length > 0) {
+        const model = data.model;
+        const usage = data.usage;
+        AIManager.updateUsage(model, usage);
         const message = data.choices[0].message;
         const reply = message.content;
         log(`响应内容:`, reply, "\nlatency", Date.now() - time, "ms");
@@ -3469,7 +3475,7 @@ ${memeryPrompt}`;
   };
 
   // src/AI/AI.ts
-  var AI = class _AI {
+  var AI2 = class _AI {
     constructor(id) {
       this.id = id;
       this.context = new Context();
@@ -3555,11 +3561,11 @@ ${memeryPrompt}`;
     }
     static getAI(id) {
       if (!this.cache.hasOwnProperty(id)) {
-        let data = new AI(id);
+        let data = new AI2(id);
         try {
           data = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || "{}", (key, value) => {
             if (key === "") {
-              return AI.reviver(value, id);
+              return AI2.reviver(value, id);
             }
             if (key === "context") {
               return Context.reviver(value);
@@ -3587,8 +3593,36 @@ ${memeryPrompt}`;
         ConfigManager.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
       }
     }
+    static clearUsageMap() {
+      this.usageMap = {};
+    }
+    static getUsageMap() {
+      try {
+        const usage = JSON.parse(ConfigManager.ext.storageGet("usageMap") || "{}");
+        this.usageMap = usage;
+      } catch (error) {
+        console.error(`从数据库中获取usageMap失败:`, error);
+      }
+    }
+    static saveUsageMap() {
+      ConfigManager.ext.storageSet("usageMap", JSON.stringify(this.usageMap));
+    }
+    static updateUsage(model, usage) {
+      if (!this.usageMap.hasOwnProperty(model)) {
+        this.usageMap[model] = {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0
+        };
+      }
+      this.usageMap[model].prompt_tokens += usage.prompt_tokens || 0;
+      this.usageMap[model].completion_tokens += usage.completion_tokens || 0;
+      this.usageMap[model].total_tokens += usage.total_tokens || 0;
+      this.saveUsageMap();
+    }
   };
   AIManager.cache = {};
+  AIManager.usageMap = {};
 
   // src/index.ts
   function main() {
@@ -3606,6 +3640,7 @@ ${memeryPrompt}`;
     }
     ConfigManager.ext = ext;
     ConfigManager.registerConfig();
+    AIManager.getUsageMap();
     ToolManager.registerTool();
     const CQTypesAllow = ["at", "image", "reply", "face"];
     const cmdAI = seal.ext.newCmdItemInfo();
@@ -3620,8 +3655,9 @@ ${memeryPrompt}`;
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
 【.ai fgt】遗忘上下文
-【.ai memo】修改AI的记忆
-【.ai tool】AI的工具相关`;
+【.ai memo】AI的记忆相关
+【.ai tool】AI的工具相关
+【.ai tk】AI的token相关`;
     cmdAI.allowDelegate = true;
     cmdAI.solve = async (ctx, msg, cmdArgs) => {
       const val = cmdArgs.getArgN(1);
@@ -4086,6 +4122,88 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
                 seal.replyToSender(ctx, msg, s);
                 return ret;
               }
+            }
+          }
+        }
+        case "tk": {
+          const val2 = cmdArgs.getArgN(2);
+          switch (val2) {
+            case "lst": {
+              const s = Object.keys(AIManager.usageMap).join("\n");
+              seal.replyToSender(ctx, msg, `有使用记录的模型:
+${s}`);
+              return ret;
+            }
+            case "sum": {
+              const usage = Object.keys(AIManager.usageMap).map((key) => {
+                return AIManager.usageMap[key];
+              }).reduce((acc, usage2) => {
+                acc.prompt_tokens += usage2.prompt_tokens;
+                acc.completion_tokens += usage2.completion_tokens;
+                acc.total_tokens += usage2.total_tokens;
+                return acc;
+              }, {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0
+              });
+              const s = `输入token:${usage.prompt_tokens}
+输出token:${usage.completion_tokens}
+总token:${usage.total_tokens}`;
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
+            case "all": {
+              const s = Object.keys(AIManager.usageMap).map((key, index) => {
+                const usage = AIManager.usageMap[key];
+                return `${index + 1}. ${key}:
+输入token:${usage.prompt_tokens}
+输出token:${usage.completion_tokens}
+总token:${usage.total_tokens}`;
+              }).join("\n");
+              seal.replyToSender(ctx, msg, `使用记录如下:
+${s}`);
+              return ret;
+            }
+            case "clr": {
+              const val3 = cmdArgs.getArgN(3);
+              if (val3 === "all") {
+                AIManager.clearUsageMap();
+                seal.replyToSender(ctx, msg, "已清除token使用记录");
+                return ret;
+              }
+              if (!AIManager.usageMap.hasOwnProperty(val3)) {
+                seal.replyToSender(ctx, msg, "没有这个模型，请使用【.ai tk lst】查看所有模型");
+                return ret;
+              }
+              delete AIManager.usageMap[val3];
+              seal.replyToSender(ctx, msg, `已清除 ${val3} 的token使用记录`);
+              AIManager.saveUsageMap();
+              return ret;
+            }
+            case "":
+            case "help": {
+              const s = `帮助:
+【.ai tk lst】查看所有模型
+【.ai tk sum】查看所有模型的token使用记录总和
+【.ai tk all】查看所有模型的token使用记录
+【.ai tk <模型名称>】查看模型的token使用记录
+【.ai tk clr all】清除token使用记录
+【.ai tk clr <模型名称>】清除token使用记录`;
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
+            default: {
+              if (!AIManager.usageMap.hasOwnProperty(val2)) {
+                seal.replyToSender(ctx, msg, "没有这个模型，请使用【.ai tk lst】查看所有模型");
+                return ret;
+              }
+              const usage = AIManager.usageMap[val2];
+              const s = `输入token:${usage.prompt_tokens}
+输出token:${usage.completion_tokens}
+总token:${usage.total_tokens}`;
+              seal.replyToSender(ctx, msg, s);
+              return ret;
             }
           }
         }
