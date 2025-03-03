@@ -3630,7 +3630,7 @@ ${memeryPrompt}`;
 【.ai memo】修改AI的记忆
 【.ai tool】AI的工具相关`;
     cmdAI.allowDelegate = true;
-    cmdAI.solve = async (ctx, msg, cmdArgs) => {
+    cmdAI.solve = (ctx, msg, cmdArgs) => {
       const val = cmdArgs.getArgN(1);
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
@@ -4085,8 +4085,9 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
                     return ret;
                   }
                 }
-                const s = await tool.solve(ctx, msg, ai, args);
-                seal.replyToSender(ctx, msg, s);
+                tool.solve(ctx, msg, ai, args).then((s) => {
+                  seal.replyToSender(ctx, msg, s);
+                });
                 return ret;
               } catch (e) {
                 const s = `调用函数 (${val2}) 失败:${e.message}`;
@@ -4098,7 +4099,7 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
         }
         case "help":
         default: {
-          seal.replyToSender(ctx, msg, cmdAI.help);
+          ret.showHelp = true;
           return ret;
         }
       }
@@ -4110,7 +4111,7 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
 【img stl (on/off)】偷图 开启/关闭
 【img f】遗忘
 【img itt [图片/ran] (附加提示词)】图片转文字`;
-    cmdImage.solve = async (ctx, msg, cmdArgs) => {
+    cmdImage.solve = (ctx, msg, cmdArgs) => {
       const val = cmdArgs.getArgN(1);
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
@@ -4133,25 +4134,27 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
             }
             case "stl":
             case "stolen": {
-              const image = await ai.image.drawStolenImageFile();
-              if (!image) {
-                seal.replyToSender(ctx, msg, "暂无偷取图片");
-                return ret;
-              }
-              seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+              ai.image.drawStolenImageFile().then((image) => {
+                if (!image) {
+                  seal.replyToSender(ctx, msg, "暂无偷取图片");
+                } else {
+                  seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+                }
+              });
               return ret;
             }
             case "all": {
-              const image = await ai.image.drawImageFile();
-              if (!image) {
-                seal.replyToSender(ctx, msg, "暂无图片");
-                return ret;
-              }
-              seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+              ai.image.drawImageFile().then((image) => {
+                if (!image) {
+                  seal.replyToSender(ctx, msg, "暂无图片");
+                } else {
+                  seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+                }
+              });
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, cmdImage.help);
+              ret.showHelp = true;
               return ret;
             }
           }
@@ -4192,29 +4195,35 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
             seal.replyToSender(ctx, msg, "【img itt [图片/ran] (附加提示词)】图片转文字");
             return ret;
           }
-          let url = "";
           if (val2 == "ran") {
-            url = await ai.image.drawStolenImageFile();
-            if (!url) {
-              seal.replyToSender(ctx, msg, "图片偷取为空");
-              return ret;
-            }
+            ai.image.drawStolenImageFile().then((url) => {
+              if (!url) {
+                seal.replyToSender(ctx, msg, "图片偷取为空");
+              } else {
+                const text = cmdArgs.getRestArgsFrom(3);
+                ImageManager.imageToText(url, text).then((s) => {
+                  seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]
+` + s);
+                });
+              }
+            });
           } else {
             const match = val2.match(/\[CQ:image,file=(.*?)\]/);
             if (!match) {
               seal.replyToSender(ctx, msg, "请附带图片");
               return ret;
             }
-            url = match[1];
-          }
-          const text = cmdArgs.getRestArgsFrom(3);
-          const s = await ImageManager.imageToText(url, text);
-          seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]
+            const url = match[1];
+            const text = cmdArgs.getRestArgsFrom(3);
+            ImageManager.imageToText(url, text).then((s) => {
+              seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]
 ` + s);
+            });
+          }
           return ret;
         }
         default: {
-          seal.replyToSender(ctx, msg, cmdImage.help);
+          ret.showHelp = true;
           return ret;
         }
       }
