@@ -166,33 +166,45 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
 
 function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
     const { isTool, usePromptEngineering } = ConfigManager.tool;
-    try {
-        const bodyObject = JSON.parse(`{${template.join(',')}}`);
+    
+    const bodyObject: any = {};
 
-        if (bodyObject?.messages === null) {
-            bodyObject.messages = messages;
+    for (let i = 0; i < template.length; i++) {
+        const s = template[i];
+        if (s.trim() === '') {
+            continue;
         }
 
-        if (bodyObject?.stream !== false) {
-            console.error(`不支持流式传输，请将stream设置为false`);
-            bodyObject.stream = false;
+        try {
+            const obj = JSON.parse(`{${s}}`);
+            const key = Object.keys(obj)[0];
+            bodyObject[key] = obj[key];
+        } catch (err) {
+            throw new Error(`解析body的【${s}】时出现错误:${err}`);
         }
-
-        if (isTool && !usePromptEngineering) {
-            if (bodyObject?.tools === null) {
-                bodyObject.tools = tools;
-            }
-
-            if (bodyObject?.tool_choice === null) {
-                bodyObject.tool_choice = tool_choice;
-            }
-        } else {
-            delete bodyObject?.tools;
-            delete bodyObject?.tool_choice;
-        }
-
-        return bodyObject;
-    } catch (err) {
-        throw new Error(`解析body时出现错误:${err}`);
     }
+
+    if (bodyObject?.messages === null) {
+        bodyObject.messages = messages;
+    }
+
+    if (bodyObject?.stream !== false) {
+        console.error(`不支持流式传输，请将stream设置为false`);
+        bodyObject.stream = false;
+    }
+
+    if (isTool && !usePromptEngineering) {
+        if (bodyObject?.tools === null) {
+            bodyObject.tools = tools;
+        }
+
+        if (bodyObject?.tool_choice === null) {
+            bodyObject.tool_choice = tool_choice;
+        }
+    } else {
+        delete bodyObject?.tools;
+        delete bodyObject?.tool_choice;
+    }
+
+    return bodyObject;
 }

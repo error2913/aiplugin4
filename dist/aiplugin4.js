@@ -2878,30 +2878,39 @@ ${memeryPrompt}`;
   }
   function parseBody(template, messages, tools, tool_choice) {
     const { isTool, usePromptEngineering } = ConfigManager.tool;
-    try {
-      const bodyObject = JSON.parse(`{${template.join(",")}}`);
-      if ((bodyObject == null ? void 0 : bodyObject.messages) === null) {
-        bodyObject.messages = messages;
+    const bodyObject = {};
+    for (let i = 0; i < template.length; i++) {
+      const s = template[i];
+      if (s.trim() === "") {
+        continue;
       }
-      if ((bodyObject == null ? void 0 : bodyObject.stream) !== false) {
-        console.error(`不支持流式传输，请将stream设置为false`);
-        bodyObject.stream = false;
+      try {
+        const obj = JSON.parse(`{${s}}`);
+        const key = Object.keys(obj)[0];
+        bodyObject[key] = obj[key];
+      } catch (err) {
+        throw new Error(`解析body的【${s}】时出现错误:${err}`);
       }
-      if (isTool && !usePromptEngineering) {
-        if ((bodyObject == null ? void 0 : bodyObject.tools) === null) {
-          bodyObject.tools = tools;
-        }
-        if ((bodyObject == null ? void 0 : bodyObject.tool_choice) === null) {
-          bodyObject.tool_choice = tool_choice;
-        }
-      } else {
-        bodyObject == null ? true : delete bodyObject.tools;
-        bodyObject == null ? true : delete bodyObject.tool_choice;
-      }
-      return bodyObject;
-    } catch (err) {
-      throw new Error(`解析body时出现错误:${err}`);
     }
+    if ((bodyObject == null ? void 0 : bodyObject.messages) === null) {
+      bodyObject.messages = messages;
+    }
+    if ((bodyObject == null ? void 0 : bodyObject.stream) !== false) {
+      console.error(`不支持流式传输，请将stream设置为false`);
+      bodyObject.stream = false;
+    }
+    if (isTool && !usePromptEngineering) {
+      if ((bodyObject == null ? void 0 : bodyObject.tools) === null) {
+        bodyObject.tools = tools;
+      }
+      if ((bodyObject == null ? void 0 : bodyObject.tool_choice) === null) {
+        bodyObject.tool_choice = tool_choice;
+      }
+    } else {
+      bodyObject == null ? true : delete bodyObject.tools;
+      bodyObject == null ? true : delete bodyObject.tool_choice;
+    }
+    return bodyObject;
   }
 
   // src/AI/image.ts
