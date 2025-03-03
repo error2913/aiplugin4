@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI骰娘4
 // @author       错误、白鱼
-// @version      4.5.11
+// @version      4.5.12
 // @description  适用于大部分OpenAI API兼容格式AI的模型插件，测试环境为 Deepseek AI (https://platform.deepseek.com/)，用于与 AI 进行对话，并根据特定关键词触发回复。使用.AI help查看使用方法。具体配置查看插件配置项。\nopenai标准下的function calling功能已进行适配，选用模型若不支持该功能，可以开启迁移到提示词工程的开关，即可使用调用函数功能。\n交流答疑QQ群：940049120
 // @timestamp    1733387279
 // 2024-12-05 16:27:59
@@ -3628,7 +3628,7 @@ ${memeryPrompt}`;
   function main() {
     let ext = seal.ext.find("aiplugin4");
     if (!ext) {
-      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.11");
+      ext = seal.ext.new("aiplugin4", "baiyu&错误", "4.5.12");
       seal.ext.register(ext);
     }
     try {
@@ -4126,6 +4126,10 @@ ${Object.keys(tool.info.function.parameters.properties).map((key) => {
           }
         }
         case "tk": {
+          if (ctx.privilegeLevel < 100) {
+            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+            return ret;
+          }
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case "lst": {
