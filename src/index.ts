@@ -12,7 +12,7 @@ import { triggerConditionMap } from "./tool/tool_set_trigger_condition";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.11');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.12');
     seal.ext.register(ext);
   }
 
@@ -27,6 +27,7 @@ function main() {
 
   ConfigManager.ext = ext;
   ConfigManager.registerConfig();
+  AIManager.getUsageMap();
   ToolManager.registerTool();
 
   const CQTypesAllow = ["at", "image", "reply", "face"];
@@ -43,8 +44,9 @@ function main() {
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
 【.ai fgt】遗忘上下文
-【.ai memo】修改AI的记忆
-【.ai tool】AI的工具相关`;
+【.ai memo】AI的记忆相关
+【.ai tool】AI的工具相关
+【.ai tk】AI的token相关`;
   cmdAI.allowDelegate = true;
   cmdAI.solve = (ctx, msg, cmdArgs) => {
     const val = cmdArgs.getArgN(1);
@@ -548,6 +550,95 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               seal.replyToSender(ctx, msg, s);
               return ret;
             }
+          }
+        }
+      }
+      case 'tk': {
+        if (ctx.privilegeLevel < 100) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        const val2 = cmdArgs.getArgN(2);
+        switch (val2) {
+          case 'lst': {
+            const s = Object.keys(AIManager.usageMap).join('\n');
+            seal.replyToSender(ctx, msg, `有使用记录的模型:\n${s}`);
+            return ret;
+          }
+          case 'sum': {
+            const usage = Object.keys(AIManager.usageMap).map((key) => {
+              return AIManager.usageMap[key];
+            }).reduce((acc, usage) => {
+              acc.prompt_tokens += usage.prompt_tokens;
+              acc.completion_tokens += usage.completion_tokens;
+              acc.total_tokens += usage.total_tokens;
+              return acc;
+            }, {
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0
+            });
+
+            const s = `输入token:${usage.prompt_tokens}
+输出token:${usage.completion_tokens}
+总token:${usage.total_tokens}`;
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+          case 'all': {
+            const s = Object.keys(AIManager.usageMap).map((key, index) => {
+              const usage = AIManager.usageMap[key];
+              return `${index + 1}. ${key}:
+输入token:${usage.prompt_tokens}
+输出token:${usage.completion_tokens}
+总token:${usage.total_tokens}`;
+            }).join('\n');
+            seal.replyToSender(ctx, msg, `使用记录如下:\n${s}`);
+            return ret;
+          }
+          case 'clr': {
+            const val3 = cmdArgs.getArgN(3);
+            if (val3 === 'all') {
+              AIManager.clearUsageMap();
+              seal.replyToSender(ctx, msg, '已清除token使用记录');
+              return ret;
+            }
+
+            if (!AIManager.usageMap.hasOwnProperty(val3)) {
+              seal.replyToSender(ctx, msg, '没有这个模型，请使用【.ai tk lst】查看所有模型');
+              return ret;
+            }
+
+            delete AIManager.usageMap[val3];
+            seal.replyToSender(ctx, msg, `已清除 ${val3} 的token使用记录`);
+            AIManager.saveUsageMap();
+            return ret;
+          }
+          case '':
+          case 'help': {
+            const s = `帮助:
+【.ai tk lst】查看所有模型
+【.ai tk sum】查看所有模型的token使用记录总和
+【.ai tk all】查看所有模型的token使用记录
+【.ai tk <模型名称>】查看模型的token使用记录
+【.ai tk clr all】清除token使用记录
+【.ai tk clr <模型名称>】清除token使用记录`;
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+          default: {
+            if (!AIManager.usageMap.hasOwnProperty(val2)) {
+              seal.replyToSender(ctx, msg, '没有这个模型，请使用【.ai tk lst】查看所有模型');
+              return ret;
+            }
+
+            const usage = AIManager.usageMap[val2];
+            const s = `输入token:${usage.prompt_tokens}
+输出token:${usage.completion_tokens}
+总token:${usage.total_tokens}`;
+            seal.replyToSender(ctx, msg, s);
+            return ret;
           }
         }
       }
