@@ -3596,6 +3596,38 @@ ${memeryPrompt}`;
     static clearUsageMap() {
       this.usageMap = {};
     }
+    static clearExpiredUsage(model) {
+      const now = /* @__PURE__ */ new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+      const currentDay = now.getDate();
+      const currentYM = currentYear * 12 + currentMonth;
+      const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
+      if (!this.usageMap.hasOwnProperty(model)) {
+        return;
+      }
+      for (const key in this.usageMap[model]) {
+        const [year, month, day] = key.split("-").map(Number);
+        const ym = year * 12 + month;
+        const ymd = year * 12 * 31 + month * 31 + day;
+        if (ym < currentYM - 11) {
+          delete this.usageMap[model][key];
+          continue;
+        }
+        if (ymd < currentYMD - 30) {
+          const newKey = `${year}-${month}-0`;
+          if (!this.usageMap[model].hasOwnProperty(newKey)) {
+            this.usageMap[model][newKey] = {
+              prompt_tokens: 0,
+              completion_tokens: 0
+            };
+          }
+          this.usageMap[model][newKey].prompt_tokens += this.usageMap[model][key].prompt_tokens;
+          this.usageMap[model][newKey].completion_tokens += this.usageMap[model][key].completion_tokens;
+          delete this.usageMap[model][key];
+        }
+      }
+    }
     static getUsageMap() {
       try {
         const usage = JSON.parse(ConfigManager.ext.storageGet("usageMap") || "{}");
@@ -3621,6 +3653,7 @@ ${memeryPrompt}`;
           prompt_tokens: 0,
           completion_tokens: 0
         };
+        this.clearExpiredUsage(model);
       }
       this.usageMap[model][key].prompt_tokens += usage.prompt_tokens || 0;
       this.usageMap[model][key].completion_tokens += usage.completion_tokens || 0;
