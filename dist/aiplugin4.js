@@ -3610,12 +3610,14 @@ ${memeryPrompt}`;
         const [year, month, day] = key.split("-").map(Number);
         const ym = year * 12 + month;
         const ymd = year * 12 * 31 + month * 31 + day;
-        if (ym < currentYM - 11) {
-          delete this.usageMap[model][key];
-          continue;
-        }
+        let newKey = "";
         if (ymd < currentYMD - 30) {
-          const newKey = `${year}-${month}-0`;
+          newKey = `${year}-${month}-0`;
+        }
+        if (ym < currentYM - 11) {
+          newKey = `0-0-0`;
+        }
+        if (newKey) {
           if (!this.usageMap[model].hasOwnProperty(newKey)) {
             this.usageMap[model][newKey] = {
               prompt_tokens: 0,
