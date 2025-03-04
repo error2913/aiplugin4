@@ -1244,6 +1244,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
     isTaskRunning = true;
 
+    let changed = false;
     for (let i = 0; i < timerQueue.length && i >= 0; i++) {
       const timestamp = timerQueue[i].timestamp;
       if (timestamp > Math.floor(Date.now() / 1000)) {
@@ -1275,11 +1276,14 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       timerQueue.splice(i, 1);
       i--;
+      changed = true;
 
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
+    if (changed) {
+      ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
+    }
 
     isTaskRunning = false;
   })
