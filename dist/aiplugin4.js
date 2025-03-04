@@ -3603,6 +3603,40 @@ ${memeryPrompt}`;
     static clearUsageMap() {
       this.usageMap = {};
     }
+    static clearExpiredUsage(model) {
+      const now = /* @__PURE__ */ new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+      const currentDay = now.getDate();
+      const currentYM = currentYear * 12 + currentMonth;
+      const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
+      if (!this.usageMap.hasOwnProperty(model)) {
+        return;
+      }
+      for (const key in this.usageMap[model]) {
+        const [year, month, day] = key.split("-").map(Number);
+        const ym = year * 12 + month;
+        const ymd = year * 12 * 31 + month * 31 + day;
+        let newKey = "";
+        if (ymd < currentYMD - 30) {
+          newKey = `${year}-${month}-0`;
+        }
+        if (ym < currentYM - 11) {
+          newKey = `0-0-0`;
+        }
+        if (newKey) {
+          if (!this.usageMap[model].hasOwnProperty(newKey)) {
+            this.usageMap[model][newKey] = {
+              prompt_tokens: 0,
+              completion_tokens: 0
+            };
+          }
+          this.usageMap[model][newKey].prompt_tokens += this.usageMap[model][key].prompt_tokens;
+          this.usageMap[model][newKey].completion_tokens += this.usageMap[model][key].completion_tokens;
+          delete this.usageMap[model][key];
+        }
+      }
+    }
     static getUsageMap() {
       try {
         const usage = JSON.parse(ConfigManager.ext.storageGet("usageMap") || "{}");
@@ -3617,67 +3651,81 @@ ${memeryPrompt}`;
     static updateUsage(model, usage) {
       const now = /* @__PURE__ */ new Date();
       const year = now.getFullYear();
-      const month = now.getMonth();
+      const month = now.getMonth() + 1;
       const day = now.getDate();
+      const key = `${year}-${month}-${day}`;
       if (!this.usageMap.hasOwnProperty(model)) {
-        this.usageMap[model] = {
-          [month]: {
-            year,
-            data: {
-              [day]: {
-                prompt_tokens: usage.prompt_tokens || 0,
-                completion_tokens: usage.completion_tokens || 0
-              }
-            }
-          }
-        };
-      } else if (!this.usageMap[model].hasOwnProperty(month)) {
-        this.usageMap[model][month] = {
-          year,
-          data: {
-            [day]: {
-              prompt_tokens: usage.prompt_tokens || 0,
-              completion_tokens: usage.completion_tokens || 0
-            }
-          }
-        };
-      } else if (this.usageMap[model][month].year !== year) {
-        this.usageMap[model][month] = {
-          year,
-          data: {
-            [day]: {
-              prompt_tokens: usage.prompt_tokens || 0,
-              completion_tokens: usage.completion_tokens || 0
-            }
-          }
-        };
-      } else if (!this.usageMap[model][month].data.hasOwnProperty(day)) {
-        this.usageMap[model][month].data[day] = {
-          prompt_tokens: usage.prompt_tokens || 0,
-          completion_tokens: usage.completion_tokens || 0
-        };
-      } else {
-        this.usageMap[model][month].data[day].prompt_tokens += usage.prompt_tokens || 0;
-        this.usageMap[model][month].data[day].completion_tokens += usage.completion_tokens || 0;
+        this.usageMap[model] = {};
       }
+      if (!this.usageMap[model].hasOwnProperty(key)) {
+        this.usageMap[model][key] = {
+          prompt_tokens: 0,
+          completion_tokens: 0
+        };
+        this.clearExpiredUsage(model);
+      }
+      this.usageMap[model][key].prompt_tokens += usage.prompt_tokens || 0;
+      this.usageMap[model][key].completion_tokens += usage.completion_tokens || 0;
       this.saveUsageMap();
     }
-    static getMonthUsage(model, month) {
-      if (!this.usageMap.hasOwnProperty(model) || !this.usageMap[model].hasOwnProperty(month)) {
+    static getMonthUsage(model, year, month) {
+      const prefix = `${year}-${month}-`;
+      if (!this.usageMap.hasOwnProperty(model)) {
         return {
-          year: -1,
           prompt_tokens: 0,
           completion_tokens: 0
         };
       }
       const usage = {
-        year: this.usageMap[model][month].year,
         prompt_tokens: 0,
         completion_tokens: 0
       };
-      for (const day in this.usageMap[model][month].data) {
-        usage.prompt_tokens += this.usageMap[model][month].data[day].prompt_tokens;
-        usage.completion_tokens += this.usageMap[model][month].data[day].completion_tokens;
+      for (const key in this.usageMap[model]) {
+        if (!key.startsWith(prefix)) {
+          continue;
+        }
+        usage.prompt_tokens += this.usageMap[model][key].prompt_tokens;
+        usage.completion_tokens += this.usageMap[model][key].completion_tokens;
+      }
+      return usage;
+    }
+    static getYearUsage(model, year) {
+      const prefix = `${year}-`;
+      if (!this.usageMap.hasOwnProperty(model)) {
+        return {
+          prompt_tokens: 0,
+          completion_tokens: 0
+        };
+      }
+      const usage = {
+        prompt_tokens: 0,
+        completion_tokens: 0
+      };
+      for (const key in this.usageMap[model]) {
+        if (!key.startsWith(prefix)) {
+          continue;
+        }
+        const month = parseInt(key.split("-")[1]);
+        const monthUsage = this.getMonthUsage(model, year, month);
+        usage.prompt_tokens += monthUsage.prompt_tokens;
+        usage.completion_tokens += monthUsage.completion_tokens;
+      }
+      return usage;
+    }
+    static getModelUsage(model) {
+      if (!this.usageMap.hasOwnProperty(model)) {
+        return {
+          prompt_tokens: 0,
+          completion_tokens: 0
+        };
+      }
+      const usage = {
+        prompt_tokens: 0,
+        completion_tokens: 0
+      };
+      for (const key in this.usageMap[model]) {
+        usage.prompt_tokens += this.usageMap[model][key].prompt_tokens;
+        usage.completion_tokens += this.usageMap[model][key].completion_tokens;
       }
       return usage;
     }
@@ -4206,12 +4254,9 @@ ${s}`);
                 completion_tokens: 0
               };
               for (const model in AIManager.usageMap) {
-                const modelUsage = AIManager.usageMap[model];
-                for (const month in modelUsage) {
-                  const monthUsage = AIManager.getMonthUsage(model, parseInt(month));
-                  usage.prompt_tokens += monthUsage.prompt_tokens;
-                  usage.completion_tokens += monthUsage.completion_tokens;
-                }
+                const modelUsage = AIManager.getModelUsage(model);
+                usage.prompt_tokens += modelUsage.prompt_tokens;
+                usage.completion_tokens += modelUsage.completion_tokens;
               }
               if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                 seal.replyToSender(ctx, msg, `没有使用记录`);
@@ -4225,16 +4270,7 @@ ${s}`);
             }
             case "all": {
               const s = Object.keys(AIManager.usageMap).map((model, index) => {
-                const usage = {
-                  prompt_tokens: 0,
-                  completion_tokens: 0
-                };
-                const modelUsage = AIManager.usageMap[model];
-                for (const month in modelUsage) {
-                  const monthUsage = AIManager.getMonthUsage(model, parseInt(month));
-                  usage.prompt_tokens += monthUsage.prompt_tokens;
-                  usage.completion_tokens += monthUsage.completion_tokens;
-                }
+                const usage = AIManager.getModelUsage(model);
                 if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                   return `${index + 1}. ${model}: 没有使用记录`;
                 }
@@ -4243,79 +4279,113 @@ ${s}`);
   输出token:${usage.completion_tokens}
   总token:${usage.prompt_tokens + usage.completion_tokens}`;
               }).join("\n");
-              seal.replyToSender(ctx, msg, `使用记录如下:
+              if (!s) {
+                seal.replyToSender(ctx, msg, `没有使用记录`);
+                return ret;
+              }
+              seal.replyToSender(ctx, msg, `全部使用记录如下:
 ${s}`);
               return ret;
             }
             case "y": {
               const obj = {};
+              const now = /* @__PURE__ */ new Date();
+              const currentYear = now.getFullYear();
+              const currentMonth = now.getMonth() + 1;
+              const currentYM = currentYear * 12 + currentMonth;
               for (const model in AIManager.usageMap) {
                 const modelUsage = AIManager.usageMap[model];
-                for (const month in modelUsage) {
-                  const monthUsage = AIManager.getMonthUsage(model, parseInt(month));
-                  if (monthUsage.year === -1) {
-                    continue;
+                for (const key in modelUsage) {
+                  const usage = modelUsage[key];
+                  const [year, month, _] = key.split("-").map((v) => parseInt(v));
+                  const ym = year * 12 + month;
+                  if (ym >= currentYM - 11 && ym <= currentYM) {
+                    const key2 = `${year}-${month}`;
+                    if (!obj.hasOwnProperty(key2)) {
+                      obj[key2] = {
+                        prompt_tokens: 0,
+                        completion_tokens: 0
+                      };
+                    }
+                    obj[key2].prompt_tokens += usage.prompt_tokens;
+                    obj[key2].completion_tokens += usage.completion_tokens;
                   }
-                  obj[month] = monthUsage;
                 }
               }
-              const months = Object.keys(obj).sort((a, b) => obj[a].year - obj[b].year || parseInt(a) - parseInt(b));
-              const s = months.map((month) => {
-                const usage = obj[month];
+              const keys = Object.keys(obj).sort((a, b) => {
+                const [yearA, monthA] = a.split("-").map((v) => parseInt(v));
+                const [yearB, monthB] = b.split("-").map((v) => parseInt(v));
+                return yearA * 12 + monthA - (yearB * 12 + monthB);
+              });
+              const s = keys.map((key) => {
+                const usage = obj[key];
                 if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                   return ``;
                 }
-                return `${usage.year}年${month}月:
+                return `${key}:
   输入token:${usage.prompt_tokens}
   输出token:${usage.completion_tokens}
   总token:${usage.prompt_tokens + usage.completion_tokens}`;
-              });
-              seal.replyToSender(ctx, msg, `使用记录如下:
+              }).join("\n");
+              if (!s) {
+                seal.replyToSender(ctx, msg, `没有使用记录`);
+                return ret;
+              }
+              seal.replyToSender(ctx, msg, `最近12个月使用记录如下:
 ${s}`);
               return ret;
             }
             case "m": {
               const obj = {};
-              const year = (/* @__PURE__ */ new Date()).getFullYear();
-              const month = (/* @__PURE__ */ new Date()).getMonth();
+              const now = /* @__PURE__ */ new Date();
+              const currentYear = now.getFullYear();
+              const currentMonth = now.getMonth() + 1;
+              const currentDay = now.getDate();
+              const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
               for (const model in AIManager.usageMap) {
                 const modelUsage = AIManager.usageMap[model];
-                if (!modelUsage.hasOwnProperty(month) || modelUsage[month].year !== year) {
-                  continue;
-                }
-                const monthUsage = modelUsage[month];
-                for (const day in monthUsage.data) {
-                  if (!obj.hasOwnProperty(day)) {
-                    obj[day] = {
-                      prompt_tokens: 0,
-                      completion_tokens: 0
-                    };
+                for (const key in modelUsage) {
+                  const usage = modelUsage[key];
+                  const [year, month, day] = key.split("-").map((v) => parseInt(v));
+                  const ymd = year * 12 * 31 + month * 31 + day;
+                  if (ymd >= currentYMD - 30 && ymd <= currentYMD) {
+                    const key2 = `${year}-${month}-${day}`;
+                    if (!obj.hasOwnProperty(key2)) {
+                      obj[key2] = {
+                        prompt_tokens: 0,
+                        completion_tokens: 0
+                      };
+                    }
+                    obj[key2].prompt_tokens += usage.prompt_tokens;
+                    obj[key2].completion_tokens += usage.completion_tokens;
                   }
-                  const dayUsage = monthUsage.data[day];
-                  obj[day].prompt_tokens += dayUsage.prompt_tokens;
-                  obj[day].completion_tokens += dayUsage.completion_tokens;
                 }
               }
-              const days = Object.keys(obj).sort((a, b) => parseInt(a) - parseInt(b));
-              const s = days.map((day) => {
-                const usage = obj[day];
+              const days = Object.keys(obj).sort((a, b) => {
+                const [yearA, monthA, dayA] = a.split("-").map((v) => parseInt(v));
+                const [yearB, monthB, dayB] = b.split("-").map((v) => parseInt(v));
+                return yearA * 12 * 31 + monthA * 31 + dayA - (yearB * 12 * 31 + monthB * 31 + dayB);
+              });
+              const s = days.map((key) => {
+                const usage = obj[key];
                 if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                   return ``;
                 }
-                return `${day}日:
+                return `${key}:
   输入token:${usage.prompt_tokens}
   输出token:${usage.completion_tokens}
   总token:${usage.prompt_tokens + usage.completion_tokens}`;
-              });
-              seal.replyToSender(ctx, msg, `使用记录如下:
+              }).join("\n");
+              seal.replyToSender(ctx, msg, `最近31天使用记录如下:
 ${s}`);
               return ret;
             }
             case "clr": {
               const val3 = cmdArgs.getArgN(3);
-              if (val3 === "all") {
+              if (!val3) {
                 AIManager.clearUsageMap();
                 seal.replyToSender(ctx, msg, "已清除token使用记录");
+                AIManager.saveUsageMap();
                 return ret;
               }
               if (!AIManager.usageMap.hasOwnProperty(val3)) {
@@ -4336,7 +4406,7 @@ ${s}`);
 【.ai tk [y/m]】查看所有模型今年/这个月的token使用记录
 【.ai tk <模型名称>】查看模型的token使用记录
 【.ai tk <模型名称> [y/m]】查看模型今年/这个月的token使用记录
-【.ai tk clr all】清除token使用记录
+【.ai tk clr】清除token使用记录
 【.ai tk clr <模型名称>】清除token使用记录`;
               seal.replyToSender(ctx, msg, s);
               return ret;
@@ -4350,76 +4420,97 @@ ${s}`);
               switch (val3) {
                 case "y": {
                   const obj = {};
-                  const modelUsage = AIManager.usageMap[val2];
-                  for (const month in modelUsage) {
-                    const monthUsage = AIManager.getMonthUsage(val2, parseInt(month));
-                    if (monthUsage.year === -1) {
-                      continue;
+                  const now = /* @__PURE__ */ new Date();
+                  const currentYear = now.getFullYear();
+                  const currentMonth = now.getMonth() + 1;
+                  const currentYM = currentYear * 12 + currentMonth;
+                  const model = val2;
+                  const modelUsage = AIManager.usageMap[model];
+                  for (const key in modelUsage) {
+                    const usage = modelUsage[key];
+                    const [year, month, _] = key.split("-").map((v) => parseInt(v));
+                    const ym = year * 12 + month;
+                    if (ym >= currentYM - 11 && ym <= currentYM) {
+                      const key2 = `${year}-${month}`;
+                      if (!obj.hasOwnProperty(key2)) {
+                        obj[key2] = {
+                          prompt_tokens: 0,
+                          completion_tokens: 0
+                        };
+                      }
+                      obj[key2].prompt_tokens += usage.prompt_tokens;
+                      obj[key2].completion_tokens += usage.completion_tokens;
                     }
-                    obj[month] = monthUsage;
                   }
-                  const months = Object.keys(obj).sort((a, b) => obj[a].year - obj[b].year || parseInt(a) - parseInt(b));
-                  const s = months.map((month) => {
-                    const usage = obj[month];
+                  const keys = Object.keys(obj).sort((a, b) => {
+                    const [yearA, monthA] = a.split("-").map((v) => parseInt(v));
+                    const [yearB, monthB] = b.split("-").map((v) => parseInt(v));
+                    return yearA * 12 + monthA - (yearB * 12 + monthB);
+                  });
+                  const s = keys.map((key) => {
+                    const usage = obj[key];
                     if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                       return ``;
                     }
-                    return `${usage}年${month}月:
-  输入token:${usage.prompt_tokens}
-  输出token:${usage.completion_tokens}
-  总token:${usage.prompt_tokens + usage.completion_tokens}`;
-                  });
-                  seal.replyToSender(ctx, msg, `使用记录如下:
+                    return `${key}:
+      输入token:${usage.prompt_tokens}
+      输出token:${usage.completion_tokens}
+      总token:${usage.prompt_tokens + usage.completion_tokens}`;
+                  }).join("\n");
+                  if (!s) {
+                    seal.replyToSender(ctx, msg, `没有使用记录`);
+                    return ret;
+                  }
+                  seal.replyToSender(ctx, msg, `最近12个月使用记录如下:
 ${s}`);
                   return ret;
                 }
                 case "m": {
                   const obj = {};
-                  const year = (/* @__PURE__ */ new Date()).getFullYear();
-                  const month = (/* @__PURE__ */ new Date()).getMonth();
-                  const modelUsage = AIManager.usageMap[val2];
-                  if (!modelUsage.hasOwnProperty(month) || modelUsage[month].year !== year) {
-                    seal.replyToSender(ctx, msg, "没有这个月的token使用记录");
-                    return ret;
-                  }
-                  const monthUsage = modelUsage[month];
-                  for (const day in monthUsage.data) {
-                    if (!obj.hasOwnProperty(day)) {
-                      obj[day] = {
-                        prompt_tokens: 0,
-                        completion_tokens: 0
-                      };
+                  const now = /* @__PURE__ */ new Date();
+                  const currentYear = now.getFullYear();
+                  const currentMonth = now.getMonth() + 1;
+                  const currentDay = now.getDate();
+                  const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
+                  const model = val2;
+                  const modelUsage = AIManager.usageMap[model];
+                  for (const key in modelUsage) {
+                    const usage = modelUsage[key];
+                    const [year, month, day] = key.split("-").map((v) => parseInt(v));
+                    const ymd = year * 12 * 31 + month * 31 + day;
+                    if (ymd >= currentYMD - 30 && ymd <= currentYMD) {
+                      const key2 = `${year}-${month}-${day}`;
+                      if (!obj.hasOwnProperty(key2)) {
+                        obj[key2] = {
+                          prompt_tokens: 0,
+                          completion_tokens: 0
+                        };
+                      }
+                      obj[key2].prompt_tokens += usage.prompt_tokens;
+                      obj[key2].completion_tokens += usage.completion_tokens;
                     }
-                    const dayUsage = monthUsage.data[day];
-                    obj[day].prompt_tokens += dayUsage.prompt_tokens;
-                    obj[day].completion_tokens += dayUsage.completion_tokens;
                   }
-                  const days = Object.keys(obj).sort((a, b) => parseInt(a) - parseInt(b));
-                  const s = days.map((day) => {
-                    const usage = obj[day];
+                  const days = Object.keys(obj).sort((a, b) => {
+                    const [yearA, monthA, dayA] = a.split("-").map((v) => parseInt(v));
+                    const [yearB, monthB, dayB] = b.split("-").map((v) => parseInt(v));
+                    return yearA * 12 * 31 + monthA * 31 + dayA - (yearB * 12 * 31 + monthB * 31 + dayB);
+                  });
+                  const s = days.map((key) => {
+                    const usage = obj[key];
                     if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                       return ``;
                     }
-                    return `${day}日:
-  输入token:${usage.prompt_tokens}
-  输出token:${usage.completion_tokens}
-  总token:${usage.prompt_tokens + usage.completion_tokens}`;
-                  });
-                  seal.replyToSender(ctx, msg, `使用记录如下:
+                    return `${key}:
+      输入token:${usage.prompt_tokens}
+      输出token:${usage.completion_tokens}
+      总token:${usage.prompt_tokens + usage.completion_tokens}`;
+                  }).join("\n");
+                  seal.replyToSender(ctx, msg, `最近31天使用记录如下:
 ${s}`);
                   return ret;
                 }
                 default: {
-                  const usage = {
-                    prompt_tokens: 0,
-                    completion_tokens: 0
-                  };
-                  const modelUsage = AIManager.usageMap[val2];
-                  for (const month in modelUsage) {
-                    const monthUsage = AIManager.getMonthUsage(val2, parseInt(month));
-                    usage.prompt_tokens += monthUsage.prompt_tokens;
-                    usage.completion_tokens += monthUsage.completion_tokens;
-                  }
+                  const usage = AIManager.getModelUsage(val2);
                   if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                     seal.replyToSender(ctx, msg, `没有使用记录`);
                     return ret;
