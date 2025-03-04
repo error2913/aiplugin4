@@ -116,7 +116,7 @@ export function registerGetGroupMemberList() {
             }
 
             const s = `群成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''} ${item.role === 'owner' ? '【群主】' : item.role === 'admin' ? '【管理员】' : item.is_robot ? '【机器人】' : ''}`;
+                return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''} ${item.title ? `头衔: ${item.title}` : ''} ${item.role === 'owner' ? '【群主】' : item.role === 'admin' ? '【管理员】' : item.is_robot ? '【机器人】' : ''}`;
             }).join('\n');
             return s;
         } catch (e) {
