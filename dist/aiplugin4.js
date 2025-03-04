@@ -1761,7 +1761,7 @@ QQ等级: ${data.qqLevel}
     if (segments.length === 0) {
       return { s: "", reply: "", isRepeat: false, images: [] };
     }
-    s = segments[0].replace(/<br>/g, "\n").slice(0, maxChar).trim();
+    s = segments[0];
     let reply = s;
     filterContextTemplate.forEach((item) => {
       try {
@@ -1771,6 +1771,7 @@ QQ等级: ${data.qqLevel}
         console.error("Error in RegExp:", error);
       }
     });
+    s = s.slice(0, maxChar).trim();
     const isRepeat = checkRepeat(context, s);
     reply = await replaceMentions(ctx, context, reply);
     const { result, images } = await replaceImages(context, reply);
@@ -1784,7 +1785,21 @@ QQ等级: ${data.qqLevel}
       }
     });
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
-    reply = prefix + reply.trim();
+    const segments2 = reply.split(/(\[CQ:.+?\])/);
+    let nonCQLength = 0;
+    let finalReply = prefix;
+    for (const segment of segments2) {
+      if (segment.startsWith("[CQ:") && segment.endsWith("]")) {
+        finalReply += segment;
+      } else {
+        const remaining = maxChar - nonCQLength;
+        if (remaining > 0) {
+          finalReply += segment.slice(0, remaining);
+          nonCQLength += Math.min(segment.length, remaining);
+        }
+      }
+    }
+    reply = finalReply;
     return { s, isRepeat, reply, images };
   }
   function checkRepeat(context, s) {
@@ -3667,50 +3682,6 @@ ${memeryPrompt}`;
       this.usageMap[model][key].prompt_tokens += usage.prompt_tokens || 0;
       this.usageMap[model][key].completion_tokens += usage.completion_tokens || 0;
       this.saveUsageMap();
-    }
-    static getMonthUsage(model, year, month) {
-      const prefix = `${year}-${month}-`;
-      if (!this.usageMap.hasOwnProperty(model)) {
-        return {
-          prompt_tokens: 0,
-          completion_tokens: 0
-        };
-      }
-      const usage = {
-        prompt_tokens: 0,
-        completion_tokens: 0
-      };
-      for (const key in this.usageMap[model]) {
-        if (!key.startsWith(prefix)) {
-          continue;
-        }
-        usage.prompt_tokens += this.usageMap[model][key].prompt_tokens;
-        usage.completion_tokens += this.usageMap[model][key].completion_tokens;
-      }
-      return usage;
-    }
-    static getYearUsage(model, year) {
-      const prefix = `${year}-`;
-      if (!this.usageMap.hasOwnProperty(model)) {
-        return {
-          prompt_tokens: 0,
-          completion_tokens: 0
-        };
-      }
-      const usage = {
-        prompt_tokens: 0,
-        completion_tokens: 0
-      };
-      for (const key in this.usageMap[model]) {
-        if (!key.startsWith(prefix)) {
-          continue;
-        }
-        const month = parseInt(key.split("-")[1]);
-        const monthUsage = this.getMonthUsage(model, year, month);
-        usage.prompt_tokens += monthUsage.prompt_tokens;
-        usage.completion_tokens += monthUsage.completion_tokens;
-      }
-      return usage;
     }
     static getModelUsage(model) {
       if (!this.usageMap.hasOwnProperty(model)) {

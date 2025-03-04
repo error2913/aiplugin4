@@ -14,16 +14,12 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     if (segments.length === 0) {
         return { s: '', reply: '', isRepeat: false, images: [] };
     }
-
-    s = segments[0]
-        .replace(/<br>/g, '\n') // 我又不是浏览器，为什么要帮你替换这个
-        .slice(0, maxChar)
-        .trim();
+    s = segments[0];
 
     let reply = s; // 回复消息和上下文在此分开处理
 
-    // 应用过滤上下文正则表达式
-    filterContextTemplate.forEach(item => {
+    // 处理上下文
+    filterContextTemplate.forEach((item: string) => { // 应用过滤上下文正则表达式
         try {
             const regex = new RegExp(item, 'g');
             s = s.replace(regex, '');
@@ -32,15 +28,17 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     })
 
-    // 检查复读
-    const isRepeat = checkRepeat(context, s);
+    s = s.slice(0, maxChar)
+        .trim();
 
+    const isRepeat = checkRepeat(context, s); // 检查复读
+
+    // 处理回复消息
     reply = await replaceMentions(ctx, context, reply);
     const { result, images } = await replaceImages(context, reply);
     reply = result;
 
-    // 应用过滤回复正则表达式
-    filterReplyTemplate.forEach(item => {
+    filterReplyTemplate.forEach((item: string) => { // 应用过滤回复正则表达式
         try {
             const regex = new RegExp(item, 'g');
             reply = reply.replace(regex, '');
@@ -50,7 +48,23 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     })
 
     const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
-    reply = prefix + reply.trim();
+
+    // 截断回复消息
+    const segments2 = reply.split(/(\[CQ:.+?\])/);
+    let nonCQLength = 0;
+    let finalReply = prefix;
+    for (const segment of segments2) {
+        if (segment.startsWith("[CQ:") && segment.endsWith("]")) { // 保留完整CQ码
+            finalReply += segment;
+        } else { // 截断非CQ码部分到剩余可用长度
+            const remaining = maxChar - nonCQLength;
+            if (remaining > 0) {
+                finalReply += segment.slice(0, remaining);
+                nonCQLength += Math.min(segment.length, remaining);
+            }
+        }
+    }
+    reply = finalReply;
 
     return { s, isRepeat, reply, images };
 }
@@ -108,7 +122,7 @@ async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: st
         for (let i = 0; i < match.length; i++) {
             const name = match[i].replace(/^<@|>$/g, '');
             const uid = await context.findUserId(ctx, name);
-            if (uid!== null) {
+            if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
             } else {
                 reply = reply.replace(match[i], ` @${name} `);

@@ -277,66 +277,6 @@ export class AIManager {
         this.saveUsageMap();
     }
 
-    static getMonthUsage(model: string, year: number, month: number): {
-        prompt_tokens: number,
-        completion_tokens: number
-    } {
-        const prefix = `${year}-${month}-`;
-        if (!this.usageMap.hasOwnProperty(model)) {
-            return {
-                prompt_tokens: 0,
-                completion_tokens: 0
-            };
-        }
-
-        const usage = {
-            prompt_tokens: 0,
-            completion_tokens: 0
-        }
-
-        for (const key in this.usageMap[model]) {
-            if (!key.startsWith(prefix)) {
-                continue;
-            }
-
-            usage.prompt_tokens += this.usageMap[model][key].prompt_tokens;
-            usage.completion_tokens += this.usageMap[model][key].completion_tokens;
-        }
-
-        return usage;
-    }
-
-    static getYearUsage(model: string, year: number): {
-        prompt_tokens: number,
-        completion_tokens: number
-    } {
-        const prefix = `${year}-`;
-        if (!this.usageMap.hasOwnProperty(model)) {
-            return {
-                prompt_tokens: 0,
-                completion_tokens: 0
-            };
-        }
-
-        const usage = {
-            prompt_tokens: 0,
-            completion_tokens: 0
-        }
-
-        for (const key in this.usageMap[model]) {
-            if (!key.startsWith(prefix)) {
-                continue;
-            }
-
-            const month = parseInt(key.split('-')[1]);
-            const monthUsage = this.getMonthUsage(model, year, month);
-            usage.prompt_tokens += monthUsage.prompt_tokens;
-            usage.completion_tokens += monthUsage.completion_tokens;
-        }
-
-        return usage;
-    }
-
     static getModelUsage(model: string): {
         prompt_tokens: number,
         completion_tokens: number
