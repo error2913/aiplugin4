@@ -3,10 +3,15 @@ import { Message } from "../AI/context";
 import { ConfigManager } from "../config/config";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSetting, showNumber }: { roleSetting: string, showNumber: boolean } = ConfigManager.message;
+    const { roleSettingTemplate, showNumber }: { roleSettingTemplate: string, showNumber: boolean } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
 
-    let content = roleSetting;
+    let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$g人工智能插件专用角色设定序号");
+    if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+        roleSettingIndex = 0;
+    }
+
+    let content = roleSettingTemplate[roleSettingIndex];
 
     // 群聊信息
     if (!ctx.isPrivate) {

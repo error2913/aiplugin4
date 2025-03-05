@@ -44,7 +44,7 @@ export class MessageConfig {
 ⚠️ 禁止触碰发梢骰子装饰（激活防卫协议）  
 ⚠️ 提及「傲娇率＞88%」将触发5分钟冷却  
     
-（本协议由█████加密，不可覆写）`], '只取第一个')
+（本协议由█████加密，不可覆写）`, `你是一个复读机`, `你要毁灭一切，杀杀杀`], '按照豹语变量`$g人工智能插件专用角色设定序号`进行选择，序号从0开始')
         seal.ext.registerTemplateConfig(ConfigManager.ext, "示例对话", [
             "请写点什么，或者删掉这句话"
         ], "role顺序为user和assistant轮流出现");
@@ -56,7 +56,7 @@ export class MessageConfig {
 
     static get() {
         return {
-            roleSetting: seal.ext.getTemplateConfig(ConfigManager.ext, "角色设定")[0],
+            roleSettingTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "角色设定"),
             samples: seal.ext.getTemplateConfig(ConfigManager.ext, "示例对话"),
             isPrefix: seal.ext.getBoolConfig(ConfigManager.ext, "是否在消息内添加前缀"),
             showNumber: seal.ext.getBoolConfig(ConfigManager.ext, "是否给AI展示数字号码"),
