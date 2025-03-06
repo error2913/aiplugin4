@@ -34,8 +34,8 @@ export function registerSendMsg() {
                                 description: '函数名称'
                             },
                             arguments: {
-                                type: 'object',
-                                description: '函数参数，必须严格按照目标函数的参数定义（包括参数名和类型）完整填写'
+                                type: 'string',
+                                description: '函数参数，必须严格按照目标函数的参数定义（包括参数名和类型）完整填写，格式为JSON字符串'
                             }
                         },
                         required: ["name", "arguments"],
@@ -127,6 +127,12 @@ export function registerSendMsg() {
 
             try {
                 const tool = ToolManager.toolMap[tool_call.name];
+
+                try {
+                    tool_call.arguments = JSON.parse(tool_call.arguments);
+                } catch (e) {
+                    return `调用函数失败:arguement不是一个合法的JSON字符串`;
+                }
 
                 const args = tool_call.arguments;
                 if (args !== null && typeof args !== 'object') {
