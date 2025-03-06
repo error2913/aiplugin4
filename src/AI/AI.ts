@@ -28,7 +28,6 @@ export class AI {
         content: string
     }
     isChatting: boolean;
-    isGettingAct: boolean;
 
     constructor(id: string) {
         this.id = id;
@@ -48,7 +47,6 @@ export class AI {
             content: ''
         };
         this.isChatting = false;
-        this.isGettingAct = false;
     }
 
     static reviver(value: any, id: string): AI {

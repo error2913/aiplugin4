@@ -206,7 +206,7 @@ export class ImageManager {
 
         const textContent = {
             "type": "text",
-            "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题等信息"
+            "text": text ? text : "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"
         }
 
         const messages = [{
