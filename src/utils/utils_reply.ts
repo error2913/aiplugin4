@@ -9,12 +9,32 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 分离AI臆想出来的多轮对话
     const segments = s
-        .split(/<[\|｜]from.*?[\|｜]?>/)
+        .split(/(<[\|｜]from:?.*?[\|｜]?>)/)
         .filter(item => item.trim() !== '');
     if (segments.length === 0) {
         return { s: '', reply: '', isRepeat: false, images: [] };
     }
-    s = segments[0];
+
+    s = '';
+    for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        const match = segment.match(/<[\|｜]from:?(.*?)[\|｜]?>/);
+        if (match) {
+            const uid = await context.findUserId(ctx, match[1]);
+            if (uid === ctx.endPoint.userId && i < segments.length - 1) {
+                s += segments[i + 1]; // 如果臆想对象是自己，那么将下一条消息添加到s中
+            }
+        } else if (i === 0) {
+            s = segment;
+        }
+    }
+
+    if (!s.trim()) {
+        s = segments.find(segment => !/<[\|｜]from:?.*?[\|｜]?>/.test(segment));
+        if (!s.trim()) {
+            return { s: '', reply: '', isRepeat: false, images: [] };
+        }
+    }
 
     let reply = s; // 回复消息和上下文在此分开处理
 
