@@ -25,7 +25,7 @@ import { registerGetContext } from "./tool_get_context"
 import { registerGetGroupMemberList, registerGetList } from "./tool_get_list"
 import { registerSearchChat, registerSearchCommonGroup } from "./tool_search_chat"
 import { registerSetTriggerCondition } from "./tool_set_trigger_condition"
-import { registerMusicCard } from "./tool_music"
+import { registerMusicPlay } from "./tool_music"
 
 export interface ToolInfo {
     type: "function",
@@ -174,7 +174,7 @@ export class ToolManager {
         registerSearchChat();
         registerSearchCommonGroup();
         registerSetTriggerCondition();
-        registerMusicCard();
+        registerMusicPlay();
     }
 
     /**
