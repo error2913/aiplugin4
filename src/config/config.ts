@@ -47,4 +47,18 @@ export class ConfigManager {
     static get received() { return this.getCache('received', ReceivedConfig.get) }
     static get reply() { return this.getCache('reply', ReplyConfig.get) }
     static get image() { return this.getCache('image', ImageConfig.get) }
+
+    static getExt(name: string): seal.ExtInfo {
+        if (name == 'aiplugin4') {
+            return ConfigManager.ext;
+        }
+
+        let ext = seal.ext.find(name);
+        if (!ext) {
+            ext = seal.ext.new(name, 'baiyu&错误', '1.0.0');
+            seal.ext.register(ext);
+        }
+
+        return ext;
+    }
 }

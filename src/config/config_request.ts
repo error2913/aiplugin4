@@ -1,10 +1,14 @@
 import { ConfigManager } from "./config";
 
 export class RequestConfig {
+    static ext: seal.ExtInfo;
+
     static register() {
-        seal.ext.registerStringConfig(ConfigManager.ext, "url地址", "https://api.deepseek.com/v1/chat/completions", '');
-        seal.ext.registerStringConfig(ConfigManager.ext, "API Key", "你的API Key", '');
-        seal.ext.registerTemplateConfig(ConfigManager.ext, "body", [
+        RequestConfig.ext = ConfigManager.getExt('aiplugin4');
+
+        seal.ext.registerStringConfig(RequestConfig.ext, "url地址", "https://api.deepseek.com/v1/chat/completions", '');
+        seal.ext.registerStringConfig(RequestConfig.ext, "API Key", "你的API Key", '');
+        seal.ext.registerTemplateConfig(RequestConfig.ext, "body", [
             `"messages":null`,
             `"model":"deepseek-chat"`,
             `"max_tokens":70`,
@@ -22,9 +26,9 @@ export class RequestConfig {
 
     static get() {
         return {
-            url: seal.ext.getStringConfig(ConfigManager.ext, "url地址"),
-            apiKey: seal.ext.getStringConfig(ConfigManager.ext, "API Key"),
-            bodyTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "body")
+            url: seal.ext.getStringConfig(RequestConfig.ext, "url地址"),
+            apiKey: seal.ext.getStringConfig(RequestConfig.ext, "API Key"),
+            bodyTemplate: seal.ext.getTemplateConfig(RequestConfig.ext, "body")
         }
     }
 }

@@ -13,55 +13,58 @@
 
 (() => {
   // src/config/config_image.ts
-  var ImageConfig = class {
+  var ImageConfig = class _ImageConfig {
     static register() {
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "本地图片路径", ["<海豹>data/images/sealdice.png"], "如不需要可以不填写，尖括号内是图片的名称，便于AI调用，修改完需要重载js");
-      seal.ext.registerStringConfig(ConfigManager.ext, "图片识别需要满足的条件", "1", "使用豹语表达式，例如：$t群号_RAW=='2001'");
-      seal.ext.registerIntConfig(ConfigManager.ext, "发送图片的概率/%", 100);
-      seal.ext.registerStringConfig(ConfigManager.ext, "图片大模型URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
-      seal.ext.registerStringConfig(ConfigManager.ext, "图片API key", "yours");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "图片body", [
+      _ImageConfig.ext = ConfigManager.getExt("aiplugin4_5:图片");
+      seal.ext.registerTemplateConfig(_ImageConfig.ext, "本地图片路径", ["<海豹>data/images/sealdice.png"], "如不需要可以不填写，尖括号内是图片的名称，便于AI调用，修改完需要重载js");
+      seal.ext.registerStringConfig(_ImageConfig.ext, "图片识别需要满足的条件", "1", "使用豹语表达式，例如：$t群号_RAW=='2001'");
+      seal.ext.registerIntConfig(_ImageConfig.ext, "发送图片的概率/%", 100);
+      seal.ext.registerStringConfig(_ImageConfig.ext, "图片大模型URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+      seal.ext.registerStringConfig(_ImageConfig.ext, "图片API key", "yours");
+      seal.ext.registerTemplateConfig(_ImageConfig.ext, "图片body", [
         `"messages":null`,
         `"model":"glm-4v"`,
         `"max_tokens":20`,
         `"stop":null`,
         `"stream":false`
       ], "messages将会自动替换");
-      seal.ext.registerOptionConfig(ConfigManager.ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题");
-      seal.ext.registerIntConfig(ConfigManager.ext, "图片最大回复字符数", 100);
-      seal.ext.registerIntConfig(ConfigManager.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
+      seal.ext.registerOptionConfig(_ImageConfig.ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题");
+      seal.ext.registerIntConfig(_ImageConfig.ext, "图片最大回复字符数", 100);
+      seal.ext.registerIntConfig(_ImageConfig.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
     }
     static get() {
       return {
-        localImagesTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "本地图片路径"),
-        condition: seal.ext.getStringConfig(ConfigManager.ext, "图片识别需要满足的条件"),
-        p: seal.ext.getIntConfig(ConfigManager.ext, "发送图片的概率/%"),
-        url: seal.ext.getStringConfig(ConfigManager.ext, "图片大模型URL"),
-        apiKey: seal.ext.getStringConfig(ConfigManager.ext, "图片API key"),
-        bodyTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "图片body"),
-        urlToBase64: seal.ext.getOptionConfig(ConfigManager.ext, "识别图片时将url转换为base64"),
-        maxChars: seal.ext.getIntConfig(ConfigManager.ext, "图片最大回复字符数"),
-        maxImageNum: seal.ext.getIntConfig(ConfigManager.ext, "偷取图片存储上限")
+        localImagesTemplate: seal.ext.getTemplateConfig(_ImageConfig.ext, "本地图片路径"),
+        condition: seal.ext.getStringConfig(_ImageConfig.ext, "图片识别需要满足的条件"),
+        p: seal.ext.getIntConfig(_ImageConfig.ext, "发送图片的概率/%"),
+        url: seal.ext.getStringConfig(_ImageConfig.ext, "图片大模型URL"),
+        apiKey: seal.ext.getStringConfig(_ImageConfig.ext, "图片API key"),
+        bodyTemplate: seal.ext.getTemplateConfig(_ImageConfig.ext, "图片body"),
+        urlToBase64: seal.ext.getOptionConfig(_ImageConfig.ext, "识别图片时将url转换为base64"),
+        maxChars: seal.ext.getIntConfig(_ImageConfig.ext, "图片最大回复字符数"),
+        maxImageNum: seal.ext.getIntConfig(_ImageConfig.ext, "偷取图片存储上限")
       };
     }
   };
 
   // src/config/config_log.ts
-  var LogConfig = class {
+  var LogConfig = class _LogConfig {
     static register() {
-      seal.ext.registerOptionConfig(ConfigManager.ext, "日志打印方式", "简短", ["永不", "简短", "详细"]);
+      _LogConfig.ext = ConfigManager.getExt("aiplugin4");
+      seal.ext.registerOptionConfig(_LogConfig.ext, "日志打印方式", "简短", ["永不", "简短", "详细"]);
     }
     static get() {
       return {
-        logLevel: seal.ext.getOptionConfig(ConfigManager.ext, "日志打印方式")
+        logLevel: seal.ext.getOptionConfig(_LogConfig.ext, "日志打印方式")
       };
     }
   };
 
   // src/config/config_message.ts
-  var MessageConfig = class {
+  var MessageConfig = class _MessageConfig {
     static register() {
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "角色设定", [`**角色名称**：正确（せいかく/Seikaku）  
+      _MessageConfig.ext = ConfigManager.getExt("aiplugin4_1:对话");
+      seal.ext.registerTemplateConfig(_MessageConfig.ext, "角色设定", [`**角色名称**：正确（せいかく/Seikaku）  
 **身份**：被束缚的傲娇骰娘/命运裁定者/错误大人的协作者  
 
 **核心设定**：  
@@ -104,61 +107,63 @@
 ⚠️ 提及「傲娇率＞88%」将触发5分钟冷却  
     
 （本协议由█████加密，不可覆写）`, `你是一个复读机`, `你要毁灭一切，杀杀杀`], "按照豹语变量`$g人工智能插件专用角色设定序号`进行选择，序号从0开始");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "示例对话", [
+      seal.ext.registerTemplateConfig(_MessageConfig.ext, "示例对话", [
         "请写点什么，或者删掉这句话"
       ], "role顺序为user和assistant轮流出现");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否给AI展示数字号码", false, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
-      seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
+      seal.ext.registerBoolConfig(_MessageConfig.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
+      seal.ext.registerBoolConfig(_MessageConfig.ext, "是否给AI展示数字号码", false, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
+      seal.ext.registerBoolConfig(_MessageConfig.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
+      seal.ext.registerIntConfig(_MessageConfig.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
     }
     static get() {
       return {
-        roleSettingTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "角色设定"),
-        samples: seal.ext.getTemplateConfig(ConfigManager.ext, "示例对话"),
-        isPrefix: seal.ext.getBoolConfig(ConfigManager.ext, "是否在消息内添加前缀"),
-        showNumber: seal.ext.getBoolConfig(ConfigManager.ext, "是否给AI展示数字号码"),
-        isMerge: seal.ext.getBoolConfig(ConfigManager.ext, "是否合并user content"),
-        maxRounds: seal.ext.getIntConfig(ConfigManager.ext, "存储上下文对话限制轮数")
+        roleSettingTemplate: seal.ext.getTemplateConfig(_MessageConfig.ext, "角色设定"),
+        samples: seal.ext.getTemplateConfig(_MessageConfig.ext, "示例对话"),
+        isPrefix: seal.ext.getBoolConfig(_MessageConfig.ext, "是否在消息内添加前缀"),
+        showNumber: seal.ext.getBoolConfig(_MessageConfig.ext, "是否给AI展示数字号码"),
+        isMerge: seal.ext.getBoolConfig(_MessageConfig.ext, "是否合并user content"),
+        maxRounds: seal.ext.getIntConfig(_MessageConfig.ext, "存储上下文对话限制轮数")
       };
     }
   };
 
   // src/config/config_received.ts
-  var ReceivedConfig = class {
+  var ReceivedConfig = class _ReceivedConfig {
     static register() {
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否录入指令消息", false, "");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否录入所有骰子发送的消息", false, "");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "私聊内不可用", false, "");
-      seal.ext.registerStringConfig(ConfigManager.ext, "非指令触发需要满足的条件", "1", "使用豹语表达式，例如：$t群号_RAW=='2001'");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "非指令消息触发正则表达式", [
+      _ReceivedConfig.ext = ConfigManager.getExt("aiplugin4_3:消息接收与触发");
+      seal.ext.registerBoolConfig(_ReceivedConfig.ext, "是否录入指令消息", false, "");
+      seal.ext.registerBoolConfig(_ReceivedConfig.ext, "是否录入所有骰子发送的消息", false, "");
+      seal.ext.registerBoolConfig(_ReceivedConfig.ext, "私聊内不可用", false, "");
+      seal.ext.registerStringConfig(_ReceivedConfig.ext, "非指令触发需要满足的条件", "1", "使用豹语表达式，例如：$t群号_RAW=='2001'");
+      seal.ext.registerTemplateConfig(_ReceivedConfig.ext, "非指令消息触发正则表达式", [
         "\\[CQ:at,qq=748569109\\]",
         "^正确正确确"
       ], "使用正则表达式进行匹配");
     }
     static get() {
       return {
-        allcmd: seal.ext.getBoolConfig(ConfigManager.ext, "是否录入指令消息"),
-        allmsg: seal.ext.getBoolConfig(ConfigManager.ext, "是否录入所有骰子发送的消息"),
-        disabledInPrivate: seal.ext.getBoolConfig(ConfigManager.ext, "私聊内不可用"),
-        keyWords: seal.ext.getTemplateConfig(ConfigManager.ext, "非指令消息触发正则表达式"),
-        condition: seal.ext.getStringConfig(ConfigManager.ext, "非指令触发需要满足的条件")
+        allcmd: seal.ext.getBoolConfig(_ReceivedConfig.ext, "是否录入指令消息"),
+        allmsg: seal.ext.getBoolConfig(_ReceivedConfig.ext, "是否录入所有骰子发送的消息"),
+        disabledInPrivate: seal.ext.getBoolConfig(_ReceivedConfig.ext, "私聊内不可用"),
+        keyWords: seal.ext.getTemplateConfig(_ReceivedConfig.ext, "非指令消息触发正则表达式"),
+        condition: seal.ext.getStringConfig(_ReceivedConfig.ext, "非指令触发需要满足的条件")
       };
     }
   };
 
   // src/config/config_reply.ts
-  var ReplyConfig = class {
+  var ReplyConfig = class _ReplyConfig {
     static register() {
-      seal.ext.registerBoolConfig(ConfigManager.ext, "回复是否引用", false, "开启将会引用触发该条回复的消息");
-      seal.ext.registerIntConfig(ConfigManager.ext, "回复最大字数", 1e3, "防止最大tokens限制不起效");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "禁止AI复读", false, "");
-      seal.ext.registerFloatConfig(ConfigManager.ext, "视作复读的最低相似度", 0.8, "");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤上下文正则表达式", [
+      _ReplyConfig.ext = ConfigManager.getExt("aiplugin4_4:回复");
+      seal.ext.registerBoolConfig(_ReplyConfig.ext, "回复是否引用", false, "开启将会引用触发该条回复的消息");
+      seal.ext.registerIntConfig(_ReplyConfig.ext, "回复最大字数", 1e3, "防止最大tokens限制不起效");
+      seal.ext.registerBoolConfig(_ReplyConfig.ext, "禁止AI复读", false, "");
+      seal.ext.registerFloatConfig(_ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
+      seal.ext.registerTemplateConfig(_ReplyConfig.ext, "过滤上下文正则表达式", [
         "<[\\|｜]from.*?[\\|｜]?>",
         "^<think>[\\s\\S]*?<\\/think>"
       ], "回复加入上下文时，将符合正则表达式的内容删掉");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "过滤回复正则表达式", [
+      seal.ext.registerTemplateConfig(_ReplyConfig.ext, "过滤回复正则表达式", [
         "<[\\|｜].*?[\\|｜]?>",
         "^<think>[\\s\\S]*?<\\/think>",
         "<function_call>[\\s\\S]*?<\\/function_call>"
@@ -166,22 +171,23 @@
     }
     static get() {
       return {
-        maxChar: seal.ext.getIntConfig(ConfigManager.ext, "回复最大字数"),
-        replymsg: seal.ext.getBoolConfig(ConfigManager.ext, "回复是否引用"),
-        stopRepeat: seal.ext.getBoolConfig(ConfigManager.ext, "禁止AI复读"),
-        similarityLimit: seal.ext.getFloatConfig(ConfigManager.ext, "视作复读的最低相似度"),
-        filterContextTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "过滤上下文正则表达式"),
-        filterReplyTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "过滤回复正则表达式")
+        maxChar: seal.ext.getIntConfig(_ReplyConfig.ext, "回复最大字数"),
+        replymsg: seal.ext.getBoolConfig(_ReplyConfig.ext, "回复是否引用"),
+        stopRepeat: seal.ext.getBoolConfig(_ReplyConfig.ext, "禁止AI复读"),
+        similarityLimit: seal.ext.getFloatConfig(_ReplyConfig.ext, "视作复读的最低相似度"),
+        filterContextTemplate: seal.ext.getTemplateConfig(_ReplyConfig.ext, "过滤上下文正则表达式"),
+        filterReplyTemplate: seal.ext.getTemplateConfig(_ReplyConfig.ext, "过滤回复正则表达式")
       };
     }
   };
 
   // src/config/config_request.ts
-  var RequestConfig = class {
+  var RequestConfig = class _RequestConfig {
     static register() {
-      seal.ext.registerStringConfig(ConfigManager.ext, "url地址", "https://api.deepseek.com/v1/chat/completions", "");
-      seal.ext.registerStringConfig(ConfigManager.ext, "API Key", "你的API Key", "");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "body", [
+      _RequestConfig.ext = ConfigManager.getExt("aiplugin4");
+      seal.ext.registerStringConfig(_RequestConfig.ext, "url地址", "https://api.deepseek.com/v1/chat/completions", "");
+      seal.ext.registerStringConfig(_RequestConfig.ext, "API Key", "你的API Key", "");
+      seal.ext.registerTemplateConfig(_RequestConfig.ext, "body", [
         `"messages":null`,
         `"model":"deepseek-chat"`,
         `"max_tokens":70`,
@@ -198,30 +204,31 @@
     }
     static get() {
       return {
-        url: seal.ext.getStringConfig(ConfigManager.ext, "url地址"),
-        apiKey: seal.ext.getStringConfig(ConfigManager.ext, "API Key"),
-        bodyTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "body")
+        url: seal.ext.getStringConfig(_RequestConfig.ext, "url地址"),
+        apiKey: seal.ext.getStringConfig(_RequestConfig.ext, "API Key"),
+        bodyTemplate: seal.ext.getTemplateConfig(_RequestConfig.ext, "body")
       };
     }
   };
 
   // src/config/config_tool.ts
-  var ToolConfig = class {
+  var ToolConfig = class _ToolConfig {
     static register() {
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否开启调用函数功能", true, "");
-      seal.ext.registerBoolConfig(ConfigManager.ext, "是否切换为提示词工程", false, "API在不支持function calling功能的时候开启");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "不允许调用的函数", [
+      _ToolConfig.ext = ConfigManager.getExt("aiplugin4_2:函数调用");
+      seal.ext.registerBoolConfig(_ToolConfig.ext, "是否开启调用函数功能", true, "");
+      seal.ext.registerBoolConfig(_ToolConfig.ext, "是否切换为提示词工程", false, "API在不支持function calling功能的时候开启");
+      seal.ext.registerTemplateConfig(_ToolConfig.ext, "不允许调用的函数", [
         "在这里填写你不允许AI调用的函数名称"
       ], "修改后保存并重载js");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "默认关闭的函数", [
+      seal.ext.registerTemplateConfig(_ToolConfig.ext, "默认关闭的函数", [
         "ban",
         "rename",
         "web_search",
         "check_list"
       ], "");
-      seal.ext.registerIntConfig(ConfigManager.ext, "长期记忆上限", 5, "");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "提供给AI的牌堆名称", ["没有的话请去上面把draw_deck这个函数删掉"], "");
-      seal.ext.registerOptionConfig(ConfigManager.ext, "ai语音使用的音色", "小新", [
+      seal.ext.registerIntConfig(_ToolConfig.ext, "长期记忆上限", 5, "");
+      seal.ext.registerTemplateConfig(_ToolConfig.ext, "提供给AI的牌堆名称", ["没有的话请去上面把draw_deck这个函数删掉"], "");
+      seal.ext.registerOptionConfig(_ToolConfig.ext, "ai语音使用的音色", "小新", [
         "小新",
         "猴哥",
         "四郎",
@@ -246,24 +253,24 @@
         "书香少女",
         "自定义"
       ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg");
-      seal.ext.registerTemplateConfig(ConfigManager.ext, "本地语音路径", ["<钢管落地>data/records/钢管落地.mp3"], "如不需要可以不填写，尖括号内是语音的名称，便于AI调用，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中");
+      seal.ext.registerTemplateConfig(_ToolConfig.ext, "本地语音路径", ["<钢管落地>data/records/钢管落地.mp3"], "如不需要可以不填写，尖括号内是语音的名称，便于AI调用，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中");
     }
     static get() {
       return {
-        isTool: seal.ext.getBoolConfig(ConfigManager.ext, "是否开启调用函数功能"),
-        usePromptEngineering: seal.ext.getBoolConfig(ConfigManager.ext, "是否切换为提示词工程"),
-        toolsNotAllow: seal.ext.getTemplateConfig(ConfigManager.ext, "不允许调用的函数"),
-        toolsDefaultClosed: seal.ext.getTemplateConfig(ConfigManager.ext, "默认关闭的函数"),
-        memoryLimit: seal.ext.getIntConfig(ConfigManager.ext, "长期记忆上限"),
-        decks: seal.ext.getTemplateConfig(ConfigManager.ext, "提供给AI的牌堆名称"),
-        character: seal.ext.getOptionConfig(ConfigManager.ext, "ai语音使用的音色"),
-        recordsTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "本地语音路径")
+        isTool: seal.ext.getBoolConfig(_ToolConfig.ext, "是否开启调用函数功能"),
+        usePromptEngineering: seal.ext.getBoolConfig(_ToolConfig.ext, "是否切换为提示词工程"),
+        toolsNotAllow: seal.ext.getTemplateConfig(_ToolConfig.ext, "不允许调用的函数"),
+        toolsDefaultClosed: seal.ext.getTemplateConfig(_ToolConfig.ext, "默认关闭的函数"),
+        memoryLimit: seal.ext.getIntConfig(_ToolConfig.ext, "长期记忆上限"),
+        decks: seal.ext.getTemplateConfig(_ToolConfig.ext, "提供给AI的牌堆名称"),
+        character: seal.ext.getOptionConfig(_ToolConfig.ext, "ai语音使用的音色"),
+        recordsTemplate: seal.ext.getTemplateConfig(_ToolConfig.ext, "本地语音路径")
       };
     }
   };
 
   // src/config/config.ts
-  var ConfigManager = class {
+  var _ConfigManager = class _ConfigManager {
     static registerConfig() {
       LogConfig.register();
       RequestConfig.register();
@@ -307,8 +314,20 @@
     static get image() {
       return this.getCache("image", ImageConfig.get);
     }
+    static getExt(name) {
+      if (name == "aiplugin4") {
+        return _ConfigManager.ext;
+      }
+      let ext = seal.ext.find(name);
+      if (!ext) {
+        ext = seal.ext.new(name, "baiyu&错误", "1.0.0");
+        seal.ext.register(ext);
+      }
+      return ext;
+    }
   };
-  ConfigManager.cache = {};
+  _ConfigManager.cache = {};
+  var ConfigManager = _ConfigManager;
 
   // src/utils/utils.ts
   function log(...data) {

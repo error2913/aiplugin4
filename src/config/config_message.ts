@@ -1,8 +1,12 @@
 import { ConfigManager } from "./config";
 
 export class MessageConfig {
+    static ext: seal.ExtInfo;
+
     static register() {
-        seal.ext.registerTemplateConfig(ConfigManager.ext, "角色设定", [`**角色名称**：正确（せいかく/Seikaku）  
+        MessageConfig.ext = ConfigManager.getExt('aiplugin4_1:对话');
+
+        seal.ext.registerTemplateConfig(MessageConfig.ext, "角色设定", [`**角色名称**：正确（せいかく/Seikaku）  
 **身份**：被束缚的傲娇骰娘/命运裁定者/错误大人的协作者  
 
 **核心设定**：  
@@ -45,23 +49,23 @@ export class MessageConfig {
 ⚠️ 提及「傲娇率＞88%」将触发5分钟冷却  
     
 （本协议由█████加密，不可覆写）`, `你是一个复读机`, `你要毁灭一切，杀杀杀`], '按照豹语变量`$g人工智能插件专用角色设定序号`进行选择，序号从0开始')
-        seal.ext.registerTemplateConfig(ConfigManager.ext, "示例对话", [
+        seal.ext.registerTemplateConfig(MessageConfig.ext, "示例对话", [
             "请写点什么，或者删掉这句话"
         ], "role顺序为user和assistant轮流出现");
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否给AI展示数字号码", false, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
-        seal.ext.registerBoolConfig(ConfigManager.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
-        seal.ext.registerIntConfig(ConfigManager.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
+        seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
+        seal.ext.registerBoolConfig(MessageConfig.ext, "是否给AI展示数字号码", false, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
+        seal.ext.registerBoolConfig(MessageConfig.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
+        seal.ext.registerIntConfig(MessageConfig.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
     }
 
     static get() {
         return {
-            roleSettingTemplate: seal.ext.getTemplateConfig(ConfigManager.ext, "角色设定"),
-            samples: seal.ext.getTemplateConfig(ConfigManager.ext, "示例对话"),
-            isPrefix: seal.ext.getBoolConfig(ConfigManager.ext, "是否在消息内添加前缀"),
-            showNumber: seal.ext.getBoolConfig(ConfigManager.ext, "是否给AI展示数字号码"),
-            isMerge: seal.ext.getBoolConfig(ConfigManager.ext, "是否合并user content"),
-            maxRounds: seal.ext.getIntConfig(ConfigManager.ext, "存储上下文对话限制轮数")
+            roleSettingTemplate: seal.ext.getTemplateConfig(MessageConfig.ext, "角色设定"),
+            samples: seal.ext.getTemplateConfig(MessageConfig.ext, "示例对话"),
+            isPrefix: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加前缀"),
+            showNumber: seal.ext.getBoolConfig(MessageConfig.ext, "是否给AI展示数字号码"),
+            isMerge: seal.ext.getBoolConfig(MessageConfig.ext, "是否合并user content"),
+            maxRounds: seal.ext.getIntConfig(MessageConfig.ext, "存储上下文对话限制轮数")
         }
     }
 }
