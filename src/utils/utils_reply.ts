@@ -67,7 +67,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     })
 
-    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    const prefix = replymsg && msg.rawId ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
 
     // 截断回复消息
     const segments2 = reply.split(/(\[CQ:.+?\])/);

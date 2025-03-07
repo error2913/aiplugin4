@@ -1821,7 +1821,7 @@ QQ等级: ${data.qqLevel}
         console.error("Error in RegExp:", error);
       }
     });
-    const prefix = replymsg ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    const prefix = replymsg && msg.rawId ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
     const segments2 = reply.split(/(\[CQ:.+?\])/);
     let nonCQLength = 0;
     let finalReply = prefix;
