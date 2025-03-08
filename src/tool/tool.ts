@@ -26,6 +26,7 @@ import { registerGetGroupMemberList, registerGetList } from "./tool_get_list"
 import { registerSearchChat, registerSearchCommonGroup } from "./tool_search_chat"
 import { registerSetTriggerCondition } from "./tool_set_trigger_condition"
 import { registerMusicPlay } from "./tool_music"
+import { registerTextToImage } from "./tool_text_to_image"
 
 export interface ToolInfo {
     type: "function",
@@ -175,6 +176,7 @@ export class ToolManager {
         registerSearchCommonGroup();
         registerSetTriggerCondition();
         registerMusicPlay();
+        registerTextToImage();
     }
 
     /**
