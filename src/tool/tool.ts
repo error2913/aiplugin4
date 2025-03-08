@@ -3,28 +3,23 @@ import { ConfigManager } from "../config/config"
 import { log } from "../utils/utils"
 import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
 import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
-import { registerDrawDeck } from "./tool_draw_deck"
-import { registerFace } from "./tool_face"
-import { registerGetTime } from "./tool_get_time"
-import { registerCheckAvatar, registerImageToText, registerTextToImage } from "./tool_image"
+import { registerDrawDeck } from "./tool_deck"
+import { registerCheckAvatar, registerFace, registerImageToText, registerTextToImage } from "./tool_image"
 import { registerJrrp } from "./tool_jrrp"
 import { registerAddMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
 import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
-import { registerRollCheck } from "./tool_roll_check"
-import { registerSanCheck } from "./tool_san_check"
-import { registerCancelTimer, registerSetTimer, registerShowTimerList } from "./tool_timer"
-import { registerTextToSound } from "./tool_text_to_sound"
+import { registerRollCheck, registerSanCheck } from "./tool_roll_check"
+import { registerCancelTimer, registerGetTime, registerSetTimer, registerShowTimerList } from "./tool_time"
+import { registerRecord, registerTextToSound } from "./tool_voice"
 import { registerWebSearch } from "./tool_web_search"
 import { registerGroupSign } from "./tool_group_sign"
-import { registerGetPersonInfo } from "./tool_get_person_info"
-import { registerRecord } from "./tool_record"
+import { registerGetPersonInfo } from "./tool_person_info"
 import { registerSendMsg } from "./tool_send_msg"
-import { registerGetContext } from "./tool_get_context"
-import { registerGetGroupMemberList, registerGetList } from "./tool_get_list"
-import { registerSearchChat, registerSearchCommonGroup } from "./tool_search_chat"
-import { registerSetTriggerCondition } from "./tool_set_trigger_condition"
+import { registerGetContext } from "./tool_context"
+import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
+import { registerSetTriggerCondition } from "./tool_trigger"
 import { registerMusicPlay } from "./tool_music"
 
 export interface ToolInfo {
@@ -142,11 +137,11 @@ export class ToolManager {
         registerAddMemory();
         registerShowMemory();
         registerDrawDeck();
-        registerFace();
         registerJrrp();
         registerModuRoll();
         registerModuSearch();
         registerRollCheck();
+        registerSanCheck();
         registerRename();
         registerAttrShow();
         registerAttrGet();
@@ -154,6 +149,7 @@ export class ToolManager {
         registerBan();
         registerWholeBan();
         registerGetBanList();
+        registerRecord();
         registerTextToSound();
         registerPoke();
         registerGetTime();
@@ -161,13 +157,12 @@ export class ToolManager {
         registerShowTimerList();
         registerCancelTimer();
         registerWebSearch();
+        registerFace();
         registerImageToText();
         registerCheckAvatar();
         registerTextToImage();
-        registerSanCheck();
         registerGroupSign();
         registerGetPersonInfo();
-        registerRecord();
         registerSendMsg();
         registerGetContext();
         registerGetList();

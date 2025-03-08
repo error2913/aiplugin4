@@ -1,13 +1,13 @@
 import { AIManager } from "./AI/AI";
 import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
-import { timerQueue } from "./tool/tool_timer";
+import { timerQueue } from "./tool/tool_time";
 import { ConfigManager } from "./config/config";
 import { log } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
 import { getCQTypes } from "./utils/utils_string";
 import { buildSystemMessage } from "./utils/utils_message";
-import { triggerConditionMap } from "./tool/tool_set_trigger_condition";
+import { triggerConditionMap } from "./tool/tool_trigger";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
