@@ -6,7 +6,7 @@ import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_draw_deck"
 import { registerFace } from "./tool_face"
 import { registerGetTime } from "./tool_get_time"
-import { registerCheckAvatar, registerImageToText } from "./tool_image_to_text"
+import { registerCheckAvatar, registerImageToText, registerTextToImage } from "./tool_image"
 import { registerJrrp } from "./tool_jrrp"
 import { registerAddMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
@@ -26,7 +26,6 @@ import { registerGetGroupMemberList, registerGetList } from "./tool_get_list"
 import { registerSearchChat, registerSearchCommonGroup } from "./tool_search_chat"
 import { registerSetTriggerCondition } from "./tool_set_trigger_condition"
 import { registerMusicPlay } from "./tool_music"
-import { registerTextToImage } from "./tool_text_to_image"
 
 export interface ToolInfo {
     type: "function",
@@ -164,6 +163,7 @@ export class ToolManager {
         registerWebSearch();
         registerImageToText();
         registerCheckAvatar();
+        registerTextToImage();
         registerSanCheck();
         registerGroupSign();
         registerGetPersonInfo();
@@ -176,7 +176,6 @@ export class ToolManager {
         registerSearchCommonGroup();
         registerSetTriggerCondition();
         registerMusicPlay();
-        registerTextToImage();
     }
 
     /**
