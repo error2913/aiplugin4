@@ -19,40 +19,40 @@
 ## 目录
 
 - [🎲 AI骰娘4 - SealDice AI插件](#-ai骰娘4---sealdice-ai插件)
-    - [快速开始](#快速开始)
-  - [目录](#目录)
-  - [🌟 核心特性](#-核心特性)
-  - [🛠️ 完整安装指南](#️-完整安装指南)
-    - [环境要求](#环境要求)
-    - [下载](#下载)
-    - [依赖下载](#依赖下载)
-    - [安装](#安装)
-  - [⚙️ 配置手册](#️-配置手册)
-    - [打印日志设置](#打印日志设置)
-    - [基础文本大模型请求设置](#基础文本大模型请求设置)
-    - [基础对话设置](#基础对话设置)
-    - [函数调用设置](#函数调用设置)
-    - [接收消息和触发相关设置](#接收消息和触发相关设置)
-    - [回复相关设置](#回复相关设置)
-    - [图片相关设置](#图片相关设置)
-  - [💻 完整命令手册](#-完整命令手册)
-    - [基础控制命令](#基础控制命令)
-    - [工具管理命令](#工具管理命令)
-    - [记忆管理命令](#记忆管理命令)
-    - [图片相关命令](#图片相关命令)
-    - [管理员命令](#管理员命令)
-    - [token计数（管理员命令）](#token计数管理员命令)
-    - [可用工具函数示例](#可用工具函数示例)
-  - [🚨 注意事项](#-注意事项)
-    - [常见问题处理](#常见问题处理)
-  - [可用AI大模型开放平台列表](#可用ai大模型开放平台列表)
-  - [📜 开发文档](#-开发文档)
-    - [项目结构](#项目结构)
-    - [添加新功能](#添加新功能)
-    - [添加新配置](#添加新配置)
-  - [版权信息](#版权信息)
-  - [致谢](#致谢)
-  - [📞 技术支持](#-技术支持)
+  - [快速开始](#快速开始)
+    - [目录](#目录)
+    - [🌟 核心特性](#-核心特性)
+    - [🛠️ 完整安装指南](#️-完整安装指南)
+  - [环境要求](#环境要求)
+  - [下载](#下载)
+  - [依赖下载](#依赖下载)
+  - [安装](#安装)
+    - [⚙️ 配置手册](#️-配置手册)
+  - [打印日志设置](#打印日志设置)
+  - [基础文本大模型请求设置](#基础文本大模型请求设置)
+  - [基础对话设置](#基础对话设置)
+  - [函数调用设置](#函数调用设置)
+  - [接收消息和触发相关设置](#接收消息和触发相关设置)
+  - [回复相关设置](#回复相关设置)
+  - [图片相关设置](#图片相关设置)
+    - [💻 完整命令手册](#-完整命令手册)
+  - [基础控制命令](#基础控制命令)
+  - [工具管理命令](#工具管理命令)
+  - [记忆管理命令](#记忆管理命令)
+  - [图片相关命令](#图片相关命令)
+  - [管理员命令](#管理员命令)
+  - [token计数（管理员命令）](#token计数管理员命令)
+  - [可用工具函数示例](#可用工具函数示例)
+    - [🚨 注意事项](#-注意事项)
+  - [常见问题处理](#常见问题处理)
+    - [可用AI大模型开放平台列表](#可用ai大模型开放平台列表)
+    - [📜 开发文档](#-开发文档)
+  - [项目结构](#项目结构)
+  - [添加新功能](#添加新功能)
+  - [添加新配置](#添加新配置)
+    - [版权信息](#版权信息)
+    - [致谢](#致谢)
+    - [📞 技术支持](#-技术支持)
 
 ## 🌟 核心特性
 
@@ -78,13 +78,19 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 
 - 通过GitHub下载最新稳定版：[下载链接](https://github.com/baiyu-yu/plug-in/blob/main/aiplugin4.js)
 
-- 通过GitHub下载最新开发版：[下载链接](https://github.com/baiyu-yu/plug-in/blob/main/aiplugin4/dist/aiplugin4.js)
+- 通过GitHub下载最新开发版：[下载链接](https://github.com/error2913/aiplugin4/blob/main/dist/aiplugin4.js)
 
-- 通过GitHub下载后自编译最新开发版：[下载链接](https://github.com/baiyu-yu/plug-in/blob/main/aiplugin4)
+- 通过GitHub下载后自编译最新开发版：
   
-  - 需要node.js环境，在下载后文件夹执行npm install命令安装依赖，执行npm run build命令编译为aiplugin4.js文件,在dist文件夹中可找到
+  - 安装Node.js和npm
+  - ```bash
+    git clone https://github.com/error2913/aiplugin4 # 克隆仓库
+    npm install # 安装依赖
+    npm run build # 编译
+    ```
+  - 在dist文件夹中可找到编译好的aiplugin4.js文件
 
-- 在QQ群中获取插件文件
+- 在QQ群中获取
   
   ### 依赖下载
 
@@ -92,7 +98,9 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 
 - 通过GitHub下载最新版：[http依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)
 
-- 在QQ群中获取插件文件
+- 通过GitHub下载最新版：[AIDrawing依赖插件](https://github.com/baiyu-yu/plug-in/blob/main/AIDrawing.js)
+
+- 在QQ群中获取
 
 ### 安装
 
@@ -135,14 +143,14 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 
 ### 基础对话设置
 
-| 设置项              | 类型  | 默认值           | 说明                                              |
-|:----------------:|:---:|:-------------:|:-----------------------------------------------:|
-| 角色设定             | 模板  | 太长了不粘贴        | ai的扮演设定，按照豹语变量`$g人工智能插件专用角色设定序号`进行选择，序号从0开始，可自行设置自定义回复切换角色设定                                |
-| 示例对话             | 模板  | 请写点什么，或者删掉这句话 | 顺序为用户和AI回复轮流出现，可用于提供扮演示例，位于上下文最前面，不会被上下文机制删除    |
-| 是否在消息内添加前缀       | 布尔  | true          | 添加消息来源，如 from:土豆                                |
-| 是否给AI展示数字号码      | 布尔  | false         | 添加消息来源的数字ID，如 from:土豆(114514)                   |
-| 是否合并user content | 布尔  | false         | 在不支持连续多个role为user的情况下开启，比如 deepseek-reasoner 模型 |
-| 存储上下文对话限制轮数      | 整数  | 10            | 出现一次user视作一轮，超过轮数会遗忘除了示例对话之外最早的对话，越长消耗的token越多  |
+| 设置项              | 类型  | 默认值           | 说明                                                           |
+|:----------------:|:---:|:-------------:|:------------------------------------------------------------:|
+| 角色设定             | 模板  | 太长了不粘贴        | ai的扮演设定，按照豹语变量`$g人工智能插件专用角色设定序号`进行选择，序号从0开始，可自行设置自定义回复切换角色设定 |
+| 示例对话             | 模板  | 请写点什么，或者删掉这句话 | 顺序为用户和AI回复轮流出现，可用于提供扮演示例，位于上下文最前面，不会被上下文机制删除                 |
+| 是否在消息内添加前缀       | 布尔  | true          | 添加消息来源，如 from:土豆                                             |
+| 是否给AI展示数字号码      | 布尔  | false         | 添加消息来源的数字ID，如 from:土豆(114514)                                |
+| 是否合并user content | 布尔  | false         | 在不支持连续多个role为user的情况下开启，比如 deepseek-reasoner 模型              |
+| 存储上下文对话限制轮数      | 整数  | 10            | 出现一次user视作一轮，超过轮数会遗忘除了示例对话之外最早的对话，越长消耗的token越多               |
 
 ---
 
@@ -263,15 +271,16 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 
 ### token计数（管理员命令）
 
-| 命令           | 使用示例                                                                | 说明                                       |
-| `.ai tk lst`   | -  | 查看有使用记录的模型  |
-| `.ai tk sum`   | -  | 查看所有模型的token使用记录总和  |
-| `.ai tk all`   | -  | 查看所有模型的token使用记录，分别列出  |
-| `.ai tk [y/m] (chart)`   | -  | 查看所有模型今年/这个月的token使用记录，chart为使用图表表示  |
-| `.ai tk <模型名称>`   | `.ai tk deepseek-v3` 查看deepseek-v3的token使用量  | 查看模型的token总使用记录  |
-| `.ai tk <模型名称> [y/m] (chart)`   | -  | 查看模型今年/这个月的token使用记录，chart为使用图表表示  |
-| `.ai tk clr`   | -  | 清除token使用记录  |
-| `.ai tk clr <模型名称>`   | -  | 清除指定模型的token使用记录  |
+| 命令                            | 使用示例                                        | 说明                                  |
+|:-----------------------------:|:-------------------------------------------:|:-----------------------------------:|
+| `.ai tk lst`                  | -                                           | 查看有使用记录的模型                          |
+| `.ai tk sum`                  | -                                           | 查看所有模型的token使用记录总和                  |
+| `.ai tk all`                  | -                                           | 查看所有模型的token使用记录，分别列出               |
+| `.ai tk [y/m] (chart)`        | -                                           | 查看所有模型今年/这个月的token使用记录，chart为使用图表表示 |
+| `.ai tk <模型名称>`               | `.ai tk deepseek-v3` 查看deepseek-v3的token使用量 | 查看模型的token总使用记录                     |
+| `.ai tk <模型名称> [y/m] (chart)` | -                                           | 查看模型今年/这个月的token使用记录，chart为使用图表表示   |
+| `.ai tk clr`                  | -                                           | 清除token使用记录                         |
+| `.ai tk clr <模型名称>`           | -                                           | 清除指定模型的token使用记录                    |
 
 ### 可用工具函数示例
 
@@ -302,6 +311,7 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 | cancel_timer          | 取消当前聊天指定定时器              |                                      |
 | web_search            | 搜索引擎搜索                   |                                      |
 | image_to_text         | 图片内容识别，可指定特别关注的内容        | 需要设置视觉大模型相关配置项，需要支持QQ图床的视觉大模型或使用中转插件 |
+| text_to_image         | 生成图片                     | 需要AIDrawing依赖                        |
 | check_avatar          | 查看指定用户头像或群聊头像，可指定特别关注的内容 | 需要设置视觉大模型相关配置项                       |
 | san_check             | San值检定                   |                                      |
 | group_sign            | 发送群打卡                    | 需要http依赖                             |
@@ -313,7 +323,7 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 | get_group_member_list | 查看群聊成员列表                 | 需要http依赖                             |
 | search_chat           | 搜索好友或群聊                  | 需要http依赖                             |
 | search_common_group   | 搜索共同群聊                   | 需要http依赖                             |
-| music_play           | 搜索并播放音乐                   | 需要协议端配置音卡签名                             |
+| music_play            | 搜索并播放音乐                  | 需要协议端配置音卡签名                          |
 
 > 注：部分工具函数需要额外依赖或权限，请在依赖下载一节中获取。
 
@@ -359,76 +369,43 @@ AI骰娘4是一款面向TRPG玩家（吗？）的智能对话插件，基于Open
 aiplugin4/
 ├── src/
 │   ├── config/        # 配置项相关
-│   │   ├── config.ts  # 配置管理
-│   │   ├── config_image.ts  # 图片配置
-│   │   ├── config_log.ts  # 日志配置
-│   │   ├── config_message.ts  # 构建prompt和消息拼接配置
-│   │   ├── config_receive.ts  # 接收消息和触发配置
-│   │   ├── config_reply.ts  # 回复配置
-│   │   ├── config_request.ts  # 基础文本大模型请求配置
-│   │   └── config_tool.ts  # 函数调用配置
+│   │   ├── config.ts  # 配置总管理
+│   │   └── config_...  # 各种配置的相应管理
 │   ├── tools/         # 调用函数扩展
-│   │   ├── tool.ts     # 工具管理
-│   │   ├── tool_attr.ts     # 属性工具
-│   │   ├── tool_ban.ts     # 禁言工具
-│   │   ├── tool_draw_deck.ts     # 抽取牌堆工具
-│   │   ├── tool_face.ts     # 本地表情发送工具
-│   │   ├── tool_get_context.ts     # 查看上下文工具
-│   │   ├── tool_get_list.ts     # 查看QQ相关列表工具
-│   │   ├── tool_get_person_info.ts     # 获取用户信息工具
-│   │   ├── tool_get_time.ts     # 获取当前时间工具
-│   │   ├── tool_group_sign.ts     # 群打卡工具
-│   │   ├── tool_image_to_text.ts     # 图片识别工具
-│   │   ├── tool_jrrp.ts     # 今日人品工具
-│   │   ├── tool_memory.ts     # 记忆工具
-│   │   ├── tool_modu.ts     # 模组工具
-│   │   ├── tool_poke.ts     # 戳戳工具
-│   │   ├── tool_record.ts     # 本地语音发送工具
-│   │   ├── tool_rename.ts     # 修改群名片工具
-│   │   ├── tool_roll_check.ts     # 检定工具
-│   │   ├── tool_san_check.ts     # sc工具
-│   │   ├── tool_search_chat.ts     # QQ相关搜索工具
-│   │   ├── tool_send_msg.ts     # 发送消息工具
-│   │   ├── tool_text_to_sound.ts     # 文字转语音工具
-│   │   ├── tool_timer.ts     # 定时任务工具
-│   │   └── tool_web_search.ts     # 联网搜索工具
+│   │   ├── tool.ts     # 工具总管理
+│   │   └── tool_...     # 各种工具的实现
 │   ├── AI/            # 核心逻辑
 │   │   ├── AI.ts       # 核心AI逻辑
 │   │   ├── context.ts  # 上下文管理
 │   │   ├── memory.ts   # 记忆管理
 │   │   ├── image.ts    # 图片管理
 │   │   └── service.ts  # 服务管理，包括API调用
-│   └── utils/         # 工具函数
-│       ├── utils.ts   # 杂项工具函数
-│       ├── utils_message.ts  # 构建prompt和消息拼接
-│       ├── utils_reply.ts  # 回复处理
-│       ├── utils_seal.ts   # msg和ctx制作
-│       └── utils_string.ts    # 字符串处理
+│   └── utils/         # 各种工具函数
 └── package.json       # 项目依赖
 ```
 
 ### 添加新功能
 
-1. 在`src/tools/`目录下创建新文件，文件命名格式为`tool_xxx.ts`(也可直接在有关文件内添加新功能)
+1. 在`src/tools/`目录下创建新文件，文件命名格式为`tool_xxx.ts`(也可直接在有关文件内添加新功能，避免文件过多导致难以管理)
 
 2. 实现工具接口，示例：
    
    ```typescript
    import { Tool, ToolInfo, ToolManager } from "./tool";
    
-   export function registerGetTime() {
+   export function registerSayHi() {
        // 用JSON Schema标准填写tool info，以提供给AI
        const info: ToolInfo = {
            type: "function",
            function: {
-               name: "get_time",
-               description: `获取当前时间`,
+               name: "say_hi",
+               description: `打招呼`,
                parameters: {
                    type: "object",
                    properties: {
                        arg1: {
                            type: 'string',
-                           description: '喵喵喵'
+                           description: '说点什么'
                        }
                    },
                    required: ['arg1'] // 必需参数
@@ -439,7 +416,8 @@ aiplugin4/
        const tool = new Tool(info); // 创建一个新tool
        tool.solve = async (ctx, msg, ai, args) => { // 实现方法，返回字符串提供给AI
            const { arg1 } = args; // 解构获取AI提供的参数
-           return new Date().toLocaleString();
+   
+           return `你好，${arg1}`;
        }
    
        // 注册到toolMap中
@@ -451,13 +429,13 @@ aiplugin4/
    
    ```typescript
    // 打开src/tool/tool.ts，导入你写的注册函数
-   import { registerGetTime } from "./tool_get_time"
+   import { registerSayHi } from "./tool_say_hi"
    
    export class ToolManager {
        // ...
        static registerTool() {
            // ...
-           registerGetTime(); // 添加到registerTool函数中
+           registerSayHi(); // 添加到registerTool函数中
        }
    }
    ```
@@ -473,14 +451,18 @@ aiplugin4/
    ```typescript
    import { ConfigManager } from "./config";
    
-   export class LogConfig {
+   export class NewConfig {
+       static ext: seal.ExtInfo; // 配置项对应的扩展信息
+   
        static register() {
-           seal.ext.registerBoolConfig(ConfigManager.ext, "是否打印日志细节", true, "");
+           NewConfig.ext = ConfigManager.getExt('aiplugin4_999:新的配置'); // 初始化扩展信息
+   
+           seal.ext.registerBoolConfig(ConfigManager.ext, "对吗？", true, "对的对的");
        }
    
        static get() {
            return {
-               isLog: seal.ext.getBoolConfig(ConfigManager.ext, "是否打印日志细节")
+               isLog: seal.ext.getBoolConfig(ConfigManager.ext, "对吗？")
            }
        }
    }
@@ -490,16 +472,16 @@ aiplugin4/
    
    ```typescript
    // 打开src/config/config.ts，导入你写的类
-   import { LogConfig } from "./config_log";
+   import { NewConfig } from "./config_new";
    
    export class ConfigManager {
        // ...
        static registerConfig() {
            // ...
-           LogConfig.register(); // 添加你的注册函数
+           NewConfig.register(); // 添加你的注册函数
        }
        // ..
-       static get log() { return this.getCache('log', LogConfig.get) } // 添加你的get方法
+       static get yourNewConfig() { return this.getCache('yourNewConfig', newConfig.get) } // 添加你的get方法
    }
    ```
    
@@ -524,7 +506,7 @@ Permission is hereby granted...
 
 ## 📞 技术支持
 
-- GitHub Issues: [问题提交](https://github.com/baiyu-yu/plug-in/issues)
+- GitHub Issues: [问题提交](https://github.com/error2913/aiplugin4/issues)
 - QQ交流群: 940049120
 
 > "才、才不是专门给你写的文档呢！只是...只是顺便而已！(///ω///)" —— 正确·改
