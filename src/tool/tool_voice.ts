@@ -4,6 +4,9 @@ import { Tool, ToolInfo, ToolManager } from "./tool";
 export function registerRecord() {
     const { recordPaths } = ConfigManager.tool;
     const records: { [key: string]: string } = recordPaths.reduce((acc: { [key: string]: string }, path: string) => {
+        if (path.trim() === '') {
+            return acc;
+        }
         try {
             const name = path.split('/').pop().split('.')[0];
             if (!name) {

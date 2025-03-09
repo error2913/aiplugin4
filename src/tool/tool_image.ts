@@ -5,6 +5,9 @@ import { Tool, ToolInfo, ToolManager } from "./tool";
 export function registerFace() {
     const { localImagePaths } = ConfigManager.image;
     const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
+        if (path.trim() === '') {
+            return acc;
+        }
         try {
             const name = path.split('/').pop().split('.')[0];
             if (!name) {
