@@ -1,31 +1,8 @@
 # CHANGELOG
 
-## Unreleased
+## [v4.6.0](https://github.com/error2913/aiplugin4/releases/tag/v4.6.0) - 2025-03-09 09:58:57
 
-*No description*
-
-### Feature
-
-- general:
-  - 增加流式输出 (#7) ([ba8f689](https://github.com/error2913/aiplugin4/commit/ba8f689a9e39880bf01feee9afafb93bb672b46f)) ([#7](https://github.com/error2913/aiplugin4/pull/7))
-  - 移除需要使用尖括号来获取名字，改为从路径中解析 (#6) ([f6841a3](https://github.com/error2913/aiplugin4/commit/f6841a327dae45657885cef6711a3542ff30470c)) ([#6](https://github.com/error2913/aiplugin4/pull/6))
-  - add tti (#3) ([782b924](https://github.com/error2913/aiplugin4/commit/782b924803788035420621b6859c124486d70520))
-
-### Bug Fixes
-
-- general:
-  - 修复不填写路径时会抛出错误的问题 ([6f10ba1](https://github.com/error2913/aiplugin4/commit/6f10ba1d52e1db3f5a088ff477677c98bcbf27df))
-
-### Documentation
-
-- general:
-  - 信息更新 ([7f84333](https://github.com/error2913/aiplugin4/commit/7f8433365e2ac7f88071a697021da22e380965b3))
-  - update ([3fe9c49](https://github.com/error2913/aiplugin4/commit/3fe9c493a84ad66bd4d5a643c0b46b161293bf96)) ([#4](https://github.com/error2913/aiplugin4/pull/4))
-
-### Refactor
-
-- general:
-  - 合并与重命名tool文件 (#5) ([2c42a20](https://github.com/error2913/aiplugin4/commit/2c42a2052455070d100719096bf91661abc34bda))
+# CHANGELOG
 
 ## [v4.5.14](https://github.com/error2913/aiplugin4/releases/tag/v4.5.14) - 2025-03-08 09:11:13
 
