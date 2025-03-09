@@ -7,24 +7,20 @@ on:
         description: '版本号'
         required: true
         default: '1.0.0'
+      changelog:
+        description: '更新日志'
+        required: true
+        default: 'Initial release'
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -37,38 +33,19 @@ jobs:
       - name: Build project
         run: npm run build
 
-      - name: Generate CHANGELOG
-        uses: BobAnkh/auto-generate-changelog@v1.2.5
-        with:
-          REPO_NAME: ${{ github.repository }}
-          ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PATH: 'CHANGELOG.md'
-          COMMIT_MESSAGE: 'docs(CHANGELOG): update release notes'
-          TYPE: 'feat:新增功能或特性,fix:修复,refactor:重构,perf:优化'
-          UNRELEASED_COMMITS: true
-
-      - name: Create Local Git Tag
+      - name: Create Git Tag
         run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           TAG_NAME="v${{ github.event.inputs.version }}"
+          echo "Creating tag: $TAG_NAME"
           git tag $TAG_NAME
-
-      - name: Prepare Release Notes
-        run: |
-          VERSION="v${{ github.event.inputs.version }}"
-          awk -v version="## [$VERSION]" 'BEGIN {print_flag=0} $0 ~ version {print_flag=1; next} /^## / && print_flag {exit} print_flag' CHANGELOG.md > release_notes.md
-
-      - name: Pull Latest Changes
-        run: git pull origin main --rebase  # 关键修复：同步远程
-
-      - name: Push Changes with Tag
-        run: |
-          git push origin main
-          git push origin "v${{ github.event.inputs.version }}"
+          git push origin $TAG_NAME
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2.0.8
         with:
           tag_name: "v${{ github.event.inputs.version }}"
           name: "Release v${{ github.event.inputs.version }}"
-          body_path: release_notes.md
+          body: ${{ github.event.inputs.changelog }}
           files: dist/*
