@@ -92,7 +92,7 @@ export async function sendITTRequest(messages: {
             const model = data.model;
             const usage = data.usage;
             AIManager.updateUsage(model, usage);
-            
+
             const message = data.choices[0].message;
             const reply = message.content;
 
@@ -174,13 +174,11 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
     return data;
 }
 
-const baseUrl = 'http://localhost:3010';
-
 export async function start_stream(messages: {
     role: string,
     content: string
 }[]) {
-    const { url, apiKey, bodyTemplate } = ConfigManager.request;
+    const { url, apiKey, bodyTemplate, streamUrl } = ConfigManager.request;
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, null, null);
@@ -196,7 +194,7 @@ export async function start_stream(messages: {
         });
         log(`请求发送前的上下文:\n`, s);
 
-        const response = await fetch(`${baseUrl}/start`, {
+        const response = await fetch(`${streamUrl}/start`, {
             method: 'POST',
             headers: {
                 "Content-Type": "application/json",
@@ -239,8 +237,10 @@ export async function start_stream(messages: {
 }
 
 export async function poll_stream(id: string, after: number) {
+    const { streamUrl } = ConfigManager.request;
+
     try {
-        const response = await fetch(`${baseUrl}/poll?id=${id}&after=${after}`, {
+        const response = await fetch(`${streamUrl}/poll?id=${id}&after=${after}`, {
             method: 'GET',
             headers: {
                 "Accept": "application/json"
@@ -278,8 +278,10 @@ export async function poll_stream(id: string, after: number) {
 }
 
 export async function end_stream(id: string) {
+    const { streamUrl } = ConfigManager.request;
+
     try {
-        const response = await fetch(`${baseUrl}/end?id=${id}`, {
+        const response = await fetch(`${streamUrl}/end?id=${id}`, {
             method: 'GET',
             headers: {
                 "Accept": "application/json"
