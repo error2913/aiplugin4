@@ -16,7 +16,7 @@
   var ImageConfig = class _ImageConfig {
     static register() {
       _ImageConfig.ext = ConfigManager.getExt("aiplugin4_5:图片");
-      seal.ext.registerTemplateConfig(_ImageConfig.ext, "本地图片路径", ["<海豹>data/images/sealdice.png"], "如不需要可以不填写，尖括号内是图片的名称，便于AI调用，修改完需要重载js");
+      seal.ext.registerTemplateConfig(_ImageConfig.ext, "本地图片路径", ["data/images/sealdice.png"], "如不需要可以不填写，修改完需要重载js");
       seal.ext.registerStringConfig(_ImageConfig.ext, "图片识别需要满足的条件", "1", "使用豹语表达式，例如：$t群号_RAW=='2001'");
       seal.ext.registerIntConfig(_ImageConfig.ext, "发送图片的概率/%", 100);
       seal.ext.registerStringConfig(_ImageConfig.ext, "图片大模型URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
@@ -34,7 +34,7 @@
     }
     static get() {
       return {
-        localImagesTemplate: seal.ext.getTemplateConfig(_ImageConfig.ext, "本地图片路径"),
+        localImagePaths: seal.ext.getTemplateConfig(_ImageConfig.ext, "本地图片路径"),
         condition: seal.ext.getStringConfig(_ImageConfig.ext, "图片识别需要满足的条件"),
         p: seal.ext.getIntConfig(_ImageConfig.ext, "发送图片的概率/%"),
         url: seal.ext.getStringConfig(_ImageConfig.ext, "图片大模型URL"),
@@ -253,7 +253,7 @@
         "书香少女",
         "自定义"
       ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg");
-      seal.ext.registerTemplateConfig(_ToolConfig.ext, "本地语音路径", ["<钢管落地>data/records/钢管落地.mp3"], "如不需要可以不填写，尖括号内是语音的名称，便于AI调用，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中");
+      seal.ext.registerTemplateConfig(_ToolConfig.ext, "本地语音路径", ["data/records/钢管落地.mp3"], "如不需要可以不填写，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中");
     }
     static get() {
       return {
@@ -264,7 +264,7 @@
         memoryLimit: seal.ext.getIntConfig(_ToolConfig.ext, "长期记忆上限"),
         decks: seal.ext.getTemplateConfig(_ToolConfig.ext, "提供给AI的牌堆名称"),
         character: seal.ext.getOptionConfig(_ToolConfig.ext, "ai语音使用的音色"),
-        recordsTemplate: seal.ext.getTemplateConfig(_ToolConfig.ext, "本地语音路径")
+        recordPaths: seal.ext.getTemplateConfig(_ToolConfig.ext, "本地语音路径")
       };
     }
   };
@@ -632,7 +632,7 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_draw_deck.ts
+  // src/tool/tool_deck.ts
   function registerDrawDeck() {
     const { decks } = ConfigManager.tool;
     const info = {
@@ -671,14 +671,18 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_face.ts
+  // src/tool/tool_image.ts
   function registerFace() {
-    const { localImagesTemplate } = ConfigManager.image;
-    const localImages = localImagesTemplate.reduce((acc, item) => {
-      const match = item.match(/<(.+)>.*/);
-      if (match !== null) {
-        const key = match[1];
-        acc[key] = item.replace(/<.*>/g, "");
+    const { localImagePaths } = ConfigManager.image;
+    const localImages = localImagePaths.reduce((acc, path) => {
+      try {
+        const name = path.split("/").pop().split(".")[0];
+        if (!name) {
+          throw new Error(`本地图片路径格式错误:${path}`);
+        }
+        acc[name] = path;
+      } catch (e) {
+        console.error(e);
       }
       return acc;
     }, {});
@@ -715,29 +719,6 @@ ${attr}: ${value}=>${result}`;
     };
     ToolManager.toolMap[info.function.name] = tool;
   }
-
-  // src/tool/tool_get_time.ts
-  function registerGetTime() {
-    const info = {
-      type: "function",
-      function: {
-        name: "get_time",
-        description: `获取当前时间`,
-        parameters: {
-          type: "object",
-          properties: {},
-          required: []
-        }
-      }
-    };
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ___, ____) => {
-      return (/* @__PURE__ */ new Date()).toLocaleString();
-    };
-    ToolManager.toolMap[info.function.name] = tool;
-  }
-
-  // src/tool/tool_image_to_text.ts
   function registerImageToText() {
     const info = {
       type: "function",
@@ -830,6 +811,46 @@ ${attr}: ${value}=>${result}`;
         return reply;
       } else {
         return "头像识别失败";
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
+  function registerTextToImage() {
+    const info = {
+      type: "function",
+      function: {
+        name: "text_to_image",
+        description: "通过文字描述生成图像",
+        parameters: {
+          type: "object",
+          properties: {
+            prompt: {
+              type: "string",
+              description: "图像描述"
+            },
+            negative_prompt: {
+              type: "string",
+              description: "不希望图片中出现的内容描述"
+            }
+          },
+          required: ["prompt"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, _, args) => {
+      const { prompt, negative_prompt } = args;
+      const ext = seal.ext.find("AIDrawing");
+      if (!ext) {
+        console.error(`未找到AIDrawing依赖`);
+        return `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`;
+      }
+      try {
+        await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
+        return `图像生成请求已发送`;
+      } catch (e) {
+        console.error(`图像生成失败：${e}`);
+        return `图像生成失败：${e}`;
       }
     };
     ToolManager.toolMap[info.function.name] = tool;
@@ -1225,8 +1246,6 @@ ${attr}: ${value}=>${result}`;
     };
     ToolManager.toolMap[info.function.name] = tool;
   }
-
-  // src/tool/tool_san_check.ts
   function registerSanCheck() {
     const info = {
       type: "function",
@@ -1281,8 +1300,27 @@ ${attr}: ${value}=>${result}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_timer.ts
+  // src/tool/tool_time.ts
   var timerQueue = [];
+  function registerGetTime() {
+    const info = {
+      type: "function",
+      function: {
+        name: "get_time",
+        description: `获取当前时间`,
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (_, __, ___, ____) => {
+      return (/* @__PURE__ */ new Date()).toLocaleString();
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
   function registerSetTimer() {
     const info = {
       type: "function",
@@ -1409,7 +1447,54 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_text_to_sound.ts
+  // src/tool/tool_voice.ts
+  function registerRecord() {
+    const { recordPaths } = ConfigManager.tool;
+    const records = recordPaths.reduce((acc, path) => {
+      try {
+        const name = path.split("/").pop().split(".")[0];
+        if (!name) {
+          throw new Error(`本地语音路径格式错误:${path}`);
+        }
+        acc[name] = path;
+      } catch (e) {
+        console.error(e);
+      }
+      return acc;
+    }, {});
+    if (Object.keys(records).length === 0) {
+      return;
+    }
+    const info = {
+      type: "function",
+      function: {
+        name: "record",
+        description: `发送语音，语音名称有:${Object.keys(records).join("、")}`,
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "语音名称"
+            }
+          },
+          required: ["name"]
+        }
+      }
+    };
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, _, args) => {
+      const { name } = args;
+      if (records.hasOwnProperty(name)) {
+        seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
+        return "发送成功";
+      } else {
+        console.error(`本地语音${name}不存在`);
+        return `本地语音${name}不存在`;
+      }
+    };
+    ToolManager.toolMap[info.function.name] = tool;
+  }
   var characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
     "猴哥": "lucy-voice-houge",
@@ -1605,7 +1690,7 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_get_person_info.ts
+  // src/tool/tool_person_info.ts
   var constellations = ["水瓶座", "双鱼座", "白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座"];
   var shengXiao = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
   function registerGetPersonInfo() {
@@ -1677,51 +1762,6 @@ QQ等级: ${data.qqLevel}
       } catch (e) {
         console.error(e);
         return `获取用户信息失败`;
-      }
-    };
-    ToolManager.toolMap[info.function.name] = tool;
-  }
-
-  // src/tool/tool_record.ts
-  function registerRecord() {
-    const { recordsTemplate } = ConfigManager.tool;
-    const records = recordsTemplate.reduce((acc, item) => {
-      const match = item.match(/<(.+)>.*/);
-      if (match !== null) {
-        const key = match[1];
-        acc[key] = item.replace(/<.*>/g, "");
-      }
-      return acc;
-    }, {});
-    if (Object.keys(records).length === 0) {
-      return;
-    }
-    const info = {
-      type: "function",
-      function: {
-        name: "record",
-        description: `发送语音，语音名称有:${Object.keys(records).join("、")}`,
-        parameters: {
-          type: "object",
-          properties: {
-            name: {
-              type: "string",
-              description: "语音名称"
-            }
-          },
-          required: ["name"]
-        }
-      }
-    };
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, args) => {
-      const { name } = args;
-      if (records.hasOwnProperty(name)) {
-        seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
-        return "发送成功";
-      } else {
-        console.error(`本地语音${name}不存在`);
-        return `本地语音${name}不存在`;
       }
     };
     ToolManager.toolMap[info.function.name] = tool;
@@ -2048,7 +2088,7 @@ QQ等级: ${data.qqLevel}
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_get_context.ts
+  // src/tool/tool_context.ts
   function registerGetContext() {
     const info = {
       type: "function",
@@ -2125,7 +2165,7 @@ QQ等级: ${data.qqLevel}
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_get_list.ts
+  // src/tool/tool_qq_list.ts
   function registerGetList() {
     const info = {
       type: "function",
@@ -2245,8 +2285,6 @@ QQ等级: ${data.qqLevel}
     };
     ToolManager.toolMap[info.function.name] = tool;
   }
-
-  // src/tool/tool_search_chat.ts
   function registerSearchChat() {
     const info = {
       type: "function",
@@ -2380,7 +2418,7 @@ QQ等级: ${data.qqLevel}
     ToolManager.toolMap[info.function.name] = tool;
   }
 
-  // src/tool/tool_set_trigger_condition.ts
+  // src/tool/tool_trigger.ts
   var triggerConditionMap = {};
   function registerSetTriggerCondition() {
     const info = {
@@ -2595,11 +2633,11 @@ QQ等级: ${data.qqLevel}
       registerAddMemory();
       registerShowMemory();
       registerDrawDeck();
-      registerFace();
       registerJrrp();
       registerModuRoll();
       registerModuSearch();
       registerRollCheck();
+      registerSanCheck();
       registerRename();
       registerAttrShow();
       registerAttrGet();
@@ -2607,6 +2645,7 @@ QQ等级: ${data.qqLevel}
       registerBan();
       registerWholeBan();
       registerGetBanList();
+      registerRecord();
       registerTextToSound();
       registerPoke();
       registerGetTime();
@@ -2614,12 +2653,12 @@ QQ等级: ${data.qqLevel}
       registerShowTimerList();
       registerCancelTimer();
       registerWebSearch();
+      registerFace();
       registerImageToText();
       registerCheckAvatar();
-      registerSanCheck();
+      registerTextToImage();
       registerGroupSign();
       registerGetPersonInfo();
-      registerRecord();
       registerSendMsg();
       registerGetContext();
       registerGetList();
@@ -3104,12 +3143,16 @@ ${memeryPrompt}`;
       this.imageList = this.imageList.concat(images.filter((item) => item.isUrl)).slice(-maxImageNum);
     }
     drawLocalImageFile() {
-      const { localImagesTemplate } = ConfigManager.image;
-      const localImages = localImagesTemplate.reduce((acc, item) => {
-        const match = item.match(/<(.+)>.*/);
-        if (match !== null) {
-          const key = match[1];
-          acc[key] = item.replace(/<.*>/g, "");
+      const { localImagePaths } = ConfigManager.image;
+      const localImages = localImagePaths.reduce((acc, path) => {
+        try {
+          const name = path.split("/").pop().split(".")[0];
+          if (!name) {
+            throw new Error(`本地图片路径格式错误:${path}`);
+          }
+          acc[name] = path;
+        } catch (e) {
+          console.error(e);
         }
         return acc;
       }, {});
@@ -3134,12 +3177,16 @@ ${memeryPrompt}`;
       return url;
     }
     async drawImageFile() {
-      const { localImagesTemplate } = ConfigManager.image;
-      const localImages = localImagesTemplate.reduce((acc, item) => {
-        const match = item.match(/<(.+)>.*/);
-        if (match !== null) {
-          const key = match[1];
-          acc[key] = item.replace(/<.*>/g, "");
+      const { localImagePaths } = ConfigManager.image;
+      const localImages = localImagePaths.reduce((acc, path) => {
+        try {
+          const name = path.split("/").pop().split(".")[0];
+          if (!name) {
+            throw new Error(`本地图片路径格式错误:${path}`);
+          }
+          acc[name] = path;
+        } catch (e) {
+          console.error(e);
         }
         return acc;
       }, {});

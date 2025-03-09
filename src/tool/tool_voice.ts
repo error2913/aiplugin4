@@ -2,12 +2,17 @@ import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerRecord() {
-    const { recordsTemplate } = ConfigManager.tool;
-    const records: { [key: string]: string } = recordsTemplate.reduce((acc: { [key: string]: string }, item: string) => {
-        const match = item.match(/<(.+)>.*/);
-        if (match !== null) {
-            const key = match[1];
-            acc[key] = item.replace(/<.*>/g, '');
+    const { recordPaths } = ConfigManager.tool;
+    const records: { [key: string]: string } = recordPaths.reduce((acc: { [key: string]: string }, path: string) => {
+        try {
+            const name = path.split('/').pop().split('.')[0];
+            if (!name) {
+                throw new Error(`本地语音路径格式错误:${path}`);
+            }
+
+            acc[name] = path;
+        } catch (e) {
+            console.error(e);
         }
         return acc;
     }, {});

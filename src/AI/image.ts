@@ -44,12 +44,17 @@ export class ImageManager {
     }
 
     drawLocalImageFile(): string {
-        const { localImagesTemplate } = ConfigManager.image;
-        const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
-            const match = item.match(/<(.+)>.*/);
-            if (match !== null) {
-                const key = match[1];
-                acc[key] = item.replace(/<.*>/g, '');
+        const { localImagePaths } = ConfigManager.image;
+        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
+            try {
+                const name = path.split('/').pop().split('.')[0];
+                if (!name) {
+                    throw new Error(`本地图片路径格式错误:${path}`);
+                }
+    
+                acc[name] = path;
+            } catch (e) {
+                console.error(e);
             }
             return acc;
         }, {});
@@ -80,12 +85,17 @@ export class ImageManager {
     }
 
     async drawImageFile(): Promise<string> {
-        const { localImagesTemplate } = ConfigManager.image;
-        const localImages: { [key: string]: string } = localImagesTemplate.reduce((acc: { [key: string]: string }, item: string) => {
-            const match = item.match(/<(.+)>.*/);
-            if (match !== null) {
-                const key = match[1];
-                acc[key] = item.replace(/<.*>/g, '');
+        const { localImagePaths } = ConfigManager.image;
+        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
+            try {
+                const name = path.split('/').pop().split('.')[0];
+                if (!name) {
+                    throw new Error(`本地图片路径格式错误:${path}`);
+                }
+    
+                acc[name] = path;
+            } catch (e) {
+                console.error(e);
             }
             return acc;
         }, {});
