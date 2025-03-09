@@ -12,7 +12,7 @@ import { triggerConditionMap } from "./tool/tool_trigger";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.5.14');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.6.0');
     seal.ext.register(ext);
   }
 
