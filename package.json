@@ -1,11 +1,11 @@
 {
-  "name": "a-long-story",
+  "name": "aiplugin4",
   "version": "1.0.0",
-  "description": "once upon a time, ...",
+  "description": "ai plugin for sealdice",
   "main": "build/index.js",
   "typings": "build/index.d.ts",
-  "repository": "https://github.com/sealdice/seal-swordworld",
-  "license": "Apache-2.0",
+  "repository": "https://github.com/error2913/aiplugin4",
+  "license": "MIT",
   "keywords": [],
   "scripts": {
     "build": "cross-env NODE_ENV=production node tools/build.js",
