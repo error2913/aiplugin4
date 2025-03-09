@@ -1,9 +1,5 @@
 # CHANGELOG
 
-## [v4.6.0](https://github.com/error2913/aiplugin4/releases/tag/v4.6.0) - 2025-03-09 09:58:57
-
-# CHANGELOG
-
 ## [v4.5.14](https://github.com/error2913/aiplugin4/releases/tag/v4.5.14) - 2025-03-08 09:11:13
 
 这是一个release
