@@ -7,10 +7,6 @@ on:
         description: '版本号'
         required: true
         default: '1.0.0'
-      changelog:
-        description: '更新日志'
-        required: true
-        default: 'Initial release'
 
 jobs:
   release:
@@ -33,6 +29,16 @@ jobs:
       - name: Build project
         run: npm run build
 
+      - name: Generate CHANGELOG
+        uses: BobAnkh/auto-generate-changelog@v1.2.5
+        with:
+          REPO_NAME: ${{ github.repository }}
+          ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATH: 'CHANGELOG.md'
+          COMMIT_MESSAGE: 'docs(CHANGELOG): update release notes'
+          TYPE: 'feat:Feature,fix:Bug Fixes,docs:Documentation,refactor:Refactor,perf:Performance Improvements'
+          UNRELEASED_COMMITS: true
+
       - name: Create Git Tag
         run: |
           git config --global user.name "github-actions[bot]"
@@ -47,5 +53,5 @@ jobs:
         with:
           tag_name: "v${{ github.event.inputs.version }}"
           name: "Release v${{ github.event.inputs.version }}"
-          body: ${{ github.event.inputs.changelog }}
+          body_path: CHANGELOG.md
           files: dist/*
