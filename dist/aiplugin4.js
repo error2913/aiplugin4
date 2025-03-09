@@ -22,12 +22,11 @@
       seal.ext.registerStringConfig(_ImageConfig.ext, "图片大模型URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
       seal.ext.registerStringConfig(_ImageConfig.ext, "图片API key", "yours");
       seal.ext.registerTemplateConfig(_ImageConfig.ext, "图片body", [
-        `"messages":null`,
         `"model":"glm-4v"`,
         `"max_tokens":20`,
         `"stop":null`,
         `"stream":false`
-      ], "messages将会自动替换");
+      ], "messages不存在时，将会自动替换");
       seal.ext.registerOptionConfig(_ImageConfig.ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题");
       seal.ext.registerIntConfig(_ImageConfig.ext, "图片最大回复字符数", 100);
       seal.ext.registerIntConfig(_ImageConfig.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
@@ -188,19 +187,15 @@
       seal.ext.registerStringConfig(_RequestConfig.ext, "url地址", "https://api.deepseek.com/v1/chat/completions", "");
       seal.ext.registerStringConfig(_RequestConfig.ext, "API Key", "你的API Key", "");
       seal.ext.registerTemplateConfig(_RequestConfig.ext, "body", [
-        `"messages":null`,
         `"model":"deepseek-chat"`,
         `"max_tokens":70`,
         `"stop":null`,
         `"stream":false`,
-        `"response_format":{"type":"text"}`,
         `"frequency_penalty":0`,
         `"presence_penalty":0`,
         `"temperature":1`,
-        `"top_p":1`,
-        `"tools":null`,
-        `"tool_choice":null`
-      ], "messages,tools,tool_choice为null时，将会自动替换。具体参数请参考你所使用模型的接口文档");
+        `"top_p":1`
+      ], "messages,tools,tool_choice不存在时，将会自动替换。具体参数请参考你所使用模型的接口文档");
     }
     static get() {
       return {
@@ -348,6 +343,41 @@
     const timestamp = Date.now().toString(36);
     const random = Math.random().toString(36).substring(2, 6);
     return (timestamp + random).slice(-6);
+  }
+  function parseBody(template, messages, tools, tool_choice) {
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
+    const bodyObject = {};
+    for (let i = 0; i < template.length; i++) {
+      const s = template[i];
+      if (s.trim() === "") {
+        continue;
+      }
+      try {
+        const obj = JSON.parse(`{${s}}`);
+        const key = Object.keys(obj)[0];
+        bodyObject[key] = obj[key];
+      } catch (err) {
+        throw new Error(`解析body的【${s}】时出现错误:${err}`);
+      }
+    }
+    if (!bodyObject.hasOwnProperty("messages")) {
+      bodyObject.messages = messages;
+    }
+    if (!bodyObject.hasOwnProperty("model")) {
+      throw new Error(`body中没有model`);
+    }
+    if (isTool && !usePromptEngineering) {
+      if (!bodyObject.hasOwnProperty("tools")) {
+        bodyObject.tools = tools;
+      }
+      if (!bodyObject.hasOwnProperty("tool_choice")) {
+        bodyObject.tool_choice = tool_choice;
+      }
+    } else {
+      bodyObject == null ? true : delete bodyObject.tools;
+      bodyObject == null ? true : delete bodyObject.tool_choice;
+    }
+    return bodyObject;
   }
 
   // src/utils/utils_seal.ts
@@ -3077,41 +3107,122 @@ ${memeryPrompt}`;
     }
     return data;
   }
-  function parseBody(template, messages, tools, tool_choice) {
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
-    const bodyObject = {};
-    for (let i = 0; i < template.length; i++) {
-      const s = template[i];
-      if (s.trim() === "") {
-        continue;
+  var baseUrl = "http://localhost:3010";
+  async function start_stream(messages) {
+    const { url, apiKey, bodyTemplate } = ConfigManager.request;
+    try {
+      const bodyObject = parseBody(bodyTemplate, messages, null, null);
+      const s = JSON.stringify(bodyObject.messages, (key, value) => {
+        if (key === "" && Array.isArray(value)) {
+          return value.filter((item) => {
+            return item.role !== "system";
+          });
+        }
+        return value;
+      });
+      log(`请求发送前的上下文:
+`, s);
+      const response = await fetch(`${baseUrl}/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          url,
+          api_key: apiKey,
+          body_obj: bodyObject
+        })
+      });
+      console.log("响应体", JSON.stringify(response, null, 2));
+      const data = await response.json();
+      if (!response.ok) {
+        let s2 = `请求失败! 状态码: ${response.status}`;
+        if (data.error) {
+          s2 += `
+错误信息: ${data.error.message}`;
+        }
+        s2 += `
+响应体: ${JSON.stringify(data, null, 2)}`;
+        throw new Error(s2);
       }
-      try {
-        const obj = JSON.parse(`{${s}}`);
-        const key = Object.keys(obj)[0];
-        bodyObject[key] = obj[key];
-      } catch (err) {
-        throw new Error(`解析body的【${s}】时出现错误:${err}`);
+      if (data.id) {
+        const id = data.id;
+        return id;
+      } else {
+        throw new Error("服务器响应中没有id字段");
       }
+    } catch (error) {
+      console.error("在start_completion中出错：", error);
+      return "";
     }
-    if ((bodyObject == null ? void 0 : bodyObject.messages) === null) {
-      bodyObject.messages = messages;
-    }
-    if ((bodyObject == null ? void 0 : bodyObject.stream) !== false) {
-      console.error(`不支持流式传输，请将stream设置为false`);
-      bodyObject.stream = false;
-    }
-    if (isTool && !usePromptEngineering) {
-      if ((bodyObject == null ? void 0 : bodyObject.tools) === null) {
-        bodyObject.tools = tools;
+  }
+  async function poll_stream(id, after) {
+    try {
+      const response = await fetch(`${baseUrl}/poll?id=${id}&after=${after}`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        let s = `请求失败! 状态码: ${response.status}`;
+        if (data.error) {
+          s += `
+错误信息: ${data.error.message}`;
+        }
+        s += `
+响应体: ${JSON.stringify(data, null, 2)}`;
+        throw new Error(s);
       }
-      if ((bodyObject == null ? void 0 : bodyObject.tool_choice) === null) {
-        bodyObject.tool_choice = tool_choice;
+      if (data.status) {
+        const status = data.status;
+        const reply = data.results.join("");
+        const nextAfter = data.next_after;
+        return { status, reply, nextAfter };
+      } else {
+        throw new Error("服务器响应中没有status字段");
       }
-    } else {
-      bodyObject == null ? true : delete bodyObject.tools;
-      bodyObject == null ? true : delete bodyObject.tool_choice;
+    } catch (error) {
+      console.error("在start_completion中出错：", error);
+      return { status: "failed", reply: "", nextAfter: 0 };
     }
-    return bodyObject;
+  }
+  async function end_stream(id) {
+    try {
+      const response = await fetch(`${baseUrl}/end?id=${id}`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        let s = `请求失败! 状态码: ${response.status}`;
+        if (data.error) {
+          s += `
+错误信息: ${data.error.message}`;
+        }
+        s += `
+响应体: ${JSON.stringify(data, null, 2)}`;
+        throw new Error(s);
+      }
+      if (data.status) {
+        const status = data.status;
+        if (status === "success") {
+          log(`对话结束成功`);
+        } else {
+          log(`对话结束失败`);
+        }
+        return status;
+      } else {
+        throw new Error("服务器响应中没有status字段");
+      }
+    } catch (error) {
+      console.error("在start_completion中出错：", error);
+      return "";
+    }
   }
 
   // src/AI/image.ts
@@ -3707,6 +3818,7 @@ ${memeryPrompt}`;
         content: ""
       };
       this.isChatting = false;
+      this.streamId = "";
     }
     static reviver(value, id) {
       const ai = new _AI(id);
@@ -3741,6 +3853,12 @@ ${memeryPrompt}`;
       return { s, reply, images };
     }
     async chat(ctx, msg) {
+      const bodyTemplate = ConfigManager.request.bodyTemplate;
+      const bodyObject = parseBody(bodyTemplate, [], null, null);
+      if ((bodyObject == null ? void 0 : bodyObject.stream) === true) {
+        await this.chatStream(ctx, msg);
+        return;
+      }
       if (this.isChatting) {
         log(this.id, `正在处理消息，跳过`);
         return;
@@ -3764,6 +3882,36 @@ ${memeryPrompt}`;
       }
       clearTimeout(timeout);
       this.isChatting = false;
+    }
+    async chatStream(ctx, msg) {
+      if (this.streamId) {
+        await end_stream(this.streamId);
+        this.streamId = "";
+      }
+      this.clearData();
+      const messages = handleMessages(ctx, this);
+      this.streamId = await start_stream(messages);
+      let status = "processing";
+      let allStr = "";
+      const allImages = [];
+      let after = 0;
+      while (status == "processing") {
+        const result = await poll_stream(this.streamId, after);
+        status = result.status;
+        after = result.nextAfter;
+        const raw_reply = result.reply;
+        if (raw_reply.trim() !== "") {
+          const { s: s2, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
+          allStr += s2;
+          allImages.push(...images);
+          seal.replyToSender(ctx, msg, reply);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1e3));
+      }
+      await end_stream(this.streamId);
+      const { s } = await handleReply(ctx, msg, allStr, this.context);
+      await this.context.iteration(ctx, s, allImages, "assistant");
+      this.streamId = "";
     }
   };
   var AIManager = class {

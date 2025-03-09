@@ -1,7 +1,7 @@
 import { Image, ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
-import { log } from "../utils/utils";
-import { sendChatRequest } from "./service";
+import { log, parseBody } from "../utils/utils";
+import { end_stream, poll_stream, sendChatRequest, start_stream } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages } from "../utils/utils_message";
@@ -28,6 +28,7 @@ export class AI {
         content: string
     }
     isChatting: boolean;
+    streamId: string;
 
     constructor(id: string) {
         this.id = id;
@@ -47,6 +48,7 @@ export class AI {
             content: ''
         };
         this.isChatting = false;
+        this.streamId = '';
     }
 
     static reviver(value: any, id: string): AI {
@@ -96,6 +98,13 @@ export class AI {
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        const bodyTemplate = ConfigManager.request.bodyTemplate;
+        const bodyObject = parseBody(bodyTemplate, [], null, null);
+        if (bodyObject?.stream === true) {
+            await this.chatStream(ctx, msg);
+            return;
+        }
+
         if (this.isChatting) {
             log(this.id, `正在处理消息，跳过`);
             return;
@@ -127,6 +136,46 @@ export class AI {
 
         clearTimeout(timeout);
         this.isChatting = false;
+    }
+
+    async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        if (this.streamId) {
+            await end_stream(this.streamId);
+            this.streamId = '';
+        }
+
+        //清空数据
+        this.clearData();
+
+        const messages = handleMessages(ctx, this);
+        this.streamId = await start_stream(messages);
+
+        let status = 'processing';
+        let allStr = '';
+        const allImages: Image[] = [];
+        let after = 0;
+        while (status == 'processing') {
+            const result = await poll_stream(this.streamId, after);
+            status = result.status;
+            after = result.nextAfter;
+
+            const raw_reply = result.reply;
+            if (raw_reply.trim() !== '') {
+                const { s, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
+                allStr += s;
+                allImages.push(...images);
+                seal.replyToSender(ctx, msg, reply);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        await end_stream(this.streamId);
+
+        const { s } = await handleReply(ctx, msg, allStr, this.context);
+        await this.context.iteration(ctx, s, allImages, 'assistant');
+
+        this.streamId = '';
     }
 }
 
@@ -227,7 +276,7 @@ export class AIManager {
 
                 this.usageMap[model][newKey].prompt_tokens += this.usageMap[model][key].prompt_tokens;
                 this.usageMap[model][newKey].completion_tokens += this.usageMap[model][key].completion_tokens;
-    
+
                 delete this.usageMap[model][key];
             }
         }

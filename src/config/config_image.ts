@@ -12,12 +12,11 @@ export class ImageConfig {
         seal.ext.registerStringConfig(ImageConfig.ext, "图片大模型URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
         seal.ext.registerStringConfig(ImageConfig.ext, "图片API key", "yours");
         seal.ext.registerTemplateConfig(ImageConfig.ext, "图片body", [
-            `"messages":null`,
             `"model":"glm-4v"`,
             `"max_tokens":20`,
             `"stop":null`,
             `"stream":false`,
-        ], "messages将会自动替换")
+        ], "messages不存在时，将会自动替换")
         seal.ext.registerOptionConfig(ImageConfig.ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题");
         seal.ext.registerIntConfig(ImageConfig.ext, "图片最大回复字符数", 100);
         seal.ext.registerIntConfig(ImageConfig.ext, "偷取图片存储上限", 30, "每个群聊或私聊单独储存");
