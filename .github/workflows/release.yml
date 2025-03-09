@@ -19,6 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -41,12 +42,14 @@ jobs:
           TYPE: 'feat:Feature,fix:Bug Fixes,docs:Documentation,refactor:Refactor,perf:Performance Improvements'
           UNRELEASED_COMMITS: true
 
+      - name: Push CHANGELOG changes
+        run: git push origin HEAD:main
+
       - name: Create Git Tag
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           TAG_NAME="v${{ github.event.inputs.version }}"
-          echo "Creating tag: $TAG_NAME"
           git tag $TAG_NAME
           git push origin $TAG_NAME
 
