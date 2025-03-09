@@ -1,7 +1,7 @@
 import { AI, AIManager } from "./AI";
-import { ToolCall, ToolInfo, ToolManager } from "../tool/tool";
+import { ToolCall, ToolManager } from "../tool/tool";
 import { ConfigManager } from "../config/config";
-import { log } from "../utils/utils";
+import { log, parseBody } from "../utils/utils";
 import { handleMessages } from "../utils/utils_message";
 import { ImageManager } from "./image";
 
@@ -174,47 +174,147 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
     return data;
 }
 
-function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
-    
-    const bodyObject: any = {};
+const baseUrl = 'http://localhost:3010';
 
-    for (let i = 0; i < template.length; i++) {
-        const s = template[i];
-        if (s.trim() === '') {
-            continue;
+export async function start_stream(messages: {
+    role: string,
+    content: string
+}[]) {
+    const { url, apiKey, bodyTemplate } = ConfigManager.request;
+
+    try {
+        const bodyObject = parseBody(bodyTemplate, messages, null, null);
+
+        // 打印请求发送前的上下文
+        const s = JSON.stringify(bodyObject.messages, (key, value) => {
+            if (key === "" && Array.isArray(value)) {
+                return value.filter(item => {
+                    return item.role !== "system";
+                });
+            }
+            return value;
+        });
+        log(`请求发送前的上下文:\n`, s);
+
+        const response = await fetch(`${baseUrl}/start`, {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify({
+                url: url,
+                api_key: apiKey,
+                body_obj: bodyObject
+            })
+        });
+
+        // console.log("响应体", JSON.stringify(response, null, 2));
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            let s = `请求失败! 状态码: ${response.status}`;
+            if (data.error) {
+                s += `\n错误信息: ${data.error.message}`;
+            }
+
+            s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
+
+            throw new Error(s);
         }
 
-        try {
-            const obj = JSON.parse(`{${s}}`);
-            const key = Object.keys(obj)[0];
-            bodyObject[key] = obj[key];
-        } catch (err) {
-            throw new Error(`解析body的【${s}】时出现错误:${err}`);
+        if (data.id) {
+
+            const id = data.id;
+
+            return id;
+        } else {
+            throw new Error("服务器响应中没有id字段");
         }
+    } catch (error) {
+        console.error("在start_stream中出错：", error);
+        return '';
     }
+}
 
-    if (bodyObject?.messages === null) {
-        bodyObject.messages = messages;
-    }
+export async function poll_stream(id: string, after: number) {
+    try {
+        const response = await fetch(`${baseUrl}/poll?id=${id}&after=${after}`, {
+            method: 'GET',
+            headers: {
+                "Accept": "application/json"
+            }
+        });
 
-    if (bodyObject?.stream !== false) {
-        console.error(`不支持流式传输，请将stream设置为false`);
-        bodyObject.stream = false;
-    }
+        // console.log("响应体", JSON.stringify(response, null, 2));
 
-    if (isTool && !usePromptEngineering) {
-        if (bodyObject?.tools === null) {
-            bodyObject.tools = tools;
+        const data = await response.json();
+
+        if (!response.ok) {
+            let s = `请求失败! 状态码: ${response.status}`;
+            if (data.error) {
+                s += `\n错误信息: ${data.error.message}`;
+            }
+
+            s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
+
+            throw new Error(s);
         }
 
-        if (bodyObject?.tool_choice === null) {
-            bodyObject.tool_choice = tool_choice;
-        }
-    } else {
-        delete bodyObject?.tools;
-        delete bodyObject?.tool_choice;
-    }
+        if (data.status) {
+            const status = data.status;
+            const reply = data.results.join('');
+            const nextAfter = data.next_after;
 
-    return bodyObject;
+            return { status, reply, nextAfter };
+        } else {
+            throw new Error("服务器响应中没有status字段");
+        }
+    } catch (error) {
+        console.error("在poll_stream中出错：", error);
+        return { status: 'failed', reply: '', nextAfter: 0 };
+    }
+}
+
+export async function end_stream(id: string) {
+    try {
+        const response = await fetch(`${baseUrl}/end?id=${id}`, {
+            method: 'GET',
+            headers: {
+                "Accept": "application/json"
+            }
+        });
+
+        // console.log("响应体", JSON.stringify(response, null, 2));
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            let s = `请求失败! 状态码: ${response.status}`;
+            if (data.error) {
+                s += `\n错误信息: ${data.error.message}`;
+            }
+
+            s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
+
+            throw new Error(s);
+        }
+
+        if (data.status) {
+            const status = data.status;
+            if (status === 'success') {
+                log(`对话结束成功`);
+            } else {
+                log(`对话结束失败`);
+            }
+
+            return status;
+        } else {
+            throw new Error("服务器响应中没有status字段");
+        }
+    } catch (error) {
+        console.error("在end_stream中出错：", error);
+        return '';
+    }
 }
