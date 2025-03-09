@@ -154,7 +154,7 @@ export class AI {
         let allStr = '';
         const allImages: Image[] = [];
         let after = 0;
-        while (status == 'processing') {
+        while (status == 'processing' && this.streamId) {
             const result = await poll_stream(this.streamId, after);
             status = result.status;
             after = result.nextAfter;

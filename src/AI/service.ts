@@ -233,7 +233,7 @@ export async function start_stream(messages: {
             throw new Error("服务器响应中没有id字段");
         }
     } catch (error) {
-        console.error("在start_completion中出错：", error);
+        console.error("在start_stream中出错：", error);
         return '';
     }
 }
@@ -272,7 +272,7 @@ export async function poll_stream(id: string, after: number) {
             throw new Error("服务器响应中没有status字段");
         }
     } catch (error) {
-        console.error("在start_completion中出错：", error);
+        console.error("在poll_stream中出错：", error);
         return { status: 'failed', reply: '', nextAfter: 0 };
     }
 }
@@ -314,7 +314,7 @@ export async function end_stream(id: string) {
             throw new Error("服务器响应中没有status字段");
         }
     } catch (error) {
-        console.error("在start_completion中出错：", error);
+        console.error("在end_stream中出错：", error);
         return '';
     }
 }
