@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased
+
+*No description*
+
+### 新增功能或特性
+
+- general:
+  - 增加流式输出 (#7) ([ba8f689](https://github.com/error2913/aiplugin4/commit/ba8f689a9e39880bf01feee9afafb93bb672b46f)) ([#7](https://github.com/error2913/aiplugin4/pull/7))
+  - 移除需要使用尖括号来获取名字，改为从路径中解析 (#6) ([f6841a3](https://github.com/error2913/aiplugin4/commit/f6841a327dae45657885cef6711a3542ff30470c)) ([#6](https://github.com/error2913/aiplugin4/pull/6))
+  - add tti (#3) ([782b924](https://github.com/error2913/aiplugin4/commit/782b924803788035420621b6859c124486d70520))
+
+### 修复
+
+- general:
+  - 修复不填写路径时会抛出错误的问题 ([6f10ba1](https://github.com/error2913/aiplugin4/commit/6f10ba1d52e1db3f5a088ff477677c98bcbf27df))
+
+### 重构
+
+- general:
+  - 合并与重命名tool文件 (#5) ([2c42a20](https://github.com/error2913/aiplugin4/commit/2c42a2052455070d100719096bf91661abc34bda))
+
 ## [v4.5.14](https://github.com/error2913/aiplugin4/releases/tag/v4.5.14) - 2025-03-08 09:11:13
 
 这是一个release
