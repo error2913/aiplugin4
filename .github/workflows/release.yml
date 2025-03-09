@@ -57,6 +57,9 @@ jobs:
           VERSION="v${{ github.event.inputs.version }}"
           awk -v version="## [$VERSION]" 'BEGIN {print_flag=0} $0 ~ version {print_flag=1; next} /^## / && print_flag {exit} print_flag' CHANGELOG.md > release_notes.md
 
+      - name: Pull Latest Changes
+        run: git pull origin main --rebase  # 关键修复：同步远程
+
       - name: Push Changes with Tag
         run: |
           git push origin main
