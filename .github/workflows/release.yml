@@ -32,6 +32,13 @@ jobs:
       - name: Build project
         run: npm run build
 
+      # 先创建标签（但暂不推送）
+      - name: Create Local Git Tag
+        run: |
+          TAG_NAME="v${{ github.event.inputs.version }}"
+          git tag $TAG_NAME
+
+      # 生成CHANGELOG（此时能识别新标签）
       - name: Generate CHANGELOG
         uses: BobAnkh/auto-generate-changelog@v1.2.5
         with:
@@ -40,18 +47,15 @@ jobs:
           PATH: 'CHANGELOG.md'
           COMMIT_MESSAGE: 'docs(CHANGELOG): update release notes'
           TYPE: 'feat:新增功能或特性,fix:修复,refactor:重构,perf:优化'
-          UNRELEASED_COMMITS: true
+          UNRELEASED_COMMITS: false
 
-      - name: Push CHANGELOG changes
-        run: git push origin HEAD:main
-
-      - name: Create Git Tag
+      # 推送包含标签的提交
+      - name: Push Changes with Tag
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          TAG_NAME="v${{ github.event.inputs.version }}"
-          git tag $TAG_NAME
-          git push origin $TAG_NAME
+          git add CHANGELOG.md
+          git commit -m "docs: 更新版本日志"
+          git push origin main
+          git push origin "v${{ github.event.inputs.version }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2.0.8
