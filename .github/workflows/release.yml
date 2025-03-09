@@ -21,6 +21,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -32,13 +37,6 @@ jobs:
       - name: Build project
         run: npm run build
 
-      # 先创建标签（但暂不推送）
-      - name: Create Local Git Tag
-        run: |
-          TAG_NAME="v${{ github.event.inputs.version }}"
-          git tag $TAG_NAME
-
-      # 生成CHANGELOG（此时能识别新标签）
       - name: Generate CHANGELOG
         uses: BobAnkh/auto-generate-changelog@v1.2.5
         with:
@@ -47,15 +45,20 @@ jobs:
           PATH: 'CHANGELOG.md'
           COMMIT_MESSAGE: 'docs(CHANGELOG): update release notes'
           TYPE: 'feat:新增功能或特性,fix:修复,refactor:重构,perf:优化'
-          UNRELEASED_COMMITS: false
+          UNRELEASED_COMMITS: true
 
-      # 推送包含标签的提交
+      - name: Create Local Git Tag
+        run: |
+          TAG_NAME="v${{ github.event.inputs.version }}"
+          git tag $TAG_NAME
+
+      - name: Prepare Release Notes
+        run: |
+          VERSION="v${{ github.event.inputs.version }}"
+          awk -v version="## [$VERSION]" 'BEGIN {print_flag=0} $0 ~ version {print_flag=1; next} /^## / && print_flag {exit} print_flag' CHANGELOG.md > release_notes.md
+
       - name: Push Changes with Tag
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "docs: 更新版本日志"
           git push origin main
           git push origin "v${{ github.event.inputs.version }}"
 
@@ -64,5 +67,5 @@ jobs:
         with:
           tag_name: "v${{ github.event.inputs.version }}"
           name: "Release v${{ github.event.inputs.version }}"
-          body_path: CHANGELOG.md
+          body_path: release_notes.md
           files: dist/*
