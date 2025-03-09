@@ -67,7 +67,7 @@ def process_stream(response, stream_id: str):
                     
                     part += content
                     
-                    if content in split_str_tuple and len(part) > 10:
+                    if (content in split_str_tuple and len(part) > 10) or len(part) > 40:
                         parts.append(part)
                         part = ""
         
