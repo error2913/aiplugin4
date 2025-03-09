@@ -705,6 +705,9 @@ ${attr}: ${value}=>${result}`;
   function registerFace() {
     const { localImagePaths } = ConfigManager.image;
     const localImages = localImagePaths.reduce((acc, path) => {
+      if (path.trim() === "") {
+        return acc;
+      }
       try {
         const name = path.split("/").pop().split(".")[0];
         if (!name) {
@@ -1481,6 +1484,9 @@ ${t.setTime} => ${new Date(t.timestamp * 1e3).toLocaleString()}`;
   function registerRecord() {
     const { recordPaths } = ConfigManager.tool;
     const records = recordPaths.reduce((acc, path) => {
+      if (path.trim() === "") {
+        return acc;
+      }
       try {
         const name = path.split("/").pop().split(".")[0];
         if (!name) {
@@ -3134,7 +3140,6 @@ ${memeryPrompt}`;
           body_obj: bodyObject
         })
       });
-      console.log("响应体", JSON.stringify(response, null, 2));
       const data = await response.json();
       if (!response.ok) {
         let s2 = `请求失败! 状态码: ${response.status}`;
@@ -3256,6 +3261,9 @@ ${memeryPrompt}`;
     drawLocalImageFile() {
       const { localImagePaths } = ConfigManager.image;
       const localImages = localImagePaths.reduce((acc, path) => {
+        if (path.trim() === "") {
+          return acc;
+        }
         try {
           const name = path.split("/").pop().split(".")[0];
           if (!name) {
@@ -3290,6 +3298,9 @@ ${memeryPrompt}`;
     async drawImageFile() {
       const { localImagePaths } = ConfigManager.image;
       const localImages = localImagePaths.reduce((acc, path) => {
+        if (path.trim() === "") {
+          return acc;
+        }
         try {
           const name = path.split("/").pop().split(".")[0];
           if (!name) {

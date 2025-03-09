@@ -209,7 +209,7 @@ export async function start_stream(messages: {
             })
         });
 
-        console.log("响应体", JSON.stringify(response, null, 2));
+        // console.log("响应体", JSON.stringify(response, null, 2));
 
         const data = await response.json();
 
