@@ -39,7 +39,7 @@ jobs:
           ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATH: 'CHANGELOG.md'
           COMMIT_MESSAGE: 'docs(CHANGELOG): update release notes'
-          TYPE: 'feat:Feature,fix:Bug Fixes,docs:Documentation,refactor:Refactor,perf:Performance Improvements'
+          TYPE: 'feat:新增功能或特性,fix:修复,refactor:重构,perf:优化'
           UNRELEASED_COMMITS: true
 
       - name: Push CHANGELOG changes
