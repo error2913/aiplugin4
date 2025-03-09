@@ -140,6 +140,7 @@ export class AI {
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         if (this.streamId) {
+            log(`打断当前会话${this.streamId}`);
             await end_stream(this.streamId);
             this.streamId = '';
         }
@@ -148,13 +149,15 @@ export class AI {
         this.clearData();
 
         const messages = handleMessages(ctx, this);
-        this.streamId = await start_stream(messages);
+        const id = await start_stream(messages);
 
+        this.streamId = id;
         let status = 'processing';
         let allStr = '';
         const allImages: Image[] = [];
         let after = 0;
-        while (status == 'processing' && this.streamId) {
+
+        while (status == 'processing' && this.streamId === id) {
             const result = await poll_stream(this.streamId, after);
             status = result.status;
             after = result.nextAfter;
@@ -170,12 +173,15 @@ export class AI {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        await end_stream(this.streamId);
+        if (this.streamId === id) {
+            await end_stream(this.streamId);
+            this.streamId = '';
+        } else {
+            await end_stream(id);
+        }
 
         const { s } = await handleReply(ctx, msg, allStr, this.context);
         await this.context.iteration(ctx, s, allImages, 'assistant');
-
-        this.streamId = '';
     }
 }
 
