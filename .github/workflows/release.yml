@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version Number (e.g., 2.3.4)'
+        description: '版本号'
         required: true
         default: '1.0.0'
+      changelog:
+        description: '更新日志'
+        required: true
+        default: 'Initial release'
 
 jobs:
   release:
@@ -43,4 +47,5 @@ jobs:
         with:
           tag_name: "v${{ github.event.inputs.version }}"
           name: "Release v${{ github.event.inputs.version }}"
+          body: ${{ github.event.inputs.changelog }}
           files: dist/*
