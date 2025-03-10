@@ -18,7 +18,7 @@ export class ToolConfig {
             'check_list'
         ], "");
         seal.ext.registerIntConfig(ToolConfig.ext, "长期记忆上限", 5, "");
-        seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", ["没有的话请去上面把draw_deck这个函数删掉"], "");
+        seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", ["没有的话建议把draw_deck这个函数加入不允许调用"], "");
         seal.ext.registerOptionConfig(ToolConfig.ext, "ai语音使用的音色", '小新', [
             "小新",
             "猴哥",
