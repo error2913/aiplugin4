@@ -85,7 +85,13 @@ export class Memory {
             s += '无';
         } else {
             s += this.memoryList.map((item, i) => {
-                return `${i + 1}. (${item.time}) ${item.isPrivate ? `来自私聊` : `来自群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/\D+/g, '')})` : ``}`}: ${item.content}`;
+                const source = item.isPrivate ?
+                    `私聊` :
+                    `群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/\D+/g, '')})` : ``}`;
+
+                return `${i + 1}. 时间:${item.time}
+    来源:${source}
+    内容:${item.content}`;
             }).join('\n');
         }
 
@@ -99,7 +105,8 @@ export class Memory {
             s += '无';
         } else {
             s += this.memoryList.map((item, i) => {
-                return `${i + 1}. (${item.time}) ${item.content}`;
+                return `${i + 1}. 时间:${item.time}
+    内容:${item.content}`;
             }).join('\n');
         }
 

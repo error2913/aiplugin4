@@ -23,7 +23,7 @@ export function registerAddMemory() {
                     },
                     content: {
                         type: 'string',
-                        description: '记忆内容'
+                        description: '记忆内容，尽量简短，无需附带时间与来源'
                     }
                 },
                 required: ['memory_type', 'name', 'content']
@@ -44,7 +44,7 @@ export function registerAddMemory() {
                 return `不能添加自己的记忆`;
             }
     
-            msg = createMsg('private', uid, '');
+            msg = createMsg(msg.messageType, uid, ctx.group.groupId);
             ctx = createCtx(ctx.endPoint.userId, msg);
     
             ai = AIManager.getAI(uid);
