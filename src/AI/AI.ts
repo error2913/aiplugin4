@@ -1,7 +1,7 @@
 import { Image, ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
 import { log, parseBody } from "../utils/utils";
-import { end_stream, poll_stream, sendChatRequest, start_stream } from "./service";
+import { end_stream as endStream, poll_stream as pollStream, sendChatRequest, start_stream as startStream } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages } from "../utils/utils_message";
@@ -28,7 +28,11 @@ export class AI {
         content: string
     }
     isChatting: boolean;
-    streamId: string;
+    stream: {
+        id: string,
+        reply: string,
+        images: Image[]
+    }
 
     constructor(id: string) {
         this.id = id;
@@ -48,7 +52,11 @@ export class AI {
             content: ''
         };
         this.isChatting = false;
-        this.streamId = '';
+        this.stream = {
+            id: '',
+            reply: '',
+            images: []
+        }
     }
 
     static reviver(value: any, id: string): AI {
@@ -139,49 +147,61 @@ export class AI {
     }
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
-        if (this.streamId) {
-            log(`打断当前会话${this.streamId}`);
-            await end_stream(this.streamId);
-            this.streamId = '';
-        }
+        await this.stopCurrentChatStream(ctx, msg);
 
         //清空数据
         this.clearData();
 
         const messages = handleMessages(ctx, this);
-        const id = await start_stream(messages);
+        const id = await startStream(messages);
 
-        this.streamId = id;
+        this.stream.id = id;
         let status = 'processing';
-        let allStr = '';
-        const allImages: Image[] = [];
         let after = 0;
 
-        while (status == 'processing' && this.streamId === id) {
-            const result = await poll_stream(this.streamId, after);
+        while (status == 'processing' && this.stream.id === id) {
+            const result = await pollStream(this.stream.id, after);
             status = result.status;
             after = result.nextAfter;
 
             const raw_reply = result.reply;
             if (raw_reply.trim() !== '') {
                 const { s, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
-                allStr += s;
-                allImages.push(...images);
+
+                if (this.stream.id !== id) {
+                    return;
+                }
+
+                this.stream.reply += s;
+                this.stream.images.push(...images);
                 seal.replyToSender(ctx, msg, reply);
             }
 
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        if (this.streamId === id) {
-            await end_stream(this.streamId);
-            this.streamId = '';
-        } else {
-            await end_stream(id);
+        if (this.stream.id !== id) {
+            return;
         }
 
-        const { s } = await handleReply(ctx, msg, allStr, this.context);
-        await this.context.iteration(ctx, s, allImages, 'assistant');
+        await this.stopCurrentChatStream(ctx, msg);
+    }
+
+    async stopCurrentChatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        const { id, reply, images } = this.stream;
+        this.stream = {
+            id: '',
+            reply: '',
+            images: []
+        }
+        if (id) {
+            log(`结束会话${id}`);
+            if (reply) {
+                const { s } = await handleReply(ctx, msg, reply, this.context);
+                await this.context.iteration(ctx, s, images, 'assistant');
+            }
+            await endStream(id);
+        }
     }
 }
 

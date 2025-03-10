@@ -17,7 +17,7 @@ stream_lock = threading.Lock()
 CLEANUP_INTERVAL = 24 * 60 * 60  # 24小时
 
 # 分隔符元组，用于检查结尾
-split_str_tuple = (',', '，', '。', '!', '！', '?', '？', '...', '……', '\n', '\t', '\r')
+split_str_tuple = (',', '，', '。', '!', '！', '?', '？', ';', '：', '——', '...', '……', '\n', '\t', '\r')
 
 async def periodic_cleanup():
     """
