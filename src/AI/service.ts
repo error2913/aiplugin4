@@ -174,7 +174,7 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
     return data;
 }
 
-export async function start_stream(messages: {
+export async function startStream(messages: {
     role: string,
     content: string
 }[]) {
@@ -236,7 +236,7 @@ export async function start_stream(messages: {
     }
 }
 
-export async function poll_stream(id: string, after: number) {
+export async function pollStream(id: string, after: number) {
     const { streamUrl } = ConfigManager.request;
 
     try {
@@ -277,7 +277,7 @@ export async function poll_stream(id: string, after: number) {
     }
 }
 
-export async function end_stream(id: string) {
+export async function endStream(id: string) {
     const { streamUrl } = ConfigManager.request;
 
     try {
