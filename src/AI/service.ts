@@ -39,16 +39,19 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 
             if (isTool) {
                 if (usePromptEngineering) {
-                    const match = reply.match(/<function_call>([\s\S]*?)<\/function_call>/);
+                    const match = reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                     if (match) {
                         ai.context.iteration(ctx, match[0], [], "assistant");
-                        const tool_call = JSON.parse(match[1]);
-                        await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
+                        try {
+                            const tool_call = JSON.parse(match[1]);
+                            await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
+                        } catch (e) {
+                            console.error('处理prompt tool call时出现错误:', e);
+                        }
 
                         const messages = handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
                     }
-
                 } else {
                     if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
                         log(`触发工具调用`);
