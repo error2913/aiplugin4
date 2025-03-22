@@ -30,7 +30,8 @@ export class AI {
     stream: {
         id: string,
         reply: string,
-        images: Image[]
+        images: Image[],
+        toolCallStatus: boolean
     }
 
     constructor(id: string) {
@@ -53,7 +54,8 @@ export class AI {
         this.stream = {
             id: '',
             reply: '',
-            images: []
+            images: [],
+            toolCallStatus: false
         }
     }
 
@@ -138,6 +140,8 @@ export class AI {
     }
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        const { isTool, usePromptEngineering } = ConfigManager.tool;
+
         await this.stopCurrentChatStream(ctx, msg);
 
         //清空数据
@@ -153,21 +157,85 @@ export class AI {
         while (status == 'processing' && this.stream.id === id) {
             const result = await pollStream(this.stream.id, after);
             status = result.status;
-            after = result.nextAfter;
-
             const raw_reply = result.reply;
-            if (raw_reply.trim() !== '') {
-                const { s, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
+            if (raw_reply.trim() === '') {
+                after = result.nextAfter;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+            log("接收到的回复:", raw_reply);
 
-                if (this.stream.id !== id) {
-                    return;
+            if (isTool && usePromptEngineering) {
+                if (!this.stream.toolCallStatus && /<function_call>/.test(this.stream.reply + raw_reply)) {
+                    // 处理并发送function_call前面的内容
+                    const match = raw_reply.match(/([\s\S]*)<function_call>/);
+                    if (match) {
+                        if (match[1].trim() !== '') {
+                            const { s, reply, images } = await handleReply(ctx, msg, match[1], this.context);
+
+                            if (this.stream.id !== id) {
+                                return;
+                            }
+                            this.stream.reply += s;
+                            this.stream.images.push(...images);
+                            seal.replyToSender(ctx, msg, reply);
+
+                            await this.context.iteration(ctx, this.stream.reply, this.stream.images, 'assistant');
+                        }
+                    }
+
+                    if (this.stream.id !== id) {
+                        return;
+                    }
+                    this.stream.reply = (this.stream.reply + raw_reply).replace(/[\s\S]*<function_call>/, '<function_call>');
+                    this.stream.toolCallStatus = true;
+
+                    after = result.nextAfter;
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
                 }
 
-                this.stream.reply += s;
-                this.stream.images.push(...images);
-                seal.replyToSender(ctx, msg, reply);
+                if (this.stream.toolCallStatus) {
+                    this.stream.reply += raw_reply;
+
+                    if (/<\/function_call>/.test(this.stream.reply)) {
+                        // 去除function_call后面的内容
+                        this.stream.reply = this.stream.reply.replace(/<\/function_call>[\s\S]*/, '</function_call>');
+
+                        const reply = this.stream.reply;
+                        const match = reply.match(/<function_call>([\s\S]*)<\/function_call>/);
+                        if (match) {
+                            this.stream.toolCallStatus = false;
+                            await this.stopCurrentChatStream(ctx, msg);
+
+                            try {
+                                const tool_call = JSON.parse(match[1]);
+                                await ToolManager.handlePromptToolCall(ctx, msg, this, tool_call);
+                            } catch (e) {
+                                console.error('处理prompt tool call时出现错误:', e);
+                            }
+
+                            await this.chatStream(ctx, msg);
+                            return;
+                        }
+                    } else {
+                        after = result.nextAfter;
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+                }
             }
 
+            const { s, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
+
+            if (this.stream.id !== id) {
+                return;
+            }
+            this.stream.reply += s;
+            this.stream.images.push(...images);
+            seal.replyToSender(ctx, msg, reply);
+
+            after = result.nextAfter;
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
@@ -179,17 +247,21 @@ export class AI {
     }
 
     async stopCurrentChatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
-        const { id, reply, images } = this.stream;
+        const { id, reply, images, toolCallStatus } = this.stream;
         this.stream = {
             id: '',
             reply: '',
-            images: []
+            images: [],
+            toolCallStatus: false
         }
         if (id) {
             log(`结束会话${id}`);
             if (reply) {
                 const { s } = await handleReply(ctx, msg, reply, this.context);
                 await this.context.iteration(ctx, s, images, 'assistant');
+                if (toolCallStatus) { // 没有处理完的工具调用，直接发送
+                    seal.replyToSender(ctx, msg, s);
+                }
             }
             await endStream(id);
         }
