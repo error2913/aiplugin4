@@ -23,7 +23,7 @@ export class AI {
     memory: Memory;
     image: ImageManager;
     privilege: Privilege;
-    
+
     // 下面是临时变量，用于处理消息
     listen: {
         status: boolean,
@@ -80,33 +80,6 @@ export class AI {
         this.context.counter = 0;
     }
 
-    async getReply(ctx: seal.MsgContext, msg: seal.Message, retry = 0): Promise<{ s: string, reply: string, images: Image[] }> {
-        // 处理messages
-        const messages = handleMessages(ctx, this);
-
-        //获取处理后的回复
-        const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
-        const { s, isRepeat, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
-
-        //禁止AI复读
-        if (isRepeat && reply !== '') {
-            if (retry == 3) {
-                log(`发现复读，已达到最大重试次数，清除AI上下文`);
-                this.context.messages = this.context.messages.filter(item => item.role !== 'assistant' && item.role !== 'tool');
-                return { s: '', reply: '', images: [] };
-            }
-
-            retry++;
-            log(`发现复读，一秒后进行重试:[${retry}/3]`);
-
-            //等待一秒后进行重试
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return await this.getReply(ctx, msg, retry);
-        }
-
-        return { s, reply, images };
-    }
-
     async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const bodyTemplate = ConfigManager.request.bodyTemplate;
         const bodyObject = parseBody(bodyTemplate, [], null, null);
@@ -122,7 +95,37 @@ export class AI {
         //清空数据
         this.clearData();
 
-        let { s, reply, images } = await this.getReply(ctx, msg);
+        let result = {
+            s: '',
+            isRepeat: false,
+            reply: '',
+            images: []
+        }
+        const MaxRetry = 3;
+        for (let retry = 0; retry <= MaxRetry; retry++) {
+            // 处理messages
+            const messages = handleMessages(ctx, this);
+
+            //获取处理后的回复
+            const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
+            result = await handleReply(ctx, msg, raw_reply, this.context);
+
+            if (!result.isRepeat || result.reply.trim() === '') {
+                break;
+            }
+
+            if (retry > MaxRetry) {
+                log(`发现复读，已达到最大重试次数，清除AI上下文`);
+                this.context.messages = this.context.messages.filter(item => item.role !== 'assistant' && item.role !== 'tool');
+                break;
+            }
+
+            log(`发现复读，一秒后进行重试:[${retry}/3]`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        const { s, reply, images } = result;
+
         this.context.lastReply = reply;
         await this.context.iteration(ctx, s, images, 'assistant');
 
