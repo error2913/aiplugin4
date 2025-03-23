@@ -46,7 +46,8 @@ function main() {
 【.ai fgt】遗忘上下文
 【.ai memo】AI的记忆相关
 【.ai tool】AI的工具相关
-【.ai tk】AI的token相关`;
+【.ai tk】AI的token相关
+【.ai shut】终止AI当前流式输出`;
   cmdAI.allowDelegate = true;
   cmdAI.solve = (ctx, msg, cmdArgs) => {
     const val = cmdArgs.getArgN(1);
@@ -946,7 +947,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
         }
       }
-      case 'help':
+      case 'shut': {
+        ai.stopCurrentChatStream(ctx, msg).then(() => {
+          seal.replyToSender(ctx, msg, '已停止当前对话');
+        });
+        return ret;
+      }
       default: {
         ret.showHelp = true;
         return ret;
