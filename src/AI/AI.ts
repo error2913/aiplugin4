@@ -23,6 +23,8 @@ export class AI {
     memory: Memory;
     image: ImageManager;
     privilege: Privilege;
+    
+    // 下面是临时变量，用于处理消息
     listen: {
         status: boolean,
         content: string
