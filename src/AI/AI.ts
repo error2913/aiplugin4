@@ -27,7 +27,6 @@ export class AI {
         status: boolean,
         content: string
     }
-    isChatting: boolean;
     stream: {
         id: string,
         reply: string,
@@ -51,7 +50,6 @@ export class AI {
             status: false,
             content: ''
         };
-        this.isChatting = false;
         this.stream = {
             id: '',
             reply: '',
@@ -113,13 +111,7 @@ export class AI {
             return;
         }
 
-        if (this.isChatting) {
-            log(this.id, `正在处理消息，跳过`);
-            return;
-        }
-        this.isChatting = true;
         const timeout = setTimeout(() => {
-            this.isChatting = false;
             log(this.id, `处理消息超时`);
         }, 60 * 1000);
 
@@ -143,7 +135,6 @@ export class AI {
         }
 
         clearTimeout(timeout);
-        this.isChatting = false;
     }
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {

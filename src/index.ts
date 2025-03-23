@@ -1318,7 +1318,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       await ai.context.systemUserIteration("定时器触发提示", s, []);
 
       log('定时任务触发回复');
-      ai.isChatting = false;
       await ai.chat(ctx, msg);
       AIManager.saveAI(id);
 
