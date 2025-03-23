@@ -652,7 +652,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                   seal.replyToSender(ctx, msg, `图表生成失败`);
                   return;
                 }
-                seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`); 
+                seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
               })
               return ret;
             }
@@ -724,7 +724,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                   seal.replyToSender(ctx, msg, `图表生成失败`);
                   return;
                 }
-                seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`); 
+                seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
               })
               return ret;
             }
@@ -831,7 +831,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                       seal.replyToSender(ctx, msg, `图表生成失败`);
                       return;
                     }
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`); 
+                    seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
                   })
                   return ret;
                 }
@@ -903,7 +903,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                       seal.replyToSender(ctx, msg, `图表生成失败`);
                       return;
                     }
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`); 
+                    seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
                   })
                   return ret;
                 }
@@ -948,6 +948,17 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         }
       }
       case 'shut': {
+        const pr = ai.privilege;
+        if (ctx.privilegeLevel < pr.limit) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        if (ai.stream.id === '') {
+          seal.replyToSender(ctx, msg, '当前没有正在进行的对话');
+          return ret;
+        }
+
         ai.stopCurrentChatStream(ctx, msg).then(() => {
           seal.replyToSender(ctx, msg, '已停止当前对话');
         });

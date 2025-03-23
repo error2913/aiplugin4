@@ -172,44 +172,37 @@ export class AI {
 
             if (isTool && usePromptEngineering) {
                 if (!this.stream.toolCallStatus && /<function_call>/.test(this.stream.reply + raw_reply)) {
-                    // 处理并发送function_call前面的内容
+                    log("发现工具调用开始标签，拦截后续内容");
+
+                    // 对于function_call前面的内容，发送并添加到上下文中
                     const match = raw_reply.match(/([\s\S]*)<function_call>/);
-                    if (match) {
-                        if (match[1].trim() !== '') {
-                            const { s, reply, images } = await handleReply(ctx, msg, match[1], this.context);
+                    if (match && match[1].trim() !== '') {
+                        const { s, reply, images } = await handleReply(ctx, msg, match[1], this.context);
 
-                            if (this.stream.id !== id) {
-                                return;
-                            }
-                            this.stream.reply += s;
-                            this.stream.images.push(...images);
-                            seal.replyToSender(ctx, msg, reply);
-
-                            await this.context.iteration(ctx, this.stream.reply, this.stream.images, 'assistant');
+                        if (this.stream.id !== id) {
+                            return;
                         }
+                        this.stream.images.push(...images);
+                        seal.replyToSender(ctx, msg, reply);
+
+                        await this.context.iteration(ctx, this.stream.reply + s, this.stream.images, 'assistant');
                     }
 
-                    if (this.stream.id !== id) {
-                        return;
-                    }
-                    this.stream.reply = (this.stream.reply + raw_reply).replace(/[\s\S]*<function_call>/, '<function_call>');
                     this.stream.toolCallStatus = true;
+                }
 
-                    after = result.nextAfter;
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    continue;
+                if (this.stream.id !== id) {
+                    return;
                 }
 
                 if (this.stream.toolCallStatus) {
                     this.stream.reply += raw_reply;
 
                     if (/<\/function_call>/.test(this.stream.reply)) {
-                        // 去除function_call后面的内容
-                        this.stream.reply = this.stream.reply.replace(/<\/function_call>[\s\S]*/, '</function_call>');
-
-                        const reply = this.stream.reply;
-                        const match = reply.match(/<function_call>([\s\S]*)<\/function_call>/);
+                        log("发现工具调用结束标签，开始处理对应工具调用");
+                        const match = this.stream.reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                         if (match) {
+                            this.stream.reply = match[0];
                             this.stream.toolCallStatus = false;
                             await this.stopCurrentChatStream(ctx, msg);
 
@@ -218,11 +211,15 @@ export class AI {
                                 await ToolManager.handlePromptToolCall(ctx, msg, this, tool_call);
                             } catch (e) {
                                 console.error('处理prompt tool call时出现错误:', e);
+                                return;
                             }
 
                             await this.chatStream(ctx, msg);
-                            return;
+                        } else {
+                            console.error('无法匹配到function_call');
+                            await this.stopCurrentChatStream(ctx, msg);
                         }
+                        return;
                     } else {
                         after = result.nextAfter;
                         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -264,8 +261,9 @@ export class AI {
             if (reply) {
                 const { s } = await handleReply(ctx, msg, reply, this.context);
                 await this.context.iteration(ctx, s, images, 'assistant');
-                if (toolCallStatus) { // 没有处理完的工具调用，直接发送
-                    seal.replyToSender(ctx, msg, s);
+
+                if (toolCallStatus) { // 没有处理完的工具调用，在日志中显示
+                    log(`工具调用未处理完成:${reply}`);
                 }
             }
             await endStream(id);
