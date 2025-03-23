@@ -31,7 +31,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     if (!s.trim()) {
         s = segments.find(segment => !/<[\|｜]from:?.*?[\|｜]?>/.test(segment));
-        if (!s.trim()) {
+        if (!s || !s.trim()) {
             return { s: '', reply: '', isRepeat: false, images: [] };
         }
     }
