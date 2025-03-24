@@ -9,17 +9,39 @@ import uvicorn
 from typing import AsyncIterator, Dict, Any, List
 import threading
 
+CLEANUP_INTERVAL = 24 * 60 * 60 # 清理过期任务的间隔（秒）
+SPLIT_STR_TUPLE = (',', '，', '。', '!', '！', '?', '？', ';', '；', ':', '：', '~', '--', '——', '...', '……', '\n', '\t', '\r')
+SYM_PAIRS = {
+    "(": (")", 11),
+    "（": ("）", 11),
+    "[": ("]", 11),
+    "【": ("】", 11),
+    "{": ("}", 30),
+    "《": ("》", 7),
+    "『": ("』", 7),
+    "「": ("」", 7),
+    '"': ('"', 30),
+    "“": ("”", 30),
+    "'": ("'", 11),
+    "‘": ("’", 11),
+    "<|": ("|>", 22),
+    "<｜": ("｜>", 22),
+    "`": ("`", 11),
+    "```": ("```", 30),
+    "**": ("**", 30),
+}
+
+OPEN_TOKENS = set(SYM_PAIRS.keys())
+CLOSE_TOKENS = set([v[0] for v in SYM_PAIRS.values()])
+SPLIT_TOKENS = set(SPLIT_STR_TUPLE)
+ALL_TOKENS = sorted(OPEN_TOKENS | CLOSE_TOKENS | SPLIT_TOKENS, key=len, reverse=True)
+
+FORCE_THRESHOLD = 150 # 强制分割的阈值
+
 stream_data: Dict[str, Dict[str, Any]] = {}
-# 线程锁
-stream_lock = threading.Lock()
+stream_lock = threading.Lock() # 线程锁
 
-# 清理过期任务的间隔（秒）
-CLEANUP_INTERVAL = 24 * 60 * 60  # 24小时
-
-# 分隔符元组，用于检查结尾
-split_str_tuple = (',', '，', '。', '!', '！', '?', '？', ';', '：', '——', '...', '……', '\n', '\t', '\r')
-
-async def periodic_cleanup():
+async def cleanup_stream():
     """
     定期清理过期任务
     """
@@ -38,8 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     生命周期管理：启动和关闭逻辑
     """
     # 启动时启动定期清理任务
-    cleanup_task = asyncio.create_task(periodic_cleanup())
+    cleanup_task = asyncio.create_task(cleanup_stream())
     yield
+    
     # 关闭时取消清理任务
     cleanup_task.cancel()
     try:
@@ -49,63 +72,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
 app = FastAPI(lifespan=lifespan)
 
-NON_SYM_PAIRS = {
-    "(": ")",
-    "（": "）",
-    "[": "]",
-    "【": "】",
-    "{": "}",
-    "《": "》",
-    "『": "』",
-    "「": "」",
-    '"': '"',
-    "“": "”",
-    "'": "'",
-    "‘": "’",
-    "<|": "|>",
-    "<｜": "｜>",
-}
-
-OPEN_TOKENS = set(NON_SYM_PAIRS.keys())
-CLOSE_TOKENS = set(NON_SYM_PAIRS.values())
-
-ALL_TOKENS = sorted(OPEN_TOKENS | CLOSE_TOKENS, key=len, reverse=True)
-
-def parse_symbols(text: str) -> list:
-    stack = []
+def parse_symbols(text: str, stack: list) -> list:
+    """
+    解析文本中的符号，并更新栈
+    """
+    seg_info = [] # 分割信息
+    force_threshold = sum([SYM_PAIRS[sym][1] for sym in stack]) # 强制分割的阈值
+    text_len = len(text) # 除去成对符号后的文本长度
     i = 0
     while i < len(text):
         matched = False
         for token in ALL_TOKENS:
             if text.startswith(token, i):
-                if token in OPEN_TOKENS:
+                if token in CLOSE_TOKENS and stack and SYM_PAIRS.get(stack[-1])[0] == token:
+                    stack.pop()
+                    force_threshold -= SYM_PAIRS[token][1]
+                    text_len -= i + len(token)
+                elif token in OPEN_TOKENS:
                     stack.append(token)
-                elif token in CLOSE_TOKENS:
-                    if stack and NON_SYM_PAIRS.get(stack[-1]) == token:
-                        stack.pop()
-                    else:
-                        stack.append(token)
+                    force_threshold += SYM_PAIRS[token][1]
+                elif token in SPLIT_TOKENS and (force_threshold == 0 or text_len >= force_threshold): # 防止分割掉成对符号
+                    seg_info.append((i, token))
                 i += len(token)
                 matched = True
                 break
         if not matched:
             i += 1
-    return stack
-
-def is_balanced(text: str) -> bool:
-    """
-    检查文本中成对符号是否平衡。
-    """
-    return len(parse_symbols(text)) == 0
-
-def get_unbalanced_depth(text: str) -> int:
-    """
-    返回最终栈中剩余的符号个数。
-    """
-    return len(parse_symbols(text))
-
-BASE_FORCE_THRESHOLD = 60
-FORCE_THRESHOLD_INCREMENT = 20
+            
+    if force_threshold > 0 and text_len >= force_threshold: # 如果长度超过阈值，则强制分割
+        seg_info.append((text_len - 1, ''))
+            
+    return seg_info
 
 def process_stream(response, stream_id: str):
     try:
@@ -121,40 +118,26 @@ def process_stream(response, stream_id: str):
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 part += content
+                
+                with stream_lock:
+                    seg_info = parse_symbols(part, data['symbols_stack']) # 解析符号，更新栈，并获取分割信息
+                    
+                    if seg_info:
+                        seg_info.sort()
+                        for idx, token in seg_info:
+                            data['parts'].append(part[: idx + len(token)])
+                            part = part[idx + len(token):]
 
-                while len(part) >= 10:
-                    candidates = [(idx, sep) for sep in split_str_tuple if (idx := part.find(sep)) != -1]
-                    if not candidates:
-                        break
-
-                    candidates.sort()
-                    found = False
-                    for idx, sep in candidates:
-                        candidate_segment = part[: idx + len(sep)]
-                        if len(candidate_segment) < 10:
-                            continue
-                        if is_balanced(candidate_segment):
-                            if candidate_segment.endswith(',') or candidate_segment.endswith('，'):
-                                candidate_segment = candidate_segment.rstrip(',，')
-                            with stream_lock:
-                                data['parts'].append(candidate_segment)
-                            part = part[idx + len(sep):]
-                            found = True
-                            break
-                    if not found:
-                        break
-
-                effective_threshold = BASE_FORCE_THRESHOLD + get_unbalanced_depth(part) * FORCE_THRESHOLD_INCREMENT
-                if len(part) > effective_threshold:
-                    segment = part.rstrip(',，')
+                if len(part) >= FORCE_THRESHOLD: # 如果长度超过阈值，则强制分割
                     with stream_lock:
-                        data['parts'].append(segment)
+                        data['symbols_stack'] = []
+                        data['parts'].append(part)
                     part = ""
         
         with stream_lock:
             if stream_id in stream_data:
                 if part:
-                    stream_data[stream_id]['parts'].append(part.rstrip(',，'))
+                    stream_data[stream_id]['parts'].append(part)
                 stream_data[stream_id]['status'] = 'completed'
     except Exception as e:
         with stream_lock:
@@ -184,6 +167,7 @@ async def start_completion(
             stream_data[stream_id] = {
                 'timestamp': time.time(),
                 'parts': [],
+                'symbols_stack': [],
                 'status': 'processing',
                 'error': None
             }
