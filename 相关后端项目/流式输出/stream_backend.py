@@ -49,40 +49,63 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
 app = FastAPI(lifespan=lifespan)
 
+NON_SYM_PAIRS = {
+    "(": ")",
+    "（": "）",
+    "[": "]",
+    "【": "】",
+    "{": "}",
+    "《": "》",
+    "『": "』",
+    "「": "」",
+    '"': '"',
+    "“": "”",
+    "'": "'",
+    "‘": "’",
+    "<|": "|>",
+    "<｜": "｜>",
+}
+
+OPEN_TOKENS = set(NON_SYM_PAIRS.keys())
+CLOSE_TOKENS = set(NON_SYM_PAIRS.values())
+
+ALL_TOKENS = sorted(OPEN_TOKENS | CLOSE_TOKENS, key=len, reverse=True)
+
+def parse_symbols(text: str) -> list:
+    stack = []
+    i = 0
+    while i < len(text):
+        matched = False
+        for token in ALL_TOKENS:
+            if text.startswith(token, i):
+                if token in OPEN_TOKENS:
+                    stack.append(token)
+                elif token in CLOSE_TOKENS:
+                    if stack and NON_SYM_PAIRS.get(stack[-1]) == token:
+                        stack.pop()
+                    else:
+                        stack.append(token)
+                i += len(token)
+                matched = True
+                break
+        if not matched:
+            i += 1
+    return stack
+
 def is_balanced(text: str) -> bool:
     """
     检查文本中成对符号是否平衡。
-    支持的符号包括：括号、中文括号、单引号、双引号等。
-    对于对称符号（如引号），采用栈的方式：如果遇到同样符号则视为闭合。
     """
-    pairs = {
-        '(': ')',
-        '（': '）',
-        '"': '"',
-        '“': '”',
-        "'": "'",
-        '‘': '’',
-    }
-    stack = []
-    for ch in text:
-        if ch in pairs:
-            if ch in ['"', "'", '“', '‘']:
-                if stack and stack[-1] == ch:
-                    stack.pop()
-                else:
-                    stack.append(ch)
-            else:
-                stack.append(ch)
-        elif ch in pairs.values():
-            if stack:
-                top = stack[-1]
-                if pairs.get(top) == ch:
-                    stack.pop()
-                else:
-                    return False
-            else:
-                return False
-    return not stack
+    return len(parse_symbols(text)) == 0
+
+def get_unbalanced_depth(text: str) -> int:
+    """
+    返回最终栈中剩余的符号个数。
+    """
+    return len(parse_symbols(text))
+
+BASE_FORCE_THRESHOLD = 60
+FORCE_THRESHOLD_INCREMENT = 20
 
 def process_stream(response, stream_id: str):
     try:
@@ -97,36 +120,41 @@ def process_stream(response, stream_id: str):
 
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
-                part += content 
+                part += content
 
                 while len(part) >= 10:
-                    candidates = []
-                    for sep in split_str_tuple:
-                        idx = part.find(sep)
-                        if idx != -1:
-                            candidates.append((idx, sep))
+                    candidates = [(idx, sep) for sep in split_str_tuple if (idx := part.find(sep)) != -1]
                     if not candidates:
-                        break  
+                        break
 
-                    candidates.sort(key=lambda x: x[0])
+                    candidates.sort()
                     found = False
                     for idx, sep in candidates:
                         candidate_segment = part[: idx + len(sep)]
                         if len(candidate_segment) < 10:
                             continue
                         if is_balanced(candidate_segment):
+                            if candidate_segment.endswith(',') or candidate_segment.endswith('，'):
+                                candidate_segment = candidate_segment.rstrip(',，')
                             with stream_lock:
                                 data['parts'].append(candidate_segment)
                             part = part[idx + len(sep):]
                             found = True
-                            break 
+                            break
                     if not found:
                         break
 
+                effective_threshold = BASE_FORCE_THRESHOLD + get_unbalanced_depth(part) * FORCE_THRESHOLD_INCREMENT
+                if len(part) > effective_threshold:
+                    segment = part.rstrip(',，')
+                    with stream_lock:
+                        data['parts'].append(segment)
+                    part = ""
+        
         with stream_lock:
             if stream_id in stream_data:
                 if part:
-                    stream_data[stream_id]['parts'].append(part)
+                    stream_data[stream_id]['parts'].append(part.rstrip(',，'))
                 stream_data[stream_id]['status'] = 'completed'
     except Exception as e:
         with stream_lock:
