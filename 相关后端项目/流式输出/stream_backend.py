@@ -91,11 +91,13 @@ def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
             if text.startswith(token, i):
                 if token in CLOSE_TOKENS and stack and SYM_PAIRS.get(stack[-1])[0] == token:
                     stack.pop()
-                    force_threshold -= SYM_PAIRS[token][1]
+                    force_threshold -= [SYM_PAIRS[key][1] + len(token) for key in OPEN_TOKENS if SYM_PAIRS[key][0] == token][0]
                     text_len -= i + len(token)
                 elif token in OPEN_TOKENS:
+                    if seg and seg[0] < i and len(stack) > 0:
+                        seg = None # 两个左符号之间，分割信息失效
                     stack.append(token)
-                    force_threshold += SYM_PAIRS[token][1]
+                    force_threshold += SYM_PAIRS[token][1] + len(token)
                 elif token in SPLIT_TOKENS and (force_threshold == 0 or text_len >= force_threshold): # 防止分割掉成对符号
                     seg = (i, token)
                 i += len(token)
