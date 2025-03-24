@@ -49,6 +49,41 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
 app = FastAPI(lifespan=lifespan)
 
+def is_balanced(text: str) -> bool:
+    """
+    检查文本中成对符号是否平衡。
+    支持的符号包括：括号、中文括号、单引号、双引号等。
+    对于对称符号（如引号），采用栈的方式：如果遇到同样符号则视为闭合。
+    """
+    pairs = {
+        '(': ')',
+        '（': '）',
+        '"': '"',
+        '“': '”',
+        "'": "'",
+        '‘': '’',
+    }
+    stack = []
+    for ch in text:
+        if ch in pairs:
+            if ch in ['"', "'", '“', '‘']:
+                if stack and stack[-1] == ch:
+                    stack.pop()
+                else:
+                    stack.append(ch)
+            else:
+                stack.append(ch)
+        elif ch in pairs.values():
+            if stack:
+                top = stack[-1]
+                if pairs.get(top) == ch:
+                    stack.pop()
+                else:
+                    return False
+            else:
+                return False
+    return not stack
+
 def process_stream(response, stream_id: str):
     try:
         part = ""
@@ -56,22 +91,38 @@ def process_stream(response, stream_id: str):
             with stream_lock:
                 if stream_id not in stream_data:
                     return
-                
                 data = stream_data[stream_id]
                 if data['status'] != 'processing':
                     return
-                
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    parts = data['parts']
-                    
-                    part += content
-                    
-                    if (content in split_str_tuple and len(part) > 10) or len(part) > 40:
-                        parts.append(part)
-                        part = ""
-        
-        # 流处理完成，更新状态
+
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                part += content 
+
+                while len(part) >= 10:
+                    candidates = []
+                    for sep in split_str_tuple:
+                        idx = part.find(sep)
+                        if idx != -1:
+                            candidates.append((idx, sep))
+                    if not candidates:
+                        break  
+
+                    candidates.sort(key=lambda x: x[0])
+                    found = False
+                    for idx, sep in candidates:
+                        candidate_segment = part[: idx + len(sep)]
+                        if len(candidate_segment) < 10:
+                            continue
+                        if is_balanced(candidate_segment):
+                            with stream_lock:
+                                data['parts'].append(candidate_segment)
+                            part = part[idx + len(sep):]
+                            found = True
+                            break 
+                    if not found:
+                        break
+
         with stream_lock:
             if stream_id in stream_data:
                 if part:
