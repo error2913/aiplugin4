@@ -25,10 +25,6 @@ export class AI {
     privilege: Privilege;
 
     // 下面是临时变量，用于处理消息
-    listen: {
-        status: boolean,
-        content: string
-    }
     stream: {
         id: string,
         reply: string,
@@ -48,10 +44,6 @@ export class AI {
             timer: -1,
             prob: -1,
             standby: false
-        };
-        this.listen = { // 监听调用函数发送的内容
-            status: false,
-            content: ''
         };
         this.stream = {
             id: '',

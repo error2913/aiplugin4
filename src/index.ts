@@ -1267,9 +1267,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     let message = msg.message;
     let images: Image[] = [];
 
-    if (ai.listen.status) {
-      ai.listen.status = false;
-      ai.listen.content = message;
+    if (ai.tool.listen.status) {
+      ai.tool.listen.status = false;
+      ai.tool.listen.content = message;
       return;
     }
 

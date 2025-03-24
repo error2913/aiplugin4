@@ -86,12 +86,23 @@ export class ToolManager {
     static toolMap: { [key: string]: Tool } = {};
     toolStatus: { [key: string]: boolean };
 
+    // 监听调用函数发送的内容
+    listen: {
+        status: boolean,
+        content: string
+    }
+
     constructor() {
         const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
         this.toolStatus = Object.keys(ToolManager.toolMap).reduce((acc, key) => {
             acc[key] = !toolsNotAllow.includes(key) && !toolsDefaultClosed.includes(key);
             return acc;
         }, {});
+
+        this.listen = {
+            status: false,
+            content: ''
+        };
     }
 
     static reviver(value: any): ToolManager {
@@ -189,19 +200,19 @@ export class ToolManager {
         cmdArgs.amIBeMentionedFirst = false;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
 
-        ai.listen.status = true;
+        ai.tool.listen.status = true;
 
         const ext = seal.ext.find(cmdInfo.ext);
         ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
 
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        if (ai.listen.status) {
-            ai.listen.status = false;
+        if (ai.tool.listen.status) {
+            ai.tool.listen.status = false;
             return ['', false];
         }
 
-        return [ai.listen.content, true];
+        return [ai.tool.listen.content, true];
     }
 
     /**
