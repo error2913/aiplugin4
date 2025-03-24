@@ -61,16 +61,11 @@ export class Context {
                 const epId = ctx.endPoint.userId;
                 const gid = ctx.group.groupId;
                 const uid = `QQ:${p1}`;
-
-                if (showNumber) {
-                    return `<@${uid.replace(/\D+/g, '')}>`;
-                }
-
                 const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
                 const mctx = createCtx(epId, mmsg);
                 const name = mctx.player.name || '未知用户';
 
-                return `<@${name}>`;
+                return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
             })
             .replace(/\[CQ:.*?\]/g, '')
 

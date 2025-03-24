@@ -137,10 +137,10 @@ function checkRepeat(context: Context, s: string) {
  * @returns 
  */
 async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/<@(.+?)>/g);
+    const match = reply.match(/<[\|｜]@(.+?)[\|｜]?>/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^<@|>$/g, '');
+            const name = match[i].replace(/^<[\|｜]@|[\|｜]?>$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
