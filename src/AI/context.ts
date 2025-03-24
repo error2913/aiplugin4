@@ -77,8 +77,8 @@ export class Context {
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
-        if (length !== 0 && messages[length - 1].name === name) {
-            messages[length - 1].content += ' ' + s;
+        if (length !== 0 && messages[length - 1].name === name && !s.startsWith('<function_call>')) {
+            messages[length - 1].content += '\n' + s;
             messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
             messages[length - 1].images.push(...images);
         } else {
