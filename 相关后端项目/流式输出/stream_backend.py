@@ -76,12 +76,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
 app = FastAPI(lifespan=lifespan)
 
-def parse_symbols(text: str, stack: list) -> tuple[int, str]:
+def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
     """
     解析文本中的符号，并更新栈
     """
+    stack = [] # 符号栈
     seg = None # 分割信息
-    force_threshold = sum([SYM_PAIRS[sym][1] for sym in stack]) # 强制分割的阈值
+    force_threshold = 0 # 强制分割的阈值
     text_len = len(text) # 除去成对符号后的文本长度
     i = 0
     while i < len(text):
@@ -106,7 +107,7 @@ def parse_symbols(text: str, stack: list) -> tuple[int, str]:
     if force_threshold > 0 and text_len >= force_threshold: # 如果长度超过阈值，则强制分割
         seg = (text_len - 1, '')
             
-    return seg
+    return seg, stack
 
 def process_stream(response, stream_id: str):
     try:
@@ -124,7 +125,7 @@ def process_stream(response, stream_id: str):
                 part += content
                 
                 with stream_lock:
-                    seg = parse_symbols(part, data['symbols_stack']) # 解析符号，更新栈，并获取分割信息
+                    seg, data['symbols_stack'] = parse_symbols(part) # 解析符号，更新栈，并获取分割信息
                     
                     if seg:
                         (idx, token) = seg
