@@ -76,11 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
 app = FastAPI(lifespan=lifespan)
 
-def parse_symbols(text: str, stack: list) -> list:
+def parse_symbols(text: str, stack: list) -> tuple[int, str]:
     """
     解析文本中的符号，并更新栈
     """
-    seg_info = [] # 分割信息
+    seg = None # 分割信息
     force_threshold = sum([SYM_PAIRS[sym][1] for sym in stack]) # 强制分割的阈值
     text_len = len(text) # 除去成对符号后的文本长度
     i = 0
@@ -96,7 +96,7 @@ def parse_symbols(text: str, stack: list) -> list:
                     stack.append(token)
                     force_threshold += SYM_PAIRS[token][1]
                 elif token in SPLIT_TOKENS and (force_threshold == 0 or text_len >= force_threshold): # 防止分割掉成对符号
-                    seg_info.append((i, token))
+                    seg = (i, token)
                 i += len(token)
                 matched = True
                 break
@@ -104,9 +104,9 @@ def parse_symbols(text: str, stack: list) -> list:
             i += 1
             
     if force_threshold > 0 and text_len >= force_threshold: # 如果长度超过阈值，则强制分割
-        seg_info.append((text_len - 1, ''))
+        seg = (text_len - 1, '')
             
-    return seg_info
+    return seg
 
 def process_stream(response, stream_id: str):
     try:
@@ -124,19 +124,17 @@ def process_stream(response, stream_id: str):
                 part += content
                 
                 with stream_lock:
-                    seg_info = parse_symbols(part, data['symbols_stack']) # 解析符号，更新栈，并获取分割信息
+                    seg = parse_symbols(part, data['symbols_stack']) # 解析符号，更新栈，并获取分割信息
                     
-                    if seg_info:
-                        seg_info.sort()
-                        for idx, token in seg_info:
-                            data['parts'].append(part[: idx + len(token)])
-                            part = part[idx + len(token):]
+                    if seg:
+                        (idx, token) = seg
+                        data['parts'].append(part[: idx + len(token)])
+                        part = part[idx + len(token):]
 
-                if len(part) >= FORCE_THRESHOLD: # 如果长度超过阈值，则强制分割
-                    with stream_lock:
+                    if len(part) >= FORCE_THRESHOLD: # 如果长度超过阈值，则强制分割
                         data['symbols_stack'] = []
                         data['parts'].append(part)
-                    part = ""
+                        part = ""
         
         with stream_lock:
             if stream_id in stream_data:
