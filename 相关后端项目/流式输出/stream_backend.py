@@ -1,4 +1,8 @@
 # coding: utf-8
+"""
+version: 1.0.0
+"""
+
 import asyncio
 from contextlib import asynccontextmanager
 import time
