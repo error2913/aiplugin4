@@ -73,10 +73,15 @@ export class AI {
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
-        const bodyTemplate = ConfigManager.request.bodyTemplate;
-        const bodyObject = parseBody(bodyTemplate, [], null, null);
-        if (bodyObject?.stream === true) {
-            await this.chatStream(ctx, msg);
+        try {
+            const bodyTemplate = ConfigManager.request.bodyTemplate;
+            const bodyObject = parseBody(bodyTemplate, [], null, null);
+            if (bodyObject?.stream === true) {
+                await this.chatStream(ctx, msg);
+                return;
+            }
+        } catch (err) {
+            console.error('解析body时出现错误:', err);
             return;
         }
 
