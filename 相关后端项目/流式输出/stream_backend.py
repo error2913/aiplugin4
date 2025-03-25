@@ -1,7 +1,5 @@
 # coding: utf-8
-"""
-version: 1.0.0
-"""
+VERSION = "1.0.0"
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -13,6 +11,7 @@ import uvicorn
 from typing import AsyncIterator, Dict, Any, List
 import threading
 import tiktoken
+import logging
 
 CLEANUP_INTERVAL = 24 * 60 * 60 # 清理过期任务的间隔（秒）
 SPLIT_STR_TUPLE = (',', '，', '。', '!', '！', '?', '？', ';', '；', ':', '：', '~', '--', '——', '...', '……', '\n', '\t', '\r')
@@ -48,17 +47,21 @@ stream_lock = threading.Lock() # 线程锁
 
 encoder = tiktoken.get_encoding("cl100k_base")
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("流式处理")
+
 async def cleanup_stream():
     """
     定期清理过期任务
     """
     while True:
+        logger.info(f"开始清理过期任务，当前任务数：{len(stream_data)}")
         time = time.time()
         with stream_lock:
             for stream_id, data in list(stream_data.items()):
                 if data['time'] + CLEANUP_INTERVAL < time:
                     del stream_data[stream_id]
-                    
+        logger.info(f"清理完成，剩余任务数：{len(stream_data)}")
         await asyncio.sleep(CLEANUP_INTERVAL)
         
 @asynccontextmanager
@@ -66,11 +69,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     生命周期管理：启动和关闭逻辑
     """
-    # 启动时启动定期清理任务
+    logger.info("启动定期清理任务")
     cleanup_task = asyncio.create_task(cleanup_stream())
     yield
     
-    # 关闭时取消清理任务
+    logger.info("关闭定期清理任务")
     cleanup_task.cancel()
     try:
         await cleanup_task
@@ -152,7 +155,9 @@ def process_stream(response, stream_id: str):
                 if part:
                     stream_data[stream_id]['parts'].append(part)
                 stream_data[stream_id]['status'] = 'completed'
+                logger.info(f"任务{stream_id}处理完成")
     except Exception as e:
+        logger.error(f"任务{stream_id}处理失败：{str(e)}")
         with stream_lock:
             if stream_id in stream_data:
                 stream_data[stream_id]['status'] = 'failed'
@@ -163,6 +168,7 @@ async def start_completion(
     request: Request, 
     background_tasks: BackgroundTasks
 ):
+    stream_id = None
     try:
         body = await request.json()
         url = body.get("url")
@@ -176,9 +182,12 @@ async def start_completion(
         
         # 计算输入tokens
         prompt_tokens = sum(len(encoder.encode(message['content'])) for message in body_obj['messages'])
+        logger.info(f"输入tokens：{prompt_tokens}")
         
         # 生成唯一ID
         stream_id = uuid.uuid4().hex
+        logger.info(f"生成的ID：{stream_id}")
+        
         with stream_lock:
             stream_data[stream_id] = {
                 'timestamp': time.time(),
@@ -200,8 +209,10 @@ async def start_completion(
         return {"id": stream_id}
     
     except HTTPException as he:
+        logger.error(f"HTTP异常：{str(he)}")
         raise
     except Exception as e:
+        logger.error(f"内部错误：{str(e)}")
         with stream_lock:
             if stream_id in stream_data:
                 del stream_data[stream_id]
@@ -212,44 +223,62 @@ async def poll_completion(
     id: str = Query(..., description="Stream ID"),
     after: int = Query(0, description="Last received part index")
 ):
-    with stream_lock:
+    try:
         if id not in stream_data:
             raise HTTPException(404, "Stream not found")
-        
-        data = stream_data[id]
-        parts = data['parts']
-        
-        if after >= len(parts):
+        with stream_lock:
+            data = stream_data[id]
+            parts = data['parts']
+            
+            if after >= len(parts):
+                return {
+                    "status": data['status'],
+                    "results": [],
+                    "next_after": after
+                }
+            
+            results = parts[after:]
             return {
                 "status": data['status'],
-                "results": [],
-                "next_after": after
+                "results": results,
+                "next_after": len(parts)
             }
-        
-        results = parts[after:]
-        return {
-            "status": data['status'],
-            "results": results,
-            "next_after": len(parts)
-        }
+    except HTTPException as he:
+        logger.error(f"HTTP异常：{str(he)}")
+        raise
+    except Exception as e:
+        logger.error(f"内部错误：{str(e)}")
+        raise HTTPException(500, f"Internal error: {str(e)}")
 
 @app.get("/end")
 async def end_completion(id: str = Query(...)):
-    model = stream_data[id]['model']
-    completion_tokens = sum(len(encoder.encode(part)) for part in stream_data[id]['parts'])
-    usage = {
-        "prompt_tokens": stream_data[id]['prompt_tokens'],
-        "completion_tokens": completion_tokens,
-        "total_tokens": stream_data[id]['prompt_tokens'] + completion_tokens
-    }
-    with stream_lock:
-        if id in stream_data:
+    try:
+        if id not in stream_data:
+            raise HTTPException(404, "Stream not found")
+        with stream_lock:
+            model = stream_data[id]['model']
+            completion_tokens = sum(len(encoder.encode(part)) for part in stream_data[id]['parts'])
+            usage = {
+                "prompt_tokens": stream_data[id]['prompt_tokens'],
+                "completion_tokens": completion_tokens,
+                "total_tokens": stream_data[id]['prompt_tokens'] + completion_tokens
+            }
+            
             del stream_data[id]
-    return {
-        "status": "success",
-        "model": model,
-        "usage": usage
-    }
+            logger.info(f"任务{id}结束成功")
+            return {
+                "status": "success",
+                "model": model,
+                "usage": usage
+            }
+    except Exception as e:
+        logger.error(f"内部错误：{str(e)}")
+        with stream_lock:
+            if id in stream_data:
+                del stream_data[id]
+        raise HTTPException(500, f"Internal error: {str(e)}")
 
 if __name__ == "__main__":
+    logger.info(f"服务开始启动，版本号：{VERSION}")
     uvicorn.run(app, host="0.0.0.0", port=3010)
+    logger.info("服务退出成功")
