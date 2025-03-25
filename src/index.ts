@@ -1353,7 +1353,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   })
 }
 
-async function get_chart_url(chart_type: string, data: {
+async function get_chart_url(chart_type: string, usage_data: {
   [key: string]: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -1369,24 +1369,27 @@ async function get_chart_url(chart_type: string, data: {
       },
       body: JSON.stringify({
         chart_type: chart_type,
-        data: data
+        data: usage_data
       })
     })
 
-    const data2 = await response.json();
-
+    const text = await response.text();
     if (!response.ok) {
-      let s = `请求失败! 状态码: ${response.status}`;
-      if (data2.error) {
-        s += `\n错误信息: ${data2.error.message}`;
-      }
-
-      s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-
-      throw new Error(s);
+      throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+    }
+    if (!text) {
+      throw new Error("响应体为空");
     }
 
-    return data2.image_url;
+    try {
+      const data = JSON.parse(text);
+      if (data.error) {
+        throw new Error(`请求失败! 错误信息: ${data.error.message}`);
+      }
+      return data.image_url;
+    } catch (e) {
+      throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
+    }
   } catch (error) {
     console.error("在get_chart_url中请求出错：", error);
     return '';

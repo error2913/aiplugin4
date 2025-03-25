@@ -156,25 +156,23 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
 
     // console.log("响应体", JSON.stringify(response, null, 2));
 
-    const data = await response.json();
-
-    if (!response.ok) {
-        let s = `请求失败! 状态码: ${response.status}`;
-        if (data.error) {
-            s += `\n错误信息: ${data.error.message}`;
-        }
-
-        s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-
-        throw new Error(s);
-    }
-
     const text = await response.text();
+    if (!response.ok) {
+        throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+    }
     if (!text) {
-        throw new Error(`响应体为空!`);
+        throw new Error("响应体为空");
     }
 
-    return data;
+    try {
+        const data = JSON.parse(text);
+        if (data.error) {
+            throw new Error(`请求失败! 错误信息: ${data.error.message}`);
+        }
+        return data;
+    } catch (e) {
+        throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
+    }
 }
 
 export async function startStream(messages: {
@@ -212,26 +210,25 @@ export async function startStream(messages: {
 
         // console.log("响应体", JSON.stringify(response, null, 2));
 
-        const data = await response.json();
-
+        const text = await response.text();
         if (!response.ok) {
-            let s = `请求失败! 状态码: ${response.status}`;
-            if (data.error) {
-                s += `\n错误信息: ${data.error.message}`;
-            }
-
-            s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-
-            throw new Error(s);
+            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+        }
+        if (!text) {
+            throw new Error("响应体为空");
         }
 
-        if (data.id) {
-
-            const id = data.id;
-
-            return id;
-        } else {
-            throw new Error("服务器响应中没有id字段");
+        try {
+            const data = JSON.parse(text);
+            if (data.error) {
+                throw new Error(`请求失败! 错误信息: ${data.error.message}`);
+            }
+            if (!data.id) {
+                throw new Error("服务器响应中没有id字段");
+            }
+            return data.id;
+        } catch (e) {
+            throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (error) {
         console.error("在start_stream中出错：", error);
@@ -252,27 +249,29 @@ export async function pollStream(id: string, after: number): Promise<{ status: s
 
         // console.log("响应体", JSON.stringify(response, null, 2));
 
-        const data = await response.json();
-
+        const text = await response.text();
         if (!response.ok) {
-            let s = `请求失败! 状态码: ${response.status}`;
-            if (data.error) {
-                s += `\n错误信息: ${data.error.message}`;
-            }
-
-            s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-
-            throw new Error(s);
+            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+        }
+        if (!text) {
+            throw new Error("响应体为空");
         }
 
-        if (data.status) {
-            const status = data.status;
-            const reply = data.results.join('');
-            const nextAfter = data.next_after;
-
-            return { status, reply, nextAfter };
-        } else {
-            throw new Error("服务器响应中没有status字段");
+        try {
+            const data = JSON.parse(text);
+            if (data.error) {
+                throw new Error(`请求失败! 错误信息: ${data.error.message}`);
+            }
+            if (!data.status) {
+                throw new Error("服务器响应中没有status字段");
+            }
+            return {
+                status: data.status,
+                reply: data.results.join(''),
+                nextAfter: data.next_after
+            };
+        } catch (e) {
+            throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (error) {
         console.error("在poll_stream中出错：", error);
@@ -293,30 +292,26 @@ export async function endStream(id: string): Promise<string> {
 
         // console.log("响应体", JSON.stringify(response, null, 2));
 
-        const data = await response.json();
-
+        const text = await response.text();
         if (!response.ok) {
-            let s = `请求失败! 状态码: ${response.status}`;
-            if (data.error) {
-                s += `\n错误信息: ${data.error.message}`;
-            }
-
-            s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-
-            throw new Error(s);
+            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+        }
+        if (!text) {
+            throw new Error("响应体为空");
         }
 
-        if (data.status) {
-            const status = data.status;
-            if (status === 'success') {
-                log(`对话结束成功`);
-            } else {
-                log(`对话结束失败`);
+        try {
+            const data = JSON.parse(text);
+            if (data.error) {
+                throw new Error(`请求失败! 错误信息: ${data.error.message}`);
             }
-
-            return status;
-        } else {
-            throw new Error("服务器响应中没有status字段");
+            if (!data.status) {
+                throw new Error("服务器响应中没有status字段");
+            }
+            log('对话结束', data.status === 'success' ? '成功' : '失败');
+            return data.status;
+        } catch (e) {
+            throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (error) {
         console.error("在end_stream中出错：", error);

@@ -37,7 +37,7 @@ export function registerWebSearch() {
     const tool = new Tool(info);
     tool.solve = async (_, __, ___, args) => {
         const { q, page, categories, time_range = '' } = args;
-        
+
         let part = 1;
         let pageno = '';
         if (page) {
@@ -59,14 +59,7 @@ export function registerWebSearch() {
             const data = await response.json();
 
             if (!response.ok) {
-                let s = `请求失败! 状态码: ${response.status}`;
-                if (data.error) {
-                    s += `\n错误信息: ${data.error.message}`;
-                }
-        
-                s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-                
-                throw new Error(s);
+                throw new Error(`请求失败:${JSON.stringify(data)}}`);
             }
 
             const number_of_results = data.number_of_results;

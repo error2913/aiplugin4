@@ -54,7 +54,7 @@ export class ImageManager {
                 if (!name) {
                     throw new Error(`本地图片路径格式错误:${path}`);
                 }
-    
+
                 acc[name] = path;
             } catch (e) {
                 console.error(e);
@@ -98,7 +98,7 @@ export class ImageManager {
                 if (!name) {
                     throw new Error(`本地图片路径格式错误:${path}`);
                 }
-    
+
                 acc[name] = path;
             } catch (e) {
                 console.error(e);
@@ -251,24 +251,26 @@ export class ImageManager {
                 body: JSON.stringify({ url: imageUrl })
             });
 
-            const data = await response.json();
-
+            const text = await response.text();
             if (!response.ok) {
-                let s = `请求失败! 状态码: ${response.status}`;
+                throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+            }
+            if (!text) {
+                throw new Error("响应体为空");
+            }
+
+            try {
+                const data = JSON.parse(text);
                 if (data.error) {
-                    s += `\n错误信息: ${data.error.message}`;
+                    throw new Error(`请求失败! 错误信息: ${data.error.message}`);
                 }
-
-                s += `\n响应体: ${JSON.stringify(data, null, 2)}`;
-
-                throw new Error(s);
+                if (!data.base64 || !data.format) {
+                    throw new Error(`响应体中缺少base64或format字段`);
+                }
+                return data;
+            } catch (e) {
+                throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
-
-            if (!data.base64 || !data.format) {
-                throw new Error(`响应体中缺少base64或format字段`);
-            }
-
-            return data;
         } catch (error) {
             console.error("在imageUrlToBase64中请求出错：", error);
             return { base64: '', format: '' };
