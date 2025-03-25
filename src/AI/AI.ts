@@ -155,14 +155,26 @@ export class AI {
         this.stream.id = id;
         let status = 'processing';
         let after = 0;
+        let interval = 1000;
 
         while (status == 'processing' && this.stream.id === id) {
             const result = await pollStream(this.stream.id, after);
             status = result.status;
             const raw_reply = result.reply;
+
+            if (raw_reply.length <= 8) {
+                interval = 1500;
+            } else if (raw_reply.length <= 20) {
+                interval = 1000;
+            } else if (raw_reply.length <= 30) {
+                interval = 500;
+            } else {
+                interval = 200;
+            }
+
             if (raw_reply.trim() === '') {
                 after = result.nextAfter;
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, interval));
                 continue;
             }
             log("接收到的回复:", raw_reply);
@@ -219,7 +231,7 @@ export class AI {
                         return;
                     } else {
                         after = result.nextAfter;
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await new Promise(resolve => setTimeout(resolve, interval));
                         continue;
                     }
                 }
@@ -235,7 +247,7 @@ export class AI {
             seal.replyToSender(ctx, msg, reply);
 
             after = result.nextAfter;
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, interval));
         }
 
         if (this.stream.id !== id) {
@@ -389,6 +401,9 @@ export class AIManager {
         completion_tokens: number,
         total_tokens: number
     }) {
+        if (!model) {
+            return;
+        }
         const now = new Date();
         const year = now.getFullYear();
         const month = now.getMonth() + 1;
