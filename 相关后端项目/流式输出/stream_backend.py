@@ -76,6 +76,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     
 app = FastAPI(lifespan=lifespan)
 
+def cal_len(text: str) -> float:
+    """
+    计算文本长度，半角字符算0.5，全角字符算1
+    """
+    return round(sum(0.5 if ord(c) < 256 else 1 for c in text), 1)
+
 def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
     """
     解析文本中的符号，并更新栈
@@ -89,19 +95,18 @@ def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
         for token in ALL_TOKENS:
             if text.startswith(token, i):
                 if token in CLOSE_TOKENS and stack and SYM_PAIRS.get(stack[-1][1])[0] == token:
+                    text_len -= cal_len(text[stack[-1][0]: i + len(token)]) # 减去成对符号的长度
                     stack.pop()
                     force_threshold -= [SYM_PAIRS[key][1] for key in OPEN_TOKENS if SYM_PAIRS[key][0] == token][0]
                     if not stack:
                         text_len = 0 # 没有左符号，重置长度
-                    else:
-                        text_len -= i - stack[-1][0] + len(token) # 减去成对符号的长度
                 elif token in OPEN_TOKENS:
                     if seg and stack:
                         seg = None # 两个左符号之间，分割信息失效
                     stack.append((i, token))
                     force_threshold += SYM_PAIRS[token][1]
                     if not stack:
-                        text_len = len(text) - i - len(token) # 记录第一个左符号后的长度
+                        text_len = cal_len(text) - i - len(token) # 记录第一个左符号后的长度
                 elif token in SPLIT_TOKENS and (force_threshold == 0 or text_len >= force_threshold): # 防止分割掉成对符号
                     seg = (i, token)
                 i += len(token) - 1
@@ -135,7 +140,7 @@ def process_stream(response, stream_id: str):
                         data['parts'].append(part[: idx + len(token)])
                         part = part[idx + len(token):]
 
-                    if len(part) >= FORCE_THRESHOLD: # 如果长度超过阈值，则强制分割
+                    if cal_len(part) >= FORCE_THRESHOLD: # 如果长度超过阈值，则强制分割
                         data['symbols_stack'] = []
                         data['parts'].append(part)
                         part = ""
