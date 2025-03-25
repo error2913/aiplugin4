@@ -80,34 +80,35 @@ def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
     """
     解析文本中的符号，并更新栈
     """
-    stack = [] # 符号栈
+    stack: List[tuple[int, str]] = [] # 符号栈
     seg = None # 分割信息
     force_threshold = 0 # 强制分割的阈值
-    text_len = len(text) # 除去成对符号后的文本长度
+    text_len = 0 # 除去成对符号后的文本长度，从第一个左符号后开始计算
     i = 0
     while i < len(text):
-        matched = False
         for token in ALL_TOKENS:
             if text.startswith(token, i):
-                if token in CLOSE_TOKENS and stack and SYM_PAIRS.get(stack[-1])[0] == token:
+                if token in CLOSE_TOKENS and stack and SYM_PAIRS.get(stack[-1][1])[0] == token:
                     stack.pop()
-                    force_threshold -= [SYM_PAIRS[key][1] + len(token) for key in OPEN_TOKENS if SYM_PAIRS[key][0] == token][0]
-                    text_len -= i + len(token)
+                    force_threshold -= [SYM_PAIRS[key][1] for key in OPEN_TOKENS if SYM_PAIRS[key][0] == token][0]
+                    if not stack:
+                        text_len = 0 # 没有左符号，重置长度
+                    else:
+                        text_len -= i - stack[-1][0] + len(token) # 减去成对符号的长度
                 elif token in OPEN_TOKENS:
-                    if seg and seg[0] < i and len(stack) > 0:
+                    if seg and stack:
                         seg = None # 两个左符号之间，分割信息失效
-                    stack.append(token)
-                    force_threshold += SYM_PAIRS[token][1] + len(token)
+                    stack.append((i, token))
+                    force_threshold += SYM_PAIRS[token][1]
+                    if not stack:
+                        text_len = len(text) - i - len(token) # 记录第一个左符号后的长度
                 elif token in SPLIT_TOKENS and (force_threshold == 0 or text_len >= force_threshold): # 防止分割掉成对符号
                     seg = (i, token)
-                i += len(token)
-                matched = True
+                i += len(token) - 1
                 break
-        if not matched:
-            i += 1
-            
-    if force_threshold > 0 and text_len >= force_threshold: # 如果长度超过阈值，则强制分割
-        seg = (text_len - 1, '')
+        if force_threshold > 0 and text_len >= force_threshold: # 如果长度超过阈值，则强制分割
+            seg = (i, '')
+        i += 1
             
     return seg, stack
 
