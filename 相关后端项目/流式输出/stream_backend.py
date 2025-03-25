@@ -12,6 +12,7 @@ from openai import OpenAI
 import uvicorn
 from typing import AsyncIterator, Dict, Any, List
 import threading
+import tiktoken
 
 CLEANUP_INTERVAL = 24 * 60 * 60 # 清理过期任务的间隔（秒）
 SPLIT_STR_TUPLE = (',', '，', '。', '!', '！', '?', '？', ';', '；', ':', '：', '~', '--', '——', '...', '……', '\n', '\t', '\r')
@@ -44,6 +45,8 @@ FORCE_THRESHOLD = 150 # 强制分割的阈值
 
 stream_data: Dict[str, Dict[str, Any]] = {}
 stream_lock = threading.Lock() # 线程锁
+
+encoder = tiktoken.get_encoding("cl100k_base")
 
 async def cleanup_stream():
     """
@@ -172,11 +175,16 @@ async def start_completion(
 
         body_obj['stream'] = True
         
+        # 计算输入tokens
+        prompt_tokens = sum(len(encoder.encode(message['content'])) for message in body_obj['messages'])
+        
         # 生成唯一ID
         stream_id = uuid.uuid4().hex
         with stream_lock:
             stream_data[stream_id] = {
                 'timestamp': time.time(),
+                'model': body_obj['model'],
+                'prompt_tokens': prompt_tokens,
                 'parts': [],
                 'symbols_stack': [],
                 'status': 'processing',
@@ -229,10 +237,21 @@ async def poll_completion(
 
 @app.get("/end")
 async def end_completion(id: str = Query(...)):
+    model = stream_data[id]['model']
+    completion_tokens = sum(len(encoder.encode(part)) for part in stream_data[id]['parts'])
+    usage = {
+        "prompt_tokens": stream_data[id]['prompt_tokens'],
+        "completion_tokens": completion_tokens,
+        "total_tokens": stream_data[id]['prompt_tokens'] + completion_tokens
+    }
     with stream_lock:
         if id in stream_data:
             del stream_data[id]
-    return {"status": "success"}
+    return {
+        "status": "success",
+        "model": model,
+        "usage": usage
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=3010)

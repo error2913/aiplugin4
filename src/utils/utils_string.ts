@@ -34,11 +34,11 @@ export function levenshteinDistance(s1: string, s2: string): number {
 }
 
 export function calculateSimilarity(s1: string, s2: string): number {
-    if (s1.length === 0 || s2.length === 0) {
+    if (!s1 || !s2 || s1 === s2) {
         return 0;
     }
 
     const distance = levenshteinDistance(s1, s2);
     const maxLength = Math.max(s1.length, s2.length);
-    return 1 - distance / maxLength;
+    return 1 - distance / maxLength || 0;
 }

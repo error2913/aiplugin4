@@ -401,6 +401,9 @@ export class AIManager {
         completion_tokens: number,
         total_tokens: number
     }) {
+        if (!model) {
+            return;
+        }
         const now = new Date();
         const year = now.getFullYear();
         const month = now.getMonth() + 1;

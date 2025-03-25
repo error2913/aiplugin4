@@ -22,9 +22,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
         const data = await fetchData(url, apiKey, bodyObject);
 
         if (data.choices && data.choices.length > 0) {
-            const model = data.model;
-            const usage = data.usage;
-            AIManager.updateUsage(model, usage);
+            AIManager.updateUsage(data.model, data.usage);
 
             const message = data.choices[0].message;
             const finish_reason = data.choices[0].finish_reason;
@@ -92,9 +90,7 @@ export async function sendITTRequest(messages: {
         const data = await fetchData(url, apiKey, bodyObject);
 
         if (data.choices && data.choices.length > 0) {
-            const model = data.model;
-            const usage = data.usage;
-            AIManager.updateUsage(model, usage);
+            AIManager.updateUsage(data.model, data.usage);
 
             const message = data.choices[0].message;
             const reply = message.content;
@@ -309,6 +305,9 @@ export async function endStream(id: string): Promise<string> {
                 throw new Error("服务器响应中没有status字段");
             }
             log('对话结束', data.status === 'success' ? '成功' : '失败');
+            if (data.status ==='success') {
+                AIManager.updateUsage(data.model, data.usage);
+            }
             return data.status;
         } catch (e) {
             throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
