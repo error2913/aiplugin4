@@ -85,9 +85,9 @@ def cal_len(text: str) -> float:
     """
     return round(sum(0.5 if ord(c) < 256 else 1 for c in text), 1)
 
-def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
+def parse_symbols(text: str) -> tuple[int, str]:
     """
-    解析文本中的符号，并更新栈
+    解析文本中的符号，并返回分割信息
     """
     stack: List[tuple[int, str]] = [] # 符号栈
     seg = None # 分割信息
@@ -118,7 +118,7 @@ def parse_symbols(text: str) -> tuple[tuple[int, str], List[str]]:
             seg = (i, '')
         i += 1
             
-    return seg, stack
+    return seg
 
 def process_stream(response, stream_id: str):
     try:
@@ -136,7 +136,7 @@ def process_stream(response, stream_id: str):
                 part += content
                 
                 with stream_lock:
-                    seg, data['symbols_stack'] = parse_symbols(part) # 解析符号，更新栈，并获取分割信息
+                    seg = parse_symbols(part) # 解析符号，并获取分割信息
                     
                     if seg:
                         (idx, token) = seg
@@ -144,7 +144,6 @@ def process_stream(response, stream_id: str):
                         part = part[idx + len(token):]
 
                     if cal_len(part) >= FORCE_THRESHOLD: # 如果长度超过阈值，则强制分割
-                        data['symbols_stack'] = []
                         data['parts'].append(part)
                         part = ""
         
@@ -186,7 +185,6 @@ async def start_completion(
                 'model': body_obj['model'],
                 'prompt_tokens': prompt_tokens,
                 'parts': [],
-                'symbols_stack': [],
                 'status': 'processing',
                 'error': None
             }
