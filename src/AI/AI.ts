@@ -98,7 +98,7 @@ export class AI {
             images: []
         }
         const MaxRetry = 3;
-        for (let retry = 0; retry <= MaxRetry; retry++) {
+        for (let retry = 1; retry <= MaxRetry; retry++) {
             // 处理messages
             const messages = handleMessages(ctx, this);
 
