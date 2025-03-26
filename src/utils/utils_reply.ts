@@ -166,7 +166,7 @@ async function replaceImages(context: Context, reply: string) {
     const match = reply.match(/<[\|｜]图片.+?[\|｜]?>/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+            const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1].trim().slice(0, 6);
             const image = context.findImage(id);
 
             if (image) {

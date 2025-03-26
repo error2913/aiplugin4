@@ -5,6 +5,7 @@ import { ConfigManager } from "../config/config";
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, showNumber }: { roleSettingTemplate: string, showNumber: boolean } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
+    const { condition } = ConfigManager.image;
 
     let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$g人工智能插件专用角色设定序号");
     if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
@@ -13,42 +14,35 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
 
     let content = roleSettingTemplate[roleSettingIndex];
 
-    // 群聊信息
-    if (!ctx.isPrivate) {
-        content += `
-**相关信息**
-- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
+    content += `\n**聊天相关信息**`;
+    content += ctx.isPrivate ?
+        `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
+        `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
 - <|@xxx|>表示@某个群成员`;
-    } else {
-        content += `
-**相关信息**
-- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}`;
-    }
-
-    content += `- <|from:xxx|>表示消息来源
-- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
+    content += `- <|from:xxx|>表示消息来源`;
+    content += condition === '0' ?
+        `\n- <|图片xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|图片xxxxxx|>的格式` :
+        `\n- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
 
     // 记忆
     const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
-    if (memeryPrompt) {
-        content += `
-**记忆**
+    content += memeryPrompt ?
+        `\n**记忆**
 如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
-${memeryPrompt}`;
-    }
+${memeryPrompt}` :
+        ``;
 
     // 调用函数
     if (isTool && usePromptEngineering) {
         const tools = ai.tool.getToolsInfo();
         const toolsPrompt = tools.map((item, index) => {
             return `${index + 1}. 名称:${item.function.name}
-- 描述:${item.function.description}
-- 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
-- 必需参数:${item.function.parameters.required.join('\n')}`;
+    - 描述:${item.function.description}
+    - 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
+    - 必需参数:${item.function.parameters.required.join('\n')}`;
         });
 
-        content += `
-**调用函数**
+        content += `\n**调用函数**
 当需要调用函数功能时，请严格使用以下格式：
 
 <function_call>
@@ -63,7 +57,8 @@ ${memeryPrompt}`;
 
 要用成对的标签包裹，标签外不要附带其他文本，且每次只能调用一次函数
 
-可用函数列表: ${toolsPrompt}`;
+可用函数列表:
+${toolsPrompt}`;
     }
 
     const systemMessage: Message = {

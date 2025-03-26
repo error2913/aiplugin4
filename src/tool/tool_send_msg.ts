@@ -64,7 +64,7 @@ export function registerSendMsg() {
         const match = content.match(/<[\|｜]图片.+?[\|｜]?>/g);
         if (match) {
             for (let i = 0; i < match.length; i++) {
-                const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1];
+                const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1].trim().slice(0, 6);
                 const image = ai.context.findImage(id);
 
                 if (image) {
