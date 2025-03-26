@@ -395,10 +395,6 @@ function main() {
               return ret;
             }
 
-            if (ai2.memory.memoryList.length === 0) {
-              seal.replyToSender(ctx, msg, '暂无记忆');
-              return ret;
-            }
             const s = ai2.memory.buildPersonMemoryPrompt();
             seal.replyToSender(ctx, msg, s);
             return ret;
