@@ -5,7 +5,7 @@ import { endStream, pollStream, sendChatRequest, startStream } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages } from "../utils/utils_message";
-import { handleReply } from "../utils/utils_reply";
+import { checkRepeat, handleReply } from "../utils/utils_reply";
 import { ToolManager } from "../tool/tool";
 
 export interface Privilege {
@@ -94,7 +94,6 @@ export class AI {
 
         let result = {
             s: '',
-            isRepeat: false,
             reply: '',
             images: []
         }
@@ -107,7 +106,7 @@ export class AI {
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
             result = await handleReply(ctx, msg, raw_reply, this.context);
 
-            if (!result.isRepeat || result.reply.trim() === '') {
+            if (!checkRepeat(this.context, result.s) || result.reply.trim() === '') {
                 break;
             }
 

@@ -4,7 +4,7 @@ import { ConfigManager } from "../config/config";
 import { log } from "./utils";
 import { calculateSimilarity } from "./utils_string";
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, isRepeat: boolean, reply: string, images: Image[] }> {
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, reply: string, images: Image[] }> {
     const { maxChar, replymsg, filterContextTemplate, filterReplyTemplate } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
@@ -12,7 +12,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         .split(/(<[\|｜]from:?.*?[\|｜]?>)/)
         .filter(item => item.trim() !== '');
     if (segments.length === 0) {
-        return { s: '', reply: '', isRepeat: false, images: [] };
+        return { s: '', reply: '', images: [] };
     }
 
     s = '';
@@ -32,7 +32,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     if (!s.trim()) {
         s = segments.find(segment => !/<[\|｜]from:?.*?[\|｜]?>/.test(segment));
         if (!s || !s.trim()) {
-            return { s: '', reply: '', isRepeat: false, images: [] };
+            return { s: '', reply: '', images: [] };
         }
     }
 
@@ -50,8 +50,6 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     s = s.slice(0, maxChar)
         .trim();
-
-    const isRepeat = checkRepeat(context, s); // 检查复读
 
     // 处理回复消息
     reply = await replaceMentions(ctx, context, reply);
@@ -86,10 +84,10 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     }
     reply = finalReply;
 
-    return { s, isRepeat, reply, images };
+    return { s, reply, images };
 }
 
-function checkRepeat(context: Context, s: string) {
+export function checkRepeat(context: Context, s: string) {
     const { stopRepeat, similarityLimit } = ConfigManager.reply;
 
     if (!stopRepeat) {
