@@ -40,6 +40,9 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 处理上下文
     filterContextTemplate.forEach((item: string) => { // 应用过滤上下文正则表达式
+        if (!item) {
+            return;
+        }
         try {
             const regex = new RegExp(item, 'g');
             s = s.replace(regex, '');
@@ -57,6 +60,9 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     reply = result;
 
     filterReplyTemplate.forEach((item: string) => { // 应用过滤回复正则表达式
+        if (!item) {
+            return;
+        }
         try {
             const regex = new RegExp(item, 'g');
             reply = reply.replace(regex, '');

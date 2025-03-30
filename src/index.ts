@@ -1136,6 +1136,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       // 非指令触发
       for (const keyword of keyWords) {
+        if (!keyword) {
+          continue;
+        }
         try {
           const pattern = new RegExp(keyword);
           if (!pattern.test(message)) {
