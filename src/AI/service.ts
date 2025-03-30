@@ -31,7 +31,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                 log(`思维链内容:`, message.reasoning_content);
             }
 
-            const reply = message.content;
+            const reply = message.content || '';
 
             log(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
@@ -93,7 +93,7 @@ export async function sendITTRequest(messages: {
             AIManager.updateUsage(data.model, data.usage);
 
             const message = data.choices[0].message;
-            const reply = message.content;
+            const reply = message.content || '';
 
             log(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
 
