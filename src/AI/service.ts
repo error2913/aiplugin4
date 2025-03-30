@@ -65,7 +65,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 
             return reply;
         } else {
-            throw new Error("服务器响应中没有choices或choices为空");
+            throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (error) {
         console.error("在sendChatRequest中出错：", error);
@@ -99,7 +99,7 @@ export async function sendITTRequest(messages: {
 
             return reply;
         } else {
-            throw new Error("服务器响应中没有choices或choices为空");
+            throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (error) {
         console.error("在imageToText中请求出错：", error);
@@ -154,7 +154,7 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
 
     const text = await response.text();
     if (!response.ok) {
-        throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+        throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
     }
     if (!text) {
         throw new Error("响应体为空");
@@ -208,7 +208,7 @@ export async function startStream(messages: {
 
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+            throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
         }
         if (!text) {
             throw new Error("响应体为空");
@@ -247,7 +247,7 @@ export async function pollStream(id: string, after: number): Promise<{ status: s
 
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+            throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
         }
         if (!text) {
             throw new Error("响应体为空");
@@ -290,7 +290,7 @@ export async function endStream(id: string): Promise<string> {
 
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+            throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
         }
         if (!text) {
             throw new Error("响应体为空");
@@ -305,7 +305,7 @@ export async function endStream(id: string): Promise<string> {
                 throw new Error("服务器响应中没有status字段");
             }
             log('对话结束', data.status === 'success' ? '成功' : '失败');
-            if (data.status ==='success') {
+            if (data.status === 'success') {
                 AIManager.updateUsage(data.model, data.usage);
             }
             return data.status;
