@@ -1,4 +1,4 @@
-import { Image, ImageManager } from "./image";
+import { ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
 import { log, parseBody } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "./service";
@@ -28,7 +28,6 @@ export class AI {
     stream: {
         id: string,
         reply: string,
-        images: Image[],
         toolCallStatus: boolean
     }
 
@@ -48,7 +47,6 @@ export class AI {
         this.stream = {
             id: '',
             reply: '',
-            images: [],
             toolCallStatus: false
         }
     }
@@ -112,7 +110,7 @@ export class AI {
 
             if (retry > MaxRetry) {
                 log(`发现复读，已达到最大重试次数，清除AI上下文`);
-                this.context.messages = this.context.messages.filter(item => item.role !== 'assistant' && item.role !== 'tool');
+                this.context.clearMessages('assistant', 'tool');
                 break;
             }
 
@@ -122,10 +120,8 @@ export class AI {
 
         const { s, reply, images } = result;
 
-        this.context.lastReply = reply;
         await this.context.iteration(ctx, s, images, 'assistant');
-
-        // 发送回复
+        this.context.lastReply = reply;
         seal.replyToSender(ctx, msg, reply);
 
         //发送偷来的图片
@@ -143,7 +139,7 @@ export class AI {
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { isTool, usePromptEngineering } = ConfigManager.tool;
 
-        await this.stopCurrentChatStream(ctx, msg);
+        await this.stopCurrentChatStream();
 
         //清空数据
         this.clearData();
@@ -190,10 +186,10 @@ export class AI {
                         if (this.stream.id !== id) {
                             return;
                         }
-                        this.stream.images.push(...images);
-                        seal.replyToSender(ctx, msg, reply);
 
-                        await this.context.iteration(ctx, this.stream.reply + s, this.stream.images, 'assistant');
+                        await this.context.iteration(ctx, s, images, 'assistant');
+                        this.context.lastReply = reply;
+                        seal.replyToSender(ctx, msg, reply);
                     }
 
                     this.stream.toolCallStatus = true;
@@ -212,7 +208,7 @@ export class AI {
                         if (match) {
                             this.stream.reply = match[0];
                             this.stream.toolCallStatus = false;
-                            await this.stopCurrentChatStream(ctx, msg);
+                            await this.stopCurrentChatStream();
 
                             try {
                                 const tool_call = JSON.parse(match[1]);
@@ -225,7 +221,7 @@ export class AI {
                             await this.chatStream(ctx, msg);
                         } else {
                             console.error('无法匹配到function_call');
-                            await this.stopCurrentChatStream(ctx, msg);
+                            await this.stopCurrentChatStream();
                         }
                         return;
                     } else {
@@ -241,8 +237,9 @@ export class AI {
             if (this.stream.id !== id) {
                 return;
             }
-            this.stream.reply += s;
-            this.stream.images.push(...images);
+
+            await this.context.iteration(ctx, s, images, 'assistant');
+            this.context.lastReply = reply;
             seal.replyToSender(ctx, msg, reply);
 
             after = result.nextAfter;
@@ -253,23 +250,19 @@ export class AI {
             return;
         }
 
-        await this.stopCurrentChatStream(ctx, msg);
+        await this.stopCurrentChatStream();
     }
 
-    async stopCurrentChatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
-        const { id, reply, images, toolCallStatus } = this.stream;
+    async stopCurrentChatStream(): Promise<void> {
+        const { id, reply, toolCallStatus } = this.stream;
         this.stream = {
             id: '',
             reply: '',
-            images: [],
             toolCallStatus: false
         }
         if (id) {
             log(`结束会话${id}`);
             if (reply) {
-                const { s } = await handleReply(ctx, msg, reply, this.context);
-                await this.context.iteration(ctx, s, images, 'assistant');
-
                 if (toolCallStatus) { // 没有处理完的工具调用，在日志中显示
                     log(`工具调用未处理完成:${reply}`);
                 }

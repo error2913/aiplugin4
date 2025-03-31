@@ -315,24 +315,22 @@ function main() {
         ai.clearData();
 
         const val2 = cmdArgs.getArgN(2);
-        const messages = ai.context.messages;
-
         switch (val2) {
           case 'ass':
           case 'assistant': {
-            ai.context.messages = messages.filter(item => item.role !== 'assistant');
+            ai.context.clearMessages('assistant', 'tool');
             seal.replyToSender(ctx, msg, 'ai上下文已清除');
             AIManager.saveAI(id);
             return ret;
           }
           case 'user': {
-            ai.context.messages = messages.filter(item => item.role !== 'user');
+            ai.context.clearMessages('user');
             seal.replyToSender(ctx, msg, '用户上下文已清除');
             AIManager.saveAI(id);
             return ret;
           }
           default: {
-            ai.context.messages = []
+            ai.context.clearMessages();
             seal.replyToSender(ctx, msg, '上下文已清除');
             AIManager.saveAI(id);
             return ret;
@@ -955,7 +953,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           return ret;
         }
 
-        ai.stopCurrentChatStream(ctx, msg).then(() => {
+        ai.stopCurrentChatStream().then(() => {
           seal.replyToSender(ctx, msg, '已停止当前对话');
         });
         return ret;

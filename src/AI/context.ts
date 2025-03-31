@@ -44,15 +44,17 @@ export class Context {
         return context;
     }
 
-    async iteration(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant') {
-        const messages = this.messages;
-
-        // 如果是assistant，且最后一条消息是tool_calls，则不处理，防止在处理tool_calls时插入user消息
-        if (role === 'user' && messages.length !== 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1]?.tool_calls) {
-            return;
+    clearMessages(...roles: string[]) {
+        if (roles.length === 0) {
+            this.messages = [];
+        } else {
+            this.messages = this.messages.filter(message => !roles.includes(message.role));
         }
+    }
 
+    async iteration(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant') {
         const { showNumber, maxRounds } = ConfigManager.message;
+        const messages = this.messages;
 
         //处理文本
         s = s
@@ -78,7 +80,8 @@ export class Context {
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
         if (length !== 0 && messages[length - 1].name === name && !s.startsWith('<function_call>')) {
-            messages[length - 1].content += '\n' + s;
+            const seg = role === 'assistant' ? '' : '\n';
+            messages[length - 1].content += seg + s;
             messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
             messages[length - 1].images.push(...images);
         } else {
