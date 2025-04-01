@@ -39,7 +39,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                 if (usePromptEngineering) {
                     const match = reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                     if (match) {
-                        ai.context.iteration(ctx, match[0], [], "assistant");
+                        ai.context.addMessage(ctx, match[0], [], "assistant", '');
                         try {
                             const tool_call = JSON.parse(match[1]);
                             await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
@@ -54,7 +54,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                     if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
                         log(`触发工具调用`);
 
-                        ai.context.toolCallsIteration(message.tool_calls);
+                        ai.context.addToolCallsMessage(message.tool_calls);
                         const tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
 
                         const messages = handleMessages(ctx, ai);

@@ -1,6 +1,6 @@
 import { ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
-import { log, parseBody } from "../utils/utils";
+import { log, parseBody, replyToSender } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
@@ -120,9 +120,8 @@ export class AI {
 
         const { s, reply, images } = result;
 
-        await this.context.iteration(ctx, s, images, 'assistant');
-        this.context.lastReply = reply;
-        seal.replyToSender(ctx, msg, reply);
+        const msgId = await replyToSender(ctx, msg, this, reply);
+        await this.context.addMessage(ctx, s, images, 'assistant', msgId);
 
         //发送偷来的图片
         const { p } = ConfigManager.image;
@@ -187,9 +186,8 @@ export class AI {
                             return;
                         }
 
-                        await this.context.iteration(ctx, s, images, 'assistant');
-                        this.context.lastReply = reply;
-                        seal.replyToSender(ctx, msg, reply);
+                        const msgId = await replyToSender(ctx, msg, this, reply);
+                        await this.context.addMessage(ctx, s, images, 'assistant', msgId);
                     }
 
                     this.stream.toolCallStatus = true;
@@ -238,9 +236,8 @@ export class AI {
                 return;
             }
 
-            await this.context.iteration(ctx, s, images, 'assistant');
-            this.context.lastReply = reply;
-            seal.replyToSender(ctx, msg, reply);
+            const msgId = await replyToSender(ctx, msg, this, reply);
+            await this.context.addMessage(ctx, s, images, 'assistant', msgId);
 
             after = result.nextAfter;
             await new Promise(resolve => setTimeout(resolve, interval));

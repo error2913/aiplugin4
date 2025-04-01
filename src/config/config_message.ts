@@ -54,6 +54,7 @@ export class MessageConfig {
         ], "role顺序为user和assistant轮流出现");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否给AI展示数字号码", false, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
+        seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加消息ID", false, "可用于撤回等情况");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
         seal.ext.registerIntConfig(MessageConfig.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
     }
@@ -64,6 +65,7 @@ export class MessageConfig {
             samples: seal.ext.getTemplateConfig(MessageConfig.ext, "示例对话"),
             isPrefix: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加前缀"),
             showNumber: seal.ext.getBoolConfig(MessageConfig.ext, "是否给AI展示数字号码"),
+            showMsgId: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加消息ID"),
             isMerge: seal.ext.getBoolConfig(MessageConfig.ext, "是否合并user content"),
             maxRounds: seal.ext.getIntConfig(MessageConfig.ext, "存储上下文对话限制轮数")
         }

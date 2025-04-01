@@ -1,5 +1,6 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
+import { replyToSender } from "../utils/utils";
 import { handleReply } from "../utils/utils_reply";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
@@ -106,13 +107,12 @@ export function registerSendMsg() {
             return `未知的消息类型<${msg_type}>`;
         }
 
-        await ai.context.systemUserIteration("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
+        await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
         const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
-        ai.context.lastReply = reply;
-        await ai.context.iteration(ctx, s, images, "assistant");
 
-        seal.replyToSender(ctx, msg, reply);
+        const msgId = await replyToSender(ctx, msg, ai, reply);
+        await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
 
         if (tool_call) {
             if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
@@ -145,14 +145,14 @@ export function registerSendMsg() {
                 }
 
                 const s = await tool.solve(ctx, msg, ai, args);
-                await ai.context.systemUserIteration('调用函数返回', s, []);
+                await ai.context.addSystemUserMessage('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return `函数调用成功，返回值:${s}`;
             } catch (e) {
                 const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
                 console.error(s);
-                await ai.context.systemUserIteration('调用函数返回', s, []);
+                await ai.context.addSystemUserMessage('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return s;

@@ -16,6 +16,7 @@ export interface Message {
     name: string;
     timestamp: number;
     images: Image[];
+    contentMap: { [key: string]: string };
 }
 
 export class Context {
@@ -52,7 +53,7 @@ export class Context {
         }
     }
 
-    async iteration(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant') {
+    async addMessage(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string) {
         const { showNumber, maxRounds } = ConfigManager.message;
         const messages = this.messages;
 
@@ -80,19 +81,29 @@ export class Context {
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
         if (length !== 0 && messages[length - 1].name === name && !s.startsWith('<function_call>')) {
-            const seg = role === 'assistant' ? '' : '\n';
-            messages[length - 1].content += seg + s;
             messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
             messages[length - 1].images.push(...images);
+            if (!msgId) {
+                const seg = role === 'assistant' ? '' : '\n';
+                messages[length - 1].content += seg + s;
+            } else {
+                messages[length - 1].contentMap[msgId] = s;
+            }
         } else {
             const message = {
                 role: role,
-                content: s,
+                content: '',
                 uid: uid,
                 name: name,
                 timestamp: Math.floor(Date.now() / 1000),
-                images: images
+                images: images,
+                contentMap: {}
             };
+            if (!msgId) {
+                message.content = s;
+            } else {
+                message.contentMap[msgId] = s;
+            }
             messages.push(message);
         }
 
@@ -100,7 +111,7 @@ export class Context {
         this.limitMessages(maxRounds);
     }
 
-    async toolCallsIteration(tool_calls: ToolCall[]) {
+    async addToolCallsMessage(tool_calls: ToolCall[]) {
         const message = {
             role: 'assistant',
             content: '',
@@ -108,12 +119,13 @@ export class Context {
             uid: '',
             name: '',
             timestamp: Math.floor(Date.now() / 1000),
-            images: []
+            images: [],
+            contentMap: {}
         };
         this.messages.push(message);
     }
 
-    async toolIteration(tool_call_id: string, s: string) {
+    async addToolMessage(tool_call_id: string, s: string) {
         const message = {
             role: 'tool',
             content: s,
@@ -121,7 +133,8 @@ export class Context {
             uid: '',
             name: '',
             timestamp: Math.floor(Date.now() / 1000),
-            images: []
+            images: [],
+            contentMap: {}
         };
 
         for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -134,14 +147,15 @@ export class Context {
         console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
 
-    async systemUserIteration(name: string, s: string, images: Image[]) {
+    async addSystemUserMessage(name: string, s: string, images: Image[]) {
         const message = {
             role: 'user',
             content: s,
             uid: '',
             name: `_${name}`,
             timestamp: Math.floor(Date.now() / 1000),
-            images: images
+            images: images,
+            contentMap: {}
         };
         this.messages.push(message);
     }

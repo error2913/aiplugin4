@@ -3,7 +3,7 @@ import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { timerQueue } from "./tool/tool_time";
 import { ConfigManager } from "./config/config";
-import { log } from "./utils/utils";
+import { log, transformMsgId } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
 import { getCQTypes } from "./utils/utils_string";
 import { buildSystemMessage } from "./utils/utils_message";
@@ -1149,7 +1149,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition === 1) {
-          await ai.context.iteration(ctx, message, images, 'user');
+          await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
 
           log('非指令触发回复');
           await ai.chat(ctx, msg);
@@ -1169,8 +1169,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             continue;
           }
 
-          await ai.context.iteration(ctx, message, images, 'user');
-          await ai.context.systemUserIteration('触发原因提示', condition.reason, []);
+          await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
+          await ai.context.addSystemUserMessage('触发原因提示', condition.reason, []);
           triggerConditionMap[id].splice(i, 1);
 
           log('AI设定触发条件触发回复');
@@ -1183,7 +1183,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       // 开启任一模式时
       const pr = ai.privilege;
       if (pr.standby) {
-        await ai.context.iteration(ctx, message, images, 'user');
+        await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
       }
 
       if (pr.counter > -1) {
@@ -1247,7 +1247,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const result = await ImageManager.handleImageMessage(ctx, message);
           message = result.message;
           images = result.images;
-          await ai.context.iteration(ctx, message, images, 'user');
+          await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
         }
       }
     }
@@ -1284,7 +1284,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const result = await ImageManager.handleImageMessage(ctx, message);
           message = result.message;
           images = result.images;
-          await ai.context.iteration(ctx, message, images, 'assistant');
+          await ai.context.addMessage(ctx, message, images, 'assistant', transformMsgId(msg.rawId));
           return;
         }
       }
@@ -1329,7 +1329,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 当前触发时间：${new Date().toLocaleString()}
 提示内容：${content}`;
 
-      await ai.context.systemUserIteration("定时器触发提示", s, []);
+      await ai.context.addSystemUserMessage("定时器触发提示", s, []);
 
       log('定时任务触发回复');
       await ai.chat(ctx, msg);
