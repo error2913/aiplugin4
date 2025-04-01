@@ -16,7 +16,7 @@ export function log(...data: any[]) {
         }
     }
 
-    console.log(...data);
+    console.log('【aiplugin4】: ', ...data);
 }
 
 export function generateId() {
@@ -27,7 +27,7 @@ export function generateId() {
 
 export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
     const { isTool, usePromptEngineering } = ConfigManager.tool;
-    
+
     const bodyObject: any = {};
 
     for (let i = 0; i < template.length; i++) {
