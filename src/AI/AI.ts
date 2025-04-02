@@ -98,19 +98,19 @@ export class AI {
         const MaxRetry = 3;
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // 处理messages
-            const messages = handleMessages(ctx, this);
+            const messages = await handleMessages(ctx, this);
 
             //获取处理后的回复
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
             result = await handleReply(ctx, msg, raw_reply, this.context);
 
-            if (!checkRepeat(this.context, result.s) || result.reply.trim() === '') {
+            if (!await checkRepeat(this.context, result.s) || result.reply.trim() === '') {
                 break;
             }
 
             if (retry > MaxRetry) {
                 log(`发现复读，已达到最大重试次数，清除AI上下文`);
-                this.context.clearMessages('assistant', 'tool');
+                await this.context.clearMessages('assistant', 'tool');
                 break;
             }
 
@@ -143,7 +143,7 @@ export class AI {
         //清空数据
         this.clearData();
 
-        const messages = handleMessages(ctx, this);
+        const messages = await handleMessages(ctx, this);
         const id = await startStream(messages);
 
         this.stream.id = id;

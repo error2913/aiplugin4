@@ -93,13 +93,14 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     return { s, reply, images };
 }
 
-export function checkRepeat(context: Context, s: string) {
+export async function checkRepeat(context: Context, s: string): Promise<boolean> {
     const { stopRepeat, similarityLimit } = ConfigManager.reply;
 
     if (!stopRepeat) {
         return false;
     }
 
+    await context.lock.acquireReadLock();
     const messages = context.messages;
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
@@ -125,12 +126,14 @@ export function checkRepeat(context: Context, s: string) {
 
                 messages.splice(start, count);
 
+                context.lock.releaseReadLock();
                 return true;
             }
 
             break;
         }
     }
+    context.lock.releaseReadLock();
     return false;
 }
 
@@ -171,7 +174,7 @@ async function replaceImages(context: Context, reply: string) {
     if (match) {
         for (let i = 0; i < match.length; i++) {
             const id = match[i].match(/<[\|｜]图片(.+?)[\|｜]?>/)[1].trim().slice(0, 6);
-            const image = context.findImage(id);
+            const image = await context.findImage(id);
 
             if (image) {
                 const file = image.file;

@@ -2,7 +2,7 @@ import { AI } from "../AI/AI";
 import { Message } from "../AI/context";
 import { ConfigManager } from "../config/config";
 
-export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
+export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { roleSettingTemplate, showNumber, showMsgId } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { condition } = ConfigManager.image;
@@ -28,7 +28,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         `\n- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
 
     // 记忆
-    const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
+    const memeryPrompt = await ai.memory.buildMemoryPrompt(ctx, ai.context);
     content += memeryPrompt ?
         `\n**记忆**
 如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
@@ -111,13 +111,15 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
     return samplesMessages;
 }
 
-export function handleMessages(ctx: seal.MsgContext, ai: AI) {
+export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
     const { isPrefix, showNumber, showMsgId, isMerge } = ConfigManager.message;
 
-    const systemMessage = buildSystemMessage(ctx, ai);
+    const systemMessage = await buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
 
+    await ai.context.lock.acquireReadLock();
     const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
+    ai.context.lock.releaseReadLock();
 
     // 处理 tool_calls 并过滤无效项
     for (let i = 0; i < messages.length; i++) {

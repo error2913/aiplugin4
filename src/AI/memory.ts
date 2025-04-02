@@ -113,7 +113,7 @@ export class Memory {
         return s;
     }
 
-    buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
+    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context): Promise<string> {
         const { showNumber } = ConfigManager.message;
 
         if (ctx.isPrivate) {
@@ -125,6 +125,7 @@ export class Memory {
             s += this.buildGroupMemoryPrompt();
 
             // 群内用户的个人记忆
+            await context.lock.acquireReadLock();
             const arr = [];
             for (const message of context.messages) {
                 const uid = message.uid;
@@ -144,6 +145,7 @@ export class Memory {
 
                 arr.push(uid);
             }
+            context.lock.releaseReadLock();
 
             return s;
         }

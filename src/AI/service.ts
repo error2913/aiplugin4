@@ -47,7 +47,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                             console.error('处理prompt tool call时出现错误:', e);
                         }
 
-                        const messages = handleMessages(ctx, ai);
+                        const messages = await handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
                     }
                 } else {
@@ -57,7 +57,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                         ai.context.addToolCallsMessage(message.tool_calls);
                         const tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
 
-                        const messages = handleMessages(ctx, ai);
+                        const messages = await handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
                     }
                 }

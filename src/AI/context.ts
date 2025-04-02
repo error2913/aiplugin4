@@ -5,6 +5,7 @@ import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AIManager } from "./AI";
 import { log } from "../utils/utils";
+import { ReadWriteLock } from "./lock";
 
 export interface Message {
     role: string;
@@ -20,12 +21,14 @@ export interface Message {
 }
 
 export class Context {
+    lock: ReadWriteLock;
     messages: Message[];
     lastReply: string;
     counter: number;
     timer: number;
 
     constructor() {
+        this.lock = new ReadWriteLock();
         this.messages = [];
         this.lastReply = '';
         this.counter = 0;
@@ -45,16 +48,20 @@ export class Context {
         return context;
     }
 
-    clearMessages(...roles: string[]) {
+    async clearMessages(...roles: string[]) {
+        await this.lock.acquireWriteLock();
         if (roles.length === 0) {
             this.messages = [];
         } else {
             this.messages = this.messages.filter(message => !roles.includes(message.role));
         }
+        this.lock.releaseWriteLock();
     }
 
     async addMessage(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string) {
         const { showNumber, maxRounds } = ConfigManager.message;
+
+        await this.lock.acquireWriteLock();
         const messages = this.messages;
 
         //处理文本
@@ -73,6 +80,7 @@ export class Context {
             .replace(/\[CQ:.*?\]/g, '')
 
         if (s === '') {
+            this.lock.releaseWriteLock();
             return;
         }
 
@@ -107,11 +115,12 @@ export class Context {
             messages.push(message);
         }
 
-        //删除多余的上下文
+        this.lock.releaseWriteLock();
         this.limitMessages(maxRounds);
     }
 
     async addToolCallsMessage(tool_calls: ToolCall[]) {
+        await this.lock.acquireWriteLock();
         const message = {
             role: 'assistant',
             content: '',
@@ -123,9 +132,11 @@ export class Context {
             contentMap: {}
         };
         this.messages.push(message);
+        this.lock.releaseWriteLock();
     }
 
     async addToolMessage(tool_call_id: string, s: string) {
+        await this.lock.acquireWriteLock();
         const message = {
             role: 'tool',
             content: s,
@@ -140,14 +151,17 @@ export class Context {
         for (let i = this.messages.length - 1; i >= 0; i--) {
             if (this.messages[i]?.tool_calls && this.messages[i].tool_calls.some(tool_call => tool_call.id === tool_call_id)) {
                 this.messages.splice(i + 1, 0, message);
+                this.lock.releaseWriteLock();
                 return;
             }
         }
 
+        this.lock.releaseWriteLock();
         console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
 
     async addSystemUserMessage(name: string, s: string, images: Image[]) {
+        await this.lock.acquireWriteLock();
         const message = {
             role: 'user',
             content: s,
@@ -158,9 +172,11 @@ export class Context {
             contentMap: {}
         };
         this.messages.push(message);
+        this.lock.releaseWriteLock();
     }
 
     async limitMessages(maxRounds: number) {
+        await this.lock.acquireWriteLock();
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -172,6 +188,7 @@ export class Context {
                 break;
             }
         }
+        this.lock.releaseWriteLock();
     }
 
     async findUserId(ctx: seal.MsgContext, name: string, findInFriendList: boolean = false): Promise<string> {
@@ -189,18 +206,22 @@ export class Context {
         }
 
         // 在上下文中查找用户
+        await this.lock.acquireReadLock();
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (name === messages[i].name) {
+                this.lock.releaseReadLock();
                 return messages[i].uid;
             }
             if (name.length > 4) {
                 const distance = levenshteinDistance(name, messages[i].name);
                 if (distance <= 2) {
+                    this.lock.releaseReadLock();
                     return messages[i].uid;
                 }
             }
         }
+        this.lock.releaseReadLock();
 
         // 在群成员列表、好友列表中查找用户
         const ext = seal.ext.find('HTTP依赖');
@@ -253,6 +274,7 @@ export class Context {
         }
 
         // 在上下文中用户的记忆中查找群聊
+        await this.lock.acquireReadLock();
         const messages = this.messages;
         const userSet = new Set<string>();
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -271,11 +293,13 @@ export class Context {
 
             for (const memory of memoryList) {
                 if (memory.group.groupName === groupName) {
+                    this.lock.releaseReadLock();
                     return memory.group.groupId;
                 }
                 if (memory.group.groupName.length > 4) {
                     const distance = levenshteinDistance(groupName, memory.group.groupName);
                     if (distance <= 2) {
+                        this.lock.releaseReadLock();
                         return memory.group.groupId;
                     }
                 }
@@ -283,6 +307,7 @@ export class Context {
 
             userSet.add(uid);
         }
+        this.lock.releaseReadLock();
 
         // 在群聊列表中查找用户
         const ext = seal.ext.find('HTTP依赖');
@@ -307,24 +332,29 @@ export class Context {
         return null;
     }
 
-    getNames(): string[] {
+    async getNames(): Promise<string[]> {
+        await this.lock.acquireReadLock();
         const names = [];
         for (const message of this.messages) {
             if (message.role === 'user' && message.name && !names.includes(message.name)) {
                 names.push(message.name);
             }
         }
+        this.lock.releaseReadLock();
         return names;
     }
 
-    findImage(id: string): Image {
+    async findImage(id: string): Promise<Image> {
+        await this.lock.acquireReadLock();
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
             const image = messages[i].images.find(item => item.id === id);
             if (image) {
+                this.lock.releaseReadLock();
                 return image;
             }
         }
+        this.lock.releaseReadLock();
         return null;
     }
 }

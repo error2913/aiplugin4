@@ -68,6 +68,7 @@ export function registerGetContext() {
 
         const { isPrefix, showNumber } = ConfigManager.message;
 
+        await ai.context.lock.acquireReadLock();
         const messages = ai.context.messages;
         const images = [];
         let s = '';
@@ -88,9 +89,12 @@ export function registerGetContext() {
 
             s += `\n[${message.role}]: ${prefix}${message.content}`;
         }
+        ai.context.lock.releaseReadLock();
 
         // 将images添加到最后一条消息，以便使用
+        await originalAI.context.lock.acquireWriteLock();
         originalAI.context.messages[originalAI.context.messages.length - 1].images.push(...images);
+        originalAI.context.lock.releaseWriteLock();
 
         return s;
     }

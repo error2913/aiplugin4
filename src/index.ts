@@ -141,9 +141,9 @@ function main() {
           return ret;
         }
 
-        const systemMessage = buildSystemMessage(ctx, ai);
-
-        seal.replyToSender(ctx, msg, systemMessage.content);
+        buildSystemMessage(ctx, ai).then((systemMessage) => {
+          seal.replyToSender(ctx, msg, systemMessage.content);
+        });
         return ret;
       }
       case 'pr': {
@@ -168,9 +168,10 @@ function main() {
           return ret;
         }
 
-        const names = ai.context.getNames();
-        const s = `上下文里的名字有：\n<${names.join('>\n<')}>`;
-        seal.replyToSender(ctx, msg, s);
+        ai.context.getNames().then((names) => {
+          const s = `上下文里的名字有：\n<${names.join('>\n<')}>`;
+          seal.replyToSender(ctx, msg, s);
+        });
         return ret;
       }
       case 'on': {
@@ -318,21 +319,24 @@ function main() {
         switch (val2) {
           case 'ass':
           case 'assistant': {
-            ai.context.clearMessages('assistant', 'tool');
-            seal.replyToSender(ctx, msg, 'ai上下文已清除');
-            AIManager.saveAI(id);
+            ai.context.clearMessages('assistant', 'tool').then(() => {
+              seal.replyToSender(ctx, msg, 'ai上下文已清除');
+              AIManager.saveAI(id);
+            });
             return ret;
           }
           case 'user': {
-            ai.context.clearMessages('user');
-            seal.replyToSender(ctx, msg, '用户上下文已清除');
-            AIManager.saveAI(id);
+            ai.context.clearMessages('user').then(() => {
+              seal.replyToSender(ctx, msg, '用户上下文已清除');
+              AIManager.saveAI(id);
+            });
             return ret;
           }
           default: {
-            ai.context.clearMessages();
-            seal.replyToSender(ctx, msg, '上下文已清除');
-            AIManager.saveAI(id);
+            ai.context.clearMessages().then(() => {
+              seal.replyToSender(ctx, msg, '上下文已清除');
+              AIManager.saveAI(id);
+            });
             return ret;
           }
         }
