@@ -16,7 +16,7 @@ import { registerRecord, registerTextToSound } from "./tool_voice"
 import { registerWebSearch } from "./tool_web_search"
 import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_person_info"
-import { registerSendMsg } from "./tool_send_msg"
+import { registerDeleteMsg, registerQuoteMsg, registerSendMsg } from "./tool_message"
 import { registerGetContext } from "./tool_context"
 import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
 import { registerSetTriggerCondition } from "./tool_trigger"
@@ -175,6 +175,8 @@ export class ToolManager {
         registerGroupSign();
         registerGetPersonInfo();
         registerSendMsg();
+        registerDeleteMsg();
+        registerQuoteMsg();
         registerGetContext();
         registerGetList();
         registerGetGroupMemberList();

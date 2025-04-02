@@ -7,7 +7,7 @@ export class ImageConfig {
         ImageConfig.ext = ConfigManager.getExt('aiplugin4_5:图片');
 
         seal.ext.registerTemplateConfig(ImageConfig.ext, "本地图片路径", ['data/images/sealdice.png'], "如不需要可以不填写，修改完需要重载js");
-        seal.ext.registerStringConfig(ImageConfig.ext, "图片识别需要满足的条件", '1', "使用豹语表达式，例如：$t群号_RAW=='2001'");
+        seal.ext.registerStringConfig(ImageConfig.ext, "图片识别需要满足的条件", '0', "使用豹语表达式，例如：$t群号_RAW=='2001'。若要开启所有图片自动识别转文字，请填写'1'");
         seal.ext.registerIntConfig(ImageConfig.ext, "发送图片的概率/%", 100);
         seal.ext.registerStringConfig(ImageConfig.ext, "图片大模型URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions");
         seal.ext.registerStringConfig(ImageConfig.ext, "图片API key", "yours");

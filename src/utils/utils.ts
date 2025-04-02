@@ -96,13 +96,20 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
             return '';
         }
 
+        const message: { type: string, data: any }[] = [{ type: 'text', data: { text: s } }]
+        const match = s.match(/^\[CQ:reply,id=([\d\-]+)\]/);
+        if (match) {
+            message[0].data.text = s.replace(match[0], '');
+            message.unshift({ type: 'reply', data: { id: match[1] } });
+        }
+
         const epId = ctx.endPoint.userId;
         const group_id = ctx.group.groupId.replace(/\D+/g, '');
         const user_id = ctx.player.userId.replace(/\D+/g, '');
         if (ctx.isPrivate) {
             const data = {
                 user_id,
-                message: [{ type: 'text', data: { text: s } }]
+                message: message
             }
             const result = await globalThis.http.getData(epId, 'send_private_msg', data);
             if (result.message_id) {
@@ -114,7 +121,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         } else {
             const data = {
                 group_id,
-                message: [{ type: 'text', data: { text: s } }]
+                message: message
             }
             const result = await globalThis.http.getData(epId, 'send_group_msg', data);
             if (result.message_id) {

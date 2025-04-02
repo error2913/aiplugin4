@@ -19,9 +19,9 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
         `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
 - <|@xxx|>表示@某个群成员`;
-    content += `\n- <|from:xxx|>表示消息来源`;
+    content += `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用`;
     content += showMsgId ?
-        `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在聊天中提及` :
+        `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用` :
         ``;
     content += condition === '0' ?
         `\n- <|图片xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|图片xxxxxx|>的格式` :
@@ -162,7 +162,8 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
                 `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
         ) : '';
 
-        const content = message.content + '\n' + (message.contentMap ? Object.keys(message.contentMap).map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\n') : '');
+        const msgIdList = Object.keys(message.contentMap);
+        const content = message.content + (msgIdList.length !== 0 ? '\n' + msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\n') : '');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\n\n' + prefix + content;
