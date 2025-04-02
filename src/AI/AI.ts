@@ -1,12 +1,13 @@
 import { ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
-import { log, parseBody, replyToSender } from "../utils/utils";
+import { parseBody, replyToSender } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages } from "../utils/utils_message";
 import { checkRepeat, handleReply } from "../utils/utils_reply";
 import { ToolManager } from "../tool/tool";
+import { logger } from "./logger";
 
 export interface Privilege {
     limit: number,
@@ -84,7 +85,7 @@ export class AI {
         }
 
         const timeout = setTimeout(() => {
-            log(this.id, `处理消息超时`);
+            logger.warning(this.id, `处理消息超时`);
         }, 60 * 1000);
 
         //清空数据
@@ -109,12 +110,12 @@ export class AI {
             }
 
             if (retry > MaxRetry) {
-                log(`发现复读，已达到最大重试次数，清除AI上下文`);
+                logger.warning(`发现复读，已达到最大重试次数，清除AI上下文`);
                 this.context.clearMessages('assistant', 'tool');
                 break;
             }
 
-            log(`发现复读，一秒后进行重试:[${retry}/3]`);
+            logger.warning(`发现复读，一秒后进行重试:[${retry}/3]`);
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
@@ -171,11 +172,11 @@ export class AI {
                 await new Promise(resolve => setTimeout(resolve, interval));
                 continue;
             }
-            log("接收到的回复:", raw_reply);
+            logger.info("接收到的回复:", raw_reply);
 
             if (isTool && usePromptEngineering) {
                 if (!this.stream.toolCallStatus && /<function_call>/.test(this.stream.reply + raw_reply)) {
-                    log("发现工具调用开始标签，拦截后续内容");
+                    logger.info("发现工具调用开始标签，拦截后续内容");
 
                     // 对于function_call前面的内容，发送并添加到上下文中
                     const match = raw_reply.match(/([\s\S]*)<function_call>/);
@@ -201,7 +202,7 @@ export class AI {
                     this.stream.reply += raw_reply;
 
                     if (/<\/function_call>/.test(this.stream.reply)) {
-                        log("发现工具调用结束标签，开始处理对应工具调用");
+                        logger.info("发现工具调用结束标签，开始处理对应工具调用");
                         const match = this.stream.reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                         if (match) {
                             this.stream.reply = match[0];
@@ -258,10 +259,10 @@ export class AI {
             toolCallStatus: false
         }
         if (id) {
-            log(`结束会话${id}`);
+            logger.info(`结束会话:`, id);
             if (reply) {
                 if (toolCallStatus) { // 没有处理完的工具调用，在日志中显示
-                    log(`工具调用未处理完成:${reply}`);
+                    logger.warning(`工具调用未处理完成:`, reply);
                 }
             }
             await endStream(id);

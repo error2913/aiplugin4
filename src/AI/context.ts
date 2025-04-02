@@ -4,7 +4,7 @@ import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AIManager } from "./AI";
-import { log } from "../utils/utils";
+import { logger } from "./logger";
 
 export interface Message {
     role: string;
@@ -234,7 +234,7 @@ export class Context {
             }
         }
 
-        log(`未找到用户<${name}>`);
+        logger.warning(`未找到用户<${name}>`);
         return null;
     }
 
@@ -303,7 +303,7 @@ export class Context {
             }
         }
 
-        log(`未找到群聊<${groupName}>`);
+        logger.warning(`未找到群聊<${groupName}>`);
         return null;
     }
 

@@ -1,6 +1,7 @@
 import { ConfigManager } from "../config/config";
 import { sendITTRequest } from "./service";
-import { generateId, log } from "../utils/utils";
+import { generateId } from "../utils/utils";
+import { logger } from "./logger";
 
 export class Image {
     id: string;
@@ -178,17 +179,17 @@ export class ImageManager {
             if (response.ok) {
                 const contentType = response.headers.get('Content-Type');
                 if (contentType && contentType.startsWith('image')) {
-                    log('URL有效且未过期');
+                    logger.info('URL有效且未过期');
                     isValid = true;
                 } else {
-                    log(`URL有效但未返回图片 Content-Type: ${contentType}`);
+                    logger.warning(`URL有效但未返回图片 Content-Type: ${contentType}`);
                 }
             } else {
                 if (response.status === 500) {
-                    log(`URL不知道有没有效 状态码: ${response.status}`);
+                    logger.warning(`URL不知道有没有效 状态码: ${response.status}`);
                     isValid = true;
                 } else {
-                    log(`URL无效或过期 状态码: ${response.status}`);
+                    logger.warning(`URL无效或过期 状态码: ${response.status}`);
                 }
             }
         } catch (error) {
@@ -209,7 +210,7 @@ export class ImageManager {
         if (urlToBase64 == '总是') {
             const { base64, format } = await ImageManager.imageUrlToBase64(imageUrl);
             if (!base64 || !format) {
-                log(`转换为base64失败`);
+                logger.warning(`转换为base64失败`);
                 return '';
             }
 

@@ -1,9 +1,10 @@
 import { AI, AIManager } from "./AI";
 import { ToolCall, ToolManager } from "../tool/tool";
 import { ConfigManager } from "../config/config";
-import { log, parseBody } from "../utils/utils";
+import { parseBody } from "../utils/utils";
 import { handleMessages } from "../utils/utils_message";
 import { ImageManager } from "./image";
+import { logger } from "./logger";
 
 export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messages: {
     role: string,
@@ -28,12 +29,12 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
             const finish_reason = data.choices[0].finish_reason;
 
             if (message.hasOwnProperty('reasoning_content')) {
-                log(`思维链内容:`, message.reasoning_content);
+                logger.info(`思维链内容:`, message.reasoning_content);
             }
 
             const reply = message.content || '';
 
-            log(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+            logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
             if (isTool) {
                 if (usePromptEngineering) {
@@ -52,7 +53,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                     }
                 } else {
                     if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                        log(`触发工具调用`);
+                        logger.info(`触发工具调用`);
 
                         ai.context.addToolCallsMessage(message.tool_calls);
                         const tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
@@ -95,7 +96,7 @@ export async function sendITTRequest(messages: {
             const message = data.choices[0].message;
             const reply = message.content || '';
 
-            log(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+            logger.info(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
 
             return reply;
         } else {
@@ -104,7 +105,7 @@ export async function sendITTRequest(messages: {
     } catch (error) {
         console.error("在imageToText中请求出错：", error);
         if (urlToBase64 === '自动' && !useBase64) {
-            log(`自动尝试使用转换为base64`);
+            logger.info(`自动尝试使用转换为base64`);
 
             for (let i = 0; i < messages.length; i++) {
                 const message = messages[i];
@@ -113,7 +114,7 @@ export async function sendITTRequest(messages: {
                     if (content.type === 'image_url') {
                         const { base64, format } = await ImageManager.imageUrlToBase64(content.image_url.url);
                         if (!base64 || !format) {
-                            log(`转换为base64失败`);
+                            logger.warning(`转换为base64失败`);
                             return '';
                         }
 
@@ -138,7 +139,7 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
         }
         return value;
     });
-    log(`请求发送前的上下文:\n`, s);
+    logger.info(`请求发送前的上下文:\n`, s);
 
     const response = await fetch(url, {
         method: 'POST',
@@ -150,7 +151,7 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
         body: JSON.stringify(bodyObject)
     });
 
-    // console.log("响应体", JSON.stringify(response, null, 2));
+    // logger.info("响应体", JSON.stringify(response, null, 2));
 
     const text = await response.text();
     if (!response.ok) {
@@ -189,7 +190,7 @@ export async function startStream(messages: {
             }
             return value;
         });
-        log(`请求发送前的上下文:\n`, s);
+        logger.info(`请求发送前的上下文:\n`, s);
 
         const response = await fetch(`${streamUrl}/start`, {
             method: 'POST',
@@ -204,7 +205,7 @@ export async function startStream(messages: {
             })
         });
 
-        // console.log("响应体", JSON.stringify(response, null, 2));
+        // logger.info("响应体", JSON.stringify(response, null, 2));
 
         const text = await response.text();
         if (!response.ok) {
@@ -243,7 +244,7 @@ export async function pollStream(id: string, after: number): Promise<{ status: s
             }
         });
 
-        // console.log("响应体", JSON.stringify(response, null, 2));
+        // logger.info("响应体", JSON.stringify(response, null, 2));
 
         const text = await response.text();
         if (!response.ok) {
@@ -286,7 +287,7 @@ export async function endStream(id: string): Promise<string> {
             }
         });
 
-        // console.log("响应体", JSON.stringify(response, null, 2));
+        // logger.info("响应体", JSON.stringify(response, null, 2));
 
         const text = await response.text();
         if (!response.ok) {
@@ -304,7 +305,7 @@ export async function endStream(id: string): Promise<string> {
             if (!data.status) {
                 throw new Error("服务器响应中没有status字段");
             }
-            log('对话结束', data.status === 'success' ? '成功' : '失败');
+            logger.info('对话结束', data.status === 'success' ? '成功' : '失败');
             if (data.status === 'success') {
                 AIManager.updateUsage(data.model, data.usage);
             }

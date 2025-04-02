@@ -1,24 +1,7 @@
 import { AI } from "../AI/AI";
+import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
-
-export function log(...data: any[]) {
-    const { logLevel } = ConfigManager.log;
-
-    if (logLevel === "永不") {
-        return;
-    }
-
-    if (logLevel === "简短") {
-        const s = data.map(item => `${item}`).join(" ");
-        if (s.length > 1000) {
-            console.log(s.substring(0, 500), "\n...\n", s.substring(s.length - 500));
-            return;
-        }
-    }
-
-    console.log('【aiplugin4】: ', ...data);
-}
 
 export function transformMsgId(msgId: string | number): string {
     if (typeof msgId === 'string') {
@@ -113,7 +96,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
             }
             const result = await globalThis.http.getData(epId, 'send_private_msg', data);
             if (result.message_id) {
-                log(`(${result.message_id})发送给QQ:${user_id}:${s}`);
+                logger.info(`(${result.message_id})发送给QQ:${user_id}:${s}`);
                 return transformMsgId(result.message_id);
             } else {
                 throw new Error(`在replyToSender中: 获取消息ID失败`);
@@ -125,7 +108,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
             }
             const result = await globalThis.http.getData(epId, 'send_group_msg', data);
             if (result.message_id) {
-                log(`(${result.message_id})发送给QQ-Group:${group_id}:${s}`);
+                logger.info(`(${result.message_id})发送给QQ-Group:${group_id}:${s}`);
                 return transformMsgId(result.message_id);
             } else {
                 throw new Error(`在replyToSender中: 获取消息ID失败`);

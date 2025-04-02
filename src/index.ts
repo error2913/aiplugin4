@@ -3,11 +3,12 @@ import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { timerQueue } from "./tool/tool_time";
 import { ConfigManager } from "./config/config";
-import { log, transformMsgId } from "./utils/utils";
+import { transformMsgId } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
 import { getCQTypes } from "./utils/utils_string";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
+import { logger } from "./AI/logger";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
@@ -529,7 +530,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
               for (const key of tool.info.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
-                  log(`调用函数失败:缺少必需参数 ${key}`);
+                  logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                   seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
                   return ret;
                 }
@@ -1151,7 +1152,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         if (fmtCondition === 1) {
           await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
 
-          log('非指令触发回复');
+          logger.info('非指令触发回复');
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -1173,7 +1174,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           await ai.context.addSystemUserMessage('触发原因提示', condition.reason, []);
           triggerConditionMap[id].splice(i, 1);
 
-          log('AI设定触发条件触发回复');
+          logger.info('AI设定触发条件触发回复');
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -1190,7 +1191,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         ai.context.counter += 1;
 
         if (ai.context.counter >= pr.counter) {
-          log('计数器触发回复');
+          logger.info('计数器触发回复');
           ai.context.counter = 0;
 
           await ai.chat(ctx, msg);
@@ -1203,7 +1204,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         const ran = Math.random() * 100;
 
         if (ran <= pr.prob) {
-          log('概率触发回复');
+          logger.info('概率触发回复');
 
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
@@ -1213,7 +1214,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       if (pr.timer > -1) {
         ai.context.timer = setTimeout(async () => {
-          log('计时器触发回复');
+          logger.info('计时器触发回复');
 
           ai.context.timer = null;
           await ai.chat(ctx, msg);
@@ -1300,7 +1301,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     }
 
     if (isTaskRunning) {
-      log('定时器任务正在运行，跳过');
+      logger.info('定时器任务正在运行，跳过');
       return;
     }
 
@@ -1331,7 +1332,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       await ai.context.addSystemUserMessage("定时器触发提示", s, []);
 
-      log('定时任务触发回复');
+      logger.info('定时任务触发回复');
       await ai.chat(ctx, msg);
       AIManager.saveAI(id);
 

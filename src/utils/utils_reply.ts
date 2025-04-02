@@ -1,7 +1,7 @@
 import { Context } from "../AI/context";
 import { Image, ImageManager } from "../AI/image";
+import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
-import { log } from "./utils";
 import { calculateSimilarity } from "./utils_string";
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, reply: string, images: Image[] }> {
@@ -107,7 +107,7 @@ export function checkRepeat(context: Context, s: string) {
         if (message.role === 'assistant' && !message?.tool_calls) {
             const content = message.content;
             const similarity = calculateSimilarity(content.trim(), s.trim());
-            log(`复读相似度：${similarity}`);
+            logger.info(`复读相似度：${similarity}`);
 
             if (similarity > similarityLimit) {
                 // 找到最近的一块assistant消息全部删除，防止触发tool相关的bug

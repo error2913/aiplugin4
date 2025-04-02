@@ -1,4 +1,4 @@
-import { log } from "../utils/utils";
+import { logger } from "../AI/logger";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerMusicPlay() {
@@ -45,7 +45,7 @@ export function registerMusicPlay() {
         }
 
         try {
-            log(`搜索音乐: ${api}`);
+            logger.info(`搜索音乐: ${api}`);
             const response = await fetch(api, {
                 method: "GET",
                 headers: {
@@ -100,7 +100,7 @@ export function registerMusicPlay() {
                 }
             }
         } catch (error) {
-            log(`音乐搜索请求错误: ${error}`);
+            logger.warning(`音乐搜索请求错误: ${error}`);
             return `音乐搜索请求错误: ${error}`;
         }
     };
