@@ -1,5 +1,5 @@
 # coding: utf-8
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -56,11 +56,11 @@ async def cleanup_stream():
     定期清理过期任务
     """
     while True:
-        logger.info(f"开始清理过期任务，当前任务数：{len(stream_data)}")
-        time = time.time()
+        current_time = time.time()
+        logger.info(f"开始清理过期任务，当前任务数：{len(stream_data)}，当前时间：{current_time}")
         with stream_lock:
             for stream_id, data in list(stream_data.items()):
-                if data['time'] + CLEANUP_INTERVAL < time:
+                if data['time'] + CLEANUP_INTERVAL < current_time:
                     del stream_data[stream_id]
         logger.info(f"清理完成，剩余任务数：{len(stream_data)}")
         await asyncio.sleep(CLEANUP_INTERVAL)
