@@ -1,5 +1,6 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
+import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { handleReply } from "../utils/utils_reply";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
@@ -106,13 +107,12 @@ export function registerSendMsg() {
             return `未知的消息类型<${msg_type}>`;
         }
 
-        await ai.context.systemUserIteration("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
+        await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
         const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
-        ai.context.lastReply = reply;
-        await ai.context.iteration(ctx, s, images, "assistant");
 
-        seal.replyToSender(ctx, msg, reply);
+        const msgId = await replyToSender(ctx, msg, ai, reply);
+        await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
 
         if (tool_call) {
             if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
@@ -145,14 +145,14 @@ export function registerSendMsg() {
                 }
 
                 const s = await tool.solve(ctx, msg, ai, args);
-                await ai.context.systemUserIteration('调用函数返回', s, []);
+                await ai.context.addSystemUserMessage('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return `函数调用成功，返回值:${s}`;
             } catch (e) {
                 const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
                 console.error(s);
-                await ai.context.systemUserIteration('调用函数返回', s, []);
+                await ai.context.addSystemUserMessage('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
                 return s;
@@ -161,6 +161,89 @@ export function registerSendMsg() {
 
         AIManager.saveAI(ai.id);
         return "消息发送成功";
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
+}
+
+export function registerDeleteMsg() {
+    const info: ToolInfo = {
+        type: 'function',
+        function: {
+            name: 'delete_msg',
+            description: '撤回指定消息',
+            parameters: {
+                type: 'object',
+                properties: {
+                    msg_id: {
+                        type: 'string',
+                        description: '消息ID'
+                    }
+                },
+                required: ['msg_id']
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, __, args) => {
+        const { msg_id } = args;
+
+        const ext = seal.ext.find('HTTP依赖');
+        if (!ext) {
+            console.error(`未找到HTTP依赖`);
+            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+        }
+
+        try {
+            const epId = ctx.endPoint.userId;
+            await globalThis.http.getData(epId, `delete_msg?message_id=${transformMsgIdBack(msg_id)}`);
+            return `已撤回消息${msg_id}`;
+        } catch (e) {
+            console.error(e);
+            return `撤回消息失败`;
+        }
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
+}
+
+export function registerQuoteMsg() {
+    const info: ToolInfo = {
+        type: 'function',
+        function: {
+            name: 'quote_msg',
+            description: '引用指定消息并回复',
+            parameters: {
+                type: 'object',
+                properties: {
+                    msg_id: {
+                        type: 'string',
+                        description: '消息ID'
+                    },
+                    content: {
+                        type: 'string',
+                        description: '回复的内容'
+                    }
+                },
+                required: ['msg_id', 'content']
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { msg_id, content } = args;
+
+        try {
+            const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
+            const msgId = await replyToSender(ctx, msg, ai, `[CQ:reply,id=${transformMsgIdBack(msg_id)}]${reply}`);
+            await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
+            return `已引用消息${msg_id}并回复`;
+        } catch (e) {
+            console.error(e);
+            return `引用消息失败`;
+        }
     }
 
     ToolManager.toolMap[info.function.name] = tool;

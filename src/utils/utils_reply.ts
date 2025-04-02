@@ -71,7 +71,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     })
 
-    const prefix = replymsg && msg.rawId ? `[CQ:reply,id=${msg.rawId}][CQ:at,qq=${ctx.player.userId.replace(/\D+/g, "")}] ` : ``;
+    const prefix = replymsg && msg.rawId ? `[CQ:reply,id=${msg.rawId}]` : ``;
 
     // 截断回复消息
     const segments2 = reply.split(/(\[CQ:.+?\])/);
@@ -88,7 +88,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
             }
         }
     }
-    reply = finalReply;
+    reply = finalReply.trim();
 
     return { s, reply, images };
 }

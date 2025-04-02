@@ -3,7 +3,7 @@ import { Message } from "../AI/context";
 import { ConfigManager } from "../config/config";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSettingTemplate, showNumber }: { roleSettingTemplate: string, showNumber: boolean } = ConfigManager.message;
+    const { roleSettingTemplate, showNumber, showMsgId } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { condition } = ConfigManager.image;
 
@@ -19,7 +19,10 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
         `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
 - <|@xxx|>表示@某个群成员`;
-    content += `- <|from:xxx|>表示消息来源`;
+    content += `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用`;
+    content += showMsgId ?
+        `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用` :
+        ``;
     content += condition === '0' ?
         `\n- <|图片xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|图片xxxxxx|>的格式` :
         `\n- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
@@ -67,7 +70,8 @@ ${toolsPrompt}`;
         uid: '',
         name: '',
         timestamp: 0,
-        images: []
+        images: [],
+        contentMap: {}
     };
 
     return systemMessage;
@@ -87,7 +91,8 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
                     uid: '',
                     name: "用户",
                     timestamp: 0,
-                    images: []
+                    images: [],
+                    contentMap: {}
                 };
             } else {
                 return {
@@ -96,7 +101,8 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
                     uid: ctx.endPoint.userId,
                     name: seal.formatTmpl(ctx, "核心:骰子名字"),
                     timestamp: 0,
-                    images: []
+                    images: [],
+                    contentMap: {}
                 };
             }
         })
@@ -106,7 +112,7 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
 }
 
 export function handleMessages(ctx: seal.MsgContext, ai: AI) {
-    const { isPrefix, showNumber, isMerge } = ConfigManager.message;
+    const { isPrefix, showNumber, showMsgId, isMerge } = ConfigManager.message;
 
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -156,12 +162,15 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
                 `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
         ) : '';
 
+        const msgIdList = Object.keys(message.contentMap);
+        const content = message.content + (msgIdList.length !== 0 ? '\n' + msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\n') : '');
+
         if (isMerge && message.role === last_role && message.role !== 'tool') {
-            processedMessages[processedMessages.length - 1].content += '\n\n' + prefix + message.content;
+            processedMessages[processedMessages.length - 1].content += '\n\n' + prefix + content;
         } else {
             processedMessages.push({
                 role: message.role,
-                content: prefix + message.content,
+                content: prefix + content,
                 tool_calls: message?.tool_calls ? message.tool_calls : undefined,
                 tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
             });
