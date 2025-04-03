@@ -1,5 +1,4 @@
 import { ConfigManager } from "../config/config";
-import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerBan() {
@@ -26,8 +25,12 @@ export function registerBan() {
     }
 
     const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    tool.solve = async (ctx, _, ai, args) => {
         const { name, duration } = args;
+
+        if (ctx.isPrivate) {
+            return `该命令只能在群聊中使用`;
+        }
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
@@ -40,13 +43,23 @@ export function registerBan() {
             return `未找到<${name}>`;
         }
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        try {
+            const epId = ctx.endPoint.userId;
+            const group_id = ctx.group.groupId.replace(/\D+/g, '');
+            const user_id = epId.replace(/\D+/g, '');
+            const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
+            if (result.role !== 'owner' && result.role !== 'admin') {
+                return `你没有管理员权限`; 
+            }
+        } catch (e) {
+            console.error(e);
+            return `获取权限信息失败`;
+        }
 
         try {
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            const user_id = ctx.player.userId.replace(/\D+/g, '');
+            const user_id = uid.replace(/\D+/g, '');
             await globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
             return `已禁言<${name}> ${duration}秒`;
         } catch (e) {

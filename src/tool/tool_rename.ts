@@ -29,6 +29,22 @@ export function registerRename() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
 
+        const ext = seal.ext.find('HTTP依赖');
+        if (ext) {
+            try {
+                const epId = ctx.endPoint.userId;
+                const group_id = ctx.group.groupId.replace(/\D+/g, '');
+                const user_id = epId.replace(/\D+/g, '');
+                const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
+                if (result.role !== 'owner' && result.role !== 'admin') {
+                    return `你没有管理员权限`;
+                }
+            } catch (e) {
+                console.error(e);
+                return `获取权限信息失败`;
+            }
+        }
+
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
             return `未找到<${name}>`;

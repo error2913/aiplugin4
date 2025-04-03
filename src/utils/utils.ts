@@ -83,6 +83,9 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         const match = s.match(/^\[CQ:reply,id=([\d\-]+)\]/);
         if (match) {
             message[0].data.text = s.replace(match[0], '');
+            if (!message[0].data.text) {
+               return ''; 
+            }
             message.unshift({ type: 'reply', data: { id: match[1] } });
         }
 
