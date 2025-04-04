@@ -11,11 +11,11 @@ export class ReplyConfig {
         seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "过滤上下文正则表达式", [
-            "<[\\|│｜]from:?.*?[\\|│｜]?>",
+            "<\\s?[\\|│｜]from:?.*?[\\|│｜]?\\s?>",
             "<think>[\\s\\S]*?<\\/think>",
         ], "回复加入上下文时，将符合正则表达式的内容删掉");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "过滤回复正则表达式", [
-            "<[\\|│｜].*?[\\|│｜]?>",
+            "<\\s?[\\|│｜].*?[\\|│｜]?\\s?>",
             "<think>[\\s\\S]*?<\\/think>",
             "<function_call>[\\s\\S]*?<\\/function_call>",
         ], "发送回复时，将符合正则表达式的内容删掉");
