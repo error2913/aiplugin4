@@ -1,8 +1,8 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
-import { handleReply } from "../utils/utils_reply";
 import { createCtx, createMsg } from "../utils/utils_seal";
+import { handleReply } from "../utils/utils_string";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerSendMsg() {
@@ -62,10 +62,10 @@ export function registerSendMsg() {
             `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}`;
 
         const originalImages = [];
-        const match = content.match(/<[\|│｜]图片.+?[\|│｜]?>/g);
+        const match = content.match(/<\s?[\|│｜]图片.+?[\|│｜]?>/g);
         if (match) {
             for (let i = 0; i < match.length; i++) {
-                const id = match[i].match(/<[\|│｜]图片(.+?)[\|│｜]?>/)[1].trim().slice(0, 6);
+                const id = match[i].match(/<\s?[\|│｜]图片(.+?)[\|│｜]?>/)[1].trim().slice(0, 6);
                 const image = ai.context.findImage(id);
 
                 if (image) {

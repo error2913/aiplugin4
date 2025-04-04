@@ -1,6 +1,7 @@
 import { AI } from "../AI/AI";
 import { Message } from "../AI/context";
 import { ConfigManager } from "../config/config";
+import { ToolInfo } from "../tool/tool";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, showNumber, showMsgId } = ConfigManager.message;
@@ -179,4 +180,47 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
     }
 
     return processedMessages;
+}
+
+export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
+    const bodyObject: any = {};
+
+    for (let i = 0; i < template.length; i++) {
+        const s = template[i];
+        if (s.trim() === '') {
+            continue;
+        }
+
+        try {
+            const obj = JSON.parse(`{${s}}`);
+            const key = Object.keys(obj)[0];
+            bodyObject[key] = obj[key];
+        } catch (err) {
+            throw new Error(`解析body的【${s}】时出现错误:${err}`);
+        }
+    }
+
+    if (!bodyObject.hasOwnProperty('messages')) {
+        bodyObject.messages = messages;
+    }
+
+    if (!bodyObject.hasOwnProperty('model')) {
+        throw new Error(`body中没有model`);
+    }
+
+    if (isTool && !usePromptEngineering) {
+        if (!bodyObject.hasOwnProperty('tools')) {
+            bodyObject.tools = tools;
+        }
+
+        if (!bodyObject.hasOwnProperty('tool_choice')) {
+            bodyObject.tool_choice = tool_choice;
+        }
+    } else {
+        delete bodyObject?.tools;
+        delete bodyObject?.tool_choice;
+    }
+
+    return bodyObject;
 }

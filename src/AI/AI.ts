@@ -1,13 +1,13 @@
 import { ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
-import { parseBody, replyToSender } from "../utils/utils";
+import { replyToSender } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "./service";
 import { Context } from "./context";
 import { Memory } from "./memory";
-import { handleMessages } from "../utils/utils_message";
-import { checkRepeat, handleReply } from "../utils/utils_reply";
+import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "./logger";
+import { checkRepeat, handleReply } from "../utils/utils_string";
 
 export interface Privilege {
     limit: number,

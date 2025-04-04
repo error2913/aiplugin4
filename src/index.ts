@@ -5,10 +5,10 @@ import { timerQueue } from "./tool/tool_time";
 import { ConfigManager } from "./config/config";
 import { transformMsgId } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
-import { getCQTypes } from "./utils/utils_string";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./AI/logger";
+import { parseText } from "./utils/utils_string";
 
 function main() {
   let ext = seal.ext.find('aiplugin4');
@@ -1118,7 +1118,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     const ai = AIManager.getAI(id);
 
     // 检查CQ码
-    const CQTypes = getCQTypes(message);
+    const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
     if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
       // 非指令触发图片偷取，以及图片转文字
       if (CQTypes.includes('image')) {
@@ -1241,7 +1241,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       let message = msg.message;
       let images: Image[] = [];
 
-      const CQTypes = getCQTypes(message);
+      const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
@@ -1278,7 +1278,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         return;
       }
 
-      const CQTypes = getCQTypes(message);
+      const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
@@ -1291,8 +1291,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       }
     }
   }
-
-
 
   let isTaskRunning = false;
   seal.ext.registerTask(ext, "cron", "* * * * *", async () => {
