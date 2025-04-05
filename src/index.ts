@@ -13,7 +13,7 @@ import { parseText } from "./utils/utils_string";
 function main() {
   let ext = seal.ext.find('aiplugin4');
   if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.7.0');
+    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.7.1');
     seal.ext.register(ext);
   }
 
