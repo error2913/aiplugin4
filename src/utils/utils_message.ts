@@ -163,7 +163,7 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
                 `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
         ) : '';
 
-        const msgIdList = Object.keys(message.contentMap);
+        const msgIdList = Object.keys(message?.contentMap || {});
         const content = message.content + (msgIdList.length !== 0 ? '\n' + msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\n') : '');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {

@@ -197,22 +197,24 @@ export function registerDeleteMsg() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            const user_id = epId.replace(/\D+/g, '');
-            const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-            if (result.role !== 'owner' && result.role !== 'admin') {
-                return `你没有管理员权限`; 
-            }
-        } catch (e) {
-            console.error(e);
-            return `获取权限信息失败`;
-        }
-
-        try {
-            const epId = ctx.endPoint.userId;
             const result = await globalThis.http.getData(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            if ((result.sender.role == 'owner' || result.sender.role == 'admin') && result.sender.user_id != epId.replace(/\D+/g, '')) {
-                return `你没有权限撤回该消息`; 
+            if (result.sender.user_id != epId.replace(/\D+/g, '')) {
+                if (result.sender.role == 'owner' || result.sender.role == 'admin') {
+                    return `你没有权限撤回该消息`;
+                }
+
+                try {
+                    const epId = ctx.endPoint.userId;
+                    const group_id = ctx.group.groupId.replace(/\D+/g, '');
+                    const user_id = epId.replace(/\D+/g, '');
+                    const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
+                    if (result.role !== 'owner' && result.role !== 'admin') {
+                        return `你没有管理员权限`;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    return `获取权限信息失败`;
+                }
             }
         } catch (e) {
             console.error(e);

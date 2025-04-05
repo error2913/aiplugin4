@@ -83,7 +83,7 @@ export class Context {
         if (length !== 0 && messages[length - 1].name === name && !s.startsWith('<function_call>')) {
             messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
             messages[length - 1].images.push(...images);
-            if (!msgId) {
+            if (!msgId && messages[length - 1]?.contentMap) {
                 const seg = role === 'assistant' ? '' : '\n';
                 messages[length - 1].content += seg + s;
             } else {
