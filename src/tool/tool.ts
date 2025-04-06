@@ -376,12 +376,21 @@ export class ToolManager {
         }
     }
 
-    static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call: {
-        name: string,
-        arguments: {
-            [key: string]: any
+    static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call_str: string): Promise<void> {
+        let tool_call: {
+            name: string,
+            arguments: {
+                [key: string]: any
+            }
+        } = null;
+
+        try {
+            tool_call = JSON.parse(tool_call_str);
+        } catch (e) {
+            logger.error('解析tool_call时出现错误:', e);
+            await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
         }
-    }): Promise<void> {
+
         if (!tool_call.hasOwnProperty('name') || !tool_call.hasOwnProperty('arguments')) {
             logger.warning(`调用函数失败:缺少name或arguments`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:缺少name或arguments`, []);

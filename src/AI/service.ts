@@ -40,12 +40,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                     const match = reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                     if (match) {
                         ai.context.addMessage(ctx, match[0], [], "assistant", '');
-                        try {
-                            const tool_call = JSON.parse(match[1]);
-                            await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
-                        } catch (e) {
-                            console.error('处理prompt tool call时出现错误:', e);
-                        }
+                        await ToolManager.handlePromptToolCall(ctx, msg, ai, match[1]);
 
                         const messages = handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);

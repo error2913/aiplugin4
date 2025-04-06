@@ -205,17 +205,12 @@ export class AI {
                         logger.info("发现工具调用结束标签，开始处理对应工具调用");
                         const match = this.stream.reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                         if (match) {
-                            this.stream.reply = match[0];
+                            this.stream.reply = '';
                             this.stream.toolCallStatus = false;
                             await this.stopCurrentChatStream();
 
-                            try {
-                                const tool_call = JSON.parse(match[1]);
-                                await ToolManager.handlePromptToolCall(ctx, msg, this, tool_call);
-                            } catch (e) {
-                                console.error('处理prompt tool call时出现错误:', e);
-                                return;
-                            }
+                            this.context.addMessage(ctx, match[0], [], "assistant", '');
+                            await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
 
                             await this.chatStream(ctx, msg);
                         } else {
