@@ -40,7 +40,7 @@ export function registerAttrShow() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
         if (!success) {
-            return '展示完成';
+            return '展示失败';
         }
 
         return s;

@@ -90,8 +90,10 @@ export class ToolManager {
 
     // 监听调用函数发送的内容
     listen: {
-        status: boolean,
-        content: string
+        timeoutId: number,
+        resolve: (content: string) => void,
+        reject: (err: Error) => void,
+        cleanup: () => void
     }
 
     constructor() {
@@ -102,8 +104,18 @@ export class ToolManager {
         }, {});
 
         this.listen = {
-            status: false,
-            content: ''
+            timeoutId: null,
+            resolve: null,
+            reject: null,
+            cleanup: () => {
+                if (this.listen.timeoutId) {
+                    clearTimeout(this.listen.timeoutId);
+                }
+
+                this.listen.timeoutId = null;
+                this.listen.resolve = null;
+                this.listen.reject = null;
+            }
         };
     }
 
@@ -216,25 +228,46 @@ export class ToolManager {
         cmdArgs.amIBeMentionedFirst = false;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
 
-        ai.tool.listen.status = true;
-
         const ext = seal.ext.find(cmdInfo.ext);
         if (!ext.cmdMap.hasOwnProperty(cmdInfo.name)) {
             logger.warning(`扩展${cmdInfo.ext}中未找到指令:${cmdInfo.name}`);
             return ['', false];
         }
 
-        ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
-
-        // 感觉这里应该有更好的写法……
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        if (ai.tool.listen.status) {
-            ai.tool.listen.status = false;
-            return ['', false];
+        // 清理现有监听状态
+        if (ai.tool.listen.timeoutId) {
+            ai.tool.listen.reject?.(new Error('中断当前监听'));
         }
 
-        return [ai.tool.listen.content, true];
+        return new Promise((
+            resolve: (result: [string, boolean]) => void,
+            reject: (err: Error) => void
+        ) => {
+            ai.tool.listen.timeoutId = setTimeout(() => {
+                reject(new Error('监听消息超时'));
+                ai.tool.listen.cleanup();
+            }, 10 * 1000);
+
+            ai.tool.listen.resolve = (content: string) => {
+                resolve([content, true]);
+                ai.tool.listen.cleanup();
+            };
+
+            ai.tool.listen.reject = (err: Error) => {
+                reject(err);
+                ai.tool.listen.cleanup();
+            };
+
+            try {
+                ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
+            } catch (err) {
+                reject(new Error(`solve中发生错误:${err.message}`));
+                ai.tool.listen.cleanup();
+            }
+        }).catch((err) => {
+            logger.error(`在extensionSolve中: 调用函数失败:${err.message}`);
+            return ['', false];
+        });
     }
 
     /**

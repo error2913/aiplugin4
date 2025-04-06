@@ -13,7 +13,7 @@ export function registerRollCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被检定的人的名称"  + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: "被检定的人的名称" + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: "string",
@@ -80,7 +80,7 @@ export function registerRollCheck() {
         ToolManager.cmdArgs.specialExecuteTimes = 1;
 
         if (!success) {
-            return '检定完成';
+            return '检定执行失败';
         }
 
         return s;
@@ -141,7 +141,7 @@ export function registerSanCheck() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args2);
         if (!success) {
-            return 'san check已执行';
+            return 'san check执行失败';
         }
 
         return s;

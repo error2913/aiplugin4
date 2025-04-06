@@ -23,7 +23,7 @@ export function registerModuRoll() {
     tool.solve = async (ctx, msg, ai, _) => {
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
         if (!success) {
-            return '今日人品查询成功';
+            return '今日人品查询失败';
         }
 
         return s;
@@ -62,7 +62,7 @@ export function registerModuSearch() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, name);
         if (!success) {
-            return '今日人品查询成功';
+            return '今日人品查询失败';
         }
 
         return s;

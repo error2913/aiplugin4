@@ -1265,11 +1265,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     let message = msg.message;
     let images: Image[] = [];
 
-    if (ai.tool.listen.status) {
-      ai.tool.listen.status = false;
-      ai.tool.listen.content = message;
-      return;
-    }
+    ai.tool.listen.resolve?.(message); // 将消息传递给监听工具
 
     const { allmsg } = ConfigManager.received;
     if (allmsg) {
