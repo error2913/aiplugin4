@@ -1,3 +1,4 @@
+import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";

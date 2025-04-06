@@ -1,4 +1,5 @@
 import { AIManager } from "../AI/AI";
+import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";

@@ -1,3 +1,4 @@
+import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
