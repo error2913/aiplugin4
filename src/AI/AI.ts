@@ -80,7 +80,7 @@ export class AI {
                 return;
             }
         } catch (err) {
-            console.error('解析body时出现错误:', err);
+            logger.error('解析body时出现错误:', err);
             return;
         }
 
@@ -214,7 +214,7 @@ export class AI {
 
                             await this.chatStream(ctx, msg);
                         } else {
-                            console.error('无法匹配到function_call');
+                            logger.error('无法匹配到function_call');
                             await this.stopCurrentChatStream();
                         }
                         return;
@@ -306,7 +306,7 @@ export class AIManager {
                     return value;
                 });
             } catch (error) {
-                console.error(`从数据库中获取${`AI_${id}`}失败:`, error);
+                logger.error(`从数据库中获取${`AI_${id}`}失败:`, error);
             }
 
             this.cache[id] = data;
@@ -373,7 +373,7 @@ export class AIManager {
             const usage = JSON.parse(ConfigManager.ext.storageGet('usageMap') || '{}');
             this.usageMap = usage;
         } catch (error) {
-            console.error(`从数据库中获取usageMap失败:`, error);
+            logger.error(`从数据库中获取usageMap失败:`, error);
         }
     }
 

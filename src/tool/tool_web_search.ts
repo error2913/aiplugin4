@@ -78,7 +78,7 @@ export function registerWebSearch() {
 
             return s;
         } catch (error) {
-            console.error("在web_search中请求出错：", error);
+            logger.error("在web_search中请求出错：", error);
             return `使用搜索引擎搜索失败:${error}`;
         }
     }

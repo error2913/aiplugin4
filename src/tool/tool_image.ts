@@ -16,7 +16,7 @@ export function registerFace() {
 
             acc[name] = path;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
         }
         return acc;
     }, {});
@@ -51,7 +51,7 @@ export function registerFace() {
             seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);
             return '发送成功';
         } else {
-            console.error(`本地图片${name}不存在`);
+            logger.error(`本地图片${name}不存在`);
             return `本地图片${name}不存在`;
         }
     }
@@ -198,7 +198,7 @@ export function registerTextToImage() {
 
         const ext = seal.ext.find('AIDrawing');
         if (!ext) {
-            console.error(`未找到AIDrawing依赖`);
+            logger.error(`未找到AIDrawing依赖`);
             return `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`;
         }
 
@@ -206,7 +206,7 @@ export function registerTextToImage() {
             await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
             return `图像生成请求已发送`;
         } catch (e) {
-            console.error(`图像生成失败：${e}`);
+            logger.error(`图像生成失败：${e}`);
             return `图像生成失败：${e}`;
         }
     };

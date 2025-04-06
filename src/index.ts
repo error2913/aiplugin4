@@ -23,7 +23,7 @@ function main() {
         timerQueue.push(item);
       });
   } catch (e) {
-    console.error('在获取timerQueue时出错', e);
+    logger.error('在获取timerQueue时出错', e);
   }
 
   ConfigManager.ext = ext;
@@ -1144,7 +1144,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             continue;
           }
         } catch (error) {
-          console.error('Error in RegExp:', error);
+          logger.error(`正则表达式错误，内容:${keyword}，错误信息:${error}`);
           continue;
         }
 
@@ -1383,7 +1383,7 @@ async function get_chart_url(chart_type: string, usage_data: {
       throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
     }
   } catch (error) {
-    console.error("在get_chart_url中请求出错：", error);
+    logger.error("在get_chart_url中请求出错：", error);
     return '';
   }
 }

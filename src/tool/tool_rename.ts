@@ -41,7 +41,7 @@ export function registerRename() {
                     return `你没有管理员权限`;
                 }
             } catch (e) {
-                console.error(e);
+                logger.error(e);
                 return `获取权限信息失败`;
             }
         }
@@ -59,7 +59,7 @@ export function registerRename() {
             seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
             return '设置成功';
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return '设置失败';
         }
     }

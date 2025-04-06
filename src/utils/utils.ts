@@ -29,7 +29,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
     if (showMsgId) {
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
 
             ai.context.lastReply = s;
             seal.replyToSender(ctx, msg, s);

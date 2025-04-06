@@ -58,7 +58,7 @@ export class ImageManager {
 
                 acc[name] = path;
             } catch (e) {
-                console.error(e);
+                logger.error(e);
             }
             return acc;
         }, {});
@@ -102,7 +102,7 @@ export class ImageManager {
 
                 acc[name] = path;
             } catch (e) {
-                console.error(e);
+                logger.error(e);
             }
             return acc;
         }, {});
@@ -162,7 +162,7 @@ export class ImageManager {
 
                     images.push(image);
                 } catch (error) {
-                    console.error('Error in imageToText:', error);
+                    logger.error('在handleImageMessage中处理图片时出错:', error);
                 }
             }
         }
@@ -193,7 +193,7 @@ export class ImageManager {
                 }
             }
         } catch (error) {
-            console.error('Error checking URL:', error);
+            logger.error('在checkImageUrl中请求出错:', error);
         }
 
         return isValid;
@@ -273,7 +273,7 @@ export class ImageManager {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (error) {
-            console.error("在imageUrlToBase64中请求出错：", error);
+            logger.error("在imageUrlToBase64中请求出错：", error);
             return { base64: '', format: '' };
         }
     }

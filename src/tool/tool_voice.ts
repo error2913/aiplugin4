@@ -15,7 +15,7 @@ export function registerRecord() {
 
             acc[name] = path;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
         }
         return acc;
     }, {});
@@ -50,7 +50,7 @@ export function registerRecord() {
             seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
             return '发送成功';
         } else {
-            console.error(`本地语音${name}不存在`);
+            logger.error(`本地语音${name}不存在`);
             return `本地语音${name}不存在`;
         }
     }
@@ -112,7 +112,7 @@ export function registerTextToSound() {
             if (character === '自定义') {
                 const aittsExt = seal.ext.find('AITTS');
                 if (!aittsExt) {
-                    console.error(`未找到AITTS依赖`);
+                    logger.error(`未找到AITTS依赖`);
                     return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
                 }
                 
@@ -120,7 +120,7 @@ export function registerTextToSound() {
             } else {
                 const ext = seal.ext.find('HTTP依赖');
                 if (!ext) {
-                    console.error(`未找到HTTP依赖`);
+                    logger.error(`未找到HTTP依赖`);
                     return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
                 }
 
@@ -132,7 +132,7 @@ export function registerTextToSound() {
 
             return `发送语音成功`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `发送语音失败`;
         }
     }

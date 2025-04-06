@@ -154,7 +154,7 @@ export function registerSendMsg() {
                 return `函数调用成功，返回值:${s}`;
             } catch (e) {
                 const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
-                console.error(s);
+                logger.error(s);
                 await ai.context.addSystemUserMessage('调用函数返回', s, []);
 
                 AIManager.saveAI(ai.id);
@@ -194,7 +194,7 @@ export function registerDeleteMsg() {
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -215,12 +215,12 @@ export function registerDeleteMsg() {
                         return `你没有管理员权限`;
                     }
                 } catch (e) {
-                    console.error(e);
+                    logger.error(e);
                     return `获取权限信息失败`;
                 }
             }
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `获取消息信息失败`;
         }
 
@@ -229,7 +229,7 @@ export function registerDeleteMsg() {
             await globalThis.http.getData(epId, `delete_msg?message_id=${transformMsgIdBack(msg_id)}`);
             return `已撤回消息${msg_id}`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `撤回消息失败`;
         }
     }
@@ -270,7 +270,7 @@ export function registerQuoteMsg() {
             await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
             return `已引用消息${msg_id}并回复`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `引用消息失败`;
         }
     }

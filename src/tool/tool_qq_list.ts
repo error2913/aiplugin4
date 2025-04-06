@@ -36,7 +36,7 @@ export function registerGetList() {
 
                 return s;
             } catch (e) {
-                console.error(e);
+                logger.error(e);
                 return `获取好友列表失败`;
             }
         } else if (msg_type === "group") {
@@ -50,7 +50,7 @@ export function registerGetList() {
 
                 return s;
             } catch (e) {
-                console.error(e);
+                logger.error(e);
                 return `获取好友列表失败`;
             }
         } else {
@@ -121,7 +121,7 @@ export function registerGetGroupMemberList() {
             }).join('\n');
             return s;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `获取群成员列表失败`;
         }
     }
@@ -172,7 +172,7 @@ export function registerSearchChat() {
 
                 return s;
             } catch (e) {
-                console.error(e);
+                logger.error(e);
                 return `获取好友列表失败`;
             }
         } else if (msg_type === "group") {
@@ -190,7 +190,7 @@ export function registerSearchChat() {
 
                 return s;
             } catch (e) {
-                console.error(e);
+                logger.error(e);
                 return `获取好友列表失败`;
             }
         } else {
@@ -269,7 +269,7 @@ export function registerSearchCommonGroup() {
 
             return s;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `获取共群列表失败`;
         }
     }

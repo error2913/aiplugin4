@@ -35,7 +35,7 @@ export function registerBan() {
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -53,7 +53,7 @@ export function registerBan() {
                 return `你没有管理员权限`; 
             }
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `获取权限信息失败`;
         }
 
@@ -64,7 +64,7 @@ export function registerBan() {
             await globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
             return `已禁言<${name}> ${duration}秒`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `禁言失败`;
         }
     }
@@ -98,7 +98,7 @@ export function registerWholeBan() {
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -108,7 +108,7 @@ export function registerWholeBan() {
             await globalThis.http.getData(epId, `set_group_whole_ban?group_id=${gid.replace(/\D+/g, '')}&enable=${enable}`);
             return `已${enable? '开启' : '关闭'}全员禁言`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `全员禁言失败`;
         }
     }
@@ -136,7 +136,7 @@ export function registerGetBanList() {
     tool.solve = async (ctx, _, __, ___) => {
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -151,7 +151,7 @@ export function registerGetBanList() {
 
             return s;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `获取禁言列表失败`;
         }
     }

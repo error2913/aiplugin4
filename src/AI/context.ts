@@ -144,7 +144,7 @@ export class Context {
             }
         }
 
-        console.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
+        logger.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
     }
 
     async addSystemUserMessage(name: string, s: string, images: Image[]) {

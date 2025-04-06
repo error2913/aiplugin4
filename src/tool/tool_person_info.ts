@@ -30,7 +30,7 @@ export function registerGetPersonInfo() {
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -71,7 +71,7 @@ QQ等级: ${data.qqLevel}
 
             return s;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `获取用户信息失败`;
         }
     }

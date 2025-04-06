@@ -27,7 +27,7 @@ export function registerPoke() {
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -46,7 +46,7 @@ export function registerPoke() {
             await globalThis.http.getData(epId, `group_poke?group_id=${group_id}&user_id=${user_id}`);
             return `已向<${name}>发送戳一戳`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `发送戳一戳失败`;
         }
     }

@@ -27,13 +27,13 @@ export function registerDrawDeck() {
 
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
-            console.error(`牌堆${name}不存在:${dr.err}`);
+            logger.error(`牌堆${name}不存在:${dr.err}`);
             return `牌堆${name}不存在:${dr.err}`;
         }
 
         const result = dr.result;
         if (result == null) {
-            console.error(`牌堆${name}结果为空:${dr.err}`);
+            logger.error(`牌堆${name}结果为空:${dr.err}`);
             return `牌堆${name}结果为空:${dr.err}`;
         }
 

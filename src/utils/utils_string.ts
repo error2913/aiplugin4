@@ -84,7 +84,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
             const regex = new RegExp(item, 'g');
             s = s.replace(regex, '');
         } catch (error) {
-            console.error('Error in RegExp:', error);
+            logger.error(`正则表达式错误，内容:${item}，错误信息:${error}`);
         }
     })
 
@@ -104,7 +104,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
             const regex = new RegExp(item, 'g');
             reply = reply.replace(regex, '');
         } catch (error) {
-            console.error('Error in RegExp:', error);
+            logger.error(`正则表达式错误，内容:${item}，错误信息:${error}`);
         }
     })
 

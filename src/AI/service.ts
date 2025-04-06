@@ -63,7 +63,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (error) {
-        console.error("在sendChatRequest中出错：", error);
+        logger.error("在sendChatRequest中出错：", error);
         return '';
     }
 }
@@ -97,7 +97,7 @@ export async function sendITTRequest(messages: {
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (error) {
-        console.error("在imageToText中请求出错：", error);
+        logger.error("在sendITTRequest中请求出错：", error);
         if (urlToBase64 === '自动' && !useBase64) {
             logger.info(`自动尝试使用转换为base64`);
 
@@ -222,7 +222,7 @@ export async function startStream(messages: {
             throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (error) {
-        console.error("在start_stream中出错：", error);
+        logger.error("在startStream中出错：", error);
         return '';
     }
 }
@@ -265,7 +265,7 @@ export async function pollStream(id: string, after: number): Promise<{ status: s
             throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (error) {
-        console.error("在poll_stream中出错：", error);
+        logger.error("在pollStream中出错：", error);
         return { status: 'failed', reply: '', nextAfter: 0 };
     }
 }
@@ -308,7 +308,7 @@ export async function endStream(id: string): Promise<string> {
             throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (error) {
-        console.error("在end_stream中出错：", error);
+        logger.error("在endStream中出错：", error);
         return '';
     }
 }

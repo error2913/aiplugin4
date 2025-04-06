@@ -369,9 +369,8 @@ export class ToolManager {
 
             return tool.tool_choice;
         } catch (e) {
-            const s = `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`;
-            console.error(s);
-            await ai.context.addToolMessage(tool_call.id, s);
+            logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
+            await ai.context.addToolMessage(tool_call.id, `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
             return "none";
         }
     }
@@ -441,9 +440,8 @@ export class ToolManager {
 
             await ai.context.addSystemUserMessage('调用函数返回', s, []);
         } catch (e) {
-            const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
-            console.error(s);
-            await ai.context.addSystemUserMessage('调用函数返回', s, []);
+            logger.error(`调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`);
+            await ai.context.addSystemUserMessage('调用函数返回', `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`, []);
         }
     }
 }

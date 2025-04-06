@@ -24,7 +24,7 @@ export function registerGroupSign() {
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
-            console.error(`未找到HTTP依赖`);
+            logger.error(`未找到HTTP依赖`);
             return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
         }
 
@@ -34,7 +34,7 @@ export function registerGroupSign() {
             await globalThis.http.getData(epId, `send_group_sign?group_id=${group_id.replace(/\D+/, '')}`);
             return `已发送群打卡，若无响应可能今日已打卡`;
         } catch (e) {
-            console.error(e);
+            logger.error(e);
             return `发送群打卡失败`;
         }
     }
