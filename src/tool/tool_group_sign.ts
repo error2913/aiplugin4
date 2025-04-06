@@ -16,6 +16,7 @@ export function registerGroupSign() {
     }
 
     const tool = new Tool(info);
+    tool.type = 'group';
     tool.solve = async (ctx, _, __, ___) => {
         if (ctx.isPrivate) {
             return `群打卡只能在群聊中使用`; 

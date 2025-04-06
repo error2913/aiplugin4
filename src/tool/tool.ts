@@ -57,14 +57,15 @@ export interface ToolCall {
 }
 
 export interface CmdInfo {
-    ext: string,
-    name: string,
-    fixedArgs: string[]
+    ext: string, // 使用的扩展名称
+    name: string, // 指令名称
+    fixedArgs: string[] // 参数
 }
 
 export class Tool {
     info: ToolInfo;
-    cmdInfo: CmdInfo;
+    cmdInfo: CmdInfo; // 海豹指令信息
+    type: string; // 可使用函数的聊天场景类型："private" | "group" | "all"
     tool_choice: string; // 是否可以继续调用函数："none" | "auto" | "required"
     solve: (ctx: seal.MsgContext, msg: seal.Message, ai: AI, args: { [key: string]: any }) => Promise<string>;
 
@@ -75,6 +76,7 @@ export class Tool {
             name: '',
             fixedArgs: []
         }
+        this.type = "all"
         this.tool_choice = 'none';
         this.solve = async (_, __, ___, ____) => "函数未实现";
     }
@@ -126,11 +128,23 @@ export class ToolManager {
         return tm;
     }
 
-    getToolsInfo(): ToolInfo[] {
+    getToolsInfo(type: string): ToolInfo[] {
+        if (type !== "private" && type !== "group") {
+            type = "all";
+        }
+
         const tools = Object.keys(this.toolStatus)
             .map(key => {
                 if (this.toolStatus[key]) {
-                    return ToolManager.toolMap[key].info;
+                    if (!ToolManager.toolMap.hasOwnProperty(key)) {
+                        logger.error(`在getToolsInfo中找不到工具:${key}`);
+                        return null;
+                    }
+                    const tool = ToolManager.toolMap[key];
+                    if (tool.type !== "all" && tool.type !== type) {
+                        return null;
+                    }
+                    return tool.info;
                 } else {
                     return null;
                 }
@@ -205,8 +219,14 @@ export class ToolManager {
         ai.tool.listen.status = true;
 
         const ext = seal.ext.find(cmdInfo.ext);
+        if (!ext.cmdMap.hasOwnProperty(cmdInfo.name)) {
+            logger.warning(`扩展${cmdInfo.ext}中未找到指令:${cmdInfo.name}`);
+            return ['', false];
+        }
+
         ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
 
+        // 感觉这里应该有更好的写法……
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         if (ai.tool.listen.status) {
@@ -234,11 +254,15 @@ export class ToolManager {
             arguments: string
         }
     }[]): Promise<string> {
-        tool_calls.splice(5); // 最多调用5个函数
         if (tool_calls.length !== 0) {
             logger.info(`调用函数:`, tool_calls.map((item, i) => {
                 return `(${i}) ${item.function.name}:${item.function.arguments}`;
             }).join('\n'));
+        }
+
+        if (tool_calls.length > 5) {
+            logger.warning('一次性调用超过5个函数，将进行截断操作……');
+            tool_calls.splice(5);
         }
 
         let tool_choice = 'none';
@@ -267,9 +291,9 @@ export class ToolManager {
     }): Promise<string> {
         const name = tool_call.function.name;
 
-        if (!this.toolMap.hasOwnProperty(name)) {
-            logger.warning(`调用函数失败:未注册的函数:${name}`);
-            await ai.context.addToolMessage(tool_call.id, `调用函数失败:未注册的函数:${name}`);
+        if (this.cmdArgs == null) {
+            logger.warning(`暂时无法调用函数，请先使用任意海豹指令`);
+            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用任意指令`);
             return "none";
         }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {
@@ -277,15 +301,21 @@ export class ToolManager {
             await ai.context.addToolMessage(tool_call.id, `调用函数失败:禁止调用的函数:${name}`);
             return "none";
         }
-        if (this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用任意指令`);
-            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用任意指令`);
+        if (!this.toolMap.hasOwnProperty(name)) {
+            logger.warning(`调用函数失败:未注册的函数:${name}`);
+            await ai.context.addToolMessage(tool_call.id, `调用函数失败:未注册的函数:${name}`);
+            return "none";
+        }
+
+
+        const tool = this.toolMap[name];
+        if (tool.type !== "all" && tool.type !== msg.messageType) {
+            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
+            await ai.context.addToolMessage(tool_call.id, `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
             return "none";
         }
 
         try {
-            const tool = this.toolMap[name];
-
             const args = JSON.parse(tool_call.function.arguments);
             if (args !== null && typeof args !== 'object') {
                 logger.warning(`调用函数失败:arguement不是一个object`);
@@ -326,9 +356,9 @@ export class ToolManager {
 
         const name = tool_call.name;
 
-        if (!this.toolMap.hasOwnProperty(name)) {
-            logger.warning(`调用函数失败:未注册的函数:${name}`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:未注册的函数:${name}`, []);
+        if (this.cmdArgs == null) {
+            logger.warning(`暂时无法调用函数，请先使用任意海豹指令`);
+            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`, []);
             return;
         }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {
@@ -336,15 +366,21 @@ export class ToolManager {
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:禁止调用的函数:${name}`, []);
             return;
         }
-        if (this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用任意指令`);
-            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用任意指令`, []);
+        if (!this.toolMap.hasOwnProperty(name)) {
+            logger.warning(`调用函数失败:未注册的函数:${name}`);
+            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:未注册的函数:${name}`, []);
+            return;
+        }
+
+
+        const tool = this.toolMap[name];
+        if (tool.type !== "all" && tool.type !== msg.messageType) {
+            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
+            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`, []);
             return;
         }
 
         try {
-            const tool = this.toolMap[name];
-
             const args = tool_call.arguments;
             if (args !== null && typeof args !== 'object') {
                 logger.warning(`调用函数失败:arguement不是一个object`);

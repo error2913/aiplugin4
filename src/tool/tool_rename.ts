@@ -26,6 +26,7 @@ export function registerRename() {
     }
 
     const tool = new Tool(info);
+    tool.type = 'group';
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
 

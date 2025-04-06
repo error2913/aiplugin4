@@ -25,6 +25,7 @@ export function registerBan() {
     }
 
     const tool = new Tool(info);
+    tool.type = 'group';
     tool.solve = async (ctx, _, ai, args) => {
         const { name, duration } = args;
 
@@ -91,6 +92,7 @@ export function registerWholeBan() {
     }
 
     const tool = new Tool(info);
+    tool.type = 'group';
     tool.solve = async (ctx, _, __, args) => {
         const { enable } = args;
 
@@ -130,6 +132,7 @@ export function registerGetBanList() {
     }
 
     const tool = new Tool(info);
+    tool.type = 'group';
     tool.solve = async (ctx, _, __, ___) => {
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {

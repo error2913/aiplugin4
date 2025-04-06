@@ -13,7 +13,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 }[], tool_choice: string): Promise<string> {
     const { url, apiKey, bodyTemplate } = ConfigManager.request;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
-    const tools = ai.tool.getToolsInfo();
+    const tools = ai.tool.getToolsInfo(msg.messageType);
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);

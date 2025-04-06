@@ -115,19 +115,22 @@ export function registerSendMsg() {
         await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
 
         if (tool_call) {
-            if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
-                return `调用函数失败:未注册的函数:${tool_call.name}`;
+            if (ToolManager.cmdArgs == null) {
+                return `暂时无法调用函数，请先使用任意海豹指令`;
             }
             if (ConfigManager.tool.toolsNotAllow.includes(tool_call.name)) {
                 return `调用函数失败:禁止调用的函数:${tool_call.name}`;
             }
-            if (ToolManager.cmdArgs == null) {
-                return `暂时无法调用函数，请先使用任意指令`;
+            if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
+                return `调用函数失败:未注册的函数:${tool_call.name}`;
+            }
+
+            const tool = ToolManager.toolMap[tool_call.name];
+            if (tool.type !== "all" && tool.type !== msg.messageType) {
+                return `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`;
             }
 
             try {
-                const tool = ToolManager.toolMap[tool_call.name];
-
                 try {
                     tool_call.arguments = JSON.parse(tool_call.arguments);
                 } catch (e) {

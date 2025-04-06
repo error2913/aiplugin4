@@ -38,15 +38,16 @@ ${memeryPrompt}` :
 
     // 调用函数
     if (isTool && usePromptEngineering) {
-        const tools = ai.tool.getToolsInfo();
-        const toolsPrompt = tools.map((item, index) => {
-            return `${index + 1}. 名称:${item.function.name}
+        const tools = ai.tool.getToolsInfo(ctx.isPrivate ? 'private' : 'group');
+        if (tools && tools.length > 0) {
+            const toolsPrompt = tools.map((item, index) => {
+                return `${index + 1}. 名称:${item.function.name}
     - 描述:${item.function.description}
     - 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
     - 必需参数:${item.function.parameters.required.join('\n')}`;
-        });
+            }).join('\n');
 
-        content += `\n**调用函数**
+            content += `\n**调用函数**
 当需要调用函数功能时，请严格使用以下格式：
 
 <function_call>
@@ -63,6 +64,7 @@ ${memeryPrompt}` :
 
 可用函数列表:
 ${toolsPrompt}`;
+        }
     }
 
     const systemMessage: Message = {

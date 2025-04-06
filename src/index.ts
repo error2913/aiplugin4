@@ -18,8 +18,8 @@ function main() {
   }
 
   try {
-    JSON.parse(ext.storageGet(`timerQueue`) || '[]').
-      forEach((item: any) => {
+    JSON.parse(ext.storageGet(`timerQueue`) || '[]')
+      .forEach((item: any) => {
         timerQueue.push(item);
       });
   } catch (e) {
@@ -194,13 +194,13 @@ function main() {
 【p】概率模式，每条消息按概率触发
 单位/%，默认10%
 
-【.ai on --t --p=42】使用示例`
+【.ai on --t --p=42】使用示例`;
 
           seal.replyToSender(ctx, msg, s);
           return ret;
         }
 
-        let text = `AI已开启：`
+        let text = `AI已开启：`;
         kwargs.forEach(kwarg => {
           const name = kwarg.name;
           const exist = kwarg.valueExists;
@@ -273,7 +273,7 @@ function main() {
           return ret;
         }
 
-        let text = `AI已关闭：`
+        let text = `AI已关闭：`;
         kwargs.forEach(kwarg => {
           const name = kwarg.name;
 
@@ -281,19 +281,19 @@ function main() {
             case 'c':
             case 'counter': {
               pr.counter = -1;
-              text += `\n计数器模式`
+              text += `\n计数器模式`;
               break;
             }
             case 't':
             case 'timer': {
               pr.timer = -1;
-              text += `\n计时器模式`
+              text += `\n计时器模式`;
               break;
             }
             case 'p':
             case 'prob': {
               pr.prob = -1;
-              text += `\n概率模式`
+              text += `\n概率模式`;
               break;
             }
           }
@@ -511,7 +511,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             }
 
             if (ToolManager.cmdArgs == null) {
-              seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意指令`);
+              seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意海豹指令`);
               return ret;
             }
 
@@ -648,7 +648,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                   return;
                 }
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-              })
+              });
               return ret;
             }
 
@@ -720,7 +720,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                   return;
                 }
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-              })
+              });
               return ret;
             }
 
@@ -827,7 +827,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                       return;
                     }
                     seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-                  })
+                  });
                   return ret;
                 }
 
@@ -899,7 +899,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                       return;
                     }
                     seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-                  })
+                  });
                   return ret;
                 }
 
@@ -1027,7 +1027,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       }
       case 'stl':
       case 'steal': {
-        const op = cmdArgs.getArgN(2)
+        const op = cmdArgs.getArgN(2);
         switch (op) {
           case 'on': {
             ai.image.stealStatus = true;
