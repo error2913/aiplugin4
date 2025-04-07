@@ -1385,9 +1385,9 @@ async function get_chart_url(chart_type: string, usage_data: {
     completion_tokens: number;
   }
 }) {
+  const { usageChartUrl } = ConfigManager.backend;
   try {
-    const chart_url = 'http://42.193.236.17:3009/chart';
-    const response = await fetch(chart_url, {
+    const response = await fetch(`${usageChartUrl}/chart`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

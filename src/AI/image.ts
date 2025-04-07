@@ -240,10 +240,10 @@ export class ImageManager {
     }
 
     static async imageUrlToBase64(imageUrl: string): Promise<{ base64: string, format: string }> {
-        const url = 'http://110.41.69.149:46678/image-to-base64';
+        const { imageTobase64Url } = ConfigManager.backend;
 
         try {
-            const response = await fetch(url, {
+            const response = await fetch(`${imageTobase64Url}/image-to-base64`, {
                 method: 'POST',
                 headers: {
                     "Content-Type": "application/json",

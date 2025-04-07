@@ -170,7 +170,8 @@ export async function startStream(messages: {
     role: string,
     content: string
 }[]): Promise<string> {
-    const { url, apiKey, bodyTemplate, streamUrl } = ConfigManager.request;
+    const { url, apiKey, bodyTemplate } = ConfigManager.request;
+    const { streamUrl } = ConfigManager.backend;
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, null, null);
@@ -228,7 +229,7 @@ export async function startStream(messages: {
 }
 
 export async function pollStream(id: string, after: number): Promise<{ status: string, reply: string, nextAfter: number }> {
-    const { streamUrl } = ConfigManager.request;
+    const { streamUrl } = ConfigManager.backend;
 
     try {
         const response = await fetch(`${streamUrl}/poll?id=${id}&after=${after}`, {
@@ -271,7 +272,7 @@ export async function pollStream(id: string, after: number): Promise<{ status: s
 }
 
 export async function endStream(id: string): Promise<string> {
-    const { streamUrl } = ConfigManager.request;
+    const { streamUrl } = ConfigManager.backend;
 
     try {
         const response = await fetch(`${streamUrl}/end?id=${id}`, {

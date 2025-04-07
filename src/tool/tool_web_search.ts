@@ -1,4 +1,5 @@
 import { logger } from "../AI/logger";
+import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerWebSearch() {
@@ -37,6 +38,7 @@ export function registerWebSearch() {
     const tool = new Tool(info);
     tool.solve = async (_, __, ___, args) => {
         const { q, page, categories, time_range = '' } = args;
+        const { webSearchUrl } = ConfigManager.backend;
 
         let part = 1;
         let pageno = '';
@@ -45,7 +47,7 @@ export function registerWebSearch() {
             pageno = page ? Math.ceil(parseInt(page) / 2).toString() : '';
         }
 
-        const url = `http://110.41.69.149:8080/search?q=${q}&format=json${pageno ? `&pageno=${pageno}` : ''}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
+        const url = `${webSearchUrl}/search?q=${q}&format=json${pageno ? `&pageno=${pageno}` : ''}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
         try {
             logger.info(`使用搜索引擎搜索:${url}`);
 

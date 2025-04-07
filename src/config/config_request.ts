@@ -18,15 +18,13 @@ export class RequestConfig {
             `"temperature":1`,
             `"top_p":1`
         ], "messages,tools,tool_choice不存在时，将会自动替换。具体参数请参考你所使用模型的接口文档");
-        seal.ext.registerStringConfig(RequestConfig.ext, "流式输出后端url", "http://localhost:3010", '自行搭建或使用他人提供的后端');
     }
 
     static get() {
         return {
             url: seal.ext.getStringConfig(RequestConfig.ext, "url地址"),
             apiKey: seal.ext.getStringConfig(RequestConfig.ext, "API Key"),
-            bodyTemplate: seal.ext.getTemplateConfig(RequestConfig.ext, "body"),
-            streamUrl: seal.ext.getStringConfig(RequestConfig.ext, "流式输出后端url")
+            bodyTemplate: seal.ext.getTemplateConfig(RequestConfig.ext, "body")
         }
     }
 }
