@@ -1120,16 +1120,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     // 检查CQ码
     const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
     if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
-      // 非指令触发图片偷取，以及图片转文字
-      if (CQTypes.includes('image')) {
-        const result = await ImageManager.handleImageMessage(ctx, message);
-        message = result.message;
-        images = result.images;
-        if (ai.image.stealStatus) {
-          ai.image.updateImageList(images);
-        }
-      }
-
       clearTimeout(ai.context.timer);
       ai.context.timer = null;
 
@@ -1150,6 +1140,16 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
         if (fmtCondition === 1) {
+          // 图片偷取，以及图片转文字
+          if (CQTypes.includes('image')) {
+            const result = await ImageManager.handleImageMessage(ctx, message);
+            message = result.message;
+            images = result.images;
+            if (ai.image.stealStatus) {
+              ai.image.updateImageList(images);
+            }
+          }
+
           await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
 
           logger.info('非指令触发回复');
@@ -1170,6 +1170,16 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             continue;
           }
 
+          // 图片偷取，以及图片转文字
+          if (CQTypes.includes('image')) {
+            const result = await ImageManager.handleImageMessage(ctx, message);
+            message = result.message;
+            images = result.images;
+            if (ai.image.stealStatus) {
+              ai.image.updateImageList(images);
+            }
+          }
+
           await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
           await ai.context.addSystemUserMessage('触发原因提示', condition.reason, []);
           triggerConditionMap[id].splice(i, 1);
@@ -1184,6 +1194,16 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       // 开启任一模式时
       const pr = ai.privilege;
       if (pr.standby) {
+        // 图片偷取，以及图片转文字
+        if (CQTypes.includes('image')) {
+          const result = await ImageManager.handleImageMessage(ctx, message);
+          message = result.message;
+          images = result.images;
+          if (ai.image.stealStatus) {
+            ai.image.updateImageList(images);
+          }
+        }
+
         await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
       }
 
@@ -1245,9 +1265,16 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
-          const result = await ImageManager.handleImageMessage(ctx, message);
-          message = result.message;
-          images = result.images;
+          // 图片偷取，以及图片转文字
+          if (CQTypes.includes('image')) {
+            const result = await ImageManager.handleImageMessage(ctx, message);
+            message = result.message;
+            images = result.images;
+            if (ai.image.stealStatus) {
+              ai.image.updateImageList(images);
+            }
+          }
+
           await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
         }
       }
@@ -1278,9 +1305,16 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         const pr = ai.privilege;
         if (pr.standby) {
-          const result = await ImageManager.handleImageMessage(ctx, message);
-          message = result.message;
-          images = result.images;
+          // 图片偷取，以及图片转文字
+          if (CQTypes.includes('image')) {
+            const result = await ImageManager.handleImageMessage(ctx, message);
+            message = result.message;
+            images = result.images;
+            if (ai.image.stealStatus) {
+              ai.image.updateImageList(images);
+            }
+          }
+
           await ai.context.addMessage(ctx, message, images, 'assistant', transformMsgId(msg.rawId));
           return;
         }

@@ -234,10 +234,7 @@ export class ToolManager {
             return ['', false];
         }
 
-        // 清理现有监听状态
-        if (ai.tool.listen.timeoutId) {
-            ai.tool.listen.reject?.(new Error('中断当前监听'));
-        }
+        ai.tool.listen.reject?.(new Error('中断当前监听'));
 
         return new Promise((
             resolve: (result: [string, boolean]) => void,

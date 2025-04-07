@@ -26,7 +26,7 @@ export class RequestConfig {
             url: seal.ext.getStringConfig(RequestConfig.ext, "url地址"),
             apiKey: seal.ext.getStringConfig(RequestConfig.ext, "API Key"),
             bodyTemplate: seal.ext.getTemplateConfig(RequestConfig.ext, "body"),
-            streamUrl: seal.ext.getStringConfig(RequestConfig.ext, "流式输出后端url"),
+            streamUrl: seal.ext.getStringConfig(RequestConfig.ext, "流式输出后端url")
         }
     }
 }
