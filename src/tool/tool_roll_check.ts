@@ -65,7 +65,12 @@ export function registerRollCheck() {
             args2.push(additional_dice);
         }
 
-        args2.push(rank + expression);
+        if (rank || /[\dDd+\-*/]/.test(expression)) {
+            args2.push(rank + expression);
+        } else {
+            const value = seal.vars.intGet(ctx, expression)[0];
+            args2.push(expression + (value === 0 ? '50' : ''));
+        }
 
         if (reason) {
             args2.push(reason);

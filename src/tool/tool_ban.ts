@@ -51,7 +51,20 @@ export function registerBan() {
             const user_id = epId.replace(/\D+/g, '');
             const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
             if (result.role !== 'owner' && result.role !== 'admin') {
-                return `你没有管理员权限`; 
+                return `你没有管理员权限`;
+            }
+        } catch (e) {
+            logger.error(e);
+            return `获取权限信息失败`;
+        }
+
+        try {
+            const epId = ctx.endPoint.userId;
+            const group_id = ctx.group.groupId.replace(/\D+/g, '');
+            const user_id = uid.replace(/\D+/g, '');
+            const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
+            if (result.role === 'owner' || result.role === 'admin') {
+                return `你无法禁言${result.role === 'owner' ? '群主' : '管理员'}`;
             }
         } catch (e) {
             logger.error(e);
@@ -84,7 +97,7 @@ export function registerWholeBan() {
                 properties: {
                     enable: {
                         type: 'boolean',
-                        description: '开启还是关闭全员禁言' 
+                        description: '开启还是关闭全员禁言'
                     }
                 },
                 required: ['enable']
@@ -107,7 +120,7 @@ export function registerWholeBan() {
             const epId = ctx.endPoint.userId;
             const gid = ctx.group.groupId;
             await globalThis.http.getData(epId, `set_group_whole_ban?group_id=${gid.replace(/\D+/g, '')}&enable=${enable}`);
-            return `已${enable? '开启' : '关闭'}全员禁言`;
+            return `已${enable ? '开启' : '关闭'}全员禁言`;
         } catch (e) {
             logger.error(e);
             return `全员禁言失败`;

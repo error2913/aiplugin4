@@ -90,6 +90,10 @@ export function registerImageToText() {
         const image = ai.context.findImage(id);
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
+        if (!image) {
+            return `未找到图片${id}`;
+        }
+
         if (image.isUrl) {
             const reply = await ImageManager.imageToText(image.file, text);
             if (reply) {
