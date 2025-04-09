@@ -93,6 +93,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 处理回复消息
     reply = await replaceMentions(ctx, context, reply);
+    reply = await replacePoke(ctx, context, reply);
     const { result, images } = await replaceImages(context, reply);
     reply = result;
 
@@ -172,7 +173,7 @@ export function checkRepeat(context: Context, s: string) {
 }
 
 /**
- * 替换艾特提及为CQ码
+ * 替换艾特替换为CQ码
  * @param context 
  * @param reply 
  * @returns 
@@ -187,6 +188,30 @@ async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: st
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
             } else {
                 reply = reply.replace(match[i], ` @${name} `);
+            }
+        }
+    }
+
+    return reply;
+}
+
+/**
+ * 替换戳一戳替换为CQ码
+ * @param context 
+ * @param reply 
+ * @returns 
+ */
+async function replacePoke(ctx: seal.MsgContext, context: Context, reply: string) {
+    const match = reply.match(/<\s?[\|│｜]戳[:：]\s?(.+?)(?:[\|│｜]\s?>|[\|│｜]|\s?>)/g);
+    if (match) {
+        for (let i = 0; i < match.length; i++) {
+            const name = match[i].replace(/^<\s?[\|│｜]戳[:：]\s?|(?:[\|│｜]\s?>|[\|│｜]|\s?>)$/g, '');
+            const uid = await context.findUserId(ctx, name);
+            if (uid !== null) {
+                reply = reply.replace(match[i], `[CQ:poke,qq=${uid.replace(/\D+/g, "")}]`);
+            } else {
+                logger.warning(`无法找到用户：${name}`);
+                reply = reply.replace(match[i], '');
             }
         }
     }

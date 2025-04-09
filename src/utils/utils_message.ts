@@ -21,6 +21,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
 - <|@xxx|>表示@某个群成员`;
     content += `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用`;
+    content += `\n- <|戳:xxx|>表示戳一戳某个群成员`;
     content += showMsgId ?
         `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用` :
         ``;
@@ -166,7 +167,13 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
         ) : '';
 
         const msgIdList = Object.keys(message?.contentMap || {});
-        const content = message.content + (msgIdList.length !== 0 ? '\n' + msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\n') : '');
+        const content = message.content + (msgIdList.length !== 0 ? '\n' + msgIdList.map(msgId => {
+            if (showMsgId && msgId !== '0') {
+                return `<|msg_id:${msgId}|>` + message.contentMap[msgId];
+            } else {
+                return message.contentMap[msgId];
+            }
+        }).join('\n') : '');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\n\n' + prefix + content;
