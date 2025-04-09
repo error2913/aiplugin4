@@ -61,15 +61,28 @@ export class Context {
 
         //处理文本
         s = s
-            .replace(/\[CQ:at,qq=(\d+)\]/g, (_, p1) => {
+            .replace(/\[CQ:reply,id=-?\d+\]\[CQ:at,qq=\d+\]/g, '')//全部处理
+            .replace(/\[CQ:(.*?),qq=(\d+)\]/g, (_, p1, p2) => {
                 const epId = ctx.endPoint.userId;
                 const gid = ctx.group.groupId;
-                const uid = `QQ:${p1}`;
+                const uid = `QQ:${p2}`;
                 const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
                 const mctx = createCtx(epId, mmsg);
                 const name = mctx.player.name || '未知用户';
 
-                return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                let type = '';
+                switch (p1) {
+                    case 'at':
+                        type = '@';
+                        break;
+                    case 'poke':
+                        type = '戳:';
+                        break;
+                    default:
+                        return '';
+                }
+
+                return `<|${type}${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
             })
             .replace(/\[CQ:reply,id=-?\d+\]/g, '')
             .replace(/\[CQ:.*?\]/g, '')

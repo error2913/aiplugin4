@@ -7,7 +7,6 @@ import { registerCheckAvatar, registerFace, registerImageToText, registerTextToI
 import { registerJrrp } from "./tool_jrrp"
 import { registerAddMemory, registerDelMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
-import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
 import { registerRollCheck, registerSanCheck } from "./tool_roll_check"
 import { registerCancelTimer, registerGetTime, registerSetTimer, registerShowTimerList } from "./tool_time"
@@ -190,7 +189,6 @@ export class ToolManager {
         registerGetBanList();
         registerRecord();
         registerTextToSound();
-        registerPoke();
         registerGetTime();
         registerSetTimer();
         registerShowTimerList();
