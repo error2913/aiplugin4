@@ -82,7 +82,7 @@ function main() {
 【50】群管理员
 【60】群主
 【100】骰主
-不填写时默认为0`;
+不填写时默认为100`;
 
           seal.replyToSender(ctx, msg, s);
           return ret;
