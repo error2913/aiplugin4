@@ -87,3 +87,65 @@ export function registerWebSearch() {
 
     ToolManager.toolMap[info.function.name] = tool;
 }
+
+export function registerWebRead() {
+    const info: ToolInfo = {
+        type: "function",
+        function: {
+            name: "web_read",
+            description: `读取网页内容`,
+            parameters: {
+                type: "object",
+                properties: {
+                    url: {
+                        type: "string",
+                        description: "需要读取内容的网页链接"
+                    }
+                },
+                required: ["url"]
+            }
+        }
+    };
+
+    const tool = new Tool(info);
+    tool.solve = async (_, __, ___, args) => {
+        const { url } = args;
+        const { webReadUrl } = ConfigManager.backend;
+
+        try {
+            logger.info(`读取网页内容: ${url}`);
+
+            const response = await fetch(`${webReadUrl}/scrape`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ url })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(`请求失败: ${JSON.stringify(data)}`);
+            }
+
+            const { title, content, links } = data;
+
+            if (!title && !content && (!links || links.length === 0)) {
+                return `未能从网页中提取到有效内容`;
+            }
+
+            const result = `标题: ${title || "无标题"}\n内容: ${content || "无内容"}\n网页包含链接:\n` +
+                (links && links.length > 0
+                    ? links.map((link: string, index: number) => `${index + 1}. ${link}`).join('\n')
+                    : "无链接");
+
+            return result;
+        } catch (error) {
+            logger.error("在web_read中请求出错：", error);
+            return `读取网页内容失败: ${error}`;
+        }
+    };
+
+    ToolManager.toolMap[info.function.name] = tool;
+}

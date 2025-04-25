@@ -12,10 +12,11 @@ import { registerRename } from "./tool_rename"
 import { registerRollCheck, registerSanCheck } from "./tool_roll_check"
 import { registerCancelTimer, registerGetTime, registerSetTimer, registerShowTimerList } from "./tool_time"
 import { registerRecord, registerTextToSound } from "./tool_voice"
-import { registerWebSearch } from "./tool_web_search"
+import { registerWebSearch, registerWebRead } from "./tool_web_search"
 import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_person_info"
 import { registerDeleteMsg, registerQuoteMsg, registerSendMsg } from "./tool_message"
+import { registerSetEssenceMsg } from "./tool_essence_msg"
 import { registerGetContext } from "./tool_context"
 import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
 import { registerSetTriggerCondition } from "./tool_trigger"
@@ -194,6 +195,7 @@ export class ToolManager {
         registerShowTimerList();
         registerCancelTimer();
         registerWebSearch();
+        registerWebRead();
         registerFace();
         registerImageToText();
         registerCheckAvatar();
@@ -203,6 +205,7 @@ export class ToolManager {
         registerSendMsg();
         registerDeleteMsg();
         registerQuoteMsg();
+        registerSetEssenceMsg();
         registerGetContext();
         registerGetList();
         registerGetGroupMemberList();
