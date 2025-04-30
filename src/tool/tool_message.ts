@@ -112,59 +112,67 @@ export function registerSendMsg() {
 
         const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
 
-        const msgId = await replyToSender(ctx, msg, ai, reply);
-        await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
+        try {
+            const { msgId, error } = await replyToSender(ctx, msg, ai, reply);
+            if (error) {
+                throw error;
+            }
+            await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
 
-        if (tool_call) {
-            if (ToolManager.cmdArgs == null) {
-                return `暂时无法调用函数，请先使用任意海豹指令`;
-            }
-            if (ConfigManager.tool.toolsNotAllow.includes(tool_call.name)) {
-                return `调用函数失败:禁止调用的函数:${tool_call.name}`;
-            }
-            if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
-                return `调用函数失败:未注册的函数:${tool_call.name}`;
-            }
+            if (tool_call) {
+                if (ToolManager.cmdArgs == null) {
+                    return `暂时无法调用函数，请先使用任意海豹指令`;
+                }
+                if (ConfigManager.tool.toolsNotAllow.includes(tool_call.name)) {
+                    return `调用函数失败:禁止调用的函数:${tool_call.name}`;
+                }
+                if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
+                    return `调用函数失败:未注册的函数:${tool_call.name}`;
+                }
 
-            const tool = ToolManager.toolMap[tool_call.name];
-            if (tool.type !== "all" && tool.type !== msg.messageType) {
-                return `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`;
-            }
+                const tool = ToolManager.toolMap[tool_call.name];
+                if (tool.type !== "all" && tool.type !== msg.messageType) {
+                    return `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`;
+                }
 
-            try {
                 try {
-                    tool_call.arguments = JSON.parse(tool_call.arguments);
-                } catch (e) {
-                    return `调用函数失败:arguement不是一个合法的JSON字符串`;
-                }
-
-                const args = tool_call.arguments;
-                if (args !== null && typeof args !== 'object') {
-                    return `调用函数失败:arguement不是一个object`;
-                }
-                for (const key of tool.info.function.parameters.required) {
-                    if (!args.hasOwnProperty(key)) {
-                        return `调用函数失败:缺少必需参数 ${key}`;
+                    try {
+                        tool_call.arguments = JSON.parse(tool_call.arguments);
+                    } catch (e) {
+                        return `调用函数失败:arguement不是一个合法的JSON字符串`;
                     }
+
+                    const args = tool_call.arguments;
+                    if (args !== null && typeof args !== 'object') {
+                        return `调用函数失败:arguement不是一个object`;
+                    }
+                    for (const key of tool.info.function.parameters.required) {
+                        if (!args.hasOwnProperty(key)) {
+                            return `调用函数失败:缺少必需参数 ${key}`;
+                        }
+                    }
+
+                    const s = await tool.solve(ctx, msg, ai, args);
+                    await ai.context.addSystemUserMessage('调用函数返回', s, []);
+
+                    AIManager.saveAI(ai.id);
+                    return `函数调用成功，返回值:${s}`;
+                } catch (e) {
+                    const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
+                    logger.error(s);
+                    await ai.context.addSystemUserMessage('调用函数返回', s, []);
+
+                    AIManager.saveAI(ai.id);
+                    return s;
                 }
-
-                const s = await tool.solve(ctx, msg, ai, args);
-                await ai.context.addSystemUserMessage('调用函数返回', s, []);
-
-                AIManager.saveAI(ai.id);
-                return `函数调用成功，返回值:${s}`;
-            } catch (e) {
-                const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
-                logger.error(s);
-                await ai.context.addSystemUserMessage('调用函数返回', s, []);
-
-                AIManager.saveAI(ai.id);
-                return s;
             }
-        }
 
-        AIManager.saveAI(ai.id);
-        return "消息发送成功";
+            AIManager.saveAI(ai.id);
+            return "消息发送成功";
+        } catch (e) {
+            logger.error(e);
+            return `消息发送失败:${e.message}`;
+        }
     }
 
     ToolManager.toolMap[info.function.name] = tool;
@@ -267,12 +275,15 @@ export function registerQuoteMsg() {
 
         try {
             const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
-            const msgId = await replyToSender(ctx, msg, ai, `[CQ:reply,id=${transformMsgIdBack(msg_id)}]${reply}`);
+            const { msgId, error } = await replyToSender(ctx, msg, ai, `[CQ:reply,id=${transformMsgIdBack(msg_id)}]${reply}`);
+            if (error) {
+                throw error;
+            }
             await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
             return `已引用消息${msg_id}并回复`;
         } catch (e) {
             logger.error(e);
-            return `引用消息失败`;
+            return `引用消息失败:${e.message}`;
         }
     }
 

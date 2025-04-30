@@ -20,9 +20,9 @@ export function generateId() {
     return (timestamp + random).slice(-6); // 截取最后6位
 }
 
-export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<string> {
+export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<{ msgId: string, error: Error }> {
     if (!s) {
-        return '';
+        return { msgId: '', error: null };
     }
 
     const { showMsgId } = ConfigManager.message;
@@ -33,7 +33,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
 
             ai.context.lastReply = s;
             seal.replyToSender(ctx, msg, s);
-            return '';
+            return { msgId: '', error: new Error(`未找到HTTP依赖`) };
         }
 
         try {
@@ -50,9 +50,9 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
                 const result = await globalThis.http.getData(epId, 'send_private_msg', data);
                 if (result?.message_id) {
                     logger.info(`(${result.message_id})发送给QQ:${user_id}:${s}`);
-                    return transformMsgId(result.message_id);
+                    return { msgId: transformMsgId(result.message_id), error: null };
                 } else {
-                    throw new Error(`获取消息ID失败`);
+                    throw new Error(`获取消息ID失败，可能未添加好友`);
                 }
             } else if (msg.messageType === 'group') {
                 const data = {
@@ -62,9 +62,9 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
                 const result = await globalThis.http.getData(epId, 'send_group_msg', data);
                 if (result?.message_id) {
                     logger.info(`(${result.message_id})发送给QQ-Group:${group_id}:${s}`);
-                    return transformMsgId(result.message_id);
+                    return { msgId: transformMsgId(result.message_id), error: null };
                 } else {
-                    throw new Error(`获取消息ID失败`);
+                    throw new Error(`获取消息ID失败，可能未加入群聊`);
                 }
             } else {
                 throw new Error(`未知的消息类型`);
@@ -73,11 +73,11 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
             logger.error(`在replyToSender中: ${error}`);
             ai.context.lastReply = s;
             seal.replyToSender(ctx, msg, s);
-            return '';
+            return { msgId: '', error: error as Error };
         }
     } else {
         ai.context.lastReply = s;
         seal.replyToSender(ctx, msg, s);
-        return '';
+        return { msgId: '', error: null };
     }
 }
