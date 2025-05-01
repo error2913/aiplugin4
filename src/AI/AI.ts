@@ -213,6 +213,7 @@ export class AI {
                             await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
 
                             await this.chatStream(ctx, msg);
+                            return;
                         } else {
                             logger.error('无法匹配到function_call');
                             await this.stopCurrentChatStream();

@@ -154,6 +154,7 @@ export function registerSendMsg() {
 
                     const s = await tool.solve(ctx, msg, ai, args);
                     await ai.context.addSystemUserMessage('调用函数返回', s, []);
+                    ai.tool.toolCallCount++;
 
                     AIManager.saveAI(ai.id);
                     return `函数调用成功，返回值:${s}`;

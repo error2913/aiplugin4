@@ -1153,6 +1153,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
 
           logger.info('非指令触发回复');
+          ai.tool.toolCallCount = 0;
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -1185,6 +1186,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           triggerConditionMap[id].splice(i, 1);
 
           logger.info('AI设定触发条件触发回复');
+          ai.tool.toolCallCount = 0;
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -1212,6 +1214,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         if (ai.context.counter >= pr.counter) {
           logger.info('计数器触发回复');
+          ai.tool.toolCallCount = 0;
           ai.context.counter = 0;
 
           await ai.chat(ctx, msg);
@@ -1225,7 +1228,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         if (ran <= pr.prob) {
           logger.info('概率触发回复');
-
+          ai.tool.toolCallCount = 0;
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -1235,7 +1238,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       if (pr.timer > -1) {
         ai.context.timer = setTimeout(async () => {
           logger.info('计时器触发回复');
-
+          ai.tool.toolCallCount = 0;
           ai.context.timer = null;
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
@@ -1361,6 +1364,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       await ai.context.addSystemUserMessage("定时器触发提示", s, []);
 
       logger.info('定时任务触发回复');
+      ai.tool.toolCallCount = 0;
       await ai.chat(ctx, msg);
       AIManager.saveAI(id);
 

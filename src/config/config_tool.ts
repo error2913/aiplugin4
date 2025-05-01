@@ -8,6 +8,7 @@ export class ToolConfig {
 
         seal.ext.registerBoolConfig(ToolConfig.ext, "是否开启调用函数功能", true, "");
         seal.ext.registerBoolConfig(ToolConfig.ext, "是否切换为提示词工程", false, "API在不支持function calling功能的时候开启");
+        seal.ext.registerIntConfig(ToolConfig.ext, "允许连续调用函数次数", 5, "单次对话中允许连续调用函数的次数");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "不允许调用的函数", [
             '在这里填写你不允许AI调用的函数名称'
         ], "修改后保存并重载js");
@@ -51,6 +52,7 @@ export class ToolConfig {
         return {
             isTool: seal.ext.getBoolConfig(ToolConfig.ext, "是否开启调用函数功能"),
             usePromptEngineering: seal.ext.getBoolConfig(ToolConfig.ext, "是否切换为提示词工程"),
+            maxCallCount: seal.ext.getIntConfig(ToolConfig.ext, "允许连续调用函数次数"),
             toolsNotAllow: seal.ext.getTemplateConfig(ToolConfig.ext, "不允许调用的函数"),
             toolsDefaultClosed: seal.ext.getTemplateConfig(ToolConfig.ext, "默认关闭的函数"),
             memoryLimit: seal.ext.getIntConfig(ToolConfig.ext, "长期记忆上限"),

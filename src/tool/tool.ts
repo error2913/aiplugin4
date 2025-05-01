@@ -88,6 +88,7 @@ export class ToolManager {
     static cmdArgs: seal.CmdArgs = null;
     static toolMap: { [key: string]: Tool } = {};
     toolStatus: { [key: string]: boolean };
+    toolCallCount: number;
 
     // 监听调用函数发送的内容
     listen: {
@@ -103,6 +104,7 @@ export class ToolManager {
             acc[key] = !toolsNotAllow.includes(key) && !toolsDefaultClosed.includes(key);
             return acc;
         }, {});
+        this.toolCallCount = 0;
 
         this.listen = {
             timeoutId: null,
@@ -287,15 +289,26 @@ export class ToolManager {
             arguments: string
         }
     }[]): Promise<string> {
+        const { maxCallCount } = ConfigManager.tool;
+
         if (tool_calls.length !== 0) {
             logger.info(`调用函数:`, tool_calls.map((item, i) => {
                 return `(${i}) ${item.function.name}:${item.function.arguments}`;
             }).join('\n'));
         }
 
-        if (tool_calls.length > 5) {
-            logger.warning('一次性调用超过5个函数，将进行截断操作……');
-            tool_calls.splice(5);
+        if (ai.tool.toolCallCount >= maxCallCount) {
+            logger.warning('连续调用函数次数超过上限');
+            for (let i = 0; i < tool_calls.length; i++) {
+                const tool_call = tool_calls[i];
+                await ai.context.addToolMessage(tool_call.id, `连续调用函数次数超过上限`);
+            }
+            return "none";
+        }
+
+        if (tool_calls.length + ai.tool.toolCallCount > maxCallCount) {
+            logger.warning('一次性调用超过上限，将进行截断操作……');
+            tool_calls.splice(maxCallCount - ai.tool.toolCallCount);
         }
 
         let tool_choice = 'none';
@@ -366,6 +379,7 @@ export class ToolManager {
             const s = await tool.solve(ctx, msg, ai, args);
 
             await ai.context.addToolMessage(tool_call.id, s);
+            ai.tool.toolCallCount++;
 
             return tool.tool_choice;
         } catch (e) {
@@ -376,6 +390,14 @@ export class ToolManager {
     }
 
     static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call_str: string): Promise<void> {
+        const { maxCallCount } = ConfigManager.tool;
+
+        if (ai.tool.toolCallCount >= maxCallCount) {
+            logger.warning('连续调用函数次数超过上限');
+            await ai.context.addSystemUserMessage('调用函数返回', `连续调用函数次数超过上限`, []);
+            return;
+        }
+
         let tool_call: {
             name: string,
             arguments: {
@@ -439,6 +461,7 @@ export class ToolManager {
             const s = await tool.solve(ctx, msg, ai, args);
 
             await ai.context.addSystemUserMessage('调用函数返回', s, []);
+            ai.tool.toolCallCount++;
         } catch (e) {
             logger.error(`调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`, []);
