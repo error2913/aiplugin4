@@ -121,7 +121,7 @@ export function registerSendMsg() {
 
             if (tool_call) {
                 if (ToolManager.cmdArgs == null) {
-                    return `暂时无法调用函数，请先使用任意海豹指令`;
+                    return `暂时无法调用函数，请先使用 .r 指令`;
                 }
                 if (ConfigManager.tool.toolsNotAllow.includes(tool_call.name)) {
                     return `调用函数失败:禁止调用的函数:${tool_call.name}`;

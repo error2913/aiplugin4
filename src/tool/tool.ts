@@ -338,8 +338,8 @@ export class ToolManager {
         const name = tool_call.function.name;
 
         if (this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用任意海豹指令`);
-            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用任意海豹指令`);
+            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
+            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用 .r 指令`);
             return "none";
         }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {
@@ -420,8 +420,8 @@ export class ToolManager {
         const name = tool_call.name;
 
         if (this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用任意海豹指令`);
-            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用任意海豹指令`, []);
+            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
+            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
             return;
         }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {

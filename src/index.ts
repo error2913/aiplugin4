@@ -511,7 +511,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             }
 
             if (ToolManager.cmdArgs == null) {
-              seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用任意海豹指令`);
+              seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
               return ret;
             }
 
