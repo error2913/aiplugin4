@@ -352,61 +352,81 @@ function main() {
         switch (val2) {
           case 'st': {
             const s = cmdArgs.getRestArgsFrom(3);
-            if (s.length > 20) {
-              seal.replyToSender(ctx, msg, '记忆过长，请控制在20字以内');
-              return ret;
+            switch (s) {
+              case '': {
+                seal.replyToSender(ctx, msg, '参数缺失，【.ai memo st <内容>】设置个人设定，【.ai memo st clr】清除个人设定');
+                return ret;
+              }
+              case 'clr': {
+                ai2.memory.persona = '无';
+                seal.replyToSender(ctx, msg, '设定已清除');
+                AIManager.saveAI(muid);
+                return ret;
+              }
+              default: {
+                if (s.length > 20) {
+                  seal.replyToSender(ctx, msg, '设定过长，请控制在20字以内');
+                  return ret;
+                }
+                ai2.memory.persona = s;
+                seal.replyToSender(ctx, msg, '设定已修改');
+                AIManager.saveAI(muid);
+                return ret;
+              }
             }
-            ai2.memory.setSystemMemory(s);
-            seal.replyToSender(ctx, msg, '记忆已添加');
-            AIManager.saveAI(muid);
-            return ret;
           }
-          case 'clr': {
+          case 'private': {
             const val3 = cmdArgs.getArgN(3);
-            if (val3 === 'group') {
-              if (ctx.isPrivate) {
-                seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
+            switch (val3) {
+              case 'show': {
+                const s = ai2.memory.buildPersonMemoryPrompt();
+                seal.replyToSender(ctx, msg, s);
                 return ret;
               }
-              ai.memory.clearMemory();
-              seal.replyToSender(ctx, msg, '群聊记忆已清除');
-              AIManager.saveAI(id);
-              return ret;
+              case 'clr': {
+                ai2.memory.clearMemory();
+                seal.replyToSender(ctx, msg, '个人记忆已清除');
+                AIManager.saveAI(muid);
+                return ret;
+              }
+              default: {
+                seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private show】展示个人记忆，【.ai memo private clr】清除个人记忆');
+                return ret;
+              }
             }
-            ai2.memory.clearMemory();
-            seal.replyToSender(ctx, msg, '记忆已清除');
-            AIManager.saveAI(muid);
-            return ret;
           }
-          case 'show': {
-            const val3 = cmdArgs.getArgN(3);
-            if (val3 === 'group') {
-              if (ctx.isPrivate) {
-                seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
-                return ret;
-              }
-              if (ai.memory.memoryList.length === 0) {
-                seal.replyToSender(ctx, msg, '暂无群聊记忆');
-                return ret;
-              }
-              const s = ai.memory.buildGroupMemoryPrompt();
-              seal.replyToSender(ctx, msg, s);
+          case 'group': {
+            if (ctx.isPrivate) {
+              seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
               return ret;
             }
-
-            const s = ai2.memory.buildPersonMemoryPrompt();
-            seal.replyToSender(ctx, msg, s);
-            return ret;
+            const val3 = cmdArgs.getArgN(3);
+            switch (val3) {
+              case 'show': {
+                const s = ai.memory.buildGroupMemoryPrompt();
+                seal.replyToSender(ctx, msg, s);
+                return ret;
+              }
+              case 'clr': {
+                ai.memory.clearMemory();
+                seal.replyToSender(ctx, msg, '群聊记忆已清除');
+                AIManager.saveAI(id);
+                return ret;
+              }
+              default: {
+                seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group show】展示群聊记忆，【.ai memo group clr】清除群聊记忆');
+                return ret;
+              }
+            }
           }
           default: {
-            const s = `帮助:
-【.ai memo st <内容>】设置记忆
-【.ai memo clr】清除记忆
-【.ai memo clr group】清除群聊记忆
-【.ai memo show】展示个人记忆
-【.ai memo show group】展示群聊记忆`;
-
-            seal.replyToSender(ctx, msg, s);
+            seal.replyToSender(ctx, msg, `帮助:
+【.ai memo st <内容>】设置个人设定
+【.ai memo st clr】清除个人设定
+【.ai memo private show】展示个人记忆
+【.ai memo private clr】清除个人记忆
+【.ai memo group show】展示群聊记忆
+【.ai memo group clr】清除群聊记忆`);
             return ret;
           }
         }

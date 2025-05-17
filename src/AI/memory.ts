@@ -21,11 +21,7 @@ export class Memory {
     memoryList: MemoryInfo[];
 
     constructor() {
-        if (Math.random() < 0.5) {
-            this.persona = '好人';
-        } else {
-            this.persona = '坏人';
-        }
+        this.persona = '无';
         this.memoryList = [];
     }
 
@@ -40,18 +36,6 @@ export class Memory {
         }
 
         return memory;
-    }
-
-    setSystemMemory(s: string) {
-        if (!s) {
-            if (Math.random() < 0.5) {
-                s = '好人';
-            } else {
-                s = '坏人';
-            }
-        }
-
-        this.persona = s;
     }
 
     addMemory(ctx: seal.MsgContext, content: string) {
