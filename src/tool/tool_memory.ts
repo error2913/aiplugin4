@@ -43,20 +43,20 @@ export function registerAddMemory() {
             if (uid === ctx.endPoint.userId) {
                 return `不能添加自己的记忆`;
             }
-    
+
             msg = createMsg(msg.messageType, uid, ctx.group.groupId);
             ctx = createCtx(ctx.endPoint.userId, msg);
-    
+
             ai = AIManager.getAI(uid);
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
                 return `未找到<${name}>`;
             }
-    
+
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
-    
+
             ai = AIManager.getAI(gid);
         } else {
             return `未知的记忆类型<${memory_type}>`;
@@ -67,6 +67,78 @@ export function registerAddMemory() {
         AIManager.saveAI(ai.id);
 
         return `添加记忆成功`;
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
+}
+
+export function registerDelMemory() {
+    const info: ToolInfo = {
+        type: 'function',
+        function: {
+            name: 'del_memory',
+            description: '删除个人记忆或群聊记忆',
+            parameters: {
+                type: 'object',
+                properties: {
+                    memory_type: {
+                        type: "string",
+                        description: "记忆类型，个人或群聊。",
+                        enum: ["private", "group"]
+                    },
+                    name: {
+                        type: 'string',
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
+                    },
+                    index_list: {
+                        type: 'array',
+                        description: '记忆序号列表',
+                        items: {
+                            type: 'integer'
+                        }
+                    }
+                },
+                required: ['memory_type', 'name', 'index_list']
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (ctx, msg, ai, args) => {
+        const { memory_type, name, index_list } = args;
+
+        if (memory_type === "private") {
+            const uid = await ai.context.findUserId(ctx, name, true);
+            if (uid === null) {
+                return `未找到<${name}>`;
+            }
+            if (uid === ctx.endPoint.userId) {
+                return `不能删除自己的记忆`;
+            }
+
+            msg = createMsg(msg.messageType, uid, ctx.group.groupId);
+            ctx = createCtx(ctx.endPoint.userId, msg);
+
+            ai = AIManager.getAI(uid);
+        } else if (memory_type === "group") {
+            const gid = await ai.context.findGroupId(ctx, name);
+            if (gid === null) {
+                return `未找到<${name}>`;
+            }
+
+            msg = createMsg('group', ctx.player.userId, gid);
+            ctx = createCtx(ctx.endPoint.userId, msg);
+
+            ai = AIManager.getAI(gid);
+        } else {
+            return `未知的记忆类型<${memory_type}>`;
+        }
+
+        //记忆相关处理
+        ai.memory.delMemory(index_list);
+        AIManager.saveAI(ai.id);
+
+        return `删除记忆成功`;
     }
 
     ToolManager.toolMap[info.function.name] = tool;
@@ -111,10 +183,10 @@ export function registerShowMemory() {
             if (uid === ctx.endPoint.userId) {
                 return `不能查看自己的记忆`;
             }
-    
+
             msg = createMsg('private', uid, '');
             ctx = createCtx(ctx.endPoint.userId, msg);
-    
+
             ai = AIManager.getAI(uid);
             return ai.memory.buildPersonMemoryPrompt();
         } else if (memory_type === "group") {
@@ -125,10 +197,10 @@ export function registerShowMemory() {
             if (gid === ctx.group.groupId) {
                 return `查看当前群聊记忆无需调用函数`;
             }
-    
+
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
-    
+
             ai = AIManager.getAI(gid);
             return ai.memory.buildGroupMemoryPrompt();
         } else {

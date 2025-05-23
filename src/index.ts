@@ -383,6 +383,18 @@ function main() {
                 seal.replyToSender(ctx, msg, s);
                 return ret;
               }
+              case 'del': {
+                const indexList = cmdArgs.args.slice(3).map(item => parseInt(item)).filter(item => !isNaN(item));
+                if (indexList.length === 0) {
+                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private del <序号1> <序号2>】删除个人记忆');
+                  return ret;
+                }
+                ai2.memory.delMemory(indexList);
+                const s = ai2.memory.buildPersonMemoryPrompt();
+                seal.replyToSender(ctx, msg, s);
+                AIManager.saveAI(muid);
+                return ret;
+              }
               case 'clr': {
                 ai2.memory.clearMemory();
                 seal.replyToSender(ctx, msg, '个人记忆已清除');
@@ -400,11 +412,28 @@ function main() {
               seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
               return ret;
             }
+            const pr = ai.privilege;
+            if (ctx.privilegeLevel < pr.limit) {
+              seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+              return ret;
+            }
             const val3 = cmdArgs.getArgN(3);
             switch (val3) {
               case 'show': {
                 const s = ai.memory.buildGroupMemoryPrompt();
                 seal.replyToSender(ctx, msg, s);
+                return ret;
+              }
+              case 'del': {
+                const indexList = cmdArgs.args.slice(3).map(item => parseInt(item)).filter(item => !isNaN(item));
+                if (indexList.length === 0) {
+                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group del <序号1> <序号2>】删除群聊记忆');
+                  return ret;
+                }
+                ai.memory.delMemory(indexList);
+                const s = ai.memory.buildGroupMemoryPrompt();
+                seal.replyToSender(ctx, msg, s);
+                AIManager.saveAI(id);
                 return ret;
               }
               case 'clr': {
@@ -424,8 +453,10 @@ function main() {
 【.ai memo st <内容>】设置个人设定
 【.ai memo st clr】清除个人设定
 【.ai memo private show】展示个人记忆
+【.ai memo private del <序号1> <序号2>】删除个人记忆
 【.ai memo private clr】清除个人记忆
 【.ai memo group show】展示群聊记忆
+【.ai memo group del <序号1> <序号2>】删除群聊记忆
 【.ai memo group clr】清除群聊记忆`);
             return ret;
           }

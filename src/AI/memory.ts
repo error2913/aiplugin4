@@ -60,6 +60,13 @@ export class Memory {
         this.memoryList.splice(0, this.memoryList.length - memoryLimit);
     }
 
+    delMemory(indexList: number[]) {
+        indexList.sort((a, b) => b - a);
+        for (const index of indexList) {
+            this.memoryList.splice(index - 1, 1);
+        }
+    }
+
     buildPersonMemoryPrompt(): string {
         const { showNumber } = ConfigManager.message;
         

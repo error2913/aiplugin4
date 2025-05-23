@@ -5,7 +5,7 @@ import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_deck"
 import { registerCheckAvatar, registerFace, registerImageToText, registerTextToImage } from "./tool_image"
 import { registerJrrp } from "./tool_jrrp"
-import { registerAddMemory, registerShowMemory } from "./tool_memory"
+import { registerAddMemory, registerDelMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
 import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
@@ -175,6 +175,7 @@ export class ToolManager {
 
     static registerTool() {
         registerAddMemory();
+        registerDelMemory();
         registerShowMemory();
         registerDrawDeck();
         registerJrrp();
