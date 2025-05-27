@@ -32,6 +32,11 @@ export class AI {
         toolCallStatus: boolean
     }
 
+    bucket: {
+        count: number,
+        lastTime: number
+    }
+
     constructor(id: string) {
         this.id = id;
         this.context = new Context();
@@ -49,6 +54,10 @@ export class AI {
             id: '',
             reply: '',
             toolCallStatus: false
+        }
+        this.bucket = {
+            count: 0,
+            lastTime: 0
         }
     }
 
@@ -72,6 +81,19 @@ export class AI {
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        const { bucketLimit, fillInterval } = ConfigManager.received;
+        // 补充触发次数
+        if (Date.now() - this.bucket.lastTime > fillInterval * 1000) {
+            const fillCount = (Date.now() - this.bucket.lastTime) / (fillInterval * 1000);
+            this.bucket.count = Math.min(this.bucket.count + fillCount, bucketLimit);
+            this.bucket.lastTime = Date.now();
+        }
+        if (this.bucket.count <= 0) {
+            logger.warning(`触发次数不足，无法回复`);
+            return;
+        }
+        this.bucket.count--;
+
         try {
             const bodyTemplate = ConfigManager.request.bodyTemplate;
             const bodyObject = parseBody(bodyTemplate, [], null, null);
