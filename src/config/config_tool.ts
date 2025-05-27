@@ -18,6 +18,7 @@ export class ToolConfig {
             'web_search',
             'check_list'
         ], "");
+        seal.ext.registerBoolConfig(ToolConfig.ext, "是否启用记忆", true, "");
         seal.ext.registerIntConfig(ToolConfig.ext, "长期记忆上限", 5, "");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", ["没有的话建议把draw_deck这个函数加入不允许调用"], "");
         seal.ext.registerOptionConfig(ToolConfig.ext, "ai语音使用的音色", '小新', [
@@ -55,6 +56,7 @@ export class ToolConfig {
             maxCallCount: seal.ext.getIntConfig(ToolConfig.ext, "允许连续调用函数次数"),
             toolsNotAllow: seal.ext.getTemplateConfig(ToolConfig.ext, "不允许调用的函数"),
             toolsDefaultClosed: seal.ext.getTemplateConfig(ToolConfig.ext, "默认关闭的函数"),
+            isMemory: seal.ext.getBoolConfig(ToolConfig.ext, "是否启用记忆"),
             memoryLimit: seal.ext.getIntConfig(ToolConfig.ext, "长期记忆上限"),
             decks: seal.ext.getTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称"),
             character: seal.ext.getOptionConfig(ToolConfig.ext, "ai语音使用的音色"),
