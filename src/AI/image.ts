@@ -51,7 +51,7 @@ export class ImageManager {
                 return acc;
             }
             try {
-                const name = path.split('/').pop().split('.')[0];
+                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
                 if (!name) {
                     throw new Error(`本地图片路径格式错误:${path}`);
                 }
@@ -95,7 +95,7 @@ export class ImageManager {
                 return acc;
             }
             try {
-                const name = path.split('/').pop().split('.')[0];
+                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
                 if (!name) {
                     throw new Error(`本地图片路径格式错误:${path}`);
                 }
@@ -136,6 +136,8 @@ export class ImageManager {
      * @returns 
      */
     static async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<{ message: string, images: Image[] }> {
+        const { receiveImage } = ConfigManager.image;
+
         const images: Image[] = [];
 
         const match = message.match(/\[CQ:image,file=(.*?)\]/g);
@@ -143,9 +145,15 @@ export class ImageManager {
             for (let i = 0; i < match.length; i++) {
                 try {
                     const file = match[i].match(/\[CQ:image,file=(.*?)\]/)[1];
+
+                    if (!receiveImage) {
+                        message = message.replace(`[CQ:image,file=${file}]`, '');
+                        continue;
+                    }
+
                     const image = new Image(file);
 
-                    message = message.replace(`[CQ:image,file=${file}]`, `<|图片${image.id}|>`);
+                    message = message.replace(`[CQ:image,file=${file}]`, `<|img:${image.id}|>`);
 
                     if (image.isUrl) {
                         const { condition } = ConfigManager.image;
@@ -155,7 +163,7 @@ export class ImageManager {
                             const reply = await ImageManager.imageToText(file);
                             if (reply) {
                                 image.content = reply;
-                                message = message.replace(`<|图片${image.id}|>`, `<|图片${image.id}:${reply}|>`);
+                                message = message.replace(`<|img:${image.id}|>`, `<|img:${image.id}:${reply}|>`);
                             }
                         }
                     }

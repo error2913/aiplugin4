@@ -9,7 +9,7 @@ export function registerRecord() {
             return acc;
         }
         try {
-            const name = path.split('/').pop().split('.')[0];
+            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
             if (!name) {
                 throw new Error(`本地语音路径格式错误:${path}`);
             }

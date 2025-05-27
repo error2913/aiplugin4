@@ -1,12 +1,29 @@
 import { AI } from "../AI/AI";
 import { Message } from "../AI/context";
+import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, showNumber, showMsgId } = ConfigManager.message;
     const { isTool, usePromptEngineering, isMemory } = ConfigManager.tool;
-    const { condition } = ConfigManager.image;
+    const { localImagePaths, receiveImage, condition } = ConfigManager.image;
+    const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
+        if (path.trim() === '') {
+            return acc;
+        }
+        try {
+            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
+            if (!name) {
+                throw new Error(`本地图片路径格式错误:${path}`);
+            }
+
+            acc[name] = path;
+        } catch (e) {
+            logger.error(e);
+        }
+        return acc;
+    }, {});
 
     let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$g人工智能插件专用角色设定序号");
     if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
@@ -24,9 +41,16 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     content += showMsgId ?
         `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用` :
         ``;
-    content += condition === '0' ?
-        `\n- <|图片xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|图片xxxxxx|>的格式` :
-        `\n- <|图片xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|图片xxxxxx|>的格式`;
+
+    if (receiveImage) {
+        content += condition === '0' ?
+            `\n- <|img:xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|img:xxxxxx|>的格式` :
+            `\n- <|img:xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|img:xxxxxx|>的格式`;
+    }
+
+    if (Object.keys(localImages).length !== 0) {
+        content += `\n- 可使用<|img:图片名称|>发送表情包，表情名称有:${Object.keys(localImages).join("、")}`;
+    }
 
     // 记忆
     if (isMemory) {
