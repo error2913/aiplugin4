@@ -14,6 +14,8 @@ export class ReceivedConfig {
             "\\[CQ:at,qq=748569109\\]",
             "^正确正确确"
         ], "使用正则表达式进行匹配");
+        seal.ext.registerIntConfig(ReceivedConfig.ext, "触发次数上限", 3, "");
+        seal.ext.registerIntConfig(ReceivedConfig.ext, "触发次数补充间隔/s", 3, "");
     }
 
     static get() {
@@ -22,7 +24,9 @@ export class ReceivedConfig {
             allmsg: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入所有骰子发送的消息"),
             disabledInPrivate: seal.ext.getBoolConfig(ReceivedConfig.ext, "私聊内不可用"),
             keyWords: seal.ext.getTemplateConfig(ReceivedConfig.ext, "非指令消息触发正则表达式"),
-            condition: seal.ext.getStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件")
+            condition: seal.ext.getStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件"),
+            bucketLimit: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数上限"),
+            fillInterval: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数补充间隔/s")
         }
     }
 }
