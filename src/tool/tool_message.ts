@@ -52,10 +52,10 @@ export function registerSendMsg() {
             `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}`;
 
         const originalImages = [];
-        const match = content.match(/<\s?[\|│｜]图片.+?(?:[\|│｜]\s?>|[\|│｜]|\s?>)/g);
+        const match = content.match(/[<＜]\s?[\|│｜]图片.+?(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/g);
         if (match) {
             for (let i = 0; i < match.length; i++) {
-                const id = match[i].match(/<\s?[\|│｜]图片(.+?)(?:[\|│｜]\s?>|[\|│｜]|\s?>)/)[1].trim().slice(0, 6);
+                const id = match[i].match(/[<＜]\s?[\|│｜]图片(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/)[1].trim().slice(0, 6);
                 const image = ai.context.findImage(id);
 
                 if (image) {

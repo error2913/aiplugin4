@@ -46,7 +46,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 分离AI臆想出来的多轮对话
     const segments = s
-        .split(/(<\s?[\|│｜]from:?.*?(?:[\|│｜]\s?>|[\|│｜]|\s?>))/)
+        .split(/([<＜]\s?[\|│｜]from:?.*?(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞]))/)
         .filter(item => item.trim() !== '');
     if (segments.length === 0) {
         return { s: '', reply: '', images: [] };
@@ -55,7 +55,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     s = '';
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const match = segment.match(/<\s?[\|│｜]from:?(.*?)(?:[\|│｜]\s?>|[\|│｜]|\s?>)/);
+        const match = segment.match(/[<＜]\s?[\|│｜]from:?(.*?)(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/);
         if (match) {
             const uid = await context.findUserId(ctx, match[1]);
             if (uid === ctx.endPoint.userId && i < segments.length - 1) {
@@ -67,7 +67,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     }
 
     if (!s.trim()) {
-        s = segments.find(segment => !/<\s?[\|│｜]from:?.*?(?:[\|│｜]\s?>|[\|│｜]|\s?>)/.test(segment));
+        s = segments.find(segment => !/[<＜]\s?[\|│｜]from:?.*?(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/.test(segment));
         if (!s || !s.trim()) {
             return { s: '', reply: '', images: [] };
         }
@@ -178,10 +178,10 @@ export function checkRepeat(context: Context, s: string) {
  * @returns 
  */
 async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/<\s?[\|│｜]@(.+?)(?:[\|│｜]\s?>|[\|│｜]|\s?>)/g);
+    const match = reply.match(/[<＜]\s?[\|│｜]@(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^<\s?[\|│｜]@|(?:[\|│｜]\s?>|[\|│｜]|\s?>)$/g, '');
+            const name = match[i].replace(/^[<＜]\s?[\|│｜]@|(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
@@ -204,10 +204,10 @@ async function replaceImages(context: Context, reply: string) {
     let result = reply;
     const images = [];
 
-    const match = reply.match(/<\s?[\|│｜]图片.+?(?:[\|│｜]\s?>|[\|│｜]|\s?>)/g);
+    const match = reply.match(/[<＜]\s?[\|│｜]图片.+?(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const id = match[i].match(/<\s?[\|│｜]图片(.+?)(?:[\|│｜]\s?>|[\|│｜]|\s?>)/)[1].trim().slice(0, 6);
+            const id = match[i].match(/[<＜]\s?[\|│｜]图片(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/)[1].trim().slice(0, 6);
             const image = context.findImage(id);
 
             if (image) {
