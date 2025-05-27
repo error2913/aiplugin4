@@ -94,6 +94,9 @@ export class AI {
             logger.warning(`触发次数不足，无法回复`);
             return;
         }
+        
+        //清空数据
+        this.resetState();
 
         // 解析body，检查是否为流式
         try {
@@ -107,9 +110,6 @@ export class AI {
             logger.error('解析body时出现错误:', err);
             return;
         }
-
-        //清空数据
-        this.resetState();
 
         const timeout = setTimeout(() => {
             logger.warning(this.id, `处理消息超时`);
@@ -164,9 +164,6 @@ export class AI {
         const { isTool, usePromptEngineering } = ConfigManager.tool;
 
         await this.stopCurrentChatStream();
-
-        //清空数据
-        this.resetState();
 
         const messages = handleMessages(ctx, this);
         const id = await startStream(messages);

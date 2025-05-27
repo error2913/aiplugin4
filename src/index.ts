@@ -1262,9 +1262,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         ai.context.counter += 1;
 
         if (ai.context.counter >= pr.counter) {
-          logger.info('计数器触发回复');
           ai.context.counter = 0;
-
+          logger.info('计数器触发回复');
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
           return;
@@ -1284,8 +1283,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       if (pr.timer > -1) {
         ai.context.timer = setTimeout(async () => {
-          logger.info('计时器触发回复');
           ai.context.timer = null;
+          logger.info('计时器触发回复');
           await ai.chat(ctx, msg);
           AIManager.saveAI(id);
         }, pr.timer * 1000 + Math.floor(Math.random() * 500));
