@@ -40,7 +40,13 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                     const match = reply.match(/<function_call>([\s\S]*)<\/function_call>/);
                     if (match) {
                         ai.context.addMessage(ctx, match[0], [], "assistant", '');
-                        await ToolManager.handlePromptToolCall(ctx, msg, ai, match[1]);
+
+                        try {
+                            await ToolManager.handlePromptToolCall(ctx, msg, ai, match[1]);
+                        } catch (e) {
+                            logger.error(e);
+                            return '';
+                        }
 
                         const messages = handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
@@ -50,7 +56,14 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                         logger.info(`触发工具调用`);
 
                         ai.context.addToolCallsMessage(message.tool_calls);
-                        const tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
+
+                        let tool_choice = 'none';
+                        try {
+                            tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
+                        } catch (e) {
+                            logger.error(e);
+                            return '';
+                        }
 
                         const messages = handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);

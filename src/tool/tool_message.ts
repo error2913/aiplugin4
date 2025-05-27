@@ -29,19 +29,8 @@ export function registerSendMsg() {
                         description: '消息内容'
                     },
                     function: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: 'string',
-                                description: '函数名称'
-                            },
-                            arguments: {
-                                type: 'string',
-                                description: '函数参数，必须严格按照目标函数的参数定义（包括参数名和类型）完整填写，格式为JSON字符串'
-                            }
-                        },
-                        required: ["name", "arguments"],
-                        description: '函数调用，必须准确理解目标函数的参数定义后再填写'
+                        type: "string",
+                        description: '函数调用，纯JSON字符串，格式为：{"name": "函数名称", "arguments": {"参数1": "值1", "参数2": "值2"}}'
                     },
                     reason: {
                         type: 'string',
@@ -108,6 +97,8 @@ export function registerSendMsg() {
             return `未知的消息类型<${msg_type}>`;
         }
 
+        ai.resetState();
+
         await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
         const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
@@ -120,51 +111,11 @@ export function registerSendMsg() {
             await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
 
             if (tool_call) {
-                if (ToolManager.cmdArgs == null) {
-                    return `暂时无法调用函数，请先使用 .r 指令`;
-                }
-                if (ConfigManager.tool.toolsNotAllow.includes(tool_call.name)) {
-                    return `调用函数失败:禁止调用的函数:${tool_call.name}`;
-                }
-                if (!ToolManager.toolMap.hasOwnProperty(tool_call.name)) {
-                    return `调用函数失败:未注册的函数:${tool_call.name}`;
-                }
-
-                const tool = ToolManager.toolMap[tool_call.name];
-                if (tool.type !== "all" && tool.type !== msg.messageType) {
-                    return `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`;
-                }
-
                 try {
-                    try {
-                        tool_call.arguments = JSON.parse(tool_call.arguments);
-                    } catch (e) {
-                        return `调用函数失败:arguement不是一个合法的JSON字符串`;
-                    }
-
-                    const args = tool_call.arguments;
-                    if (args !== null && typeof args !== 'object') {
-                        return `调用函数失败:arguement不是一个object`;
-                    }
-                    for (const key of tool.info.function.parameters.required) {
-                        if (!args.hasOwnProperty(key)) {
-                            return `调用函数失败:缺少必需参数 ${key}`;
-                        }
-                    }
-
-                    const s = await tool.solve(ctx, msg, ai, args);
-                    await ai.context.addSystemUserMessage('调用函数返回', s, []);
-                    ai.tool.toolCallCount++;
-
-                    AIManager.saveAI(ai.id);
-                    return `函数调用成功，返回值:${s}`;
+                    await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
                 } catch (e) {
-                    const s = `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`;
-                    logger.error(s);
-                    await ai.context.addSystemUserMessage('调用函数返回', s, []);
-
-                    AIManager.saveAI(ai.id);
-                    return s;
+                    logger.error(e);
+                    return `函数调用失败:${e.message}`;
                 }
             }
 

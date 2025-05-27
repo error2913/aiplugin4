@@ -74,15 +74,17 @@ export class AI {
         return ai;
     }
 
-    clearData() {
+    resetState() {
         clearTimeout(this.context.timer);
         this.context.timer = null;
         this.context.counter = 0;
+        this.bucket.count--;
+        this.tool.toolCallCount = 0;
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { bucketLimit, fillInterval } = ConfigManager.received;
-        // 补充触发次数
+        // 补充并检查触发次数
         if (Date.now() - this.bucket.lastTime > fillInterval * 1000) {
             const fillCount = (Date.now() - this.bucket.lastTime) / (fillInterval * 1000);
             this.bucket.count = Math.min(this.bucket.count + fillCount, bucketLimit);
@@ -92,8 +94,8 @@ export class AI {
             logger.warning(`触发次数不足，无法回复`);
             return;
         }
-        this.bucket.count--;
 
+        // 解析body，检查是否为流式
         try {
             const bodyTemplate = ConfigManager.request.bodyTemplate;
             const bodyObject = parseBody(bodyTemplate, [], null, null);
@@ -106,12 +108,12 @@ export class AI {
             return;
         }
 
+        //清空数据
+        this.resetState();
+
         const timeout = setTimeout(() => {
             logger.warning(this.id, `处理消息超时`);
         }, 60 * 1000);
-
-        //清空数据
-        this.clearData();
 
         let result = {
             s: '',
@@ -164,7 +166,7 @@ export class AI {
         await this.stopCurrentChatStream();
 
         //清空数据
-        this.clearData();
+        this.resetState();
 
         const messages = handleMessages(ctx, this);
         const id = await startStream(messages);
@@ -232,7 +234,14 @@ export class AI {
                             await this.stopCurrentChatStream();
 
                             this.context.addMessage(ctx, match[0], [], "assistant", '');
-                            await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
+
+                            try {
+                                await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
+                            } catch (e) {
+                                logger.error(e);
+                                await this.stopCurrentChatStream();
+                                return;
+                            }
 
                             await this.chatStream(ctx, msg);
                             return;
