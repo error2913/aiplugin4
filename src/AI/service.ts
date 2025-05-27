@@ -127,9 +127,7 @@ async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<
     // 打印请求发送前的上下文
     const s = JSON.stringify(bodyObject.messages, (key, value) => {
         if (key === "" && Array.isArray(value)) {
-            return value.filter(item => {
-                return item.role !== "system";
-            });
+            return value.filter(item => item.role !== "system");
         }
         return value;
     });
@@ -179,9 +177,7 @@ export async function startStream(messages: {
         // 打印请求发送前的上下文
         const s = JSON.stringify(bodyObject.messages, (key, value) => {
             if (key === "" && Array.isArray(value)) {
-                return value.filter(item => {
-                    return item.role !== "system";
-                });
+                return value.filter(item => item.role !== "system");
             }
             return value;
         });
