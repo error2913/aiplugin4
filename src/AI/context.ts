@@ -174,7 +174,9 @@ export class Context {
         }
     }
 
-    async findUserId(ctx: seal.MsgContext, name: string, findInFriendList: boolean = false): Promise<string> {
+    async findUserId(ctx: seal.MsgContext, name: string | number, findInFriendList: boolean = false): Promise<string> {
+        name = String(name).trim();
+
         if (name.length > 4 && !isNaN(parseInt(name))) {
             return `QQ:${name}`;
         }
@@ -238,7 +240,9 @@ export class Context {
         return null;
     }
 
-    async findGroupId(ctx: seal.MsgContext, groupName: string): Promise<string> {
+    async findGroupId(ctx: seal.MsgContext, groupName: string | number): Promise<string> {
+        groupName = String(groupName).trim();
+
         if (groupName.length > 5 && !isNaN(parseInt(groupName))) {
             return `QQ-Group:${groupName}`;
         }
