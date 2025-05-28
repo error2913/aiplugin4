@@ -8,15 +8,14 @@ import { logger } from "./logger";
 
 export interface Message {
     role: string;
-    content: string;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
 
     uid: string;
     name: string;
-    timestamp: number;
+    contentArray: string[];
+    msgIdArray: string[];
     images: Image[];
-    contentMap: { [key: string]: string };
 }
 
 export class Context {
@@ -53,7 +52,7 @@ export class Context {
         }
     }
 
-    async addMessage(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string) {
+    async addMessage(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
         const { showNumber, maxRounds } = ConfigManager.message;
         const messages = this.messages;
 
@@ -81,28 +80,19 @@ export class Context {
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
         if (length !== 0 && messages[length - 1].name === name && !s.startsWith('<function_call>')) {
-            messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
+            messages[length - 1].contentArray.push(s);
+            messages[length - 1].msgIdArray.push(msgId);
             messages[length - 1].images.push(...images);
-            if (!msgId && messages[length - 1]?.contentMap) {
-                messages[length - 1].content += '\f' + s;
-            } else {
-                messages[length - 1].contentMap[msgId] = s;
-            }
         } else {
             const message = {
                 role: role,
                 content: '',
                 uid: uid,
                 name: name,
-                timestamp: Math.floor(Date.now() / 1000),
-                images: images,
-                contentMap: {}
+                contentArray: [s],
+                msgIdArray: [msgId],
+                images: images
             };
-            if (!msgId) {
-                message.content = s;
-            } else {
-                message.contentMap[msgId] = s;
-            }
             messages.push(message);
         }
 
@@ -113,13 +103,12 @@ export class Context {
     async addToolCallsMessage(tool_calls: ToolCall[]) {
         const message = {
             role: 'assistant',
-            content: '',
             tool_calls: tool_calls,
             uid: '',
             name: '',
-            timestamp: Math.floor(Date.now() / 1000),
-            images: [],
-            contentMap: {}
+            contentArray: [],
+            msgIdArray: [],
+            images: []
         };
         this.messages.push(message);
     }
@@ -127,13 +116,12 @@ export class Context {
     async addToolMessage(tool_call_id: string, s: string) {
         const message = {
             role: 'tool',
-            content: s,
             tool_call_id: tool_call_id,
             uid: '',
             name: '',
-            timestamp: Math.floor(Date.now() / 1000),
-            images: [],
-            contentMap: {}
+            contentArray: [s],
+            msgIdArray: [''],
+            images: []
         };
 
         for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -152,9 +140,9 @@ export class Context {
             content: s,
             uid: '',
             name: `_${name}`,
-            timestamp: Math.floor(Date.now() / 1000),
-            images: images,
-            contentMap: {}
+            contentArray: [s],
+            msgIdArray: [''],
+            images: images
         };
         this.messages.push(message);
     }

@@ -44,10 +44,10 @@ export function registerGetContext() {
             if (uid === ctx.endPoint.userId) {
                 return `禁止向自己发送消息`;
             }
-    
+
             msg = createMsg('private', uid, '');
             ctx = createCtx(ctx.endPoint.userId, msg);
-    
+
             ai = AIManager.getAI(uid);
         } else if (ctx_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
@@ -57,16 +57,16 @@ export function registerGetContext() {
             if (gid === ctx.group.groupId) {
                 return `向当前群聊发送消息无需调用函数`;
             }
-    
+
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
-    
+
             ai = AIManager.getAI(gid);
         } else {
             return `未知的上下文类型<${ctx_type}>`;
         }
 
-        const { isPrefix, showNumber } = ConfigManager.message;
+        const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
 
         const messages = ai.context.messages;
         const images = [];
@@ -80,13 +80,15 @@ export function registerGetContext() {
                 s += `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
             }
 
-            const prefix = isPrefix && message.name ? (
+            const prefix = (isPrefix && message.name) ? (
                 message.name.startsWith('_') ?
                     `<|${message.name}|>` :
                     `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
             ) : '';
 
-            s += `\n[${message.role}]: ${prefix}${message.content}`;
+            const content = message.msgIdArray.map((msgId, index) => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
+
+            s += `\n[${message.role}]: ${prefix}${content}`;
         }
 
         // 将images添加到最后一条消息，以便使用

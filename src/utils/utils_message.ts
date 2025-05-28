@@ -93,12 +93,11 @@ ${toolsPrompt}`;
 
     const systemMessage: Message = {
         role: "system",
-        content: content,
         uid: '',
         name: '',
-        timestamp: 0,
-        images: [],
-        contentMap: {}
+        contentArray: [content],
+        msgIdArray: [''],
+        images: []
     };
 
     return systemMessage;
@@ -114,22 +113,20 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
             } else if (index % 2 === 0) {
                 return {
                     role: "user",
-                    content: item,
                     uid: '',
                     name: "用户",
-                    timestamp: 0,
-                    images: [],
-                    contentMap: {}
+                    contentArray: [item],
+                    msgIdArray: [''],
+                    images: []
                 };
             } else {
                 return {
                     role: "assistant",
-                    content: item,
                     uid: ctx.endPoint.userId,
                     name: seal.formatTmpl(ctx, "核心:骰子名字"),
-                    timestamp: 0,
-                    images: [],
-                    contentMap: {}
+                    contentArray: [item],
+                    msgIdArray: [''],
+                    images: []
                 };
             }
         })
@@ -183,15 +180,13 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
     let last_role = '';
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
-        const prefix = isPrefix && message.name && !message.content.startsWith('<function_call>') ? (
+        const prefix = (isPrefix && message.name) ? (
             message.name.startsWith('_') ?
                 `<|${message.name}|>` :
                 `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
         ) : '';
 
-        const msgIdList = Object.keys(message?.contentMap || {});
-        const content = (message.content ? (message.content + '\f') : '') +
-            (msgIdList.length !== 0 ? msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\f') : '');
+        const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\f' + prefix + content;

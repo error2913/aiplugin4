@@ -141,7 +141,7 @@ function main() {
 
         const systemMessage = buildSystemMessage(ctx, ai);
 
-        seal.replyToSender(ctx, msg, systemMessage.content);
+        seal.replyToSender(ctx, msg, systemMessage.contentArray[0]);
         return ret;
       }
       case 'pr': {
