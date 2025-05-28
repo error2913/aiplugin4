@@ -59,7 +59,6 @@ export class Context {
 
         //处理文本
         s = s
-            .replace(/\[CQ:reply,id=-?\d+\]\[CQ:at,qq=\d+\]/g, '')
             .replace(/\[CQ:at,qq=(\d+)\]/g, (_, p1) => {
                 const epId = ctx.endPoint.userId;
                 const gid = ctx.group.groupId;
@@ -70,6 +69,7 @@ export class Context {
 
                 return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
             })
+            .replace(/\[CQ:reply,id=-?\d+\]/g, '')
             .replace(/\[CQ:.*?\]/g, '')
 
         if (s === '') {
@@ -84,8 +84,7 @@ export class Context {
             messages[length - 1].timestamp = Math.floor(Date.now() / 1000);
             messages[length - 1].images.push(...images);
             if (!msgId && messages[length - 1]?.contentMap) {
-                const seg = role === 'assistant' ? '' : '\n';
-                messages[length - 1].content += seg + s;
+                messages[length - 1].content += '\f' + s;
             } else {
                 messages[length - 1].contentMap[msgId] = s;
             }

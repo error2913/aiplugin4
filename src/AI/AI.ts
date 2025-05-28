@@ -94,7 +94,7 @@ export class AI {
             logger.warning(`触发次数不足，无法回复`);
             return;
         }
-        
+
         //清空数据
         this.resetState();
 
@@ -116,8 +116,8 @@ export class AI {
         }, 60 * 1000);
 
         let result = {
-            s: '',
-            reply: '',
+            stringArray: [],
+            replyArray: [],
             images: []
         }
         const MaxRetry = 3;
@@ -129,7 +129,7 @@ export class AI {
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
             result = await handleReply(ctx, msg, raw_reply, this.context);
 
-            if (!checkRepeat(this.context, result.s) || result.reply.trim() === '') {
+            if (!checkRepeat(this.context, result.stringArray.join('')) || result.replyArray.join('').trim() === '') {
                 break;
             }
 
@@ -143,10 +143,14 @@ export class AI {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        const { s, reply, images } = result;
+        const { stringArray, replyArray, images } = result;
 
-        const { msgId } = await replyToSender(ctx, msg, this, reply);
-        await this.context.addMessage(ctx, s, images, 'assistant', msgId);
+        for (let i = 0; i < stringArray.length; i++) {
+            const s = stringArray[i];
+            const reply = replyArray[i];
+            const msgId = await replyToSender(ctx, msg, this, reply);
+            await this.context.addMessage(ctx, s, images, 'assistant', msgId);
+        }
 
         //发送偷来的图片
         const { p } = ConfigManager.image;
@@ -201,15 +205,19 @@ export class AI {
 
                     // 对于function_call前面的内容，发送并添加到上下文中
                     const match = raw_reply.match(/([\s\S]*)<function_call>/);
-                    if (match && match[1].trim() !== '') {
-                        const { s, reply, images } = await handleReply(ctx, msg, match[1], this.context);
+                    if (match && match[1].trim()) {
+                        const { stringArray, replyArray, images } = await handleReply(ctx, msg, match[1], this.context);
 
                         if (this.stream.id !== id) {
                             return;
                         }
 
-                        const { msgId } = await replyToSender(ctx, msg, this, reply);
-                        await this.context.addMessage(ctx, s, images, 'assistant', msgId);
+                        for (let i = 0; i < stringArray.length; i++) {
+                            const s = stringArray[i];
+                            const reply = replyArray[i];
+                            const msgId = await replyToSender(ctx, msg, this, reply);
+                            await this.context.addMessage(ctx, s, images, 'assistant', msgId);
+                        }
                     }
 
                     this.stream.toolCallStatus = true;
@@ -255,14 +263,18 @@ export class AI {
                 }
             }
 
-            const { s, reply, images } = await handleReply(ctx, msg, raw_reply, this.context);
+            const { stringArray, replyArray, images } = await handleReply(ctx, msg, raw_reply, this.context);
 
             if (this.stream.id !== id) {
                 return;
             }
 
-            const { msgId } = await replyToSender(ctx, msg, this, reply);
-            await this.context.addMessage(ctx, s, images, 'assistant', msgId);
+            for (let i = 0; i < stringArray.length; i++) {
+                const s = stringArray[i];
+                const reply = replyArray[i];
+                const msgId = await replyToSender(ctx, msg, this, reply);
+                await this.context.addMessage(ctx, s, images, 'assistant', msgId);
+            }
 
             after = result.nextAfter;
             await new Promise(resolve => setTimeout(resolve, interval));

@@ -101,14 +101,15 @@ export function registerSendMsg() {
 
         await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
-        const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
+        const { stringArray, replyArray, images } = await handleReply(ctx, msg, content, ai.context);
 
         try {
-            const { msgId, error } = await replyToSender(ctx, msg, ai, reply);
-            if (error) {
-                throw error;
+            for (let i = 0; i < stringArray.length; i++) {
+                const s = stringArray[i];
+                const reply = replyArray[i];
+                const msgId = await replyToSender(ctx, msg, ai, reply);
+                await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
             }
-            await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
 
             if (tool_call) {
                 try {
@@ -226,12 +227,15 @@ export function registerQuoteMsg() {
         const { msg_id, content } = args;
 
         try {
-            const { s, reply, images } = await handleReply(ctx, msg, content, ai.context);
-            const { msgId, error } = await replyToSender(ctx, msg, ai, `[CQ:reply,id=${transformMsgIdBack(msg_id)}]${reply}`);
-            if (error) {
-                throw error;
+            const { stringArray, replyArray, images } = await handleReply(ctx, msg, content, ai.context);
+
+            for (let i = 0; i < stringArray.length; i++) {
+                const s = stringArray[i];
+                const reply = replyArray[i];
+                const msgId = await replyToSender(ctx, msg, ai, `[CQ:reply,id=${transformMsgIdBack(msg_id)}]${reply}`);
+                await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
             }
-            await ai.context.addMessage(ctx, s, images, 'assistant', msgId);
+
             return `已引用消息${msg_id}并回复`;
         } catch (e) {
             logger.error(e);

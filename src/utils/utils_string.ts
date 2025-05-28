@@ -4,7 +4,7 @@ import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 
 export function parseText(s: string): { type: string, data: { [key: string]: string } }[] {
-    const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment !== '');
+    const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
     const messageArray: { type: string, data: { [key: string]: string } }[] = [];
     for (const segment of segments) {
         if (segment.startsWith('[CQ:')) {
@@ -41,15 +41,15 @@ export function parseText(s: string): { type: string, data: { [key: string]: str
     return messageArray;
 }
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ s: string, reply: string, images: Image[] }> {
-    const { maxChar, replymsg, filterContextTemplate, filterReplyTemplate } = ConfigManager.reply;
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ stringArray: string[], replyArray: string[], images: Image[] }> {
+    const { maxChar, replymsg, filterRegex } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
         .split(/([<＜]\s?[\|│｜]from:?.*?(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞]))/)
-        .filter(item => item.trim() !== '');
+        .filter(item => item.trim());
     if (segments.length === 0) {
-        return { s: '', reply: '', images: [] };
+        return { stringArray: [], replyArray: [], images: [] };
     }
 
     s = '';
@@ -66,68 +66,73 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         }
     }
 
+    // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
         s = segments.find(segment => !/[<＜]\s?[\|│｜]from:?.*?(?:[\|│｜]\s?[>＞]|[\|│｜]|\s?[>＞])/.test(segment));
         if (!s || !s.trim()) {
-            return { s: '', reply: '', images: [] };
+            return { stringArray: [], replyArray: [], images: [] };
         }
     }
 
-    let reply = s; // 回复消息和上下文在此分开处理
+    const stringArray: string[] = [];
+    const replyArray: string[] = [];
+    const images: Image[] = [];
+    let replyLength = 0;
 
-    // 处理上下文
-    filterContextTemplate.forEach((item: string) => { // 应用过滤上下文正则表达式
-        if (!item) {
-            return;
-        }
-        try {
-            const regex = new RegExp(item, 'g');
-            s = s.replace(regex, '');
-        } catch (error) {
-            logger.error(`正则表达式错误，内容:${item}，错误信息:${error}`);
-        }
-    })
+    // 应用过滤正则表达式，并分割消息
+    // 过滤正则表达式的捕获组会保留在stringArray中
+    try {
+        const regex = new RegExp(filterRegex, 'g');
+        const segments = s.split(regex).filter(item => item);
+        for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            const match = segment.match(regex);
+            if (match) {
+                if (stringArray.length === 0) {
+                    stringArray.push(segment);
+                    replyArray.push('');
+                } else {
+                    stringArray[stringArray.length - 1] += match[0];
+                }
+            } else {
+                const segs = segment.split('\\f').filter(item => item);
 
-    s = s.slice(0, maxChar)
-        .trim();
+                for (let j = 0; j < segs.length; j++) {
+                    const seg = segs[j];
 
-    // 处理回复消息
-    reply = await replaceMentions(ctx, context, reply);
-    const { result, images } = await replaceImages(context, reply);
-    reply = result;
+                    // 长度超过最大限制，直接截断
+                    replyLength += seg.length;
+                    if (replyLength > maxChar) {
+                        break;
+                    }
 
-    filterReplyTemplate.forEach((item: string) => { // 应用过滤回复正则表达式
-        if (!item) {
-            return;
-        }
-        try {
-            const regex = new RegExp(item, 'g');
-            reply = reply.replace(regex, '');
-        } catch (error) {
-            logger.error(`正则表达式错误，内容:${item}，错误信息:${error}`);
-        }
-    })
-
-    const prefix = replymsg && msg.rawId ? `[CQ:reply,id=${msg.rawId}]` : ``;
-
-    // 截断回复消息
-    const segments2 = reply.split(/(\[CQ:.+?\])/);
-    let nonCQLength = 0;
-    let finalReply = prefix;
-    for (const segment of segments2) {
-        if (segment.startsWith("[CQ:") && segment.endsWith("]")) { // 保留完整CQ码
-            finalReply += segment;
-        } else { // 截断非CQ码部分到剩余可用长度
-            const remaining = maxChar - nonCQLength;
-            if (remaining > 0) {
-                finalReply += segment.slice(0, remaining);
-                nonCQLength += Math.min(segment.length, remaining);
+                    if (stringArray.length === 0 || j !== 0) {
+                        stringArray.push(seg);
+                        replyArray.push(seg);
+                    } else {
+                        stringArray[stringArray.length - 1] += segs[0];
+                        replyArray[replyArray.length - 1] += segs[0];
+                    }
+                }
             }
         }
+    } catch (error) {
+        logger.error(`正则表达式错误，内容:${filterRegex}，错误信息:${error}`);
     }
-    reply = finalReply.trim();
 
-    return { s, reply, images };
+    // 处理回复消息
+    for (let i = 0; i < replyArray.length; i++) {
+        let reply = replyArray[i];
+        reply = await replaceMentions(ctx, context, reply);
+        const { result, images: replyImages } = await replaceImages(context, reply);
+        reply = result;
+
+        const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
+        replyArray[i] = prefix + reply;
+        images.push(...replyImages);
+    }
+
+    return { stringArray, replyArray, images };
 }
 
 export function checkRepeat(context: Context, s: string) {

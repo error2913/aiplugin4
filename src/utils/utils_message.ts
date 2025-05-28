@@ -5,7 +5,7 @@ import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSettingTemplate, showNumber, showMsgId } = ConfigManager.message;
+    const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
     const { isTool, usePromptEngineering, isMemory } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
@@ -32,15 +32,13 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
 
     let content = roleSettingTemplate[roleSettingIndex];
 
-    content += `\n**聊天相关信息**`;
+    content += `\n\n**聊天相关信息**`;
     content += ctx.isPrivate ?
         `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
-        `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}
-- <|@xxx|>表示@某个群成员`;
-    content += `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用`;
-    content += showMsgId ?
-        `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用` :
-        ``;
+        `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}\n- <|@xxx|>表示@某个群成员`;
+    content += isPrefix ? `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用` : ``;
+    content += showMsgId ? `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用` : ``;
+    content += `\n- \\f用于分割多条消息`
 
     if (receiveImage) {
         content += condition === '0' ?
@@ -56,7 +54,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     if (isMemory) {
         const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
         content += memeryPrompt ?
-            `\n**记忆**
+            `\n\n**记忆**
 如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
 ${memeryPrompt}` :
             ``;
@@ -192,10 +190,11 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
         ) : '';
 
         const msgIdList = Object.keys(message?.contentMap || {});
-        const content = message.content + (msgIdList.length !== 0 ? '\n' + msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\n') : '');
+        const content = (message.content ? (message.content + '\f') : '') +
+            (msgIdList.length !== 0 ? msgIdList.map(msgId => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentMap[msgId]).join('\f') : '');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
-            processedMessages[processedMessages.length - 1].content += '\n\n' + prefix + content;
+            processedMessages[processedMessages.length - 1].content += '\f' + prefix + content;
         } else {
             processedMessages.push({
                 role: message.role,

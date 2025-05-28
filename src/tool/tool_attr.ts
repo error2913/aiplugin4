@@ -133,7 +133,7 @@ export function registerAttrSet() {
 
         const value = seal.vars.intGet(ctx, attr)[0];
 
-        const attrs = expr.split(/[\s\dDd+\-*/=]+/).filter(item => item !== '');
+        const attrs = expr.split(/[\s\dDd+\-*/=]+/).filter(item => item);
         const values = attrs.map(item => seal.vars.intGet(ctx, item)[0]);
 
         let s = expr;

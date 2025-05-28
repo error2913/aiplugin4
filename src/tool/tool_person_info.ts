@@ -55,20 +55,20 @@ QQ等级: ${data.qqLevel}
 是否为VIP: ${data.is_vip}
 是否为年费会员: ${data.is_years_vip}`;
 
-            if (data.remark && data.remark !== '') s += `\n备注: ${data.remark}`;
+            if (data.remark) s += `\n备注: ${data.remark}`;
             if (data.birthday_year && data.birthday_year !== 0) {
                 s += `\n年龄: ${data.age}
 生日: ${data.birthday_year}-${data.birthday_month}-${data.birthday_day}
 星座: ${constellations[data.constellation - 1]}
 生肖: ${shengXiao[data.shengXiao - 1]}`;
             }
-            if (data.pos && data.pos !== '') s += `\n位置: ${data.pos}`;
-            if (data.country && data.country !== '') s += `\n所在地: ${data.country} ${data.province} ${data.city}`;
-            if (data.address && data.address !== '') s += `\n地址: ${data.address}`;
-            if (data.eMail && data.eMail !== '') s += `\n邮箱: ${data.eMail}`;
-            if (data.interest && data.interest !== '') s += `\n兴趣: ${data.interest}`;
+            if (data.pos) s += `\n位置: ${data.pos}`;
+            if (data.country) s += `\n所在地: ${data.country} ${data.province} ${data.city}`;
+            if (data.address) s += `\n地址: ${data.address}`;
+            if (data.eMail) s += `\n邮箱: ${data.eMail}`;
+            if (data.interest) s += `\n兴趣: ${data.interest}`;
             if (data.labels && data.labels.length > 0) s += `\n标签: ${data.labels.join(',')}`;
-            if (data.long_nick && data.long_nick !== '') s += `\n个性签名: ${data.long_nick}`;
+            if (data.long_nick) s += `\n个性签名: ${data.long_nick}`;
 
             return s;
         } catch (e) {
