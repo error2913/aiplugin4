@@ -45,6 +45,7 @@ function main() {
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
 【.ai fgt】遗忘上下文
+【.ai role】选择角色设定
 【.ai memo】AI的记忆相关
 【.ai tool】AI的工具相关
 【.ai tk】AI的token相关
@@ -68,7 +69,7 @@ function main() {
 
         const val2 = cmdArgs.getArgN(2);
         if (!val2 || val2 == 'help') {
-          const s = `帮助:
+          seal.replyToSender(ctx, msg, `帮助:
 【.ai st <ID> <权限限制>】
 
 <ID>:
@@ -82,9 +83,7 @@ function main() {
 【50】群管理员
 【60】群主
 【100】骰主
-不填写时默认为100`;
-
-          seal.replyToSender(ctx, msg, s);
+不填写时默认为100`);
           return ret;
         }
 
@@ -111,15 +110,13 @@ function main() {
 
         const val2 = cmdArgs.getArgN(2);
         if (!val2 || val2 == 'help') {
-          const s = `帮助:
+          seal.replyToSender(ctx, msg, `帮助:
 【.ai ck <ID>】
 
 <ID>:
 【QQ:1234567890】 私聊窗口
 【QQ-Group:1234】 群聊窗口
-【now】当前窗口`;
-
-          seal.replyToSender(ctx, msg, s);
+【now】当前窗口`);
           return ret;
         }
 
@@ -183,7 +180,7 @@ function main() {
 
         const kwargs = cmdArgs.kwargs;
         if (kwargs.length == 0) {
-          const s = `帮助:
+          seal.replyToSender(ctx, msg, `帮助:
 【.ai on --<参数>=<数字>】
 
 <参数>:
@@ -194,9 +191,7 @@ function main() {
 【p】概率模式，每条消息按概率触发
 单位/%，默认10%
 
-【.ai on --t --p=42】使用示例`;
-
-          seal.replyToSender(ctx, msg, s);
+【.ai on --t --p=42】使用示例`);
           return ret;
         }
 
@@ -334,6 +329,42 @@ function main() {
             ai.context.clearMessages();
             seal.replyToSender(ctx, msg, '上下文已清除');
             AIManager.saveAI(id);
+            return ret;
+          }
+        }
+      }
+      case 'role': {
+        const pr = ai.privilege;
+        if (ctx.privilegeLevel < pr.limit) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        const { roleSettingTemplate } = ConfigManager.message;
+
+        const val2 = cmdArgs.getArgN(2);
+        switch (val2) {
+          case 'show': {
+            const [roleSettingIndex, _] = seal.vars.intGet(ctx, "$g人工智能插件专用角色设定序号");
+            seal.replyToSender(ctx, msg, `当前角色设定序号为${roleSettingIndex}，序号范围为0-${roleSettingTemplate.length - 1}`);
+            return ret;
+          }
+          case '':
+          case 'help': {
+            seal.replyToSender(ctx, msg, `帮助:
+【.ai role show】查看当前角色设定序号
+【.ai role <序号>】切换角色设定，序号范围为0-${roleSettingTemplate.length - 1}`);
+            return ret;
+          }
+          default: {
+            const index = parseInt(val2);
+            if (isNaN(index) || index < 0 || index >= roleSettingTemplate.length) {
+              seal.replyToSender(ctx, msg, `角色设定序号错误，序号范围为0-${roleSettingTemplate.length - 1}`);
+              return ret;
+            }
+
+            seal.vars.intSet(ctx, "$g人工智能插件专用角色设定序号", index);
+            seal.replyToSender(ctx, msg, `角色设定已切换到${index}`);
             return ret;
           }
         }
@@ -481,14 +512,12 @@ function main() {
           case 'help': {
             const val3 = cmdArgs.getArgN(3);
             if (!val3) {
-              const s = `帮助:
+              seal.replyToSender(ctx, msg, `帮助:
 【.ai tool】列出所有工具
 【.ai tool help <函数名>】查看工具详情
 【.ai tool [on/off]】开启或关闭全部工具函数
 【.ai tool <函数名> [on/off]】开启或关闭工具函数
-【.ai tool <函数名> --参数名=具体参数】试用工具函数
-`;
-              seal.replyToSender(ctx, msg, s);
+【.ai tool <函数名> --参数名=具体参数】试用工具函数`);
               return ret;
             }
 
@@ -817,7 +846,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
           case '':
           case 'help': {
-            const s = `帮助:
+            seal.replyToSender(ctx, msg, `帮助:
 【.ai tk lst】查看所有模型
 【.ai tk sum】查看所有模型的token使用记录总和
 【.ai tk all】查看所有模型的token使用记录
@@ -825,8 +854,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 【.ai tk <模型名称>】查看模型的token使用记录
 【.ai tk <模型名称> [y/m] (chart)】查看模型今年/这个月的token使用记录
 【.ai tk clr】清除token使用记录
-【.ai tk clr <模型名称>】清除token使用记录`;
-            seal.replyToSender(ctx, msg, s);
+【.ai tk clr <模型名称>】清除token使用记录`);
             return ret;
           }
           default: {

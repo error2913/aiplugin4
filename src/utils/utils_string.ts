@@ -122,7 +122,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
-        let reply = replyArray[i];
+        let reply = replyArray[i].trim();
         reply = await replaceMentions(ctx, context, reply);
         const { result, images: replyImages } = await replaceImages(context, reply);
         reply = result;
