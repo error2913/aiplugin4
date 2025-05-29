@@ -3,63 +3,6 @@ import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
-export function registerFace() {
-    const { localImagePaths } = ConfigManager.image;
-    const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-        if (path.trim() === '') {
-            return acc;
-        }
-        try {
-            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-            if (!name) {
-                throw new Error(`本地图片路径格式错误:${path}`);
-            }
-
-            acc[name] = path;
-        } catch (e) {
-            logger.error(e);
-        }
-        return acc;
-    }, {});
-
-    if (Object.keys(localImages).length === 0) {
-        return;
-    }
-
-    const info: ToolInfo = {
-        type: "function",
-        function: {
-            name: "face",
-            description: `发送表情包，表情名称有:${Object.keys(localImages).join("、")}`,
-            parameters: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string",
-                        description: "表情名称"
-                    }
-                },
-                required: ["name"]
-            }
-        }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, args) => {
-        const { name } = args;
-
-        if (localImages.hasOwnProperty(name)) {
-            seal.replyToSender(ctx, msg, `[CQ:image,file=${localImages[name]}]`);
-            return '发送成功';
-        } else {
-            logger.error(`本地图片${name}不存在`);
-            return `本地图片${name}不存在`;
-        }
-    }
-
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
 export function registerImageToText() {
     const info: ToolInfo = {
         type: "function",
