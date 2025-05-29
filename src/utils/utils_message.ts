@@ -103,7 +103,7 @@ ${toolsPrompt}`;
     return systemMessage;
 }
 
-export function buildSamplesMessages(ctx: seal.MsgContext) {
+function buildSamplesMessages(ctx: seal.MsgContext): Message[] {
     const { samples }: { samples: string[] } = ConfigManager.message;
 
     const samplesMessages: Message[] = samples
@@ -135,13 +135,45 @@ export function buildSamplesMessages(ctx: seal.MsgContext) {
     return samplesMessages;
 }
 
+function buildContextMessages(systemMessage: Message, messages: Message[]): Message[] {
+    const { insertCount } = ConfigManager.message;
+
+    const contextMessages = messages.slice();
+
+    if (insertCount <= 0) {
+        return contextMessages;
+    }
+
+    const userPositions = contextMessages
+        .map((item, index) => (item.role === 'user' ? index : -1))
+        .filter(index => index !== -1);
+
+    if (userPositions.length <= insertCount) {
+        return contextMessages;
+    }
+
+    for (let i = userPositions.length - 1; i >= 0; i--) {
+        if (i + 1 <= insertCount) {
+            break;
+        }
+
+        const index = userPositions[i];
+        if ((userPositions.length - i) % insertCount === 0) {
+            contextMessages.splice(index, 0, systemMessage); //从后往前数的个数是insertCount的倍数时，插入到消息前面
+        }
+    }
+
+    return contextMessages;
+}
+
 export function handleMessages(ctx: seal.MsgContext, ai: AI) {
     const { isPrefix, showNumber, showMsgId, isMerge } = ConfigManager.message;
 
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
+    const contextMessages = buildContextMessages(systemMessage, ai.context.messages);
 
-    const messages = [systemMessage, ...samplesMessages, ...ai.context.messages];
+    const messages = [systemMessage, ...samplesMessages, ...contextMessages];
 
     // 处理 tool_calls 并过滤无效项
     for (let i = 0; i < messages.length; i++) {
