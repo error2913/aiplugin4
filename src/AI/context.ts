@@ -5,6 +5,7 @@ import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AIManager } from "./AI";
 import { logger } from "./logger";
+import { transformMsgId } from "../utils/utils";
 
 export interface Message {
     role: string;
@@ -56,22 +57,42 @@ export class Context {
     }
 
     async addMessage(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { showNumber, maxRounds } = ConfigManager.message;
+        const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const messages = this.messages;
 
         //处理文本
         s = s
-            .replace(/\[CQ:at,qq=(\d+)\]/g, (_, p1) => {
-                const epId = ctx.endPoint.userId;
-                const gid = ctx.group.groupId;
-                const uid = `QQ:${p1}`;
-                const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                const mctx = createCtx(epId, mmsg);
-                const name = mctx.player.name || '未知用户';
+            .replace(/\[CQ:(.*?),(?:qq|id)=(-?\d+)\]/g, (_, p1, p2) => {
+                switch (p1) {
+                    case 'at': {
+                        const epId = ctx.endPoint.userId;
+                        const gid = ctx.group.groupId;
+                        const uid = `QQ:${p2}`;
+                        const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                        const mctx = createCtx(epId, mmsg);
+                        const name = mctx.player.name || '未知用户';
 
-                return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                        return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                    }
+                    case 'poke': {
+                        const epId = ctx.endPoint.userId;
+                        const gid = ctx.group.groupId;
+                        const uid = `QQ:${p2}`;
+                        const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                        const mctx = createCtx(epId, mmsg);
+                        const name = mctx.player.name || '未知用户';
+
+                        return `<|poke:${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                    }
+                    case 'reply': {
+                        return showMsgId ? `<|quote:${transformMsgId(p2)}|>` : ``;
+                    }
+                    default: {
+                        return '';
+                    }
+                }
+
             })
-            .replace(/\[CQ:reply,id=-?\d+\]/g, '')
             .replace(/\[CQ:.*?\]/g, '')
 
         if (s === '') {

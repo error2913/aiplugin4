@@ -7,7 +7,6 @@ import { registerCheckAvatar, registerFace, registerImageToText, registerTextToI
 import { registerJrrp } from "./tool_jrrp"
 import { registerAddMemory, registerDelMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
-import { registerPoke } from "./tool_poke"
 import { registerRename } from "./tool_rename"
 import { registerRollCheck, registerSanCheck } from "./tool_roll_check"
 import { registerCancelTimer, registerGetTime, registerSetTimer, registerShowTimerList } from "./tool_time"
@@ -15,7 +14,7 @@ import { registerRecord, registerTextToSound } from "./tool_voice"
 import { registerWebSearch, registerWebRead } from "./tool_web_search"
 import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_person_info"
-import { registerDeleteMsg, registerQuoteMsg, registerSendMsg } from "./tool_message"
+import { registerDeleteMsg, registerSendMsg } from "./tool_message"
 import { registerSetEssenceMsg } from "./tool_essence_msg"
 import { registerGetContext } from "./tool_context"
 import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
@@ -190,7 +189,6 @@ export class ToolManager {
         registerGetBanList();
         registerRecord();
         registerTextToSound();
-        registerPoke();
         registerGetTime();
         registerSetTimer();
         registerShowTimerList();
@@ -205,7 +203,6 @@ export class ToolManager {
         registerGetPersonInfo();
         registerSendMsg();
         registerDeleteMsg();
-        registerQuoteMsg();
         registerSetEssenceMsg();
         registerGetContext();
         registerGetList();

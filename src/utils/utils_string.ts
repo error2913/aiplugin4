@@ -2,6 +2,7 @@ import { Context } from "../AI/context";
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
+import { transformMsgIdBack } from "./utils";
 
 export function parseText(s: string): { type: string, data: { [key: string]: string } }[] {
     const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
@@ -46,7 +47,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 分离AI臆想出来的多轮对话
     const segments = s
-        .split(/([<＜]\s?[\|│｜]from:?.*?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜]))/)
+        .split(/([<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜]))/)
         .filter(item => item.trim());
     if (segments.length === 0) {
         return { stringArray: [], replyArray: [], images: [] };
@@ -55,7 +56,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     s = '';
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const match = segment.match(/[<＜]\s?[\|│｜]from:?(.*?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/);
+        const match = segment.match(/[<＜]\s?[\|│｜]from[:：]?\s?(.*?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/);
         if (match) {
             const uid = await context.findUserId(ctx, match[1]);
             if (uid === ctx.endPoint.userId && i < segments.length - 1) {
@@ -68,11 +69,16 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
-        s = segments.find(segment => !/[<＜]\s?[\|│｜]from:?.*?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/.test(segment));
+        s = segments.find(segment => !/[<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/.test(segment));
         if (!s || !s.trim()) {
             return { stringArray: [], replyArray: [], images: [] };
         }
     }
+
+    // 分离回复消息和戳一戳消息
+    s = s
+        .replace(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g, (match) => `\\f${match}`)
+        .replace(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g, (match) => `\\f${match}\\f`);
 
     const stringArray: string[] = [];
     const replyArray: string[] = [];
@@ -124,6 +130,8 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     for (let i = 0; i < replyArray.length; i++) {
         let reply = replyArray[i].trim();
         reply = await replaceMentions(ctx, context, reply);
+        reply = await replacePoke(ctx, context, reply);
+        reply = await replaceQuote(reply);
         const { result, images: replyImages } = await replaceImages(context, reply);
         reply = result;
 
@@ -177,7 +185,8 @@ export function checkRepeat(context: Context, s: string) {
 }
 
 /**
- * 替换艾特提及为CQ码
+ * 替换艾特为CQ码
+ * @param ctx
  * @param context 
  * @param reply 
  * @returns 
@@ -191,8 +200,51 @@ async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: st
             if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
             } else {
+                logger.warning(`无法找到用户：${name}`);
                 reply = reply.replace(match[i], ` @${name} `);
             }
+        }
+    }
+
+    return reply;
+}
+
+/**
+ * 替换戳一戳为CQ码
+ * @param ctx
+ * @param context 
+ * @param reply 
+ * @returns 
+ */
+async function replacePoke(ctx: seal.MsgContext, context: Context, reply: string) {
+    const match = reply.match(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g);
+    if (match) {
+        for (let i = 0; i < match.length; i++) {
+            const name = match[i].replace(/^[<＜]\s?[\|│｜]poke[:：]?\s?|(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])$/g, '');
+            const uid = await context.findUserId(ctx, name);
+            if (uid !== null) {
+                reply = reply.replace(match[i], `[CQ:poke,qq=${uid.replace(/\D+/g, "")}]`);
+            } else {
+                logger.warning(`无法找到用户：${name}`);
+                reply = reply.replace(match[i], '');
+            }
+        }
+    }
+
+    return reply;
+}
+
+/**
+ * 替换引用为CQ码
+ * @param reply 
+ * @returns 
+ */
+async function replaceQuote(reply: string) {
+    const match = reply.match(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g);
+    if (match) {
+        for (let i = 0; i < match.length; i++) {
+            const msgId = match[i].replace(/^[<＜]\s?[\|│｜]quote[:：]?\s?|(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])$/g, '');
+            reply = reply.replace(match[i], `[CQ:reply,id=${transformMsgIdBack(msgId)}]`);
         }
     }
 

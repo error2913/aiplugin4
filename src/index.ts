@@ -31,7 +31,7 @@ function main() {
   AIManager.getUsageMap();
   ToolManager.registerTool();
 
-  const CQTypesAllow = ["at", "image", "reply", "face"];
+  const CQTypesAllow = ["at", "image", "reply", "face", "poke"];
 
   const cmdAI = seal.ext.newCmdItemInfo();
   cmdAI.name = 'ai'; // 指令名字，可用中文
