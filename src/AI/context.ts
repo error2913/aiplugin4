@@ -20,12 +20,15 @@ export interface Message {
 
 export class Context {
     messages: Message[];
+    ignoreList: string[];
+
     lastReply: string;
     counter: number;
     timer: number;
 
     constructor() {
         this.messages = [];
+        this.ignoreList = [];
         this.lastReply = '';
         this.counter = 0;
         this.timer = null;
@@ -33,7 +36,7 @@ export class Context {
 
     static reviver(value: any): Context {
         const context = new Context();
-        const validKeys = ['messages'];
+        const validKeys = ['messages', 'ignoreList'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -165,7 +168,8 @@ export class Context {
         name = String(name).trim();
 
         if (name.length > 4 && !isNaN(parseInt(name))) {
-            return `QQ:${name}`;
+            const uid = `QQ:${name}`;
+            return this.ignoreList.includes(uid) ? null : uid;
         }
 
         const match = name.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
@@ -174,19 +178,22 @@ export class Context {
         }
 
         if (name === ctx.player.name) {
-            return ctx.player.userId;
+            const uid = ctx.player.userId;
+            return this.ignoreList.includes(uid) ? null : uid;
         }
 
         // 在上下文中查找用户
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (name === messages[i].name) {
-                return messages[i].uid;
+                const uid = messages[i].uid;
+                return this.ignoreList.includes(uid) ? null : uid;
             }
             if (name.length > 4) {
                 const distance = levenshteinDistance(name, messages[i].name);
                 if (distance <= 2) {
-                    return messages[i].uid;
+                    const uid = messages[i].uid;
+                    return this.ignoreList.includes(uid) ? null : uid;
                 }
             }
         }
@@ -201,7 +208,8 @@ export class Context {
                 const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, '')}`);
                 for (let i = 0; i < data.length; i++) {
                     if (name === data[i].card || name === data[i].nickname) {
-                        return `QQ:${data[i].user_id}`;
+                        const uid = `QQ:${data[i].user_id}`;
+                        return this.ignoreList.includes(uid) ? null : uid;
                     }
                 }
             }
@@ -210,7 +218,8 @@ export class Context {
                 const data = await globalThis.http.getData(epId, 'get_friend_list');
                 for (let i = 0; i < data.length; i++) {
                     if (name === data[i].nickname || name === data[i].remark) {
-                        return `QQ:${data[i].user_id}`;
+                        const uid = `QQ:${data[i].user_id}`;
+                        return this.ignoreList.includes(uid) ? null : uid;
                     }
                 }
             }
@@ -219,7 +228,8 @@ export class Context {
         if (name.length > 4) {
             const distance = levenshteinDistance(name, ctx.player.name);
             if (distance <= 2) {
-                return ctx.player.userId;
+                const uid = ctx.player.userId;
+                return this.ignoreList.includes(uid) ? null : uid;
             }
         }
 

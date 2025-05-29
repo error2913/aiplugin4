@@ -48,6 +48,7 @@ function main() {
 【.ai role】选择角色设定
 【.ai memo】AI的记忆相关
 【.ai tool】AI的工具相关
+【.ai ign】AI的忽略名单相关
 【.ai tk】AI的token相关
 【.ai shut】终止AI当前流式输出`;
   cmdAI.allowDelegate = true;
@@ -184,7 +185,7 @@ function main() {
 【.ai on --<参数>=<数字>】
 
 <参数>:
-【c】计数器模式，接收消息数达到后触发。
+【c】计数器模式，接收消息数达到后触发
 单位/条，默认10条
 【t】计时器模式，最后一条消息后达到时限触发
 单位/秒，默认60秒
@@ -626,6 +627,68 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               seal.replyToSender(ctx, msg, s);
               return ret;
             }
+          }
+        }
+      }
+      case 'ign': {
+        if (ctx.isPrivate) {
+          seal.replyToSender(ctx, msg, '忽略名单仅在群聊可用');
+          return ret;
+        }
+
+        const pr = ai.privilege;
+        if (ctx.privilegeLevel < pr.limit) {
+          seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+          return ret;
+        }
+
+        const epId = ctx.endPoint.userId;
+        const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
+        const muid = cmdArgs.amIBeMentionedFirst ? epId : mctx.player.userId;
+
+        const val2 = cmdArgs.getArgN(2);
+        switch (val2) {
+          case 'add': {
+            if (cmdArgs.at.length === 0) {
+              seal.replyToSender(ctx, msg, '参数缺失，【.ai ign add @xxx】添加忽略名单');
+              return ret;
+            }
+            if (ai.context.ignoreList.includes(muid)) {
+              seal.replyToSender(ctx, msg, '已经在忽略名单中');
+              return ret;
+            }
+            ai.context.ignoreList.push(muid);
+            seal.replyToSender(ctx, msg, '已添加到忽略名单');
+            AIManager.saveAI(id);
+            return ret;
+          }
+          case 'rm': {
+            if (cmdArgs.at.length === 0) {
+              seal.replyToSender(ctx, msg, '参数缺失，【.ai ign rm @xxx】移除忽略名单');
+              return ret;
+            }
+            if (!ai.context.ignoreList.includes(muid)) {
+              seal.replyToSender(ctx, msg, '不在忽略名单中');
+              return ret;
+            }
+            ai.context.ignoreList = ai.context.ignoreList.filter(item => item !== muid);
+            seal.replyToSender(ctx, msg, '已从忽略名单中移除');
+            AIManager.saveAI(id);
+            return ret;
+          }
+          case 'list': {
+            const s = ai.context.ignoreList.length === 0 ? '忽略名单为空' : `忽略名单如下:\n${ai.context.ignoreList.join('\n')}`;
+            seal.replyToSender(ctx, msg, s);
+            return ret;
+          }
+          default: {
+            seal.replyToSender(ctx, msg, `帮助:
+【.ai ign add @xxx】添加忽略名单
+【.ai ign rm @xxx】移除忽略名单
+【.ai ign list】列出忽略名单
+
+忽略名单中的对象仍能正常对话，但无法被选中QQ号`);
+            return ret;
           }
         }
       }
