@@ -99,15 +99,17 @@ export class AI {
         this.resetState();
 
         // 解析body，检查是否为流式
+        let stream = false;
         try {
             const bodyTemplate = ConfigManager.request.bodyTemplate;
             const bodyObject = parseBody(bodyTemplate, [], null, null);
-            if (bodyObject?.stream === true) {
-                await this.chatStream(ctx, msg);
-                return;
-            }
+            stream = bodyObject?.stream === true;
         } catch (err) {
             logger.error('解析body时出现错误:', err);
+            return;
+        }
+        if (stream) {
+            await this.chatStream(ctx, msg);
             return;
         }
 
