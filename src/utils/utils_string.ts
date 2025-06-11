@@ -128,7 +128,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
-        let reply = replyArray[i].trim();
+        let reply = replyArray[i];
         reply = await replaceMentions(ctx, context, reply);
         reply = await replacePoke(ctx, context, reply);
         reply = await replaceQuote(reply);
