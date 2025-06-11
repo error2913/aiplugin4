@@ -8,6 +8,8 @@ import { RequestConfig } from "./config_request";
 import { ToolConfig } from "./config_tool";
 
 export class ConfigManager {
+    static version = "4.9.1";
+    static author = "baiyu&错误";
     static ext: seal.ExtInfo;
     static cache: {
         [key: string]: {
@@ -17,6 +19,7 @@ export class ConfigManager {
     } = {}
 
     static registerConfig() {
+        this.ext = ConfigManager.getExt('aiplugin4');
         LogConfig.register();
         RequestConfig.register();
         MessageConfig.register();
@@ -52,13 +55,13 @@ export class ConfigManager {
     static get backend() { return this.getCache('backend', BackendConfig.get) }
 
     static getExt(name: string): seal.ExtInfo {
-        if (name == 'aiplugin4') {
+        if (name == 'aiplugin4' && ConfigManager.ext) {
             return ConfigManager.ext;
         }
 
         let ext = seal.ext.find(name);
         if (!ext) {
-            ext = seal.ext.new(name, 'baiyu&错误', '1.0.0');
+            ext = seal.ext.new(name, this.author, this.version);
             seal.ext.register(ext);
         }
 

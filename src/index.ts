@@ -9,13 +9,15 @@ import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./AI/logger";
 import { parseText } from "./utils/utils_string";
+import { checkUpdate } from "./utils/utils_update";
 
 function main() {
-  let ext = seal.ext.find('aiplugin4');
-  if (!ext) {
-    ext = seal.ext.new('aiplugin4', 'baiyu&错误', '4.9.0');
-    seal.ext.register(ext);
-  }
+  ConfigManager.registerConfig();
+  AIManager.getUsageMap();
+  ToolManager.registerTool();
+  checkUpdate();
+
+  const ext = ConfigManager.ext;
 
   try {
     JSON.parse(ext.storageGet(`timerQueue`) || '[]')
@@ -26,10 +28,6 @@ function main() {
     logger.error('在获取timerQueue时出错', e);
   }
 
-  ConfigManager.ext = ext;
-  ConfigManager.registerConfig();
-  AIManager.getUsageMap();
-  ToolManager.registerTool();
 
   const CQTypesAllow = ["at", "image", "reply", "face", "poke"];
 

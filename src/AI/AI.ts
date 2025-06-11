@@ -8,6 +8,7 @@ import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "./logger";
 import { checkRepeat, handleReply } from "../utils/utils_string";
+import { checkContextUpdate } from "../utils/utils_update";
 
 export interface Privilege {
     limit: number,
@@ -19,6 +20,7 @@ export interface Privilege {
 
 export class AI {
     id: string;
+    version: string;
     context: Context;
     tool: ToolManager;
     memory: Memory;
@@ -39,6 +41,7 @@ export class AI {
 
     constructor(id: string) {
         this.id = id;
+        this.version = '0.0.0';
         this.context = new Context();
         this.tool = new ToolManager();
         this.memory = new Memory();
@@ -63,7 +66,7 @@ export class AI {
 
     static reviver(value: any, id: string): AI {
         const ai = new AI(id);
-        const validKeys = ['context', 'tool', 'memory', 'image', 'privilege'];
+        const validKeys = ['version', 'context', 'tool', 'memory', 'image', 'privilege'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -309,6 +312,7 @@ export class AI {
 }
 
 export class AIManager {
+    static version = "1.0.0";
     static cache: { [key: string]: AI } = {};
     static usageMap: {
         [key: string]: { // 模型名
@@ -325,10 +329,10 @@ export class AIManager {
 
     static getAI(id: string) {
         if (!this.cache.hasOwnProperty(id)) {
-            let data = new AI(id);
+            let ai = new AI(id);
 
             try {
-                data = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
+                ai = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
                     if (key === "") {
                         return AI.reviver(value, id);
                     }
@@ -352,7 +356,9 @@ export class AIManager {
                 logger.error(`从数据库中获取${`AI_${id}`}失败:`, error);
             }
 
-            this.cache[id] = data;
+            checkContextUpdate(ai);
+
+            this.cache[id] = ai;
         }
 
         return this.cache[id];
