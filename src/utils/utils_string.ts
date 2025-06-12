@@ -43,7 +43,7 @@ export function parseText(s: string): { type: string, data: { [key: string]: str
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ stringArray: string[], replyArray: string[], images: Image[] }> {
-    const { maxChar, replymsg, filterRegex } = ConfigManager.reply;
+    const { maxChar, replymsg, filterRegex, isTrim } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
@@ -133,7 +133,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         reply = await replacePoke(ctx, context, reply);
         reply = await replaceQuote(reply);
         const { result, images: replyImages } = await replaceImages(context, reply);
-        reply = result;
+        reply = isTrim ? result.trim() : result;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
         replyArray[i] = prefix + reply;
