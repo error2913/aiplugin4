@@ -248,7 +248,7 @@ export class AI {
                             try {
                                 await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
                             } catch (e) {
-                                logger.error(e);
+                                logger.error(`在handlePromptToolCall中出错：`, e.message);
                                 return;
                             }
 

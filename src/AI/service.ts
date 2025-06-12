@@ -44,7 +44,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                         try {
                             await ToolManager.handlePromptToolCall(ctx, msg, ai, match[1]);
                         } catch (e) {
-                            logger.error(e);
+                            logger.error(`在handlePromptToolCall中出错：`, e.message);
                             return '';
                         }
 
@@ -61,7 +61,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                         try {
                             tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
                         } catch (e) {
-                            logger.error(e);
+                            logger.error(`在handleToolCalls中出错：`, e.message);
                             return '';
                         }
 

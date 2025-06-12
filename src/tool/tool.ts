@@ -292,7 +292,15 @@ export class ToolManager {
             }).join('\n'));
         }
 
+        if (tool_calls.length + ai.tool.toolCallCount > maxCallCount) {
+            logger.warning('一次性调用超过上限，将进行截断操作……');
+            tool_calls.splice(Math.max(0, maxCallCount - ai.tool.toolCallCount));
+        }
+
+        ai.tool.toolCallCount += tool_calls.length;
         if (ai.tool.toolCallCount === maxCallCount) {
+            logger.warning('连续调用函数次数达到上限');
+        } else if (ai.tool.toolCallCount === maxCallCount + tool_calls.length) {
             logger.warning('连续调用函数次数超过上限');
             for (let i = 0; i < tool_calls.length; i++) {
                 const tool_call = tool_calls[i];
@@ -300,20 +308,14 @@ export class ToolManager {
                 ai.tool.toolCallCount++;
             }
             return "none";
-        } else if (ai.tool.toolCallCount > maxCallCount) {
+        } else if (ai.tool.toolCallCount > maxCallCount + tool_calls.length) {
             throw new Error('连续调用函数次数超过上限，已终止对话');
-        }
-
-        if (tool_calls.length + ai.tool.toolCallCount > maxCallCount) {
-            logger.warning('一次性调用超过上限，将进行截断操作……');
-            tool_calls.splice(maxCallCount - ai.tool.toolCallCount);
         }
 
         let tool_choice = 'none';
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
             const tool_choice2 = await this.handleToolCall(ctx, msg, ai, tool_call);
-            ai.tool.toolCallCount++;
 
             if (tool_choice2 === 'required') {
                 tool_choice = 'required';
@@ -389,12 +391,14 @@ export class ToolManager {
     static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call_str: string): Promise<void> {
         const { maxCallCount } = ConfigManager.tool;
 
+        ai.tool.toolCallCount++;
         if (ai.tool.toolCallCount === maxCallCount) {
+            logger.warning('连续调用函数次数达到上限');
+        } else if (ai.tool.toolCallCount === maxCallCount + 1) {
             logger.warning('连续调用函数次数超过上限');
             await ai.context.addSystemUserMessage('调用函数返回', `连续调用函数次数超过上限`, []);
-            ai.tool.toolCallCount++;
             return;
-        } else if (ai.tool.toolCallCount > maxCallCount) {
+        } else if (ai.tool.toolCallCount > maxCallCount + 1) {
             throw new Error('连续调用函数次数超过上限，已终止对话');
         }
 
@@ -463,7 +467,6 @@ export class ToolManager {
             const s = await tool.solve(ctx, msg, ai, args);
 
             await ai.context.addSystemUserMessage('调用函数返回', s, []);
-            ai.tool.toolCallCount++;
         } catch (e) {
             logger.error(`调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`, []);

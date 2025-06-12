@@ -115,7 +115,7 @@ export function registerSendMsg() {
                 try {
                     await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
                 } catch (e) {
-                    logger.error(e);
+                    logger.error(`在handlePromptToolCall中出错：`, e.message);
                     return `函数调用失败:${e.message}`;
                 }
             }
