@@ -249,7 +249,6 @@ export class AI {
                                 await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
                             } catch (e) {
                                 logger.error(e);
-                                await this.stopCurrentChatStream();
                                 return;
                             }
 

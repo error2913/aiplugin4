@@ -410,11 +410,13 @@ export class ToolManager {
         } catch (e) {
             logger.error('解析tool_call时出现错误:', e);
             await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
+            return;
         }
 
         if (!tool_call.hasOwnProperty('name') || !tool_call.hasOwnProperty('arguments')) {
             logger.warning(`调用函数失败:缺少name或arguments`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:缺少name或arguments`, []);
+            return;
         }
 
         const name = tool_call.name;
