@@ -4,13 +4,14 @@ import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
 
-export function parseText(s: string): { type: string, data: { [key: string]: string } }[] {
+export function transformTextToArray(s: string): { type: string, data: { [key: string]: string } }[] {
     const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
     const messageArray: { type: string, data: { [key: string]: string } }[] = [];
     for (const segment of segments) {
         if (segment.startsWith('[CQ:')) {
             const match = segment.match(/^\[CQ:([^,]+),?([^\]]*)\]$/);
             if (match) {
+                const type = match[1].trim();
                 const params: { [key: string]: string } = {};
                 if (match[2]) {
                     match[2].trim().split(',').forEach(param => {
@@ -21,6 +22,12 @@ export function parseText(s: string): { type: string, data: { [key: string]: str
 
                         const key = param.slice(0, eqIndex).trim();
                         const value = param.slice(eqIndex + 1).trim();
+
+                        // 这对吗？nc是这样的吗？
+                        if (type === 'image' && key === 'file') {
+                            params['url'] = value;
+                        }
+
                         if (key) {
                             params[key] = value;
                         }
@@ -28,7 +35,7 @@ export function parseText(s: string): { type: string, data: { [key: string]: str
                 }
 
                 messageArray.push({
-                    type: match[1].trim(),
+                    type: type,
                     data: params
                 });
             } else {
@@ -40,6 +47,32 @@ export function parseText(s: string): { type: string, data: { [key: string]: str
     }
 
     return messageArray;
+}
+
+export function transformArrayToText(messageArray: { type: string, data: { [key: string]: string } }[]): string {
+    let s = '';
+    for (const message of messageArray) {
+        if (message.type === 'text') {
+            s += message.data['text'];
+        } else {
+            if (message.type === 'image') {
+                if (message.data['url']) {
+                    s += `[CQ:image,file=${message.data['url']}]`;
+                } else if (message.data['file']) {
+                    s += `[CQ:image,file=${message.data['file']}]`;
+                }
+            } else {
+                s += `[CQ:${message.type}`;
+                for (const key in message.data) {
+                    if (typeof message.data[key] === 'string') {
+                        s += `,${key}=${message.data[key]}`;
+                    }
+                }
+                s += ']';
+            }
+        }
+    }
+    return s;
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ stringArray: string[], replyArray: string[], images: Image[] }> {

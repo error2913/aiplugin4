@@ -7,9 +7,11 @@ import { ReplyConfig } from "./config_reply";
 import { RequestConfig } from "./config_request";
 import { ToolConfig } from "./config_tool";
 
+export const VERSION = "4.9.1";
+export const AUTHOR = "baiyu&错误";
+export const CQTYPESALLOW = ["at", "image", "reply", "face", "poke"];
+
 export class ConfigManager {
-    static version = "4.9.1";
-    static author = "baiyu&错误";
     static ext: seal.ExtInfo;
     static cache: {
         [key: string]: {
@@ -61,7 +63,7 @@ export class ConfigManager {
 
         let ext = seal.ext.find(name);
         if (!ext) {
-            ext = seal.ext.new(name, this.author, this.version);
+            ext = seal.ext.new(name, AUTHOR, VERSION);
             seal.ext.register(ext);
         }
 

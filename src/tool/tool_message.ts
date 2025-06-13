@@ -1,9 +1,10 @@
 import { AIManager } from "../AI/AI";
+import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
-import { ConfigManager } from "../config/config";
+import { ConfigManager, CQTYPESALLOW } from "../config/config";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { handleReply } from "../utils/utils_string";
+import { handleReply, transformArrayToText } from "../utils/utils_string";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerSendMsg() {
@@ -125,6 +126,65 @@ export function registerSendMsg() {
         } catch (e) {
             logger.error(e);
             return `消息发送失败:${e.message}`;
+        }
+    }
+
+    ToolManager.toolMap[info.function.name] = tool;
+}
+
+export function registerGetMsg() {
+    const info: ToolInfo = {
+        type: 'function',
+        function: {
+            name: 'get_msg',
+            description: '获取指定消息',
+            parameters: {
+                type: 'object',
+                properties: {
+                    msg_id: {
+                        type: 'string',
+                        description: '消息ID'
+                    }
+                },
+                required: ['msg_id']
+            }
+        }
+    }
+
+    const tool = new Tool(info);
+    tool.solve = async (ctx, _, ai, args) => {
+        const { msg_id } = args;
+
+        const ext = seal.ext.find('HTTP依赖');
+        if (!ext) {
+            logger.error(`未找到HTTP依赖`);
+            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+        }
+
+        try {
+            const epId = ctx.endPoint.userId;
+            const result = await globalThis.http.getData(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
+            const CQTypes = result.message.filter(item => item.type !== 'text').map(item => item.type);
+            let message = transformArrayToText(result.message.filter((item) => CQTYPESALLOW.includes(item.type)));
+            let images: Image[] = [];
+
+            // 图片偷取，以及图片转文字
+            if (CQTypes.includes('image')) {
+                const result = await ImageManager.handleImageMessage(ctx, message);
+                message = result.message;
+                images = result.images;
+                if (ai.image.stealStatus) {
+                    ai.image.updateImageList(images);
+                }
+            }
+
+            // 将images添加到最后一条消息，以便使用
+            ai.context.messages[ai.context.messages.length - 1].images.push(...images);
+
+            return message;
+        } catch (e) {
+            logger.error(e);
+            return `获取消息信息失败`;
         }
     }
 

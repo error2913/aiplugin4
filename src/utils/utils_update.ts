@@ -1,7 +1,7 @@
 import { AI, AIManager } from "../AI/AI";
 import { logger } from "../AI/logger";
 import { updateInfo } from "../AI/update";
-import { ConfigManager } from "../config/config";
+import { ConfigManager, VERSION } from "../config/config";
 
 /**
  * 比较两个版本号的大小。
@@ -34,8 +34,8 @@ export function checkUpdate() {
     const oldVersion = ConfigManager.ext.storageGet("version") || "0.0.0";
 
     try {
-        if (compareVersions(oldVersion, ConfigManager.version) < 0) {
-            ConfigManager.ext.storageSet("version", ConfigManager.version);
+        if (compareVersions(oldVersion, VERSION) < 0) {
+            ConfigManager.ext.storageSet("version", VERSION);
             let info = [];
             for (const v in updateInfo) {
                 if (compareVersions(oldVersion, v) >= 0) {
@@ -43,7 +43,7 @@ export function checkUpdate() {
                 }
                 info.unshift(`${v}：\n${updateInfo[v]}`);
             }
-            logger.warning(`更新到${ConfigManager.version}版本，更新内容：\n\n${info.join("\n\n")}`);
+            logger.warning(`更新到${VERSION}版本，更新内容：\n\n${info.join("\n\n")}`);
         }
     } catch (error) {
         logger.error(`版本校验失败：${error}`);

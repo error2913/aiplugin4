@@ -2,13 +2,13 @@ import { AIManager } from "./AI/AI";
 import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { timerQueue } from "./tool/tool_time";
-import { ConfigManager } from "./config/config";
+import { ConfigManager, CQTYPESALLOW } from "./config/config";
 import { transformMsgId } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./AI/logger";
-import { parseText } from "./utils/utils_string";
+import { transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 
 function main() {
@@ -27,9 +27,6 @@ function main() {
   } catch (e) {
     logger.error('在获取timerQueue时出错', e);
   }
-
-
-  const CQTypesAllow = ["at", "image", "reply", "face", "poke"];
 
   const cmdAI = seal.ext.newCmdItemInfo();
   cmdAI.name = 'ai'; // 指令名字，可用中文
@@ -1287,8 +1284,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       }
 
       // 检查CQ码
-      const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
-      if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
+      const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
+      if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
         clearTimeout(ai.context.timer);
         ai.context.timer = null;
 
@@ -1428,8 +1425,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         let message = msg.message;
         let images: Image[] = [];
 
-        const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
-        if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
+        const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
+        if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
           const pr = ai.privilege;
           if (pr.standby) {
             // 图片偷取，以及图片转文字
@@ -1472,8 +1469,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           return;
         }
 
-        const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
-        if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
+        const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
+        if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
           const pr = ai.privilege;
           if (pr.standby) {
             // 图片偷取，以及图片转文字

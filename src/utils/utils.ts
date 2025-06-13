@@ -1,7 +1,7 @@
 import { AI } from "../AI/AI";
 import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
-import { parseText } from "./utils_string";
+import { transformTextToArray } from "./utils_string";
 
 export function transformMsgId(msgId: string | number): string {
     if (typeof msgId === 'string') {
@@ -37,7 +37,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         }
 
         try {
-            const messageArray = parseText(s);
+            const messageArray = transformTextToArray(s);
 
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/\D+/g, '');
