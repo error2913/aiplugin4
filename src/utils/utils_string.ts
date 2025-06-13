@@ -43,7 +43,7 @@ export function parseText(s: string): { type: string, data: { [key: string]: str
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ stringArray: string[], replyArray: string[], images: Image[] }> {
-    const { maxChar, replymsg, filterRegex, isTrim } = ConfigManager.reply;
+    const { maxChar, replymsg, filterRegexes, isTrim } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
@@ -87,43 +87,45 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 应用过滤正则表达式，并分割消息
     // 过滤正则表达式的捕获组会保留在stringArray中
+    const filterRegex = filterRegexes.join('|');
+    let pattern: RegExp;
     try {
-        const regex = new RegExp(filterRegex, 'g');
-        const segments = s.split(regex).filter(item => item);
-        for (let i = 0; i < segments.length; i++) {
-            const segment = segments[i];
-            const match = segment.match(regex);
-            if (match) {
-                if (stringArray.length === 0) {
-                    stringArray.push(segment);
-                    replyArray.push('');
-                } else {
-                    stringArray[stringArray.length - 1] += match[0];
-                }
+        pattern = new RegExp(filterRegex, 'g');
+    } catch (e) {
+        logger.error(`正则表达式错误，内容:${filterRegex}，错误信息:${e.message}`);
+    }
+    const segments2 = s.split(pattern).filter(item => item);
+    for (let i = 0; i < segments2.length; i++) {
+        const segment = segments2[i];
+        const match = segment.match(pattern);
+        if (match) {
+            if (stringArray.length === 0) {
+                stringArray.push(segment);
+                replyArray.push('');
             } else {
-                const segs = segment.split('\\f').filter(item => item);
+                stringArray[stringArray.length - 1] += match[0];
+            }
+        } else {
+            const segs = segment.split('\\f').filter(item => item);
 
-                for (let j = 0; j < segs.length; j++) {
-                    const seg = segs[j];
+            for (let j = 0; j < segs.length; j++) {
+                const seg = segs[j];
 
-                    // 长度超过最大限制，直接截断
-                    replyLength += seg.length;
-                    if (replyLength > maxChar) {
-                        break;
-                    }
+                // 长度超过最大限制，直接截断
+                replyLength += seg.length;
+                if (replyLength > maxChar) {
+                    break;
+                }
 
-                    if (stringArray.length === 0 || j !== 0) {
-                        stringArray.push(seg);
-                        replyArray.push(seg);
-                    } else {
-                        stringArray[stringArray.length - 1] += segs[0];
-                        replyArray[replyArray.length - 1] += segs[0];
-                    }
+                if (stringArray.length === 0 || j !== 0) {
+                    stringArray.push(seg);
+                    replyArray.push(seg);
+                } else {
+                    stringArray[stringArray.length - 1] += segs[0];
+                    replyArray[replyArray.length - 1] += segs[0];
                 }
             }
         }
-    } catch (error) {
-        logger.error(`正则表达式错误，内容:${filterRegex}，错误信息:${error}`);
     }
 
     // 处理回复消息

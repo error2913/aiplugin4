@@ -1257,7 +1257,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   //接受非指令消息
   ext.onNotCommandReceived = async (ctx, msg) => {
     try {
-      const { disabledInPrivate, keyWords, condition } = ConfigManager.received;
+      const { disabledInPrivate, triggerRegexes, ignoreRegexes, triggerCondition } = ConfigManager.received;
       if (ctx.isPrivate && disabledInPrivate) {
         return;
       }
@@ -1270,45 +1270,58 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       let images: Image[] = [];
       const ai = AIManager.getAI(id);
 
+      // 非指令消息忽略
+      const ignoreRegex = ignoreRegexes.join('|');
+      if (ignoreRegex) {
+        let pattern: RegExp;
+        try {
+          pattern = new RegExp(ignoreRegex);
+        } catch (e) {
+          logger.error(`正则表达式错误，内容:${ignoreRegex}，错误信息:${e.message}`);
+        }
+
+        if (pattern && pattern.test(message)) {
+          logger.info(`非指令消息忽略:${message}`);
+          return;
+        }
+      }
+
       // 检查CQ码
       const CQTypes = parseText(message).filter(item => item.type !== 'text').map(item => item.type);
       if (CQTypes.length === 0 || CQTypes.every(item => CQTypesAllow.includes(item))) {
         clearTimeout(ai.context.timer);
         ai.context.timer = null;
 
-        // 非指令触发
-        for (const keyword of keyWords) {
-          if (!keyword) {
-            continue;
-          }
+        // 非指令消息触发
+        const triggerRegex = triggerRegexes.join('|');
+        if (triggerRegex) {
+          let pattern: RegExp;
           try {
-            const pattern = new RegExp(keyword);
-            if (!pattern.test(message)) {
-              continue;
-            }
-          } catch (error) {
-            logger.error(`正则表达式错误，内容:${keyword}，错误信息:${error}`);
-            continue;
+            pattern = new RegExp(triggerRegex);
+          } catch (e) {
+            logger.error(`正则表达式错误，内容:${triggerRegex}，错误信息:${e.message}`);
           }
 
-          const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-          if (fmtCondition === 1) {
-            // 图片偷取，以及图片转文字
-            if (CQTypes.includes('image')) {
-              const result = await ImageManager.handleImageMessage(ctx, message);
-              message = result.message;
-              images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+          if (pattern && pattern.test(message)) {
+            const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
+            if (fmtCondition === 1) {
+              // 图片偷取，以及图片转文字
+              if (CQTypes.includes('image')) {
+                const result = await ImageManager.handleImageMessage(ctx, message);
+                message = result.message;
+                images = result.images;
+                if (ai.image.stealStatus) {
+                  ai.image.updateImageList(images);
+                }
               }
+
+              await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
+
+              logger.info('非指令触发回复');
+              await ai.chat(ctx, msg);
+              AIManager.saveAI(id);
+              return;
             }
-
-            await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
-
-            logger.info('非指令触发回复');
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
           }
         }
 

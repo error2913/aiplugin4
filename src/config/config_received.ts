@@ -12,8 +12,11 @@ export class ReceivedConfig {
         seal.ext.registerStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件", '1', "使用豹语表达式，例如：$t群号_RAW=='2001'");
         seal.ext.registerTemplateConfig(ReceivedConfig.ext, "非指令消息触发正则表达式", [
             "\\[CQ:at,qq=748569109\\]",
-            "^正确正确确"
-        ], "使用正则表达式进行匹配");
+            "^正确.*。$"
+        ], "");
+        seal.ext.registerTemplateConfig(ReceivedConfig.ext, "非指令消息忽略正则表达式", [
+            "^忽略这句话$"
+        ], "匹配的消息不会接收录入上下文");
         seal.ext.registerIntConfig(ReceivedConfig.ext, "触发次数上限", 3, "");
         seal.ext.registerIntConfig(ReceivedConfig.ext, "触发次数补充间隔/s", 3, "");
     }
@@ -23,8 +26,9 @@ export class ReceivedConfig {
             allcmd: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入指令消息"),
             allmsg: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入所有骰子发送的消息"),
             disabledInPrivate: seal.ext.getBoolConfig(ReceivedConfig.ext, "私聊内不可用"),
-            keyWords: seal.ext.getTemplateConfig(ReceivedConfig.ext, "非指令消息触发正则表达式"),
-            condition: seal.ext.getStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件"),
+            triggerRegexes: seal.ext.getTemplateConfig(ReceivedConfig.ext, "非指令消息触发正则表达式"),
+            ignoreRegexes: seal.ext.getTemplateConfig(ReceivedConfig.ext, "非指令消息忽略正则表达式"),
+            triggerCondition: seal.ext.getStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件"),
             bucketLimit: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数上限"),
             fillInterval: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数补充间隔/s")
         }
