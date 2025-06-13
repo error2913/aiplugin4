@@ -188,6 +188,10 @@ export class Context {
     async findUserId(ctx: seal.MsgContext, name: string | number, findInFriendList: boolean = false): Promise<string> {
         name = String(name);
 
+        if (!name) {
+            return null;
+        }
+
         if (name.length > 4 && !isNaN(parseInt(name))) {
             const uid = `QQ:${name}`;
             return this.ignoreList.includes(uid) ? null : uid;
@@ -260,6 +264,10 @@ export class Context {
 
     async findGroupId(ctx: seal.MsgContext, groupName: string | number): Promise<string> {
         groupName = String(groupName);
+
+        if (!groupName) {
+            return null;
+        }
 
         if (groupName.length > 5 && !isNaN(parseInt(groupName))) {
             return `QQ-Group:${groupName}`;
