@@ -205,6 +205,8 @@ declare namespace seal {
     // 暂不提供，未来可能有变化
     specialExecuteTimes: number;
     // 但是额外指出， `ra10#50` 时此项 = 10，并且 argv[0] 会被处理为 50；请注意这一点
+    rawText: string;
+    // 原始文本
 
     /** 获取关键字参数，如“.ra 50 --key=20 --asm”时，有两个kwarg，一个叫key，一个叫asm */
     getKwarg(key: string): Kwarg;

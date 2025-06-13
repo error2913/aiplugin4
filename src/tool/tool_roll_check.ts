@@ -80,7 +80,7 @@ export function registerRollCheck() {
             ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
         }
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args2);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, args2, [], []);
 
         ToolManager.cmdArgs.specialExecuteTimes = 1;
 
@@ -94,6 +94,10 @@ export function registerRollCheck() {
     ToolManager.toolMap[info.function.name] = tool;
 }
 
+// 该函数疑似无法正常工作。无法找到原因。
+// 表现：使用该函数时，san值会被异常清0
+// 调试发现正常指令的cmdArgs与该函数构建的完全一致的情况下也能触发bug
+// 推测：构建的临时ctx导致bug，详细原因不明，期待后续修复
 export function registerSanCheck() {
     const info: ToolInfo = {
         type: "function",
@@ -138,13 +142,18 @@ export function registerSanCheck() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
+        const value = seal.vars.intGet(ctx, 'san')[0]; console.log(value)
+        if (value === 0) {
+            seal.vars.intSet(ctx, 'san', 60);
+        }
+
         const args2 = [];
         if (additional_dice) {
             args2.push(additional_dice);
         }
         args2.push(expression);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, ...args2);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, args2, [], []);
         if (!success) {
             return 'san check执行失败';
         }

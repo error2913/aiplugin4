@@ -218,16 +218,18 @@ export class ToolManager {
      * @param cmdArgs
      * @param args
      */
-    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, ai: AI, cmdInfo: CmdInfo, ...args: string[]): Promise<[string, boolean]> {
+    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, ai: AI, cmdInfo: CmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
         const cmdArgs = this.cmdArgs;
         cmdArgs.command = cmdInfo.name;
         cmdArgs.args = cmdInfo.fixedArgs.concat(args);
-        cmdArgs.kwargs = [];
-        cmdArgs.at = [];
-        cmdArgs.rawArgs = cmdArgs.args.join(' ');
-        cmdArgs.amIBeMentioned = false;
-        cmdArgs.amIBeMentionedFirst = false;
+        cmdArgs.kwargs = kwargs;
+        cmdArgs.at = at;
+        cmdArgs.rawArgs = `${cmdArgs.args.join(' ')} ${kwargs.map(item => `--${item.name}${item.valueExists ? `=${item.value}` : ``}`).join(' ')}`;
+        cmdArgs.amIBeMentioned = at.findIndex(item => item.userId === ctx.endPoint.userId) !== -1;
+        cmdArgs.amIBeMentionedFirst = at[0].userId === ctx.endPoint.userId;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
+        cmdArgs.specialExecuteTimes = 0;
+        cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/\D+/g, '')}]`).join(' ')}`;
 
         const ext = seal.ext.find(cmdInfo.ext);
         if (!ext.cmdMap.hasOwnProperty(cmdInfo.name)) {

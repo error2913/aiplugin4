@@ -38,7 +38,7 @@ export function registerAttrShow() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
         if (!success) {
             return '展示失败';
         }

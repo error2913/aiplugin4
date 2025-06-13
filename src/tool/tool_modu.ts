@@ -21,7 +21,7 @@ export function registerModuRoll() {
         fixedArgs: ['roll']
     }
     tool.solve = async (ctx, msg, ai, _) => {
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
         if (!success) {
             return '今日人品查询失败';
         }
@@ -60,7 +60,7 @@ export function registerModuSearch() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, name);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [name], [], []);
         if (!success) {
             return '今日人品查询失败';
         }
