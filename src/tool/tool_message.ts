@@ -2,7 +2,7 @@ import { AIManager } from "../AI/AI";
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
 import { ConfigManager, CQTYPESALLOW } from "../config/config";
-import { replyToSender, transformMsgIdBack } from "../utils/utils";
+import { replyToSender, transformMsgId, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { handleReply, transformArrayToText } from "../utils/utils_string";
 import { Tool, ToolInfo, ToolManager } from "./tool";
@@ -154,6 +154,7 @@ export function registerGetMsg() {
     const tool = new Tool(info);
     tool.solve = async (ctx, _, ai, args) => {
         const { msg_id } = args;
+        const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
 
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
@@ -165,7 +166,7 @@ export function registerGetMsg() {
             const epId = ctx.endPoint.userId;
             const result = await globalThis.http.getData(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
             const CQTypes = result.message.filter(item => item.type !== 'text').map(item => item.type);
-            let message = transformArrayToText(result.message.filter((item) => CQTYPESALLOW.includes(item.type)));
+            let message = transformArrayToText(result.message.filter((item) => item.type === 'text' || CQTYPESALLOW.includes(item.type)));
             let images: Image[] = [];
 
             // 图片偷取，以及图片转文字
@@ -181,7 +182,49 @@ export function registerGetMsg() {
             // 将images添加到最后一条消息，以便使用
             ai.context.messages[ai.context.messages.length - 1].images.push(...images);
 
-            return message;
+            //处理文本
+            message = message
+                .replace(/\[CQ:(.*?),(?:qq|id)=(-?\d+)\]/g, (_, p1, p2) => {
+                    switch (p1) {
+                        case 'at': {
+                            const epId = ctx.endPoint.userId;
+                            const gid = ctx.group.groupId;
+                            const uid = `QQ:${p2}`;
+                            const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                            const mctx = createCtx(epId, mmsg);
+                            const name = mctx.player.name || '未知用户';
+
+                            return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                        }
+                        case 'poke': {
+                            const epId = ctx.endPoint.userId;
+                            const gid = ctx.group.groupId;
+                            const uid = `QQ:${p2}`;
+                            const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                            const mctx = createCtx(epId, mmsg);
+                            const name = mctx.player.name || '未知用户';
+
+                            return `<|poke:${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                        }
+                        case 'reply': {
+                            return showMsgId ? `<|quote:${transformMsgId(p2)}|>` : ``;
+                        }
+                        default: {
+                            return '';
+                        }
+                    }
+
+                })
+                .replace(/\[CQ:.*?\]/g, '')
+
+            const gid = ctx.group.groupId;
+            const uid = `QQ:${result.sender.user_id}`;
+            const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+            const mctx = createCtx(epId, mmsg);
+            const name = mctx.player.name || '未知用户';
+            const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>` : '';
+
+            return prefix + message;
         } catch (e) {
             logger.error(e);
             return `获取消息信息失败`;
