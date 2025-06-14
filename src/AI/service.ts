@@ -57,7 +57,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 
                         ai.context.addToolCallsMessage(message.tool_calls);
 
-                        let tool_choice = 'none';
+                        let tool_choice = 'auto';
                         try {
                             tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
                         } catch (e) {

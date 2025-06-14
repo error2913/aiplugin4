@@ -7,7 +7,7 @@ import { ReplyConfig } from "./config_reply";
 import { RequestConfig } from "./config_request";
 import { ToolConfig } from "./config_tool";
 
-export const VERSION = "4.9.1";
+export const VERSION = "4.9.2";
 export const AUTHOR = "baiyu&错误";
 export const CQTYPESALLOW = ["at", "image", "reply", "face", "poke"];
 

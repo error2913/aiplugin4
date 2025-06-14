@@ -75,7 +75,7 @@ export class Tool {
             fixedArgs: []
         }
         this.type = "all"
-        this.tool_choice = 'none';
+        this.tool_choice = 'auto';
         this.solve = async (_, __, ___, ____) => "函数未实现";
     }
 
@@ -370,13 +370,13 @@ export class ToolManager {
             if (args !== null && typeof args !== 'object') {
                 logger.warning(`调用函数失败:arguement不是一个object`);
                 await ai.context.addToolMessage(tool_call.id, `调用函数失败:arguement不是一个object`);
-                return "none";
+                return "auto";
             }
             for (const key of tool.info.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                     logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                     await ai.context.addToolMessage(tool_call.id, `调用函数失败:缺少必需参数 ${key}`);
-                    return "none";
+                    return "auto";
                 }
             }
 
