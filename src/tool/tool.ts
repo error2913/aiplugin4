@@ -226,7 +226,7 @@ export class ToolManager {
         cmdArgs.at = at;
         cmdArgs.rawArgs = `${cmdArgs.args.join(' ')} ${kwargs.map(item => `--${item.name}${item.valueExists ? `=${item.value}` : ``}`).join(' ')}`;
         cmdArgs.amIBeMentioned = at.findIndex(item => item.userId === ctx.endPoint.userId) !== -1;
-        cmdArgs.amIBeMentionedFirst = at[0].userId === ctx.endPoint.userId;
+        cmdArgs.amIBeMentionedFirst = at?.[0].userId === ctx.endPoint.userId;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
         cmdArgs.specialExecuteTimes = 0;
         cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/\D+/g, '')}]`).join(' ')}`;

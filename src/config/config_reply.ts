@@ -13,8 +13,8 @@ export class ReplyConfig {
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
             "<think>[\\s\\S]*?<\\/think>",
             "(<function_call>[\\s\\S]*?<\\/function_call>)",
-            "[<＜]\\s?[\\|│｜](?:from|msg_id).*?(?:[\\|│｜]\\s?[>＞<＜]|[\\|│｜]|\\s?[>＞<＜])",
-            "([<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞<＜]|[\\|│｜]|\\s?[>＞<＜]))"
+            "[<＜]\\s?[\\|│｜](?:from|msg_id).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
+            "([<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞]))"
         ], "回复加入上下文时，将捕获组内文本保留，发送回复时，将捕获组内文本删除");
         seal.ext.registerBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符", true, "");
     }

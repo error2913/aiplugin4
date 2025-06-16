@@ -32,7 +32,7 @@ export class ConfigManager {
         BackendConfig.register();
     }
 
-    static getCache(key: string, getFunc: () => any) {
+    static getCache<T>(key: string, getFunc: () => T): T {
         const timestamp = Date.now()
         if (this.cache?.[key] && timestamp - this.cache[key].timestamp < 3000) {
             return this.cache[key].data;

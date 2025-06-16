@@ -80,7 +80,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 分离AI臆想出来的多轮对话
     const segments = s
-        .split(/([<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜]))/)
+        .split(/([<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞]|[\|│｜>＞]))/)
         .filter(item => item.trim());
     if (segments.length === 0) {
         return { stringArray: [], replyArray: [], images: [] };
@@ -89,7 +89,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     s = '';
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const match = segment.match(/[<＜]\s?[\|│｜]from[:：]?\s?(.*?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/);
+        const match = segment.match(/[<＜]\s?[\|│｜]from[:：]?\s?(.*?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/);
         if (match) {
             const uid = await context.findUserId(ctx, match[1]);
             if (uid === ctx.endPoint.userId && i < segments.length - 1) {
@@ -102,7 +102,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
-        s = segments.find(segment => !/[<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/.test(segment));
+        s = segments.find(segment => !/[<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/.test(segment));
         if (!s || !s.trim()) {
             return { stringArray: [], replyArray: [], images: [] };
         }
@@ -110,8 +110,8 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
 
     // 分离回复消息和戳一戳消息
     s = s
-        .replace(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g, (match) => `\\f${match}`)
-        .replace(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g, (match) => `\\f${match}\\f`);
+        .replace(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g, (match) => `\\f${match}`)
+        .replace(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g, (match) => `\\f${match}\\f`);
 
     const stringArray: string[] = [];
     const replyArray: string[] = [];
@@ -227,10 +227,10 @@ export function checkRepeat(context: Context, s: string) {
  * @returns 
  */
 async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/[<＜]\s?[\|│｜]@(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g);
+    const match = reply.match(/[<＜]\s?[\|│｜]@(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^[<＜]\s?[\|│｜]@|(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])$/g, '');
+            const name = match[i].replace(/^[<＜]\s?[\|│｜]@|(?:[\|│｜]\s?[>＞]|[\|│｜>＞])$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
@@ -252,10 +252,10 @@ async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: st
  * @returns 
  */
 async function replacePoke(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g);
+    const match = reply.match(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^[<＜]\s?[\|│｜]poke[:：]?\s?|(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])$/g, '');
+            const name = match[i].replace(/^[<＜]\s?[\|│｜]poke[:：]?\s?|(?:[\|│｜]\s?[>＞]|[\|│｜>＞])$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:poke,qq=${uid.replace(/\D+/g, "")}]`);
@@ -275,10 +275,10 @@ async function replacePoke(ctx: seal.MsgContext, context: Context, reply: string
  * @returns 
  */
 async function replaceQuote(reply: string) {
-    const match = reply.match(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g);
+    const match = reply.match(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const msgId = match[i].replace(/^[<＜]\s?[\|│｜]quote[:：]?\s?|(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])$/g, '');
+            const msgId = match[i].replace(/^[<＜]\s?[\|│｜]quote[:：]?\s?|(?:[\|│｜]\s?[>＞]|[\|│｜>＞])$/g, '');
             reply = reply.replace(match[i], `[CQ:reply,id=${transformMsgIdBack(msgId)}]`);
         }
     }
@@ -296,10 +296,10 @@ async function replaceImages(context: Context, reply: string) {
     let result = reply;
     const images = [];
 
-    const match = reply.match(/[<＜]\s?[\|│｜]img:.+?(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/g);
+    const match = reply.match(/[<＜]\s?[\|│｜]img:.+?(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const id = match[i].match(/[<＜]\s?[\|│｜]img:(.+?)(?:[\|│｜]\s?[>＞<＜]|[\|│｜]|\s?[>＞<＜])/)[1].trim().slice(0, 6);
+            const id = match[i].match(/[<＜]\s?[\|│｜]img:(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/)[1].trim().slice(0, 6);
             const image = context.findImage(id);
 
             if (image) {
