@@ -118,7 +118,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     const images: Image[] = [];
     let replyLength = 0;
 
-    // 应用过滤正则表达式，并分割消息
+    // 应用过滤正则表达式，并按照\f分割消息
     // 过滤正则表达式的捕获组会保留在stringArray中
     const filterRegex = filterRegexes.join('|');
     let pattern: RegExp;
@@ -133,31 +133,52 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         const match = segment.match(pattern);
         if (match) {
             if (stringArray.length === 0) {
-                stringArray.push(segment);
+                stringArray.push(match[0]);
                 replyArray.push('');
             } else {
                 stringArray[stringArray.length - 1] += match[0];
+                replyArray[replyArray.length - 1] += '';
             }
         } else {
             const segs = segment.split('\\f').filter(item => item);
 
+            if (segment.startsWith('\\f')) {
+                stringArray.push('');
+                replyArray.push('');
+            }
+
             for (let j = 0; j < segs.length; j++) {
-                const seg = segs[j];
+                let seg = segs[j];
 
                 // 长度超过最大限制，直接截断
-                replyLength += seg.length;
-                if (replyLength > maxChar) {
-                    break;
+                if (replyLength + seg.length > maxChar) {
+                    seg = seg.slice(0, maxChar - replyLength);
                 }
 
                 if (stringArray.length === 0 || j !== 0) {
                     stringArray.push(seg);
                     replyArray.push(seg);
                 } else {
-                    stringArray[stringArray.length - 1] += segs[0];
-                    replyArray[replyArray.length - 1] += segs[0];
+                    stringArray[stringArray.length - 1] += seg;
+                    replyArray[replyArray.length - 1] += seg;
+                }
+
+                // 长度超过最大限制，直接退出
+                replyLength += seg.length;
+                if (replyLength > maxChar) {
+                    break;
                 }
             }
+
+            if (segment.endsWith('\\f')) {
+                stringArray.push('');
+                replyArray.push('');
+            }
+        }
+
+        // 长度超过最大限制，直接退出
+        if (replyLength > maxChar) {
+            break;
         }
     }
 
