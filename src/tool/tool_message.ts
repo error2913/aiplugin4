@@ -49,8 +49,8 @@ export function registerSendMsg() {
 
         const { showNumber } = ConfigManager.message;
         const source = ctx.isPrivate ?
-            `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
-            `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}`;
+            `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/^.+:/, '')})` : ``}` :
+            `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/^.+:/, '')})` : ``}`;
 
         const originalImages = [];
         const match = content.match(/[<＜]\s?[\|│｜]img:.+?(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g);
@@ -194,7 +194,7 @@ export function registerGetMsg() {
                             const mctx = createCtx(epId, mmsg);
                             const name = mctx.player.name || '未知用户';
 
-                            return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                            return `<|@${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
                         }
                         case 'poke': {
                             const epId = ctx.endPoint.userId;
@@ -204,7 +204,7 @@ export function registerGetMsg() {
                             const mctx = createCtx(epId, mmsg);
                             const name = mctx.player.name || '未知用户';
 
-                            return `<|poke:${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                            return `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
                         }
                         case 'reply': {
                             return showMsgId ? `<|quote:${transformMsgId(p2)}|>` : ``;
@@ -222,7 +222,7 @@ export function registerGetMsg() {
             const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
             const mctx = createCtx(epId, mmsg);
             const name = mctx.player.name || '未知用户';
-            const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>` : '';
+            const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
 
             return prefix + message;
         } catch (e) {
@@ -266,15 +266,15 @@ export function registerDeleteMsg() {
         try {
             const epId = ctx.endPoint.userId;
             const result = await globalThis.http.getData(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            if (result.sender.user_id != epId.replace(/\D+/g, '')) {
+            if (result.sender.user_id != epId.replace(/^.+:/, '')) {
                 if (result.sender.role == 'owner' || result.sender.role == 'admin') {
                     return `你没有权限撤回该消息`;
                 }
 
                 try {
                     const epId = ctx.endPoint.userId;
-                    const group_id = ctx.group.groupId.replace(/\D+/g, '');
-                    const user_id = epId.replace(/\D+/g, '');
+                    const group_id = ctx.group.groupId.replace(/^.+:/, '');
+                    const user_id = epId.replace(/^.+:/, '');
                     const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
                     if (result.role !== 'owner' && result.role !== 'admin') {
                         return `你没有管理员权限`;

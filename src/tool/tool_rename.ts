@@ -35,8 +35,8 @@ export function registerRename() {
         if (ext) {
             try {
                 const epId = ctx.endPoint.userId;
-                const group_id = ctx.group.groupId.replace(/\D+/g, '');
-                const user_id = epId.replace(/\D+/g, '');
+                const group_id = ctx.group.groupId.replace(/^.+:/, '');
+                const user_id = epId.replace(/^.+:/, '');
                 const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
                 if (result.role !== 'owner' && result.role !== 'admin') {
                     return `你没有管理员权限`;

@@ -229,7 +229,7 @@ export class ToolManager {
         cmdArgs.amIBeMentionedFirst = at?.[0]?.userId === ctx.endPoint.userId;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
         cmdArgs.specialExecuteTimes = 0;
-        cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/\D+/g, '')}]`).join(' ')}`;
+        cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
 
         const ext = seal.ext.find(cmdInfo.ext);
         if (!ext.cmdMap.hasOwnProperty(cmdInfo.name)) {

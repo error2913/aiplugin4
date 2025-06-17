@@ -78,7 +78,7 @@ export class Memory {
             s += this.memoryList.map((item, i) => {
                 const source = item.isPrivate ?
                     `私聊` :
-                    `群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/\D+/g, '')})` : ``}`;
+                    `群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/^.+:/, '')})` : ``}`;
 
                 return `${i + 1}. 时间:${item.time}
     来源:${source}
@@ -112,7 +112,7 @@ export class Memory {
         } else {
             // 群聊记忆
             const gid = ctx.group.groupId;
-            let s = `\n- 关于群聊:<${ctx.group.groupName}>${showNumber ? `(${gid.replace(/\D+/g, '')})` : ``}:`;
+            let s = `\n- 关于群聊:<${ctx.group.groupName}>${showNumber ? `(${gid.replace(/^.+:/, '')})` : ``}:`;
             s += this.buildGroupMemoryPrompt();
 
             // 群内用户的个人记忆
@@ -130,7 +130,7 @@ export class Memory {
 
                 const ai = AIManager.getAI(uid);
 
-                s += `\n\n关于<${name}>${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}:`;
+                s += `\n\n关于<${name}>${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}:`;
                 s += ai.memory.buildPersonMemoryPrompt();
 
                 arr.push(uid);

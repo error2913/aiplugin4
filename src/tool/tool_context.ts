@@ -83,7 +83,7 @@ export function registerGetContext() {
             const prefix = (isPrefix && message.name) ? (
                 message.name.startsWith('_') ?
                     `<|${message.name}|>` :
-                    `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
+                    `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
             ) : '';
 
             const content = message.msgIdArray.map((msgId, index) => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');

@@ -72,7 +72,7 @@ export class Context {
                         const mctx = createCtx(epId, mmsg);
                         const name = mctx.player.name || '未知用户';
 
-                        return `<|@${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                        return `<|@${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
                     }
                     case 'poke': {
                         const epId = ctx.endPoint.userId;
@@ -82,7 +82,7 @@ export class Context {
                         const mctx = createCtx(epId, mmsg);
                         const name = mctx.player.name || '未知用户';
 
-                        return `<|poke:${name}${showNumber ? `(${uid.replace(/\D+/g, '')})` : ``}|>`;
+                        return `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
                     }
                     case 'reply': {
                         return showMsgId ? `<|quote:${transformMsgId(p2)}|>` : ``;
@@ -230,7 +230,7 @@ export class Context {
 
             if (!ctx.isPrivate) {
                 const gid = ctx.group.groupId;
-                const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, '')}`);
+                const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
                 for (let i = 0; i < data.length; i++) {
                     if (name === data[i].card || name === data[i].nickname) {
                         const uid = `QQ:${data[i].user_id}`;

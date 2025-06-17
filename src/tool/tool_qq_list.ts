@@ -89,7 +89,7 @@ export function registerGetGroupMemberList() {
         try {
             const epId = ctx.endPoint.userId;
             const gid = ctx.group.groupId;
-            const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/\D+/g, '')}`);
+            const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
 
             if (role === 'owner') {
                 const owner = data.find((item: any) => item.role === role);
@@ -258,7 +258,7 @@ export function registerSearchCommonGroup() {
             const arr = [];
             for (const group_info of data) {
                 const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${group_info.group_id}`);
-                const user_info = data.find((user_info: any) => user_info.user_id.toString() === uid.replace(/\D+/g, ''));
+                const user_info = data.find((user_info: any) => user_info.user_id.toString() === uid.replace(/^.+:/, ''));
                 if (user_info) {
                     arr.push({ group_info, user_info });
                 }

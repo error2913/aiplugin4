@@ -45,7 +45,7 @@ export function registerGetPersonInfo() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const user_id = ctx.player.userId.replace(/\D+/g, '');
+            const user_id = ctx.player.userId.replace(/^.+:/, '');
             const data = await globalThis.http.getData(epId, `get_stranger_info?user_id=${user_id}`);
 
             let s = `昵称: ${data.nickname}

@@ -47,8 +47,8 @@ export function registerBan() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            const user_id = epId.replace(/\D+/g, '');
+            const group_id = ctx.group.groupId.replace(/^.+:/, '');
+            const user_id = epId.replace(/^.+:/, '');
             const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
             if (result.role !== 'owner' && result.role !== 'admin') {
                 return `你没有管理员权限`;
@@ -60,8 +60,8 @@ export function registerBan() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            const user_id = uid.replace(/\D+/g, '');
+            const group_id = ctx.group.groupId.replace(/^.+:/, '');
+            const user_id = uid.replace(/^.+:/, '');
             const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
             if (result.role === 'owner' || result.role === 'admin') {
                 return `你无法禁言${result.role === 'owner' ? '群主' : '管理员'}`;
@@ -73,8 +73,8 @@ export function registerBan() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            const user_id = uid.replace(/\D+/g, '');
+            const group_id = ctx.group.groupId.replace(/^.+:/, '');
+            const user_id = uid.replace(/^.+:/, '');
             await globalThis.http.getData(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
             return `已禁言<${name}> ${duration}秒`;
         } catch (e) {
@@ -119,7 +119,7 @@ export function registerWholeBan() {
         try {
             const epId = ctx.endPoint.userId;
             const gid = ctx.group.groupId;
-            await globalThis.http.getData(epId, `set_group_whole_ban?group_id=${gid.replace(/\D+/g, '')}&enable=${enable}`);
+            await globalThis.http.getData(epId, `set_group_whole_ban?group_id=${gid.replace(/^.+:/, '')}&enable=${enable}`);
             return `已${enable ? '开启' : '关闭'}全员禁言`;
         } catch (e) {
             logger.error(e);
@@ -157,7 +157,7 @@ export function registerGetBanList() {
         try {
             const epId = ctx.endPoint.userId;
             const gid = ctx.group.groupId;
-            const data = await globalThis.http.getData(epId, `get_group_shut_list?group_id=${gid.replace(/\D+/g, '')}`);
+            const data = await globalThis.http.getData(epId, `get_group_shut_list?group_id=${gid.replace(/^.+:/, '')}`);
 
             const s = `被禁言成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
                 return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${new Date(item.shutUpTime * 1000).toLocaleString()}`;

@@ -254,7 +254,7 @@ async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: st
             const name = match[i].replace(/^[<＜]\s?[\|│｜]@|(?:[\|│｜]\s?[>＞]|[\|│｜>＞])$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
-                reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/\D+/g, "")}]`);
+                reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`);
             } else {
                 logger.warning(`无法找到用户：${name}`);
                 reply = reply.replace(match[i], ` @${name} `);
@@ -279,7 +279,7 @@ async function replacePoke(ctx: seal.MsgContext, context: Context, reply: string
             const name = match[i].replace(/^[<＜]\s?[\|│｜]poke[:：]?\s?|(?:[\|│｜]\s?[>＞]|[\|│｜>＞])$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
-                reply = reply.replace(match[i], `[CQ:poke,qq=${uid.replace(/\D+/g, "")}]`);
+                reply = reply.replace(match[i], `[CQ:poke,qq=${uid.replace(/^.+:/, "")}]`);
             } else {
                 logger.warning(`无法找到用户：${name}`);
                 reply = reply.replace(match[i], '');

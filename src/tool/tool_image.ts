@@ -93,14 +93,14 @@ export function registerCheckAvatar() {
                 return `未找到<${name}>`;
             }
 
-            url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/\D+/g, '')}&s=640`;
+            url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
         } else if (avatar_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
                 return `未找到<${name}>`;
             }
 
-            url = `https://p.qlogo.cn/gh/${gid.replace(/\D+/g, '')}/${gid.replace(/\D+/g, '')}/640`;
+            url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
         } else {
             return `未知的头像类型<${avatar_type}>`;
         }

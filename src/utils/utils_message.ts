@@ -33,9 +33,10 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     let content = roleSettingTemplate[roleSettingIndex];
 
     content += `\n\n**聊天相关信息**`;
+    content += `\n- 当前平台:${ctx.endPoint.platform}`;
     content += ctx.isPrivate ?
-        `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/\D+/g, '')})` : ``}` :
-        `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/\D+/g, '')})` : ``}\n- <|@xxx|>表示@某个群成员\n- <|poke:xxx|>表示戳一戳某个群成员`;
+        `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/^.+:/, '')})` : ``}` :
+        `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/^.+:/, '')})` : ``}\n- <|@xxx|>表示@某个群成员\n- <|poke:xxx|>表示戳一戳某个群成员`;
     content += isPrefix ? `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用` : ``;
     content += showMsgId ? `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用\n- <|quote:xxx|>表示引用消息，xxx为对应的消息ID` : ``;
     content += `\n- \\f用于分割多条消息`
@@ -215,7 +216,7 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
         const prefix = (isPrefix && message.name) ? (
             message.name.startsWith('_') ?
                 `<|${message.name}|>` :
-                `<|from:${message.name}${showNumber ? `(${message.uid.replace(/\D+/g, '')})` : ``}|>`
+                `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
         ) : '';
 
         const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');

@@ -31,7 +31,7 @@ export function registerGroupSign() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
+            const group_id = ctx.group.groupId.replace(/^.+:/, '');
             await globalThis.http.getData(epId, `send_group_sign?group_id=${group_id.replace(/\D+/, '')}`);
             return `已发送群打卡，若无响应可能今日已打卡`;
         } catch (e) {

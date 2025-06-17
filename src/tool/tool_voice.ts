@@ -127,7 +127,7 @@ export function registerTextToSound() {
 
                 const characterId = characterMap[character];
                 const epId = ctx.endPoint.userId;
-                const group_id = ctx.group.groupId.replace(/\D+/g, '');
+                const group_id = ctx.group.groupId.replace(/^.+:/, '');
                 await globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
             }
 

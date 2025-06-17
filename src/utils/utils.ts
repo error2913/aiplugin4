@@ -40,8 +40,8 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
             const messageArray = transformTextToArray(s);
 
             const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/\D+/g, '');
-            const user_id = ctx.player.userId.replace(/\D+/g, '');
+            const group_id = ctx.group.groupId.replace(/^.+:/, '');
+            const user_id = ctx.player.userId.replace(/^.+:/, '');
             if (msg.messageType === 'private') {
                 const data = {
                     user_id,
