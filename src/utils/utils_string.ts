@@ -140,9 +140,9 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
                 replyArray[replyArray.length - 1] += '';
             }
         } else {
-            const segs = segment.split('\\f').filter(item => item);
+            const segs = segment.split(/\\f|\f/g).filter(item => item);
 
-            if (segment.startsWith('\\f')) {
+            if (segment.startsWith('\\f') || segment.startsWith('\f')) {
                 stringArray.push('');
                 replyArray.push('');
             }
@@ -170,7 +170,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
                 }
             }
 
-            if (segment.endsWith('\\f')) {
+            if (segment.endsWith('\\f') || segment.endsWith('\f')) {
                 stringArray.push('');
                 replyArray.push('');
             }
