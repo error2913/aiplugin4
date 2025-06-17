@@ -379,36 +379,36 @@ function main() {
           const ai2 = AIManager.getAI(muid);
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
-            case 'st': {
-              const s = cmdArgs.getRestArgsFrom(3);
-              switch (s) {
-                case '': {
-                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo st <内容>】设置个人设定，【.ai memo st clr】清除个人设定');
-                  return ret;
-                }
-                case 'clr': {
-                  ai2.memory.persona = '无';
-                  seal.replyToSender(ctx, msg, '设定已清除');
-                  AIManager.saveAI(muid);
-                  return ret;
-                }
-                default: {
-                  if (s.length > 20) {
-                    seal.replyToSender(ctx, msg, '设定过长，请控制在20字以内');
-                    return ret;
-                  }
-                  ai2.memory.persona = s;
-                  seal.replyToSender(ctx, msg, '设定已修改');
-                  AIManager.saveAI(muid);
-                  return ret;
-                }
-              }
-            }
             case 'private': {
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
+                case 'st': {
+                  const s = cmdArgs.getRestArgsFrom(4);
+                  switch (s) {
+                    case '': {
+                      seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private st <内容>】设置个人设定，【.ai memo private st clr】清除个人设定');
+                      return ret;
+                    }
+                    case 'clr': {
+                      ai2.memory.persona = '无';
+                      seal.replyToSender(ctx, msg, '设定已清除');
+                      AIManager.saveAI(muid);
+                      return ret;
+                    }
+                    default: {
+                      if (s.length > 20) {
+                        seal.replyToSender(ctx, msg, '设定过长，请控制在20字以内');
+                        return ret;
+                      }
+                      ai2.memory.persona = s;
+                      seal.replyToSender(ctx, msg, '设定已修改');
+                      AIManager.saveAI(muid);
+                      return ret;
+                    }
+                  }
+                }
                 case 'show': {
-                  const s = ai2.memory.buildPersonMemoryPrompt();
+                  const s = ai2.memory.buildMemory(mctx, mctx.player.name, mctx.player.userId);
                   seal.replyToSender(ctx, msg, s);
                   return ret;
                 }
@@ -419,7 +419,7 @@ function main() {
                     return ret;
                   }
                   ai2.memory.delMemory(indexList);
-                  const s = ai2.memory.buildPersonMemoryPrompt();
+                  const s = ai2.memory.buildMemory(mctx, mctx.player.name, mctx.player.userId);
                   seal.replyToSender(ctx, msg, s);
                   AIManager.saveAI(muid);
                   return ret;
@@ -448,8 +448,33 @@ function main() {
               }
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
+                case 'st': {
+                  const s = cmdArgs.getRestArgsFrom(4);
+                  switch (s) {
+                    case '': {
+                      seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group st <内容>】设置群聊设定，【.ai memo group st clr】清除群聊设定');
+                      return ret;
+                    }
+                    case 'clr': {
+                      ai.memory.persona = '无';
+                      seal.replyToSender(ctx, msg, '设定已清除');
+                      AIManager.saveAI(id);
+                      return ret;
+                    }
+                    default: {
+                      if (s.length > 30) {
+                        seal.replyToSender(ctx, msg, '设定过长，请控制在30字以内');
+                        return ret;
+                      }
+                      ai.memory.persona = s;
+                      seal.replyToSender(ctx, msg, '设定已修改');
+                      AIManager.saveAI(id);
+                      return ret;
+                    }
+                  }
+                }
                 case 'show': {
-                  const s = ai.memory.buildGroupMemoryPrompt();
+                  const s = ai.memory.buildMemory(ctx);
                   seal.replyToSender(ctx, msg, s);
                   return ret;
                 }
@@ -460,7 +485,7 @@ function main() {
                     return ret;
                   }
                   ai.memory.delMemory(indexList);
-                  const s = ai.memory.buildGroupMemoryPrompt();
+                  const s = ai.memory.buildMemory(ctx);
                   seal.replyToSender(ctx, msg, s);
                   AIManager.saveAI(id);
                   return ret;
@@ -479,11 +504,13 @@ function main() {
             }
             default: {
               seal.replyToSender(ctx, msg, `帮助:
-【.ai memo st <内容>】设置个人设定
-【.ai memo st clr】清除个人设定
+【.ai memo private st <内容>】设置个人设定
+【.ai memo private st clr】清除个人设定
 【.ai memo private show】展示个人记忆
 【.ai memo private del <序号1> <序号2>】删除个人记忆
 【.ai memo private clr】清除个人记忆
+【.ai memo group st <内容>】设置群聊设定
+【.ai memo group st clr】清除群聊设定
 【.ai memo group show】展示群聊记忆
 【.ai memo group del <序号1> <序号2>】删除群聊记忆
 【.ai memo group clr】清除群聊记忆`);

@@ -188,7 +188,7 @@ export function registerShowMemory() {
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(uid);
-            return ai.memory.buildPersonMemoryPrompt();
+            return ai.memory.buildMemory(ctx, ctx.player.name, ctx.player.userId);
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
@@ -202,7 +202,7 @@ export function registerShowMemory() {
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(gid);
-            return ai.memory.buildGroupMemoryPrompt();
+            return ai.memory.buildMemory(ctx);
         } else {
             return `未知的记忆类型<${memory_type}>`;
         }

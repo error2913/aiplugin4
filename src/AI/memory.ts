@@ -1,3 +1,4 @@
+import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
 import { AIManager } from "./AI";
 import { Context } from "./context";
@@ -67,53 +68,59 @@ export class Memory {
         }
     }
 
-    buildPersonMemoryPrompt(): string {
+    /**
+     * 
+     * @param ctx 
+     * @param name 构建个人记忆时传入
+     * @param uid 构建个人记忆时传入
+     * @returns 
+     */
+    buildMemory(ctx: seal.MsgContext, name: string = '', uid: string = ''): string {
         const { showNumber } = ConfigManager.message;
-        
-        let s = `\n- 设定:${this.persona}\n- 记忆:\n`;
+        const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.tool;
 
+        let memoryContent = '';
         if (this.memoryList.length === 0) {
-            s += '无';
+            memoryContent += '无';
         } else {
-            s += this.memoryList.map((item, i) => {
-                const source = item.isPrivate ?
-                    `私聊` :
-                    `群聊<${item.group.groupName}>${showNumber ? `(${item.group.groupId.replace(/^.+:/, '')})` : ``}`;
-
-                return `${i + 1}. 时间:${item.time}
-    来源:${source}
-    内容:${item.content}`;
+            memoryContent += this.memoryList.map((item, i) => {
+                const data = {
+                    "序号": i + 1,
+                    "记忆时间": item.time,
+                    "个人记忆": uid, //有uid代表这是个人记忆
+                    "私聊": item.isPrivate,
+                    "展示号码": showNumber,
+                    "群聊名称": item.group.groupName,
+                    "群聊号码": item.group.groupId.replace(/^.+:/, ''),
+                    "记忆内容": item.content
+                }
+                
+                const template = Handlebars.compile(memorySingleShowTemplate[0]);
+                return template(data);
             }).join('\n');
         }
 
-        return s;
-    }
-
-    buildGroupMemoryPrompt(): string {
-        let s = `\n- 记忆:\n`;
-
-        if (this.memoryList.length === 0) {
-            s += '无';
-        } else {
-            s += this.memoryList.map((item, i) => {
-                return `${i + 1}. 时间:${item.time}
-    内容:${item.content}`;
-            }).join('\n');
+        const data = {
+            "私聊": ctx.isPrivate,
+            "展示号码": showNumber,
+            "用户名称": name,
+            "用户号码": uid.replace(/^.+:/, ''),
+            "群聊名称": ctx.group.groupName,
+            "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
+            "设定": this.persona,
+            "记忆列表": memoryContent
         }
 
-        return s;
+        const template = Handlebars.compile(memoryShowTemplate[0]);
+        return template(data);
     }
 
     buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
-        const { showNumber } = ConfigManager.message;
-
         if (ctx.isPrivate) {
-            return this.buildPersonMemoryPrompt();
+            return this.buildMemory(ctx, ctx.player.name, ctx.player.userId);
         } else {
             // 群聊记忆
-            const gid = ctx.group.groupId;
-            let s = `\n- 关于群聊:<${ctx.group.groupName}>${showNumber ? `(${gid.replace(/^.+:/, '')})` : ``}:`;
-            s += this.buildGroupMemoryPrompt();
+            let s = this.buildMemory(ctx);
 
             // 群内用户的个人记忆
             const arr = [];
@@ -130,8 +137,7 @@ export class Memory {
 
                 const ai = AIManager.getAI(uid);
 
-                s += `\n\n关于<${name}>${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}:`;
-                s += ai.memory.buildPersonMemoryPrompt();
+                s += ai.memory.buildMemory(ctx, name, uid);
 
                 arr.push(uid);
             }

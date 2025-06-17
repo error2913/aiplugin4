@@ -1,3 +1,4 @@
+import Handlebars from "handlebars";
 import { AI } from "../AI/AI";
 import { Message } from "../AI/context";
 import { logger } from "../AI/logger";
@@ -5,7 +6,7 @@ import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
+    const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
     const { isTool, usePromptEngineering, isMemory } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
@@ -30,67 +31,41 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         roleSettingIndex = 0;
     }
 
-    let content = roleSettingTemplate[roleSettingIndex];
-
-    content += `\n\n**聊天相关信息**`;
-    content += `\n- 当前平台:${ctx.endPoint.platform}`;
-    content += ctx.isPrivate ?
-        `\n- 当前私聊:<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/^.+:/, '')})` : ``}` :
-        `\n- 当前群聊:<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/^.+:/, '')})` : ``}\n- <|@xxx|>表示@某个群成员\n- <|poke:xxx|>表示戳一戳某个群成员`;
-    content += isPrefix ? `\n- <|from:xxx|>表示消息来源，不要在生成的回复中使用` : ``;
-    content += showMsgId ? `\n- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用\n- <|quote:xxx|>表示引用消息，xxx为对应的消息ID` : ``;
-    content += `\n- \\f用于分割多条消息`
-
-    if (receiveImage) {
-        content += condition === '0' ?
-            `\n- <|img:xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|img:xxxxxx|>的格式` :
-            `\n- <|img:xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|img:xxxxxx|>的格式`;
-    }
-
-    if (Object.keys(localImages).length !== 0) {
-        content += `\n- 可使用<|img:图片名称|>发送表情包，表情名称有:${Object.keys(localImages).join("、")}`;
-    }
-
     // 记忆
+    let memoryPrompt = '';
     if (isMemory) {
-        const memeryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
-        content += memeryPrompt ?
-            `\n\n**记忆**
-如果记忆与上述设定冲突，请遵守角色设定。记忆如下:
-${memeryPrompt}` :
-            ``;
+        memoryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
     }
 
     // 调用函数
+    let toolsPrompt = '';
     if (isTool && usePromptEngineering) {
-        const tools = ai.tool.getToolsInfo(ctx.isPrivate ? 'private' : 'group');
-        if (tools && tools.length > 0) {
-            const toolsPrompt = tools.map((item, index) => {
-                return `${index + 1}. 名称:${item.function.name}
-    - 描述:${item.function.description}
-    - 参数信息:${JSON.stringify(item.function.parameters.properties, null, 2)}
-    - 必需参数:${item.function.parameters.required.join('\n')}`;
-            }).join('\n');
-
-            content += `\n**调用函数**
-当需要调用函数功能时，请严格使用以下格式：
-
-<function_call>
-{
-    "name": "函数名",
-    "arguments": {
-        "参数1": "值1",
-        "参数2": "值2"
+        toolsPrompt = ai.tool.getToolsPrompt(ctx);
     }
-}
-</function_call>
 
-要用成对的标签包裹，标签外不要附带其他文本，且每次只能调用一次函数
-
-可用函数列表:
-${toolsPrompt}`;
-        }
+    const data = {
+        "角色设定": roleSettingTemplate[roleSettingIndex],
+        "平台": ctx.endPoint.platform,
+        "私聊": ctx.isPrivate,
+        "展示号码": showNumber,
+        "用户名称": ctx.player.name,
+        "用户号码": ctx.player.userId.replace(/^.+:/, ''),
+        "群聊名称": ctx.group.groupName,
+        "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
+        "添加前缀": isPrefix,
+        "展示消息ID": showMsgId,
+        "接收图片": receiveImage,
+        "图片条件不为零": condition !== '0',
+        "本地图片不为空": Object.keys(localImages).length !== 0,
+        "本地图片名称": Object.keys(localImages).join("、"),
+        "开启记忆": isMemory && memoryPrompt,
+        "记忆信息": memoryPrompt,
+        "开启工具函数提示词": isTool && usePromptEngineering,
+        "函数列表": toolsPrompt
     }
+
+    const template = Handlebars.compile(systemMessageTemplate[0]);
+    const content = template(data);
 
     const systemMessage: Message = {
         role: "system",
