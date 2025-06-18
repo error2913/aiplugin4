@@ -121,7 +121,7 @@ export class AI {
         }, 60 * 1000);
 
         let result = {
-            stringArray: [],
+            contextArray: [],
             replyArray: [],
             images: []
         }
@@ -134,7 +134,7 @@ export class AI {
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
             result = await handleReply(ctx, msg, raw_reply, this.context);
 
-            if (!checkRepeat(this.context, result.stringArray.join('')) || result.replyArray.join('').trim() === '') {
+            if (!checkRepeat(this.context, result.contextArray.join('')) || result.replyArray.join('').trim() === '') {
                 break;
             }
 
@@ -148,10 +148,10 @@ export class AI {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        const { stringArray, replyArray, images } = result;
+        const { contextArray, replyArray, images } = result;
 
-        for (let i = 0; i < stringArray.length; i++) {
-            const s = stringArray[i];
+        for (let i = 0; i < contextArray.length; i++) {
+            const s = contextArray[i];
             const reply = replyArray[i];
             const msgId = await replyToSender(ctx, msg, this, reply);
             await this.context.addMessage(ctx, s, images, 'assistant', msgId);
@@ -211,14 +211,14 @@ export class AI {
                     // 对于function_call前面的内容，发送并添加到上下文中
                     const match = raw_reply.match(/([\s\S]*)<function_call>/);
                     if (match && match[1].trim()) {
-                        const { stringArray, replyArray, images } = await handleReply(ctx, msg, match[1], this.context);
+                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, match[1], this.context);
 
                         if (this.stream.id !== id) {
                             return;
                         }
 
-                        for (let i = 0; i < stringArray.length; i++) {
-                            const s = stringArray[i];
+                        for (let i = 0; i < contextArray.length; i++) {
+                            const s = contextArray[i];
                             const reply = replyArray[i];
                             const msgId = await replyToSender(ctx, msg, this, reply);
                             await this.context.addMessage(ctx, s, images, 'assistant', msgId);
@@ -267,14 +267,14 @@ export class AI {
                 }
             }
 
-            const { stringArray, replyArray, images } = await handleReply(ctx, msg, raw_reply, this.context);
+            const { contextArray, replyArray, images } = await handleReply(ctx, msg, raw_reply, this.context);
 
             if (this.stream.id !== id) {
                 return;
             }
 
-            for (let i = 0; i < stringArray.length; i++) {
-                const s = stringArray[i];
+            for (let i = 0; i < contextArray.length; i++) {
+                const s = contextArray[i];
                 const reply = replyArray[i];
                 const msgId = await replyToSender(ctx, msg, this, reply);
                 await this.context.addMessage(ctx, s, images, 'assistant', msgId);

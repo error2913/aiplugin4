@@ -102,11 +102,11 @@ export function registerSendMsg() {
 
         await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
-        const { stringArray, replyArray, images } = await handleReply(ctx, msg, content, ai.context);
+        const { contextArray, replyArray, images } = await handleReply(ctx, msg, content, ai.context);
 
         try {
-            for (let i = 0; i < stringArray.length; i++) {
-                const s = stringArray[i];
+            for (let i = 0; i < contextArray.length; i++) {
+                const s = contextArray[i];
                 const reply = replyArray[i];
                 const msgId = await replyToSender(ctx, msg, ai, reply);
                 await ai.context.addMessage(ctx, s, images, 'assistant', msgId);

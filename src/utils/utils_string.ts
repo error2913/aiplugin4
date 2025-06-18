@@ -1,3 +1,4 @@
+import Handlebars from "handlebars";
 import { Context } from "../AI/context";
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
@@ -75,15 +76,15 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
     return s;
 }
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ stringArray: string[], replyArray: string[], images: Image[] }> {
-    const { maxChar, replymsg, filterRegexes, isTrim } = ConfigManager.reply;
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
+    const { replymsg, isTrim } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
         .split(/([<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞]|[\|│｜>＞]))/)
         .filter(item => item.trim());
     if (segments.length === 0) {
-        return { stringArray: [], replyArray: [], images: [] };
+        return { contextArray: [], replyArray: [], images: [] };
     }
 
     s = '';
@@ -104,7 +105,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     if (!s.trim()) {
         s = segments.find(segment => !/[<＜]\s?[\|│｜]from[:：]?\s?.*?(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/.test(segment));
         if (!s || !s.trim()) {
-            return { stringArray: [], replyArray: [], images: [] };
+            return { contextArray: [], replyArray: [], images: [] };
         }
     }
 
@@ -113,74 +114,8 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         .replace(/[<＜]\s?[\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g, (match) => `\\f${match}`)
         .replace(/[<＜]\s?[\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜]\s?[>＞]|[\|│｜>＞])/g, (match) => `\\f${match}\\f`);
 
-    const stringArray: string[] = [];
-    const replyArray: string[] = [];
+    const { contextArray, replyArray } = filterString(s);
     const images: Image[] = [];
-    let replyLength = 0;
-
-    // 应用过滤正则表达式，并按照\f分割消息
-    // 过滤正则表达式的捕获组会保留在stringArray中
-    const filterRegex = filterRegexes.join('|');
-    let pattern: RegExp;
-    try {
-        pattern = new RegExp(filterRegex, 'g');
-    } catch (e) {
-        logger.error(`正则表达式错误，内容:${filterRegex}，错误信息:${e.message}`);
-    }
-    const segments2 = s.split(pattern).filter(item => item);
-    for (let i = 0; i < segments2.length; i++) {
-        const segment = segments2[i];
-        const match = segment.match(pattern);
-        if (match) {
-            if (stringArray.length === 0) {
-                stringArray.push(match[0]);
-                replyArray.push('');
-            } else {
-                stringArray[stringArray.length - 1] += match[0];
-                replyArray[replyArray.length - 1] += '';
-            }
-        } else {
-            const segs = segment.split(/\\f|\f/g).filter(item => item);
-
-            if (segment.startsWith('\\f') || segment.startsWith('\f')) {
-                stringArray.push('');
-                replyArray.push('');
-            }
-
-            for (let j = 0; j < segs.length; j++) {
-                let seg = segs[j];
-
-                // 长度超过最大限制，直接截断
-                if (replyLength + seg.length > maxChar) {
-                    seg = seg.slice(0, maxChar - replyLength);
-                }
-
-                if (stringArray.length === 0 || j !== 0) {
-                    stringArray.push(seg);
-                    replyArray.push(seg);
-                } else {
-                    stringArray[stringArray.length - 1] += seg;
-                    replyArray[replyArray.length - 1] += seg;
-                }
-
-                // 长度超过最大限制，直接退出
-                replyLength += seg.length;
-                if (replyLength > maxChar) {
-                    break;
-                }
-            }
-
-            if (segment.endsWith('\\f') || segment.endsWith('\f')) {
-                stringArray.push('');
-                replyArray.push('');
-            }
-        }
-
-        // 长度超过最大限制，直接退出
-        if (replyLength > maxChar) {
-            break;
-        }
-    }
 
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
@@ -196,7 +131,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         images.push(...replyImages);
     }
 
-    return { stringArray, replyArray, images };
+    return { contextArray, replyArray, images };
 }
 
 export function checkRepeat(context: Context, s: string) {
@@ -238,6 +173,110 @@ export function checkRepeat(context: Context, s: string) {
         }
     }
     return false;
+}
+
+function filterString(s: string): { contextArray: string[], replyArray: string[] } {
+    const { maxChar, filterRegexes, contextTemplate, replyTemplate } = ConfigManager.reply;
+
+    const contextArray: string[] = [];
+    const replyArray: string[] = [];
+    let replyLength = 0; //只计算未被匹配的部分
+
+    const filterRegex = filterRegexes.join('|');
+    let pattern: RegExp;
+    try {
+        pattern = new RegExp(filterRegex, 'g');
+    } catch (e) {
+        logger.error(`正则表达式错误，内容:${filterRegex}，错误信息:${e.message}`);
+    }
+
+    const filters = filterRegexes.map((regex, index) => {
+        let pattern: RegExp;
+        try {
+            pattern = new RegExp(regex);
+        } catch (e) {
+            logger.error(`正则表达式错误，内容:${regex}，错误信息:${e.message}`);
+        }
+        return {
+            pattern,
+            contextTemplate: Handlebars.compile(contextTemplate[index] || ''),
+            replyTemplate: Handlebars.compile(replyTemplate[index] || '')
+        }
+    })
+
+    // 应用过滤正则表达式，并按照\f分割消息
+    const segments = advancedSplit(s, pattern).filter(Boolean);
+    for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        let isMatched = false;
+        for (let j = 0; j < filterRegexes.length; j++) {
+            const filter = filters[j];
+            const match = segment.match(filter.pattern);
+            if (match) {
+                isMatched = true;
+                const data = {
+                    "match": match
+                }
+
+                const contextString = filter.contextTemplate(data);
+                const replyString = filter.replyTemplate(data);
+
+                if (contextArray.length === 0) {
+                    contextArray.push(contextString);
+                    replyArray.push(replyString);
+                } else {
+                    contextArray[contextArray.length - 1] += contextString;
+                    replyArray[replyArray.length - 1] += replyString;
+                }
+
+                break;
+            }
+        }
+
+        if (!isMatched) {
+            const segs = segment.split(/\\f|\f/g).filter(item => item);
+
+            if (segment.startsWith('\\f') || segment.startsWith('\f')) {
+                contextArray.push('');
+                replyArray.push('');
+            }
+
+            for (let j = 0; j < segs.length; j++) {
+                let seg = segs[j];
+
+                // 长度超过最大限制，直接截断
+                if (replyLength + seg.length > maxChar) {
+                    seg = seg.slice(0, maxChar - replyLength);
+                }
+
+                if (contextArray.length === 0 || j !== 0) {
+                    contextArray.push(seg);
+                    replyArray.push(seg);
+                } else {
+                    contextArray[contextArray.length - 1] += seg;
+                    replyArray[replyArray.length - 1] += seg;
+                }
+
+                // 长度超过最大限制，直接退出
+                replyLength += seg.length;
+                if (replyLength > maxChar) {
+                    break;
+                }
+            }
+
+            if (segment.endsWith('\\f') || segment.endsWith('\f')) {
+                contextArray.push('');
+                replyArray.push('');
+            }
+        }
+
+        // 长度超过最大限制，直接退出
+        if (replyLength > maxChar) {
+            break;
+        }
+    }
+
+    return { contextArray, replyArray };
 }
 
 /**
@@ -374,4 +413,42 @@ export function calculateSimilarity(s1: string, s2: string): number {
     const distance = levenshteinDistance(s1, s2);
     const maxLength = Math.max(s1.length, s2.length);
     return 1 - distance / maxLength || 0;
+}
+
+function advancedSplit(s: string, r: RegExp) {
+    const parts = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray;
+
+    // 确保是全局正则
+    if (!r.global) {
+        r = new RegExp(r.source, r.flags + "g");
+    }
+
+    while ((match = r.exec(s)) !== null) {
+        // 添加匹配前的部分
+        if (match.index > lastIndex) {
+            parts.push(s.slice(lastIndex, match.index));
+        }
+
+        // 添加匹配部分
+        parts.push(match[0]);
+        lastIndex = match.index + match[0].length;
+
+        // 处理零长度匹配（避免死循环）
+        if (match[0].length === 0) {
+            if (r.lastIndex < s.length) {
+                r.lastIndex++;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // 添加剩余部分
+    if (lastIndex < s.length) {
+        parts.push(s.slice(lastIndex));
+    }
+
+    return parts;
 }

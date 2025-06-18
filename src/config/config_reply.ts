@@ -12,10 +12,37 @@ export class ReplyConfig {
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
             "<think>[\\s\\S]*?<\\/think>",
-            "(<function_call>[\\s\\S]*?<\\/function_call>)",
+            "<function_call>[\\s\\S]*?<\\/function_call>",
             "[<＜]\\s?[\\|│｜](?:from|msg_id).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
-            "([<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞]))"
-        ], "回复加入上下文时，将捕获组内文本保留，发送回复时，将捕获组内文本删除");
+            "[<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
+            "```.*\\n([\\s\\S]*?)\\n```",
+            "\\*\\*(.*?)\\*\\*",
+            "~~(.*?)~~",
+            "(?:^|\\n)\\s{0,12}[-*]\\s+(.*)",
+            "(?:^|\\n)#{1,6}\\s+(.*)"
+        ], "匹配在下面通过{{{match.[数字]}}}访问，一一对应");
+        seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理上下文消息模板", [
+            "",
+            "{{{match.[0]}}}",
+            "",
+            "{{{match.[0]}}}",
+            "{{{match.[0]}}}",
+            "{{{match.[0]}}}",
+            "{{{match.[0]}}}",
+            "{{{match.[0]}}}",
+            "{{{match.[0]}}}"
+        ], "替换匹配到的文本");
+        seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板", [
+            "",
+            "",
+            "",
+            "",
+            "{{{match.[1]}}}",
+            "{{{match.[1]}}}",
+            "{{{match.[1]}}}",
+            "{{{match.[1]}}}",
+            "{{{match.[1]}}}"
+        ], "替换匹配到的文本");
         seal.ext.registerBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符", true, "");
     }
 
@@ -26,6 +53,8 @@ export class ReplyConfig {
             stopRepeat: seal.ext.getBoolConfig(ReplyConfig.ext, "禁止AI复读"),
             similarityLimit: seal.ext.getFloatConfig(ReplyConfig.ext, "视作复读的最低相似度"),
             filterRegexes: seal.ext.getTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
+            contextTemplate: seal.ext.getTemplateConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
+            replyTemplate: seal.ext.getTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板"),
             isTrim: seal.ext.getBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符")
         }
     }
