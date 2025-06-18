@@ -20,7 +20,7 @@ export class ReplyConfig {
             "~~(.*?)~~",
             "(?:^|\\n)\\s{0,12}[-*]\\s+(.*)",
             "(?:^|\\n)#{1,6}\\s+(.*)"
-        ], "匹配在下面通过{{{match.[数字]}}}访问，一一对应");
+        ], "匹配在下面通过{{{match.[数字]}}}访问，0为匹配到的消息，1之后为捕获组");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理上下文消息模板", [
             "",
             "{{{match.[0]}}}",
@@ -31,18 +31,18 @@ export class ReplyConfig {
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}"
-        ], "替换匹配到的文本");
+        ], "替换匹配到的文本，与什么正则表达式序号对应");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板", [
             "",
             "",
             "",
             "",
+            "\n{{{match.[1]}}}\n",
             "{{{match.[1]}}}",
             "{{{match.[1]}}}",
-            "{{{match.[1]}}}",
-            "{{{match.[1]}}}",
-            "{{{match.[1]}}}"
-        ], "替换匹配到的文本");
+            "\n{{{match.[1]}}}",
+            "\n{{{match.[1]}}}"
+        ], "替换匹配到的文本，与上面正则表达式序号对应");
         seal.ext.registerBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符", true, "");
     }
 
