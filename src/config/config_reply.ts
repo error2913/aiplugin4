@@ -15,6 +15,7 @@ export class ReplyConfig {
             "<function_call>[\\s\\S]*?<\\/function_call>",
             "[<＜]\\s?[\\|│｜](?:from|msg_id).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
             "[<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
+            "[<＜]\\s?[\\|│｜](?:from|msg_id|@|poke|quote|img)[^\\|│｜>＞]{0,10}$",
             "```.*\\n([\\s\\S]*?)\\n```",
             "\\*\\*(.*?)\\*\\*",
             "~~(.*?)~~",
@@ -26,6 +27,7 @@ export class ReplyConfig {
             "{{{match.[0]}}}",
             "",
             "{{{match.[0]}}}",
+            "",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
@@ -33,6 +35,7 @@ export class ReplyConfig {
             "{{{match.[0]}}}"
         ], "替换匹配到的文本，与什么正则表达式序号对应");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板", [
+            "",
             "",
             "",
             "",

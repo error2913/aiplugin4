@@ -45,7 +45,7 @@ export class Memory {
         content = content.slice(0, 100);
 
         this.memoryList.push({
-            isPrivate: ctx.group.groupName ? false : true,
+            isPrivate: ctx.isPrivate,
             player: {
                 userId: ctx.player.userId,
                 name: ctx.player.name
