@@ -11,8 +11,8 @@ export class ReplyConfig {
         seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
-            "<think>[\\s\\S]*?<\\/think>",
-            "<function_call>[\\s\\S]*?<\\/function_call>",
+            "<think>[\\s\\S]*<\\/think>",
+            "<function(?:_call)?>[\\s\\S]*<\\/function(?:_call)?>",
             "[<＜]\\s?[\\|│｜](?:from|msg_id).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
             "[<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
             "[<＜]\\s?[\\|│｜](?:from|msg_id|@|poke|quote|img)[^\\|│｜>＞]{0,10}$",

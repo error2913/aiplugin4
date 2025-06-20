@@ -114,7 +114,7 @@ export class MessageConfig {
 ## 调用函数
 当需要调用函数功能时，请严格使用以下格式：
 
-<function_call>
+<function>
 {
     "name": "函数名",
     "arguments": {
@@ -122,7 +122,7 @@ export class MessageConfig {
         "参数2": "值2"
     }
 }
-</function_call>
+</function>
 
 要用成对的标签包裹，标签外不要附带其他文本，且每次只能调用一次函数
 
