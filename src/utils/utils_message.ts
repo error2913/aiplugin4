@@ -7,8 +7,9 @@ import { ToolInfo } from "../tool/tool";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
-    const { isTool, usePromptEngineering, isMemory } = ConfigManager.tool;
+    const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
+    const { isMemory } = ConfigManager.memory;
     const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
         if (path.trim() === '') {
             return acc;

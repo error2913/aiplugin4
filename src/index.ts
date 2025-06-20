@@ -379,6 +379,7 @@ function main() {
           const ai2 = AIManager.getAI(muid);
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
+            case 'p':
             case 'private': {
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
@@ -408,18 +409,19 @@ function main() {
                   }
                 }
                 case 'show': {
-                  const s = ai2.memory.buildMemory(mctx, mctx.player.name, mctx.player.userId);
+                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
                   seal.replyToSender(ctx, msg, s);
                   return ret;
                 }
                 case 'del': {
-                  const indexList = cmdArgs.args.slice(3).map(item => parseInt(item)).filter(item => !isNaN(item));
-                  if (indexList.length === 0) {
-                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private del <序号1> <序号2>】删除个人记忆');
+                  const idList = cmdArgs.args.slice(3);
+                  const kw = cmdArgs.kwargs.map(item => item.name);
+                  if (idList.length === 0 && kw.length === 0) {
+                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
                     return ret;
                   }
-                  ai2.memory.delMemory(indexList);
-                  const s = ai2.memory.buildMemory(mctx, mctx.player.name, mctx.player.userId);
+                  ai2.memory.delMemory(idList, kw);
+                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
                   seal.replyToSender(ctx, msg, s);
                   AIManager.saveAI(muid);
                   return ret;
@@ -436,6 +438,7 @@ function main() {
                 }
               }
             }
+            case 'g':
             case 'group': {
               if (ctx.isPrivate) {
                 seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
@@ -474,18 +477,19 @@ function main() {
                   }
                 }
                 case 'show': {
-                  const s = ai.memory.buildMemory(ctx);
+                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
                   seal.replyToSender(ctx, msg, s);
                   return ret;
                 }
                 case 'del': {
-                  const indexList = cmdArgs.args.slice(3).map(item => parseInt(item)).filter(item => !isNaN(item));
-                  if (indexList.length === 0) {
-                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group del <序号1> <序号2>】删除群聊记忆');
+                  const idList = cmdArgs.args.slice(3);
+                  const kw = cmdArgs.kwargs.map(item => item.name);
+                  if (idList.length === 0 && kw.length === 0) {
+                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group del <ID1> <ID2>】删除群聊记忆');
                     return ret;
                   }
-                  ai.memory.delMemory(indexList);
-                  const s = ai.memory.buildMemory(ctx);
+                  ai.memory.delMemory(idList, kw);
+                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
                   seal.replyToSender(ctx, msg, s);
                   AIManager.saveAI(id);
                   return ret;
@@ -504,16 +508,16 @@ function main() {
             }
             default: {
               seal.replyToSender(ctx, msg, `帮助:
-【.ai memo private st <内容>】设置个人设定
-【.ai memo private st clr】清除个人设定
-【.ai memo private show】展示个人记忆
-【.ai memo private del <序号1> <序号2>】删除个人记忆
-【.ai memo private clr】清除个人记忆
-【.ai memo group st <内容>】设置群聊设定
-【.ai memo group st clr】清除群聊设定
-【.ai memo group show】展示群聊记忆
-【.ai memo group del <序号1> <序号2>】删除群聊记忆
-【.ai memo group clr】清除群聊记忆`);
+【.ai memo p st <内容>】设置个人设定
+【.ai memo p st clr】清除个人设定
+【.ai memo p show】展示个人记忆
+【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆
+【.ai memo p clr】清除个人记忆
+【.ai memo g st <内容>】设置群聊设定
+【.ai memo g st clr】清除群聊设定
+【.ai memo g show】展示群聊记忆
+【.ai memo g del <ID1> <ID2> --关键词1 --关键词2】删除群聊记忆
+【.ai memo g clr】清除群聊记忆`);
               return ret;
             }
           }
@@ -1340,7 +1344,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 }
               }
 
-              await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
+              await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
 
               logger.info('非指令触发回复');
               await ai.chat(ctx, msg);
@@ -1371,7 +1375,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               }
             }
 
-            await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
+            await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
             await ai.context.addSystemUserMessage('触发原因提示', condition.reason, []);
             triggerConditionMap[id].splice(i, 1);
 
@@ -1395,7 +1399,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             }
           }
 
-          await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
+          await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
         }
 
         if (pr.counter > -1) {
@@ -1465,7 +1469,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               }
             }
 
-            await ai.context.addMessage(ctx, message, images, 'user', transformMsgId(msg.rawId));
+            await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
           }
         }
       }
@@ -1509,7 +1513,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               }
             }
 
-            await ai.context.addMessage(ctx, message, images, 'assistant', transformMsgId(msg.rawId));
+            await ai.context.addMessage(ai, ctx, message, images, 'assistant', transformMsgId(msg.rawId));
             return;
           }
         }

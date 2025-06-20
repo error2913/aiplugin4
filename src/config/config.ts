@@ -1,6 +1,7 @@
 import { BackendConfig } from "./config_backend";
 import { ImageConfig } from "./config_image";
 import { LogConfig } from "./config_log";
+import { MemoryConfig } from "./config_memory";
 import { MessageConfig } from "./config_message";
 import { ReceivedConfig } from "./config_received";
 import { ReplyConfig } from "./config_reply";
@@ -30,6 +31,7 @@ export class ConfigManager {
         ReplyConfig.register();
         ImageConfig.register();
         BackendConfig.register();
+        MemoryConfig.register();
     }
 
     static getCache<T>(key: string, getFunc: () => T): T {
@@ -55,6 +57,7 @@ export class ConfigManager {
     static get reply() { return this.getCache('reply', ReplyConfig.get) }
     static get image() { return this.getCache('image', ImageConfig.get) }
     static get backend() { return this.getCache('backend', BackendConfig.get) }
+    static get memory() { return this.getCache('memory', MemoryConfig.get) }
 
     static getExt(name: string): seal.ExtInfo {
         if (name == 'aiplugin4' && ConfigManager.ext) {

@@ -3,7 +3,7 @@ import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
-import { AIManager } from "./AI";
+import { AI, AIManager } from "./AI";
 import { logger } from "./logger";
 import { transformMsgId } from "../utils/utils";
 
@@ -56,7 +56,7 @@ export class Context {
         }
     }
 
-    async addMessage(ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
+    async addMessage(ai: AI, ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
         const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const messages = this.messages;
 
@@ -119,6 +119,9 @@ export class Context {
             };
             messages.push(message);
         }
+
+        //更新记忆权重
+        ai.memory.updateMemoryWeight(ctx, ai.context, s, role);
 
         //删除多余的上下文
         this.limitMessages(maxRounds);
@@ -297,16 +300,16 @@ export class Context {
             }
 
             const ai = AIManager.getAI(uid);
-            const memoryList = ai.memory.memoryList;
+            const memoryList = Object.values(ai.memory.memoryMap);
 
-            for (const memory of memoryList) {
-                if (memory.group.groupName === groupName) {
-                    return memory.group.groupId;
+            for (const mi of memoryList) {
+                if (mi.group.groupName === groupName) {
+                    return mi.group.groupId;
                 }
-                if (memory.group.groupName.length > 4) {
-                    const distance = levenshteinDistance(groupName, memory.group.groupName);
+                if (mi.group.groupName.length > 4) {
+                    const distance = levenshteinDistance(groupName, mi.group.groupName);
                     if (distance <= 2) {
-                        return memory.group.groupId;
+                        return mi.group.groupId;
                     }
                 }
             }

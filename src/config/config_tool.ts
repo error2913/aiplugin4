@@ -24,25 +24,6 @@ export class ToolConfig {
             'web_search',
             'check_list'
         ], "");
-        seal.ext.registerBoolConfig(ToolConfig.ext, "是否启用记忆", true, "");
-        seal.ext.registerIntConfig(ToolConfig.ext, "长期记忆上限", 5, "");
-        seal.ext.registerTemplateConfig(ToolConfig.ext, "记忆展示模板", [
-            `{{#if 私聊}}
-### 关于用户<{{{用户名称}}}>{{#if 展示号码}}({{{用户号码}}}){{/if}}:
-{{else}}
-### 关于群聊<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}:
-{{/if}}
-    - 设定:{{{设定}}}
-    - 记忆:
-{{{记忆列表}}}`
-        ], "");
-        seal.ext.registerTemplateConfig(ToolConfig.ext, "单条记忆展示模板", [
-            `   {{{序号}}}. 时间:{{{记忆时间}}}
-{{#if 个人记忆}}
-    来源:{{#if 私聊}}私聊{{else}}群聊<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}{{/if}}
-{{/if}}
-    内容:{{{记忆内容}}}`
-        ], "");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", ["没有的话建议把draw_deck这个函数加入不允许调用"], "");
         seal.ext.registerOptionConfig(ToolConfig.ext, "ai语音使用的音色", '小新', [
             "小新",
@@ -80,10 +61,6 @@ export class ToolConfig {
             maxCallCount: seal.ext.getIntConfig(ToolConfig.ext, "允许连续调用函数次数"),
             toolsNotAllow: seal.ext.getTemplateConfig(ToolConfig.ext, "不允许调用的函数"),
             toolsDefaultClosed: seal.ext.getTemplateConfig(ToolConfig.ext, "默认关闭的函数"),
-            isMemory: seal.ext.getBoolConfig(ToolConfig.ext, "是否启用记忆"),
-            memoryLimit: seal.ext.getIntConfig(ToolConfig.ext, "长期记忆上限"),
-            memoryShowTemplate: seal.ext.getTemplateConfig(ToolConfig.ext, "记忆展示模板"),
-            memorySingleShowTemplate: seal.ext.getTemplateConfig(ToolConfig.ext, "单条记忆展示模板"),
             decks: seal.ext.getTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称"),
             character: seal.ext.getOptionConfig(ToolConfig.ext, "ai语音使用的音色"),
             recordPaths: seal.ext.getTemplateConfig(ToolConfig.ext, "本地语音路径")

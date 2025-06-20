@@ -21,27 +21,31 @@ export function registerAddMemory() {
                         type: 'string',
                         description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
                     },
+                    keywords: {
+                        type: 'array',
+                        description: '记忆关键词',
+                        items: {
+                            type: 'string'
+                        }
+                    },
                     content: {
                         type: 'string',
                         description: '记忆内容，尽量简短，无需附带时间与来源'
                     }
                 },
-                required: ['memory_type', 'name', 'content']
+                required: ['memory_type', 'name', 'keywords', 'content']
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-        const { memory_type, name, content } = args;
+        const { memory_type, name, keywords, content } = args;
 
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
                 return `未找到<${name}>`;
-            }
-            if (uid === ctx.endPoint.userId) {
-                return `不能添加自己的记忆`;
             }
 
             msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -63,7 +67,7 @@ export function registerAddMemory() {
         }
 
         //记忆相关处理
-        ai.memory.addMemory(ctx, content);
+        ai.memory.addMemory(ctx, keywords, content);
         AIManager.saveAI(ai.id);
 
         return `添加记忆成功`;
@@ -92,20 +96,27 @@ export function registerDelMemory() {
                     },
                     index_list: {
                         type: 'array',
-                        description: '记忆序号列表',
+                        description: '记忆序号列表，可为空',
                         items: {
                             type: 'integer'
                         }
+                    },
+                    keywords: {
+                        type: 'array',
+                        description: '记忆关键词，可为空',
+                        items: {
+                            type: 'string'
+                        }
                     }
                 },
-                required: ['memory_type', 'name', 'index_list']
+                required: ['memory_type', 'name', 'index_list', 'keywords']
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (ctx, msg, ai, args) => {
-        const { memory_type, name, index_list } = args;
+        const { memory_type, name, index_list, keywords } = args;
 
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
@@ -135,7 +146,7 @@ export function registerDelMemory() {
         }
 
         //记忆相关处理
-        ai.memory.delMemory(index_list);
+        ai.memory.delMemory(index_list, keywords);
         AIManager.saveAI(ai.id);
 
         return `删除记忆成功`;
@@ -188,7 +199,7 @@ export function registerShowMemory() {
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(uid);
-            return ai.memory.buildMemory(ctx, ctx.player.name, ctx.player.userId);
+            return ai.memory.buildMemory(true, ctx.player.name, ctx.player.userId, '', '');
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
@@ -202,7 +213,7 @@ export function registerShowMemory() {
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(gid);
-            return ai.memory.buildMemory(ctx);
+            return ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
         } else {
             return `未知的记忆类型<${memory_type}>`;
         }
