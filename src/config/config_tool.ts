@@ -16,16 +16,17 @@ export class ToolConfig {
         ], "提示词工程中每个函数的prompt");
         seal.ext.registerIntConfig(ToolConfig.ext, "允许连续调用函数次数", 5, "单次对话中允许连续调用函数的次数");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "不允许调用的函数", [
-            '在这里填写你不允许AI调用的函数名称'
+            'ban',
+            'whole_ban',
+            'get_ban_list'
         ], "修改后保存并重载js");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "默认关闭的函数", [
-            'ban',
             'rename',
-            'web_search',
-            'check_list'
+            'record',
+            'text_to_image'
         ], "");
-        seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", ["没有的话建议把draw_deck这个函数加入不允许调用"], "");
-        seal.ext.registerOptionConfig(ToolConfig.ext, "ai语音使用的音色", '小新', [
+        seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", ["克苏鲁神话"], "没有的话建议把draw_deck这个函数加入不允许调用");
+        seal.ext.registerOptionConfig(ToolConfig.ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",
             "四郎",

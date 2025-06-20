@@ -27,7 +27,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         return acc;
     }, {});
 
-    let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$g人工智能插件专用角色设定序号");
+    let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
     if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
         roleSettingIndex = 0;
     }

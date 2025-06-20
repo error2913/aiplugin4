@@ -210,6 +210,10 @@ export class Context {
             return this.ignoreList.includes(uid) ? null : uid;
         }
 
+        if (name === seal.formatTmpl(ctx, "核心:骰子名字")) {
+            return ctx.endPoint.userId;
+        }
+
         // 在上下文中查找用户
         const messages = this.messages;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -351,7 +355,7 @@ export class Context {
     }
 
     findImage(id: string): Image {
-        if (/^[0-9a-z]{6}$/.test(id)) {
+        if (/^[0-9a-z]{6}$/.test(id.trim())) {
             const messages = this.messages;
             for (let i = messages.length - 1; i >= 0; i--) {
                 const image = messages[i].images.find(item => item.id === id);

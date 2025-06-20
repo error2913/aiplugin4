@@ -7,15 +7,13 @@ export class ReplyConfig {
         ReplyConfig.ext = ConfigManager.getExt('aiplugin4_4:回复');
 
         seal.ext.registerBoolConfig(ReplyConfig.ext, "回复是否引用", false, "开启将会引用触发该条回复的消息");
-        seal.ext.registerIntConfig(ReplyConfig.ext, "回复最大字数", 1000, "防止最大tokens限制不起效");
+        seal.ext.registerIntConfig(ReplyConfig.ext, "回复最大字数", 5000, "防止最大tokens限制不起效");
         seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
-            "<think>[\\s\\S]*<\\/think>",
+            "<think>[\\s\\S]*<\\/think>|[<＜][\\|│｜](?:from|msg_id).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|<func[^>]{0,9}$|[<＜][\\|│｜](?:from|msg_id|@|poke|quote|img)[^\\|│｜>＞]{0,10}$",
             "<function(?:_call)?>[\\s\\S]*<\\/function(?:_call)?>",
-            "[<＜]\\s?[\\|│｜](?:from|msg_id).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
-            "[<＜]\\s?[\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜]\\s?[>＞]|[\\|│｜>＞])",
-            "[<＜]\\s?[\\|│｜](?:from|msg_id|@|poke|quote|img)[^\\|│｜>＞]{0,10}$",
+            "[<＜][\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])",
             "```.*\\n([\\s\\S]*?)\\n```",
             "\\*\\*(.*?)\\*\\*",
             "~~(.*?)~~",
@@ -25,9 +23,7 @@ export class ReplyConfig {
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理上下文消息模板", [
             "",
             "{{{match.[0]}}}",
-            "",
             "{{{match.[0]}}}",
-            "",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
@@ -35,8 +31,6 @@ export class ReplyConfig {
             "{{{match.[0]}}}"
         ], "替换匹配到的文本，与什么正则表达式序号对应");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板", [
-            "",
-            "",
             "",
             "",
             "",

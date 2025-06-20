@@ -343,7 +343,7 @@ function main() {
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case 'show': {
-              const [roleSettingIndex, _] = seal.vars.intGet(ctx, "$g人工智能插件专用角色设定序号");
+              const [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
               seal.replyToSender(ctx, msg, `当前角色设定序号为${roleSettingIndex}，序号范围为0-${roleSettingTemplate.length - 1}`);
               return ret;
             }
@@ -361,7 +361,7 @@ function main() {
                 return ret;
               }
 
-              seal.vars.intSet(ctx, "$g人工智能插件专用角色设定序号", index);
+              seal.vars.intSet(ctx, "$gSYSPROMPT", index);
               seal.replyToSender(ctx, msg, `角色设定已切换到${index}`);
               return ret;
             }

@@ -10,7 +10,7 @@ export class RequestConfig {
         seal.ext.registerStringConfig(RequestConfig.ext, "API Key", "你的API Key", '');
         seal.ext.registerTemplateConfig(RequestConfig.ext, "body", [
             `"model":"deepseek-chat"`,
-            `"max_tokens":70`,
+            `"max_tokens":1000`,
             `"stop":null`,
             `"stream":false`,
             `"frequency_penalty":0`,
