@@ -1,7 +1,7 @@
 import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
 import { AIManager } from "./AI";
-import { Context } from "./context";
+import { Context, Message } from "./context";
 import { generateId } from "../utils/utils";
 import { logger } from "./logger";
 import { fetchData } from "./service";
@@ -143,9 +143,9 @@ export class Memory {
         }
     }
 
-    async updateShortMemory(ctx: seal.MsgContext, sumMessages: { role: string, content: string }[]) {
+    async updateShortMemory(ctx: seal.MsgContext, sumMessages: Message[]) {
         const { url, apiKey } = ConfigManager.request;
-        const { roleSettingTemplate, isPrefix } = ConfigManager.message;
+        const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
         const { memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
 
         try {
@@ -155,7 +155,19 @@ export class Memory {
             }
             const prompt = Handlebars.compile(memoryPromptTemplate[0])({
                 "角色设定": roleSettingTemplate[roleSettingIndex],
-                "对话内容": isPrefix ? sumMessages.map(item => item.content).join('\n') : JSON.stringify(sumMessages)
+                "对话内容": isPrefix ? sumMessages.map(message => {
+                    if (message.role === 'assistant' && message?.tool_calls && message?.tool_calls.length > 0) {
+                        return `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
+                    }
+                    const prefix = (isPrefix && message.name) ? (
+                        message.name.startsWith('_') ?
+                            `<|${message.name}|>` :
+                            `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
+                    ) : '';
+                    const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
+
+                    return `[${message.role}]: ${prefix}${content}`;
+                }).join('\n') : JSON.stringify(sumMessages)
             })
 
             logger.info(`记忆总结prompt:\n`, prompt);

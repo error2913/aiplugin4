@@ -70,14 +70,11 @@ export function registerGetContext() {
 
         const messages = ai.context.messages;
         const images = [];
-        let s = '';
-        for (let i = 0; i < messages.length; i++) {
-            const message = messages[i];
-
+        const s = messages.map(message => {
             images.push(...message.images);
 
-            if (message.role === 'assistant' && message?.tool_calls) {
-                s += `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
+            if (message.role === 'assistant' && message?.tool_calls && message?.tool_calls.length > 0) {
+                return `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
             }
 
             const prefix = (isPrefix && message.name) ? (
@@ -85,11 +82,10 @@ export function registerGetContext() {
                     `<|${message.name}|>` :
                     `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
             ) : '';
+            const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
 
-            const content = message.msgIdArray.map((msgId, index) => (showMsgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
-
-            s += `\n[${message.role}]: ${prefix}${content}`;
-        }
+            return `[${message.role}]: ${prefix}${content}`;
+        }).join('\n');
 
         // 将images添加到最后一条消息，以便使用
         originalAI.context.messages[originalAI.context.messages.length - 1].images.push(...images);

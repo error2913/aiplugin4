@@ -66,7 +66,7 @@ export class Context {
     }
 
     async addMessage(ai: AI, ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { isPrefix, showNumber, showMsgId, maxRounds } = ConfigManager.message;
+        const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
 
@@ -133,22 +133,7 @@ export class Context {
             if (isShortMemory) {
                 if (this.summaryCounter >= shortMemorySummaryRound) {
                     this.summaryCounter = 0;
-                    ai.memory.updateShortMemory(ctx, messages.slice(0, shortMemorySummaryRound).map(message => {
-                        const prefix = (isPrefix && message.name) ? (
-                            message.name.startsWith('_') ?
-                                `<|${message.name}|>` :
-                                `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
-                        ) : '';
-
-                        const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
-
-                        return {
-                            role: message.role,
-                            content: prefix + content,
-                            tool_calls: message?.tool_calls ? message.tool_calls : undefined,
-                            tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
-                        }
-                    }));
+                    ai.memory.updateShortMemory(ctx, messages.slice(0, shortMemorySummaryRound));
                 } else {
                     this.summaryCounter++;
                 }

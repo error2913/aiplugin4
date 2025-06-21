@@ -211,8 +211,8 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
             processedMessages.push({
                 role: message.role,
                 content: prefix + content,
-                tool_calls: message?.tool_calls ? message.tool_calls : undefined,
-                tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
+                tool_calls: message?.tool_calls,
+                tool_call_id: message?.tool_call_id
             });
             last_role = message.role;
         }

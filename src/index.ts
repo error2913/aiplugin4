@@ -528,25 +528,9 @@ function main() {
               }
             }
             case 'sum': {
-              const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
               const { shortMemorySummaryRound } = ConfigManager.memory;
               ai.context.summaryCounter = 0;
-              ai.memory.updateShortMemory(ctx, ai.context.messages.slice(0, shortMemorySummaryRound).map(message => {
-                const prefix = (isPrefix && message.name) ? (
-                  message.name.startsWith('_') ?
-                    `<|${message.name}|>` :
-                    `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
-                ) : '';
-
-                const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
-
-                return {
-                  role: message.role,
-                  content: prefix + content,
-                  tool_calls: message?.tool_calls ? message.tool_calls : undefined,
-                  tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
-                }
-              })).then(() => {
+              ai.memory.updateShortMemory(ctx, ai.context.messages.slice(0, shortMemorySummaryRound)).then(() => {
                 const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
                 seal.replyToSender(ctx, msg, s);
               });
