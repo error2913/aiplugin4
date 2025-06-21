@@ -39,8 +39,10 @@ export class MemoryConfig {
             `"stream":false`
         ], "messages不存在时，将会自动替换");
         seal.ext.registerTemplateConfig(MemoryConfig.ext, "记忆总结prompt模板", [
-            `请对以下对话内容进行总结:
+            `你现在扮演的角色如下:
+{{{角色设定}}}
 
+请根据你的设定，对以下对话内容进行总结:
 {{{对话内容}}}
 
 返回格式为JSON，格式类型如下:
@@ -49,7 +51,7 @@ export class MemoryConfig {
     "importance": boolean,
     "keywords": string[]
 }
-content为总结后的对话摘要，请根据人物、行为、场景进行简短描述，只保留核心内容
+content为总结后的对话摘要，请根据人物、行为、场景，以所扮演角色的口吻进行简短描述，只保留核心内容
 若对话内容对记忆有重要影响，importance为true，keywords为对话内容中的关键词
 若对话内容对记忆无重要影响，importance为false，keywords为空数组`
         ], "");

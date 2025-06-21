@@ -145,15 +145,25 @@ export class Memory {
 
     async updateShortMemory(ctx: seal.MsgContext, sumMessages: { role: string, content: string }[]) {
         const { url, apiKey } = ConfigManager.request;
+        const { roleSettingTemplate, isPrefix } = ConfigManager.message;
         const { memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
 
         try {
+            let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
+            if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+                roleSettingIndex = 0;
+            }
+            const prompt = Handlebars.compile(memoryPromptTemplate[0])({
+                "角色设定": roleSettingTemplate[roleSettingIndex],
+                "对话内容": isPrefix ? sumMessages.map(item => item.content).join('\n') : JSON.stringify(sumMessages)
+            })
+
+            logger.info(`记忆总结prompt:\n`, prompt);
+
             const messages = [
                 {
                     role: "system",
-                    content: Handlebars.compile(memoryPromptTemplate[0])({
-                        "对话内容": JSON.stringify(sumMessages)
-                    })
+                    content: prompt
                 }
             ]
             const bodyObject = parseBody(memoryBodyTemplate, messages, [], "none");
