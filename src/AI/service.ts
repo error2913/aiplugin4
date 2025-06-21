@@ -136,7 +136,7 @@ export async function sendITTRequest(messages: {
     }
 }
 
-async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
+export async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
     // 打印请求发送前的上下文
     const s = JSON.stringify(bodyObject.messages, (key, value) => {
         if (key === "" && Array.isArray(value)) {

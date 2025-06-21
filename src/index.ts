@@ -387,7 +387,7 @@ function main() {
                   const s = cmdArgs.getRestArgsFrom(4);
                   switch (s) {
                     case '': {
-                      seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private st <内容>】设置个人设定，【.ai memo private st clr】清除个人设定');
+                      seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p st <内容>】设置个人设定，【.ai memo p st clr】清除个人设定');
                       return ret;
                     }
                     case 'clr': {
@@ -417,7 +417,7 @@ function main() {
                   const idList = cmdArgs.args.slice(3);
                   const kw = cmdArgs.kwargs.map(item => item.name);
                   if (idList.length === 0 && kw.length === 0) {
-                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
+                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
                     return ret;
                   }
                   ai2.memory.delMemory(idList, kw);
@@ -433,7 +433,7 @@ function main() {
                   return ret;
                 }
                 default: {
-                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo private show】展示个人记忆，【.ai memo private clr】清除个人记忆');
+                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p show】展示个人记忆，【.ai memo p clr】清除个人记忆');
                   return ret;
                 }
               }
@@ -455,7 +455,7 @@ function main() {
                   const s = cmdArgs.getRestArgsFrom(4);
                   switch (s) {
                     case '': {
-                      seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group st <内容>】设置群聊设定，【.ai memo group st clr】清除群聊设定');
+                      seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g st <内容>】设置群聊设定，【.ai memo g st clr】清除群聊设定');
                       return ret;
                     }
                     case 'clr': {
@@ -485,7 +485,7 @@ function main() {
                   const idList = cmdArgs.args.slice(3);
                   const kw = cmdArgs.kwargs.map(item => item.name);
                   if (idList.length === 0 && kw.length === 0) {
-                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group del <ID1> <ID2>】删除群聊记忆');
+                    seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g del <ID1> <ID2>】删除群聊记忆');
                     return ret;
                   }
                   ai.memory.delMemory(idList, kw);
@@ -501,10 +501,56 @@ function main() {
                   return ret;
                 }
                 default: {
-                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo group show】展示群聊记忆，【.ai memo group clr】清除群聊记忆');
+                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g show】展示群聊记忆，【.ai memo g clr】清除群聊记忆');
                   return ret;
                 }
               }
+            }
+            case 's':
+            case 'short': {
+              const val3 = cmdArgs.getArgN(3);
+              switch (val3) {
+                case 'show': {
+                  const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                  seal.replyToSender(ctx, msg, s);
+                  return ret;
+                }
+                case 'clr': {
+                  ai.memory.clearShortMemory();
+                  seal.replyToSender(ctx, msg, '群聊记忆已清除');
+                  AIManager.saveAI(id);
+                  return ret;
+                }
+                default: {
+                  seal.replyToSender(ctx, msg, '参数缺失，【.ai memo s show】展示短期记忆，【.ai memo s clr】清除短期记忆');
+                  return ret;
+                }
+              }
+            }
+            case 'sum': {
+              const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
+              const { shortMemorySummaryRound } = ConfigManager.memory;
+              ai.context.summaryCounter = 0;
+              ai.memory.updateShortMemory(ctx, ai.context.messages.slice(0, shortMemorySummaryRound).map(message => {
+                const prefix = (isPrefix && message.name) ? (
+                  message.name.startsWith('_') ?
+                    `<|${message.name}|>` :
+                    `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
+                ) : '';
+
+                const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
+
+                return {
+                  role: message.role,
+                  content: prefix + content,
+                  tool_calls: message?.tool_calls ? message.tool_calls : undefined,
+                  tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
+                }
+              })).then(() => {
+                const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                seal.replyToSender(ctx, msg, s);
+              });
+              return ret;
             }
             default: {
               seal.replyToSender(ctx, msg, `帮助:
@@ -517,7 +563,10 @@ function main() {
 【.ai memo g st clr】清除群聊设定
 【.ai memo g show】展示群聊记忆
 【.ai memo g del <ID1> <ID2> --关键词1 --关键词2】删除群聊记忆
-【.ai memo g clr】清除群聊记忆`);
+【.ai memo g clr】清除群聊记忆
+【.ai memo s show】展示短期记忆
+【.ai memo s clr】清除短期记忆
+【.ai memo sum】总结短期记忆`);
               return ret;
             }
           }

@@ -22,6 +22,7 @@ export interface Message {
 export class Context {
     messages: Message[];
     ignoreList: string[];
+    summaryCounter: number;
 
     lastReply: string;
     counter: number;
@@ -30,6 +31,7 @@ export class Context {
     constructor() {
         this.messages = [];
         this.ignoreList = [];
+        this.summaryCounter = 0;
         this.lastReply = '';
         this.counter = 0;
         this.timer = null;
@@ -37,7 +39,7 @@ export class Context {
 
     static reviver(value: any): Context {
         const context = new Context();
-        const validKeys = ['messages', 'ignoreList'];
+        const validKeys = ['messages', 'ignoreList', 'summaryCounter'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -57,7 +59,8 @@ export class Context {
     }
 
     async addMessage(ai: AI, ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
+        const { isPrefix, showNumber, showMsgId, maxRounds } = ConfigManager.message;
+        const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
 
         //处理文本
@@ -103,7 +106,7 @@ export class Context {
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
-        if (length !== 0 && messages[length - 1].name === name && !/<function(?:_call)?>/.test(s)) {
+        if (length !== 0 && messages[length - 1].uid === uid && !/<function(?:_call)?>/.test(s)) {
             messages[length - 1].contentArray.push(s);
             messages[length - 1].msgIdArray.push(msgId);
             messages[length - 1].images.push(...images);
@@ -118,6 +121,31 @@ export class Context {
                 images: images
             };
             messages.push(message);
+
+            // 更新短期记忆
+            if (isShortMemory) {
+                if (this.summaryCounter >= shortMemorySummaryRound) {
+                    this.summaryCounter = 0;
+                    ai.memory.updateShortMemory(ctx, messages.slice(0, shortMemorySummaryRound).map(message => {
+                        const prefix = (isPrefix && message.name) ? (
+                            message.name.startsWith('_') ?
+                                `<|${message.name}|>` :
+                                `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
+                        ) : '';
+
+                        const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
+
+                        return {
+                            role: message.role,
+                            content: prefix + content,
+                            tool_calls: message?.tool_calls ? message.tool_calls : undefined,
+                            tool_call_id: message?.tool_call_id ? message.tool_call_id : undefined
+                        }
+                    }));
+                } else {
+                    this.summaryCounter++;
+                }
+            }
         }
 
         //更新记忆权重

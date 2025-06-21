@@ -14,7 +14,7 @@ export class ImageConfig {
         seal.ext.registerStringConfig(ImageConfig.ext, "图片API key", "yours");
         seal.ext.registerTemplateConfig(ImageConfig.ext, "图片body", [
             `"model":"glm-4v"`,
-            `"max_tokens":100`,
+            `"max_tokens":128`,
             `"stop":null`,
             `"stream":false`,
         ], "messages不存在时，将会自动替换")

@@ -9,7 +9,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
-    const { isMemory } = ConfigManager.memory;
+    const { isMemory, isShortMemory } = ConfigManager.memory;
     const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
         if (path.trim() === '') {
             return acc;
@@ -38,6 +38,12 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         memoryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
     }
 
+    // 短期记忆
+    let shortMemoryPrompt = '';
+    if (isShortMemory) {
+        shortMemoryPrompt = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+    }
+
     // 调用函数
     let toolsPrompt = '';
     if (isTool && usePromptEngineering) {
@@ -59,8 +65,10 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "图片条件不为零": condition !== '0',
         "本地图片不为空": Object.keys(localImages).length !== 0,
         "本地图片名称": Object.keys(localImages).join("、"),
-        "开启记忆": isMemory && memoryPrompt,
+        "开启长期记忆": isMemory && memoryPrompt,
         "记忆信息": memoryPrompt,
+        "开启短期记忆": isShortMemory && shortMemoryPrompt,
+        "短期记忆信息": shortMemoryPrompt,
         "开启工具函数提示词": isTool && usePromptEngineering,
         "函数列表": toolsPrompt
     }

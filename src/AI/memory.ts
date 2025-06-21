@@ -4,6 +4,8 @@ import { AIManager } from "./AI";
 import { Context } from "./context";
 import { generateId } from "../utils/utils";
 import { logger } from "./logger";
+import { fetchData } from "./service";
+import { parseBody } from "../utils/utils_message";
 
 export interface MemoryInfo {
     id: string;
@@ -27,15 +29,17 @@ export interface MemoryInfo {
 export class Memory {
     persona: string;
     memoryMap: { [key: string]: MemoryInfo };
+    shortMemory: string[];
 
     constructor() {
         this.persona = '无';
         this.memoryMap = {};
+        this.shortMemory = [];
     }
 
     static reviver(value: any): Memory {
         const memory = new Memory();
-        const validKeys = ['persona', 'memoryMap'];
+        const validKeys = ['persona', 'memoryMap', 'shortMemory'];
 
         for (const k in value) {
             if (validKeys.includes(k)) {
@@ -46,7 +50,7 @@ export class Memory {
         return memory;
     }
 
-    addMemory(ctx: seal.MsgContext, kw: string[], content: string) {
+    addMemory(ctx: seal.MsgContext, kws: string[], content: string) {
         let id = generateId(), a = 0;
         while (this.memoryMap.hasOwnProperty(id)) {
             id = generateId();
@@ -71,7 +75,7 @@ export class Memory {
             time: new Date().toLocaleString(),
             createTime: Math.floor(Date.now() / 1000),
             lastMentionTime: Math.floor(Date.now() / 1000),
-            keywords: kw,
+            keywords: kws,
             content: content,
             weight: 0
         };
@@ -79,8 +83,8 @@ export class Memory {
         this.limitMemory();
     }
 
-    delMemory(idList: string[] = [], kw: string[] = []) {
-        if (idList.length === 0 && kw.length === 0) {
+    delMemory(idList: string[] = [], kws: string[] = []) {
+        if (idList.length === 0 && kws.length === 0) {
             return;
         }
 
@@ -88,10 +92,10 @@ export class Memory {
             delete this.memoryMap?.[id];
         })
 
-        if (kw.length > 0) {
+        if (kws.length > 0) {
             for (const id in this.memoryMap) {
                 const mi = this.memoryMap[id];
-                if (kw.some(kw => mi.keywords.includes(kw))) {
+                if (kws.some(kw => mi.keywords.includes(kw))) {
                     delete this.memoryMap[id];
                 }
             }
@@ -100,6 +104,10 @@ export class Memory {
 
     clearMemory() {
         this.memoryMap = {};
+    }
+
+    clearShortMemory() {
+        this.shortMemory = [];
     }
 
     limitMemory() {
@@ -126,6 +134,62 @@ export class Memory {
             .map(item => item.id);
 
         this.delMemory(forgetIdList);
+    }
+
+    limitShortMemory() {
+        const { shortMemoryLimit } = ConfigManager.memory;
+        if (this.shortMemory.length > shortMemoryLimit) {
+            this.shortMemory.splice(0, this.shortMemory.length - shortMemoryLimit);
+        }
+    }
+
+    async updateShortMemory(ctx: seal.MsgContext, sumMessages: { role: string, content: string }[]) {
+        const { url, apiKey } = ConfigManager.request;
+        const { memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+
+        try {
+            const messages = [
+                {
+                    role: "system",
+                    content: Handlebars.compile(memoryPromptTemplate[0])({
+                        "对话内容": JSON.stringify(sumMessages)
+                    })
+                }
+            ]
+            const bodyObject = parseBody(memoryBodyTemplate, messages, [], "none");
+
+            const time = Date.now();
+            const data = await fetchData(url, apiKey, bodyObject);
+
+            if (data.choices && data.choices.length > 0) {
+                AIManager.updateUsage(data.model, data.usage);
+
+                const message = data.choices[0].message;
+                const finish_reason = data.choices[0].finish_reason;
+
+                if (message.hasOwnProperty('reasoning_content')) {
+                    logger.info(`思维链内容:`, message.reasoning_content);
+                }
+
+                const reply = message.content || '';
+                logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+
+                const memory = JSON.parse(reply) as {
+                    content: string,
+                    importance: boolean,
+                    keywords: string[]
+                };
+
+                if (memory.importance) {
+                    this.addMemory(ctx, memory.keywords, memory.content);
+                } else {
+                    this.shortMemory.push(memory.content);
+                    this.limitShortMemory();
+                }
+            }
+        } catch (e) {
+            logger.error(`更新短期记忆失败: ${e.message}`);
+        }
     }
 
     updateSingleMemoryWeight(s: string, role: 'user' | 'assistant') {

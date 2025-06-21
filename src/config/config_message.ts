@@ -105,11 +105,16 @@ export class MessageConfig {
 {{#if 本地图片不为空}}
     - 可使用<|img:图片名称|>发送表情包，表情名称有:{{{本地图片名称}}}
 {{/if}}
-{{#if 开启记忆}}
+{{#if 开启长期记忆}}
 
 ## 记忆
 如果记忆与上述角色设定冲突，请忽略该记忆并优先遵守角色设定。记忆如下:
 {{{记忆信息}}}
+{{/if}}
+{{#if 开启短期记忆}}
+
+## 短期记忆
+{{{短期记忆信息}}}
 {{/if}}
 {{#if 开启工具函数提示词}}
 
@@ -139,7 +144,7 @@ export class MessageConfig {
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否给AI展示数字号码", true, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加消息ID", false, "可用于撤回等情况");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
-        seal.ext.registerIntConfig(MessageConfig.ext, "存储上下文对话限制轮数", 10, "出现一次user视作一轮");
+        seal.ext.registerIntConfig(MessageConfig.ext, "存储上下文对话限制轮数", 15, "出现一次user视作一轮");
         seal.ext.registerIntConfig(MessageConfig.ext, "上下文插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，示例对话不计入轮数");
     }
 
