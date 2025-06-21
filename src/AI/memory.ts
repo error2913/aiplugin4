@@ -131,11 +131,13 @@ export class Memory {
     updateSingleMemoryWeight(s: string, role: 'user' | 'assistant') {
         const increase = role === 'user' ? 1 : 0.1;
         const decrease = role === 'user' ? 0.1 : 0;
+        const now = Math.floor(Date.now() / 1000);
 
         for (const id in this.memoryMap) {
             const mi = this.memoryMap[id];
             if (mi.keywords.some(kw => s.includes(kw))) {
                 mi.weight = Math.max(10, mi.weight + increase);
+                mi.lastMentionTime = now;
             } else {
                 mi.weight = Math.min(0, mi.weight - decrease);
             }
@@ -169,7 +171,7 @@ export class Memory {
         }
     }
 
-    buildMemory(isPrivate: boolean, un: string, uid: string, gn: string, gid: string): string {
+    buildMemory(isPrivate: boolean, un: string, uid: string, gn: string, gid: string, lastMsg: string = ''): string {
         const { showNumber } = ConfigManager.message;
         const { memoryShowNumber, memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
         const memoryList = Object.values(this.memoryMap);
@@ -183,6 +185,13 @@ export class Memory {
             memoryContent += '无';
         } else {
             memoryContent += memoryList
+                .map(item => {
+                    const mi: MemoryInfo = JSON.parse(JSON.stringify(item));
+                    if (item.keywords.some(kw => lastMsg.includes(kw))) {
+                        mi.weight += 10;
+                    }
+                    return mi;
+                })
                 .sort((a, b) => b.weight - a.weight)
                 .slice(0, memoryShowNumber)
                 .map((item, i) => {
@@ -220,8 +229,11 @@ export class Memory {
     }
 
     buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
+        const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
+        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].contentArray.join('') : '';
+
         const ai = AIManager.getAI(ctx.endPoint.userId);
-        let s = ai.memory.buildMemory(true, seal.formatTmpl(ctx, "核心:骰子名字"), ctx.endPoint.userId, '', '');
+        let s = ai.memory.buildMemory(true, seal.formatTmpl(ctx, "核心:骰子名字"), ctx.endPoint.userId, '', '', lastMsg);
 
         if (ctx.isPrivate) {
             return this.buildMemory(true, ctx.player.name, ctx.player.userId, '', '');
@@ -231,14 +243,10 @@ export class Memory {
 
             // 群内用户的个人记忆
             const arr = [];
-            for (const message of context.messages) {
-                const uid = message.uid;
-                if (arr.includes(uid) || message.role !== 'user') {
-                    continue;
-                }
-
+            for (const message of userMessages) {
                 const name = message.name;
-                if (name.startsWith('_')) {
+                const uid = message.uid;
+                if (arr.includes(uid)) {
                     continue;
                 }
 

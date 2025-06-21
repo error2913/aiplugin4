@@ -11,9 +11,8 @@ export class ReplyConfig {
         seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
-            "<think>[\\s\\S]*<\\/think>|[<＜][\\|│｜](?:from|msg_id).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|<func[^>]{0,9}$|[<＜][\\|│｜](?:from|msg_id|@|poke|quote|img)[^\\|│｜>＞]{0,10}$",
+            "<think>[\\s\\S]*<\\/think>|<func[^>]{0,9}$|[<＜][\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|^[^\\|│｜>＞]{0,10}[\\|│｜][>＞]|[<＜][\\|│｜][^\\|│｜>＞]{0,20}$",
             "<function(?:_call)?>[\\s\\S]*<\\/function(?:_call)?>",
-            "[<＜][\\|│｜](?!@|poke|quote|img).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])",
             "```.*\\n([\\s\\S]*?)\\n```",
             "\\*\\*(.*?)\\*\\*",
             "~~(.*?)~~",
@@ -27,11 +26,9 @@ export class ReplyConfig {
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
-            "{{{match.[0]}}}",
             "{{{match.[0]}}}"
         ], "替换匹配到的文本，与什么正则表达式序号对应");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板", [
-            "",
             "",
             "",
             "\n{{{match.[1]}}}\n",
