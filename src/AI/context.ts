@@ -22,7 +22,7 @@ export interface Message {
 export class Context {
     messages: Message[];
     ignoreList: string[];
-    summaryCounter: number;
+    summaryCounter: number; // 用于短期记忆自动总结计数
 
     lastReply: string;
     counter: number;
@@ -52,9 +52,16 @@ export class Context {
 
     clearMessages(...roles: string[]) {
         if (roles.length === 0) {
+            this.summaryCounter = 0;
             this.messages = [];
         } else {
-            this.messages = this.messages.filter(message => !roles.includes(message.role));
+            this.messages = this.messages.filter(message => {
+                if (roles.includes(message.role)) {
+                    this.summaryCounter--;
+                    return false;
+                }
+                return true;
+            });
         }
     }
 

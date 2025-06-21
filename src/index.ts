@@ -554,16 +554,11 @@ function main() {
             }
             default: {
               seal.replyToSender(ctx, msg, `帮助:
-【.ai memo p st <内容>】设置个人设定
-【.ai memo p st clr】清除个人设定
-【.ai memo p show】展示个人记忆
-【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆
-【.ai memo p clr】清除个人记忆
-【.ai memo g st <内容>】设置群聊设定
-【.ai memo g st clr】清除群聊设定
-【.ai memo g show】展示群聊记忆
-【.ai memo g del <ID1> <ID2> --关键词1 --关键词2】删除群聊记忆
-【.ai memo g clr】清除群聊记忆
+【.ai memo [p/g] st <内容>】设置个人/群聊设定
+【.ai memo [p/g] st clr】清除个人/群聊设定
+【.ai memo [p/g] show】展示个人/群聊记忆
+【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
+【.ai memo [p/g] clr】清除个人/群聊记忆
 【.ai memo s show】展示短期记忆
 【.ai memo s clr】清除短期记忆
 【.ai memo sum】总结短期记忆`);

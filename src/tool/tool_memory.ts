@@ -123,9 +123,6 @@ export function registerDelMemory() {
             if (uid === null) {
                 return `未找到<${name}>`;
             }
-            if (uid === ctx.endPoint.userId) {
-                return `不能删除自己的记忆`;
-            }
 
             msg = createMsg(msg.messageType, uid, ctx.group.groupId);
             ctx = createCtx(ctx.endPoint.userId, msg);
@@ -190,9 +187,6 @@ export function registerShowMemory() {
             }
             if (uid === ctx.player.userId) {
                 return `查看该用户记忆无需调用函数`;
-            }
-            if (uid === ctx.endPoint.userId) {
-                return `不能查看自己的记忆`;
             }
 
             msg = createMsg('private', uid, '');
