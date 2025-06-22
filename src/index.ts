@@ -410,7 +410,7 @@ function main() {
                 }
                 case 'show': {
                   const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s);
+                  seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'del': {
@@ -422,7 +422,7 @@ function main() {
                   }
                   ai2.memory.delMemory(idList, kw);
                   const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s);
+                  seal.replyToSender(ctx, msg, s || '无');
                   AIManager.saveAI(muid);
                   return ret;
                 }
@@ -478,7 +478,7 @@ function main() {
                 }
                 case 'show': {
                   const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s);
+                  seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'del': {
@@ -490,7 +490,7 @@ function main() {
                   }
                   ai.memory.delMemory(idList, kw);
                   const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s);
+                  seal.replyToSender(ctx, msg, s || '无');
                   AIManager.saveAI(id);
                   return ret;
                 }
@@ -512,7 +512,7 @@ function main() {
               switch (val3) {
                 case 'show': {
                   const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
-                  seal.replyToSender(ctx, msg, s);
+                  seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'clr': {
@@ -532,7 +532,7 @@ function main() {
               ai.context.summaryCounter = 0;
               ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound)).then(() => {
                 const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
-                seal.replyToSender(ctx, msg, s);
+                seal.replyToSender(ctx, msg, s || '无');
               });
               return ret;
             }
