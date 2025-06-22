@@ -1,11 +1,12 @@
 import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
-import { AIManager } from "./AI";
+import { AI, AIManager } from "./AI";
 import { Context, Message } from "./context";
 import { generateId } from "../utils/utils";
 import { logger } from "./logger";
 import { fetchData } from "./service";
 import { parseBody } from "../utils/utils_message";
+import { ToolManager } from "../tool/tool";
 
 export interface MemoryInfo {
     id: string;
@@ -143,7 +144,7 @@ export class Memory {
         }
     }
 
-    async updateShortMemory(ctx: seal.MsgContext, sumMessages: Message[]) {
+    async updateShortMemory(ctx: seal.MsgContext, msg: seal.Message, ai: AI, sumMessages: Message[]) {
         const { url, apiKey } = ConfigManager.request;
         const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
         const { memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
@@ -155,6 +156,15 @@ export class Memory {
             }
             const prompt = Handlebars.compile(memoryPromptTemplate[0])({
                 "角色设定": roleSettingTemplate[roleSettingIndex],
+                "平台": ctx.endPoint.platform,
+                "私聊": ctx.isPrivate,
+                "展示号码": showNumber,
+                "用户名称": ctx.player.name,
+                "用户号码": ctx.player.userId.replace(/^.+:/, ''),
+                "群聊名称": ctx.group.groupName,
+                "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
+                "添加前缀": isPrefix,
+                "展示消息ID": showMsgId,
                 "对话内容": isPrefix ? sumMessages.map(message => {
                     if (message.role === 'assistant' && message?.tool_calls && message?.tool_calls.length > 0) {
                         return `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
@@ -196,18 +206,23 @@ export class Memory {
                 const reply = message.content || '';
                 logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
-                const memory = JSON.parse(reply) as {
+                const memoryData = JSON.parse(reply) as {
                     content: string,
-                    importance: boolean,
-                    keywords: string[]
+                    memories: {
+                        memory_type: 'private' | 'group',
+                        name: string,
+                        keywords: string[],
+                        content: string
+                    }[]
                 };
 
-                if (memory.importance) {
-                    this.addMemory(ctx, memory.keywords, memory.content);
-                } else {
-                    this.shortMemory.push(memory.content);
-                    this.limitShortMemory();
-                }
+
+                this.shortMemory.push(memoryData.content);
+                this.limitShortMemory();
+
+                memoryData.memories.forEach(m => {
+                    ToolManager.toolMap["add_memory"].solve(ctx, msg, ai, m);
+                });
             }
         } catch (e) {
             logger.error(`更新短期记忆失败: ${e.message}`);

@@ -65,7 +65,7 @@ export class Context {
         }
     }
 
-    async addMessage(ai: AI, ctx: seal.MsgContext, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
+    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
         const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
@@ -133,7 +133,7 @@ export class Context {
             if (isShortMemory) {
                 if (this.summaryCounter >= shortMemorySummaryRound) {
                     this.summaryCounter = 0;
-                    ai.memory.updateShortMemory(ctx, messages.slice(0, shortMemorySummaryRound));
+                    ai.memory.updateShortMemory(ctx, msg, ai, messages.slice(0, shortMemorySummaryRound));
                 } else {
                     this.summaryCounter++;
                 }

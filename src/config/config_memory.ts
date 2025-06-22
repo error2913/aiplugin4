@@ -40,20 +40,67 @@ export class MemoryConfig {
         ], "messages不存在时，将会自动替换");
         seal.ext.registerTemplateConfig(MemoryConfig.ext, "记忆总结prompt模板", [
             `你现在扮演的角色如下:
+## 扮演详情
 {{{角色设定}}}
+            
+## 聊天相关
+    - 当前平台:{{{平台}}}
+{{#if 私聊}}
+    - 当前私聊:<{{{用户名称}}}>{{#if 展示号码}}({{{用户号码}}}){{/if}}
+{{else}}
+    - 当前群聊:<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}
+    - <|@xxx|>表示@某个群成员
+    - <|poke:xxx|>表示戳一戳某个群成员
+{{/if}}
+{{#if 添加前缀}}
+    - <|from:xxx|>表示消息来源，不要在生成的回复中使用
+{{/if}}
+{{#if 展示消息ID}}
+    - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
+    - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
+{{/if}}
+    - \\f用于分割多条消息
 
 请根据你的设定，对以下对话内容进行总结:
 {{{对话内容}}}
 
 返回格式为JSON，格式类型如下:
 {
-    "content": string,
-    "importance": boolean,
-    "keywords": string[]
-}
-content为总结后的对话摘要，请根据人物、行为、场景，以所扮演角色的口吻进行简短描述，只保留核心内容
-若对话内容对记忆有重要影响，importance为true，keywords为对话内容中的关键词
-若对话内容对记忆无重要影响，importance为false，keywords为空数组`
+    "content": {
+        type: 'string',
+        description: '总结后的对话摘要，请根据人物、行为、场景，以所扮演角色的口吻进行简短描述，只保留核心内容'
+    },
+    "memories": {
+        type: 'array',
+        description: '记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组',
+        items: {
+            type: 'object',
+            description: '记忆对象',
+            properties: {
+                "memory_type": {
+                    type: "string",
+                    description: "记忆类型，个人或群聊。",
+                    enum: ["private", "group"]
+                },
+                "name": {
+                    type: 'string',
+                    description: '用户名称或群聊名称{{#if 展示号码}}或纯数字QQ号、群号{{/if}}，实际使用时与记忆类型对应'
+                },
+                "keywords": {
+                    type: 'array',
+                    description: '记忆关键词',
+                    items: {
+                        type: 'string'
+                    }
+                },
+                "content": {
+                    type: 'string',
+                    description: '记忆内容，尽量简短，无需附带时间与来源'
+                }
+            }
+        }
+    }
+}`
         ], "");
     }
 

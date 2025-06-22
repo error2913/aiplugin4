@@ -154,7 +154,7 @@ export class AI {
             const s = contextArray[i];
             const reply = replyArray[i];
             const msgId = await replyToSender(ctx, msg, this, reply);
-            await this.context.addMessage(this, ctx, s, images, 'assistant', msgId);
+            await this.context.addMessage(ctx, msg, this, s, images, 'assistant', msgId);
         }
 
         //发送偷来的图片
@@ -221,7 +221,7 @@ export class AI {
                             const s = contextArray[i];
                             const reply = replyArray[i];
                             const msgId = await replyToSender(ctx, msg, this, reply);
-                            await this.context.addMessage(this, ctx, s, images, 'assistant', msgId);
+                            await this.context.addMessage(ctx, msg, this, s, images, 'assistant', msgId);
                         }
                     }
 
@@ -243,7 +243,7 @@ export class AI {
                             this.stream.toolCallStatus = false;
                             await this.stopCurrentChatStream();
 
-                            this.context.addMessage(this, ctx, match[0], [], "assistant", '');
+                            await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
 
                             try {
                                 await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
@@ -277,7 +277,7 @@ export class AI {
                 const s = contextArray[i];
                 const reply = replyArray[i];
                 const msgId = await replyToSender(ctx, msg, this, reply);
-                await this.context.addMessage(this, ctx, s, images, 'assistant', msgId);
+                await this.context.addMessage(ctx, msg, this, s, images, 'assistant', msgId);
             }
 
             after = result.nextAfter;

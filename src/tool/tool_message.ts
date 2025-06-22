@@ -109,7 +109,7 @@ export function registerSendMsg() {
                 const s = contextArray[i];
                 const reply = replyArray[i];
                 const msgId = await replyToSender(ctx, msg, ai, reply);
-                await ai.context.addMessage(ai, ctx, s, images, 'assistant', msgId);
+                await ai.context.addMessage(ctx, msg, ai, s, images, 'assistant', msgId);
             }
 
             if (tool_call) {

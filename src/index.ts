@@ -530,7 +530,7 @@ function main() {
             case 'sum': {
               const { shortMemorySummaryRound } = ConfigManager.memory;
               ai.context.summaryCounter = 0;
-              ai.memory.updateShortMemory(ctx, ai.context.messages.slice(0, shortMemorySummaryRound)).then(() => {
+              ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound)).then(() => {
                 const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
                 seal.replyToSender(ctx, msg, s);
               });
@@ -1372,7 +1372,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 }
               }
 
-              await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
+              await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
 
               logger.info('非指令触发回复');
               await ai.chat(ctx, msg);
@@ -1403,7 +1403,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               }
             }
 
-            await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
+            await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
             await ai.context.addSystemUserMessage('触发原因提示', condition.reason, []);
             triggerConditionMap[id].splice(i, 1);
 
@@ -1427,7 +1427,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             }
           }
 
-          await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
+          await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
         }
 
         if (pr.counter > -1) {
@@ -1497,7 +1497,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               }
             }
 
-            await ai.context.addMessage(ai, ctx, message, images, 'user', transformMsgId(msg.rawId));
+            await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
           }
         }
       }
@@ -1541,7 +1541,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               }
             }
 
-            await ai.context.addMessage(ai, ctx, message, images, 'assistant', transformMsgId(msg.rawId));
+            await ai.context.addMessage(ctx, msg, ai, message, images, 'assistant', transformMsgId(msg.rawId));
             return;
           }
         }
