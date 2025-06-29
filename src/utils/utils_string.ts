@@ -4,6 +4,7 @@ import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
+import { AI } from "../AI/AI";
 
 export function transformTextToArray(s: string): { type: string, data: { [key: string]: string } }[] {
     const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
@@ -76,7 +77,7 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
     return s;
 }
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context, ai?: AI): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
     const { replymsg, isTrim } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
@@ -123,7 +124,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         reply = await replaceMentions(ctx, context, reply);
         reply = await replacePoke(ctx, context, reply);
         reply = await replaceQuote(reply);
-        const { result, images: replyImages } = await replaceImages(context, reply);
+        const { result, images: replyImages } = await replaceImages(context, reply, ai);
         reply = isTrim ? result.trim() : result;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
@@ -350,9 +351,10 @@ async function replaceQuote(reply: string) {
  * 替换图片占位符为CQ码
  * @param context 
  * @param reply 
+ * @param ai 
  * @returns 
  */
-async function replaceImages(context: Context, reply: string) {
+async function replaceImages(context: Context, reply: string, ai?: AI) {
     let result = reply;
     const images = [];
 
@@ -360,14 +362,13 @@ async function replaceImages(context: Context, reply: string) {
     if (match) {
         for (let i = 0; i < match.length; i++) {
             const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-            const image = context.findImage(id);
+            const image = context.findImage(id, ai);
 
             if (image) {
-                const file = image.file;
                 images.push(image);
 
-                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(file))) {
-                    result = result.replace(match[i], `[CQ:image,file=${file}]`);
+                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
+                    result = result.replace(match[i], `[CQ:image,file=${image.file}]`);
                     continue;
                 }
             }

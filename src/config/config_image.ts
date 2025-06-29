@@ -22,6 +22,7 @@ export class ImageConfig {
         seal.ext.registerOptionConfig(ImageConfig.ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题");
         seal.ext.registerIntConfig(ImageConfig.ext, "图片最大回复字符数", 500);
         seal.ext.registerIntConfig(ImageConfig.ext, "偷取图片存储上限", 50, "每个群聊或私聊单独储存");
+        seal.ext.registerIntConfig(ImageConfig.ext, "保存图片存储上限", 50, "每个群聊或私聊单独储存");
     }
 
     static get() {
@@ -36,7 +37,8 @@ export class ImageConfig {
             defaultPrompt: seal.ext.getStringConfig(ImageConfig.ext, "图片识别默认prompt"),
             urlToBase64: seal.ext.getOptionConfig(ImageConfig.ext, "识别图片时将url转换为base64"),
             maxChars: seal.ext.getIntConfig(ImageConfig.ext, "图片最大回复字符数"),
-            maxImageNum: seal.ext.getIntConfig(ImageConfig.ext, "偷取图片存储上限")
+            maxImageNum: seal.ext.getIntConfig(ImageConfig.ext, "偷取图片存储上限"),
+            maxSavedImageNum: seal.ext.getIntConfig(ImageConfig.ext, "保存图片存储上限")
         }
     }
 }

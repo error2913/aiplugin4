@@ -1172,7 +1172,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   const cmdImage = seal.ext.newCmdItemInfo();
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
-【img draw [stl/lcl/all]】随机抽取偷的图片/本地图片/全部
+【img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片全部
 【img stl (on/off)】偷图 开启/关闭
 【img f】遗忘
 【img itt [图片/ran] (附加提示词)】图片转文字`;
@@ -1212,6 +1212,22 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 });
               return ret;
             }
+            case 'save': {
+              ai.image.drawSaveImageFile()
+                .then(image => {
+                  if (!image) {
+                    seal.replyToSender(ctx, msg, '暂无保存的表情包图片');
+                  } else {
+                    // 发送图片+名称+场景
+                    let text = `[CQ:image,file=${image.file}]\n名称：${image.name}`;
+                    if (image.scene) {
+                      text += `\n场景：${image.scene}`;
+                    }
+                    seal.replyToSender(ctx, msg, text);
+                  }
+                });
+              return ret;
+            }
             case 'all': {
               ai.image.drawImageFile()
                 .then(image => {
@@ -1235,18 +1251,18 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           switch (op) {
             case 'on': {
               ai.image.stealStatus = true;
-              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.imageList.length}`);
+              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.imageList.filter(img => img.isUrl).length}`);
               AIManager.saveAI(id);
               return ret;
             }
             case 'off': {
               ai.image.stealStatus = false;
-              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.imageList.length}`);
+              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.imageList.filter(img => img.isUrl).length}`);
               AIManager.saveAI(id);
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.image.stealStatus},当前偷取数量:${ai.image.imageList.length}`);
+              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.image.stealStatus},当前偷取数量:${ai.image.imageList.filter(img => img.isUrl).length}`);
               return ret;
             }
           }

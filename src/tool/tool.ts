@@ -4,7 +4,7 @@ import { ConfigManager } from "../config/config"
 import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
 import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_deck"
-import { registerCheckAvatar, registerImageToText, registerTextToImage } from "./tool_image"
+import { registerCheckAvatar, registerImageToText, registerTextToImage, registerSaveImage, registerDeleteSavedImage } from "./tool_image"
 import { registerJrrp } from "./tool_jrrp"
 import { registerAddMemory, registerDelMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
@@ -199,6 +199,8 @@ export class ToolManager {
         registerImageToText();
         registerCheckAvatar();
         registerTextToImage();
+        registerSaveImage();
+        registerDeleteSavedImage();
         registerGroupSign();
         registerGetPersonInfo();
         registerSendMsg();

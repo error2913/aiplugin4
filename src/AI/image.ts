@@ -44,6 +44,43 @@ export class ImageManager {
         this.imageList = this.imageList.concat(images.filter(item => item.isUrl)).slice(-maxImageNum);
     }
 
+    updateSavedImageList(name: string, scene: string, base64: string) {
+        const { maxSavedImageNum } = ConfigManager.image;
+        
+        const savedImages = this.imageList.filter(img => !img.isUrl && (() => {
+            try {
+                const meta = JSON.parse(img.content);
+                return meta && typeof meta.name === 'string';
+            } catch {
+                return false;
+            }
+        })());
+        
+        if (savedImages.length >= maxSavedImageNum) {
+            throw new Error(`保存图片已达到上限${maxSavedImageNum}张，无法继续保存`);
+        }
+
+        let finalName = name;
+        let count = 1;
+        while (this.imageList.some(img => {
+            try {
+                const meta = JSON.parse(img.content);
+                return meta.name === finalName;
+            } catch {
+                return false;
+            }
+        })) {
+            finalName = `${name}_${count++}`;
+        }
+
+        const img = new Image(`${base64}`);
+        img.content = JSON.stringify({ name: finalName, scene: scene || '' });
+
+        this.imageList.push(img);
+        return finalName;
+    }
+
+
     drawLocalImageFile(): string {
         const { localImagePaths } = ConfigManager.image;
         const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
@@ -72,12 +109,13 @@ export class ImageManager {
     }
 
     async drawStolenImageFile(): Promise<string> {
-        if (this.imageList.length == 0) {
+        const stolenImages = this.imageList.filter(img => img.isUrl);
+        if (stolenImages.length === 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * this.imageList.length);
-        const image = this.imageList.splice(index, 1)[0];
+        const index = Math.floor(Math.random() * stolenImages.length);
+        const image = stolenImages.splice(index, 1)[0];
         const url = image.file;
 
         if (!await ImageManager.checkImageUrl(url)) {
@@ -86,6 +124,34 @@ export class ImageManager {
         }
 
         return url;
+    }
+
+    async drawSaveImageFile(): Promise<{ file: string, name: string, scene: string } | null> {
+        const savedImages = this.imageList.filter(img => !img.isUrl && (() => {
+            try {
+                const meta = JSON.parse(img.content);
+                return meta && typeof meta.name === 'string';
+            } catch {
+                return false;
+            }
+        })());
+        if (savedImages.length === 0) {
+            return null;
+        }
+        const index = Math.floor(Math.random() * savedImages.length);
+        const image = savedImages.splice(index, 1)[0];
+        const imagefile = seal.base64ToImage(image.file);
+
+        try {
+            const meta = JSON.parse(image.content);
+            return {
+                file: imagefile,
+                name: meta.name,
+                scene: meta.scene || ''
+            };
+        } catch {
+            return null;
+        }
     }
 
     async drawImageFile(): Promise<string> {
@@ -117,15 +183,21 @@ export class ImageManager {
         if (index < values.length) {
             return values[index];
         } else {
-            const image = this.imageList.splice(index - values.length, 1)[0];
-            const url = image.file;
+            const image = this.imageList[index - values.length];
+            if (!image.isUrl) {
+                const file = seal.base64ToImage(image.file);
+                return file;
+            } else {
+                this.imageList.splice(index - values.length, 1);
+                const url = image.file;
 
-            if (!await ImageManager.checkImageUrl(url)) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                return await this.drawImageFile();
+                if (!await ImageManager.checkImageUrl(url)) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    return await this.drawImageFile();
+                }
+
+                return url;
             }
-
-            return url;
         }
     }
 

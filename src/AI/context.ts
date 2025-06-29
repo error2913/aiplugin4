@@ -374,7 +374,7 @@ export class Context {
         return names;
     }
 
-    findImage(id: string): Image {
+    findImage(id: string, ai?: AI): Image | null {
         if (/^[0-9a-z]{6}$/.test(id.trim())) {
             const messages = this.messages;
             for (let i = messages.length - 1; i >= 0; i--) {
@@ -382,6 +382,29 @@ export class Context {
                 if (image) {
                     return image;
                 }
+            }
+        }
+
+        if (ai && ai.image) {
+            const savedImage = ai.image.imageList.find(img => {
+                if (img.content) {
+                    try {
+                        const meta = JSON.parse(img.content);
+                        return meta.name === id;
+                    } catch {
+                        return false;
+                    }
+                }
+                return false;
+            });
+            if (savedImage) {
+
+                const filePath = seal.base64ToImage(savedImage.file);
+                const newImage = new Image(filePath);
+                newImage.id = savedImage.id;
+                newImage.content = savedImage.content;
+                newImage.isUrl = false;
+                return newImage;
             }
         }
 

@@ -27,6 +27,16 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         return acc;
     }, {});
 
+    const savedImages = ai.image.imageList.filter(img => !img.isUrl);
+    const savedImageNames = savedImages.map(img => {
+        try {
+            const meta = JSON.parse(img.content);
+            return meta.scene ? `${meta.name}（${meta.scene}）` : meta.name;
+        } catch {
+            return '';
+        }
+    }).filter(Boolean).join("、");    
+
     let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
     if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
         roleSettingIndex = 0;
@@ -65,6 +75,8 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "图片条件不为零": condition !== '0',
         "本地图片不为空": Object.keys(localImages).length !== 0,
         "本地图片名称": Object.keys(localImages).join("、"),
+        "保存图片不为空": savedImages.length > 0,
+        "保存图片名称": savedImageNames,
         "开启长期记忆": isMemory && memoryPrompt,
         "记忆信息": memoryPrompt,
         "开启短期记忆": isShortMemory && shortMemoryPrompt,

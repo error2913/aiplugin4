@@ -132,7 +132,7 @@ export class AI {
 
             //获取处理后的回复
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
-            result = await handleReply(ctx, msg, raw_reply, this.context);
+            result = await handleReply(ctx, msg, raw_reply, this.context, this);
 
             if (!checkRepeat(this.context, result.contextArray.join('')) || result.replyArray.join('').trim() === '') {
                 break;
@@ -161,6 +161,7 @@ export class AI {
         const { p } = ConfigManager.image;
         if (Math.random() * 100 <= p) {
             const file = await this.image.drawImageFile();
+             
             if (file) {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
             }
@@ -211,7 +212,7 @@ export class AI {
                     // 对于function_call前面的内容，发送并添加到上下文中
                     const match = raw_reply.match(/([\s\S]*)<function(?:_call)?>/);
                     if (match && match[1].trim()) {
-                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, match[1], this.context);
+                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, match[1], this.context, this);
 
                         if (this.stream.id !== id) {
                             return;
@@ -267,7 +268,7 @@ export class AI {
                 }
             }
 
-            const { contextArray, replyArray, images } = await handleReply(ctx, msg, raw_reply, this.context);
+            const { contextArray, replyArray, images } = await handleReply(ctx, msg, raw_reply, this.context, this);
 
             if (this.stream.id !== id) {
                 return;
