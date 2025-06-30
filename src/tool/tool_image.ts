@@ -241,7 +241,7 @@ export function registerDeleteSavedImage() {
     tool.solve = async (_, __, ai, args) => {
         const { name } = args;
 
-        const imageIndex = ai.image.imageList.findIndex(img => {
+        const imageIndex = ai.image.savedImages.findIndex(img => {
             if (img.content) {
                 try {
                     const meta = JSON.parse(img.content);
@@ -257,7 +257,7 @@ export function registerDeleteSavedImage() {
             return `未找到名称为"${name}"的保存图片`;
         }
 
-        const deletedImage = ai.image.imageList.splice(imageIndex, 1)[0];
+        const deletedImage = ai.image.savedImages.splice(imageIndex, 1)[0];
         try {
             const meta = JSON.parse(deletedImage.content);
             return `已删除保存的图片：${meta.name}${meta.scene ? `（${meta.scene}）` : ''}`;

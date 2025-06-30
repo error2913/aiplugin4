@@ -19,16 +19,18 @@ export class Image {
 
 export class ImageManager {
     imageList: Image[];
+    savedImages: Image[];
     stealStatus: boolean;
 
     constructor() {
         this.imageList = [];
+        this.savedImages = [];
         this.stealStatus = false;
     }
 
     static reviver(value: any): ImageManager {
         const im = new ImageManager();
-        const validKeys = ['imageList', 'stealStatus'];
+        const validKeys = ['imageList', 'savedImages', 'stealStatus'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -46,23 +48,13 @@ export class ImageManager {
 
     updateSavedImageList(name: string, scene: string, base64: string) {
         const { maxSavedImageNum } = ConfigManager.image;
-        
-        const savedImages = this.imageList.filter(img => !img.isUrl && (() => {
-            try {
-                const meta = JSON.parse(img.content);
-                return meta && typeof meta.name === 'string';
-            } catch {
-                return false;
-            }
-        })());
-        
-        if (savedImages.length >= maxSavedImageNum) {
+        if (this.savedImages.length >= maxSavedImageNum) {
             throw new Error(`保存图片已达到上限${maxSavedImageNum}张，无法继续保存`);
         }
 
         let finalName = name;
         let count = 1;
-        while (this.imageList.some(img => {
+        while (this.savedImages.some(img => {
             try {
                 const meta = JSON.parse(img.content);
                 return meta.name === finalName;
@@ -75,8 +67,8 @@ export class ImageManager {
 
         const img = new Image(`${base64}`);
         img.content = JSON.stringify({ name: finalName, scene: scene || '' });
-
-        this.imageList.push(img);
+        img.isUrl = false;
+        this.savedImages.push(img);
         return finalName;
     }
 
@@ -109,13 +101,10 @@ export class ImageManager {
     }
 
     async drawStolenImageFile(): Promise<string> {
-        const stolenImages = this.imageList.filter(img => img.isUrl);
-        if (stolenImages.length === 0) {
-            return '';
-        }
+        if (this.imageList.length === 0) return '';
 
-        const index = Math.floor(Math.random() * stolenImages.length);
-        const image = stolenImages.splice(index, 1)[0];
+        const index = Math.floor(Math.random() * this.imageList.length);
+        const image = this.imageList.splice(index, 1)[0];
         const url = image.file;
 
         if (!await ImageManager.checkImageUrl(url)) {
@@ -127,21 +116,10 @@ export class ImageManager {
     }
 
     async drawSaveImageFile(): Promise<{ file: string, name: string, scene: string } | null> {
-        const savedImages = this.imageList.filter(img => !img.isUrl && (() => {
-            try {
-                const meta = JSON.parse(img.content);
-                return meta && typeof meta.name === 'string';
-            } catch {
-                return false;
-            }
-        })());
-        if (savedImages.length === 0) {
-            return null;
-        }
-        const index = Math.floor(Math.random() * savedImages.length);
-        const image = savedImages.splice(index, 1)[0];
+        if (this.savedImages.length === 0) return null;
+        const index = Math.floor(Math.random() * this.savedImages.length);
+        const image = this.savedImages[index];
         const imagefile = seal.base64ToImage(image.file);
-
         try {
             const meta = JSON.parse(image.content);
             return {
@@ -174,30 +152,28 @@ export class ImageManager {
         }, {});
 
         const values = Object.values(localImages);
-        if (this.imageList.length == 0 && values.length == 0) {
+        if (this.imageList.length == 0 && values.length == 0 && this.savedImages.length == 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * (values.length + this.imageList.length));
+        const index = Math.floor(Math.random() * (values.length + this.imageList.length + this.savedImages.length));
 
         if (index < values.length) {
             return values[index];
-        } else {
+        } else if (index < values.length + this.imageList.length) {
             const image = this.imageList[index - values.length];
-            if (!image.isUrl) {
-                const file = seal.base64ToImage(image.file);
-                return file;
-            } else {
-                this.imageList.splice(index - values.length, 1);
-                const url = image.file;
+            this.imageList.splice(index - values.length, 1);
+            const url = image.file;
 
-                if (!await ImageManager.checkImageUrl(url)) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    return await this.drawImageFile();
-                }
-
-                return url;
+            if (!await ImageManager.checkImageUrl(url)) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return await this.drawImageFile();
             }
+
+            return url;
+        } else {
+            const image = this.savedImages[index - values.length - this.imageList.length];
+            return seal.base64ToImage(image.file);
         }
     }
 

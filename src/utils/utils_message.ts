@@ -27,7 +27,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         return acc;
     }, {});
 
-    const savedImages = ai.image.imageList.filter(img => !img.isUrl);
+    const savedImages = ai.image.savedImages;
     const savedImageNames = savedImages.map(img => {
         try {
             const meta = JSON.parse(img.content);

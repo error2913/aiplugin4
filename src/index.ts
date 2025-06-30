@@ -1172,9 +1172,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   const cmdImage = seal.ext.newCmdItemInfo();
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
-【img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片全部
+【img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
 【img stl (on/off)】偷图 开启/关闭
-【img f】遗忘
+【img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
 【img itt [图片/ran] (附加提示词)】图片转文字`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
@@ -1218,7 +1218,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                   if (!image) {
                     seal.replyToSender(ctx, msg, '暂无保存的表情包图片');
                   } else {
-                    // 发送图片+名称+场景
                     let text = `[CQ:image,file=${image.file}]\n名称：${image.name}`;
                     if (image.scene) {
                       text += `\n场景：${image.scene}`;
@@ -1270,10 +1269,33 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         case 'f':
         case 'fgt':
         case 'forget': {
-          ai.image.imageList = [];
-          seal.replyToSender(ctx, msg, '图片已遗忘');
-          AIManager.saveAI(id);
-          return ret;
+          const type = cmdArgs.getArgN(2);
+          switch (type) {
+            case 'stl':
+            case 'stolen': {
+              ai.image.imageList = [];
+              seal.replyToSender(ctx, msg, '偷取图片已遗忘');
+              AIManager.saveAI(id);
+              return ret;
+            }
+            case 'save': {
+              ai.image.savedImages = [];
+              seal.replyToSender(ctx, msg, '保存图片已遗忘');
+              AIManager.saveAI(id);
+              return ret;
+            }
+            case 'all': {
+              ai.image.imageList = [];
+              ai.image.savedImages = [];
+              seal.replyToSender(ctx, msg, '所有图片已遗忘');
+              AIManager.saveAI(id);
+              return ret;
+            }
+            default: {
+              ret.showHelp = true;
+              return ret;
+            }
+          }
         }
         case 'itt': {
           const val2 = cmdArgs.getArgN(2);

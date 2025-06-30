@@ -386,7 +386,7 @@ export class Context {
         }
 
         if (ai && ai.image) {
-            const savedImage = ai.image.imageList.find(img => {
+            const savedImage = ai.image.savedImages.find(img => {
                 if (img.content) {
                     try {
                         const meta = JSON.parse(img.content);
@@ -398,7 +398,6 @@ export class Context {
                 return false;
             });
             if (savedImage) {
-
                 const filePath = seal.base64ToImage(savedImage.file);
                 const newImage = new Image(filePath);
                 newImage.id = savedImage.id;
