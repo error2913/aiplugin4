@@ -500,14 +500,26 @@ function main() {
             case 'short': {
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
+                case 'on': {
+                  ai.memory.useShortMemory = true;
+                  seal.replyToSender(ctx, msg, '短期记忆已开启');
+                  AIManager.saveAI(id);
+                  return ret;
+                }
+                case 'off': {
+                  ai.memory.useShortMemory = false;
+                  seal.replyToSender(ctx, msg, '短期记忆已关闭');
+                  AIManager.saveAI(id);
+                  return ret;
+                }
                 case 'show': {
-                  const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                  const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
                   seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'clr': {
                   ai.memory.clearShortMemory();
-                  seal.replyToSender(ctx, msg, '群聊记忆已清除');
+                  seal.replyToSender(ctx, msg, '短期记忆已清除');
                   AIManager.saveAI(id);
                   return ret;
                 }
@@ -522,7 +534,7 @@ function main() {
               ai.context.summaryCounter = 0;
               ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound))
                 .then(() => {
-                  const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                  const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
                   seal.replyToSender(ctx, msg, s || '无');
                 });
               return ret;
@@ -534,6 +546,7 @@ function main() {
 【.ai memo [p/g] show】展示个人/群聊记忆
 【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
 【.ai memo [p/g] clr】清除个人/群聊记忆
+【.ai memo s [on/off]】开启/关闭短期记忆
 【.ai memo s show】展示短期记忆
 【.ai memo s clr】清除短期记忆
 【.ai memo sum】总结短期记忆`);

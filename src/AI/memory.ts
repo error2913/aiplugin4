@@ -30,17 +30,19 @@ export interface MemoryInfo {
 export class Memory {
     persona: string;
     memoryMap: { [key: string]: MemoryInfo };
-    shortMemory: string[];
+    useShortMemory: boolean;
+    shortMemoryList: string[];
 
     constructor() {
         this.persona = '无';
         this.memoryMap = {};
-        this.shortMemory = [];
+        this.useShortMemory = false;
+        this.shortMemoryList = [];
     }
 
     static reviver(value: any): Memory {
         const memory = new Memory();
-        const validKeys = ['persona', 'memoryMap', 'shortMemory'];
+        const validKeys = ['persona', 'memoryMap', 'useShortMemory', 'shortMemory'];
 
         for (const k in value) {
             if (validKeys.includes(k)) {
@@ -108,7 +110,7 @@ export class Memory {
     }
 
     clearShortMemory() {
-        this.shortMemory = [];
+        this.shortMemoryList = [];
     }
 
     limitMemory() {
@@ -139,12 +141,16 @@ export class Memory {
 
     limitShortMemory() {
         const { shortMemoryLimit } = ConfigManager.memory;
-        if (this.shortMemory.length > shortMemoryLimit) {
-            this.shortMemory.splice(0, this.shortMemory.length - shortMemoryLimit);
+        if (this.shortMemoryList.length > shortMemoryLimit) {
+            this.shortMemoryList.splice(0, this.shortMemoryList.length - shortMemoryLimit);
         }
     }
 
     async updateShortMemory(ctx: seal.MsgContext, msg: seal.Message, ai: AI, sumMessages: Message[]) {
+        if (!this.useShortMemory) {
+            return;
+        }
+
         const { url, apiKey } = ConfigManager.request;
         const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
         const { memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
@@ -217,7 +223,7 @@ export class Memory {
                 };
 
 
-                this.shortMemory.push(memoryData.content);
+                this.shortMemoryList.push(memoryData.content);
                 this.limitShortMemory();
 
                 memoryData.memories.forEach(m => {
