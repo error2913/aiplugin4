@@ -4,7 +4,7 @@ import { ConfigManager } from "../config/config"
 import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
 import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
 import { registerDrawDeck } from "./tool_deck"
-import { registerCheckAvatar, registerImageToText, registerTextToImage, registerSaveImage, registerDeleteSavedImage } from "./tool_image"
+import { registerCheckAvatar, registerImageToText, registerTextToImage, registerSaveImage, registerDelImage } from "./tool_image"
 import { registerJrrp } from "./tool_jrrp"
 import { registerAddMemory, registerDelMemory, registerShowMemory } from "./tool_memory"
 import { registerModuRoll, registerModuSearch } from "./tool_modu"
@@ -34,9 +34,7 @@ export interface ToolInfo {
                 [key: string]: {
                     type: string,
                     description: string,
-                    items?: {
-                        type: string
-                    },
+                    items?: object,
                     enum?: string[]
                 }
             },
@@ -200,7 +198,7 @@ export class ToolManager {
         registerCheckAvatar();
         registerTextToImage();
         registerSaveImage();
-        registerDeleteSavedImage();
+        registerDelImage();
         registerGroupSign();
         registerGetPersonInfo();
         registerSendMsg();

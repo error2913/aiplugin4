@@ -10,32 +10,27 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const { isMemory, isShortMemory } = ConfigManager.memory;
-    const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-        if (path.trim() === '') {
-            return acc;
-        }
-        try {
-            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-            if (!name) {
-                throw new Error(`本地图片路径格式错误:${path}`);
+    const sandableImagesPrompt: string = localImagePaths
+        .map(path => {
+            if (path.trim() === '') {
+                return null;
             }
+            try {
+                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
+                if (!name) {
+                    throw new Error(`本地图片路径格式错误:${path}`);
+                }
 
-            acc[name] = path;
-        } catch (e) {
-            logger.error(e);
-        }
-        return acc;
-    }, {});
-
-    const savedImages = ai.image.savedImages;
-    const savedImageNames = savedImages.map(img => {
-        try {
-            const meta = JSON.parse(img.content);
-            return meta.scene ? `${meta.name}（${meta.scene}）` : meta.name;
-        } catch {
-            return '';
-        }
-    }).filter(Boolean).join("、");    
+                return name;
+            } catch (e) {
+                logger.error(e);
+            }
+            return null;
+        })
+        .filter(Boolean)
+        .concat(ai.imageManager.savedImages.map(img => `${img.id}\n应用场景: ${img.scenes.join('、')}`))
+        .map((prompt, index) => `${index + 1}. ${prompt}`)
+        .join('\n');
 
     let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
     if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
@@ -73,10 +68,8 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "展示消息ID": showMsgId,
         "接收图片": receiveImage,
         "图片条件不为零": condition !== '0',
-        "本地图片不为空": Object.keys(localImages).length !== 0,
-        "本地图片名称": Object.keys(localImages).join("、"),
-        "保存图片不为空": savedImages.length > 0,
-        "保存图片名称": savedImageNames,
+        "可发送图片不为空": sandableImagesPrompt,
+        "可发送图片列表": sandableImagesPrompt,
         "开启长期记忆": isMemory && memoryPrompt,
         "记忆信息": memoryPrompt,
         "开启短期记忆": isShortMemory && shortMemoryPrompt,

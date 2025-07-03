@@ -7,23 +7,27 @@ export class Image {
     id: string;
     isUrl: boolean;
     file: string;
+    scenes: string[];
+    base64: string;
     content: string;
 
     constructor(file: string) {
         this.id = generateId();
         this.isUrl = file.startsWith('http');
         this.file = file;
+        this.scenes = [];
+        this.base64 = '';
         this.content = '';
     }
 }
 
 export class ImageManager {
-    imageList: Image[];
+    stolenImages: Image[];
     savedImages: Image[];
     stealStatus: boolean;
 
     constructor() {
-        this.imageList = [];
+        this.stolenImages = [];
         this.savedImages = [];
         this.stealStatus = false;
     }
@@ -41,37 +45,15 @@ export class ImageManager {
         return im;
     }
 
-    updateImageList(images: Image[]) {
-        const { maxImageNum } = ConfigManager.image;
-        this.imageList = this.imageList.concat(images.filter(item => item.isUrl)).slice(-maxImageNum);
+    updateStolenImages(images: Image[]) {
+        const { maxStolenImageNum } = ConfigManager.image;
+        this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
     }
 
-    updateSavedImageList(name: string, scene: string, base64: string) {
+    updateSavedImages(images: Image[]) {
         const { maxSavedImageNum } = ConfigManager.image;
-        if (this.savedImages.length >= maxSavedImageNum) {
-            throw new Error(`保存图片已达到上限${maxSavedImageNum}张，无法继续保存`);
-        }
-
-        let finalName = name;
-        let count = 1;
-        while (this.savedImages.some(img => {
-            try {
-                const meta = JSON.parse(img.content);
-                return meta.name === finalName;
-            } catch {
-                return false;
-            }
-        })) {
-            finalName = `${name}_${count++}`;
-        }
-
-        const img = new Image(`${base64}`);
-        img.content = JSON.stringify({ name: finalName, scene: scene || '' });
-        img.isUrl = false;
-        this.savedImages.push(img);
-        return finalName;
+        this.savedImages = this.savedImages.concat(images.filter(item => item.isUrl)).slice(-maxSavedImageNum);
     }
-
 
     drawLocalImageFile(): string {
         const { localImagePaths } = ConfigManager.image;
@@ -101,10 +83,12 @@ export class ImageManager {
     }
 
     async drawStolenImageFile(): Promise<string> {
-        if (this.imageList.length === 0) return '';
+        if (this.stolenImages.length === 0) {
+            return '';
+        }
 
-        const index = Math.floor(Math.random() * this.imageList.length);
-        const image = this.imageList.splice(index, 1)[0];
+        const index = Math.floor(Math.random() * this.stolenImages.length);
+        const image = this.stolenImages.splice(index, 1)[0];
         const url = image.file;
 
         if (!await ImageManager.checkImageUrl(url)) {
@@ -115,21 +99,11 @@ export class ImageManager {
         return url;
     }
 
-    async drawSaveImageFile(): Promise<{ file: string, name: string, scene: string } | null> {
+    drawSavedImageFile(): string {
         if (this.savedImages.length === 0) return null;
         const index = Math.floor(Math.random() * this.savedImages.length);
         const image = this.savedImages[index];
-        const imagefile = seal.base64ToImage(image.file);
-        try {
-            const meta = JSON.parse(image.content);
-            return {
-                file: imagefile,
-                name: meta.name,
-                scene: meta.scene || ''
-            };
-        } catch {
-            return null;
-        }
+        return seal.base64ToImage(image.base64);
     }
 
     async drawImageFile(): Promise<string> {
@@ -152,28 +126,18 @@ export class ImageManager {
         }, {});
 
         const values = Object.values(localImages);
-        if (this.imageList.length == 0 && values.length == 0 && this.savedImages.length == 0) {
+        if (this.stolenImages.length == 0 && values.length == 0 && this.savedImages.length == 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * (values.length + this.imageList.length + this.savedImages.length));
+        const index = Math.floor(Math.random() * (values.length + this.stolenImages.length + this.savedImages.length));
 
         if (index < values.length) {
             return values[index];
-        } else if (index < values.length + this.imageList.length) {
-            const image = this.imageList[index - values.length];
-            this.imageList.splice(index - values.length, 1);
-            const url = image.file;
-
-            if (!await ImageManager.checkImageUrl(url)) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                return await this.drawImageFile();
-            }
-
-            return url;
+        } else if (index < values.length + this.stolenImages.length) {
+            return await this.drawStolenImageFile();
         } else {
-            const image = this.savedImages[index - values.length - this.imageList.length];
-            return seal.base64ToImage(image.file);
+            return this.drawSavedImageFile();
         }
     }
 

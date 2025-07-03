@@ -1,4 +1,4 @@
-import { ImageManager } from "../AI/image";
+import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
@@ -30,7 +30,7 @@ export function registerImageToText() {
     tool.solve = async (_, __, ai, args) => {
         const { id, content } = args;
 
-        const image = ai.context.findImage(id, ai);
+        const image = ai.context.findImage(id, ai.imageManager);
         if (!image) {
             return `未找到图片${id}`;
         }
@@ -170,101 +170,118 @@ export function registerSaveImage() {
             parameters: {
                 type: "object",
                 properties: {
-                    id: {
-                        type: "string",
-                        description: `图片的id，六位字符`
-                    },
-                    name: {
-                        type: "string",
-                        description: `图片命名`
-                    },
-                    scene: {
-                        type: "string",
-                        description: `表情包的应用场景`
+                    images: {
+                        type: "array",
+                        description: "要保存的图片信息数组",
+                        items: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "string",
+                                    description: `图片的id，六位字符`
+                                },
+                                name: {
+                                    type: "string",
+                                    description: `图片命名`
+                                },
+                                scenes: {
+                                    type: "array",
+                                    description: `表情包的应用场景`,
+                                    items: {
+                                        type: "string"
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
-                required: ["id", "name"]
+                required: ["images"]
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, args) => {
-        const { id, name, scene } = args;
+        const { images } = args;
 
-        const image = ai.context.findImage(id, ai);
-        if (!image) {
-            return `未找到图片${id}`;
+        const savedImages: Image[] = [];
+        for (const ii of images) {
+            const { id, name, scenes } = ii;
+
+            const image = ai.context.findImage(id, ai.imageManager);
+            if (!image) {
+                return `未找到图片${id}`;
+            }
+
+            if (image.isUrl) {
+                const { base64 } = await ImageManager.imageUrlToBase64(image.file);
+                if (!base64) {
+                    logger.warning(`图片${id}转换为base64失败`);
+                }
+
+                const newImage = new Image(image.file);
+
+                let acc = 0;
+                do {
+                    newImage.id = name + (acc++ ? `_${acc}` : '');
+                } while (ai.context.findImage(newImage.id, ai.imageManager));
+
+                newImage.scenes = scenes;
+                newImage.base64 = base64;
+                newImage.content = image.content;
+
+                savedImages.push(newImage);
+            } else {
+                return '本地图片不用再次储存';
+            }
         }
 
-        if (image.isUrl) {
-            const { base64 } = await ImageManager.imageUrlToBase64(image.file);
-            if (!base64) {
-                logger.warning(`转换为base64失败`);
-                return '转换为base64失败';
-            }
 
-            try {
-                const finalName = ai.image.updateSavedImageList(name, scene || '', base64);
-                return `图片已保存为表情包，名称：${finalName}`;
-            } catch (error) {
-                return error.message;
-            }
-        } else {
-            return '本地图片不用再次储存';
+        try {
+            ai.imageManager.updateSavedImages(savedImages);
+            return `图片已保存`;
+        } catch (e) {
+            return `图片保存失败：${e.message}`
         }
     }
-    
+
     ToolManager.toolMap[info.function.name] = tool;
 }
 
-export function registerDeleteSavedImage() {
+export function registerDelImage() {
     const info: ToolInfo = {
         type: "function",
         function: {
-            name: "delete_saved_image",
+            name: "del_image",
             description: "删除保存的表情包图片",
             parameters: {
                 type: "object",
                 properties: {
-                    name: {
-                        type: "string",
-                        description: `要删除的图片名称`
+                    names: {
+                        type: "array",
+                        description: `要删除的图片名称数组`
                     }
                 },
-                required: ["name"]
+                required: ["names"]
             }
         }
     }
 
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, args) => {
-        const { name } = args;
+        const { names } = args;
 
-        const imageIndex = ai.image.savedImages.findIndex(img => {
-            if (img.content) {
-                try {
-                    const meta = JSON.parse(img.content);
-                    return meta.name === name;
-                } catch {
-                    return false;
-                }
+        for (const name of names) {
+            const imageIndex = ai.imageManager.savedImages.findIndex(img => img.id === name);
+            if (imageIndex === -1) {
+                return `未找到名称为"${name}"的保存图片`;
             }
-            return false;
-        });
 
-        if (imageIndex === -1) {
-            return `未找到名称为"${name}"的保存图片`;
+            ai.imageManager.savedImages.splice(imageIndex, 1);
         }
 
-        const deletedImage = ai.image.savedImages.splice(imageIndex, 1)[0];
-        try {
-            const meta = JSON.parse(deletedImage.content);
-            return `已删除保存的图片：${meta.name}${meta.scene ? `（${meta.scene}）` : ''}`;
-        } catch {
-            return `已删除保存的图片：${name}`;
-        }
+        return `已删除${names.length}个图片`;
     }
-    
+
     ToolManager.toolMap[info.function.name] = tool;
 }

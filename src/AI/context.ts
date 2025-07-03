@@ -1,6 +1,6 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
-import { Image } from "./image";
+import { Image, ImageManager } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
@@ -374,7 +374,7 @@ export class Context {
         return names;
     }
 
-    findImage(id: string, ai?: AI): Image | null {
+    findImage(id: string, im: ImageManager): Image | null {
         if (/^[0-9a-z]{6}$/.test(id.trim())) {
             const messages = this.messages;
             for (let i = messages.length - 1; i >= 0; i--) {
@@ -382,28 +382,6 @@ export class Context {
                 if (image) {
                     return image;
                 }
-            }
-        }
-
-        if (ai && ai.image) {
-            const savedImage = ai.image.savedImages.find(img => {
-                if (img.content) {
-                    try {
-                        const meta = JSON.parse(img.content);
-                        return meta.name === id;
-                    } catch {
-                        return false;
-                    }
-                }
-                return false;
-            });
-            if (savedImage) {
-                const filePath = seal.base64ToImage(savedImage.file);
-                const newImage = new Image(filePath);
-                newImage.id = savedImage.id;
-                newImage.content = savedImage.content;
-                newImage.isUrl = false;
-                return newImage;
             }
         }
 
@@ -427,6 +405,15 @@ export class Context {
 
         if (localImages.hasOwnProperty(id)) {
             return new Image(localImages[id]);
+        }
+
+        const savedImage = im.savedImages.find(img => img.id === id);
+        if (savedImage) {
+            const filePath = seal.base64ToImage(savedImage.base64);
+            const newImage = new Image(filePath);
+            newImage.id = savedImage.id;
+            newImage.content = savedImage.content;
+            return newImage;
         }
 
         return null;

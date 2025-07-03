@@ -1192,43 +1192,36 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           switch (type) {
             case 'lcl':
             case 'local': {
-              const image = ai.image.drawLocalImageFile();
-              if (!image) {
+              const file = ai.imageManager.drawLocalImageFile();
+              if (!file) {
                 seal.replyToSender(ctx, msg, '暂无本地图片');
                 return ret;
               }
-              seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+              seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
               return ret;
             }
             case 'stl':
             case 'stolen': {
-              ai.image.drawStolenImageFile()
-                .then(image => {
-                  if (!image) {
+              ai.imageManager.drawStolenImageFile()
+                .then(file => {
+                  if (!file) {
                     seal.replyToSender(ctx, msg, '暂无偷取图片');
                   } else {
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+                    seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
                   }
                 });
               return ret;
             }
             case 'save': {
-              ai.image.drawSaveImageFile()
-                .then(image => {
-                  if (!image) {
-                    seal.replyToSender(ctx, msg, '暂无保存的表情包图片');
-                  } else {
-                    let text = `[CQ:image,file=${image.file}]\n名称：${image.name}`;
-                    if (image.scene) {
-                      text += `\n场景：${image.scene}`;
-                    }
-                    seal.replyToSender(ctx, msg, text);
-                  }
-                });
+              const file = ai.imageManager.drawSavedImageFile();
+              if (!file) {
+                seal.replyToSender(ctx, msg, '暂无保存的表情包图片');
+              }
+              seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
               return ret;
             }
             case 'all': {
-              ai.image.drawImageFile()
+              ai.imageManager.drawImageFile()
                 .then(image => {
                   if (!image) {
                     seal.replyToSender(ctx, msg, '暂无图片');
@@ -1249,19 +1242,19 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const op = cmdArgs.getArgN(2);
           switch (op) {
             case 'on': {
-              ai.image.stealStatus = true;
-              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.imageList.filter(img => img.isUrl).length}`);
+              ai.imageManager.stealStatus = true;
+              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
               AIManager.saveAI(id);
               return ret;
             }
             case 'off': {
-              ai.image.stealStatus = false;
-              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.imageList.filter(img => img.isUrl).length}`);
+              ai.imageManager.stealStatus = false;
+              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
               AIManager.saveAI(id);
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.image.stealStatus},当前偷取数量:${ai.image.imageList.filter(img => img.isUrl).length}`);
+              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
               return ret;
             }
           }
@@ -1273,20 +1266,20 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           switch (type) {
             case 'stl':
             case 'stolen': {
-              ai.image.imageList = [];
+              ai.imageManager.stolenImages = [];
               seal.replyToSender(ctx, msg, '偷取图片已遗忘');
               AIManager.saveAI(id);
               return ret;
             }
             case 'save': {
-              ai.image.savedImages = [];
+              ai.imageManager.savedImages = [];
               seal.replyToSender(ctx, msg, '保存图片已遗忘');
               AIManager.saveAI(id);
               return ret;
             }
             case 'all': {
-              ai.image.imageList = [];
-              ai.image.savedImages = [];
+              ai.imageManager.stolenImages = [];
+              ai.imageManager.savedImages = [];
               seal.replyToSender(ctx, msg, '所有图片已遗忘');
               AIManager.saveAI(id);
               return ret;
@@ -1305,7 +1298,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
 
           if (val2 == 'ran') {
-            ai.image.drawStolenImageFile()
+            ai.imageManager.drawStolenImageFile()
               .then(url => {
                 if (!url) {
                   seal.replyToSender(ctx, msg, '图片偷取为空');
@@ -1405,8 +1398,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 const result = await ImageManager.handleImageMessage(ctx, message);
                 message = result.message;
                 images = result.images;
-                if (ai.image.stealStatus) {
-                  ai.image.updateImageList(images);
+                if (ai.imageManager.stealStatus) {
+                  ai.imageManager.updateStolenImages(images);
                 }
               }
 
@@ -1436,8 +1429,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const result = await ImageManager.handleImageMessage(ctx, message);
               message = result.message;
               images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+              if (ai.imageManager.stealStatus) {
+                ai.imageManager.updateStolenImages(images);
               }
             }
 
@@ -1460,8 +1453,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             const result = await ImageManager.handleImageMessage(ctx, message);
             message = result.message;
             images = result.images;
-            if (ai.image.stealStatus) {
-              ai.image.updateImageList(images);
+            if (ai.imageManager.stealStatus) {
+              ai.imageManager.updateStolenImages(images);
             }
           }
 
@@ -1530,8 +1523,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const result = await ImageManager.handleImageMessage(ctx, message);
               message = result.message;
               images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+              if (ai.imageManager.stealStatus) {
+                ai.imageManager.updateStolenImages(images);
               }
             }
 
@@ -1574,8 +1567,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const result = await ImageManager.handleImageMessage(ctx, message);
               message = result.message;
               images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+              if (ai.imageManager.stealStatus) {
+                ai.imageManager.updateStolenImages(images);
               }
             }
 

@@ -37,7 +37,7 @@ export class ImageConfig {
             defaultPrompt: seal.ext.getStringConfig(ImageConfig.ext, "图片识别默认prompt"),
             urlToBase64: seal.ext.getOptionConfig(ImageConfig.ext, "识别图片时将url转换为base64"),
             maxChars: seal.ext.getIntConfig(ImageConfig.ext, "图片最大回复字符数"),
-            maxImageNum: seal.ext.getIntConfig(ImageConfig.ext, "偷取图片存储上限"),
+            maxStolenImageNum: seal.ext.getIntConfig(ImageConfig.ext, "偷取图片存储上限"),
             maxSavedImageNum: seal.ext.getIntConfig(ImageConfig.ext, "保存图片存储上限")
         }
     }

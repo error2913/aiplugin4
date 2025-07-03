@@ -24,7 +24,7 @@ export class AI {
     context: Context;
     tool: ToolManager;
     memory: Memory;
-    image: ImageManager;
+    imageManager: ImageManager;
     privilege: Privilege;
 
     // 下面是临时变量，用于处理消息
@@ -45,7 +45,7 @@ export class AI {
         this.context = new Context();
         this.tool = new ToolManager();
         this.memory = new Memory();
-        this.image = new ImageManager();
+        this.imageManager = new ImageManager();
         this.privilege = {
             limit: 100,
             counter: -1,
@@ -66,7 +66,7 @@ export class AI {
 
     static reviver(value: any, id: string): AI {
         const ai = new AI(id);
-        const validKeys = ['version', 'context', 'tool', 'memory', 'image', 'privilege'];
+        const validKeys = ['version', 'context', 'tool', 'memory', 'imageManager', 'privilege'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -132,7 +132,7 @@ export class AI {
 
             //获取处理后的回复
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
-            result = await handleReply(ctx, msg, raw_reply, this.context, this);
+            result = await handleReply(ctx, msg, this, raw_reply);
 
             if (!checkRepeat(this.context, result.contextArray.join('')) || result.replyArray.join('').trim() === '') {
                 break;
@@ -160,8 +160,8 @@ export class AI {
         //发送偷来的图片
         const { p } = ConfigManager.image;
         if (Math.random() * 100 <= p) {
-            const file = await this.image.drawImageFile();
-             
+            const file = await this.imageManager.drawImageFile();
+
             if (file) {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
             }
@@ -212,7 +212,7 @@ export class AI {
                     // 对于function_call前面的内容，发送并添加到上下文中
                     const match = raw_reply.match(/([\s\S]*)<function(?:_call)?>/);
                     if (match && match[1].trim()) {
-                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, match[1], this.context, this);
+                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
 
                         if (this.stream.id !== id) {
                             return;
@@ -268,7 +268,7 @@ export class AI {
                 }
             }
 
-            const { contextArray, replyArray, images } = await handleReply(ctx, msg, raw_reply, this.context, this);
+            const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, raw_reply);
 
             if (this.stream.id !== id) {
                 return;
