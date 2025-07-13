@@ -413,6 +413,7 @@ export class Context {
             const newImage = new Image(filePath);
             newImage.id = savedImage.id;
             newImage.content = savedImage.content;
+            newImage.weight = savedImage.weight;
             return newImage;
         }
 

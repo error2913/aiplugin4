@@ -10,6 +10,7 @@ export class Image {
     scenes: string[];
     base64: string;
     content: string;
+    weight: number;
 
     constructor(file: string) {
         this.id = generateId();
@@ -18,6 +19,7 @@ export class Image {
         this.scenes = [];
         this.base64 = '';
         this.content = '';
+        this.weight = 1;
     }
 }
 
@@ -34,7 +36,7 @@ export class ImageManager {
 
     static reviver(value: any): ImageManager {
         const im = new ImageManager();
-        const validKeys = ['imageList', 'savedImages', 'stealStatus'];
+        const validKeys = ['stolenImages', 'savedImages', 'stealStatus'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -52,7 +54,12 @@ export class ImageManager {
 
     updateSavedImages(images: Image[]) {
         const { maxSavedImageNum } = ConfigManager.image;
-        this.savedImages = this.savedImages.concat(images.filter(item => item.isUrl)).slice(-maxSavedImageNum);
+        this.savedImages = this.savedImages.concat(images.filter(item => item.isUrl));
+    
+        if (this.savedImages.length > maxSavedImageNum) {
+            this.savedImages.sort((a, b) => a.weight - b.weight);
+            this.savedImages = this.savedImages.slice(-maxSavedImageNum);
+        }
     }
 
     drawLocalImageFile(): string {
@@ -104,6 +111,41 @@ export class ImageManager {
         const index = Math.floor(Math.random() * this.savedImages.length);
         const image = this.savedImages[index];
         return seal.base64ToImage(image.base64);
+    }
+
+    getSavedImagesInfo(): string {
+        if (this.savedImages.length === 0) {
+            return '暂无保存的图片';
+        }
+        
+        const imageList = this.savedImages.map((img, index) => 
+            `${index + 1}.   名称: ${img.id}\n   应用场景: ${img.scenes.join('、') || '无'}\n   权重: ${img.weight}`
+        ).join('\n');
+        
+        return `保存的图片列表:\n${imageList}`;
+    }
+
+    getSavedImagesInfoWithCQ(): string {
+        if (this.savedImages.length === 0) {
+            return '暂无保存的图片';
+        }
+        
+        const imageList = this.savedImages.map((img, index) => {
+            const filePath = seal.base64ToImage(img.base64);
+            return `${index + 1}.  名称: ${img.id}\n   应用场景: ${img.scenes.join('、') || '无'}\n   权重: ${img.weight}\n   [CQ:image,file=${filePath}]`;
+        }).join('\n\n');
+        
+        return `保存的图片列表:\n${imageList}`;
+    }
+
+    deleteSavedImageByName(imageName: string): string {
+        const imageIndex = this.savedImages.findIndex(img => img.id === imageName);
+        if (imageIndex === -1) {
+            return `未找到名称为"${imageName}"的保存图片`;
+        }
+
+        const deletedImage = this.savedImages.splice(imageIndex, 1)[0];
+        return `已删除图片"${deletedImage.id}"`;
     }
 
     async drawImageFile(): Promise<string> {

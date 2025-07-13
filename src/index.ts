@@ -1175,7 +1175,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 【img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
 【img stl (on/off)】偷图 开启/关闭
 【img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
-【img itt [图片/ran] (附加提示词)】图片转文字`;
+【img itt [图片/ran] (附加提示词)】图片转文字
+【img list [show/send]】展示保存的图片列表/展示并发送所有保存的图片
+【img del <图片名称>】删除指定名称的保存图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
@@ -1323,6 +1325,36 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s);
               });
           }
+          return ret;
+        }
+        case 'list': {
+          const type = cmdArgs.getArgN(2);
+          switch (type) {
+            case 'show': {
+              const info = ai.imageManager.getSavedImagesInfo();
+              seal.replyToSender(ctx, msg, info);
+              return ret;
+            }
+            case 'send': {
+              const info = ai.imageManager.getSavedImagesInfoWithCQ();
+              seal.replyToSender(ctx, msg, info);
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, '参数缺失，【img list show】展示保存的图片列表，【img list send】展示并发送所有保存的图片');
+              return ret;
+            }
+          }
+        }
+        case 'del': {
+          const imageName = cmdArgs.getArgN(2);
+          if (!imageName) {
+            seal.replyToSender(ctx, msg, '参数缺失，【img del <图片名称>】删除指定名称的保存图片');
+            return ret;
+          }
+
+          const result = ai.imageManager.deleteSavedImageByName(imageName);
+          seal.replyToSender(ctx, msg, result);
           return ret;
         }
         default: {

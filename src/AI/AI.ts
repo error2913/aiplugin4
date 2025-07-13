@@ -346,7 +346,7 @@ export class AIManager {
                     if (key === "memory") {
                         return Memory.reviver(value);
                     }
-                    if (key === "image") {
+                    if (key === "imageManager") {
                         return ImageManager.reviver(value);
                     }
 
