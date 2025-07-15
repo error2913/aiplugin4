@@ -410,11 +410,8 @@ export class Context {
         const savedImage = im.savedImages.find(img => img.id === id);
         if (savedImage) {
             const filePath = seal.base64ToImage(savedImage.base64);
-            const newImage = new Image(filePath);
-            newImage.id = savedImage.id;
-            newImage.content = savedImage.content;
-            newImage.weight = savedImage.weight;
-            return newImage;
+            savedImage.file = filePath;
+            return savedImage;
         }
 
         return null;

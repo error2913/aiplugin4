@@ -1172,12 +1172,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   const cmdImage = seal.ext.newCmdItemInfo();
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
-【img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
-【img stl (on/off)】偷图 开启/关闭
-【img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
-【img itt [图片/ran] (附加提示词)】图片转文字
-【img list [show/send]】展示保存的图片列表/展示并发送所有保存的图片
-【img del <图片名称>】删除指定名称的保存图片`;
+【.img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
+【.img stl (on/off)】偷图 开启/关闭
+【.img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
+【.img itt [图片/ran] (附加提示词)】图片转文字
+【.img list [show/send]】展示保存的图片列表/展示并发送所有保存的图片
+【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
@@ -1295,7 +1295,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         case 'itt': {
           const val2 = cmdArgs.getArgN(2);
           if (!val2) {
-            seal.replyToSender(ctx, msg, '【img itt [图片/ran] (附加提示词)】图片转文字');
+            seal.replyToSender(ctx, msg, '【.img itt [图片/ran] (附加提示词)】图片转文字');
             return ret;
           }
 
@@ -1331,30 +1331,49 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const type = cmdArgs.getArgN(2);
           switch (type) {
             case 'show': {
-              const info = ai.imageManager.getSavedImagesInfo();
-              seal.replyToSender(ctx, msg, info);
+              if (ai.imageManager.savedImages.length === 0) {
+                seal.replyToSender(ctx, msg, '暂无保存的图片');
+                return ret;
+              }
+
+              const imageList = ai.imageManager.savedImages.map((img, index) => `${index + 1}. 名称: ${img.id}
+应用场景: ${img.scenes.join('、') || '无'}
+权重: ${img.weight}`).join('\n');
+
+              seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
               return ret;
             }
             case 'send': {
-              const info = ai.imageManager.getSavedImagesInfoWithCQ();
-              seal.replyToSender(ctx, msg, info);
+              if (ai.imageManager.savedImages.length === 0) {
+                seal.replyToSender(ctx, msg, '暂无保存的图片');
+                return ret;
+              }
+
+              const imageList = ai.imageManager.savedImages.map((img, index) => {
+                return `${index + 1}. 名称: ${img.id}
+应用场景: ${img.scenes.join('、') || '无'}
+权重: ${img.weight}
+[CQ:image,file=${seal.base64ToImage(img.base64)}]`;
+              }).join('\n\n');
+
+              seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, '参数缺失，【img list show】展示保存的图片列表，【img list send】展示并发送所有保存的图片');
+              seal.replyToSender(ctx, msg, '参数缺失，【.img list show】展示保存的图片列表，【.img list send】展示并发送所有保存的图片');
               return ret;
             }
           }
         }
         case 'del': {
-          const imageName = cmdArgs.getArgN(2);
-          if (!imageName) {
-            seal.replyToSender(ctx, msg, '参数缺失，【img del <图片名称>】删除指定名称的保存图片');
+          const nameList = cmdArgs.args.slice(1);
+          if (nameList.length === 0) {
+            seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
             return ret;
           }
 
-          const result = ai.imageManager.deleteSavedImageByName(imageName);
-          seal.replyToSender(ctx, msg, result);
+          ai.imageManager.delSavedImage(nameList);
+          seal.replyToSender(ctx, msg, `已删除图片`);
           return ret;
         }
         default: {

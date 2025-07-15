@@ -216,7 +216,8 @@ export function registerSaveImage() {
             if (image.isUrl) {
                 const { base64 } = await ImageManager.imageUrlToBase64(image.file);
                 if (!base64) {
-                    logger.warning(`图片${id}转换为base64失败`);
+                    logger.error(`图片${id}转换为base64失败`);
+                    return `图片转换为base64失败`;
                 }
 
                 const newImage = new Image(image.file);

@@ -368,9 +368,8 @@ async function replaceImages(context: Context, im: ImageManager, reply: string) 
                 images.push(image);
 
                 if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
-                    const savedImage = im.savedImages.find(img => img.id === id);
-                    if (savedImage) {
-                        savedImage.weight += 1;
+                    if (image.base64) {
+                        image.weight += 1;
                     }
                     result = result.replace(match[i], `[CQ:image,file=${image.file}]`);
                     continue;
