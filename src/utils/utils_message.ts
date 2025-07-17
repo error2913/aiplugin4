@@ -45,8 +45,8 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
 
     // 短期记忆
     let shortMemoryPrompt = '';
-    if (isShortMemory) {
-        shortMemoryPrompt = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+    if (isShortMemory && ai.memory.useShortMemory) {
+        shortMemoryPrompt = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
     }
 
     // 调用函数
@@ -72,7 +72,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "可发送图片列表": sandableImagesPrompt,
         "开启长期记忆": isMemory && memoryPrompt,
         "记忆信息": memoryPrompt,
-        "开启短期记忆": isShortMemory && shortMemoryPrompt,
+        "开启短期记忆": isShortMemory && ai.memory.useShortMemory && shortMemoryPrompt,
         "短期记忆信息": shortMemoryPrompt,
         "开启工具函数提示词": isTool && usePromptEngineering,
         "函数列表": toolsPrompt

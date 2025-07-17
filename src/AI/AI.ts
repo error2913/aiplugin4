@@ -28,13 +28,13 @@ export class AI {
     privilege: Privilege;
 
     // 下面是临时变量，用于处理消息
-    stream: {
+    stream: { // 用于流式输出相关
         id: string,
         reply: string,
         toolCallStatus: boolean
     }
 
-    bucket: {
+    bucket: { // 触发次数令牌桶
         count: number,
         lastTime: number
     }
