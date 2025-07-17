@@ -1,6 +1,6 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
-import { Image } from "./image";
+import { Image, ImageManager } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
@@ -374,7 +374,7 @@ export class Context {
         return names;
     }
 
-    findImage(id: string): Image {
+    findImage(id: string, im: ImageManager): Image | null {
         if (/^[0-9a-z]{6}$/.test(id.trim())) {
             const messages = this.messages;
             for (let i = messages.length - 1; i >= 0; i--) {
@@ -405,6 +405,13 @@ export class Context {
 
         if (localImages.hasOwnProperty(id)) {
             return new Image(localImages[id]);
+        }
+
+        const savedImage = im.savedImages.find(img => img.id === id);
+        if (savedImage) {
+            const filePath = seal.base64ToImage(savedImage.base64);
+            savedImage.file = filePath;
+            return savedImage;
         }
 
         return null;

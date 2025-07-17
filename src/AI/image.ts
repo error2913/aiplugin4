@@ -7,28 +7,36 @@ export class Image {
     id: string;
     isUrl: boolean;
     file: string;
+    scenes: string[];
+    base64: string;
     content: string;
+    weight: number;
 
     constructor(file: string) {
         this.id = generateId();
         this.isUrl = file.startsWith('http');
         this.file = file;
+        this.scenes = [];
+        this.base64 = '';
         this.content = '';
+        this.weight = 1;
     }
 }
 
 export class ImageManager {
-    imageList: Image[];
+    stolenImages: Image[];
+    savedImages: Image[];
     stealStatus: boolean;
 
     constructor() {
-        this.imageList = [];
+        this.stolenImages = [];
+        this.savedImages = [];
         this.stealStatus = false;
     }
 
     static reviver(value: any): ImageManager {
         const im = new ImageManager();
-        const validKeys = ['imageList', 'stealStatus'];
+        const validKeys = ['stolenImages', 'savedImages', 'stealStatus'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -39,9 +47,24 @@ export class ImageManager {
         return im;
     }
 
-    updateImageList(images: Image[]) {
-        const { maxImageNum } = ConfigManager.image;
-        this.imageList = this.imageList.concat(images.filter(item => item.isUrl)).slice(-maxImageNum);
+    updateStolenImages(images: Image[]) {
+        const { maxStolenImageNum } = ConfigManager.image;
+        this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
+    }
+
+    updateSavedImages(images: Image[]) {
+        const { maxSavedImageNum } = ConfigManager.image;
+        this.savedImages = this.savedImages.concat(images.filter(item => item.isUrl));
+
+        if (this.savedImages.length > maxSavedImageNum) {
+            this.savedImages = this.savedImages
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, maxSavedImageNum);
+        }
+    }
+
+    delSavedImage(nameList: string[]) {
+        this.savedImages = this.savedImages.filter(img => !nameList.includes(img.id));
     }
 
     drawLocalImageFile(): string {
@@ -72,12 +95,12 @@ export class ImageManager {
     }
 
     async drawStolenImageFile(): Promise<string> {
-        if (this.imageList.length == 0) {
+        if (this.stolenImages.length === 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * this.imageList.length);
-        const image = this.imageList.splice(index, 1)[0];
+        const index = Math.floor(Math.random() * this.stolenImages.length);
+        const image = this.stolenImages.splice(index, 1)[0];
         const url = image.file;
 
         if (!await ImageManager.checkImageUrl(url)) {
@@ -86,6 +109,13 @@ export class ImageManager {
         }
 
         return url;
+    }
+
+    drawSavedImageFile(): string {
+        if (this.savedImages.length === 0) return null;
+        const index = Math.floor(Math.random() * this.savedImages.length);
+        const image = this.savedImages[index];
+        return seal.base64ToImage(image.base64);
     }
 
     async drawImageFile(): Promise<string> {
@@ -108,24 +138,18 @@ export class ImageManager {
         }, {});
 
         const values = Object.values(localImages);
-        if (this.imageList.length == 0 && values.length == 0) {
+        if (this.stolenImages.length == 0 && values.length == 0 && this.savedImages.length == 0) {
             return '';
         }
 
-        const index = Math.floor(Math.random() * (values.length + this.imageList.length));
+        const index = Math.floor(Math.random() * (values.length + this.stolenImages.length + this.savedImages.length));
 
         if (index < values.length) {
             return values[index];
+        } else if (index < values.length + this.stolenImages.length) {
+            return await this.drawStolenImageFile();
         } else {
-            const image = this.imageList.splice(index - values.length, 1)[0];
-            const url = image.file;
-
-            if (!await ImageManager.checkImageUrl(url)) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                return await this.drawImageFile();
-            }
-
-            return url;
+            return this.drawSavedImageFile();
         }
     }
 

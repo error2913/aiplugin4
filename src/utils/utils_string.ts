@@ -4,6 +4,7 @@ import { Image, ImageManager } from "../AI/image";
 import { logger } from "../AI/logger";
 import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
+import { AI } from "../AI/AI";
 
 export function transformTextToArray(s: string): { type: string, data: { [key: string]: string } }[] {
     const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
@@ -76,7 +77,7 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
     return s;
 }
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: string, context: Context): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
     const { replymsg, isTrim } = ConfigManager.reply;
 
     // 分离AI臆想出来的多轮对话
@@ -92,7 +93,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
         const segment = segments[i];
         const match = segment.match(/[<＜][\|│｜]from[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
         if (match) {
-            const uid = await context.findUserId(ctx, match[1]);
+            const uid = await ai.context.findUserId(ctx, match[1]);
             if (uid === ctx.endPoint.userId && i < segments.length - 1) {
                 s += segments[i + 1]; // 如果臆想对象是自己，那么将下一条消息添加到s中
             }
@@ -120,10 +121,10 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, s: st
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
         let reply = replyArray[i];
-        reply = await replaceMentions(ctx, context, reply);
-        reply = await replacePoke(ctx, context, reply);
+        reply = await replaceMentions(ctx, ai.context, reply);
+        reply = await replacePoke(ctx, ai.context, reply);
         reply = await replaceQuote(reply);
-        const { result, images: replyImages } = await replaceImages(context, reply);
+        const { result, images: replyImages } = await replaceImages(ai.context, ai.imageManager, reply);
         reply = isTrim ? result.trim() : result;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
@@ -349,10 +350,11 @@ async function replaceQuote(reply: string) {
 /**
  * 替换图片占位符为CQ码
  * @param context 
+ * @param im 图片管理器
  * @param reply 
  * @returns 
  */
-async function replaceImages(context: Context, reply: string) {
+async function replaceImages(context: Context, im: ImageManager, reply: string) {
     let result = reply;
     const images = [];
 
@@ -360,14 +362,16 @@ async function replaceImages(context: Context, reply: string) {
     if (match) {
         for (let i = 0; i < match.length; i++) {
             const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-            const image = context.findImage(id);
+            const image = context.findImage(id, im);
 
             if (image) {
-                const file = image.file;
                 images.push(image);
 
-                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(file))) {
-                    result = result.replace(match[i], `[CQ:image,file=${file}]`);
+                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
+                    if (image.base64) {
+                        image.weight += 1;
+                    }
+                    result = result.replace(match[i], `[CQ:image,file=${image.file}]`);
                     continue;
                 }
             }

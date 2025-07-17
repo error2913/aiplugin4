@@ -1172,10 +1172,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   const cmdImage = seal.ext.newCmdItemInfo();
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
-【img draw [stl/lcl/all]】随机抽取偷的图片/本地图片/全部
-【img stl (on/off)】偷图 开启/关闭
-【img f】遗忘
-【img itt [图片/ran] (附加提示词)】图片转文字`;
+【.img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
+【.img stl (on/off)】偷图 开启/关闭
+【.img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
+【.img itt [图片/ran] (附加提示词)】图片转文字
+【.img list [show/send]】展示保存的图片列表/展示并发送所有保存的图片
+【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
@@ -1192,28 +1194,36 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           switch (type) {
             case 'lcl':
             case 'local': {
-              const image = ai.image.drawLocalImageFile();
-              if (!image) {
+              const file = ai.imageManager.drawLocalImageFile();
+              if (!file) {
                 seal.replyToSender(ctx, msg, '暂无本地图片');
                 return ret;
               }
-              seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+              seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
               return ret;
             }
             case 'stl':
             case 'stolen': {
-              ai.image.drawStolenImageFile()
-                .then(image => {
-                  if (!image) {
+              ai.imageManager.drawStolenImageFile()
+                .then(file => {
+                  if (!file) {
                     seal.replyToSender(ctx, msg, '暂无偷取图片');
                   } else {
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
+                    seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
                   }
                 });
               return ret;
             }
+            case 'save': {
+              const file = ai.imageManager.drawSavedImageFile();
+              if (!file) {
+                seal.replyToSender(ctx, msg, '暂无保存的表情包图片');
+              }
+              seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
+              return ret;
+            }
             case 'all': {
-              ai.image.drawImageFile()
+              ai.imageManager.drawImageFile()
                 .then(image => {
                   if (!image) {
                     seal.replyToSender(ctx, msg, '暂无图片');
@@ -1234,19 +1244,19 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const op = cmdArgs.getArgN(2);
           switch (op) {
             case 'on': {
-              ai.image.stealStatus = true;
-              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.image.imageList.length}`);
+              ai.imageManager.stealStatus = true;
+              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
               AIManager.saveAI(id);
               return ret;
             }
             case 'off': {
-              ai.image.stealStatus = false;
-              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.image.imageList.length}`);
+              ai.imageManager.stealStatus = false;
+              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
               AIManager.saveAI(id);
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.image.stealStatus},当前偷取数量:${ai.image.imageList.length}`);
+              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
               return ret;
             }
           }
@@ -1254,20 +1264,43 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         case 'f':
         case 'fgt':
         case 'forget': {
-          ai.image.imageList = [];
-          seal.replyToSender(ctx, msg, '图片已遗忘');
-          AIManager.saveAI(id);
-          return ret;
+          const type = cmdArgs.getArgN(2);
+          switch (type) {
+            case 'stl':
+            case 'stolen': {
+              ai.imageManager.stolenImages = [];
+              seal.replyToSender(ctx, msg, '偷取图片已遗忘');
+              AIManager.saveAI(id);
+              return ret;
+            }
+            case 'save': {
+              ai.imageManager.savedImages = [];
+              seal.replyToSender(ctx, msg, '保存图片已遗忘');
+              AIManager.saveAI(id);
+              return ret;
+            }
+            case 'all': {
+              ai.imageManager.stolenImages = [];
+              ai.imageManager.savedImages = [];
+              seal.replyToSender(ctx, msg, '所有图片已遗忘');
+              AIManager.saveAI(id);
+              return ret;
+            }
+            default: {
+              ret.showHelp = true;
+              return ret;
+            }
+          }
         }
         case 'itt': {
           const val2 = cmdArgs.getArgN(2);
           if (!val2) {
-            seal.replyToSender(ctx, msg, '【img itt [图片/ran] (附加提示词)】图片转文字');
+            seal.replyToSender(ctx, msg, '【.img itt [图片/ran] (附加提示词)】图片转文字');
             return ret;
           }
 
           if (val2 == 'ran') {
-            ai.image.drawStolenImageFile()
+            ai.imageManager.drawStolenImageFile()
               .then(url => {
                 if (!url) {
                   seal.replyToSender(ctx, msg, '图片偷取为空');
@@ -1292,6 +1325,55 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s);
               });
           }
+          return ret;
+        }
+        case 'list': {
+          const type = cmdArgs.getArgN(2);
+          switch (type) {
+            case 'show': {
+              if (ai.imageManager.savedImages.length === 0) {
+                seal.replyToSender(ctx, msg, '暂无保存的图片');
+                return ret;
+              }
+
+              const imageList = ai.imageManager.savedImages.map((img, index) => `${index + 1}. 名称: ${img.id}
+应用场景: ${img.scenes.join('、') || '无'}
+权重: ${img.weight}`).join('\n');
+
+              seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
+              return ret;
+            }
+            case 'send': {
+              if (ai.imageManager.savedImages.length === 0) {
+                seal.replyToSender(ctx, msg, '暂无保存的图片');
+                return ret;
+              }
+
+              const imageList = ai.imageManager.savedImages.map((img, index) => {
+                return `${index + 1}. 名称: ${img.id}
+应用场景: ${img.scenes.join('、') || '无'}
+权重: ${img.weight}
+[CQ:image,file=${seal.base64ToImage(img.base64)}]`;
+              }).join('\n\n');
+
+              seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, '参数缺失，【.img list show】展示保存的图片列表，【.img list send】展示并发送所有保存的图片');
+              return ret;
+            }
+          }
+        }
+        case 'del': {
+          const nameList = cmdArgs.args.slice(1);
+          if (nameList.length === 0) {
+            seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
+            return ret;
+          }
+
+          ai.imageManager.delSavedImage(nameList);
+          seal.replyToSender(ctx, msg, `已删除图片`);
           return ret;
         }
         default: {
@@ -1367,8 +1449,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 const result = await ImageManager.handleImageMessage(ctx, message);
                 message = result.message;
                 images = result.images;
-                if (ai.image.stealStatus) {
-                  ai.image.updateImageList(images);
+                if (ai.imageManager.stealStatus) {
+                  ai.imageManager.updateStolenImages(images);
                 }
               }
 
@@ -1398,8 +1480,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const result = await ImageManager.handleImageMessage(ctx, message);
               message = result.message;
               images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+              if (ai.imageManager.stealStatus) {
+                ai.imageManager.updateStolenImages(images);
               }
             }
 
@@ -1422,8 +1504,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             const result = await ImageManager.handleImageMessage(ctx, message);
             message = result.message;
             images = result.images;
-            if (ai.image.stealStatus) {
-              ai.image.updateImageList(images);
+            if (ai.imageManager.stealStatus) {
+              ai.imageManager.updateStolenImages(images);
             }
           }
 
@@ -1492,8 +1574,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const result = await ImageManager.handleImageMessage(ctx, message);
               message = result.message;
               images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+              if (ai.imageManager.stealStatus) {
+                ai.imageManager.updateStolenImages(images);
               }
             }
 
@@ -1536,8 +1618,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const result = await ImageManager.handleImageMessage(ctx, message);
               message = result.message;
               images = result.images;
-              if (ai.image.stealStatus) {
-                ai.image.updateImageList(images);
+              if (ai.imageManager.stealStatus) {
+                ai.imageManager.updateStolenImages(images);
               }
             }
 

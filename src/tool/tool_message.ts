@@ -57,7 +57,7 @@ export function registerSendMsg() {
         if (match) {
             for (let i = 0; i < match.length; i++) {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1].trim().slice(0, 6);
-                const image = ai.context.findImage(id);
+                const image = ai.context.findImage(id, ai.imageManager);
 
                 if (image) {
                     originalImages.push(image);
@@ -102,7 +102,7 @@ export function registerSendMsg() {
 
         await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
 
-        const { contextArray, replyArray, images } = await handleReply(ctx, msg, content, ai.context);
+        const { contextArray, replyArray, images } = await handleReply(ctx, msg, ai, content);
 
         try {
             for (let i = 0; i < contextArray.length; i++) {
@@ -174,8 +174,8 @@ export function registerGetMsg() {
                 const result = await ImageManager.handleImageMessage(ctx, message);
                 message = result.message;
                 images = result.images;
-                if (ai.image.stealStatus) {
-                    ai.image.updateImageList(images);
+                if (ai.imageManager.stealStatus) {
+                    ai.imageManager.updateStolenImages(images);
                 }
             }
 

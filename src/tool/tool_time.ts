@@ -138,11 +138,11 @@ export function registerCancelTimer() {
                 type: 'object',
                 properties: {
                     index_list: {
-                       type: 'array',
-                       items: {
-                           type: 'integer'
-                       }, 
-                       description: '要取消的定时器序号列表，序号从1开始'
+                        type: 'array',
+                        items: {
+                            type: 'integer'
+                        },
+                        description: '要取消的定时器序号列表，序号从1开始'
                     }
                 },
                 required: ['index_list']
@@ -170,7 +170,7 @@ export function registerCancelTimer() {
 
             const i = timerQueue.indexOf(timers[index - 1]);
             if (i === -1) {
-                return `出错了:找不到序号${index}的定时器`; 
+                return `出错了:找不到序号${index}的定时器`;
             }
 
             timerQueue.splice(i, 1);
