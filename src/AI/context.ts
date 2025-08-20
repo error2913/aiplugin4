@@ -194,7 +194,7 @@ export class Context {
         this.messages.push(message);
     }
 
-    async limitMessages(maxRounds: number) {
+    limitMessages(maxRounds: number) {
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {

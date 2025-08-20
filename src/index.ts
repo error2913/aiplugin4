@@ -1,9 +1,8 @@
 import { AIManager } from "./AI/AI";
-import { Image, ImageManager } from "./AI/image";
+import { ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { timerQueue } from "./tool/tool_time";
 import { ConfigManager, CQTYPESALLOW } from "./config/config";
-import { transformMsgId } from "./utils/utils";
 import { createMsg, createCtx } from "./utils/utils_seal";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
@@ -530,10 +529,11 @@ function main() {
             case 'sum': {
               const { shortMemorySummaryRound } = ConfigManager.memory;
               ai.context.summaryCounter = 0;
-              ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound)).then(() => {
-                const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
-                seal.replyToSender(ctx, msg, s || '无');
-              });
+              ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound))
+                .then(() => {
+                  const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                  seal.replyToSender(ctx, msg, s || '无');
+                });
               return ret;
             }
             default: {
@@ -674,9 +674,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 }
 
                 tool.solve(ctx, msg, ai, args)
-                  .then(s => {
-                    seal.replyToSender(ctx, msg, s);
-                  });
+                  .then(s => seal.replyToSender(ctx, msg, s));
                 return ret;
               } catch (e) {
                 const s = `调用函数 (${val2}) 失败:${e.message}`;
@@ -841,13 +839,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
               const val3 = cmdArgs.getArgN(3);
               if (val3 === 'chart') {
-                get_chart_url('year', obj).then(url => {
-                  if (!url) {
-                    seal.replyToSender(ctx, msg, `图表生成失败`);
-                    return;
-                  }
-                  seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-                });
+                get_chart_url('year', obj)
+                  .then(url => seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败'));
                 return ret;
               }
 
@@ -913,13 +906,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
               const val3 = cmdArgs.getArgN(3);
               if (val3 === 'chart') {
-                get_chart_url('month', obj).then(url => {
-                  if (!url) {
-                    seal.replyToSender(ctx, msg, `图表生成失败`);
-                    return;
-                  }
-                  seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-                });
+                get_chart_url('month', obj)
+                  .then(url => seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败'));
                 return ret;
               }
 
@@ -1019,13 +1007,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
                   const val4 = cmdArgs.getArgN(4);
                   if (val4 === 'chart') {
-                    get_chart_url('year', obj).then(url => {
-                      if (!url) {
-                        seal.replyToSender(ctx, msg, `图表生成失败`);
-                        return;
-                      }
-                      seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-                    });
+                    get_chart_url('year', obj)
+                      .then(url => seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败'));
                     return ret;
                   }
 
@@ -1091,13 +1074,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
                   const val4 = cmdArgs.getArgN(4);
                   if (val4 === 'chart') {
-                    get_chart_url('month', obj).then(url => {
-                      if (!url) {
-                        seal.replyToSender(ctx, msg, `图表生成失败`);
-                        return;
-                      }
-                      seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]`);
-                    });
+                    get_chart_url('month', obj)
+                      .then(url => seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败'));
                     return ret;
                   }
 
@@ -1152,9 +1130,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             return ret;
           }
 
-          ai.stopCurrentChatStream().then(() => {
-            seal.replyToSender(ctx, msg, '已停止当前对话');
-          });
+          ai.stopCurrentChatStream()
+            .then(() => seal.replyToSender(ctx, msg, '已停止当前对话'));
           return ret;
         }
         default: {
@@ -1205,13 +1182,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             case 'stl':
             case 'stolen': {
               ai.imageManager.drawStolenImageFile()
-                .then(file => {
-                  if (!file) {
-                    seal.replyToSender(ctx, msg, '暂无偷取图片');
-                  } else {
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
-                  }
-                });
+                .then(file => seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '暂无偷取图片'));
               return ret;
             }
             case 'save': {
@@ -1224,13 +1195,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             }
             case 'all': {
               ai.imageManager.drawImageFile()
-                .then(image => {
-                  if (!image) {
-                    seal.replyToSender(ctx, msg, '暂无图片');
-                  } else {
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${image}]`);
-                  }
-                });
+                .then(file => seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '暂无图片'));
               return ret;
             }
             default: {
@@ -1304,13 +1269,11 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               .then(url => {
                 if (!url) {
                   seal.replyToSender(ctx, msg, '图片偷取为空');
-                } else {
-                  const text = cmdArgs.getRestArgsFrom(3);
-                  ImageManager.imageToText(url, text)
-                    .then(s => {
-                      seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s);
-                    });
+                  return;
                 }
+                const text = cmdArgs.getRestArgsFrom(3);
+                ImageManager.imageToText(url, text)
+                  .then(s => seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s));
               });
           } else {
             const match = val2.match(/\[CQ:image,file=(.*?)\]/);
@@ -1321,9 +1284,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             const url = match[1];
             const text = cmdArgs.getRestArgsFrom(3);
             ImageManager.imageToText(url, text)
-              .then(s => {
-                seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s);
-              });
+              .then(s => seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s));
           }
           return ret;
         }
@@ -1394,7 +1355,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   ext.cmdMap['img'] = cmdImage;
 
   //接受非指令消息
-  ext.onNotCommandReceived = async (ctx, msg) => {
+  ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
     try {
       const { disabledInPrivate, globalStandby, triggerRegexes, ignoreRegexes, triggerCondition } = ConfigManager.received;
       if (ctx.isPrivate && disabledInPrivate) {
@@ -1406,7 +1367,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       const id = ctx.isPrivate ? userId : groupId;
 
       let message = msg.message;
-      let images: Image[] = [];
       const ai = AIManager.getAI(id);
 
       // 非指令消息忽略
@@ -1444,22 +1404,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           if (pattern && pattern.test(message)) {
             const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
             if (fmtCondition === 1) {
-              // 图片偷取，以及图片转文字
-              if (CQTypes.includes('image')) {
-                const result = await ImageManager.handleImageMessage(ctx, message);
-                message = result.message;
-                images = result.images;
-                if (ai.imageManager.stealStatus) {
-                  ai.imageManager.updateStolenImages(images);
-                }
-              }
-
-              await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
-
-              logger.info('非指令触发回复');
-              await ai.chat(ctx, msg);
-              AIManager.saveAI(id);
-              return;
+              return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
+                .then(() => ai.chat(ctx, msg, '非指令'))
+                .then(() => AIManager.saveAI(id));
             }
           }
         }
@@ -1475,71 +1422,41 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               continue;
             }
 
-            // 图片偷取，以及图片转文字
-            if (CQTypes.includes('image')) {
-              const result = await ImageManager.handleImageMessage(ctx, message);
-              message = result.message;
-              images = result.images;
-              if (ai.imageManager.stealStatus) {
-                ai.imageManager.updateStolenImages(images);
-              }
-            }
-
-            await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
-            await ai.context.addSystemUserMessage('触发原因提示', condition.reason, []);
-            triggerConditionMap[id].splice(i, 1);
-
-            logger.info('AI设定触发条件触发回复');
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
+            return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
+              .then(() => ai.context.addSystemUserMessage('触发原因提示', condition.reason, []))
+              .then(() => triggerConditionMap[id].splice(i, 1))
+              .then(() => ai.chat(ctx, msg, 'AI设定触发条件'))
+              .then(() => AIManager.saveAI(id));
           }
         }
 
         // 开启任一模式时
         const pr = ai.privilege;
         if (pr.standby || globalStandby) {
-          // 图片偷取，以及图片转文字
-          if (CQTypes.includes('image')) {
-            const result = await ImageManager.handleImageMessage(ctx, message);
-            message = result.message;
-            images = result.images;
-            if (ai.imageManager.stealStatus) {
-              ai.imageManager.updateStolenImages(images);
-            }
-          }
+          ai.handleReceipt(ctx, msg, ai, message, CQTypes)
+            .then((): void | Promise<void> => {
+              if (pr.counter > -1) {
+                ai.context.counter += 1;
+                if (ai.context.counter >= pr.counter) {
+                  ai.context.counter = 0;
+                  return ai.chat(ctx, msg, '计数器').then(() => AIManager.saveAI(id));
+                }
+              }
 
-          await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
-        }
+              if (pr.prob > -1) {
+                const ran = Math.random() * 100;
+                if (ran <= pr.prob) {
+                  return ai.chat(ctx, msg, '概率').then(() => AIManager.saveAI(id));
+                }
+              }
 
-        if (pr.counter > -1) {
-          ai.context.counter += 1;
-          if (ai.context.counter >= pr.counter) {
-            ai.context.counter = 0;
-            logger.info('计数器触发回复');
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
-          }
-        }
-
-        if (pr.prob > -1) {
-          const ran = Math.random() * 100;
-          if (ran <= pr.prob) {
-            logger.info('概率触发回复');
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-            return;
-          }
-        }
-
-        if (pr.timer > -1) {
-          ai.context.timer = setTimeout(async () => {
-            ai.context.timer = null;
-            logger.info('计时器触发回复');
-            await ai.chat(ctx, msg);
-            AIManager.saveAI(id);
-          }, pr.timer * 1000 + Math.floor(Math.random() * 500));
+              if (pr.timer > -1) {
+                ai.context.timer = setTimeout(() => {
+                  ai.context.timer = null;
+                  ai.chat(ctx, msg, '计时器').then(() => AIManager.saveAI(id));
+                }, pr.timer * 1000 + Math.floor(Math.random() * 500));
+              }
+            });
         }
       }
     } catch (e) {
@@ -1548,7 +1465,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   }
 
   //接受的指令
-  ext.onCommandReceived = async (ctx, msg, cmdArgs) => {
+  ext.onCommandReceived = (ctx, msg, cmdArgs) => {
     try {
       if (ToolManager.cmdArgs === null) {
         ToolManager.cmdArgs = cmdArgs;
@@ -1563,23 +1480,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         const ai = AIManager.getAI(id);
 
         let message = msg.message;
-        let images: Image[] = [];
 
         const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
           const pr = ai.privilege;
           if (pr.standby) {
-            // 图片偷取，以及图片转文字
-            if (CQTypes.includes('image')) {
-              const result = await ImageManager.handleImageMessage(ctx, message);
-              message = result.message;
-              images = result.images;
-              if (ai.imageManager.stealStatus) {
-                ai.imageManager.updateStolenImages(images);
-              }
-            }
-
-            await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
+            ai.handleReceipt(ctx, msg, ai, message, CQTypes);
           }
         }
       }
@@ -1589,7 +1495,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   }
 
   //骰子发送的消息
-  ext.onMessageSend = async (ctx, msg) => {
+  ext.onMessageSend = (ctx, msg) => {
     try {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
@@ -1598,7 +1504,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       const ai = AIManager.getAI(id);
 
       let message = msg.message;
-      let images: Image[] = [];
 
       ai.tool.listen.resolve?.(message); // 将消息传递给监听工具
 
@@ -1613,18 +1518,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
           const pr = ai.privilege;
           if (pr.standby) {
-            // 图片偷取，以及图片转文字
-            if (CQTypes.includes('image')) {
-              const result = await ImageManager.handleImageMessage(ctx, message);
-              message = result.message;
-              images = result.images;
-              if (ai.imageManager.stealStatus) {
-                ai.imageManager.updateStolenImages(images);
-              }
-            }
-
-            await ai.context.addMessage(ctx, msg, ai, message, images, 'assistant', transformMsgId(msg.rawId));
-            return;
+            ai.handleReceipt(ctx, msg, ai, message, CQTypes);
           }
         }
       }
@@ -1634,7 +1528,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   }
 
   let isTaskRunning = false;
-  seal.ext.registerTask(ext, "cron", "* * * * *", async () => {
+  seal.ext.registerTask(ext, "cron", "* * * * *", () => {
     try {
       if (timerQueue.length === 0) {
         return;
@@ -1648,46 +1542,50 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       isTaskRunning = true;
 
       let changed = false;
-      for (let i = 0; i < timerQueue.length && i >= 0; i++) {
-        const timestamp = timerQueue[i].timestamp;
-        if (timestamp > Math.floor(Date.now() / 1000)) {
-          continue;
-        }
+      async function processTimer() {
+        for (let i = 0; i < timerQueue.length && i >= 0; i++) {
+          const timestamp = timerQueue[i].timestamp;
+          if (timestamp > Math.floor(Date.now() / 1000)) {
+            continue;
+          }
 
-        const setTime = timerQueue[i].setTime;
-        const content = timerQueue[i].content;
-        const id = timerQueue[i].id;
-        const messageType = timerQueue[i].messageType;
-        const uid = timerQueue[i].uid;
-        const gid = timerQueue[i].gid;
-        const epId = timerQueue[i].epId;
-        const msg = createMsg(messageType, uid, gid);
-        const ctx = createCtx(epId, msg);
-        const ai = AIManager.getAI(id);
+          const setTime = timerQueue[i].setTime;
+          const content = timerQueue[i].content;
+          const id = timerQueue[i].id;
+          const messageType = timerQueue[i].messageType;
+          const uid = timerQueue[i].uid;
+          const gid = timerQueue[i].gid;
+          const epId = timerQueue[i].epId;
+          const msg = createMsg(messageType, uid, gid);
+          const ctx = createCtx(epId, msg);
+          const ai = AIManager.getAI(id);
 
-        const s = `你设置的定时器触发了，请按照以下内容发送回复：
+          const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${setTime}
 当前触发时间：${new Date().toLocaleString()}
 提示内容：${content}`;
 
-        await ai.context.addSystemUserMessage("定时器触发提示", s, []);
+          await ai.context.addSystemUserMessage("定时器触发提示", s, []);
 
-        logger.info('定时任务触发回复');
-        await ai.chat(ctx, msg);
-        AIManager.saveAI(id);
+          logger.info('定时任务触发回复');
+          await ai.chat(ctx, msg);
+          AIManager.saveAI(id);
 
-        timerQueue.splice(i, 1);
-        i--;
-        changed = true;
+          timerQueue.splice(i, 1);
+          i--;
+          changed = true;
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
 
-      if (changed) {
-        ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
-      }
+      processTimer().then(() => {
+        if (changed) {
+          ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
+        }
 
-      isTaskRunning = false;
+        isTaskRunning = false;
+      });
     } catch (e) {
       logger.error(`定时任务处理出错，错误信息:${e.message}`);
     }
