@@ -1541,8 +1541,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       isTaskRunning = true;
 
-      let changed = false;
       async function processTimer() {
+        let changed = false;
         for (let i = 0; i < timerQueue.length && i >= 0; i++) {
           const timestamp = timerQueue[i].timestamp;
           if (timestamp > Math.floor(Date.now() / 1000)) {
@@ -1567,8 +1567,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
           await ai.context.addSystemUserMessage("定时器触发提示", s, []);
 
-          logger.info('定时任务触发回复');
-          await ai.chat(ctx, msg);
+          await ai.chat(ctx, msg, '定时任务');
           AIManager.saveAI(id);
 
           timerQueue.splice(i, 1);
@@ -1577,9 +1576,11 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
+
+        return changed;
       }
 
-      processTimer().then(() => {
+      processTimer().then(changed => {
         if (changed) {
           ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
         }
