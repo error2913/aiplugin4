@@ -1526,7 +1526,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   }
 
   let isTaskRunning = false;
-  seal.ext.registerTask(ext, "cron", "* * * * *", () => {
+  setInterval(() => {
     try {
       if (timerQueue.length === 0) {
         return;
@@ -1587,7 +1587,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
     } catch (e) {
       logger.error(`定时任务处理出错，错误信息:${e.message}`);
     }
-  })
+  }, 5000);
 }
 
 main();
