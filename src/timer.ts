@@ -72,13 +72,7 @@ export class TimerManager {
                     continue;
                 }
 
-                const setTime = timer.setTime;
-                const content = timer.content;
-                const id = timer.id;
-                const messageType = timer.messageType;
-                const uid = timer.uid;
-                const gid = timer.gid;
-                const epId = timer.epId;
+                const { id, messageType, uid, gid, epId, setTime, content } = timer;
                 const msg = createMsg(messageType, uid, gid);
                 const ctx = createCtx(epId, msg);
                 const ai = AIManager.getAI(id);
