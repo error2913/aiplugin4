@@ -3,8 +3,8 @@ import { ConfigManager } from "../config/config";
 import { AI, AIManager } from "./AI";
 import { Context, Message } from "./context";
 import { generateId } from "../utils/utils";
-import { logger } from "./logger";
-import { fetchData } from "./service";
+import { logger } from "../logger";
+import { fetchData } from "../service";
 import { parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 

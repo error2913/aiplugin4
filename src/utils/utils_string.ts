@@ -1,7 +1,7 @@
 import Handlebars from "handlebars";
 import { Context } from "../AI/context";
 import { Image, ImageManager } from "../AI/image";
-import { logger } from "../AI/logger";
+import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";

@@ -1,7 +1,7 @@
 import { ConfigManager } from "../config/config";
-import { sendITTRequest } from "./service";
+import { sendITTRequest } from "../service";
 import { generateId } from "../utils/utils";
-import { logger } from "./logger";
+import { logger } from "../logger";
 
 export class Image {
     id: string;

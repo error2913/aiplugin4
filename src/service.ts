@@ -1,8 +1,8 @@
-import { AI, AIManager } from "./AI";
-import { ToolCall, ToolManager } from "../tool/tool";
-import { ConfigManager } from "../config/config";
-import { handleMessages, parseBody } from "../utils/utils_message";
-import { ImageManager } from "./image";
+import { AI, AIManager } from "./AI/AI";
+import { ToolCall, ToolManager } from "./tool/tool";
+import { ConfigManager } from "./config/config";
+import { handleMessages, parseBody } from "./utils/utils_message";
+import { ImageManager } from "./AI/image";
 import { logger } from "./logger";
 
 export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messages: {

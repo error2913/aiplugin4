@@ -1,32 +1,23 @@
 import { AIManager } from "./AI/AI";
 import { ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
-import { timerQueue } from "./tool/tool_time";
 import { ConfigManager, CQTYPESALLOW } from "./config/config";
-import { createMsg, createCtx } from "./utils/utils_seal";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
-import { logger } from "./AI/logger";
+import { logger } from "./logger";
 import { transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
-import { get_chart_url } from "./AI/service";
+import { get_chart_url } from "./service";
+import { TimerManager } from "./timer";
 
 function main() {
   ConfigManager.registerConfig();
+  checkUpdate();
   AIManager.getUsageMap();
   ToolManager.registerTool();
-  checkUpdate();
+  TimerManager.init();
 
   const ext = ConfigManager.ext;
-
-  try {
-    JSON.parse(ext.storageGet(`timerQueue`) || '[]')
-      .forEach((item: any) => {
-        timerQueue.push(item);
-      });
-  } catch (e) {
-    logger.error('在获取timerQueue时出错', e);
-  }
 
   const cmdAI = seal.ext.newCmdItemInfo();
   cmdAI.name = 'ai'; // 指令名字，可用中文
@@ -1524,70 +1515,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       logger.error(`获取发送消息处理出错，错误信息:${e.message}`);
     }
   }
-
-  let isTaskRunning = false;
-  setInterval(() => {
-    try {
-      if (timerQueue.length === 0) {
-        return;
-      }
-
-      if (isTaskRunning) {
-        logger.info('定时器任务正在运行，跳过');
-        return;
-      }
-
-      isTaskRunning = true;
-
-      async function processTimer() {
-        let changed = false;
-        for (let i = 0; i < timerQueue.length && i >= 0; i++) {
-          const timestamp = timerQueue[i].timestamp;
-          if (timestamp > Math.floor(Date.now() / 1000)) {
-            continue;
-          }
-
-          const setTime = timerQueue[i].setTime;
-          const content = timerQueue[i].content;
-          const id = timerQueue[i].id;
-          const messageType = timerQueue[i].messageType;
-          const uid = timerQueue[i].uid;
-          const gid = timerQueue[i].gid;
-          const epId = timerQueue[i].epId;
-          const msg = createMsg(messageType, uid, gid);
-          const ctx = createCtx(epId, msg);
-          const ai = AIManager.getAI(id);
-
-          const s = `你设置的定时器触发了，请按照以下内容发送回复：
-定时器设定时间：${setTime}
-当前触发时间：${new Date().toLocaleString()}
-提示内容：${content}`;
-
-          await ai.context.addSystemUserMessage("定时器触发提示", s, []);
-
-          await ai.chat(ctx, msg, '定时任务');
-
-          timerQueue.splice(i, 1);
-          i--;
-          changed = true;
-
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-
-        return changed;
-      }
-
-      processTimer().then(changed => {
-        if (changed) {
-          ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
-        }
-
-        isTaskRunning = false;
-      });
-    } catch (e) {
-      logger.error(`定时任务处理出错，错误信息:${e.message}`);
-    }
-  }, 5000);
 }
 
 main();

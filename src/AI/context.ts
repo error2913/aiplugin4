@@ -4,7 +4,7 @@ import { Image, ImageManager } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
-import { logger } from "./logger";
+import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
 
 export interface Message {

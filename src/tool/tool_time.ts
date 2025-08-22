@@ -1,16 +1,6 @@
+import { TimerManager } from "../timer";
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
-
-export const timerQueue: {
-    id: string,
-    messageType: 'private' | 'group',
-    uid: string,
-    gid: string,
-    epId: string,
-    timestamp: number,
-    setTime: string,
-    content: string
-}[] = [];
 
 export function registerGetTime() {
     const info: ToolInfo = {
@@ -75,18 +65,7 @@ export function registerSetTimer() {
             return '时间应为数字';
         }
 
-        timerQueue.push({
-            id: ai.id,
-            messageType: msg.messageType,
-            uid: ctx.player.userId,
-            gid: ctx.group.groupId,
-            epId: ctx.endPoint.userId,
-            timestamp: Math.floor(Date.now() / 1000) + t * 60,
-            setTime: new Date().toLocaleString(),
-            content: content
-        })
-
-        ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
+        TimerManager.addTimer(ctx, msg, ai, t, content);
 
         return `设置定时器成功，请等待`;
     }
@@ -111,7 +90,7 @@ export function registerShowTimerList() {
 
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, ___) => {
-        const timers = timerQueue.filter(t => t.id === ai.id);
+        const timers = TimerManager.timerQueue.filter(t => t.id === ai.id);
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
@@ -153,7 +132,7 @@ export function registerCancelTimer() {
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, args) => {
         const { index_list } = args;
-        const timers = timerQueue.filter(t => t.id === ai.id);
+        const timers = TimerManager.timerQueue.filter(t => t.id === ai.id);
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
@@ -168,15 +147,15 @@ export function registerCancelTimer() {
                 return `序号${index}超出范围`;
             }
 
-            const i = timerQueue.indexOf(timers[index - 1]);
+            const i = TimerManager.timerQueue.indexOf(timers[index - 1]);
             if (i === -1) {
                 return `出错了:找不到序号${index}的定时器`;
             }
 
-            timerQueue.splice(i, 1);
+            TimerManager.timerQueue.splice(i, 1);
         }
 
-        ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(timerQueue));
+        ConfigManager.ext.storageSet(`TimerMatimerQueue`, JSON.stringify(TimerManager.timerQueue));
 
         return '定时器取消成功';
     }
