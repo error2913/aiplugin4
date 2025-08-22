@@ -47,14 +47,15 @@ export class TimerManager {
         })
 
         this.saveTimerQueue();
+
+        if (!this.intervalId) {
+            logger.info('定时器任务启动');
+            this.executeTask();
+        }
     }
 
     static async task() {
         try {
-            if (this.timerQueue.length === 0) {
-                return;
-            }
-
             if (this.isTaskRunning) {
                 logger.info('定时器任务正在运行，跳过');
                 return;
@@ -105,22 +106,26 @@ export class TimerManager {
         }
     }
 
-    static init() {
-        this.getTimerQueue();
+    static async executeTask() {
+        if (this.timerQueue.length === 0) {
+            this.destroy();
+            return;
+        }
 
-        // 使用setTimeout递归替代setInterval，避免异步操作重叠
-        const executeTask = async () => {
-            await this.task();
-            this.intervalId = setTimeout(executeTask, 5000);
-        };
-
-        this.intervalId = setTimeout(executeTask, 5000);
+        await this.task();
+        this.intervalId = setTimeout(this.executeTask.bind(this), 5000);
     }
 
     static destroy() {
         if (this.intervalId) {
             clearTimeout(this.intervalId);
             this.intervalId = null;
+            logger.info('定时器任务已停止');
         }
+    }
+
+    static init() {
+        this.getTimerQueue();
+        this.executeTask();
     }
 }
