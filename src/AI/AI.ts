@@ -130,6 +130,7 @@ export class AI {
         }
         if (stream) {
             await this.chatStream(ctx, msg);
+            AIManager.saveAI(this.id);
             return;
         }
 
@@ -185,6 +186,7 @@ export class AI {
         }
 
         clearTimeout(timeout);
+        AIManager.saveAI(this.id);
     }
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {

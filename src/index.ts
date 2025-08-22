@@ -1405,8 +1405,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
             if (fmtCondition === 1) {
               return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
-                .then(() => ai.chat(ctx, msg, '非指令'))
-                .then(() => AIManager.saveAI(id));
+                .then(() => ai.chat(ctx, msg, '非指令'));
             }
           }
         }
@@ -1425,8 +1424,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
               .then(() => ai.context.addSystemUserMessage('触发原因提示', condition.reason, []))
               .then(() => triggerConditionMap[id].splice(i, 1))
-              .then(() => ai.chat(ctx, msg, 'AI设定触发条件'))
-              .then(() => AIManager.saveAI(id));
+              .then(() => ai.chat(ctx, msg, 'AI设定触发条件'));
           }
         }
 
@@ -1439,21 +1437,21 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 ai.context.counter += 1;
                 if (ai.context.counter >= pr.counter) {
                   ai.context.counter = 0;
-                  return ai.chat(ctx, msg, '计数器').then(() => AIManager.saveAI(id));
+                  return ai.chat(ctx, msg, '计数器');
                 }
               }
 
               if (pr.prob > -1) {
                 const ran = Math.random() * 100;
                 if (ran <= pr.prob) {
-                  return ai.chat(ctx, msg, '概率').then(() => AIManager.saveAI(id));
+                  return ai.chat(ctx, msg, '概率');
                 }
               }
 
               if (pr.timer > -1) {
                 ai.context.timer = setTimeout(() => {
                   ai.context.timer = null;
-                  ai.chat(ctx, msg, '计时器').then(() => AIManager.saveAI(id));
+                  ai.chat(ctx, msg, '计时器');
                 }, pr.timer * 1000 + Math.floor(Math.random() * 500));
               }
             });
@@ -1568,7 +1566,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           await ai.context.addSystemUserMessage("定时器触发提示", s, []);
 
           await ai.chat(ctx, msg, '定时任务');
-          AIManager.saveAI(id);
 
           timerQueue.splice(i, 1);
           i--;
