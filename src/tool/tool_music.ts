@@ -1,4 +1,4 @@
-import { logger } from "../AI/logger";
+import { logger } from "../logger";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerMusicPlay() {

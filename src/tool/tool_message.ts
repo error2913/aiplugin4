@@ -1,6 +1,6 @@
 import { AIManager } from "../AI/AI";
 import { Image, ImageManager } from "../AI/image";
-import { logger } from "../AI/logger";
+import { logger } from "../logger";
 import { ConfigManager, CQTYPESALLOW } from "../config/config";
 import { replyToSender, transformMsgId, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";

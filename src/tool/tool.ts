@@ -21,7 +21,7 @@ import { registerGetContext } from "./tool_context"
 import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
 import { registerSetTriggerCondition } from "./tool_trigger"
 import { registerMusicPlay } from "./tool_music"
-import { logger } from "../AI/logger"
+import { logger } from "../logger"
 
 export interface ToolInfo {
     type: "function",

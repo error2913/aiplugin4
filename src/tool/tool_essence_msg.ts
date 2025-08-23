@@ -1,4 +1,4 @@
-import { logger } from "../AI/logger";
+import { logger } from "../logger";
 import { transformMsgIdBack } from "../utils/utils";
 import { ToolInfo, Tool, ToolManager } from "./tool";
 

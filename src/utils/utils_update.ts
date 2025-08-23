@@ -1,6 +1,6 @@
 import { AI, AIManager } from "../AI/AI";
-import { logger } from "../AI/logger";
-import { updateInfo } from "../AI/update";
+import { logger } from "../logger";
+import { updateInfo } from "../update";
 import { ConfigManager, VERSION } from "../config/config";
 
 /**

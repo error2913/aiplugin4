@@ -1,5 +1,5 @@
 import { AI } from "../AI/AI";
-import { logger } from "../AI/logger";
+import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformTextToArray } from "./utils_string";
 

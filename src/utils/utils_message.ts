@@ -1,7 +1,7 @@
 import Handlebars from "handlebars";
 import { AI } from "../AI/AI";
 import { Message } from "../AI/context";
-import { logger } from "../AI/logger";
+import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 
