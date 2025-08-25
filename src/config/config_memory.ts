@@ -31,6 +31,8 @@ export class MemoryConfig {
         seal.ext.registerBoolConfig(MemoryConfig.ext, "是否启用短期记忆", true, "");
         seal.ext.registerIntConfig(MemoryConfig.ext, "短期记忆上限", 10, "");
         seal.ext.registerIntConfig(MemoryConfig.ext, "短期记忆总结轮数", 10, "");
+        seal.ext.registerStringConfig(MemoryConfig.ext, "记忆总结 url地址", "", '为空时，默认使用对话接口');
+        seal.ext.registerStringConfig(MemoryConfig.ext, "记忆总结 API Key", "你的API Key", '若使用对话接口无需填写');
         seal.ext.registerTemplateConfig(MemoryConfig.ext, "记忆总结 body", [
             `"model":"deepseek-chat"`,
             `"max_tokens":1024`,
@@ -114,6 +116,8 @@ export class MemoryConfig {
             isShortMemory: seal.ext.getBoolConfig(MemoryConfig.ext, "是否启用短期记忆"),
             shortMemoryLimit: seal.ext.getIntConfig(MemoryConfig.ext, "短期记忆上限"),
             shortMemorySummaryRound: seal.ext.getIntConfig(MemoryConfig.ext, "短期记忆总结轮数"),
+            memoryUrl: seal.ext.getStringConfig(MemoryConfig.ext, "记忆总结 url地址"),
+            memoryApiKey: seal.ext.getStringConfig(MemoryConfig.ext, "记忆总结 API Key"),
             memoryBodyTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "记忆总结 body"),
             memoryPromptTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "记忆总结prompt模板")
         }

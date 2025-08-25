@@ -151,9 +151,16 @@ export class Memory {
             return;
         }
 
-        const { url, apiKey } = ConfigManager.request;
+        const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
         const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
-        const { memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+        const { memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+
+        let url = chatUrl;
+        let apiKey = chatApiKey;
+        if (memoryUrl.trim()) {
+            url = memoryUrl;
+            apiKey = memoryApiKey;
+        }
 
         try {
             let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
