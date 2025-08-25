@@ -369,6 +369,27 @@ function main() {
           const ai2 = AIManager.getAI(muid);
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
+            case 'status': {
+              let ai3 = ai;
+              if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== ctx.endPoint.userId)) {
+                ai3 = ai2;
+              }
+
+              const { isMemory, isShortMemory } = ConfigManager.memory;
+
+              const keywords = new Set<string>();
+              for (const key in ai3.memory.memoryMap) {
+                ai3.memory.memoryMap[key].keywords.forEach(kw => keywords.add(kw));
+              }
+
+              seal.replyToSender(ctx, msg, `${ai3.id}
+长期记忆开启状态: ${isMemory ? '是' : '否'}
+长期记忆条数: ${Object.keys(ai3.memory.memoryMap).length}
+关键词库: ${Array.from(keywords).join('、')}
+短期记忆开启状态: ${(isShortMemory && ai3.memory.useShortMemory) ? '是' : '否'}
+短期记忆条数: ${ai3.memory.shortMemoryList.length}`);
+              return ret;
+            }
             case 'p':
             case 'private': {
               const val3 = cmdArgs.getArgN(3);
@@ -398,11 +419,6 @@ function main() {
                     }
                   }
                 }
-                case 'show': {
-                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s || '无');
-                  return ret;
-                }
                 case 'del': {
                   const idList = cmdArgs.args.slice(3);
                   const kw = cmdArgs.kwargs.map(item => item.name);
@@ -414,6 +430,11 @@ function main() {
                   const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
                   seal.replyToSender(ctx, msg, s || '无');
                   AIManager.saveAI(muid);
+                  return ret;
+                }
+                case 'show': {
+                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
+                  seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'clr': {
@@ -466,11 +487,6 @@ function main() {
                     }
                   }
                 }
-                case 'show': {
-                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s || '无');
-                  return ret;
-                }
                 case 'del': {
                   const idList = cmdArgs.args.slice(3);
                   const kw = cmdArgs.kwargs.map(item => item.name);
@@ -482,6 +498,11 @@ function main() {
                   const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
                   seal.replyToSender(ctx, msg, s || '无');
                   AIManager.saveAI(id);
+                  return ret;
+                }
+                case 'show': {
+                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
+                  seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'clr': {
@@ -500,14 +521,26 @@ function main() {
             case 'short': {
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
+                case 'on': {
+                  ai.memory.useShortMemory = true;
+                  seal.replyToSender(ctx, msg, '短期记忆已开启');
+                  AIManager.saveAI(id);
+                  return ret;
+                }
+                case 'off': {
+                  ai.memory.useShortMemory = false;
+                  seal.replyToSender(ctx, msg, '短期记忆已关闭');
+                  AIManager.saveAI(id);
+                  return ret;
+                }
                 case 'show': {
-                  const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                  const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
                   seal.replyToSender(ctx, msg, s || '无');
                   return ret;
                 }
                 case 'clr': {
                   ai.memory.clearShortMemory();
-                  seal.replyToSender(ctx, msg, '群聊记忆已清除');
+                  seal.replyToSender(ctx, msg, '短期记忆已清除');
                   AIManager.saveAI(id);
                   return ret;
                 }
@@ -522,21 +555,21 @@ function main() {
               ai.context.summaryCounter = 0;
               ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound))
                 .then(() => {
-                  const s = ai.memory.shortMemory.map((item, index) => `${index + 1}. ${item}`).join('\n');
+                  const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
                   seal.replyToSender(ctx, msg, s || '无');
                 });
               return ret;
             }
             default: {
               seal.replyToSender(ctx, msg, `帮助:
+【.ai memo status (@xxx)】查看记忆状态，@为查看个人记忆状态
 【.ai memo [p/g] st <内容>】设置个人/群聊设定
 【.ai memo [p/g] st clr】清除个人/群聊设定
-【.ai memo [p/g] show】展示个人/群聊记忆
 【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
-【.ai memo [p/g] clr】清除个人/群聊记忆
-【.ai memo s show】展示短期记忆
-【.ai memo s clr】清除短期记忆
-【.ai memo sum】总结短期记忆`);
+【.ai memo [p/g/s] show】展示个人/群聊/短期记忆
+【.ai memo [p/g/s] clr】清除个人/群聊/短期记忆
+【.ai memo s [on/off]】开启/关闭短期记忆
+【.ai memo sum】立即总结一次短期记忆`);
               return ret;
             }
           }
@@ -1141,7 +1174,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
 【.img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
-【.img stl (on/off)】偷图 开启/关闭
+【.img stl [on/off]】偷图 开启/关闭
 【.img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
 【.img itt [图片/ran] (附加提示词)】图片转文字
 【.img list [show/send]】展示保存的图片列表/展示并发送所有保存的图片
