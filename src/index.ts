@@ -25,7 +25,7 @@ function main() {
 【.ai st】修改权限(仅骰主可用)
 【.ai ck】检查权限(仅骰主可用)
 【.ai prompt】检查当前prompt(仅骰主可用)
-【.ai pr】查看当前群聊权限
+【.ai status】查看当前AI状态
 【.ai ctxn】查看上下文里的名字
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
@@ -132,19 +132,20 @@ function main() {
           seal.replyToSender(ctx, msg, systemMessage.contentArray[0]);
           return ret;
         }
-        case 'pr': {
+        case 'status': {
           const pr = ai.privilege;
           if (ctx.privilegeLevel < pr.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
 
-          const counter = pr.counter > -1 ? `${pr.counter}条` : '关闭';
-          const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
-          const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
-          const standby = pr.standby ? '开启' : '关闭';
-          const s = `${id}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
-          seal.replyToSender(ctx, msg, s);
+          seal.replyToSender(ctx, msg, `${id}
+权限限制: ${pr.limit}
+上下文轮数: ${ai.context.messages.filter(m => m.role === 'user').length}
+计数器模式(c): ${pr.counter > -1 ? `${pr.counter}条` : '关闭'}
+计时器模式(t): ${pr.timer > -1 ? `${pr.timer}秒` : '关闭'}
+概率模式(p): ${pr.prob > -1 ? `${pr.prob}%` : '关闭'}
+待机模式: ${pr.standby ? '开启' : '关闭'}`);
           return ret;
         }
         case 'ctxn': {
@@ -385,7 +386,7 @@ function main() {
               seal.replyToSender(ctx, msg, `${ai3.id}
 长期记忆开启状态: ${isMemory ? '是' : '否'}
 长期记忆条数: ${Object.keys(ai3.memory.memoryMap).length}
-关键词库: ${Array.from(keywords).join('、')}
+关键词库: ${Array.from(keywords).join('、') || '无'}
 短期记忆开启状态: ${(isShortMemory && ai3.memory.useShortMemory) ? '是' : '否'}
 短期记忆条数: ${ai3.memory.shortMemoryList.length}`);
               return ret;

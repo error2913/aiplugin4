@@ -6,7 +6,8 @@ export const updateInfo = {
 - 新增保存图片功能
 - 重构了定时任务的执行
 - 新增短期记忆单独控制开启
-- 新增memo status命令`,
+- 新增memo status命令
+- 将ai pr命令改为ai status`,
     "4.10.0": `- 新增了全局待机模式配置项
 - 修改了部分正则和部分默认配置项
 - 修复了无法调用内置指令
