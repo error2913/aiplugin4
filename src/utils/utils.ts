@@ -81,3 +81,12 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         return '';
     }
 }
+
+export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): Promise<T> {
+    return Promise.race([
+        asyncFunc(),
+        new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`操作超时 (${timeoutMs}ms)`)), timeoutMs);
+        })
+    ]);
+}
