@@ -10,6 +10,7 @@ import { ToolConfig } from "./config_tool";
 
 export const VERSION = "4.10.1";
 export const AUTHOR = "baiyu&错误";
+export const NAME = "aiplugin4";
 export const CQTYPESALLOW = ["at", "image", "reply", "face", "poke"];
 
 export class ConfigManager {
@@ -22,7 +23,7 @@ export class ConfigManager {
     } = {}
 
     static registerConfig() {
-        this.ext = ConfigManager.getExt('aiplugin4');
+        this.ext = ConfigManager.getExt(NAME);
         LogConfig.register();
         RequestConfig.register();
         MessageConfig.register();
@@ -60,7 +61,7 @@ export class ConfigManager {
     static get memory() { return this.getCache('memory', MemoryConfig.get) }
 
     static getExt(name: string): seal.ExtInfo {
-        if (name == 'aiplugin4' && ConfigManager.ext) {
+        if (name == NAME && ConfigManager.ext) {
             return ConfigManager.ext;
         }
 

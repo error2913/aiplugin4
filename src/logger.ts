@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config/config";
+import { ConfigManager, NAME } from "./config/config";
 
 class Logger {
     name: string;
@@ -49,4 +49,4 @@ class Logger {
     }
 }
 
-export const logger = new Logger('aiplugin4');
+export const logger = new Logger(NAME);
