@@ -1,6 +1,5 @@
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
-import { logger } from "../logger"
 
 const baseurl = "http://meme.lovesealdice.online/";
 
@@ -93,11 +92,12 @@ export function registerMeme() {
             if (uid === null) {
                 return `未找到<${name}>`;
             }
-            image.push(`[CQ:at,qq=${uid.replace(/\D/g, "")}]`);
+            image.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/\D/g, "")}&spec=640&img_type=jpg`);
         }
+        // 忘记了之前插件是手动处理的 cq 码（）
 
         const request = { key: key, text: text, image: image, args: {} }
-        logger.info(JSON.stringify(request, null, 2));
+        // 调试信息忘记删了果咩纳塞
 
         await fetch(baseurl + "meme_generate", {
             method: "POST",
