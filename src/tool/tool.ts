@@ -213,7 +213,7 @@ export class ToolManager {
         registerSearchCommonGroup();
         registerSetTriggerCondition();
         registerMusicPlay();
-        registerMeMe();
+        registerMeme();
     }
 
     /**
