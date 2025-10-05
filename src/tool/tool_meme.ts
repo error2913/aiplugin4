@@ -4,14 +4,26 @@ import { logger } from "../logger"
 
 const baseurl = "http://meme.lovesealdice.online/";
 
-const get_key = async (name: string) => {
-    return await fetch(baseurl + name + "/key").then(res => res.json())
-        .then(json => { return json }).catch(err => { return "Error: " + err.message });
+interface MemeInfo {
+    params_type: {
+        min_texts: number,
+        max_texts: number,
+        min_images: number,
+        max_images: number,
+    }
 }
 
-const get_info = async (key: string) => {
-    return await fetch(baseurl + key + "/info").then(res => res.json())
-        .then(json => { return json }).catch(err => { return "Error: " + err.message });
+async function getInfo(name: string): Promise<{ key: string, info: MemeInfo }> {
+    try {
+        const res1 = await fetch(baseurl + name + "/key");
+        const json1 = await res1.json();
+        const key = json1.result;
+        const res2 = await fetch(baseurl + key + "/info");
+        const json2 = await res2.json();
+        return { key, info: json2 };
+    } catch (err) {
+        throw new Error("获取表情包信息失败");
+    }
 }
 
 export function registerMeme() {
@@ -66,9 +78,8 @@ export function registerMeme() {
     const tool_generator = new Tool(generator_info); // 创建一个新tool
     tool_generator.solve = async (ctx, msg, ai, args) => { // 实现方法，返回字符串提供给AI
         const { name, text = [], members = [] } = args;
-        const key = await get_key(name).then(res => { return res.result }).catch(err => { return "Error: " + err.message });
-        const limit = await get_info(key).then(res => { return res }).catch(err => { return "Error: " + err.message });
 
+        const { key, info: limit } = await getInfo(name);
         if (text.length > limit.params_type.max_texts || text.length < limit.params_type.min_texts) {
             return `文字数量错误,该表情包文字范围为 ${limit.params_type.min_texts} - ${limit.params_type.max_texts} 段,用户范围为 ${limit.params_type.min_images} - ${limit.params_type.max_images} 名`;
         }
