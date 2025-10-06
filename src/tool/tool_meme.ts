@@ -42,8 +42,13 @@ export function registerMeme() {
 
     const tool_list = new Tool(list_info); // 创建一个新tool
     tool_list.solve = async (_, __, ___, ____) => { // 实现方法，返回字符串提供给AI
-        return await fetch(baseurl + "get_command").then(res => res.json())
-            .then(json => { return JSON.stringify(json) }).catch(_ => { return "api 失效，请等待修复。" });
+        try {
+            const res = await fetch(baseurl + "get_command");
+            const json = await res.json();
+            return json.map((item: string[]) => item[0]).join("、");
+        } catch (err) {
+            return "获取表情包列表失败:" + err.message;
+        }
     }
 
     const generator_info: ToolInfo = {
@@ -94,25 +99,28 @@ export function registerMeme() {
             }
             image.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/\D/g, "")}&spec=640&img_type=jpg`);
         }
-        // 忘记了之前插件是手动处理的 cq 码（）
 
-        const request = { key: key, text: text, image: image, args: {} }
-        // 调试信息忘记删了果咩纳塞
+        try {
+            const res = await fetch(baseurl + "meme_generate", {
+                method: "POST",
+                body: JSON.stringify({
+                    key,
+                    text,
+                    image,
+                    args: {}
+                }),
+            });
 
-        await fetch(baseurl + "meme_generate", {
-            method: "POST",
-            body: JSON.stringify(request),
-        }).then(res => res.json())
-            .then(json => {
-                if (json.status == "success") {
-                    seal.replyToSender(ctx, msg, `[CQ:image,file=${seal.base64ToImage(json.message)}]`)
-                    return "发送成功";
-                } else {
-                    return "Error: " + json.message;
-                }
-            })
-
-        return ""
+            const json = await res.json();
+            if (json.status == "success") {
+                seal.replyToSender(ctx, msg, `[CQ:image,file=${seal.base64ToImage(json.message)}]`)
+                return "发送成功";
+            } else {
+                throw new Error(json.message);
+            }
+        } catch (err) {
+            return "生成表情包失败:" + err.message;
+        }
     }
 
     // 注册到toolMap中
