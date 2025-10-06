@@ -17,6 +17,7 @@ export interface Message {
     contentArray: string[];
     msgIdArray: string[];
     images: Image[];
+    time?: number;
 }
 
 export class Context {
@@ -70,6 +71,8 @@ export class Context {
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
 
+        const messageTime = msg?.time || Date.now() / 1000;
+
         //处理文本
         s = s
             .replace(/\[CQ:(.*?),(?:qq|id)=(-?\d+)\]/g, (_, p1, p2) => {
@@ -117,6 +120,7 @@ export class Context {
             messages[length - 1].contentArray.push(s);
             messages[length - 1].msgIdArray.push(msgId);
             messages[length - 1].images.push(...images);
+            messages[length - 1].time = messageTime;
         } else {
             const message = {
                 role: role,
@@ -125,7 +129,8 @@ export class Context {
                 name: name,
                 contentArray: [s],
                 msgIdArray: [msgId],
-                images: images
+                images: images,
+                time: messageTime
             };
             messages.push(message);
 

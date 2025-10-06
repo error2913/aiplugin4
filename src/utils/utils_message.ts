@@ -5,8 +5,19 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 
+function formatTimestamp(timestamp: number): string {
+    const date = new Date(timestamp * 1000); 
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
+    const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const { isMemory, isShortMemory } = ConfigManager.memory;
@@ -66,6 +77,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
         "添加前缀": isPrefix,
         "展示消息ID": showMsgId,
+        "展示时间": showTime,
         "接收图片": receiveImage,
         "图片条件不为零": condition !== '0',
         "可发送图片不为空": sandableImagesPrompt,
@@ -157,7 +169,7 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
 }
 
 export function handleMessages(ctx: seal.MsgContext, ai: AI) {
-    const { isPrefix, showNumber, showMsgId, isMerge } = ConfigManager.message;
+    const { isPrefix, showNumber, showMsgId, isMerge, showTime } = ConfigManager.message;
 
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -208,7 +220,17 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
                 `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
         ) : '';
 
-        const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
+        const content = message.msgIdArray.map((msgId, index) => {
+            let result = '';
+            if (showMsgId && msgId) {
+                result += `<|msg_id:${msgId}|>`;
+            }
+            if (showTime && message.time) {
+                result += `<|time:${formatTimestamp(message.time)}|>`;
+            }
+            result += message.contentArray[index];
+            return result;
+        }).join('\f');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\f' + prefix + content;
