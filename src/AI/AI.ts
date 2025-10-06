@@ -16,8 +16,11 @@ export interface Privilege {
     timer: number,
     prob: number,
     standby: boolean,
-    activeTimeRange: { start: string, end: string } | null,
-    segments: number,
+    activeTimeInfo: {
+        start: number,
+        end: number,
+        segments: number
+    }
 }
 
 export class AI {
@@ -43,7 +46,7 @@ export class AI {
 
     constructor(id: string) {
         this.id = id;
-        this.version = '0.0.0';
+        this.version = '0.0.1';
         this.context = new Context();
         this.tool = new ToolManager();
         this.memory = new Memory();
@@ -54,8 +57,11 @@ export class AI {
             timer: -1,
             prob: -1,
             standby: false,
-            activeTimeRange: null,
-            segments: 3
+            activeTimeInfo: {
+                start: 0,
+                end: 0,
+                segments: 0
+            }
         };
         this.stream = {
             id: '',
@@ -105,16 +111,6 @@ export class AI {
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = ''): Promise<void> {
-        const isKeywordTrigger = reason === "事件触发" || reason === "非指令";
-        const isTimerTrigger = reason === "定时任务";
-        
-        if (!isKeywordTrigger && !isTimerTrigger) {
-            if (!this.isInActiveTimeRange()) {
-                logger.info(`当前时间不在AI活跃时间段内，${reason}触发不进行回复`);
-                return;
-            }
-        }
-        
         logger.info('触发回复:', reason || '未知原因');
 
         const { bucketLimit, fillInterval } = ConfigManager.received;
@@ -324,177 +320,29 @@ export class AI {
     }
 
     isInActiveTimeRange(): boolean {
-        if (!this.privilege.activeTimeRange) {
-            return true;
-        }
-
         const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentTimeMinutes = currentHour * 60 + currentMinute;
+        const current = now.getHours() * 60 + now.getMinutes();
+        const { start, end } = this.privilege.activeTimeInfo;
 
-        const { start, end } = this.privilege.activeTimeRange;
-        const [startHour, startMinute] = start.split(':').map(Number);
-        const [endHour, endMinute] = end.split(':').map(Number);
-        
-        const startTimeMinutes = startHour * 60 + startMinute;
-        const endTimeMinutes = endHour * 60 + endMinute;
-
-        if (startTimeMinutes <= endTimeMinutes) {
-            return currentTimeMinutes >= startTimeMinutes && currentTimeMinutes <= endTimeMinutes;
+        if (start <= end) {
+            return current >= start && current <= end;
         } else {
-            return currentTimeMinutes >= startTimeMinutes || currentTimeMinutes <= endTimeMinutes;
+            return current >= start || current <= end;
         }
     }
 
-    getActiveTimeSegments(): number[] {
-        if (!this.privilege.activeTimeRange) {
-            return [];
-        }
+    getActiveTimePoints(): number[] {
+        const { start, end, segments } = this.privilege.activeTimeInfo;
+        const endReal = end > start ? end : end + 24 * 60;
+        const segLen = (endReal - start) / segments;
 
-        const { start, end } = this.privilege.activeTimeRange;
-        const [startHour, startMinute] = start.split(':').map(Number);
-        const [endHour, endMinute] = end.split(':').map(Number);
-        
-        const startTimeMinutes = startHour * 60 + startMinute;
-        const endTimeMinutes = endHour * 60 + endMinute;
-        const segments = this.privilege.segments;
+        const timePoints: number[] = Array.from({ length: segments }, (_, i) =>
+            Math.floor(start + i * segLen + Math.random() * segLen) % (24 * 60)
+        );
 
-        const seed = this.generateSeed(this.id, start, end, segments);
-        const timePoints: number[] = [];
-        
-        if (startTimeMinutes <= endTimeMinutes) {
-            const totalMinutes = endTimeMinutes - startTimeMinutes;
-            const segmentDuration = totalMinutes / segments;
-            
-            for (let i = 0; i < segments; i++) {
-                const segmentStart = startTimeMinutes + i * segmentDuration;
-                const randomOffset = this.seededRandom(seed + i) * segmentDuration * 0.6 - segmentDuration * 0.3;
-                const randomTime = segmentStart + segmentDuration / 2 + randomOffset;
-                timePoints.push(Math.floor(randomTime));
-            }
-        } else {
-            const totalMinutes = (24 * 60 - startTimeMinutes) + endTimeMinutes;
-            const segmentDuration = totalMinutes / segments;
-            
-            for (let i = 0; i < segments; i++) {
-                let segmentStart = startTimeMinutes + i * segmentDuration;
-                
-                if (segmentStart >= 24 * 60) {
-                    segmentStart -= 24 * 60;
-                }
-                
-                const randomOffset = this.seededRandom(seed + i) * segmentDuration * 0.6 - segmentDuration * 0.3;
-                let randomTime = segmentStart + segmentDuration / 2 + randomOffset;
-                
-                if (randomTime >= 24 * 60) {
-                    randomTime -= 24 * 60;
-                }
-                
-                timePoints.push(Math.floor(randomTime));
-            }
-        }
-        
         return timePoints;
     }
 
-    getCurrentSegmentIndex(currentTimeMinutes: number, timePoints: number[]): number {
-        if (!this.privilege.activeTimeRange) {
-            return -1;
-        }
-    
-        const { start, end } = this.privilege.activeTimeRange;
-        const [startHour, startMinute] = start.split(':').map(Number);
-        const [endHour, endMinute] = end.split(':').map(Number);
-        const startTimeMinutes = startHour * 60 + startMinute;
-        const endTimeMinutes = endHour * 60 + endMinute;
-        const isOvernight = startTimeMinutes > endTimeMinutes;
-
-        for (let i = 0; i < timePoints.length; i++) {
-            const segStart = (i === 0) ? startTimeMinutes : timePoints[i - 1];
-            const segEnd = timePoints[i];
-    
-            if (!isOvernight) {
-                if (currentTimeMinutes >= segStart && currentTimeMinutes < segEnd) {
-                    return i;
-                }
-            } else {
-                if (segStart <= segEnd) {
-                    if (currentTimeMinutes >= segStart && currentTimeMinutes < segEnd) {
-                        return i;
-                    }
-                } else {
-                    if (currentTimeMinutes >= segStart || currentTimeMinutes < segEnd) {
-                        return i;
-                    }
-                }
-            }
-        }
-    
-        return -1;
-    }
-    
-    hasMessageInCurrentSegment(currentSegmentIndex: number, timePoints: number[]): boolean {
-        if (!this.privilege.activeTimeRange) {
-            return false;
-        }
-    
-        const lastUserMessage = [...this.context.messages].reverse()
-            .find(m => m.role !== "assistant" && m.time);
-    
-        if (!lastUserMessage) {
-            return false;
-        }
-    
-        const lastMessageDate = new Date(lastUserMessage.time * 1000);
-        const lastMessageMinutes = lastMessageDate.getHours() * 60 + lastMessageDate.getMinutes();
-    
-        const { start, end } = this.privilege.activeTimeRange;
-        const [startHour, startMinute] = start.split(':').map(Number);
-        const [endHour, endMinute] = end.split(':').map(Number);
-        const startTimeMinutes = startHour * 60 + startMinute;
-        const endTimeMinutes = endHour * 60 + endMinute;
-        const isOvernight = startTimeMinutes > endTimeMinutes;
-    
-        const currentSegmentTime = timePoints[currentSegmentIndex];
-        const previousSegmentTime = currentSegmentIndex === 0
-            ? this.getActiveTimeRangeStartMinutes()
-            : timePoints[currentSegmentIndex - 1];
-    
-        if (isOvernight) {
-            if (previousSegmentTime <= currentSegmentTime) {
-                return lastMessageMinutes >= previousSegmentTime && lastMessageMinutes < currentSegmentTime;
-            } else {
-                return lastMessageMinutes >= previousSegmentTime || lastMessageMinutes < currentSegmentTime;
-            }
-        } else {
-            return lastMessageMinutes >= previousSegmentTime && lastMessageMinutes < currentSegmentTime;
-        }
-    }    
-    
-    private getActiveTimeRangeStartMinutes(): number {
-        if (!this.privilege.activeTimeRange) {
-            return 0;
-        }
-        const [startHour, startMinute] = this.privilege.activeTimeRange.start.split(':').map(Number);
-        return startHour * 60 + startMinute;
-    }
-
-    private generateSeed(id: string, start: string, end: string, segments: number): number {
-        const str = `${id}-${start}-${end}-${segments}`;
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; 
-        }
-        return Math.abs(hash);
-    }
-
-    private seededRandom(seed: number): number {
-        const x = Math.sin(seed) * 10000;
-        return x - Math.floor(x);
-    }
     async stopCurrentChatStream(): Promise<void> {
         const { id, reply, toolCallStatus } = this.stream;
         this.stream = {

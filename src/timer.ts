@@ -195,7 +195,7 @@ export class TimerManager {
                 continue;
             }
     
-            const timePoints = ai.getActiveTimeSegments();
+            const timePoints = ai.getActiveTimePoints();
             
             let currentSegmentIndex = -1;
             for (let i = 0; i < timePoints.length; i++) {
