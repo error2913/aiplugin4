@@ -21,6 +21,7 @@ import { registerGetContext } from "./tool_context"
 import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
 import { registerSetTriggerCondition } from "./tool_trigger"
 import { registerMusicPlay } from "./tool_music"
+import { registerMeme } from "./tool_meme"
 import { logger } from "../logger"
 
 export interface ToolInfo {
@@ -212,6 +213,7 @@ export class ToolManager {
         registerSearchCommonGroup();
         registerSetTriggerCondition();
         registerMusicPlay();
+        registerMeme();
     }
 
     /**
