@@ -253,13 +253,14 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                 const arr = valStr.split('-').map((item, index) => {
                   const parts = item.split(/[:：,，]+/).map(Number).map(i => isNaN(i) ? 0 : i);
                   if (index < 2) {
-                    return (parts[0] * 60 + parts[1] || 0) % (24 * 60);
+                    return (parts[0] * 60 + (parts[1] || 0)) % (24 * 60);
                   } else {
                     return parts[0];
                   }
                 })
 
                 const [start = 0, end = 0, segs = 1] = arr;
+
                 if (start === end) {
                   seal.replyToSender(ctx, msg, '活跃时间段开始时间和结束时间不能相同');
                   return ret;
