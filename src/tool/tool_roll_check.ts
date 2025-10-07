@@ -142,7 +142,7 @@ export function registerSanCheck() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        const value = seal.vars.intGet(ctx, 'san')[0]; console.log(value)
+        const value = seal.vars.intGet(ctx, 'san')[0];
         if (value === 0) {
             seal.vars.intSet(ctx, 'san', 60);
         }

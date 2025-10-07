@@ -9,25 +9,14 @@ export interface TimerInfo {
     uid: string,
     gid: string,
     epId: string,
-    timestamp: number,
+    timestamp: number, // 定时器触发时间，单位秒
     setTime: string,
-    content: string
-};
-
-export interface SegmentTimerInfo {
-    id: string,
-    messageType: 'private' | 'group',
-    uid: string,
-    gid: string,
-    epId: string,
-    timestamp: number,
-    setTime: string,
-    lastTriggeredSegment: number
+    content: string,
+    type: 'timer' | 'activeTime'
 };
 
 export class TimerManager {
     static timerQueue: TimerInfo[] = [];
-    static segmentTimerQueue: SegmentTimerInfo[] = [];
     static isTaskRunning = false;
     static intervalId: number | null = null;
 
@@ -46,31 +35,17 @@ export class TimerManager {
         ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
-    static getSegmentTimerQueue() {
-        try {
-            JSON.parse(ConfigManager.ext.storageGet(`segmentTimerQueue`) || '[]')
-                .forEach((item: any) => {
-                    this.segmentTimerQueue.push(item);
-                });
-        } catch (e) {
-            logger.error('在获取segmentTimerQueue时出错', e);
-        }
-    }
-
-    static saveSegmentTimerQueue() {
-        ConfigManager.ext.storageSet(`segmentTimerQueue`, JSON.stringify(this.segmentTimerQueue));
-    }
-
-    static addTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, t: number, content: string) {
+    static addTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, timestamp: number, content: string, reason: 'timer' | 'activeTime') {
         this.timerQueue.push({
             id: ai.id,
             messageType: msg.messageType,
             uid: ctx.player.userId,
             gid: ctx.group.groupId,
             epId: ctx.endPoint.userId,
-            timestamp: Math.floor(Date.now() / 1000) + t * 60,
+            timestamp: timestamp,
             setTime: new Date().toLocaleString(),
-            content: content
+            content: content,
+            type: reason
         })
 
         this.saveTimerQueue();
@@ -81,41 +56,37 @@ export class TimerManager {
         }
     }
 
-    static addSegmentTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
-        const existingIndex = this.segmentTimerQueue.findIndex(timer => timer.id === ai.id);
-        
-        const timerInfo = {
-            id: ai.id,
-            messageType: msg.messageType,
-            uid: ctx.player.userId,
-            gid: ctx.group.groupId,
-            epId: ctx.endPoint.userId,
-            timestamp: Math.floor(Date.now() / 1000),
-            setTime: new Date().toLocaleString(),
-            lastTriggeredSegment: -1
-        };
-    
-        if (existingIndex >= 0) {
-            timerInfo.lastTriggeredSegment = this.segmentTimerQueue[existingIndex].lastTriggeredSegment;
-            this.segmentTimerQueue[existingIndex] = timerInfo;
-        } else {
-            this.segmentTimerQueue.push(timerInfo);
-        }
-    
-        this.saveSegmentTimerQueue();
-    
-        if (!this.intervalId) {
-            logger.info('时间段检查任务启动');
-            this.executeTask();
-        }
-    }
+    static removeTimer(id: string = '', content: string = '', reason: 'timer' | 'activeTime' = 'timer', index_list: number[] = []) {
+        if (index_list.length > 0) {
+            const timers = TimerManager.timerQueue.filter(t =>
+                (id && t.id === id) &&
+                (content && t.content === content) &&
+                (reason && t.type === reason)
+            );
 
-    static removeSegmentTimer(aiId: string) {
-        const index = this.segmentTimerQueue.findIndex(timer => timer.id === aiId);
-        if (index >= 0) {
-            this.segmentTimerQueue.splice(index, 1);
-            this.saveSegmentTimerQueue();
+            for (const index of index_list) {
+                if (index < 1 || index > timers.length) {
+                    logger.warning(`序号${index}超出范围`);
+                    continue;
+                }
+
+                const i = TimerManager.timerQueue.indexOf(timers[index - 1]);
+                if (i === -1) {
+                    logger.warning(`出错了:找不到序号${index}的定时器`);
+                    continue;
+                }
+
+                TimerManager.timerQueue.splice(i, 1);
+            }
+        } else {
+            this.timerQueue = this.timerQueue.filter(timer =>
+                (id && timer.id !== id) &&
+                (content && timer.content !== content) &&
+                (reason && timer.type !== reason)
+            );
         }
+
+        this.saveTimerQueue();
     }
 
     static async task() {
@@ -136,23 +107,43 @@ export class TimerManager {
                     continue;
                 }
 
-                const { id, messageType, uid, gid, epId, setTime, content } = timer;
+                const { id, messageType, uid, gid, epId, setTime, content, type: reason } = timer;
                 const msg = createMsg(messageType, uid, gid);
                 const ctx = createCtx(epId, msg);
                 const ai = AIManager.getAI(id);
 
-                const s = `你设置的定时器触发了，请按照以下内容发送回复：
+                switch (reason) {
+                    case 'timer': {
+                        const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${setTime}
 当前触发时间：${new Date().toLocaleString()}
 提示内容：${content}`;
 
-                await ai.context.addSystemUserMessage("定时器触发提示", s, []);
-                
-                if (!ai.isInActiveTimeRange()) {
-                    await ai.context.addSystemUserMessage("睡眠中", "当前是你的睡眠时间，但定时任务触发了", []);
+                        await ai.context.addSystemUserMessage("定时器触发提示", s, []);
+                        await ai.chat(ctx, msg, '定时任务');
+                        break;
+                    }
+                    case 'activeTime': {
+                        const curSegIndex = ai.getCurSegIndex();
+                        const nextTimePoint = ai.getNextTimePoint(curSegIndex);
+                        if (nextTimePoint !== -1) {
+                            this.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
+                        }
+
+                        if (curSegIndex === -1) {
+                            logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪`);
+                            continue;
+                        }
+
+                        const s = `现在是你的活跃时间：${new Date().toLocaleString()}，请说点什么`;
+
+                        await ai.context.addSystemUserMessage("活跃时间触发提示", s, []);
+                        await ai.chat(ctx, msg, '活跃时间');
+                        break;
+                    }
                 }
-                
-                await ai.chat(ctx, msg, '定时任务');
+
+
                 changed = true;
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
@@ -162,97 +153,14 @@ export class TimerManager {
                 this.saveTimerQueue();
             }
 
-            await this.checkSegmentTimers();
-
             this.isTaskRunning = false;
         } catch (e) {
             logger.error(`定时任务处理出错，错误信息:${e.message}`);
         }
     }
 
-    static async checkSegmentTimers() {
-        const remainingTimers: SegmentTimerInfo[] = [];
-        let changed = false;
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentTimeMinutes = currentHour * 60 + currentMinute;
-    
-        for (const timer of this.segmentTimerQueue) {
-            const ai = AIManager.getAI(timer.id);
-            if (!ai) {
-                changed = true;
-                continue;
-            }
-    
-            if (!ai.privilege.standby || !ai.privilege.activeTimeRange) {
-                changed = true;
-                continue;
-            }
-    
-            if (!ai.isInActiveTimeRange()) {
-                remainingTimers.push(timer);
-                continue;
-            }
-    
-            const timePoints = ai.getActiveTimePoints();
-            
-            let currentSegmentIndex = -1;
-            for (let i = 0; i < timePoints.length; i++) {
-                if (currentTimeMinutes >= timePoints[i]) {
-                    currentSegmentIndex = i;
-                } else {
-                    break;
-                }
-            }
-    
-            if (currentSegmentIndex === -1) {
-                remainingTimers.push(timer);
-                continue;
-            }
-    
-            const segmentTime = timePoints[currentSegmentIndex];
-            const timeDiff = Math.abs(currentTimeMinutes - segmentTime);
-            
-            if (timeDiff <= 1) {
-                if (timer.lastTriggeredSegment === currentSegmentIndex) {
-                    remainingTimers.push(timer);
-                    continue;
-                }
-    
-                const hasRecentMessage = ai.hasMessageInCurrentSegment(currentSegmentIndex, timePoints);
-                
-                if (hasRecentMessage) {
-                    timer.lastTriggeredSegment = currentSegmentIndex;
-                    changed = true;
-                    remainingTimers.push(timer);
-                    continue;
-                }
-
-                const { messageType, uid, gid, epId } = timer;
-                const msg = createMsg(messageType, uid, gid);
-                const ctx = createCtx(epId, msg);
-                
-                const s = `当前时间：${now.toLocaleString()}为你的活跃时间段`;
-                await ai.context.addSystemUserMessage("活跃时间段触发提示", s, []);
-                await ai.chat(ctx, msg, '活跃时间段触发');
-                
-                timer.lastTriggeredSegment = currentSegmentIndex;
-                changed = true;
-                await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-    
-            remainingTimers.push(timer);
-        }
-    
-        if (changed) {
-            this.segmentTimerQueue = remainingTimers;
-            this.saveSegmentTimerQueue();
-        }
-    }
-
     static async executeTask() {
-        if (this.timerQueue.length === 0 && this.segmentTimerQueue.length === 0) {
+        if (this.timerQueue.length === 0) {
             this.destroy();
             return;
         }
@@ -272,6 +180,5 @@ export class TimerManager {
     static init() {
         this.getTimerQueue();
         this.executeTask();
-        this.getSegmentTimerQueue();
     }
 }

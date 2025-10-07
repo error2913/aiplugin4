@@ -9,7 +9,6 @@ import { transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
-import { registerEventHandlers } from "./events";
 
 function main() {
   ConfigManager.registerConfig();
@@ -17,7 +16,6 @@ function main() {
   AIManager.getUsageMap();
   ToolManager.registerTool();
   TimerManager.init();
-  registerEventHandlers();
 
   const ext = ConfigManager.ext;
 
@@ -141,14 +139,17 @@ function main() {
             return ret;
           }
 
+          const { start, end, segs } = pr.activeTimeInfo;
+
           seal.replyToSender(ctx, msg, `${id}
 权限限制: ${pr.limit}
 上下文轮数: ${ai.context.messages.filter(m => m.role === 'user').length}
 计数器模式(c): ${pr.counter > -1 ? `${pr.counter}条` : '关闭'}
 计时器模式(t): ${pr.timer > -1 ? `${pr.timer}秒` : '关闭'}
 概率模式(p): ${pr.prob > -1 ? `${pr.prob}%` : '关闭'}
-待机模式: ${pr.standby ? '开启' : '关闭'}
-活跃时间段: ${pr.activeTimeRange ? `${pr.activeTimeRange.start}至${pr.activeTimeRange.end}` : '未设置'}`);
+活跃时间段: ${(start !== 0 || end !== 0) ? `${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}` : '未设置'}
+活跃次数: ${segs > 0 ? segs : '未设置'}
+待机模式: ${pr.standby ? '开启' : '关闭'}`);
           return ret;
         }
         case 'ctxn': {
@@ -182,88 +183,92 @@ function main() {
 单位/秒，默认60秒
 【p】概率模式，每条消息按概率触发
 单位/%，默认10%
-【s】活跃时间段或时间段分割数量
-格式为"开始时间-结束时间"(如"09:00-18:00")或数字(如"5"表示分割5个时间段)
+【a】活跃时间段和活跃次数
+格式为"开始时间-结束时间-活跃次数"(如"09:00-18:00-5")
 
 【.ai on --t --p=42】使用示例`);
             return ret;
           }
 
           let text = `AI已开启：`;
-          kwargs.forEach(kwarg => {
+          for (const kwarg of kwargs) {
             const name = kwarg.name;
             const exist = kwarg.valueExists;
-            const value = parseFloat(kwarg.value);
+            const valInt = parseInt(kwarg.value);
+            const valFloat = parseFloat(kwarg.value);
+            const valStr = kwarg.value.trim();
 
             switch (name) {
               case 'c':
               case 'counter': {
-                pr.counter = exist && !isNaN(value) ? value : 10;
+                ai.context.counter = 0;
+                pr.counter = exist && !isNaN(valInt) ? valInt : 10;
                 text += `\n计数器模式:${pr.counter}条`;
                 break;
               }
               case 't':
               case 'timer': {
-                pr.timer = exist && !isNaN(value) ? value : 60;
+                clearTimeout(ai.context.timer);
+                ai.context.timer = null;
+                pr.timer = exist && !isNaN(valFloat) ? valFloat : 60;
                 text += `\n计时器模式:${pr.timer}秒`;
                 break;
               }
               case 'p':
               case 'prob': {
-                pr.prob = exist && !isNaN(value) ? value : 10;
+                pr.prob = exist && !isNaN(valFloat) ? valFloat : 10;
                 text += `\n概率模式:${pr.prob}%`;
                 break;
               }
-              case 's':
-              case 'schedule':
-                if (exist && kwarg.value) {
-                  const timeRange = kwarg.value.trim();
-                  const timePattern = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/;
-                  const match = timeRange.match(timePattern);
-                  
-                  if (match) {
-                    const [startTime, endTime] = match.slice(1);
-                    const validateTime = (timeStr: string): boolean => {
-                      const [hours, minutes] = timeStr.split(':').map(Number);
-                      return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
-                    };
-                    
-                    if (validateTime(startTime) && validateTime(endTime)) {
-                      const [startH, startM] = startTime.split(':').map(Number);
-                      const [endH, endM] = endTime.split(':').map(Number);
-                      pr.activeTimeRange = { 
-                        start: startH + ':' + startM, 
-                        end: endH + ':' + endM,
-                      };
-                      TimerManager.addSegmentTimer(ctx, msg, ai);
-                      text += `\n活跃时间段:${startTime}至${endTime}`;
-                    } else {
-                      text += `\n活跃时间段格式错误，应为HH:MM格式`;
-                    }
-                  } else if (!isNaN(parseInt(timeRange))) {
-                    const segments = parseInt(timeRange);
-                    if (segments > 0 && segments <= 10) {
-                      pr.segments = segments;
-                      text += `\n时间段分割数量:${segments}个`;
-                    } else {
-                      text += `\n时间段分割数量必须在1-10之间`;
-                    }
+              case 'a':
+              case 'active': {
+                if (!exist) {
+                  seal.replyToSender(ctx, msg, '请输入活跃时间段');
+                  return ret;
+                }
+
+                const arr = valStr.split('-').map((item, index) => {
+                  const parts = item.split(/[:：,，]+/).map(Number).map(i => isNaN(i) ? 0 : i);
+                  if (index < 2) {
+                    return (parts[0] * 60 + parts[1] || 0) % (24 * 60);
                   } else {
-                    text += `\n活跃时间段格式错误，应为"开始时间-结束时间"或数字`;
+                    return parts[0];
                   }
-                } else {
-                  pr.activeTimeRange = null;
-                  text += `\n已清除活跃时间段限制`;
+                })
+
+                const [start = 0, end = 0, segs = 1] = arr;
+                if (start === end) {
+                  seal.replyToSender(ctx, msg, '活跃时间段开始时间和结束时间不能相同');
+                  return ret;
+                }
+
+                const endReal = end > start ? end : end + 24 * 60;
+                if (segs > endReal - start) {
+                  seal.replyToSender(ctx, msg, '活跃次数不能大于活跃时间段分钟数');
+                  return ret;
+                }
+
+                TimerManager.removeTimer(id, '', 'activeTime', []);
+                pr.activeTimeInfo = {
+                  start,
+                  end,
+                  segs,
+                }
+
+                text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
+                text += `\n活跃次数:${segs}`;
+
+                const curSegIndex = ai.getCurSegIndex();
+                const nextTimePoint = ai.getNextTimePoint(curSegIndex);
+                if (nextTimePoint !== -1) {
+                  TimerManager.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
                 }
                 break;
+              }
             }
-          });
+          };
 
           pr.standby = true;
-
-          if (pr.activeTimeRange) {
-            TimerManager.addSegmentTimer(ctx, msg, ai);
-          }
 
           seal.replyToSender(ctx, msg, text);
           AIManager.saveAI(id);
@@ -276,12 +281,18 @@ function main() {
             return ret;
           }
 
+          ai.resetState();
+          TimerManager.removeTimer(id, '', 'activeTime', []);
+
           pr.counter = -1;
           pr.timer = -1;
           pr.prob = -1;
           pr.standby = true;
-
-          ai.resetState();
+          pr.activeTimeInfo = {
+            start: 0,
+            end: 0,
+            segs: 0,
+          }
 
           seal.replyToSender(ctx, msg, 'AI已开启待机模式');
           AIManager.saveAI(id);
@@ -296,14 +307,18 @@ function main() {
 
           const kwargs = cmdArgs.kwargs;
           if (kwargs.length == 0) {
+            ai.resetState();
+            TimerManager.removeTimer(id, '', 'activeTime', []);
+
             pr.counter = -1;
             pr.timer = -1;
             pr.prob = -1;
             pr.standby = false;
-
-            TimerManager.removeSegmentTimer(id);
-
-            ai.resetState();
+            pr.activeTimeInfo = {
+              start: 0,
+              end: 0,
+              segs: 0,
+            }
 
             seal.replyToSender(ctx, msg, 'AI已关闭');
             AIManager.saveAI(id);
@@ -317,12 +332,15 @@ function main() {
             switch (name) {
               case 'c':
               case 'counter': {
+                ai.context.counter = 0;
                 pr.counter = -1;
                 text += `\n计数器模式`;
                 break;
               }
               case 't':
               case 'timer': {
+                clearTimeout(ai.context.timer);
+                ai.context.timer = null;
                 pr.timer = -1;
                 text += `\n计时器模式`;
                 break;
@@ -333,18 +351,19 @@ function main() {
                 text += `\n概率模式`;
                 break;
               }
-              case 's':
-              case 'schedule': {
-                pr.activeTimeRange = null;
-                pr.segments = 3;
-                TimerManager.removeSegmentTimer(id);
+              case 'a':
+              case 'active': {
+                TimerManager.removeTimer(id, '', 'activeTime', []);
+                pr.activeTimeInfo = {
+                  start: 0,
+                  end: 0,
+                  segs: 0,
+                }
                 text += `\n活跃时间段`;
                 break;
               }
             }
           });
-
-          ai.resetState();
 
           seal.replyToSender(ctx, msg, text);
           AIManager.saveAI(id);
@@ -1489,9 +1508,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           if (pattern && pattern.test(message)) {
             const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
             if (fmtCondition === 1) {
-              if (!ai.isInActiveTimeRange()) {
-                ai.context.addSystemUserMessage("睡眠中", "当前是你的睡眠时间，但触发了关键词", []);
-              }
               return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
                 .then(() => ai.chat(ctx, msg, '非指令'));
             }

@@ -4,17 +4,7 @@ import { Message } from "../AI/context";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
-
-function formatTimestamp(timestamp: number): string {
-    const date = new Date(timestamp * 1000); 
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-}
+import { fmtTime } from "./utils_string";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
@@ -99,6 +89,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         name: '',
         contentArray: [content],
         msgIdArray: [''],
+        timeArray: [Math.floor(Date.now() / 1000)],
         images: []
     };
 
@@ -119,6 +110,7 @@ function buildSamplesMessages(ctx: seal.MsgContext): Message[] {
                     name: "用户",
                     contentArray: [item],
                     msgIdArray: [''],
+                    timeArray: [Math.floor(Date.now() / 1000)],
                     images: []
                 };
             } else {
@@ -128,6 +120,7 @@ function buildSamplesMessages(ctx: seal.MsgContext): Message[] {
                     name: seal.formatTmpl(ctx, "核心:骰子名字"),
                     contentArray: [item],
                     msgIdArray: [''],
+                    timeArray: [Math.floor(Date.now() / 1000)],
                     images: []
                 };
             }
@@ -220,17 +213,11 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
                 `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
         ) : '';
 
-        const content = message.msgIdArray.map((msgId, index) => {
-            let result = '';
-            if (showMsgId && msgId) {
-                result += `<|msg_id:${msgId}|>`;
-            }
-            if (showTime && message.time) {
-                result += `<|time:${formatTimestamp(message.time)}|>`;
-            }
-            result += message.contentArray[index];
-            return result;
-        }).join('\f');
+        const content = message.msgIdArray.map((msgId, index) =>
+            (showMsgId && msgId) ? `<|msg_id:${msgId}|>` : '' +
+                (showTime ? `<|time:${fmtTime(message.timeArray[index])}|>` : '') +
+                message.contentArray[index]
+        ).join('\f');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\f' + prefix + content;

@@ -16,8 +16,8 @@ export interface Message {
     name: string;
     contentArray: string[];
     msgIdArray: string[];
+    timeArray: number[];
     images: Image[];
-    time?: number;
 }
 
 export class Context {
@@ -71,8 +71,6 @@ export class Context {
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
 
-        const messageTime = msg?.time || Date.now() / 1000;
-
         //处理文本
         s = s
             .replace(/\[CQ:(.*?),(?:qq|id)=(-?\d+)\]/g, (_, p1, p2) => {
@@ -119,18 +117,17 @@ export class Context {
         if (length !== 0 && messages[length - 1].uid === uid && !/<function(?:_call)?>/.test(s)) {
             messages[length - 1].contentArray.push(s);
             messages[length - 1].msgIdArray.push(msgId);
+            messages[length - 1].timeArray.push(Math.floor(Date.now() / 1000));
             messages[length - 1].images.push(...images);
-            messages[length - 1].time = messageTime;
         } else {
-            const message = {
+            const message: Message = {
                 role: role,
-                content: '',
                 uid: uid,
                 name: name,
                 contentArray: [s],
                 msgIdArray: [msgId],
-                images: images,
-                time: messageTime
+                timeArray: [Math.floor(Date.now() / 1000)],
+                images: images
             };
             messages.push(message);
 
@@ -154,26 +151,28 @@ export class Context {
     }
 
     async addToolCallsMessage(tool_calls: ToolCall[]) {
-        const message = {
+        const message: Message = {
             role: 'assistant',
             tool_calls: tool_calls,
             uid: '',
             name: '',
             contentArray: [],
             msgIdArray: [],
+            timeArray: [],
             images: []
         };
         this.messages.push(message);
     }
 
     async addToolMessage(tool_call_id: string, s: string) {
-        const message = {
+        const message: Message = {
             role: 'tool',
             tool_call_id: tool_call_id,
             uid: '',
             name: '',
             contentArray: [s],
             msgIdArray: [''],
+            timeArray: [Math.floor(Date.now() / 1000)],
             images: []
         };
 
@@ -195,6 +194,7 @@ export class Context {
             name: `_${name}`,
             contentArray: [s],
             msgIdArray: [''],
+            timeArray: [Math.floor(Date.now() / 1000)],
             images: images
         };
         this.messages.push(message);
