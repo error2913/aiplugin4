@@ -1,5 +1,6 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
+import { buildContent } from "../utils/utils_message";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -66,8 +67,6 @@ export function registerGetContext() {
             return `未知的上下文类型<${ctx_type}>`;
         }
 
-        const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
-
         const messages = ai.context.messages;
         const images = [];
         const s = messages.map(message => {
@@ -77,14 +76,7 @@ export function registerGetContext() {
                 return `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
             }
 
-            const prefix = (isPrefix && message.name) ? (
-                message.name.startsWith('_') ?
-                    `<|${message.name}|>` :
-                    `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
-            ) : '';
-            const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
-
-            return `[${message.role}]: ${prefix}${content}`;
+            return `[${message.role}]: ${buildContent(message)}`;
         }).join('\n');
 
         // 将images添加到最后一条消息，以便使用

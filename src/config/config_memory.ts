@@ -61,6 +61,9 @@ export class MemoryConfig {
     - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
     - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
 {{/if}}
+{{#if 展示时间}}
+    - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+{{/if}}
     - \\f用于分割多条消息
 
 请根据你的设定，对以下对话内容进行总结:

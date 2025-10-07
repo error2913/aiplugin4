@@ -129,7 +129,7 @@ function main() {
 
           const systemMessage = buildSystemMessage(ctx, ai);
 
-          seal.replyToSender(ctx, msg, systemMessage.contentArray[0]);
+          seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
           return ret;
         }
         case 'status': {

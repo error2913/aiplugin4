@@ -46,7 +46,7 @@ export class AI {
 
     constructor(id: string) {
         this.id = id;
-        this.version = '0.0.1';
+        this.version = '0.0.0';
         this.context = new Context();
         this.tool = new ToolManager();
         this.memory = new Memory();
@@ -389,7 +389,7 @@ export class AI {
 }
 
 export class AIManager {
-    static version = "1.0.0";
+    static version = "1.0.1";
     static cache: { [key: string]: AI } = {};
     static usageMap: {
         [key: string]: { // 模型名
