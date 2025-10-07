@@ -1,6 +1,7 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
+import { fmtTime } from "../utils/utils_string";
 
 export function registerBan() {
     const info: ToolInfo = {
@@ -160,7 +161,7 @@ export function registerGetBanList() {
             const data = await globalThis.http.getData(epId, `get_group_shut_list?group_id=${gid.replace(/^.+:/, '')}`);
 
             const s = `被禁言成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${new Date(item.shutUpTime * 1000).toLocaleString()}`;
+                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${fmtTime(item.shutUpTime)}`;
             }).join('\n');
 
             return s;

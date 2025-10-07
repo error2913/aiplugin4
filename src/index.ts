@@ -5,7 +5,7 @@ import { ConfigManager, CQTYPESALLOW } from "./config/config";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
-import { transformTextToArray } from "./utils/utils_string";
+import { fmtTime, transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
@@ -27,6 +27,7 @@ function main() {
 【.ai prompt】检查当前prompt(仅骰主可用)
 【.ai status】查看当前AI状态
 【.ai ctxn】查看上下文里的名字
+【.ai timer】查看当前聊天定时器
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记忆聊天内容
 【.ai off】关闭AI，此时仍能用关键词触发
@@ -164,6 +165,28 @@ function main() {
           seal.replyToSender(ctx, msg, s);
           return ret;
         }
+        case 'timer': {
+          const pr = ai.privilege;
+          if (ctx.privilegeLevel < pr.limit) {
+            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+            return ret;
+          }
+
+          const timers = TimerManager.timerQueue.filter(t => t.id === ai.id);
+
+          if (timers.length === 0) {
+            seal.replyToSender(ctx, msg, '当前对话没有定时器');
+            return ret;
+          }
+
+          const s = timers.map((t, i) => {
+            return `${i + 1}. 触发内容：${t.content}
+${t.setTime} => ${fmtTime(t.timestamp)}
+类型:${t.type}`;
+          }).join('\n');
+          seal.replyToSender(ctx, msg, s);
+          return ret;
+        }
         case 'on': {
           const pr = ai.privilege;
           if (ctx.privilegeLevel < pr.limit) {
@@ -242,7 +265,7 @@ function main() {
                   return ret;
                 }
 
-                const endReal = end > start ? end : end + 24 * 60;
+                const endReal = end >= start ? end : end + 24 * 60;
                 if (segs > endReal - start) {
                   seal.replyToSender(ctx, msg, '活跃次数不能大于活跃时间段分钟数');
                   return ret;

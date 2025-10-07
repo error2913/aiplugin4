@@ -2,6 +2,7 @@ import { ConfigManager } from "./config/config";
 import { createCtx, createMsg } from "./utils/utils_seal";
 import { AI, AIManager } from "./AI/AI";
 import { logger } from "./logger";
+import { fmtTime } from "./utils/utils_string";
 
 export interface TimerInfo {
     id: string,
@@ -43,7 +44,7 @@ export class TimerManager {
             gid: ctx.group.groupId,
             epId: ctx.endPoint.userId,
             timestamp: timestamp,
-            setTime: new Date().toLocaleString(),
+            setTime: fmtTime(Math.floor(Date.now() / 1000)),
             content: content,
             type: reason
         })
@@ -116,7 +117,7 @@ export class TimerManager {
                     case 'timer': {
                         const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${setTime}
-当前触发时间：${new Date().toLocaleString()}
+当前触发时间：${fmtTime(Math.floor(Date.now() / 1000))}
 提示内容：${content}`;
 
                         await ai.context.addSystemUserMessage("定时器触发提示", s, []);
@@ -135,7 +136,7 @@ export class TimerManager {
                             continue;
                         }
 
-                        const s = `现在是你的活跃时间：${new Date().toLocaleString()}，请说点什么`;
+                        const s = `现在是你的活跃时间：${fmtTime(Math.floor(Date.now() / 1000))}，请说点什么`;
 
                         await ai.context.addSystemUserMessage("活跃时间触发提示", s, []);
                         await ai.chat(ctx, msg, '活跃时间');

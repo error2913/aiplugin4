@@ -1,4 +1,5 @@
 import { TimerManager } from "../timer";
+import { fmtTime } from "../utils/utils_string";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
 export function registerGetTime() {
@@ -18,7 +19,7 @@ export function registerGetTime() {
 
     const tool = new Tool(info);
     tool.solve = async (_, __, ___, ____) => {
-        return new Date().toLocaleString();
+        return fmtTime(Math.floor(Date.now() / 1000));
     }
 
     ToolManager.toolMap[info.function.name] = tool;
@@ -97,7 +98,7 @@ export function registerShowTimerList() {
 
         const s = timers.map((t, i) => {
             return `${i + 1}. 触发内容：${t.content}
-${t.setTime} => ${new Date(t.timestamp * 1000).toLocaleString()}`;
+${t.setTime} => ${fmtTime(t.timestamp)}`;
         }).join('\n');
 
         return s;

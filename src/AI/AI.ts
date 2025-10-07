@@ -324,10 +324,10 @@ export class AI {
         const now = new Date();
         const cur = now.getHours() * 60 + now.getMinutes();
         const { start, end, segs } = this.privilege.activeTimeInfo;
-        const endReal = end > start ? end : end + 24 * 60;
-        const curReal = cur > start ? cur : cur + 24 * 60;
+        const endReal = end >= start ? end : end + 24 * 60;
+        const curReal = cur >= start ? cur : cur + 24 * 60;
 
-        if (curReal > endReal) return -1;
+        if (curReal >= endReal) return -1;
 
         const segLen = (endReal - start) / segs;
         const index = Math.floor((curReal - start) / segLen);
@@ -340,7 +340,7 @@ export class AI {
 
         if (start === 0 && end === 0) return -1;
 
-        const endReal = end > start ? end : end + 24 * 60;
+        const endReal = end >= start ? end : end + 24 * 60;
         const segLen = (endReal - start) / segs;
         const nextSegIndex = (curSegIndex + 1) % segs;
         const todayMin = Math.floor(start + nextSegIndex * segLen + Math.random() * segLen) % (24 * 60);
@@ -354,19 +354,6 @@ export class AI {
         }
 
         return Math.floor(nextTime.getTime() / 1000);
-    }
-
-    //no need
-    getActiveTimePoints(): number[] {
-        const { start, end, segs: segments } = this.privilege.activeTimeInfo;
-        const endReal = end > start ? end : end + 24 * 60;
-        const segLen = (endReal - start) / segments;
-
-        const timePoints: number[] = Array.from({ length: segments }, (_, i) =>
-            Math.floor(start + i * segLen + Math.random() * segLen) % (24 * 60)
-        );
-
-        return timePoints;
     }
 
     async stopCurrentChatStream(): Promise<void> {
