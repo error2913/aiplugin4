@@ -3,7 +3,8 @@ export const updateInfo = {
     "4.10.2":`- 新增请求超时相关
 - 修复addMemory时，keywords可以为null的问题
 - 新增表情包制作工具
-- 新增活跃时间`,
+- 新增活跃时间
+- 新增清除上下文标志位$gCLRMSGS，1:清除所有上下文，2:清除assistant和tool上下文，3:清除user上下文`,
     "4.10.1": `- 可能修复了非指令无法响应的问题
 - 修复了构建ctx时，isPrivate始终为0的问题
 - 新增保存图片功能

@@ -12,6 +12,15 @@ export const VERSION = "4.10.1";
 export const AUTHOR = "baiyu&错误";
 export const NAME = "aiplugin4";
 export const CQTYPESALLOW = ["at", "image", "reply", "face", "poke"];
+export const PRIVILEGELEVELMAP = {
+    "master": 100,
+    "whitelist": 70,
+    "owner": 60,
+    "admin": 50,
+    "inviter": 40,
+    "user": 0,
+    "blacklist": -30
+}
 
 export class ConfigManager {
     static ext: seal.ExtInfo;

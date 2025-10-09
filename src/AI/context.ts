@@ -63,6 +63,29 @@ export class Context {
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
 
+        // 检查清除上下文，1:清除所有上下文，2:清除assistant和tool上下文，3:清除user上下文
+        const [clrmsgs, _] = seal.vars.intGet(ctx, "$gCLRMSGS");
+        switch (clrmsgs) {
+            case 1: {
+                ai.context.clearMessages();
+                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+                logger.info('标志位为1，清除所有上下文');
+                break;
+            }
+            case 2: {
+                ai.context.clearMessages('assistant', 'tool');
+                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+                logger.info('标志位为2，清除assistant和tool上下文');
+                break;
+            }
+            case 3: {
+                ai.context.clearMessages('user');
+                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+                logger.info('标志位为3，清除user上下文');
+                break;
+            }
+        }
+
         //处理文本
         s = s
             .replace(/\[CQ:(.*?),(?:qq|id)=(-?\d+)\]/g, (_, p1, p2) => {

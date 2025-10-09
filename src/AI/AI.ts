@@ -9,6 +9,7 @@ import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
 import { checkRepeat, handleReply } from "../utils/utils_string";
 import { checkContextUpdate } from "../utils/utils_update";
+import { TimerManager } from "../timer";
 
 export class Setting {
     static validKeys: (keyof Setting)[] = ['limit', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo'];
@@ -115,6 +116,12 @@ export class AI {
             logger.warning(`触发次数不足，无法回复`);
             return;
         }
+
+        // 检查toolsNotAllow状态
+        const { toolsNotAllow } = ConfigManager.tool;
+        Object.keys(ToolManager.toolMap).forEach(key => {
+            this.tool.toolStatus[key] = !toolsNotAllow.includes(key);
+        });
 
         //清空数据
         this.resetState();
@@ -347,6 +354,21 @@ export class AI {
         return Math.floor(nextTime.getTime() / 1000);
     }
 
+    checkActiveTimer(ctx: seal.MsgContext, msg: seal.Message) {
+        if (this.setting.activeTimeInfo.segs !== 0 && this.setting.activeTimeInfo.start !== 0 && this.setting.activeTimeInfo.end !== 0) {
+            const timers = TimerManager.getTimer(this.id, '', 'activeTime');
+            if (timers.length === 0) {
+                const curSegIndex = this.getCurSegIndex();
+                const nextTimePoint = this.getNextTimePoint(curSegIndex);
+                if (nextTimePoint !== -1) {
+                    TimerManager.addTimer(ctx, msg, this, nextTimePoint, '', 'activeTime');
+                } else {
+                    logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
+                }
+            }
+        }
+    }
+
     async stopCurrentChatStream(): Promise<void> {
         const { id, reply, toolCallStatus } = this.stream;
         this.stream = {
@@ -414,7 +436,6 @@ export class AIManager {
             }
 
             ai.id = id;
-
             checkContextUpdate(ai);
 
             this.cache[id] = ai;

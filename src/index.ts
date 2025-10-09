@@ -1507,32 +1507,15 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         return;
       }
 
-      const userId = ctx.player.userId;
-      const groupId = ctx.group.groupId;
-      const id = ctx.isPrivate ? userId : groupId;
-
-      let message = msg.message;
+      const uid = ctx.player.userId;
+      const gid = ctx.group.groupId;
+      const id = ctx.isPrivate ? uid : gid;
       const ai = AIManager.getAI(id);
 
-      // 检查toolsNotAllow状态
-      const { toolsNotAllow } = ConfigManager.tool;
-      Object.keys(ToolManager.toolMap).forEach(key => {
-        ai.tool.toolStatus[key] = !toolsNotAllow.includes(key);
-      });
-
       // 检查活跃时间定时器
-      if (ai.setting.activeTimeInfo.segs !== 0 && ai.setting.activeTimeInfo.start !== 0 && ai.setting.activeTimeInfo.end !== 0) {
-        const timers = TimerManager.getTimer(id, '', 'activeTime');
-        if (timers.length === 0) {
-          const curSegIndex = ai.getCurSegIndex();
-          const nextTimePoint = ai.getNextTimePoint(curSegIndex);
-          if (nextTimePoint !== -1) {
-            TimerManager.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
-          } else {
-            logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
-          }
-        }
-      }
+      ai.checkActiveTimer(ctx, msg);
+
+      let message = msg.message;
 
       // 非指令消息忽略
       const ignoreRegex = ignoreRegexes.join('|');
@@ -1582,7 +1565,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
               continue;
             }
-            if (condition.uid && condition.uid !== userId) {
+            if (condition.uid && condition.uid !== uid) {
               continue;
             }
 
@@ -1639,8 +1622,10 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
         const id = ctx.isPrivate ? uid : gid;
-
         const ai = AIManager.getAI(id);
+
+        // 检查活跃时间定时器
+        ai.checkActiveTimer(ctx, msg);
 
         let message = msg.message;
 
@@ -1663,8 +1648,10 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
       const id = ctx.isPrivate ? uid : gid;
-
       const ai = AIManager.getAI(id);
+
+      // 检查活跃时间定时器
+      ai.checkActiveTimer(ctx, msg);
 
       let message = msg.message;
 
