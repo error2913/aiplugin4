@@ -87,6 +87,9 @@ export class MessageConfig {
     - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
     - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
 {{/if}}
+{{#if 展示时间}}
+    - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+{{/if}}
     - \\f用于分割多条消息
 {{#if 接收图片}}
 
@@ -143,6 +146,7 @@ export class MessageConfig {
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否给AI展示数字号码", true, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加消息ID", false, "可用于撤回等情况");
+        seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加发送时间", false, "将消息发送时间添加到上下文中");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
         seal.ext.registerIntConfig(MessageConfig.ext, "存储上下文对话限制轮数", 15, "出现一次user视作一轮");
         seal.ext.registerIntConfig(MessageConfig.ext, "上下文插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，示例对话不计入轮数");
@@ -156,6 +160,7 @@ export class MessageConfig {
             isPrefix: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加前缀"),
             showNumber: seal.ext.getBoolConfig(MessageConfig.ext, "是否给AI展示数字号码"),
             showMsgId: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加消息ID"),
+            showTime: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加发送时间"),
             isMerge: seal.ext.getBoolConfig(MessageConfig.ext, "是否合并user content"),
             maxRounds: seal.ext.getIntConfig(MessageConfig.ext, "存储上下文对话限制轮数"),
             insertCount: seal.ext.getIntConfig(MessageConfig.ext, "上下文插入system message间隔轮数")

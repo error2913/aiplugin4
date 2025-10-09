@@ -5,8 +5,9 @@ import { Context } from "./context";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData } from "../service";
-import { parseBody } from "../utils/utils_message";
+import { buildContent, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
+import { fmtTime } from "../utils/utils_string";
 
 export interface MemoryInfo {
     id: string;
@@ -75,7 +76,7 @@ export class Memory {
                 groupId: ctx.group.groupId,
                 groupName: ctx.group.groupName
             },
-            time: new Date().toLocaleString(),
+            time: fmtTime(Math.floor(Date.now() / 1000)),
             createTime: Math.floor(Date.now() / 1000),
             lastMentionTime: Math.floor(Date.now() / 1000),
             keywords: kws || [],
@@ -152,7 +153,7 @@ export class Memory {
         }
 
         const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
-        const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
+        const { roleSettingTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
         const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
 
         const messages = ai.context.messages;
@@ -195,18 +196,13 @@ export class Memory {
                 "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
                 "添加前缀": isPrefix,
                 "展示消息ID": showMsgId,
+                "展示时间": showTime,
                 "对话内容": isPrefix ? sumMessages.map(message => {
                     if (message.role === 'assistant' && message?.tool_calls && message?.tool_calls.length > 0) {
                         return `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
                     }
-                    const prefix = (isPrefix && message.name) ? (
-                        message.name.startsWith('_') ?
-                            `<|${message.name}|>` :
-                            `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
-                    ) : '';
-                    const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
 
-                    return `[${message.role}]: ${prefix}${content}`;
+                    return `[${message.role}]: ${buildContent(message)}`;
                 }).join('\n') : JSON.stringify(sumMessages)
             })
 
@@ -361,7 +357,7 @@ export class Memory {
 
     buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
         const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
-        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].contentArray.join('') : '';
+        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(mi => mi.content).join('') : '';
 
         const ai = AIManager.getAI(ctx.endPoint.userId);
         let s = ai.memory.buildMemory(true, seal.formatTmpl(ctx, "核心:骰子名字"), ctx.endPoint.userId, '', '', lastMsg);

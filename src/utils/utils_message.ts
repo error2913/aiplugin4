@@ -4,9 +4,10 @@ import { Message } from "../AI/context";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
+import { fmtTime } from "./utils_string";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
+    const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const { isMemory, isShortMemory } = ConfigManager.memory;
@@ -66,6 +67,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
         "添加前缀": isPrefix,
         "展示消息ID": showMsgId,
+        "展示时间": showTime,
         "接收图片": receiveImage,
         "图片条件不为零": condition !== '0',
         "可发送图片不为空": sandableImagesPrompt,
@@ -85,9 +87,12 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         role: "system",
         uid: '',
         name: '',
-        contentArray: [content],
-        msgIdArray: [''],
-        images: []
+        images: [],
+        msgArray: [{
+            msgId: '',
+            time: Math.floor(Date.now() / 1000),
+            content: content
+        }]
     };
 
     return systemMessage;
@@ -105,18 +110,24 @@ function buildSamplesMessages(ctx: seal.MsgContext): Message[] {
                     role: "user",
                     uid: '',
                     name: "用户",
-                    contentArray: [item],
-                    msgIdArray: [''],
-                    images: []
+                    images: [],
+                    msgArray: [{
+                        msgId: '',
+                        time: Math.floor(Date.now() / 1000),
+                        content: item
+                    }]
                 };
             } else {
                 return {
                     role: "assistant",
                     uid: ctx.endPoint.userId,
                     name: seal.formatTmpl(ctx, "核心:骰子名字"),
-                    contentArray: [item],
-                    msgIdArray: [''],
-                    images: []
+                    images: [],
+                    msgArray: [{
+                        msgId: '',
+                        time: Math.floor(Date.now() / 1000),
+                        content: item
+                    }]
                 };
             }
         })
@@ -157,7 +168,7 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
 }
 
 export function handleMessages(ctx: seal.MsgContext, ai: AI) {
-    const { isPrefix, showNumber, showMsgId, isMerge } = ConfigManager.message;
+    const { isMerge } = ConfigManager.message;
 
     const systemMessage = buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -202,20 +213,13 @@ export function handleMessages(ctx: seal.MsgContext, ai: AI) {
     let last_role = '';
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
-        const prefix = (isPrefix && message.name) ? (
-            message.name.startsWith('_') ?
-                `<|${message.name}|>` :
-                `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
-        ) : '';
-
-        const content = message.msgIdArray.map((msgId, index) => (showMsgId && msgId ? `<|msg_id:${msgId}|>` : '') + message.contentArray[index]).join('\f');
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
-            processedMessages[processedMessages.length - 1].content += '\f' + prefix + content;
+            processedMessages[processedMessages.length - 1].content += '\f' + buildContent(message);
         } else {
             processedMessages.push({
                 role: message.role,
-                content: prefix + content,
+                content: buildContent(message),
                 tool_calls: message?.tool_calls,
                 tool_call_id: message?.tool_call_id
             });
@@ -267,4 +271,19 @@ export function parseBody(template: string[], messages: any[], tools: ToolInfo[]
     }
 
     return bodyObject;
+}
+
+export function buildContent(message: Message): string {
+    const { isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
+    const prefix = (isPrefix && message.name) ? (
+        message.name.startsWith('_') ?
+            `<|${message.name}|>` :
+            `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
+    ) : '';
+    const content = message.msgArray.map(mi =>
+        ((showMsgId && mi.msgId) ? `<|msg_id:${mi.msgId}|>` : '') +
+        (showTime ? `<|time:${fmtTime(mi.time)}|>` : '') +
+        mi.content
+    ).join('\f');
+    return prefix + content;
 }

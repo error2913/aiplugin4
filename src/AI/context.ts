@@ -7,6 +7,12 @@ import { AI, AIManager } from "./AI";
 import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
 
+export interface MessageInfo {
+    msgId: string;
+    time: number; // 秒
+    content: string;
+}
+
 export interface Message {
     role: string;
     tool_calls?: ToolCall[];
@@ -14,9 +20,8 @@ export interface Message {
 
     uid: string;
     name: string;
-    contentArray: string[];
-    msgIdArray: string[];
     images: Image[];
+    msgArray: MessageInfo[];
 }
 
 export class Context {
@@ -114,18 +119,23 @@ export class Context {
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
         if (length !== 0 && messages[length - 1].uid === uid && !/<function(?:_call)?>/.test(s)) {
-            messages[length - 1].contentArray.push(s);
-            messages[length - 1].msgIdArray.push(msgId);
             messages[length - 1].images.push(...images);
+            messages[length - 1].msgArray.push({
+                msgId: msgId,
+                time: Math.floor(Date.now() / 1000),
+                content: s
+            });
         } else {
-            const message = {
+            const message: Message = {
                 role: role,
-                content: '',
                 uid: uid,
                 name: name,
-                contentArray: [s],
-                msgIdArray: [msgId],
-                images: images
+                images: images,
+                msgArray: [{
+                    msgId: msgId,
+                    time: Math.floor(Date.now() / 1000),
+                    content: s
+                }]
             };
             messages.push(message);
 
@@ -149,27 +159,29 @@ export class Context {
     }
 
     async addToolCallsMessage(tool_calls: ToolCall[]) {
-        const message = {
+        const message: Message = {
             role: 'assistant',
             tool_calls: tool_calls,
             uid: '',
             name: '',
-            contentArray: [],
-            msgIdArray: [],
-            images: []
+            images: [],
+            msgArray: []
         };
         this.messages.push(message);
     }
 
     async addToolMessage(tool_call_id: string, s: string) {
-        const message = {
+        const message: Message = {
             role: 'tool',
             tool_call_id: tool_call_id,
             uid: '',
             name: '',
-            contentArray: [s],
-            msgIdArray: [''],
-            images: []
+            images: [],
+            msgArray: [{
+                msgId: '',
+                time: Math.floor(Date.now() / 1000),
+                content: s
+            }]
         };
 
         for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -183,14 +195,16 @@ export class Context {
     }
 
     async addSystemUserMessage(name: string, s: string, images: Image[]) {
-        const message = {
+        const message: Message = {
             role: 'user',
-            content: s,
             uid: '',
             name: `_${name}`,
-            contentArray: [s],
-            msgIdArray: [''],
-            images: images
+            images: images,
+            msgArray: [{
+                msgId: '',
+                time: Math.floor(Date.now() / 1000),
+                content: s
+            }]
         };
         this.messages.push(message);
     }

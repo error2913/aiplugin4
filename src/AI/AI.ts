@@ -15,7 +15,12 @@ export interface Privilege {
     counter: number,
     timer: number,
     prob: number,
-    standby: boolean
+    standby: boolean,
+    activeTimeInfo: {
+        start: number,
+        end: number,
+        segs: number
+    }
 }
 
 export class AI {
@@ -51,7 +56,12 @@ export class AI {
             counter: -1,
             timer: -1,
             prob: -1,
-            standby: false
+            standby: false,
+            activeTimeInfo: {
+                start: 0,
+                end: 0,
+                segs: 0
+            }
         };
         this.stream = {
             id: '',
@@ -309,6 +319,43 @@ export class AI {
         await this.stopCurrentChatStream();
     }
 
+    // 若不在活动时间范围内，返回-1
+    getCurSegIndex(): number {
+        const now = new Date();
+        const cur = now.getHours() * 60 + now.getMinutes();
+        const { start, end, segs } = this.privilege.activeTimeInfo;
+        const endReal = end >= start ? end : end + 24 * 60;
+        const curReal = cur >= start ? cur : cur + 24 * 60;
+
+        if (curReal >= endReal) return -1;
+
+        const segLen = (endReal - start) / segs;
+        const index = Math.floor((curReal - start) / segLen);
+        return Math.min(index, segs - 1);
+    }
+
+    // 若没有下一个活跃时间点，返回-1
+    getNextTimePoint(curSegIndex: number): number {
+        const { start, end, segs } = this.privilege.activeTimeInfo;
+
+        if (start === 0 && end === 0) return -1;
+
+        const endReal = end >= start ? end : end + 24 * 60;
+        const segLen = (endReal - start) / segs;
+        const nextSegIndex = (curSegIndex + 1) % segs;
+        const todayMin = Math.floor(start + nextSegIndex * segLen + Math.random() * segLen) % (24 * 60);
+
+        const nextTime = new Date();
+        nextTime.setHours(Math.floor(todayMin / 60), todayMin % 60, Math.floor(Math.random() * 60), 0);
+
+        // 如果时间已过，设置为明天
+        if (nextTime.getTime() <= Date.now()) {
+            nextTime.setDate(nextTime.getDate() + 1);
+        }
+
+        return Math.floor(nextTime.getTime() / 1000);
+    }
+
     async stopCurrentChatStream(): Promise<void> {
         const { id, reply, toolCallStatus } = this.stream;
         this.stream = {
@@ -329,7 +376,7 @@ export class AI {
 }
 
 export class AIManager {
-    static version = "1.0.0";
+    static version = "1.0.1";
     static cache: { [key: string]: AI } = {};
     static usageMap: {
         [key: string]: { // 模型名

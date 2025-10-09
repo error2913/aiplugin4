@@ -147,7 +147,7 @@ export function checkRepeat(context: Context, s: string) {
         const message = messages[i];
         // 寻找最后一条文本消息
         if (message.role === 'assistant' && !message?.tool_calls) {
-            const content = message.contentArray[message.contentArray.length - 1] || '';
+            const content = message.msgArray[message.msgArray.length - 1].content || '';
             const similarity = calculateSimilarity(content.trim(), s.trim());
             logger.info(`复读相似度：${similarity}`);
 
@@ -455,4 +455,15 @@ function advancedSplit(s: string, r: RegExp) {
     }
 
     return parts;
+}
+
+export function fmtTime(timestamp: number) {
+    const date = new Date(timestamp * 1000);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hour = String(date.getHours()).padStart(2, '0');
+    const minute = String(date.getMinutes()).padStart(2, '0');
+    const second = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
