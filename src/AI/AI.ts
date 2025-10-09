@@ -1,6 +1,6 @@
 import { Image, ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
-import { replyToSender, transformMsgId } from "../utils/utils";
+import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../service";
 import { Context } from "./context";
 import { Memory } from "./memory";
@@ -10,20 +10,35 @@ import { logger } from "../logger";
 import { checkRepeat, handleReply } from "../utils/utils_string";
 import { checkContextUpdate } from "../utils/utils_update";
 
-export interface Setting {
-    limit: number,
-    counter: number,
-    timer: number,
-    prob: number,
-    standby: boolean,
+export class Setting {
+    static validKeys: (keyof Setting)[] = ['limit', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo'];
+    limit: number;
+    standby: boolean;
+    counter: number;
+    timer: number;
+    prob: number;
     activeTimeInfo: {
-        start: number,
-        end: number,
-        segs: number
+        start: number;
+        end: number;
+        segs: number;
+    }
+
+    constructor() {
+        this.limit = 100;
+        this.standby = false;
+        this.counter = -1;
+        this.timer = -1;
+        this.prob = -1;
+        this.activeTimeInfo = {
+            start: 0,
+            end: 0,
+            segs: 0
+        }
     }
 }
 
 export class AI {
+    static validKeys: (keyof AI)[] = ['version', 'context', 'tool', 'memory', 'imageManager', 'setting'];
     id: string;
     version: string;
     context: Context;
@@ -44,25 +59,14 @@ export class AI {
         lastTime: number
     }
 
-    constructor(id: string) {
-        this.id = id;
+    constructor() {
+        this.id = '';
         this.version = '0.0.0';
         this.context = new Context();
         this.tool = new ToolManager();
         this.memory = new Memory();
         this.imageManager = new ImageManager();
-        this.setting = {
-            limit: 100,
-            counter: -1,
-            timer: -1,
-            prob: -1,
-            standby: false,
-            activeTimeInfo: {
-                start: 0,
-                end: 0,
-                segs: 0
-            }
-        };
+        this.setting = new Setting();
         this.stream = {
             id: '',
             reply: '',
@@ -72,19 +76,6 @@ export class AI {
             count: 0,
             lastTime: 0
         }
-    }
-
-    static reviver(value: any, id: string): AI {
-        const ai = new AI(id);
-        const validKeys = ['version', 'context', 'tool', 'memory', 'imageManager', 'setting'];
-
-        for (const k of validKeys) {
-            if (value.hasOwnProperty(k)) {
-                ai[k] = value[k];
-            }
-        }
-
-        return ai;
     }
 
     resetState() {
@@ -393,25 +384,28 @@ export class AIManager {
 
     static getAI(id: string) {
         if (!this.cache.hasOwnProperty(id)) {
-            let ai = new AI(id);
+            let ai = new AI();
+            ai.id = id;
 
             try {
                 ai = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
                     if (key === "") {
-                        return AI.reviver(value, id);
+                        return revive(AI, value, AI.validKeys);
                     }
-
                     if (key === "context") {
-                        return Context.reviver(value);
+                        return revive(Context, value, Context.validKeys);
                     }
                     if (key === "tool") {
-                        return ToolManager.reviver(value);
+                        return revive(ToolManager, value, ToolManager.validKeys);
                     }
                     if (key === "memory") {
-                        return Memory.reviver(value);
+                        return revive(Memory, value, Memory.validKeys);
                     }
                     if (key === "imageManager") {
-                        return ImageManager.reviver(value);
+                        return revive(ImageManager, value, ImageManager.validKeys);
+                    }
+                    if (key === "setting") {
+                        return revive(Setting, value, Setting.validKeys);
                     }
 
                     return value;

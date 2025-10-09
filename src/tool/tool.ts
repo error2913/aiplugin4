@@ -82,10 +82,11 @@ export class Tool {
 }
 
 export class ToolManager {
+    static validKeys: (keyof ToolManager)[] = ['toolStatus'];
     static cmdArgs: seal.CmdArgs = null;
     static toolMap: { [key: string]: Tool } = {};
     toolStatus: { [key: string]: boolean };
-    toolCallCount: number;
+    toolCallCount: number; // 一次性调用函数计数
 
     // 监听调用函数发送的内容
     listen: {
@@ -117,27 +118,6 @@ export class ToolManager {
                 this.listen.reject = null;
             }
         };
-    }
-
-    static reviver(value: any): ToolManager {
-        const tm = new ToolManager();
-        const validKeys = ['toolStatus'];
-
-        for (const k of validKeys) {
-            if (value.hasOwnProperty(k)) {
-                tm[k] = value[k];
-
-                if (k === 'toolStatus') {
-                    const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
-                    tm[k] = Object.keys(ToolManager.toolMap).reduce((acc, key) => {
-                        acc[key] = !toolsNotAllow.includes(key) && (value[k].hasOwnProperty(key) ? value[k][key] : !toolsDefaultClosed.includes(key));
-                        return acc;
-                    }, {});
-                }
-            }
-        }
-
-        return tm;
     }
 
     getToolsInfo(type: string): ToolInfo[] {

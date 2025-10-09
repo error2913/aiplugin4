@@ -90,3 +90,15 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
         })
     ]);
 }
+
+export function revive<T>(constructor: new () => T, value: any, validKeys: (keyof T)[]): T {
+    const obj = new constructor();
+
+    for (const k of validKeys) {
+        if (value.hasOwnProperty(k)) {
+            obj[k] = value[k];
+        }
+    }
+
+    return obj;
+}

@@ -29,6 +29,7 @@ export interface MemoryInfo {
 }
 
 export class Memory {
+    static validKeys: (keyof Memory)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
     persona: string;
     memoryMap: { [key: string]: MemoryInfo };
     useShortMemory: boolean;
@@ -39,19 +40,6 @@ export class Memory {
         this.memoryMap = {};
         this.useShortMemory = false;
         this.shortMemoryList = [];
-    }
-
-    static reviver(value: any): Memory {
-        const memory = new Memory();
-        const validKeys = ['persona', 'memoryMap', 'useShortMemory', 'shortMemory'];
-
-        for (const k in value) {
-            if (validKeys.includes(k)) {
-                memory[k] = value[k];
-            }
-        }
-
-        return memory;
     }
 
     addMemory(ctx: seal.MsgContext, kws: string[], content: string) {

@@ -270,7 +270,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                 const arr = valStr.split('-').map((item, index) => {
                   const parts = item.split(/[:：,，]+/).map(Number).map(i => isNaN(i) ? 0 : i);
                   if (index < 2) {
-                    return (parts[0] * 60 + (parts[1] || 0)) % (24 * 60);
+                    return Math.ceil((parts[0] * 60 + (parts[1] || 0)) % (24 * 60));
                   } else {
                     return parts[0];
                   }
@@ -280,6 +280,11 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
 
                 if (start === end) {
                   seal.replyToSender(ctx, msg, '活跃时间段开始时间和结束时间不能相同');
+                  return ret;
+                }
+
+                if (!Number.isInteger(segs)) {
+                  seal.replyToSender(ctx, msg, '活跃次数必须为整数');
                   return ret;
                 }
 
@@ -1508,6 +1513,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       let message = msg.message;
       const ai = AIManager.getAI(id);
+
+      // 检查toolsNotAllow状态
+      const { toolsNotAllow } = ConfigManager.tool;
+      Object.keys(ToolManager.toolMap).forEach(key => {
+        ai.tool.toolStatus[key] = !toolsNotAllow.includes(key);
+      });
 
       // 检查活跃时间定时器
       if (ai.setting.activeTimeInfo.segs !== 0 && ai.setting.activeTimeInfo.start !== 0 && ai.setting.activeTimeInfo.end !== 0) {

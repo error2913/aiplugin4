@@ -25,6 +25,7 @@ export interface Message {
 }
 
 export class Context {
+    static validKeys: (keyof Context)[] = ['messages', 'ignoreList', 'summaryCounter'];
     messages: Message[];
     ignoreList: string[];
     summaryCounter: number; // 用于短期记忆自动总结计数
@@ -40,19 +41,6 @@ export class Context {
         this.lastReply = '';
         this.counter = 0;
         this.timer = null;
-    }
-
-    static reviver(value: any): Context {
-        const context = new Context();
-        const validKeys = ['messages', 'ignoreList', 'summaryCounter'];
-
-        for (const k of validKeys) {
-            if (value.hasOwnProperty(k)) {
-                context[k] = value[k];
-            }
-        }
-
-        return context;
     }
 
     clearMessages(...roles: string[]) {

@@ -24,6 +24,7 @@ export class Image {
 }
 
 export class ImageManager {
+    static validKeys: (keyof ImageManager)[] = ['stolenImages', 'savedImages', 'stealStatus'];
     stolenImages: Image[];
     savedImages: Image[];
     stealStatus: boolean;
@@ -32,19 +33,6 @@ export class ImageManager {
         this.stolenImages = [];
         this.savedImages = [];
         this.stealStatus = false;
-    }
-
-    static reviver(value: any): ImageManager {
-        const im = new ImageManager();
-        const validKeys = ['stolenImages', 'savedImages', 'stealStatus'];
-
-        for (const k of validKeys) {
-            if (value.hasOwnProperty(k)) {
-                im[k] = value[k];
-            }
-        }
-
-        return im;
     }
 
     updateStolenImages(images: Image[]) {
