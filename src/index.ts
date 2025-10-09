@@ -85,7 +85,7 @@ function main() {
           const id2 = val2 === 'now' ? id : val2;
           const ai2 = AIManager.getAI(id2);
 
-          ai2.privilege.limit = limit;
+          ai2.setting.limit = limit;
 
           seal.replyToSender(ctx, msg, '权限修改完成');
           AIManager.saveAI(id2);
@@ -112,13 +112,13 @@ function main() {
           const id2 = val2 === 'now' ? id : val2;
           const ai2 = AIManager.getAI(id2);
 
-          const pr = ai2.privilege;
+          const setting = ai2.setting;
 
-          const counter = pr.counter > -1 ? `${pr.counter}条` : '关闭';
-          const timer = pr.timer > -1 ? `${pr.timer}秒` : '关闭';
-          const prob = pr.prob > -1 ? `${pr.prob}%` : '关闭';
-          const standby = pr.standby ? '开启' : '关闭';
-          const s = `${id2}\n权限限制:${pr.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
+          const counter = setting.counter > -1 ? `${setting.counter}条` : '关闭';
+          const timer = setting.timer > -1 ? `${setting.timer}秒` : '关闭';
+          const prob = setting.prob > -1 ? `${setting.prob}%` : '关闭';
+          const standby = setting.standby ? '开启' : '关闭';
+          const s = `${id2}\n权限限制:${setting.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
           seal.replyToSender(ctx, msg, s);
           return ret;
         }
@@ -134,28 +134,28 @@ function main() {
           return ret;
         }
         case 'status': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
 
-          const { start, end, segs } = pr.activeTimeInfo;
+          const { start, end, segs } = setting.activeTimeInfo;
 
           seal.replyToSender(ctx, msg, `${id}
-权限限制: ${pr.limit}
+权限限制: ${setting.limit}
 上下文轮数: ${ai.context.messages.filter(m => m.role === 'user').length}
-计数器模式(c): ${pr.counter > -1 ? `${pr.counter}条` : '关闭'}
-计时器模式(t): ${pr.timer > -1 ? `${pr.timer}秒` : '关闭'}
-概率模式(p): ${pr.prob > -1 ? `${pr.prob}%` : '关闭'}
+计数器模式(c): ${setting.counter > -1 ? `${setting.counter}条` : '关闭'}
+计时器模式(t): ${setting.timer > -1 ? `${setting.timer}秒` : '关闭'}
+概率模式(p): ${setting.prob > -1 ? `${setting.prob}%` : '关闭'}
 活跃时间段: ${(start !== 0 || end !== 0) ? `${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}` : '未设置'}
 活跃次数: ${segs > 0 ? segs : '未设置'}
-待机模式: ${pr.standby ? '开启' : '关闭'}`);
+待机模式: ${setting.standby ? '开启' : '关闭'}`);
           return ret;
         }
         case 'ctxn': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -166,8 +166,8 @@ function main() {
           return ret;
         }
         case 'timer': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -205,8 +205,8 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           }
         }
         case 'on': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -242,22 +242,22 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
               case 'c':
               case 'counter': {
                 ai.context.counter = 0;
-                pr.counter = exist && !isNaN(valInt) ? valInt : 10;
-                text += `\n计数器模式:${pr.counter}条`;
+                setting.counter = exist && !isNaN(valInt) ? valInt : 10;
+                text += `\n计数器模式:${setting.counter}条`;
                 break;
               }
               case 't':
               case 'timer': {
                 clearTimeout(ai.context.timer);
                 ai.context.timer = null;
-                pr.timer = exist && !isNaN(valFloat) ? valFloat : 60;
-                text += `\n计时器模式:${pr.timer}秒`;
+                setting.timer = exist && !isNaN(valFloat) ? valFloat : 60;
+                text += `\n计时器模式:${setting.timer}秒`;
                 break;
               }
               case 'p':
               case 'prob': {
-                pr.prob = exist && !isNaN(valFloat) ? valFloat : 10;
-                text += `\n概率模式:${pr.prob}%`;
+                setting.prob = exist && !isNaN(valFloat) ? valFloat : 10;
+                text += `\n概率模式:${setting.prob}%`;
                 break;
               }
               case 'a':
@@ -290,7 +290,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                 }
 
                 TimerManager.removeTimer(id, '', 'activeTime', []);
-                pr.activeTimeInfo = {
+                setting.activeTimeInfo = {
                   start,
                   end,
                   segs,
@@ -309,15 +309,15 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
             }
           };
 
-          pr.standby = true;
+          setting.standby = true;
 
           seal.replyToSender(ctx, msg, text);
           AIManager.saveAI(id);
           return ret;
         }
         case 'sb': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -325,11 +325,11 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           ai.resetState();
           TimerManager.removeTimer(id, '', 'activeTime', []);
 
-          pr.counter = -1;
-          pr.timer = -1;
-          pr.prob = -1;
-          pr.standby = true;
-          pr.activeTimeInfo = {
+          setting.counter = -1;
+          setting.timer = -1;
+          setting.prob = -1;
+          setting.standby = true;
+          setting.activeTimeInfo = {
             start: 0,
             end: 0,
             segs: 0,
@@ -340,8 +340,8 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           return ret;
         }
         case 'off': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -351,11 +351,11 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
             ai.resetState();
             TimerManager.removeTimer(id, '', 'activeTime', []);
 
-            pr.counter = -1;
-            pr.timer = -1;
-            pr.prob = -1;
-            pr.standby = false;
-            pr.activeTimeInfo = {
+            setting.counter = -1;
+            setting.timer = -1;
+            setting.prob = -1;
+            setting.standby = false;
+            setting.activeTimeInfo = {
               start: 0,
               end: 0,
               segs: 0,
@@ -374,7 +374,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
               case 'c':
               case 'counter': {
                 ai.context.counter = 0;
-                pr.counter = -1;
+                setting.counter = -1;
                 text += `\n计数器模式`;
                 break;
               }
@@ -382,20 +382,20 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
               case 'timer': {
                 clearTimeout(ai.context.timer);
                 ai.context.timer = null;
-                pr.timer = -1;
+                setting.timer = -1;
                 text += `\n计时器模式`;
                 break;
               }
               case 'p':
               case 'prob': {
-                pr.prob = -1;
+                setting.prob = -1;
                 text += `\n概率模式`;
                 break;
               }
               case 'a':
               case 'active': {
                 TimerManager.removeTimer(id, '', 'activeTime', []);
-                pr.activeTimeInfo = {
+                setting.activeTimeInfo = {
                   start: 0,
                   end: 0,
                   segs: 0,
@@ -412,8 +412,8 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
         }
         case 'f':
         case 'fgt': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -444,8 +444,8 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           }
         }
         case 'role': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -572,8 +572,8 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                 seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
                 return ret;
               }
-              const pr = ai.privilege;
-              if (ctx.privilegeLevel < pr.limit) {
+              const setting = ai.setting;
+              if (ctx.privilegeLevel < setting.limit) {
                 seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
                 return ret;
               }
@@ -830,8 +830,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
             return ret;
           }
 
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -1259,8 +1259,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
         }
         case 'shut': {
-          const pr = ai.privilege;
-          if (ctx.privilegeLevel < pr.limit) {
+          const setting = ai.setting;
+          if (ctx.privilegeLevel < setting.limit) {
             seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
@@ -1510,7 +1510,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       const ai = AIManager.getAI(id);
 
       // 检查活跃时间定时器
-      if (ai.privilege.activeTimeInfo.segs !== 0 && ai.privilege.activeTimeInfo.start !== 0 && ai.privilege.activeTimeInfo.end !== 0) {
+      if (ai.setting.activeTimeInfo.segs !== 0 && ai.setting.activeTimeInfo.start !== 0 && ai.setting.activeTimeInfo.end !== 0) {
         const timers = TimerManager.getTimer(id, '', 'activeTime');
         if (timers.length === 0) {
           const curSegIndex = ai.getCurSegIndex();
@@ -1583,30 +1583,30 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         }
 
         // 开启任一模式时
-        const pr = ai.privilege;
-        if (pr.standby || globalStandby) {
+        const setting = ai.setting;
+        if (setting.standby || globalStandby) {
           ai.handleReceipt(ctx, msg, ai, message, CQTypes)
             .then((): void | Promise<void> => {
-              if (pr.counter > -1) {
+              if (setting.counter > -1) {
                 ai.context.counter += 1;
-                if (ai.context.counter >= pr.counter) {
+                if (ai.context.counter >= setting.counter) {
                   ai.context.counter = 0;
                   return ai.chat(ctx, msg, '计数器');
                 }
               }
 
-              if (pr.prob > -1) {
+              if (setting.prob > -1) {
                 const ran = Math.random() * 100;
-                if (ran <= pr.prob) {
+                if (ran <= setting.prob) {
                   return ai.chat(ctx, msg, '概率');
                 }
               }
 
-              if (pr.timer > -1) {
+              if (setting.timer > -1) {
                 ai.context.timer = setTimeout(() => {
                   ai.context.timer = null;
                   ai.chat(ctx, msg, '计时器');
-                }, pr.timer * 1000 + Math.floor(Math.random() * 500));
+                }, setting.timer * 1000 + Math.floor(Math.random() * 500));
               }
             });
         }
@@ -1635,8 +1635,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
-          const pr = ai.privilege;
-          if (pr.standby) {
+          const setting = ai.setting;
+          if (setting.standby) {
             ai.handleReceipt(ctx, msg, ai, message, CQTypes);
           }
         }
@@ -1668,8 +1668,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
         const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
-          const pr = ai.privilege;
-          if (pr.standby) {
+          const setting = ai.setting;
+          if (setting.standby) {
             ai.handleReceipt(ctx, msg, ai, message, CQTypes);
           }
         }

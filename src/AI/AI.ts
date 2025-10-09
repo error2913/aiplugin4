@@ -10,7 +10,7 @@ import { logger } from "../logger";
 import { checkRepeat, handleReply } from "../utils/utils_string";
 import { checkContextUpdate } from "../utils/utils_update";
 
-export interface Privilege {
+export interface Setting {
     limit: number,
     counter: number,
     timer: number,
@@ -30,7 +30,7 @@ export class AI {
     tool: ToolManager;
     memory: Memory;
     imageManager: ImageManager;
-    privilege: Privilege;
+    setting: Setting;
 
     // 下面是临时变量，用于处理消息
     stream: { // 用于流式输出相关
@@ -51,7 +51,7 @@ export class AI {
         this.tool = new ToolManager();
         this.memory = new Memory();
         this.imageManager = new ImageManager();
-        this.privilege = {
+        this.setting = {
             limit: 100,
             counter: -1,
             timer: -1,
@@ -76,7 +76,7 @@ export class AI {
 
     static reviver(value: any, id: string): AI {
         const ai = new AI(id);
-        const validKeys = ['version', 'context', 'tool', 'memory', 'imageManager', 'privilege'];
+        const validKeys = ['version', 'context', 'tool', 'memory', 'imageManager', 'setting'];
 
         for (const k of validKeys) {
             if (value.hasOwnProperty(k)) {
@@ -323,7 +323,7 @@ export class AI {
     getCurSegIndex(): number {
         const now = new Date();
         const cur = now.getHours() * 60 + now.getMinutes();
-        const { start, end, segs } = this.privilege.activeTimeInfo;
+        const { start, end, segs } = this.setting.activeTimeInfo;
         const endReal = end >= start ? end : end + 24 * 60;
         const curReal = cur >= start ? cur : cur + 24 * 60;
 
@@ -336,7 +336,7 @@ export class AI {
 
     // 若没有下一个活跃时间点，返回-1
     getNextTimePoint(curSegIndex: number): number {
-        const { start, end, segs } = this.privilege.activeTimeInfo;
+        const { start, end, segs } = this.setting.activeTimeInfo;
 
         if (start === 0 && end === 0) return -1;
 
