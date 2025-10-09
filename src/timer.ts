@@ -57,12 +57,12 @@ export class TimerManager {
         }
     }
 
-    static removeTimer(id: string = '', content: string = '', reason: 'timer' | 'activeTime' = 'timer', index_list: number[] = []) {
+    static removeTimer(id: string = '', content: string = '', type: 'timer' | 'activeTime' | '' = '', index_list: number[] = []) {
         if (index_list.length > 0) {
             const timers = TimerManager.timerQueue.filter(t =>
-                (id && t.id === id) &&
-                (content && t.content === content) &&
-                (reason && t.type === reason)
+                (!id || t.id === id) &&
+                (!content || t.content === content) &&
+                (!type || t.type === type)
             );
 
             for (const index of index_list) {
@@ -81,13 +81,21 @@ export class TimerManager {
             }
         } else {
             this.timerQueue = this.timerQueue.filter(timer =>
-                (id && timer.id !== id) &&
-                (content && timer.content !== content) &&
-                (reason && timer.type !== reason)
+                (!id || timer.id !== id) &&
+                (!content || timer.content !== content) &&
+                (!type || timer.type !== type)
             );
         }
 
         this.saveTimerQueue();
+    }
+
+    static getTimer(id: string = '', content: string = '', type: 'timer' | 'activeTime' | '' = ''): TimerInfo[] {
+        return this.timerQueue.filter(timer =>
+            (!id || timer.id === id) &&
+            (!content || timer.content === content) &&
+            (!type || timer.type === type)
+        );
     }
 
     static async task() {

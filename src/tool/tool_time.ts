@@ -90,7 +90,7 @@ export function registerShowTimerList() {
 
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, ___) => {
-        const timers = TimerManager.timerQueue.filter(t => t.id === ai.id && t.type === 'timer');
+        const timers = TimerManager.getTimer(ai.id, '', 'timer');
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
@@ -132,7 +132,7 @@ export function registerCancelTimer() {
     const tool = new Tool(info);
     tool.solve = async (_, __, ai, args) => {
         const { index_list } = args;
-        const timers = TimerManager.timerQueue.filter(t => t.id === ai.id && t.type === 'timer');
+        const timers = TimerManager.getTimer(ai.id, '', 'timer');
 
         if (timers.length === 0) {
             return '当前对话没有定时器';

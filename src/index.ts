@@ -172,20 +172,37 @@ function main() {
             return ret;
           }
 
-          const timers = TimerManager.timerQueue.filter(t => t.id === ai.id);
+          const val2 = cmdArgs.getArgN(2);
+          switch (val2) {
+            case 'clr': {
+              TimerManager.removeTimer(id, '', '', []);
+              seal.replyToSender(ctx, msg, '所有定时器已清除');
+              return ret;
+            }
+            case 'help': {
+              seal.replyToSender(ctx, msg, `帮助:
+【.ai timer】查看当前定时器
+【.ai timer clr】清除所有定时器`);
+              return ret;
+            }
+            case '':
+            default: {
+              const timers = TimerManager.getTimer(id, '', '');
 
-          if (timers.length === 0) {
-            seal.replyToSender(ctx, msg, '当前对话没有定时器');
-            return ret;
-          }
+              if (timers.length === 0) {
+                seal.replyToSender(ctx, msg, '当前对话没有定时器');
+                return ret;
+              }
 
-          const s = timers.map((t, i) => {
-            return `${i + 1}. 触发内容：${t.content}
+              const s = timers.map((t, i) => {
+                return `${i + 1}. 触发内容：${t.content}
 ${t.setTime} => ${fmtTime(t.timestamp)}
 类型:${t.type}`;
-          }).join('\n');
-          seal.replyToSender(ctx, msg, s);
-          return ret;
+              }).join('\n');
+              seal.replyToSender(ctx, msg, s);
+              return ret;
+            }
+          }
         }
         case 'on': {
           const pr = ai.privilege;
@@ -437,16 +454,11 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
 
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
-            case 'show': {
-              const [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-              seal.replyToSender(ctx, msg, `当前角色设定序号为${roleSettingIndex}，序号范围为0-${roleSettingTemplate.length - 1}`);
-              return ret;
-            }
             case '':
             case 'help': {
+              const [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
               seal.replyToSender(ctx, msg, `帮助:
-【.ai role show】查看当前角色设定序号
-【.ai role <序号>】切换角色设定，序号范围为0-${roleSettingTemplate.length - 1}`);
+【.ai role <序号>】切换角色设定，当前角色设定序号为${roleSettingIndex}，序号范围为0-${roleSettingTemplate.length - 1}`);
               return ret;
             }
             default: {
@@ -1496,6 +1508,20 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       let message = msg.message;
       const ai = AIManager.getAI(id);
+
+      // 检查活跃时间定时器
+      if (ai.privilege.activeTimeInfo.segs !== 0 && ai.privilege.activeTimeInfo.start !== 0 && ai.privilege.activeTimeInfo.end !== 0) {
+        const timers = TimerManager.getTimer(id, '', 'activeTime');
+        if (timers.length === 0) {
+          const curSegIndex = ai.getCurSegIndex();
+          const nextTimePoint = ai.getNextTimePoint(curSegIndex);
+          if (nextTimePoint !== -1) {
+            TimerManager.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
+          } else {
+            logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
+          }
+        }
+      }
 
       // 非指令消息忽略
       const ignoreRegex = ignoreRegexes.join('|');
