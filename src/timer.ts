@@ -36,7 +36,7 @@ export class TimerManager {
         ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
-    static addTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, timestamp: number, content: string, reason: 'timer' | 'activeTime') {
+    static addTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, timestamp: number, content: string, type: 'timer' | 'activeTime') {
         this.timerQueue.push({
             id: ai.id,
             messageType: msg.messageType,
@@ -46,7 +46,7 @@ export class TimerManager {
             timestamp: timestamp,
             setTime: fmtTime(Math.floor(Date.now() / 1000)),
             content: content,
-            type: reason
+            type: type
         })
 
         this.saveTimerQueue();
@@ -55,6 +55,8 @@ export class TimerManager {
             logger.info('定时器任务启动');
             this.executeTask();
         }
+
+        logger.info(`添加${type}定时器${ai.id}，${content}，触发时间${fmtTime(timestamp)}，类型${type}`);
     }
 
     static removeTimer(id: string = '', content: string = '', type: 'timer' | 'activeTime' | '' = '', index_list: number[] = []) {
@@ -114,14 +116,17 @@ export class TimerManager {
                 if (timestamp > Math.floor(Date.now() / 1000)) {
                     remainingTimers.push(timer);
                     continue;
+                } else if (Math.floor(Date.now() / 1000) - timestamp >= 60 * 60) {
+                    logger.info(`${timer.id} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                    continue;
                 }
 
-                const { id, messageType, uid, gid, epId, setTime, content, type: reason } = timer;
+                const { id, messageType, uid, gid, epId, setTime, content, type } = timer;
                 const msg = createMsg(messageType, uid, gid);
                 const ctx = createCtx(epId, msg);
                 const ai = AIManager.getAI(id);
 
-                switch (reason) {
+                switch (type) {
                     case 'timer': {
                         const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${setTime}
@@ -140,7 +145,7 @@ export class TimerManager {
                         }
 
                         if (curSegIndex === -1) {
-                            logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪`);
+                            logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${setTime},nextTimePoint:${fmtTime(nextTimePoint)}`);
                             continue;
                         }
 

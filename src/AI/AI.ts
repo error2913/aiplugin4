@@ -385,7 +385,6 @@ export class AIManager {
     static getAI(id: string) {
         if (!this.cache.hasOwnProperty(id)) {
             let ai = new AI();
-            ai.id = id;
 
             try {
                 ai = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
@@ -413,6 +412,8 @@ export class AIManager {
             } catch (error) {
                 logger.error(`从数据库中获取${`AI_${id}`}失败:`, error);
             }
+
+            ai.id = id;
 
             checkContextUpdate(ai);
 
