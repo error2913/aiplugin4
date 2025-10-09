@@ -552,9 +552,8 @@ function main() {
               }
             }
             case 'sum': {
-              const { shortMemorySummaryRound } = ConfigManager.memory;
               ai.context.summaryCounter = 0;
-              ai.memory.updateShortMemory(ctx, msg, ai, ai.context.messages.slice(0, shortMemorySummaryRound))
+              ai.memory.updateShortMemory(ctx, msg, ai)
                 .then(() => {
                   const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
                   seal.replyToSender(ctx, msg, s || '无');

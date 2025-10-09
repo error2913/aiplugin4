@@ -1,7 +1,7 @@
 import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
 import { AI, AIManager } from "./AI";
-import { Context, Message } from "./context";
+import { Context } from "./context";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData } from "../service";
@@ -146,14 +146,31 @@ export class Memory {
         }
     }
 
-    async updateShortMemory(ctx: seal.MsgContext, msg: seal.Message, ai: AI, sumMessages: Message[]) {
+    async updateShortMemory(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
         if (!this.useShortMemory) {
             return;
         }
 
         const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
         const { roleSettingTemplate, isPrefix, showNumber, showMsgId } = ConfigManager.message;
-        const { memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+        const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+
+        const messages = ai.context.messages;
+        let sumMessages = messages.slice();
+        let round = 0;
+        for (let i = 0; i < messages.length; i++) {
+            if (messages[i].role === 'user' && !messages[i].name.startsWith('_')) {
+                round++;
+            }
+            if (round > shortMemorySummaryRound) {
+                sumMessages = messages.slice(0, i); // 只保留最近的shortMemorySummaryRound轮对话
+                break;
+            }
+        }
+
+        if (sumMessages.length === 0) {
+            return;
+        }
 
         let url = chatUrl;
         let apiKey = chatApiKey;

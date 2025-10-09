@@ -131,11 +131,12 @@ export class Context {
 
             // 更新短期记忆
             if (isShortMemory) {
+                if (role === 'user') {
+                    this.summaryCounter++;
+                }
                 if (this.summaryCounter >= shortMemorySummaryRound) {
                     this.summaryCounter = 0;
-                    ai.memory.updateShortMemory(ctx, msg, ai, messages.slice(0, shortMemorySummaryRound));
-                } else {
-                    this.summaryCounter++;
+                    ai.memory.updateShortMemory(ctx, msg, ai);
                 }
             }
         }
