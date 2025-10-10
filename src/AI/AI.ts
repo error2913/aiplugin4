@@ -411,22 +411,22 @@ export class AIManager {
             try {
                 ai = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
                     if (key === "") {
-                        return revive(AI, value, AI.validKeys);
+                        return revive(AI, value);
                     }
                     if (key === "context") {
-                        return revive(Context, value, Context.validKeys);
+                        return revive(Context, value);
                     }
                     if (key === "tool") {
-                        return revive(ToolManager, value, ToolManager.validKeys);
+                        return revive(ToolManager, value);
                     }
                     if (key === "memory") {
-                        return revive(Memory, value, Memory.validKeys);
+                        return revive(Memory, value);
                     }
                     if (key === "imageManager") {
-                        return revive(ImageManager, value, ImageManager.validKeys);
+                        return revive(ImageManager, value);
                     }
                     if (key === "setting") {
-                        return revive(Setting, value, Setting.validKeys);
+                        return revive(Setting, value);
                     }
 
                     return value;

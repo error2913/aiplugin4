@@ -112,54 +112,58 @@ export class TimerManager {
             const remainingTimers: TimerInfo[] = [];
             let changed = false;
             for (const timer of this.timerQueue) {
-                const timestamp = timer.timestamp;
-                if (timestamp > Math.floor(Date.now() / 1000)) {
-                    remainingTimers.push(timer);
-                    continue;
-                } else if (Math.floor(Date.now() / 1000) - timestamp >= 60 * 60) {
-                    logger.info(`${timer.id} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
-                    continue;
-                }
+                try {
+                    const timestamp = timer.timestamp;
+                    if (timestamp > Math.floor(Date.now() / 1000)) {
+                        remainingTimers.push(timer);
+                        continue;
+                    } else if (Math.floor(Date.now() / 1000) - timestamp >= 60 * 60) {
+                        logger.info(`${timer.id} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                        continue;
+                    }
 
-                const { id, messageType, uid, gid, epId, setTime, content, type } = timer;
-                const msg = createMsg(messageType, uid, gid);
-                const ctx = createCtx(epId, msg);
-                const ai = AIManager.getAI(id);
+                    const { id, messageType, uid, gid, epId, setTime, content, type } = timer;
+                    const msg = createMsg(messageType, uid, gid);
+                    const ctx = createCtx(epId, msg);
+                    const ai = AIManager.getAI(id);
 
-                switch (type) {
-                    case 'timer': {
-                        const s = `你设置的定时器触发了，请按照以下内容发送回复：
+                    switch (type) {
+                        case 'timer': {
+                            const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${setTime}
 当前触发时间：${fmtTime(Math.floor(Date.now() / 1000))}
 提示内容：${content}`;
 
-                        await ai.context.addSystemUserMessage("定时器触发提示", s, []);
-                        await ai.chat(ctx, msg, '定时任务');
-                        break;
-                    }
-                    case 'activeTime': {
-                        const curSegIndex = ai.getCurSegIndex();
-                        const nextTimePoint = ai.getNextTimePoint(curSegIndex);
-                        if (nextTimePoint !== -1) {
-                            this.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
+                            await ai.context.addSystemUserMessage("定时器触发提示", s, []);
+                            await ai.chat(ctx, msg, '定时任务');
+                            break;
                         }
+                        case 'activeTime': {
+                            const curSegIndex = ai.getCurSegIndex();
+                            const nextTimePoint = ai.getNextTimePoint(curSegIndex);
+                            if (nextTimePoint !== -1) {
+                                this.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
+                            }
 
-                        if (curSegIndex === -1) {
-                            logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${setTime},nextTimePoint:${fmtTime(nextTimePoint)}`);
-                            continue;
+                            if (curSegIndex === -1) {
+                                logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${setTime},nextTimePoint:${fmtTime(nextTimePoint)}`);
+                                continue;
+                            }
+
+                            const s = `现在是你的活跃时间：${fmtTime(Math.floor(Date.now() / 1000))}，请说点什么`;
+
+                            await ai.context.addSystemUserMessage("活跃时间触发提示", s, []);
+                            await ai.chat(ctx, msg, '活跃时间');
+                            break;
                         }
-
-                        const s = `现在是你的活跃时间：${fmtTime(Math.floor(Date.now() / 1000))}，请说点什么`;
-
-                        await ai.context.addSystemUserMessage("活跃时间触发提示", s, []);
-                        await ai.chat(ctx, msg, '活跃时间');
-                        break;
                     }
+
+
+                    changed = true;
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (e) {
+                    logger.error(`${timer.id} 执行 ${timer.type} 定时器出错，错误信息:${e.message}`);
                 }
-
-
-                changed = true;
-                await new Promise(resolve => setTimeout(resolve, 2000));
             }
 
             if (changed) {

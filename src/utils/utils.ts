@@ -91,10 +91,15 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
     ]);
 }
 
-export function revive<T>(constructor: new () => T, value: any, validKeys: (keyof T)[]): T {
+export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, value: any): T {
     const obj = new constructor();
 
-    for (const k of validKeys) {
+    if (!constructor.validKeys) {
+        logger.error(`revive: ${constructor.name} 没有 validKeys 属性`);
+        return obj;
+    }
+
+    for (const k of constructor.validKeys) {
         if (value.hasOwnProperty(k)) {
             obj[k] = value[k];
         }
