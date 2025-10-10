@@ -199,3 +199,10 @@ export function registerMeme() {
     ToolManager.toolMap[get_info.function.name] = tool_get;
     ToolManager.toolMap[generator_info.function.name] = tool_generator;
 }
+
+// 说实话感觉并不是最完美的状态
+// 感觉应该先把meme_list和meme_info本地化
+// 然后给出一个选择meme模板的模板配置项，毕竟有的人设并不适合所有的表情包
+// 再把选中的meme模板构建prompt，另外我注意到有的模板应该是有默认文本的，这其实也可以提示ai要输入什么文本，而不是牛头不对马嘴
+// 这样只需保留meme_generator的实现
+// 另外可以把url加进后端配置中
