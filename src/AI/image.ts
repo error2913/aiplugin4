@@ -2,6 +2,7 @@ import { ConfigManager } from "../config/config";
 import { sendITTRequest } from "../service";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
+import { AI } from "./AI";
 
 export class Image {
     id: string;
@@ -33,6 +34,17 @@ export class ImageManager {
         this.stolenImages = [];
         this.savedImages = [];
         this.stealStatus = false;
+    }
+
+    static generateImageId(ai: AI, name: string): string {
+        let id = name;
+
+        let acc = 0;
+        do {
+            id = name + (acc++ ? `_${acc}` : '');
+        } while (ai.context.findImage(id, ai.imageManager));
+
+        return id;
     }
 
     updateStolenImages(images: Image[]) {

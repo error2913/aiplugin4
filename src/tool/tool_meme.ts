@@ -1,3 +1,4 @@
+import { Image, ImageManager } from "../AI/image";
 import { ConfigManager } from "../config/config";
 import { Tool, ToolInfo, ToolManager } from "./tool";
 
@@ -83,12 +84,27 @@ export function registerMeme() {
     tool_generator.solve = async (ctx, msg, ai, args) => { // 实现方法，返回字符串提供给AI
         const { name, text = [], members = [] } = args;
 
-        const { key, info: limit } = await getInfo(name);
-        if (text.length > limit.params_type.max_texts || text.length < limit.params_type.min_texts) {
-            return `文字数量错误,该表情包文字范围为 ${limit.params_type.min_texts} - ${limit.params_type.max_texts} 段,用户范围为 ${limit.params_type.min_images} - ${limit.params_type.max_images} 名`;
+        let s = '';
+
+        const { key, info } = await getInfo(name);
+        const { max_images, max_texts, min_images, min_texts } = info.params_type;
+        const image_text = min_images === max_images ? `用户数量为 ${min_images} 名` : `用户范围为 ${min_images} - ${max_images} 名`;
+        const text_text = min_texts === max_texts ? `文字数量为 ${min_texts} 段` : `文字范围为 ${min_texts} - ${max_texts} 段`;
+        if (text.length > max_texts || text.length < min_texts) {
+            if (max_texts === 0) {
+                text.length = 0;
+                s += `该表情包不需要文字信息，已舍弃。`;
+            } else {
+                return `文字数量错误,${text_text},${image_text}`;
+            }
         }
-        if (members.length > limit.params_type.max_images || members.length < limit.params_type.min_images) {
-            return `用户数量错误,该表情包文字范围为 ${limit.params_type.min_texts} - ${limit.params_type.max_texts} 段,用户范围为 ${limit.params_type.min_images} - ${limit.params_type.max_images} 名`;
+        if (members.length > max_images || members.length < min_images) {
+            if (max_images === 0) {
+                members.length = 0;
+                s += `该表情包不需要用户信息，已舍弃。`;
+            } else {
+                return `用户数量错误,${image_text},${text_text}`;
+            }
         }
 
         const image = [];
@@ -113,8 +129,21 @@ export function registerMeme() {
 
             const json = await res.json();
             if (json.status == "success") {
-                seal.replyToSender(ctx, msg, `[CQ:image,file=${seal.base64ToImage(json.message)}]`)
-                return "发送成功";
+                const base64 = json.message;
+                const file = seal.base64ToImage(base64);
+                const newImage = new Image(file);
+
+                newImage.id = ImageManager.generateImageId(ai, name);
+                newImage.scenes = [...text, ...members];
+                newImage.base64 = base64;
+                newImage.content = `表情包${name}
+文字${text.join('，') || '无'}
+用户${members.join('，') || '无'}`;
+
+                ai.imageManager.savedImages.push(newImage);
+
+                seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`)
+                return `${s}发送成功，已保存为<|img:${newImage.id}|>`;
             } else {
                 throw new Error(json.message);
             }

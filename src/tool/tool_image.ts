@@ -222,11 +222,8 @@ export function registerSaveImage() {
 
                 const newImage = new Image(image.file);
 
-                let acc = 0;
-                do {
-                    newImage.id = name + (acc++ ? `_${acc}` : '');
-                } while (ai.context.findImage(newImage.id, ai.imageManager));
 
+                newImage.id = ImageManager.generateImageId(ai, name);
                 newImage.scenes = scenes;
                 newImage.base64 = base64;
                 newImage.content = image.content;

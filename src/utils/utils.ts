@@ -91,6 +91,12 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
     ]);
 }
 
+/**
+ * 恢复一个对象，只恢复构造函数中定义的属性，暂不支持嵌套属性
+ * @param constructor 传入构造函数，必须有 validKeys 属性
+ * @param value 要恢复的对象
+ * @returns 恢复后的对象
+ */
 export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, value: any): T {
     const obj = new constructor();
 
