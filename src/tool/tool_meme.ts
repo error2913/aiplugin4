@@ -132,15 +132,15 @@ export function registerMeme() {
                 const base64 = json.message;
                 const file = seal.base64ToImage(base64);
                 const newImage = new Image(file);
-
                 newImage.id = ImageManager.generateImageId(ai, name);
+                newImage.isUrl = false;
                 newImage.scenes = [...text, ...members];
                 newImage.base64 = base64;
                 newImage.content = `表情包${name}
 文字${text.join('，') || '无'}
 用户${members.join('，') || '无'}`;
 
-                ai.imageManager.savedImages.push(newImage);
+                ai.imageManager.updateSavedImages([newImage]);
 
                 seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`)
                 return `${s}发送成功，已保存为<|img:${newImage.id}|>`;

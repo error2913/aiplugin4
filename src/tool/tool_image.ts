@@ -208,6 +208,10 @@ export function registerSaveImage() {
         for (const ii of images) {
             const { id, name, scenes } = ii;
 
+            if (!id || !name || !scenes || scenes.length === 0) {
+                return `图片${id}信息不完整，缺少id、name或scenes为空`;
+            }
+
             const image = ai.context.findImage(id, ai.imageManager);
             if (!image) {
                 return `未找到图片${id}`;
@@ -221,9 +225,8 @@ export function registerSaveImage() {
                 }
 
                 const newImage = new Image(image.file);
-
-
                 newImage.id = ImageManager.generateImageId(ai, name);
+                newImage.isUrl = false;
                 newImage.scenes = scenes;
                 newImage.base64 = base64;
                 newImage.content = image.content;

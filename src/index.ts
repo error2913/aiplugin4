@@ -1,5 +1,5 @@
 import { AIManager } from "./AI/AI";
-import { ImageManager } from "./AI/image";
+import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { ConfigManager, CQTYPESALLOW } from "./config/config";
 import { buildSystemMessage } from "./utils/utils_message";
@@ -1298,7 +1298,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 【.img stl [on/off]】偷图 开启/关闭
 【.img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
 【.img itt [图片/ran] (附加提示词)】图片转文字
-【.img list [show/send]】展示保存的图片列表/展示并发送所有保存的图片
+【.img save 名称 场景1,场景2,... 图片】保存图片
+【.img save [show/clr]】展示保存的图片列表/展示并发送所有保存的图片
 【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
@@ -1433,9 +1434,13 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
           return ret;
         }
-        case 'list': {
-          const type = cmdArgs.getArgN(2);
-          switch (type) {
+        case 'save': {
+          const val2 = cmdArgs.getArgN(2);
+          switch (val2) {
+            case '': {
+              seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+              return ret;
+            }
             case 'show': {
               if (ai.imageManager.savedImages.length === 0) {
                 seal.replyToSender(ctx, msg, '暂无保存的图片');
@@ -1444,29 +1449,58 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
               const imageList = ai.imageManager.savedImages.map((img, index) => `${index + 1}. 名称: ${img.id}
 应用场景: ${img.scenes.join('、') || '无'}
-权重: ${img.weight}`).join('\n');
+权重: ${img.weight}
+[CQ:image,file=${seal.base64ToImage(img.base64)}]`).join('\n\n');
 
               seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
               return ret;
             }
-            case 'send': {
-              if (ai.imageManager.savedImages.length === 0) {
-                seal.replyToSender(ctx, msg, '暂无保存的图片');
-                return ret;
-              }
-
-              const imageList = ai.imageManager.savedImages.map((img, index) => {
-                return `${index + 1}. 名称: ${img.id}
-应用场景: ${img.scenes.join('、') || '无'}
-权重: ${img.weight}
-[CQ:image,file=${seal.base64ToImage(img.base64)}]`;
-              }).join('\n\n');
-
-              seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
+            case 'clr': {
+              ai.imageManager.clearSavedImages();
+              seal.replyToSender(ctx, msg, '已清除所有保存的图片');
+              AIManager.saveAI(id);
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, '参数缺失，【.img list show】展示保存的图片列表，【.img list send】展示并发送所有保存的图片');
+              const name = val2;
+              if (!name) {
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                return ret;
+              }
+
+              const scenes = cmdArgs.getArgN(3).split(/[，,]/);
+              if (scenes.length === 0) {
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                return ret;
+              }
+
+              const match = cmdArgs.getArgN(4).match(/\[CQ:image,file=(.*?)\]/);
+              if (!match) {
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                return ret;
+              }
+              const url = match[1];
+
+              ImageManager.imageUrlToBase64(url)
+                .then((value) => {
+                  if (!value.base64) {
+                    throw new Error(`图片转换为base64失败`);
+                  }
+
+                  const image = new Image(url);
+                  image.id = ImageManager.generateImageId(ai, name);
+                  image.isUrl = false;
+                  image.scenes = scenes;
+                  image.base64 = value.base64;
+                  return image;
+                })
+                .then((image) => {
+                  ai.imageManager.updateSavedImages([image]);
+                  seal.replyToSender(ctx, msg, `已保存图片 ${image.id}`);
+                })
+                .catch((e) => {
+                  seal.replyToSender(ctx, msg, `图片保存失败:${e.message}`);
+                });
               return ret;
             }
           }

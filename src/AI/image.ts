@@ -52,9 +52,13 @@ export class ImageManager {
         this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
     }
 
+    delSavedImage(nameList: string[]) {
+        this.savedImages = this.savedImages.filter(img => !nameList.includes(img.id));
+    }
+
     updateSavedImages(images: Image[]) {
         const { maxSavedImageNum } = ConfigManager.image;
-        this.savedImages = this.savedImages.concat(images.filter(item => item.isUrl));
+        this.savedImages = this.savedImages.concat(images);
 
         if (this.savedImages.length > maxSavedImageNum) {
             this.savedImages = this.savedImages
@@ -63,8 +67,8 @@ export class ImageManager {
         }
     }
 
-    delSavedImage(nameList: string[]) {
-        this.savedImages = this.savedImages.filter(img => !nameList.includes(img.id));
+    clearSavedImages() {
+        this.savedImages = [];
     }
 
     drawLocalImageFile(): string {
