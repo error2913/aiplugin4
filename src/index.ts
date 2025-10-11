@@ -1301,7 +1301,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 【.img itt [图片/ran] (附加提示词)】图片转文字
 【.img save 名称 场景1,场景2,... 图片】保存图片
 【.img save [show/clr]】展示保存的图片列表/展示并发送所有保存的图片
-【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
+【.img save del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
@@ -1439,7 +1439,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case '': {
-              seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+              seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片，【.img save del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
               return ret;
             }
             case 'show': {
@@ -1462,16 +1462,22 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               AIManager.saveAI(id);
               return ret;
             }
-            default: {
-              const name = val2;
-              if (!name) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+            case 'del': {
+              const nameList = cmdArgs.args.slice(2);
+              if (nameList.length === 0) {
+                seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
                 return ret;
               }
 
+              ai.imageManager.delSavedImage(nameList);
+              seal.replyToSender(ctx, msg, `已删除图片`);
+              return ret;
+            }
+            default: {
+              const name = val2;
               const scenes = cmdArgs.getArgN(3).split(/[，,]/);
               if (scenes.length === 0) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片');
                 return ret;
               }
 
@@ -1479,7 +1485,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const messageItem0 = transformTextToArray(val4)?.[0];
               const url = messageItem0?.data?.url || messageItem0?.data?.file;
               if (messageItem0?.type !== 'image' || !url) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片');
                 return ret;
               }
 
@@ -1506,17 +1512,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               return ret;
             }
           }
-        }
-        case 'del': {
-          const nameList = cmdArgs.args.slice(1);
-          if (nameList.length === 0) {
-            seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
-            return ret;
-          }
-
-          ai.imageManager.delSavedImage(nameList);
-          seal.replyToSender(ctx, msg, `已删除图片`);
-          return ret;
         }
         default: {
           ret.showHelp = true;
