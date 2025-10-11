@@ -3,7 +3,10 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformTextToArray } from "./utils_string";
 
-export function transformMsgId(msgId: string | number): string {
+export function transformMsgId(msgId: string | number | null): string {
+    if (msgId === null) {
+        return '';
+    }
     if (typeof msgId === 'string') {
         msgId = parseInt(msgId);
     }

@@ -9,6 +9,7 @@ import { fmtTime, transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
+import { createMsg } from "./utils/utils_seal";
 
 function main() {
   ConfigManager.registerConfig();
@@ -1532,6 +1533,16 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
   ext.cmdMap['AI'] = cmdAI;
   ext.cmdMap['ai'] = cmdAI;
   ext.cmdMap['img'] = cmdImage;
+
+  ext.onPoke = (ctx, event) => {
+    const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
+    msg.message = `[CQ:poke,qq=${event.targetId.replace(/\D/g, '')}]`;
+    if (event.senderId === ctx.endPoint.userId) {
+      ext.onMessageSend(ctx, msg);
+    } else {
+      ext.onNotCommandReceived(ctx, msg);
+    }
+  }
 
   //接受非指令消息
   ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
