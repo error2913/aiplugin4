@@ -3,6 +3,7 @@ import { sendITTRequest } from "../service";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
 import { AI } from "./AI";
+import { MessageItem } from "../utils/utils_string";
 
 export class Image {
     id: string;
@@ -163,47 +164,46 @@ export class ImageManager {
      * @param message 
      * @returns 
      */
-    static async handleImageMessage(ctx: seal.MsgContext, message: string): Promise<{ message: string, images: Image[] }> {
+    static async handleImageMessage(ctx: seal.MsgContext, messageArray: MessageItem[]): Promise<{ messageArray: MessageItem[], images: Image[] }> {
         const { receiveImage } = ConfigManager.image;
 
+        const processedArray: MessageItem[] = [];
         const images: Image[] = [];
 
-        const match = message.match(/\[CQ:image,file=(.*?)\]/g);
-        if (match !== null) {
-            for (let i = 0; i < match.length; i++) {
-                try {
-                    const file = match[i].match(/\[CQ:image,file=(.*?)\]/)[1];
+        for (const item of messageArray) {
+            if (item.type !== 'image') {
+                processedArray.push(item);
+                continue;
+            }
 
-                    if (!receiveImage) {
-                        message = message.replace(`[CQ:image,file=${file}]`, '');
-                        continue;
-                    }
+            try {
+                const file = item.data.file || item.data.url || '';
+                if (!file || !receiveImage) {
+                    continue;
+                }
 
-                    const image = new Image(file);
+                const image = new Image(file);
 
-                    message = message.replace(`[CQ:image,file=${file}]`, `<|img:${image.id}|>`);
+                if (image.isUrl) {
+                    const { condition } = ConfigManager.image;
 
-                    if (image.isUrl) {
-                        const { condition } = ConfigManager.image;
-
-                        const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-                        if (fmtCondition === 1) {
-                            const reply = await ImageManager.imageToText(file);
-                            if (reply) {
-                                image.content = reply;
-                                message = message.replace(`<|img:${image.id}|>`, `<|img:${image.id}:${reply}|>`);
-                            }
+                    const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
+                    if (fmtCondition === 1) {
+                        const reply = await ImageManager.imageToText(file);
+                        if (reply) {
+                            image.content = reply;
                         }
                     }
-
-                    images.push(image);
-                } catch (error) {
-                    logger.error('在handleImageMessage中处理图片时出错:', error);
                 }
-            }
-        }
 
-        return { message, images };
+                processedArray.push({ type: 'text', data: { text: image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>` } });
+                images.push(image);
+            } catch (error) {
+                logger.error('在handleImageMessage中处理图片时出错:', error);
+            }
+        };
+
+        return { messageArray: processedArray, images };
     }
 
     static async checkImageUrl(url: string): Promise<boolean> {

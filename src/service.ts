@@ -5,6 +5,7 @@ import { handleMessages, parseBody } from "./utils/utils_message";
 import { ImageManager } from "./AI/image";
 import { logger } from "./logger";
 import { withTimeout } from "./utils/utils";
+import { transformTextToArray } from "./utils/utils_string";
 
 export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messages: {
     role: string,
@@ -40,7 +41,8 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                 if (usePromptEngineering) {
                     const match = reply.match(/<function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
                     if (match) {
-                        await ai.context.addMessage(ctx, msg, ai, match[0], [], "assistant", '');
+                        const messageArray = transformTextToArray(match[0]);
+                        await ai.context.addMessage(ctx, msg, ai, messageArray, [], "assistant", '');
 
                         try {
                             await ToolManager.handlePromptToolCall(ctx, msg, ai, match[1]);

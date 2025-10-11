@@ -7,7 +7,7 @@ import { Memory } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
-import { checkRepeat, handleReply } from "../utils/utils_string";
+import { checkRepeat, handleReply, MessageItem, transformTextToArray } from "../utils/utils_string";
 import { checkContextUpdate } from "../utils/utils_update";
 import { TimerManager } from "../timer";
 
@@ -87,19 +87,19 @@ export class AI {
         this.tool.toolCallCount = 0;
     }
 
-    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, ai: AI, message: string, CQTypes: string[]) {
+    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageItem[]) {
         // 图片偷取，以及图片转文字
         let images: Image[] = [];
-        if (CQTypes.includes('image')) {
-            const result = await ImageManager.handleImageMessage(ctx, message);
-            message = result.message;
+        if (messageArray.some(item => item.type === 'image')) {
+            const result = await ImageManager.handleImageMessage(ctx, messageArray);
+            messageArray = result.messageArray;
             images = result.images;
             if (ai.imageManager.stealStatus) {
                 ai.imageManager.updateStolenImages(images);
             }
         }
 
-        await ai.context.addMessage(ctx, msg, ai, message, images, 'user', transformMsgId(msg.rawId));
+        await ai.context.addMessage(ctx, msg, ai, messageArray, images, 'user', transformMsgId(msg.rawId));
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = ''): Promise<void> {
@@ -174,9 +174,10 @@ export class AI {
 
         for (let i = 0; i < contextArray.length; i++) {
             const s = contextArray[i];
+            const messageArray = transformTextToArray(s);
             const reply = replyArray[i];
             const msgId = await replyToSender(ctx, msg, this, reply);
-            await this.context.addMessage(ctx, msg, this, s, images, 'assistant', msgId);
+            await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
         }
 
         //发送偷来的图片
@@ -245,9 +246,10 @@ export class AI {
 
                         for (let i = 0; i < contextArray.length; i++) {
                             const s = contextArray[i];
+                            const messageArray = transformTextToArray(s);
                             const reply = replyArray[i];
                             const msgId = await replyToSender(ctx, msg, this, reply);
-                            await this.context.addMessage(ctx, msg, this, s, images, 'assistant', msgId);
+                            await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
                         }
                     }
 
@@ -269,7 +271,8 @@ export class AI {
                             this.stream.toolCallStatus = false;
                             await this.stopCurrentChatStream();
 
-                            await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
+                            const messageArray = transformTextToArray(match[0]);
+                            await this.context.addMessage(ctx, msg, this, messageArray, [], "assistant", '');
 
                             try {
                                 await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
@@ -301,9 +304,10 @@ export class AI {
 
             for (let i = 0; i < contextArray.length; i++) {
                 const s = contextArray[i];
+                const messageArray = transformTextToArray(s);
                 const reply = replyArray[i];
                 const msgId = await replyToSender(ctx, msg, this, reply);
-                await this.context.addMessage(ctx, msg, this, s, images, 'assistant', msgId);
+                await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
             }
 
             after = result.nextAfter;

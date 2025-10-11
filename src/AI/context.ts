@@ -2,7 +2,7 @@ import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { Image, ImageManager } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { levenshteinDistance } from "../utils/utils_string";
+import { levenshteinDistance, MessageItem } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
 import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
@@ -58,7 +58,7 @@ export class Context {
         }
     }
 
-    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
+    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageItem[], images: Image[], role: 'user' | 'assistant', msgId: string = '') {
         const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
@@ -87,39 +87,39 @@ export class Context {
         }
 
         //处理文本
-        s = s
-            .replace(/\[CQ:(.*?),(?:qq|id)=(-?\d+)\]/g, (_, p1, p2) => {
-                switch (p1) {
-                    case 'at': {
-                        const epId = ctx.endPoint.userId;
-                        const gid = ctx.group.groupId;
-                        const uid = `QQ:${p2}`;
-                        const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                        const mctx = createCtx(epId, mmsg);
-                        const name = mctx.player.name || '未知用户';
-
-                        return `<|@${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
-                    }
-                    case 'poke': {
-                        const epId = ctx.endPoint.userId;
-                        const gid = ctx.group.groupId;
-                        const uid = `QQ:${p2}`;
-                        const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                        const mctx = createCtx(epId, mmsg);
-                        const name = mctx.player.name || '未知用户';
-
-                        return `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
-                    }
-                    case 'reply': {
-                        return showMsgId ? `<|quote:${transformMsgId(p2)}|>` : ``;
-                    }
-                    default: {
-                        return '';
-                    }
+        const s = messageArray.map(item => {
+            switch (item.type) {
+                case 'text': {
+                    return item.data.text;
                 }
+                case 'at': {
+                    const epId = ctx.endPoint.userId;
+                    const gid = ctx.group.groupId;
+                    const uid = `QQ:${item.data.qq || ''}`;
+                    const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                    const mctx = createCtx(epId, mmsg);
+                    const name = mctx.player.name || '未知用户';
 
-            })
-            .replace(/\[CQ:.*?\]/g, '')
+                    return `<|at:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
+                }
+                case 'poke': {
+                    const epId = ctx.endPoint.userId;
+                    const gid = ctx.group.groupId;
+                    const uid = `QQ:${item.data.qq || ''}`;
+                    const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                    const mctx = createCtx(epId, mmsg);
+                    const name = mctx.player.name || '未知用户';
+
+                    return `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
+                }
+                case 'reply': {
+                    return showMsgId ? `<|quote:${transformMsgId(item.data.id || '')}|>` : ``;
+                }
+                default: {
+                    return '';
+                }
+            }
+        }).join('');
 
         if (s === '') {
             return;

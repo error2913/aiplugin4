@@ -1423,12 +1423,12 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                   .then(s => seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s));
               });
           } else {
-            const match = val2.match(/\[CQ:image,file=(.*?)\]/);
-            if (!match) {
+            const messageItem0 = transformTextToArray(val2)?.[0];
+            const url = messageItem0?.data?.url || messageItem0?.data?.file;
+            if (messageItem0?.type !== 'image' || !url) {
               seal.replyToSender(ctx, msg, '请附带图片');
               return ret;
             }
-            const url = match[1];
             const text = cmdArgs.getRestArgsFrom(3);
             ImageManager.imageToText(url, text)
               .then(s => seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s));
@@ -1475,12 +1475,13 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                 return ret;
               }
 
-              const match = cmdArgs.getArgN(4).match(/\[CQ:image,file=(.*?)\]/);
-              if (!match) {
+              const val4 = cmdArgs.getArgN(4);
+              const messageItem0 = transformTextToArray(val4)?.[0];
+              const url = messageItem0?.data?.url || messageItem0?.data?.file;
+              if (messageItem0?.type !== 'image' || !url) {
                 seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
                 return ret;
               }
-              const url = match[1];
 
               ImageManager.imageUrlToBase64(url)
                 .then((value) => {
@@ -1560,7 +1561,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       // 检查活跃时间定时器
       ai.checkActiveTimer(ctx, msg);
 
-      let message = msg.message;
+      const message = msg.message;
+      const messageArray = transformTextToArray(message);
 
       // 非指令消息忽略
       const ignoreRegex = ignoreRegexes.join('|');
@@ -1579,7 +1581,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       }
 
       // 检查CQ码
-      const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
+      const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
       if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
         clearTimeout(ai.context.timer);
         ai.context.timer = null;
@@ -1597,7 +1599,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           if (pattern && pattern.test(message)) {
             const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
             if (fmtCondition === 1) {
-              return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
+              return ai.handleReceipt(ctx, msg, ai, messageArray)
                 .then(() => ai.chat(ctx, msg, '非指令'));
             }
           }
@@ -1614,7 +1616,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               continue;
             }
 
-            return ai.handleReceipt(ctx, msg, ai, message, CQTypes)
+            return ai.handleReceipt(ctx, msg, ai, messageArray)
               .then(() => ai.context.addSystemUserMessage('触发原因提示', condition.reason, []))
               .then(() => triggerConditionMap[id].splice(i, 1))
               .then(() => ai.chat(ctx, msg, 'AI设定触发条件'));
@@ -1624,7 +1626,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         // 开启任一模式时
         const setting = ai.setting;
         if (setting.standby || globalStandby) {
-          ai.handleReceipt(ctx, msg, ai, message, CQTypes)
+          ai.handleReceipt(ctx, msg, ai, messageArray)
             .then((): void | Promise<void> => {
               if (setting.counter > -1) {
                 ai.context.counter += 1;
@@ -1672,13 +1674,14 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         // 检查活跃时间定时器
         ai.checkActiveTimer(ctx, msg);
 
-        let message = msg.message;
+        const message = msg.message;
+        const messageArray = transformTextToArray(message);
 
-        const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
+        const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
           const setting = ai.setting;
           if (setting.standby) {
-            ai.handleReceipt(ctx, msg, ai, message, CQTypes);
+            ai.handleReceipt(ctx, msg, ai, messageArray);
           }
         }
       }
@@ -1698,7 +1701,8 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       // 检查活跃时间定时器
       ai.checkActiveTimer(ctx, msg);
 
-      let message = msg.message;
+      const message = msg.message;
+      const messageArray = transformTextToArray(message);
 
       ai.tool.listen.resolve?.(message); // 将消息传递给监听工具
 
@@ -1709,11 +1713,11 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           return;
         }
 
-        const CQTypes = transformTextToArray(message).filter(item => item.type !== 'text').map(item => item.type);
+        const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
           const setting = ai.setting;
           if (setting.standby) {
-            ai.handleReceipt(ctx, msg, ai, message, CQTypes);
+            ai.handleReceipt(ctx, msg, ai, messageArray);
           }
         }
       }

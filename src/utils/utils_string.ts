@@ -6,9 +6,17 @@ import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
 
-export function transformTextToArray(s: string): { type: string, data: { [key: string]: string } }[] {
+export interface MessageItem {
+    type: string;
+    data: { 
+        text?: string;
+        /** 其他参数 */
+        [key: string]: string };
+}
+
+export function transformTextToArray(s: string): MessageItem[] {
     const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
-    const messageArray: { type: string, data: { [key: string]: string } }[] = [];
+    const messageArray: MessageItem[] = [];
     for (const segment of segments) {
         if (segment.startsWith('[CQ:')) {
             const match = segment.match(/^\[CQ:([^,]+),?([^\]]*)\]$/);
@@ -288,10 +296,10 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
  * @returns 
  */
 async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/[<＜][\|│｜]@(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g);
+    const match = reply.match(/[<＜][\|│｜]at[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g);
     if (match) {
         for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^[<＜][\|│｜]@|(?:[\|│｜][>＞]|[\|│｜>＞])$/g, '');
+            const name = match[i].replace(/^[<＜][\|│｜]at[:：]?\s?|(?:[\|│｜][>＞]|[\|│｜>＞])$/g, '');
             const uid = await context.findUserId(ctx, name);
             if (uid !== null) {
                 reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`);
