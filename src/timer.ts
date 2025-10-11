@@ -3,18 +3,32 @@ import { createCtx, createMsg } from "./utils/utils_seal";
 import { AI, AIManager } from "./AI/AI";
 import { logger } from "./logger";
 import { fmtTime } from "./utils/utils_string";
+import { revive } from "./utils/utils";
 
-export interface TimerInfo {
-    id: string,
-    messageType: 'private' | 'group',
-    uid: string,
-    gid: string,
-    epId: string,
-    timestamp: number, // 定时器触发时间，单位秒
-    setTime: string,
-    content: string,
-    type: 'timer' | 'activeTime'
-};
+export class TimerInfo {
+    static validKeys: (keyof TimerInfo)[] = ['id', 'messageType', 'uid', 'gid', 'epId', 'timestamp', 'setTime', 'content', 'type'];
+    id: string;
+    messageType: 'private' | 'group';
+    uid: string;
+    gid: string;
+    epId: string;
+    timestamp: number; // 定时器触发时间，单位秒
+    setTime: string;
+    content: string;
+    type: 'timer' | 'activeTime';
+
+    constructor() {
+        this.id = '';
+        this.messageType = 'private';
+        this.uid = '';
+        this.gid = '';
+        this.epId = '';
+        this.timestamp = 0;
+        this.setTime = '';
+        this.content = '';
+        this.type = 'timer';
+    }
+}
 
 export class TimerManager {
     static timerQueue: TimerInfo[] = [];
@@ -23,10 +37,14 @@ export class TimerManager {
 
     static getTimerQueue() {
         try {
-            JSON.parse(ConfigManager.ext.storageGet(`timerQueue`) || '[]')
-                .forEach((item: any) => {
-                    this.timerQueue.push(item);
-                });
+            const data = JSON.parse(ConfigManager.ext.storageGet(`timerQueue`) || '[]')
+            if (!Array.isArray(data)) {
+                throw new Error('timerQueue不是数组');
+            }
+
+            data.forEach((item: any) => {
+                this.timerQueue.push(revive(TimerInfo, item));
+            });
         } catch (e) {
             logger.error('在获取timerQueue时出错', e);
         }
@@ -37,18 +55,18 @@ export class TimerManager {
     }
 
     static addTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, timestamp: number, content: string, type: 'timer' | 'activeTime') {
-        this.timerQueue.push({
-            id: ai.id,
-            messageType: msg.messageType,
-            uid: ctx.player.userId,
-            gid: ctx.group.groupId,
-            epId: ctx.endPoint.userId,
-            timestamp: timestamp,
-            setTime: fmtTime(Math.floor(Date.now() / 1000)),
-            content: content,
-            type: type
-        })
+        const timer = new TimerInfo();
+        timer.id = ai.id;
+        timer.messageType = msg.messageType;
+        timer.uid = ctx.player.userId;
+        timer.gid = ctx.group.groupId;
+        timer.epId = ctx.endPoint.userId;
+        timer.timestamp = timestamp;
+        timer.setTime = fmtTime(Math.floor(Date.now() / 1000));
+        timer.content = content;
+        timer.type = type;
 
+        this.timerQueue.push(timer);
         this.saveTimerQueue();
 
         if (!this.intervalId) {
