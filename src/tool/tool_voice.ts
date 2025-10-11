@@ -1,63 +1,6 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool";
-
-export function registerRecord() {
-    const { recordPaths } = ConfigManager.tool;
-    const records: { [key: string]: string } = recordPaths.reduce((acc: { [key: string]: string }, path: string) => {
-        if (path.trim() === '') {
-            return acc;
-        }
-        try {
-            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-            if (!name) {
-                throw new Error(`本地语音路径格式错误:${path}`);
-            }
-
-            acc[name] = path;
-        } catch (e) {
-            logger.error(e);
-        }
-        return acc;
-    }, {});
-
-    if (Object.keys(records).length === 0) {
-        return;
-    }
-
-    const info: ToolInfo = {
-        type: "function",
-        function: {
-            name: "record",
-            description: `发送语音，语音名称有:${Object.keys(records).join("、")}`,
-            parameters: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string",
-                        description: "语音名称"
-                    }
-                },
-                required: ["name"]
-            }
-        }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, args) => {
-        const { name } = args;
-
-        if (records.hasOwnProperty(name)) {
-            seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
-            return '发送成功';
-        } else {
-            logger.error(`本地语音${name}不存在`);
-            return `本地语音${name}不存在`;
-        }
-    }
-
-    ToolManager.toolMap[info.function.name] = tool;
-}
+import { Tool } from "./tool";
 
 const characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
@@ -84,8 +27,57 @@ const characterMap = {
     "书香少女": "lucy-voice-f34"
 };
 
-export function registerTextToSound() {
-    const info: ToolInfo = {
+export function registerRecord() {
+    const { recordPaths } = ConfigManager.tool;
+    const records: { [key: string]: string } = recordPaths.reduce((acc: { [key: string]: string }, path: string) => {
+        if (path.trim() === '') {
+            return acc;
+        }
+        try {
+            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
+            if (!name) {
+                throw new Error(`本地语音路径格式错误:${path}`);
+            }
+
+            acc[name] = path;
+        } catch (e) {
+            logger.error(e);
+        }
+        return acc;
+    }, {});
+
+    if (Object.keys(records).length !== 0) {
+        const toolRecord = new Tool({
+            type: "function",
+            function: {
+                name: "record",
+                description: `发送语音，语音名称有:${Object.keys(records).join("、")}`,
+                parameters: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string",
+                            description: "语音名称"
+                        }
+                    },
+                    required: ["name"]
+                }
+            }
+        });
+        toolRecord.solve = async (ctx, msg, _, args) => {
+            const { name } = args;
+
+            if (records.hasOwnProperty(name)) {
+                seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
+                return '发送成功';
+            } else {
+                logger.error(`本地语音${name}不存在`);
+                return `本地语音${name}不存在`;
+            }
+        }
+    }
+
+    const toolTTS = new Tool({
         type: 'function',
         function: {
             name: 'text_to_sound',
@@ -101,22 +93,20 @@ export function registerTextToSound() {
                 required: ['text']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, args) => {
+    });
+    toolTTS.solve = async (ctx, msg, _, args) => {
         const { text } = args;
 
         try {
             const { character } = ConfigManager.tool;
-            
+
             if (character === '自定义') {
                 const aittsExt = seal.ext.find('AITTS');
                 if (!aittsExt) {
                     logger.error(`未找到AITTS依赖`);
                     return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
                 }
-                
+
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
             } else {
                 const ext = seal.ext.find('HTTP依赖');
@@ -137,6 +127,4 @@ export function registerTextToSound() {
             return `发送语音失败`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

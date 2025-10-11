@@ -1,25 +1,25 @@
 import Handlebars from "handlebars";
 import { AI } from "../AI/AI"
 import { ConfigManager } from "../config/config"
-import { registerAttrGet, registerAttrSet, registerAttrShow } from "./tool_attr"
-import { registerBan, registerGetBanList, registerWholeBan } from "./tool_ban"
-import { registerDrawDeck } from "./tool_deck"
-import { registerCheckAvatar, registerImageToText, registerTextToImage, registerSaveImage, registerDelImage } from "./tool_image"
+import { registerAttr } from "./tool_attr"
+import { registerBan } from "./tool_ban"
+import { registerDeck } from "./tool_deck"
+import { registerImage } from "./tool_image"
 import { registerJrrp } from "./tool_jrrp"
-import { registerAddMemory, registerDelMemory, registerShowMemory } from "./tool_memory"
-import { registerModuRoll, registerModuSearch } from "./tool_modu"
+import { registerMemory } from "./tool_memory"
+import { registerModu } from "./tool_modu"
 import { registerRename } from "./tool_rename"
-import { registerRollCheck, registerSanCheck } from "./tool_roll_check"
-import { registerCancelTimer, registerGetTime, registerSetTimer, registerShowTimerList } from "./tool_time"
-import { registerRecord, registerTextToSound } from "./tool_voice"
-import { registerWebSearch, registerWebRead } from "./tool_web_search"
+import { registerRollCheck } from "./tool_roll_check"
+import { registerTime } from "./tool_time"
+import { registerRecord } from "./tool_voice"
+import { registerWeb } from "./tool_web"
 import { registerGroupSign } from "./tool_group_sign"
 import { registerGetPersonInfo } from "./tool_person_info"
-import { registerDeleteMsg, registerGetMsg, registerSendMsg } from "./tool_message"
-import { registerSetEssenceMsg } from "./tool_essence_msg"
-import { registerGetContext } from "./tool_context"
-import { registerGetGroupMemberList, registerGetList, registerSearchChat, registerSearchCommonGroup } from "./tool_qq_list"
-import { registerSetTriggerCondition } from "./tool_trigger"
+import { registerMessage } from "./tool_message"
+import { registerEssenceMsg } from "./tool_essence_msg"
+import { registerContext } from "./tool_context"
+import { registerQQList } from "./tool_qq_list"
+import { registerSetTrigger } from "./tool_trigger"
 import { registerMusicPlay } from "./tool_music"
 import { registerMeme } from "./tool_meme"
 import { logger } from "../logger"
@@ -77,6 +77,8 @@ export class Tool {
         this.type = "all"
         this.tool_choice = 'auto';
         this.solve = async (_, __, ___, ____) => "函数未实现";
+
+        ToolManager.toolMap[info.function.name] = this;
     }
 
 }
@@ -151,47 +153,25 @@ export class ToolManager {
     }
 
     static registerTool() {
-        registerAddMemory();
-        registerDelMemory();
-        registerShowMemory();
-        registerDrawDeck();
+        registerMemory();
+        registerDeck();
         registerJrrp();
-        registerModuRoll();
-        registerModuSearch();
+        registerModu();
         registerRollCheck();
-        registerSanCheck();
         registerRename();
-        registerAttrShow();
-        registerAttrGet();
-        registerAttrSet();
+        registerAttr();
         registerBan();
-        registerWholeBan();
-        registerGetBanList();
         registerRecord();
-        registerTextToSound();
-        registerGetTime();
-        registerSetTimer();
-        registerShowTimerList();
-        registerCancelTimer();
-        registerWebSearch();
-        registerWebRead();
-        registerImageToText();
-        registerCheckAvatar();
-        registerTextToImage();
-        registerSaveImage();
-        registerDelImage();
+        registerTime();
+        registerWeb();
+        registerImage();
         registerGroupSign();
         registerGetPersonInfo();
-        registerSendMsg();
-        registerGetMsg();
-        registerDeleteMsg();
-        registerSetEssenceMsg();
-        registerGetContext();
-        registerGetList();
-        registerGetGroupMemberList();
-        registerSearchChat();
-        registerSearchCommonGroup();
-        registerSetTriggerCondition();
+        registerMessage();
+        registerEssenceMsg();
+        registerContext();
+        registerQQList();
+        registerSetTrigger();
         registerMusicPlay();
         registerMeme();
     }

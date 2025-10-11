@@ -1,10 +1,11 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool"
+import { Tool } from "./tool"
 
-export function registerDrawDeck() {
+export function registerDeck() {
     const { decks } = ConfigManager.tool;
-    const info: ToolInfo = {
+
+    const toolDraw = new Tool({
         type: "function",
         function: {
             name: "draw_deck",
@@ -20,10 +21,8 @@ export function registerDrawDeck() {
                 required: ["name"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, args) => {
+    });
+    toolDraw.solve = async (ctx, msg, _, args) => {
         const { name } = args;
 
         const dr = seal.deck.draw(ctx, name, true);
@@ -41,6 +40,4 @@ export function registerDrawDeck() {
         seal.replyToSender(ctx, msg, result);
         return result;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

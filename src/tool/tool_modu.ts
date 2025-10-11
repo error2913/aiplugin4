@@ -1,7 +1,7 @@
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool, ToolManager } from "./tool";
 
-export function registerModuRoll() {
-    const info: ToolInfo = {
+export function registerModu() {
+    const toolRoll = new Tool({
         type: "function",
         function: {
             name: "modu_roll",
@@ -12,16 +12,14 @@ export function registerModuRoll() {
                 required: []
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.cmdInfo = {
+    });
+    toolRoll.cmdInfo = {
         ext: 'story',
         name: 'modu',
         fixedArgs: ['roll']
     }
-    tool.solve = async (ctx, msg, ai, _) => {
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
+    toolRoll.solve = async (ctx, msg, ai, _) => {
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.cmdInfo, [], [], []);
         if (!success) {
             return '今日人品查询失败';
         }
@@ -29,11 +27,7 @@ export function registerModuRoll() {
         return s;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerModuSearch() {
-    const info: ToolInfo = {
+    const toolSearch = new Tool({
         type: "function",
         function: {
             name: "modu_search",
@@ -49,24 +43,20 @@ export function registerModuSearch() {
                 required: ['name']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.cmdInfo = {
+    });
+    toolSearch.cmdInfo = {
         ext: 'story',
         name: 'modu',
         fixedArgs: ['search']
     }
-    tool.solve = async (ctx, msg, ai, args) => {
+    toolSearch.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [name], [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolSearch.cmdInfo, [name], [], []);
         if (!success) {
             return '今日人品查询失败';
         }
 
         return s;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

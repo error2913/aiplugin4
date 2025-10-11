@@ -1,10 +1,10 @@
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerImageToText() {
-    const info: ToolInfo = {
+export function registerImage() {
+    const toolText = new Tool({
         type: "function",
         function: {
             name: "image_to_text",
@@ -24,10 +24,8 @@ export function registerImageToText() {
                 required: ["id"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ai, args) => {
+    });
+    toolText.solve = async (_, __, ai, args) => {
         const { id, content } = args;
 
         const image = ai.context.findImage(id, ai.imageManager);
@@ -48,11 +46,7 @@ export function registerImageToText() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerCheckAvatar() {
-    const info: ToolInfo = {
+    const toolAvatar = new Tool({
         type: "function",
         function: {
             name: "check_avatar",
@@ -77,10 +71,8 @@ export function registerCheckAvatar() {
                 required: ["avatar_type", "name"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, ai, args) => {
+    });
+    toolAvatar.solve = async (ctx, _, ai, args) => {
         const { avatar_type, name, content = '' } = args;
 
         let url = '';
@@ -113,11 +105,7 @@ export function registerCheckAvatar() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerTextToImage() {
-    const info: ToolInfo = {
+    const toolImage = new Tool({
         type: 'function',
         function: {
             name: 'text_to_image',
@@ -137,10 +125,8 @@ export function registerTextToImage() {
                 required: ['prompt']
             }
         }
-    };
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, _, args) => {
+    });
+    toolImage.solve = async (ctx, msg, _, args) => {
         const { prompt, negative_prompt } = args;
 
         const ext = seal.ext.find('AIDrawing');
@@ -156,13 +142,9 @@ export function registerTextToImage() {
             logger.error(`图像生成失败：${e}`);
             return `图像生成失败：${e}`;
         }
-    };
+    }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerSaveImage() {
-    const info: ToolInfo = {
+    const toolSave = new Tool({
         type: "function",
         function: {
             name: "save_image",
@@ -198,10 +180,8 @@ export function registerSaveImage() {
                 required: ["images"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ai, args) => {
+    });
+    toolSave.solve = async (_, __, ai, args) => {
         const { images } = args;
 
         const savedImages: Image[] = [];
@@ -246,11 +226,7 @@ export function registerSaveImage() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerDelImage() {
-    const info: ToolInfo = {
+    const toolDel = new Tool({
         type: "function",
         function: {
             name: "del_image",
@@ -266,10 +242,8 @@ export function registerDelImage() {
                 required: ["names"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ai, args) => {
+    });
+    toolDel.solve = async (_, __, ai, args) => {
         const { names } = args;
 
         for (const name of names) {
@@ -283,6 +257,4 @@ export function registerDelImage() {
 
         return `已删除${names.length}个图片`;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

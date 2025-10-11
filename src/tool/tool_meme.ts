@@ -1,7 +1,7 @@
 import { Image, ImageManager } from "../AI/image";
 import { ConfigManager } from "../config/config";
 import { logger } from "../logger";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
 const baseurl = "http://meme.lovesealdice.online/";
 
@@ -28,7 +28,7 @@ async function getInfo(name: string): Promise<{ key: string, info: MemeInfo }> {
 }
 
 export function registerMeme() {
-    const list_info: ToolInfo = {
+    const toolList = new Tool({
         type: "function",
         function: {
             name: "meme_list",
@@ -37,12 +37,11 @@ export function registerMeme() {
                 type: "object",
                 properties: {
                 },
-                required: [] // 必需参数
+                required: []
             }
         }
-    }
-    const tool_list = new Tool(list_info); // 创建一个新tool
-    tool_list.solve = async (_, __, ___, ____) => { // 实现方法，返回字符串提供给AI
+    });
+    toolList.solve = async (_, __, ___, ____) => {
         try {
             const res = await fetch(baseurl + "get_command");
             const json = await res.json();
@@ -52,7 +51,7 @@ export function registerMeme() {
         }
     }
 
-    const get_info: ToolInfo = {
+    const toolGet = new Tool({
         type: "function",
         function: {
             name: "get_meme_info",
@@ -65,12 +64,11 @@ export function registerMeme() {
                         description: "表情包名字,为 meme_list 返回的结果"
                     }
                 },
-                required: ["name"] // 必需参数
+                required: ["name"]
             }
         }
-    }
-    const tool_get = new Tool(get_info); // 创建一个新tool
-    tool_get.solve = async (_, __, ___, args) => { // 实现方法，返回字符串提供给AI
+    });
+    toolGet.solve = async (_, __, ___, args) => {
         const { name } = args;
 
         const { info } = await getInfo(name);
@@ -81,7 +79,7 @@ export function registerMeme() {
         return `该表情包需要：${image_text}，${text_text}`;
     }
 
-    const generator_info: ToolInfo = {
+    const toolGenerator = new Tool({
         type: "function",
         function: {
             name: "meme_generator",
@@ -108,12 +106,11 @@ export function registerMeme() {
                         description: "是否保存图片"
                     }
                 },
-                required: ["name", "text", "members", "save"] // 必需参数
+                required: ["name", "text", "members", "save"]
             }
         }
-    }
-    const tool_generator = new Tool(generator_info); // 创建一个新tool
-    tool_generator.solve = async (ctx, msg, ai, args) => { // 实现方法，返回字符串提供给AI
+    });
+    toolGenerator.solve = async (ctx, msg, ai, args) => {
         const { name, text = [], members = [], save } = args;
 
         let s = '';
@@ -193,11 +190,6 @@ export function registerMeme() {
             return "生成表情包失败:" + err.message;
         }
     }
-
-    // 注册到toolMap中
-    ToolManager.toolMap[list_info.function.name] = tool_list;
-    ToolManager.toolMap[get_info.function.name] = tool_get;
-    ToolManager.toolMap[generator_info.function.name] = tool_generator;
 }
 
 // 说实话感觉并不是最完美的状态
@@ -205,4 +197,4 @@ export function registerMeme() {
 // 然后给出一个选择meme模板的模板配置项，毕竟有的人设并不适合所有的表情包
 // 再把选中的meme模板构建prompt，另外我注意到有的模板应该是有默认文本的，这其实也可以提示ai要输入什么文本，而不是牛头不对马嘴
 // 这样只需保留meme_generator的实现
-// 另外可以把url加进后端配置中
+// 另外可以把url加进后端配置中，这个的后端是哪个项目啊————

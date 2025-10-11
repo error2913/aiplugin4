@@ -1,9 +1,9 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerWebSearch() {
-    const info: ToolInfo = {
+export function registerWeb() {
+    const toolSearch = new Tool({
         type: "function",
         function: {
             name: "web_search",
@@ -33,10 +33,8 @@ export function registerWebSearch() {
                 required: ["q"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ___, args) => {
+    });
+    toolSearch.solve = async (_, __, ___, args) => {
         const { q, page, categories, time_range = '' } = args;
         const { webSearchUrl } = ConfigManager.backend;
 
@@ -85,11 +83,7 @@ export function registerWebSearch() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerWebRead() {
-    const info: ToolInfo = {
+    const tool = new Tool({
         type: "function",
         function: {
             name: "web_read",
@@ -105,9 +99,7 @@ export function registerWebRead() {
                 required: ["url"]
             }
         }
-    };
-
-    const tool = new Tool(info);
+    });
     tool.solve = async (_, __, ___, args) => {
         const { url } = args;
         const { webReadUrl } = ConfigManager.backend;
@@ -145,7 +137,5 @@ export function registerWebRead() {
             logger.error("在web_read中请求出错：", error);
             return `读取网页内容失败: ${error}`;
         }
-    };
-
-    ToolManager.toolMap[info.function.name] = tool;
+    }
 }

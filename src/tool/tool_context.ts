@@ -2,10 +2,10 @@ import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
 import { buildContent } from "../utils/utils_message";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerGetContext() {
-    const info: ToolInfo = {
+export function registerContext() {
+    const toolGet = new Tool({
         type: "function",
         function: {
             name: "get_context",
@@ -26,10 +26,8 @@ export function registerGetContext() {
                 required: ["ctx_type", "name"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolGet.solve = async (ctx, msg, ai, args) => {
         const { ctx_type, name } = args;
 
         const originalAI = ai;
@@ -84,6 +82,4 @@ export function registerGetContext() {
 
         return s;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

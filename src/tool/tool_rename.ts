@@ -1,10 +1,10 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
 export function registerRename() {
-    const info: ToolInfo = {
+    const tool = new Tool({
         type: "function",
         function: {
             name: "rename",
@@ -24,9 +24,7 @@ export function registerRename() {
                 required: ['name', 'new_name']
             }
         }
-    }
-
-    const tool = new Tool(info);
+    });
     tool.type = 'group';
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
@@ -64,6 +62,4 @@ export function registerRename() {
             return '设置失败';
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

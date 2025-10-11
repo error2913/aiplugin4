@@ -177,7 +177,7 @@ export class ImageManager {
             }
 
             try {
-                const file = item.data.file || item.data.url || '';
+                const file = item.data.url || item.data.file || '';
                 if (!file || !receiveImage) {
                     continue;
                 }

@@ -6,12 +6,111 @@ import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
 
+/* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
+
+export interface MessageItemText {
+    type: 'text';
+    data: {
+        text: string;
+    };
+}
+
+export interface MessageItemAt {
+    type: 'at';
+    data: {
+        qq: string;
+    };
+}
+
+export interface MessageItemImage {
+    type: 'image';
+    data: {
+        file: string;
+        url?: string;
+    };
+}
+
+export interface MessageItemFace {
+    type: 'face';
+    data: {
+        id: string;
+    };
+}
+
+export interface MessageItemJson {
+    type: 'json';
+    data: {
+        data: string;
+    };
+}
+
+export interface MessageItemRecord {
+    type: 'record';
+    data: {
+        file: string;
+    };
+}
+
+export interface MessageItemVideo {
+    type: 'video';
+    data: {
+        file: string;
+    };
+}
+
+export interface MessageItemReply {
+    type: 'reply';
+    data: {
+        id: string;
+    };
+}
+
+export interface MessageItemMusic {
+    type: 'music';
+    data: {
+        type: 'qq' | '163';
+        id: string;
+    } | {
+        type: 'custom';
+        url: string;
+        audio: string;
+        title: string;
+        image: string;
+    };
+}
+
+export interface MessageItemDice {
+    type: 'dice';
+}
+
+export interface MessageItemRps {
+    type: 'rps';
+}
+
+export interface MessageItemFile {
+    type: 'file';
+    data: {
+        file: string;
+    };
+}
+
+export interface MessageItemNode { // 这是干嘛的？是合并转发吗？
+    type: 'node';
+    data: {
+        user_id: string;
+        nickname: string;
+        content: (MessageItemText | MessageItemAt | MessageItemImage | MessageItemFace | MessageItemJson | MessageItemRecord | MessageItemVideo | MessageItemReply | MessageItemMusic | MessageItemDice | MessageItemRps | MessageItemFile)[];
+    };
+}
+
+export type MessageItem = MessageItemText | MessageItemAt | MessageItemImage | MessageItemFace | MessageItemJson | MessageItemRecord | MessageItemVideo | MessageItemReply | MessageItemMusic | MessageItemDice | MessageItemRps | MessageItemFile | MessageItemNode;
+*/
+
 export interface MessageItem {
     type: string;
     data: { 
-        text?: string;
-        /** 其他参数 */
-        [key: string]: string };
+        [key: string]: string
+    };
 }
 
 export function transformTextToArray(s: string): MessageItem[] {

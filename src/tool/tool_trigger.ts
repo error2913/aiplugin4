@@ -1,10 +1,10 @@
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
 export const triggerConditionMap: { [key: string]: { keyword: string, uid: string, reason: string }[] } = {};
 
-export function registerSetTriggerCondition() {
-    const info: ToolInfo = {
+export function registerSetTrigger() {
+    const tool = new Tool({
         type: "function",
         function: {
             name: "set_trigger_condition",
@@ -28,9 +28,7 @@ export function registerSetTriggerCondition() {
                 required: ["reason"]
             }
         }
-    }
-
-    const tool = new Tool(info);
+    });
     tool.solve = async (ctx, _, ai, args) => {
         const { keyword = '', name = '', reason } = args;
 
@@ -68,6 +66,4 @@ export function registerSetTriggerCondition() {
 
         return "触发条件设置成功";
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

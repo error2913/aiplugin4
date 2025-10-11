@@ -1,10 +1,10 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 import { fmtTime } from "../utils/utils_string";
 
 export function registerBan() {
-    const info: ToolInfo = {
+    const toolBan = new Tool({
         type: 'function',
         function: {
             name: 'ban',
@@ -24,11 +24,9 @@ export function registerBan() {
                 required: ['name', 'duration']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.type = 'group';
-    tool.solve = async (ctx, _, ai, args) => {
+    });
+    toolBan.type = 'group';
+    toolBan.solve = async (ctx, _, ai, args) => {
         const { name, duration } = args;
 
         if (ctx.isPrivate) {
@@ -84,11 +82,7 @@ export function registerBan() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerWholeBan() {
-    const info: ToolInfo = {
+    const toolWhole = new Tool({
         type: 'function',
         function: {
             name: 'whole_ban',
@@ -104,11 +98,9 @@ export function registerWholeBan() {
                 required: ['enable']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.type = 'group';
-    tool.solve = async (ctx, _, __, args) => {
+    });
+    toolWhole.type = 'group';
+    toolWhole.solve = async (ctx, _, __, args) => {
         const { enable } = args;
 
         const ext = seal.ext.find('HTTP依赖');
@@ -128,11 +120,7 @@ export function registerWholeBan() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerGetBanList() {
-    const info: ToolInfo = {
+    const toolList = new Tool({
         type: 'function',
         function: {
             name: 'get_ban_list',
@@ -144,11 +132,9 @@ export function registerGetBanList() {
                 required: []
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.type = 'group';
-    tool.solve = async (ctx, _, __, ___) => {
+    });
+    toolList.type = 'group';
+    toolList.solve = async (ctx, _, __, ___) => {
         const ext = seal.ext.find('HTTP依赖');
         if (!ext) {
             logger.error(`未找到HTTP依赖`);
@@ -170,6 +156,4 @@ export function registerGetBanList() {
             return `获取禁言列表失败`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

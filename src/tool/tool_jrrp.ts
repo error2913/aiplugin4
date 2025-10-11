@@ -1,9 +1,9 @@
 import { ConfigManager } from "../config/config";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool, ToolManager } from "./tool";
 
 export function registerJrrp() {
-    const info: ToolInfo = {
+    const tool = new Tool({
         type: "function",
         function: {
             name: "jrrp",
@@ -19,9 +19,7 @@ export function registerJrrp() {
                 required: ["name"]
             }
         }
-    }
-
-    const tool = new Tool(info);
+    });
     tool.cmdInfo = {
         ext: 'fun',
         name: 'jrrp',
@@ -45,6 +43,4 @@ export function registerJrrp() {
 
         return s;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

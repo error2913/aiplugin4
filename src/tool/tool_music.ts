@@ -1,8 +1,8 @@
 import { logger } from "../logger";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
 export function registerMusicPlay() {
-    const info: ToolInfo = {
+    const tool = new Tool({
         type: "function",
         function: {
             name: "music_play",
@@ -23,9 +23,7 @@ export function registerMusicPlay() {
                 required: ["platform", "song_name"]
             }
         }
-    };
-
-    const tool = new Tool(info);
+    });
     tool.solve = async (ctx, msg, _, args) => {
         const { platform, song_name } = args;
 
@@ -104,6 +102,4 @@ export function registerMusicPlay() {
             return `音乐搜索请求错误: ${error}`;
         }
     };
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

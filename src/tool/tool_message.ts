@@ -5,10 +5,10 @@ import { ConfigManager, CQTYPESALLOW } from "../config/config";
 import { replyToSender, transformMsgId, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { handleReply, MessageItem, transformTextToArray } from "../utils/utils_string";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool, ToolManager } from "./tool";
 
-export function registerSendMsg() {
-    const info: ToolInfo = {
+export function registerMessage() {
+    const toolSend = new Tool({
         type: "function",
         function: {
             name: "send_msg",
@@ -41,10 +41,8 @@ export function registerSendMsg() {
                 required: ["msg_type", "name", "content"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolSend.solve = async (ctx, msg, ai, args) => {
         const { msg_type, name, content, function: tool_call, reason = '' } = args;
 
         const { showNumber } = ConfigManager.message;
@@ -130,11 +128,7 @@ export function registerSendMsg() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerGetMsg() {
-    const info: ToolInfo = {
+    const toolGet = new Tool({
         type: 'function',
         function: {
             name: 'get_msg',
@@ -150,10 +144,8 @@ export function registerGetMsg() {
                 required: ['msg_id']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, ai, args) => {
+    });
+    toolGet.solve = async (ctx, _, ai, args) => {
         const { msg_id } = args;
         const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
 
@@ -231,11 +223,7 @@ export function registerGetMsg() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerDeleteMsg() {
-    const info: ToolInfo = {
+    const toolDel = new Tool({
         type: 'function',
         function: {
             name: 'delete_msg',
@@ -251,10 +239,8 @@ export function registerDeleteMsg() {
                 required: ['msg_id']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, args) => {
+    });
+    toolDel.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
         const ext = seal.ext.find('HTTP依赖');
@@ -298,6 +284,4 @@ export function registerDeleteMsg() {
             return `撤回消息失败`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

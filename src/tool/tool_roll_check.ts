@@ -1,9 +1,9 @@
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool, ToolManager } from "./tool";
 
 export function registerRollCheck() {
-    const info: ToolInfo = {
+    const toolRoll = new Tool({
         type: "function",
         function: {
             name: "roll_check",
@@ -40,15 +40,13 @@ export function registerRollCheck() {
                 required: ["name", "expression"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.cmdInfo = {
+    });
+    toolRoll.cmdInfo = {
         ext: 'coc7',
         name: 'ra',
         fixedArgs: []
     }
-    tool.solve = async (ctx, msg, ai, args) => {
+    toolRoll.solve = async (ctx, msg, ai, args) => {
         const { name, expression, rank = '', times = 1, additional_dice = '', reason = '' } = args;
 
         const uid = await ai.context.findUserId(ctx, name);
@@ -80,7 +78,7 @@ export function registerRollCheck() {
             ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
         }
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, args2, [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.cmdInfo, args2, [], []);
 
         ToolManager.cmdArgs.specialExecuteTimes = 1;
 
@@ -91,15 +89,11 @@ export function registerRollCheck() {
         return s;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-// 该函数疑似无法正常工作。无法找到原因。
-// 表现：使用该函数时，san值会被异常清0
-// 调试发现正常指令的cmdArgs与该函数构建的完全一致的情况下也能触发bug
-// 推测：构建的临时ctx导致bug，详细原因不明，期待后续修复
-export function registerSanCheck() {
-    const info: ToolInfo = {
+    // 该函数疑似无法正常工作。无法找到原因。
+    // 表现：使用该函数时，san值会被异常清0
+    // 调试发现正常指令的cmdArgs与该函数构建的完全一致的情况下也能触发bug
+    // 推测：构建的临时ctx导致bug，详细原因不明，期待后续修复
+    const tool = new Tool({
         type: "function",
         function: {
             name: "san_check",
@@ -123,9 +117,7 @@ export function registerSanCheck() {
                 required: ['name', 'expression']
             }
         }
-    }
-
-    const tool = new Tool(info)
+    })
     tool.cmdInfo = {
         ext: 'coc7',
         name: 'sc',
@@ -160,6 +152,4 @@ export function registerSanCheck() {
 
         return s;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

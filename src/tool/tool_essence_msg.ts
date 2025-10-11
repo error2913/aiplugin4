@@ -1,9 +1,9 @@
 import { logger } from "../logger";
 import { transformMsgIdBack } from "../utils/utils";
-import { ToolInfo, Tool, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerSetEssenceMsg() {
-    const info: ToolInfo = {
+export function registerEssenceMsg() {
+    const toolSet = new Tool({
         type: 'function',
         function: {
             name: 'set_essence_msg',
@@ -19,10 +19,8 @@ export function registerSetEssenceMsg() {
                 required: ['msg_id']
             }
         }
-    };
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, args) => {
+    });
+    toolSet.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
         const ext = seal.ext.find('HTTP依赖');
@@ -53,8 +51,6 @@ export function registerSetEssenceMsg() {
             return `设置精华消息失败`;
         }
     };
-
-    ToolManager.toolMap[info.function.name] = tool;
 }
 
 //TODO: 查看精华消息列表、取消精华消息

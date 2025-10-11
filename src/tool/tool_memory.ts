@@ -1,10 +1,10 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerAddMemory() {
-    const info: ToolInfo = {
+export function registerMemory() {
+    const toolAdd = new Tool({
         type: 'function',
         function: {
             name: 'add_memory',
@@ -36,10 +36,8 @@ export function registerAddMemory() {
                 required: ['memory_type', 'name', 'keywords', 'content']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolAdd.solve = async (ctx, msg, ai, args) => {
         const { memory_type, name, keywords, content } = args;
 
         if (memory_type === "private") {
@@ -73,11 +71,7 @@ export function registerAddMemory() {
         return `添加记忆成功`;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerDelMemory() {
-    const info: ToolInfo = {
+    const toolDel = new Tool({
         type: 'function',
         function: {
             name: 'del_memory',
@@ -112,10 +106,8 @@ export function registerDelMemory() {
                 required: ['memory_type', 'name', 'index_list', 'keywords']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolDel.solve = async (ctx, msg, ai, args) => {
         const { memory_type, name, index_list, keywords } = args;
 
         if (memory_type === "private") {
@@ -149,11 +141,7 @@ export function registerDelMemory() {
         return `删除记忆成功`;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerShowMemory() {
-    const info: ToolInfo = {
+    const toolShow = new Tool({
         type: 'function',
         function: {
             name: 'show_memory',
@@ -174,10 +162,8 @@ export function registerShowMemory() {
                 required: ['memory_type', 'name']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolShow.solve = async (ctx, msg, ai, args) => {
         const { memory_type, name } = args;
 
         if (memory_type === "private") {
@@ -212,6 +198,4 @@ export function registerShowMemory() {
             return `未知的记忆类型<${memory_type}>`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

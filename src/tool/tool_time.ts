@@ -1,9 +1,9 @@
 import { TimerManager } from "../timer";
 import { fmtTime } from "../utils/utils_string";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerGetTime() {
-    const info: ToolInfo = {
+export function registerTime() {
+    const toolGet = new Tool({
         type: "function",
         function: {
             name: "get_time",
@@ -15,18 +15,12 @@ export function registerGetTime() {
                 required: []
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ___, ____) => {
+    });
+    toolGet.solve = async (_, __, ___, ____) => {
         return fmtTime(Math.floor(Date.now() / 1000));
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerSetTimer() {
-    const info: ToolInfo = {
+    const toolSet = new Tool({
         type: 'function',
         function: {
             name: 'set_timer',
@@ -54,10 +48,8 @@ export function registerSetTimer() {
                 required: ['minutes', 'content']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolSet.solve = async (ctx, msg, ai, args) => {
         const { days = 0, hours = 0, minutes, content } = args;
 
         const t = parseInt(days) * 24 * 60 + parseInt(hours) * 60 + parseInt(minutes);
@@ -70,11 +62,7 @@ export function registerSetTimer() {
         return `设置定时器成功，请等待`;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerShowTimerList() {
-    const info: ToolInfo = {
+    const toolShow = new Tool({
         type: 'function',
         function: {
             name: 'show_timer_list',
@@ -86,10 +74,8 @@ export function registerShowTimerList() {
                 required: []
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ai, ___) => {
+    });
+    toolShow.solve = async (_, __, ai, ___) => {
         const timers = TimerManager.getTimer(ai.id, '', 'timer');
 
         if (timers.length === 0) {
@@ -104,11 +90,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}`;
         return s;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerCancelTimer() {
-    const info: ToolInfo = {
+    const toolCancel = new Tool({
         type: 'function',
         function: {
             name: 'cancel_timer',
@@ -127,10 +109,8 @@ export function registerCancelTimer() {
                 required: ['index_list']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (_, __, ai, args) => {
+    });
+    toolCancel.solve = async (_, __, ai, args) => {
         const { index_list } = args;
         const timers = TimerManager.getTimer(ai.id, '', 'timer');
 
@@ -146,6 +126,4 @@ export function registerCancelTimer() {
 
         return '定时器取消成功';
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

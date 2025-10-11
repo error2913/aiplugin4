@@ -1,9 +1,9 @@
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool, ToolManager } from "./tool";
 
-export function registerAttrShow() {
-    const info: ToolInfo = {
+export function registerAttr() {
+    const toolShow = new Tool({
         type: 'function',
         function: {
             name: 'attr_show',
@@ -19,15 +19,13 @@ export function registerAttrShow() {
                 required: ['name']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.cmdInfo = {
+    });
+    toolShow.cmdInfo = {
         ext: 'coc7',
         name: 'st',
         fixedArgs: ['show']
     }
-    tool.solve = async (ctx, msg, ai, args) => {
+    toolShow.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
         const uid = await ai.context.findUserId(ctx, name);
@@ -38,7 +36,7 @@ export function registerAttrShow() {
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolShow.cmdInfo, [], [], []);
         if (!success) {
             return '展示失败';
         }
@@ -46,11 +44,7 @@ export function registerAttrShow() {
         return s;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerAttrGet() {
-    const info: ToolInfo = {
+    const toolGet = new Tool({
         type: 'function',
         function: {
             name: 'attr_get',
@@ -70,10 +64,8 @@ export function registerAttrGet() {
                 required: ['name', 'attr']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolGet.solve = async (ctx, msg, ai, args) => {
         const { name, attr } = args;
 
         const uid = await ai.context.findUserId(ctx, name);
@@ -88,11 +80,7 @@ export function registerAttrGet() {
         return `${attr}: ${value}`;
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerAttrSet() {
-    const info: ToolInfo = {
+    const toolSet = new Tool({
         type: 'function',
         function: {
             name: 'attr_set',
@@ -112,10 +100,8 @@ export function registerAttrSet() {
                 required: ['name', 'expression']
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, msg, ai, args) => {
+    });
+    toolSet.solve = async (ctx, msg, ai, args) => {
         const { name, expression } = args;
 
         const uid = await ai.context.findUserId(ctx, name);
@@ -152,6 +138,4 @@ export function registerAttrSet() {
         seal.replyToSender(ctx, msg, `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`);
         return `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`;
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

@@ -1,13 +1,13 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
 const constellations = ["水瓶座", "双鱼座", "白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座"];
 const shengXiao = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
 
 export function registerGetPersonInfo() {
-    const info: ToolInfo = {
+    const tool = new Tool({
         type: 'function',
         function: {
             name: 'get_person_info',
@@ -23,9 +23,7 @@ export function registerGetPersonInfo() {
                 required: ['name']
             }
         }
-    }
-
-    const tool = new Tool(info);
+    });
     tool.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
@@ -76,6 +74,4 @@ QQ等级: ${data.qqLevel}
             return `获取用户信息失败`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

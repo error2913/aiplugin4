@@ -1,9 +1,9 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
-export function registerGetList() {
-    const info: ToolInfo = {
+export function registerQQList() {
+    const toolList = new Tool({
         type: "function",
         function: {
             name: "get_list",
@@ -20,10 +20,8 @@ export function registerGetList() {
                 required: ["msg_type"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, args) => {
+    });
+    toolList.solve = async (ctx, _, __, args) => {
         const { msg_type } = args;
 
         if (msg_type === "private") {
@@ -59,11 +57,7 @@ export function registerGetList() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerGetGroupMemberList() {
-    const info: ToolInfo = {
+    const toolMember = new Tool({
         type: "function",
         function: {
             name: "get_group_member_list",
@@ -80,10 +74,8 @@ export function registerGetGroupMemberList() {
                 required: []
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, args) => {
+    });
+    toolMember.solve = async (ctx, _, __, args) => {
         const { role = '' } = args;
 
         try {
@@ -127,11 +119,7 @@ export function registerGetGroupMemberList() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerSearchChat() {
-    const info: ToolInfo = {
+    const toolChat = new Tool({
         type: "function",
         function: {
             name: "search_chat",
@@ -152,10 +140,8 @@ export function registerSearchChat() {
                 required: ["q"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, __, args) => {
+    });
+    toolChat.solve = async (ctx, _, __, args) => {
         const { msg_type, q } = args;
 
         if (msg_type === "private") {
@@ -217,11 +203,7 @@ export function registerSearchChat() {
         }
     }
 
-    ToolManager.toolMap[info.function.name] = tool;
-}
-
-export function registerSearchCommonGroup() {
-    const info: ToolInfo = {
+    const toolCommon = new Tool({
         type: "function",
         function: {
             name: "search_common_group",
@@ -237,10 +219,8 @@ export function registerSearchCommonGroup() {
                 required: ["name"]
             }
         }
-    }
-
-    const tool = new Tool(info);
-    tool.solve = async (ctx, _, ai, args) => {
+    });
+    toolCommon.solve = async (ctx, _, ai, args) => {
         const { name } = args;
 
         const uid = await ai.context.findUserId(ctx, name, true);
@@ -274,6 +254,4 @@ export function registerSearchCommonGroup() {
             return `获取共群列表失败`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }

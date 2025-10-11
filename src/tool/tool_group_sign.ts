@@ -1,8 +1,8 @@
 import { logger } from "../logger";
-import { Tool, ToolInfo, ToolManager } from "./tool";
+import { Tool } from "./tool";
 
 export function registerGroupSign() {
-    const info: ToolInfo = {
+    const tool = new Tool({
         type: 'function',
         function: {
             name: 'group_sign',
@@ -14,13 +14,11 @@ export function registerGroupSign() {
                 required: []
             }
         }
-    }
-
-    const tool = new Tool(info);
+    });
     tool.type = 'group';
     tool.solve = async (ctx, _, __, ___) => {
         if (ctx.isPrivate) {
-            return `群打卡只能在群聊中使用`; 
+            return `群打卡只能在群聊中使用`;
         }
 
         const ext = seal.ext.find('HTTP依赖');
@@ -39,6 +37,4 @@ export function registerGroupSign() {
             return `发送群打卡失败`;
         }
     }
-
-    ToolManager.toolMap[info.function.name] = tool;
 }
