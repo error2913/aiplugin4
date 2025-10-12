@@ -169,8 +169,8 @@ export class PrivilegeManager {
         try {
             const cmdPriv = JSON.parse(ConfigManager.ext.storageGet('cmdPriv') || '[]');
             if (cmdPriv.length > 0) {
-                this.cmdPriv = cmdPriv;
-                this.updateCmdPriv(this.cmdPriv, defaultCmdPriv);
+                this.cmdPriv = this.updateCmdPriv(cmdPriv, defaultCmdPriv);
+                this.saveCmdPriv();
             }
         } catch (error) {
             logger.error(`从数据库中获取cmdPriv失败:`, error);
@@ -181,25 +181,27 @@ export class PrivilegeManager {
         ConfigManager.ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
     }
 
-    static updateCmdPriv(cp: CmdPrivInfo[], defaultCp: CmdPrivInfo[]) {
+    static updateCmdPriv(cp: CmdPrivInfo[], defaultCp: CmdPrivInfo[]): CmdPrivInfo[] {
+        const newCp: CmdPrivInfo[] = [];
         for (const defaultCpi of defaultCp) {
             const cpi = cp.find(cpi => defaultCpi.cmd.some(c => cpi.cmd.includes(c)));
             if (!cpi) {
-                cp.push(defaultCpi);
+                newCp.push(defaultCpi);
             } else {
                 if (defaultCpi.args) {
                     cpi.cmd = defaultCpi.cmd;
                     if (cpi.args) {
-                        this.updateCmdPriv(cpi.args, defaultCpi.args);
+                        cpi.args = this.updateCmdPriv(cpi.args, defaultCpi.args);
                     } else {
                         cpi.args = defaultCpi.args;
                     }
                 } else if (cpi.args) {
                     delete cpi.args;
                 }
+                newCp.push(cpi);
             }
         }
-        this.saveCmdPriv();
+        return newCp;
     }
 
     static resetCmdPriv() {
