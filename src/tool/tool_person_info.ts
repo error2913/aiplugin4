@@ -27,10 +27,10 @@ export function registerGetPersonInfo() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const ext = seal.ext.find('HTTP依赖');
-        if (!ext) {
-            logger.error(`未找到HTTP依赖`);
-            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+        const net = globalThis.net || globalThis.http;
+        if (!net) {
+            logger.error(`未找到ob11网络连接依赖`);
+            return `未找到ob11网络连接依赖，请提示用户安装`;
         }
 
         const uid = await ai.context.findUserId(ctx, name, true);
@@ -44,7 +44,7 @@ export function registerGetPersonInfo() {
         try {
             const epId = ctx.endPoint.userId;
             const user_id = ctx.player.userId.replace(/^.+:/, '');
-            const data = await globalThis.http.getData(epId, `get_stranger_info?user_id=${user_id}`);
+            const data = await net.callApi(epId, `get_stranger_info?user_id=${user_id}`);
 
             let s = `昵称: ${data.nickname}
 QQ号: ${data.user_id}

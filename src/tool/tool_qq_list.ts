@@ -27,7 +27,7 @@ export function registerQQList() {
         if (msg_type === "private") {
             try {
                 const epId = ctx.endPoint.userId;
-                const data = await globalThis.http.getData(epId, `get_friend_list`);
+                const data = await net.callApi(epId, `get_friend_list`);
 
                 const s = `好友数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
                     return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`;
@@ -41,7 +41,7 @@ export function registerQQList() {
         } else if (msg_type === "group") {
             try {
                 const epId = ctx.endPoint.userId;
-                const data = await globalThis.http.getData(epId, `get_group_list`);
+                const data = await net.callApi(epId, `get_group_list`);
 
                 const s = `群聊数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
                     return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
@@ -81,7 +81,7 @@ export function registerQQList() {
         try {
             const epId = ctx.endPoint.userId;
             const gid = ctx.group.groupId;
-            const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
+            const data = await net.callApi(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
 
             if (role === 'owner') {
                 const owner = data.find((item: any) => item.role === role);
@@ -147,7 +147,7 @@ export function registerQQList() {
         if (msg_type === "private") {
             try {
                 const epId = ctx.endPoint.userId;
-                const data = await globalThis.http.getData(epId, `get_friend_list`);
+                const data = await net.callApi(epId, `get_friend_list`);
 
                 const arr = data.filter((item: any) => {
                     return item.nickname.includes(q) || item.remark.includes(q);
@@ -165,7 +165,7 @@ export function registerQQList() {
         } else if (msg_type === "group") {
             try {
                 const epId = ctx.endPoint.userId;
-                const data = await globalThis.http.getData(epId, `get_group_list`);
+                const data = await net.callApi(epId, `get_group_list`);
 
                 const arr = data.filter((item: any) => {
                     return item.group_name.includes(q);
@@ -183,12 +183,12 @@ export function registerQQList() {
         } else {
             const epId = ctx.endPoint.userId;
 
-            const data1 = await globalThis.http.getData(epId, `get_friend_list`);
+            const data1 = await net.callApi(epId, `get_friend_list`);
             const arr1 = data1.filter((item: any) => {
                 return item.nickname.includes(q) || item.remark.includes(q);
             });
 
-            const data2 = await globalThis.http.getData(epId, `get_group_list`);
+            const data2 = await net.callApi(epId, `get_group_list`);
             const arr2 = data2.filter((item: any) => {
                 return item.group_name.includes(q);
             });
@@ -233,11 +233,11 @@ export function registerQQList() {
 
         try {
             const epId = ctx.endPoint.userId;
-            const data = await globalThis.http.getData(epId, `get_group_list`);
+            const data = await net.callApi(epId, `get_group_list`);
 
             const arr = [];
             for (const group_info of data) {
-                const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${group_info.group_id}`);
+                const data = await net.callApi(epId, `get_group_member_list?group_id=${group_info.group_id}`);
                 const user_info = data.find((user_info: any) => user_info.user_id.toString() === uid.replace(/^.+:/, ''));
                 if (user_info) {
                     arr.push({ group_info, user_info });

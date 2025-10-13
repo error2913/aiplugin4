@@ -109,16 +109,16 @@ export function registerRecord() {
 
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
             } else {
-                const ext = seal.ext.find('HTTP依赖');
-                if (!ext) {
-                    logger.error(`未找到HTTP依赖`);
-                    return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+                const net = globalThis.net || globalThis.http;
+                if (!net) {
+                    logger.error(`未找到ob11网络连接依赖`);
+                    return `未找到ob11网络连接依赖，请提示用户安装`;
                 }
 
                 const characterId = characterMap[character];
                 const epId = ctx.endPoint.userId;
                 const group_id = ctx.group.groupId.replace(/^.+:/, '');
-                await globalThis.http.getData(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
+                await net.callApi(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
             }
 
             return `发送语音成功`;

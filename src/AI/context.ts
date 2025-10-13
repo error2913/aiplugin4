@@ -277,13 +277,13 @@ export class Context {
         }
 
         // 在群成员列表、好友列表中查找用户
-        const ext = seal.ext.find('HTTP依赖');
-        if (ext) {
+        const net = globalThis.net || globalThis.http;
+        if (net) {
             const epId = ctx.endPoint.userId;
 
             if (!ctx.isPrivate) {
                 const gid = ctx.group.groupId;
-                const data = await globalThis.http.getData(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
+                const data = await net.callApi(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
                 for (let i = 0; i < data.length; i++) {
                     if (name === data[i].card || name === data[i].nickname) {
                         const uid = `QQ:${data[i].user_id}`;
@@ -293,7 +293,7 @@ export class Context {
             }
 
             if (findInFriendList) {
-                const data = await globalThis.http.getData(epId, 'get_friend_list');
+                const data = await net.callApi(epId, 'get_friend_list');
                 for (let i = 0; i < data.length; i++) {
                     if (name === data[i].nickname || name === data[i].remark) {
                         const uid = `QQ:${data[i].user_id}`;
@@ -368,10 +368,10 @@ export class Context {
         }
 
         // 在群聊列表中查找用户
-        const ext = seal.ext.find('HTTP依赖');
-        if (ext) {
+        const net = globalThis.net || globalThis.http;
+        if (net) {
             const epId = ctx.endPoint.userId;
-            const data = await globalThis.http.getData(epId, 'get_group_list');
+            const data = await net.callApi(epId, 'get_group_list');
             for (let i = 0; i < data.length; i++) {
                 if (groupName === data[i].group_name) {
                     return `QQ-Group:${data[i].group_id}`;
