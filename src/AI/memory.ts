@@ -53,6 +53,15 @@ export class Memory {
             }
         }
 
+        for (const id of Object.keys(this.memoryMap)) {
+            const m = this.memoryMap[id];
+            if (content === m.content && ((!m.isPrivate && ctx.group.groupId === m.group.groupId) || m.isPrivate)) {
+                m.keywords = Array.from(new Set([...m.keywords, ...kws]));
+                logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
+                return;
+            }
+        }
+
         this.memoryMap[id] = {
             id,
             isPrivate: ctx.isPrivate,
