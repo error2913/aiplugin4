@@ -30,10 +30,9 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
 
     const { showMsgId } = ConfigManager.message;
     if (showMsgId) {
-        const ext = seal.ext.find('HTTP依赖');
-        if (!ext) {
-            logger.error(`未找到HTTP依赖`);
-
+        const net = globalThis.net || globalThis.http;
+        if (!net) {
+            logger.error(`未找到ob11网络连接依赖`);
             ai.context.lastReply = s;
             seal.replyToSender(ctx, msg, s);
             return '';
@@ -50,7 +49,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
                     user_id,
                     message: messageArray
                 }
-                const result = await globalThis.http.getData(epId, 'send_private_msg', data);
+                const result = await net.callApi(epId, 'send_private_msg', data);
                 if (result?.message_id) {
                     logger.info(`(${result.message_id})发送给QQ:${user_id}:${s}`);
                     return transformMsgId(result.message_id);
@@ -62,7 +61,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
                     group_id,
                     message: messageArray
                 }
-                const result = await globalThis.http.getData(epId, 'send_group_msg', data);
+                const result = await net.callApi(epId, 'send_group_msg', data);
                 if (result?.message_id) {
                     logger.info(`(${result.message_id})发送给QQ-Group:${group_id}:${s}`);
                     return transformMsgId(result.message_id);

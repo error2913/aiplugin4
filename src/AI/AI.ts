@@ -12,8 +12,8 @@ import { checkContextUpdate } from "../utils/utils_update";
 import { TimerManager } from "../timer";
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['limit', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo'];
-    limit: number;
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo'];
+    priv: number;
     standby: boolean;
     counter: number;
     timer: number;
@@ -25,7 +25,7 @@ export class Setting {
     }
 
     constructor() {
-        this.limit = 100;
+        this.priv = 0;
         this.standby = false;
         this.counter = -1;
         this.timer = -1;

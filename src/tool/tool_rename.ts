@@ -29,13 +29,13 @@ export function registerRename() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
 
-        const ext = seal.ext.find('HTTP依赖');
-        if (ext) {
+        const net = globalThis.net || globalThis.http;
+        if (net) {
             try {
                 const epId = ctx.endPoint.userId;
                 const group_id = ctx.group.groupId.replace(/^.+:/, '');
                 const user_id = epId.replace(/^.+:/, '');
-                const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
+                const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
                 if (result.role !== 'owner' && result.role !== 'admin') {
                     return `你没有管理员权限`;
                 }

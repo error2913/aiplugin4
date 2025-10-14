@@ -149,15 +149,15 @@ export function registerMessage() {
         const { msg_id } = args;
         const { isPrefix, showNumber, showMsgId } = ConfigManager.message;
 
-        const ext = seal.ext.find('HTTP依赖');
-        if (!ext) {
-            logger.error(`未找到HTTP依赖`);
-            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+        const net = globalThis.net || globalThis.http;
+        if (!net) {
+            logger.error(`未找到ob11网络连接依赖`);
+            return `未找到ob11网络连接依赖，请提示用户安装`;
         }
 
         try {
             const epId = ctx.endPoint.userId;
-            const result = await globalThis.http.getData(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
+            const result = await net.callApi(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
             let messageArray: MessageItem[] = result.message.filter((item: MessageItem) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
 
             // 图片偷取，以及图片转文字
@@ -243,15 +243,15 @@ export function registerMessage() {
     toolDel.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
-        const ext = seal.ext.find('HTTP依赖');
-        if (!ext) {
-            logger.error(`未找到HTTP依赖`);
-            return `未找到HTTP依赖，请提示用户安装HTTP依赖`;
+        const net = globalThis.net || globalThis.http;
+        if (!net) {
+            logger.error(`未找到ob11网络连接依赖`);
+            return `未找到ob11网络连接依赖，请提示用户安装`;
         }
 
         try {
             const epId = ctx.endPoint.userId;
-            const result = await globalThis.http.getData(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
+            const result = await net.callApi(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
             if (result.sender.user_id != epId.replace(/^.+:/, '')) {
                 if (result.sender.role == 'owner' || result.sender.role == 'admin') {
                     return `你没有权限撤回该消息`;
@@ -261,7 +261,7 @@ export function registerMessage() {
                     const epId = ctx.endPoint.userId;
                     const group_id = ctx.group.groupId.replace(/^.+:/, '');
                     const user_id = epId.replace(/^.+:/, '');
-                    const result = await globalThis.http.getData(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
+                    const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
                     if (result.role !== 'owner' && result.role !== 'admin') {
                         return `你没有管理员权限`;
                     }
@@ -277,7 +277,7 @@ export function registerMessage() {
 
         try {
             const epId = ctx.endPoint.userId;
-            await globalThis.http.getData(epId, `delete_msg?message_id=${transformMsgIdBack(msg_id)}`);
+            await net.callApi(epId, `delete_msg?message_id=${transformMsgIdBack(msg_id)}`);
             return `已撤回消息${msg_id}`;
         } catch (e) {
             logger.error(e);

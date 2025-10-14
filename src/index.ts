@@ -10,6 +10,7 @@ import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
 import { createMsg } from "./utils/utils_seal";
+import { PrivilegeManager } from "./privilege";
 
 function main() {
   ConfigManager.registerConfig();
@@ -17,15 +18,15 @@ function main() {
   AIManager.getUsageMap();
   ToolManager.registerTool();
   TimerManager.init();
+  PrivilegeManager.reviveCmdPriv();
 
   const ext = ConfigManager.ext;
 
   const cmdAI = seal.ext.newCmdItemInfo();
   cmdAI.name = 'ai'; // 指令名字，可用中文
   cmdAI.help = `帮助:
-【.ai st】修改权限(仅骰主可用)
-【.ai ck】检查权限(仅骰主可用)
-【.ai prompt】检查当前prompt(仅骰主可用)
+【.ai priv】权限相关
+【.ai prompt】查看system prompt
 【.ai status】查看当前AI状态
 【.ai ctxn】查看上下文里的名字
 【.ai timer】查看当前聊天定时器
@@ -49,102 +50,199 @@ function main() {
 
       const ret = seal.ext.newCmdExecuteResult(true);
       const ai = AIManager.getAI(id);
+      if (!PrivilegeManager.checkPriv(ctx, cmdArgs, ai)) {
+        seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+        return ret;
+      }
 
       switch (val) {
-        case 'st': {
-          if (ctx.privilegeLevel < 100) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
+        case 'priv': {
           const val2 = cmdArgs.getArgN(2);
-          if (!val2 || val2 == 'help') {
-            seal.replyToSender(ctx, msg, `帮助:
-【.ai st <ID> <权限限制>】
+          switch (val2) {
+            case 's':
+            case 'session': {
+              const val3 = cmdArgs.getArgN(3);
+              switch (val3) {
+                case 'st': {
+                  const val3 = cmdArgs.getArgN(3);
+                  if (!val3 || val3 == 'help') {
+                    seal.replyToSender(ctx, msg, `帮助:
+【.ai s st <ID> <会话权限>】修改会话权限
 
 <ID>:
 【QQ:1234567890】 私聊窗口
 【QQ-Group:1234】 群聊窗口
 【now】当前窗口
 
-<权限限制>:
-【0】普通用户
-【40】邀请者
-【50】群管理员
-【60】群主
-【100】骰主
-不填写时默认为100`);
-            return ret;
-          }
+<会话权限>:任意数字，越大权限越高`);
+                    return ret;
+                  }
 
-          const limit = parseInt(cmdArgs.getArgN(3));
-          if (isNaN(limit)) {
-            seal.replyToSender(ctx, msg, '权限值必须为数字');
-            return ret;
-          }
+                  const val4 = cmdArgs.getArgN(4);
+                  const limit = parseInt(val4);
+                  if (isNaN(limit)) {
+                    seal.replyToSender(ctx, msg, '权限值必须为数字');
+                    return ret;
+                  }
 
-          const id2 = val2 === 'now' ? id : val2;
-          const ai2 = AIManager.getAI(id2);
+                  const id2 = val3 === 'now' ? id : val3;
+                  const ai2 = AIManager.getAI(id2);
 
-          ai2.setting.limit = limit;
+                  ai2.setting.priv = limit;
 
-          seal.replyToSender(ctx, msg, '权限修改完成');
-          AIManager.saveAI(id2);
-          return ret;
-        }
-        case 'ck': {
-          if (ctx.privilegeLevel < 100) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
-          const val2 = cmdArgs.getArgN(2);
-          if (!val2 || val2 == 'help') {
-            seal.replyToSender(ctx, msg, `帮助:
-【.ai ck <ID>】
+                  seal.replyToSender(ctx, msg, '权限修改完成');
+                  AIManager.saveAI(id2);
+                  return ret;
+                }
+                case 'ck': {
+                  const val3 = cmdArgs.getArgN(3);
+                  if (!val3 || val3 == 'help') {
+                    seal.replyToSender(ctx, msg, `帮助:
+【.ai s ck <ID>】检查会话权限
 
 <ID>:
 【QQ:1234567890】 私聊窗口
 【QQ-Group:1234】 群聊窗口
 【now】当前窗口`);
-            return ret;
+                    return ret;
+                  }
+
+                  const id2 = val3 === 'now' ? id : val3;
+                  const ai2 = AIManager.getAI(id2);
+
+                  const setting = ai2.setting;
+
+                  const counter = setting.counter > -1 ? `${setting.counter}条` : '关闭';
+                  const timer = setting.timer > -1 ? `${setting.timer}秒` : '关闭';
+                  const prob = setting.prob > -1 ? `${setting.prob}%` : '关闭';
+                  const standby = setting.standby ? '开启' : '关闭';
+                  const s = `${id2}\n权限限制:${setting.priv}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
+                  seal.replyToSender(ctx, msg, s);
+                  return ret;
+                }
+                default: {
+                  seal.replyToSender(ctx, msg, `帮助:
+【.ai s st <ID> <会话权限>】修改会话权限
+【.ai s ck <ID>】检查会话权限
+
+<ID>:
+【QQ:1234567890】 私聊窗口
+【QQ-Group:1234】 群聊窗口
+【now】当前窗口
+
+<会话权限>:任意数字，越大权限越高`);
+                  return ret;
+                }
+              }
+            }
+            case 'st': {
+              const val3 = cmdArgs.getArgN(3);
+              if (!val3 || val3 == 'help') {
+                seal.replyToSender(ctx, msg, `帮助:
+【.ai st <指令> <权限限制>】修改指令权限
+
+<指令>:指令名称和参数，多个指令用-连接，如ai-sb
+<权限限制>:数字0-数字1-数字2，如0-0-0，含义如下:
+0: 会话所需权限, 1: 会话检查通过后用户所需权限, 2: 强行触发指令用户所需权限, 进行检查时若通过0和1则无需检查2
+【-30】黑名单用户
+【0】普通用户
+【40】邀请者
+【50】群管理员
+【60】群主
+【70】白名单用户
+【100】骰主`);
+                return ret;
+              }
+              const cmdChain = val3.split('-');
+              if (cmdChain?.[1] === 'priv') {
+                seal.replyToSender(ctx, msg, `你不能修改priv指令的权限`);
+                return ret;
+              }
+              const cpi = PrivilegeManager.getCmdPriv(cmdChain);
+              if (!cpi) {
+                seal.replyToSender(ctx, msg, `指令${val3}不存在`);
+                return ret;
+              }
+              const val4 = cmdArgs.getArgN(4);
+              const priv = val4.split('-').map(p => parseInt(p));
+              if (priv.length !== 3) {
+                seal.replyToSender(ctx, msg, '权限值必须为3个数字');
+                return ret;
+              }
+              for (const p of priv) {
+                if (isNaN(p)) {
+                  seal.replyToSender(ctx, msg, '权限值必须为数字');
+                  return ret;
+                }
+              }
+              cpi.priv = priv as [number, number, number];
+              PrivilegeManager.saveCmdPriv();
+              seal.replyToSender(ctx, msg, '权限修改完成');
+              return ret;
+            }
+            case 'show': {
+              const val3 = cmdArgs.getArgN(3);
+              if (!val3 || val3 == 'help') {
+                seal.replyToSender(ctx, msg, `帮助:
+【.ai s show <指令>】检查指令权限
+
+<指令>:指令名称和参数，多个指令用-连接，如ai-sb`);
+                return ret;
+              }
+              const cmdChain = val3.split('-');
+              const cpi = PrivilegeManager.getCmdPriv(cmdChain);
+              if (!cpi) {
+                seal.replyToSender(ctx, msg, `指令${val3}不存在`);
+                return ret;
+              }
+              seal.replyToSender(ctx, msg, `指令${val3}权限限制:${cpi.priv.join('-')}`);
+              return ret;
+            }
+            case 'reset': {
+              PrivilegeManager.resetCmdPriv();
+              seal.replyToSender(ctx, msg, '指令权限重置完成');
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, `帮助:
+【.ai s st <ID> <会话权限>】修改会话权限
+【.ai s ck <ID>】检查会话权限
+【.ai st <指令> <权限限制>】修改指令权限
+【.ai show <指令>】检查指令权限
+【.ai reset】重置指令权限
+
+<ID>:
+【QQ:1234567890】 私聊窗口
+【QQ-Group:1234】 群聊窗口
+【now】当前窗口
+
+<会话权限>:任意数字，越大权限越高
+<指令>:指令名称和参数，多个指令用-连接，如ai-sb
+<权限限制>:数字0-数字1-数字2，如0-0-0，含义如下:
+0: 会话所需权限, 1: 会话检查通过后用户所需权限, 2: 强行触发指令用户所需权限, 进行检查时若通过0和1则无需检查2
+【-30】黑名单用户
+【0】普通用户
+【40】邀请者
+【50】群管理员
+【60】群主
+【70】白名单用户
+【100】骰主`);
+              return ret;
+            }
           }
-
-          const id2 = val2 === 'now' ? id : val2;
-          const ai2 = AIManager.getAI(id2);
-
-          const setting = ai2.setting;
-
-          const counter = setting.counter > -1 ? `${setting.counter}条` : '关闭';
-          const timer = setting.timer > -1 ? `${setting.timer}秒` : '关闭';
-          const prob = setting.prob > -1 ? `${setting.prob}%` : '关闭';
-          const standby = setting.standby ? '开启' : '关闭';
-          const s = `${id2}\n权限限制:${setting.limit}\n计数器模式(c):${counter}\n计时器模式(t):${timer}\n概率模式(p):${prob}\n待机模式:${standby}`;
-          seal.replyToSender(ctx, msg, s);
-          return ret;
         }
         case 'prompt': {
-          if (ctx.privilegeLevel < 100) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           const systemMessage = buildSystemMessage(ctx, ai);
-
+          logger.info(`system prompt:\n`, systemMessage.msgArray[0].content);
           seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
           return ret;
         }
         case 'status': {
           const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           const { start, end, segs } = setting.activeTimeInfo;
 
           seal.replyToSender(ctx, msg, `${id}
-权限限制: ${setting.limit}
+权限: ${setting.priv}
 上下文轮数: ${ai.context.messages.filter(m => m.role === 'user').length}
 计数器模式(c): ${setting.counter > -1 ? `${setting.counter}条` : '关闭'}
 计时器模式(t): ${setting.timer > -1 ? `${setting.timer}秒` : '关闭'}
@@ -155,24 +253,12 @@ function main() {
           return ret;
         }
         case 'ctxn': {
-          const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           const names = ai.context.getNames();
           const s = `上下文里的名字有：\n<${names.join('>\n<')}>`;
           seal.replyToSender(ctx, msg, s);
           return ret;
         }
         case 'timer': {
-          const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case 'clr': {
@@ -207,10 +293,6 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
         }
         case 'on': {
           const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
 
           const kwargs = cmdArgs.kwargs;
           if (kwargs.length == 0) {
@@ -323,10 +405,6 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
         }
         case 'sb': {
           const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
 
           ai.resetState();
           TimerManager.removeTimer(id, '', 'activeTime', []);
@@ -347,10 +425,6 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
         }
         case 'off': {
           const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
 
           const kwargs = cmdArgs.kwargs;
           if (kwargs.length == 0) {
@@ -418,12 +492,6 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
         }
         case 'f':
         case 'fgt': {
-          const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           ai.resetState();
 
           const val2 = cmdArgs.getArgN(2);
@@ -450,12 +518,6 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           }
         }
         case 'role': {
-          const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           const { roleSettingTemplate } = ConfigManager.message;
 
           const val2 = cmdArgs.getArgN(2);
@@ -483,11 +545,6 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
         case 'memo': {
           const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
           const muid = mctx.player.userId;
-
-          if (ctx.privilegeLevel < 100 && muid !== uid) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
 
           const ai2 = AIManager.getAI(muid);
           const val2 = cmdArgs.getArgN(2);
@@ -578,11 +635,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                 seal.replyToSender(ctx, msg, '群聊记忆仅在群聊可用');
                 return ret;
               }
-              const setting = ai.setting;
-              if (ctx.privilegeLevel < setting.limit) {
-                seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-                return ret;
-              }
+
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
                 case 'st': {
@@ -769,63 +822,61 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
               // 开启或关闭工具函数
               const val3 = cmdArgs.getArgN(3);
-              if (val3 === 'on') {
-                const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
-                if (toolsNotAllow.includes(val2)) {
-                  seal.replyToSender(ctx, msg, `工具函数 ${val2} 不被允许开启`);
+              switch (val3) {
+                case 'on': {
+                  const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
+                  if (toolsNotAllow.includes(val2)) {
+                    seal.replyToSender(ctx, msg, `工具函数 ${val2} 不被允许开启`);
+                    return ret;
+                  }
+
+                  ai.tool.toolStatus[val2] = true;
+                  seal.replyToSender(ctx, msg, `已开启工具函数 ${val2}`);
+                  AIManager.saveAI(id);
                   return ret;
                 }
-
-                ai.tool.toolStatus[val2] = true;
-                seal.replyToSender(ctx, msg, `已开启工具函数 ${val2}`);
-                AIManager.saveAI(id);
-                return ret;
-              } else if (val3 === 'off') {
-                ai.tool.toolStatus[val2] = false;
-                seal.replyToSender(ctx, msg, `已关闭工具函数 ${val2}`);
-                AIManager.saveAI(id);
-                return ret;
-              }
-
-              // 调用工具函数
-              if (ctx.privilegeLevel < 100) {
-                seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-                return ret;
-              }
-
-              if (ToolManager.cmdArgs == null) {
-                seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
-                return ret;
-              }
-
-              const tool = ToolManager.toolMap[val2];
-
-              try {
-                const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
-                  const valueString = kwarg.value;
-                  try {
-                    acc[kwarg.name] = JSON.parse(`[${valueString}]`)[0];
-                  } catch (e) {
-                    acc[kwarg.name] = valueString;
+                case 'off': {
+                  ai.tool.toolStatus[val2] = false;
+                  seal.replyToSender(ctx, msg, `已关闭工具函数 ${val2}`);
+                  AIManager.saveAI(id);
+                  return ret;
+                }
+                default: {
+                  if (ToolManager.cmdArgs == null) {
+                    seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
+                    return ret;
                   }
-                  return acc;
-                }, {});
 
-                for (const key of tool.info.function.parameters.required) {
-                  if (!args.hasOwnProperty(key)) {
-                    logger.warning(`调用函数失败:缺少必需参数 ${key}`);
-                    seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
+                  const tool = ToolManager.toolMap[val2];
+
+                  try {
+                    const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
+                      const valueString = kwarg.value;
+                      try {
+                        acc[kwarg.name] = JSON.parse(`[${valueString}]`)[0];
+                      } catch (e) {
+                        acc[kwarg.name] = valueString;
+                      }
+                      return acc;
+                    }, {});
+
+                    for (const key of tool.info.function.parameters.required) {
+                      if (!args.hasOwnProperty(key)) {
+                        logger.warning(`调用函数失败:缺少必需参数 ${key}`);
+                        seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
+                        return ret;
+                      }
+                    }
+
+                    tool.solve(ctx, msg, ai, args)
+                      .then(s => seal.replyToSender(ctx, msg, s));
+                    return ret;
+                  } catch (e) {
+                    const s = `调用函数 (${val2}) 失败:${e.message}`;
+                    seal.replyToSender(ctx, msg, s);
                     return ret;
                   }
                 }
-
-                tool.solve(ctx, msg, ai, args)
-                  .then(s => seal.replyToSender(ctx, msg, s));
-                return ret;
-              } catch (e) {
-                const s = `调用函数 (${val2}) 失败:${e.message}`;
-                seal.replyToSender(ctx, msg, s);
-                return ret;
               }
             }
           }
@@ -833,12 +884,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
         case 'ign': {
           if (ctx.isPrivate) {
             seal.replyToSender(ctx, msg, '忽略名单仅在群聊可用');
-            return ret;
-          }
-
-          const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
             return ret;
           }
 
@@ -893,11 +938,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
         }
         case 'tk': {
-          if (ctx.privilegeLevel < 100) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case 'lst': {
@@ -1265,12 +1305,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           }
         }
         case 'shut': {
-          const setting = ai.setting;
-          if (ctx.privilegeLevel < setting.limit) {
-            seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
-            return ret;
-          }
-
           if (ai.stream.id === '') {
             seal.replyToSender(ctx, msg, '当前没有正在进行的对话');
             return ret;
@@ -1301,7 +1335,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 【.img itt [图片/ran] (附加提示词)】图片转文字
 【.img save 名称 场景1,场景2,... 图片】保存图片
 【.img save [show/clr]】展示保存的图片列表/展示并发送所有保存的图片
-【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
+【.img save del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
@@ -1311,6 +1345,10 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       const ret = seal.ext.newCmdExecuteResult(true);
       const ai = AIManager.getAI(id);
+      if (!PrivilegeManager.checkPriv(ctx, cmdArgs, ai)) {
+        seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+        return ret;
+      }
 
       switch (val) {
         case 'draw': {
@@ -1439,7 +1477,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case '': {
-              seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+              seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片，【.img save del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
               return ret;
             }
             case 'show': {
@@ -1462,16 +1500,22 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               AIManager.saveAI(id);
               return ret;
             }
-            default: {
-              const name = val2;
-              if (!name) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+            case 'del': {
+              const nameList = cmdArgs.args.slice(2);
+              if (nameList.length === 0) {
+                seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
                 return ret;
               }
 
+              ai.imageManager.delSavedImage(nameList);
+              seal.replyToSender(ctx, msg, `已删除图片`);
+              return ret;
+            }
+            default: {
+              const name = val2;
               const scenes = cmdArgs.getArgN(3).split(/[，,]/);
               if (scenes.length === 0) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片');
                 return ret;
               }
 
@@ -1479,7 +1523,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               const messageItem0 = transformTextToArray(val4)?.[0];
               const url = messageItem0?.data?.url || messageItem0?.data?.file;
               if (messageItem0?.type !== 'image' || !url) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片');
+                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片');
                 return ret;
               }
 
@@ -1506,17 +1550,6 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
               return ret;
             }
           }
-        }
-        case 'del': {
-          const nameList = cmdArgs.args.slice(1);
-          if (nameList.length === 0) {
-            seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
-            return ret;
-          }
-
-          ai.imageManager.delSavedImage(nameList);
-          seal.replyToSender(ctx, msg, `已删除图片`);
-          return ret;
         }
         default: {
           ret.showHelp = true;
