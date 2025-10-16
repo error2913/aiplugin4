@@ -51,7 +51,7 @@ function main() {
       const ret = seal.ext.newCmdExecuteResult(true);
       const ai = AIManager.getAI(id);
       if (!PrivilegeManager.checkPriv(ctx, cmdArgs, ai)) {
-        seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+        seal.replyToSender(ctx, msg, "权限不足或指令不存在");
         return ret;
       }
 
@@ -1346,7 +1346,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
       const ret = seal.ext.newCmdExecuteResult(true);
       const ai = AIManager.getAI(id);
       if (!PrivilegeManager.checkPriv(ctx, cmdArgs, ai)) {
-        seal.replyToSender(ctx, msg, seal.formatTmpl(ctx, "核心:提示_无权限"));
+        seal.replyToSender(ctx, msg, "权限不足或指令不存在");
         return ret;
       }
 
