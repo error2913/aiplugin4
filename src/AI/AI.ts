@@ -1,7 +1,7 @@
 import { Image, ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
-import { endStream, pollStream, sendChatRequest, startStream } from "../service";
+import { sendChatRequest, StreamWebSocket } from "../service";
 import { Context } from "./context";
 import { Memory } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
@@ -51,6 +51,7 @@ export class AI {
     // 下面是临时变量，用于处理消息
     stream: { // 用于流式输出相关
         id: string,
+        ws: StreamWebSocket,
         reply: string,
         toolCallStatus: boolean
     }
@@ -70,6 +71,7 @@ export class AI {
         this.setting = new Setting();
         this.stream = {
             id: '',
+            ws: null,
             reply: '',
             toolCallStatus: false
         }
@@ -195,52 +197,105 @@ export class AI {
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { isTool, usePromptEngineering } = ConfigManager.tool;
+        const { streamUrl } = ConfigManager.backend;
 
         await this.stopCurrentChatStream();
 
         const messages = handleMessages(ctx, this);
-        const id = await startStream(messages);
-        if (id === '') {
-            return;
-        }
+        
+        // 创建WebSocket连接
+        const ws = new StreamWebSocket(streamUrl);
+        this.stream.ws = ws;
 
-        this.stream.id = id;
-        let status = 'processing';
-        let after = 0;
-        let interval = 1000;
-
-        while (status == 'processing' && this.stream.id === id) {
-            const result = await pollStream(this.stream.id, after);
-            status = result.status;
-            const raw_reply = result.reply;
-
-            if (raw_reply.length <= 8) {
-                interval = 1500;
-            } else if (raw_reply.length <= 20) {
-                interval = 1000;
-            } else if (raw_reply.length <= 30) {
-                interval = 500;
-            } else {
-                interval = 200;
+        try {
+            const streamId = await ws.connect(messages);
+            if (!streamId) {
+                return;
             }
 
-            if (raw_reply.trim() === '') {
-                after = result.nextAfter;
-                await new Promise(resolve => setTimeout(resolve, interval));
-                continue;
-            }
-            logger.info("接收到的回复:", raw_reply);
+            this.stream.id = streamId;
+            let accumulatedContent = '';
 
-            if (isTool && usePromptEngineering) {
-                if (!this.stream.toolCallStatus && /<function(?:_call)?>/.test(this.stream.reply + raw_reply)) {
-                    logger.info("发现工具调用开始标签，拦截后续内容");
+            // 设置消息处理回调
+            ws.onMessage(async (data) => {
+                if (this.stream.id !== streamId) {
+                    return;
+                }
 
-                    // 对于function_call前面的内容，发送并添加到上下文中
-                    const match = raw_reply.match(/([\s\S]*)<function(?:_call)?>/);
-                    if (match && match[1].trim()) {
-                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
+                switch (data.type) {
+                    case 'content':
+                        const raw_reply = data.content;
+                        accumulatedContent += raw_reply;
 
-                        if (this.stream.id !== id) {
+                        if (raw_reply.trim() === '') {
+                            return;
+                        }
+                        logger.info("接收到的回复:", raw_reply);
+
+                        if (isTool && usePromptEngineering) {
+                            if (!this.stream.toolCallStatus && /<function(?:_call)?>/.test(this.stream.reply + accumulatedContent)) {
+                                logger.info("发现工具调用开始标签，拦截后续内容");
+
+                                // 对于function_call前面的内容，发送并添加到上下文中
+                                const match = accumulatedContent.match(/([\s\S]*)<function(?:_call)?>/);
+                                if (match && match[1].trim()) {
+                                    const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
+
+                                    if (this.stream.id !== streamId) {
+                                        return;
+                                    }
+
+                                    for (let i = 0; i < contextArray.length; i++) {
+                                        const s = contextArray[i];
+                                        const messageArray = transformTextToArray(s);
+                                        const reply = replyArray[i];
+                                        const msgId = await replyToSender(ctx, msg, this, reply);
+                                        await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
+                                    }
+                                }
+
+                                this.stream.toolCallStatus = true;
+                                accumulatedContent = '';
+                            }
+
+                            if (this.stream.toolCallStatus) {
+                                this.stream.reply += raw_reply;
+
+                                if (/<\/function(?:_call)?>/.test(this.stream.reply)) {
+                                    logger.info("发现工具调用结束标签，开始处理对应工具调用");
+                                    const match = this.stream.reply.match(/<function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                                    if (match) {
+                                        this.stream.reply = '';
+                                        this.stream.toolCallStatus = false;
+                                        await this.stopCurrentChatStream();
+
+                                        const messageArray = transformTextToArray(match[0]);
+                                        await this.context.addMessage(ctx, msg, this, messageArray, [], "assistant", '');
+
+                                        try {
+                                            await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
+                                        } catch (e) {
+                                            logger.error(`在handlePromptToolCall中出错：`, e.message);
+                                            return;
+                                        }
+
+                                        await this.chatStream(ctx, msg);
+                                        return;
+                                    } else {
+                                        logger.error('无法匹配到function_call');
+                                        await this.stopCurrentChatStream();
+                                    }
+                                    return;
+                                } else {
+                                    return;
+                                }
+                            }
+                        }
+
+                        // 处理普通内容
+                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, raw_reply);
+
+                        if (this.stream.id !== streamId) {
                             return;
                         }
 
@@ -251,74 +306,71 @@ export class AI {
                             const msgId = await replyToSender(ctx, msg, this, reply);
                             await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
                         }
-                    }
+                        break;
 
-                    this.stream.toolCallStatus = true;
-                }
-
-                if (this.stream.id !== id) {
-                    return;
-                }
-
-                if (this.stream.toolCallStatus) {
-                    this.stream.reply += raw_reply;
-
-                    if (/<\/function(?:_call)?>/.test(this.stream.reply)) {
-                        logger.info("发现工具调用结束标签，开始处理对应工具调用");
-                        const match = this.stream.reply.match(/<function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
-                        if (match) {
-                            this.stream.reply = '';
-                            this.stream.toolCallStatus = false;
-                            await this.stopCurrentChatStream();
-
-                            const messageArray = transformTextToArray(match[0]);
-                            await this.context.addMessage(ctx, msg, this, messageArray, [], "assistant", '');
-
-                            try {
-                                await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
-                            } catch (e) {
-                                logger.error(`在handlePromptToolCall中出错：`, e.message);
-                                return;
-                            }
-
-                            await this.chatStream(ctx, msg);
-                            return;
-                        } else {
-                            logger.error('无法匹配到function_call');
-                            await this.stopCurrentChatStream();
+                    case 'completed':
+                        logger.info('流式对话完成');
+                        if (data.usage) {
+                            AIManager.updateUsage(data.model, data.usage);
                         }
-                        return;
-                    } else {
-                        after = result.nextAfter;
-                        await new Promise(resolve => setTimeout(resolve, interval));
-                        continue;
-                    }
+                        await this.stopCurrentChatStream();
+                        break;
+
+                    case 'error':
+                        logger.error('流式对话错误:', data.error);
+                        await this.stopCurrentChatStream();
+                        break;
+                }
+            });
+
+            ws.onError((error) => {
+                logger.error('WebSocket错误:', error);
+                this.stopCurrentChatStream();
+            });
+
+            ws.onClose(() => {
+                logger.info('WebSocket连接关闭');
+                if (this.stream.id === streamId) {
+                    this.stream.id = '';
+                }
+            });
+
+        } catch (e) {
+            logger.error('创建WebSocket连接失败:', e.message);
+            await this.stopCurrentChatStream();
+        }
+    }
+
+    async stopCurrentChatStream(): Promise<void> {
+        const { id, reply, toolCallStatus, ws } = this.stream;
+        
+        // 重置 stream 状态
+        this.stream = {
+            id: '',
+            reply: '',
+            toolCallStatus: false,
+            ws: null
+        };
+        
+        if (id) {
+            logger.info(`结束会话:`, id);
+            
+            // 检查未处理的工具调用（保持原有逻辑）
+            if (reply) {
+                if (toolCallStatus) {
+                    logger.warning(`工具调用未处理完成:`, reply);
                 }
             }
-
-            const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, raw_reply);
-
-            if (this.stream.id !== id) {
-                return;
+            
+            // 关闭 WebSocket 连接
+            if (ws) {
+                ws.sendCancel();
+                ws.close();
             }
-
-            for (let i = 0; i < contextArray.length; i++) {
-                const s = contextArray[i];
-                const messageArray = transformTextToArray(s);
-                const reply = replyArray[i];
-                const msgId = await replyToSender(ctx, msg, this, reply);
-                await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
-            }
-
-            after = result.nextAfter;
-            await new Promise(resolve => setTimeout(resolve, interval));
+            
+            // 注意：WebSocket 版本不再需要调用 endStream
+            // 因为使用统计信息会在 WebSocket 的 completed 消息中返回
         }
-
-        if (this.stream.id !== id) {
-            return;
-        }
-
-        await this.stopCurrentChatStream();
     }
 
     // 若不在活动时间范围内，返回-1
@@ -370,24 +422,6 @@ export class AI {
                     logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
                 }
             }
-        }
-    }
-
-    async stopCurrentChatStream(): Promise<void> {
-        const { id, reply, toolCallStatus } = this.stream;
-        this.stream = {
-            id: '',
-            reply: '',
-            toolCallStatus: false
-        }
-        if (id) {
-            logger.info(`结束会话:`, id);
-            if (reply) {
-                if (toolCallStatus) { // 没有处理完的工具调用，在日志中显示
-                    logger.warning(`工具调用未处理完成:`, reply);
-                }
-            }
-            await endStream(id);
         }
     }
 }
