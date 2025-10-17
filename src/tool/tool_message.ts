@@ -66,13 +66,13 @@ export function registerMessage() {
         if (msg_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (uid === ctx.player.userId && ctx.isPrivate) {
-                return `向当前私聊发送消息无需调用函数`;
+                return { content: `向当前私聊发送消息无需调用函数`, images: [] };
             }
             if (uid === ctx.endPoint.userId) {
-                return `禁止向自己发送消息`;
+                return { content: `禁止向自己发送消息`, images: [] };
             }
 
             msg = createMsg('private', uid, '');
@@ -82,10 +82,10 @@ export function registerMessage() {
         } else if (msg_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (gid === ctx.group.groupId) {
-                return `向当前群聊发送消息无需调用函数`;
+                return { content: `向当前群聊发送消息无需调用函数`, images: [] };
             }
 
             msg = createMsg('group', ctx.player.userId, gid);
@@ -93,7 +93,7 @@ export function registerMessage() {
 
             ai = AIManager.getAI(gid);
         } else {
-            return `未知的消息类型<${msg_type}>`;
+            return { content: `未知的消息类型<${msg_type}>`, images: [] };
         }
 
         ai.resetState();
@@ -116,15 +116,15 @@ export function registerMessage() {
                     await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
                 } catch (e) {
                     logger.error(`在handlePromptToolCall中出错：`, e.message);
-                    return `函数调用失败:${e.message}`;
+                    return { content: `函数调用失败:${e.message}`, images: [] };
                 }
             }
 
             AIManager.saveAI(ai.id);
-            return "消息发送成功";
+            return { content: "消息发送成功", images: [] };
         } catch (e) {
             logger.error(e);
-            return `消息发送失败:${e.message}`;
+            return { content: `消息发送失败:${e.message}`, images: [] };
         }
     }
 
@@ -152,7 +152,7 @@ export function registerMessage() {
         const net = globalThis.net || globalThis.http;
         if (!net) {
             logger.error(`未找到ob11网络连接依赖`);
-            return `未找到ob11网络连接依赖，请提示用户安装`;
+            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
         }
 
         try {
@@ -170,9 +170,6 @@ export function registerMessage() {
                     ai.imageManager.updateStolenImages(images);
                 }
             }
-
-            // 将images添加到最后一条消息，以便使用
-            ai.context.messages[ai.context.messages.length - 1].images.push(...images);
 
             //处理文本
             const message = messageArray.map(item => {
@@ -216,10 +213,10 @@ export function registerMessage() {
             const name = mctx.player.name || '未知用户';
             const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
 
-            return prefix + message;
+            return { content: prefix + message, images: images };
         } catch (e) {
             logger.error(e);
-            return `获取消息信息失败`;
+            return { content: `获取消息信息失败`, images: [] };
         }
     }
 
@@ -246,7 +243,7 @@ export function registerMessage() {
         const net = globalThis.net || globalThis.http;
         if (!net) {
             logger.error(`未找到ob11网络连接依赖`);
-            return `未找到ob11网络连接依赖，请提示用户安装`;
+            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
         }
 
         try {
@@ -254,7 +251,7 @@ export function registerMessage() {
             const result = await net.callApi(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
             if (result.sender.user_id != epId.replace(/^.+:/, '')) {
                 if (result.sender.role == 'owner' || result.sender.role == 'admin') {
-                    return `你没有权限撤回该消息`;
+                    return { content: `你没有权限撤回该消息`, images: [] };
                 }
 
                 try {
@@ -263,25 +260,25 @@ export function registerMessage() {
                     const user_id = epId.replace(/^.+:/, '');
                     const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
                     if (result.role !== 'owner' && result.role !== 'admin') {
-                        return `你没有管理员权限`;
+                        return { content: `你没有管理员权限`, images: [] };
                     }
                 } catch (e) {
                     logger.error(e);
-                    return `获取权限信息失败`;
+                    return { content: `获取权限信息失败`, images: [] };
                 }
             }
         } catch (e) {
             logger.error(e);
-            return `获取消息信息失败`;
+            return { content: `获取消息信息失败`, images: [] };
         }
 
         try {
             const epId = ctx.endPoint.userId;
             await net.callApi(epId, `delete_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            return `已撤回消息${msg_id}`;
+            return { content: `已撤回消息${msg_id}`, images: [] };
         } catch (e) {
             logger.error(e);
-            return `撤回消息失败`;
+            return { content: `撤回消息失败`, images: [] };
         }
     }
 }

@@ -37,17 +37,17 @@ export function registerRename() {
                 const user_id = epId.replace(/^.+:/, '');
                 const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
                 if (result.role !== 'owner' && result.role !== 'admin') {
-                    return `你没有管理员权限`;
+                    return { content: `你没有管理员权限`, images: [] };
                 }
             } catch (e) {
                 logger.error(e);
-                return `获取权限信息失败`;
+                return { content: `获取权限信息失败`, images: [] };
             }
         }
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -56,10 +56,10 @@ export function registerRename() {
         try {
             seal.setPlayerGroupCard(ctx, new_name);
             seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
-            return '设置成功';
+            return { content: '设置成功', images: [] };
         } catch (e) {
             logger.error(e);
-            return '设置失败';
+            return { content: '设置失败', images: [] };
         }
     }
 }

@@ -51,7 +51,7 @@ export function registerRollCheck() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -83,10 +83,10 @@ export function registerRollCheck() {
         ToolManager.cmdArgs.specialExecuteTimes = 1;
 
         if (!success) {
-            return '检定执行失败';
+            return { content: '检定执行失败', images: [] };
         }
 
-        return s;
+        return { content: s, images: [] };
     }
 
     // 该函数疑似无法正常工作。无法找到原因。
@@ -128,7 +128,7 @@ export function registerRollCheck() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -147,9 +147,9 @@ export function registerRollCheck() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, args2, [], []);
         if (!success) {
-            return 'san check执行失败';
+            return { content: 'san check执行失败', images: [] };
         }
 
-        return s;
+        return { content: s, images: [] };
     }
 }

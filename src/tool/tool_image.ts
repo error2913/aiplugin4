@@ -30,19 +30,19 @@ export function registerImage() {
 
         const image = ai.context.findImage(id, ai);
         if (!image) {
-            return `未找到图片${id}`;
+            return { content: `未找到图片${id}`, images: [] };
         }
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
         if (image.isUrl) {
             const reply = await ImageManager.imageToText(image.file, text);
             if (reply) {
-                return reply;
+                return { content: reply, images: [] };
             } else {
-                return '图片识别失败';
+                return { content: '图片识别失败', images: [] };
             }
         } else {
-            return '本地图片暂时无法识别';
+            return { content: '本地图片暂时无法识别', images: [] };
         }
     }
 
@@ -81,27 +81,27 @@ export function registerImage() {
         if (avatar_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
 
             url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
         } else if (avatar_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
 
             url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
         } else {
-            return `未知的头像类型<${avatar_type}>`;
+            return { content: `未知的头像类型<${avatar_type}>`, images: [] };
         }
 
 
         const reply = await ImageManager.imageToText(url, text);
         if (reply) {
-            return reply;
+            return { content: reply, images: [] };
         } else {
-            return '头像识别失败';
+            return { content: '头像识别失败', images: [] };
         }
     }
 
@@ -132,15 +132,15 @@ export function registerImage() {
         const ext = seal.ext.find('AIDrawing');
         if (!ext) {
             logger.error(`未找到AIDrawing依赖`);
-            return `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`;
+            return { content: `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`, images: [] };
         }
 
         try {
             await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
-            return `图像生成请求已发送`;
+            return { content: `图像生成请求已发送`, images: [] };
         } catch (e) {
             logger.error(`图像生成失败：${e}`);
-            return `图像生成失败：${e}`;
+            return { content: `图像生成失败：${e}`, images: [] };
         }
     }
 
@@ -189,19 +189,19 @@ export function registerImage() {
             const { id, name, scenes } = ii;
 
             if (!id || !name || !scenes || scenes.length === 0) {
-                return `图片${id}信息不完整，缺少id、name或scenes为空`;
+                return { content: `图片${id}信息不完整，缺少id、name或scenes为空`, images: [] };
             }
 
             const image = ai.context.findImage(id, ai);
             if (!image) {
-                return `未找到图片${id}`;
+                return { content: `未找到图片${id}`, images: [] };
             }
 
             if (image.isUrl) {
                 const { base64 } = await ImageManager.imageUrlToBase64(image.file);
                 if (!base64) {
                     logger.error(`图片${id}转换为base64失败`);
-                    return `图片转换为base64失败`;
+                    return { content: `图片转换为base64失败`, images: [] };
                 }
 
                 const newImage = new Image(image.file);
@@ -213,16 +213,16 @@ export function registerImage() {
 
                 savedImages.push(newImage);
             } else {
-                return '本地图片不用再次储存';
+                return { content: '本地图片不用再次储存', images: [] };
             }
         }
 
 
         try {
             ai.imageManager.updateSavedImages(savedImages);
-            return `图片已保存`;
+            return { content: `图片已保存`, images: [] };
         } catch (e) {
-            return `图片保存失败：${e.message}`
+            return { content: `图片保存失败：${e.message}`, images: [] };
         }
     }
 
@@ -249,12 +249,12 @@ export function registerImage() {
         for (const name of names) {
             const imageIndex = ai.imageManager.savedImages.findIndex(img => img.id === name);
             if (imageIndex === -1) {
-                return `未找到名称为"${name}"的保存图片`;
+                return { content: `未找到名称为"${name}"的保存图片`, images: [] };
             }
 
             ai.imageManager.savedImages.splice(imageIndex, 1);
         }
 
-        return `已删除${names.length}个图片`;
+        return { content: `已删除${names.length}个图片`, images: [] };
     }
 }

@@ -43,17 +43,17 @@ export function registerSetTrigger() {
                 new RegExp(keyword);
                 condition.keyword = keyword;
             } catch (e) {
-                return `触发关键词格式错误`;
+                return { content: `触发关键词格式错误`, images: [] };
             }
         }
 
         if (name) {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (uid === ctx.endPoint.userId) {
-                return `禁止将自己设置为触发条件`;
+                return { content: `禁止将自己设置为触发条件`, images: [] };
             }
 
             condition.uid = uid;
@@ -64,6 +64,6 @@ export function registerSetTrigger() {
         }
         triggerConditionMap[ai.id].push(condition);
 
-        return "触发条件设置成功";
+        return { content: "触发条件设置成功", images: [] };
     }
 }

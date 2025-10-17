@@ -886,7 +886,7 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
                     }
 
                     tool.solve(ctx, msg, ai, args)
-                      .then(s => seal.replyToSender(ctx, msg, s));
+                      .then(({ content }) => seal.replyToSender(ctx, msg, content));
                     return ret;
                   } catch (e) {
                     const s = `调用函数 (${val2}) 失败:${e.message}`;

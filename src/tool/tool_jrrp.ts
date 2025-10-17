@@ -30,7 +30,7 @@ export function registerJrrp() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -38,9 +38,9 @@ export function registerJrrp() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
         if (!success) {
-            return '今日人品查询失败'
+            return { content: '今日人品查询失败', images: [] };
         }
 
-        return s;
+        return { content: s, images: [] };
     }
 }

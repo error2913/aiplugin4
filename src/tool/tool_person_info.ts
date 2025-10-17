@@ -30,12 +30,12 @@ export function registerGetPersonInfo() {
         const net = globalThis.net || globalThis.http;
         if (!net) {
             logger.error(`未找到ob11网络连接依赖`);
-            return `未找到ob11网络连接依赖，请提示用户安装`;
+            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
         }
 
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -68,10 +68,10 @@ QQ等级: ${data.qqLevel}
             if (data.labels && data.labels.length > 0) s += `\n标签: ${data.labels.join(',')}`;
             if (data.long_nick) s += `\n个性签名: ${data.long_nick}`;
 
-            return s;
+            return { content: s, images: [] };
         } catch (e) {
             logger.error(e);
-            return `获取用户信息失败`;
+            return { content: `获取用户信息失败`, images: [] };
         }
     }
 }

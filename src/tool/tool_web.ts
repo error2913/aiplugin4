@@ -66,7 +66,7 @@ export function registerWeb() {
             const results_length = data.results.length;
             const results = part == 1 ? data.results.slice(0, Math.ceil(results_length / 2)) : data.results.slice(Math.ceil(results_length / 2));
             if (number_of_results == 0 || results.length == 0) {
-                return `没有搜索到结果`;
+                return { content: `没有搜索到结果`, images: [] };
             }
 
             const s = `搜索结果长度:${number_of_results}\n` + results.map((result: any, index: number) => {
@@ -76,10 +76,10 @@ export function registerWeb() {
 - 相关性:${result.score}`;
             }).join('\n');
 
-            return s;
+            return { content: s, images: [] };
         } catch (error) {
             logger.error("在web_search中请求出错：", error);
-            return `使用搜索引擎搜索失败:${error}`;
+            return { content: `使用搜索引擎搜索失败:${error}`, images: [] };
         }
     }
 
@@ -124,7 +124,7 @@ export function registerWeb() {
             const { title, content, links } = data;
 
             if (!title && !content && (!links || links.length === 0)) {
-                return `未能从网页中提取到有效内容`;
+                return { content: `未能从网页中提取到有效内容`, images: [] };
             }
 
             const result = `标题: ${title || "无标题"}\n内容: ${content || "无内容"}\n网页包含链接:\n` +
@@ -132,10 +132,10 @@ export function registerWeb() {
                     ? links.map((link: string, index: number) => `${index + 1}. ${link}`).join('\n')
                     : "无链接");
 
-            return result;
+            return { content: result, images: [] };
         } catch (error) {
             logger.error("在web_read中请求出错：", error);
-            return `读取网页内容失败: ${error}`;
+            return { content: `读取网页内容失败: ${error}`, images: [] };
         }
     }
 }
