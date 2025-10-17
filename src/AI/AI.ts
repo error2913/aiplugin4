@@ -3,7 +3,7 @@ import { ConfigManager } from "../config/config";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../service";
 import { Context } from "./context";
-import { Memory } from "./memory";
+import { MemoryManager, Memory } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
@@ -44,7 +44,7 @@ export class AI {
     version: string;
     context: Context;
     tool: ToolManager;
-    memory: Memory;
+    memory: MemoryManager;
     imageManager: ImageManager;
     setting: Setting;
 
@@ -65,7 +65,7 @@ export class AI {
         this.version = '0.0.0';
         this.context = new Context();
         this.tool = new ToolManager();
-        this.memory = new Memory();
+        this.memory = new MemoryManager();
         this.imageManager = new ImageManager();
         this.setting = new Setting();
         this.stream = {
@@ -418,6 +418,7 @@ export class AIManager {
                     if (key === "") {
                         return revive(AI, value);
                     }
+
                     if (key === "context") {
                         return revive(Context, value);
                     }
@@ -425,13 +426,19 @@ export class AIManager {
                         return revive(ToolManager, value);
                     }
                     if (key === "memory") {
-                        return revive(Memory, value);
+                        return revive(MemoryManager, value);
                     }
                     if (key === "imageManager") {
                         return revive(ImageManager, value);
                     }
                     if (key === "setting") {
                         return revive(Setting, value);
+                    }
+
+                    if (key === "memoryMap") {
+                        for (const key in value) {
+                            value[key] = revive(Memory, value[key]);
+                        }
                     }
 
                     return value;

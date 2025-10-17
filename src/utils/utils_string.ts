@@ -108,7 +108,7 @@ export type MessageItem = MessageItemText | MessageItemAt | MessageItemImage | M
 
 export interface MessageItem {
     type: string;
-    data: { 
+    data: {
         [key: string]: string
     };
 }
@@ -231,7 +231,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
         reply = await replaceMentions(ctx, ai.context, reply);
         reply = await replacePoke(ctx, ai.context, reply);
         reply = await replaceQuote(reply);
-        const { result, images: replyImages } = await replaceImages(ai.context, ai.imageManager, reply);
+        const { result, images: replyImages } = await replaceImages(ai, reply);
         reply = isTrim ? result.trim() : result;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
@@ -461,7 +461,7 @@ async function replaceQuote(reply: string) {
  * @param reply 
  * @returns 
  */
-async function replaceImages(context: Context, im: ImageManager, reply: string) {
+async function replaceImages(ai: AI, reply: string) {
     let result = reply;
     const images = [];
 
@@ -469,7 +469,7 @@ async function replaceImages(context: Context, im: ImageManager, reply: string) 
     if (match) {
         for (let i = 0; i < match.length; i++) {
             const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-            const image = context.findImage(id, im);
+            const image = ai.context.findImage(id, ai);
 
             if (image) {
                 images.push(image);

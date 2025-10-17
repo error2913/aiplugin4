@@ -8,8 +8,10 @@ import { fetchData } from "../service";
 import { buildContent, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { fmtDate } from "../utils/utils_string";
+import { Image, ImageManager } from "./image";
 
-export interface MemoryInfo {
+export class Memory {
+    static validKeys: (keyof Memory)[] = ['id', 'isPrivate', 'player', 'group', 'createTime', 'lastMentionTime', 'keywords', 'weight', 'content', 'images'];
     id: string;
     isPrivate: boolean;
     player: {
@@ -20,18 +22,48 @@ export interface MemoryInfo {
         groupId: string;
         groupName: string;
     }
-    time: string;
     createTime: number; // 秒级时间戳
     lastMentionTime: number;
     keywords: string[];
-    content: string;
     weight: number; // 记忆权重，0-10
+    content: string;
+    images: Image[];
+
+    constructor() {
+        this.id = '';
+        this.isPrivate = true;
+        this.player = {
+            userId: '',
+            name: ''
+        };
+        this.group = {
+            groupId: '',
+            groupName: ''
+        };
+        this.createTime = 0;
+        this.lastMentionTime = 0;
+        this.keywords = [];
+        this.weight = 0;
+        this.content = '';
+        this.images = [];
+    }
+
+    calcFgtWeight(now: number) {
+        const d = 24 * 60 * 60;
+        // 基础新鲜度衰减（按天计算）
+        const ageDecay = Math.log10((now - this.createTime) / d + 1);
+        // 活跃度衰减因子（最近接触按小时衰减）
+        const activityDecay = Math.max(1, (now - this.lastMentionTime) / 3600);
+        // 权重转换（0-10 → 1.0-3.0 指数曲线）
+        const importance = Math.pow(1.1161, this.weight);
+        return (ageDecay * activityDecay) / importance;
+    }
 }
 
-export class Memory {
-    static validKeys: (keyof Memory)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
+export class MemoryManager {
+    static validKeys: (keyof MemoryManager)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
     persona: string;
-    memoryMap: { [key: string]: MemoryInfo };
+    memoryMap: { [key: string]: Memory };
     useShortMemory: boolean;
     shortMemoryList: string[];
 
@@ -42,7 +74,7 @@ export class Memory {
         this.shortMemoryList = [];
     }
 
-    addMemory(ctx: seal.MsgContext, kws: string[], content: string) {
+    async addMemory(ctx: seal.MsgContext, ai: AI, kws: string[], content: string) {
         let id = generateId(), a = 0;
         while (this.memoryMap.hasOwnProperty(id)) {
             id = generateId();
@@ -62,24 +94,54 @@ export class Memory {
             }
         }
 
-        this.memoryMap[id] = {
-            id,
-            isPrivate: ctx.isPrivate,
-            player: {
-                userId: ctx.player.userId,
-                name: ctx.player.name
-            },
-            group: {
-                groupId: ctx.group.groupId,
-                groupName: ctx.group.groupName
-            },
-            time: fmtDate(Math.floor(Date.now() / 1000)),
-            createTime: Math.floor(Date.now() / 1000),
-            lastMentionTime: Math.floor(Date.now() / 1000),
-            keywords: kws || [],
-            content: content || '',
-            weight: 0
+        const now = Math.floor(Date.now() / 1000);
+        const m = new Memory();
+        m.id = id;
+        m.isPrivate = ctx.isPrivate;
+        m.player = {
+            userId: ctx.player.userId,
+            name: ctx.player.name
         };
+        m.group = {
+            groupId: ctx.group.groupId,
+            groupName: ctx.group.groupName
+        };
+        m.createTime = now;
+        m.lastMentionTime = now;
+        m.keywords = kws || [];
+        m.weight = 0;
+        m.content = content || '';
+
+        const images = [];
+        const match = content.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
+        if (match) {
+            for (let i = 0; i < match.length; i++) {
+                const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
+                const image = ai.context.findImage(id, ai);
+
+                if (image) {
+                    if (!image.isUrl) {
+                        if (image.base64) {
+                            image.weight += 1;
+                        }
+                        images.push(image);
+                    } else {
+                        const { base64 } = await ImageManager.imageUrlToBase64(image.file);
+                        if (!base64) {
+                            logger.error(`图片${id}转换为base64失败`);
+                            continue;
+                        }
+
+                        image.isUrl = false;
+                        image.base64 = base64;
+                        images.push(image);
+                    }
+                }
+            }
+        }
+        m.images = images || [];
+
+        this.memoryMap[id] = m;
 
         this.limitMemory();
     }
@@ -95,8 +157,8 @@ export class Memory {
 
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
-                const mi = this.memoryMap[id];
-                if (kws.some(kw => mi.keywords.includes(kw))) {
+                const m = this.memoryMap[id];
+                if (kws.some(kw => m.keywords.includes(kw))) {
                     delete this.memoryMap[id];
                 }
             }
@@ -114,20 +176,13 @@ export class Memory {
     limitMemory() {
         const { memoryLimit } = ConfigManager.memory;
         const now = Math.floor(Date.now() / 1000);
-        const d = 24 * 60 * 60;
         const memoryList = Object.values(this.memoryMap);
 
         const forgetIdList = memoryList
             .map((item) => {
-                // 基础新鲜度衰减（按天计算）
-                const ageDecay = Math.log10((now - item.createTime) / d + 1);
-                // 活跃度衰减因子（最近接触按小时衰减）
-                const activityDecay = Math.max(1, (now - item.lastMentionTime) / 3600);
-                // 权重转换（0-10 → 1.0-3.0 指数曲线）
-                const importance = Math.pow(1.1161, item.weight);
                 return {
                     id: item.id,
-                    fgtWeight: (ageDecay * activityDecay) / importance
+                    fgtWeight: item.calcFgtWeight(now)
                 }
             })
             .sort((a, b) => b.fgtWeight - a.fgtWeight)
@@ -258,12 +313,12 @@ export class Memory {
         const now = Math.floor(Date.now() / 1000);
 
         for (const id in this.memoryMap) {
-            const mi = this.memoryMap[id];
-            if (mi.keywords.some(kw => s.includes(kw))) {
-                mi.weight = Math.max(10, mi.weight + increase);
-                mi.lastMentionTime = now;
+            const m = this.memoryMap[id];
+            if (m.keywords.some(kw => s.includes(kw))) {
+                m.weight = Math.max(10, m.weight + increase);
+                m.lastMentionTime = now;
             } else {
-                mi.weight = Math.min(0, mi.weight - decrease);
+                m.weight = Math.min(0, m.weight - decrease);
             }
         }
     }
@@ -310,7 +365,7 @@ export class Memory {
         } else {
             memoryContent += memoryList
                 .map(item => {
-                    const mi: MemoryInfo = JSON.parse(JSON.stringify(item));
+                    const mi: Memory = JSON.parse(JSON.stringify(item));
                     if (item.keywords.some(kw => lastMsg.includes(kw))) {
                         mi.weight += 10;
                     }
@@ -322,7 +377,7 @@ export class Memory {
                     const data = {
                         "序号": i + 1,
                         "记忆ID": item.id,
-                        "记忆时间": item.time,
+                        "记忆时间": fmtDate(item.createTime),
                         "个人记忆": uid, //有uid代表这是个人记忆
                         "私聊": item.isPrivate,
                         "展示号码": showNumber,
@@ -354,7 +409,7 @@ export class Memory {
 
     buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
         const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
-        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(mi => mi.content).join('') : '';
+        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
 
         const ai = AIManager.getAI(ctx.endPoint.userId);
         let s = ai.memory.buildMemory(true, seal.formatTmpl(ctx, "核心:骰子名字"), ctx.endPoint.userId, '', '', lastMsg);
@@ -382,5 +437,15 @@ export class Memory {
 
             return s;
         }
+    }
+
+    findImage(id: string): Image | null {
+        for (const m of Object.values(this.memoryMap)) {
+            const image = m.images.find(item => item.id === id);
+            if (image) {
+                return image;
+            }
+        }
+        return null;
     }
 }

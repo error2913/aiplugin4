@@ -28,7 +28,7 @@ export function registerImage() {
     toolText.solve = async (_, __, ai, args) => {
         const { id, content } = args;
 
-        const image = ai.context.findImage(id, ai.imageManager);
+        const image = ai.context.findImage(id, ai);
         if (!image) {
             return `未找到图片${id}`;
         }
@@ -192,7 +192,7 @@ export function registerImage() {
                 return `图片${id}信息不完整，缺少id、name或scenes为空`;
             }
 
-            const image = ai.context.findImage(id, ai.imageManager);
+            const image = ai.context.findImage(id, ai);
             if (!image) {
                 return `未找到图片${id}`;
             }

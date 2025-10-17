@@ -280,10 +280,10 @@ export function buildContent(message: Message): string {
             `<|${message.name}|>` :
             `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
     ) : '';
-    const content = message.msgArray.map(mi =>
-        ((showMsgId && mi.msgId) ? `<|msg_id:${mi.msgId}|>` : '') +
-        (showTime ? `<|time:${fmtDate(mi.time)}|>` : '') +
-        mi.content
+    const content = message.msgArray.map(m =>
+        ((showMsgId && m.msgId) ? `<|msg_id:${m.msgId}|>` : '') +
+        (showTime ? `<|time:${fmtDate(m.time)}|>` : '') +
+        m.content
     ).join('\f');
     return prefix + content;
 }

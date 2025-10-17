@@ -65,7 +65,7 @@ export function registerMemory() {
         }
 
         //记忆相关处理
-        ai.memory.addMemory(ctx, Array.isArray(keywords) ? keywords : [], content);
+        await ai.memory.addMemory(ctx, ai, Array.isArray(keywords) ? keywords : [], content);
         AIManager.saveAI(ai.id);
 
         return `添加记忆成功`;

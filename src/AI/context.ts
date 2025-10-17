@@ -1,6 +1,6 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
-import { Image, ImageManager } from "./image";
+import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance, MessageItem } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
@@ -343,7 +343,6 @@ export class Context {
             if (userSet.has(uid) || messages[i].role !== 'user') {
                 continue;
             }
-
             const name = messages[i].name;
             if (name.startsWith('_')) {
                 continue;
@@ -352,14 +351,14 @@ export class Context {
             const ai = AIManager.getAI(uid);
             const memoryList = Object.values(ai.memory.memoryMap);
 
-            for (const mi of memoryList) {
-                if (mi.group.groupName === groupName) {
-                    return mi.group.groupId;
+            for (const m of memoryList) {
+                if (m.group.groupName === groupName) {
+                    return m.group.groupId;
                 }
-                if (mi.group.groupName.length > 4) {
-                    const distance = levenshteinDistance(groupName, mi.group.groupName);
+                if (m.group.groupName.length > 4) {
+                    const distance = levenshteinDistance(groupName, m.group.groupName);
                     if (distance <= 2) {
-                        return mi.group.groupId;
+                        return m.group.groupId;
                     }
                 }
             }
@@ -400,14 +399,37 @@ export class Context {
         return names;
     }
 
-    findImage(id: string, im: ImageManager): Image | null {
+    findImage(id: string, ai: AI): Image | null {
         if (/^[0-9a-z]{6}$/.test(id.trim())) {
+            // 从上下文中查找图片
             const messages = this.messages;
+            const userSet = new Set<string>();
             for (let i = messages.length - 1; i >= 0; i--) {
                 const image = messages[i].images.find(item => item.id === id);
                 if (image) {
                     return image;
                 }
+
+                const uid = messages[i].uid;
+                if (userSet.has(uid) || messages[i].role !== 'user') {
+                    continue;
+                }
+                const name = messages[i].name;
+                if (name.startsWith('_')) {
+                    continue;
+                }
+
+                const ai2 = AIManager.getAI(uid);
+                const image2 = ai2.memory.findImage(id);
+                if (image2) {
+                    return image2;
+                }
+            }
+
+            // 从自己记忆中查找图片
+            const image = ai.memory.findImage(id);
+            if (image) {
+                return image;
             }
         }
 
@@ -433,7 +455,7 @@ export class Context {
             return new Image(localImages[id]);
         }
 
-        const savedImage = im.savedImages.find(img => img.id === id);
+        const savedImage = ai.imageManager.savedImages.find(img => img.id === id);
         if (savedImage) {
             const filePath = seal.base64ToImage(savedImage.base64);
             savedImage.file = filePath;

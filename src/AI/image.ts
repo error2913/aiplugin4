@@ -43,7 +43,7 @@ export class ImageManager {
         let acc = 0;
         do {
             id = name + (acc++ ? `_${acc}` : '');
-        } while (ai.context.findImage(id, ai.imageManager));
+        } while (ai.context.findImage(id, ai));
 
         return id;
     }
@@ -51,10 +51,6 @@ export class ImageManager {
     updateStolenImages(images: Image[]) {
         const { maxStolenImageNum } = ConfigManager.image;
         this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
-    }
-
-    delSavedImage(nameList: string[]) {
-        this.savedImages = this.savedImages.filter(img => !nameList.includes(img.id));
     }
 
     updateSavedImages(images: Image[]) {
@@ -66,6 +62,10 @@ export class ImageManager {
                 .sort((a, b) => b.weight - a.weight)
                 .slice(0, maxSavedImageNum);
         }
+    }
+
+    delSavedImage(nameList: string[]) {
+        this.savedImages = this.savedImages.filter(img => !nameList.includes(img.id));
     }
 
     clearSavedImages() {
