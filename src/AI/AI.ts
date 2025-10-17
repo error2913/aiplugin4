@@ -321,6 +321,24 @@ export class AI {
         await this.stopCurrentChatStream();
     }
 
+    async stopCurrentChatStream(): Promise<void> {
+        const { id, reply, toolCallStatus } = this.stream;
+        this.stream = {
+            id: '',
+            reply: '',
+            toolCallStatus: false
+        }
+        if (id) {
+            logger.info(`结束会话:`, id);
+            if (reply) {
+                if (toolCallStatus) { // 没有处理完的工具调用，在日志中显示
+                    logger.warning(`工具调用未处理完成:`, reply);
+                }
+            }
+            await endStream(id);
+        }
+    }
+
     // 若不在活动时间范围内，返回-1
     getCurSegIndex(): number {
         const now = new Date();
@@ -359,35 +377,18 @@ export class AI {
     }
 
     checkActiveTimer(ctx: seal.MsgContext, msg: seal.Message) {
-        if (this.setting.activeTimeInfo.segs !== 0 && this.setting.activeTimeInfo.start !== 0 && this.setting.activeTimeInfo.end !== 0) {
-            const timers = TimerManager.getTimer(this.id, '', 'activeTime');
+        const { segs, start, end } = this.setting.activeTimeInfo;
+        if (segs !== 0 && (start !== 0 || end !== 0)) {
+            const timers = TimerManager.getTimers(this.id, '', ['activeTime']);
             if (timers.length === 0) {
                 const curSegIndex = this.getCurSegIndex();
                 const nextTimePoint = this.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
-                    TimerManager.addTimer(ctx, msg, this, nextTimePoint, '', 'activeTime');
+                    TimerManager.addActiveTimeTimer(ctx, msg, this, nextTimePoint);
                 } else {
                     logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
                 }
             }
-        }
-    }
-
-    async stopCurrentChatStream(): Promise<void> {
-        const { id, reply, toolCallStatus } = this.stream;
-        this.stream = {
-            id: '',
-            reply: '',
-            toolCallStatus: false
-        }
-        if (id) {
-            logger.info(`结束会话:`, id);
-            if (reply) {
-                if (toolCallStatus) { // 没有处理完的工具调用，在日志中显示
-                    logger.warning(`工具调用未处理完成:`, reply);
-                }
-            }
-            await endStream(id);
         }
     }
 }

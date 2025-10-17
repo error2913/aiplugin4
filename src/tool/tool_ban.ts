@@ -1,7 +1,7 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { Tool } from "./tool";
-import { fmtTime } from "../utils/utils_string";
+import { fmtDate } from "../utils/utils_string";
 
 export function registerBan() {
     const toolBan = new Tool({
@@ -147,7 +147,7 @@ export function registerBan() {
             const data = await net.callApi(epId, `get_group_shut_list?group_id=${gid.replace(/^.+:/, '')}`);
 
             const s = `被禁言成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${fmtTime(item.shutUpTime)}`;
+                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${fmtDate(item.shutUpTime)}`;
             }).join('\n');
 
             return s;

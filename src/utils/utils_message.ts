@@ -4,7 +4,7 @@ import { Message } from "../AI/context";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
-import { fmtTime } from "./utils_string";
+import { fmtDate } from "./utils_string";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
@@ -282,7 +282,7 @@ export function buildContent(message: Message): string {
     ) : '';
     const content = message.msgArray.map(mi =>
         ((showMsgId && mi.msgId) ? `<|msg_id:${mi.msgId}|>` : '') +
-        (showTime ? `<|time:${fmtTime(mi.time)}|>` : '') +
+        (showTime ? `<|time:${fmtDate(mi.time)}|>` : '') +
         mi.content
     ).join('\f');
     return prefix + content;

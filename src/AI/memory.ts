@@ -7,7 +7,7 @@ import { logger } from "../logger";
 import { fetchData } from "../service";
 import { buildContent, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
-import { fmtTime } from "../utils/utils_string";
+import { fmtDate } from "../utils/utils_string";
 
 export interface MemoryInfo {
     id: string;
@@ -73,7 +73,7 @@ export class Memory {
                 groupId: ctx.group.groupId,
                 groupName: ctx.group.groupName
             },
-            time: fmtTime(Math.floor(Date.now() / 1000)),
+            time: fmtDate(Math.floor(Date.now() / 1000)),
             createTime: Math.floor(Date.now() / 1000),
             lastMentionTime: Math.floor(Date.now() / 1000),
             keywords: kws || [],

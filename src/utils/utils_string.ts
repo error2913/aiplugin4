@@ -564,7 +564,7 @@ function advancedSplit(s: string, r: RegExp) {
     return parts;
 }
 
-export function fmtTime(timestamp: number) {
+export function fmtDate(timestamp: number) {
     const date = new Date(timestamp * 1000);
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');

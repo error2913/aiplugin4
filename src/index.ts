@@ -5,7 +5,7 @@ import { ConfigManager, CQTYPESALLOW } from "./config/config";
 import { buildSystemMessage } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
-import { fmtTime, transformTextToArray } from "./utils/utils_string";
+import { fmtDate, transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
@@ -262,7 +262,7 @@ function main() {
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
             case 'clr': {
-              TimerManager.removeTimer(id, '', '', []);
+              TimerManager.removeTimers(id, '', [], []);
               seal.replyToSender(ctx, msg, '所有定时器已清除');
               return ret;
             }
@@ -274,7 +274,7 @@ function main() {
             }
             case '':
             default: {
-              const timers = TimerManager.getTimer(id, '', '');
+              const timers = TimerManager.getTimers(id, '', []);
 
               if (timers.length === 0) {
                 seal.replyToSender(ctx, msg, '当前对话没有定时器');
@@ -282,9 +282,26 @@ function main() {
               }
 
               const s = timers.map((t, i) => {
-                return `${i + 1}. 触发内容：${t.content}
-${t.setTime} => ${fmtTime(t.timestamp)}
-类型:${t.type}`;
+                switch (t.type) {
+                  case 'target': {
+                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+目标时间：${fmtDate(t.target)}
+内容：${t.content}`;
+                  }
+                  case 'interval': {
+                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+间隔时间：${t.interval}秒
+剩余触发次数：${t.count === -1 ? '无限' : t.count - 1}
+内容：${t.content}`;
+                  }
+                  case 'activeTime': {
+                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+目标时间：${fmtDate(t.target)}`;
+                  }
+                }
               }).join('\n');
               seal.replyToSender(ctx, msg, s);
               return ret;
@@ -377,7 +394,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                   return ret;
                 }
 
-                TimerManager.removeTimer(id, '', 'activeTime', []);
+                TimerManager.removeTimers(id, '', ['activeTime'], []);
                 setting.activeTimeInfo = {
                   start,
                   end,
@@ -390,7 +407,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
                 const curSegIndex = ai.getCurSegIndex();
                 const nextTimePoint = ai.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
-                  TimerManager.addTimer(ctx, msg, ai, nextTimePoint, '', 'activeTime');
+                  TimerManager.addActiveTimeTimer(ctx, msg, ai, nextTimePoint);
                 }
                 break;
               }
@@ -407,7 +424,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           const setting = ai.setting;
 
           ai.resetState();
-          TimerManager.removeTimer(id, '', 'activeTime', []);
+          TimerManager.removeTimers(id, '', ['activeTime'], []);
 
           setting.counter = -1;
           setting.timer = -1;
@@ -429,7 +446,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
           const kwargs = cmdArgs.kwargs;
           if (kwargs.length == 0) {
             ai.resetState();
-            TimerManager.removeTimer(id, '', 'activeTime', []);
+            TimerManager.removeTimers(id, '', ['activeTime'], []);
 
             setting.counter = -1;
             setting.timer = -1;
@@ -474,7 +491,7 @@ ${t.setTime} => ${fmtTime(t.timestamp)}
               }
               case 'a':
               case 'active': {
-                TimerManager.removeTimer(id, '', 'activeTime', []);
+                TimerManager.removeTimers(id, '', ['activeTime'], []);
                 setting.activeTimeInfo = {
                   start: 0,
                   end: 0,
