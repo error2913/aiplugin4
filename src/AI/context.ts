@@ -181,13 +181,13 @@ export class Context {
         this.messages.push(message);
     }
 
-    async addToolMessage(tool_call_id: string, s: string) {
+    async addToolMessage(tool_call_id: string, s: string, images: Image[]) {
         const message: Message = {
             role: 'tool',
             tool_call_id: tool_call_id,
             uid: '',
             name: '',
-            images: [],
+            images: images,
             msgArray: [{
                 msgId: '',
                 time: Math.floor(Date.now() / 1000),

@@ -30,18 +30,16 @@ export function registerContext() {
     toolGet.solve = async (ctx, msg, ai, args) => {
         const { ctx_type, name } = args;
 
-        const originalAI = ai;
-
         if (ctx_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (uid === ctx.player.userId && ctx.isPrivate) {
-                return `向当前私聊发送消息无需调用函数`;
+                return { content: `向当前私聊发送消息无需调用函数`, images: [] };
             }
             if (uid === ctx.endPoint.userId) {
-                return `禁止向自己发送消息`;
+                return { content: `禁止向自己发送消息`, images: [] };
             }
 
             msg = createMsg('private', uid, '');
@@ -51,10 +49,10 @@ export function registerContext() {
         } else if (ctx_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (gid === ctx.group.groupId) {
-                return `向当前群聊发送消息无需调用函数`;
+                return { content: `向当前群聊发送消息无需调用函数`, images: [] };
             }
 
             msg = createMsg('group', ctx.player.userId, gid);
@@ -62,7 +60,7 @@ export function registerContext() {
 
             ai = AIManager.getAI(gid);
         } else {
-            return `未知的上下文类型<${ctx_type}>`;
+            return { content: `未知的上下文类型<${ctx_type}>`, images: [] };
         }
 
         const messages = ai.context.messages;
@@ -77,9 +75,6 @@ export function registerContext() {
             return `[${message.role}]: ${buildContent(message)}`;
         }).join('\n');
 
-        // 将images添加到最后一条消息，以便使用
-        originalAI.context.messages[originalAI.context.messages.length - 1].images.push(...images);
-
-        return s;
+        return { content: s, images: images };
     }
 }

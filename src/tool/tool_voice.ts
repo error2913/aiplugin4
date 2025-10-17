@@ -69,10 +69,10 @@ export function registerRecord() {
 
             if (records.hasOwnProperty(name)) {
                 seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
-                return '发送成功';
+                return { content: '发送成功', images: [] };
             } else {
                 logger.error(`本地语音${name}不存在`);
-                return `本地语音${name}不存在`;
+                return { content: `本地语音${name}不存在`, images: [] };
             }
         }
     }
@@ -104,7 +104,7 @@ export function registerRecord() {
                 const aittsExt = seal.ext.find('AITTS');
                 if (!aittsExt) {
                     logger.error(`未找到AITTS依赖`);
-                    return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
+                    return { content: `未找到AITTS依赖，请提示用户安装AITTS依赖`, images: [] };
                 }
 
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
@@ -112,7 +112,7 @@ export function registerRecord() {
                 const net = globalThis.net || globalThis.http;
                 if (!net) {
                     logger.error(`未找到ob11网络连接依赖`);
-                    return `未找到ob11网络连接依赖，请提示用户安装`;
+                    return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
                 }
 
                 const characterId = characterMap[character];
@@ -121,10 +121,10 @@ export function registerRecord() {
                 await net.callApi(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
             }
 
-            return `发送语音成功`;
+            return { content: `发送语音成功`, images: [] };
         } catch (e) {
             logger.error(e);
-            return `发送语音失败`;
+            return { content: `发送语音失败`, images: [] };
         }
     }
 }

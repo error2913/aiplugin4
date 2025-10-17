@@ -21,10 +21,10 @@ export function registerModu() {
     toolRoll.solve = async (ctx, msg, ai, _) => {
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.cmdInfo, [], [], []);
         if (!success) {
-            return '今日人品查询失败';
+            return { content: '今日人品查询失败', images: [] };
         }
 
-        return s;
+        return { content: s, images: [] };
     }
 
     const toolSearch = new Tool({
@@ -54,9 +54,9 @@ export function registerModu() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolSearch.cmdInfo, [name], [], []);
         if (!success) {
-            return '今日人品查询失败';
+            return { content: '今日人品查询失败', images: [] };
         }
 
-        return s;
+        return { content: s, images: [] };
     }
 }

@@ -43,7 +43,7 @@ export function registerMemory() {
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
 
             msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -53,7 +53,7 @@ export function registerMemory() {
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
 
             msg = createMsg('group', ctx.player.userId, gid);
@@ -61,14 +61,14 @@ export function registerMemory() {
 
             ai = AIManager.getAI(gid);
         } else {
-            return `未知的记忆类型<${memory_type}>`;
+            return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
 
         //记忆相关处理
         await ai.memory.addMemory(ctx, ai, Array.isArray(keywords) ? keywords : [], content);
         AIManager.saveAI(ai.id);
 
-        return `添加记忆成功`;
+        return { content: `添加记忆成功`, images: [] };
     }
 
     const toolDel = new Tool({
@@ -113,7 +113,7 @@ export function registerMemory() {
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
 
             msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -123,7 +123,7 @@ export function registerMemory() {
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
 
             msg = createMsg('group', ctx.player.userId, gid);
@@ -131,14 +131,14 @@ export function registerMemory() {
 
             ai = AIManager.getAI(gid);
         } else {
-            return `未知的记忆类型<${memory_type}>`;
+            return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
 
         //记忆相关处理
         ai.memory.delMemory(index_list, keywords);
         AIManager.saveAI(ai.id);
 
-        return `删除记忆成功`;
+        return { content: `删除记忆成功`, images: [] };
     }
 
     const toolShow = new Tool({
@@ -169,33 +169,33 @@ export function registerMemory() {
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
             if (uid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (uid === ctx.player.userId) {
-                return `查看该用户记忆无需调用函数`;
+                return { content: `查看该用户记忆无需调用函数`, images: [] };
             }
 
             msg = createMsg('private', uid, '');
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(uid);
-            return ai.memory.buildMemory(true, ctx.player.name, ctx.player.userId, '', '');
+            return { content: ai.memory.buildMemory(true, ctx.player.name, ctx.player.userId, '', ''), images: [] };
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
-                return `未找到<${name}>`;
+                return { content: `未找到<${name}>`, images: [] };
             }
             if (gid === ctx.group.groupId) {
-                return `查看当前群聊记忆无需调用函数`;
+                return { content: `查看当前群聊记忆无需调用函数`, images: [] };
             }
 
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(gid);
-            return ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
+            return { content: ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId), images: [] };
         } else {
-            return `未知的记忆类型<${memory_type}>`;
+            return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
     }
 }

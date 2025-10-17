@@ -28,16 +28,16 @@ export function registerDeck() {
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
             logger.error(`牌堆${name}不存在:${dr.err}`);
-            return `牌堆${name}不存在:${dr.err}`;
+            return { content: `牌堆${name}不存在:${dr.err}`, images: [] };
         }
 
         const result = dr.result;
         if (result == null) {
             logger.error(`牌堆${name}结果为空:${dr.err}`);
-            return `牌堆${name}结果为空:${dr.err}`;
+            return { content: `牌堆${name}结果为空:${dr.err}`, images: [] };
         }
 
         seal.replyToSender(ctx, msg, result);
-        return result;
+        return { content: result, images: [] };
     }
 }

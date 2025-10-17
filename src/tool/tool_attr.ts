@@ -30,7 +30,7 @@ export function registerAttr() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -38,10 +38,10 @@ export function registerAttr() {
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolShow.cmdInfo, [], [], []);
         if (!success) {
-            return '展示失败';
+            return { content: '展示失败', images: [] };
         }
 
-        return s;
+        return { content: s, images: [] };
     }
 
     const toolGet = new Tool({
@@ -70,14 +70,14 @@ export function registerAttr() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
         const value = seal.vars.intGet(ctx, attr)[0];
-        return `${attr}: ${value}`;
+        return { content: `${attr}: ${value}`, images: [] };
     }
 
     const toolSet = new Tool({
@@ -106,7 +106,7 @@ export function registerAttr() {
 
         const uid = await ai.context.findUserId(ctx, name);
         if (uid === null) {
-            return `未找到<${name}>`;
+            return { content: `未找到<${name}>`, images: [] };
         }
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
@@ -114,7 +114,7 @@ export function registerAttr() {
 
         const [attr, expr] = expression.split('=');
         if (expr === undefined) {
-            return `修改失败，表达式 ${expression} 格式错误`;
+            return { content: `修改失败，表达式 ${expression} 格式错误`, images: [] };
         }
 
         const value = seal.vars.intGet(ctx, attr)[0];
@@ -130,12 +130,12 @@ export function registerAttr() {
         const result = parseInt(seal.format(ctx, `{${s}}`));
 
         if (isNaN(result)) {
-            return `修改失败，表达式 ${expression} 格式化错误`;
+            return { content: `修改失败，表达式 ${expression} 格式化错误`, images: [] };
         }
 
         seal.vars.intSet(ctx, attr, result);
 
         seal.replyToSender(ctx, msg, `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`);
-        return `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`;
+        return { content: `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`, images: [] };
     }
 }

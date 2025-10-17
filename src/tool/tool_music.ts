@@ -38,7 +38,7 @@ export function registerMusicPlay() {
                 break;
             }
             default: {
-                return `不支持的平台: ${platform}`;
+                return { content: `不支持的平台: ${platform}`, images: [] };
             }
         }
 
@@ -61,7 +61,7 @@ export function registerMusicPlay() {
                 case '网易云': {
                     const song = data.result.songs[0];
                     if (!song) {
-                        return "网易云没找到这首歌";
+                        return { content: "网易云没找到这首歌", images: [] };
                     }
 
                     const id = song.id;
@@ -82,24 +82,24 @@ export function registerMusicPlay() {
                     const url = downloadData.data.url;
 
                     seal.replyToSender(ctx, msg, `[CQ:music,type=163,url=${url},audio=${url},title=${name},content=${artist},image=${img}]`);
-                    return `发送成功，歌名:${name}，歌手:${artist}`;
+                    return { content: `发送成功，歌名:${name}，歌手:${artist}`, images: [] };
                 }
                 case 'qq': {
                     const song = data.data.list[0];
                     if (!song) {
-                        return "QQ音乐没找到这首歌...";
+                        return { content: "QQ音乐没找到这首歌...", images: [] };
                     }
 
                     seal.replyToSender(ctx, msg, `[CQ:music,type=qq,id=${song.songid}]`);
-                    return '发送成功';
+                    return { content: '发送成功', images: [] };
                 }
                 default: {
-                    return "不支持的平台";
+                    return { content: "不支持的平台", images: [] };
                 }
             }
         } catch (error) {
             logger.warning(`音乐搜索请求错误: ${error}`);
-            return `音乐搜索请求错误: ${error}`;
+            return { content: `音乐搜索请求错误: ${error}`, images: [] };
         }
     };
 }

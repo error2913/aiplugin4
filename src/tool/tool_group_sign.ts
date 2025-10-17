@@ -18,23 +18,23 @@ export function registerGroupSign() {
     tool.type = 'group';
     tool.solve = async (ctx, _, __, ___) => {
         if (ctx.isPrivate) {
-            return `群打卡只能在群聊中使用`;
+            return { content: `群打卡只能在群聊中使用`, images: [] };
         }
 
         const net = globalThis.net || globalThis.http;
         if (!net) {
             logger.error(`未找到ob11网络连接依赖`);
-            return `未找到ob11网络连接依赖，请提示用户安装`;
+            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
         }
 
         try {
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/^.+:/, '');
             await net.callApi(epId, `send_group_sign?group_id=${group_id.replace(/\D+/, '')}`);
-            return `已发送群打卡，若无响应可能今日已打卡`;
+            return { content: `已发送群打卡，若无响应可能今日已打卡`, images: [] };
         } catch (e) {
             logger.error(e);
-            return `发送群打卡失败`;
+            return { content: `发送群打卡失败`, images: [] };
         }
     }
 }
