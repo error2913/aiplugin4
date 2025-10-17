@@ -1,7 +1,7 @@
 import { logger } from "../logger";
 import { transformMsgIdBack, transformMsgId } from "../utils/utils";
 import { Tool } from "./tool";
-import { Image } from "../AI/image";
+import { Image, ImageManager } from "../AI/image";
 
 export function registerEssenceMsg() {
     const toolSet = new Tool({
@@ -87,7 +87,7 @@ export function registerEssenceMsg() {
             }
 
             let response = `群精华消息列表 (${result.length}条):\n\n`;
-            const images: Image[] = [];
+            let images: Image[] = [];
 
             for (let i = 0; i < result.length; i++) {
                 const essence = result[i];
@@ -99,23 +99,19 @@ export function registerEssenceMsg() {
                 if (essence.content) {
                     let content = '';
                     if (Array.isArray(essence.content)) {
-                        for (const item of essence.content) {
-                            if (item.type === 'text') {
-                                content += item.data.text;
-                            } else if (item.type === 'image') {
-                                const imageUrl = item.data.url;
-                                if (imageUrl) {
-                                    const image = new Image(imageUrl);
-                                    images.push(image);
-                                }
-                            }
+                        let messageArray = essence.content;
+                        if (messageArray.some(item => item.type === 'image')) {
+                            const result = await ImageManager.handleImageMessage(ctx, messageArray);
+                            messageArray = result.messageArray;
+                            images = result.images;
                         }
+                        content = messageArray.map(item => item.type === 'text' ? item.data.text : '').join('');
                     } else if (typeof essence.content === 'string') {
                         content = essence.content;
                     }
 
                     if (content.length > 50) {
-                        content = content.substring(0, 50) + '...';
+                        content = content.substring(0, 100) + '...';
                     }
 
                     response += `${i + 1}. 发送者: ${senderName}
