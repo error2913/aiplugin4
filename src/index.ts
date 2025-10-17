@@ -11,6 +11,7 @@ import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
 import { createMsg } from "./utils/utils_seal";
 import { PrivilegeManager } from "./privilege";
+import { registerEventHandlers } from "./events";
 
 function main() {
   ConfigManager.registerConfig();
@@ -19,6 +20,7 @@ function main() {
   ToolManager.registerTool();
   TimerManager.init();
   PrivilegeManager.reviveCmdPriv();
+  registerEventHandlers();
 
   const ext = ConfigManager.ext;
 
