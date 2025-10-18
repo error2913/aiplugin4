@@ -7,7 +7,7 @@ import { MemoryManager, Memory } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
-import { checkRepeat, handleReply, MessageItem, transformTextToArray } from "../utils/utils_string";
+import { checkRepeat, handleReply, MessageSegment, transformTextToArray } from "../utils/utils_string";
 import { checkContextUpdate } from "../utils/utils_update";
 import { TimerManager } from "../timer";
 
@@ -87,7 +87,7 @@ export class AI {
         this.tool.toolCallCount = 0;
     }
 
-    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageItem[]) {
+    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageSegment[]) {
         // 图片偷取，以及图片转文字
         let images: Image[] = [];
         if (messageArray.some(item => item.type === 'image')) {

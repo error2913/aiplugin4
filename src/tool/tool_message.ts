@@ -4,7 +4,7 @@ import { logger } from "../logger";
 import { ConfigManager, CQTYPESALLOW } from "../config/config";
 import { replyToSender, transformMsgId, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { handleReply, MessageItem, transformTextToArray } from "../utils/utils_string";
+import { handleReply, MessageSegment, transformTextToArray } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
 
 export function registerMessage() {
@@ -158,7 +158,7 @@ export function registerMessage() {
         try {
             const epId = ctx.endPoint.userId;
             const result = await net.callApi(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            let messageArray: MessageItem[] = result.message.filter((item: MessageItem) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
+            let messageArray: MessageSegment[] = result.message.filter((item: MessageSegment) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
 
             // 图片偷取，以及图片转文字
             const images: Image[] = [];

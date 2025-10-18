@@ -39,7 +39,22 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         }
 
         try {
-            const messageArray = transformTextToArray(s);
+            const rawMessageArray = transformTextToArray(s);
+            const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
+
+            // 处理戳戳戳
+            const pokeMsgArr = rawMessageArray.filter(item => item.type === 'poke');
+            if (pokeMsgArr.length > 0) {
+                pokeMsgArr.forEach(item => {
+                    const s = `[CQ:poke,qq=${item.data.qq}]`;
+                    ai.context.lastReply = s;
+                    seal.replyToSender(ctx, msg, s);
+                });
+            }
+
+            if (messageArray.length === 0) {
+                return '';
+            }
 
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/^.+:/, '');

@@ -3,7 +3,7 @@ import { sendITTRequest } from "../service";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
 import { AI } from "./AI";
-import { MessageItem } from "../utils/utils_string";
+import { MessageSegment } from "../utils/utils_string";
 
 export class Image {
     id: string;
@@ -164,10 +164,10 @@ export class ImageManager {
      * @param message 
      * @returns 
      */
-    static async handleImageMessage(ctx: seal.MsgContext, messageArray: MessageItem[]): Promise<{ messageArray: MessageItem[], images: Image[] }> {
+    static async handleImageMessage(ctx: seal.MsgContext, messageArray: MessageSegment[]): Promise<{ messageArray: MessageSegment[], images: Image[] }> {
         const { receiveImage } = ConfigManager.image;
 
-        const processedArray: MessageItem[] = [];
+        const processedArray: MessageSegment[] = [];
         const images: Image[] = [];
 
         for (const item of messageArray) {

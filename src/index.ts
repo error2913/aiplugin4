@@ -67,7 +67,7 @@ function main() {
                   const val3 = cmdArgs.getArgN(3);
                   if (!val3 || val3 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
-【.ai s st <ID> <会话权限>】修改会话权限
+【.ai priv s st <ID> <会话权限>】修改会话权限
 
 <ID>:
 【QQ:1234567890】 私聊窗口
@@ -98,7 +98,7 @@ function main() {
                   const val3 = cmdArgs.getArgN(3);
                   if (!val3 || val3 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
-【.ai s ck <ID>】检查会话权限
+【.ai priv s ck <ID>】检查会话权限
 
 <ID>:
 【QQ:1234567890】 私聊窗口
@@ -122,8 +122,8 @@ function main() {
                 }
                 default: {
                   seal.replyToSender(ctx, msg, `帮助:
-【.ai s st <ID> <会话权限>】修改会话权限
-【.ai s ck <ID>】检查会话权限
+【.ai priv s st <ID> <会话权限>】修改会话权限
+【.ai priv s ck <ID>】检查会话权限
 
 <ID>:
 【QQ:1234567890】 私聊窗口
@@ -139,7 +139,7 @@ function main() {
               const val3 = cmdArgs.getArgN(3);
               if (!val3 || val3 == 'help') {
                 seal.replyToSender(ctx, msg, `帮助:
-【.ai st <指令> <权限限制>】修改指令权限
+【.ai priv st <指令> <权限限制>】修改指令权限
 
 <指令>:指令名称和参数，多个指令用-连接，如ai-sb
 <权限限制>:数字0-数字1-数字2，如0-0-0，含义如下:
@@ -184,7 +184,7 @@ function main() {
               const val3 = cmdArgs.getArgN(3);
               if (!val3 || val3 == 'help') {
                 seal.replyToSender(ctx, msg, `帮助:
-【.ai s show <指令>】检查指令权限
+【.ai priv show <指令>】检查指令权限
 
 <指令>:指令名称和参数，多个指令用-连接，如ai-sb`);
                 return ret;
@@ -205,11 +205,11 @@ function main() {
             }
             default: {
               seal.replyToSender(ctx, msg, `帮助:
-【.ai s st <ID> <会话权限>】修改会话权限
-【.ai s ck <ID>】检查会话权限
-【.ai st <指令> <权限限制>】修改指令权限
-【.ai show <指令>】检查指令权限
-【.ai reset】重置指令权限
+【.ai priv s st <ID> <会话权限>】修改会话权限
+【.ai priv s ck <ID>】检查会话权限
+【.ai priv st <指令> <权限限制>】修改指令权限
+【.ai priv show <指令>】检查指令权限
+【.ai priv reset】重置指令权限
 
 <ID>:
 【QQ:1234567890】 私聊窗口

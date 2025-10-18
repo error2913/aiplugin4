@@ -8,21 +8,21 @@ import { AI } from "../AI/AI";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
-export interface MessageItemText {
+export interface MessageSegmentText {
     type: 'text';
     data: {
         text: string;
     };
 }
 
-export interface MessageItemAt {
+export interface MessageSegmentAt {
     type: 'at';
     data: {
         qq: string;
     };
 }
 
-export interface MessageItemImage {
+export interface MessageSegmentImage {
     type: 'image';
     data: {
         file: string;
@@ -30,42 +30,42 @@ export interface MessageItemImage {
     };
 }
 
-export interface MessageItemFace {
+export interface MessageSegmentFace {
     type: 'face';
     data: {
         id: string;
     };
 }
 
-export interface MessageItemJson {
+export interface MessageSegmentJson {
     type: 'json';
     data: {
         data: string;
     };
 }
 
-export interface MessageItemRecord {
+export interface MessageSegmentRecord {
     type: 'record';
     data: {
         file: string;
     };
 }
 
-export interface MessageItemVideo {
+export interface MessageSegmentVideo {
     type: 'video';
     data: {
         file: string;
     };
 }
 
-export interface MessageItemReply {
+export interface MessageSegmentReply {
     type: 'reply';
     data: {
         id: string;
     };
 }
 
-export interface MessageItemMusic {
+export interface MessageSegmentMusic {
     type: 'music';
     data: {
         type: 'qq' | '163';
@@ -79,43 +79,43 @@ export interface MessageItemMusic {
     };
 }
 
-export interface MessageItemDice {
+export interface MessageSegmentDice {
     type: 'dice';
 }
 
-export interface MessageItemRps {
+export interface MessageSegmentRps {
     type: 'rps';
 }
 
-export interface MessageItemFile {
+export interface MessageSegmentFile {
     type: 'file';
     data: {
         file: string;
     };
 }
 
-export interface MessageItemNode { // 这是干嘛的？是合并转发吗？
+export interface MessageSegmentNode { // 这是干嘛的？是合并转发吗？
     type: 'node';
     data: {
         user_id: string;
         nickname: string;
-        content: (MessageItemText | MessageItemAt | MessageItemImage | MessageItemFace | MessageItemJson | MessageItemRecord | MessageItemVideo | MessageItemReply | MessageItemMusic | MessageItemDice | MessageItemRps | MessageItemFile)[];
+        content: (MessageSegmentText | MessageSegmentAt | MessageSegmentImage | MessageSegmentFace | MessageSegmentJson | MessageSegmentRecord | MessageSegmentVideo | MessageSegmentReply | MessageSegmentMusic | MessageSegmentDice | MessageSegmentRps | MessageSegmentFile)[];
     };
 }
 
-export type MessageItem = MessageItemText | MessageItemAt | MessageItemImage | MessageItemFace | MessageItemJson | MessageItemRecord | MessageItemVideo | MessageItemReply | MessageItemMusic | MessageItemDice | MessageItemRps | MessageItemFile | MessageItemNode;
+export type MessageSegment = MessageSegmentText | MessageSegmentAt | MessageSegmentImage | MessageSegmentFace | MessageSegmentJson | MessageSegmentRecord | MessageSegmentVideo | MessageSegmentReply | MessageSegmentMusic | MessageSegmentDice | MessageSegmentRps | MessageSegmentFile | MessageSegmentNode;
 */
 
-export interface MessageItem {
+export interface MessageSegment {
     type: string;
     data: {
         [key: string]: string
     };
 }
 
-export function transformTextToArray(s: string): MessageItem[] {
+export function transformTextToArray(s: string): MessageSegment[] {
     const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
-    const messageArray: MessageItem[] = [];
+    const messageArray: MessageSegment[] = [];
     for (const segment of segments) {
         if (segment.startsWith('[CQ:')) {
             const match = segment.match(/^\[CQ:([^,]+),?([^\]]*)\]$/);

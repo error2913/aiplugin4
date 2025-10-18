@@ -2,7 +2,7 @@ import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { levenshteinDistance, MessageItem } from "../utils/utils_string";
+import { levenshteinDistance, MessageSegment } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
 import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
@@ -58,7 +58,7 @@ export class Context {
         }
     }
 
-    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageItem[], images: Image[], role: 'user' | 'assistant', msgId: string = '') {
+    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageSegment[], images: Image[], role: 'user' | 'assistant', msgId: string = '') {
         const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;

@@ -50,6 +50,7 @@ const defaultCmdPriv: CmdPrivInfo[] = [
                             {
                                 cmd: ["st"], priv: [0, 0, 0], args: [
                                     { cmd: ["clr"], priv: [0, 0, 0] },
+                                    { cmd: ["*"], priv: [0, 0, 0] }
                                 ]
                             },
                             { cmd: ["del"], priv: [0, 0, 0] },
@@ -62,6 +63,7 @@ const defaultCmdPriv: CmdPrivInfo[] = [
                             {
                                 cmd: ["st"], priv: [0, 0, 0], args: [
                                     { cmd: ["clr"], priv: [0, 0, 0] },
+                                    { cmd: ["*"], priv: [0, 0, 0] }
                                 ]
                             },
                             { cmd: ["del"], priv: [0, 0, 0] },
@@ -219,7 +221,7 @@ export class PrivilegeManager {
             return null;
         }
 
-        if (cpi.args) {
+        if (cpi.args && cmdChain.length > 1) {
             return this.getCmdPriv(cmdChain.slice(1), cpi.args);
         }
 
