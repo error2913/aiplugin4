@@ -64,8 +64,8 @@ function main() {
               const val3 = cmdArgs.getArgN(3);
               switch (val3) {
                 case 'st': {
-                  const val3 = cmdArgs.getArgN(3);
-                  if (!val3 || val3 == 'help') {
+                  const val4 = cmdArgs.getArgN(4);
+                  if (!val4 || val4 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
 【.ai priv s st <ID> <会话权限>】修改会话权限
 
@@ -78,14 +78,14 @@ function main() {
                     return ret;
                   }
 
-                  const val4 = cmdArgs.getArgN(4);
-                  const limit = parseInt(val4);
+                  const val5 = cmdArgs.getArgN(5);
+                  const limit = parseInt(val5);
                   if (isNaN(limit)) {
                     seal.replyToSender(ctx, msg, '权限值必须为数字');
                     return ret;
                   }
 
-                  const id2 = val3 === 'now' ? id : val3;
+                  const id2 = val4 === 'now' ? id : val4;
                   const ai2 = AIManager.getAI(id2);
 
                   ai2.setting.priv = limit;
@@ -95,8 +95,8 @@ function main() {
                   return ret;
                 }
                 case 'ck': {
-                  const val3 = cmdArgs.getArgN(3);
-                  if (!val3 || val3 == 'help') {
+                  const val4 = cmdArgs.getArgN(4);
+                  if (!val4 || val4 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
 【.ai priv s ck <ID>】检查会话权限
 
@@ -107,7 +107,7 @@ function main() {
                     return ret;
                   }
 
-                  const id2 = val3 === 'now' ? id : val3;
+                  const id2 = val4 === 'now' ? id : val4;
                   const ai2 = AIManager.getAI(id2);
 
                   const setting = ai2.setting;
