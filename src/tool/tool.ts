@@ -24,6 +24,7 @@ import { registerMusicPlay } from "./tool_music"
 import { registerMeme } from "./tool_meme"
 import { logger } from "../logger"
 import { Image } from "../AI/image";
+import { fixJsonString } from "../utils/utils_string";
 
 export interface ToolInfo {
     type: "function",
@@ -328,8 +329,27 @@ export class ToolManager {
             return "none";
         }
 
+        let args = null;
         try {
-            const args = JSON.parse(tool_call.function.arguments);
+            args = JSON.parse(tool_call.function.arguments);
+        } catch (e) {
+            const fixedStr = fixJsonString(tool_call.function.arguments);
+            if (fixedStr === '') {
+                logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
+                await ai.context.addToolMessage(tool_call.id, `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`, []);
+                return "none";
+            }
+            try {
+                args = JSON.parse(fixedStr);
+            } catch (e) {
+                logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
+                await ai.context.addToolMessage(tool_call.id, `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`, []);
+                return "none";
+            }
+
+        }
+
+        try {
             if (args !== null && typeof args !== 'object') {
                 logger.warning(`调用函数失败:arguement不是一个object`);
                 await ai.context.addToolMessage(tool_call.id, `调用函数失败:arguement不是一个object`, []);
@@ -377,9 +397,19 @@ export class ToolManager {
         try {
             tool_call = JSON.parse(tool_call_str);
         } catch (e) {
-            logger.error('解析tool_call时出现错误:', e);
-            await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
-            return;
+            const fixedStr = fixJsonString(tool_call_str);
+            if (fixedStr === '') {
+                logger.error('解析tool_call时出现错误:', e);
+                await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
+                return;
+            }
+            try {
+                tool_call = JSON.parse(fixedStr);
+            } catch (e) {
+                logger.error('解析tool_call时出现错误:', e);
+                await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
+                return;
+            }
         }
 
         if (!tool_call.hasOwnProperty('name') || !tool_call.hasOwnProperty('arguments')) {

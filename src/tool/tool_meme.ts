@@ -45,9 +45,9 @@ export function registerMeme() {
         try {
             const res = await fetch(baseurl + "get_command");
             const json = await res.json();
-            return json.map((item: string[]) => item[0]).join("、");
+            return { content: json.map((item: string[]) => item[0]).join("、"), images: [] };
         } catch (err) {
-            return "获取表情包列表失败:" + err.message;
+            return { content: "获取表情包列表失败:" + err.message, images: [] };
         }
     }
 
