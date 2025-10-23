@@ -246,7 +246,7 @@ export class Context {
             return this.ignoreList.includes(uid) ? null : uid;
         }
 
-        const match = name.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
+        const match = name.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
         if (match) {
             name = match[1] || match[2];
         }
@@ -326,7 +326,7 @@ export class Context {
             return `QQ-Group:${groupName}`;
         }
 
-        const match = groupName.match(/^<([^>]+?)>(?:\(\d+\))?$|(.+?)\(\d+\)$/);
+        const match = groupName.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
         if (match) {
             groupName = match[1] || match[2];
         }

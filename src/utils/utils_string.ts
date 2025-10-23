@@ -228,10 +228,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
         let reply = replyArray[i];
-        reply = await replaceMentions(ctx, ai.context, reply);
-        reply = await replacePoke(ctx, ai.context, reply);
-        reply = await replaceQuote(reply);
-        const { result, images: replyImages } = await replaceImages(ai, reply);
+        const { result, images: replyImages } = await replaceSpecialTokens(ctx, ai, reply);
         reply = isTrim ? result.trim() : result;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
@@ -387,106 +384,103 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
     return { contextArray, replyArray };
 }
 
-/**
- * 替换艾特为CQ码
- * @param ctx
- * @param context 
- * @param reply 
- * @returns 
- */
-async function replaceMentions(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/[<＜][\|│｜]at[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-    if (match) {
-        for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^[<＜][\|│｜]at[:：]?\s?|(?:[\|│｜][>＞]|[\|│｜>＞])$/g, '');
-            const uid = await context.findUserId(ctx, name);
-            if (uid !== null) {
-                reply = reply.replace(match[i], `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`);
+interface TokenSegment {
+    type: 'text' | 'at' | 'poke' | 'quote' | 'img';
+    content: string;
+}
+
+function parseSpecialTokens(s: string): TokenSegment[] {
+    const result: TokenSegment[] = [];
+    const segs = s.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/);
+    segs.forEach(seg => {
+        if (!seg) return;
+        const match = seg.match(/[<＜][\|│｜]([^:：]+)[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
+        if (!match) {
+            result.push({
+                type: 'text',
+                content: seg
+            })
+        } else {
+            const [_, type = 'text', content = ''] = match;
+            if (!['at', 'poke', 'quote', 'img'].includes(type)) {
+                result.push({
+                    type: 'text',
+                    content: seg
+                })
             } else {
-                logger.warning(`无法找到用户：${name}`);
-                reply = reply.replace(match[i], ` @${name} `);
+                result.push({
+                    type: type as 'at' | 'poke' | 'quote' | 'img',
+                    content: content
+                })
             }
         }
-    }
-
-    return reply;
+    })
+    return result;
 }
 
 /**
- * 替换戳一戳为CQ码
- * @param ctx
- * @param context 
- * @param reply 
- * @returns 
+ * 替换特殊标签
+ * @param ctx 消息上下文
+ * @param ai AI实例
+ * @param reply 回复内容
+ * @returns 包含处理后的结果和图片列表的对象
  */
-async function replacePoke(ctx: seal.MsgContext, context: Context, reply: string) {
-    const match = reply.match(/[<＜][\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-    if (match) {
-        for (let i = 0; i < match.length; i++) {
-            const name = match[i].replace(/^[<＜][\|│｜]poke[:：]?\s?|(?:[\|│｜][>＞]|[\|│｜>＞])$/g, '');
-            const uid = await context.findUserId(ctx, name);
-            if (uid !== null) {
-                reply = reply.replace(match[i], `[CQ:poke,qq=${uid.replace(/^.+:/, "")}]`);
-            } else {
-                logger.warning(`无法找到用户：${name}`);
-                reply = reply.replace(match[i], '');
+async function replaceSpecialTokens(ctx: seal.MsgContext, ai: AI, reply: string): Promise<{ result: string, images: Image[] }> {
+    const segs = parseSpecialTokens(reply);
+    let result = '';
+    const images: Image[] = [];
+    for (const seg of segs) {
+        switch (seg.type) {
+            case 'text': {
+                result += seg.content;
+                break;
             }
-        }
-    }
-
-    return reply;
-}
-
-/**
- * 替换引用为CQ码
- * @param reply 
- * @returns 
- */
-async function replaceQuote(reply: string) {
-    const match = reply.match(/[<＜][\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-    if (match) {
-        for (let i = 0; i < match.length; i++) {
-            const msgId = match[i].replace(/^[<＜][\|│｜]quote[:：]?\s?|(?:[\|│｜][>＞]|[\|│｜>＞])$/g, '');
-            reply = reply.replace(match[i], `[CQ:reply,id=${transformMsgIdBack(msgId)}]`);
-        }
-    }
-
-    return reply;
-}
-
-/**
- * 替换图片占位符为CQ码
- * @param context 
- * @param im 图片管理器
- * @param reply 
- * @returns 
- */
-async function replaceImages(ai: AI, reply: string) {
-    let result = reply;
-    const images = [];
-
-    const match = reply.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-    if (match) {
-        for (let i = 0; i < match.length; i++) {
-            const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-            const image = ai.context.findImage(id, ai);
-
-            if (image) {
-                images.push(image);
-
-                if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
-                    if (image.base64) {
-                        image.weight += 1;
-                    }
-                    result = result.replace(match[i], `[CQ:image,file=${image.file}]`);
-                    continue;
+            case 'at': {
+                const name = seg.content;
+                const uid = await ai.context.findUserId(ctx, name);
+                if (uid !== null) {
+                    result += `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                    result += ` @${name} `;
                 }
+                break;
             }
+            case 'poke': {
+                const name = seg.content;
+                const uid = await ai.context.findUserId(ctx, name);
+                if (uid !== null) {
+                    result += `[CQ:poke,qq=${uid.replace(/^.+:/, "")}]`;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                }
+                break;
+            }
+            case 'quote': {
+                const msgId = seg.content;
+                result += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
+                break;
+            }
+            case 'img': {
+                const id = seg.content;
+                const image = ai.context.findImage(id, ai);
 
-            result = result.replace(match[i], ``);
+                if (image) {
+                    images.push(image);
+
+                    if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
+                        if (image.base64) {
+                            image.weight += 1;
+                        }
+                        result += `[CQ:image,file=${image.file}]`;
+                    }
+                } else {
+                    logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
         }
     }
-
     return { result, images };
 }
 
