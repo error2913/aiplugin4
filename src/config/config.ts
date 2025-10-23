@@ -8,7 +8,7 @@ import { ReplyConfig } from "./config_reply";
 import { RequestConfig } from "./config_request";
 import { ToolConfig } from "./config_tool";
 
-export const VERSION = "4.11.1";
+export const VERSION = "4.11.2";
 export const AUTHOR = "baiyu&错误";
 export const NAME = "aiplugin4";
 export const CQTYPESALLOW = ["at", "image", "reply", "face", "poke"];
