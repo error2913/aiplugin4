@@ -2,174 +2,221 @@ import { AI } from "./AI/AI";
 import { logger } from "./logger";
 import { ConfigManager } from "./config/config";
 
+
 export interface CmdPrivInfo {
-    cmd: string[];
     priv: [number, number, number], // 0: 会话所需权限, 1: 会话检查通过后用户所需权限, 2: 强行触发指令用户所需权限, 进行检查时若通过0和1则无需检查2
-    args?: CmdPrivInfo[]; // 需通过前一级检查才可检查子命令
+    help: string;
+    args?: CmdPriv; // 需通过前一级检查才可检查子命令
 }
 
-const defaultCmdPriv: CmdPrivInfo[] = [
-    {
-        cmd: ["ai", "AI"], priv: [0, 0, 0], args: [
-            {
-                cmd: ["priv"], priv: [0, 100, 100], args: [
-                    {
-                        cmd: ["s", "session"], priv: [0, 0, 0], args: [
-                            { cmd: ["st"], priv: [0, 0, 0] },
-                            { cmd: ["ck"], priv: [0, 0, 0] },
-                        ]
+export interface CmdPriv { [key: string]: CmdPrivInfo };
+
+// 命令别名映射表，别名：原始命令
+export const aliasMap = {
+    "AI": "ai",
+    "priv": "privilege",
+    "ses": "session",
+    "st": "set",
+    "ck": "check",
+    "clr": "clear",
+    "sb": "standby",
+    "fgt": "forget",
+    "f": "forget",
+    "ass": "assistant",
+    "memo": "memory",
+    "p": "private",
+    "g": "group",
+    "del": "delete",
+    "ign": "ignore",
+    "rm": "remove",
+    "lst": "list",
+    "tk": "token",
+    "y": "year",
+    "m": "month",
+    "lcl": "local",
+    "stl": "steal",
+    "ran": "random",
+}
+
+const defaultCmdPriv: CmdPriv = {
+    ai: {
+        priv: [0, 0, 0], help: '',
+        args: {
+            privilege: {
+                priv: [0, 100, 100], help: '',
+                args: {
+                    session: {
+                        priv: [0, 0, 0], help: '',
+                        args: {
+                            set: { priv: [0, 0, 0], help: '' },
+                            check: { priv: [0, 0, 0], help: '' }
+                        }
                     },
-                    { cmd: ["st"], priv: [0, 0, 0] },
-                    { cmd: ["show"], priv: [0, 0, 0] },
-                    { cmd: ["reset"], priv: [0, 0, 0] },
-                ]
+                    set: { priv: [0, 0, 0], help: '' },
+                    show: { priv: [0, 0, 0], help: '' },
+                    reset: { priv: [0, 0, 0], help: '' }
+                }
             },
-            { cmd: ["prompt"], priv: [0, 100, 100] },
-            { cmd: ["status"], priv: [0, 0, 0] },
-            { cmd: ["ctxn"], priv: [0, 0, 0] },
-            {
-                cmd: ["timer"], priv: [0, 0, 0], args: [
-                    { cmd: ["clr"], priv: [0, 40, 40] }
-                ]
+            prompt: { priv: [0, 100, 100], help: '' },
+            status: { priv: [0, 0, 0], help: '' },
+            ctxn: { priv: [0, 0, 0], help: '' },
+            timer: {
+                priv: [0, 0, 0], help: '',
+                args: {
+                    clear: { priv: [0, 40, 40], help: '' }
+                }
             },
-            { cmd: ["on"], priv: [1, 40, 100] },
-            { cmd: ["sb"], priv: [0, 40, 40] },
-            { cmd: ["off"], priv: [0, 40, 40] },
-            {
-                cmd: ["f", "fgt"], priv: [0, 40, 40], args: [
-                    { cmd: ["ass", "assistant"], priv: [0, 0, 0] },
-                    { cmd: ["user"], priv: [0, 0, 0] }
-                ]
+            on: { priv: [1, 40, 100], help: '' },
+            standby: { priv: [0, 40, 40], help: '' },
+            off: { priv: [0, 40, 40], help: '' },
+            forget: {
+                priv: [0, 40, 40], help: '',
+                args: {
+                    assistant: { priv: [0, 0, 0], help: '' },
+                    user: { priv: [0, 0, 0], help: '' }
+                }
             },
-            { cmd: ["role"], priv: [1, 40, 40] },
-            {
-                cmd: ["memo"], priv: [0, 0, 0], args: [
-                    { cmd: ["status"], priv: [0, 0, 0] },
-                    {
-                        cmd: ["p", "private"], priv: [0, 0, 0], args: [
-                            {
-                                cmd: ["st"], priv: [0, 0, 0], args: [
-                                    { cmd: ["clr"], priv: [0, 0, 0] },
-                                    { cmd: ["*"], priv: [0, 0, 0] }
-                                ]
+            role: { priv: [1, 40, 40], help: '' },
+            memory: {
+                priv: [0, 0, 0], help: '',
+                args: {
+                    status: { priv: [0, 0, 0], help: '' },
+                    private: {
+                        priv: [0, 0, 0], help: '',
+                        args: {
+                            set: {
+                                priv: [0, 0, 0], help: '',
+                                args: {
+                                    clear: { priv: [0, 0, 0], help: '' },
+                                    "*": { priv: [0, 0, 0], help: '' }
+                                }
                             },
-                            { cmd: ["del"], priv: [0, 0, 0] },
-                            { cmd: ["show"], priv: [0, 0, 0] },
-                            { cmd: ["clr"], priv: [0, 0, 0] }
-                        ]
+                            delete: { priv: [0, 0, 0], help: '' },
+                            show: { priv: [0, 0, 0], help: '' },
+                            clear: { priv: [0, 0, 0], help: '' }
+                        }
                     },
-                    {
-                        cmd: ["g", "group"], priv: [0, 40, 40], args: [
-                            {
-                                cmd: ["st"], priv: [0, 0, 0], args: [
-                                    { cmd: ["clr"], priv: [0, 0, 0] },
-                                    { cmd: ["*"], priv: [0, 0, 0] }
-                                ]
+                    group: {
+                        priv: [0, 40, 40], help: '',
+                        args: {
+                            set: {
+                                priv: [0, 0, 0], help: '',
+                                args: {
+                                    clear: { priv: [0, 0, 0], help: '' },
+                                    "*": { priv: [0, 0, 0], help: '' }
+                                }
                             },
-                            { cmd: ["del"], priv: [0, 0, 0] },
-                            { cmd: ["show"], priv: [0, 0, 0] },
-                            { cmd: ["clr"], priv: [0, 0, 0] }
-                        ]
+                            delete: { priv: [0, 0, 0], help: '' },
+                            show: { priv: [0, 0, 0], help: '' },
+                            clear: { priv: [0, 0, 0], help: '' }
+                        }
                     },
-                    {
-                        cmd: ["s", "short"], priv: [1, 40, 100], args: [
-                            { cmd: ["show"], priv: [0, 0, 0] },
-                            { cmd: ["clr"], priv: [0, 0, 0] },
-                            { cmd: ["on"], priv: [0, 0, 0] },
-                            { cmd: ["off"], priv: [0, 0, 0] }
-                        ]
+                    short: {
+                        priv: [1, 40, 100], help: '',
+                        args: {
+                            show: { priv: [0, 0, 0], help: '' },
+                            clear: { priv: [0, 0, 0], help: '' },
+                            on: { priv: [0, 0, 0], help: '' },
+                            off: { priv: [0, 0, 0], help: '' }
+                        }
                     },
-                    { cmd: ["sum"], priv: [1, 40, 100] }
-                ]
+                    sum: { priv: [0, 0, 0], help: '' }
+                }
             },
-            {
-                cmd: ["tool"], priv: [0, 40, 40], args: [
-                    { cmd: ["help"], priv: [0, 0, 0] },
-                    { cmd: ["on"], priv: [0, 0, 0] },
-                    { cmd: ["off"], priv: [0, 0, 0] },
-                    {
-                        cmd: ["*"], priv: [1, 100, 100], args: [
-                            { cmd: ["on"], priv: [0, 0, 0] },
-                            { cmd: ["off"], priv: [0, 0, 0] }
-                        ]
-                    }
-                ]
+            tool: {
+                priv: [0, 40, 40], help: '',
+                args: {
+                    help: { priv: [0, 0, 0], help: '' },
+                    on: { priv: [0, 0, 0], help: '' },
+                    off: { priv: [0, 0, 0], help: '' },
+                    "*": { priv: [0, 100, 100], help: '' }
+                }
             },
-            {
-                cmd: ["ign"], priv: [0, 0, 0], args: [
-                    { cmd: ["add"], priv: [0, 0, 0] },
-                    { cmd: ["rm"], priv: [0, 0, 0] },
-                    { cmd: ["list"], priv: [0, 0, 0] }
-                ]
+            ignore: {
+                priv: [0, 0, 0], help: '',
+                args: {
+                    add: { priv: [0, 0, 0], help: '' },
+                    remove: { priv: [0, 0, 0], help: '' },
+                    list: { priv: [0, 0, 0], help: '' }
+                }
             },
-            {
-                cmd: ["tk"], priv: [1, 40, 100], args: [
-                    { cmd: ["lst"], priv: [0, 0, 0] },
-                    { cmd: ["sum"], priv: [0, 0, 0] },
-                    { cmd: ["all"], priv: [0, 0, 0] },
-                    {
-                        cmd: ["y"], priv: [0, 0, 0], args: [
-                            { cmd: ["chart"], priv: [0, 0, 0] }
-                        ]
+            token: {
+                priv: [1, 40, 100], help: '',
+                args: {
+                    list: { priv: [0, 0, 0], help: '' },
+                    sum: { priv: [0, 0, 0], help: '' },
+                    all: { priv: [0, 0, 0], help: '' },
+                    year: {
+                        priv: [0, 0, 0], help: '',
+                        args: {
+                            chart: { priv: [0, 0, 0], help: '' }
+                        }
                     },
-                    {
-                        cmd: ["m"], priv: [0, 0, 0], args: [
-                            { cmd: ["chart"], priv: [0, 0, 0] }
-                        ]
+                    month: {
+                        priv: [0, 0, 0], help: '',
+                        args: {
+                            chart: { priv: [0, 0, 0], help: '' }
+                        }
                     },
-                    { cmd: ["clr"], priv: [0, 0, 0] }
-                ]
+                    clear: { priv: [0, 0, 0], help: '' }
+                }
             },
-            { cmd: ["shut"], priv: [0, 0, 0] }
-        ]
+            shut: { priv: [0, 0, 0], help: '' }
+        }
     },
-    {
-        cmd: ["img"], priv: [0, 0, 0], args: [
-            {
-                cmd: ["draw"], priv: [0, 0, 0], args: [
-                    { cmd: ["lcl", "local"], priv: [0, 0, 0] },
-                    { cmd: ["stl", "stolen"], priv: [0, 0, 0] },
-                    { cmd: ["save"], priv: [0, 0, 0] },
-                    { cmd: ["all"], priv: [0, 0, 0] }
-                ]
+    img: {
+        priv: [0, 0, 0], help: '',
+        args: {
+            draw: {
+                priv: [0, 0, 0], help: '',
+                args: {
+                    local: { priv: [0, 0, 0], help: '' },
+                    steal: { priv: [0, 0, 0], help: '' },
+                    save: { priv: [0, 0, 0], help: '' },
+                    all: { priv: [0, 0, 0], help: '' }
+                }
             },
-            {
-                cmd: ["stl", "steal"], priv: [0, 40, 40], args: [
-                    { cmd: ["on"], priv: [0, 0, 0] },
-                    { cmd: ["off"], priv: [0, 0, 0] }
-                ]
+            steal: {
+                priv: [0, 40, 40], help: '',
+                args: {
+                    on: { priv: [0, 0, 0], help: '' },
+                    off: { priv: [0, 0, 0], help: '' }
+                }
             },
-            {
-                cmd: ["f", "fgt", "forget"], priv: [0, 40, 40], args: [
-                    { cmd: ["stl", "stolen"], priv: [0, 0, 0] },
-                    { cmd: ["save"], priv: [0, 0, 0] },
-                    { cmd: ["all"], priv: [0, 0, 0] }
-                ]
+            forget: {
+                priv: [0, 40, 40], help: '',
+                args: {
+                    steal: { priv: [0, 0, 0], help: '' },
+                    save: { priv: [0, 0, 0], help: '' },
+                    all: { priv: [0, 0, 0], help: '' }
+                }
             },
-            {
-                cmd: ["itt"], priv: [1, 100, 100], args: [
-                    { cmd: ["ran"], priv: [0, 0, 0] },
-                    { cmd: ["*"], priv: [0, 0, 0] }
-                ]
+            itt: {
+                priv: [0, 100, 100], help: '',
+                args: {
+                    ran: { priv: [0, 0, 0], help: '' },
+                    "*": { priv: [0, 0, 0], help: '' }
+                }
             },
-            {
-                cmd: ["save"], priv: [0, 40, 40], args: [
-                    { cmd: ["show"], priv: [0, 0, 0] },
-                    { cmd: ["clr"], priv: [0, 0, 0] },
-                    { cmd: ["del"], priv: [0, 0, 0] },
-                    { cmd: ["*"], priv: [1, 100, 100] }
-                ]
+            save: {
+                priv: [0, 40, 40], help: '',
+                args: {
+                    show: { priv: [0, 0, 0], help: '' },
+                    clear: { priv: [0, 0, 0], help: '' },
+                    delete: { priv: [0, 0, 0], help: '' },
+                    "*": { priv: [0, 100, 100], help: '' }
+                }
             }
-        ]
-    },
-];
+        }
+    }
+};
 
 export class PrivilegeManager {
-    static cmdPriv: CmdPrivInfo[] = defaultCmdPriv;
+    static cmdPriv: CmdPriv = defaultCmdPriv;
 
     static reviveCmdPriv() {
         try {
-            const cmdPriv = JSON.parse(ConfigManager.ext.storageGet('cmdPriv') || '[]');
+            const cmdPriv = JSON.parse(ConfigManager.ext.storageGet('cmdPriv') || '{}');
             if (cmdPriv.length > 0) {
                 this.cmdPriv = this.updateCmdPriv(cmdPriv, defaultCmdPriv);
                 this.saveCmdPriv();
@@ -183,15 +230,15 @@ export class PrivilegeManager {
         ConfigManager.ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
     }
 
-    static updateCmdPriv(cp: CmdPrivInfo[], defaultCp: CmdPrivInfo[]): CmdPrivInfo[] {
-        const newCp: CmdPrivInfo[] = [];
-        for (const defaultCpi of defaultCp) {
-            const cpi = cp.find(cpi => defaultCpi.cmd.some(c => cpi.cmd.includes(c)));
-            if (!cpi) {
-                newCp.push(defaultCpi);
+    static updateCmdPriv(cp: CmdPriv, defaultCp: CmdPriv): CmdPriv {
+        const newCp: CmdPriv = {};
+        for (const cmd in defaultCp) {
+            const defaultCpi = defaultCp[cmd];
+            if (!cp.hasOwnProperty(cmd)) {
+                newCp[cmd] = defaultCpi;
             } else {
+                const cpi = cp[cmd];
                 if (defaultCpi.args) {
-                    cpi.cmd = defaultCpi.cmd;
                     if (cpi.args) {
                         cpi.args = this.updateCmdPriv(cpi.args, defaultCpi.args);
                     } else {
@@ -200,7 +247,7 @@ export class PrivilegeManager {
                 } else if (cpi.args) {
                     delete cpi.args;
                 }
-                newCp.push(cpi);
+                newCp[cmd] = cpi;
             }
         }
         return newCp;
@@ -211,16 +258,17 @@ export class PrivilegeManager {
         this.saveCmdPriv();
     }
 
-    static getCmdPriv(cmdChain: string[], cp: CmdPrivInfo[] = this.cmdPriv): CmdPrivInfo | null {
+    static getCmdPriv(cmdChain: string[], cp: CmdPriv = this.cmdPriv): CmdPrivInfo | null {
         if (cmdChain.length === 0) {
             return null;
         }
 
-        const cpi = cp.find(cpi => cpi.cmd.includes(cmdChain[0]));
-        if (!cpi) {
+        const cmd = cmdChain[0];
+        if (!cp.hasOwnProperty(cmd)) {
             return null;
         }
 
+        const cpi = cp[cmd];
         if (cpi.args && cmdChain.length > 1) {
             return this.getCmdPriv(cmdChain.slice(1), cpi.args);
         }
@@ -228,36 +276,35 @@ export class PrivilegeManager {
         return cpi;
     }
 
-    static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, ai: AI): boolean {
+    static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, ai: AI): { success: boolean, help: string } {
         const sessionPriv = ai.setting.priv;
         const userPriv = ctx.privilegeLevel;
         const cmdChain = [cmdArgs.command, ...cmdArgs.args];
 
-        function checkCmdPriv(cp: CmdPrivInfo[], i: number): boolean {
+        function checkCmdPriv(cp: CmdPriv, help: string, i: number): { success: boolean, help: string } {
             if (i >= cmdChain.length) {
-                return true;
+                return { success: true, help: help };
             }
 
-            for (const cpi of cp) {
-                if (!cpi.cmd.includes(cmdChain[i]) && !cpi.cmd.includes("*")) {
-                    continue;
-                }
-
-                if (sessionPriv >= cpi.priv[0] && userPriv >= cpi.priv[1]) {
-                    return cpi.args ? checkCmdPriv(cpi.args, i + 1) : true;
-                }
-
-                if (userPriv >= cpi.priv[2]) {
-                    return cpi.args ? checkCmdPriv(cpi.args, i + 1) : true;
-                }
-
-                return false;
+            const cmd = cmdChain[i];
+            if (!cp.hasOwnProperty(cmd) && !cp.hasOwnProperty("*")) {
+                logger.warning(`权限检查失败，命令：[${cmdChain.join(' ')}]，未在权限列表中找到匹配项`);
+                return { success: false, help: help };
             }
 
-            logger.warning(`权限检查失败，命令：${cmdChain.join(' ')}，未在权限列表中找到匹配项`);
-            return false;
+            const cpi = cp[cmd] || cp["*"];
+
+            if (sessionPriv >= cpi.priv[0] && userPriv >= cpi.priv[1]) {
+                return cpi.args ? checkCmdPriv(cpi.args, cpi.help, i + 1) : { success: true, help: help };
+            }
+
+            if (userPriv >= cpi.priv[2]) {
+                return cpi.args ? checkCmdPriv(cpi.args, cpi.help, i + 1) : { success: true, help: help };
+            }
+
+            return { success: false, help: `命令：[${cmdChain.join(' ')}]权限不足` };
         }
 
-        return checkCmdPriv(this.cmdPriv, 0);
+        return checkCmdPriv(this.cmdPriv, '', 0);
     }
 }

@@ -50,8 +50,9 @@ function main() {
 
       const ret = seal.ext.newCmdExecuteResult(true);
       const ai = AIManager.getAI(id);
-      if (!PrivilegeManager.checkPriv(ctx, cmdArgs, ai)) {
-        seal.replyToSender(ctx, msg, "权限不足或指令不存在");
+      const checkResult = PrivilegeManager.checkPriv(ctx, cmdArgs, ai);
+      if (!checkResult.success) {
+        seal.replyToSender(ctx, msg, checkResult.help);
         return ret;
       }
 
@@ -766,6 +767,7 @@ function main() {
             }
           }
         }
+        // 实现需要修改一下，on/off + 具体函数名，*是直接调用
         case 'tool': {
           const val2 = cmdArgs.getArgN(2);
           switch (val2) {
@@ -1362,8 +1364,9 @@ ${Object.keys(tool.info.function.parameters.properties).map(key => {
 
       const ret = seal.ext.newCmdExecuteResult(true);
       const ai = AIManager.getAI(id);
-      if (!PrivilegeManager.checkPriv(ctx, cmdArgs, ai)) {
-        seal.replyToSender(ctx, msg, "权限不足或指令不存在");
+      const checkResult = PrivilegeManager.checkPriv(ctx, cmdArgs, ai);
+      if (!checkResult.success) {
+        seal.replyToSender(ctx, msg, checkResult.help);
         return ret;
       }
 

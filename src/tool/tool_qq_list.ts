@@ -232,7 +232,7 @@ export function registerQQList() {
                     name: {
                         type: 'string',
                         description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
-                    },
+                    }
                 },
                 required: ["name"]
             }
