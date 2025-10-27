@@ -1,210 +1,175 @@
 import { AI } from "./AI/AI";
 import { logger } from "./logger";
-import { ConfigManager } from "./config/config";
+import { ConfigManager, PRIVILEGELEVELMAP } from "./config/config";
+import { aliasToCmd } from "./utils/utils";
 
 
 export interface CmdPrivInfo {
     priv: [number, number, number], // 0: 会话所需权限, 1: 会话检查通过后用户所需权限, 2: 强行触发指令用户所需权限, 进行检查时若通过0和1则无需检查2
-    help: string;
     args?: CmdPriv; // 需通过前一级检查才可检查子命令
 }
 
 export interface CmdPriv { [key: string]: CmdPrivInfo };
 
-// 命令别名映射表，别名：原始命令
-export const aliasMap = {
-    "AI": "ai",
-    "priv": "privilege",
-    "ses": "session",
-    "st": "set",
-    "ck": "check",
-    "clr": "clear",
-    "sb": "standby",
-    "fgt": "forget",
-    "f": "forget",
-    "ass": "assistant",
-    "memo": "memory",
-    "p": "private",
-    "g": "group",
-    "del": "delete",
-    "ign": "ignore",
-    "rm": "remove",
-    "lst": "list",
-    "tk": "token",
-    "y": "year",
-    "m": "month",
-    "lcl": "local",
-    "stl": "steal",
-    "ran": "random",
-}
+const U: [number, number, number] = [0, PRIVILEGELEVELMAP.user, PRIVILEGELEVELMAP.user]; // user
+const M: [number, number, number] = [0, PRIVILEGELEVELMAP.master, PRIVILEGELEVELMAP.master]; // master
+const I: [number, number, number] = [0, PRIVILEGELEVELMAP.inviter, PRIVILEGELEVELMAP.inviter]; // inviter
+const S: [number, number, number] = [1, PRIVILEGELEVELMAP.inviter, PRIVILEGELEVELMAP.master]; // spesial，会话所需权限为1，是才能被邀请者使用，否则需为骰主
 
-const defaultCmdPriv: CmdPriv = {
+export const defaultCmdPriv: CmdPriv = {
     ai: {
-        priv: [0, 0, 0], help: '',
-        args: {
+        priv: U, args: {
             privilege: {
-                priv: [0, 100, 100], help: '',
-                args: {
+                priv: M, args: {
                     session: {
-                        priv: [0, 0, 0], help: '',
-                        args: {
-                            set: { priv: [0, 0, 0], help: '' },
-                            check: { priv: [0, 0, 0], help: '' }
+                        priv: U, args: {
+                            set: { priv: U },
+                            check: { priv: U }
                         }
                     },
-                    set: { priv: [0, 0, 0], help: '' },
-                    show: { priv: [0, 0, 0], help: '' },
-                    reset: { priv: [0, 0, 0], help: '' }
+                    set: { priv: U },
+                    show: { priv: U },
+                    reset: { priv: U }
                 }
             },
-            prompt: { priv: [0, 100, 100], help: '' },
-            status: { priv: [0, 0, 0], help: '' },
-            ctxn: { priv: [0, 0, 0], help: '' },
+            prompt: { priv: M },
+            status: { priv: U },
+            ctxn: { priv: U },
             timer: {
-                priv: [0, 0, 0], help: '',
-                args: {
-                    clear: { priv: [0, 40, 40], help: '' }
+                priv: U, args: {
+                    list: { priv: U },
+                    clear: { priv: I }
                 }
             },
-            on: { priv: [1, 40, 100], help: '' },
-            standby: { priv: [0, 40, 40], help: '' },
-            off: { priv: [0, 40, 40], help: '' },
+            on: { priv: S },
+            standby: { priv: I },
+            off: { priv: I },
             forget: {
-                priv: [0, 40, 40], help: '',
-                args: {
-                    assistant: { priv: [0, 0, 0], help: '' },
-                    user: { priv: [0, 0, 0], help: '' }
+                priv: I, args: {
+                    assistant: { priv: U },
+                    user: { priv: U }
                 }
             },
-            role: { priv: [1, 40, 40], help: '' },
+            role: {
+                priv: S, args: {
+                    show: { priv: U },
+                    "*": { priv: U },
+                }
+            },
             memory: {
-                priv: [0, 0, 0], help: '',
-                args: {
-                    status: { priv: [0, 0, 0], help: '' },
+                priv: U, args: {
+                    status: { priv: U },
                     private: {
-                        priv: [0, 0, 0], help: '',
-                        args: {
+                        priv: U, args: {
                             set: {
-                                priv: [0, 0, 0], help: '',
-                                args: {
-                                    clear: { priv: [0, 0, 0], help: '' },
-                                    "*": { priv: [0, 0, 0], help: '' }
+                                priv: U, args: {
+                                    clear: { priv: U },
+                                    "*": { priv: U }
                                 }
                             },
-                            delete: { priv: [0, 0, 0], help: '' },
-                            show: { priv: [0, 0, 0], help: '' },
-                            clear: { priv: [0, 0, 0], help: '' }
+                            delete: { priv: U },
+                            show: { priv: U },
+                            clear: { priv: U }
                         }
                     },
                     group: {
-                        priv: [0, 40, 40], help: '',
-                        args: {
+                        priv: I, args: {
                             set: {
-                                priv: [0, 0, 0], help: '',
-                                args: {
-                                    clear: { priv: [0, 0, 0], help: '' },
-                                    "*": { priv: [0, 0, 0], help: '' }
+                                priv: U, args: {
+                                    clear: { priv: U },
+                                    "*": { priv: U }
                                 }
                             },
-                            delete: { priv: [0, 0, 0], help: '' },
-                            show: { priv: [0, 0, 0], help: '' },
-                            clear: { priv: [0, 0, 0], help: '' }
+                            delete: { priv: U },
+                            show: { priv: U },
+                            clear: { priv: U }
                         }
                     },
                     short: {
-                        priv: [1, 40, 100], help: '',
-                        args: {
-                            show: { priv: [0, 0, 0], help: '' },
-                            clear: { priv: [0, 0, 0], help: '' },
-                            on: { priv: [0, 0, 0], help: '' },
-                            off: { priv: [0, 0, 0], help: '' }
+                        priv: S, args: {
+                            show: { priv: U },
+                            clear: { priv: U },
+                            on: { priv: U },
+                            off: { priv: U }
                         }
                     },
-                    sum: { priv: [0, 0, 0], help: '' }
+                    sum: { priv: U }
                 }
             },
             tool: {
-                priv: [0, 40, 40], help: '',
-                args: {
-                    help: { priv: [0, 0, 0], help: '' },
-                    on: { priv: [0, 0, 0], help: '' },
-                    off: { priv: [0, 0, 0], help: '' },
-                    "*": { priv: [0, 100, 100], help: '' }
+                priv: U, args: {
+                    on: { priv: I },
+                    off: { priv: I },
+                    help: { priv: U },
+                    call: { priv: M },
+                    "*": { priv: U }
                 }
             },
             ignore: {
-                priv: [0, 0, 0], help: '',
-                args: {
-                    add: { priv: [0, 0, 0], help: '' },
-                    remove: { priv: [0, 0, 0], help: '' },
-                    list: { priv: [0, 0, 0], help: '' }
+                priv: U, args: {
+                    add: { priv: U },
+                    remove: { priv: U },
+                    list: { priv: U }
                 }
             },
             token: {
-                priv: [1, 40, 100], help: '',
-                args: {
-                    list: { priv: [0, 0, 0], help: '' },
-                    sum: { priv: [0, 0, 0], help: '' },
-                    all: { priv: [0, 0, 0], help: '' },
+                priv: S, args: {
+                    list: { priv: U },
+                    sum: { priv: U },
+                    all: { priv: U },
                     year: {
-                        priv: [0, 0, 0], help: '',
-                        args: {
-                            chart: { priv: [0, 0, 0], help: '' }
+                        priv: U, args: {
+                            chart: { priv: U }
                         }
                     },
                     month: {
-                        priv: [0, 0, 0], help: '',
-                        args: {
-                            chart: { priv: [0, 0, 0], help: '' }
+                        priv: U, args: {
+                            chart: { priv: U }
                         }
                     },
-                    clear: { priv: [0, 0, 0], help: '' }
+                    clear: { priv: U },
+                    help: { priv: U },
+                    "*": { priv: U }
                 }
             },
-            shut: { priv: [0, 0, 0], help: '' }
+            shut: { priv: U }
         }
     },
     img: {
-        priv: [0, 0, 0], help: '',
-        args: {
+        priv: U, args: {
             draw: {
-                priv: [0, 0, 0], help: '',
-                args: {
-                    local: { priv: [0, 0, 0], help: '' },
-                    steal: { priv: [0, 0, 0], help: '' },
-                    save: { priv: [0, 0, 0], help: '' },
-                    all: { priv: [0, 0, 0], help: '' }
+                priv: U, args: {
+                    local: { priv: U },
+                    steal: { priv: U },
+                    save: { priv: U },
+                    all: { priv: U }
                 }
             },
             steal: {
-                priv: [0, 40, 40], help: '',
-                args: {
-                    on: { priv: [0, 0, 0], help: '' },
-                    off: { priv: [0, 0, 0], help: '' }
+                priv: I, args: {
+                    on: { priv: U },
+                    off: { priv: U }
                 }
             },
             forget: {
-                priv: [0, 40, 40], help: '',
-                args: {
-                    steal: { priv: [0, 0, 0], help: '' },
-                    save: { priv: [0, 0, 0], help: '' },
-                    all: { priv: [0, 0, 0], help: '' }
+                priv: I, args: {
+                    steal: { priv: U },
+                    save: { priv: U },
+                    all: { priv: U }
                 }
             },
             itt: {
-                priv: [0, 100, 100], help: '',
-                args: {
-                    ran: { priv: [0, 0, 0], help: '' },
-                    "*": { priv: [0, 0, 0], help: '' }
+                priv: M, args: {
+                    random: { priv: U },
+                    "*": { priv: U }
                 }
             },
             save: {
-                priv: [0, 40, 40], help: '',
-                args: {
-                    show: { priv: [0, 0, 0], help: '' },
-                    clear: { priv: [0, 0, 0], help: '' },
-                    delete: { priv: [0, 0, 0], help: '' },
-                    "*": { priv: [0, 100, 100], help: '' }
+                priv: I, args: {
+                    show: { priv: U },
+                    clear: { priv: U },
+                    delete: { priv: U },
+                    "*": { priv: M }
                 }
             }
         }
@@ -217,9 +182,11 @@ export class PrivilegeManager {
     static reviveCmdPriv() {
         try {
             const cmdPriv = JSON.parse(ConfigManager.ext.storageGet('cmdPriv') || '{}');
-            if (cmdPriv.length > 0) {
-                this.cmdPriv = this.updateCmdPriv(cmdPriv, defaultCmdPriv);
+            if (typeof cmdPriv === 'object' && !Array.isArray(cmdPriv)) {
+                this.cmdPriv = this.updateCmdPriv(cmdPriv, JSON.parse(JSON.stringify(defaultCmdPriv)));
                 this.saveCmdPriv();
+            } else {
+                this.resetCmdPriv();
             }
         } catch (error) {
             logger.error(`从数据库中获取cmdPriv失败:`, error);
@@ -238,13 +205,13 @@ export class PrivilegeManager {
                 newCp[cmd] = defaultCpi;
             } else {
                 const cpi = cp[cmd];
-                if (defaultCpi.args) {
-                    if (cpi.args) {
+                if (defaultCpi.hasOwnProperty('args')) {
+                    if (cpi.hasOwnProperty('args')) {
                         cpi.args = this.updateCmdPriv(cpi.args, defaultCpi.args);
                     } else {
                         cpi.args = defaultCpi.args;
                     }
-                } else if (cpi.args) {
+                } else if (cpi.hasOwnProperty('args')) {
                     delete cpi.args;
                 }
                 newCp[cmd] = cpi;
@@ -254,57 +221,57 @@ export class PrivilegeManager {
     }
 
     static resetCmdPriv() {
-        this.cmdPriv = defaultCmdPriv;
+        this.cmdPriv = JSON.parse(JSON.stringify(defaultCmdPriv));
         this.saveCmdPriv();
     }
 
-    static getCmdPriv(cmdChain: string[], cp: CmdPriv = this.cmdPriv): CmdPrivInfo | null {
+    static getCmdPrivInfo(cmdChain: string[], cp: CmdPriv = this.cmdPriv): CmdPrivInfo | null {
         if (cmdChain.length === 0) {
             return null;
         }
 
-        const cmd = cmdChain[0];
+        const cmd = aliasToCmd(cmdChain[0]);
         if (!cp.hasOwnProperty(cmd)) {
             return null;
         }
 
         const cpi = cp[cmd];
         if (cpi.args && cmdChain.length > 1) {
-            return this.getCmdPriv(cmdChain.slice(1), cpi.args);
+            return this.getCmdPrivInfo(cmdChain.slice(1), cpi.args);
         }
 
         return cpi;
     }
 
-    static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, ai: AI): { success: boolean, help: string } {
+    static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, ai: AI): { success: boolean, exist: boolean } {
         const sessionPriv = ai.setting.priv;
         const userPriv = ctx.privilegeLevel;
-        const cmdChain = [cmdArgs.command, ...cmdArgs.args];
+        const cmdChain = [cmdArgs.command, ...cmdArgs.args].map(cmd => aliasToCmd(cmd));
 
-        function checkCmdPriv(cp: CmdPriv, help: string, i: number): { success: boolean, help: string } {
+        function checkCmdPriv(cp: CmdPriv, i: number): { success: boolean, exist: boolean } {
             if (i >= cmdChain.length) {
-                return { success: true, help: help };
+                return { success: true, exist: true };
             }
 
             const cmd = cmdChain[i];
             if (!cp.hasOwnProperty(cmd) && !cp.hasOwnProperty("*")) {
                 logger.warning(`权限检查失败，命令：[${cmdChain.join(' ')}]，未在权限列表中找到匹配项`);
-                return { success: false, help: help };
+                return { success: false, exist: false };
             }
 
             const cpi = cp[cmd] || cp["*"];
 
             if (sessionPriv >= cpi.priv[0] && userPriv >= cpi.priv[1]) {
-                return cpi.args ? checkCmdPriv(cpi.args, cpi.help, i + 1) : { success: true, help: help };
+                return cpi.args ? checkCmdPriv(cpi.args, i + 1) : { success: true, exist: true };
             }
 
             if (userPriv >= cpi.priv[2]) {
-                return cpi.args ? checkCmdPriv(cpi.args, cpi.help, i + 1) : { success: true, help: help };
+                return cpi.args ? checkCmdPriv(cpi.args, i + 1) : { success: true, exist: true };
             }
 
-            return { success: false, help: `命令：[${cmdChain.join(' ')}]权限不足` };
+            return { success: false, exist: true };
         }
 
-        return checkCmdPriv(this.cmdPriv, '', 0);
+        return checkCmdPriv(this.cmdPriv, 0);
     }
 }

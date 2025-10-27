@@ -130,3 +130,33 @@ export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, val
 
     return obj;
 }
+
+export function aliasToCmd(val: string) {
+    // 命令别名映射表，别名：原始命令
+    const aliasMap = {
+        "AI": "ai",
+        "priv": "privilege",
+        "ses": "session",
+        "st": "set",
+        "ck": "check",
+        "clr": "clear",
+        "sb": "standby",
+        "fgt": "forget",
+        "f": "forget",
+        "ass": "assistant",
+        "memo": "memory",
+        "p": "private",
+        "g": "group",
+        "del": "delete",
+        "ign": "ignore",
+        "rm": "remove",
+        "lst": "list",
+        "tk": "token",
+        "y": "year",
+        "m": "month",
+        "lcl": "local",
+        "stl": "steal",
+        "ran": "random",
+    }
+    return aliasMap[val] || val;
+}
