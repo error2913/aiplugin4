@@ -219,7 +219,7 @@ export function registerImage() {
 
 
         try {
-            ai.imageManager.updateSavedImages(savedImages);
+            ai.imageManager.saveImages(savedImages);
             return { content: `图片已保存`, images: [] };
         } catch (e) {
             return { content: `图片保存失败：${e.message}`, images: [] };

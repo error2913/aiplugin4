@@ -472,7 +472,7 @@ async function replaceSpecialTokens(ctx: seal.MsgContext, ai: AI, reply: string)
                         if (image.base64) {
                             image.weight += 1;
                         }
-                        result += `[CQ:image,file=${image.file}]`;
+                        result += ImageManager.getImageCQCode(image);
                     }
                 } else {
                     logger.warning(`无法找到图片：${id}`);

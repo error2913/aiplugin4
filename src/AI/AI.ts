@@ -95,7 +95,7 @@ export class AI {
             messageArray = result.messageArray;
             images = result.images;
             if (ai.imageManager.stealStatus) {
-                ai.imageManager.updateStolenImages(images);
+                ai.imageManager.stealImages(images);
             }
         }
 

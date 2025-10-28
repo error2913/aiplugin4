@@ -828,7 +828,10 @@ ${JSON.stringify(tool.info.function.parameters.properties, null, 2)}
                 }
 
                 tool.solve(ctx, msg, ai, args)
-                  .then(({ content }) => seal.replyToSender(ctx, msg, content));
+                  .then(({ content, images }) => seal.replyToSender(ctx, msg, `返回内容:
+${content}
+返回图片:
+${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
                 return ret;
               } catch (e) {
                 const s = `调用函数 (${val3}) 失败:${e.message}`;
@@ -1458,7 +1461,7 @@ ${JSON.stringify(tool.info.function.parameters.properties, null, 2)}
               const imageList = ai.imageManager.savedImages.map((img, index) => `${index + 1}. 名称: ${img.id}
 应用场景: ${img.scenes.join('、') || '无'}
 权重: ${img.weight}
-[CQ:image,file=${seal.base64ToImage(img.base64)}]`).join('\n\n');
+${ImageManager.getImageCQCode(img)}`).join('\n\n');
 
               seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
               return ret;
@@ -1510,7 +1513,7 @@ ${JSON.stringify(tool.info.function.parameters.properties, null, 2)}
                   return image;
                 })
                 .then((image) => {
-                  ai.imageManager.updateSavedImages([image]);
+                  ai.imageManager.saveImages([image]);
                   seal.replyToSender(ctx, msg, `已保存图片 ${image.id}`);
                 })
                 .catch((e) => {

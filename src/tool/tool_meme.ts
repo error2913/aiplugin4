@@ -136,13 +136,27 @@ export function registerMeme() {
             }
         }
 
-        const image = [];
+        const scenes = ["meme", ...text, ...members];
+
+        // 图片存在则直接返回
+        for (const img of ai.imageManager.savedImages) {
+            if (img.scenes[0] !== "meme") {
+                continue;
+            }
+            // 检查场景是否匹配，需要注意的是，text和members有可能发生重合，导致scenes一致但meme实际内容不同，现阶段不管
+            if (img.scenes.every((v, i) => v === scenes[i]) && img.id.replace(/_\d+$/, "") === name) {
+                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
+                return { content: `${s}发送成功，${save ? `已保存为<|img:${img.id}|>` : `可使用<|img:${img.id}|>再次调用`}`, images: [img] };
+            }
+        }
+
+        const avatars = [];
         for (const name of members) {
             const uid = await ai.context.findUserId(ctx, name);
             if (uid === null) {
                 return { content: `未找到<${name}>`, images: [] };
             }
-            image.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/\D/g, "")}&spec=640&img_type=jpg`);
+            avatars.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/\D/g, "")}&spec=640&img_type=jpg`);
         }
 
         try {
@@ -151,7 +165,7 @@ export function registerMeme() {
                 body: JSON.stringify({
                     key,
                     text,
-                    image,
+                    image: avatars,
                     args: {}
                 }),
             });
@@ -166,21 +180,21 @@ export function registerMeme() {
 
                 const file = seal.base64ToImage(base64);
 
-                const newImage = new Image(file);
-                newImage.id = ImageManager.generateImageId(ai, name);
-                newImage.isUrl = false;
-                newImage.scenes = [...text, ...members];
-                newImage.base64 = base64;
-                newImage.content = `表情包${name}
+                const img = new Image(file);
+                img.id = ImageManager.generateImageId(ai, name);
+                img.isUrl = false;
+                img.scenes = scenes;
+                img.base64 = base64;
+                img.content = `表情包${name}
 文字${text.join('，') || '无'}
 用户${members.join('，') || '无'}`;
 
                 if (save) {
-                    ai.imageManager.updateSavedImages([newImage]);
+                    ai.imageManager.saveImages([img]);
                 }
 
-                seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`)
-                return { content: `${s}发送成功，${save ? `已保存为<|img:${newImage.id}|>` : `可使用<|img:${newImage.id}|>再次调用`}`, images: [newImage] };
+                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
+                return { content: `${s}发送成功，${save ? `已保存为<|img:${img.id}|>` : `可使用<|img:${img.id}|>再次调用`}`, images: [img] };
             } else {
                 throw new Error(json.message);
             }

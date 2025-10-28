@@ -48,12 +48,19 @@ export class ImageManager {
         return id;
     }
 
-    updateStolenImages(images: Image[]) {
+    static getImageCQCode(img: Image): string {
+        if (!img.isUrl && img.base64 !== '') {
+            return `[CQ:image,file=${seal.base64ToImage(img.base64)}]`;
+        }
+        return `[CQ:image,file=${img.file}]`;
+    }
+
+    stealImages(images: Image[]) {
         const { maxStolenImageNum } = ConfigManager.image;
         this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
     }
 
-    updateSavedImages(images: Image[]) {
+    saveImages(images: Image[]) {
         const { maxSavedImageNum } = ConfigManager.image;
         this.savedImages = this.savedImages.concat(images);
 

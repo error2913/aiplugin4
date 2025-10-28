@@ -167,7 +167,7 @@ export function registerMessage() {
                 messageArray = result.messageArray;
                 images.push(...result.images);
                 if (ai.imageManager.stealStatus) {
-                    ai.imageManager.updateStolenImages(images);
+                    ai.imageManager.stealImages(images);
                 }
             }
 

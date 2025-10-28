@@ -400,37 +400,35 @@ export class Context {
     }
 
     findImage(id: string, ai: AI): Image | null {
-        if (/^[0-9a-z]{6}$/.test(id.trim())) {
-            // 从上下文中查找图片
-            const messages = this.messages;
-            const userSet = new Set<string>();
-            for (let i = messages.length - 1; i >= 0; i--) {
-                const image = messages[i].images.find(item => item.id === id);
-                if (image) {
-                    return image;
-                }
-
-                const uid = messages[i].uid;
-                if (userSet.has(uid) || messages[i].role !== 'user') {
-                    continue;
-                }
-                const name = messages[i].name;
-                if (name.startsWith('_')) {
-                    continue;
-                }
-
-                const ai2 = AIManager.getAI(uid);
-                const image2 = ai2.memory.findImage(id);
-                if (image2) {
-                    return image2;
-                }
-            }
-
-            // 从自己记忆中查找图片
-            const image = ai.memory.findImage(id);
+        // 从上下文中查找图片
+        const messages = this.messages;
+        const userSet = new Set<string>();
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const image = messages[i].images.find(item => item.id === id);
             if (image) {
                 return image;
             }
+
+            const uid = messages[i].uid;
+            if (userSet.has(uid) || messages[i].role !== 'user') {
+                continue;
+            }
+            const name = messages[i].name;
+            if (name.startsWith('_')) {
+                continue;
+            }
+
+            const ai2 = AIManager.getAI(uid);
+            const image2 = ai2.memory.findImage(id);
+            if (image2) {
+                return image2;
+            }
+        }
+
+        // 从自己记忆中查找图片
+        const image = ai.memory.findImage(id);
+        if (image) {
+            return image;
         }
 
         const { localImagePaths } = ConfigManager.image;
