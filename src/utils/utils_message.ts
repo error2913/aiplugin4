@@ -7,7 +7,7 @@ import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./utils_string";
 
 export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
-    const { roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
+    const { roleSettingNames, roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const { isMemory, isShortMemory } = ConfigManager.memory;
@@ -33,9 +33,13 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         .map((prompt, index) => `${index + 1}. ${prompt}`)
         .join('\n');
 
-    let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-    if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
-        roleSettingIndex = 0;
+    let [roleSettingName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
+    let roleSettingIndex = 0;
+    if (exists && roleSettingName !== '' && roleSettingNames.includes(roleSettingName)) {
+        roleSettingIndex = roleSettingNames.indexOf(roleSettingName);
+        if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+            roleSettingIndex = 0;
+        }
     }
 
     // 记忆

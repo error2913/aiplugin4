@@ -51,7 +51,7 @@ export const defaultCmdPriv: CmdPriv = {
                 }
             },
             role: {
-                priv: S, args: {
+                priv: U, args: {
                     show: { priv: U },
                     "*": { priv: U },
                 }

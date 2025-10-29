@@ -205,7 +205,7 @@ export class MemoryManager {
         }
 
         const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
-        const { roleSettingTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
+        const { roleSettingNames, roleSettingTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
         const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
 
         const messages = ai.context.messages;
@@ -233,9 +233,13 @@ export class MemoryManager {
         }
 
         try {
-            let [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-            if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
-                roleSettingIndex = 0;
+            let [roleSettingName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
+            let roleSettingIndex = 0;
+            if (exists && roleSettingName !== '' && roleSettingNames.includes(roleSettingName)) {
+                roleSettingIndex = roleSettingNames.indexOf(roleSettingName);
+                if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+                    roleSettingIndex = 0;
+                }
             }
             const prompt = Handlebars.compile(memoryPromptTemplate[0])({
                 "角色设定": roleSettingTemplate[roleSettingIndex],

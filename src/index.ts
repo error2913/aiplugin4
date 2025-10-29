@@ -488,24 +488,33 @@ ${HELPMAP["权限限制"]}`);
           }
         }
         case 'role': {
-          const { roleSettingTemplate } = ConfigManager.message;
+          const { roleSettingNames, roleSettingTemplate } = ConfigManager.message;
 
           const val2 = cmdArgs.getArgN(2);
           switch (aliasToCmd(val2)) {
             case 'show': {
-              const [roleSettingIndex, _] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-              seal.replyToSender(ctx, msg, `当前角色设定序号为${roleSettingIndex}，序号范围为0-${roleSettingTemplate.length - 1}`);
+              let [roleSettingName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
+              if (!exists || roleSettingName === '' || !roleSettingNames.includes(roleSettingName)) {
+                roleSettingName = roleSettingNames[0];
+              }
+              const roleSettingIndex = roleSettingNames.indexOf(roleSettingName);
+              if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+                roleSettingName = roleSettingNames[0];
+              }
+              seal.replyToSender(ctx, msg, `当前角色设定名称为[${roleSettingName}]，名称有:\n${roleSettingNames.join('、')}`);
               return ret;
             }
             default: {
-              const index = parseInt(val2);
-              if (isNaN(index) || index < 0 || index >= roleSettingTemplate.length) {
-                seal.replyToSender(ctx, msg, `【.ai role <序号>】切换角色设定\n角色设定序号错误，序号范围为0-${roleSettingTemplate.length - 1}`);
+              if (!roleSettingNames.includes(val2)) {
+                seal.replyToSender(ctx, msg, `【.ai role <名称>】切换角色设定\n角色设定名称错误，名称有:\n${roleSettingNames.join('、')}`);
                 return ret;
               }
-
-              seal.vars.intSet(ctx, "$gSYSPROMPT", index);
-              seal.replyToSender(ctx, msg, `角色设定已切换到${index}`);
+              const roleSettingIndex = roleSettingNames.indexOf(val2);
+              if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+                seal.replyToSender(ctx, msg, `角色设定名称[${val2}]没有对应的角色设定`);
+              }
+              seal.vars.strSet(ctx, "$gSYSPROMPT", val2);
+              seal.replyToSender(ctx, msg, `角色设定已切换到[${val2}]`);
               return ret;
             }
           }
