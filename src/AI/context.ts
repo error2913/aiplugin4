@@ -129,7 +129,7 @@ export class Context {
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
         const length = messages.length;
-        if (length !== 0 && messages[length - 1].uid === uid && !/<function(?:_call)?>/.test(s)) {
+        if (length !== 0 && messages[length - 1].uid === uid && !/<[\|│｜]?function(?:_call)?>/.test(s)) {
             messages[length - 1].images.push(...images);
             messages[length - 1].msgArray.push({
                 msgId: msgId,

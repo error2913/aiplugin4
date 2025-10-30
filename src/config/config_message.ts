@@ -87,9 +87,7 @@ export class MessageConfig {
 {{{函数列表}}}
 {{/if}}`
         ], "");
-        seal.ext.registerTemplateConfig(MessageConfig.ext, "示例对话", [
-            "请写点什么，或者删掉这句话"
-        ], "role顺序为user和assistant轮流出现");
+        seal.ext.registerTemplateConfig(MessageConfig.ext, "示例对话", [""], "role顺序为user和assistant轮流出现");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加前缀", true, "可用于辨别不同用户");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否给AI展示数字号码", true, "例如QQ号和群号，能力较弱模型可能会出现幻觉");
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否在消息内添加消息ID", false, "可用于撤回等情况");

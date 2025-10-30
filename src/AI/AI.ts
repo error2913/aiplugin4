@@ -232,11 +232,11 @@ export class AI {
             logger.info("接收到的回复:", raw_reply);
 
             if (isTool && usePromptEngineering) {
-                if (!this.stream.toolCallStatus && /<function(?:_call)?>/.test(this.stream.reply + raw_reply)) {
+                if (!this.stream.toolCallStatus && /<[\|│｜]?function(?:_call)?>/.test(this.stream.reply + raw_reply)) {
                     logger.info("发现工具调用开始标签，拦截后续内容");
 
                     // 对于function_call前面的内容，发送并添加到上下文中
-                    const match = raw_reply.match(/([\s\S]*)<function(?:_call)?>/);
+                    const match = raw_reply.match(/([\s\S]*)<[\|│｜]?function(?:_call)?>/);
                     if (match && match[1].trim()) {
                         const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
 
@@ -265,7 +265,7 @@ export class AI {
 
                     if (/<\/function(?:_call)?>/.test(this.stream.reply)) {
                         logger.info("发现工具调用结束标签，开始处理对应工具调用");
-                        const match = this.stream.reply.match(/<function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                        const match = this.stream.reply.match(/<[\|│｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
                         if (match) {
                             this.stream.reply = '';
                             this.stream.toolCallStatus = false;

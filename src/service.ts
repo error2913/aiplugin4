@@ -39,7 +39,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
 
             if (isTool) {
                 if (usePromptEngineering) {
-                    const match = reply.match(/<function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                    const match = reply.match(/<[\|│｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
                     if (match) {
                         const messageArray = transformTextToArray(match[0]);
                         await ai.context.addMessage(ctx, msg, ai, messageArray, [], "assistant", '');
