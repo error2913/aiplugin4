@@ -36,7 +36,7 @@ export function registerQQList() {
                 const data = await net.callApi(epId, `get_friend_list`);
 
                 const s = `好友数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                    return { content: `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`, images: [] };
+                    return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`;
                 }).join('\n');
 
                 return { content: s, images: [] };
@@ -50,7 +50,7 @@ export function registerQQList() {
                 const data = await net.callApi(epId, `get_group_list`);
 
                 const s = `群聊数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                    return { content: `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`, images: [] };
+                    return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
                 }).join('\n');
 
                 return { content: s, images: [] };
@@ -107,7 +107,7 @@ export function registerQQList() {
                     return { content: `未找到管理员`, images: [] };
                 }
                 const s = `管理员数量: ${admins.length}\n` + admins.slice(0, 50).map((item: any, index: number) => {
-                    return { content: `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`, images: [] };
+                    `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`;
                 }).join('\n');
                 return { content: s, images: [] };
             } else if (role === 'robot') {
@@ -116,13 +116,13 @@ export function registerQQList() {
                     return { content: `未找到机器人`, images: [] };
                 }
                 const s = `机器人数量: ${robots.length}\n` + robots.slice(0, 50).map((item: any, index: number) => {
-                    return { content: `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`, images: [] };
+                    return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''}`;
                 }).join('\n');
                 return { content: s, images: [] };
             }
 
             const s = `群成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return { content: `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''} ${item.title ? `头衔: ${item.title}` : ''} ${item.role === 'owner' ? '【群主】' : item.role === 'admin' ? '【管理员】' : item.is_robot ? '【机器人】' : ''}`, images: [] };
+                return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.card && item.card !== item.nickname ? `群名片: ${item.card}` : ''} ${item.title ? `头衔: ${item.title}` : ''} ${item.role === 'owner' ? '【群主】' : item.role === 'admin' ? '【管理员】' : item.is_robot ? '【机器人】' : ''}`;
             }).join('\n');
             return { content: s, images: [] };
         } catch (e) {
@@ -172,7 +172,7 @@ export function registerQQList() {
                 });
 
                 const s = `搜索结果好友数量: ${arr.length}\n` + arr.slice(0, 50).map((item: any, index: number) => {
-                    return { content: `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`, images: [] };
+                    return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`;
                 }).join('\n');
 
                 return { content: s, images: [] };
@@ -190,7 +190,7 @@ export function registerQQList() {
                 });
 
                 const s = `搜索结果群聊数量: ${arr.length}\n` + arr.slice(0, 50).map((item: any, index: number) => {
-                    return { content: `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`, images: [] };
+                    return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
                 }).join('\n');
 
                 return { content: s, images: [] };
@@ -212,9 +212,9 @@ export function registerQQList() {
             });
 
             const s = `搜索结果好友数量: ${arr1.length}\n` + arr1.slice(0, 50).map((item: any, index: number) => {
-                return { content: `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`, images: [] };
+                return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`;
             }).join('\n') + `\n搜索结果群聊数量: ${arr2.length}\n` + arr2.slice(0, 50).map((item: any, index: number) => {
-                return { content: `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`, images: [] };
+                return `${index + 1}. ${item.group_name}(${item.group_id}) 人数: ${item.member_count}/${item.max_member_count}`;
             }).join('\n');
 
             return { content: s, images: [] };
@@ -269,7 +269,7 @@ export function registerQQList() {
             }
 
             const s = `共群数量: ${arr.length}\n` + arr.slice(0, 50).map((item: any, index: number) => {
-                return { content: `${index + 1}. ${item.group_info.group_name}(${item.group_info.group_id}) 人数: ${item.group_info.member_count}/${item.group_info.max_member_count} ${item.user_info.card && item.user_info.card !== item.user_info.nickname ? `群名片: ${item.user_info.card}` : ''}`, images: [] };
+                return `${index + 1}. ${item.group_info.group_name}(${item.group_info.group_id}) 人数: ${item.group_info.member_count}/${item.group_info.max_member_count} ${item.user_info.card && item.user_info.card !== item.user_info.nickname ? `群名片: ${item.user_info.card}` : ''}`;
             }).join('\n');
 
             return { content: s, images: [] };
