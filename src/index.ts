@@ -493,15 +493,20 @@ ${HELPMAP["权限限制"]}`);
           const val2 = cmdArgs.getArgN(2);
           switch (aliasToCmd(val2)) {
             case 'show': {
-              let [roleSettingName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
-              if (!exists || roleSettingName === '' || !roleSettingNames.includes(roleSettingName)) {
-                roleSettingName = roleSettingNames[0];
+              let name = roleSettingNames[0];;
+              const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
+              if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
+                const roleIndex = roleSettingNames.indexOf(roleName);
+                if (roleIndex >= 0 && roleIndex < roleSettingTemplate.length) {
+                  name = roleName;
+                }
+              } else {
+                const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
+                if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) {
+                  name = String(roleIndex2);
+                }
               }
-              const roleSettingIndex = roleSettingNames.indexOf(roleSettingName);
-              if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
-                roleSettingName = roleSettingNames[0];
-              }
-              seal.replyToSender(ctx, msg, `当前角色设定名称为[${roleSettingName}]，名称有:\n${roleSettingNames.join('、')}`);
+              seal.replyToSender(ctx, msg, `当前角色设定名称为[${name}]，名称有:\n${roleSettingNames.join('、')}`);
               return ret;
             }
             default: {

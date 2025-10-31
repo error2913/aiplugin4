@@ -33,12 +33,17 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         .map((prompt, index) => `${index + 1}. ${prompt}`)
         .join('\n');
 
-    let [roleSettingName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
-    let roleSettingIndex = 0;
-    if (exists && roleSettingName !== '' && roleSettingNames.includes(roleSettingName)) {
-        roleSettingIndex = roleSettingNames.indexOf(roleSettingName);
-        if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
-            roleSettingIndex = 0;
+    const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
+    let roleIndex = 0;
+    if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
+        roleIndex = roleSettingNames.indexOf(roleName);
+        if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) {
+            roleIndex = 0;
+        }
+    } else {
+        const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
+        if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) {
+            roleIndex = roleIndex2;
         }
     }
 
@@ -61,7 +66,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     }
 
     const data = {
-        "角色设定": roleSettingTemplate[roleSettingIndex],
+        "角色设定": roleSettingTemplate[roleIndex],
         "平台": ctx.endPoint.platform,
         "私聊": ctx.isPrivate,
         "展示号码": showNumber,
