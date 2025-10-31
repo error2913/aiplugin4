@@ -304,12 +304,6 @@ export class ToolManager {
         }
     }): Promise<string> {
         const name = tool_call.function.name;
-
-        if (this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
-            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
-            return "none";
-        }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {
             logger.warning(`调用函数失败:禁止调用的函数:${name}`);
             await ai.context.addToolMessage(tool_call.id, `调用函数失败:禁止调用的函数:${name}`, []);
@@ -323,6 +317,11 @@ export class ToolManager {
 
 
         const tool = this.toolMap[name];
+        if (tool.cmdInfo.ext !== '' && this.cmdArgs == null) {
+            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
+            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
+            return "none";
+        }
         if (tool.type !== "all" && tool.type !== msg.messageType) {
             logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
             await ai.context.addToolMessage(tool_call.id, `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`, []);
@@ -419,12 +418,6 @@ export class ToolManager {
         }
 
         const name = tool_call.name;
-
-        if (this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
-            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
-            return;
-        }
         if (ConfigManager.tool.toolsNotAllow.includes(name)) {
             logger.warning(`调用函数失败:禁止调用的函数:${name}`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:禁止调用的函数:${name}`, []);
@@ -438,6 +431,11 @@ export class ToolManager {
 
 
         const tool = this.toolMap[name];
+        if (tool.cmdInfo.ext !== '' && this.cmdArgs == null) {
+            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
+            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
+            return;
+        }
         if (tool.type !== "all" && tool.type !== msg.messageType) {
             logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`, []);

@@ -810,17 +810,20 @@ ${JSON.stringify(tool.info.function.parameters.properties, null, 2)}
               return ret;
             }
             case 'call': {
-              if (ToolManager.cmdArgs == null) {
-                seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
-                return ret;
-              }
-
               const val3 = cmdArgs.getArgN(3);
               if (!val3) {
                 seal.replyToSender(ctx, msg, `调用函数缺少工具函数名`);
                 return ret;
               }
+              if (!ToolManager.toolMap.hasOwnProperty(val3)) {
+                seal.replyToSender(ctx, msg, `调用函数失败:未注册的函数:${val3}`);
+                return ret;
+              }
               const tool = ToolManager.toolMap[val3];
+              if (tool.cmdInfo.ext !== '' && ToolManager.cmdArgs == null) {
+                seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
+                return ret;
+              }
 
               try {
                 const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
