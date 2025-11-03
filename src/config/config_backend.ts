@@ -11,6 +11,7 @@ export class BackendConfig {
         seal.ext.registerStringConfig(BackendConfig.ext, "联网搜索", "https://searxng.fishwhite.top", '可自行搭建');
         seal.ext.registerStringConfig(BackendConfig.ext, "网页读取", "https://webread.fishwhite.top", '可自行搭建');
         seal.ext.registerStringConfig(BackendConfig.ext, "用量图表", "http://usagechart.error2913.com", '可自行搭建');
+        seal.ext.registerStringConfig(BackendConfig.ext, "md和html图片渲染", "https://md.fishwhite.top", '可自行搭建');
     }
 
     static get() {
@@ -19,7 +20,8 @@ export class BackendConfig {
             imageTobase64Url: seal.ext.getStringConfig(BackendConfig.ext, "图片转base64"),
             webSearchUrl: seal.ext.getStringConfig(BackendConfig.ext, "联网搜索"),
             webReadUrl: seal.ext.getStringConfig(BackendConfig.ext, "网页读取"),
-            usageChartUrl: seal.ext.getStringConfig(BackendConfig.ext, "用量图表")
+            usageChartUrl: seal.ext.getStringConfig(BackendConfig.ext, "用量图表"),
+            renderUrl: seal.ext.getStringConfig(BackendConfig.ext, "md和html图片渲染"),
         }
     }
 }
