@@ -34,7 +34,13 @@ export const defaultCmdPriv: CmdPriv = {
             },
             prompt: { priv: M },
             status: { priv: U },
-            ctxn: { priv: U },
+            ctxn: {
+                priv: U, args: {
+                    status: { priv: U },
+                    set: { priv: I },
+                    mod: { priv: I }
+                }
+            },
             timer: {
                 priv: U, args: {
                     list: { priv: U },

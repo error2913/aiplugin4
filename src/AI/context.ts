@@ -6,6 +6,12 @@ import { levenshteinDistance, MessageSegment } from "../utils/utils_string";
 import { AI, AIManager } from "./AI";
 import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
+import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
+
+export interface UserInfo {
+    uid: string;
+    name: string;
+}
 
 export interface MessageInfo {
     msgId: string;
@@ -25,10 +31,11 @@ export interface Message {
 }
 
 export class Context {
-    static validKeys: (keyof Context)[] = ['messages', 'ignoreList', 'summaryCounter'];
+    static validKeys: (keyof Context)[] = ['messages', 'ignoreList', 'summaryCounter', 'autoNameMod'];
     messages: Message[];
     ignoreList: string[];
     summaryCounter: number; // 用于短期记忆自动总结计数
+    autoNameMod: number; // 自动修改上下文里的名字，0:不自动修改，1:修改为昵称，2:修改为群名片
 
     lastReply: string;
     counter: number;
@@ -62,29 +69,6 @@ export class Context {
         const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
-
-        // 检查清除上下文，1:清除所有上下文，2:清除assistant和tool上下文，3:清除user上下文
-        const [clrmsgs, _] = seal.vars.intGet(ctx, "$gCLRMSGS");
-        switch (clrmsgs) {
-            case 1: {
-                ai.context.clearMessages();
-                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
-                logger.info('标志位为1，清除所有上下文');
-                break;
-            }
-            case 2: {
-                ai.context.clearMessages('assistant', 'tool');
-                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
-                logger.info('标志位为2，清除assistant和tool上下文');
-                break;
-            }
-            case 3: {
-                ai.context.clearMessages('user');
-                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
-                logger.info('标志位为3，清除user上下文');
-                break;
-            }
-        }
 
         //处理文本
         const s = messageArray.map(item => {
@@ -125,9 +109,39 @@ export class Context {
             return;
         }
 
-        //更新上下文
-        const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
+
+        // 自动更新上下文里的名字
+        const exists = messages.some(message => message.uid === uid);
+        if (!exists) {
+            await this.updateName(ctx.endPoint.userId, ctx.group.groupId, uid);
+        }
+
+        // 检查清除上下文，1:清除所有上下文，2:清除assistant和tool上下文，3:清除user上下文
+        const [clrmsgs, _] = seal.vars.intGet(ctx, "$gCLRMSGS");
+        switch (clrmsgs) {
+            case 1: {
+                ai.context.clearMessages();
+                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+                logger.info('标志位为1，清除所有上下文');
+                break;
+            }
+            case 2: {
+                ai.context.clearMessages('assistant', 'tool');
+                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+                logger.info('标志位为2，清除assistant和tool上下文');
+                break;
+            }
+            case 3: {
+                ai.context.clearMessages('user');
+                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+                logger.info('标志位为3，清除user上下文');
+                break;
+            }
+        }
+
+        // 添加消息到上下文
+        const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const length = messages.length;
         if (length !== 0 && messages[length - 1].uid === uid && !/<[\|│｜]?function(?:_call)?>/.test(s)) {
             messages[length - 1].images.push(...images);
@@ -389,14 +403,77 @@ export class Context {
         return null;
     }
 
-    getNames(): string[] {
-        const names = [];
-        for (const message of this.messages) {
-            if (message.role === 'user' && message.name && !names.includes(message.name)) {
-                names.push(message.name);
+    getUserInfo(): UserInfo[] {
+        const userMap: { [key: string]: UserInfo } = {};
+        this.messages.forEach(message => {
+            if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {
+                userMap[message.uid] = {
+                    name: message.name,
+                    uid: message.uid,
+                };
+            }
+        });
+        return Object.values(userMap);
+    }
+
+    async setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card') {
+        let name = '';
+        switch (mod) {
+            case 'nickname': {
+                const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
+                if (!strangerInfo || !strangerInfo.nickname) {
+                    logger.warning(`未找到用户<${uid}>的昵称`);
+                    break;
+                }
+                name = strangerInfo.nickname;
+                break;
+            }
+            case 'card': {
+                if (!gid) {
+                    break;
+                }
+                const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
+                if (!memberInfo) {
+                    logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
+                    this.setName(epId, gid, uid, 'nickname');
+                    break;
+                }
+                name = memberInfo.card;
+                if (!name) {
+                    name = memberInfo.nickname;
+                }
+                if (!name) {
+                    this.setName(epId, gid, uid, 'nickname');
+                    break;
+                }
+                break;
             }
         }
-        return names;
+        if (!name) {
+            logger.warning(`用户<${uid}>未设置昵称或群名片`);
+            return;
+        }
+        const msg = createMsg(gid ? 'group' : 'private', uid, gid);
+        const ctx = createCtx(epId, msg);
+        ctx.player.name = name;
+        this.messages.forEach(message => {
+            if (message.uid === uid) {
+                message.name = name;
+            }
+        });
+    }
+
+    async updateName(epId: string, gid: string, uid: string) {
+        switch (this.autoNameMod) {
+            case 1: {
+                await this.setName(epId, gid, uid, 'nickname');
+                break;
+            }
+            case 2: {
+                await this.setName(epId, gid, uid, 'card');
+                break;
+            }
+        }
     }
 
     findImage(id: string, ai: AI): Image | null {

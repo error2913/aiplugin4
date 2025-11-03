@@ -30,7 +30,7 @@ export function registerGroupSign() {
         try {
             const epId = ctx.endPoint.userId;
             const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            await net.callApi(epId, `send_group_sign?group_id=${group_id.replace(/\D+/, '')}`);
+            await net.callApi(epId, `send_group_sign?group_id=${group_id.replace(/^.+:/, '')}`);
             return { content: `已发送群打卡，若无响应可能今日已打卡`, images: [] };
         } catch (e) {
             logger.error(e);

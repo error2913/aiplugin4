@@ -29,7 +29,7 @@ function main() {
 【.ai priv】权限相关
 【.ai prompt】查看system prompt
 【.ai status】查看当前AI状态
-【.ai ctxn】查看上下文里的名字
+【.ai ctxn】上下文名字相关
 【.ai timer】定时器相关
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记录聊天内容
@@ -47,6 +47,7 @@ function main() {
       const val = cmdArgs.getArgN(1);
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
+      const epId = ctx.endPoint.userId;
       const id = ctx.isPrivate ? uid : gid;
 
       const ret = seal.ext.newCmdExecuteResult(true);
@@ -209,10 +210,53 @@ ${HELPMAP["权限限制"]}`);
           return ret;
         }
         case 'ctxn': {
-          const names = ai.context.getNames();
-          const s = `上下文里的名字有：\n<${names.join('>\n<')}>`;
-          seal.replyToSender(ctx, msg, s);
-          return ret;
+          const val2 = cmdArgs.getArgN(2);
+          switch (aliasToCmd(val2)) {
+            case 'status': {
+              seal.replyToSender(ctx, msg, `自动修改上下文里的名字状态：${ai.context.autoNameMod}
+上下文里的名字有：\n${ai.context.getUserInfo().map(ui => `${ui.name}(${ui.uid})`).join('\n')}`);
+              return ret;
+            }
+            case 'set': {
+              const val3 = cmdArgs.getArgN(3);
+              const mod = aliasToCmd(val3);
+              if (mod !== 'nickname' && mod !== 'card') {
+                seal.replyToSender(ctx, msg, `帮助:
+【.ai ctxn set [nick/card]】设置上下文里的名字为昵称/群名片`);
+                return ret;
+              }
+              const promises = ai.context.getUserInfo().map(ui => ai.context.setName(epId, gid, ui.uid, mod));
+              Promise.all(promises).then(() => {
+                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.getUserInfo().map(ui => `${ui.name}(${ui.uid})`).join('\n')}`);
+              });
+              return ret;
+            }
+            case 'mod': {
+              const val3 = cmdArgs.getArgN(3);
+              const mod = parseInt(val3);
+              if (isNaN(mod) || mod < 0 || mod > 2) {
+                seal.replyToSender(ctx, msg, `帮助:
+【.ai ctxn mod <数字>】自动修改上下文里的名字(只在第一次出现时修改)
+0: 不自动修改
+1: 自动修改为昵称
+2: 自动修改为群名片`);
+                return ret;
+              }
+              ai.context.autoNameMod = mod;
+              seal.replyToSender(ctx, msg, `设置成功，将自动修改上下文里的名字为${mod === 1 ? '昵称' : '群名片'}`);
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, `帮助:
+【.ai ctxn status】查看上下文里的名字和自动修改状态
+【.ai ctxn set [nick/card]】设置上下文里的名字为昵称/群名片
+【.ai ctxn mod <数字>】自动修改上下文里的名字(只在第一次出现时修改)
+0: 不自动修改
+1: 自动修改为昵称
+2: 自动修改为群名片`);
+              return ret;
+            }
+          }
         }
         case 'timer': {
           const val2 = cmdArgs.getArgN(2);
@@ -533,7 +577,7 @@ ${HELPMAP["权限限制"]}`);
           switch (aliasToCmd(val2)) {
             case 'status': {
               let ai3 = ai;
-              if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== ctx.endPoint.userId)) {
+              if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== epId)) {
                 ai3 = ai2;
               }
 
@@ -877,7 +921,6 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
             return ret;
           }
 
-          const epId = ctx.endPoint.userId;
           const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
           const muid = cmdArgs.amIBeMentionedFirst ? epId : mctx.player.userId;
 
@@ -1559,7 +1602,7 @@ ${ImageManager.getImageCQCode(img)}`).join('\n\n');
 
   ext.onPoke = (ctx, event) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
-    msg.message = `[CQ:poke,qq=${event.targetId.replace(/\D/g, '')}]`;
+    msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
     if (event.senderId === ctx.endPoint.userId) {
       ext.onMessageSend(ctx, msg);
     } else {

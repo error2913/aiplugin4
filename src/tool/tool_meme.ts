@@ -156,7 +156,7 @@ export function registerMeme() {
             if (uid === null) {
                 return { content: `未找到<${name}>`, images: [] };
             }
-            avatars.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/\D/g, "")}&spec=640&img_type=jpg`);
+            avatars.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/^.+:/, '')}&spec=640&img_type=jpg`);
         }
 
         try {

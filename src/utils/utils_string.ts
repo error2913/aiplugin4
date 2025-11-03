@@ -113,8 +113,8 @@ export interface MessageSegment {
     };
 }
 
-export function transformTextToArray(s: string): MessageSegment[] {
-    const segments = s.split(/(\[CQ:.*?\])/).filter(segment => segment);
+export function transformTextToArray(text: string): MessageSegment[] {
+    const segments = text.split(/(\[CQ:.*?\])/).filter(segment => segment);
     const messageArray: MessageSegment[] = [];
     for (const segment of segments) {
         if (segment.startsWith('[CQ:')) {
@@ -159,29 +159,29 @@ export function transformTextToArray(s: string): MessageSegment[] {
 }
 
 export function transformArrayToText(messageArray: { type: string, data: { [key: string]: string } }[]): string {
-    let s = '';
+    let text = '';
     for (const message of messageArray) {
         if (message.type === 'text') {
-            s += message.data['text'];
+            text += message.data['text'];
         } else {
             if (message.type === 'image') {
                 if (message.data['url']) {
-                    s += `[CQ:image,file=${message.data['url']}]`;
+                    text += `[CQ:image,file=${message.data['url']}]`;
                 } else if (message.data['file']) {
-                    s += `[CQ:image,file=${message.data['file']}]`;
+                    text += `[CQ:image,file=${message.data['file']}]`;
                 }
             } else {
-                s += `[CQ:${message.type}`;
+                text += `[CQ:${message.type}`;
                 for (const key in message.data) {
                     if (typeof message.data[key] === 'string') {
-                        s += `,${key}=${message.data[key]}`;
+                        text += `,${key}=${message.data[key]}`;
                     }
                 }
-                s += ']';
+                text += ']';
             }
         }
     }
-    return s;
+    return text;
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {

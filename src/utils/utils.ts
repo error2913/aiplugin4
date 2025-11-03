@@ -157,6 +157,7 @@ export function aliasToCmd(val: string) {
         "lcl": "local",
         "stl": "steal",
         "ran": "random",
+        "nick": "nickname"
     }
     return aliasMap[val] || val;
 }
