@@ -123,36 +123,6 @@ export class ToolManager {
         };
     }
 
-    getToolsInfo(type: string): ToolInfo[] {
-        if (type !== "private" && type !== "group") {
-            type = "all";
-        }
-
-        const tools = Object.keys(this.toolStatus)
-            .map(key => {
-                if (this.toolStatus[key]) {
-                    if (!ToolManager.toolMap.hasOwnProperty(key)) {
-                        logger.error(`在getToolsInfo中找不到工具:${key}`);
-                        return null;
-                    }
-                    const tool = ToolManager.toolMap[key];
-                    if (tool.type !== "all" && tool.type !== type) {
-                        return null;
-                    }
-                    return tool.info;
-                } else {
-                    return null;
-                }
-            })
-            .filter(item => item !== null);
-
-        if (tools.length === 0) {
-            return null;
-        } else {
-            return tools;
-        }
-    }
-
     static registerTool() {
         registerMemory();
         registerDeck();
@@ -462,6 +432,47 @@ export class ToolManager {
         } catch (e) {
             logger.error(`调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`, []);
+        }
+    }
+
+    updatetoolStauts() {
+        const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
+        for (const k in ToolManager.toolMap) {
+            if (!this.toolStatus.hasOwnProperty(k)) {
+                this.toolStatus[k] = !toolsNotAllow.includes(k) && !toolsDefaultClosed.includes(k);
+            } else if (toolsNotAllow.includes(k)) {
+                this.toolStatus[k] = false;
+            }
+        }
+    }
+
+    getToolsInfo(type: string): ToolInfo[] {
+        if (type !== "private" && type !== "group") {
+            type = "all";
+        }
+
+        const tools = Object.keys(this.toolStatus)
+            .map(key => {
+                if (this.toolStatus[key]) {
+                    if (!ToolManager.toolMap.hasOwnProperty(key)) {
+                        logger.error(`在getToolsInfo中找不到工具:${key}`);
+                        return null;
+                    }
+                    const tool = ToolManager.toolMap[key];
+                    if (tool.type !== "all" && tool.type !== type) {
+                        return null;
+                    }
+                    return tool.info;
+                } else {
+                    return null;
+                }
+            })
+            .filter(item => item !== null);
+
+        if (tools.length === 0) {
+            return null;
+        } else {
+            return tools;
         }
     }
 

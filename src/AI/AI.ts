@@ -423,7 +423,9 @@ export class AIManager {
                         return revive(Context, value);
                     }
                     if (key === "tool") {
-                        return revive(ToolManager, value);
+                        const tm = revive(ToolManager, value);
+                        tm.updatetoolStauts();
+                        return tm;
                     }
                     if (key === "memory") {
                         return revive(MemoryManager, value);
