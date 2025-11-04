@@ -8,7 +8,7 @@ import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
 import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
 
-export interface UserInfo {
+export interface UserNameInfo { // 用于上下文名字修改相关操作
     uid: string;
     name: string;
 }
@@ -48,6 +48,26 @@ export class Context {
         this.lastReply = '';
         this.counter = 0;
         this.timer = null;
+    }
+
+    reviveMessages() {
+        this.messages = this.messages.map(message => {
+            if (!message.hasOwnProperty('role')) return null;
+            if (!message.hasOwnProperty('uid')) return null;
+            if (!message.hasOwnProperty('name')) return null;
+            if (!message.hasOwnProperty('images')) return null;
+            if (!message.hasOwnProperty('msgArray')) return null;
+
+            message.msgArray = message.msgArray.map(msgInfo => {
+                if (!msgInfo.hasOwnProperty('msgId')) return null;
+                if (!msgInfo.hasOwnProperty('time')) return null;
+                if (!msgInfo.hasOwnProperty('content')) return null;
+
+                return msgInfo;
+            }).filter(msgInfo => msgInfo);
+
+            return message;
+        }).filter(message => message);
     }
 
     clearMessages(...roles: string[]) {
@@ -403,8 +423,8 @@ export class Context {
         return null;
     }
 
-    getUserInfo(): UserInfo[] {
-        const userMap: { [key: string]: UserInfo } = {};
+    getUserNameInfo(): UserNameInfo[] {
+        const userMap: { [key: string]: UserNameInfo } = {};
         this.messages.forEach(message => {
             if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {
                 userMap[message.uid] = {

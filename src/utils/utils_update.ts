@@ -1,4 +1,3 @@
-import { AI, AIManager } from "../AI/AI";
 import { logger } from "../logger";
 import { updateInfo } from "../update";
 import { ConfigManager, VERSION } from "../config/config";
@@ -47,14 +46,5 @@ export function checkUpdate() {
         }
     } catch (error) {
         logger.error(`版本校验失败：${error}`);
-    }
-}
-
-export function checkContextUpdate(ai: AI) {
-    if (compareVersions(ai.version, AIManager.version) < 0) {
-        logger.warning(`${ai.id}上下文版本更新到${AIManager.version}，自动清除上下文`);
-        ai.context.clearMessages();
-        ai.version = AIManager.version;
-        ConfigManager.ext.storageSet(`AI_${ai.id}`, JSON.stringify(ai));
     }
 }

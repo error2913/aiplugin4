@@ -2,7 +2,7 @@ import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
 import { AI, AIManager } from "./AI";
 import { Context } from "./context";
-import { generateId } from "../utils/utils";
+import { generateId, revive } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData } from "../service";
 import { buildContent, parseBody } from "../utils/utils_message";
@@ -12,7 +12,7 @@ import { Image, ImageManager } from "./image";
 
 export class Memory {
     static validKeys: (keyof Memory)[] = ['id', 'isPrivate', 'player', 'group', 'createTime', 'lastMentionTime', 'keywords', 'weight', 'content', 'images'];
-    id: string;
+    id: string; // 记忆ID
     isPrivate: boolean;
     player: {
         userId: string;
@@ -63,7 +63,7 @@ export class Memory {
 export class MemoryManager {
     static validKeys: (keyof MemoryManager)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
     persona: string;
-    memoryMap: { [key: string]: Memory };
+    memoryMap: { [key: string]: Memory }; // key: 记忆ID
     useShortMemory: boolean;
     shortMemoryList: string[];
 
@@ -72,6 +72,12 @@ export class MemoryManager {
         this.memoryMap = {};
         this.useShortMemory = false;
         this.shortMemoryList = [];
+    }
+
+    reviveMemoryMap() {
+        for (const id in this.memoryMap) {
+            this.memoryMap[id] = revive(Memory, this.memoryMap[id]);
+        }
     }
 
     async addMemory(ctx: seal.MsgContext, ai: AI, kws: string[], content: string) {

@@ -214,7 +214,7 @@ ${HELPMAP["权限限制"]}`);
           switch (aliasToCmd(val2)) {
             case 'status': {
               seal.replyToSender(ctx, msg, `自动修改上下文里的名字状态：${ai.context.autoNameMod}
-上下文里的名字有：\n${ai.context.getUserInfo().map(ui => `${ui.name}(${ui.uid})`).join('\n')}`);
+上下文里的名字有：\n${ai.context.getUserNameInfo().map(uni => `${uni.name}(${uni.uid})`).join('\n')}`);
               return ret;
             }
             case 'set': {
@@ -225,9 +225,9 @@ ${HELPMAP["权限限制"]}`);
 【.ai ctxn set [nick/card]】设置上下文里的名字为昵称/群名片`);
                 return ret;
               }
-              const promises = ai.context.getUserInfo().map(ui => ai.context.setName(epId, gid, ui.uid, mod));
+              const promises = ai.context.getUserNameInfo().map(uni => ai.context.setName(epId, gid, uni.uid, mod));
               Promise.all(promises).then(() => {
-                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.getUserInfo().map(ui => `${ui.name}(${ui.uid})`).join('\n')}`);
+                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.getUserNameInfo().map(uni => `${uni.name}(${uni.uid})`).join('\n')}`);
               });
               return ret;
             }

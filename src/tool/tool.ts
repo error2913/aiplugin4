@@ -435,7 +435,7 @@ export class ToolManager {
         }
     }
 
-    updatetoolStauts() {
+    reviveToolStauts() {
         const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
         for (const k in ToolManager.toolMap) {
             if (!this.toolStatus.hasOwnProperty(k)) {

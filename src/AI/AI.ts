@@ -3,12 +3,11 @@ import { ConfigManager } from "../config/config";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../service";
 import { Context } from "./context";
-import { MemoryManager, Memory } from "./memory";
+import { MemoryManager } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
 import { checkRepeat, handleReply, MessageSegment, transformTextToArray } from "../utils/utils_string";
-import { checkContextUpdate } from "../utils/utils_update";
 import { TimerManager } from "../timer";
 
 export class Setting {
@@ -39,9 +38,8 @@ export class Setting {
 }
 
 export class AI {
-    static validKeys: (keyof AI)[] = ['version', 'context', 'tool', 'memory', 'imageManager', 'setting'];
+    static validKeys: (keyof AI)[] = ['context', 'tool', 'memory', 'imageManager', 'setting'];
     id: string;
-    version: string;
     context: Context;
     tool: ToolManager;
     memory: MemoryManager;
@@ -62,7 +60,6 @@ export class AI {
 
     constructor() {
         this.id = '';
-        this.version = '0.0.0';
         this.context = new Context();
         this.tool = new ToolManager();
         this.memory = new MemoryManager();
@@ -420,27 +417,25 @@ export class AIManager {
                     }
 
                     if (key === "context") {
-                        return revive(Context, value);
+                        const context = revive(Context, value);
+                        context.reviveMessages();
+                        return context;
                     }
                     if (key === "tool") {
                         const tm = revive(ToolManager, value);
-                        tm.updatetoolStauts();
+                        tm.reviveToolStauts();
                         return tm;
                     }
                     if (key === "memory") {
-                        return revive(MemoryManager, value);
+                        const mm = revive(MemoryManager, value);
+                        mm.reviveMemoryMap();
+                        return mm;
                     }
                     if (key === "imageManager") {
                         return revive(ImageManager, value);
                     }
                     if (key === "setting") {
                         return revive(Setting, value);
-                    }
-
-                    if (key === "memoryMap") {
-                        for (const key in value) {
-                            value[key] = revive(Memory, value[key]);
-                        }
                     }
 
                     return value;
@@ -450,8 +445,6 @@ export class AIManager {
             }
 
             ai.id = id;
-            checkContextUpdate(ai);
-
             this.cache[id] = ai;
         }
 
