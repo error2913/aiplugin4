@@ -3,26 +3,10 @@ import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance, MessageSegment } from "../utils/utils_string";
-import { AI, AIManager } from "./AI";
+import { AI, AIManager, UserInfo } from "./AI";
 import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
 import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
-
-export interface SessionInfo {
-    sessionId: string;
-    isPrivate: boolean;
-    sessionName: string;
-}
-
-export interface UserInfo { // 用于上下文名字修改相关操作
-    userId: string;
-    name: string;
-}
-
-export interface GroupInfo {
-    groupId: string;
-    groupName: string;
-}
 
 export interface MessageInfo {
     msgId: string;
@@ -397,13 +381,13 @@ export class Context {
             const memoryList = Object.values(ai.memory.memoryMap);
 
             for (const m of memoryList) {
-                if (m.sessionInfo.isPrivate && m.sessionInfo.sessionName === groupName) {
-                    return m.sessionInfo.sessionId;
+                if (m.sessionInfo.isPrivate && m.sessionInfo.name === groupName) {
+                    return m.sessionInfo.id;
                 }
-                if (m.sessionInfo.isPrivate && m.sessionInfo.sessionName.length > 4) {
-                    const distance = levenshteinDistance(groupName, m.sessionInfo.sessionName);
+                if (m.sessionInfo.isPrivate && m.sessionInfo.name.length > 4) {
+                    const distance = levenshteinDistance(groupName, m.sessionInfo.name);
                     if (distance <= 2) {
-                        return m.sessionInfo.sessionId;
+                        return m.sessionInfo.id;
                     }
                 }
             }
@@ -434,12 +418,13 @@ export class Context {
         return null;
     }
 
-    getUserInfo(): UserInfo[] {
+    get userInfoList(): UserInfo[] {
         const userMap: { [key: string]: UserInfo } = {};
         this.messages.forEach(message => {
             if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {
                 userMap[message.uid] = {
-                    userId: message.uid,
+                    isPrivate: true,
+                    id: message.uid,
                     name: message.name
                 };
             }

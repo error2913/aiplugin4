@@ -10,6 +10,20 @@ import { logger } from "../logger";
 import { checkRepeat, handleReply, MessageSegment, transformTextToArray } from "../utils/utils_string";
 import { TimerManager } from "../timer";
 
+export interface GroupInfo {
+    isPrivate: false;
+    id: string;
+    name: string;
+}
+
+export interface UserInfo {
+    isPrivate: true;
+    id: string;
+    name: string;
+}
+
+export type SessionInfo = GroupInfo | UserInfo;
+
 export class Setting {
     static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo'];
     priv: number;
@@ -337,7 +351,7 @@ export class AI {
     }
 
     // 若不在活动时间范围内，返回-1
-    getCurSegIndex(): number {
+    get curSegIndex(): number {
         const now = new Date();
         const cur = now.getHours() * 60 + now.getMinutes();
         const { start, end, segs } = this.setting.activeTimeInfo;
@@ -378,7 +392,7 @@ export class AI {
         if (segs !== 0 && (start !== 0 || end !== 0)) {
             const timers = TimerManager.getTimers(this.id, '', ['activeTime']);
             if (timers.length === 0) {
-                const curSegIndex = this.getCurSegIndex();
+                const curSegIndex = this.curSegIndex;
                 const nextTimePoint = this.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
                     TimerManager.addActiveTimeTimer(ctx, msg, this, nextTimePoint);
@@ -390,17 +404,26 @@ export class AI {
     }
 }
 
+export interface UsageInfo {
+    prompt_tokens: number,
+    completion_tokens: number
+}
+
 export class AIManager {
     static version = "1.0.1";
     static cache: { [key: string]: AI } = {};
-    static usageMap: {
-        [key: string]: { // 模型名
-            [key: number]: { // 年月日
-                prompt_tokens: number,
-                completion_tokens: number
+    static usageMapCache: { [model: string]: { [time: number]: UsageInfo } } = {};
+
+    static get usageMap(): { [model: string]: { [time: number]: UsageInfo } } {
+        if (!this.usageMapCache) {
+            try {
+                this.usageMapCache = JSON.parse(ConfigManager.ext.storageGet('usageMap') || '{}');
+            } catch (error) {
+                logger.error(`从数据库中获取usageMap失败:`, error);
             }
         }
-    } = {};
+        return this.usageMapCache;
+    }
 
     static clearCache() {
         this.cache = {};
@@ -458,7 +481,7 @@ export class AIManager {
     }
 
     static clearUsageMap() {
-        this.usageMap = {};
+        this.usageMapCache = {};
     }
 
     static clearExpiredUsage(model: string) {
@@ -504,17 +527,8 @@ export class AIManager {
         }
     }
 
-    static getUsageMap() {
-        try {
-            const usage = JSON.parse(ConfigManager.ext.storageGet('usageMap') || '{}');
-            this.usageMap = usage;
-        } catch (error) {
-            logger.error(`从数据库中获取usageMap失败:`, error);
-        }
-    }
-
     static saveUsageMap() {
-        ConfigManager.ext.storageSet('usageMap', JSON.stringify(this.usageMap));
+        ConfigManager.ext.storageSet('usageMap', JSON.stringify(this.usageMapCache));
     }
 
     static updateUsage(model: string, usage: {

@@ -1,8 +1,7 @@
-import { AI } from "../AI/AI";
+import { AI, GroupInfo, UserInfo } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformTextToArray } from "./utils_string";
-import { GroupInfo, UserInfo } from "../AI/context";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {
@@ -186,13 +185,13 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 export function hasCommonUser(a: UserInfo[], b: UserInfo[]) {
     if (a.length === 0 || b.length === 0) return true;
-    const aid = new Set(a.map(u => u.userId));
-    return b.some(u => aid.has(u.userId));
+    const aid = new Set(a.map(u => u.id));
+    return b.some(u => aid.has(u.id));
 }
 export function hasCommonGroup(a: GroupInfo[], b: GroupInfo[]) {
     if (a.length === 0 || b.length === 0) return true;
-    const aid = new Set(a.map(g => g.groupId));
-    return b.some(g => aid.has(g.groupId));
+    const aid = new Set(a.map(g => g.id));
+    return b.some(g => aid.has(g.id));
 }
 export function hasCommonKeyword(a: string[], b: string[]) {
     if (a.length === 0 || b.length === 0) return true;

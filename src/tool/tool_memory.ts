@@ -1,8 +1,8 @@
-import { AIManager } from "../AI/AI";
-import { GroupInfo, UserInfo } from "../AI/context";
+import { AIManager, GroupInfo, SessionInfo, UserInfo } from "../AI/AI";
 import { ConfigManager } from "../config/config";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool } from "./tool";
+import { searchOptions as SearchOptions } from "../AI/memory";
 
 export function registerMemory() {
     const toolAdd = new Tool({
@@ -27,6 +27,13 @@ export function registerMemory() {
                         description: '记忆内容，尽量简短，无需附带时间与来源'
                     },
                     keywords: {
+                        type: 'array',
+                        description: '相关用户名称列表',
+                        items: {
+                            type: 'string'
+                        }
+                    },
+                    userList: {
                         type: 'array',
                         description: '相关用户名称列表',
                         items: {
@@ -77,7 +84,8 @@ export function registerMemory() {
             const uid = await ai.context.findUserId(ctx, n, true);
             if (uid !== null) {
                 uiList.push({
-                    userId: uid,
+                    isPrivate: true,
+                    id: uid,
                     name: n
                 });
             }
@@ -87,8 +95,9 @@ export function registerMemory() {
             const gid = await ai.context.findGroupId(ctx, n);
             if (gid !== null) {
                 giList.push({
-                    groupId: gid,
-                    groupName: n
+                    isPrivate: false,
+                    id: gid,
+                    name: n
                 });
             }
         }
@@ -170,11 +179,148 @@ export function registerMemory() {
         return { content: `删除记忆成功`, images: [] };
     }
 
-    const toolShow = new Tool({
+    const toolSearch = new Tool({
         type: 'function',
         function: {
-            name: 'show_memory',
-            description: '查看个人记忆或群聊记忆',
+            name: 'search_memory',
+            description: '搜索个人记忆或群聊记忆',
+            parameters: {
+                type: 'object',
+                properties: {
+                    memory_type: {
+                        type: "string",
+                        description: "记忆类型，个人或群聊",
+                        enum: ["private", "group"]
+                    },
+                    name: {
+                        type: 'string',
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
+                    },
+                    query: {
+                        type: 'string',
+                        description: '搜索查询，为空时返回权重靠前的记忆'
+                    },
+                    topK: {
+                        type: 'number',
+                        description: '返回记忆条数，默认5条'
+                    },
+                    keywords: {
+                        type: 'array',
+                        description: '相关用户名称列表',
+                        items: {
+                            type: 'string'
+                        }
+                    },
+                    userList: {
+                        type: 'array',
+                        description: '相关用户名称列表',
+                        items: {
+                            type: 'string'
+                        }
+                    },
+                    groupList: {
+                        type: 'array',
+                        description: '相关群聊名称列表',
+                        items: {
+                            type: 'string'
+                        }
+                    },
+                    includeImages: {
+                        type: 'boolean',
+                        description: '是否包含图片'
+                    }
+                },
+                required: ['memory_type', 'name']
+            }
+        }
+    });
+    toolSearch.solve = async (ctx, msg, ai, args) => {
+        const { memory_type, name, query = '', topK = 5, keywords = [], userList = [], groupList = [], includeImages = false } = args;
+
+        let si: SessionInfo = {
+            isPrivate: false,
+            id: '',
+            name: ''
+        };
+        if (memory_type === "private") {
+            const uid = await ai.context.findUserId(ctx, name, true);
+            if (uid === null) {
+                return { content: `未找到<${name}>`, images: [] };
+            }
+
+            msg = createMsg('private', uid, '');
+            ctx = createCtx(ctx.endPoint.userId, msg);
+
+            ai = AIManager.getAI(uid);
+            si = {
+                isPrivate: true,
+                id: uid,
+                name: name
+            }
+        } else if (memory_type === "group") {
+            const gid = await ai.context.findGroupId(ctx, name);
+            if (gid === null) {
+                return { content: `未找到<${name}>`, images: [] };
+            }
+
+            msg = createMsg('group', ctx.player.userId, gid);
+            ctx = createCtx(ctx.endPoint.userId, msg);
+
+            ai = AIManager.getAI(gid);
+            si = {
+                isPrivate: false,
+                id: gid,
+                name: name
+            }
+        } else {
+            return { content: `未知的记忆类型<${memory_type}>`, images: [] };
+        }
+
+        const uiList: UserInfo[] = [];
+        for (const n of userList) {
+            const uid = await ai.context.findUserId(ctx, n, true);
+            if (uid !== null) {
+                uiList.push({
+                    isPrivate: true,
+                    id: uid,
+                    name: n
+                });
+            }
+        }
+        const giList: GroupInfo[] = [];
+        for (const n of groupList) {
+            const gid = await ai.context.findGroupId(ctx, n);
+            if (gid !== null) {
+                giList.push({
+                    isPrivate: false,
+                    id: gid,
+                    name: n
+                });
+            }
+        }
+
+        const options: SearchOptions = {
+            topK: topK,
+            keywords: keywords,
+            userList: userList,
+            groupList: groupList,
+            includeImages: includeImages
+        }
+
+        const memoryList = await ai.memory.search(query, options);
+        const images = Array.from(new Set([].concat(...memoryList.map(m => m.images))));
+
+        return {
+            content: ai.memory.buildMemory(si, memoryList),
+            images: images
+        };
+    }
+
+    const toolClear = new Tool({
+        type: 'function',
+        function: {
+            name: 'clear_memory',
+            description: '清除个人记忆或群聊记忆',
             parameters: {
                 type: 'object',
                 properties: {
@@ -192,7 +338,7 @@ export function registerMemory() {
             }
         }
     });
-    toolShow.solve = async (ctx, msg, ai, args) => {
+    toolClear.solve = async (ctx, msg, ai, args) => {
         const { memory_type, name } = args;
 
         if (memory_type === "private") {
@@ -200,43 +346,28 @@ export function registerMemory() {
             if (uid === null) {
                 return { content: `未找到<${name}>`, images: [] };
             }
-            if (uid === ctx.player.userId) {
-                return { content: `查看该用户记忆无需调用函数`, images: [] };
-            }
 
             msg = createMsg('private', uid, '');
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(uid);
-            return {
-                content: await ai.memory.buildMemory({
-                    isPrivate: true,
-                    sessionName: ctx.player.name,
-                    sessionId: ctx.player.userId
-                }, ''), images: []
-            };
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
             if (gid === null) {
                 return { content: `未找到<${name}>`, images: [] };
-            }
-            if (gid === ctx.group.groupId) {
-                return { content: `查看当前群聊记忆无需调用函数`, images: [] };
             }
 
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
 
             ai = AIManager.getAI(gid);
-            return {
-                content: await ai.memory.buildMemory({
-                    isPrivate: false,
-                    sessionName: ctx.group.groupName,
-                    sessionId: ctx.group.groupId
-                }, ''), images: []
-            };
         } else {
             return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
+
+
+        ai.memory.clearMemory();
+        AIManager.saveAI(ai.id);
+        return { content: `清除记忆成功`, images: [] };
     }
 }

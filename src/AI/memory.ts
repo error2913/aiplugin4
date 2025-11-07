@@ -1,7 +1,7 @@
 import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
-import { AI, AIManager } from "./AI";
-import { Context, GroupInfo, SessionInfo, UserInfo } from "./context";
+import { AI, AIManager, GroupInfo, SessionInfo, UserInfo } from "./AI";
+import { Context } from "./context";
 import { cosineSimilarity, generateId, hasCommonGroup, hasCommonKeyword, hasCommonUser, revive } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../service";
@@ -37,9 +37,9 @@ export class Memory {
         this.vector = [];
         this.text = '';
         this.sessionInfo = {
-            sessionId: '',
+            id: '',
             isPrivate: false,
-            sessionName: '',
+            name: '',
         };
         this.userList = [];
         this.groupList = [];
@@ -87,7 +87,7 @@ export class MemoryManager {
 
         for (const id of Object.keys(this.memoryMap)) {
             const m = this.memoryMap[id];
-            if (text === m.text && m.sessionInfo.sessionId === ai.id && hasCommonUser(ul, m.userList) && hasCommonGroup(gl, m.groupList)) {
+            if (text === m.text && m.sessionInfo.id === ai.id && hasCommonUser(ul, m.userList) && hasCommonGroup(gl, m.groupList)) {
                 m.keywords = Array.from(new Set([...m.keywords, ...kws]));
                 logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
                 return;
@@ -99,9 +99,9 @@ export class MemoryManager {
         m.id = id;
         m.text = text;
         m.sessionInfo = {
-            sessionId: ai.id,
+            id: ai.id,
             isPrivate: ctx.isPrivate,
-            sessionName: ctx.isPrivate ? ctx.player.name : ctx.group.groupName,
+            name: ctx.isPrivate ? ctx.player.name : ctx.group.groupName,
         };
         m.userList = ul;
         m.groupList = gl;
@@ -307,7 +307,6 @@ export class MemoryManager {
         }
     }
 
-    // 语义搜索
     async search(query: string, options: searchOptions = {
         topK: 10,
         userList: [],
@@ -405,28 +404,26 @@ export class MemoryManager {
         }
     }
 
-    async buildMemory(sessionInfo: SessionInfo, lastMsg: string): Promise<string> {
-        const { showNumber } = ConfigManager.message;
-        const { memoryShowNumber, memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
-        const memoryList = Object.values(this.memoryMap);
+    async getTopMemoryList(lastMsg: string) {
+        const { memoryShowNumber } = ConfigManager.memory;
+        return await this.search(lastMsg, {
+            topK: memoryShowNumber,
+            userList: [],
+            groupList: [],
+            keywords: [],
+            includeImages: false,
+        });
+    }
 
-        if (memoryList.length === 0 && this.persona === '无') {
-            return '';
-        }
+    buildMemory(sessionInfo: SessionInfo, memoryList: Memory[]): string {
+        const { showNumber } = ConfigManager.message;
+        const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
 
         let memoryContent = '';
         if (memoryList.length === 0) {
-            memoryContent += '无';
+            memoryContent = '无';
         } else {
-            const searchResult = await this.search(lastMsg, {
-                topK: memoryShowNumber,
-                userList: [],
-                groupList: [],
-                keywords: [],
-                includeImages: false,
-            });
-
-            memoryContent += searchResult
+            memoryContent = memoryList
                 .map((m, i) => {
                     const data = {
                         "序号": i + 1,
@@ -435,10 +432,10 @@ export class MemoryManager {
                         "个人记忆": sessionInfo.isPrivate,
                         "私聊": m.sessionInfo.isPrivate,
                         "展示号码": showNumber,
-                        "群聊名称": m.sessionInfo.sessionName,
-                        "群聊号码": m.sessionInfo.sessionId,
-                        "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.userId.replace(/^.+:/, '')})` : '')).join(';'),
-                        "相关群聊": m.groupList.map(g => g.groupName + (showNumber ? `(${g.groupId.replace(/^.+:/, '')})` : '')).join(';'),
+                        "群聊名称": m.sessionInfo.name,
+                        "群聊号码": m.sessionInfo.id,
+                        "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
+                        "相关群聊": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "关键词": m.keywords.join(';'),
                         "记忆内容": m.text
                     }
@@ -451,10 +448,10 @@ export class MemoryManager {
         const data = {
             "私聊": sessionInfo.isPrivate,
             "展示号码": showNumber,
-            "用户名称": sessionInfo.sessionName,
-            "用户号码": sessionInfo.sessionId.replace(/^.+:/, ''),
-            "群聊名称": sessionInfo.sessionName,
-            "群聊号码": sessionInfo.sessionId.replace(/^.+:/, ''),
+            "用户名称": sessionInfo.name,
+            "用户号码": sessionInfo.id.replace(/^.+:/, ''),
+            "群聊名称": sessionInfo.name,
+            "群聊号码": sessionInfo.id.replace(/^.+:/, ''),
             "设定": this.persona,
             "记忆列表": memoryContent
         }
@@ -468,25 +465,25 @@ export class MemoryManager {
         const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
 
         const ai = AIManager.getAI(ctx.endPoint.userId);
-        let s = await ai.memory.buildMemory({
+        let s = ai.memory.buildMemory({
             isPrivate: true,
-            sessionName: seal.formatTmpl(ctx, "核心:骰子名字"),
-            sessionId: ctx.endPoint.userId
-        }, lastMsg);
+            id: ctx.endPoint.userId,
+            name: seal.formatTmpl(ctx, "核心:骰子名字")
+        }, await ai.memory.getTopMemoryList(lastMsg));
 
         if (ctx.isPrivate) {
             return this.buildMemory({
                 isPrivate: true,
-                sessionName: ctx.player.name,
-                sessionId: ctx.player.userId
-            }, lastMsg);
+                id: ctx.player.userId,
+                name: ctx.player.name
+            }, await ai.memory.getTopMemoryList(lastMsg));
         } else {
             // 群聊记忆
-            s += await this.buildMemory({
+            s += this.buildMemory({
                 isPrivate: false,
-                sessionName: ctx.group.groupName,
-                sessionId: ctx.group.groupId
-            }, lastMsg);
+                id: ctx.group.groupId,
+                name: ctx.group.groupName
+            }, await ai.memory.getTopMemoryList(lastMsg));
 
             // 群内用户的个人记忆
             const arr = [];
@@ -500,9 +497,9 @@ export class MemoryManager {
                 const ai = AIManager.getAI(uid);
                 s += ai.memory.buildMemory({
                     isPrivate: true,
-                    sessionName: name,
-                    sessionId: uid
-                }, lastMsg);
+                    id: uid,
+                    name: name
+                }, await ai.memory.getTopMemoryList(lastMsg));
 
                 arr.push(uid);
             }
