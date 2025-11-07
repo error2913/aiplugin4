@@ -274,7 +274,13 @@ export class TimerManager {
                                 this.addActiveTimeTimer(ctx, msg, ai, nextTimePoint);
                             }
 
-                            const s = `现在是你的活跃时间：${fmtDate(Math.floor(Date.now() / 1000))}，请说点什么`;
+                            const messages = ai.context.messages;
+                            const lastMsgArray = messages[messages.length - 1].msgArray;
+                            const lastTime = lastMsgArray[lastMsgArray.length - 1].time;
+                            const lastTimePrompt = `最后一条消息时间：${fmtDate(lastTime)}`;
+                            const s = `现在是你的活跃时间：${fmtDate(Math.floor(Date.now() / 1000))}
+${lastTimePrompt}
+请说点什么`;
 
                             await ai.context.addSystemUserMessage("活跃时间触发提示", s, []);
                             await ai.chat(ctx, msg, '活跃时间');
