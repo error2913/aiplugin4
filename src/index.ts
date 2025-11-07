@@ -189,9 +189,10 @@ ${HELPMAP["权限限制"]}`);
           }
         }
         case 'prompt': {
-          const systemMessage = buildSystemMessage(ctx, ai);
-          logger.info(`system prompt:\n`, systemMessage.msgArray[0].content);
-          seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
+          buildSystemMessage(ctx, ai).then(systemMessage => {
+            logger.info(`system prompt:\n`, systemMessage.msgArray[0].content);
+            seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
+          });
           return ret;
         }
         case 'status': {
@@ -214,7 +215,7 @@ ${HELPMAP["权限限制"]}`);
           switch (aliasToCmd(val2)) {
             case 'status': {
               seal.replyToSender(ctx, msg, `自动修改上下文里的名字状态：${ai.context.autoNameMod}
-上下文里的名字有：\n${ai.context.getUserNameInfo().map(uni => `${uni.name}(${uni.uid})`).join('\n')}`);
+上下文里的名字有：\n${ai.context.getUserInfo().map(uni => `${uni.name}(${uni.userId})`).join('\n')}`);
               return ret;
             }
             case 'set': {
@@ -225,9 +226,9 @@ ${HELPMAP["权限限制"]}`);
 【.ai ctxn set [nick/card]】设置上下文里的名字为昵称/群名片`);
                 return ret;
               }
-              const promises = ai.context.getUserNameInfo().map(uni => ai.context.setName(epId, gid, uni.uid, mod));
+              const promises = ai.context.getUserInfo().map(uni => ai.context.setName(epId, gid, uni.userId, mod));
               Promise.all(promises).then(() => {
-                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.getUserNameInfo().map(uni => `${uni.name}(${uni.uid})`).join('\n')}`);
+                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.getUserInfo().map(uni => `${uni.name}(${uni.userId})`).join('\n')}`);
               });
               return ret;
             }
@@ -632,14 +633,23 @@ ${HELPMAP["权限限制"]}`);
                     return ret;
                   }
                   ai2.memory.delMemory(idList, kw);
-                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s || '无');
-                  AIManager.saveAI(muid);
+                  ai2.memory.buildMemory({
+                    isPrivate: true,
+                    sessionName: mctx.player.name,
+                    sessionId: mctx.player.userId
+                  }, '').then(s => {
+                    seal.replyToSender(ctx, msg, s || '无');
+                    AIManager.saveAI(muid);
+                  }
+                  );
                   return ret;
                 }
                 case 'show': {
-                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s || '无');
+                  ai2.memory.buildMemory({
+                    isPrivate: true,
+                    sessionName: mctx.player.name,
+                    sessionId: mctx.player.userId
+                  }, '').then(s => seal.replyToSender(ctx, msg, s || '无'));
                   return ret;
                 }
                 case 'clear': {
@@ -700,14 +710,23 @@ ${HELPMAP["权限限制"]}`);
                     return ret;
                   }
                   ai.memory.delMemory(idList, kw);
-                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s || '无');
-                  AIManager.saveAI(id);
+                  ai.memory.buildMemory({
+                    isPrivate: false,
+                    sessionName: ctx.group.groupName,
+                    sessionId: ctx.group.groupId
+                  }, '').then(s => {
+                    seal.replyToSender(ctx, msg, s || '无');
+                    AIManager.saveAI(id);
+                  }
+                  );
                   return ret;
                 }
                 case 'show': {
-                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s || '无');
+                  ai.memory.buildMemory({
+                    isPrivate: false,
+                    sessionName: ctx.group.groupName,
+                    sessionId: ctx.group.groupId
+                  }, '').then(s => seal.replyToSender(ctx, msg, s || '无'));
                   return ret;
                 }
                 case 'clear': {

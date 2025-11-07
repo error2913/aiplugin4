@@ -6,7 +6,7 @@ import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./utils_string";
 
-export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
+export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { roleSettingNames, roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
@@ -50,7 +50,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
     // 记忆
     let memoryPrompt = '';
     if (isMemory) {
-        memoryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
+        memoryPrompt = await ai.memory.buildMemoryPrompt(ctx, ai.context);
     }
 
     // 短期记忆
@@ -176,10 +176,10 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
     return contextMessages;
 }
 
-export function handleMessages(ctx: seal.MsgContext, ai: AI) {
+export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
     const { isMerge } = ConfigManager.message;
 
-    const systemMessage = buildSystemMessage(ctx, ai);
+    const systemMessage = await buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
     const contextMessages = buildContextMessages(systemMessage, ai.context.messages);
 
@@ -277,6 +277,34 @@ export function parseBody(template: string[], messages: any[], tools: ToolInfo[]
     } else {
         delete bodyObject?.tools;
         delete bodyObject?.tool_choice;
+    }
+
+    return bodyObject;
+}
+
+export function parseEmbeddingBody(template: string[], input: string, dimensions: number) {
+    const bodyObject: any = {};
+
+    for (let i = 0; i < template.length; i++) {
+        const s = template[i];
+        if (s.trim() === '') {
+            continue;
+        }
+
+        try {
+            const obj = JSON.parse(`{${s}}`);
+            const key = Object.keys(obj)[0];
+            bodyObject[key] = obj[key];
+        } catch (err) {
+            throw new Error(`解析body的【${s}】时出现错误:${err}`);
+        }
+    }
+
+    if (!bodyObject.hasOwnProperty('input')) {
+        bodyObject.input = input;
+    }
+    if (!bodyObject.hasOwnProperty('dimensions')) {
+        bodyObject.dimensions = dimensions;
     }
 
     return bodyObject;

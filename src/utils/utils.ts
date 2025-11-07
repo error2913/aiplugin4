@@ -2,6 +2,7 @@ import { AI } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformTextToArray } from "./utils_string";
+import { GroupInfo, UserInfo } from "../AI/context";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {
@@ -160,4 +161,41 @@ export function aliasToCmd(val: string) {
         "nick": "nickname"
     }
     return aliasMap[val] || val;
+}
+
+// 计算余弦相似度
+export function cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+        logger.error(`cosineSimilarity: 向量维度必须相同，a: ${a.length}, b: ${b.length}`);
+        return 0;
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+        dotProduct += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+    }
+
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+export function hasCommonUser(a: UserInfo[], b: UserInfo[]) {
+    if (a.length === 0 || b.length === 0) return true;
+    const aid = new Set(a.map(u => u.userId));
+    return b.some(u => aid.has(u.userId));
+}
+export function hasCommonGroup(a: GroupInfo[], b: GroupInfo[]) {
+    if (a.length === 0 || b.length === 0) return true;
+    const aid = new Set(a.map(g => g.groupId));
+    return b.some(g => aid.has(g.groupId));
+}
+export function hasCommonKeyword(a: string[], b: string[]) {
+    if (a.length === 0 || b.length === 0) return true;
+    const aid = new Set(a);
+    return b.some(k => aid.has(k));
 }

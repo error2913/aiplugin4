@@ -320,4 +320,35 @@ export class ImageManager {
             return { base64: '', format: '' };
         }
     }
+
+    static async extractExistingImages(ai: AI, s: string): Promise<Image[]> {
+        const images = [];
+        const match = s.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
+        if (match) {
+            for (let i = 0; i < match.length; i++) {
+                const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
+                const image = ai.context.findImage(id, ai);
+
+                if (image) {
+                    if (!image.isUrl) {
+                        if (image.base64) {
+                            image.weight += 1;
+                        }
+                        images.push(image);
+                    } else {
+                        const { base64 } = await ImageManager.imageUrlToBase64(image.file);
+                        if (!base64) {
+                            logger.error(`图片${id}转换为base64失败`);
+                            continue;
+                        }
+
+                        image.isUrl = false;
+                        image.base64 = base64;
+                        images.push(image);
+                    }
+                }
+            }
+        }
+        return images;
+    }
 }

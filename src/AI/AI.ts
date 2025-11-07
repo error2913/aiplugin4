@@ -147,7 +147,7 @@ export class AI {
         const MaxRetry = 3;
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // 处理messages
-            const messages = handleMessages(ctx, this);
+            const messages = await handleMessages(ctx, this);
 
             //获取处理后的回复
             const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
@@ -195,7 +195,7 @@ export class AI {
 
         await this.stopCurrentChatStream();
 
-        const messages = handleMessages(ctx, this);
+        const messages = await handleMessages(ctx, this);
         const id = await startStream(messages);
         if (id === '') {
             return;

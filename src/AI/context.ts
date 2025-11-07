@@ -8,9 +8,20 @@ import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
 import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
 
-export interface UserNameInfo { // 用于上下文名字修改相关操作
-    uid: string;
+export interface SessionInfo {
+    sessionId: string;
+    isPrivate: boolean;
+    sessionName: string;
+}
+
+export interface UserInfo { // 用于上下文名字修改相关操作
+    userId: string;
     name: string;
+}
+
+export interface GroupInfo {
+    groupId: string;
+    groupName: string;
 }
 
 export interface MessageInfo {
@@ -386,13 +397,13 @@ export class Context {
             const memoryList = Object.values(ai.memory.memoryMap);
 
             for (const m of memoryList) {
-                if (m.group.groupName === groupName) {
-                    return m.group.groupId;
+                if (m.sessionInfo.isPrivate && m.sessionInfo.sessionName === groupName) {
+                    return m.sessionInfo.sessionId;
                 }
-                if (m.group.groupName.length > 4) {
-                    const distance = levenshteinDistance(groupName, m.group.groupName);
+                if (m.sessionInfo.isPrivate && m.sessionInfo.sessionName.length > 4) {
+                    const distance = levenshteinDistance(groupName, m.sessionInfo.sessionName);
                     if (distance <= 2) {
-                        return m.group.groupId;
+                        return m.sessionInfo.sessionId;
                     }
                 }
             }
@@ -423,13 +434,13 @@ export class Context {
         return null;
     }
 
-    getUserNameInfo(): UserNameInfo[] {
-        const userMap: { [key: string]: UserNameInfo } = {};
+    getUserInfo(): UserInfo[] {
+        const userMap: { [key: string]: UserInfo } = {};
         this.messages.forEach(message => {
             if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {
                 userMap[message.uid] = {
-                    name: message.name,
-                    uid: message.uid,
+                    userId: message.uid,
+                    name: message.name
                 };
             }
         });

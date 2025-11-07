@@ -1,69 +1,60 @@
 import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
 import { AI, AIManager } from "./AI";
-import { Context } from "./context";
-import { generateId, revive } from "../utils/utils";
+import { Context, GroupInfo, SessionInfo, UserInfo } from "./context";
+import { cosineSimilarity, generateId, hasCommonGroup, hasCommonKeyword, hasCommonUser, revive } from "../utils/utils";
 import { logger } from "../logger";
-import { fetchData } from "../service";
+import { fetchData, getEmbedding } from "../service";
 import { buildContent, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { fmtDate } from "../utils/utils_string";
 import { Image, ImageManager } from "./image";
 
+export interface searchOptions {
+    topK: number;
+    userList: UserInfo[];
+    groupList: GroupInfo[];
+    keywords: string[];
+    includeImages: boolean;
+}
+
 export class Memory {
-    static validKeys: (keyof Memory)[] = ['id', 'isPrivate', 'player', 'group', 'createTime', 'lastMentionTime', 'keywords', 'weight', 'content', 'images'];
+    static validKeys: (keyof Memory)[] = ['id', 'vector', 'text', 'sessionInfo', 'userList', 'groupList', 'createTime', 'lastMentionTime', 'keywords', 'weight', 'images'];
     id: string; // 记忆ID
-    isPrivate: boolean;
-    player: {
-        userId: string;
-        name: string;
-    }
-    group: {
-        groupId: string;
-        groupName: string;
-    }
+    vector: number[]; // 记忆向量
+    text: string; // 记忆内容
+    sessionInfo: SessionInfo;
+    userList: UserInfo[];
+    groupList: GroupInfo[];
     createTime: number; // 秒级时间戳
     lastMentionTime: number;
     keywords: string[];
     weight: number; // 记忆权重，0-10
-    content: string;
     images: Image[];
 
     constructor() {
         this.id = '';
-        this.isPrivate = true;
-        this.player = {
-            userId: '',
-            name: ''
+        this.vector = [];
+        this.text = '';
+        this.sessionInfo = {
+            sessionId: '',
+            isPrivate: false,
+            sessionName: '',
         };
-        this.group = {
-            groupId: '',
-            groupName: ''
-        };
+        this.userList = [];
+        this.groupList = [];
         this.createTime = 0;
         this.lastMentionTime = 0;
         this.keywords = [];
         this.weight = 0;
-        this.content = '';
         this.images = [];
-    }
-
-    calcFgtWeight(now: number) {
-        const d = 24 * 60 * 60;
-        // 基础新鲜度衰减（按天计算）
-        const ageDecay = Math.log10((now - this.createTime) / d + 1);
-        // 活跃度衰减因子（最近接触按小时衰减）
-        const activityDecay = Math.max(1, (now - this.lastMentionTime) / 3600);
-        // 权重转换（0-10 → 1.0-3.0 指数曲线）
-        const importance = Math.pow(1.1161, this.weight);
-        return (ageDecay * activityDecay) / importance;
     }
 }
 
 export class MemoryManager {
     static validKeys: (keyof MemoryManager)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
     persona: string;
-    memoryMap: { [key: string]: Memory }; // key: 记忆ID
+    memoryMap: { [id: string]: Memory };
     useShortMemory: boolean;
     shortMemoryList: string[];
 
@@ -77,10 +68,13 @@ export class MemoryManager {
     reviveMemoryMap() {
         for (const id in this.memoryMap) {
             this.memoryMap[id] = revive(Memory, this.memoryMap[id]);
+            if (!this.memoryMap[id].text) {
+                delete this.memoryMap[id];
+            }
         }
     }
 
-    async addMemory(ctx: seal.MsgContext, ai: AI, kws: string[], content: string) {
+    async addMemory(ctx: seal.MsgContext, ai: AI, ul: UserInfo[], gl: GroupInfo[], kws: string[], text: string) {
         let id = generateId(), a = 0;
         while (this.memoryMap.hasOwnProperty(id)) {
             id = generateId();
@@ -93,7 +87,7 @@ export class MemoryManager {
 
         for (const id of Object.keys(this.memoryMap)) {
             const m = this.memoryMap[id];
-            if (content === m.content && ((!m.isPrivate && ctx.group.groupId === m.group.groupId) || m.isPrivate)) {
+            if (text === m.text && m.sessionInfo.sessionId === ai.id && hasCommonUser(ul, m.userList) && hasCommonGroup(gl, m.groupList)) {
                 m.keywords = Array.from(new Set([...m.keywords, ...kws]));
                 logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
                 return;
@@ -103,49 +97,33 @@ export class MemoryManager {
         const now = Math.floor(Date.now() / 1000);
         const m = new Memory();
         m.id = id;
-        m.isPrivate = ctx.isPrivate;
-        m.player = {
-            userId: ctx.player.userId,
-            name: ctx.player.name
+        m.text = text;
+        m.sessionInfo = {
+            sessionId: ai.id,
+            isPrivate: ctx.isPrivate,
+            sessionName: ctx.isPrivate ? ctx.player.name : ctx.group.groupName,
         };
-        m.group = {
-            groupId: ctx.group.groupId,
-            groupName: ctx.group.groupName
-        };
+        m.userList = ul;
+        m.groupList = gl;
         m.createTime = now;
         m.lastMentionTime = now;
-        m.keywords = kws || [];
-        m.weight = 0;
-        m.content = content || '';
+        m.keywords = kws;
+        m.weight = 5;
+        m.images = await ImageManager.extractExistingImages(ai, text);
 
-        const images = [];
-        const match = content.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-        if (match) {
-            for (let i = 0; i < match.length; i++) {
-                const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-                const image = ai.context.findImage(id, ai);
-
-                if (image) {
-                    if (!image.isUrl) {
-                        if (image.base64) {
-                            image.weight += 1;
-                        }
-                        images.push(image);
-                    } else {
-                        const { base64 } = await ImageManager.imageUrlToBase64(image.file);
-                        if (!base64) {
-                            logger.error(`图片${id}转换为base64失败`);
-                            continue;
-                        }
-
-                        image.isUrl = false;
-                        image.base64 = base64;
-                        images.push(image);
-                    }
-                }
+        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        if (isMemoryVector) {
+            const vector = await getEmbedding(text);
+            if (!vector.length) {
+                logger.error('向量为空');
+                return null;
             }
+            if (vector.length !== embeddingDimension) {
+                logger.error(`向量维度不匹配。期望: ${embeddingDimension}, 实际: ${vector.length}`);
+                return null;
+            }
+            m.vector = vector;
         }
-        m.images = images || [];
 
         this.memoryMap[id] = m;
 
@@ -171,24 +149,23 @@ export class MemoryManager {
         }
     }
 
-    clearMemory() {
-        this.memoryMap = {};
-    }
-
-    clearShortMemory() {
-        this.shortMemoryList = [];
-    }
-
     limitMemory() {
         const { memoryLimit } = ConfigManager.memory;
         const now = Math.floor(Date.now() / 1000);
         const memoryList = Object.values(this.memoryMap);
 
         const forgetIdList = memoryList
-            .map((item) => {
+            .map((m) => {
+                const d = 24 * 60 * 60;
+                // 基础新鲜度衰减（按天计算）
+                const ageDecay = Math.log10((now - m.createTime) / d + 1);
+                // 活跃度衰减因子（最近接触按小时衰减）
+                const activityDecay = Math.max(1, (now - m.lastMentionTime) / 3600);
+                // 权重转换（0-10 → 1.0-3.0 指数曲线）
+                const importance = Math.pow(1.1161, m.weight);
                 return {
-                    id: item.id,
-                    fgtWeight: item.calcFgtWeight(now)
+                    id: m.id,
+                    fgtWeight: (ageDecay * activityDecay) / importance
                 }
             })
             .sort((a, b) => b.fgtWeight - a.fgtWeight)
@@ -198,11 +175,19 @@ export class MemoryManager {
         this.delMemory(forgetIdList);
     }
 
+    clearMemory() {
+        this.memoryMap = {};
+    }
+
     limitShortMemory() {
         const { shortMemoryLimit } = ConfigManager.memory;
         if (this.shortMemoryList.length > shortMemoryLimit) {
             this.shortMemoryList.splice(0, this.shortMemoryList.length - shortMemoryLimit);
         }
+    }
+
+    clearShortMemory() {
+        this.shortMemoryList = [];
     }
 
     async updateShortMemory(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
@@ -322,6 +307,61 @@ export class MemoryManager {
         }
     }
 
+    // 语义搜索
+    async search(query: string, options: searchOptions = {
+        topK: 10,
+        userList: [],
+        groupList: [],
+        keywords: [],
+        includeImages: false,
+    }) {
+        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        const filteredMemoryList = Object.values(this.memoryMap)
+            .filter(item =>
+                (!options.userList.length || hasCommonUser(item.userList, options.userList)) &&
+                (!options.groupList.length || hasCommonGroup(item.groupList, options.groupList)) &&
+                (!options.keywords.length || hasCommonKeyword(item.keywords, options.keywords)) &&
+                (!options.includeImages || item.images.length > 0)
+            );
+        if (!filteredMemoryList.length) {
+            return [];
+        }
+
+        if (isMemoryVector && query) {
+            try {
+                const queryVector = await getEmbedding(query);
+                if (!queryVector.length) {
+                    logger.error('查询向量为空');
+                    return [];
+                }
+                for (const m of filteredMemoryList) {
+                    if (m.vector.length !== embeddingDimension) {
+                        logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
+                        m.vector = await getEmbedding(m.text);
+                    }
+                }
+                return filteredMemoryList
+                    .sort((a, b) => {
+                        const aScore = cosineSimilarity(queryVector, a.vector);
+                        const bScore = cosineSimilarity(queryVector, b.vector);
+                        return bScore - aScore;
+                    })
+                    .slice(0, options.topK);
+            } catch (e) {
+                logger.error(`语义搜索失败: ${e.message}`);
+            }
+        }
+        return filteredMemoryList
+            .map(item => {
+                const mi: Memory = JSON.parse(JSON.stringify(item));
+                if (item.keywords.some(kw => query.includes(kw))) {
+                    mi.weight += 10; //提权
+                }
+                return mi;
+            })
+            .sort((a, b) => b.weight - a.weight);
+    }
+
     updateSingleMemoryWeight(s: string, role: 'user' | 'assistant') {
         const increase = role === 'user' ? 1 : 0.1;
         const decrease = role === 'user' ? 0.1 : 0;
@@ -365,7 +405,7 @@ export class MemoryManager {
         }
     }
 
-    buildMemory(isPrivate: boolean, un: string, uid: string, gn: string, gid: string, lastMsg: string = ''): string {
+    async buildMemory(sessionInfo: SessionInfo, lastMsg: string): Promise<string> {
         const { showNumber } = ConfigManager.message;
         const { memoryShowNumber, memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
         const memoryList = Object.values(this.memoryMap);
@@ -378,28 +418,29 @@ export class MemoryManager {
         if (memoryList.length === 0) {
             memoryContent += '无';
         } else {
-            memoryContent += memoryList
-                .map(item => {
-                    const mi: Memory = JSON.parse(JSON.stringify(item));
-                    if (item.keywords.some(kw => lastMsg.includes(kw))) {
-                        mi.weight += 10;
-                    }
-                    return mi;
-                })
-                .sort((a, b) => b.weight - a.weight)
-                .slice(0, memoryShowNumber)
-                .map((item, i) => {
+            const searchResult = await this.search(lastMsg, {
+                topK: memoryShowNumber,
+                userList: [],
+                groupList: [],
+                keywords: [],
+                includeImages: false,
+            });
+
+            memoryContent += searchResult
+                .map((m, i) => {
                     const data = {
                         "序号": i + 1,
-                        "记忆ID": item.id,
-                        "记忆时间": fmtDate(item.createTime),
-                        "个人记忆": uid, //有uid代表这是个人记忆
-                        "私聊": item.isPrivate,
+                        "记忆ID": m.id,
+                        "记忆时间": fmtDate(m.createTime),
+                        "个人记忆": sessionInfo.isPrivate,
+                        "私聊": m.sessionInfo.isPrivate,
                         "展示号码": showNumber,
-                        "群聊名称": item.group.groupName,
-                        "群聊号码": item.group.groupId.replace(/^.+:/, ''),
-                        "关键词": item.keywords.join(';'),
-                        "记忆内容": item.content
+                        "群聊名称": m.sessionInfo.sessionName,
+                        "群聊号码": m.sessionInfo.sessionId,
+                        "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.userId.replace(/^.+:/, '')})` : '')).join(';'),
+                        "相关群聊": m.groupList.map(g => g.groupName + (showNumber ? `(${g.groupId.replace(/^.+:/, '')})` : '')).join(';'),
+                        "关键词": m.keywords.join(';'),
+                        "记忆内容": m.text
                     }
 
                     const template = Handlebars.compile(memorySingleShowTemplate[0]);
@@ -408,12 +449,12 @@ export class MemoryManager {
         }
 
         const data = {
-            "私聊": isPrivate,
+            "私聊": sessionInfo.isPrivate,
             "展示号码": showNumber,
-            "用户名称": un,
-            "用户号码": uid.replace(/^.+:/, ''),
-            "群聊名称": gn,
-            "群聊号码": gid.replace(/^.+:/, ''),
+            "用户名称": sessionInfo.sessionName,
+            "用户号码": sessionInfo.sessionId.replace(/^.+:/, ''),
+            "群聊名称": sessionInfo.sessionName,
+            "群聊号码": sessionInfo.sessionId.replace(/^.+:/, ''),
             "设定": this.persona,
             "记忆列表": memoryContent
         }
@@ -422,18 +463,30 @@ export class MemoryManager {
         return template(data) + '\n';
     }
 
-    buildMemoryPrompt(ctx: seal.MsgContext, context: Context): string {
+    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context): Promise<string> {
         const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
         const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
 
         const ai = AIManager.getAI(ctx.endPoint.userId);
-        let s = ai.memory.buildMemory(true, seal.formatTmpl(ctx, "核心:骰子名字"), ctx.endPoint.userId, '', '', lastMsg);
+        let s = await ai.memory.buildMemory({
+            isPrivate: true,
+            sessionName: seal.formatTmpl(ctx, "核心:骰子名字"),
+            sessionId: ctx.endPoint.userId
+        }, lastMsg);
 
         if (ctx.isPrivate) {
-            return this.buildMemory(true, ctx.player.name, ctx.player.userId, '', '');
+            return this.buildMemory({
+                isPrivate: true,
+                sessionName: ctx.player.name,
+                sessionId: ctx.player.userId
+            }, lastMsg);
         } else {
             // 群聊记忆
-            s += this.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
+            s += await this.buildMemory({
+                isPrivate: false,
+                sessionName: ctx.group.groupName,
+                sessionId: ctx.group.groupId
+            }, lastMsg);
 
             // 群内用户的个人记忆
             const arr = [];
@@ -445,7 +498,11 @@ export class MemoryManager {
                 }
 
                 const ai = AIManager.getAI(uid);
-                s += ai.memory.buildMemory(true, name, uid, '', '');
+                s += ai.memory.buildMemory({
+                    isPrivate: true,
+                    sessionName: name,
+                    sessionId: uid
+                }, lastMsg);
 
                 arr.push(uid);
             }
