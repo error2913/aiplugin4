@@ -526,15 +526,10 @@ export class Context {
 
         const { localImagePaths } = ConfigManager.image;
         const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') {
-                return acc;
-            }
+            if (path.trim() === '') return acc;
             try {
                 const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) {
-                    throw new Error(`本地图片路径格式错误:${path}`);
-                }
-
+                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
                 acc[name] = path;
             } catch (e) {
                 logger.error(e);

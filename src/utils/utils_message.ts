@@ -13,15 +13,10 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
     const { isMemory, isShortMemory } = ConfigManager.memory;
     const sandableImagesPrompt: string = localImagePaths
         .map(path => {
-            if (path.trim() === '') {
-                return null;
-            }
+            if (path.trim() === '') return null;
             try {
                 const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) {
-                    throw new Error(`本地图片路径格式错误:${path}`);
-                }
-
+                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
                 return name;
             } catch (e) {
                 logger.error(e);
@@ -37,33 +32,18 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
     let roleIndex = 0;
     if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
         roleIndex = roleSettingNames.indexOf(roleName);
-        if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) {
-            roleIndex = 0;
-        }
+        if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) roleIndex = 0;
     } else {
         const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-        if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) {
-            roleIndex = roleIndex2;
-        }
+        if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) roleIndex = roleIndex2;
     }
 
     // 记忆
-    let memoryPrompt = '';
-    if (isMemory) {
-        memoryPrompt = await ai.memory.buildMemoryPrompt(ctx, ai.context);
-    }
-
+    const memoryPrompt = isMemory ? await ai.memory.buildMemoryPrompt(ctx, ai.context) : '';
     // 短期记忆
-    let shortMemoryPrompt = '';
-    if (isShortMemory && ai.memory.useShortMemory) {
-        shortMemoryPrompt = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
-    }
-
+    const shortMemoryPrompt = isShortMemory && ai.memory.useShortMemory ? ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n') : '';
     // 调用函数
-    let toolsPrompt = '';
-    if (isTool && usePromptEngineering) {
-        toolsPrompt = ai.tool.getToolsPrompt(ctx);
-    }
+    const toolsPrompt = isTool && usePromptEngineering ? ai.tool.getToolsPrompt(ctx) : '';
 
     const data = {
         "角色设定": roleSettingTemplate[roleIndex],

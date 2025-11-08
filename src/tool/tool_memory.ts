@@ -48,12 +48,12 @@ export function registerMemory() {
                         }
                     }
                 },
-                required: ['memory_type', 'name', 'text', 'keywords']
+                required: ['memory_type', 'name', 'text']
             }
         }
     });
     toolAdd.solve = async (ctx, msg, ai, args) => {
-        const { memory_type, name, text, keywords, userList = [], groupList = [] } = args;
+        const { memory_type, name, text, keywords = [], userList = [], groupList = [] } = args;
 
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
