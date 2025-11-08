@@ -123,11 +123,11 @@ export class Memory {
             const vector = await getEmbedding(this.text);
             if (!vector.length) {
                 logger.error('返回向量为空');
-                return null;
+                return;
             }
             if (vector.length !== embeddingDimension) {
                 logger.error(`向量维度不匹配。期望: ${embeddingDimension}, 实际: ${vector.length}`);
-                return null;
+                return;
             }
             this.vector = vector;
         }
@@ -369,17 +369,17 @@ export class MemoryManager {
         }
     }
 
-    async search(query: string, options: searchOptions = {
+    async searchByScore(query: string, options: searchOptions = {
         topK: 10,
         userList: [],
         groupList: [],
         keywords: [],
         includeImages: false,
     }) {
-        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        const { embeddingDimension } = ConfigManager.memory;
         const memoryList = Object.values(this.memoryMap);
         if (!memoryList.length) return [];
-        if (isMemoryVector && query) {
+        if (query) {
             try {
                 const queryVector = await getEmbedding(query);
                 if (!queryVector.length) {
@@ -407,6 +407,23 @@ export class MemoryManager {
             } catch (e) {
                 logger.error(`语义搜索失败: ${e.message}`);
             }
+        }
+        return [];
+    }
+
+    async search(query: string, options: searchOptions = {
+        topK: 10,
+        userList: [],
+        groupList: [],
+        keywords: [],
+        includeImages: false,
+    }) {
+        const { isMemoryVector } = ConfigManager.memory;
+        const memoryList = Object.values(this.memoryMap);
+        if (!memoryList.length) return [];
+        if (isMemoryVector && query) {
+            const result = await this.searchByScore(query, options);
+            if (result.length) return result;
         }
         return memoryList
             .map(item => {
@@ -473,6 +490,7 @@ export class MemoryManager {
     }
 
     buildMemory(sessionInfo: SessionInfo, memoryList: Memory[]): string {
+        if (this.persona === '无' && memoryList.length === 0) return '';
         const { showNumber } = ConfigManager.message;
         const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
 
@@ -597,7 +615,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
         if (!s) return;
 
         const memoryMap: { [id: string]: Memory } = {}
-        const segs = s.split(/-{3,}/);
+        const segs = s.split(/\n-{3,}\n/);
         for (const seg of segs) {
             if (!seg.trim()) continue;
 

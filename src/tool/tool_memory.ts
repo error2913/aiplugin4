@@ -311,7 +311,7 @@ export function registerMemory() {
         const images = Array.from(new Set([].concat(...memoryList.map(m => m.images))));
 
         return {
-            content: ai.memory.buildMemory(si, memoryList),
+            content: ai.memory.buildMemory(si, memoryList) || '暂无记忆',
             images: images
         };
     }
