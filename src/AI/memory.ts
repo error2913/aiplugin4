@@ -2,7 +2,7 @@ import Handlebars from "handlebars";
 import { ConfigManager } from "../config/config";
 import { AI, AIManager, GroupInfo, SessionInfo, UserInfo } from "./AI";
 import { Context } from "./context";
-import { cosineSimilarity, generateId, hasCommonGroup, hasCommonKeyword, hasCommonUser, revive } from "../utils/utils";
+import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../service";
 import { buildContent, parseBody } from "../utils/utils_message";
@@ -49,6 +49,56 @@ export class Memory {
         this.weight = 0;
         this.images = [];
     }
+
+    /**
+     * 计算记忆的基础相似度分数
+     * @returns 基础相似度分数（0.5-2.0）
+     */
+    calculateBaseScore() {
+        // 权重转换(weight: 0-10 → baseScore: 0.5-2.0)
+        return 0.5 + (this.weight / 0.15);
+    }
+
+    /**
+     * 计算记忆的新鲜度衰减因子
+     * @returns 衰减因子（1-∞）
+     */
+    calculateDecay() {
+        const now = Math.floor(Date.now() / 1000);
+        const w = 7 * 24 * 60 * 60;
+        // 基础新鲜度衰减: 1 + ln(1 + ageInWeeks)
+        const ageDecay = Math.log(1 + (now - this.createTime) / w);
+        // 活跃度衰减因子: 1 + ln(1 + 4hours)
+        const activityDecay = Math.log(1 + (now - this.lastMentionTime) / 14400);
+        // 衰减因子
+        return Math.max(1, ageDecay * activityDecay);
+    }
+
+    /**
+     * 计算记忆与查询的相似度分数
+     * @param v  查询向量
+     * @param ul 查询用户列表
+     * @param gl 查询群组列表
+     * @param kws 查询关键词列表
+     * @returns 相似度分数（0.7-1.3）
+     */
+    calculateSimiliarity(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
+        // 向量相似度分数（如果提供了向量v）
+        const vectorSimilarity = (v && v.length > 0 && this.vector && this.vector.length > 0) ? (cosineSimilarity(v, this.vector) + 1) / 2 : 0;
+        // 用户相似度分数
+        const commonUser = getCommonUser(this.userList, ul);
+        const userSimilarity = (ul && ul.length > 0) ? commonUser.length / (this.userList.length + ul.length - commonUser.length) : 0;
+        // 群组相似度分数
+        const commonGroup = getCommonGroup(this.groupList, gl);
+        const groupSimilarity = (gl && gl.length > 0) ? commonGroup.length / (this.groupList.length + gl.length - commonGroup.length) : 0;
+        // 关键词匹配分数
+        const commonKeyword = getCommonKeyword(this.keywords, kws);
+        const keywordSimilarity = (kws && kws.length > 0) ? commonKeyword.length / kws.length : 0;
+        // 综合相似度分数
+        const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.25 + groupSimilarity * 0.25 + keywordSimilarity * 0.1;
+        // 相似度增强因子
+        return avgSimilarity ? 0.7 + avgSimilarity * 0.6 : 1;
+    }
 }
 
 export class MemoryManager {
@@ -87,7 +137,7 @@ export class MemoryManager {
 
         for (const id of Object.keys(this.memoryMap)) {
             const m = this.memoryMap[id];
-            if (text === m.text && m.sessionInfo.id === ai.id && hasCommonUser(ul, m.userList) && hasCommonGroup(gl, m.groupList)) {
+            if (text === m.text && m.sessionInfo.id === ai.id && getCommonUser(ul, m.userList).length > 0 && getCommonGroup(gl, m.groupList).length > 0) {
                 m.keywords = Array.from(new Set([...m.keywords, ...kws]));
                 logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
                 return;
@@ -125,9 +175,8 @@ export class MemoryManager {
             m.vector = vector;
         }
 
-        this.memoryMap[id] = m;
-
         this.limitMemory();
+        this.memoryMap[id] = m;
     }
 
     delMemory(idList: string[] = [], kws: string[] = []) {
@@ -151,25 +200,17 @@ export class MemoryManager {
 
     limitMemory() {
         const { memoryLimit } = ConfigManager.memory;
-        const now = Math.floor(Date.now() / 1000);
         const memoryList = Object.values(this.memoryMap);
 
         const forgetIdList = memoryList
             .map((m) => {
-                const d = 24 * 60 * 60;
-                // 基础新鲜度衰减（按天计算）
-                const ageDecay = Math.log10((now - m.createTime) / d + 1);
-                // 活跃度衰减因子（最近接触按小时衰减）
-                const activityDecay = Math.max(1, (now - m.lastMentionTime) / 3600);
-                // 权重转换（0-10 → 1.0-3.0 指数曲线）
-                const importance = Math.pow(1.1161, m.weight);
                 return {
                     id: m.id,
-                    fgtWeight: (ageDecay * activityDecay) / importance
+                    fgtWeight: m.calculateDecay() / m.calculateBaseScore()
                 }
             })
             .sort((a, b) => b.fgtWeight - a.fgtWeight)
-            .slice(0, memoryList.length - memoryLimit)
+            .slice(0, memoryList.length - memoryLimit + 1) // 预留1个位置用于存储最新记忆
             .map(item => item.id);
 
         this.delMemory(forgetIdList);
@@ -315,17 +356,8 @@ export class MemoryManager {
         includeImages: false,
     }) {
         const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
-        const filteredMemoryList = Object.values(this.memoryMap)
-            .filter(item =>
-                (!options.userList.length || hasCommonUser(item.userList, options.userList)) &&
-                (!options.groupList.length || hasCommonGroup(item.groupList, options.groupList)) &&
-                (!options.keywords.length || hasCommonKeyword(item.keywords, options.keywords)) &&
-                (!options.includeImages || item.images.length > 0)
-            );
-        if (!filteredMemoryList.length) {
-            return [];
-        }
-
+        const memoryList = Object.values(this.memoryMap);
+        if (!memoryList.length) return [];
         if (isMemoryVector && query) {
             try {
                 const queryVector = await getEmbedding(query);
@@ -333,16 +365,16 @@ export class MemoryManager {
                     logger.error('查询向量为空');
                     return [];
                 }
-                for (const m of filteredMemoryList) {
+                for (const m of memoryList) {
                     if (m.vector.length !== embeddingDimension) {
                         logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
                         m.vector = await getEmbedding(m.text);
                     }
                 }
-                return filteredMemoryList
+                return memoryList
                     .sort((a, b) => {
-                        const aScore = cosineSimilarity(queryVector, a.vector);
-                        const bScore = cosineSimilarity(queryVector, b.vector);
+                        const bScore = b.calculateBaseScore() * b.calculateSimiliarity(queryVector, options.userList, options.groupList, options.keywords);
+                        const aScore = a.calculateBaseScore() * a.calculateSimiliarity(queryVector, options.userList, options.groupList, options.keywords);
                         return bScore - aScore;
                     })
                     .slice(0, options.topK);
@@ -350,7 +382,7 @@ export class MemoryManager {
                 logger.error(`语义搜索失败: ${e.message}`);
             }
         }
-        return filteredMemoryList
+        return memoryList
             .map(item => {
                 const mi: Memory = JSON.parse(JSON.stringify(item));
                 if (item.keywords.some(kw => query.includes(kw))) {
