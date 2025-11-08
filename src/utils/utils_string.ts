@@ -4,7 +4,7 @@ import { Image, ImageManager } from "../AI/image";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformMsgIdBack } from "./utils";
-import { AI, GroupInfo, UserInfo } from "../AI/AI";
+import { AI } from "../AI/AI";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
@@ -620,90 +620,4 @@ export function fixJsonString(s: string): string {
 
         return fixed;
     }
-}
-
-export function parseConfigMemory(s: string): { text: string, userList: UserInfo[], groupList: GroupInfo[], keywords: string[], images: Image[] }[] {
-    if (!s) return [];
-
-    const result: { text: string, userList: UserInfo[], groupList: GroupInfo[], keywords: string[], images: Image[] }[] = [];
-    const segs = s.split(/-{3,}/);
-    segs.forEach(seg => {
-        if (!seg.trim()) return;
-
-        const item: { text: string, userList: UserInfo[], groupList: GroupInfo[], keywords: string[], images: Image[] } = {
-            text: '',
-            userList: [],
-            groupList: [],
-            keywords: [],
-            images: []
-        };
-
-        const lines = seg.split('\n');
-        if (lines.length === 0) return;
-
-        for (let i = 0; i < lines.length; i++) {
-            const match = lines[i].match(/^\s*?(用户|群聊|关键词|图片|内容)\s*?[:：](.*)/);
-            if (!match) {
-                continue;
-            }
-            const type = match[1];
-            const value = match[2].trim();
-            switch (type) {
-                case '用户': {
-                    item.userList = value.split(/[,，]/).map(s => {
-                        const [name, id] = s.split(/[:：]/).map(s => s.trim()).filter(s => s);
-                        if (!name || !id) return null;
-                        return { isPrivate: true, id, name };
-                    }).filter(ui => ui) as UserInfo[];
-                    break;
-                }
-                case '群聊': {
-                    item.groupList = value.split(/[,，]/).map(s => {
-                        const [name, id] = s.split(/[:：]/).map(s => s.trim()).filter(s => s);
-                        if (!name || !id) return null;
-                        return { isPrivate: false, id, name };
-                    }).filter(ui => ui) as GroupInfo[];
-                    break;
-                }
-                case '关键词': {
-                    item.keywords = value.split(/[,，]/).map(kw => kw.trim()).filter(kw => kw);
-                    break;
-                }
-                case '图片': {
-                    const { localImagePaths } = ConfigManager.image;
-                    const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-                        if (path.trim() === '') {
-                            return acc;
-                        }
-                        try {
-                            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                            if (!name) throw new Error(`本地图片路径格式错误:${path}`);
-                            acc[name] = path;
-                        } catch (e) {
-                            logger.error(e);
-                        }
-                        return acc;
-                    }, {});
-
-                    item.images = value.split(/[,，]/).map(id => id.trim()).map(id => {
-                        if (localImages.hasOwnProperty(id)) return new Image(localImages[id]);
-                        logger.error(`图片${id}不存在`);
-                        return null;
-                    }).filter(img => img);
-                    break;
-                }
-                case '内容': {
-                    item.text = lines.slice(i).join('\n').trim();
-                    break;
-                }
-                default: continue;
-            }
-        }
-
-        if (!item.text) return;
-
-        result.push(item);
-    });
-
-    return result;
 }

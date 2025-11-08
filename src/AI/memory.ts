@@ -50,6 +50,22 @@ export class Memory {
         this.images = [];
     }
 
+    copy(): Memory {
+        const m = new Memory();
+        m.id = this.id;
+        m.vector = [...this.vector];
+        m.text = this.text;
+        m.sessionInfo = JSON.parse(JSON.stringify(this.sessionInfo));
+        m.userList = JSON.parse(JSON.stringify(this.userList));
+        m.groupList = JSON.parse(JSON.stringify(this.groupList));
+        m.createTime = this.createTime;
+        m.lastMentionTime = this.lastMentionTime;
+        m.keywords = [...this.keywords];
+        m.weight = this.weight;
+        m.images = [...this.images];
+        return m;
+    }
+
     /**
      * 计算记忆的基础相似度分数
      * @returns 基础相似度分数（0.5-2.0）
@@ -98,6 +114,23 @@ export class Memory {
         const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.25 + groupSimilarity * 0.25 + keywordSimilarity * 0.1;
         // 相似度增强因子
         return avgSimilarity ? 0.7 + avgSimilarity * 0.6 : 1;
+    }
+
+    async updateVector() {
+        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        if (isMemoryVector) {
+            logger.info(`更新记忆向量: ${this.id}`);
+            const vector = await getEmbedding(this.text);
+            if (!vector.length) {
+                logger.error('返回向量为空');
+                return null;
+            }
+            if (vector.length !== embeddingDimension) {
+                logger.error(`向量维度不匹配。期望: ${embeddingDimension}, 实际: ${vector.length}`);
+                return null;
+            }
+            this.vector = vector;
+        }
     }
 }
 
@@ -160,21 +193,7 @@ export class MemoryManager {
         m.keywords = kws;
         m.weight = 5;
         m.images = await ImageManager.extractExistingImages(ai, text);
-
-        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
-        if (isMemoryVector) {
-            const vector = await getEmbedding(text);
-            if (!vector.length) {
-                logger.error('向量为空');
-                return null;
-            }
-            if (vector.length !== embeddingDimension) {
-                logger.error(`向量维度不匹配。期望: ${embeddingDimension}, 实际: ${vector.length}`);
-                return null;
-            }
-            m.vector = vector;
-        }
-
+        await m.updateVector();
         this.limitMemory();
         this.memoryMap[id] = m;
     }
@@ -330,8 +349,10 @@ export class MemoryManager {
                     memories: {
                         memory_type: 'private' | 'group',
                         name: string,
-                        keywords: string[],
-                        content: string
+                        text: string,
+                        keywords?: string[],
+                        userList?: string[],
+                        groupList?: string[],
                     }[]
                 };
 
@@ -368,10 +389,15 @@ export class MemoryManager {
                 for (const m of memoryList) {
                     if (m.vector.length !== embeddingDimension) {
                         logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
-                        m.vector = await getEmbedding(m.text);
+                        await m.updateVector();
                     }
                 }
                 return memoryList
+                    .map(item => {
+                        const m = item.copy();
+                        if (item.keywords.some(kw => query.includes(kw))) m.weight += 10; //提权
+                        return m;
+                    })
                     .sort((a, b) => {
                         const bScore = b.calculateBaseScore() * b.calculateSimiliarity(queryVector, options.userList, options.groupList, options.keywords);
                         const aScore = a.calculateBaseScore() * a.calculateSimiliarity(queryVector, options.userList, options.groupList, options.keywords);
@@ -384,13 +410,12 @@ export class MemoryManager {
         }
         return memoryList
             .map(item => {
-                const mi: Memory = JSON.parse(JSON.stringify(item));
-                if (item.keywords.some(kw => query.includes(kw))) {
-                    mi.weight += 10; //提权
-                }
-                return mi;
+                const m = item.copy();
+                if (item.keywords.some(kw => query.includes(kw))) m.weight += 10; //提权
+                return m;
             })
-            .sort((a, b) => b.weight - a.weight);
+            .sort((a, b) => b.weight - a.weight)
+            .slice(0, options.topK);
     }
 
     updateSingleMemoryWeight(s: string, role: 'user' | 'assistant') {
@@ -410,8 +435,8 @@ export class MemoryManager {
     }
 
     updateMemoryWeight(ctx: seal.MsgContext, context: Context, s: string, role: 'user' | 'assistant') {
-        const ai = AIManager.getAI(ctx.endPoint.userId);
-        ai.memory.updateSingleMemoryWeight(s, role);
+        AIManager.getAI(ctx.endPoint.userId).memory.updateSingleMemoryWeight(s, role);
+        knowledgeMM.updateSingleMemoryWeight(s, role);
         this.updateSingleMemoryWeight(s, role);
 
         if (!ctx.isPrivate) {
@@ -550,3 +575,166 @@ export class MemoryManager {
         return null;
     }
 }
+
+export class KnowledgeMemoryManager extends MemoryManager {
+    constructor() {
+        super();
+    }
+
+    init() {
+        this.memoryMap = JSON.parse(ConfigManager.ext.storageGet('knowledgeMemoryMap') || '{}');
+        this.reviveMemoryMap();
+    }
+
+    save() {
+        ConfigManager.ext.storageSet('knowledgeMemoryMap', JSON.stringify(this.memoryMap));
+    }
+
+    async updateKnowledgeMemory(index: number) {
+        const { knowledgeMemoryStringList } = ConfigManager.memory;
+        if (index < 0 || index >= knowledgeMemoryStringList.length) return;
+        const s = knowledgeMemoryStringList[index];
+        if (!s) return;
+
+        const memoryMap: { [id: string]: Memory } = {}
+        const segs = s.split(/-{3,}/);
+        for (const seg of segs) {
+            if (!seg.trim()) continue;
+
+            const lines = seg.split('\n');
+            if (lines.length === 0) continue;
+
+            const now = Math.floor(Date.now() / 1000);
+            const m = new Memory();
+            for (let i = 0; i < lines.length; i++) {
+                const match = lines[i].match(/^\s*?(ID|用户|群聊|关键词|图片|内容)\s*?[:：](.*)/);
+                if (!match) {
+                    continue;
+                }
+                const type = match[1];
+                const value = match[2].trim();
+                switch (type) {
+                    case 'ID': {
+                        m.id = value;
+                        break;
+                    }
+                    case '用户': {
+                        m.userList = value.split(/[,，]/).map(s => {
+                            const segs = s.split(/[:：]/).map(s => s.trim()).filter(s => s);
+                            if (segs.length < 2) return null;
+                            const name = value.replace(/[:：].*$/, '').trim();
+                            const id = segs[segs.length - 1];
+                            if (!name || !id) return null;
+                            return { isPrivate: true, id, name };
+                        }).filter(ui => ui) as UserInfo[];
+                        break;
+                    }
+                    case '群聊': {
+                        m.groupList = value.split(/[,，]/).map(s => {
+                            const segs = s.split(/[:：]/).map(s => s.trim()).filter(s => s);
+                            if (segs.length < 2) return null;
+                            const name = value.replace(/[:：].*$/, '').trim();
+                            const id = segs[segs.length - 1];
+                            if (!name || !id) return null;
+                            return { isPrivate: false, id, name };
+                        }).filter(ui => ui) as GroupInfo[];
+                        break;
+                    }
+                    case '关键词': {
+                        m.keywords = value.split(/[,，]/).map(kw => kw.trim()).filter(kw => kw);
+                        break;
+                    }
+                    case '图片': {
+                        const { localImagePaths } = ConfigManager.image;
+                        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
+                            if (path.trim() === '') {
+                                return acc;
+                            }
+                            try {
+                                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
+                                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
+                                acc[name] = path;
+                            } catch (e) {
+                                logger.error(e);
+                            }
+                            return acc;
+                        }, {});
+
+                        m.images = value.split(/[,，]/).map(id => id.trim()).map(id => {
+                            if (localImages.hasOwnProperty(id)) return new Image(localImages[id]);
+                            logger.error(`图片${id}不存在`);
+                            return null;
+                        }).filter(img => img);
+                        break;
+                    }
+                    case '内容': {
+                        m.text = lines.slice(i).join('\n').trim().replace(/^内容[:：]/, '');
+                        break;
+                    }
+                    default: continue;
+                }
+            }
+
+            if (!m.id && !m.text) continue;
+            if (this.memoryMap.hasOwnProperty(m.id)) {
+                const m2 = this.memoryMap[m.id];
+                m.vector = m2.vector;
+                if (m2.text !== m.text) await m.updateVector();
+                m.createTime = m2.createTime;
+                m.lastMentionTime = m2.lastMentionTime;
+                m.weight = m2.weight;
+            } else {
+                await m.updateVector();
+                m.createTime = now;
+                m.lastMentionTime = now;
+                m.weight = 5;
+            }
+            memoryMap[m.id] = m;
+        }
+        this.memoryMap = memoryMap;
+        this.save();
+    }
+
+    async buildKnowledgeMemoryPrompt(index: number, context: Context): Promise<string> {
+        await this.updateKnowledgeMemory(index);
+        if (Object.keys(this.memoryMap).length === 0) return '';
+
+        const { showNumber } = ConfigManager.message;
+        const { knowledgeMemoryShowNumber, knowledgeMemorySingleShowTemplate } = ConfigManager.memory;
+
+        const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
+        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
+        const memoryList = await this.search(lastMsg, {
+            topK: knowledgeMemoryShowNumber,
+            userList: [],
+            groupList: [],
+            keywords: [],
+            includeImages: false
+        });
+        if (memoryList.length === 0) return '';
+
+        let prompt = '';
+        if (memoryList.length === 0) {
+            prompt = '无';
+        } else {
+            prompt = memoryList
+                .map((m, i) => {
+                    const data = {
+                        "序号": i + 1,
+                        "记忆ID": m.id,
+                        "用户列表": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
+                        "群聊列表": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
+                        "关键词": m.keywords.join(';'),
+                        "记忆内容": m.text
+                    }
+
+                    const template = Handlebars.compile(knowledgeMemorySingleShowTemplate[0]);
+                    return template(data);
+                }).join('\n');
+        }
+
+        return prompt;
+    }
+}
+
+export const knowledgeMM = new KnowledgeMemoryManager();

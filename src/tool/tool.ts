@@ -437,13 +437,17 @@ export class ToolManager {
 
     reviveToolStauts() {
         const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
+        const toolStatus: {[key: string]: boolean} = {};
         for (const k in ToolManager.toolMap) {
             if (!this.toolStatus.hasOwnProperty(k)) {
-                this.toolStatus[k] = !toolsNotAllow.includes(k) && !toolsDefaultClosed.includes(k);
+                toolStatus[k] = !toolsNotAllow.includes(k) && !toolsDefaultClosed.includes(k);
             } else if (toolsNotAllow.includes(k)) {
-                this.toolStatus[k] = false;
+                toolStatus[k] = false;
+            } else {
+                toolStatus[k] = this.toolStatus[k];
             }
         }
+        this.toolStatus = toolStatus;
     }
 
     getToolsInfo(type: string): ToolInfo[] {

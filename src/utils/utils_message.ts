@@ -5,6 +5,7 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./utils_string";
+import { knowledgeMM } from "../AI/memory";
 
 export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { roleSettingNames, roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
@@ -38,6 +39,8 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
         if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) roleIndex = roleIndex2;
     }
 
+    // 知识库
+    const knowledgePrompt = await knowledgeMM.buildKnowledgeMemoryPrompt(roleIndex, ai.context);
     // 记忆
     const memoryPrompt = isMemory ? await ai.memory.buildMemoryPrompt(ctx, ai.context) : '';
     // 短期记忆
@@ -61,6 +64,7 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
         "图片条件不为零": condition !== '0',
         "可发送图片不为空": sandableImagesPrompt,
         "可发送图片列表": sandableImagesPrompt,
+        "知识库": knowledgePrompt,
         "开启长期记忆": isMemory && memoryPrompt,
         "记忆信息": memoryPrompt,
         "开启短期记忆": isShortMemory && ai.memory.useShortMemory && shortMemoryPrompt,

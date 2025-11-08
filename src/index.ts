@@ -12,6 +12,7 @@ import { TimerManager } from "./timer";
 import { createMsg } from "./utils/utils_seal";
 import { PrivilegeManager } from "./privilege";
 import { aliasToCmd } from "./utils/utils";
+import { knowledgeMM } from "./AI/memory";
 
 function main() {
   ConfigManager.registerConfig();
@@ -19,6 +20,7 @@ function main() {
   ToolManager.registerTool();
   TimerManager.init();
   PrivilegeManager.reviveCmdPriv();
+  knowledgeMM.init();
 
   const ext = ConfigManager.ext;
 

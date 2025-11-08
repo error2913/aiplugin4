@@ -140,10 +140,18 @@ export async function sendITTRequest(messages: {
     }
 }
 
+const vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
+
 export async function getEmbedding(text: string): Promise<number[]> {
     if (!text) {
         logger.warning(`getEmbedding: 文本为空`);
         return [];
+    }
+
+    if (text === vectorCache.text) {
+        const v = vectorCache.vector;
+        vectorCache.text = '';
+        return v;
     }
 
     const { timeout } = ConfigManager.request;
@@ -160,7 +168,9 @@ export async function getEmbedding(text: string): Promise<number[]> {
 
             const embedding = data.data[0].embedding;
 
-            logger.info(`响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
+            logger.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
+            vectorCache.text = text;
+            vectorCache.vector = embedding;
 
             return embedding;
         } else {
