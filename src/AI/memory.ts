@@ -67,15 +67,6 @@ export class Memory {
     }
 
     /**
-     * 计算记忆的基础相似度分数
-     * @returns 基础相似度分数（0.5-2.0）
-     */
-    calculateBaseScore() {
-        // 权重转换(weight: 0-10 → baseScore: 0.5-2.0)
-        return 0.5 + (this.weight * 0.15);
-    }
-
-    /**
      * 计算记忆的新鲜度衰减因子，越大表示越新鲜
      * @returns 衰减因子（0-1）
      */
@@ -97,7 +88,7 @@ export class Memory {
      * @param ul 查询用户列表
      * @param gl 查询群组列表
      * @param kws 查询关键词列表
-     * @returns 相似度分数（0-1）
+     * @returns 相似度分数（1-2）
      */
     calculateSimilarity(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
         // 总权重 0-1
@@ -116,8 +107,8 @@ export class Memory {
         const keywordSimilarity = (kws && kws.length > 0) ? commonKeyword.length / kws.length : 0;
         // 综合相似度分数 0-1
         const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.2 + groupSimilarity * 0.2 + keywordSimilarity * 0.2;
-        // 相似度增强因子 0-1
-        return avgSimilarity / totalWeight;
+        // 相似度增强因子 1-2
+        return 1 + avgSimilarity / totalWeight;
     }
 
     async updateVector() {
@@ -229,7 +220,7 @@ export class MemoryManager {
         memoryList.map((m) => {
             return {
                 id: m.id,
-                score: m.calculateDecay() * m.calculateBaseScore()
+                score: m.calculateDecay() * m.weight
             }
         })
             .sort((a, b) => b.score - a.score) // 从大到小排序
@@ -401,8 +392,8 @@ export class MemoryManager {
                         return m;
                     })
                     .sort((a, b) => {
-                        const bScore = b.calculateBaseScore() * b.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
-                        const aScore = a.calculateBaseScore() * a.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
+                        const bScore = b.weight * b.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
+                        const aScore = a.weight * a.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
                         return bScore - aScore;
                     })
                     .slice(0, options.topK);
