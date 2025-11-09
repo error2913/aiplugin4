@@ -148,14 +148,13 @@ export async function getEmbedding(text: string): Promise<number[]> {
         return [];
     }
 
-    if (text === vectorCache.text) {
-        const v = vectorCache.vector;
-        vectorCache.text = '';
-        return v;
-    }
-
     const { timeout } = ConfigManager.request;
     const { embeddingDimension, embeddingUrl, embeddingApiKey, embeddingBodyTemplate } = ConfigManager.memory;
+
+    if (vectorCache.text === text && vectorCache.vector.length === embeddingDimension) {
+        const v = vectorCache.vector;
+        return v;
+    }
 
     try {
         const bodyObject = parseEmbeddingBody(embeddingBodyTemplate, text, embeddingDimension);

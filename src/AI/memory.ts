@@ -72,22 +72,23 @@ export class Memory {
      */
     calculateBaseScore() {
         // 权重转换(weight: 0-10 → baseScore: 0.5-2.0)
-        return 0.5 + (this.weight / 0.15);
+        return 0.5 + (this.weight * 0.15);
     }
 
     /**
-     * 计算记忆的新鲜度衰减因子
-     * @returns 衰减因子（1-∞）
+     * 计算记忆的新鲜度衰减因子，越大表示越新鲜
+     * @returns 衰减因子（0-1）
      */
     calculateDecay() {
         const now = Math.floor(Date.now() / 1000);
-        const w = 7 * 24 * 60 * 60;
-        // 基础新鲜度衰减: 1 + ln(1 + ageInWeeks)
-        const ageDecay = Math.log(1 + (now - this.createTime) / w);
-        // 活跃度衰减因子: 1 + ln(1 + 4hours)
-        const activityDecay = Math.log(1 + (now - this.lastMentionTime) / 14400);
-        // 衰减因子
-        return Math.max(1, ageDecay * activityDecay);
+        const ageInDays = (now - this.createTime) / (24 * 60 * 60);
+        const activityInHours = (now - this.lastMentionTime) / (60 * 60);
+        // 基础新鲜度: exp(-ageInDays / 7)
+        const ageDecay = Math.exp(-ageInDays / 7);
+        // 活跃度: exp(-activityInHours / 4)
+        const activityDecay = Math.exp(-activityInHours / 4);
+        // 衰减因子，取年龄衰减和活跃度衰减的较大值
+        return Math.max(ageDecay, activityDecay);
     }
 
     /**
@@ -96,24 +97,27 @@ export class Memory {
      * @param ul 查询用户列表
      * @param gl 查询群组列表
      * @param kws 查询关键词列表
-     * @returns 相似度分数（0.7-1.3）
+     * @returns 相似度分数（0-1）
      */
-    calculateSimiliarity(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
-        // 向量相似度分数（如果提供了向量v）
+    calculateSimilarity(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
+        // 总权重 0-1
+        const totalWeight = (v.length ? 0.4 : 0) + (ul.length ? 0.2 : 0) + (gl.length ? 0.2 : 0) + (kws.length ? 0.2 : 0);
+        if (totalWeight === 0) return 0;
+        // 向量相似度分数（如果提供了向量v） 0-1
         const vectorSimilarity = (v && v.length > 0 && this.vector && this.vector.length > 0) ? (cosineSimilarity(v, this.vector) + 1) / 2 : 0;
-        // 用户相似度分数
+        // 用户相似度分数 0-1
         const commonUser = getCommonUser(this.userList, ul);
         const userSimilarity = (ul && ul.length > 0) ? commonUser.length / (this.userList.length + ul.length - commonUser.length) : 0;
-        // 群组相似度分数
+        // 群组相似度分数 0-1
         const commonGroup = getCommonGroup(this.groupList, gl);
         const groupSimilarity = (gl && gl.length > 0) ? commonGroup.length / (this.groupList.length + gl.length - commonGroup.length) : 0;
-        // 关键词匹配分数
+        // 关键词匹配分数 0-1
         const commonKeyword = getCommonKeyword(this.keywords, kws);
         const keywordSimilarity = (kws && kws.length > 0) ? commonKeyword.length / kws.length : 0;
-        // 综合相似度分数
-        const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.25 + groupSimilarity * 0.25 + keywordSimilarity * 0.1;
-        // 相似度增强因子
-        return avgSimilarity ? 0.7 + avgSimilarity * 0.6 : 1;
+        // 综合相似度分数 0-1
+        const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.2 + groupSimilarity * 0.2 + keywordSimilarity * 0.2;
+        // 相似度增强因子 0-1
+        return avgSimilarity / totalWeight;
     }
 
     async updateVector() {
@@ -219,20 +223,18 @@ export class MemoryManager {
 
     limitMemory() {
         const { memoryLimit } = ConfigManager.memory;
-        const memoryList = Object.values(this.memoryMap);
-
-        const forgetIdList = memoryList
-            .map((m) => {
-                return {
-                    id: m.id,
-                    fgtWeight: m.calculateDecay() / m.calculateBaseScore()
-                }
-            })
-            .sort((a, b) => b.fgtWeight - a.fgtWeight)
-            .slice(0, memoryList.length - memoryLimit + 1) // 预留1个位置用于存储最新记忆
-            .map(item => item.id);
-
-        this.delMemory(forgetIdList);
+        const limit = memoryLimit > 0 ? memoryLimit - 1 : 0; // 预留1个位置用于存储最新记忆
+        const memoryList = Object.values(this.memoryMap)
+        if (memoryList.length <= limit) return;
+        memoryList.map((m) => {
+            return {
+                id: m.id,
+                score: m.calculateDecay() * m.calculateBaseScore()
+            }
+        })
+            .sort((a, b) => b.score - a.score) // 从大到小排序
+            .slice(limit)
+            .forEach(item => delete this.memoryMap?.[item.id]);
     }
 
     clearMemory() {
@@ -386,12 +388,12 @@ export class MemoryManager {
                     logger.error('查询向量为空');
                     return [];
                 }
-                for (const m of memoryList) {
+                await Promise.all(memoryList.map(async m => {
                     if (m.vector.length !== embeddingDimension) {
                         logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
                         await m.updateVector();
                     }
-                }
+                }))
                 return memoryList
                     .map(item => {
                         const m = item.copy();
@@ -399,8 +401,8 @@ export class MemoryManager {
                         return m;
                     })
                     .sort((a, b) => {
-                        const bScore = b.calculateBaseScore() * b.calculateSimiliarity(queryVector, options.userList, options.groupList, options.keywords);
-                        const aScore = a.calculateBaseScore() * a.calculateSimiliarity(queryVector, options.userList, options.groupList, options.keywords);
+                        const bScore = b.calculateBaseScore() * b.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
+                        const aScore = a.calculateBaseScore() * a.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
                         return bScore - aScore;
                     })
                     .slice(0, options.topK);
@@ -622,7 +624,6 @@ export class KnowledgeMemoryManager extends MemoryManager {
             const lines = seg.split('\n');
             if (lines.length === 0) continue;
 
-            const now = Math.floor(Date.now() / 1000);
             const m = new Memory();
             for (let i = 0; i < lines.length; i++) {
                 const match = lines[i].match(/^\s*?(ID|用户|群聊|关键词|图片|内容)\s*?[:：](.*)/);
@@ -694,6 +695,12 @@ export class KnowledgeMemoryManager extends MemoryManager {
             }
 
             if (!m.id && !m.text) continue;
+
+            memoryMap[m.id] = m;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        await Promise.all(Object.values(memoryMap).map(async m => {
             if (this.memoryMap.hasOwnProperty(m.id)) {
                 const m2 = this.memoryMap[m.id];
                 m.vector = m2.vector;
@@ -707,8 +714,8 @@ export class KnowledgeMemoryManager extends MemoryManager {
                 m.lastMentionTime = now;
                 m.weight = 5;
             }
-            memoryMap[m.id] = m;
-        }
+        }))
+
         this.memoryMap = memoryMap;
         this.save();
     }
@@ -756,3 +763,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
 }
 
 export const knowledgeMM = new KnowledgeMemoryManager();
+
+// 可以通过维护一组索引来优化搜索性能。
+// 好麻烦，不想弄
+// 目前数量级应该没什么优化的需求
