@@ -192,7 +192,7 @@ export class Context {
         }
 
         //更新记忆权重
-        ai.memory.updateMemoryWeight(ctx, ai.context, s, role);
+        ai.memory.updateRelatedMemoryWeight(ctx, ai.context, s, role);
 
         //删除多余的上下文
         this.limitMessages(maxRounds);
@@ -377,10 +377,7 @@ export class Context {
                 continue;
             }
 
-            const ai = AIManager.getAI(uid);
-            const memoryList = Object.values(ai.memory.memoryMap);
-
-            for (const m of memoryList) {
+            for (const m of AIManager.getAI(uid).memory.memoryList) {
                 if (m.sessionInfo.isPrivate && m.sessionInfo.name === groupName) {
                     return m.sessionInfo.id;
                 }

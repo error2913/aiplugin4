@@ -50,7 +50,7 @@ export class Memory {
         this.images = [];
     }
 
-    copy(): Memory {
+    get copy(): Memory {
         const m = new Memory();
         m.id = this.id;
         m.vector = [...this.vector];
@@ -68,9 +68,9 @@ export class Memory {
 
     /**
      * 计算记忆的新鲜度衰减因子，越大表示越新鲜
-     * @returns 衰减因子（0-1）
+     * @returns 衰减因子（1→0）
      */
-    calculateDecay() {
+    get decay() {
         const now = Math.floor(Date.now() / 1000);
         const ageInDays = (now - this.createTime) / (24 * 60 * 60);
         const activityInHours = (now - this.lastMentionTime) / (60 * 60);
@@ -152,6 +152,20 @@ export class MemoryManager {
         }
     }
 
+    get memoryIds() {
+        return Object.keys(this.memoryMap);
+    }
+
+    get memoryList() {
+        return Object.values(this.memoryMap);
+    }
+
+    get keywords() {
+        const keywords = new Set<string>();
+        this.memoryList.forEach(m => m.keywords.forEach(kw => keywords.add(kw)));
+        return Array.from(keywords);
+    }
+
     async addMemory(ctx: seal.MsgContext, ai: AI, ul: UserInfo[], gl: GroupInfo[], kws: string[], text: string) {
         let id = generateId(), a = 0;
         while (this.memoryMap.hasOwnProperty(id)) {
@@ -163,7 +177,7 @@ export class MemoryManager {
             }
         }
 
-        for (const id of Object.keys(this.memoryMap)) {
+        for (const id of this.memoryIds) {
             const m = this.memoryMap[id];
             if (text === m.text && m.sessionInfo.id === ai.id && getCommonUser(ul, m.userList).length > 0 && getCommonGroup(gl, m.groupList).length > 0) {
                 m.keywords = Array.from(new Set([...m.keywords, ...kws]));
@@ -193,19 +207,14 @@ export class MemoryManager {
         this.memoryMap[id] = m;
     }
 
-    delMemory(idList: string[] = [], kws: string[] = []) {
-        if (idList.length === 0 && kws.length === 0) {
-            return;
-        }
+    deleteMemory(ids: string[] = [], kws: string[] = []) {
+        if (ids.length === 0 && kws.length === 0) return;
 
-        idList.forEach(id => {
-            delete this.memoryMap?.[id];
-        })
+        ids.forEach(id => delete this.memoryMap?.[id])
 
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
-                const m = this.memoryMap[id];
-                if (kws.some(kw => m.keywords.includes(kw))) {
+                if (kws.some(kw => this.memoryMap[id].keywords.includes(kw))) {
                     delete this.memoryMap[id];
                 }
             }
@@ -215,12 +224,11 @@ export class MemoryManager {
     limitMemory() {
         const { memoryLimit } = ConfigManager.memory;
         const limit = memoryLimit > 0 ? memoryLimit - 1 : 0; // 预留1个位置用于存储最新记忆
-        const memoryList = Object.values(this.memoryMap)
-        if (memoryList.length <= limit) return;
-        memoryList.map((m) => {
+        if (this.memoryList.length <= limit) return;
+        this.memoryList.map((m) => {
             return {
                 id: m.id,
-                score: m.calculateDecay() * m.weight
+                score: m.decay * m.weight
             }
         })
             .sort((a, b) => b.score - a.score) // 从大到小排序
@@ -370,8 +378,7 @@ export class MemoryManager {
         includeImages: false,
     }) {
         const { embeddingDimension } = ConfigManager.memory;
-        const memoryList = Object.values(this.memoryMap);
-        if (!memoryList.length) return [];
+        if (!this.memoryList.length) return [];
         if (query) {
             try {
                 const queryVector = await getEmbedding(query);
@@ -379,15 +386,15 @@ export class MemoryManager {
                     logger.error('查询向量为空');
                     return [];
                 }
-                await Promise.all(memoryList.map(async m => {
+                await Promise.all(this.memoryList.map(async m => {
                     if (m.vector.length !== embeddingDimension) {
                         logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
                         await m.updateVector();
                     }
                 }))
-                return memoryList
+                return this.memoryList
                     .map(item => {
-                        const m = item.copy();
+                        const m = item.copy;
                         if (item.keywords.some(kw => query.includes(kw))) m.weight += 10; //提权
                         return m;
                     })
@@ -412,15 +419,14 @@ export class MemoryManager {
         includeImages: false,
     }) {
         const { isMemoryVector } = ConfigManager.memory;
-        const memoryList = Object.values(this.memoryMap);
-        if (!memoryList.length) return [];
+        if (!this.memoryList.length) return [];
         if (isMemoryVector && query) {
             const result = await this.searchByScore(query, options);
             if (result.length) return result;
         }
-        return memoryList
+        return this.memoryList
             .map(item => {
-                const m = item.copy();
+                const m = item.copy;
                 if (item.keywords.some(kw => query.includes(kw))) m.weight += 10; //提权
                 return m;
             })
@@ -428,7 +434,7 @@ export class MemoryManager {
             .slice(0, options.topK);
     }
 
-    updateSingleMemoryWeight(s: string, role: 'user' | 'assistant') {
+    updateMemoryWeight(s: string, role: 'user' | 'assistant') {
         const increase = role === 'user' ? 1 : 0.1;
         const decrease = role === 'user' ? 0.1 : 0;
         const now = Math.floor(Date.now() / 1000);
@@ -444,31 +450,15 @@ export class MemoryManager {
         }
     }
 
-    updateMemoryWeight(ctx: seal.MsgContext, context: Context, s: string, role: 'user' | 'assistant') {
-        AIManager.getAI(ctx.endPoint.userId).memory.updateSingleMemoryWeight(s, role);
-        knowledgeMM.updateSingleMemoryWeight(s, role);
-        this.updateSingleMemoryWeight(s, role);
-
-        if (!ctx.isPrivate) {
-            // 群内用户的记忆权重更新
-            const arr = [];
-            for (const message of context.messages) {
-                const uid = message.uid;
-                if (arr.includes(uid) || message.role !== 'user') {
-                    continue;
-                }
-
-                const name = message.name;
-                if (name.startsWith('_')) {
-                    continue;
-                }
-
-                const ai = AIManager.getAI(uid);
-                ai.memory.updateSingleMemoryWeight(s, role);
-
-                arr.push(uid);
-            }
-        }
+    updateRelatedMemoryWeight(ctx: seal.MsgContext, context: Context, s: string, role: 'user' | 'assistant') {
+        // bot记忆权重更新
+        AIManager.getAI(ctx.endPoint.userId).memory.updateMemoryWeight(s, role);
+        // 知识库记忆权重更新
+        knowledgeMM.updateMemoryWeight(s, role);
+        // 会话自身记忆权重更新
+        this.updateMemoryWeight(s, role);
+        // 群内用户的记忆权重更新
+        if (!ctx.isPrivate) context.userInfoList.forEach(ui => AIManager.getAI(ui.id).memory.updateMemoryWeight(s, role));
     }
 
     async getTopMemoryList(lastMsg: string) {
@@ -577,11 +567,9 @@ export class MemoryManager {
     }
 
     findImage(id: string): Image | null {
-        for (const m of Object.values(this.memoryMap)) {
+        for (const m of this.memoryList) {
             const image = m.images.find(item => item.id === id);
-            if (image) {
-                return image;
-            }
+            if (image) return image;
         }
         return null;
     }
@@ -713,7 +701,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
 
     async buildKnowledgeMemoryPrompt(index: number, context: Context): Promise<string> {
         await this.updateKnowledgeMemory(index);
-        if (Object.keys(this.memoryMap).length === 0) return '';
+        if (this.memoryIds.length === 0) return '';
 
         const { showNumber } = ConfigManager.message;
         const { knowledgeMemoryShowNumber, knowledgeMemorySingleShowTemplate } = ConfigManager.memory;

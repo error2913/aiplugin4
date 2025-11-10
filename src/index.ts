@@ -582,18 +582,11 @@ ${HELPMAP["权限限制"]}`);
               if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== epId)) {
                 ai3 = ai2;
               }
-
               const { isMemory, isShortMemory } = ConfigManager.memory;
-
-              const keywords = new Set<string>();
-              for (const key in ai3.memory.memoryMap) {
-                ai3.memory.memoryMap[key].keywords.forEach(kw => keywords.add(kw));
-              }
-
               seal.replyToSender(ctx, msg, `${ai3.id}
 长期记忆开启状态: ${isMemory ? '是' : '否'}
-长期记忆条数: ${Object.keys(ai3.memory.memoryMap).length}
-关键词库: ${Array.from(keywords).join('、') || '无'}
+长期记忆条数: ${ai3.memory.memoryIds.length}
+关键词库: ${ai3.memory.keywords.join('、') || '无'}
 短期记忆开启状态: ${(isShortMemory && ai3.memory.useShortMemory) ? '是' : '否'}
 短期记忆条数: ${ai3.memory.shortMemoryList.length}`);
               return ret;
@@ -633,7 +626,7 @@ ${HELPMAP["权限限制"]}`);
                     seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
                     return ret;
                   }
-                  ai2.memory.delMemory(idList, kw);
+                  ai2.memory.deleteMemory(idList, kw);
                   ai2.memory.getTopMemoryList('').then(memoryList => {
                     const s = ai2.memory.buildMemory({
                       isPrivate: true,
@@ -715,7 +708,7 @@ ${HELPMAP["权限限制"]}`);
                     seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g del <ID1> <ID2>】删除群聊记忆');
                     return ret;
                   }
-                  ai.memory.delMemory(idList, kw);
+                  ai.memory.deleteMemory(idList, kw);
                   ai.memory.getTopMemoryList('').then(memoryList => {
                     const s = ai.memory.buildMemory({
                       isPrivate: false,

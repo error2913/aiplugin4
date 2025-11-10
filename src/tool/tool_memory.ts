@@ -173,7 +173,7 @@ export function registerMemory() {
         }
 
         //记忆相关处理
-        ai.memory.delMemory(id_list, keywords);
+        ai.memory.deleteMemory(id_list, keywords);
         AIManager.saveAI(ai.id);
 
         return { content: `删除记忆成功`, images: [] };
