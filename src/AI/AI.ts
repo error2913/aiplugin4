@@ -351,7 +351,7 @@ export class AI {
     }
 
     // 若不在活动时间范围内，返回-1
-    get curSegIndex(): number {
+    get curActiveTimeSegIndex(): number {
         const now = new Date();
         const cur = now.getHours() * 60 + now.getMinutes();
         const { start, end, segs } = this.setting.activeTimeInfo;
@@ -392,7 +392,7 @@ export class AI {
         if (segs !== 0 && (start !== 0 || end !== 0)) {
             const timers = TimerManager.getTimers(this.id, '', ['activeTime']);
             if (timers.length === 0) {
-                const curSegIndex = this.curSegIndex;
+                const curSegIndex = this.curActiveTimeSegIndex;
                 const nextTimePoint = this.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
                     TimerManager.addActiveTimeTimer(ctx, msg, this, nextTimePoint);
@@ -410,7 +410,6 @@ export interface UsageInfo {
 }
 
 export class AIManager {
-    static version = "1.0.1";
     static cache: { [key: string]: AI } = {};
     static usageMapCache: { [model: string]: { [time: number]: UsageInfo } } = {};
 

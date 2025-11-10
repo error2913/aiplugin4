@@ -405,7 +405,7 @@ ${HELPMAP["权限限制"]}`);
                 text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
                 text += `\n活跃次数:${segs}`;
 
-                const curSegIndex = ai.curSegIndex;
+                const curSegIndex = ai.curActiveTimeSegIndex;
                 const nextTimePoint = ai.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
                   TimerManager.addActiveTimeTimer(ctx, msg, ai, nextTimePoint);

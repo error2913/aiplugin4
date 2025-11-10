@@ -264,7 +264,7 @@ export class TimerManager {
                             const ctx = createCtx(epId, msg);
                             const ai = AIManager.getAI(id);
 
-                            const curSegIndex = ai.curSegIndex;
+                            const curSegIndex = ai.curActiveTimeSegIndex;
                             const nextTimePoint = ai.getNextTimePoint(curSegIndex);
                             if (curSegIndex === -1) {
                                 logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
