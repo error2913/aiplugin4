@@ -2,10 +2,9 @@ import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
-import { levenshteinDistance, MessageSegment } from "../utils/utils_string";
+import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager, UserInfo } from "./AI";
 import { logger } from "../logger";
-import { transformMsgId } from "../utils/utils";
 import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
 
 export interface MessageInfo {
@@ -80,49 +79,9 @@ export class Context {
         }
     }
 
-    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageSegment[], images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { showNumber, showMsgId } = ConfigManager.message;
+    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, content: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
-
-        //处理文本
-        const s = messageArray.map(item => {
-            switch (item.type) {
-                case 'text': {
-                    return item.data.text;
-                }
-                case 'at': {
-                    const epId = ctx.endPoint.userId;
-                    const gid = ctx.group.groupId;
-                    const uid = `QQ:${item.data.qq || ''}`;
-                    const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                    const mctx = createCtx(epId, mmsg);
-                    const name = mctx.player.name || '未知用户';
-
-                    return `<|at:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
-                }
-                case 'poke': {
-                    const epId = ctx.endPoint.userId;
-                    const gid = ctx.group.groupId;
-                    const uid = `QQ:${item.data.qq || ''}`;
-                    const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                    const mctx = createCtx(epId, mmsg);
-                    const name = mctx.player.name || '未知用户';
-
-                    return `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
-                }
-                case 'reply': {
-                    return showMsgId ? `<|quote:${transformMsgId(item.data.id || '')}|>` : ``;
-                }
-                default: {
-                    return '';
-                }
-            }
-        }).join('');
-
-        if (s === '') {
-            return;
-        }
 
         const now = Math.floor(Date.now() / 1000);
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
@@ -158,12 +117,12 @@ export class Context {
         // 添加消息到上下文
         const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
         const length = messages.length;
-        if (length !== 0 && messages[length - 1].uid === uid && !/<[\|│｜]?function(?:_call)?>/.test(s)) {
+        if (length !== 0 && messages[length - 1].uid === uid && !/<[\|│｜]?function(?:_call)?>/.test(content)) {
             messages[length - 1].images.push(...images);
             messages[length - 1].msgArray.push({
                 msgId: msgId,
                 time: now,
-                content: s
+                content: content
             });
         } else {
             const message: Message = {
@@ -174,7 +133,7 @@ export class Context {
                 msgArray: [{
                     msgId: msgId,
                     time: now,
-                    content: s
+                    content: content
                 }]
             };
             messages.push(message);
@@ -192,7 +151,7 @@ export class Context {
         }
 
         //更新记忆权重
-        ai.memory.updateRelatedMemoryWeight(ctx, ai.context, s, role);
+        ai.memory.updateRelatedMemoryWeight(ctx, ai.context, content, role);
 
         //删除多余的上下文
         this.limitMessages();

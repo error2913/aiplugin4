@@ -1,7 +1,8 @@
 import { logger } from "../logger";
 import { transformMsgIdBack, transformMsgId } from "../utils/utils";
 import { Tool } from "./tool";
-import { Image, ImageManager } from "../AI/image";
+import { Image } from "../AI/image";
+import { transformArrayToContent } from "../utils/utils_string";
 
 export function registerEssenceMsg() {
     const toolSet = new Tool({
@@ -66,7 +67,7 @@ export function registerEssenceMsg() {
             }
         }
     });
-    toolGet.solve = async (ctx, _, __, ___) => {
+    toolGet.solve = async (ctx, _, ai, __) => {
         if (ctx.isPrivate) {
             return { content: `精华消息功能仅在群聊中可用`, images: [] };
         }
@@ -87,7 +88,7 @@ export function registerEssenceMsg() {
             }
 
             let response = `群精华消息列表 (${result.length}条):\n\n`;
-            let images: Image[] = [];
+            const images: Image[] = [];
 
             for (let i = 0; i < result.length; i++) {
                 const essence = result[i];
@@ -99,13 +100,9 @@ export function registerEssenceMsg() {
                 if (essence.content) {
                     let content = '';
                     if (Array.isArray(essence.content)) {
-                        let messageArray = essence.content;
-                        if (messageArray.some(item => item.type === 'image')) {
-                            const result = await ImageManager.handleImageMessage(ctx, messageArray);
-                            messageArray = result.messageArray;
-                            images = result.images;
-                        }
-                        content = messageArray.map(item => item.type === 'text' ? item.data.text : '').join('');
+                        const result = await transformArrayToContent(ctx, ai, essence.content);
+                        content = result.content;
+                        images.push(...result.images);
                     } else if (typeof essence.content === 'string') {
                         content = essence.content;
                     }

@@ -151,46 +151,36 @@ export class ImageManager {
      * @param message 
      * @returns 
      */
-    static async handleImageMessage(ctx: seal.MsgContext, messageArray: MessageSegment[]): Promise<{ messageArray: MessageSegment[], images: Image[] }> {
+    async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
         const { receiveImage } = ConfigManager.image;
+        if (!receiveImage || seg.type !== 'image') return { content: '', images: [] };
 
-        const processedArray: MessageSegment[] = [];
+        let content = '';
         const images: Image[] = [];
+        try {
+            const file = seg.data.url || seg.data.file || '';
+            if (!file) return { content: '', images: [] };
 
-        for (const item of messageArray) {
-            if (item.type !== 'image') {
-                processedArray.push(item);
-                continue;
-            }
-
-            try {
-                const file = item.data.url || item.data.file || '';
-                if (!file || !receiveImage) {
-                    continue;
-                }
-
-                const image = new Image(file);
-
-                if (image.isUrl) {
-                    const { condition } = ConfigManager.image;
-
-                    const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-                    if (fmtCondition === 1) {
-                        const reply = await ImageManager.imageToText(file);
-                        if (reply) {
-                            image.content = reply;
-                        }
+            const image = new Image(file);
+            if (image.isUrl) {
+                const { condition } = ConfigManager.image;
+                const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
+                if (fmtCondition === 1) {
+                    const reply = await ImageManager.imageToText(file);
+                    if (reply) {
+                        image.content = reply;
                     }
                 }
-
-                processedArray.push({ type: 'text', data: { text: image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>` } });
-                images.push(image);
-            } catch (error) {
-                logger.error('在handleImageMessage中处理图片时出错:', error);
             }
-        };
 
-        return { messageArray: processedArray, images };
+            content += image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>`;
+            images.push(image);
+        } catch (error) {
+            logger.error('在handleImageMessage中处理图片时出错:', error);
+        }
+
+        if (this.stealStatus) this.stealImages(images);
+        return { content, images };
     }
 
     static async checkImageUrl(url: string): Promise<boolean> {

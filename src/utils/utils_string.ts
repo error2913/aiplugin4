@@ -3,8 +3,9 @@ import { Context } from "../AI/context";
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
-import { transformMsgIdBack } from "./utils";
+import { transformMsgId, transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
+import { createCtx, createMsg } from "./utils_seal";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
@@ -184,6 +185,117 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
     return text;
 }
 
+export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, messageArray: MessageSegment[]): Promise<{ content: string, images: Image[] }> {
+    const { showNumber, showMsgId } = ConfigManager.message;
+    let content = '';
+    const images: Image[] = [];
+    for (const seg of messageArray) {
+        switch (seg.type) {
+            case 'text': {
+                content += seg.data.text;
+                break;
+            }
+            case 'at': {
+                const epId = ctx.endPoint.userId;
+                const gid = ctx.group.groupId;
+                const uid = `QQ:${seg.data.qq || ''}`;
+                const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                const mctx = createCtx(epId, mmsg);
+                const name = mctx.player.name || '未知用户';
+                content += `<|at:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
+                break;
+            }
+            case 'poke': {
+                const epId = ctx.endPoint.userId;
+                const gid = ctx.group.groupId;
+                const uid = `QQ:${seg.data.qq || ''}`;
+                const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+                const mctx = createCtx(epId, mmsg);
+                const name = mctx.player.name || '未知用户';
+                content += `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
+                break;
+            }
+            case 'reply': {
+                content += showMsgId ? `<|quote:${transformMsgId(seg.data.id || '')}|>` : ``;
+                break;
+            }
+            case 'image': {
+                const result = await ai.imageManager.handleImageMessageSegment(ctx, seg);
+                content += result.content;
+                images.push(...result.images);
+                break;
+            }
+        }
+    }
+    return { content, images };
+}
+
+/**
+ * 转换文本内容中的特殊标签为CQ码
+ * @param ctx 消息上下文
+ * @param ai AI实例
+ * @param content 文本内容
+ * @returns 包含处理后的结果和图片列表的对象
+ */
+async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: string): Promise<{ text: string, images: Image[] }> {
+    const segs = parseSpecialTokens(content);
+    let text = '';
+    const images: Image[] = [];
+    for (const seg of segs) {
+        switch (seg.type) {
+            case 'text': {
+                text += seg.content;
+                break;
+            }
+            case 'at': {
+                const name = seg.content;
+                const uid = await ai.context.findUserId(ctx, name);
+                if (uid !== null) {
+                    text += `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                    text += ` @${name} `;
+                }
+                break;
+            }
+            case 'poke': {
+                const name = seg.content;
+                const uid = await ai.context.findUserId(ctx, name);
+                if (uid !== null) {
+                    text += `[CQ:poke,qq=${uid.replace(/^.+:/, "")}]`;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                }
+                break;
+            }
+            case 'quote': {
+                const msgId = seg.content;
+                text += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
+                break;
+            }
+            case 'img': {
+                const id = seg.content;
+                const image = ai.context.findImage(id, ai);
+
+                if (image) {
+                    images.push(image);
+
+                    if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
+                        if (image.base64) {
+                            image.weight += 1;
+                        }
+                        text += ImageManager.getImageCQCode(image);
+                    }
+                } else {
+                    logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
+        }
+    }
+    return { text, images };
+}
+
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
     const { replymsg, isTrim } = ConfigManager.reply;
 
@@ -218,8 +330,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
     }
 
     // 分离回复消息和戳一戳消息
-    s = s
-        .replace(/[<＜][\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}`)
+    s = s.replace(/[<＜][\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}`)
         .replace(/[<＜][\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}\\f`);
 
     const { contextArray, replyArray } = filterString(s);
@@ -227,13 +338,12 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
 
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
-        let reply = replyArray[i];
-        const { result, images: replyImages } = await replaceSpecialTokens(ctx, ai, reply);
-        reply = isTrim ? result.trim() : result;
+        const result = await transformContentToText(ctx, ai, replyArray[i]);
+        const reply = isTrim ? result.text.trim() : result.text;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
         replyArray[i] = prefix + reply;
-        images.push(...replyImages);
+        images.push(...result.images);
     }
 
     return { contextArray, replyArray, images };
@@ -416,72 +526,6 @@ function parseSpecialTokens(s: string): TokenSegment[] {
         }
     })
     return result;
-}
-
-/**
- * 替换特殊标签
- * @param ctx 消息上下文
- * @param ai AI实例
- * @param reply 回复内容
- * @returns 包含处理后的结果和图片列表的对象
- */
-async function replaceSpecialTokens(ctx: seal.MsgContext, ai: AI, reply: string): Promise<{ result: string, images: Image[] }> {
-    const segs = parseSpecialTokens(reply);
-    let result = '';
-    const images: Image[] = [];
-    for (const seg of segs) {
-        switch (seg.type) {
-            case 'text': {
-                result += seg.content;
-                break;
-            }
-            case 'at': {
-                const name = seg.content;
-                const uid = await ai.context.findUserId(ctx, name);
-                if (uid !== null) {
-                    result += `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                    result += ` @${name} `;
-                }
-                break;
-            }
-            case 'poke': {
-                const name = seg.content;
-                const uid = await ai.context.findUserId(ctx, name);
-                if (uid !== null) {
-                    result += `[CQ:poke,qq=${uid.replace(/^.+:/, "")}]`;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                }
-                break;
-            }
-            case 'quote': {
-                const msgId = seg.content;
-                result += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
-                break;
-            }
-            case 'img': {
-                const id = seg.content;
-                const image = ai.context.findImage(id, ai);
-
-                if (image) {
-                    images.push(image);
-
-                    if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
-                        if (image.base64) {
-                            image.weight += 1;
-                        }
-                        result += ImageManager.getImageCQCode(image);
-                    }
-                } else {
-                    logger.warning(`无法找到图片：${id}`);
-                }
-                break;
-            }
-        }
-    }
-    return { result, images };
 }
 
 export function levenshteinDistance(s1: string, s2: string): number {

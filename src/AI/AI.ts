@@ -1,4 +1,4 @@
-import { Image, ImageManager } from "./image";
+import { ImageManager } from "./image";
 import { ConfigManager } from "../config/config";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../service";
@@ -7,7 +7,7 @@ import { MemoryManager } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
-import { checkRepeat, handleReply, MessageSegment, transformTextToArray } from "../utils/utils_string";
+import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
 import { TimerManager } from "../timer";
 
 export interface GroupInfo {
@@ -99,18 +99,8 @@ export class AI {
     }
 
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageSegment[]) {
-        // 图片偷取，以及图片转文字
-        let images: Image[] = [];
-        if (messageArray.some(item => item.type === 'image')) {
-            const result = await ImageManager.handleImageMessage(ctx, messageArray);
-            messageArray = result.messageArray;
-            images = result.images;
-            if (ai.imageManager.stealStatus) {
-                ai.imageManager.stealImages(images);
-            }
-        }
-
-        await ai.context.addMessage(ctx, msg, ai, messageArray, images, 'user', transformMsgId(msg.rawId));
+        const { content, images } = await transformArrayToContent(ctx, ai, messageArray);
+        await ai.context.addMessage(ctx, msg, ai, content, images, 'user', transformMsgId(msg.rawId));
     }
 
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = ''): Promise<void> {
@@ -184,11 +174,10 @@ export class AI {
         const { contextArray, replyArray, images } = result;
 
         for (let i = 0; i < contextArray.length; i++) {
-            const s = contextArray[i];
-            const messageArray = transformTextToArray(s);
+            const content = contextArray[i];
             const reply = replyArray[i];
             const msgId = await replyToSender(ctx, msg, this, reply);
-            await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
+            await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
         }
 
         //发送偷来的图片
@@ -256,11 +245,10 @@ export class AI {
                         }
 
                         for (let i = 0; i < contextArray.length; i++) {
-                            const s = contextArray[i];
-                            const messageArray = transformTextToArray(s);
+                            const content = contextArray[i];
                             const reply = replyArray[i];
                             const msgId = await replyToSender(ctx, msg, this, reply);
-                            await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
+                            await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
                         }
                     }
 
@@ -282,8 +270,7 @@ export class AI {
                             this.stream.toolCallStatus = false;
                             await this.stopCurrentChatStream();
 
-                            const messageArray = transformTextToArray(match[0]);
-                            await this.context.addMessage(ctx, msg, this, messageArray, [], "assistant", '');
+                            await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
 
                             try {
                                 await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
@@ -314,11 +301,10 @@ export class AI {
             }
 
             for (let i = 0; i < contextArray.length; i++) {
-                const s = contextArray[i];
-                const messageArray = transformTextToArray(s);
+                const content = contextArray[i];
                 const reply = replyArray[i];
                 const msgId = await replyToSender(ctx, msg, this, reply);
-                await this.context.addMessage(ctx, msg, this, messageArray, images, 'assistant', msgId);
+                await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
             }
 
             after = result.nextAfter;
