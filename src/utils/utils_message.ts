@@ -12,6 +12,8 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const { isMemory, isShortMemory } = ConfigManager.memory;
+
+    // 可发送的图片提示
     const sandableImagesPrompt: string = localImagePaths
         .map(path => {
             if (path.trim() === '') return null;
@@ -29,6 +31,8 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
         .map((prompt, index) => `${index + 1}. ${prompt}`)
         .join('\n');
 
+
+    // 角色设定
     const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
     let roleIndex = 0;
     if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
@@ -39,10 +43,14 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
         if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) roleIndex = roleIndex2;
     }
 
+    // 获取lastMsg
+    const userMessages = ai.context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
+    const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
+
     // 知识库
-    const knowledgePrompt = await knowledgeMM.buildKnowledgeMemoryPrompt(roleIndex, ai.context);
+    const knowledgePrompt = await knowledgeMM.buildKnowledgeMemoryPrompt(roleIndex, lastMsg);
     // 记忆
-    const memoryPrompt = isMemory ? await ai.memory.buildMemoryPrompt(ctx, ai.context) : '';
+    const memoryPrompt = isMemory ? await ai.memory.buildMemoryPrompt(ctx, ai.context, lastMsg) : '';
     // 短期记忆
     const shortMemoryPrompt = isShortMemory && ai.memory.useShortMemory ? ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n') : '';
     // 调用函数

@@ -411,7 +411,7 @@ export interface UsageInfo {
 
 export class AIManager {
     static cache: { [key: string]: AI } = {};
-    static usageMapCache: { [model: string]: { [time: number]: UsageInfo } } = {};
+    static usageMapCache: { [model: string]: { [time: number]: UsageInfo } } = null;
 
     static get usageMap(): { [model: string]: { [time: number]: UsageInfo } } {
         if (!this.usageMapCache) {

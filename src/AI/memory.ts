@@ -16,6 +16,7 @@ export interface searchOptions {
     groupList: GroupInfo[];
     keywords: string[];
     includeImages: boolean;
+    method: 'weight' | 'similarity' | 'score';
 }
 
 export class Memory {
@@ -370,68 +371,53 @@ export class MemoryManager {
         }
     }
 
-    async searchByScore(query: string, options: searchOptions = {
-        topK: 10,
-        userList: [],
-        groupList: [],
-        keywords: [],
-        includeImages: false,
-    }) {
-        const { embeddingDimension } = ConfigManager.memory;
-        if (!this.memoryList.length) return [];
-        if (query) {
-            try {
-                const queryVector = await getEmbedding(query);
-                if (!queryVector.length) {
-                    logger.error('查询向量为空');
-                    return [];
-                }
-                await Promise.all(this.memoryList.map(async m => {
-                    if (m.vector.length !== embeddingDimension) {
-                        logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
-                        await m.updateVector();
-                    }
-                }))
-                return this.memoryList
-                    .map(item => {
-                        const m = item.copy;
-                        if (item.keywords.some(kw => query.includes(kw))) m.weight += 10; //提权
-                        return m;
-                    })
-                    .sort((a, b) => {
-                        const bScore = b.weight * b.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
-                        const aScore = a.weight * a.calculateSimilarity(queryVector, options.userList, options.groupList, options.keywords);
-                        return bScore - aScore;
-                    })
-                    .slice(0, options.topK);
-            } catch (e) {
-                logger.error(`语义搜索失败: ${e.message}`);
-            }
-        }
-        return [];
-    }
-
     async search(query: string, options: searchOptions = {
         topK: 10,
         userList: [],
         groupList: [],
         keywords: [],
         includeImages: false,
+        method: 'score'
     }) {
-        const { isMemoryVector } = ConfigManager.memory;
         if (!this.memoryList.length) return [];
+        const { userList: ul, groupList: gl, keywords: kws, includeImages, method } = options;
+
+        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        let qv: number[] = [];
         if (isMemoryVector && query) {
-            const result = await this.searchByScore(query, options);
-            if (result.length) return result;
+            qv = await getEmbedding(query);
+            if (!qv.length) {
+                logger.error('查询向量为空');
+                return [];
+            }
+            await Promise.all(this.memoryList.map(async m => {
+                if (m.vector.length !== embeddingDimension) {
+                    logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
+                    await m.updateVector();
+                }
+            }))
         }
+
         return this.memoryList
-            .map(item => {
-                const m = item.copy;
-                if (item.keywords.some(kw => query.includes(kw))) m.weight += 10; //提权
-                return m;
+            .map(m => {
+                if (includeImages && m.images.length === 0) return null;
+                const mc = m.copy;
+                if (mc.keywords.some(kw => query.includes(kw))) mc.weight += 10; //提权
+                return mc;
             })
-            .sort((a, b) => b.weight - a.weight)
-            .slice(0, options.topK);
+            .filter(m => m)
+            .sort((a, b) => {
+                switch (method) {
+                    case 'weight': return b.weight - a.weight;
+                    case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
+                    case 'score': {
+                        const aScore = a.weight * a.calculateSimilarity(qv, ul, gl, kws);
+                        const bScore = b.weight * b.calculateSimilarity(qv, ul, gl, kws);
+                        return bScore - aScore;
+                    }
+                }
+            })
+            .slice(0, options.topK || 10);
     }
 
     updateMemoryWeight(s: string, role: 'user' | 'assistant') {
@@ -469,6 +455,7 @@ export class MemoryManager {
             groupList: [],
             keywords: [],
             includeImages: false,
+            method: 'score'
         });
     }
 
@@ -518,10 +505,7 @@ export class MemoryManager {
         return template(data) + '\n';
     }
 
-    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context): Promise<string> {
-        const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
-        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
-
+    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context, lastMsg: string): Promise<string> {
         const ai = AIManager.getAI(ctx.endPoint.userId);
         let s = ai.memory.buildMemory({
             isPrivate: true,
@@ -544,13 +528,12 @@ export class MemoryManager {
             }, await ai.memory.getTopMemoryList(lastMsg));
 
             // 群内用户的个人记忆
-            const arr = [];
-            for (const message of userMessages) {
-                const name = message.name;
-                const uid = message.uid;
-                if (arr.includes(uid)) {
-                    continue;
-                }
+            const set = new Set<string>();
+            for (const ui of context.userInfoList) {
+                const name = ui.name;
+                const uid = ui.id;
+                if (set.has(uid)) continue;
+                set.add(uid);
 
                 const ai = AIManager.getAI(uid);
                 s += ai.memory.buildMemory({
@@ -558,8 +541,6 @@ export class MemoryManager {
                     id: uid,
                     name: name
                 }, await ai.memory.getTopMemoryList(lastMsg));
-
-                arr.push(uid);
             }
 
             return s;
@@ -699,22 +680,9 @@ export class KnowledgeMemoryManager extends MemoryManager {
         this.save();
     }
 
-    async buildKnowledgeMemoryPrompt(index: number, context: Context): Promise<string> {
-        await this.updateKnowledgeMemory(index);
-        if (this.memoryIds.length === 0) return '';
-
+    buildKnowledgeMemory(memoryList: Memory[]) {
         const { showNumber } = ConfigManager.message;
-        const { knowledgeMemoryShowNumber, knowledgeMemorySingleShowTemplate } = ConfigManager.memory;
-
-        const userMessages = context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
-        const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
-        const memoryList = await this.search(lastMsg, {
-            topK: knowledgeMemoryShowNumber,
-            userList: [],
-            groupList: [],
-            keywords: [],
-            includeImages: false
-        });
+        const { knowledgeMemorySingleShowTemplate } = ConfigManager.memory;
         if (memoryList.length === 0) return '';
 
         let prompt = '';
@@ -738,6 +706,23 @@ export class KnowledgeMemoryManager extends MemoryManager {
         }
 
         return prompt;
+    }
+
+    async buildKnowledgeMemoryPrompt(index: number, lastMsg: string): Promise<string> {
+        await this.updateKnowledgeMemory(index);
+        if (this.memoryIds.length === 0) return '';
+
+        const { knowledgeMemoryShowNumber } = ConfigManager.memory;
+        const memoryList = await this.search(lastMsg, {
+            topK: knowledgeMemoryShowNumber,
+            userList: [],
+            groupList: [],
+            keywords: [],
+            includeImages: false,
+            method: 'score'
+        });
+
+        return this.buildKnowledgeMemory(memoryList);
     }
 }
 
