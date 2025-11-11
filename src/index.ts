@@ -12,14 +12,15 @@ import { TimerManager } from "./timer";
 import { createMsg } from "./utils/utils_seal";
 import { PrivilegeManager } from "./privilege";
 import { aliasToCmd } from "./utils/utils";
+import { knowledgeMM } from "./AI/memory";
 
 function main() {
   ConfigManager.registerConfig();
   checkUpdate();
-  AIManager.getUsageMap();
   ToolManager.registerTool();
   TimerManager.init();
   PrivilegeManager.reviveCmdPriv();
+  knowledgeMM.init();
 
   const ext = ConfigManager.ext;
 
@@ -189,9 +190,10 @@ ${HELPMAP["权限限制"]}`);
           }
         }
         case 'prompt': {
-          const systemMessage = buildSystemMessage(ctx, ai);
-          logger.info(`system prompt:\n`, systemMessage.msgArray[0].content);
-          seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
+          buildSystemMessage(ctx, ai).then(systemMessage => {
+            logger.info(`system prompt:\n`, systemMessage.msgArray[0].content);
+            seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
+          });
           return ret;
         }
         case 'status': {
@@ -214,7 +216,7 @@ ${HELPMAP["权限限制"]}`);
           switch (aliasToCmd(val2)) {
             case 'status': {
               seal.replyToSender(ctx, msg, `自动修改上下文里的名字状态：${ai.context.autoNameMod}
-上下文里的名字有：\n${ai.context.getUserNameInfo().map(uni => `${uni.name}(${uni.uid})`).join('\n')}`);
+上下文里的名字有：\n${ai.context.userInfoList.map(ui => `${ui.name}(${ui.id})`).join('\n')}`);
               return ret;
             }
             case 'set': {
@@ -225,9 +227,9 @@ ${HELPMAP["权限限制"]}`);
 【.ai ctxn set [nick/card]】设置上下文里的名字为昵称/群名片`);
                 return ret;
               }
-              const promises = ai.context.getUserNameInfo().map(uni => ai.context.setName(epId, gid, uni.uid, mod));
+              const promises = ai.context.userInfoList.map(ui => ai.context.setName(epId, gid, ui.id, mod));
               Promise.all(promises).then(() => {
-                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.getUserNameInfo().map(uni => `${uni.name}(${uni.uid})`).join('\n')}`);
+                seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.userInfoList.map(uni => `${uni.name}(${uni.id})`).join('\n')}`);
               });
               return ret;
             }
@@ -403,7 +405,7 @@ ${HELPMAP["权限限制"]}`);
                 text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
                 text += `\n活跃次数:${segs}`;
 
-                const curSegIndex = ai.getCurSegIndex();
+                const curSegIndex = ai.curActiveTimeSegIndex;
                 const nextTimePoint = ai.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
                   TimerManager.addActiveTimeTimer(ctx, msg, ai, nextTimePoint);
@@ -580,18 +582,11 @@ ${HELPMAP["权限限制"]}`);
               if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== epId)) {
                 ai3 = ai2;
               }
-
               const { isMemory, isShortMemory } = ConfigManager.memory;
-
-              const keywords = new Set<string>();
-              for (const key in ai3.memory.memoryMap) {
-                ai3.memory.memoryMap[key].keywords.forEach(kw => keywords.add(kw));
-              }
-
               seal.replyToSender(ctx, msg, `${ai3.id}
 长期记忆开启状态: ${isMemory ? '是' : '否'}
-长期记忆条数: ${Object.keys(ai3.memory.memoryMap).length}
-关键词库: ${Array.from(keywords).join('、') || '无'}
+长期记忆条数: ${ai3.memory.memoryIds.length}
+关键词库: ${ai3.memory.keywords.join('、') || '无'}
 短期记忆开启状态: ${(isShortMemory && ai3.memory.useShortMemory) ? '是' : '否'}
 短期记忆条数: ${ai3.memory.shortMemoryList.length}`);
               return ret;
@@ -631,15 +626,29 @@ ${HELPMAP["权限限制"]}`);
                     seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
                     return ret;
                   }
-                  ai2.memory.delMemory(idList, kw);
-                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s || '无');
-                  AIManager.saveAI(muid);
+                  ai2.memory.deleteMemory(idList, kw);
+                  ai2.memory.getTopMemoryList('').then(memoryList => {
+                    const s = ai2.memory.buildMemory({
+                      isPrivate: true,
+                      id: mctx.player.userId,
+                      name: mctx.player.name
+                    }, memoryList);
+                    seal.replyToSender(ctx, msg, s || '无');
+                    AIManager.saveAI(muid);
+                  }
+                  );
                   return ret;
                 }
                 case 'show': {
-                  const s = ai2.memory.buildMemory(true, mctx.player.name, mctx.player.userId, '', '');
-                  seal.replyToSender(ctx, msg, s || '无');
+                  ai2.memory.getTopMemoryList('').then(memoryList => {
+                    const s = ai2.memory.buildMemory({
+                      isPrivate: true,
+                      id: mctx.player.userId,
+                      name: mctx.player.name
+                    }, memoryList);
+                    seal.replyToSender(ctx, msg, s || '无');
+                  }
+                  );
                   return ret;
                 }
                 case 'clear': {
@@ -699,15 +708,29 @@ ${HELPMAP["权限限制"]}`);
                     seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g del <ID1> <ID2>】删除群聊记忆');
                     return ret;
                   }
-                  ai.memory.delMemory(idList, kw);
-                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s || '无');
-                  AIManager.saveAI(id);
+                  ai.memory.deleteMemory(idList, kw);
+                  ai.memory.getTopMemoryList('').then(memoryList => {
+                    const s = ai.memory.buildMemory({
+                      isPrivate: false,
+                      id: ctx.group.groupId,
+                      name: ctx.group.groupName
+                    }, memoryList);
+                    seal.replyToSender(ctx, msg, s || '无');
+                    AIManager.saveAI(id);
+                  }
+                  );
                   return ret;
                 }
                 case 'show': {
-                  const s = ai.memory.buildMemory(false, '', '', ctx.group.groupName, ctx.group.groupId);
-                  seal.replyToSender(ctx, msg, s || '无');
+                  ai.memory.getTopMemoryList('').then(memoryList => {
+                    const s = ai.memory.buildMemory({
+                      isPrivate: false,
+                      id: ctx.group.groupId,
+                      name: ctx.group.groupName
+                    }, memoryList);
+                    seal.replyToSender(ctx, msg, s || '无');
+                  }
+                  );
                   return ret;
                 }
                 case 'clear': {

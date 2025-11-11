@@ -5,23 +5,21 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./utils_string";
+import { knowledgeMM } from "../AI/memory";
 
-export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
+export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { roleSettingNames, roleSettingTemplate, systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
     const { isTool, usePromptEngineering } = ConfigManager.tool;
     const { localImagePaths, receiveImage, condition } = ConfigManager.image;
     const { isMemory, isShortMemory } = ConfigManager.memory;
+
+    // 可发送的图片提示
     const sandableImagesPrompt: string = localImagePaths
         .map(path => {
-            if (path.trim() === '') {
-                return null;
-            }
+            if (path.trim() === '') return null;
             try {
                 const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) {
-                    throw new Error(`本地图片路径格式错误:${path}`);
-                }
-
+                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
                 return name;
             } catch (e) {
                 logger.error(e);
@@ -33,37 +31,30 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         .map((prompt, index) => `${index + 1}. ${prompt}`)
         .join('\n');
 
+
+    // 角色设定
     const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
     let roleIndex = 0;
     if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
         roleIndex = roleSettingNames.indexOf(roleName);
-        if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) {
-            roleIndex = 0;
-        }
+        if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) roleIndex = 0;
     } else {
         const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-        if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) {
-            roleIndex = roleIndex2;
-        }
+        if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) roleIndex = roleIndex2;
     }
 
+    // 获取lastMsg
+    const userMessages = ai.context.messages.filter(msg => msg.role === 'user' && !msg.name.startsWith('_'));
+    const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1].msgArray.map(m => m.content).join('') : '';
+
+    // 知识库
+    const knowledgePrompt = await knowledgeMM.buildKnowledgeMemoryPrompt(roleIndex, lastMsg);
     // 记忆
-    let memoryPrompt = '';
-    if (isMemory) {
-        memoryPrompt = ai.memory.buildMemoryPrompt(ctx, ai.context);
-    }
-
+    const memoryPrompt = isMemory ? await ai.memory.buildMemoryPrompt(ctx, ai.context, lastMsg) : '';
     // 短期记忆
-    let shortMemoryPrompt = '';
-    if (isShortMemory && ai.memory.useShortMemory) {
-        shortMemoryPrompt = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
-    }
-
+    const shortMemoryPrompt = isShortMemory && ai.memory.useShortMemory ? ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n') : '';
     // 调用函数
-    let toolsPrompt = '';
-    if (isTool && usePromptEngineering) {
-        toolsPrompt = ai.tool.getToolsPrompt(ctx);
-    }
+    const toolsPrompt = isTool && usePromptEngineering ? ai.tool.getToolsPrompt(ctx) : '';
 
     const data = {
         "角色设定": roleSettingTemplate[roleIndex],
@@ -81,6 +72,7 @@ export function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Message {
         "图片条件不为零": condition !== '0',
         "可发送图片不为空": sandableImagesPrompt,
         "可发送图片列表": sandableImagesPrompt,
+        "知识库": knowledgePrompt,
         "开启长期记忆": isMemory && memoryPrompt,
         "记忆信息": memoryPrompt,
         "开启短期记忆": isShortMemory && ai.memory.useShortMemory && shortMemoryPrompt,
@@ -176,10 +168,10 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
     return contextMessages;
 }
 
-export function handleMessages(ctx: seal.MsgContext, ai: AI) {
+export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
     const { isMerge } = ConfigManager.message;
 
-    const systemMessage = buildSystemMessage(ctx, ai);
+    const systemMessage = await buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
     const contextMessages = buildContextMessages(systemMessage, ai.context.messages);
 
@@ -277,6 +269,34 @@ export function parseBody(template: string[], messages: any[], tools: ToolInfo[]
     } else {
         delete bodyObject?.tools;
         delete bodyObject?.tool_choice;
+    }
+
+    return bodyObject;
+}
+
+export function parseEmbeddingBody(template: string[], input: string, dimensions: number) {
+    const bodyObject: any = {};
+
+    for (let i = 0; i < template.length; i++) {
+        const s = template[i];
+        if (s.trim() === '') {
+            continue;
+        }
+
+        try {
+            const obj = JSON.parse(`{${s}}`);
+            const key = Object.keys(obj)[0];
+            bodyObject[key] = obj[key];
+        } catch (err) {
+            throw new Error(`解析body的【${s}】时出现错误:${err}`);
+        }
+    }
+
+    if (!bodyObject.hasOwnProperty('input')) {
+        bodyObject.input = input;
+    }
+    if (!bodyObject.hasOwnProperty('dimensions')) {
+        bodyObject.dimensions = dimensions;
     }
 
     return bodyObject;

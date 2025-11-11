@@ -1,7 +1,7 @@
 import { AI, AIManager } from "./AI/AI";
 import { ToolCall, ToolManager } from "./tool/tool";
 import { ConfigManager } from "./config/config";
-import { handleMessages, parseBody } from "./utils/utils_message";
+import { handleMessages, parseBody, parseEmbeddingBody } from "./utils/utils_message";
 import { ImageManager } from "./AI/image";
 import { logger } from "./logger";
 import { withTimeout } from "./utils/utils";
@@ -51,7 +51,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                             return '';
                         }
 
-                        const messages = handleMessages(ctx, ai);
+                        const messages = await handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
                     }
                 } else {
@@ -68,7 +68,7 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                             return '';
                         }
 
-                        const messages = handleMessages(ctx, ai);
+                        const messages = await handleMessages(ctx, ai);
                         return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
                     }
                 }
@@ -140,15 +140,58 @@ export async function sendITTRequest(messages: {
     }
 }
 
+const vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
+
+export async function getEmbedding(text: string): Promise<number[]> {
+    if (!text) {
+        logger.warning(`getEmbedding: 文本为空`);
+        return [];
+    }
+
+    const { timeout } = ConfigManager.request;
+    const { embeddingDimension, embeddingUrl, embeddingApiKey, embeddingBodyTemplate } = ConfigManager.memory;
+
+    if (vectorCache.text === text && vectorCache.vector.length === embeddingDimension) {
+        const v = vectorCache.vector;
+        return v;
+    }
+
+    try {
+        const bodyObject = parseEmbeddingBody(embeddingBodyTemplate, text, embeddingDimension);
+        const time = Date.now();
+
+        const data = await withTimeout(() => fetchData(embeddingUrl, embeddingApiKey, bodyObject), timeout);
+
+        if (data.data && data.data.length > 0) {
+            AIManager.updateUsage(data.model, data.usage);
+
+            const embedding = data.data[0].embedding;
+
+            logger.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
+            vectorCache.text = text;
+            vectorCache.vector = embedding;
+
+            return embedding;
+        } else {
+            throw new Error(`服务器响应中没有data或data为空\n响应体:${JSON.stringify(data, null, 2)}`);
+        }
+    } catch (e) {
+        logger.error("在getEmbedding中出错:", e.message);
+        return [];
+    }
+}
+
 export async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
     // 打印请求发送前的上下文
-    const s = JSON.stringify(bodyObject.messages, (key, value) => {
-        if (key === "" && Array.isArray(value)) {
-            return value.filter(item => item.role !== "system");
-        }
-        return value;
-    });
-    logger.info(`请求发送前的上下文:\n`, s);
+    if (bodyObject.hasOwnProperty('messages')) {
+        const s = JSON.stringify(bodyObject.messages, (key, value) => {
+            if (key === "" && Array.isArray(value)) {
+                return value.filter(item => item.role !== "system");
+            }
+            return value;
+        });
+        logger.info(`请求发送前的上下文:\n`, s);
+    }
 
     const response = await fetch(url, {
         method: 'POST',

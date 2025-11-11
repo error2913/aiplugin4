@@ -3,15 +3,10 @@ import { ConfigManager } from "../config/config";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance, MessageSegment } from "../utils/utils_string";
-import { AI, AIManager } from "./AI";
+import { AI, AIManager, UserInfo } from "./AI";
 import { logger } from "../logger";
 import { transformMsgId } from "../utils/utils";
 import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
-
-export interface UserNameInfo { // 用于上下文名字修改相关操作
-    uid: string;
-    name: string;
-}
 
 export interface MessageInfo {
     msgId: string;
@@ -86,7 +81,7 @@ export class Context {
     }
 
     async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messageArray: MessageSegment[], images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { showNumber, showMsgId, maxRounds } = ConfigManager.message;
+        const { showNumber, showMsgId } = ConfigManager.message;
         const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
         const messages = this.messages;
 
@@ -129,11 +124,11 @@ export class Context {
             return;
         }
 
+        const now = Math.floor(Date.now() / 1000);
         const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
 
-        // 自动更新上下文里的名字
-        const exists = messages.some(message => message.uid === uid);
-        if (!exists) {
+        // 自动更新上下文里的名字，发言时间一小时内不更新
+        if (!messages.some(message => message.uid === uid && message.msgArray.some(msgInfo => msgInfo.time >= now - 3600))) {
             await this.updateName(ctx.endPoint.userId, ctx.group.groupId, uid);
         }
 
@@ -167,7 +162,7 @@ export class Context {
             messages[length - 1].images.push(...images);
             messages[length - 1].msgArray.push({
                 msgId: msgId,
-                time: Math.floor(Date.now() / 1000),
+                time: now,
                 content: s
             });
         } else {
@@ -178,7 +173,7 @@ export class Context {
                 images: images,
                 msgArray: [{
                     msgId: msgId,
-                    time: Math.floor(Date.now() / 1000),
+                    time: now,
                     content: s
                 }]
             };
@@ -197,10 +192,10 @@ export class Context {
         }
 
         //更新记忆权重
-        ai.memory.updateMemoryWeight(ctx, ai.context, s, role);
+        ai.memory.updateRelatedMemoryWeight(ctx, ai.context, s, role);
 
         //删除多余的上下文
-        this.limitMessages(maxRounds);
+        this.limitMessages();
     }
 
     async addToolCallsMessage(tool_calls: ToolCall[]) {
@@ -216,6 +211,7 @@ export class Context {
     }
 
     async addToolMessage(tool_call_id: string, s: string, images: Image[]) {
+        const now = Math.floor(Date.now() / 1000);
         const message: Message = {
             role: 'tool',
             tool_call_id: tool_call_id,
@@ -224,7 +220,7 @@ export class Context {
             images: images,
             msgArray: [{
                 msgId: '',
-                time: Math.floor(Date.now() / 1000),
+                time: now,
                 content: s
             }]
         };
@@ -240,6 +236,7 @@ export class Context {
     }
 
     async addSystemUserMessage(name: string, s: string, images: Image[]) {
+        const now = Math.floor(Date.now() / 1000);
         const message: Message = {
             role: 'user',
             uid: '',
@@ -247,14 +244,15 @@ export class Context {
             images: images,
             msgArray: [{
                 msgId: '',
-                time: Math.floor(Date.now() / 1000),
+                time: now,
                 content: s
             }]
         };
         this.messages.push(message);
     }
 
-    limitMessages(maxRounds: number) {
+    limitMessages() {
+        const { maxRounds } = ConfigManager.message;
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -382,17 +380,14 @@ export class Context {
                 continue;
             }
 
-            const ai = AIManager.getAI(uid);
-            const memoryList = Object.values(ai.memory.memoryMap);
-
-            for (const m of memoryList) {
-                if (m.group.groupName === groupName) {
-                    return m.group.groupId;
+            for (const m of AIManager.getAI(uid).memory.memoryList) {
+                if (m.sessionInfo.isPrivate && m.sessionInfo.name === groupName) {
+                    return m.sessionInfo.id;
                 }
-                if (m.group.groupName.length > 4) {
-                    const distance = levenshteinDistance(groupName, m.group.groupName);
+                if (m.sessionInfo.isPrivate && m.sessionInfo.name.length > 4) {
+                    const distance = levenshteinDistance(groupName, m.sessionInfo.name);
                     if (distance <= 2) {
-                        return m.group.groupId;
+                        return m.sessionInfo.id;
                     }
                 }
             }
@@ -423,13 +418,14 @@ export class Context {
         return null;
     }
 
-    getUserNameInfo(): UserNameInfo[] {
-        const userMap: { [key: string]: UserNameInfo } = {};
+    get userInfoList(): UserInfo[] {
+        const userMap: { [key: string]: UserInfo } = {};
         this.messages.forEach(message => {
             if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {
                 userMap[message.uid] = {
-                    name: message.name,
-                    uid: message.uid,
+                    isPrivate: true,
+                    id: message.uid,
+                    name: message.name
                 };
             }
         });
@@ -530,15 +526,10 @@ export class Context {
 
         const { localImagePaths } = ConfigManager.image;
         const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') {
-                return acc;
-            }
+            if (path.trim() === '') return acc;
             try {
                 const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) {
-                    throw new Error(`本地图片路径格式错误:${path}`);
-                }
-
+                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
                 acc[name] = path;
             } catch (e) {
                 logger.error(e);

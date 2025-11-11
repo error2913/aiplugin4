@@ -1,4 +1,4 @@
-import { AI } from "../AI/AI";
+import { AI, GroupInfo, UserInfo } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/config";
 import { transformTextToArray } from "./utils_string";
@@ -160,4 +160,41 @@ export function aliasToCmd(val: string) {
         "nick": "nickname"
     }
     return aliasMap[val] || val;
+}
+
+// 计算余弦相似度
+export function cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+        logger.error(`cosineSimilarity: 向量维度必须相同，a: ${a.length}, b: ${b.length}`);
+        return 0;
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+        dotProduct += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+    }
+
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+export function getCommonUser(a: UserInfo[], b: UserInfo[]): UserInfo[] {
+    if (a.length === 0 || b.length === 0) return [];
+    const aid = new Set(a.map(u => u.id));
+    return b.filter(u => aid.has(u.id));
+}
+export function getCommonGroup(a: GroupInfo[], b: GroupInfo[]): GroupInfo[] {
+    if (a.length === 0 || b.length === 0) return [];
+    const aid = new Set(a.map(g => g.id));
+    return b.filter(g => aid.has(g.id));
+}
+export function getCommonKeyword(a: string[], b: string[]): string[] {
+    if (a.length === 0 || b.length === 0) return [];
+    const aid = new Set(a);
+    return b.filter(k => aid.has(k));
 }

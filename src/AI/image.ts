@@ -82,15 +82,10 @@ export class ImageManager {
     drawLocalImageFile(): string {
         const { localImagePaths } = ConfigManager.image;
         const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') {
-                return acc;
-            }
+            if (path.trim() === '') return acc;
             try {
                 const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) {
-                    throw new Error(`本地图片路径格式错误:${path}`);
-                }
-
+                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
                 acc[name] = path;
             } catch (e) {
                 logger.error(e);
@@ -99,17 +94,13 @@ export class ImageManager {
         }, {});
 
         const keys = Object.keys(localImages);
-        if (keys.length == 0) {
-            return '';
-        }
+        if (keys.length == 0) return '';
         const index = Math.floor(Math.random() * keys.length);
         return localImages[keys[index]];
     }
 
     async drawStolenImageFile(): Promise<string> {
-        if (this.stolenImages.length === 0) {
-            return '';
-        }
+        if (this.stolenImages.length === 0) return '';
 
         const index = Math.floor(Math.random() * this.stolenImages.length);
         const image = this.stolenImages.splice(index, 1)[0];
@@ -133,15 +124,10 @@ export class ImageManager {
     async drawImageFile(): Promise<string> {
         const { localImagePaths } = ConfigManager.image;
         const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') {
-                return acc;
-            }
+            if (path.trim() === '') return acc;
             try {
                 const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) {
-                    throw new Error(`本地图片路径格式错误:${path}`);
-                }
-
+                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
                 acc[name] = path;
             } catch (e) {
                 logger.error(e);
@@ -150,19 +136,13 @@ export class ImageManager {
         }, {});
 
         const values = Object.values(localImages);
-        if (this.stolenImages.length == 0 && values.length == 0 && this.savedImages.length == 0) {
-            return '';
-        }
+        if (this.stolenImages.length == 0 && values.length == 0 && this.savedImages.length == 0) return '';
 
         const index = Math.floor(Math.random() * (values.length + this.stolenImages.length + this.savedImages.length));
 
-        if (index < values.length) {
-            return values[index];
-        } else if (index < values.length + this.stolenImages.length) {
-            return await this.drawStolenImageFile();
-        } else {
-            return this.drawSavedImageFile();
-        }
+        if (index < values.length) return values[index];
+        else if (index < values.length + this.stolenImages.length) return await this.drawStolenImageFile();
+        else return this.drawSavedImageFile();
     }
 
     /**
@@ -319,5 +299,36 @@ export class ImageManager {
             logger.error("在imageUrlToBase64中请求出错：", error);
             return { base64: '', format: '' };
         }
+    }
+
+    static async extractExistingImages(ai: AI, s: string): Promise<Image[]> {
+        const images = [];
+        const match = s.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
+        if (match) {
+            for (let i = 0; i < match.length; i++) {
+                const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
+                const image = ai.context.findImage(id, ai);
+
+                if (image) {
+                    if (!image.isUrl) {
+                        if (image.base64) {
+                            image.weight += 1;
+                        }
+                        images.push(image);
+                    } else {
+                        const { base64 } = await ImageManager.imageUrlToBase64(image.file);
+                        if (!base64) {
+                            logger.error(`图片${id}转换为base64失败`);
+                            continue;
+                        }
+
+                        image.isUrl = false;
+                        image.base64 = base64;
+                        images.push(image);
+                    }
+                }
+            }
+        }
+        return images;
     }
 }
