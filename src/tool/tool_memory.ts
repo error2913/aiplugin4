@@ -231,7 +231,7 @@ export function registerMemory() {
                     },
                     method: {
                         type: 'string',
-                        description: '搜索方法，默认score',
+                        description: '搜索方法，默认similarity',
                         enum: ['weight', 'similarity', 'score']
                     }
                 },
@@ -240,7 +240,7 @@ export function registerMemory() {
         }
     });
     toolSearch.solve = async (ctx, msg, ai, args) => {
-        const { memory_type, name = '', query = '', topK = 5, keywords = [], userList = [], groupList = [], includeImages = false, method = 'score' } = args;
+        const { memory_type, name = '', query = '', topK = 5, keywords = [], userList = [], groupList = [], includeImages = false, method = 'similarity' } = args;
 
         let si: SessionInfo = {
             isPrivate: false,
