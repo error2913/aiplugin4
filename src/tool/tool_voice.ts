@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
 
 const characterMap = {
@@ -28,30 +28,14 @@ const characterMap = {
 };
 
 export function registerRecord() {
-    const { recordPaths } = ConfigManager.tool;
-    const records: { [key: string]: string } = recordPaths.reduce((acc: { [key: string]: string }, path: string) => {
-        if (path.trim() === '') {
-            return acc;
-        }
-        try {
-            const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-            if (!name) {
-                throw new Error(`本地语音路径格式错误:${path}`);
-            }
+    const { recordPathMap } = ConfigManager.tool;
 
-            acc[name] = path;
-        } catch (e) {
-            logger.error(e);
-        }
-        return acc;
-    }, {});
-
-    if (Object.keys(records).length !== 0) {
+    if (Object.keys(recordPathMap).length !== 0) {
         const toolRecord = new Tool({
             type: "function",
             function: {
                 name: "record",
-                description: `发送语音，语音名称有:${Object.keys(records).join("、")}`,
+                description: `发送语音，语音名称有:${Object.keys(recordPathMap).join("、")}`,
                 parameters: {
                     type: "object",
                     properties: {
@@ -67,8 +51,8 @@ export function registerRecord() {
         toolRecord.solve = async (ctx, msg, _, args) => {
             const { name } = args;
 
-            if (records.hasOwnProperty(name)) {
-                seal.replyToSender(ctx, msg, `[语音:${records[name]}]`);
+            if (recordPathMap.hasOwnProperty(name)) {
+                seal.replyToSender(ctx, msg, `[语音:${recordPathMap[name]}]`);
                 return { content: '发送成功', images: [] };
             } else {
                 logger.error(`本地语音${name}不存在`);

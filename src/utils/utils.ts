@@ -1,7 +1,8 @@
 import { AI, GroupInfo, UserInfo } from "../AI/AI";
 import { logger } from "../logger";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { transformTextToArray } from "./utils_string";
+import { aliasMap } from "../config/config";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {
@@ -132,33 +133,6 @@ export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, val
 }
 
 export function aliasToCmd(val: string) {
-    // 命令别名映射表，别名：原始命令
-    const aliasMap = {
-        "AI": "ai",
-        "priv": "privilege",
-        "ses": "session",
-        "st": "set",
-        "ck": "check",
-        "clr": "clear",
-        "sb": "standby",
-        "fgt": "forget",
-        "f": "forget",
-        "ass": "assistant",
-        "memo": "memory",
-        "p": "private",
-        "g": "group",
-        "del": "delete",
-        "ign": "ignore",
-        "rm": "remove",
-        "lst": "list",
-        "tk": "token",
-        "y": "year",
-        "m": "month",
-        "lcl": "local",
-        "stl": "steal",
-        "ran": "random",
-        "nick": "nickname"
-    }
     return aliasMap[val] || val;
 }
 

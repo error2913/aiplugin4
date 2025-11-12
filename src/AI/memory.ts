@@ -1,11 +1,10 @@
-import Handlebars from "handlebars";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { AI, AIManager, GroupInfo, SessionInfo, UserInfo } from "./AI";
 import { Context } from "./context";
 import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../service";
-import { buildContent, parseBody } from "../utils/utils_message";
+import { buildContent, getRoleSetting, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { fmtDate } from "../utils/utils_string";
 import { Image, ImageManager } from "./image";
@@ -258,8 +257,10 @@ export class MemoryManager {
         }
 
         const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
-        const { roleSettingNames, roleSettingTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
+        const { isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
         const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+
+        const { roleSetting } = getRoleSetting(ctx);
 
         const messages = ai.context.messages;
         let sumMessages = messages.slice();
@@ -286,21 +287,8 @@ export class MemoryManager {
         }
 
         try {
-            const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
-            let roleIndex = 0;
-            if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
-                roleIndex = roleSettingNames.indexOf(roleName);
-                if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) {
-                    roleIndex = 0;
-                }
-            } else {
-                const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-                if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) {
-                    roleIndex = roleIndex2;
-                }
-            }
-            const prompt = Handlebars.compile(memoryPromptTemplate[0])({
-                "角色设定": roleSettingTemplate[roleIndex],
+            const prompt = memoryPromptTemplate({
+                "角色设定": roleSetting,
                 "平台": ctx.endPoint.platform,
                 "私聊": ctx.isPrivate,
                 "展示号码": showNumber,
@@ -447,12 +435,12 @@ export class MemoryManager {
         if (!ctx.isPrivate) context.userInfoList.forEach(ui => AIManager.getAI(ui.id).memory.updateMemoryWeight(s, role));
     }
 
-    async getTopMemoryList(lastMsg: string) {
+    async getTopMemoryList(text: string = '', ui: UserInfo = null, gi: GroupInfo = null) {
         const { memoryShowNumber } = ConfigManager.memory;
-        return await this.search(lastMsg, {
+        return await this.search(text, {
             topK: memoryShowNumber,
-            userList: [],
-            groupList: [],
+            userList: ui ? [ui] : [],
+            groupList: gi ? [gi] : [],
             keywords: [],
             includeImages: false,
             method: 'score'
@@ -470,7 +458,7 @@ export class MemoryManager {
         } else {
             memoryContent = memoryList
                 .map((m, i) => {
-                    const data = {
+                    return memorySingleShowTemplate({
                         "序号": i + 1,
                         "记忆ID": m.id,
                         "记忆时间": fmtDate(m.createTime),
@@ -483,14 +471,11 @@ export class MemoryManager {
                         "相关群聊": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "关键词": m.keywords.join(';'),
                         "记忆内容": m.text
-                    }
-
-                    const template = Handlebars.compile(memorySingleShowTemplate[0]);
-                    return template(data);
+                    });
                 }).join('\n');
         }
 
-        const data = {
+        return memoryShowTemplate({
             "私聊": sessionInfo.isPrivate,
             "展示号码": showNumber,
             "用户名称": sessionInfo.name,
@@ -499,33 +484,30 @@ export class MemoryManager {
             "群聊号码": sessionInfo.id.replace(/^.+:/, ''),
             "设定": this.persona,
             "记忆列表": memoryContent
-        }
-
-        const template = Handlebars.compile(memoryShowTemplate[0]);
-        return template(data) + '\n';
+        }) + '\n';
     }
 
-    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context, lastMsg: string): Promise<string> {
+    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
         const ai = AIManager.getAI(ctx.endPoint.userId);
         let s = ai.memory.buildMemory({
             isPrivate: true,
             id: ctx.endPoint.userId,
             name: seal.formatTmpl(ctx, "核心:骰子名字")
-        }, await ai.memory.getTopMemoryList(lastMsg));
+        }, await ai.memory.getTopMemoryList(text, ui, gi));
 
         if (ctx.isPrivate) {
             return this.buildMemory({
                 isPrivate: true,
                 id: ctx.player.userId,
                 name: ctx.player.name
-            }, await ai.memory.getTopMemoryList(lastMsg));
+            }, await ai.memory.getTopMemoryList(text, ui, gi));
         } else {
             // 群聊记忆
             s += this.buildMemory({
                 isPrivate: false,
                 id: ctx.group.groupId,
                 name: ctx.group.groupName
-            }, await ai.memory.getTopMemoryList(lastMsg));
+            }, await ai.memory.getTopMemoryList(text, ui, gi));
 
             // 群内用户的个人记忆
             const set = new Set<string>();
@@ -540,7 +522,7 @@ export class MemoryManager {
                     isPrivate: true,
                     id: uid,
                     name: name
-                }, await ai.memory.getTopMemoryList(lastMsg));
+                }, await ai.memory.getTopMemoryList(text, ui, gi));
             }
 
             return s;
@@ -570,10 +552,10 @@ export class KnowledgeMemoryManager extends MemoryManager {
         ConfigManager.ext.storageSet('knowledgeMemoryMap', JSON.stringify(this.memoryMap));
     }
 
-    async updateKnowledgeMemory(index: number) {
+    async updateKnowledgeMemory(roleIndex: number) {
         const { knowledgeMemoryStringList } = ConfigManager.memory;
-        if (index < 0 || index >= knowledgeMemoryStringList.length) return;
-        const s = knowledgeMemoryStringList[index];
+        if (roleIndex < 0 || roleIndex >= knowledgeMemoryStringList.length) return;
+        const s = knowledgeMemoryStringList[roleIndex];
         if (!s) return;
 
         const memoryMap: { [id: string]: Memory } = {}
@@ -624,23 +606,10 @@ export class KnowledgeMemoryManager extends MemoryManager {
                         break;
                     }
                     case '图片': {
-                        const { localImagePaths } = ConfigManager.image;
-                        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-                            if (path.trim() === '') {
-                                return acc;
-                            }
-                            try {
-                                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
-                                acc[name] = path;
-                            } catch (e) {
-                                logger.error(e);
-                            }
-                            return acc;
-                        }, {});
+                        const { localImagePathMap } = ConfigManager.image;
 
                         m.images = value.split(/[,，]/).map(id => id.trim()).map(id => {
-                            if (localImages.hasOwnProperty(id)) return new Image(localImages[id]);
+                            if (localImagePathMap.hasOwnProperty(id)) return new Image(localImagePathMap[id]);
                             logger.error(`图片${id}不存在`);
                             return null;
                         }).filter(img => img);
@@ -691,32 +660,29 @@ export class KnowledgeMemoryManager extends MemoryManager {
         } else {
             prompt = memoryList
                 .map((m, i) => {
-                    const data = {
+                    return knowledgeMemorySingleShowTemplate({
                         "序号": i + 1,
                         "记忆ID": m.id,
                         "用户列表": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "群聊列表": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "关键词": m.keywords.join(';'),
                         "记忆内容": m.text
-                    }
-
-                    const template = Handlebars.compile(knowledgeMemorySingleShowTemplate[0]);
-                    return template(data);
+                    });
                 }).join('\n');
         }
 
         return prompt;
     }
 
-    async buildKnowledgeMemoryPrompt(index: number, lastMsg: string): Promise<string> {
-        await this.updateKnowledgeMemory(index);
+    async buildKnowledgeMemoryPrompt(roleIndex: number, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
+        await this.updateKnowledgeMemory(roleIndex);
         if (this.memoryIds.length === 0) return '';
 
         const { knowledgeMemoryShowNumber } = ConfigManager.memory;
-        const memoryList = await this.search(lastMsg, {
+        const memoryList = await this.search(text, {
             topK: knowledgeMemoryShowNumber,
-            userList: [],
-            groupList: [],
+            userList: ui ? [ui] : [],
+            groupList: gi ? [gi] : [],
             keywords: [],
             includeImages: false,
             method: 'score'

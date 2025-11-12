@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class ToolConfig {
     static ext: seal.ExtInfo;
@@ -58,13 +58,13 @@ export class ToolConfig {
         return {
             isTool: seal.ext.getBoolConfig(ToolConfig.ext, "是否开启调用函数功能"),
             usePromptEngineering: seal.ext.getBoolConfig(ToolConfig.ext, "是否切换为提示词工程"),
-            toolsPromptTemplate: seal.ext.getTemplateConfig(ToolConfig.ext, "工具函数prompt模板"),
+            toolsPromptTemplate: ConfigManager.getHandlebarsTemplateConfig(ToolConfig.ext, "工具函数prompt模板"),
             maxCallCount: seal.ext.getIntConfig(ToolConfig.ext, "允许连续调用函数次数"),
             toolsNotAllow: seal.ext.getTemplateConfig(ToolConfig.ext, "不允许调用的函数"),
             toolsDefaultClosed: seal.ext.getTemplateConfig(ToolConfig.ext, "默认关闭的函数"),
             decks: seal.ext.getTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称"),
             character: seal.ext.getOptionConfig(ToolConfig.ext, "ai语音使用的音色"),
-            recordPaths: seal.ext.getTemplateConfig(ToolConfig.ext, "本地语音路径")
+            recordPathMap: ConfigManager.getPathMapConfig(ToolConfig.ext, "本地语音路径"),
         }
     }
 }

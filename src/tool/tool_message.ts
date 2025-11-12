@@ -1,10 +1,11 @@
 import { AIManager } from "../AI/AI";
 import { logger } from "../logger";
-import { ConfigManager, CQTYPESALLOW } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
+import { CQTYPESALLOW } from "../config/config";
 
 export function registerMessage() {
     const toolSend = new Tool({

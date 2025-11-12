@@ -1,5 +1,5 @@
 import { ToolCall } from "../tool/tool";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { Image } from "./image";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
@@ -457,48 +457,24 @@ export class Context {
         const userSet = new Set<string>();
         for (let i = messages.length - 1; i >= 0; i--) {
             const image = messages[i].images.find(item => item.id === id);
-            if (image) {
-                return image;
-            }
+            if (image) return image;
 
             const uid = messages[i].uid;
-            if (userSet.has(uid) || messages[i].role !== 'user') {
-                continue;
-            }
+            if (userSet.has(uid) || messages[i].role !== 'user') continue;
             const name = messages[i].name;
-            if (name.startsWith('_')) {
-                continue;
-            }
+            if (name.startsWith('_')) continue;
 
             const ai2 = AIManager.getAI(uid);
             const image2 = ai2.memory.findImage(id);
-            if (image2) {
-                return image2;
-            }
+            if (image2) return image2;
         }
 
         // 从自己记忆中查找图片
         const image = ai.memory.findImage(id);
-        if (image) {
-            return image;
-        }
+        if (image) return image;
 
-        const { localImagePaths } = ConfigManager.image;
-        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') return acc;
-            try {
-                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
-                acc[name] = path;
-            } catch (e) {
-                logger.error(e);
-            }
-            return acc;
-        }, {});
-
-        if (localImages.hasOwnProperty(id)) {
-            return new Image(localImages[id]);
-        }
+        const { localImagePathMap } = ConfigManager.image;
+        if (localImagePathMap.hasOwnProperty(id)) return new Image(localImagePathMap[id]);
 
         const savedImage = ai.imageManager.savedImages.find(img => img.id === id);
         if (savedImage) {

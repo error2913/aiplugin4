@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class MessageConfig {
     static ext: seal.ExtInfo;
@@ -33,6 +33,7 @@ export class MessageConfig {
 {{#if 展示消息ID}}
     - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
     - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
+    - <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
 {{/if}}
 {{#if 展示时间}}
     - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
@@ -106,7 +107,7 @@ export class MessageConfig {
         return {
             roleSettingNames: seal.ext.getTemplateConfig(MessageConfig.ext, "角色设定名称"),
             roleSettingTemplate: seal.ext.getTemplateConfig(MessageConfig.ext, "角色设定"),
-            systemMessageTemplate: seal.ext.getTemplateConfig(MessageConfig.ext, "system消息模板"),
+            systemMessageTemplate: ConfigManager.getHandlebarsTemplateConfig(MessageConfig.ext, "system消息模板"),
             samples: seal.ext.getTemplateConfig(MessageConfig.ext, "示例对话"),
             isPrefix: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加前缀"),
             showNumber: seal.ext.getBoolConfig(MessageConfig.ext, "是否给AI展示数字号码"),

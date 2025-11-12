@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class ReceivedConfig {
     static ext: seal.ExtInfo;
@@ -23,16 +23,16 @@ export class ReceivedConfig {
     }
 
     static get() {
-        return {
-            allcmd: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入指令消息"),
-            allmsg: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入所有骰子发送的消息"),
-            disabledInPrivate: seal.ext.getBoolConfig(ReceivedConfig.ext, "私聊内不可用"),
-            globalStandby: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否开启全局待机"),
-            triggerRegexes: seal.ext.getTemplateConfig(ReceivedConfig.ext, "非指令消息触发正则表达式"),
-            ignoreRegexes: seal.ext.getTemplateConfig(ReceivedConfig.ext, "非指令消息忽略正则表达式"),
-            triggerCondition: seal.ext.getStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件"),
-            bucketLimit: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数上限"),
-            fillInterval: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数补充间隔/s")
+            return {
+                allcmd: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入指令消息"),
+                allmsg: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否录入所有骰子发送的消息"),
+                disabledInPrivate: seal.ext.getBoolConfig(ReceivedConfig.ext, "私聊内不可用"),
+                globalStandby: seal.ext.getBoolConfig(ReceivedConfig.ext, "是否开启全局待机"),
+                triggerRegex: ConfigManager.getRegexConfig(ReceivedConfig.ext, "非指令消息触发正则表达式"),
+                ignoreRegex: ConfigManager.getRegexConfig(ReceivedConfig.ext, "非指令消息忽略正则表达式"),
+                triggerCondition: seal.ext.getStringConfig(ReceivedConfig.ext, "非指令触发需要满足的条件"),
+                bucketLimit: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数上限"),
+                fillInterval: seal.ext.getIntConfig(ReceivedConfig.ext, "触发次数补充间隔/s")
+            }
         }
     }
-}

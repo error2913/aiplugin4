@@ -1,6 +1,6 @@
 import { AI, AIManager } from "./AI/AI";
 import { ToolCall, ToolManager } from "./tool/tool";
-import { ConfigManager } from "./config/config";
+import { ConfigManager } from "./config/configManager";
 import { handleMessages, parseBody, parseEmbeddingBody } from "./utils/utils_message";
 import { ImageManager } from "./AI/image";
 import { logger } from "./logger";

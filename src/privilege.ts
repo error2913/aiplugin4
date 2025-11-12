@@ -1,7 +1,8 @@
 import { AI } from "./AI/AI";
 import { logger } from "./logger";
-import { ConfigManager, PRIVILEGELEVELMAP } from "./config/config";
+import { ConfigManager } from "./config/configManager";
 import { aliasToCmd } from "./utils/utils";
+import { PRIVILEGELEVELMAP } from "./config/config";
 
 
 export interface CmdPrivInfo {
@@ -56,12 +57,7 @@ export const defaultCmdPriv: CmdPriv = {
                     user: { priv: U }
                 }
             },
-            role: {
-                priv: U, args: {
-                    show: { priv: U },
-                    "*": { priv: U },
-                }
-            },
+            role: { priv: U },
             memory: {
                 priv: U, args: {
                     status: { priv: U },

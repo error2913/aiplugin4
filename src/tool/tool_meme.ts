@@ -1,5 +1,5 @@
 import { Image, ImageManager } from "../AI/image";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
 import { Tool } from "./tool";
 

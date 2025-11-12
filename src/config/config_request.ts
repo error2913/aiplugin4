@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class RequestConfig {
     static ext: seal.ExtInfo;

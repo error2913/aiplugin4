@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool, ToolManager } from "./tool";
 

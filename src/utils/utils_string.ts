@@ -1,11 +1,11 @@
-import Handlebars from "handlebars";
 import { Context } from "../AI/context";
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../logger";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { transformMsgId, transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
 import { createCtx, createMsg } from "./utils_seal";
+import { faceMap } from "../config/config";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
@@ -225,6 +225,11 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
                 images.push(...result.images);
                 break;
             }
+            case 'face': {
+                const faceName = faceMap[seg.data.id] || '';
+                content += faceName ? `<|face:${faceName}|>` : '';
+                break;
+            }
         }
     }
     return { content, images };
@@ -289,6 +294,11 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
                 } else {
                     logger.warning(`无法找到图片：${id}`);
                 }
+                break;
+            }
+            case 'face': {
+                const faceId = Object.keys(faceMap).find(key => faceMap[key] === seg.content) || '';
+                text += faceId ? `[CQ:face,id=${faceId}]` : '';
                 break;
             }
         }
@@ -391,42 +401,31 @@ export function checkRepeat(context: Context, s: string) {
 }
 
 function filterString(s: string): { contextArray: string[], replyArray: string[] } {
-    const { maxChar, filterRegexes, contextTemplate, replyTemplate } = ConfigManager.reply;
+    const { maxChar, filterRegex, filterRegexes, contextTemplates, replyTemplates } = ConfigManager.reply;
 
     const contextArray: string[] = [];
     const replyArray: string[] = [];
     let replyLength = 0; //只计算未被匹配的部分
 
-    const filterRegex = filterRegexes.join('|');
-    let pattern: RegExp;
-    try {
-        pattern = new RegExp(filterRegex, 'g');
-    } catch (e) {
-        logger.error(`正则表达式错误，内容:${filterRegex}，错误信息:${e.message}`);
+    if (filterRegexes.length !== contextTemplates.length || filterRegexes.length !== replyTemplates.length) {
+        logger.error(`回复消息过滤正则表达式、正则处理上下文消息模板、正则处理回复消息模板数量不一致`);
+        return { contextArray: [], replyArray: [] };
     }
 
-    const filters = filterRegexes.map((regex, index) => {
-        let pattern: RegExp;
-        try {
-            pattern = new RegExp(regex);
-        } catch (e) {
-            logger.error(`正则表达式错误，内容:${regex}，错误信息:${e.message}`);
-        }
-        return {
-            pattern,
-            contextTemplate: Handlebars.compile(contextTemplate[index] || ''),
-            replyTemplate: Handlebars.compile(replyTemplate[index] || '')
-        }
-    })
+    const filters = Array.from({ length: filterRegexes.length }, (_, index) => ({
+        regex: filterRegexes[index],
+        contextTemplate: contextTemplates[index],
+        replyTemplate: replyTemplates[index]
+    }));
 
     // 应用过滤正则表达式，并按照\f分割消息
-    const segments = advancedSplit(s, pattern).filter(Boolean);
+    const segments = advancedSplit(s, filterRegex).filter(Boolean);
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         let isMatched = false;
         for (let j = 0; j < filterRegexes.length; j++) {
             const filter = filters[j];
-            const match = segment.match(filter.pattern);
+            const match = segment.match(filter.regex);
             if (match) {
                 isMatched = true;
                 const data = {
@@ -495,7 +494,7 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
 }
 
 interface TokenSegment {
-    type: 'text' | 'at' | 'poke' | 'quote' | 'img';
+    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'face';
     content: string;
 }
 
@@ -512,14 +511,14 @@ function parseSpecialTokens(s: string): TokenSegment[] {
             })
         } else {
             const [_, type = 'text', content = ''] = match;
-            if (!['at', 'poke', 'quote', 'img'].includes(type)) {
+            if (!['at', 'poke', 'quote', 'img', 'face'].includes(type)) {
                 result.push({
                     type: 'text',
                     content: seg
                 })
             } else {
                 result.push({
-                    type: type as 'at' | 'poke' | 'quote' | 'img',
+                    type: type as 'at' | 'poke' | 'quote' | 'img' | 'face',
                     content: content
                 })
             }
@@ -564,6 +563,12 @@ export function calculateSimilarity(s1: string, s2: string): number {
     return 1 - distance / maxLength || 0;
 }
 
+/**
+ * 高级字符串分割函数，支持正则表达式匹配分割，保留匹配部分
+ * @param s 待分割的字符串
+ * @param r 正则表达式
+ * @returns 分割后的字符串数组
+ */
 function advancedSplit(s: string, r: RegExp) {
     const parts = [];
     let lastIndex = 0;

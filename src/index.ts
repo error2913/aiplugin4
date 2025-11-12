@@ -1,8 +1,8 @@
 import { AIManager } from "./AI/AI";
 import { Image, ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
-import { ConfigManager, CQTYPESALLOW, HELPMAP } from "./config/config";
-import { buildSystemMessage } from "./utils/utils_message";
+import { ConfigManager } from "./config/configManager";
+import { buildSystemMessage, getRoleSetting } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
 import { fmtDate, transformTextToArray } from "./utils/utils_string";
@@ -13,6 +13,7 @@ import { createMsg } from "./utils/utils_seal";
 import { PrivilegeManager } from "./privilege";
 import { aliasToCmd } from "./utils/utils";
 import { knowledgeMM } from "./AI/memory";
+import { HELPMAP, CQTYPESALLOW } from "./config/config";
 
 function main() {
   ConfigManager.registerConfig();
@@ -535,40 +536,23 @@ ${HELPMAP["权限限制"]}`);
         }
         case 'role': {
           const { roleSettingNames, roleSettingTemplate } = ConfigManager.message;
-
+          const { roleName } = getRoleSetting(ctx);
           const val2 = cmdArgs.getArgN(2);
-          switch (aliasToCmd(val2)) {
-            case 'show': {
-              let name = roleSettingNames[0];;
-              const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
-              if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
-                const roleIndex = roleSettingNames.indexOf(roleName);
-                if (roleIndex >= 0 && roleIndex < roleSettingTemplate.length) {
-                  name = roleName;
-                }
-              } else {
-                const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-                if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) {
-                  name = String(roleIndex2);
-                }
-              }
-              seal.replyToSender(ctx, msg, `当前角色设定名称为[${name}]，名称有:\n${roleSettingNames.join('、')}`);
-              return ret;
-            }
-            default: {
-              if (!roleSettingNames.includes(val2)) {
-                seal.replyToSender(ctx, msg, `【.ai role <名称>】切换角色设定\n角色设定名称错误，名称有:\n${roleSettingNames.join('、')}`);
-                return ret;
-              }
-              const roleSettingIndex = roleSettingNames.indexOf(val2);
-              if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
-                seal.replyToSender(ctx, msg, `角色设定名称[${val2}]没有对应的角色设定`);
-              }
-              seal.vars.strSet(ctx, "$gSYSPROMPT", val2);
-              seal.replyToSender(ctx, msg, `角色设定已切换到[${val2}]`);
-              return ret;
-            }
+          if (!val2) {
+            seal.replyToSender(ctx, msg, `当前角色设定名称为[${roleName}]，名称有:\n${roleSettingNames.join('、')}`);
+            return ret;
           }
+          if (!roleSettingNames.includes(val2)) {
+            seal.replyToSender(ctx, msg, `【.ai role <名称>】切换角色设定\n角色设定名称错误，名称有:\n${roleSettingNames.join('、')}`);
+            return ret;
+          }
+          const roleSettingIndex = roleSettingNames.indexOf(val2);
+          if (roleSettingIndex < 0 || roleSettingIndex >= roleSettingTemplate.length) {
+            seal.replyToSender(ctx, msg, `角色设定名称[${val2}]没有对应的角色设定`);
+          }
+          seal.vars.strSet(ctx, "$gSYSPROMPT", val2);
+          seal.replyToSender(ctx, msg, `角色设定已切换到[${val2}]`);
+          return ret;
         }
         case 'memory': {
           const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
@@ -627,7 +611,7 @@ ${HELPMAP["权限限制"]}`);
                     return ret;
                   }
                   ai2.memory.deleteMemory(idList, kw);
-                  ai2.memory.getTopMemoryList('').then(memoryList => {
+                  ai2.memory.getTopMemoryList().then(memoryList => {
                     const s = ai2.memory.buildMemory({
                       isPrivate: true,
                       id: mctx.player.userId,
@@ -640,7 +624,7 @@ ${HELPMAP["权限限制"]}`);
                   return ret;
                 }
                 case 'show': {
-                  ai2.memory.getTopMemoryList('').then(memoryList => {
+                  ai2.memory.getTopMemoryList().then(memoryList => {
                     const s = ai2.memory.buildMemory({
                       isPrivate: true,
                       id: mctx.player.userId,
@@ -709,7 +693,7 @@ ${HELPMAP["权限限制"]}`);
                     return ret;
                   }
                   ai.memory.deleteMemory(idList, kw);
-                  ai.memory.getTopMemoryList('').then(memoryList => {
+                  ai.memory.getTopMemoryList().then(memoryList => {
                     const s = ai.memory.buildMemory({
                       isPrivate: false,
                       id: ctx.group.groupId,
@@ -722,7 +706,7 @@ ${HELPMAP["权限限制"]}`);
                   return ret;
                 }
                 case 'show': {
-                  ai.memory.getTopMemoryList('').then(memoryList => {
+                  ai.memory.getTopMemoryList().then(memoryList => {
                     const s = ai.memory.buildMemory({
                       isPrivate: false,
                       id: ctx.group.groupId,
@@ -1636,7 +1620,7 @@ ${ImageManager.getImageCQCode(img)}`).join('\n\n');
   //接受非指令消息
   ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
     try {
-      const { disabledInPrivate, globalStandby, triggerRegexes, ignoreRegexes, triggerCondition } = ConfigManager.received;
+      const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = ConfigManager.received;
       if (ctx.isPrivate && disabledInPrivate) {
         return;
       }
@@ -1653,19 +1637,9 @@ ${ImageManager.getImageCQCode(img)}`).join('\n\n');
       const messageArray = transformTextToArray(message);
 
       // 非指令消息忽略
-      const ignoreRegex = ignoreRegexes.join('|');
-      if (ignoreRegex) {
-        let pattern: RegExp;
-        try {
-          pattern = new RegExp(ignoreRegex);
-        } catch (e) {
-          logger.error(`正则表达式错误，内容:${ignoreRegex}，错误信息:${e.message}`);
-        }
-
-        if (pattern && pattern.test(message)) {
-          logger.info(`非指令消息忽略:${message}`);
-          return;
-        }
+      if (ignoreRegex.test(message)) {
+        logger.info(`非指令消息忽略:${message}`);
+        return;
       }
 
       // 检查CQ码
@@ -1675,21 +1649,11 @@ ${ImageManager.getImageCQCode(img)}`).join('\n\n');
         ai.context.timer = null;
 
         // 非指令消息触发
-        const triggerRegex = triggerRegexes.join('|');
-        if (triggerRegex) {
-          let pattern: RegExp;
-          try {
-            pattern = new RegExp(triggerRegex);
-          } catch (e) {
-            logger.error(`正则表达式错误，内容:${triggerRegex}，错误信息:${e.message}`);
-          }
-
-          if (pattern && pattern.test(message)) {
-            const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
-            if (fmtCondition === 1) {
-              return ai.handleReceipt(ctx, msg, ai, messageArray)
-                .then(() => ai.chat(ctx, msg, '非指令'));
-            }
+        if (triggerRegex.test(message)) {
+          const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
+          if (fmtCondition === 1) {
+            return ai.handleReceipt(ctx, msg, ai, messageArray)
+              .then(() => ai.chat(ctx, msg, '非指令'));
           }
         }
 

@@ -1,8 +1,9 @@
 import { AIManager, GroupInfo, SessionInfo, UserInfo } from "../AI/AI";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool } from "./tool";
 import { knowledgeMM, searchOptions as SearchOptions } from "../AI/memory";
+import { getRoleSetting } from "../utils/utils_message";
 
 export function registerMemory() {
     const toolAdd = new Tool({
@@ -299,16 +300,7 @@ export function registerMemory() {
                 method: method
             }
 
-            const { roleSettingNames, roleSettingTemplate } = ConfigManager.message;
-            const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
-            let roleIndex = 0;
-            if (exists && roleName !== '' && roleSettingNames.includes(roleName)) {
-                roleIndex = roleSettingNames.indexOf(roleName);
-                if (roleIndex < 0 || roleIndex >= roleSettingTemplate.length) roleIndex = 0;
-            } else {
-                const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-                if (exists2 && roleIndex2 >= 0 && roleIndex2 < roleSettingTemplate.length) roleIndex = roleIndex2;
-            }
+            const { roleIndex } = getRoleSetting(ctx);
             await knowledgeMM.updateKnowledgeMemory(roleIndex);
             if (knowledgeMM.memoryIds.length === 0) return { content: `暂无记忆`, images: [] };
 

@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class ImageConfig {
     static ext: seal.ExtInfo;
@@ -27,7 +27,7 @@ export class ImageConfig {
 
     static get() {
         return {
-            localImagePaths: seal.ext.getTemplateConfig(ImageConfig.ext, "本地图片路径"),
+            localImagePathMap: ConfigManager.getPathMapConfig(ImageConfig.ext, "本地图片路径"),
             receiveImage: seal.ext.getBoolConfig(ImageConfig.ext, "是否接收图片"),
             condition: seal.ext.getStringConfig(ImageConfig.ext, "图片识别需要满足的条件"),
             p: seal.ext.getIntConfig(ImageConfig.ext, "发送图片的概率/%"),

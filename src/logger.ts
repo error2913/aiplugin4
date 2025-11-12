@@ -1,4 +1,5 @@
-import { ConfigManager, NAME } from "./config/config";
+import { NAME } from "./config/config";
+import { ConfigManager } from "./config/configManager";
 
 class Logger {
     name: string;

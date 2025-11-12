@@ -1,5 +1,5 @@
 import { AIManager } from "../AI/AI";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { buildContent } from "../utils/utils_message";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { Tool } from "./tool";

@@ -1,6 +1,5 @@
-import Handlebars from "handlebars";
 import { AI } from "../AI/AI"
-import { ConfigManager } from "../config/config"
+import { ConfigManager } from "../config/configManager"
 import { registerAttr } from "./tool_attr"
 import { registerBan } from "./tool_ban"
 import { registerDeck } from "./tool_deck"
@@ -437,7 +436,7 @@ export class ToolManager {
 
     reviveToolStauts() {
         const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
-        const toolStatus: {[key: string]: boolean} = {};
+        const toolStatus: { [key: string]: boolean } = {};
         for (const k in ToolManager.toolMap) {
             if (!this.toolStatus.hasOwnProperty(k)) {
                 toolStatus[k] = !toolsNotAllow.includes(k) && !toolsDefaultClosed.includes(k);
@@ -486,15 +485,13 @@ export class ToolManager {
         const tools = this.getToolsInfo(ctx.isPrivate ? 'private' : 'group');
         if (tools && tools.length > 0) {
             return tools.map((item, index) => {
-                const data = {
+                return toolsPromptTemplate({
                     "序号": index + 1,
                     "函数名称": item.function.name,
                     "函数描述": item.function.description,
                     "参数信息": JSON.stringify(item.function.parameters.properties, null, 2),
                     "必需参数": item.function.parameters.required.join('\n')
-                }
-                const template = Handlebars.compile(toolsPromptTemplate[0]);
-                return template(data);
+                });
             }).join('\n');
         }
 

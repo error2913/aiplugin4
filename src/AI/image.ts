@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { sendITTRequest } from "../service";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
@@ -80,23 +80,11 @@ export class ImageManager {
     }
 
     drawLocalImageFile(): string {
-        const { localImagePaths } = ConfigManager.image;
-        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') return acc;
-            try {
-                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
-                acc[name] = path;
-            } catch (e) {
-                logger.error(e);
-            }
-            return acc;
-        }, {});
-
-        const keys = Object.keys(localImages);
-        if (keys.length == 0) return '';
-        const index = Math.floor(Math.random() * keys.length);
-        return localImages[keys[index]];
+        const { localImagePathMap } = ConfigManager.image;
+        const ids = Object.keys(localImagePathMap);
+        if (ids.length == 0) return '';
+        const index = Math.floor(Math.random() * ids.length);
+        return localImagePathMap[ids[index]];
     }
 
     async drawStolenImageFile(): Promise<string> {
@@ -122,26 +110,15 @@ export class ImageManager {
     }
 
     async drawImageFile(): Promise<string> {
-        const { localImagePaths } = ConfigManager.image;
-        const localImages: { [key: string]: string } = localImagePaths.reduce((acc: { [key: string]: string }, path: string) => {
-            if (path.trim() === '') return acc;
-            try {
-                const name = path.split('/').pop().replace(/\.[^/.]+$/, '');
-                if (!name) throw new Error(`本地图片路径格式错误:${path}`);
-                acc[name] = path;
-            } catch (e) {
-                logger.error(e);
-            }
-            return acc;
-        }, {});
+        const { localImagePathMap } = ConfigManager.image;
 
-        const values = Object.values(localImages);
-        if (this.stolenImages.length == 0 && values.length == 0 && this.savedImages.length == 0) return '';
+        const files = Object.values(localImagePathMap);
+        if (this.stolenImages.length == 0 && files.length == 0 && this.savedImages.length == 0) return '';
 
-        const index = Math.floor(Math.random() * (values.length + this.stolenImages.length + this.savedImages.length));
+        const index = Math.floor(Math.random() * (files.length + this.stolenImages.length + this.savedImages.length));
 
-        if (index < values.length) return values[index];
-        else if (index < values.length + this.stolenImages.length) return await this.drawStolenImageFile();
+        if (index < files.length) return files[index];
+        else if (index < files.length + this.stolenImages.length) return await this.drawStolenImageFile();
         else return this.drawSavedImageFile();
     }
 

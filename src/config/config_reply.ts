@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class ReplyConfig {
     static ext: seal.ExtInfo;
@@ -11,7 +11,7 @@ export class ReplyConfig {
         seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止AI复读", false, "");
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
-            "<think>[\\s\\S]*<\\/think>|<[\\|│｜]?func[^>]{0,9}$|[<＜][\\|│｜](?!at|poke|quote|img).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|^[^\\|│｜>＞]{0,10}[\\|│｜][>＞]|[<＜][\\|│｜][^\\|│｜>＞]{0,20}$",
+            "<think>[\\s\\S]*<\\/think>|<[\\|│｜]?func[^>]{0,9}$|[<＜][\\|│｜](?!at|poke|quote|img|face).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|^[^\\|│｜>＞]{0,10}[\\|│｜][>＞]|[<＜][\\|│｜][^\\|│｜>＞]{0,20}$",
             "<[\\|│｜]?function(?:_call)?>[\\s\\S]*<\\/function(?:_call)?>",
             "```.*\\n([\\s\\S]*?)\\n```",
             "\\*\\*(.*?)\\*\\*",
@@ -46,9 +46,10 @@ export class ReplyConfig {
             replymsg: seal.ext.getBoolConfig(ReplyConfig.ext, "回复是否引用"),
             stopRepeat: seal.ext.getBoolConfig(ReplyConfig.ext, "禁止AI复读"),
             similarityLimit: seal.ext.getFloatConfig(ReplyConfig.ext, "视作复读的最低相似度"),
-            filterRegexes: seal.ext.getTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
-            contextTemplate: seal.ext.getTemplateConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
-            replyTemplate: seal.ext.getTemplateConfig(ReplyConfig.ext, "正则处理回复消息模板"),
+            filterRegex: ConfigManager.getRegexConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
+            filterRegexes: ConfigManager.getRegexesConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
+            contextTemplates: ConfigManager.getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
+            replyTemplates: ConfigManager.getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理回复消息模板"),
             isTrim: seal.ext.getBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符")
         }
     }

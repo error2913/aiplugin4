@@ -1,6 +1,6 @@
 import { Image, ImageManager } from "../AI/image";
 import { logger } from "../logger";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
 
 export function registerImage() {

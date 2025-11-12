@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
 
 export const triggerConditionMap: { [key: string]: { keyword: string, uid: string, reason: string }[] } = {};

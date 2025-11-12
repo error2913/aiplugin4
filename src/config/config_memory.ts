@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config";
+import { ConfigManager } from "./configManager";
 
 export class MemoryConfig {
     static ext: seal.ExtInfo;
@@ -84,6 +84,7 @@ ID:上面是分割符
     - 当前群聊:<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}
     - <|at:xxx|>表示@某个群成员
     - <|poke:xxx|>表示戳一戳某个群成员
+    - <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
 {{/if}}
 {{#if 添加前缀}}
     - <|from:xxx|>表示消息来源，不要在生成的回复中使用
@@ -159,7 +160,7 @@ ID:上面是分割符
         return {
             knowledgeMemoryShowNumber: seal.ext.getIntConfig(MemoryConfig.ext, "知识库记忆展示数量"),
             knowledgeMemoryStringList: seal.ext.getTemplateConfig(MemoryConfig.ext, "知识库记忆"),
-            knowledgeMemorySingleShowTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "单条知识库记忆展示模板"),
+            knowledgeMemorySingleShowTemplate: ConfigManager.getHandlebarsTemplateConfig(MemoryConfig.ext, "单条知识库记忆展示模板"),
             isMemory: seal.ext.getBoolConfig(MemoryConfig.ext, "是否启用长期记忆"),
             memoryLimit: seal.ext.getIntConfig(MemoryConfig.ext, "长期记忆上限"),
             memoryShowNumber: seal.ext.getIntConfig(MemoryConfig.ext, "长期记忆展示数量"),
@@ -168,15 +169,15 @@ ID:上面是分割符
             embeddingUrl: seal.ext.getStringConfig(MemoryConfig.ext, "嵌入url地址"),
             embeddingApiKey: seal.ext.getStringConfig(MemoryConfig.ext, "嵌入API Key"),
             embeddingBodyTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "嵌入body"),
-            memoryShowTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "长期记忆展示模板"),
-            memorySingleShowTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "单条长期记忆展示模板"),
+            memoryShowTemplate: ConfigManager.getHandlebarsTemplateConfig(MemoryConfig.ext, "长期记忆展示模板"),
+            memorySingleShowTemplate: ConfigManager.getHandlebarsTemplateConfig(MemoryConfig.ext, "单条长期记忆展示模板"),
             isShortMemory: seal.ext.getBoolConfig(MemoryConfig.ext, "是否启用短期记忆"),
             shortMemoryLimit: seal.ext.getIntConfig(MemoryConfig.ext, "短期记忆上限"),
             shortMemorySummaryRound: seal.ext.getIntConfig(MemoryConfig.ext, "短期记忆总结轮数"),
             memoryUrl: seal.ext.getStringConfig(MemoryConfig.ext, "记忆总结 url地址"),
             memoryApiKey: seal.ext.getStringConfig(MemoryConfig.ext, "记忆总结 API Key"),
             memoryBodyTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "记忆总结 body"),
-            memoryPromptTemplate: seal.ext.getTemplateConfig(MemoryConfig.ext, "记忆总结prompt模板")
+            memoryPromptTemplate: ConfigManager.getHandlebarsTemplateConfig(MemoryConfig.ext, "记忆总结prompt模板")
         }
     }
 }

@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { ConfigManager } from "../config/config";
+import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
 
 export function registerWeb() {
