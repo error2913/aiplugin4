@@ -1,4 +1,4 @@
-import { logger } from "../logger";
+import { netExists, sendGroupSign } from "../utils/utils_ob11";
 import { Tool } from "./tool";
 
 export function registerGroupSign() {
@@ -21,20 +21,12 @@ export function registerGroupSign() {
             return { content: `群打卡只能在群聊中使用`, images: [] };
         }
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            await net.callApi(epId, `send_group_sign?group_id=${group_id.replace(/^.+:/, '')}`);
-            return { content: `已发送群打卡，若无响应可能今日已打卡`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `发送群打卡失败`, images: [] };
-        }
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+
+        await sendGroupSign(epId, gid.replace(/^.+:/, ''));
+        return { content: `已发送群打卡`, images: [] };
     }
 }

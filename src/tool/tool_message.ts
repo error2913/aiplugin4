@@ -1,11 +1,11 @@
 import { AIManager } from "../AI/AI";
-import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { createCtx, createMsg } from "../utils/utils_seal";
 import { handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
 import { CQTYPESALLOW } from "../config/config";
+import { deleteMsg, getGroupMemberInfo, getMsg, netExists } from "../utils/utils_ob11";
 
 export function registerMessage() {
     const toolSend = new Tool({
@@ -102,29 +102,17 @@ export function registerMessage() {
 
         const { contextArray, replyArray, images } = await handleReply(ctx, msg, ai, content);
 
-        try {
-            for (let i = 0; i < contextArray.length; i++) {
-                const content = contextArray[i];
-                const reply = replyArray[i];
-                const msgId = await replyToSender(ctx, msg, ai, reply);
-                await ai.context.addMessage(ctx, msg, ai, content, images, 'assistant', msgId);
-            }
-
-            if (tool_call) {
-                try {
-                    await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
-                } catch (e) {
-                    logger.error(`在handlePromptToolCall中出错：`, e.message);
-                    return { content: `函数调用失败:${e.message}`, images: [] };
-                }
-            }
-
-            AIManager.saveAI(ai.id);
-            return { content: "消息发送成功", images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `消息发送失败:${e.message}`, images: [] };
+        for (let i = 0; i < contextArray.length; i++) {
+            const content = contextArray[i];
+            const reply = replyArray[i];
+            const msgId = await replyToSender(ctx, msg, ai, reply);
+            await ai.context.addMessage(ctx, msg, ai, content, images, 'assistant', msgId);
         }
+
+        if (tool_call) await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
+
+        AIManager.saveAI(ai.id);
+        return { content: "消息发送成功", images: [] };
     }
 
     const toolGet = new Tool({
@@ -148,31 +136,24 @@ export function registerMessage() {
         const { msg_id } = args;
         const { isPrefix, showNumber } = ConfigManager.message;
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const result = await net.callApi(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            const messageArray: MessageSegment[] = result.message.filter((item: MessageSegment) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
+        const epId = ctx.endPoint.userId;
 
-            const { content, images } = await transformArrayToContent(ctx, ai, messageArray);
+        const result = await getMsg(epId, transformMsgIdBack(msg_id));
+        if (!result) return { content: `获取消息 ${msg_id} 失败`, images: [] };
+        const messageArray: MessageSegment[] = result.message.filter((item: MessageSegment) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
 
-            const gid = ctx.group.groupId;
-            const uid = `QQ:${result.sender.user_id}`;
-            const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-            const mctx = createCtx(epId, mmsg);
-            const name = mctx.player.name || '未知用户';
-            const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
+        const { content, images } = await transformArrayToContent(ctx, ai, messageArray);
 
-            return { content: prefix + content, images: images };
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取消息信息失败`, images: [] };
-        }
+        const gid = ctx.group.groupId;
+        const uid = `QQ:${result.sender.user_id}`;
+        const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
+        const mctx = createCtx(epId, mmsg);
+        const name = mctx.player.name || '未知用户';
+        const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
+
+        return { content: prefix + content, images: images };
     }
 
     const toolDel = new Tool({
@@ -195,45 +176,24 @@ export function registerMessage() {
     toolDel.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const result = await net.callApi(epId, `get_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            if (result.sender.user_id != epId.replace(/^.+:/, '')) {
-                if (result.sender.role == 'owner' || result.sender.role == 'admin') {
-                    return { content: `你没有权限撤回该消息`, images: [] };
-                }
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
 
-                try {
-                    const epId = ctx.endPoint.userId;
-                    const group_id = ctx.group.groupId.replace(/^.+:/, '');
-                    const user_id = epId.replace(/^.+:/, '');
-                    const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-                    if (result.role !== 'owner' && result.role !== 'admin') {
-                        return { content: `你没有管理员权限`, images: [] };
-                    }
-                } catch (e) {
-                    logger.error(e);
-                    return { content: `获取权限信息失败`, images: [] };
-                }
+        const result = await getMsg(epId, transformMsgIdBack(msg_id));
+        if (!result) return { content: `获取消息 ${msg_id} 失败`, images: [] };
+        if (result.sender.user_id != epId.replace(/^.+:/, '')) {
+            if (result.sender.role == 'owner' || result.sender.role == 'admin') {
+                return { content: `你没有权限撤回该消息`, images: [] };
             }
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取消息信息失败`, images: [] };
+
+            const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
+            if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
+            if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
         }
 
-        try {
-            const epId = ctx.endPoint.userId;
-            await net.callApi(epId, `delete_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            return { content: `已撤回消息${msg_id}`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `撤回消息失败`, images: [] };
-        }
+        await deleteMsg(epId, transformMsgIdBack(msg_id));
+        return { content: `已撤回消息${msg_id}`, images: [] };
     }
 }

@@ -1,8 +1,8 @@
-import { logger } from "../logger";
 import { transformMsgIdBack, transformMsgId } from "../utils/utils";
 import { Tool } from "./tool";
 import { Image } from "../AI/image";
 import { transformArrayToContent } from "../utils/utils_string";
+import { deleteEssenceMsg, getEssenceMsgList, getGroupMemberInfo, netExists, setEssenceMsg } from "../utils/utils_ob11";
 
 export function registerEssenceMsg() {
     const toolSet = new Tool({
@@ -25,34 +25,18 @@ export function registerEssenceMsg() {
     toolSet.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const user_id = epId.replace(/^.+:/, '');
-            const memberInfo = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-            if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') {
-                return { content: `你没有管理员权限`, images: [] };
-            }
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取权限信息失败`, images: [] };
-        }
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
 
-        try {
-            const epId = ctx.endPoint.userId;
-            await net.callApi(epId, `set_essence_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            return { content: `已将消息${msg_id}设置为精华消息`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `设置精华消息失败`, images: [] };
-        }
-    };
+        const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
+        if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
+
+        await setEssenceMsg(epId, transformMsgIdBack(msg_id));
+        return { content: `已将消息${msg_id}设置为精华消息`, images: [] };
+    }
 
     const toolGet = new Tool({
         type: 'function',
@@ -72,58 +56,47 @@ export function registerEssenceMsg() {
             return { content: `精华消息功能仅在群聊中可用`, images: [] };
         }
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const result = await net.callApi(epId, `get_essence_msg_list?group_id=${group_id}`);
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
 
-            if (!Array.isArray(result) || result.length === 0) {
-                return { content: `该群暂无精华消息`, images: [] };
-            }
+        const essenceMsgList = await getEssenceMsgList(epId, gid.replace(/^.+:/, ''));
+        if (!essenceMsgList || !Array.isArray(essenceMsgList)) return { content: `获取群 ${gid} 精华消息列表失败`, images: [] };
 
-            let response = `群精华消息列表 (${result.length}条):\n\n`;
-            const images: Image[] = [];
+        if (essenceMsgList.length === 0) return { content: `该群暂无精华消息`, images: [] };
 
-            for (let i = 0; i < result.length; i++) {
-                const essence = result[i];
-                const addTime = new Date(essence.operator_time * 1000).toLocaleString();
-                const operatorName = essence.operator_nick || `用户${essence.operator_id}`;
-                const senderName = essence.sender_nick || `用户${essence.sender_id}`;
-                const msgId = transformMsgId(essence.message_id);
+        let s = `群精华消息列表 (${essenceMsgList.length}条):\n`;
+        const images: Image[] = [];
 
-                if (essence.content) {
-                    let content = '';
-                    if (Array.isArray(essence.content)) {
-                        const result = await transformArrayToContent(ctx, ai, essence.content);
-                        content = result.content;
-                        images.push(...result.images);
-                    } else if (typeof essence.content === 'string') {
-                        content = essence.content;
-                    }
+        for (let i = 0; i < essenceMsgList.length; i++) {
+            const essence = essenceMsgList[i];
+            const addTime = new Date(essence.operator_time * 1000).toLocaleString();
+            const operatorName = essence.operator_nick || `用户${essence.operator_id}`;
+            const senderName = essence.sender_nick || `用户${essence.sender_id}`;
+            const msgId = transformMsgId(essence.message_id);
 
-                    if (content.length > 50) {
-                        content = content.substring(0, 100) + '...';
-                    }
+            if (essence.content) {
+                let content = '';
+                if (Array.isArray(essence.content)) {
+                    const result = await transformArrayToContent(ctx, ai, essence.content);
+                    content = result.content;
+                    images.push(...result.images);
+                } else if (typeof essence.content === 'string') {
+                    content = essence.content;
+                }
 
-                    response += `${i + 1}. 发送者: ${senderName}
+                if (content.length > 50) content = content.substring(0, 100) + '...';
+
+                s += `${i + 1}. 发送者: ${senderName}
     操作者: ${operatorName}
     设置时间: ${addTime}
     消息ID: ${msgId}
     内容: ${content}\n`;
-                }
             }
-
-            return { content: response.trim(), images: images };
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取精华消息列表失败: ${e.message}`, images: [] };
         }
+
+        return { content: s.trim(), images: images };
     };
 
     const toolDel = new Tool({
@@ -150,32 +123,16 @@ export function registerEssenceMsg() {
             return { content: `精华消息功能仅在群聊中可用`, images: [] };
         }
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const user_id = epId.replace(/^.+:/, '');
-            const memberInfo = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-            if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') {
-                return { content: `你没有管理员权限`, images: [] };
-            }
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取权限信息失败`, images: [] };
-        }
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
 
-        try {
-            const epId = ctx.endPoint.userId;
-            await net.callApi(epId, `delete_essence_msg?message_id=${transformMsgIdBack(msg_id)}`);
-            return { content: `已删除精华消息 ${msg_id}`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `删除精华消息失败: ${e.message}`, images: [] };
-        }
+        const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
+        if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
+
+        await deleteEssenceMsg(epId, transformMsgIdBack(msg_id));
+        return { content: `已删除精华消息 ${msg_id}`, images: [] };
     };
 }

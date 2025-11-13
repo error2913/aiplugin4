@@ -1,6 +1,7 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
+import { netExists, sendGroupAISound } from "../utils/utils_ob11";
 
 const characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
@@ -81,34 +82,31 @@ export function registerRecord() {
     toolTTS.solve = async (ctx, msg, _, args) => {
         const { text } = args;
 
-        try {
-            const { character } = ConfigManager.tool;
-
-            if (character === '自定义') {
-                const aittsExt = seal.ext.find('AITTS');
-                if (!aittsExt) {
-                    logger.error(`未找到AITTS依赖`);
-                    return { content: `未找到AITTS依赖，请提示用户安装AITTS依赖`, images: [] };
-                }
-
+        const { character } = ConfigManager.tool;
+        if (character === '自定义') {
+            const aittsExt = seal.ext.find('AITTS');
+            if (!aittsExt) {
+                logger.error(`未找到AITTS依赖`);
+                return { content: `未找到AITTS依赖，请提示用户安装AITTS依赖`, images: [] };
+            }
+            try {
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
-            } else {
-                const net = globalThis.net || globalThis.http;
-                if (!net) {
-                    logger.error(`未找到ob11网络连接依赖`);
-                    return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-                }
-
-                const characterId = characterMap[character];
-                const epId = ctx.endPoint.userId;
-                const group_id = ctx.group.groupId.replace(/^.+:/, '');
-                await net.callApi(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
+            } catch (e) {
+                logger.error(e);
+                return { content: `发送语音失败`, images: [] };
             }
 
             return { content: `发送语音成功`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `发送语音失败`, images: [] };
         }
+
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+
+        const characterId = characterMap[character];
+        await sendGroupAISound(epId, characterId, gid.replace(/^.+:/, ''), text);
+
+        return { content: `发送语音成功`, images: [] };
     }
 }

@@ -1,7 +1,7 @@
-import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
 import { fmtDate } from "../utils/utils_string";
+import { getGroupMemberInfo, getGroupShutList, netExists, setGroupBan, setGroupWholeBan } from "../utils/utils_ob11";
 
 export function registerBan() {
     const toolBan = new Tool({
@@ -29,57 +29,23 @@ export function registerBan() {
     toolBan.solve = async (ctx, _, ai, args) => {
         const { name, duration } = args;
 
-        if (ctx.isPrivate) {
-            return { content: `该命令只能在群聊中使用`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
-
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
         const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const user_id = epId.replace(/^.+:/, '');
-            const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-            if (result.role !== 'owner' && result.role !== 'admin') {
-                return { content: `你没有管理员权限`, images: [] };
-            }
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取权限信息失败`, images: [] };
-        }
+        if (uid === null) return { content: `未找到<${name}>`, images: [] };
+        const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
+        if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const user_id = uid.replace(/^.+:/, '');
-            const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-            if (result.role === 'owner' || result.role === 'admin') {
-                return { content: `你无法禁言${result.role === 'owner' ? '群主' : '管理员'}`, images: [] };
-            }
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取权限信息失败`, images: [] };
-        }
+        const memberInfo2 = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
+        if (!memberInfo2) return { content: `获取用户 ${uid} 信息失败`, images: [] };
+        if (memberInfo2.role === 'owner' || memberInfo2.role === 'admin') return { content: `你无法禁言${memberInfo2.role === 'owner' ? '群主' : '管理员'}`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const user_id = uid.replace(/^.+:/, '');
-            await net.callApi(epId, `set_group_ban?group_id=${group_id}&user_id=${user_id}&duration=${duration}`);
-            return { content: `已禁言<${name}> ${duration}秒`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `禁言失败`, images: [] };
-        }
+        await setGroupBan(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''), duration);
+        return { content: `已禁言<${name}> ${duration}秒`, images: [] };
     }
 
     const toolWhole = new Tool({
@@ -103,21 +69,13 @@ export function registerBan() {
     toolWhole.solve = async (ctx, _, __, args) => {
         const { enable } = args;
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const gid = ctx.group.groupId;
-            await net.callApi(epId, `set_group_whole_ban?group_id=${gid.replace(/^.+:/, '')}&enable=${enable}`);
-            return { content: `已${enable ? '开启' : '关闭'}全员禁言`, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `全员禁言失败`, images: [] };
-        }
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+
+        await setGroupWholeBan(epId, gid.replace(/^.+:/, ''), enable);
+        return { content: `已${enable ? '开启' : '关闭'}全员禁言`, images: [] };
     }
 
     const toolList = new Tool({
@@ -135,25 +93,19 @@ export function registerBan() {
     });
     toolList.type = 'group';
     toolList.solve = async (ctx, _, __, ___) => {
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const gid = ctx.group.groupId;
-            const data = await net.callApi(epId, `get_group_shut_list?group_id=${gid.replace(/^.+:/, '')}`);
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
 
-            const s = `被禁言成员数量: ${data.length}\n` + data.slice(0, 50).map((item: any, index: number) => {
-                return `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${fmtDate(item.shutUpTime)}`;
-            }).join('\n');
+        const groupShutList = await getGroupShutList(epId, gid.replace(/^.+:/, ''));
+        if (!groupShutList || !Array.isArray(groupShutList)) return { content: `获取禁言列表失败`, images: [] };
 
-            return { content: s, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取禁言列表失败`, images: [] };
-        }
+        const s = `被禁言成员数量: ${groupShutList.length}\n` +
+            groupShutList.slice(0, 50)
+                .map((item: any, index: number) => `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${fmtDate(item.shutUpTime)}`)
+                .join('\n');
+
+        return { content: s, images: [] };
     }
 }

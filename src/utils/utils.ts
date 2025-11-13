@@ -3,6 +3,7 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformTextToArray } from "./utils_string";
 import { aliasMap } from "../config/config";
+import { netExists, sendGroupMsg, sendPrivateMsg } from "./utils_ob11";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {
@@ -30,74 +31,43 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
     }
 
     const { showMsgId } = ConfigManager.message;
-    if (showMsgId) {
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            ai.context.lastReply = s;
-            seal.replyToSender(ctx, msg, s);
-            return '';
+    if (showMsgId && netExists()) {
+        const rawMessageArray = transformTextToArray(s);
+        const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
+
+        // 处理戳戳戳
+        const pokeMsgArr = rawMessageArray.filter(item => item.type === 'poke');
+        if (pokeMsgArr.length > 0) {
+            pokeMsgArr.forEach(item => {
+                const s = `[CQ:poke,qq=${item.data.qq}]`;
+                ai.context.lastReply = s;
+                seal.replyToSender(ctx, msg, s);
+            });
         }
 
-        try {
-            const rawMessageArray = transformTextToArray(s);
-            const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
+        if (messageArray.length === 0) return '';
 
-            // 处理戳戳戳
-            const pokeMsgArr = rawMessageArray.filter(item => item.type === 'poke');
-            if (pokeMsgArr.length > 0) {
-                pokeMsgArr.forEach(item => {
-                    const s = `[CQ:poke,qq=${item.data.qq}]`;
-                    ai.context.lastReply = s;
-                    seal.replyToSender(ctx, msg, s);
-                });
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+        const uid = ctx.player.userId;
+        if (msg.messageType === 'private') {
+            const result = await sendPrivateMsg(epId, uid.replace(/^.+:/, ''), messageArray);
+            if (result?.message_id) {
+                logger.info(`(${result.message_id})发送给${uid}:${s}`);
+                return transformMsgId(result.message_id);
             }
-
-            if (messageArray.length === 0) {
-                return '';
+        } else if (msg.messageType === 'group') {
+            const result = await sendGroupMsg(epId, gid.replace(/^.+:/, ''), messageArray);
+            if (result?.message_id) {
+                logger.info(`(${result.message_id})发送给${gid}:${s}`);
+                return transformMsgId(result.message_id);
             }
-
-            const epId = ctx.endPoint.userId;
-            const group_id = ctx.group.groupId.replace(/^.+:/, '');
-            const user_id = ctx.player.userId.replace(/^.+:/, '');
-            if (msg.messageType === 'private') {
-                const data = {
-                    user_id,
-                    message: messageArray
-                }
-                const result = await net.callApi(epId, 'send_private_msg', data);
-                if (result?.message_id) {
-                    logger.info(`(${result.message_id})发送给QQ:${user_id}:${s}`);
-                    return transformMsgId(result.message_id);
-                } else {
-                    throw new Error(`发送私聊消息失败，无法获取message_id`);
-                }
-            } else if (msg.messageType === 'group') {
-                const data = {
-                    group_id,
-                    message: messageArray
-                }
-                const result = await net.callApi(epId, 'send_group_msg', data);
-                if (result?.message_id) {
-                    logger.info(`(${result.message_id})发送给QQ-Group:${group_id}:${s}`);
-                    return transformMsgId(result.message_id);
-                } else {
-                    throw new Error(`发送群聊消息失败，无法获取message_id`);
-                }
-            } else {
-                throw new Error(`未知的消息类型`);
-            }
-        } catch (error) {
-            logger.error(`在replyToSender中: ${error}`);
-            ai.context.lastReply = s;
-            seal.replyToSender(ctx, msg, s);
-            return '';
         }
-    } else {
-        ai.context.lastReply = s;
-        seal.replyToSender(ctx, msg, s);
-        return '';
+        logger.warning(`无法获取message_id`);
     }
+    ai.context.lastReply = s;
+    seal.replyToSender(ctx, msg, s);
+    return '';
 }
 
 export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): Promise<T> {

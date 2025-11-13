@@ -2,6 +2,7 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool } from "./tool";
+import { getGroupMemberInfo, netExists } from "../utils/utils_ob11";
 
 export function registerRename() {
     const tool = new Tool({
@@ -29,32 +30,27 @@ export function registerRename() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
 
-        const net = globalThis.net || globalThis.http;
-        if (net) {
-            try {
-                const epId = ctx.endPoint.userId;
-                const group_id = ctx.group.groupId.replace(/^.+:/, '');
-                const user_id = epId.replace(/^.+:/, '');
-                const result = await net.callApi(epId, `get_group_member_info?group_id=${group_id}&user_id=${user_id}&no_cache=true`);
-                if (result.role !== 'owner' && result.role !== 'admin') {
-                    return { content: `你没有管理员权限`, images: [] };
-                }
-            } catch (e) {
-                logger.error(e);
-                return { content: `获取权限信息失败`, images: [] };
-            }
+        if (netExists()) {
+            const epId = ctx.endPoint.userId;
+            const gid = ctx.group.groupId;
+
+            const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
+            if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
+            if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
         }
 
         const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        if (uid === null) return { content: `未找到<${name}>`, images: [] };
 
         msg = createMsg(msg.messageType, uid, ctx.group.groupId);
         ctx = createCtx(ctx.endPoint.userId, msg);
 
         try {
             seal.setPlayerGroupCard(ctx, new_name);
+            if (ai.context.autoNameMod === 2) {
+                ctx.player.name = new_name;
+                ai.context.messages.forEach(message => message.name = message.uid === uid ? new_name : message.name);
+            }
             seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
             return { content: '设置成功', images: [] };
         } catch (e) {

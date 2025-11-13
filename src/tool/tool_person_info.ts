@@ -1,7 +1,6 @@
-import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
-import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool } from "./tool";
+import { getStrangerInfo, netExists } from "../utils/utils_ob11";
 
 const constellations = ["水瓶座", "双鱼座", "白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座"];
 const shengXiao = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
@@ -24,54 +23,40 @@ export function registerGetPersonInfo() {
             }
         }
     });
-    tool.solve = async (ctx, msg, ai, args) => {
+    tool.solve = async (ctx, _, ai, args) => {
         const { name } = args;
 
-        const net = globalThis.net || globalThis.http;
-        if (!net) {
-            logger.error(`未找到ob11网络连接依赖`);
-            return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
-        }
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
         const uid = await ai.context.findUserId(ctx, name, true);
         if (uid === null) {
             return { content: `未找到<${name}>`, images: [] };
         }
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        const epId = ctx.endPoint.userId;
 
-        try {
-            const epId = ctx.endPoint.userId;
-            const user_id = ctx.player.userId.replace(/^.+:/, '');
-            const data = await net.callApi(epId, `get_stranger_info?user_id=${user_id}`);
+        const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
+        if (!strangerInfo) return { content: `获取用户${uid}信息失败`, images: [] };
 
-            let s = `昵称: ${data.nickname}
-QQ号: ${data.user_id}
-性别: ${data.sex}
-QQ等级: ${data.qqLevel}
-是否为VIP: ${data.is_vip}
-是否为年费会员: ${data.is_years_vip}`;
+        let s = `昵称: ${strangerInfo.nickname}
+QQ号: ${strangerInfo.user_id}
+性别: ${strangerInfo.sex}
+QQ等级: ${strangerInfo.qqLevel}
+是否为VIP: ${strangerInfo.is_vip}
+是否为年费会员: ${strangerInfo.is_years_vip}`;
+        if (strangerInfo.remark) s += `\n备注: ${strangerInfo.remark}`;
+        if (strangerInfo.birthday_year && strangerInfo.birthday_year !== 0) s += `\n年龄: ${strangerInfo.age}
+生日: ${strangerInfo.birthday_year}-${strangerInfo.birthday_month}-${strangerInfo.birthday_day}
+星座: ${constellations[strangerInfo.constellation - 1]}
+生肖: ${shengXiao[strangerInfo.shengXiao - 1]}`;
+        if (strangerInfo.pos) s += `\n位置: ${strangerInfo.pos}`;
+        if (strangerInfo.country) s += `\n所在地: ${strangerInfo.country} ${strangerInfo.province} ${strangerInfo.city}`;
+        if (strangerInfo.address) s += `\n地址: ${strangerInfo.address}`;
+        if (strangerInfo.eMail) s += `\n邮箱: ${strangerInfo.eMail}`;
+        if (strangerInfo.interest) s += `\n兴趣: ${strangerInfo.interest}`;
+        if (strangerInfo.labels && strangerInfo.labels.length > 0) s += `\n标签: ${strangerInfo.labels.join(',')}`;
+        if (strangerInfo.long_nick) s += `\n个性签名: ${strangerInfo.long_nick}`;
 
-            if (data.remark) s += `\n备注: ${data.remark}`;
-            if (data.birthday_year && data.birthday_year !== 0) {
-                s += `\n年龄: ${data.age}
-生日: ${data.birthday_year}-${data.birthday_month}-${data.birthday_day}
-星座: ${constellations[data.constellation - 1]}
-生肖: ${shengXiao[data.shengXiao - 1]}`;
-            }
-            if (data.pos) s += `\n位置: ${data.pos}`;
-            if (data.country) s += `\n所在地: ${data.country} ${data.province} ${data.city}`;
-            if (data.address) s += `\n地址: ${data.address}`;
-            if (data.eMail) s += `\n邮箱: ${data.eMail}`;
-            if (data.interest) s += `\n兴趣: ${data.interest}`;
-            if (data.labels && data.labels.length > 0) s += `\n标签: ${data.labels.join(',')}`;
-            if (data.long_nick) s += `\n个性签名: ${data.long_nick}`;
-
-            return { content: s, images: [] };
-        } catch (e) {
-            logger.error(e);
-            return { content: `获取用户信息失败`, images: [] };
-        }
+        return { content: s, images: [] };
     }
 }

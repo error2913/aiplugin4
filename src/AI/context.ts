@@ -5,7 +5,7 @@ import { createCtx, createMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager, UserInfo } from "./AI";
 import { logger } from "../logger";
-import { getGroupMemberInfo, getStrangerInfo } from "../utils/utils_ob11";
+import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/utils_ob11";
 
 export interface MessageInfo {
     msgId: string;
@@ -268,28 +268,23 @@ export class Context {
         }
 
         // 在群成员列表、好友列表中查找用户
-        const net = globalThis.net || globalThis.http;
-        if (net) {
+        if (netExists()) {
             const epId = ctx.endPoint.userId;
+            const gid = ctx.group.groupId;
 
             if (!ctx.isPrivate) {
-                const gid = ctx.group.groupId;
-                const data = await net.callApi(epId, `get_group_member_list?group_id=${gid.replace(/^.+:/, '')}`);
-                for (let i = 0; i < data.length; i++) {
-                    if (name === data[i].card || name === data[i].nickname) {
-                        const uid = `QQ:${data[i].user_id}`;
-                        return this.ignoreList.includes(uid) ? null : uid;
-                    }
+                const groupMemberList = await getGroupMemberList(epId, gid.replace(/^.+:/, ''));
+                if (groupMemberList && Array.isArray(groupMemberList)) {
+                    const user_id = groupMemberList.find(item => item.card === name || item.nickname === name)?.user_id;
+                    if (user_id) return this.ignoreList.includes(`QQ:${user_id}`) ? null : `QQ:${user_id}`;
                 }
             }
 
             if (findInFriendList) {
-                const data = await net.callApi(epId, 'get_friend_list');
-                for (let i = 0; i < data.length; i++) {
-                    if (name === data[i].nickname || name === data[i].remark) {
-                        const uid = `QQ:${data[i].user_id}`;
-                        return this.ignoreList.includes(uid) ? null : uid;
-                    }
+                const friendList = await getFriendList(epId);
+                if (friendList && Array.isArray(friendList)) {
+                    const user_id = friendList.find(item => item.nickname === name || item.remark === name)?.user_id;
+                    if (user_id) return this.ignoreList.includes(`QQ:${user_id}`) ? null : `QQ:${user_id}`;
                 }
             }
         }
@@ -355,14 +350,12 @@ export class Context {
         }
 
         // 在群聊列表中查找用户
-        const net = globalThis.net || globalThis.http;
-        if (net) {
+        if (netExists()) {
             const epId = ctx.endPoint.userId;
-            const data = await net.callApi(epId, 'get_group_list');
-            for (let i = 0; i < data.length; i++) {
-                if (groupName === data[i].group_name) {
-                    return `QQ-Group:${data[i].group_id}`;
-                }
+            const groupList = await getGroupList(epId);
+            if (groupList && Array.isArray(groupList)) {
+                const group_id = groupList.find(item => item.group_name === groupName)?.group_id;
+                if (group_id) return `QQ-Group:${group_id}`;
             }
         }
 
@@ -404,22 +397,17 @@ export class Context {
                 break;
             }
             case 'card': {
-                if (!gid) {
-                    break;
-                }
+                if (!gid) break;
                 const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
                 if (!memberInfo) {
                     logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
                     this.setName(epId, gid, uid, 'nickname');
                     break;
                 }
-                name = memberInfo.card;
-                if (!name) {
-                    name = memberInfo.nickname;
-                }
+                name = memberInfo.card || memberInfo.nickname;
                 if (!name) {
                     this.setName(epId, gid, uid, 'nickname');
-                    break;
+                    return;
                 }
                 break;
             }
@@ -431,11 +419,7 @@ export class Context {
         const msg = createMsg(gid ? 'group' : 'private', uid, gid);
         const ctx = createCtx(epId, msg);
         ctx.player.name = name;
-        this.messages.forEach(message => {
-            if (message.uid === uid) {
-                message.name = name;
-            }
-        });
+        this.messages.forEach(message => message.name = message.uid === uid ? name : message.name);
     }
 
     async updateName(epId: string, gid: string, uid: string) {
