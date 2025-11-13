@@ -629,12 +629,12 @@ export function fixJsonString(s: string): string {
         return s;
     } catch (err) {
         const patterns = [
-            // 匹配键缺少前半引号: { key": value } 或 , key": value
-            /([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)("\s*:)/g,
-            // 匹配值缺少前半引号: : value" (但排除数字、布尔值、null)
-            /(:\s*)(?!")([^"{\[\s][^",}\]]*)("\s*[,}])/g,
-            // 匹配数组中的字符串缺少前半引号: [value"] (排除数字、布尔值、null)
-            /([\[,]\s*)(?!")([^"{\[\s][^",\]]*)("\s*[,\]])/g
+            // 匹配键缺少前半引号: {key": 或 ,key":
+            /([{,][\s\n]*)([a-zA-Z_$][a-zA-Z0-9_$]*)("[\s\n]*:)/g,
+            // 匹配值缺少前半引号: :value", 或 :value"} 或 
+            /(:[\s\n]*)([^"]+)("[\s\n]*[,}])/g,
+            // 匹配数组中的字符串缺少前半引号: [value", 或 [value"] 或 ,value", 或 ,value"]
+            /([\[,][\s\n]*)([^"]+)("[\s\n]*[,\]])/g
         ];
 
         let fixed = s;
@@ -642,10 +642,6 @@ export function fixJsonString(s: string): string {
 
         for (const pattern of patterns) {
             fixed = fixed.replace(pattern, (fullMatch, prefix, content, suffix) => {
-                // 跳过数字、布尔值和null
-                if (/^(true|false|null|\d+\.?\d*)$/.test(content.trim())) {
-                    return fullMatch;
-                }
                 matched = true;
                 const fixedContent = `${prefix}"${content}${suffix}`;
                 logger.info(`修复json字符串: ${fullMatch} -> ${fixedContent}`);
