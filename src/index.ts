@@ -1,5 +1,5 @@
 import { AIManager } from "./AI/AI";
-import { Image, ImageManager } from "./AI/image";
+import { ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { ConfigManager } from "./config/configManager";
 import { buildSystemMessage, getRoleSetting } from "./utils/utils_message";
@@ -1369,13 +1369,11 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
   const cmdImage = seal.ext.newCmdItemInfo();
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
-【.img draw [stl/lcl/save/all]】随机抽取偷的图片/本地图片/保存的图片/全部
+【.img draw [stl/lcl/all]】随机抽取偷的图片/本地图片/保存的图片/全部
 【.img stl [on/off]】偷图 开启/关闭
-【.img f [stl/save/all]】遗忘偷的图片/保存的图片/全部
+【.img f】遗忘偷的图片
 【.img itt [图片/ran] (附加提示词)】图片转文字
-【.img save 名称 场景1,场景2,... 图片】保存图片
-【.img save [show/clr]】展示保存的图片列表/展示并发送所有保存的图片
-【.img save del <图片名称1> <图片名称2> ...】删除指定名称的保存图片`;
+【.img find <图片ID>】查找图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
@@ -1407,14 +1405,6 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
             case 'steal': {
               ai.imageManager.drawStolenImageFile()
                 .then(file => seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '暂无偷取图片'));
-              return ret;
-            }
-            case 'save': {
-              const file = ai.imageManager.drawSavedImageFile();
-              if (!file) {
-                seal.replyToSender(ctx, msg, '暂无保存的表情包图片');
-              }
-              seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
               return ret;
             }
             case 'all': {
@@ -1450,32 +1440,10 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
           }
         }
         case 'forget': {
-          const type = cmdArgs.getArgN(2);
-          switch (aliasToCmd(type)) {
-            case 'steal': {
-              ai.imageManager.stolenImages = [];
-              seal.replyToSender(ctx, msg, '偷取图片已遗忘');
-              AIManager.saveAI(id);
-              return ret;
-            }
-            case 'save': {
-              ai.imageManager.savedImages = [];
-              seal.replyToSender(ctx, msg, '保存图片已遗忘');
-              AIManager.saveAI(id);
-              return ret;
-            }
-            case 'all': {
-              ai.imageManager.stolenImages = [];
-              ai.imageManager.savedImages = [];
-              seal.replyToSender(ctx, msg, '所有图片已遗忘');
-              AIManager.saveAI(id);
-              return ret;
-            }
-            default: {
-              ret.showHelp = true;
-              return ret;
-            }
-          }
+          ai.imageManager.stolenImages = [];
+          seal.replyToSender(ctx, msg, '偷取图片已遗忘');
+          AIManager.saveAI(id);
+          return ret;
         }
         case 'itt': {
           const val2 = cmdArgs.getArgN(2);
@@ -1512,83 +1480,15 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
               return ret;
           }
         }
-        case 'save': {
-          const val2 = cmdArgs.getArgN(2);
-          switch (aliasToCmd(val2)) {
-            case '': {
-              seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片，【.img save show】展示保存的图片，【.img save clr】清除所有保存的图片，【.img save del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
-              return ret;
-            }
-            case 'show': {
-              if (ai.imageManager.savedImages.length === 0) {
-                seal.replyToSender(ctx, msg, '暂无保存的图片');
-                return ret;
-              }
-
-              const imageList = ai.imageManager.savedImages.map((img, index) => `${index + 1}. 名称: ${img.id}
-应用场景: ${img.scenes.join('、') || '无'}
-权重: ${img.weight}
-${ImageManager.getImageCQCode(img)}`).join('\n\n');
-
-              seal.replyToSender(ctx, msg, `保存的图片列表:\n${imageList}`);
-              return ret;
-            }
-            case 'clear': {
-              ai.imageManager.clearSavedImages();
-              seal.replyToSender(ctx, msg, '已清除所有保存的图片');
-              AIManager.saveAI(id);
-              return ret;
-            }
-            case 'delete': {
-              const nameList = cmdArgs.args.slice(2);
-              if (nameList.length === 0) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img del <图片名称1> <图片名称2> ...】删除指定名称的保存图片');
-                return ret;
-              }
-
-              ai.imageManager.delSavedImage(nameList);
-              seal.replyToSender(ctx, msg, `已删除图片`);
-              return ret;
-            }
-            default: {
-              const name = val2;
-              const scenes = cmdArgs.getArgN(3).split(/[，,]/);
-              if (scenes.length === 0) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片');
-                return ret;
-              }
-
-              const val4 = cmdArgs.getArgN(4);
-              const messageItem0 = transformTextToArray(val4)?.[0];
-              const url = messageItem0?.data?.url || messageItem0?.data?.file;
-              if (messageItem0?.type !== 'image' || !url) {
-                seal.replyToSender(ctx, msg, '参数缺失，【.img save 名称 场景1,场景2,... 图片】保存图片');
-                return ret;
-              }
-
-              ImageManager.imageUrlToBase64(url)
-                .then((value) => {
-                  if (!value.base64) {
-                    throw new Error(`图片转换为base64失败`);
-                  }
-
-                  const image = new Image(url);
-                  image.id = ImageManager.generateImageId(ai, name);
-                  image.isUrl = false;
-                  image.scenes = scenes;
-                  image.base64 = value.base64;
-                  return image;
-                })
-                .then((image) => {
-                  ai.imageManager.saveImages([image]);
-                  seal.replyToSender(ctx, msg, `已保存图片 ${image.id}`);
-                })
-                .catch((e) => {
-                  seal.replyToSender(ctx, msg, `图片保存失败:${e.message}`);
-                });
-              return ret;
-            }
+        case 'find': {
+          const id = cmdArgs.getArgN(2);
+          if (!id) {
+            seal.replyToSender(ctx, msg, '【.img find <图片ID>】查找图片');
+            return ret;
           }
+          const img = ai.context.findImage(ctx, id);
+          seal.replyToSender(ctx, msg, img ? ImageManager.getImageCQCode(img) : '未找到该图片');
+          return ret;
         }
         default: {
           ret.showHelp = true;

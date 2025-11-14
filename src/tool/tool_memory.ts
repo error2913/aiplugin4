@@ -4,6 +4,8 @@ import { createMsg, createCtx } from "../utils/utils_seal";
 import { Tool } from "./tool";
 import { knowledgeMM, searchOptions as SearchOptions } from "../AI/memory";
 import { getRoleSetting } from "../utils/utils_message";
+import { Image, ImageManager } from "../AI/image";
+import { logger } from "../logger";
 
 export function registerMemory() {
     const toolAdd = new Tool({
@@ -25,7 +27,7 @@ export function registerMemory() {
                     },
                     text: {
                         type: 'string',
-                        description: '记忆内容，尽量简短，无需附带时间与来源'
+                        description: '记忆内容，尽量简短，可用<|img:xxxxxx|>插入图片，无需附带时间与来源'
                     },
                     keywords: {
                         type: 'array',
@@ -47,6 +49,13 @@ export function registerMemory() {
                         items: {
                             type: 'string'
                         }
+                    },
+                    images: {
+                        type: 'array',
+                        description: '图片ID列表',
+                        items: {
+                            type: 'string'
+                        }
                     }
                 },
                 required: ['memory_type', 'name', 'text']
@@ -54,7 +63,7 @@ export function registerMemory() {
         }
     });
     toolAdd.solve = async (ctx, msg, ai, args) => {
-        const { memory_type, name, text, keywords = [], userList = [], groupList = [] } = args;
+        const { memory_type, name, text, keywords = [], userList = [], groupList = [], images = [] } = args;
 
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
@@ -103,8 +112,27 @@ export function registerMemory() {
             }
         }
 
+        const savedImages: Image[] = [];
+        for (const id of images) {
+            const image = ai.context.findImage(ctx, id);
+            if (image) {
+                if (!image.isUrl) {
+                    savedImages.push(image);
+                } else {
+                    const { base64 } = await ImageManager.imageUrlToBase64(image.file);
+                    if (!base64) {
+                        logger.error(`图片${id}转换为base64失败`);
+                        continue;
+                    }
+                    image.isUrl = false;
+                    image.base64 = base64;
+                    savedImages.push(image);
+                }
+            }
+        }
+
         //记忆相关处理
-        await ai.memory.addMemory(ctx, ai, uiList, giList, Array.isArray(keywords) ? keywords : [], text);
+        await ai.memory.addMemory(ctx, ai, uiList, giList, Array.isArray(keywords) ? keywords : [], savedImages, text);
         AIManager.saveAI(ai.id);
 
         return { content: `添加记忆成功`, images: [] };

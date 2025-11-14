@@ -166,7 +166,7 @@ export class MemoryManager {
         return Array.from(keywords);
     }
 
-    async addMemory(ctx: seal.MsgContext, ai: AI, ul: UserInfo[], gl: GroupInfo[], kws: string[], text: string) {
+    async addMemory(ctx: seal.MsgContext, ai: AI, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string) {
         let id = generateId(), a = 0;
         while (this.memoryMap.hasOwnProperty(id)) {
             id = generateId();
@@ -201,7 +201,7 @@ export class MemoryManager {
         m.lastMentionTime = now;
         m.keywords = kws;
         m.weight = 5;
-        m.images = await ImageManager.extractExistingImages(ai, text);
+        m.images = images.concat(await ImageManager.extractExistingImagesToSave(ctx, ai, text));
         await m.updateVector();
         this.limitMemory();
         this.memoryMap[id] = m;
@@ -531,8 +531,22 @@ export class MemoryManager {
 
     findImage(id: string): Image | null {
         for (const m of this.memoryList) {
-            const image = m.images.find(item => item.id === id);
-            if (image) return image;
+            const image = m.images.find(img => img.id === id);
+            if (image) {
+                m.weight += 0.2;
+                return image;
+            }
+        }
+        return null;
+    }
+
+    findMemoryAndImageByImageIdPrefix(id: string): { memory: Memory, image: Image } | null {
+        for (const m of this.memoryList) {
+            const image = m.images.find(img => img.id.replace(/_\d+$/, "") === id);
+            if (image) {
+                m.weight += 0.2;
+                return { memory: m, image };
+            }
         }
         return null;
     }

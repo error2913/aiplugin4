@@ -1,3 +1,4 @@
+import { AIManager, UserInfo } from "../AI/AI";
 import { Image, ImageManager } from "../AI/image";
 import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
@@ -113,6 +114,9 @@ export function registerMeme() {
     toolGenerator.solve = async (ctx, msg, ai, args) => {
         const { name, text = [], members = [], save } = args;
 
+        // 切换到当前会话ai
+        if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
+
         let s = '';
 
         const { key, info } = await getInfo(name);
@@ -136,28 +140,33 @@ export function registerMeme() {
             }
         }
 
-        const scenes = ["meme", ...text, ...members];
+        const textText = text.join(';');
+        const memberText = members.join('、');
+
+        const uiList: UserInfo[] = [];
+        for (const n of members) {
+            const uid = await ai.context.findUserId(ctx, n, true);
+            if (uid !== null) {
+                uiList.push({
+                    isPrivate: true,
+                    id: uid,
+                    name: n
+                });
+            }
+        }
+        const kws = ["meme", name, ...text, ...members];
 
         // 图片存在则直接返回
-        for (const img of ai.imageManager.savedImages) {
-            if (img.scenes[0] !== "meme") {
-                continue;
-            }
-            // 检查场景是否匹配，需要注意的是，text和members有可能发生重合，导致scenes一致但meme实际内容不同，现阶段不管
-            if (img.scenes.every((v, i) => v === scenes[i]) && img.id.replace(/_\d+$/, "") === name) {
-                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
-                return { content: `${s}发送成功，${save ? `已保存为<|img:${img.id}|>` : `可使用<|img:${img.id}|>再次调用`}`, images: [img] };
+        const result = ai.memory.findMemoryAndImageByImageIdPrefix(name);
+        if (result) {
+            const { memory, image } = result;
+            if (memory.keywords.every((v, i) => v === kws[i]) && memory.userList.every((v, i) => v.id === uiList[i].id)) {
+                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(image));
+                return { content: `${s}生成成功：<|img:${image.id}|>`, images: [image] };
             }
         }
 
-        const avatars = [];
-        for (const name of members) {
-            const uid = await ai.context.findUserId(ctx, name);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-            avatars.push(`https://q.qlogo.cn/headimg_dl?dst_uin=${uid.replace(/^.+:/, '')}&spec=640&img_type=jpg`);
-        }
+        const avatars = uiList.map(ui => `https://q.qlogo.cn/headimg_dl?dst_uin=${ui.id.replace(/^.+:/, '')}&spec=640&img_type=jpg`);
 
         try {
             const res = await fetch(baseurl + "meme_generate", {
@@ -181,20 +190,17 @@ export function registerMeme() {
                 const file = seal.base64ToImage(base64);
 
                 const img = new Image(file);
-                img.id = ImageManager.generateImageId(ai, name);
+                img.id = ImageManager.generateImageId(ctx, ai, name);
                 img.isUrl = false;
-                img.scenes = scenes;
                 img.base64 = base64;
-                img.content = `表情包${name}
-文字${text.join('，') || '无'}
-用户${members.join('，') || '无'}`;
+                img.content = `表情包<|img:${img.id}|>
+${textText ? `文字：${textText}` : ''}
+${memberText ? `用户：${memberText}` : ''}`;
 
-                if (save) {
-                    ai.imageManager.saveImages([img]);
-                }
+                if (save) ai.memory.addMemory(ctx, ai, uiList, [], kws, [img], img.content);
 
                 seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
-                return { content: `${s}发送成功，${save ? `已保存为<|img:${img.id}|>` : `可使用<|img:${img.id}|>再次调用`}`, images: [img] };
+                return { content: `${s}生成成功：<|img:${img.id}|>`, images: [img] };
             } else {
                 throw new Error(json.message);
             }

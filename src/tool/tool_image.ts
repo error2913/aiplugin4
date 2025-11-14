@@ -1,10 +1,10 @@
-import { Image, ImageManager } from "../AI/image";
+import { ImageManager } from "../AI/image";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
 
 export function registerImage() {
-    const toolText = new Tool({
+    const toolITT = new Tool({
         type: "function",
         function: {
             name: "image_to_text",
@@ -25,13 +25,11 @@ export function registerImage() {
             }
         }
     });
-    toolText.solve = async (_, __, ai, args) => {
+    toolITT.solve = async (ctx, _, ai, args) => {
         const { id, content } = args;
 
-        const image = ai.context.findImage(id, ai);
-        if (!image) {
-            return { content: `未找到图片${id}`, images: [] };
-        }
+        const image = ai.context.findImage(ctx, id);
+        if (!image) return { content: `未找到图片${id}`, images: [] };
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
         if (image.isUrl) {
@@ -105,7 +103,7 @@ export function registerImage() {
         }
     }
 
-    const toolImage = new Tool({
+    const toolTTI = new Tool({
         type: 'function',
         function: {
             name: 'text_to_image',
@@ -126,7 +124,7 @@ export function registerImage() {
             }
         }
     });
-    toolImage.solve = async (ctx, msg, _, args) => {
+    toolTTI.solve = async (ctx, msg, _, args) => {
         const { prompt, negative_prompt } = args;
 
         const ext = seal.ext.find('AIDrawing');
@@ -142,119 +140,5 @@ export function registerImage() {
             logger.error(`图像生成失败：${e}`);
             return { content: `图像生成失败：${e}`, images: [] };
         }
-    }
-
-    const toolSave = new Tool({
-        type: "function",
-        function: {
-            name: "save_image",
-            description: "将图片保存为表情包",
-            parameters: {
-                type: "object",
-                properties: {
-                    images: {
-                        type: "array",
-                        description: "要保存的图片信息数组",
-                        items: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string",
-                                    description: `图片的id，六位字符`
-                                },
-                                name: {
-                                    type: "string",
-                                    description: `图片命名`
-                                },
-                                scenes: {
-                                    type: "array",
-                                    description: `表情包的应用场景`,
-                                    items: {
-                                        type: "string"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                required: ["images"]
-            }
-        }
-    });
-    toolSave.solve = async (_, __, ai, args) => {
-        const { images } = args;
-
-        const savedImages: Image[] = [];
-        for (const ii of images) {
-            const { id, name, scenes } = ii;
-
-            if (!id || !name || !scenes || scenes.length === 0) {
-                return { content: `图片${id}信息不完整，缺少id、name或scenes为空`, images: [] };
-            }
-
-            const image = ai.context.findImage(id, ai);
-            if (!image) {
-                return { content: `未找到图片${id}`, images: [] };
-            }
-
-            if (image.isUrl) {
-                const { base64 } = await ImageManager.imageUrlToBase64(image.file);
-                if (!base64) {
-                    logger.error(`图片${id}转换为base64失败`);
-                    return { content: `图片转换为base64失败`, images: [] };
-                }
-
-                const newImage = new Image(image.file);
-                newImage.id = ImageManager.generateImageId(ai, name);
-                newImage.isUrl = false;
-                newImage.scenes = scenes;
-                newImage.base64 = base64;
-                newImage.content = image.content;
-
-                savedImages.push(newImage);
-            } else {
-                return { content: '本地图片不用再次储存', images: [] };
-            }
-        }
-
-
-        try {
-            ai.imageManager.saveImages(savedImages);
-            return { content: `图片已保存`, images: [] };
-        } catch (e) {
-            return { content: `图片保存失败：${e.message}`, images: [] };
-        }
-    }
-
-    const toolDel = new Tool({
-        type: "function",
-        function: {
-            name: "del_image",
-            description: "删除保存的表情包图片",
-            parameters: {
-                type: "object",
-                properties: {
-                    names: {
-                        type: "array",
-                        description: `要删除的图片名称数组`
-                    }
-                },
-                required: ["names"]
-            }
-        }
-    });
-    toolDel.solve = async (_, __, ai, args) => {
-        const { names } = args;
-
-        for (const name of names) {
-            const imageIndex = ai.imageManager.savedImages.findIndex(img => img.id === name);
-            if (imageIndex === -1) {
-                return { content: `未找到名称为"${name}"的保存图片`, images: [] };
-            }
-
-            ai.imageManager.savedImages.splice(imageIndex, 1);
-        }
-
-        return { content: `已删除${names.length}个图片`, images: [] };
     }
 }

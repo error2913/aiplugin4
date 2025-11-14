@@ -9,74 +9,47 @@ export class Image {
     id: string;
     isUrl: boolean;
     file: string;
-    scenes: string[];
     base64: string;
     content: string;
-    weight: number;
 
     constructor(file: string) {
         this.id = generateId();
         this.isUrl = file.startsWith('http');
         this.file = file;
-        this.scenes = [];
         this.base64 = '';
         this.content = '';
-        this.weight = 1;
     }
 }
 
 export class ImageManager {
-    static validKeys: (keyof ImageManager)[] = ['stolenImages', 'savedImages', 'stealStatus'];
+    static validKeys: (keyof ImageManager)[] = ['stolenImages', 'stealStatus'];
     stolenImages: Image[];
-    savedImages: Image[];
     stealStatus: boolean;
 
     constructor() {
         this.stolenImages = [];
-        this.savedImages = [];
         this.stealStatus = false;
     }
 
-    static generateImageId(ai: AI, name: string): string {
+    static generateImageId(ctx: seal.MsgContext, ai: AI, name: string): string {
         let id = name;
 
         let acc = 0;
-        do {
-            id = name + (acc++ ? `_${acc}` : '');
-        } while (ai.context.findImage(id, ai));
+        do id = name + (acc++ ? `_${acc}` : '');
+        while (ai.context.findImage(ctx, id));
 
         return id;
     }
 
     static getImageCQCode(img: Image): string {
-        if (!img.isUrl && img.base64 !== '') {
-            return `[CQ:image,file=${seal.base64ToImage(img.base64)}]`;
-        }
-        return `[CQ:image,file=${img.file}]`;
+        if (!img) return '';
+        const file = img.base64 ? seal.base64ToImage(img.base64) : img.file;
+        return `[CQ:image,file=${file}]`;
     }
 
     stealImages(images: Image[]) {
         const { maxStolenImageNum } = ConfigManager.image;
         this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
-    }
-
-    saveImages(images: Image[]) {
-        const { maxSavedImageNum } = ConfigManager.image;
-        this.savedImages = this.savedImages.concat(images);
-
-        if (this.savedImages.length > maxSavedImageNum) {
-            this.savedImages = this.savedImages
-                .sort((a, b) => b.weight - a.weight)
-                .slice(0, maxSavedImageNum);
-        }
-    }
-
-    delSavedImage(nameList: string[]) {
-        this.savedImages = this.savedImages.filter(img => !nameList.includes(img.id));
-    }
-
-    clearSavedImages() {
-        this.savedImages = [];
     }
 
     drawLocalImageFile(): string {
@@ -102,24 +75,14 @@ export class ImageManager {
         return url;
     }
 
-    drawSavedImageFile(): string {
-        if (this.savedImages.length === 0) return null;
-        const index = Math.floor(Math.random() * this.savedImages.length);
-        const image = this.savedImages[index];
-        return seal.base64ToImage(image.base64);
-    }
-
     async drawImageFile(): Promise<string> {
         const { localImagePathMap } = ConfigManager.image;
 
         const files = Object.values(localImagePathMap);
-        if (this.stolenImages.length == 0 && files.length == 0 && this.savedImages.length == 0) return '';
+        if (this.stolenImages.length == 0 && files.length == 0) return '';
 
-        const index = Math.floor(Math.random() * (files.length + this.stolenImages.length + this.savedImages.length));
-
-        if (index < files.length) return files[index];
-        else if (index < files.length + this.stolenImages.length) return await this.drawStolenImageFile();
-        else return this.drawSavedImageFile();
+        const index = Math.floor(Math.random() * (files.length + this.stolenImages.length));
+        return index < files.length ? files[index] : await this.drawStolenImageFile();
     }
 
     /**
@@ -268,19 +231,15 @@ export class ImageManager {
         }
     }
 
-    static async extractExistingImages(ai: AI, s: string): Promise<Image[]> {
+    static async extractExistingImagesToSave(ctx: seal.MsgContext, ai: AI, s: string): Promise<Image[]> {
         const images = [];
         const match = s.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
         if (match) {
             for (let i = 0; i < match.length; i++) {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-                const image = ai.context.findImage(id, ai);
-
+                const image = ai.context.findImage(ctx, id);
                 if (image) {
                     if (!image.isUrl) {
-                        if (image.base64) {
-                            image.weight += 1;
-                        }
                         images.push(image);
                     } else {
                         const { base64 } = await ImageManager.imageUrlToBase64(image.file);
@@ -288,7 +247,6 @@ export class ImageManager {
                             logger.error(`图片${id}转换为base64失败`);
                             continue;
                         }
-
                         image.isUrl = false;
                         image.base64 = base64;
                         images.push(image);

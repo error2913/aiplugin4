@@ -227,10 +227,7 @@ export class Context {
 
     async findUserId(ctx: seal.MsgContext, name: string | number, findInFriendList: boolean = false): Promise<string> {
         name = String(name);
-
-        if (!name) {
-            return null;
-        }
+        if (!name) return null;
 
         if (name.length > 4 && !isNaN(parseInt(name))) {
             const uid = `QQ:${name}`;
@@ -238,18 +235,14 @@ export class Context {
         }
 
         const match = name.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
-        if (match) {
-            name = match[1] || match[2];
-        }
+        if (match) name = match[1] || match[2];
 
         if (name === ctx.player.name) {
             const uid = ctx.player.userId;
             return this.ignoreList.includes(uid) ? null : uid;
         }
 
-        if (name === seal.formatTmpl(ctx, "核心:骰子名字")) {
-            return ctx.endPoint.userId;
-        }
+        if (name === seal.formatTmpl(ctx, "核心:骰子名字")) return ctx.endPoint.userId;
 
         // 在上下文中查找用户
         const messages = this.messages;
@@ -304,45 +297,29 @@ export class Context {
     async findGroupId(ctx: seal.MsgContext, groupName: string | number): Promise<string> {
         groupName = String(groupName);
 
-        if (!groupName) {
-            return null;
-        }
+        if (!groupName) return null;
 
-        if (groupName.length > 5 && !isNaN(parseInt(groupName))) {
-            return `QQ-Group:${groupName}`;
-        }
+        if (groupName.length > 5 && !isNaN(parseInt(groupName))) return `QQ-Group:${groupName}`;
 
         const match = groupName.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
-        if (match) {
-            groupName = match[1] || match[2];
-        }
+        if (match) groupName = match[1] || match[2];
 
-        if (groupName === ctx.group.groupName) {
-            return ctx.group.groupId;
-        }
+        if (groupName === ctx.group.groupName) return ctx.group.groupId;
 
         // 在上下文中用户的记忆中查找群聊
         const messages = this.messages;
         const userSet = new Set<string>();
         for (let i = messages.length - 1; i >= 0; i--) {
             const uid = messages[i].uid;
-            if (userSet.has(uid) || messages[i].role !== 'user') {
-                continue;
-            }
+            if (userSet.has(uid) || messages[i].role !== 'user') continue;
             const name = messages[i].name;
-            if (name.startsWith('_')) {
-                continue;
-            }
+            if (name.startsWith('_')) continue;
 
             for (const m of AIManager.getAI(uid).memory.memoryList) {
-                if (m.sessionInfo.isPrivate && m.sessionInfo.name === groupName) {
-                    return m.sessionInfo.id;
-                }
+                if (m.sessionInfo.isPrivate && m.sessionInfo.name === groupName) return m.sessionInfo.id;
                 if (m.sessionInfo.isPrivate && m.sessionInfo.name.length > 4) {
                     const distance = levenshteinDistance(groupName, m.sessionInfo.name);
-                    if (distance <= 2) {
-                        return m.sessionInfo.id;
-                    }
+                    if (distance <= 2) return m.sessionInfo.id;
                 }
             }
 
@@ -361,12 +338,44 @@ export class Context {
 
         if (groupName.length > 4) {
             const distance = levenshteinDistance(groupName, ctx.group.groupName);
-            if (distance <= 2) {
-                return ctx.group.groupId;
-            }
+            if (distance <= 2) return ctx.group.groupId;
         }
 
         logger.warning(`未找到群聊<${groupName}>`);
+        return null;
+    }
+
+    findImage(ctx: seal.MsgContext, id: string): Image | null {
+        // 从上下文中查找图片
+        const messages = this.messages;
+        const userSet = new Set<string>();
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const image = messages[i].images.find(item => item.id === id);
+            if (image) return image;
+
+            const uid = messages[i].uid;
+            if (userSet.has(uid) || messages[i].role !== 'user') continue;
+            const name = messages[i].name;
+            if (name.startsWith('_')) continue;
+
+            const image2 = AIManager.getAI(uid).memory.findImage(id);
+            if (image2) return image2;
+        }
+
+        if (!ctx.isPrivate) {
+            const image = AIManager.getAI(ctx.group.groupId).memory.findImage(id);
+            if (image) return image;
+        }
+
+        // 从自己记忆中查找图片
+        const image = AIManager.getAI(ctx.endPoint.userId).memory.findImage(id);
+        if (image) return image;
+
+        // 从本地图片库中查找图片
+        const { localImagePathMap } = ConfigManager.image;
+        if (localImagePathMap.hasOwnProperty(id)) return new Image(localImagePathMap[id]);
+
+        logger.warning(`未找到图片<${id}>`);
         return null;
     }
 
@@ -433,40 +442,5 @@ export class Context {
                 break;
             }
         }
-    }
-
-    findImage(id: string, ai: AI): Image | null {
-        // 从上下文中查找图片
-        const messages = this.messages;
-        const userSet = new Set<string>();
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const image = messages[i].images.find(item => item.id === id);
-            if (image) return image;
-
-            const uid = messages[i].uid;
-            if (userSet.has(uid) || messages[i].role !== 'user') continue;
-            const name = messages[i].name;
-            if (name.startsWith('_')) continue;
-
-            const ai2 = AIManager.getAI(uid);
-            const image2 = ai2.memory.findImage(id);
-            if (image2) return image2;
-        }
-
-        // 从自己记忆中查找图片
-        const image = ai.memory.findImage(id);
-        if (image) return image;
-
-        const { localImagePathMap } = ConfigManager.image;
-        if (localImagePathMap.hasOwnProperty(id)) return new Image(localImagePathMap[id]);
-
-        const savedImage = ai.imageManager.savedImages.find(img => img.id === id);
-        if (savedImage) {
-            const filePath = seal.base64ToImage(savedImage.base64);
-            savedImage.file = filePath;
-            return savedImage;
-        }
-
-        return null;
     }
 }

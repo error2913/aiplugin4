@@ -280,17 +280,11 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'img': {
                 const id = seg.content;
-                const image = ai.context.findImage(id, ai);
+                const image = ai.context.findImage(ctx, id);
 
                 if (image) {
                     images.push(image);
-
-                    if (!image.isUrl || (image.isUrl && await ImageManager.checkImageUrl(image.file))) {
-                        if (image.base64) {
-                            image.weight += 1;
-                        }
-                        text += ImageManager.getImageCQCode(image);
-                    }
+                    text += ImageManager.getImageCQCode(image);
                 } else {
                     logger.warning(`无法找到图片：${id}`);
                 }

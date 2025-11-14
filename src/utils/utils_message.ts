@@ -13,10 +13,8 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
 
     // 可发送的图片提示
     const sandableImagesPrompt: string = Object.keys(localImagePathMap)
-        .concat(ai.imageManager.savedImages.map(img => `${img.id}\n应用场景: ${img.scenes.join('、')}`))
-        .map((prompt, index) => `${index + 1}. ${prompt}`)
+        .map((id, index) => `${index + 1}. ${id}`)
         .join('\n');
-
 
     // 角色设定
     const { roleIndex, roleSetting } = getRoleSetting(ctx);

@@ -55,25 +55,16 @@ export function registerMessage() {
         if (match) {
             for (let i = 0; i < match.length; i++) {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1].trim().slice(0, 6);
-                const image = ai.context.findImage(id, ai);
-
-                if (image) {
-                    originalImages.push(image);
-                }
+                const image = ai.context.findImage(ctx, id);
+                if (image) originalImages.push(image);
             }
         }
 
         if (msg_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-            if (uid === ctx.player.userId && ctx.isPrivate) {
-                return { content: `向当前私聊发送消息无需调用函数`, images: [] };
-            }
-            if (uid === ctx.endPoint.userId) {
-                return { content: `禁止向自己发送消息`, images: [] };
-            }
+            if (uid === null) return { content: `未找到<${name}>`, images: [] };
+            if (uid === ctx.player.userId && ctx.isPrivate) return { content: `向当前私聊发送消息无需调用函数`, images: [] };
+            if (uid === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
 
             msg = createMsg('private', uid, '');
             ctx = createCtx(ctx.endPoint.userId, msg);
@@ -81,12 +72,8 @@ export function registerMessage() {
             ai = AIManager.getAI(uid);
         } else if (msg_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-            if (gid === ctx.group.groupId) {
-                return { content: `向当前群聊发送消息无需调用函数`, images: [] };
-            }
+            if (gid === null) return { content: `未找到<${name}>`, images: [] };
+            if (gid === ctx.group.groupId) return { content: `向当前群聊发送消息无需调用函数`, images: [] };
 
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
