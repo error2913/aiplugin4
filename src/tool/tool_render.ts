@@ -20,9 +20,7 @@ async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<Re
             body: JSON.stringify(bodyData)
         });
 
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
         const json: RenderResponse = await res.json();
         return json;
@@ -52,7 +50,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。"
+                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式"
                     },
                     theme: {
                         type: "string",
@@ -64,7 +62,6 @@ export function registerRender() {
             }
         }
     });
-
     toolMd.solve = async (ctx, msg, _, args) => {
         const { content, theme = 'light' } = args;
         if (!content || !content.trim()) return { content: `内容不能为空`, images: [] };
@@ -92,17 +89,16 @@ export function registerRender() {
             description: `渲染 HTML 内容为图片`,
             parameters: {
                 type: "object",
-                    properties: {
-                        content: {
-                            type: "string",
-                            description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。"
-                        }
-                    },
-                    required: ["content"]
+                properties: {
+                    content: {
+                        type: "string",
+                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。"
+                    }
+                },
+                required: ["content"]
             }
         }
     });
-
     toolHtml.solve = async (ctx, msg, _, args) => {
         const { content } = args;
         if (!content || !content.trim()) return { content: `内容不能为空`, images: [] };
@@ -121,5 +117,4 @@ export function registerRender() {
             return { content: `渲染图片失败: ${err.message}`, images: [] };
         }
     }
-
 }

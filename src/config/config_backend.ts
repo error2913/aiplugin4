@@ -21,7 +21,7 @@ export class BackendConfig {
             webSearchUrl: seal.ext.getStringConfig(BackendConfig.ext, "联网搜索"),
             webReadUrl: seal.ext.getStringConfig(BackendConfig.ext, "网页读取"),
             usageChartUrl: seal.ext.getStringConfig(BackendConfig.ext, "用量图表"),
-            renderUrl: seal.ext.getStringConfig(BackendConfig.ext, "md和html图片渲染"),
+            renderUrl: seal.ext.getStringConfig(BackendConfig.ext, "md和html图片渲染")
         }
     }
 }
