@@ -10,7 +10,7 @@ const port = 37632;
 
 // 配置 marked 选项
 marked.setOptions({
-    breaks: true,        
+    breaks: true,
     gfm: true,
     headerIds: true,
     mangle: false,
@@ -20,8 +20,8 @@ marked.setOptions({
     smartypants: false
 });
 
-// JSON 解析中间件，添加错误处理
-app.use(express.json({ 
+// JSON 解析中间件
+app.use(express.json({
     limit: '10mb',
     strict: false
 }));
@@ -54,19 +54,10 @@ function generateImageId() {
     return crypto.randomBytes(16).toString('hex');
 }
 
-function detectContentType(content) {
-    const htmlPattern = /<(?:html|head|body|div|p|h[1-6]|table|ul|ol|li|span|a)\b[^>]*>/i;
-    return htmlPattern.test(content) ? 'html' : 'markdown';
-}
-
 // HTML模板
-function generateHTML(content, contentType = 'auto', theme = 'light', style = 'github') {
-    if (contentType === 'auto') {
-        contentType = detectContentType(content);
-    }
-    
+function generateHTML(content, contentType, theme = 'light', style = 'github') {
     const bodyContent = contentType === 'markdown' ? marked(content) : content;
-    
+
     const themes = {
         light: {
             bg: '#ffffff',
@@ -93,7 +84,8 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
 
     const selectedTheme = themes[theme] || themes.light;
 
-    return `
+    if (contentType === 'markdown') {
+        return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -126,6 +118,7 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
             min-height: 100vh;
             display: flex;
             justify-content: center;
+            align-items: flex-start;
         }
         
         .container {
@@ -147,42 +140,16 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
             line-height: 1.25;
             color: ${selectedTheme.text};
         }
-        
-        h1:first-child, h2:first-child, h3:first-child {
-            margin-top: 0;
-        }
-        
-        h1 {
-            font-size: 2em;
-            border-bottom: 1px solid ${selectedTheme.border};
-            padding-bottom: 0.3em;
-        }
-        
-        h2 {
-            font-size: 1.5em;
-            border-bottom: 1px solid ${selectedTheme.border};
-            padding-bottom: 0.3em;
-        }
-        
+        h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+        h1 { font-size: 2em; border-bottom: 1px solid ${selectedTheme.border}; padding-bottom: 0.3em; }
+        h2 { font-size: 1.5em; border-bottom: 1px solid ${selectedTheme.border}; padding-bottom: 0.3em; }
         h3 { font-size: 1.25em; }
         h4 { font-size: 1em; }
         h5 { font-size: 0.875em; }
         h6 { font-size: 0.85em; }
-        
-        p {
-            margin-bottom: 16px;
-            color: ${selectedTheme.text};
-        }
-        
-        strong, b {
-            font-weight: 600;
-            color: ${selectedTheme.text};
-        }
-        
-        em, i {
-            font-style: italic;
-        }
-        
+        p { margin-bottom: 16px; color: ${selectedTheme.text}; }
+        strong, b { font-weight: 600; color: ${selectedTheme.text}; }
+        em, i { font-style: italic; }
         code {
             background: ${selectedTheme.code_bg};
             padding: 0.2em 0.4em;
@@ -192,7 +159,6 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
             color: ${selectedTheme.text};
             border: 1px solid ${selectedTheme.border};
         }
-        
         pre {
             background: ${selectedTheme.code_bg};
             padding: 16px;
@@ -201,44 +167,18 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
             margin-bottom: 16px;
             border: 1px solid ${selectedTheme.border};
         }
-        
-        pre code {
-            background: none;
-            padding: 0;
-            border: none;
-            font-size: 0.9em;
-            line-height: 1.45;
-        }
-        
+        pre code { background: none; padding: 0; border: none; font-size: 0.9em; line-height: 1.45; }
         blockquote {
             border-left: 4px solid ${selectedTheme.border};
             padding-left: 16px;
             margin: 16px 0;
             color: ${selectedTheme.blockquote_text};
         }
-        
-        blockquote > :first-child {
-            margin-top: 0;
-        }
-        
-        blockquote > :last-child {
-            margin-bottom: 0;
-        }
-        
-        ul, ol {
-            margin-bottom: 16px;
-            padding-left: 2em;
-        }
-        
-        li {
-            margin-bottom: 8px;
-            color: ${selectedTheme.text};
-        }
-        
-        li > p {
-            margin-bottom: 8px;
-        }
-        
+        blockquote > :first-child { margin-top: 0; }
+        blockquote > :last-child { margin-bottom: 0; }
+        ul, ol { margin-bottom: 16px; padding-left: 2em; }
+        li { margin-bottom: 8px; color: ${selectedTheme.text}; }
+        li > p { margin-bottom: 8px; }
         table {
             border-collapse: collapse;
             width: 100%;
@@ -246,33 +186,16 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
             display: block;
             overflow-x: auto;
         }
-        
         th, td {
             border: 1px solid ${selectedTheme.border};
             padding: 8px 12px;
             text-align: left;
             color: ${selectedTheme.text};
         }
-        
-        th {
-            background: ${selectedTheme.code_bg};
-            font-weight: 600;
-        }
-        
-        a {
-            color: #58a6ff;
-            text-decoration: none;
-        }
-        
-        a:hover {
-            text-decoration: underline;
-        }
-        
-        img {
-            max-width: 100%;
-            height: auto;
-        }
-        
+        th { background: ${selectedTheme.code_bg}; font-weight: 600; }
+        a { color: #58a6ff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        img { max-width: 100%; height: auto; }
         hr {
             border: none;
             border-top: 1px solid ${selectedTheme.border};
@@ -280,28 +203,10 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
             background: none;
             height: 1px;
         }
-        
-        /* KaTeX 样式 */
-        .katex {
-            font-size: 1.1em;
-        }
-        
-        .katex-display {
-            margin: 1em 0;
-            overflow-x: auto;
-            overflow-y: hidden;
-        }
-        
-        /* 任务列表 */
-        input[type="checkbox"] {
-            margin-right: 0.5em;
-        }
-        
-        /* 删除线 */
-        del {
-            text-decoration: line-through;
-            opacity: 0.7;
-        }
+        .katex { font-size: 1.1em; }
+        .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
+        input[type="checkbox"] { margin-right: 0.5em; }
+        del { text-decoration: line-through; opacity: 0.7; }
     </style>
 </head>
 <body>
@@ -311,22 +216,60 @@ function generateHTML(content, contentType = 'auto', theme = 'light', style = 'g
 </body>
 </html>
     `;
+    } else {
+        // 移除所有外层样式，让传入的 HTML 自行决定外观，但是不传外层样式的时候是不是太怪了
+        return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" 
+            onload="renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false},
+                    {left: '\\\\[', right: '\\\\]', display: true},
+                    {left: '\\\\(', right: '\\\\)', display: false}
+                ],
+                throwOnError: false
+            });"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            background: #ffffff; 
+        }
+        body {
+            display: inline-block; 
+            min-width: 1px;
+        }
+    </style>
+</head>
+<body>
+    ${bodyContent}
+</body>
+</html>
+    `;
+    }
 }
 
 // 渲染内容为图片
 async function renderToImage(content, options = {}) {
     const {
-        contentType = 'auto',
+        contentType,
         theme = 'light',
         style = 'github',
-        width = 1200,
+        width = 1200, 
         quality = 90
     } = options;
 
     const browser = await puppeteer.launch({
         headless: 'new',
         args: [
-            '--no-sandbox', 
+            '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-web-security'
@@ -335,47 +278,81 @@ async function renderToImage(content, options = {}) {
 
     try {
         const page = await browser.newPage();
-        
-        await page.setViewport({ 
-            width, 
-            height: 600,
-            deviceScaleFactor: 2  
+
+        await page.setViewport({
+            width,
+            height: 3000,
+            deviceScaleFactor: 2
         });
 
         const html = generateHTML(content, contentType, theme, style);
-        await page.setContent(html, { 
+        
+        await page.setContent(html, {
             waitUntil: 'networkidle0',
             timeout: 30000
         });
 
-        await new Promise(r => setTimeout(r, 500));
-
-        const dimensions = await page.evaluate(() => {
-            const container = document.querySelector('.container');
-            return {
-                width: container.offsetWidth,
-                height: container.offsetHeight
-            };
-        });
-
-        const actualWidth = dimensions.width + 80; 
-        const actualHeight = dimensions.height + 80;
-
-        await page.setViewport({ 
-            width: actualWidth, 
-            height: actualHeight,
-            deviceScaleFactor: 2
-        });
+        await new Promise(r => setTimeout(r, 1500)); 
 
         const imageId = generateImageId();
         const fileName = `${imageId}.png`;
         const filePath = path.join(IMAGE_DIR, fileName);
 
-        await page.screenshot({
-            path: filePath,
-            type: 'png',
-            omitBackground: false
-        });
+        let clip;
+        let omitBackground = false;
+
+        if (contentType === 'markdown') {
+            clip = await page.evaluate(() => {
+                const container = document.querySelector('.container');
+                if (!container) return null;
+                const rect = container.getBoundingClientRect();
+                return {
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height
+                };
+            });
+
+            if (!clip) {
+                throw new Error('Could not find .container element for Markdown rendering.');
+            }
+            omitBackground = false; 
+
+        } else {
+            clip = await page.evaluate(() => {
+                const body = document.body;
+                return {
+                    x: 0,
+                    y: 0,
+                    width: body.scrollWidth,
+                    height: body.scrollHeight
+                };
+            });
+            omitBackground = false; 
+        }
+
+        if (!clip || clip.width === 0 || clip.height === 0) {
+            console.warn('Clipping failed, screenshotting full page as fallback.');
+            await page.screenshot({
+                path: filePath,
+                type: 'png',
+                omitBackground: omitBackground,
+                fullPage: true
+            });
+        } else {
+            await page.screenshot({
+                path: filePath,
+                type: 'png',
+                omitBackground: omitBackground,
+                clip: {
+                    x: clip.x,
+                    y: clip.y,
+                    width: Math.ceil(clip.width),
+                    height: Math.ceil(clip.height)
+                }
+            });
+        }
 
         return { imageId, fileName, filePath };
     } finally {
@@ -383,44 +360,18 @@ async function renderToImage(content, options = {}) {
     }
 }
 
-// API端点
-
-app.get('/themes', (req, res) => {
-    res.json({
-        themes: ['light', 'dark', 'gradient'],
-        contentTypes: ['auto', 'markdown', 'html'],
-        default: {
-            theme: 'light',
-            contentType: 'auto'
-        }
-    });
-});
-
-app.post('/render', async (req, res) => {
+// 渲染 Markdown 
+app.post('/render/markdown', async (req, res) => {
     try {
-        const { 
-            content,
-            markdown,
-            html,
-            contentType = 'auto',
-            theme = 'light',
-            width = 1200,
-            quality = 90
-        } = req.body;
-
-        const inputContent = content || markdown || html;
-
-        if (!inputContent) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Content is required (use "content", "markdown", or "html" field)'
-            });
+        const { markdown, theme = 'light', width = 1200, quality = 90 } = req.body;
+        if (!markdown) {
+            return res.status(400).json({ status: 'error', message: 'Field "markdown" is required' });
         }
 
         await ensureImageDir();
 
-        const result = await renderToImage(inputContent, {
-            contentType,
+        const result = await renderToImage(markdown, {
+            contentType: 'markdown', 
             theme,
             width,
             quality
@@ -428,31 +379,60 @@ app.post('/render', async (req, res) => {
 
         const imageUrl = `${req.protocol}://${req.get('host')}/images/${result.fileName}`;
 
-        const detectedType = contentType === 'auto' 
-            ? detectContentType(inputContent) 
-            : contentType;
+        res.json({
+            status: 'success',
+            imageId: result.imageId,
+            url: imageUrl,
+            fileName: result.fileName,
+            contentType: 'markdown',
+            theme
+        });
+    } catch (error) {
+        console.error('Render markdown error:', error);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
+// 渲染 HTML
+app.post('/render/html', async (req, res) => {
+    try {
+        const { html, width = 1200, quality = 90 } = req.body;
+        if (!html) {
+            return res.status(400).json({ status: 'error', message: 'Field "html" is required' });
+        }
+
+        await ensureImageDir();
+
+        const result = await renderToImage(html, {
+            contentType: 'html', 
+            width,
+            quality
+        });
+
+        const imageUrl = `${req.protocol}://${req.get('host')}/images/${result.fileName}`;
 
         res.json({
             status: 'success',
             imageId: result.imageId,
             url: imageUrl,
             fileName: result.fileName,
-            contentType: detectedType,
-            theme: theme
+            contentType: 'html'
         });
     } catch (error) {
-        console.error('Render error:', error);
-        res.status(500).json({
-            status: 'error',
-            message: error.message
-        });
+        console.error('Render html error:', error);
+        res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
 app.delete('/images/:imageId', async (req, res) => {
     try {
         const { imageId } = req.params;
-        const filePath = path.join(IMAGE_DIR, `${imageId}.png`);
+        const safeImageId = path.basename(imageId);
+        if (safeImageId !== imageId) {
+             return res.status(400).json({ status: 'error', message: 'Invalid image ID' });
+        }
+        
+        const filePath = path.join(IMAGE_DIR, `${safeImageId}.png`);
 
         await fs.unlink(filePath);
 
@@ -461,6 +441,9 @@ app.delete('/images/:imageId', async (req, res) => {
             message: 'Image deleted successfully'
         });
     } catch (error) {
+        if (error.code === 'ENOENT') {
+            return res.status(404).json({ status: 'error', message: 'Image not found' });
+        }
         res.status(500).json({
             status: 'error',
             message: error.message
