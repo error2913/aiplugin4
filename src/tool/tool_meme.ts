@@ -111,7 +111,7 @@ export function registerMeme() {
             }
         }
     });
-    toolGenerator.solve = async (ctx, msg, ai, args) => {
+    toolGenerator.solve = async (ctx, _, ai, args) => {
         const { name, text = [], members = [], save } = args;
 
         // 切换到当前会话ai
@@ -161,8 +161,7 @@ export function registerMeme() {
         if (result) {
             const { memory, image } = result;
             if (memory.keywords.every((v, i) => v === kws[i]) && memory.userList.every((v, i) => v.id === uiList[i].id)) {
-                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(image));
-                return { content: `${s}生成成功：<|img:${image.id}|>`, images: [image] };
+                return { content: `${s}生成成功，请使用<|img:${image.id}|>发送`, images: [image] };
             }
         }
 
@@ -199,8 +198,7 @@ ${memberText ? `用户：${memberText}` : ''}`;
 
                 if (save) ai.memory.addMemory(ctx, ai, uiList, [], kws, [img], img.content);
 
-                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
-                return { content: `${s}生成成功：<|img:${img.id}|>`, images: [img] };
+                return { content: `${s}生成成功，请使用<|img:${img.id}|>发送`, images: [img] };
             } else {
                 throw new Error(json.message);
             }

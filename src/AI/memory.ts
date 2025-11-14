@@ -186,6 +186,14 @@ export class MemoryManager {
             }
         }
 
+        // 添加文本内插入的图片
+        const imgIdSet = new Set(images.map(img => img.id));
+        (await ImageManager.extractExistingImagesToSave(ctx, ai, text)).forEach(img => {
+            if (imgIdSet.has(img.id)) return;
+            imgIdSet.add(img.id);
+            images.push(img);
+        });
+
         const now = Math.floor(Date.now() / 1000);
         const m = new Memory();
         m.id = id;
@@ -201,7 +209,7 @@ export class MemoryManager {
         m.lastMentionTime = now;
         m.keywords = kws;
         m.weight = 5;
-        m.images = images.concat(await ImageManager.extractExistingImagesToSave(ctx, ai, text));
+        m.images = images;
         await m.updateVector();
         this.limitMemory();
         this.memoryMap[id] = m;

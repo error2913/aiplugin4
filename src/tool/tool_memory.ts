@@ -278,9 +278,7 @@ export function registerMemory() {
         };
         if (memory_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            if (uid === null) return { content: `未找到<${name}>`, images: [] };
 
             msg = createMsg('private', uid, '');
             ctx = createCtx(ctx.endPoint.userId, msg);
@@ -293,9 +291,7 @@ export function registerMemory() {
             }
         } else if (memory_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            if (gid === null) return { content: `未找到<${name}>`, images: [] };
 
             msg = createMsg('group', ctx.player.userId, gid);
             ctx = createCtx(ctx.endPoint.userId, msg);
