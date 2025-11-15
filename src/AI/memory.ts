@@ -146,7 +146,11 @@ export class MemoryManager {
     reviveMemoryMap() {
         for (const id in this.memoryMap) {
             this.memoryMap[id] = revive(Memory, this.memoryMap[id]);
-            if (!this.memoryMap[id].text) delete this.memoryMap[id];
+            if (!this.memoryMap[id].text) {
+                delete this.memoryMap[id];
+                continue;
+            }
+            if (!this.memoryMap[id].hasOwnProperty('images')) this.memoryMap[id].images = [];
             this.memoryMap[id].images = this.memoryMap[id].images.map(image => revive(Image, image));
         }
     }
