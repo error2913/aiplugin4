@@ -2,7 +2,8 @@ import { logger } from "../logger";
 import { Tool } from "./tool";
 import { ConfigManager } from "../config/configManager";
 import { AIManager } from "../AI/AI";
-import { Image, ImageManager } from "../AI/image";
+import { Image } from "../AI/image";
+import { generateId } from "../utils/utils";
 
 interface RenderResponse {
     status: string;
@@ -74,7 +75,7 @@ export function registerRender() {
         }
     });
 
-    toolMd.solve = async (ctx, msg, ai, args) => {
+    toolMd.solve = async (ctx, _, ai, args) => {
         const { content, name, theme = 'light', save } = args;
         if (!content || !content.trim()) return { content: `内容不能为空`, images: [] };
         if (!name || !name.trim()) return { content: `图片名称不能为空`, images: [] };
@@ -83,28 +84,26 @@ export function registerRender() {
         // 切换到当前会话ai
         if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
 
+        const kws = ["render", "markdown", name, theme];
+
         try {
             const result = await renderMarkdown(content, theme, 1200);
             if (result.status === "success" && result.base64) {
-                logger.info(`Markdown 渲染成功`);
-                
                 const base64 = result.base64;
-                const file = seal.base64ToImage(base64);
-                
-                const img = new Image(file);
-                img.id = ImageManager.generateImageId(ctx, ai, `render_markdown_${name}`);
-                img.isUrl = false;
+                if (!base64) {
+                    logger.error(`生成的base64为空`);
+                    return { content: "生成的base64为空", images: [] };
+                }
+
+                const img = new Image();
+                img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.content = `Markdown 渲染图片<|img:${img.id}|>
 主题：${theme}`;
 
-                if (save) {
-                    const kws = ["render", "markdown", name, theme];
-                    ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
-                }
+                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
 
-                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
-                return { content: `渲染成功：<|img:${img.id}|>`, images: [img] };
+                return { content: `渲染成功，请使用<|img:${img.id}|>发送`, images: [img] };
             } else {
                 throw new Error(result.message || "渲染失败");
             }
@@ -121,26 +120,26 @@ export function registerRender() {
             description: `渲染 HTML 内容为图片`,
             parameters: {
                 type: "object",
-                    properties: {
-                        content: {
-                            type: "string",
-                            description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。"
-                        },
-                        name: {
-                            type: "string",
-                            description: "名称，对内容大致描述"
-                        },
-                        save: {
-                            type: "boolean",
-                            description: "是否保存图片"
-                        }
+                properties: {
+                    content: {
+                        type: "string",
+                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。"
                     },
-                    required: ["content", "name", "save"]
+                    name: {
+                        type: "string",
+                        description: "名称，对内容大致描述"
+                    },
+                    save: {
+                        type: "boolean",
+                        description: "是否保存图片"
+                    }
+                },
+                required: ["content", "name", "save"]
             }
         }
     });
 
-    toolHtml.solve = async (ctx, msg, ai, args) => {
+    toolHtml.solve = async (ctx, _, ai, args) => {
         const { content, name, save } = args;
         if (!content || !content.trim()) return { content: `内容不能为空`, images: [] };
         if (!name || !name.trim()) return { content: `图片名称不能为空`, images: [] };
@@ -148,27 +147,25 @@ export function registerRender() {
         // 切换到当前会话ai
         if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
 
+        const kws = ["render", "html", name];
+
         try {
             const result = await renderHtml(content, 1200);
             if (result.status === "success" && result.base64) {
-                logger.info(`HTML 渲染成功`);
-                
                 const base64 = result.base64;
-                const file = seal.base64ToImage(base64);
-                
-                const img = new Image(file);
-                img.id = ImageManager.generateImageId(ctx, ai, `render_html_${name}`);
-                img.isUrl = false;
+                if (!base64) {
+                    logger.error(`生成的base64为空`);
+                    return { content: "生成的base64为空", images: [] };
+                }
+
+                const img = new Image();
+                img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.content = `HTML 渲染图片<|img:${img.id}|>`;
 
-                if (save) {
-                    const kws = ["render", "html", name];
-                    ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
-                }
+                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
 
-                seal.replyToSender(ctx, msg, ImageManager.getImageCQCode(img));
-                return { content: `渲染成功：<|img:${img.id}|>`, images: [img] };
+                return { content: `渲染成功，请使用<|img:${img.id}|>发送`, images: [img] };
             } else {
                 throw new Error(result.message || "渲染失败");
             }
