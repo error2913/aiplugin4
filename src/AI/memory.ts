@@ -146,9 +146,8 @@ export class MemoryManager {
     reviveMemoryMap() {
         for (const id in this.memoryMap) {
             this.memoryMap[id] = revive(Memory, this.memoryMap[id]);
-            if (!this.memoryMap[id].text) {
-                delete this.memoryMap[id];
-            }
+            if (!this.memoryMap[id].text) delete this.memoryMap[id];
+            this.memoryMap[id].images = this.memoryMap[id].images.map(image => revive(Image, image));
         }
     }
 
@@ -631,7 +630,11 @@ export class KnowledgeMemoryManager extends MemoryManager {
                         const { localImagePathMap } = ConfigManager.image;
 
                         m.images = value.split(/[,，]/).map(id => id.trim()).map(id => {
-                            if (localImagePathMap.hasOwnProperty(id)) return new Image(localImagePathMap[id]);
+                            if (localImagePathMap.hasOwnProperty(id)) {
+                                const image = new Image();
+                                image.file = localImagePathMap[id];
+                                return image;
+                            }
                             logger.error(`图片${id}不存在`);
                             return null;
                         }).filter(img => img);

@@ -25,23 +25,82 @@ import { logger } from "../logger"
 import { Image } from "../AI/image";
 import { fixJsonString } from "../utils/utils_string";
 
+export interface ToolInfoString {
+    type: "string";
+    description?: string;
+    enum?: string[];
+    minLength?: number;
+    maxLength?: number;
+    pattern?: string;
+    format?: "date-time" | "email" | "uri" | "uuid" | "hostname" | "ipv4" | "ipv6";
+}
+
+export interface ToolInfoNumber {
+    type: "number";
+    description?: string;
+    minimum?: number;
+    maximum?: number;
+    exclusiveMinimum?: number;
+    exclusiveMaximum?: number;
+    multipleOf?: number;
+}
+
+export interface ToolInfoInteger {
+    type: "integer";
+    description?: string;
+    minimum?: number;
+    maximum?: number;
+    exclusiveMinimum?: number;
+    exclusiveMaximum?: number;
+    multipleOf?: number;
+}
+
+export interface ToolInfoBoolean {
+    type: "boolean";
+    description?: string;
+}
+
+export interface ToolInfoNull {
+    type: "null";
+    description?: string;
+}
+
+export interface ToolInfoArray {
+    type: "array";
+    description?: string;
+    items: ToolInfoItem;
+    minItems?: number;
+    maxItems?: number;
+    uniqueItems?: boolean;
+}
+
+export interface ToolInfoObject {
+    type: "object";
+    description?: string;
+    properties?: {
+        [key: string]: ToolInfoItem;
+    };
+    required?: (keyof ToolInfoObject["properties"])[];
+    additionalProperties?: boolean | ToolInfoItem;
+    minProperties?: number;
+    maxProperties?: number;
+}
+
+export type ToolInfoItem =
+    | ToolInfoString
+    | ToolInfoNumber
+    | ToolInfoInteger
+    | ToolInfoBoolean
+    | ToolInfoNull
+    | ToolInfoArray
+    | ToolInfoObject;
+
 export interface ToolInfo {
     type: "function",
     function: {
         name: string,
         description: string,
-        parameters: {
-            type: "object",
-            properties: {
-                [key: string]: {
-                    type: string,
-                    description: string,
-                    items?: object,
-                    enum?: string[]
-                }
-            },
-            required: string[]
-        }
+        parameters: ToolInfoObject
     }
 }
 

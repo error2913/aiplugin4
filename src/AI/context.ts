@@ -6,6 +6,7 @@ import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager, UserInfo } from "./AI";
 import { logger } from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/utils_ob11";
+import { revive } from "../utils/utils";
 
 export interface MessageInfo {
     msgId: string;
@@ -59,6 +60,8 @@ export class Context {
 
                 return msgInfo;
             }).filter(msgInfo => msgInfo);
+
+            message.images = message.images.map(image => revive(Image, image));
 
             return message;
         }).filter(message => message);
@@ -373,7 +376,11 @@ export class Context {
 
         // 从本地图片库中查找图片
         const { localImagePathMap } = ConfigManager.image;
-        if (localImagePathMap.hasOwnProperty(id)) return new Image(localImagePathMap[id]);
+        if (localImagePathMap.hasOwnProperty(id)) {
+            const image = new Image();
+            image.file = localImagePathMap[id];
+            return image;
+        }
 
         logger.warning(`未找到图片<${id}>`);
         return null;

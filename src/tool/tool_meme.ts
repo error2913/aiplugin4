@@ -1,7 +1,8 @@
 import { AIManager, UserInfo } from "../AI/AI";
-import { Image, ImageManager } from "../AI/image";
+import { Image } from "../AI/image";
 import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
+import { generateId } from "../utils/utils";
 import { Tool } from "./tool";
 
 const baseurl = "http://meme.lovesealdice.online/";
@@ -186,11 +187,8 @@ export function registerMeme() {
                     return { content: "生成的base64为空", images: [] };
                 }
 
-                const file = seal.base64ToImage(base64);
-
-                const img = new Image(file);
-                img.id = ImageManager.generateImageId(ctx, ai, name);
-                img.isUrl = false;
+                const img = new Image();
+                img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.content = `表情包<|img:${img.id}|>
 ${textText ? `文字：${textText}` : ''}

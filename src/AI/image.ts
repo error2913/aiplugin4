@@ -6,18 +6,27 @@ import { AI } from "./AI";
 import { MessageSegment } from "../utils/utils_string";
 
 export class Image {
+    static validKeys: (keyof Image)[] = ['id', 'file', 'content'];
     id: string;
-    isUrl: boolean;
     file: string;
-    base64: string;
     content: string;
 
-    constructor(file: string) {
+    constructor() {
         this.id = generateId();
-        this.isUrl = file.startsWith('http');
-        this.file = file;
-        this.base64 = '';
+        this.file = '';
         this.content = '';
+    }
+
+    get isUrl(): boolean {
+        return this.file.startsWith('http');
+    }
+
+    get base64(): string {
+        return ConfigManager.ext.storageGet(`base64_${this.id}`) || '';
+    }
+
+    set base64(value: string) {
+        ConfigManager.ext.storageSet(`base64_${this.id}`, value);
     }
 }
 
@@ -29,16 +38,6 @@ export class ImageManager {
     constructor() {
         this.stolenImages = [];
         this.stealStatus = false;
-    }
-
-    static generateImageId(ctx: seal.MsgContext, ai: AI, name: string): string {
-        let id = name;
-
-        let acc = 0;
-        do id = name + (acc++ ? `_${acc}` : '');
-        while (ai.context.findImage(ctx, id));
-
-        return id;
     }
 
     static getImageCQCode(img: Image): string {
@@ -101,16 +100,12 @@ export class ImageManager {
             const file = seg.data.url || seg.data.file || '';
             if (!file) return { content: '', images: [] };
 
-            const image = new Image(file);
+            const image = new Image();
+            image.file = file;
             if (image.isUrl) {
                 const { condition } = ConfigManager.image;
                 const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-                if (fmtCondition === 1) {
-                    const reply = await ImageManager.imageToText(file);
-                    if (reply) {
-                        image.content = reply;
-                    }
-                }
+                if (fmtCondition === 1) image.content = await ImageManager.imageToText(file);
             }
 
             content += image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>`;
@@ -239,18 +234,16 @@ export class ImageManager {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
                 const image = ai.context.findImage(ctx, id);
                 if (image) {
-                    if (!image.isUrl) {
-                        images.push(image);
-                    } else {
+                    if (image.isUrl) {
                         const { base64 } = await ImageManager.imageUrlToBase64(image.file);
                         if (!base64) {
                             logger.error(`图片${id}转换为base64失败`);
                             continue;
                         }
-                        image.isUrl = false;
+                        image.file = '';
                         image.base64 = base64;
-                        images.push(image);
                     }
+                    images.push(image);
                 }
             }
         }
