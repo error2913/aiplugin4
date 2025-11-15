@@ -8,7 +8,7 @@ import { MessageSegment } from "../utils/utils_string";
 export class Image {
     static validKeys: (keyof Image)[] = ['id', 'file', 'content'];
     id: string;
-    file: string;
+    file: string; // 图片url或本地路径
     content: string;
 
     constructor() {
@@ -17,112 +17,37 @@ export class Image {
         this.content = '';
     }
 
-    get isUrl(): boolean {
-        return this.file.startsWith('http');
+    get type(): 'url' | 'local' | 'base64' {
+        if (this.file.startsWith('http')) return 'url';
+        if (this.format) return 'base64';
+        return 'local';
     }
 
     get base64(): string {
         return ConfigManager.ext.storageGet(`base64_${this.id}`) || '';
     }
-
     set base64(value: string) {
+        this.file = '';
         ConfigManager.ext.storageSet(`base64_${this.id}`, value);
     }
-}
 
-export class ImageManager {
-    static validKeys: (keyof ImageManager)[] = ['stolenImages', 'stealStatus'];
-    stolenImages: Image[];
-    stealStatus: boolean;
-
-    constructor() {
-        this.stolenImages = [];
-        this.stealStatus = false;
+    get format(): string {
+        return ConfigManager.ext.storageGet(`format_${this.id}`) || '';
+    }
+    set format(value: string) {
+        ConfigManager.ext.storageSet(`format_${this.id}`, value);
     }
 
-    static getImageCQCode(img: Image): string {
-        if (!img) return '';
-        const file = img.base64 ? seal.base64ToImage(img.base64) : img.file;
+    get CQCode(): string {
+        const file = this.type === 'base64' ? seal.base64ToImage(this.base64) : this.file;
         return `[CQ:image,file=${file}]`;
     }
 
-    stealImages(images: Image[]) {
-        const { maxStolenImageNum } = ConfigManager.image;
-        this.stolenImages = this.stolenImages.concat(images.filter(item => item.isUrl)).slice(-maxStolenImageNum);
-    }
-
-    drawLocalImageFile(): string {
-        const { localImagePathMap } = ConfigManager.image;
-        const ids = Object.keys(localImagePathMap);
-        if (ids.length == 0) return '';
-        const index = Math.floor(Math.random() * ids.length);
-        return localImagePathMap[ids[index]];
-    }
-
-    async drawStolenImageFile(): Promise<string> {
-        if (this.stolenImages.length === 0) return '';
-
-        const index = Math.floor(Math.random() * this.stolenImages.length);
-        const image = this.stolenImages.splice(index, 1)[0];
-        const url = image.file;
-
-        if (!await ImageManager.checkImageUrl(url)) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            return await this.drawStolenImageFile();
-        }
-
-        return url;
-    }
-
-    async drawImageFile(): Promise<string> {
-        const { localImagePathMap } = ConfigManager.image;
-
-        const files = Object.values(localImagePathMap);
-        if (this.stolenImages.length == 0 && files.length == 0) return '';
-
-        const index = Math.floor(Math.random() * (files.length + this.stolenImages.length));
-        return index < files.length ? files[index] : await this.drawStolenImageFile();
-    }
-
-    /**
-     * 提取并替换CQ码中的图片
-     * @param ctx 
-     * @param message 
-     * @returns 
-     */
-    async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
-        const { receiveImage } = ConfigManager.image;
-        if (!receiveImage || seg.type !== 'image') return { content: '', images: [] };
-
-        let content = '';
-        const images: Image[] = [];
-        try {
-            const file = seg.data.url || seg.data.file || '';
-            if (!file) return { content: '', images: [] };
-
-            const image = new Image();
-            image.file = file;
-            if (image.isUrl) {
-                const { condition } = ConfigManager.image;
-                const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
-                if (fmtCondition === 1) image.content = await ImageManager.imageToText(file);
-            }
-
-            content += image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>`;
-            images.push(image);
-        } catch (error) {
-            logger.error('在handleImageMessage中处理图片时出错:', error);
-        }
-
-        if (this.stealStatus) this.stealImages(images);
-        return { content, images };
-    }
-
-    static async checkImageUrl(url: string): Promise<boolean> {
+    async checkImageUrl(): Promise<boolean> {
+        if (this.type !== 'url') return true;
         let isValid = false;
-
         try {
-            const response = await fetch(url, { method: 'GET' });
+            const response = await fetch(this.file, { method: 'GET' });
 
             if (response.ok) {
                 const contentType = response.headers.get('Content-Type');
@@ -143,53 +68,12 @@ export class ImageManager {
         } catch (error) {
             logger.error('在checkImageUrl中请求出错:', error);
         }
-
         return isValid;
     }
 
-    static async imageToText(imageUrl: string, text = ''): Promise<string> {
-        const { defaultPrompt, urlToBase64 } = ConfigManager.image;
-
-        let useBase64 = false;
-        let imageContent = {
-            "type": "image_url",
-            "image_url": { "url": imageUrl }
-        }
-        if (urlToBase64 == '总是') {
-            const { base64, format } = await ImageManager.imageUrlToBase64(imageUrl);
-            if (!base64 || !format) {
-                logger.warning(`转换为base64失败`);
-                return '';
-            }
-
-            useBase64 = true;
-            imageContent = {
-                "type": "image_url",
-                "image_url": { "url": `data:image/${format};base64,${base64}` }
-            }
-        }
-
-        const textContent = {
-            "type": "text",
-            "text": text ? text : defaultPrompt
-        }
-
-        const messages = [{
-            role: "user",
-            content: [imageContent, textContent]
-        }]
-
-        const { maxChars } = ConfigManager.image;
-
-        const raw_reply = await sendITTRequest(messages, useBase64);
-        const reply = raw_reply.slice(0, maxChars);
-
-        return reply;
-    }
-
-    static async imageUrlToBase64(imageUrl: string): Promise<{ base64: string, format: string }> {
+    async urlToBase64() {
+        if (this.type !== 'url') return;
         const { imageTobase64Url } = ConfigManager.backend;
-
         try {
             const response = await fetch(`${imageTobase64Url}/image-to-base64`, {
                 method: 'POST',
@@ -197,33 +81,142 @@ export class ImageManager {
                     "Content-Type": "application/json",
                     "Accept": "application/json"
                 },
-                body: JSON.stringify({ url: imageUrl })
+                body: JSON.stringify({ url: this.file })
             });
 
             const text = await response.text();
-            if (!response.ok) {
-                throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
-            }
-            if (!text) {
-                throw new Error("响应体为空");
-            }
+            if (!response.ok) throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+            if (!text) throw new Error("响应体为空");
 
             try {
                 const data = JSON.parse(text);
-                if (data.error) {
-                    throw new Error(`请求失败! 错误信息: ${data.error.message}`);
-                }
-                if (!data.base64 || !data.format) {
-                    throw new Error(`响应体中缺少base64或format字段`);
-                }
-                return data;
+                if (data.error) throw new Error(`请求失败! 错误信息: ${data.error.message}`);
+                if (!data.base64 || !data.format) throw new Error(`响应体中缺少base64或format字段`);
+                this.base64 = data.base64;
+                this.format = data.format;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (error) {
             logger.error("在imageUrlToBase64中请求出错：", error);
-            return { base64: '', format: '' };
         }
+    }
+
+    async imageToText(prompt = '') {
+        const { defaultPrompt, urlToBase64, maxChars } = ConfigManager.image;
+
+        if (urlToBase64 == '总是' && this.type === 'url') await this.urlToBase64();
+
+        const messages = [{
+            role: "user",
+            content: [{
+                "type": "image_url",
+                "image_url": { "url": this.type === 'base64' ? `data:image/${this.format};base64,${this.base64}` : this.file }
+            }, {
+                "type": "text",
+                "text": prompt ? prompt : defaultPrompt
+            }]
+        }]
+
+        this.content = (await sendITTRequest(messages)).slice(0, maxChars);
+
+        if (!this.content && urlToBase64 === '自动' && this.type === 'url') {
+            logger.info(`图片${this.id}第一次识别失败，自动尝试使用转换为base64`);
+            await this.urlToBase64();
+            messages[0].content[0].image_url.url = `data:image/${this.format};base64,${this.base64}`;
+            this.content = (await sendITTRequest(messages)).slice(0, maxChars);
+        }
+
+        if (!this.content) logger.error(`图片${this.id}识别失败`);
+    }
+}
+
+export class ImageManager {
+    static validKeys: (keyof ImageManager)[] = ['stolenImages', 'stealStatus'];
+    stolenImages: Image[];
+    stealStatus: boolean;
+
+    constructor() {
+        this.stolenImages = [];
+        this.stealStatus = false;
+    }
+
+    stealImages(images: Image[]) {
+        const { maxStolenImageNum } = ConfigManager.image;
+        this.stolenImages = this.stolenImages.concat(images).slice(-maxStolenImageNum);
+    }
+
+    drawLocalImage(): Image {
+        const { localImagePathMap } = ConfigManager.image;
+        const images = Object.keys(localImagePathMap).map(id => {
+            const image = new Image();
+            image.id = id;
+            image.file = localImagePathMap[id];
+            return image;
+        });
+        if (images.length == 0) return null;
+        const index = Math.floor(Math.random() * images.length);
+        return images[index];
+    }
+
+    async drawStolenImage(): Promise<Image> {
+        if (this.stolenImages.length === 0) return null;
+
+        const index = Math.floor(Math.random() * this.stolenImages.length);
+        const img = this.stolenImages.splice(index, 1)[0];
+
+        if (!await img.checkImageUrl()) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            return await this.drawStolenImage();
+        }
+
+        return img;
+    }
+
+    async drawImage(): Promise<Image> {
+        const { localImagePathMap } = ConfigManager.image;
+
+        const localImages = Object.keys(localImagePathMap).map(id => {
+            const image = new Image();
+            image.id = id;
+            image.file = localImagePathMap[id];
+            return image;
+        });
+        if (this.stolenImages.length == 0 && localImages.length == 0) return null;
+        const index = Math.floor(Math.random() * (localImages.length + this.stolenImages.length));
+        return index < localImages.length ? localImages[index] : await this.drawStolenImage();
+    }
+
+    /**
+     * 提取并替换CQ码中的图片
+     * @param ctx 
+     * @param message 
+     * @returns 
+     */
+    async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
+        const { receiveImage } = ConfigManager.image;
+        if (!receiveImage || seg.type !== 'image') return { content: '', images: [] };
+
+        let content = '';
+        const images: Image[] = [];
+        try {
+            const file = seg.data.url || seg.data.file || '';
+            if (!file) return { content: '', images: [] };
+
+            const image = new Image();
+            image.file = file;
+            const { condition } = ConfigManager.image;
+            const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
+            if (fmtCondition === 1) await image.imageToText();
+
+            content += image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>`;
+            images.push(image);
+        } catch (error) {
+            logger.error('在handleImageMessage中处理图片时出错:', error);
+        }
+
+        if (this.stealStatus) this.stealImages(images);
+        return { content, images };
     }
 
     static async extractExistingImagesToSave(ctx: seal.MsgContext, ai: AI, s: string): Promise<Image[]> {
@@ -234,15 +227,7 @@ export class ImageManager {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
                 const image = ai.context.findImage(ctx, id);
                 if (image) {
-                    if (image.isUrl) {
-                        const { base64 } = await ImageManager.imageUrlToBase64(image.file);
-                        if (!base64) {
-                            logger.error(`图片${id}转换为base64失败`);
-                            continue;
-                        }
-                        image.file = '';
-                        image.base64 = base64;
-                    }
+                    if (image.type === 'url') await image.urlToBase64();
                     images.push(image);
                 }
             }

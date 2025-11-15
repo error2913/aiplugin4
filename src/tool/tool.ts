@@ -272,15 +272,7 @@ export class ToolManager {
      * @param tool_calls 
      * @returns tool_choice
      */
-    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: {
-        index: number,
-        id: string,
-        type: "function",
-        function: {
-            name: string,
-            arguments: string
-        }
-    }[]): Promise<string> {
+    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: ToolCall[]): Promise<string> {
         const { maxCallCount } = ConfigManager.tool;
 
         if (tool_calls.length !== 0) {

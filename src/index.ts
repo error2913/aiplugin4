@@ -1,11 +1,10 @@
 import { AIManager } from "./AI/AI";
-import { ImageManager } from "./AI/image";
 import { ToolManager } from "./tool/tool";
 import { ConfigManager } from "./config/configManager";
 import { buildSystemMessage, getRoleSetting } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
-import { fmtDate, transformTextToArray } from "./utils/utils_string";
+import { fmtDate, transformArrayToContent, transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
@@ -899,7 +898,7 @@ ${JSON.stringify(tool.info.function.parameters.properties, null, 2)}
                   .then(({ content, images }) => seal.replyToSender(ctx, msg, `返回内容:
 ${content}
 返回图片:
-${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
+${images.map(img => img.CQCode).join('\n')}`));
                 return ret;
               } catch (e) {
                 const s = `调用函数 (${val3}) 失败:${e.message}`;
@@ -1394,22 +1393,22 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
           const type = cmdArgs.getArgN(2);
           switch (aliasToCmd(type)) {
             case 'local': {
-              const file = ai.imageManager.drawLocalImageFile();
-              if (!file) {
+              const img = ai.imageManager.drawLocalImage();
+              if (!img) {
                 seal.replyToSender(ctx, msg, '暂无本地图片');
                 return ret;
               }
-              seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
+              seal.replyToSender(ctx, msg, img.CQCode);
               return ret;
             }
             case 'steal': {
-              ai.imageManager.drawStolenImageFile()
-                .then(file => seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '暂无偷取图片'));
+              ai.imageManager.drawStolenImage()
+                .then(img => seal.replyToSender(ctx, msg, img ? img.CQCode : '暂无偷取图片'));
               return ret;
             }
             case 'all': {
-              ai.imageManager.drawImageFile()
-                .then(file => seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '暂无图片'));
+              ai.imageManager.drawImage()
+                .then(img => seal.replyToSender(ctx, msg, img ? img.CQCode : '暂无图片'));
               return ret;
             }
             default: {
@@ -1423,18 +1422,18 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
           switch (aliasToCmd(op)) {
             case 'on': {
               ai.imageManager.stealStatus = true;
-              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
+              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.length}`);
               AIManager.saveAI(id);
               return ret;
             }
             case 'off': {
               ai.imageManager.stealStatus = false;
-              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
+              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.length}`);
               AIManager.saveAI(id);
               return ret;
             }
             default: {
-              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.filter(img => img.isUrl).length}`);
+              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.length}`);
               return ret;
             }
           }
@@ -1454,30 +1453,27 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
 
           switch (aliasToCmd(val2)) {
             case 'random': {
-              ai.imageManager.drawStolenImageFile()
-                .then(url => {
-                  if (!url) {
+              ai.imageManager.drawStolenImage()
+                .then(img => {
+                  if (!img) {
                     seal.replyToSender(ctx, msg, '图片偷取为空');
                     return;
                   }
-                  const text = cmdArgs.getRestArgsFrom(3);
-                  ImageManager.imageToText(url, text)
-                    .then(s => seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s));
+                  img.imageToText(cmdArgs.getRestArgsFrom(3))
+                    .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
                 });
               return ret;
             }
             default: {
-              const messageItem0 = transformTextToArray(val2)?.[0];
-              const url = messageItem0?.data?.url || messageItem0?.data?.file;
-              if (messageItem0?.type !== 'image' || !url) {
-                seal.replyToSender(ctx, msg, '请附带图片');
-                return ret;
-              }
-              const text = cmdArgs.getRestArgsFrom(3);
-              ImageManager.imageToText(url, text)
-                .then(s => seal.replyToSender(ctx, msg, `[CQ:image,file=${url}]\n` + s));
-            }
+              const messageArray = transformTextToArray(val2);
+              transformArrayToContent(ctx, ai, messageArray).then(({ images }) => {
+                if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
+                const img = images[0];
+                img.imageToText(cmdArgs.getRestArgsFrom(3))
+                  .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
+              });
               return ret;
+            }
           }
         }
         case 'find': {
@@ -1487,7 +1483,7 @@ ${images.map(img => ImageManager.getImageCQCode(img)).join('\n')}`));
             return ret;
           }
           const img = ai.context.findImage(ctx, id);
-          seal.replyToSender(ctx, msg, img ? ImageManager.getImageCQCode(img) : '未找到该图片');
+          seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片');
           return ret;
         }
         default: {

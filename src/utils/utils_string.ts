@@ -1,5 +1,5 @@
 import { Context } from "../AI/context";
-import { Image, ImageManager } from "../AI/image";
+import { Image } from "../AI/image";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformMsgId, transformMsgIdBack } from "./utils";
@@ -126,28 +126,17 @@ export function transformTextToArray(text: string): MessageSegment[] {
                 if (match[2]) {
                     match[2].trim().split(',').forEach(param => {
                         const eqIndex = param.indexOf('=');
-                        if (eqIndex === -1) {
-                            return;
-                        }
+                        if (eqIndex === -1) return;
 
                         const key = param.slice(0, eqIndex).trim();
                         const value = param.slice(eqIndex + 1).trim();
 
-                        // 这对吗？nc是这样的吗？
-                        if (type === 'image' && key === 'file') {
-                            params['url'] = value;
-                        }
-
-                        if (key) {
-                            params[key] = value;
-                        }
+                        if (type === 'image' && key === 'file') params['url'] = value; // 这对吗？nc是这样的吗？
+                        if (key) params[key] = value;
                     });
                 }
 
-                messageArray.push({
-                    type: type,
-                    data: params
-                });
+                messageArray.push({ type, data: params });
             } else {
                 logger.error(`无法解析CQ码：${segment}`);
             }
@@ -155,7 +144,6 @@ export function transformTextToArray(text: string): MessageSegment[] {
             messageArray.push({ type: 'text', data: { text: segment } });
         }
     }
-
     return messageArray;
 }
 
@@ -284,7 +272,7 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
 
                 if (image) {
                     images.push(image);
-                    text += ImageManager.getImageCQCode(image);
+                    text += image.CQCode;
                 } else {
                     logger.warning(`无法找到图片：${id}`);
                 }

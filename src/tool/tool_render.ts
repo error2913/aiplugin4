@@ -98,6 +98,7 @@ export function registerRender() {
                 const img = new Image();
                 img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
+                img.format = 'unknown';
                 img.content = `Markdown 渲染图片<|img:${img.id}|>
 主题：${theme}`;
 
@@ -161,6 +162,7 @@ export function registerRender() {
                 const img = new Image();
                 img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
+                img.format = 'unknown';
                 img.content = `HTML 渲染图片<|img:${img.id}|>`;
 
                 if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
@@ -175,3 +177,8 @@ export function registerRender() {
         }
     }
 }
+
+// TODO:嵌入图片……
+// 1. 嵌入本地图片
+// 2. 嵌入网络图片，包括聊天记录，用户头像，群头像，直接使用url
+// 3. 嵌入base64图片
