@@ -295,8 +295,6 @@ async function renderToImage(content, options = {}) {
         await new Promise(r => setTimeout(r, 1500)); 
 
         const imageId = generateImageId();
-        const fileName = `${imageId}.png`;
-        const filePath = path.join(IMAGE_DIR, fileName);
 
         let clip;
         let omitBackground = false;
@@ -332,17 +330,17 @@ async function renderToImage(content, options = {}) {
             omitBackground = false; 
         }
 
+        let base64;
         if (!clip || clip.width === 0 || clip.height === 0) {
             console.warn('Clipping failed, screenshotting full page as fallback.');
-            await page.screenshot({
-                path: filePath,
+            base64 = await page.screenshot({
                 type: 'png',
                 omitBackground: omitBackground,
-                fullPage: true
+                fullPage: true,
+                encoding: 'base64'
             });
         } else {
-            await page.screenshot({
-                path: filePath,
+            base64 = await page.screenshot({
                 type: 'png',
                 omitBackground: omitBackground,
                 clip: {
@@ -350,11 +348,12 @@ async function renderToImage(content, options = {}) {
                     y: clip.y,
                     width: Math.ceil(clip.width),
                     height: Math.ceil(clip.height)
-                }
+                },
+                encoding: 'base64'
             });
         }
 
-        return { imageId, fileName, filePath };
+        return { imageId, base64 };
     } finally {
         await browser.close();
     }
@@ -368,8 +367,6 @@ app.post('/render/markdown', async (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Field "markdown" is required' });
         }
 
-        await ensureImageDir();
-
         const result = await renderToImage(markdown, {
             contentType: 'markdown', 
             theme,
@@ -377,13 +374,10 @@ app.post('/render/markdown', async (req, res) => {
             quality
         });
 
-        const imageUrl = `${req.protocol}://${req.get('host')}/images/${result.fileName}`;
-
         res.json({
             status: 'success',
             imageId: result.imageId,
-            url: imageUrl,
-            fileName: result.fileName,
+            base64: result.base64,
             contentType: 'markdown',
             theme
         });
@@ -401,21 +395,16 @@ app.post('/render/html', async (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Field "html" is required' });
         }
 
-        await ensureImageDir();
-
         const result = await renderToImage(html, {
             contentType: 'html', 
             width,
             quality
         });
 
-        const imageUrl = `${req.protocol}://${req.get('host')}/images/${result.fileName}`;
-
         res.json({
             status: 'success',
             imageId: result.imageId,
-            url: imageUrl,
-            fileName: result.fileName,
+            base64: result.base64,
             contentType: 'html'
         });
     } catch (error) {
