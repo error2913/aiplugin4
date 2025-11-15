@@ -190,6 +190,7 @@ export function registerMeme() {
                 const img = new Image();
                 img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
+                img.format = 'unknown';
                 img.content = `表情包<|img:${img.id}|>
 ${textText ? `文字：${textText}` : ''}
 ${memberText ? `用户：${memberText}` : ''}`;

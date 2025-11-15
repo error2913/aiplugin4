@@ -1,21 +1,17 @@
-import { AI, AIManager } from "./AI/AI";
-import { ToolCall, ToolManager } from "./tool/tool";
+import { AIManager } from "./AI/AI";
+import { ToolCall, ToolInfo } from "./tool/tool";
 import { ConfigManager } from "./config/configManager";
-import { handleMessages, parseBody, parseEmbeddingBody } from "./utils/utils_message";
-import { ImageManager } from "./AI/image";
+import { parseBody, parseEmbeddingBody } from "./utils/utils_message";
 import { logger } from "./logger";
 import { withTimeout } from "./utils/utils";
-import { transformTextToArray } from "./utils/utils_string";
 
-export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, ai: AI, messages: {
+export async function sendChatRequest(messages: {
     role: string,
     content: string,
     tool_calls?: ToolCall[],
     tool_call_id?: string
-}[], tool_choice: string): Promise<string> {
+}[], tools: ToolInfo[], tool_choice: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
     const { url, apiKey, bodyTemplate, timeout } = ConfigManager.request;
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
-    const tools = ai.tool.getToolsInfo(msg.messageType);
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, tools, tool_choice);
@@ -33,54 +29,17 @@ export async function sendChatRequest(ctx: seal.MsgContext, msg: seal.Message, a
                 logger.info(`思维链内容:`, message.reasoning_content);
             }
 
-            const reply = message.content || '';
+            const content = message.content || '';
 
-            logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+            logger.info(`响应内容:`, content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
-            if (isTool) {
-                if (usePromptEngineering) {
-                    const match = reply.match(/<[\|│｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
-                    if (match) {
-                        const messageArray = transformTextToArray(match[0]);
-                        await ai.context.addMessage(ctx, msg, ai, messageArray, [], "assistant", '');
-
-                        try {
-                            await ToolManager.handlePromptToolCall(ctx, msg, ai, match[1]);
-                        } catch (e) {
-                            logger.error(`在handlePromptToolCall中出错:`, e.message);
-                            return '';
-                        }
-
-                        const messages = await handleMessages(ctx, ai);
-                        return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
-                    }
-                } else {
-                    if (message.hasOwnProperty('tool_calls') && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-                        logger.info(`触发工具调用`);
-
-                        ai.context.addToolCallsMessage(message.tool_calls);
-
-                        let tool_choice = 'auto';
-                        try {
-                            tool_choice = await ToolManager.handleToolCalls(ctx, msg, ai, message.tool_calls);
-                        } catch (e) {
-                            logger.error(`在handleToolCalls中出错:`, e.message);
-                            return '';
-                        }
-
-                        const messages = await handleMessages(ctx, ai);
-                        return await sendChatRequest(ctx, msg, ai, messages, tool_choice);
-                    }
-                }
-            }
-
-            return reply;
+            return { content, tool_calls: message.tool_calls || [] };
         } else {
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (e) {
         logger.error("在sendChatRequest中出错:", e.message);
-        return '';
+        return { content: '', tool_calls: [] };
     }
 }
 
@@ -91,9 +50,9 @@ export async function sendITTRequest(messages: {
         image_url?: { url: string }
         text?: string
     }[]
-}[], useBase64: boolean): Promise<string> {
+}[]): Promise<string> {
     const { timeout } = ConfigManager.request;
-    const { url, apiKey, bodyTemplate, urlToBase64 } = ConfigManager.image;
+    const { url, apiKey, bodyTemplate } = ConfigManager.image;
 
     try {
         const bodyObject = parseBody(bodyTemplate, messages, null, null);
@@ -105,37 +64,16 @@ export async function sendITTRequest(messages: {
             AIManager.updateUsage(data.model, data.usage);
 
             const message = data.choices[0].message;
-            const reply = message.content || '';
+            const content = message.content || '';
 
-            logger.info(`响应内容:`, reply, '\nlatency', Date.now() - time, 'ms');
+            logger.info(`响应内容:`, content, '\nlatency', Date.now() - time, 'ms');
 
-            return reply;
+            return content;
         } else {
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (e) {
         logger.error("在sendITTRequest中请求出错:", e.message);
-        if (urlToBase64 === '自动' && !useBase64) {
-            logger.info(`自动尝试使用转换为base64`);
-
-            for (let i = 0; i < messages.length; i++) {
-                const message = messages[i];
-                for (let j = 0; j < message.content.length; j++) {
-                    const content = message.content[j];
-                    if (content.type === 'image_url') {
-                        const { base64, format } = await ImageManager.imageUrlToBase64(content.image_url.url);
-                        if (!base64 || !format) {
-                            logger.warning(`转换为base64失败`);
-                            return '';
-                        }
-
-                        message.content[j].image_url.url = `data:image/${format};base64,${base64}`;
-                    }
-                }
-            }
-
-            return await sendITTRequest(messages, true);
-        }
         return '';
     }
 }

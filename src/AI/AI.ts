@@ -1,4 +1,4 @@
-import { ImageManager } from "./image";
+import { Image, ImageManager } from "./image";
 import { ConfigManager } from "../config/configManager";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../service";
@@ -7,7 +7,7 @@ import { MemoryManager } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
-import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
+import { checkRepeat, handleReply, MessageSegment, transformArrayToContent, transformTextToArray } from "../utils/utils_string";
 import { TimerManager } from "../timer";
 
 export interface GroupInfo {
@@ -103,19 +103,37 @@ export class AI {
         await ai.context.addMessage(ctx, msg, ai, content, images, 'user', transformMsgId(msg.rawId));
     }
 
-    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = ''): Promise<void> {
+    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], images: Image[]) {
+        for (let i = 0; i < contextArray.length; i++) {
+            const content = contextArray[i];
+            const reply = replyArray[i];
+            const msgId = await replyToSender(ctx, msg, this, reply);
+            await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
+        }
+
+        //发送偷来的图片
+        const { p } = ConfigManager.image;
+        if (Math.random() * 100 <= p) {
+            const img = await this.imageManager.drawImage();
+            if (img) seal.replyToSender(ctx, msg, img.CQCode);
+        }
+    }
+
+    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string): Promise<void> {
         logger.info('触发回复:', reason || '未知原因');
 
-        const { bucketLimit, fillInterval } = ConfigManager.received;
-        // 补充并检查触发次数
-        if (Date.now() - this.bucket.lastTime > fillInterval * 1000) {
-            const fillCount = (Date.now() - this.bucket.lastTime) / (fillInterval * 1000);
-            this.bucket.count = Math.min(this.bucket.count + fillCount, bucketLimit);
-            this.bucket.lastTime = Date.now();
-        }
-        if (this.bucket.count <= 0) {
-            logger.warning(`触发次数不足，无法回复`);
-            return;
+        if (reason !== '函数回调触发') {
+            const { bucketLimit, fillInterval } = ConfigManager.received;
+            // 补充并检查触发次数
+            if (Date.now() - this.bucket.lastTime > fillInterval * 1000) {
+                const fillCount = (Date.now() - this.bucket.lastTime) / (fillInterval * 1000);
+                this.bucket.count = Math.min(this.bucket.count + fillCount, bucketLimit);
+                this.bucket.lastTime = Date.now();
+            }
+            if (this.bucket.count <= 0) {
+                logger.warning(`触发次数不足，无法回复`);
+                return;
+            }
         }
 
         // 检查toolsNotAllow状态
@@ -143,53 +161,66 @@ export class AI {
             return;
         }
 
-        let result = {
-            contextArray: [],
-            replyArray: [],
-            images: []
-        }
+
+        const { isTool, usePromptEngineering } = ConfigManager.tool;
+        const toolInfos = this.tool.getToolsInfo(msg.messageType);
+
+        let result = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // 处理messages
             const messages = await handleMessages(ctx, this);
 
             //获取处理后的回复
-            const raw_reply = await sendChatRequest(ctx, msg, this, messages, "auto");
+            const { content: raw_reply, tool_calls } = await sendChatRequest(messages, toolInfos, tool_choice || "auto");
+
+            if (isTool) {
+                if (usePromptEngineering) {
+                    const match = raw_reply.match(/<[\|│｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                    if (match) {
+                        const messageArray = transformTextToArray(match[0]);
+                        const { content, images } = await transformArrayToContent(ctx, this, messageArray);
+                        await this.context.addMessage(ctx, msg, this, content, images, "assistant", '');
+                        try {
+                            await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
+                            await this.chat(ctx, msg, '函数回调触发');
+                        } catch (e) {
+                            logger.error(`在handlePromptToolCall中出错:`, e.message);
+                        }
+                    }
+                } else {
+                    if (tool_calls.length > 0) {
+                        logger.info(`触发工具调用`);
+                        this.context.addToolCallsMessage(tool_calls);
+                        try {
+                            tool_choice = await ToolManager.handleToolCalls(ctx, msg, this, tool_calls);
+                            await this.chat(ctx, msg, '函数回调触发', tool_choice);
+                        } catch (e) {
+                            logger.error(`在handleToolCalls中出错:`, e.message);
+                        }
+                    }
+                }
+            }
+
+            // 检查是否为复读
             result = await handleReply(ctx, msg, this, raw_reply);
+            if (checkRepeat(this.context, result.contextArray.join('')) && result.replyArray.join('').trim()) {
+                if (retry > MaxRetry) {
+                    logger.warning(`发现复读，已达到最大重试次数，清除AI上下文`);
+                    this.context.clearMessages('assistant', 'tool');
+                    break;
+                }
 
-            if (!checkRepeat(this.context, result.contextArray.join('')) || result.replyArray.join('').trim() === '') {
-                break;
+                logger.warning(`发现复读，一秒后进行重试:[${retry}/3]`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
             }
 
-            if (retry > MaxRetry) {
-                logger.warning(`发现复读，已达到最大重试次数，清除AI上下文`);
-                this.context.clearMessages('assistant', 'tool');
-                break;
-            }
-
-            logger.warning(`发现复读，一秒后进行重试:[${retry}/3]`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            break;
         }
 
         const { contextArray, replyArray, images } = result;
-
-        for (let i = 0; i < contextArray.length; i++) {
-            const content = contextArray[i];
-            const reply = replyArray[i];
-            const msgId = await replyToSender(ctx, msg, this, reply);
-            await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
-        }
-
-        //发送偷来的图片
-        const { p } = ConfigManager.image;
-        if (Math.random() * 100 <= p) {
-            const file = await this.imageManager.drawImageFile();
-
-            if (file) {
-                seal.replyToSender(ctx, msg, `[CQ:image,file=${file}]`);
-            }
-        }
-
+        await this.reply(ctx, msg, contextArray, replyArray, images);
         AIManager.saveAI(this.id);
     }
 
@@ -200,9 +231,7 @@ export class AI {
 
         const messages = await handleMessages(ctx, this);
         const id = await startStream(messages);
-        if (id === '') {
-            return;
-        }
+        if (!id) return;
 
         this.stream.id = id;
         let status = 'processing';
@@ -214,15 +243,10 @@ export class AI {
             status = result.status;
             const raw_reply = result.reply;
 
-            if (raw_reply.length <= 8) {
-                interval = 1500;
-            } else if (raw_reply.length <= 20) {
-                interval = 1000;
-            } else if (raw_reply.length <= 30) {
-                interval = 500;
-            } else {
-                interval = 200;
-            }
+            if (raw_reply.length <= 8) interval = 1500;
+            else if (raw_reply.length <= 20) interval = 1000;
+            else if (raw_reply.length <= 30) interval = 500;
+            else interval = 200;
 
             if (raw_reply.trim() === '') {
                 after = result.nextAfter;
@@ -239,25 +263,13 @@ export class AI {
                     const match = raw_reply.match(/([\s\S]*)<[\|│｜]?function(?:_call)?>/);
                     if (match && match[1].trim()) {
                         const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
-
-                        if (this.stream.id !== id) {
-                            return;
-                        }
-
-                        for (let i = 0; i < contextArray.length; i++) {
-                            const content = contextArray[i];
-                            const reply = replyArray[i];
-                            const msgId = await replyToSender(ctx, msg, this, reply);
-                            await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
-                        }
+                        if (this.stream.id !== id) return;
+                        await this.reply(ctx, msg, contextArray, replyArray, images);
                     }
-
                     this.stream.toolCallStatus = true;
                 }
 
-                if (this.stream.id !== id) {
-                    return;
-                }
+                if (this.stream.id !== id) return;
 
                 if (this.stream.toolCallStatus) {
                     this.stream.reply += raw_reply;
@@ -295,17 +307,8 @@ export class AI {
             }
 
             const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, raw_reply);
-
-            if (this.stream.id !== id) {
-                return;
-            }
-
-            for (let i = 0; i < contextArray.length; i++) {
-                const content = contextArray[i];
-                const reply = replyArray[i];
-                const msgId = await replyToSender(ctx, msg, this, reply);
-                await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
-            }
+            if (this.stream.id !== id) return;
+            this.reply(ctx, msg, contextArray, replyArray, images);
 
             after = result.nextAfter;
             await new Promise(resolve => setTimeout(resolve, interval));

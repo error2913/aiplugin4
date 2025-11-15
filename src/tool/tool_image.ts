@@ -1,4 +1,4 @@
-import { ImageManager } from "../AI/image";
+import { Image } from "../AI/image";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { Tool } from "./tool";
@@ -31,17 +31,10 @@ export function registerImage() {
         const image = ai.context.findImage(ctx, id);
         if (!image) return { content: `未找到图片${id}`, images: [] };
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
-
-        if (image.isUrl) {
-            const reply = await ImageManager.imageToText(image.file, text);
-            if (reply) {
-                return { content: reply, images: [] };
-            } else {
-                return { content: '图片识别失败', images: [] };
-            }
-        } else {
-            return { content: '本地图片暂时无法识别', images: [] };
-        }
+        
+        if (image.type === 'local') return { content: '本地图片暂时无法识别', images: [] };
+        await image.imageToText(text);
+        return { content: image.content || '图片识别失败', images: [] };
     }
 
     const toolAvatar = new Tool({
@@ -78,29 +71,20 @@ export function registerImage() {
 
         if (avatar_type === "private") {
             const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-
+            if (uid === null) return { content: `未找到<${name}>`, images: [] };
             url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
         } else if (avatar_type === "group") {
             const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-
+            if (gid === null) return { content: `未找到<${name}>`, images: [] };
             url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
         } else {
             return { content: `未知的头像类型<${avatar_type}>`, images: [] };
         }
 
-
-        const reply = await ImageManager.imageToText(url, text);
-        if (reply) {
-            return { content: reply, images: [] };
-        } else {
-            return { content: '头像识别失败', images: [] };
-        }
+        const image = new Image();
+        image.file = url;
+        await image.imageToText(text);
+        return { content: image.content || '头像识别失败', images: [] };
     }
 
     const toolTTI = new Tool({
