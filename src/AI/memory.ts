@@ -88,7 +88,7 @@ export class Memory {
      * @param ul 查询用户列表
      * @param gl 查询群组列表
      * @param kws 查询关键词列表
-     * @returns 相似度分数（1-2）
+     * @returns 相似度分数（0-1）
      */
     calculateSimilarity(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
         // 总权重 0-1
@@ -107,8 +107,20 @@ export class Memory {
         const keywordSimilarity = (kws && kws.length > 0) ? commonKeyword.length / kws.length : 0;
         // 综合相似度分数 0-1
         const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.2 + groupSimilarity * 0.2 + keywordSimilarity * 0.2;
-        // 相似度增强因子 1-2
-        return 1 + avgSimilarity / totalWeight;
+        // 相似度增强因子 0-1
+        return avgSimilarity / totalWeight;
+    }
+
+    /**
+     * 计算记忆的最终分数
+     * @param v  查询向量
+     * @param ul 查询用户列表
+     * @param gl 查询群组列表
+     * @param kws 查询关键词列表
+     * @returns 相似度分数（0-1）
+     */
+    calculateScore(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
+        return this.weight * 0.03 + this.calculateSimilarity(v, ul, gl, kws) * 0.7;
     }
 
     async updateVector() {
@@ -409,11 +421,7 @@ export class MemoryManager {
                 switch (method) {
                     case 'weight': return b.weight - a.weight;
                     case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
-                    case 'score': {
-                        const aScore = a.weight * a.calculateSimilarity(qv, ul, gl, kws);
-                        const bScore = b.weight * b.calculateSimilarity(qv, ul, gl, kws);
-                        return bScore - aScore;
-                    }
+                    case 'score': return b.calculateScore(qv, ul, gl, kws) - a.calculateScore(qv, ul, gl, kws);
                 }
             })
             .slice(0, options.topK || 10);
