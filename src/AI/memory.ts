@@ -15,7 +15,7 @@ export interface searchOptions {
     groupList: GroupInfo[];
     keywords: string[];
     includeImages: boolean;
-    method: 'weight' | 'similarity' | 'score';
+    method: 'weight' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
 }
 
 export class Memory {
@@ -422,6 +422,9 @@ export class MemoryManager {
                     case 'weight': return b.weight - a.weight;
                     case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
                     case 'score': return b.calculateScore(qv, ul, gl, kws) - a.calculateScore(qv, ul, gl, kws);
+                    case 'early': return a.createTime - b.createTime;
+                    case 'late': return b.createTime - a.createTime;
+                    case 'recent': return b.lastMentionTime - a.lastMentionTime;
                 }
             })
             .slice(0, options.topK || 10);
