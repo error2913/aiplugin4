@@ -376,18 +376,15 @@ export class AI {
         return Math.floor(nextTime.getTime() / 1000);
     }
 
-    checkActiveTimer(ctx: seal.MsgContext, msg: seal.Message) {
+    checkActiveTimer(ctx: seal.MsgContext) {
         const { segs, start, end } = this.setting.activeTimeInfo;
         if (segs !== 0 && (start !== 0 || end !== 0)) {
             const timers = TimerManager.getTimers(this.id, '', ['activeTime']);
             if (timers.length === 0) {
                 const curSegIndex = this.curActiveTimeSegIndex;
                 const nextTimePoint = this.getNextTimePoint(curSegIndex);
-                if (nextTimePoint !== -1) {
-                    TimerManager.addActiveTimeTimer(ctx, msg, this, nextTimePoint);
-                } else {
-                    logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
-                }
+                if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
+                else logger.error(`活跃时间定时器添加失败，无法生成时间点，当前时段序号:${curSegIndex}`);
             }
         }
     }

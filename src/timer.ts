@@ -1,16 +1,14 @@
 import { ConfigManager } from "./config/configManager";
-import { createCtx, createMsg } from "./utils/utils_seal";
+import { getCtxAndMsg } from "./utils/utils_seal";
 import { AI, AIManager } from "./AI/AI";
 import { logger } from "./logger";
 import { fmtDate } from "./utils/utils_string";
 import { revive } from "./utils/utils";
 
 export class TimerInfo {
-    static validKeys: (keyof TimerInfo)[] = ['id', 'messageType', 'uid', 'gid', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content'];
-    id: string;
-    messageType: 'private' | 'group';
-    uid: string;
-    gid: string;
+    static validKeys: (keyof TimerInfo)[] = ['sid', 'isPrivate', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content'];
+    sid: string;
+    isPrivate: boolean;
     epId: string;
     set: number; // 定时器设置时间，单位秒
     target: number; // 定时器具体触发时间，单位秒
@@ -20,10 +18,8 @@ export class TimerInfo {
     content: string;
 
     constructor() {
-        this.id = '';
-        this.messageType = 'private';
-        this.uid = '';
-        this.gid = '';
+        this.sid = '';
+        this.isPrivate = false;
         this.epId = '';
         this.set = 0;
         this.target = 0;
@@ -42,11 +38,10 @@ export class TimerManager {
     static getTimerQueue() {
         try {
             const data = JSON.parse(ConfigManager.ext.storageGet(`timerQueue`) || '[]')
-            if (!Array.isArray(data)) {
-                throw new Error('timerQueue不是数组');
-            }
-
+            if (!Array.isArray(data)) throw new Error('timerQueue不是数组');
             data.forEach((item: any) => {
+                if (!item.hasOwnProperty('sessionId')) return;
+                if (!item.hasOwnProperty('sessionType')) return;
                 this.timerQueue.push(revive(TimerInfo, item));
             });
         } catch (e) {
@@ -58,12 +53,13 @@ export class TimerManager {
         ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
-    static addTargetTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, target: number, content: string) {
+    static addTargetTimer(ctx: seal.MsgContext, ai: AI, target: number, content: string) {
+        const uid = ctx.player.userId;
+        const gid = ctx.group.groupId;
+        const sessionId = ctx.isPrivate ? uid : gid;
         const timer = new TimerInfo();
-        timer.id = ai.id;
-        timer.messageType = msg.messageType;
-        timer.uid = ctx.player.userId;
-        timer.gid = ctx.group.groupId;
+        timer.sid = sessionId;
+        timer.isPrivate = ctx.isPrivate;
         timer.epId = ctx.endPoint.userId;
         timer.set = Math.floor(Date.now() / 1000);
         timer.target = target;
@@ -82,12 +78,13 @@ export class TimerManager {
 内容:${content}`);
     }
 
-    static addIntervalTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, interval: number, count: number, content: string) {
+    static addIntervalTimer(ctx: seal.MsgContext, ai: AI, interval: number, count: number, content: string) {
+        const uid = ctx.player.userId;
+        const gid = ctx.group.groupId;
+        const sessionId = ctx.isPrivate ? uid : gid;
         const timer = new TimerInfo();
-        timer.id = ai.id;
-        timer.messageType = msg.messageType;
-        timer.uid = ctx.player.userId;
-        timer.gid = ctx.group.groupId;
+        timer.sid = sessionId;
+        timer.isPrivate = ctx.isPrivate;
         timer.epId = ctx.endPoint.userId;
         timer.set = Math.floor(Date.now() / 1000);
         timer.interval = interval;
@@ -109,12 +106,13 @@ export class TimerManager {
 内容:${content}`);
     }
 
-    static addActiveTimeTimer(ctx: seal.MsgContext, msg: seal.Message, ai: AI, target: number) {
+    static addActiveTimeTimer(ctx: seal.MsgContext, ai: AI, target: number) {
+        const uid = ctx.player.userId;
+        const gid = ctx.group.groupId;
+        const sessionId = ctx.isPrivate ? uid : gid;
         const timer = new TimerInfo();
-        timer.id = ai.id;
-        timer.messageType = msg.messageType;
-        timer.uid = ctx.player.userId;
-        timer.gid = ctx.group.groupId;
+        timer.sid = sessionId;
+        timer.isPrivate = ctx.isPrivate;
         timer.epId = ctx.endPoint.userId;
         timer.set = Math.floor(Date.now() / 1000);
         timer.target = target;
@@ -132,9 +130,9 @@ export class TimerManager {
 触发时间:${fmtDate(target)}`);
     }
 
-    static removeTimers(id: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime')[] = [], index_list: number[] = []) {
+    static removeTimers(sid: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime')[] = [], index_list: number[] = []) {
         if (index_list.length > 0) {
-            const timers = this.getTimers(id, content, types);
+            const timers = this.getTimers(sid, content, types);
 
             for (const index of index_list) {
                 if (index < 1 || index > timers.length) {
@@ -153,7 +151,7 @@ export class TimerManager {
         } else {
             this.timerQueue = this.timerQueue.filter(timer =>
                 !(
-                    (!id || timer.id === id) &&
+                    (!sid || timer.sid === sid) &&
                     (!content || timer.content === content) &&
                     (types.length === 0 || types.includes(timer.type))
                 )
@@ -163,12 +161,34 @@ export class TimerManager {
         this.saveTimerQueue();
     }
 
-    static getTimers(id: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime')[] = []): TimerInfo[] {
+    static getTimers(sid: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime')[] = []): TimerInfo[] {
         return this.timerQueue.filter(timer =>
-            (!id || timer.id === id) &&
+            (!sid || timer.sid === sid) &&
             (!content || timer.content === content) &&
             (types.length === 0 || types.includes(timer.type))
         );
+    }
+
+    static getTimerListText(sid: string, p: number = 1): string {
+        const timers = TimerManager.getTimers(sid, '', []);
+        if (timers.length === 0) return '';
+        if (p > Math.ceil(timers.length / 10)) p = Math.ceil(timers.length / 10);
+        return timers.slice((p - 1) * 10, p * 10).map((t, i) => {
+            switch (t.type) {
+                case 'target': return `${i + 1 + (p - 1) * 10}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+目标时间：${fmtDate(t.target)}
+内容：${t.content}`;
+                case 'interval': return `${i + 1 + (p - 1) * 10}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+间隔时间：${t.interval}秒
+剩余触发次数：${t.count === -1 ? '无限' : t.count - 1}
+内容：${t.content}`;
+                case 'activeTime': return `${i + 1 + (p - 1) * 10}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+目标时间：${fmtDate(t.target)}`;
+            }
+        }).join('\n') + `\n当前页码:${p}/${Math.ceil(timers.length / 10)}`;
     }
 
     static async task() {
@@ -192,14 +212,13 @@ export class TimerManager {
                                 this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
-                                logger.info(`${timer.id} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                logger.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
                                 continue;
                             }
 
-                            const { id, messageType, uid, gid, epId, set, content } = timer;
-                            const msg = createMsg(messageType, uid, gid);
-                            const ctx = createCtx(epId, msg);
-                            const ai = AIManager.getAI(id);
+                            const { sid, isPrivate, epId, set, content } = timer;
+                            const { ctx, msg } = getCtxAndMsg(epId, sid, isPrivate);
+                            const ai = AIManager.getAI(sid);
 
                             const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${fmtDate(set)}
@@ -219,14 +238,13 @@ export class TimerManager {
                                 this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
-                                logger.info(`${timer.id} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                logger.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
                                 continue;
                             }
 
-                            const { id, messageType, uid, gid, epId, set, interval, count, content } = timer;
-                            const msg = createMsg(messageType, uid, gid);
-                            const ctx = createCtx(epId, msg);
-                            const ai = AIManager.getAI(id);
+                            const { sid, isPrivate, epId, set, interval, count, content } = timer;
+                            const { ctx, msg } = getCtxAndMsg(epId, sid, isPrivate);
+                            const ai = AIManager.getAI(sid);
 
                             if (count === -1 || count > 1) {
                                 timer.set = Math.floor(Date.now() / 1000);
@@ -255,23 +273,22 @@ export class TimerManager {
                                 this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
-                                logger.info(`${timer.id} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                logger.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
                                 continue;
                             }
 
-                            const { id, messageType, uid, gid, epId, set } = timer;
-                            const msg = createMsg(messageType, uid, gid);
-                            const ctx = createCtx(epId, msg);
-                            const ai = AIManager.getAI(id);
+                            const { sid, isPrivate, epId, set } = timer;
+                            const { ctx, msg } = getCtxAndMsg(epId, sid, isPrivate);
+                            const ai = AIManager.getAI(sid);
 
                             const curSegIndex = ai.curActiveTimeSegIndex;
                             const nextTimePoint = ai.getNextTimePoint(curSegIndex);
                             if (curSegIndex === -1) {
-                                logger.error(`${id} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
+                                logger.error(`${sid} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
                                 continue;
                             }
                             if (nextTimePoint !== -1) {
-                                this.addActiveTimeTimer(ctx, msg, ai, nextTimePoint);
+                                this.addActiveTimeTimer(ctx, ai, nextTimePoint);
                             }
 
                             const messages = ai.context.messages;
@@ -292,7 +309,7 @@ ${lastTimePrompt}
 
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (e) {
-                    logger.error(`${timer.id} 执行 ${timer.type} 定时器出错，错误信息:${e.message}`);
+                    logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e.message}`);
                 }
             }
 

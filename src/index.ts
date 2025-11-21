@@ -4,7 +4,7 @@ import { ConfigManager } from "./config/configManager";
 import { buildSystemMessage, getRoleSetting } from "./utils/utils_message";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
-import { fmtDate, transformArrayToContent, transformTextToArray } from "./utils/utils_string";
+import { transformArrayToContent, transformTextToArray } from "./utils/utils_string";
 import { checkUpdate } from "./utils/utils_update";
 import { get_chart_url } from "./service";
 import { TimerManager } from "./timer";
@@ -13,6 +13,7 @@ import { PrivilegeManager } from "./privilege";
 import { aliasToCmd } from "./utils/utils";
 import { knowledgeMM } from "./AI/memory";
 import { HELPMAP, CQTYPESALLOW } from "./config/config";
+import { ImageManager } from "./AI/image";
 
 function main() {
   ConfigManager.registerConfig();
@@ -49,14 +50,28 @@ function main() {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
       const epId = ctx.endPoint.userId;
-      const id = ctx.isPrivate ? uid : gid;
+      const sid = ctx.isPrivate ? uid : gid;
 
       const ret = seal.ext.newCmdExecuteResult(true);
-      const ai = AIManager.getAI(id);
+      const ai = AIManager.getAI(sid);
       const { success, exist } = PrivilegeManager.checkPriv(ctx, cmdArgs, ai);
       if (!success) {
         seal.replyToSender(ctx, msg, exist ? '权限不足' : '命令不存在');
         return ret;
+      }
+
+      let page = 1;
+      const kwargPage = cmdArgs.kwargs.find((kwarg) => kwarg.name === 'page' || kwarg.name === 'p');
+      if (kwargPage && kwargPage.valueExists) {
+        page = parseInt(kwargPage.value);
+        if (isNaN(page)) {
+          seal.replyToSender(ctx, msg, '页码必须为数字');
+          return ret;
+        }
+        if (page < 1) {
+          seal.replyToSender(ctx, msg, '页码必须大于等于1');
+          return ret;
+        }
       }
 
       switch (aliasToCmd(val)) {
@@ -83,7 +98,7 @@ ${HELPMAP["会话权限"]}`);
                     return ret;
                   }
 
-                  const id2 = val4 === 'now' ? id : val4;
+                  const id2 = val4 === 'now' ? sid : val4;
                   const ai2 = AIManager.getAI(id2);
 
                   ai2.setting.priv = limit;
@@ -101,7 +116,7 @@ ${HELPMAP["ID"]}`);
                     return ret;
                   }
 
-                  const id2 = val4 === 'now' ? id : val4;
+                  const id2 = val4 === 'now' ? sid : val4;
                   const ai2 = AIManager.getAI(id2);
                   seal.replyToSender(ctx, msg, `${id2}\n会话权限:${ai2.setting.priv}`);
                   return ret;
@@ -200,7 +215,7 @@ ${HELPMAP["权限限制"]}`);
           const setting = ai.setting;
           const { start, end, segs } = setting.activeTimeInfo;
 
-          seal.replyToSender(ctx, msg, `${id}
+          seal.replyToSender(ctx, msg, `${sid}
 权限: ${setting.priv}
 上下文轮数: ${ai.context.messages.filter(m => m.role === 'user').length}
 计数器模式(c): ${setting.counter > -1 ? `${setting.counter}条` : '关闭'}
@@ -264,40 +279,11 @@ ${HELPMAP["权限限制"]}`);
           const val2 = cmdArgs.getArgN(2);
           switch (aliasToCmd(val2)) {
             case 'list': {
-              const timers = TimerManager.getTimers(id, '', []);
-
-              if (timers.length === 0) {
-                seal.replyToSender(ctx, msg, '当前对话没有定时器');
-                return ret;
-              }
-
-              const s = timers.map((t, i) => {
-                switch (t.type) {
-                  case 'target': {
-                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
-类型:${t.type}
-目标时间：${fmtDate(t.target)}
-内容：${t.content}`;
-                  }
-                  case 'interval': {
-                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
-类型:${t.type}
-间隔时间：${t.interval}秒
-剩余触发次数：${t.count === -1 ? '无限' : t.count - 1}
-内容：${t.content}`;
-                  }
-                  case 'activeTime': {
-                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
-类型:${t.type}
-目标时间：${fmtDate(t.target)}`;
-                  }
-                }
-              }).join('\n');
-              seal.replyToSender(ctx, msg, s);
+              seal.replyToSender(ctx, msg, TimerManager.getTimerListText(sid, page) || '当前对话没有定时器');
               return ret;
             }
             case 'clear': {
-              TimerManager.removeTimers(id, '', [], []);
+              TimerManager.removeTimers(sid, '', [], []);
               seal.replyToSender(ctx, msg, '所有定时器已清除');
               return ret;
             }
@@ -395,7 +381,7 @@ ${HELPMAP["权限限制"]}`);
                   return ret;
                 }
 
-                TimerManager.removeTimers(id, '', ['activeTime'], []);
+                TimerManager.removeTimers(sid, '', ['activeTime'], []);
                 setting.activeTimeInfo = {
                   start,
                   end,
@@ -408,7 +394,7 @@ ${HELPMAP["权限限制"]}`);
                 const curSegIndex = ai.curActiveTimeSegIndex;
                 const nextTimePoint = ai.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) {
-                  TimerManager.addActiveTimeTimer(ctx, msg, ai, nextTimePoint);
+                  TimerManager.addActiveTimeTimer(ctx, ai, nextTimePoint);
                 }
                 break;
               }
@@ -418,14 +404,14 @@ ${HELPMAP["权限限制"]}`);
           setting.standby = true;
 
           seal.replyToSender(ctx, msg, text);
-          AIManager.saveAI(id);
+          AIManager.saveAI(sid);
           return ret;
         }
         case 'standby': {
           const setting = ai.setting;
 
           ai.resetState();
-          TimerManager.removeTimers(id, '', ['activeTime'], []);
+          TimerManager.removeTimers(sid, '', ['activeTime'], []);
 
           setting.counter = -1;
           setting.timer = -1;
@@ -438,7 +424,7 @@ ${HELPMAP["权限限制"]}`);
           }
 
           seal.replyToSender(ctx, msg, 'AI已开启待机模式');
-          AIManager.saveAI(id);
+          AIManager.saveAI(sid);
           return ret;
         }
         case 'off': {
@@ -447,7 +433,7 @@ ${HELPMAP["权限限制"]}`);
           const kwargs = cmdArgs.kwargs;
           if (kwargs.length == 0) {
             ai.resetState();
-            TimerManager.removeTimers(id, '', ['activeTime'], []);
+            TimerManager.removeTimers(sid, '', ['activeTime'], []);
 
             setting.counter = -1;
             setting.timer = -1;
@@ -460,7 +446,7 @@ ${HELPMAP["权限限制"]}`);
             }
 
             seal.replyToSender(ctx, msg, 'AI已关闭');
-            AIManager.saveAI(id);
+            AIManager.saveAI(sid);
             return ret;
           }
 
@@ -492,7 +478,7 @@ ${HELPMAP["权限限制"]}`);
               }
               case 'a':
               case 'active': {
-                TimerManager.removeTimers(id, '', ['activeTime'], []);
+                TimerManager.removeTimers(sid, '', ['activeTime'], []);
                 setting.activeTimeInfo = {
                   start: 0,
                   end: 0,
@@ -505,7 +491,7 @@ ${HELPMAP["权限限制"]}`);
           });
 
           seal.replyToSender(ctx, msg, text);
-          AIManager.saveAI(id);
+          AIManager.saveAI(sid);
           return ret;
         }
         case 'forget': {
@@ -516,19 +502,19 @@ ${HELPMAP["权限限制"]}`);
             case 'assistant': {
               ai.context.clearMessages('assistant', 'tool');
               seal.replyToSender(ctx, msg, 'ai上下文已清除');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             case 'user': {
               ai.context.clearMessages('user');
               seal.replyToSender(ctx, msg, '用户上下文已清除');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             default: {
               ai.context.clearMessages();
               seal.replyToSender(ctx, msg, '上下文已清除');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
           }
@@ -610,28 +596,20 @@ ${HELPMAP["权限限制"]}`);
                     return ret;
                   }
                   ai2.memory.deleteMemory(idList, kw);
-                  ai2.memory.getTopMemoryList().then(memoryList => {
-                    const s = ai2.memory.buildMemory({
-                      isPrivate: true,
-                      id: mctx.player.userId,
-                      name: mctx.player.name
-                    }, memoryList);
-                    seal.replyToSender(ctx, msg, s || '无');
-                    AIManager.saveAI(muid);
-                  }
-                  );
+                  seal.replyToSender(ctx, msg, ai2.memory.getLatestMemoryListText({
+                    isPrivate: true,
+                    id: mctx.player.userId,
+                    name: mctx.player.name
+                  }, page) || '记忆已全部清除');
+                  AIManager.saveAI(muid);
                   return ret;
                 }
-                case 'show': {
-                  ai2.memory.getTopMemoryList().then(memoryList => {
-                    const s = ai2.memory.buildMemory({
-                      isPrivate: true,
-                      id: mctx.player.userId,
-                      name: mctx.player.name
-                    }, memoryList);
-                    seal.replyToSender(ctx, msg, s || '无');
-                  }
-                  );
+                case 'list': {
+                  seal.replyToSender(ctx, msg, ai2.memory.getLatestMemoryListText({
+                    isPrivate: true,
+                    id: mctx.player.userId,
+                    name: mctx.player.name
+                  }, page) || '无记忆');
                   return ret;
                 }
                 case 'clear': {
@@ -645,7 +623,7 @@ ${HELPMAP["权限限制"]}`);
 【.ai memo p st <内容>】设置个人设定
 【.ai memo p st clr】清除个人设定
 【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆
-【.ai memo p show】展示个人记忆
+【.ai memo p list】展示个人记忆
 【.ai memo p clr】清除个人记忆`);
                   return ret;
                 }
@@ -669,7 +647,7 @@ ${HELPMAP["权限限制"]}`);
                     case 'clear': {
                       ai.memory.persona = '无';
                       seal.replyToSender(ctx, msg, '设定已清除');
-                      AIManager.saveAI(id);
+                      AIManager.saveAI(sid);
                       return ret;
                     }
                     default: {
@@ -679,7 +657,7 @@ ${HELPMAP["权限限制"]}`);
                       }
                       ai.memory.persona = s;
                       seal.replyToSender(ctx, msg, '设定已修改');
-                      AIManager.saveAI(id);
+                      AIManager.saveAI(sid);
                       return ret;
                     }
                   }
@@ -692,34 +670,26 @@ ${HELPMAP["权限限制"]}`);
                     return ret;
                   }
                   ai.memory.deleteMemory(idList, kw);
-                  ai.memory.getTopMemoryList().then(memoryList => {
-                    const s = ai.memory.buildMemory({
-                      isPrivate: false,
-                      id: ctx.group.groupId,
-                      name: ctx.group.groupName
-                    }, memoryList);
-                    seal.replyToSender(ctx, msg, s || '无');
-                    AIManager.saveAI(id);
-                  }
-                  );
+                  seal.replyToSender(ctx, msg, ai.memory.getLatestMemoryListText({
+                    isPrivate: false,
+                    id: ctx.group.groupId,
+                    name: ctx.group.groupName
+                  }, page) || '记忆已全部清除');
+                  AIManager.saveAI(sid);
                   return ret;
                 }
-                case 'show': {
-                  ai.memory.getTopMemoryList().then(memoryList => {
-                    const s = ai.memory.buildMemory({
-                      isPrivate: false,
-                      id: ctx.group.groupId,
-                      name: ctx.group.groupName
-                    }, memoryList);
-                    seal.replyToSender(ctx, msg, s || '无');
-                  }
-                  );
+                case 'list': {
+                  seal.replyToSender(ctx, msg, ai.memory.getLatestMemoryListText({
+                    isPrivate: false,
+                    id: ctx.group.groupId,
+                    name: ctx.group.groupName
+                  }, page) || '无记忆');
                   return ret;
                 }
                 case 'clear': {
                   ai.memory.clearMemory();
                   seal.replyToSender(ctx, msg, '群聊记忆已清除');
-                  AIManager.saveAI(id);
+                  AIManager.saveAI(sid);
                   return ret;
                 }
                 default: {
@@ -727,7 +697,7 @@ ${HELPMAP["权限限制"]}`);
 【.ai memo g st <内容>】设置群聊设定
 【.ai memo g st clr】清除群聊设定
 【.ai memo g del <ID1> <ID2> --关键词1 --关键词2】删除群聊记忆
-【.ai memo g show】展示群聊记忆
+【.ai memo g list】展示群聊记忆
 【.ai memo g clr】清除群聊记忆`);
                   return ret;
                 }
@@ -739,29 +709,35 @@ ${HELPMAP["权限限制"]}`);
                 case 'on': {
                   ai.memory.useShortMemory = true;
                   seal.replyToSender(ctx, msg, '短期记忆已开启');
-                  AIManager.saveAI(id);
+                  AIManager.saveAI(sid);
                   return ret;
                 }
                 case 'off': {
                   ai.memory.useShortMemory = false;
                   seal.replyToSender(ctx, msg, '短期记忆已关闭');
-                  AIManager.saveAI(id);
+                  AIManager.saveAI(sid);
                   return ret;
                 }
-                case 'show': {
-                  const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
-                  seal.replyToSender(ctx, msg, s || '无');
+                case 'list': {
+                  if (ai.memory.shortMemoryList.length === 0) {
+                    seal.replyToSender(ctx, msg, '短期记忆为空');
+                    return ret;
+                  }
+                  seal.replyToSender(ctx, msg, ai.memory.shortMemoryList
+                    .map((item, index) => `${index + 1}. ${item}`)
+                    .slice((page - 1) * 10, page * 10)
+                    .join('\n') + `\n当前页码: ${page}/${Math.ceil(ai.memory.shortMemoryList.length / 10)}`);
                   return ret;
                 }
                 case 'clear': {
                   ai.memory.clearShortMemory();
                   seal.replyToSender(ctx, msg, '短期记忆已清除');
-                  AIManager.saveAI(id);
+                  AIManager.saveAI(sid);
                   return ret;
                 }
                 default: {
                   seal.replyToSender(ctx, msg, `参数缺失
-【.ai memo short show】展示短期记忆
+【.ai memo short list】展示短期记忆
 【.ai memo short clr】清除短期记忆
 【.ai memo short [on/off]】开启/关闭短期记忆`);
                   return ret;
@@ -772,8 +748,10 @@ ${HELPMAP["权限限制"]}`);
               ai.context.summaryCounter = 0;
               ai.memory.updateShortMemory(ctx, msg, ai)
                 .then(() => {
-                  const s = ai.memory.shortMemoryList.map((item, index) => `${index + 1}. ${item}`).join('\n');
-                  seal.replyToSender(ctx, msg, s || '无');
+                  seal.replyToSender(ctx, msg, ai.memory.shortMemoryList
+                    .map((item, index) => `${index + 1}. ${item}`)
+                    .slice((page - 1) * 10, page * 10)
+                    .join('\n') + `\n当前页码: ${page}/${Math.ceil(ai.memory.shortMemoryList.length / 10)}`);
                 });
               return ret;
             }
@@ -783,7 +761,7 @@ ${HELPMAP["权限限制"]}`);
 【.ai memo [p/g] st <内容>】设置个人/群聊设定
 【.ai memo [p/g] st clr】清除个人/群聊设定
 【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
-【.ai memo [p/g/short] show】展示个人/群聊/短期记忆
+【.ai memo [p/g/short] list】展示个人/群聊/短期记忆
 【.ai memo [p/g/short] clr】清除个人/群聊/短期记忆
 【.ai memo short [on/off]】开启/关闭短期记忆
 【.ai memo sum】立即总结一次短期记忆`);
@@ -805,7 +783,7 @@ ${HELPMAP["权限限制"]}`);
 
                 ai.tool.toolStatus[val3] = true;
                 seal.replyToSender(ctx, msg, `已开启工具函数 ${val3}`);
-                AIManager.saveAI(id);
+                AIManager.saveAI(sid);
                 return ret;
               }
               const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
@@ -813,7 +791,7 @@ ${HELPMAP["权限限制"]}`);
                 ai.tool.toolStatus[key] = toolsNotAllow.includes(key) ? false : true;
               }
               seal.replyToSender(ctx, msg, '已开启全部工具函数');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             case 'off': {
@@ -821,14 +799,14 @@ ${HELPMAP["权限限制"]}`);
               if (val3) {
                 ai.tool.toolStatus[val3] = false;
                 seal.replyToSender(ctx, msg, `已关闭工具函数 ${val3}`);
-                AIManager.saveAI(id);
+                AIManager.saveAI(sid);
                 return ret;
               }
               for (const key in ai.tool.toolStatus) {
                 ai.tool.toolStatus[key] = false;
               }
               seal.replyToSender(ctx, msg, '已关闭全部工具函数');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             case 'help': {
@@ -943,7 +921,7 @@ ${images.map(img => img.CQCode).join('\n')}`));
               }
               ai.context.ignoreList.push(muid);
               seal.replyToSender(ctx, msg, '已添加到忽略名单');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             case 'remove': {
@@ -957,7 +935,7 @@ ${images.map(img => img.CQCode).join('\n')}`));
               }
               ai.context.ignoreList = ai.context.ignoreList.filter(item => item !== muid);
               seal.replyToSender(ctx, msg, '已从忽略名单中移除');
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             case 'list': {
@@ -1368,47 +1346,49 @@ ${images.map(img => img.CQCode).join('\n')}`));
   const cmdImage = seal.ext.newCmdItemInfo();
   cmdImage.name = 'img'; // 指令名字，可用中文
   cmdImage.help = `盗图指南:
-【.img draw [stl/lcl/all]】随机抽取偷的图片/本地图片/保存的图片/全部
-【.img stl [on/off]】偷图 开启/关闭
-【.img f】遗忘偷的图片
-【.img itt [图片/ran] (附加提示词)】图片转文字
+【.img list [stl/lcl]】展示偷取的图片/本地图片
+【.img stl [on/off/f]】偷图 开启/关闭/遗忘
+【.img itt [图片] (附加提示词)】图片转文字
 【.img find <图片ID>】查找图片`;
   cmdImage.solve = (ctx, msg, cmdArgs) => {
     try {
       const val = cmdArgs.getArgN(1);
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
-      const id = ctx.isPrivate ? uid : gid;
+      const sid = ctx.isPrivate ? uid : gid;
 
       const ret = seal.ext.newCmdExecuteResult(true);
-      const ai = AIManager.getAI(id);
+      const ai = AIManager.getAI(sid);
       const { success, exist } = PrivilegeManager.checkPriv(ctx, cmdArgs, ai);
       if (!success) {
         seal.replyToSender(ctx, msg, exist ? '权限不足' : '命令不存在');
         return ret;
       }
 
+      let page = 1;
+      const kwargPage = cmdArgs.kwargs.find((kwarg) => kwarg.name === 'page' || kwarg.name === 'p');
+      if (kwargPage && kwargPage.valueExists) {
+        page = parseInt(kwargPage.value);
+        if (isNaN(page)) {
+          seal.replyToSender(ctx, msg, '页码必须为数字');
+          return ret;
+        }
+        if (page < 1) {
+          seal.replyToSender(ctx, msg, '页码必须大于等于1');
+          return ret;
+        }
+      }
+
       switch (aliasToCmd(val)) {
-        case 'draw': {
+        case 'list': {
           const type = cmdArgs.getArgN(2);
           switch (aliasToCmd(type)) {
-            case 'local': {
-              const img = ai.imageManager.drawLocalImage();
-              if (!img) {
-                seal.replyToSender(ctx, msg, '暂无本地图片');
-                return ret;
-              }
-              seal.replyToSender(ctx, msg, img.CQCode);
-              return ret;
-            }
             case 'steal': {
-              ai.imageManager.drawStolenImage()
-                .then(img => seal.replyToSender(ctx, msg, img ? img.CQCode : '暂无偷取图片'));
+              seal.replyToSender(ctx, msg, ai.imageManager.getStolenImageListText(page) || '暂无偷取图片');
               return ret;
             }
-            case 'all': {
-              ai.imageManager.drawImage()
-                .then(img => seal.replyToSender(ctx, msg, img ? img.CQCode : '暂无图片'));
+            case 'local': {
+              seal.replyToSender(ctx, msg, ImageManager.getLocalImageListText(page) || '暂无本地图片');
               return ret;
             }
             default: {
@@ -1423,13 +1403,19 @@ ${images.map(img => img.CQCode).join('\n')}`));
             case 'on': {
               ai.imageManager.stealStatus = true;
               seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.length}`);
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
               return ret;
             }
             case 'off': {
               ai.imageManager.stealStatus = false;
               seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.length}`);
-              AIManager.saveAI(id);
+              AIManager.saveAI(sid);
+              return ret;
+            }
+            case 'forget': {
+              ai.imageManager.stolenImages = [];
+              seal.replyToSender(ctx, msg, '偷取图片已遗忘');
+              AIManager.saveAI(sid);
               return ret;
             }
             default: {
@@ -1438,43 +1424,20 @@ ${images.map(img => img.CQCode).join('\n')}`));
             }
           }
         }
-        case 'forget': {
-          ai.imageManager.stolenImages = [];
-          seal.replyToSender(ctx, msg, '偷取图片已遗忘');
-          AIManager.saveAI(id);
-          return ret;
-        }
         case 'itt': {
           const val2 = cmdArgs.getArgN(2);
           if (!val2) {
-            seal.replyToSender(ctx, msg, '【.img itt [图片/ran] (附加提示词)】图片转文字');
+            seal.replyToSender(ctx, msg, '【.img itt [图片] (附加提示词)】图片转文字');
             return ret;
           }
-
-          switch (aliasToCmd(val2)) {
-            case 'random': {
-              ai.imageManager.drawStolenImage()
-                .then(img => {
-                  if (!img) {
-                    seal.replyToSender(ctx, msg, '图片偷取为空');
-                    return;
-                  }
-                  img.imageToText(cmdArgs.getRestArgsFrom(3))
-                    .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
-                });
-              return ret;
-            }
-            default: {
-              const messageArray = transformTextToArray(val2);
-              transformArrayToContent(ctx, ai, messageArray).then(({ images }) => {
-                if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
-                const img = images[0];
-                img.imageToText(cmdArgs.getRestArgsFrom(3))
-                  .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
-              });
-              return ret;
-            }
-          }
+          const messageArray = transformTextToArray(val2);
+          transformArrayToContent(ctx, ai, messageArray).then(({ images }) => {
+            if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
+            const img = images[0];
+            img.imageToText(cmdArgs.getRestArgsFrom(3))
+              .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
+          });
+          return ret;
         }
         case 'find': {
           const id = cmdArgs.getArgN(2);
@@ -1523,11 +1486,11 @@ ${images.map(img => img.CQCode).join('\n')}`));
 
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
-      const id = ctx.isPrivate ? uid : gid;
-      const ai = AIManager.getAI(id);
+      const sid = ctx.isPrivate ? uid : gid;
+      const ai = AIManager.getAI(sid);
 
       // 检查活跃时间定时器
-      ai.checkActiveTimer(ctx, msg);
+      ai.checkActiveTimer(ctx);
 
       const message = msg.message;
       const messageArray = transformTextToArray(message);
@@ -1554,9 +1517,9 @@ ${images.map(img => img.CQCode).join('\n')}`));
         }
 
         // AI自己设定的触发条件触发
-        if (triggerConditionMap.hasOwnProperty(id) && triggerConditionMap[id].length !== 0) {
-          for (let i = 0; i < triggerConditionMap[id].length; i++) {
-            const condition = triggerConditionMap[id][i];
+        if (triggerConditionMap.hasOwnProperty(sid) && triggerConditionMap[sid].length !== 0) {
+          for (let i = 0; i < triggerConditionMap[sid].length; i++) {
+            const condition = triggerConditionMap[sid][i];
             if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
               continue;
             }
@@ -1566,7 +1529,7 @@ ${images.map(img => img.CQCode).join('\n')}`));
 
             return ai.handleReceipt(ctx, msg, ai, messageArray)
               .then(() => ai.context.addSystemUserMessage('触发原因提示', condition.reason, []))
-              .then(() => triggerConditionMap[id].splice(i, 1))
+              .then(() => triggerConditionMap[sid].splice(i, 1))
               .then(() => ai.chat(ctx, msg, 'AI设定触发条件'));
           }
         }
@@ -1616,11 +1579,11 @@ ${images.map(img => img.CQCode).join('\n')}`));
       if (allcmd) {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
-        const id = ctx.isPrivate ? uid : gid;
-        const ai = AIManager.getAI(id);
+        const sid = ctx.isPrivate ? uid : gid;
+        const ai = AIManager.getAI(sid);
 
         // 检查活跃时间定时器
-        ai.checkActiveTimer(ctx, msg);
+        ai.checkActiveTimer(ctx);
 
         const message = msg.message;
         const messageArray = transformTextToArray(message);
@@ -1643,11 +1606,11 @@ ${images.map(img => img.CQCode).join('\n')}`));
     try {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
-      const id = ctx.isPrivate ? uid : gid;
-      const ai = AIManager.getAI(id);
+      const sid = ctx.isPrivate ? uid : gid;
+      const ai = AIManager.getAI(sid);
 
       // 检查活跃时间定时器
-      ai.checkActiveTimer(ctx, msg);
+      ai.checkActiveTimer(ctx);
 
       const message = msg.message;
       const messageArray = transformTextToArray(message);

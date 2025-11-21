@@ -70,7 +70,7 @@ export const defaultCmdPriv: CmdPriv = {
                                 }
                             },
                             delete: { priv: U },
-                            show: { priv: U },
+                            list: { priv: U },
                             clear: { priv: U }
                         }
                     },
@@ -83,13 +83,13 @@ export const defaultCmdPriv: CmdPriv = {
                                 }
                             },
                             delete: { priv: U },
-                            show: { priv: U },
+                            list: { priv: U },
                             clear: { priv: U }
                         }
                     },
                     short: {
                         priv: S, args: {
-                            show: { priv: U },
+                            list: { priv: U },
                             clear: { priv: U },
                             on: { priv: U },
                             off: { priv: U }
@@ -139,26 +139,20 @@ export const defaultCmdPriv: CmdPriv = {
     },
     img: {
         priv: U, args: {
-            draw: {
+            list: {
                 priv: U, args: {
-                    local: { priv: U },
                     steal: { priv: U },
-                    all: { priv: U }
+                    local: { priv: M }
                 }
             },
             steal: {
                 priv: I, args: {
                     on: { priv: U },
-                    off: { priv: U }
+                    off: { priv: U },
+                    forget: { priv: U },
                 }
             },
-            forget: { priv: I },
-            itt: {
-                priv: M, args: {
-                    random: { priv: U },
-                    "*": { priv: U }
-                }
-            },
+            itt: { priv: M },
             find: { priv: I }
         }
     }

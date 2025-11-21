@@ -66,7 +66,7 @@ export function registerTime() {
             }
         }
     });
-    toolSet.solve = async (ctx, msg, ai, args) => {
+    toolSet.solve = async (ctx, _, ai, args) => {
         const { types, years = 0, months = 0, days = 0, hours = 0, minutes, count = 1, content } = args;
 
         const y = parseInt(years);
@@ -95,7 +95,7 @@ export function registerTime() {
                 if (t - now > 365 * 24 * 60 * 60 * 1000) {
                     return { content: '目标时间不能超过1年', images: [] };
                 }
-                TimerManager.addTargetTimer(ctx, msg, ai, Math.floor(t / 1000), content);
+                TimerManager.addTargetTimer(ctx, ai, Math.floor(t / 1000), content);
                 break;
             }
             case 'interval': {
@@ -115,7 +115,7 @@ export function registerTime() {
                 if (c > 30) {
                     return { content: '触发次数不能大于30次', images: [] };
                 }
-                TimerManager.addIntervalTimer(ctx, msg, ai, mins * 60, c, content);
+                TimerManager.addIntervalTimer(ctx, ai, mins * 60, c, content);
                 break;
             } default: {
                 return { content: '定时器类型错误', images: [] };

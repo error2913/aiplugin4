@@ -146,7 +146,7 @@ export class ImageManager {
         this.stolenImages = this.stolenImages.concat(images).slice(-maxStolenImageNum);
     }
 
-    drawLocalImage(): Image {
+    static getLocalImageListText(p: number = 1): string {
         const { localImagePathMap } = ConfigManager.image;
         const images = Object.keys(localImagePathMap).map(id => {
             const image = new Image();
@@ -154,28 +154,38 @@ export class ImageManager {
             image.file = localImagePathMap[id];
             return image;
         });
-        if (images.length == 0) return null;
-        const index = Math.floor(Math.random() * images.length);
-        return images[index];
+        if (images.length == 0) return '';
+        if (p > Math.ceil(images.length / 5)) p = Math.ceil(images.length / 5);
+        return images.slice((p - 1) * 5, p * 5)
+            .map((img, i) => {
+                return `${i + 1 + (p - 1) * 5}. 名称:${img.id}
+${img.CQCode}`;
+            }).join('\n') + `\n当前页码:${p}/${Math.ceil(images.length / 5)}`;
     }
 
     async drawStolenImage(): Promise<Image> {
         if (this.stolenImages.length === 0) return null;
-
         const index = Math.floor(Math.random() * this.stolenImages.length);
         const img = this.stolenImages.splice(index, 1)[0];
-
         if (!await img.checkImageUrl()) {
             await new Promise(resolve => setTimeout(resolve, 500));
             return await this.drawStolenImage();
         }
-
         return img;
+    }
+
+    getStolenImageListText(p: number = 1): string {
+        if (this.stolenImages.length == 0) return '';
+        if (p > Math.ceil(this.stolenImages.length / 5)) p = Math.ceil(this.stolenImages.length / 5);
+        return this.stolenImages.slice((p - 1) * 5, p * 5)
+            .map((img, i) => {
+                return `${i + 1 + (p - 1) * 5}. ID:${img.id}
+${img.CQCode}`;
+            }).join('\n') + `\n当前页码:${p}/${Math.ceil(this.stolenImages.length / 5)}`;
     }
 
     async drawImage(): Promise<Image> {
         const { localImagePathMap } = ConfigManager.image;
-
         const localImages = Object.keys(localImagePathMap).map(id => {
             const image = new Image();
             image.id = id;

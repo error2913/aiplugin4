@@ -457,7 +457,7 @@ export class MemoryManager {
         if (!ctx.isPrivate) context.userInfoList.forEach(ui => AIManager.getAI(ui.id).memory.updateMemoryWeight(s, role));
     }
 
-    async getTopMemoryList(text: string = '', ui: UserInfo = null, gi: GroupInfo = null) {
+    async getTopScoreMemoryList(text: string = '', ui: UserInfo = null, gi: GroupInfo = null) {
         const { memoryShowNumber } = ConfigManager.memory;
         return await this.search(text, {
             topK: memoryShowNumber,
@@ -469,22 +469,31 @@ export class MemoryManager {
         });
     }
 
-    buildMemory(sessionInfo: SessionInfo, memoryList: Memory[]): string {
-        if (this.persona === '无' && memoryList.length === 0) return '';
+    getLatestMemoryListText(si: SessionInfo, p: number = 1): string {
+        if (this.memoryList.length === 0) return '';
+        if (p > Math.ceil(this.memoryList.length / 5)) p = Math.ceil(this.memoryList.length / 5);
+        const latestMemoryList = this.memoryList
+            .sort((a, b) => b.createTime - a.createTime)
+            .slice((p - 1) * 5, p * 5);
+        return this.buildMemory(si, latestMemoryList) + `\n当前页码: ${p}/${Math.ceil(this.memoryList.length / 5)}`;
+    }
+
+    buildMemory(si: SessionInfo, ml: Memory[]): string {
+        if (this.persona === '无' && ml.length === 0) return '';
         const { showNumber } = ConfigManager.message;
         const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
 
         let memoryContent = '';
-        if (memoryList.length === 0) {
+        if (ml.length === 0) {
             memoryContent = '无';
         } else {
-            memoryContent = memoryList
+            memoryContent = ml
                 .map((m, i) => {
                     return memorySingleShowTemplate({
                         "序号": i + 1,
                         "记忆ID": m.id,
                         "记忆时间": fmtDate(m.createTime),
-                        "个人记忆": sessionInfo.isPrivate,
+                        "个人记忆": si.isPrivate,
                         "私聊": m.sessionInfo.isPrivate,
                         "展示号码": showNumber,
                         "群聊名称": m.sessionInfo.name,
@@ -498,12 +507,12 @@ export class MemoryManager {
         }
 
         return memoryShowTemplate({
-            "私聊": sessionInfo.isPrivate,
+            "私聊": si.isPrivate,
             "展示号码": showNumber,
-            "用户名称": sessionInfo.name,
-            "用户号码": sessionInfo.id.replace(/^.+:/, ''),
-            "群聊名称": sessionInfo.name,
-            "群聊号码": sessionInfo.id.replace(/^.+:/, ''),
+            "用户名称": si.name,
+            "用户号码": si.id.replace(/^.+:/, ''),
+            "群聊名称": si.name,
+            "群聊号码": si.id.replace(/^.+:/, ''),
             "设定": this.persona,
             "记忆列表": memoryContent
         }) + '\n';
@@ -515,21 +524,21 @@ export class MemoryManager {
             isPrivate: true,
             id: ctx.endPoint.userId,
             name: seal.formatTmpl(ctx, "核心:骰子名字")
-        }, await ai.memory.getTopMemoryList(text, ui, gi));
+        }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
 
         if (ctx.isPrivate) {
             return this.buildMemory({
                 isPrivate: true,
                 id: ctx.player.userId,
                 name: ctx.player.name
-            }, await ai.memory.getTopMemoryList(text, ui, gi));
+            }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
         } else {
             // 群聊记忆
             s += this.buildMemory({
                 isPrivate: false,
                 id: ctx.group.groupId,
                 name: ctx.group.groupName
-            }, await ai.memory.getTopMemoryList(text, ui, gi));
+            }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
 
             // 群内用户的个人记忆
             const set = new Set<string>();
@@ -544,7 +553,7 @@ export class MemoryManager {
                     isPrivate: true,
                     id: uid,
                     name: name
-                }, await ai.memory.getTopMemoryList(text, ui, gi));
+                }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
             }
 
             return s;
