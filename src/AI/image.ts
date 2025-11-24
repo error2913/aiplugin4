@@ -143,14 +143,14 @@ export class ImageManager {
 
     static getUserAvatar(uid: string): Image {
         const img = new Image();
-        img.id = uid;
+        img.id = `user_avatar:${uid}`;
         img.file = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
         return img;
     }
 
     static getGroupAvatar(gid: string): Image {
         const img = new Image();
-        img.id = gid;
+        img.id = `group_avatar:${gid}`;
         img.file = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
         return img;
     }
@@ -249,7 +249,7 @@ ${img.CQCode}`;
         if (match) {
             for (let i = 0; i < match.length; i++) {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-                const image = ai.context.findImage(ctx, id);
+                const image = await ai.context.findImage(ctx, id);
                 if (image) {
                     if (image.type === 'url') await image.urlToBase64();
                     images.push(image);

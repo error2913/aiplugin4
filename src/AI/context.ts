@@ -1,6 +1,6 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/configManager";
-import { Image } from "./image";
+import { Image, ImageManager } from "./image";
 import { getCtxAndMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager, GroupInfo, UserInfo } from "./AI";
@@ -365,7 +365,18 @@ export class Context {
         return null;
     }
 
-    findImage(ctx: seal.MsgContext, id: string): Image | null {
+    async findImage(ctx: seal.MsgContext, id: string): Promise<Image | null> {
+        // 从用户头像中查找图片
+        if (/^user_avatar[:：]/.test(id)) {
+            const ui = await this.findUserInfo(ctx, id.replace(/^user_avatar[:：]/, ''));
+            if (ui) return ImageManager.getUserAvatar(ui.id);
+        }
+        // 从群聊头像中查找图片
+        if (/^group_avatar[:：]/.test(id)) {
+            const gi = await this.findGroupInfo(ctx, id.replace(/^group_avatar[:：]/, ''));
+            if (gi) return ImageManager.getGroupAvatar(gi.id);
+        }
+
         // 从上下文中查找图片
         const messages = this.messages;
         const userSet = new Set<string>();

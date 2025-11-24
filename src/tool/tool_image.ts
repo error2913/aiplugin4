@@ -28,10 +28,10 @@ export function registerImage() {
     toolITT.solve = async (ctx, _, ai, args) => {
         const { id, content } = args;
 
-        const image = ai.context.findImage(ctx, id);
+        const image = await ai.context.findImage(ctx, id);
         if (!image) return { content: `未找到图片${id}`, images: [] };
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
-        
+
         if (image.type === 'local') return { content: '本地图片暂时无法识别', images: [] };
         await image.imageToText(text);
         return { content: image.content || '图片识别失败', images: [] };

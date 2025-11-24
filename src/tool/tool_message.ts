@@ -55,7 +55,7 @@ export function registerMessage() {
         if (match) {
             for (let i = 0; i < match.length; i++) {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1].trim().slice(0, 6);
-                const image = ai.context.findImage(ctx, id);
+                const image = await ai.context.findImage(ctx, id);
                 if (image) originalImages.push(image);
             }
         }

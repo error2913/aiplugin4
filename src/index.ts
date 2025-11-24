@@ -1445,8 +1445,9 @@ ${images.map(img => img.CQCode).join('\n')}`));
             seal.replyToSender(ctx, msg, '【.img find <图片ID>】查找图片');
             return ret;
           }
-          const img = ai.context.findImage(ctx, id);
-          seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片');
+          ai.context.findImage(ctx, id).then((img) => {
+            seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片');
+          });
           return ret;
         }
         default: {

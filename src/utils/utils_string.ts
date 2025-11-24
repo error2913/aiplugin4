@@ -266,7 +266,7 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'img': {
                 const id = seg.content;
-                const image = ai.context.findImage(ctx, id);
+                const image = await ai.context.findImage(ctx, id);
 
                 if (image) {
                     images.push(image);
