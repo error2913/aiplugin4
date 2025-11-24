@@ -84,6 +84,12 @@ async function replaceImageReferencesInContent(ctx: seal.MsgContext, ai: any, co
             processedContent = processedContent.replace(htmlSrcRegex, `$1${imgUrl}$2`);
         }
 
+        // 处理背景图片
+        const htmlBgImageRegex = new RegExp(`(background-image:\\s*url\\(['"]\\s*)${escapedRef}(\\s*['"]\\))`, 'g');
+        if (htmlBgImageRegex.test(processedContent)) {
+            processedContent = processedContent.replace(htmlBgImageRegex, `$1${imgUrl}$2`);
+        }
+
         const standaloneRegex = new RegExp(escapedRef, 'g');
         if (renderMode === 'markdown') {
             processedContent = processedContent.replace(standaloneRegex, `![image](${imgUrl})`);
@@ -143,6 +149,12 @@ async function replaceAvatarReferencesInContent(ctx: seal.MsgContext, ai: any, c
             const htmlSrcRegex = new RegExp(`(src\\s*=\\s*['"]\\s*)${escapedRef}(\\s*['"])`, 'g');
             if (htmlSrcRegex.test(processedContent)) {
                 processedContent = processedContent.replace(htmlSrcRegex, `$1${url}$2`);
+            }
+
+            // 处理背景图片
+            const htmlBgImageRegex = new RegExp(`(background-image:\\s*url\\(['"]\\s*)${escapedRef}(\\s*['"]\\))`, 'g');
+            if (htmlBgImageRegex.test(processedContent)) {
+                processedContent = processedContent.replace(htmlBgImageRegex, `$1${url}$2`);
             }
 
             const standaloneRegex = new RegExp(escapedRef, 'g');
