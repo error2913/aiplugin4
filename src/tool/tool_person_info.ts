@@ -28,15 +28,13 @@ export function registerGetPersonInfo() {
 
         if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        const uid = await ai.context.findUserId(ctx, name, true);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name, true);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
         const epId = ctx.endPoint.userId;
 
-        const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
-        if (!strangerInfo) return { content: `获取用户${uid}信息失败`, images: [] };
+        const strangerInfo = await getStrangerInfo(epId, ui.id.replace(/^.+:/, ''));
+        if (!strangerInfo) return { content: `获取用户${ui.id}信息失败`, images: [] };
 
         let s = `昵称: ${strangerInfo.nickname}
 QQ号: ${strangerInfo.user_id}

@@ -1,7 +1,7 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/configManager";
 import { buildContent } from "../utils/utils_message";
-import { createCtx, createMsg } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool } from "./tool";
 
 export function registerContext() {
@@ -27,38 +27,24 @@ export function registerContext() {
             }
         }
     });
-    toolGet.solve = async (ctx, msg, ai, args) => {
+    toolGet.solve = async (ctx, _, ai, args) => {
         const { ctx_type, name } = args;
 
         if (ctx_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-            if (uid === ctx.player.userId && ctx.isPrivate) {
-                return { content: `向当前私聊发送消息无需调用函数`, images: [] };
-            }
-            if (uid === ctx.endPoint.userId) {
-                return { content: `禁止向自己发送消息`, images: [] };
-            }
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
+            if (ui.id === ctx.player.userId && ctx.isPrivate) return { content: `向当前私聊发送消息无需调用函数`, images: [] };
+            if (ui.id === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
 
-            msg = createMsg('private', uid, '');
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(uid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
+            ai = AIManager.getAI(ui.id);
         } else if (ctx_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-            if (gid === ctx.group.groupId) {
-                return { content: `向当前群聊发送消息无需调用函数`, images: [] };
-            }
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
+            if (gi.id === ctx.group.groupId) return { content: `向当前群聊发送消息无需调用函数`, images: [] };
 
-            msg = createMsg('group', ctx.player.userId, gid);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(gid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
+            ai = AIManager.getAI(gi.id);
         } else {
             return { content: `未知的上下文类型<${ctx_type}>`, images: [] };
         }

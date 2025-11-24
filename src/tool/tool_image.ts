@@ -70,13 +70,13 @@ export function registerImage() {
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
         if (avatar_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) return { content: `未找到<${name}>`, images: [] };
-            url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
+            url = `https://q1.qlogo.cn/g?b=qq&nk=${ui.id.replace(/^.+:/, '')}&s=640`;
         } else if (avatar_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) return { content: `未找到<${name}>`, images: [] };
-            url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
+            url = `https://p.qlogo.cn/gh/${gi.id.replace(/^.+:/, '')}/${gi.id.replace(/^.+:/, '')}/640`;
         } else {
             return { content: `未知的头像类型<${avatar_type}>`, images: [] };
         }

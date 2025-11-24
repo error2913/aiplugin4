@@ -146,14 +146,8 @@ export function registerMeme() {
 
         const uiList: UserInfo[] = [];
         for (const n of members) {
-            const uid = await ai.context.findUserId(ctx, n, true);
-            if (uid !== null) {
-                uiList.push({
-                    isPrivate: true,
-                    id: uid,
-                    name: n
-                });
-            }
+            const ui = await ai.context.findUserInfo(ctx, n, true);
+            if (ui !== null) uiList.push(ui);
         }
         const kws = ["meme", name, ...text, ...members];
 

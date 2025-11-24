@@ -1,5 +1,5 @@
 import { ConfigManager } from "../config/configManager";
-import { createMsg, createCtx } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool, ToolManager } from "./tool";
 
 export function registerRollCheck() {
@@ -49,19 +49,13 @@ export function registerRollCheck() {
     toolRoll.solve = async (ctx, msg, ai, args) => {
         const { name, expression, rank = '', times = 1, additional_dice = '', reason = '' } = args;
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
         const args2 = [];
-
-        if (additional_dice) {
-            args2.push(additional_dice);
-        }
+        if (additional_dice) args2.push(additional_dice);
 
         if (rank || /[\dDd+\-*/]/.test(expression)) {
             args2.push(rank + expression);
@@ -70,22 +64,13 @@ export function registerRollCheck() {
             args2.push(expression + (value === 0 ? '50' : ''));
         }
 
-        if (reason) {
-            args2.push(reason);
-        }
+        if (reason) args2.push(reason);
 
-        if (parseInt(times) !== 1 && !isNaN(parseInt(times))) {
-            ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
-        }
+        if (parseInt(times) !== 1 && !isNaN(parseInt(times))) ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.cmdInfo, args2, [], []);
-
         ToolManager.cmdArgs.specialExecuteTimes = 1;
-
-        if (!success) {
-            return { content: '检定执行失败', images: [] };
-        }
-
+        if (!success) return { content: '检定执行失败', images: [] };
         return { content: s, images: [] };
     }
 
@@ -126,30 +111,20 @@ export function registerRollCheck() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, expression, additional_dice } = args;
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
         const value = seal.vars.intGet(ctx, 'san')[0];
-        if (value === 0) {
-            seal.vars.intSet(ctx, 'san', 60);
-        }
+        if (value === 0) seal.vars.intSet(ctx, 'san', 60);
 
         const args2 = [];
-        if (additional_dice) {
-            args2.push(additional_dice);
-        }
+        if (additional_dice) args2.push(additional_dice);
         args2.push(expression);
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, args2, [], []);
-        if (!success) {
-            return { content: 'san check执行失败', images: [] };
-        }
-
+        if (!success) return { content: 'san check执行失败', images: [] };
         return { content: s, images: [] };
     }
 }

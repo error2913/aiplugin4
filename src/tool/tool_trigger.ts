@@ -48,20 +48,13 @@ export function registerSetTrigger() {
         }
 
         if (name) {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
-            if (uid === ctx.endPoint.userId) {
-                return { content: `禁止将自己设置为触发条件`, images: [] };
-            }
-
-            condition.uid = uid;
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
+            if (ui.id === ctx.endPoint.userId) return { content: `禁止将自己设置为触发条件`, images: [] };
+            condition.uid = ui.id;
         }
 
-        if (!triggerConditionMap.hasOwnProperty(ai.id)) {
-            triggerConditionMap[ai.id] = [];
-        }
+        if (!triggerConditionMap.hasOwnProperty(ai.id)) triggerConditionMap[ai.id] = [];
         triggerConditionMap[ai.id].push(condition);
 
         return { content: "触发条件设置成功", images: [] };

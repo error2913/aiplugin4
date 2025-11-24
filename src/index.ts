@@ -1469,11 +1469,8 @@ ${images.map(img => img.CQCode).join('\n')}`));
   ext.onPoke = (ctx, event) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
-    if (event.senderId === ctx.endPoint.userId) {
-      ext.onMessageSend(ctx, msg);
-    } else {
-      ext.onNotCommandReceived(ctx, msg);
-    }
+    if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);
+    else ext.onNotCommandReceived(ctx, msg);
   }
 
   //接受非指令消息

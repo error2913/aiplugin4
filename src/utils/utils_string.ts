@@ -4,7 +4,7 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformMsgId, transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
-import { createCtx, createMsg } from "./utils_seal";
+import { getCtxAndMsg } from "./utils_seal";
 import { faceMap } from "../config/config";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
@@ -187,9 +187,8 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
                 const epId = ctx.endPoint.userId;
                 const gid = ctx.group.groupId;
                 const uid = `QQ:${seg.data.qq || ''}`;
-                const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                const mctx = createCtx(epId, mmsg);
-                const name = mctx.player.name || '未知用户';
+                ({ ctx } = getCtxAndMsg(epId, uid, gid));
+                const name = ctx.player.name || '未知用户';
                 content += `<|at:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
                 break;
             }
@@ -197,9 +196,8 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
                 const epId = ctx.endPoint.userId;
                 const gid = ctx.group.groupId;
                 const uid = `QQ:${seg.data.qq || ''}`;
-                const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-                const mctx = createCtx(epId, mmsg);
-                const name = mctx.player.name || '未知用户';
+                ({ ctx } = getCtxAndMsg(epId, uid, gid));
+                const name = ctx.player.name || '未知用户';
                 content += `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
                 break;
             }
@@ -242,9 +240,9 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'at': {
                 const name = seg.content;
-                const uid = await ai.context.findUserId(ctx, name);
-                if (uid !== null) {
-                    text += `[CQ:at,qq=${uid.replace(/^.+:/, "")}]`;
+                const ui = await ai.context.findUserInfo(ctx, name);
+                if (ui !== null) {
+                    text += `[CQ:at,qq=${ui.id.replace(/^.+:/, "")}]`;
                 } else {
                     logger.warning(`无法找到用户：${name}`);
                     text += ` @${name} `;
@@ -253,9 +251,9 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'poke': {
                 const name = seg.content;
-                const uid = await ai.context.findUserId(ctx, name);
-                if (uid !== null) {
-                    text += `[CQ:poke,qq=${uid.replace(/^.+:/, "")}]`;
+                const ui = await ai.context.findUserInfo(ctx, name);
+                if (ui !== null) {
+                    text += `[CQ:poke,qq=${ui.id.replace(/^.+:/, "")}]`;
                 } else {
                     logger.warning(`无法找到用户：${name}`);
                 }
@@ -304,10 +302,9 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
         const segment = segments[i];
         const match = segment.match(/[<＜][\|│｜]from[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
         if (match) {
-            const uid = await ai.context.findUserId(ctx, match[1]);
-            if (uid === ctx.endPoint.userId && i < segments.length - 1) {
-                s += segments[i + 1]; // 如果臆想对象是自己，那么将下一条消息添加到s中
-            }
+            // 如果臆想对象是自己，那么将下一条消息添加到s中
+            const ui = await ai.context.findUserInfo(ctx, match[1]);
+            if (ui.id === ctx.endPoint.userId && i < segments.length - 1) s += segments[i + 1];
         } else if (i === 0) {
             s = segment;
         }
@@ -316,9 +313,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
     // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
         s = segments.find(segment => !/[<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞])/.test(segment));
-        if (!s || !s.trim()) {
-            return { contextArray: [], replyArray: [], images: [] };
-        }
+        if (!s || !s.trim()) return { contextArray: [], replyArray: [], images: [] };
     }
 
     // 分离回复消息和戳一戳消息

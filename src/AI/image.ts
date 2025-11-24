@@ -141,6 +141,20 @@ export class ImageManager {
         this.stealStatus = false;
     }
 
+    static getUserAvatar(uid: string): Image {
+        const img = new Image();
+        img.id = uid;
+        img.file = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
+        return img;
+    }
+
+    static getGroupAvatar(gid: string): Image {
+        const img = new Image();
+        img.id = gid;
+        img.file = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
+        return img;
+    }
+
     stealImages(images: Image[]) {
         const { maxStolenImageNum } = ConfigManager.image;
         this.stolenImages = this.stolenImages.concat(images).slice(-maxStolenImageNum);

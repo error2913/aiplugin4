@@ -1,6 +1,6 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
-import { createMsg, createCtx } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool } from "./tool";
 import { getGroupMemberInfo, netExists } from "../utils/utils_ob11";
 
@@ -39,17 +39,16 @@ export function registerRename() {
             if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
         }
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
         try {
             seal.setPlayerGroupCard(ctx, new_name);
             if (ai.context.autoNameMod === 2) {
                 ctx.player.name = new_name;
-                ai.context.messages.forEach(message => message.name = message.uid === uid ? new_name : message.name);
+                ai.context.messages.forEach(message => message.name = message.uid === ui.id ? new_name : message.name);
             }
             seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
             return { content: '设置成功', images: [] };

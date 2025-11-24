@@ -202,13 +202,9 @@ export function registerQQList() {
     toolCommon.solve = async (ctx, _, ai, args) => {
         const { name } = args;
 
-        const uid = await ai.context.findUserId(ctx, name, true);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
-        if (uid === ctx.endPoint.userId) {
-            return { content: `禁止搜索自己`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name, true);
+        if (ui === null)   return { content: `未找到<${name}>`, images: [] };
+        if (ui.id === ctx.endPoint.userId)  return { content: `禁止搜索自己`, images: [] };
 
         if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
@@ -221,7 +217,7 @@ export function registerQQList() {
         for (const group_info of groupList) {
             const groupMemberList = await getGroupMemberList(epId, group_info.group_id);
             if (!groupMemberList || !Array.isArray(groupMemberList)) continue;
-            const user_info = groupMemberList.find((user_info: any) => user_info.user_id.toString() === uid.replace(/^.+:/, ''));
+            const user_info = groupMemberList.find((user_info: any) => user_info.user_id.toString() === ui.id.replace(/^.+:/, ''));
             if (user_info) arr.push({ group_info, user_info });
         }
 
