@@ -1,5 +1,5 @@
-import { AIManager, UserInfo } from "../AI/AI";
-import { Image } from "../AI/image";
+import { AIManager, GroupInfo, UserInfo } from "../AI/AI";
+import { Image, ImageManager } from "../AI/image";
 import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
 import { generateId } from "../utils/utils";
@@ -96,24 +96,24 @@ export function registerMeme() {
                     text: {
                         type: "array",
                         items: { type: "string" },
-                        description: "文字列表"
+                        description: "文字信息，不能插入图片"
                     },
-                    members: {
+                    image_ids: {
                         type: "array",
                         items: { type: "string" },
-                        description: '被用来绘制meme的用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: `图片的id，六位字符，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
                     },
                     save: {
                         type: "boolean",
                         description: "是否保存图片"
                     }
                 },
-                required: ["name", "text", "members", "save"]
+                required: ["name", "text", "image_ids", "save"]
             }
         }
     });
     toolGenerator.solve = async (ctx, _, ai, args) => {
-        const { name, text = [], members = [], save } = args;
+        const { name, text = [], image_ids = [], save } = args;
 
         // 切换到当前会话ai
         if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
@@ -132,35 +132,58 @@ export function registerMeme() {
                 return { content: `文字数量错误,${text_text},${image_text}`, images: [] };
             }
         }
-        if (members.length > max_images || members.length < min_images) {
+        if (image_ids.length > max_images || image_ids.length < min_images) {
             if (max_images === 0) {
-                members.length = 0;
-                s += `该表情包不需要用户信息，已舍弃。`;
+                image_ids.length = 0;
+                s += `该表情包不需要图片，已舍弃。`;
             } else {
-                return { content: `用户数量错误,${image_text},${text_text}`, images: [] };
+                return { content: `图片数量错误,${image_text},${text_text}`, images: [] };
             }
         }
 
-        const textText = text.join(';');
-        const memberText = members.join('、');
-
+        const images: Image[] = []
         const uiList: UserInfo[] = [];
-        for (const n of members) {
-            const ui = await ai.context.findUserInfo(ctx, n, true);
-            if (ui !== null) uiList.push(ui);
+        const giList: GroupInfo[] = [];
+        for (const id of image_ids) {
+            if (/^user_avatar[:：]/.test(id)) {
+                const ui = await this.findUserInfo(ctx, id.replace(/^user_avatar[:：]/, ''));
+                if (ui) {
+                    uiList.push(ui);
+                    images.push(ImageManager.getUserAvatar(ui.id));
+                } else {
+                    return { content: `用户 ${id} 不存在`, images: [] };
+                }
+                continue;
+            }
+            if (/^group_avatar[:：]/.test(id)) {
+                const gi = await this.findGroupInfo(ctx, id.replace(/^group_avatar[:：]/, ''));
+                if (gi) {
+                    giList.push(gi);
+                    images.push(ImageManager.getGroupAvatar(gi.id));
+                } else {
+                    return { content: `群聊 ${id} 不存在`, images: [] };
+                }
+                continue;
+            }
+            const img = await ai.context.findImage(ctx, id);
+            if (img) {
+                if (img.type === 'url') images.push(img);
+                else return { content: `图片 ${id} 类型错误，仅支持url类型`, images: [] };
+            } else {
+                return { content: `图片 ${id} 不存在`, images: [] };
+            }
         }
-        const kws = ["meme", name, ...text, ...members];
+
+        const kws = ["meme", name, ...text, ...image_ids];
 
         // 图片存在则直接返回
         const result = ai.memory.findMemoryAndImageByImageIdPrefix(name);
         if (result) {
             const { memory, image } = result;
-            if (memory.keywords.every((v, i) => v === kws[i]) && memory.userList.every((v, i) => v.id === uiList[i].id)) {
+            if (memory.keywords.every((v, i) => v === kws[i]) && memory.images.slice(1).every((v, i) => v.id === images[i].id)) {
                 return { content: `${s}生成成功，请使用<|img:${image.id}|>发送`, images: [image] };
             }
         }
-
-        const avatars = uiList.map(ui => `https://q.qlogo.cn/headimg_dl?dst_uin=${ui.id.replace(/^.+:/, '')}&spec=640&img_type=jpg`);
 
         try {
             const res = await fetch(baseurl + "meme_generate", {
@@ -168,7 +191,7 @@ export function registerMeme() {
                 body: JSON.stringify({
                     key,
                     text,
-                    image: avatars,
+                    image: images.map(img => img.file),
                     args: {}
                 }),
             });
@@ -181,15 +204,18 @@ export function registerMeme() {
                     return { content: "生成的base64为空", images: [] };
                 }
 
+                const textText = text.join(';');
+                const imageText = image_ids.join(';');
+
                 const img = new Image();
                 img.id = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
                 img.content = `表情包<|img:${img.id}|>
 ${textText ? `文字：${textText}` : ''}
-${memberText ? `用户：${memberText}` : ''}`;
+${imageText ? `图片：${imageText}` : ''}`;
 
-                if (save) ai.memory.addMemory(ctx, ai, uiList, [], kws, [img], img.content);
+                if (save) ai.memory.addMemory(ctx, ai, uiList, giList, kws, [img, ...images], img.content);
 
                 return { content: `${s}生成成功，请使用<|img:${img.id}|>发送`, images: [img] };
             } else {
