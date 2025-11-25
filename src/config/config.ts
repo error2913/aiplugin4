@@ -52,6 +52,7 @@ export const aliasMap = {
     "fgt": "forget",
     "f": "forget",
     "ass": "assistant",
+    "img": "image",
     "memo": "memory",
     "p": "private",
     "g": "group",

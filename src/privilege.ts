@@ -58,6 +58,25 @@ export const defaultCmdPriv: CmdPriv = {
                 }
             },
             role: { priv: I },
+            image: {
+                priv: U, args: {
+                    list: {
+                        priv: U, args: {
+                            steal: { priv: U },
+                            local: { priv: M }
+                        }
+                    },
+                    steal: {
+                        priv: I, args: {
+                            on: { priv: U },
+                            off: { priv: U },
+                            forget: { priv: U },
+                        }
+                    },
+                    itt: { priv: M },
+                    find: { priv: I }
+                }
+            },
             memory: {
                 priv: U, args: {
                     status: { priv: U },
@@ -135,25 +154,6 @@ export const defaultCmdPriv: CmdPriv = {
                 }
             },
             shut: { priv: U }
-        }
-    },
-    img: {
-        priv: U, args: {
-            list: {
-                priv: U, args: {
-                    steal: { priv: U },
-                    local: { priv: M }
-                }
-            },
-            steal: {
-                priv: I, args: {
-                    on: { priv: U },
-                    off: { priv: U },
-                    forget: { priv: U },
-                }
-            },
-            itt: { priv: M },
-            find: { priv: I }
         }
     }
 };
