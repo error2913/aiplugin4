@@ -475,7 +475,7 @@ interface TokenSegment {
     content: string;
 }
 
-function parseSpecialTokens(s: string): TokenSegment[] {
+export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
     const segs = s.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/);
     segs.forEach(seg => {

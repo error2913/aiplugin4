@@ -1,9 +1,10 @@
 import { logger } from "../logger";
 import { Tool } from "./tool";
 import { ConfigManager } from "../config/configManager";
-import { AIManager } from "../AI/AI";
+import { AI, AIManager } from "../AI/AI";
 import { Image } from "../AI/image";
 import { generateId } from "../utils/utils";
+import { parseSpecialTokens } from "../utils/utils_string";
 
 interface RenderResponse {
     status: string;
@@ -33,140 +34,43 @@ async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<Re
     }
 }
 
-//替换内容中的图片标签
-async function replaceImageReferencesInContent(ctx: seal.MsgContext, ai: any, content: string, renderMode: 'markdown' | 'html'): Promise<{ processedContent: string, errors: string[], hasImages: boolean }> {
-    const errors: string[] = [];
-    let processedContent = content;
-    let hasImages = false;    
-    const match = content.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-    
-    if (!match) return { processedContent, errors, hasImages };
-
-    const uniqueRefs = [...new Set(match)];
-
-    for (const imgRef of uniqueRefs) {
-        const idMatch = imgRef.match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
-        if (!idMatch) continue;
-        
-        const id = idMatch[1].trim();
-        const image = ai.context.findImage(ctx, id);
-        
-        if (!image) {
-            errors.push(`未找到图片<|img:${id}|>`);
-            continue;
-        }
-
-        if (image.type === 'local' ) {
-            errors.push(`图片<|img:${id}|>为本地图片，暂不支持`);
-            continue;
-        }
-        
-        let imgUrl = '';
-        if (image.type === 'base64') {
-            const format = image.format || 'png';
-            imgUrl = `data:image/${format};base64,${image.base64}`;
-            hasImages = true;
-        } else if (image.type === 'url') {
-            imgUrl = image.file;
-            hasImages = true;
-        }
-        
-        if (!imgUrl) continue;
-        
-        const escapedRef = imgRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const mdSyntaxRegex = new RegExp(`(\\[.*?\\]\\(\\s*)${escapedRef}(\\s*\\))`, 'g');
-        if (mdSyntaxRegex.test(processedContent)) {
-            processedContent = processedContent.replace(mdSyntaxRegex, `$1${imgUrl}$2`);
-        }
-
-        const htmlSrcRegex = new RegExp(`(src\\s*=\\s*['"]\\s*)${escapedRef}(\\s*['"])`, 'g');
-        if (htmlSrcRegex.test(processedContent)) {
-            processedContent = processedContent.replace(htmlSrcRegex, `$1${imgUrl}$2`);
-        }
-
-        // 处理背景图片
-        const htmlBgImageRegex = new RegExp(`(background-image:\\s*url\\(['"]\\s*)${escapedRef}(\\s*['"]\\))`, 'g');
-        if (htmlBgImageRegex.test(processedContent)) {
-            processedContent = processedContent.replace(htmlBgImageRegex, `$1${imgUrl}$2`);
-        }
-
-        const standaloneRegex = new RegExp(escapedRef, 'g');
-        if (renderMode === 'markdown') {
-            processedContent = processedContent.replace(standaloneRegex, `![image](${imgUrl})`);
-        } else {
-            processedContent = processedContent.replace(standaloneRegex, `<img src="${imgUrl}" />`);
-        }
-    }
-    
-    return { processedContent, errors, hasImages };
-}
-
-//替换内容中的头像标签
-async function replaceAvatarReferencesInContent(ctx: seal.MsgContext, ai: any, content: string, renderMode: 'markdown' | 'html'): Promise<{ processedContent: string, errors: string[], hasImages: boolean }> {
-    const errors: string[] = [];
-    let processedContent = content;
-    let hasImages = false;
-    
-    const avatarMatch = content.match(/[<＜][\|│｜]avatar:(private|group):(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-    
-    if (!avatarMatch) return { processedContent, errors, hasImages };
-
-    const uniqueRefs = [...new Set(avatarMatch)];
-
-    for (const avatarRef of uniqueRefs) {
-        const match = avatarRef.match(/[<＜][\|│｜]avatar:(private|group):(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
-        if (!match) continue;
-        
-        const avatarType = match[1];
-        const name = match[2].trim();
-        
-        let url = '';
-        if (avatarType === 'private') {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                errors.push(`未找到用户<${name}>，无法获取头像`);
-                continue;
+async function transformContentToUrlText(ctx: seal.MsgContext, ai: AI, content: string): Promise<{ text: string, images: Image[] }> {
+    const segs = parseSpecialTokens(content);
+    let text = '';
+    const images: Image[] = [];
+    for (const seg of segs) {
+        switch (seg.type) {
+            case 'text': {
+                text += seg.content;
+                break;
             }
-            url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
-        } else if (avatarType === 'group') {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                errors.push(`未找到群聊<${name}>，无法获取头像`);
-                continue;
+            case 'at': {
+                const name = seg.content;
+                const ui = await ai.context.findUserInfo(ctx, name);
+                if (ui !== null) {
+                    text += ` @${ui.name} `;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                    text += ` @${name} `;
+                }
+                break;
             }
-            url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
-        }
-        
-        if (url) {
-            hasImages = true;
-            const escapedRef = avatarRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            
-            const mdSyntaxRegex = new RegExp(`(\\[.*?\\]\\(\\s*)${escapedRef}(\\s*\\))`, 'g');
-            if (mdSyntaxRegex.test(processedContent)) {
-                processedContent = processedContent.replace(mdSyntaxRegex, `$1${url}$2`);
-            }
+            case 'img': {
+                const id = seg.content;
+                const image = await ai.context.findImage(ctx, id);
 
-            const htmlSrcRegex = new RegExp(`(src\\s*=\\s*['"]\\s*)${escapedRef}(\\s*['"])`, 'g');
-            if (htmlSrcRegex.test(processedContent)) {
-                processedContent = processedContent.replace(htmlSrcRegex, `$1${url}$2`);
-            }
-
-            // 处理背景图片
-            const htmlBgImageRegex = new RegExp(`(background-image:\\s*url\\(['"]\\s*)${escapedRef}(\\s*['"]\\))`, 'g');
-            if (htmlBgImageRegex.test(processedContent)) {
-                processedContent = processedContent.replace(htmlBgImageRegex, `$1${url}$2`);
-            }
-
-            const standaloneRegex = new RegExp(escapedRef, 'g');
-            if (renderMode === 'markdown') {
-                processedContent = processedContent.replace(standaloneRegex, `![avatar](${url})`);
-            } else {
-                processedContent = processedContent.replace(standaloneRegex, `<img src="${url}" />`);
+                if (image) {
+                    if (image.type === 'local') throw new Error(`图片<|img:${id}|>为本地图片，暂不支持`);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    logger.warning(`无法找到图片：${id}`);
+                }
+                break;
             }
         }
     }
-    
-    return { processedContent, errors, hasImages };
+    return { text, images };
 }
 
 // Markdown 渲染
@@ -190,7 +94,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>引用图片（xxxxxx为6位图片ID，不支持本地图片）。可以使用<|avatar:private:name|>或<|avatar:group:name|>引用头像"
+                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用markdown语法显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
                     },
                     name: {
                         type: "string",
@@ -223,17 +127,10 @@ export function registerRender() {
         const kws = ["render", "markdown", name, theme];
 
         try {
-            const { processedContent: contentWithImages, errors: imageErrors, hasImages: hasImageRefs } = await replaceImageReferencesInContent(ctx, ai, content, 'markdown');           
-            const { processedContent: finalContent, errors: avatarErrors, hasImages: hasAvatarRefs } = await replaceAvatarReferencesInContent(ctx, ai, contentWithImages, 'markdown');
-            
-            const allErrors = [...imageErrors, ...avatarErrors];
-            if (allErrors.length > 0) {
-                return { content: allErrors.join('\n'), images: [] };
-            }
-            
-            const hasImages = hasImageRefs || hasAvatarRefs;
-            
-            const result = await renderMarkdown(finalContent, theme, 1200, hasImages);
+            const { text, images } = await transformContentToUrlText(ctx, ai, content);
+            const hasImages = images.length > 0;
+
+            const result = await renderMarkdown(text, theme, 1200, hasImages);
             if (result.status === "success" && result.base64) {
                 const base64 = result.base64;
                 if (!base64) {
@@ -270,7 +167,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>引用图片（xxxxxx为图片ID，不支持本地图片)。可以使用<|avatar:private:name|>或<|avatar:group:name|>引用头像"
+                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用html元素显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
                     },
                     name: {
                         type: "string",
@@ -297,17 +194,10 @@ export function registerRender() {
         const kws = ["render", "html", name];
 
         try {
-            const { processedContent: contentWithImages, errors: imageErrors, hasImages: hasImageRefs } = await replaceImageReferencesInContent(ctx, ai, content, 'html');
-            const { processedContent: finalContent, errors: avatarErrors, hasImages: hasAvatarRefs } = await replaceAvatarReferencesInContent(ctx, ai, contentWithImages, 'html');
-            
-            const allErrors = [...imageErrors, ...avatarErrors];
-            if (allErrors.length > 0) {
-                return { content: allErrors.join('\n'), images: [] };
-            }
-            
-            const hasImages = hasImageRefs || hasAvatarRefs;
-            
-            const result = await renderHtml(finalContent, 1200, hasImages);
+            const { text, images } = await transformContentToUrlText(ctx, ai, content);
+            const hasImages = images.length > 0;
+
+            const result = await renderHtml(text, 1200, hasImages);
             if (result.status === "success" && result.base64) {
                 const base64 = result.base64;
                 if (!base64) {

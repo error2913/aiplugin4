@@ -101,7 +101,7 @@ export function registerMeme() {
                     image_ids: {
                         type: "array",
                         items: { type: "string" },
-                        description: `图片的id，六位字符，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
+                        description: `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
                     },
                     save: {
                         type: "boolean",
