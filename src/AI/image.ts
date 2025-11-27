@@ -43,6 +43,19 @@ export class Image {
         return `[CQ:image,file=${file}]`;
     }
 
+    get base64Url(): string {
+        let format = this.format;
+        if (!format || format === "unknown") format = 'png';
+        return `data:image/${format};base64,${this.base64}`
+    }
+
+    /**
+     * 获取图片的URL，若为base64则返回base64Url
+     */
+    get url(): string {
+        return this.type === 'base64' ? this.base64Url : this.file;
+    }
+
     async checkImageUrl(): Promise<boolean> {
         if (this.type !== 'url') return true;
         let isValid = false;
@@ -111,7 +124,7 @@ export class Image {
             role: "user",
             content: [{
                 "type": "image_url",
-                "image_url": { "url": this.type === 'base64' ? `data:image/${this.format};base64,${this.base64}` : this.file }
+                "image_url": { "url": this.url }
             }, {
                 "type": "text",
                 "text": prompt ? prompt : defaultPrompt
@@ -123,7 +136,7 @@ export class Image {
         if (!this.content && urlToBase64 === '自动' && this.type === 'url') {
             logger.info(`图片${this.id}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
-            messages[0].content[0].image_url.url = `data:image/${this.format};base64,${this.base64}`;
+            messages[0].content[0].image_url.url = this.base64Url;
             this.content = (await sendITTRequest(messages)).slice(0, maxChars);
         }
 

@@ -1,9 +1,10 @@
 import { logger } from "../logger";
 import { Tool } from "./tool";
 import { ConfigManager } from "../config/configManager";
-import { AIManager } from "../AI/AI";
+import { AI, AIManager } from "../AI/AI";
 import { Image } from "../AI/image";
 import { generateId } from "../utils/utils";
+import { parseSpecialTokens } from "../utils/utils_string";
 
 interface RenderResponse {
     status: string;
@@ -33,14 +34,53 @@ async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<Re
     }
 }
 
+async function transformContentToUrlText(ctx: seal.MsgContext, ai: AI, content: string): Promise<{ text: string, images: Image[] }> {
+    const segs = parseSpecialTokens(content);
+    let text = '';
+    const images: Image[] = [];
+    for (const seg of segs) {
+        switch (seg.type) {
+            case 'text': {
+                text += seg.content;
+                break;
+            }
+            case 'at': {
+                const name = seg.content;
+                const ui = await ai.context.findUserInfo(ctx, name);
+                if (ui !== null) {
+                    text += ` @${ui.name} `;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                    text += ` @${name} `;
+                }
+                break;
+            }
+            case 'img': {
+                const id = seg.content;
+                const image = await ai.context.findImage(ctx, id);
+
+                if (image) {
+                    if (image.type === 'local') throw new Error(`图片<|img:${id}|>为本地图片，暂不支持`);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
+        }
+    }
+    return { text, images };
+}
+
 // Markdown 渲染
-async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradient' = 'light', width = 1200) {
-    return postToRenderEndpoint('/render/markdown', { markdown, theme, width, quality: 90 });
+async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradient' = 'light', width = 1200, hasImages = false) {
+    return postToRenderEndpoint('/render/markdown', { markdown, theme, width, quality: 90, hasImages });
 }
 
 // HTML 渲染
-async function renderHtml(html: string, width = 1200) {
-    return postToRenderEndpoint('/render/html', { html, width, quality: 90 });
+async function renderHtml(html: string, width = 1200, hasImages = false) {
+    return postToRenderEndpoint('/render/html', { html, width, quality: 90, hasImages });
 }
 
 export function registerRender() {
@@ -54,7 +94,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式"
+                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用markdown语法显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
                     },
                     name: {
                         type: "string",
@@ -87,7 +127,10 @@ export function registerRender() {
         const kws = ["render", "markdown", name, theme];
 
         try {
-            const result = await renderMarkdown(content, theme, 1200);
+            const { text, images } = await transformContentToUrlText(ctx, ai, content);
+            const hasImages = images.length > 0;
+
+            const result = await renderMarkdown(text, theme, 1200, hasImages);
             if (result.status === "success" && result.base64) {
                 const base64 = result.base64;
                 if (!base64) {
@@ -124,7 +167,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。"
+                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用html元素显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
                     },
                     name: {
                         type: "string",
@@ -151,7 +194,10 @@ export function registerRender() {
         const kws = ["render", "html", name];
 
         try {
-            const result = await renderHtml(content, 1200);
+            const { text, images } = await transformContentToUrlText(ctx, ai, content);
+            const hasImages = images.length > 0;
+
+            const result = await renderHtml(text, 1200, hasImages);
             if (result.status === "success" && result.base64) {
                 const base64 = result.base64;
                 if (!base64) {
@@ -178,7 +224,4 @@ export function registerRender() {
     }
 }
 
-// TODO:嵌入图片……
-// 1. 嵌入本地图片
-// 2. 嵌入网络图片，包括聊天记录，用户头像，群头像，直接使用url
-// 3. 嵌入base64图片
+// TODO:嵌入本地图片
