@@ -42,21 +42,41 @@ app.use('/images', express.static('generated_images'));
 
 const IMAGE_DIR = path.join(__dirname, 'generated_images');
 
-async function ensureImageDir() {
-    try {
-        await fs.access(IMAGE_DIR);
-    } catch {
-        await fs.mkdir(IMAGE_DIR, { recursive: true });
-    }
-}
-
 function generateImageId() {
     return crypto.randomBytes(16).toString('hex');
 }
 
 // HTML模板
 function generateHTML(content, contentType, theme = 'light', style = 'github') {
-    const bodyContent = contentType === 'markdown' ? marked(content) : content;
+let bodyContent = content;
+
+    if (contentType === 'markdown') {
+        const mathBlocks = [];
+        
+        bodyContent = bodyContent.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
+            const id = mathBlocks.length;
+            mathBlocks.push(match); 
+            return `%%%MATH_BLOCK_${id}%%%`;
+        });
+
+        bodyContent = bodyContent.replace(/\$([^\$\n]+?)\$/g, (match) => {
+            const id = mathBlocks.length;
+            mathBlocks.push(match);
+            return `%%%MATH_BLOCK_${id}%%%`;
+        });
+        
+        bodyContent = bodyContent.replace(/\\\[([\s\S]+?)\\\]/g, (match) => {
+            const id = mathBlocks.length;
+            mathBlocks.push(match);
+            return `%%%MATH_BLOCK_${id}%%%`;
+        });
+
+        bodyContent = marked(bodyContent);
+
+        bodyContent = bodyContent.replace(/%%%MATH_BLOCK_(\d+)%%%/g, (match, id) => {
+            return mathBlocks[parseInt(id)];
+        });
+    }
 
     const themes = {
         light: {
@@ -100,7 +120,9 @@ function generateHTML(content, contentType, theme = 'light', style = 'github') {
                     {left: '\\\\[', right: '\\\\]', display: true},
                     {left: '\\\\(', right: '\\\\)', display: false}
                 ],
-                throwOnError: false
+            ignoredTags: ['script', 'noscript', 'style', 'textarea'],
+            trust: true,
+            throwOnError: false
             });"></script>
     <style>
         * {
