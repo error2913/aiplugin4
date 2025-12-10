@@ -33,18 +33,18 @@ export function registerBan() {
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
-        const uid = await ai.context.findUserId(ctx, name);
+        const ui = await ai.context.findUserInfo(ctx, name);
 
-        if (uid === null) return { content: `未找到<${name}>`, images: [] };
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
         const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
         if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
         if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
 
-        const memberInfo2 = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
-        if (!memberInfo2) return { content: `获取用户 ${uid} 信息失败`, images: [] };
+        const memberInfo2 = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), ui.id.replace(/^.+:/, ''));
+        if (!memberInfo2) return { content: `获取用户 ${ui.id} 信息失败`, images: [] };
         if (memberInfo2.role === 'owner' || memberInfo2.role === 'admin') return { content: `你无法禁言${memberInfo2.role === 'owner' ? '群主' : '管理员'}`, images: [] };
 
-        await setGroupBan(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''), duration);
+        await setGroupBan(epId, gid.replace(/^.+:/, ''), ui.id.replace(/^.+:/, ''), duration);
         return { content: `已禁言<${name}> ${duration}秒`, images: [] };
     }
 

@@ -263,7 +263,8 @@ async function renderToImage(content, options = {}) {
         theme = 'light',
         style = 'github',
         width = 1200, 
-        quality = 90
+        quality = 90,
+        hasImages = false
     } = options;
 
     const browser = await puppeteer.launch({
@@ -287,9 +288,12 @@ async function renderToImage(content, options = {}) {
 
         const html = generateHTML(content, contentType, theme, style);
         
+        // 如果有图片，增加超时时间（图片加载需要更长时间）
+        const timeout = hasImages ? 60000 : 30000;
+        
         await page.setContent(html, {
             waitUntil: 'networkidle0',
-            timeout: 30000
+            timeout: timeout
         });
 
         await new Promise(r => setTimeout(r, 1500)); 
@@ -362,7 +366,7 @@ async function renderToImage(content, options = {}) {
 // 渲染 Markdown 
 app.post('/render/markdown', async (req, res) => {
     try {
-        const { markdown, theme = 'light', width = 1200, quality = 90 } = req.body;
+        const { markdown, theme = 'light', width = 1200, quality = 90, hasImages = false } = req.body;
         if (!markdown) {
             return res.status(400).json({ status: 'error', message: 'Field "markdown" is required' });
         }
@@ -371,7 +375,8 @@ app.post('/render/markdown', async (req, res) => {
             contentType: 'markdown', 
             theme,
             width,
-            quality
+            quality,
+            hasImages
         });
 
         res.json({
@@ -390,7 +395,7 @@ app.post('/render/markdown', async (req, res) => {
 // 渲染 HTML
 app.post('/render/html', async (req, res) => {
     try {
-        const { html, width = 1200, quality = 90 } = req.body;
+        const { html, width = 1200, quality = 90, hasImages = false } = req.body;
         if (!html) {
             return res.status(400).json({ status: 'error', message: 'Field "html" is required' });
         }
@@ -398,7 +403,8 @@ app.post('/render/html', async (req, res) => {
         const result = await renderToImage(html, {
             contentType: 'html', 
             width,
-            quality
+            quality,
+            hasImages
         });
 
         res.json({

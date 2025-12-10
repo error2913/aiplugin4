@@ -38,6 +38,7 @@ function main() {
 【.ai off】关闭AI，此时仍能用正则匹配触发
 【.ai fgt】遗忘上下文
 【.ai role】角色设定相关
+【.ai img】图片相关
 【.ai memo】AI的记忆相关
 【.ai tool】AI的工具相关
 【.ai ign】AI的忽略名单相关
@@ -538,6 +539,88 @@ ${HELPMAP["权限限制"]}`);
           seal.vars.strSet(ctx, "$gSYSPROMPT", val2);
           seal.replyToSender(ctx, msg, `角色设定已切换到[${val2}]`);
           return ret;
+        }
+        case 'image': {
+          const val2 = cmdArgs.getArgN(2);
+          switch (aliasToCmd(val2)) {
+            case 'list': {
+              const type = cmdArgs.getArgN(3);
+              switch (aliasToCmd(type)) {
+                case 'steal': {
+                  seal.replyToSender(ctx, msg, ai.imageManager.getStolenImageListText(page) || '暂无偷取图片');
+                  return ret;
+                }
+                case 'local': {
+                  seal.replyToSender(ctx, msg, ImageManager.getLocalImageListText(page) || '暂无本地图片');
+                  return ret;
+                }
+                default: {
+                  seal.replyToSender(ctx, msg, '【.ai img list [stl/lcl]】展示偷取的图片/本地图片');
+                  return ret;
+                }
+              }
+            }
+            case 'steal': {
+              const op = cmdArgs.getArgN(3);
+              switch (aliasToCmd(op)) {
+                case 'on': {
+                  ai.imageManager.stealStatus = true;
+                  seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.length}`);
+                  AIManager.saveAI(sid);
+                  return ret;
+                }
+                case 'off': {
+                  ai.imageManager.stealStatus = false;
+                  seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.length}`);
+                  AIManager.saveAI(sid);
+                  return ret;
+                }
+                case 'forget': {
+                  ai.imageManager.stolenImages = [];
+                  seal.replyToSender(ctx, msg, '偷取图片已遗忘');
+                  AIManager.saveAI(sid);
+                  return ret;
+                }
+                default: {
+                  seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.length}`);
+                  return ret;
+                }
+              }
+            }
+            case 'itt': {
+              const val3 = cmdArgs.getArgN(3);
+              if (!val3) {
+                seal.replyToSender(ctx, msg, '【.ai img itt [图片] (附加提示词)】图片转文字');
+                return ret;
+              }
+              const messageArray = transformTextToArray(val3);
+              transformArrayToContent(ctx, ai, messageArray).then(({ images }) => {
+                if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
+                const img = images[0];
+                img.imageToText(cmdArgs.getRestArgsFrom(4))
+                  .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
+              });
+              return ret;
+            }
+            case 'find': {
+              const id = cmdArgs.getArgN(3);
+              if (!id) {
+                seal.replyToSender(ctx, msg, '【.ai img find <图片ID>】查找图片');
+                return ret;
+              }
+              ai.context.findImage(ctx, id)
+                .then((img) => seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片'));
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, `帮助:
+【.ai img list [stl/lcl]】展示偷取的图片/本地图片
+【.ai img stl [on/off/f]】偷图 开启/关闭/遗忘
+【.ai img itt [图片] (附加提示词)】图片转文字
+【.ai img find <图片ID>】查找图片`);
+              return ret;
+            }
+          }
         }
         case 'memory': {
           const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
@@ -1343,137 +1426,15 @@ ${images.map(img => img.CQCode).join('\n')}`));
     }
   }
 
-  const cmdImage = seal.ext.newCmdItemInfo();
-  cmdImage.name = 'img'; // 指令名字，可用中文
-  cmdImage.help = `盗图指南:
-【.img list [stl/lcl]】展示偷取的图片/本地图片
-【.img stl [on/off/f]】偷图 开启/关闭/遗忘
-【.img itt [图片] (附加提示词)】图片转文字
-【.img find <图片ID>】查找图片`;
-  cmdImage.solve = (ctx, msg, cmdArgs) => {
-    try {
-      const val = cmdArgs.getArgN(1);
-      const uid = ctx.player.userId;
-      const gid = ctx.group.groupId;
-      const sid = ctx.isPrivate ? uid : gid;
-
-      const ret = seal.ext.newCmdExecuteResult(true);
-      const ai = AIManager.getAI(sid);
-      const { success, exist } = PrivilegeManager.checkPriv(ctx, cmdArgs, ai);
-      if (!success) {
-        seal.replyToSender(ctx, msg, exist ? '权限不足' : '命令不存在');
-        return ret;
-      }
-
-      let page = 1;
-      const kwargPage = cmdArgs.kwargs.find((kwarg) => kwarg.name === 'page' || kwarg.name === 'p');
-      if (kwargPage && kwargPage.valueExists) {
-        page = parseInt(kwargPage.value);
-        if (isNaN(page)) {
-          seal.replyToSender(ctx, msg, '页码必须为数字');
-          return ret;
-        }
-        if (page < 1) {
-          seal.replyToSender(ctx, msg, '页码必须大于等于1');
-          return ret;
-        }
-      }
-
-      switch (aliasToCmd(val)) {
-        case 'list': {
-          const type = cmdArgs.getArgN(2);
-          switch (aliasToCmd(type)) {
-            case 'steal': {
-              seal.replyToSender(ctx, msg, ai.imageManager.getStolenImageListText(page) || '暂无偷取图片');
-              return ret;
-            }
-            case 'local': {
-              seal.replyToSender(ctx, msg, ImageManager.getLocalImageListText(page) || '暂无本地图片');
-              return ret;
-            }
-            default: {
-              ret.showHelp = true;
-              return ret;
-            }
-          }
-        }
-        case 'steal': {
-          const op = cmdArgs.getArgN(2);
-          switch (aliasToCmd(op)) {
-            case 'on': {
-              ai.imageManager.stealStatus = true;
-              seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.length}`);
-              AIManager.saveAI(sid);
-              return ret;
-            }
-            case 'off': {
-              ai.imageManager.stealStatus = false;
-              seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.length}`);
-              AIManager.saveAI(sid);
-              return ret;
-            }
-            case 'forget': {
-              ai.imageManager.stolenImages = [];
-              seal.replyToSender(ctx, msg, '偷取图片已遗忘');
-              AIManager.saveAI(sid);
-              return ret;
-            }
-            default: {
-              seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.length}`);
-              return ret;
-            }
-          }
-        }
-        case 'itt': {
-          const val2 = cmdArgs.getArgN(2);
-          if (!val2) {
-            seal.replyToSender(ctx, msg, '【.img itt [图片] (附加提示词)】图片转文字');
-            return ret;
-          }
-          const messageArray = transformTextToArray(val2);
-          transformArrayToContent(ctx, ai, messageArray).then(({ images }) => {
-            if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
-            const img = images[0];
-            img.imageToText(cmdArgs.getRestArgsFrom(3))
-              .then(() => seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content));
-          });
-          return ret;
-        }
-        case 'find': {
-          const id = cmdArgs.getArgN(2);
-          if (!id) {
-            seal.replyToSender(ctx, msg, '【.img find <图片ID>】查找图片');
-            return ret;
-          }
-          const img = ai.context.findImage(ctx, id);
-          seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片');
-          return ret;
-        }
-        default: {
-          ret.showHelp = true;
-          return ret;
-        }
-      }
-    } catch (e) {
-      logger.error(`指令.img执行失败:${e.message}`);
-      seal.replyToSender(ctx, msg, `指令.img执行失败:${e.message}`);
-      return seal.ext.newCmdExecuteResult(true);
-    }
-  }
-
   // 将命令注册到扩展中
   ext.cmdMap['AI'] = cmdAI;
   ext.cmdMap['ai'] = cmdAI;
-  ext.cmdMap['img'] = cmdImage;
 
   ext.onPoke = (ctx, event) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
-    if (event.senderId === ctx.endPoint.userId) {
-      ext.onMessageSend(ctx, msg);
-    } else {
-      ext.onNotCommandReceived(ctx, msg);
-    }
+    if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);
+    else ext.onNotCommandReceived(ctx, msg);
   }
 
   //接受非指令消息

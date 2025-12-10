@@ -39,20 +39,17 @@ export class MessageConfig {
     - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
 {{/if}}
     - \\f用于分割多条消息
-{{#if 接收图片}}
 
 ## 图片相关
+{{#if 接收图片}}
 {{#if 图片条件不为零}}
     - <|img:xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|img:xxxxxx|>的格式
 {{else}}
     - <|img:xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|img:xxxxxx|>的格式
 {{/if}}
-{{else}}
-{{#if 可发送图片不为空}}
-
-## 图片相关
 {{/if}}
-{{/if}}
+    - 可使用<|img:user_avatar:xxxxxx|>发送用户头像，其中xxxxxx为用户名称{{#if 展示号码}}或用户ID{{/if}}
+    - 可使用<|img:group_avatar:xxxxxx|>发送群聊头像，其中xxxxxx为群聊名称{{#if 展示号码}}或群聊ID{{/if}}
 {{#if 可发送图片不为空}}
     - 可使用<|img:图片名称|>发送表情包，表情名称有:{{{可发送图片列表}}}
 {{/if}}

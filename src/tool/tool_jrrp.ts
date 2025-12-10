@@ -1,5 +1,5 @@
 import { ConfigManager } from "../config/configManager";
-import { createCtx, createMsg } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool, ToolManager } from "./tool";
 
 export function registerJrrp() {
@@ -28,18 +28,12 @@ export function registerJrrp() {
     tool.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
-
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
-        if (!success) {
-            return { content: '今日人品查询失败', images: [] };
-        }
+        if (!success) return { content: '今日人品查询失败', images: [] };
 
         return { content: s, images: [] };
     }

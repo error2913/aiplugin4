@@ -1,6 +1,6 @@
 import { AIManager, GroupInfo, SessionInfo, UserInfo } from "../AI/AI";
 import { ConfigManager } from "../config/configManager";
-import { createMsg, createCtx } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool } from "./tool";
 import { knowledgeMM, searchOptions as SearchOptions } from "../AI/memory";
 import { getRoleSetting } from "../utils/utils_message";
@@ -53,54 +53,34 @@ export function registerMemory() {
             }
         }
     });
-    toolAdd.solve = async (ctx, msg, ai, args) => {
+    toolAdd.solve = async (ctx, _, ai, args) => {
         const { memory_type, name, text, keywords = [], userList = [], groupList = [] } = args;
 
         if (memory_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(uid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
+            ai = AIManager.getAI(ui.id);
         } else if (memory_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg('group', ctx.player.userId, gid);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(gid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
+            ai = AIManager.getAI(gi.id);
         } else {
             return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
 
         const uiList: UserInfo[] = [];
         for (const n of userList) {
-            const uid = await ai.context.findUserId(ctx, n, true);
-            if (uid !== null) {
-                uiList.push({
-                    isPrivate: true,
-                    id: uid,
-                    name: n
-                });
-            }
+            const ui = await ai.context.findUserInfo(ctx, n, true);
+            if (ui !== null) uiList.push(ui);
         }
         const giList: GroupInfo[] = [];
         for (const n of groupList) {
-            const gid = await ai.context.findGroupId(ctx, n);
-            if (gid !== null) {
-                giList.push({
-                    isPrivate: false,
-                    id: gid,
-                    name: n
-                });
-            }
+            const gi = await ai.context.findGroupInfo(ctx, n);
+            if (gi !== null) giList.push(gi);
         }
 
         //记忆相关处理
@@ -146,29 +126,21 @@ export function registerMemory() {
             }
         }
     });
-    toolDel.solve = async (ctx, msg, ai, args) => {
+    toolDel.solve = async (ctx, _, ai, args) => {
         const { memory_type, name, id_list, keywords } = args;
 
         if (memory_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(uid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
+            ai = AIManager.getAI(ui.id);
         } else if (memory_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg('group', ctx.player.userId, gid);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(gid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
+            ai = AIManager.getAI(gi.id);
         } else {
             return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
@@ -240,7 +212,7 @@ export function registerMemory() {
             }
         }
     });
-    toolSearch.solve = async (ctx, msg, ai, args) => {
+    toolSearch.solve = async (ctx, _, ai, args) => {
         const { memory_type, name = '', query = '', topK = 5, keywords = [], userList = [], groupList = [], includeImages = false, method = 'similarity' } = args;
 
         let si: SessionInfo = {
@@ -249,42 +221,22 @@ export function registerMemory() {
             name: ''
         };
         if (memory_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) return { content: `未找到<${name}>`, images: [] };
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg('private', uid, '');
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(uid);
-            si = {
-                isPrivate: true,
-                id: uid,
-                name: name
-            }
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
+            ai = AIManager.getAI(ui.id);
         } else if (memory_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) return { content: `未找到<${name}>`, images: [] };
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg('group', ctx.player.userId, gid);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(gid);
-            si = {
-                isPrivate: false,
-                id: gid,
-                name: name
-            }
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
+            ai = AIManager.getAI(gi.id);
         } else if (memory_type === "knowledge") {
             const giList: GroupInfo[] = [];
             for (const n of groupList) {
-                const gid = await ai.context.findGroupId(ctx, n);
-                if (gid !== null) {
-                    giList.push({
-                        isPrivate: false,
-                        id: gid,
-                        name: n
-                    });
-                }
+                const gi = await ai.context.findGroupInfo(ctx, n);
+                if (gi !== null) giList.push(gi);
             }
 
             const options: SearchOptions = {
@@ -312,25 +264,13 @@ export function registerMemory() {
 
         const uiList: UserInfo[] = [];
         for (const n of userList) {
-            const uid = await ai.context.findUserId(ctx, n, true);
-            if (uid !== null) {
-                uiList.push({
-                    isPrivate: true,
-                    id: uid,
-                    name: n
-                });
-            }
+            const ui = await ai.context.findUserInfo(ctx, n, true);
+            if (ui !== null) uiList.push(ui);
         }
         const giList: GroupInfo[] = [];
         for (const n of groupList) {
-            const gid = await ai.context.findGroupId(ctx, n);
-            if (gid !== null) {
-                giList.push({
-                    isPrivate: false,
-                    id: gid,
-                    name: n
-                });
-            }
+            const gi = await ai.context.findGroupInfo(ctx, n);
+            if (gi !== null) giList.push(gi);
         }
 
         const options: SearchOptions = {
@@ -370,33 +310,24 @@ export function registerMemory() {
             }
         }
     });
-    toolClear.solve = async (ctx, msg, ai, args) => {
+    toolClear.solve = async (ctx, _, ai, args) => {
         const { memory_type, name } = args;
 
         if (memory_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg('private', uid, '');
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(uid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
+            ai = AIManager.getAI(ui.id);
         } else if (memory_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) {
-                return { content: `未找到<${name}>`, images: [] };
-            }
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
 
-            msg = createMsg('group', ctx.player.userId, gid);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(gid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
+            ai = AIManager.getAI(gi.id);
         } else {
             return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
-
 
         ai.memory.clearMemory();
         AIManager.saveAI(ai.id);

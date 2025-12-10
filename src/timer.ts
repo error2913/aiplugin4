@@ -1,5 +1,5 @@
 import { ConfigManager } from "./config/configManager";
-import { getCtxAndMsg } from "./utils/utils_seal";
+import { getSessionCtxAndMsg } from "./utils/utils_seal";
 import { AI, AIManager } from "./AI/AI";
 import { logger } from "./logger";
 import { fmtDate } from "./utils/utils_string";
@@ -217,7 +217,7 @@ export class TimerManager {
                             }
 
                             const { sid, isPrivate, epId, set, content } = timer;
-                            const { ctx, msg } = getCtxAndMsg(epId, sid, isPrivate);
+                            const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const ai = AIManager.getAI(sid);
 
                             const s = `你设置的定时器触发了，请按照以下内容发送回复：
@@ -243,7 +243,7 @@ export class TimerManager {
                             }
 
                             const { sid, isPrivate, epId, set, interval, count, content } = timer;
-                            const { ctx, msg } = getCtxAndMsg(epId, sid, isPrivate);
+                            const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const ai = AIManager.getAI(sid);
 
                             if (count === -1 || count > 1) {
@@ -278,7 +278,7 @@ export class TimerManager {
                             }
 
                             const { sid, isPrivate, epId, set } = timer;
-                            const { ctx, msg } = getCtxAndMsg(epId, sid, isPrivate);
+                            const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const ai = AIManager.getAI(sid);
 
                             const curSegIndex = ai.curActiveTimeSegIndex;

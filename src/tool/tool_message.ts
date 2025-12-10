@@ -1,7 +1,7 @@
 import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/configManager";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
-import { createCtx, createMsg } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
 import { CQTYPESALLOW } from "../config/config";
@@ -55,30 +55,26 @@ export function registerMessage() {
         if (match) {
             for (let i = 0; i < match.length; i++) {
                 const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1].trim().slice(0, 6);
-                const image = ai.context.findImage(ctx, id);
+                const image = await ai.context.findImage(ctx, id);
                 if (image) originalImages.push(image);
             }
         }
 
         if (msg_type === "private") {
-            const uid = await ai.context.findUserId(ctx, name, true);
-            if (uid === null) return { content: `未找到<${name}>`, images: [] };
-            if (uid === ctx.player.userId && ctx.isPrivate) return { content: `向当前私聊发送消息无需调用函数`, images: [] };
-            if (uid === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
+            if (ui.id === ctx.player.userId && ctx.isPrivate) return { content: `向当前私聊发送消息无需调用函数`, images: [] };
+            if (ui.id === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
 
-            msg = createMsg('private', uid, '');
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(uid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
+            ai = AIManager.getAI(ui.id);
         } else if (msg_type === "group") {
-            const gid = await ai.context.findGroupId(ctx, name);
-            if (gid === null) return { content: `未找到<${name}>`, images: [] };
-            if (gid === ctx.group.groupId) return { content: `向当前群聊发送消息无需调用函数`, images: [] };
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
+            if (gi.id === ctx.group.groupId) return { content: `向当前群聊发送消息无需调用函数`, images: [] };
 
-            msg = createMsg('group', ctx.player.userId, gid);
-            ctx = createCtx(ctx.endPoint.userId, msg);
-
-            ai = AIManager.getAI(gid);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
+            ai = AIManager.getAI(gi.id);
         } else {
             return { content: `未知的消息类型<${msg_type}>`, images: [] };
         }
@@ -135,9 +131,8 @@ export function registerMessage() {
 
         const gid = ctx.group.groupId;
         const uid = `QQ:${result.sender.user_id}`;
-        const mmsg = createMsg(gid === '' ? 'private' : 'group', uid, gid);
-        const mctx = createCtx(epId, mmsg);
-        const name = mctx.player.name || '未知用户';
+        ({ ctx } = getCtxAndMsg(epId, uid, gid));
+        const name = ctx.player.name || '未知用户';
         const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
 
         return { content: prefix + content, images: images };

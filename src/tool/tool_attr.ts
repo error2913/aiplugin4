@@ -1,5 +1,5 @@
 import { ConfigManager } from "../config/configManager";
-import { createMsg, createCtx } from "../utils/utils_seal";
+import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool, ToolManager } from "./tool";
 
 export function registerAttr() {
@@ -28,18 +28,13 @@ export function registerAttr() {
     toolShow.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
         const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolShow.cmdInfo, [], [], []);
-        if (!success) {
-            return { content: '展示失败', images: [] };
-        }
+        if (!success) return { content: '展示失败', images: [] };
 
         return { content: s, images: [] };
     }
@@ -65,16 +60,13 @@ export function registerAttr() {
             }
         }
     });
-    toolGet.solve = async (ctx, msg, ai, args) => {
+    toolGet.solve = async (ctx, _, ai, args) => {
         const { name, attr } = args;
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
         const value = seal.vars.intGet(ctx, attr)[0];
         return { content: `${attr}: ${value}`, images: [] };
@@ -104,18 +96,13 @@ export function registerAttr() {
     toolSet.solve = async (ctx, msg, ai, args) => {
         const { name, expression } = args;
 
-        const uid = await ai.context.findUserId(ctx, name);
-        if (uid === null) {
-            return { content: `未找到<${name}>`, images: [] };
-        }
+        const ui = await ai.context.findUserInfo(ctx, name);
+        if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
-        msg = createMsg(msg.messageType, uid, ctx.group.groupId);
-        ctx = createCtx(ctx.endPoint.userId, msg);
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
         const [attr, expr] = expression.split('=');
-        if (expr === undefined) {
-            return { content: `修改失败，表达式 ${expression} 格式错误`, images: [] };
-        }
+        if (expr === undefined) return { content: `修改失败，表达式 ${expression} 格式错误`, images: [] };
 
         const value = seal.vars.intGet(ctx, attr)[0];
 
@@ -123,15 +110,11 @@ export function registerAttr() {
         const values = attrs.map(item => seal.vars.intGet(ctx, item)[0]);
 
         let s = expr;
-        for (let i = 0; i < attrs.length; i++) {
-            s = s.replace(attrs[i], values[i].toString());
-        }
+        attrs.forEach((a, i) => s = s.replace(a, values[i].toString()));
 
         const result = parseInt(seal.format(ctx, `{${s}}`));
 
-        if (isNaN(result)) {
-            return { content: `修改失败，表达式 ${expression} 格式化错误`, images: [] };
-        }
+        if (isNaN(result)) return { content: `修改失败，表达式 ${expression} 格式化错误`, images: [] };
 
         seal.vars.intSet(ctx, attr, result);
 
