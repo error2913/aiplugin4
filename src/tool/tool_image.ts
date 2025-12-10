@@ -85,21 +85,18 @@ export function registerImage() {
         try {
             // 新版 AIDrawing
             if (globalThis.aiDrawing && typeof globalThis.aiDrawing.sendImageRequest === 'function') {
-                const imageUrl = await globalThis.aiDrawing.sendImageRequest(prompt, negative_prompt);
-
+                const result = await globalThis.aiDrawing.sendImageRequest(prompt, negative_prompt);
                 const img = new Image();
                 img.id = `${name}_${generateId()}`;
-
-                if (save) {
-                    img.file = imageUrl;
+                if (result.startsWith("http://") || result.startsWith("https://")) {
                     try {
                         await img.urlToBase64();
                     } catch (e) {
                         logger.error(`将图片URL转换为base64失败: ${e}`);
-                        img.file = imageUrl;
+                        img.file = result;
                     }
                 } else {
-                    img.file = imageUrl;
+                    img.file = result;
                 }
 
                 img.format = img.format || 'unknown';
