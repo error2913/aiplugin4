@@ -22,6 +22,7 @@ import { registerSetTrigger } from "./tool_trigger"
 import { registerMusicPlay } from "./tool_music"
 import { registerMeme } from "./tool_meme"
 import { registerRender } from "./tool_render"
+import { registerBlockTool } from "./tool_block"
 import { logger } from "../logger"
 import { Image } from "../AI/image";
 import { fixJsonString } from "../utils/utils_string";
@@ -205,6 +206,7 @@ export class ToolManager {
         registerMusicPlay();
         registerMeme();
         registerRender();
+        registerBlockTool();
     }
 
     /**
