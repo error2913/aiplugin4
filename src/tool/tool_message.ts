@@ -5,7 +5,7 @@ import { getCtxAndMsg } from "../utils/utils_seal";
 import { handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
 import { CQTYPESALLOW } from "../config/config";
-import { deleteMsg, getGroupMemberInfo, getMsg, netExists } from "../utils/utils_ob11";
+import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../utils/utils_ob11";
 
 export function registerMessage() {
     const toolSend = new Tool({
@@ -177,5 +177,143 @@ export function registerMessage() {
 
         await deleteMsg(epId, transformMsgIdBack(msg_id));
         return { content: `已撤回消息${msg_id}`, images: [] };
+    }
+
+    const toolMerge = new Tool({
+        type: 'function',
+        function: {
+            name: 'send_forward_msg',
+            description: '发送合并转发消息',
+            parameters: {
+                type: 'object',
+                properties: {
+                    msg_type: {
+                        type: 'string',
+                        description: '消息类型，私聊或群聊',
+                        enum: ['private', 'group']
+                    },
+                    id: {
+                        type: 'string',
+                        description: '接收者ID，群号或QQ号'
+                    },
+                    messages: {
+                        type: 'array',
+                        description: '消息节点列表，可以有多个',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: {
+                                    type: 'string',
+                                    description: '发送者名称'
+                                },
+                                uin: {
+                                    type: 'string',
+                                    description: '发送者QQ号'
+                                },
+                                content: {
+                                    type: 'string',
+                                    description: '消息内容，和图片二选一'
+                                },
+                                image_url: {
+                                    type: 'string',
+                                    description: '图片ID，发送图片时必须用这个字段'
+                                }
+                            },
+                            required: ['uin']
+                        }
+                    }
+                },
+                required: ['msg_type', 'id', 'messages']
+            }
+        }
+    });
+    toolMerge.solve = async (ctx, _, ai, args) => {
+        const { msg_type, id, messages } = args;
+
+        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+
+        const nodes = [];
+        for (const msg of messages) {
+            const contentNode = [];
+
+            if (msg.content) {
+                const regex = /([<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/g;
+                const parts = msg.content.split(regex);
+
+                for (const part of parts) {
+                    if (!part) continue;
+
+                    const match = part.match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
+                    if (match) {
+                        const id = match[1].trim();
+                        const image = await ai.context.findImage(ctx, id);
+                        if (image) {
+                            const file = image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file;
+                            contentNode.push({
+                                type: "image",
+                                data: {
+                                    file: file
+                                }
+                            });
+                        } else {
+                            contentNode.push({
+                                type: "text",
+                                data: {
+                                    text: part
+                                }
+                            });
+                        }
+                    } else {
+                        contentNode.push({
+                            type: "text",
+                            data: {
+                                text: part
+                            }
+                        });
+                    }
+                }
+            }
+
+            if (msg.image_url) {
+                const image = await ai.context.findImage(ctx, msg.image_url);
+                if (!image) {
+                    return { content: `未找到图片<${msg.image_url}>`, images: [] };
+                }
+
+                const file = image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file;
+                contentNode.push({
+                    type: "image",
+                    data: {
+                        file: file
+                    }
+                });
+            }
+
+            if (contentNode.length === 0) {
+                return { content: `消息节点必须包含 content 或 image_url 其中之一`, images: [] };
+            }
+
+            nodes.push({
+                type: 'node',
+                data: {
+                    uin: String(msg.uin || ctx.endPoint.userId.replace(/^.+:/, '')),
+                    name: msg.name,
+                    content: contentNode
+                }
+            });
+        }
+
+        try {
+            if (msg_type === 'group') {
+                await sendGroupForwardMsg(ctx.endPoint.userId, id, nodes);
+            } else if (msg_type === 'private') {
+                await sendPrivateForwardMsg(ctx.endPoint.userId, id, nodes);
+            } else {
+                return { content: `不支持的消息类型`, images: [] };
+            }
+            return { content: `发送成功`, images: [] };
+        } catch (e) {
+            return { content: `发送出错: ${e.message}`, images: [] };
+        }
     }
 }
