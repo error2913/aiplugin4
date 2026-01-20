@@ -138,8 +138,10 @@ export class AI {
 
         // 检查toolsNotAllow状态
         const { toolsNotAllow } = ConfigManager.tool;
-        Object.keys(ToolManager.toolMap).forEach(key => {
-            this.tool.toolStatus[key] = !toolsNotAllow.includes(key);
+        toolsNotAllow.forEach(key => {
+            if (this.tool.toolStatus.hasOwnProperty(key)) {
+                this.tool.toolStatus[key] = false;
+            }
         });
 
         //清空数据
