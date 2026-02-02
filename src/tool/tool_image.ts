@@ -64,7 +64,7 @@ export function registerImage() {
                         description: "如果保存图片，图片的名称"
                     }
                 },
-                required: ['prompt' , 'save' , 'name']
+                required: ['prompt', 'save', 'name']
             }
         }
     });
@@ -100,7 +100,7 @@ export function registerImage() {
                 }
 
                 img.format = img.format || 'unknown';
-                img.content = `AI绘图<|img:${img.id}|>\n${prompt ? `描述: ${prompt}` : '' }\n${negative_prompt ? `不希望出现: ${negative_prompt}` : '' }`;
+                img.content = `AI绘图<|img:${img.id}|>\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
 
                 if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
 
@@ -109,7 +109,7 @@ export function registerImage() {
 
             // 兼容旧版 AIDrawing
             if (globalThis.aiDrawing && typeof globalThis.aiDrawing.generateImage === 'function') {
-                    try {
+                try {
                     await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
                     if (save) {
                         logger.warning('旧版 AIDrawing，无法直接保存图片');
@@ -129,6 +129,3 @@ export function registerImage() {
         }
     }
 }
-
-// TODO: tti改为返回图片base64
-// 注意兼容问题
