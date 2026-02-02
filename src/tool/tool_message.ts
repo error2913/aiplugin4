@@ -2,10 +2,12 @@ import { AIManager } from "../AI/AI";
 import { ConfigManager } from "../config/configManager";
 import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { getCtxAndMsg } from "../utils/utils_seal";
-import { handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
+import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
-import { CQTYPESALLOW } from "../config/config";
+import { CQTYPESALLOW, faceMap } from "../config/config";
 import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../utils/utils_ob11";
+import { logger } from "../logger";
+import { Image } from "../AI/image";
 
 export function registerMessage() {
     const toolSend = new Tool({
@@ -50,13 +52,17 @@ export function registerMessage() {
             `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/^.+:/, '')})` : ``}` :
             `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/^.+:/, '')})` : ``}`;
 
-        const originalImages = [];
-        const match = content.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-        if (match) {
-            for (let i = 0; i < match.length; i++) {
-                const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1].trim().slice(0, 6);
-                const image = await ai.context.findImage(ctx, id);
-                if (image) originalImages.push(image);
+        const segs = parseSpecialTokens(content);
+        const originalImages: Image[] = [];
+        for (const seg of segs) {
+            switch (seg.type) {
+                case 'img': {
+                    const id = seg.content;
+                    const image = await ai.context.findImage(ctx, id);
+                    if (image) originalImages.push(image);
+                    else logger.warning(`无法找到图片：${id}`);
+                    break;
+                }
             }
         }
 
@@ -212,14 +218,10 @@ export function registerMessage() {
                                 },
                                 content: {
                                     type: 'string',
-                                    description: '消息内容，和图片二选一'
-                                },
-                                image_url: {
-                                    type: 'string',
-                                    description: '图片ID，发送图片时必须用这个字段'
+                                    description: '消息内容'
                                 }
                             },
-                            required: ['uin']
+                            required: ['content']
                         }
                     }
                 },
@@ -233,72 +235,93 @@ export function registerMessage() {
         if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
         const nodes = [];
-        for (const msg of messages) {
-            const contentNode = [];
-
-            if (msg.content) {
-                const regex = /([<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/g;
-                const parts = msg.content.split(regex);
-
-                for (const part of parts) {
-                    if (!part) continue;
-
-                    const match = part.match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
-                    if (match) {
-                        const id = match[1].trim();
-                        const image = await ai.context.findImage(ctx, id);
-                        if (image) {
-                            const file = image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file;
-                            contentNode.push({
-                                type: "image",
-                                data: {
-                                    file: file
-                                }
-                            });
+        for (const messageItem of messages) {
+            const segs = parseSpecialTokens(messageItem.content);
+            const node = [];
+            for (const seg of segs) {
+                switch (seg.type) {
+                    case 'text': {
+                        node.push({
+                            type: 'text',
+                            text: seg.content
+                        })
+                        break;
+                    }
+                    case 'at': {
+                        const name = seg.content;
+                        const ui = await ai.context.findUserInfo(ctx, name);
+                        if (ui !== null) {
+                            node.push({
+                                type: 'at',
+                                qq: ui.id.replace(/^.+:/, "")
+                            })
                         } else {
-                            contentNode.push({
-                                type: "text",
-                                data: {
-                                    text: part
-                                }
-                            });
+                            logger.warning(`无法找到用户：${name}`);
+                            node.push({
+                                type: 'text',
+                                text: ` @${name} `
+                            })
                         }
-                    } else {
-                        contentNode.push({
-                            type: "text",
-                            data: {
-                                text: part
-                            }
-                        });
+                        break;
+                    }
+                    case 'poke': {
+                        const name = seg.content;
+                        const ui = await ai.context.findUserInfo(ctx, name);
+                        if (ui !== null) {
+                            node.push({
+                                type: 'poke',
+                                qq: ui.id.replace(/^.+:/, "")
+                            })
+                        } else {
+                            logger.warning(`无法找到用户：${name}`);
+                        }
+                        break;
+                    }
+                    case 'quote': {
+                        const msgId = seg.content;
+                        node.push({
+                            type: 'reply',
+                            id: transformMsgIdBack(msgId)
+                        })
+                        break;
+                    }
+                    case 'img': {
+                        const id = seg.content;
+                        const image = await ai.context.findImage(ctx, id);
+
+                        if (image) {
+                            if (image.type === 'local') break;
+                            const file = image.type === 'base64' ? image.base64 : image.file;
+                            node.push({
+                                type: 'image',
+                                data: { file: file } // 用base64发送是咋发的来着？↑
+                            })
+                        } else {
+                            logger.warning(`无法找到图片：${id}`);
+                        }
+                        break;
+                    }
+                    case 'face': {
+                        const faceId = Object.keys(faceMap).find(key => faceMap[key] === seg.content) || '';
+                        node.push({
+                            type: 'face',
+                            id: faceId
+                        })
+                        break;
                     }
                 }
             }
 
-            if (msg.image_url) {
-                const image = await ai.context.findImage(ctx, msg.image_url);
-                if (!image) {
-                    return { content: `未找到图片<${msg.image_url}>`, images: [] };
-                }
-
-                const file = image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file;
-                contentNode.push({
-                    type: "image",
-                    data: {
-                        file: file
-                    }
-                });
-            }
-
-            if (contentNode.length === 0) {
-                return { content: `消息节点必须包含 content 或 image_url 其中之一`, images: [] };
+            if (node.length === 0) {
+                return { content: `消息长度不能为0`, images: [] };
             }
 
             nodes.push({
                 type: 'node',
                 data: {
-                    uin: String(msg.uin || ctx.endPoint.userId.replace(/^.+:/, '')),
-                    name: msg.name,
-                    content: contentNode
+                    uin: String(messageItem.uin || ctx.endPoint.userId.replace(/^.+:/, '')),
+                    name: messageItem.name || '未知用户',
+                    content: node
                 }
             });
         }
@@ -317,3 +340,5 @@ export function registerMessage() {
         }
     }
 }
+
+// TODO: 合并消息嵌套

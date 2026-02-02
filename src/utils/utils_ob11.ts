@@ -251,7 +251,7 @@ export async function sendGroupAISound(epId: string, characterId: string, group_
     }
 }
 
-export async function sendGroupForwardMsg(epId: string, group_id: string, messages: any[]): Promise<any> {
+export async function sendGroupForwardMsg(epId: string, group_id: string, messages: MessageSegment[]): Promise<any> {
     const net = getNet();
     if (!net) return null;
     try {
@@ -266,7 +266,7 @@ export async function sendGroupForwardMsg(epId: string, group_id: string, messag
     }
 }
 
-export async function sendPrivateForwardMsg(epId: string, user_id: string, messages: any[]): Promise<any> {
+export async function sendPrivateForwardMsg(epId: string, user_id: string, messages: MessageSegment[]): Promise<any> {
     const net = getNet();
     if (!net) return null;
     try {

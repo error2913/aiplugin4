@@ -3,7 +3,7 @@ import { sendITTRequest } from "../service";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
 import { AI } from "./AI";
-import { MessageSegment } from "../utils/utils_string";
+import { MessageSegment, parseSpecialTokens } from "../utils/utils_string";
 
 export class Image {
     static validKeys: (keyof Image)[] = ['id', 'file', 'content'];
@@ -257,15 +257,21 @@ ${img.CQCode}`;
     }
 
     static async extractExistingImagesToSave(ctx: seal.MsgContext, ai: AI, s: string): Promise<Image[]> {
-        const images = [];
-        const match = s.match(/[<＜][\|│｜]img:.+?(?:[\|│｜][>＞]|[\|│｜>＞])/g);
-        if (match) {
-            for (let i = 0; i < match.length; i++) {
-                const id = match[i].match(/[<＜][\|│｜]img:(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/)[1];
-                const image = await ai.context.findImage(ctx, id);
-                if (image) {
-                    if (image.type === 'url') await image.urlToBase64();
-                    images.push(image);
+        const segs = parseSpecialTokens(s);
+        const images: Image[] = [];
+        for (const seg of segs) {
+            switch (seg.type) {
+                case 'img': {
+                    const id = seg.content;
+                    const image = await ai.context.findImage(ctx, id);
+
+                    if (image) {
+                        if (image.type === 'url') await image.urlToBase64();
+                        images.push(image);
+                    } else {
+                        logger.warning(`无法找到图片：${id}`);
+                    }
+                    break;
                 }
             }
         }
