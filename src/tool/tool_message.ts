@@ -291,10 +291,10 @@ export function registerMessage() {
 
                         if (image) {
                             if (image.type === 'local') break;
-                            const file = image.type === 'base64' ? image.base64 : image.file;
+                            const file = image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file;
                             node.push({
                                 type: 'image',
-                                data: { file: file } // 用base64发送是咋发的来着？↑
+                                data: { file: file }
                             })
                         } else {
                             logger.warning(`无法找到图片：${id}`);
