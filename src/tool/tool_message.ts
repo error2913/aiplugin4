@@ -198,9 +198,9 @@ export function registerMessage() {
                         description: '消息类型，私聊或群聊',
                         enum: ['private', 'group']
                     },
-                    id: {
+                    name: {
                         type: 'string',
-                        description: '接收者ID，群号或QQ号'
+                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
                     },
                     messages: {
                         type: 'array',
@@ -210,11 +210,11 @@ export function registerMessage() {
                             properties: {
                                 name: {
                                     type: 'string',
-                                    description: '发送者名称'
+                                    description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
                                 },
-                                uin: {
+                                nickname: {
                                     type: 'string',
-                                    description: '发送者QQ号'
+                                    description: '发送者名称，默认与name相同'
                                 },
                                 content: {
                                     type: 'string',
@@ -225,25 +225,28 @@ export function registerMessage() {
                         }
                     }
                 },
-                required: ['msg_type', 'id', 'messages']
+                required: ['msg_type', 'name', 'messages']
             }
         }
     });
     toolMerge.solve = async (ctx, _, ai, args) => {
-        const { msg_type, id, messages } = args;
+        const { msg_type, name, messages } = args;
 
         if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 
-        const nodes = [];
+        const messagesToSend = [];
+        const images: Image[] = [];
         for (const messageItem of messages) {
             const segs = parseSpecialTokens(messageItem.content);
-            const node = [];
+            const content: MessageSegment[] = [];
             for (const seg of segs) {
                 switch (seg.type) {
                     case 'text': {
-                        node.push({
+                        content.push({
                             type: 'text',
-                            text: seg.content
+                            data: {
+                                text: seg.content
+                            }
                         })
                         break;
                     }
@@ -251,37 +254,28 @@ export function registerMessage() {
                         const name = seg.content;
                         const ui = await ai.context.findUserInfo(ctx, name);
                         if (ui !== null) {
-                            node.push({
+                            content.push({
                                 type: 'at',
-                                qq: ui.id.replace(/^.+:/, "")
+                                data: {
+                                    qq: ui.id.replace(/^.+:/, "")
+                                }
                             })
                         } else {
                             logger.warning(`无法找到用户：${name}`);
-                            node.push({
+                            content.push({
                                 type: 'text',
-                                text: ` @${name} `
+                                data: {
+                                    text: ` @${name} `
+                                }
                             })
-                        }
-                        break;
-                    }
-                    case 'poke': {
-                        const name = seg.content;
-                        const ui = await ai.context.findUserInfo(ctx, name);
-                        if (ui !== null) {
-                            node.push({
-                                type: 'poke',
-                                qq: ui.id.replace(/^.+:/, "")
-                            })
-                        } else {
-                            logger.warning(`无法找到用户：${name}`);
                         }
                         break;
                     }
                     case 'quote': {
                         const msgId = seg.content;
-                        node.push({
+                        content.push({
                             type: 'reply',
-                            id: transformMsgIdBack(msgId)
+                            data: { id: String(transformMsgIdBack(msgId)) }
                         })
                         break;
                     }
@@ -291,10 +285,10 @@ export function registerMessage() {
 
                         if (image) {
                             if (image.type === 'local') break;
-                            const file = image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file;
-                            node.push({
+                            images.push(image);
+                            content.push({
                                 type: 'image',
-                                data: { file: file }
+                                data: { file: image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file }
                             })
                         } else {
                             logger.warning(`无法找到图片：${id}`);
@@ -303,41 +297,58 @@ export function registerMessage() {
                     }
                     case 'face': {
                         const faceId = Object.keys(faceMap).find(key => faceMap[key] === seg.content) || '';
-                        node.push({
+                        content.push({
                             type: 'face',
-                            id: faceId
+                            data: { id: faceId }
                         })
                         break;
                     }
                 }
             }
 
-            if (node.length === 0) {
+            if (content.length === 0) {
                 return { content: `消息长度不能为0`, images: [] };
             }
 
-            nodes.push({
+            let userId = "";
+            let nickname = messageItem.nickname || "";
+            const ui = await ai.context.findUserInfo(ctx, messageItem.name, true);
+            if (ui !== null) {
+                userId = ui.id.replace(/^.+:/, "");
+                nickname = nickname || ui.name;
+            }
+
+            messagesToSend.push({
                 type: 'node',
                 data: {
-                    uin: String(messageItem.uin || ctx.endPoint.userId.replace(/^.+:/, '')),
-                    name: messageItem.name || '未知用户',
-                    content: node
+                    user_id: userId,
+                    nickname: nickname,
+                    content: content
                 }
             });
         }
 
-        try {
-            if (msg_type === 'group') {
-                await sendGroupForwardMsg(ctx.endPoint.userId, id, nodes);
-            } else if (msg_type === 'private') {
-                await sendPrivateForwardMsg(ctx.endPoint.userId, id, nodes);
-            } else {
-                return { content: `不支持的消息类型`, images: [] };
-            }
-            return { content: `发送成功`, images: [] };
-        } catch (e) {
-            return { content: `发送出错: ${e.message}`, images: [] };
+        const news = null;
+        const prompt = "";
+        const summary = "";
+        const source = "";
+
+        if (msg_type === "private") {
+            const ui = await ai.context.findUserInfo(ctx, name, true);
+            if (ui === null) return { content: `未找到<${name}>`, images: [] };
+            if (ui.id === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
+
+            await sendPrivateForwardMsg(ctx.endPoint.userId, ui.id.replace(/^.+:/, ""), messagesToSend, news, prompt, summary, source);
+        } else if (msg_type === "group") {
+            const gi = await ai.context.findGroupInfo(ctx, name);
+            if (gi === null) return { content: `未找到<${name}>`, images: [] };
+
+            await sendGroupForwardMsg(ctx.endPoint.userId, gi.id.replace(/^.+:/, ""), messagesToSend, news, prompt, summary, source);
+        } else {
+            return { content: `未知的消息类型<${msg_type}>`, images: [] };
         }
+
+        return { content: `发送合并消息成功`, images: images };
     }
 }
 

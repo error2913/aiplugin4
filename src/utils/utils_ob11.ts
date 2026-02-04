@@ -251,32 +251,50 @@ export async function sendGroupAISound(epId: string, characterId: string, group_
     }
 }
 
-export async function sendGroupForwardMsg(epId: string, group_id: string, messages: MessageSegment[]): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'send_group_forward_msg', {
-            group_id,
-            messages
-        })
-        return data;
-    } catch (e) {
-        logger.error(`发送群 ${group_id} 转发消息失败：${e}`);
-        return null;
-    }
-}
-
-export async function sendPrivateForwardMsg(epId: string, user_id: string, messages: MessageSegment[]): Promise<any> {
+export async function sendPrivateForwardMsg(epId: string, user_id: string,
+    messages: MessageSegment[],
+    news: string[],
+    prompt: string,
+    summary: string,
+    source: string): Promise<any> {
     const net = getNet();
     if (!net) return null;
     try {
         const data = await net.callApi(epId, 'send_private_forward_msg', {
             user_id,
-            messages
+            messages,
+            news,
+            prompt,
+            summary,
+            source
         })
         return data;
     } catch (e) {
         logger.error(`发送用户 ${user_id} 转发消息失败：${e}`);
+        return null;
+    }
+}
+
+export async function sendGroupForwardMsg(epId: string, group_id: string,
+    messages: MessageSegment[],
+    news: string[],
+    prompt: string,
+    summary: string,
+    source: string): Promise<any> {
+    const net = getNet();
+    if (!net) return null;
+    try {
+        const data = await net.callApi(epId, 'send_group_forward_msg', {
+            group_id,
+            messages,
+            news,
+            prompt,
+            summary,
+            source
+        })
+        return data;
+    } catch (e) {
+        logger.error(`发送群 ${group_id} 转发消息失败：${e}`);
         return null;
     }
 }
