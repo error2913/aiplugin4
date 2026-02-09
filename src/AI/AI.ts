@@ -7,7 +7,7 @@ import { MemoryManager } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
-import { checkRepeat, handleReply, MessageSegment, transformArrayToContent, transformTextToArray } from "../utils/utils_string";
+import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
 import { TimerManager } from "../timer";
 
 export interface GroupInfo {
@@ -176,23 +176,34 @@ export class AI {
             //获取处理后的回复
             const { content: raw_reply, tool_calls } = await sendChatRequest(messages, toolInfos, tool_choice || "auto");
 
+            // 转化为上下文、回复、图片数组
+            result = await handleReply(ctx, msg, this, raw_reply);
+
             if (isTool) {
                 if (usePromptEngineering) {
                     const match = raw_reply.match(/<[\|│｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
                     if (match) {
-                        const messageArray = transformTextToArray(match[0]);
-                        const { content, images } = await transformArrayToContent(ctx, this, messageArray);
-                        await this.context.addMessage(ctx, msg, this, content, images, "assistant", '');
+                        logger.info(`触发工具调用`);
+                        // 先给他回复了再说
+                        const { contextArray, replyArray, images } = result;
+                        await this.reply(ctx, msg, contextArray, replyArray, images);
+
+                        await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
                         try {
                             await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
                             await this.chat(ctx, msg, '函数回调触发');
                         } catch (e) {
                             logger.error(`在handlePromptToolCall中出错:`, e.message);
                         }
+                        return;
                     }
                 } else {
                     if (tool_calls.length > 0) {
                         logger.info(`触发工具调用`);
+                        // 先给他回复了再说
+                        const { contextArray, replyArray, images } = result;
+                        await this.reply(ctx, msg, contextArray, replyArray, images);
+
                         this.context.addToolCallsMessage(tool_calls);
                         try {
                             tool_choice = await ToolManager.handleToolCalls(ctx, msg, this, tool_calls);
@@ -200,12 +211,12 @@ export class AI {
                         } catch (e) {
                             logger.error(`在handleToolCalls中出错:`, e.message);
                         }
+                        return;
                     }
                 }
             }
 
             // 检查是否为复读
-            result = await handleReply(ctx, msg, this, raw_reply);
             if (checkRepeat(this.context, result.contextArray.join('')) && result.replyArray.join('').trim()) {
                 if (retry > MaxRetry) {
                     logger.warning(`发现复读，已达到最大重试次数，清除AI上下文`);
