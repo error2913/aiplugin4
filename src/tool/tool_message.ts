@@ -237,7 +237,7 @@ export function registerMessage() {
         const messagesToSend = [];
         const images: Image[] = [];
         const randomId = Math.floor(Math.random() * 1000000000);
-        let unknowUserCount = 1;
+        let unknowUserArray: string[] = [];
         for (const messageItem of messages) {
             const segs = parseSpecialTokens(messageItem.content);
             const content: MessageSegment[] = [];
@@ -312,12 +312,20 @@ export function registerMessage() {
                 return { content: `消息长度不能为0`, images: [] };
             }
 
-            let userId = String(unknowUserCount + randomId);
-            let name = `未知用户${unknowUserCount}`;
+            let userId = '';
+            let name = '';
             const ui = await ai.context.findUserInfo(ctx, messageItem.name, true);
             if (ui !== null) {
                 userId = ui.id.replace(/^.+:/, "");
                 name = ui.name;
+            } else {
+                let unknowUserIndex = unknowUserArray.indexOf(messageItem.name);
+                if (unknowUserIndex === -1) {
+                    unknowUserIndex = unknowUserArray.length;
+                    unknowUserArray.push(messageItem.name);
+                }
+                userId = String(unknowUserIndex + randomId);
+                name = `未知用户${unknowUserIndex + 1}`;
             }
 
             messagesToSend.push({
