@@ -133,6 +133,14 @@ export const defaultCmdPriv: CmdPriv = {
                     list: { priv: U }
                 }
             },
+            block: {
+                priv: M, args: {
+                    add: { priv: M },
+                    remove: { priv: M },
+                    list: { priv: M },
+                    help: { priv: U }
+                }
+            },
             token: {
                 priv: S, args: {
                     list: { priv: U },
