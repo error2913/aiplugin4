@@ -156,28 +156,36 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
 }
 
 export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
-    const { isMerge } = ConfigManager.message;
-
     const systemMessage = await buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
     const contextMessages = buildContextMessages(systemMessage, ai.context.messages);
 
     const messages = [systemMessage, ...samplesMessages, ...contextMessages];
+    return buildRequestMessages(messages);
+}
+
+export function buildRequestMessages(messages: Message[]) {
+    const { isMerge } = ConfigManager.message;
+
+    const copiedMessages = messages.map(message => ({
+        ...message,
+        tool_calls: message.tool_calls ? message.tool_calls.slice() : undefined
+    }));
 
     // 处理 tool_calls 并过滤无效项
-    for (let i = 0; i < messages.length; i++) {
-        const message = messages[i];
+    for (let i = 0; i < copiedMessages.length; i++) {
+        const message = copiedMessages[i];
         if (!message?.tool_calls) {
             continue;
         }
 
         // 获取tool_calls消息后面的所有tool_call_id
         const tool_call_id_set = new Set<string>();
-        for (let j = i + 1; j < messages.length; j++) {
-            if (messages[j].role !== 'tool') {
+        for (let j = i + 1; j < copiedMessages.length; j++) {
+            if (copiedMessages[j].role !== 'tool') {
                 break;
             }
-            tool_call_id_set.add(messages[j].tool_call_id);
+            tool_call_id_set.add(copiedMessages[j].tool_call_id);
         }
 
         // 过滤无对应 tool_call_id 的 tool_calls
@@ -191,7 +199,7 @@ export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
 
         // 如果 tool_calls 为空则移除消息
         if (message.tool_calls.length === 0) {
-            messages.splice(i, 1);
+            copiedMessages.splice(i, 1);
             i--; // 调整索引
         }
     }
@@ -199,8 +207,8 @@ export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
     // 处理前缀并合并消息（如果有）
     let processedMessages = [];
     let last_role = '';
-    for (let i = 0; i < messages.length; i++) {
-        const message = messages[i];
+    for (let i = 0; i < copiedMessages.length; i++) {
+        const message = copiedMessages[i];
 
         if (isMerge && message.role === last_role && message.role !== 'tool') {
             processedMessages[processedMessages.length - 1].content += '\f' + buildContent(message);

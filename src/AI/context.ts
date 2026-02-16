@@ -7,6 +7,8 @@ import { AI, AIManager, GroupInfo, UserInfo } from "./AI";
 import { logger } from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/utils_ob11";
 import { revive } from "../utils/utils";
+import { sendContextCompressRequest } from "../service";
+import { buildRequestMessages } from "../utils/utils_message";
 
 export interface MessageInfo {
     msgId: string;
@@ -35,6 +37,7 @@ export class Context {
     lastReply: string;
     counter: number;
     timer: number;
+    compressingContext: boolean;
 
     constructor() {
         this.messages = [];
@@ -43,6 +46,7 @@ export class Context {
         this.lastReply = '';
         this.counter = 0;
         this.timer = null;
+        this.compressingContext = false;
     }
 
     reviveMessages() {
@@ -156,6 +160,9 @@ export class Context {
         //更新记忆权重
         ai.memory.updateRelatedMemoryWeight(ctx, ai.context, content, role);
 
+        // 压缩早期上下文
+        await this.compressMessagesIfNeeded(ctx);
+
         //删除多余的上下文
         this.limitMessages();
     }
@@ -225,6 +232,93 @@ export class Context {
                 messages.splice(0, i);
                 break;
             }
+        }
+    }
+
+    async compressMessagesIfNeeded(ctx: seal.MsgContext) {
+        const { isContextCompress, contextCompressLength, contextCompressPromptTemplate, maxRounds, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
+        const { localImagePathMap, receiveImage, condition } = ConfigManager.image;
+        const messages = this.messages;
+        if (!isContextCompress) return;
+        if (this.compressingContext) return;
+        if (maxRounds <= 0 || contextCompressLength <= 0) return;
+
+        const round = messages.filter(message => message.role === 'user' && !message.name.startsWith('_')).length;
+        if (round < maxRounds) return;
+
+        let compressCount = Math.min(contextCompressLength, messages.length - 1);
+        if (compressCount <= 0) return;
+
+        // 避免切断 tool_call，向前移动
+        while (compressCount > 0) {
+            const left = messages[compressCount - 1];
+            const right = messages[compressCount];
+            const leftIsTool = left?.role === 'tool';
+            const rightIsTool = right?.role === 'tool';
+            const leftIsToolCall = left?.role === 'assistant' && left?.tool_calls && left.tool_calls.length > 0;
+            if (!(leftIsTool || rightIsTool || leftIsToolCall)) {
+                break;
+            }
+            compressCount--;
+        }
+        if (compressCount <= 0 || compressCount >= messages.length) return;
+
+        const compressMessages = messages.slice(0, compressCount);
+        const requestMessages = buildRequestMessages(compressMessages);
+        if (requestMessages.length === 0) return;
+
+        const sandableImagesPrompt: string = Object.keys(localImagePathMap)
+            .map((id, index) => `${index + 1}. ${id}`)
+            .join('\n');
+
+        this.compressingContext = true;
+        try {
+            const prompt = contextCompressPromptTemplate({
+                "平台": ctx.endPoint.platform,
+                "私聊": ctx.isPrivate,
+                "展示号码": showNumber,
+                "用户名称": ctx.player.name,
+                "用户号码": ctx.player.userId.replace(/^.+:/, ''),
+                "群聊名称": ctx.group.groupName,
+                "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
+                "添加前缀": isPrefix,
+                "展示消息ID": showMsgId,
+                "展示时间": showTime,
+                "接收图片": receiveImage,
+                "图片条件不为零": condition !== '0',
+                "可发送图片不为空": sandableImagesPrompt,
+                "可发送图片列表": sandableImagesPrompt
+            });
+            logger.info(`上下文压缩prompt:\n`, prompt);
+
+            const summary = (await sendContextCompressRequest([
+                { role: 'system', content: prompt },
+                ...requestMessages
+            ])).trim();
+            if (!summary) {
+                logger.warning(`上下文压缩返回为空，跳过本次压缩`);
+                return;
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const summaryMessage: Message = {
+                role: 'user',
+                uid: '',
+                name: '_历史上下文摘要',
+                images: [],
+                msgArray: [{
+                    msgId: '',
+                    time: now,
+                    content: `以下为历史对话摘要:\n${summary}`
+                }]
+            };
+
+            messages.splice(0, compressCount, summaryMessage);
+            logger.info(`上下文压缩完成，压缩条数:${compressCount}，压缩后条数:${messages.length}`);
+        } catch (e) {
+            logger.error(`上下文压缩失败: ${e.message}`);
+        } finally {
+            this.compressingContext = false;
         }
     }
 
