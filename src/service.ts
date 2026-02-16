@@ -78,6 +78,44 @@ export async function sendITTRequest(messages: {
     }
 }
 
+export async function sendContextCompressRequest(messages: {
+    role: string,
+    content: string
+}[]): Promise<string> {
+    const { timeout, url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
+    const { contextCompressUrl, contextCompressApiKey, contextCompressBodyTemplate } = ConfigManager.message;
+
+    let url = chatUrl;
+    let apiKey = chatApiKey;
+    if (contextCompressUrl.trim()) {
+        url = contextCompressUrl;
+        apiKey = contextCompressApiKey;
+    }
+
+    try {
+        const bodyObject = parseBody(contextCompressBodyTemplate, messages, [], "none");
+        const time = Date.now();
+
+        const data = await withTimeout(() => fetchData(url, apiKey, bodyObject), timeout);
+
+        if (data.choices && data.choices.length > 0) {
+            AIManager.updateUsage(data.model, data.usage);
+
+            const message = data.choices[0].message;
+            const content = message.content || '';
+
+            logger.info(`上下文压缩响应内容:`, content, '\nlatency:', Date.now() - time, 'ms');
+
+            return content;
+        } else {
+            throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
+        }
+    } catch (e) {
+        logger.error("在sendContextCompressRequest中请求出错:", e.message);
+        return '';
+    }
+}
+
 const vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
 
 export async function getEmbedding(text: string): Promise<number[]> {

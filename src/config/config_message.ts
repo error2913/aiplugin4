@@ -98,6 +98,57 @@ export class MessageConfig {
         seal.ext.registerBoolConfig(MessageConfig.ext, "是否合并user content", false, "在不支持连续多个role为user的情况下开启，可用于适配deepseek-reasoner");
         seal.ext.registerIntConfig(MessageConfig.ext, "存储上下文对话限制轮数", 15, "出现一次user视作一轮");
         seal.ext.registerIntConfig(MessageConfig.ext, "上下文插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，示例对话不计入轮数");
+
+        seal.ext.registerBoolConfig(MessageConfig.ext, "是否启用上下文压缩", false, '');
+        seal.ext.registerIntConfig(MessageConfig.ext, "每次压缩上下文条数", 10, '优先压缩最早的上下文');
+        seal.ext.registerStringConfig(MessageConfig.ext, "上下文压缩 url地址", "", '为空时默认使用对话接口');
+        seal.ext.registerStringConfig(MessageConfig.ext, "上下文压缩 API Key", "你的API Key", '若使用对话接口无需填写');
+        seal.ext.registerTemplateConfig(MessageConfig.ext, "上下文压缩 body", [
+            `"model":"deepseek-chat"`,
+            `"max_tokens":1024`,
+            `"stop":null`,
+            `"stream":false`
+        ], "messages不存在时，将会自动替换");
+        seal.ext.registerTemplateConfig(MessageConfig.ext, "上下文压缩prompt模板", [
+            `你是QQ群聊对话压缩助手。请将后续给出的历史消息压缩为可供后续继续对话的一段摘要。
+
+## 聊天相关
+    - 当前平台:{{{平台}}}
+{{#if 私聊}}
+    - 当前私聊:<{{{用户名称}}}>{{#if 展示号码}}({{{用户号码}}}){{/if}}
+{{else}}
+    - 当前群聊:<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}
+    - <|at:xxx|>表示@某个群成员
+    - <|poke:xxx|>表示戳一戳某个群成员
+{{/if}}
+{{#if 添加前缀}}
+    - <|from:xxx|>表示消息来源，不要在生成的回复中使用
+{{/if}}
+{{#if 展示消息ID}}
+    - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
+    - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
+    - <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
+{{/if}}
+{{#if 展示时间}}
+    - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+{{/if}}
+    - \\f用于分割多条消息
+
+## 图片相关
+{{#if 接收图片}}
+{{#if 图片条件不为零}}
+    - <|img:xxxxxx:yyy|>为图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|img:xxxxxx|>的格式
+{{else}}
+    - <|img:xxxxxx|>为图片，其中xxxxxx为6位的图片id，如果要发送出现过的图片请使用<|img:xxxxxx|>的格式
+{{/if}}
+{{/if}}
+
+## 输出要求
+1. 保留人物关系、主要话题、关键事实、明确结论、未完成事项、后续约定。
+2. 需要体现发言归属，避免把不同人的观点混淆。
+3. 忽略闲聊、重复、噪声内容，但不要丢失约束信息。
+4. 不要编造，不要解释，不要使用JSON，只输出摘要正文。`
+        ], "");
     }
 
     static get() {
@@ -112,7 +163,13 @@ export class MessageConfig {
             showTime: seal.ext.getBoolConfig(MessageConfig.ext, "是否在消息内添加发送时间"),
             isMerge: seal.ext.getBoolConfig(MessageConfig.ext, "是否合并user content"),
             maxRounds: seal.ext.getIntConfig(MessageConfig.ext, "存储上下文对话限制轮数"),
-            insertCount: seal.ext.getIntConfig(MessageConfig.ext, "上下文插入system message间隔轮数")
+            insertCount: seal.ext.getIntConfig(MessageConfig.ext, "上下文插入system message间隔轮数"),
+            isContextCompress: seal.ext.getBoolConfig(MessageConfig.ext, "是否启用上下文压缩"),
+            contextCompressLength: seal.ext.getIntConfig(MessageConfig.ext, "每次压缩上下文条数"),
+            contextCompressUrl: seal.ext.getStringConfig(MessageConfig.ext, "上下文压缩 url地址"),
+            contextCompressApiKey: seal.ext.getStringConfig(MessageConfig.ext, "上下文压缩 API Key"),
+            contextCompressBodyTemplate: seal.ext.getTemplateConfig(MessageConfig.ext, "上下文压缩 body"),
+            contextCompressPromptTemplate: ConfigManager.getHandlebarsTemplateConfig(MessageConfig.ext, "上下文压缩prompt模板")
         }
     }
 }
