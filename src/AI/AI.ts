@@ -103,10 +103,25 @@ export class AI {
         await ai.context.addMessage(ctx, msg, ai, content, images, 'user', transformMsgId(msg.rawId));
     }
 
-    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], images: Image[]) {
+    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], images: Image[], options: { withNonStreamDelay?: boolean } = {}) {
+        const { withNonStreamDelay = false } = options;
+        const { nonStreamSegmentDelayEnabled, nonStreamSegmentDelayMs, nonStreamSegmentImageExtraDelayMs } = ConfigManager.reply;
+
         for (let i = 0; i < contextArray.length; i++) {
             const content = contextArray[i];
             const reply = replyArray[i];
+
+            // 非流式延迟
+            if (withNonStreamDelay && nonStreamSegmentDelayEnabled && i > 0) {
+                let delayMs = Math.max(0, nonStreamSegmentDelayMs);
+                if (/\[CQ:image(?:,[^\]]*)?\]/.test(reply)) {
+                    delayMs += Math.max(0, nonStreamSegmentImageExtraDelayMs);
+                }
+                if (delayMs > 0) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+            }
+
             const msgId = await replyToSender(ctx, msg, this, reply);
             await this.context.addMessage(ctx, msg, this, content, images, 'assistant', msgId);
         }
@@ -186,7 +201,7 @@ export class AI {
                         logger.info(`触发工具调用`);
                         // 先给他回复了再说
                         const { contextArray, replyArray, images } = result;
-                        await this.reply(ctx, msg, contextArray, replyArray, images);
+                        await this.reply(ctx, msg, contextArray, replyArray, images, { withNonStreamDelay: true });
 
                         await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
                         try {
@@ -202,7 +217,7 @@ export class AI {
                         logger.info(`触发工具调用`);
                         // 先给他回复了再说
                         const { contextArray, replyArray, images } = result;
-                        await this.reply(ctx, msg, contextArray, replyArray, images);
+                        await this.reply(ctx, msg, contextArray, replyArray, images, { withNonStreamDelay: true });
 
                         this.context.addToolCallsMessage(tool_calls);
                         try {
@@ -233,7 +248,7 @@ export class AI {
         }
 
         const { contextArray, replyArray, images } = result;
-        await this.reply(ctx, msg, contextArray, replyArray, images);
+        await this.reply(ctx, msg, contextArray, replyArray, images, { withNonStreamDelay: true });
         AIManager.saveAI(this.id);
     }
 

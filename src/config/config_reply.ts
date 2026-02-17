@@ -38,6 +38,9 @@ export class ReplyConfig {
             "\n{{{match.[1]}}}"
         ], "替换匹配到的文本，与上面正则表达式序号对应");
         seal.ext.registerBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符", true, "");
+        seal.ext.registerBoolConfig(ReplyConfig.ext, "非流式分段发送延时", true, "仅非流式生效，消息间隔是否开启延时防止乱序");
+        seal.ext.registerIntConfig(ReplyConfig.ext, "非流式分段发送基础延时/ms", 350, "仅非流式生效，从第二条消息开始每条发送前等待的毫秒数");
+        seal.ext.registerIntConfig(ReplyConfig.ext, "非流式分段发送含图额外延时/ms", 250, "仅非流式生效，当消息包含图片时额外增加的等待毫秒数");
     }
 
     static get() {
@@ -50,7 +53,10 @@ export class ReplyConfig {
             filterRegexes: ConfigManager.getRegexesConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
             contextTemplates: ConfigManager.getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
             replyTemplates: ConfigManager.getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理回复消息模板"),
-            isTrim: seal.ext.getBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符")
+            isTrim: seal.ext.getBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符"),
+            nonStreamSegmentDelayEnabled: seal.ext.getBoolConfig(ReplyConfig.ext, "非流式分段发送延时"),
+            nonStreamSegmentDelayMs: seal.ext.getIntConfig(ReplyConfig.ext, "非流式分段发送基础延时/ms"),
+            nonStreamSegmentImageExtraDelayMs: seal.ext.getIntConfig(ReplyConfig.ext, "非流式分段发送含图额外延时/ms")
         }
     }
 }
