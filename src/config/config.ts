@@ -61,6 +61,8 @@ export const aliasMap = {
     "rm": "remove",
     "lst": "list",
     "tk": "token",
+    "rgx": "regex",
+    "re": "regex",
     "y": "year",
     "m": "month",
     "lcl": "local",

@@ -48,6 +48,12 @@ export const defaultCmdPriv: CmdPriv = {
                     clear: { priv: I }
                 }
             },
+            regex: {
+                priv: I, args: {
+                    on: { priv: I },
+                    off: { priv: I }
+                }
+            },
             on: { priv: S },
             standby: { priv: I },
             off: { priv: I },

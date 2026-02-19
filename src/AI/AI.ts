@@ -25,12 +25,13 @@ export interface UserInfo {
 export type SessionInfo = GroupInfo | UserInfo;
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo'];
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger'];
     priv: number;
     standby: boolean;
     counter: number;
     timer: number;
     prob: number;
+    regexTrigger: boolean;
     activeTimeInfo: {
         start: number;
         end: number;
@@ -43,6 +44,7 @@ export class Setting {
         this.counter = -1;
         this.timer = -1;
         this.prob = -1;
+        this.regexTrigger = true;
         this.activeTimeInfo = {
             start: 0,
             end: 0,
