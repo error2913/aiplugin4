@@ -36,6 +36,7 @@ function main() {
 【.ai on】开启AI
 【.ai sb】开启待机模式，此时AI将记录聊天内容
 【.ai off】关闭AI，此时仍能用正则匹配触发
+【.ai rgx】非指令正则触发开关
 【.ai fgt】遗忘上下文
 【.ai role】角色设定相关
 【.ai img】图片相关
@@ -222,6 +223,7 @@ ${HELPMAP["权限限制"]}`);
 计数器模式(c): ${setting.counter > -1 ? `${setting.counter}条` : '关闭'}
 计时器模式(t): ${setting.timer > -1 ? `${setting.timer}秒` : '关闭'}
 概率模式(p): ${setting.prob > -1 ? `${setting.prob}%` : '关闭'}
+非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}
 活跃时间段: ${(start !== 0 || end !== 0) ? `${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}` : '未设置'}
 活跃次数: ${segs > 0 ? segs : '未设置'}
 待机模式: ${setting.standby ? '开启' : '关闭'}`);
@@ -292,6 +294,30 @@ ${HELPMAP["权限限制"]}`);
               seal.replyToSender(ctx, msg, `帮助:
 【.ai timer lst】查看当前聊天定时器
 【.ai timer clr】清除当前聊天定时器`);
+              return ret;
+            }
+          }
+        }
+        case 'regex': {
+          const setting = ai.setting;
+          const val2 = aliasToCmd(cmdArgs.getArgN(2));
+          switch (val2) {
+            case 'on': {
+              setting.regexTrigger = true;
+              seal.replyToSender(ctx, msg, '非指令正则触发已开启');
+              AIManager.saveAI(sid);
+              return ret;
+            }
+            case 'off': {
+              setting.regexTrigger = false;
+              seal.replyToSender(ctx, msg, '非指令正则触发已关闭');
+              AIManager.saveAI(sid);
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, `非指令正则触发状态:${setting.regexTrigger ? '开启' : '关闭'}
+【.ai rgx on】开启非指令正则触发
+【.ai rgx off】关闭非指令正则触发`);
               return ret;
             }
           }
@@ -1469,7 +1495,7 @@ ${images.map(img => img.CQCode).join('\n')}`));
         ai.context.timer = null;
 
         // 非指令消息触发
-        if (triggerRegex.test(message)) {
+        if (ai.setting.regexTrigger && triggerRegex.test(message)) {
           const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
           if (fmtCondition === 1) {
             return ai.handleReceipt(ctx, msg, ai, messageArray)
