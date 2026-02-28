@@ -14,6 +14,7 @@ import { aliasToCmd } from "./utils/utils";
 import { knowledgeMM } from "./AI/memory";
 import { HELPMAP, CQTYPESALLOW } from "./config/config";
 import { ImageManager } from "./AI/image";
+import { BlockManager } from "./block";
 
 function main() {
   ConfigManager.registerConfig();
@@ -22,6 +23,7 @@ function main() {
   TimerManager.init();
   PrivilegeManager.reviveCmdPriv();
   knowledgeMM.init();
+  BlockManager.initBlockList();
 
   const ext = ConfigManager.ext;
 
@@ -42,6 +44,7 @@ function main() {
 【.ai memo】AI的记忆相关
 【.ai tool】AI的工具相关
 【.ai ign】AI的忽略名单相关
+【.ai block】AI的黑名单相关
 【.ai tk】AI的token相关
 【.ai shut】终止AI当前流式输出`;
   cmdAI.allowDelegate = true;
@@ -1037,6 +1040,77 @@ ${images.map(img => img.CQCode).join('\n')}`));
             }
           }
         }
+        case 'block': {
+          const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
+          const muid = cmdArgs.amIBeMentionedFirst ? epId : mctx.player.userId;
+
+          const val2 = cmdArgs.getArgN(2);
+          switch (aliasToCmd(val2)) {
+            case 'add': {
+              let targetId = '';
+              let reason = '';
+              const arg3 = cmdArgs.getArgN(3);
+              const arg4 = cmdArgs.getArgN(4);
+
+              if (cmdArgs.at.length > 0) {
+                targetId = muid;
+                reason = arg4;
+              } else if (arg3 && (arg3.startsWith('QQ:') || arg3.startsWith('QQ-Group:'))) {
+                targetId = arg3;
+                reason = arg4;
+              } else {
+                seal.replyToSender(ctx, msg, '参数缺失，【.ai block add <统一ID/@xxx> <原因>】添加黑名单');
+                return ret;
+              }
+              
+              if (!reason || reason.trim() === '') {
+                reason = `未填写原因`;
+              }
+
+              if (BlockManager.checkBlock(targetId)) {
+                 seal.replyToSender(ctx, msg, '已经在黑名单中');
+                 return ret;
+              }
+
+              BlockManager.addBlock(targetId, reason);
+              seal.replyToSender(ctx, msg, `已将<${targetId}>加入黑名单，原因: ${reason}`);
+              return ret;
+            }
+            case 'remove': {
+              let targetId = '';
+              const arg3 = cmdArgs.getArgN(3);
+
+              if (cmdArgs.at.length > 0) {
+                targetId = muid;
+              } else if (arg3 && (arg3.startsWith('QQ:') || arg3.startsWith('QQ-Group:'))) {
+                targetId = arg3;
+              } else {
+                seal.replyToSender(ctx, msg, '参数缺失，【.ai block rm <统一ID/@xxx>】移除黑名单');
+                return ret;
+              }
+              
+              if (BlockManager.removeBlock(targetId)) {
+                seal.replyToSender(ctx, msg, `已将<${targetId}>移出黑名单`);
+              } else {
+                seal.replyToSender(ctx, msg, `不在黑名单中`);
+              }
+              return ret;
+            }
+            case 'list': {
+              seal.replyToSender(ctx, msg, BlockManager.getListText());
+              return ret;
+            }
+            default: {
+              seal.replyToSender(ctx, msg, `帮助:
+【.ai block add <统一ID/@xxx> <原因>】添加黑名单
+【.ai block rm <统一ID/@xxx>】移除黑名单
+【.ai block list】查看黑名单列表
+
+被拉黑的对象无法触发AI对话`);
+              return ret;
+            }
+          }
+        }
         case 'token': {
           const val2 = cmdArgs.getArgN(2);
           switch (aliasToCmd(val2)) {
@@ -1431,6 +1505,22 @@ ${images.map(img => img.CQCode).join('\n')}`));
   ext.cmdMap['ai'] = cmdAI;
 
   ext.onPoke = (ctx, event) => {
+    const uid = event.senderId;
+    const blockReason = BlockManager.checkBlock(uid);
+    if (blockReason) {
+      logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略戳一戳`);
+      return;
+    }
+
+    if (!event.isPrivate) {
+      const gid = event.groupId;
+      const groupBlockReason = BlockManager.checkBlock(gid);
+      if (groupBlockReason) {
+        logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略戳一戳`);
+        return;
+      }
+    }
+
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
     if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);
@@ -1440,12 +1530,28 @@ ${images.map(img => img.CQCode).join('\n')}`));
   //接受非指令消息
   ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
     try {
+      // 黑名单用户消息不接收不处理
+      const uid = ctx.player.userId;
+      const blockReason = BlockManager.checkBlock(uid);
+      if (blockReason) {
+        logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略消息`);
+        return;
+      }
+
+      if (!ctx.isPrivate) {
+        const gid = ctx.group.groupId;
+        const groupBlockReason = BlockManager.checkBlock(gid);
+        if (groupBlockReason) {
+          logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略消息`);
+          return;
+        }
+      }
+
       const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = ConfigManager.received;
       if (ctx.isPrivate && disabledInPrivate) {
         return;
       }
 
-      const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
       const sid = ctx.isPrivate ? uid : gid;
       const ai = AIManager.getAI(sid);
@@ -1532,6 +1638,22 @@ ${images.map(img => img.CQCode).join('\n')}`));
   //接受的指令
   ext.onCommandReceived = (ctx, msg, cmdArgs) => {
     try {
+      const uid = ctx.player.userId;
+      const blockReason = BlockManager.checkBlock(uid);
+      if (blockReason) {
+        logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略指令`);
+        return;
+      }
+
+      if (!ctx.isPrivate) {
+        const gid = ctx.group.groupId;
+        const groupBlockReason = BlockManager.checkBlock(gid);
+        if (groupBlockReason) {
+          logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略指令`);
+          return;
+        }
+      }
+
       if (ToolManager.cmdArgs === null) {
         ToolManager.cmdArgs = cmdArgs;
       }
@@ -1566,6 +1688,21 @@ ${images.map(img => img.CQCode).join('\n')}`));
   ext.onMessageSend = (ctx, msg) => {
     try {
       const uid = ctx.player.userId;
+      const blockReason = BlockManager.checkBlock(uid);
+      if (blockReason) {
+        logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略发送消息`);
+        return;
+      }
+
+      if (!ctx.isPrivate) {
+        const gid = ctx.group.groupId;
+        const groupBlockReason = BlockManager.checkBlock(gid);
+        if (groupBlockReason) {
+          logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略发送消息`);
+          return;
+        }
+      }
+
       const gid = ctx.group.groupId;
       const sid = ctx.isPrivate ? uid : gid;
       const ai = AIManager.getAI(sid);
