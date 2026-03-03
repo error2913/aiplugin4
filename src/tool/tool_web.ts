@@ -34,7 +34,7 @@ export function registerWeb() {
             }
         }
     });
-    toolSearch.solve = async (_, __, ___, args) => {
+    toolSearch.solve = async (_, __, ai, args) => {
         const { q, page, categories, time_range = '' } = args;
         const { webSearchUrl } = ConfigManager.backend;
 
@@ -76,7 +76,10 @@ export function registerWeb() {
 - 相关性:${result.score}`;
             }).join('\n');
 
-            return { content: s, images: [] };
+            if (s.includes('没有搜索到结果')) return { content: s, images: [] };
+
+            const finalContent = await ai.context.compressToolResponseIfNeeded("web_search", s, q);
+            return { content: finalContent, images: [] };
         } catch (error) {
             logger.error("在web_search中请求出错：", error);
             return { content: `使用搜索引擎搜索失败:${error}`, images: [] };
@@ -100,7 +103,7 @@ export function registerWeb() {
             }
         }
     });
-    tool.solve = async (_, __, ___, args) => {
+    tool.solve = async (_, __, ai, args) => {
         const { url } = args;
         const { webReadUrl } = ConfigManager.backend;
 
@@ -132,7 +135,10 @@ export function registerWeb() {
                     ? links.map((link: string, index: number) => `${index + 1}. ${link}`).join('\n')
                     : "无链接");
 
-            return { content: result, images: [] };
+            if (result.includes('{"error":')) return { content: result, images: [] };
+
+            const finalContent = await ai.context.compressToolResponseIfNeeded("web_read", result);
+            return { content: finalContent, images: [] };
         } catch (error) {
             logger.error("在web_read中请求出错：", error);
             return { content: `读取网页内容失败: ${error}`, images: [] };

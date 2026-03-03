@@ -61,6 +61,7 @@ export function registerContext() {
             return `[${message.role}]: ${buildContent(message)}`;
         }).join('\n');
 
-        return { content: s, images: images };
+        const finalContent = await ai.context.compressToolResponseIfNeeded("get_context", s);
+        return { content: finalContent, images: images };
     }
 }

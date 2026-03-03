@@ -78,22 +78,20 @@ export async function sendITTRequest(messages: {
     }
 }
 
-export async function sendContextCompressRequest(messages: {
+export async function sendToolRespondCompressRequest(messages: {
     role: string,
     content: string
 }[]): Promise<string> {
-    const { timeout, url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
-    const { contextCompressUrl, contextCompressApiKey, contextCompressBodyTemplate } = ConfigManager.message;
+    const { timeout, url: chatUrl, apiKey: chatApiKey, bodyTemplate: chatBodyTemplate } = ConfigManager.request;
+    const { contextCompressUrl, contextCompressApiKey, contextCompressBodyTemplate } = ConfigManager.tool;
 
-    let url = chatUrl;
-    let apiKey = chatApiKey;
-    if (contextCompressUrl.trim()) {
-        url = contextCompressUrl;
-        apiKey = contextCompressApiKey;
-    }
+    const hasCustomCompressUrl = contextCompressUrl.trim() !== '';
+    const url = hasCustomCompressUrl ? contextCompressUrl.trim() : chatUrl;
+    const apiKey = hasCustomCompressUrl ? (contextCompressApiKey.trim() || chatApiKey) : chatApiKey;
+    const bodyTemplate = contextCompressBodyTemplate.some(item => item.trim() !== '') ? contextCompressBodyTemplate : chatBodyTemplate;
 
     try {
-        const bodyObject = parseBody(contextCompressBodyTemplate, messages, [], "none");
+        const bodyObject = parseBody(bodyTemplate, messages, [], "none");
         const time = Date.now();
 
         const data = await withTimeout(() => fetchData(url, apiKey, bodyObject), timeout);
@@ -104,14 +102,14 @@ export async function sendContextCompressRequest(messages: {
             const message = data.choices[0].message;
             const content = message.content || '';
 
-            logger.info(`上下文压缩响应内容:`, content, '\nlatency:', Date.now() - time, 'ms');
+            logger.info(`长响应工具压缩响应内容:`, content, '\nlatency:', Date.now() - time, 'ms');
 
             return content;
         } else {
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         }
     } catch (e) {
-        logger.error("在sendContextCompressRequest中请求出错:", e.message);
+        logger.error("在sendToolRespondCompressRequest中请求出错:", e.message);
         return '';
     }
 }

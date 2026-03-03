@@ -20,6 +20,18 @@ export class ToolConfig {
             'whole_ban',
             'get_ban_list'
         ], "修改后保存并重载js");
+        seal.ext.registerBoolConfig(ToolConfig.ext, "是否启用工具响应压缩", false, "仅对 web_search、web_read、get_context 生效");
+        seal.ext.registerTemplateConfig(ToolConfig.ext, "工具响应压缩prompt模板", [
+            `你是文本压缩助手。请将用户提供的工具返回结果压缩为简洁摘要，保留关键信息、链接、结论和可执行事项。只输出压缩结果正文。`
+        ], "");
+        seal.ext.registerStringConfig(ToolConfig.ext, "长响应工具压缩 url地址", "", "为空时默认使用对话接口");
+        seal.ext.registerStringConfig(ToolConfig.ext, "长响应工具压缩 API Key", "", "为空时默认使用对话接口");
+        seal.ext.registerTemplateConfig(ToolConfig.ext, "长响应工具压缩 body", [
+            `"model":"deepseek-chat"`,
+            `"max_tokens":1024`,
+            `"stop":null`,
+            `"stream":false`
+        ], "为空时默认使用对话接口body，messages不存在时将会自动替换");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "默认关闭的函数", [
             'rename',
             'record',
@@ -61,6 +73,11 @@ export class ToolConfig {
             toolsPromptTemplate: ConfigManager.getHandlebarsTemplateConfig(ToolConfig.ext, "工具函数prompt模板"),
             maxCallCount: seal.ext.getIntConfig(ToolConfig.ext, "允许连续调用函数次数"),
             toolsNotAllow: seal.ext.getTemplateConfig(ToolConfig.ext, "不允许调用的函数"),
+            isToolResponseCompress: seal.ext.getBoolConfig(ToolConfig.ext, "是否启用工具响应压缩"),
+            toolResponseCompressPromptTemplate: ConfigManager.getHandlebarsTemplateConfig(ToolConfig.ext, "工具响应压缩prompt模板"),
+            contextCompressUrl: seal.ext.getStringConfig(ToolConfig.ext, "长响应工具压缩 url地址"),
+            contextCompressApiKey: seal.ext.getStringConfig(ToolConfig.ext, "长响应工具压缩 API Key"),
+            contextCompressBodyTemplate: seal.ext.getTemplateConfig(ToolConfig.ext, "长响应工具压缩 body"),
             toolsDefaultClosed: seal.ext.getTemplateConfig(ToolConfig.ext, "默认关闭的函数"),
             decks: seal.ext.getTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称"),
             character: seal.ext.getOptionConfig(ToolConfig.ext, "ai语音使用的音色"),
