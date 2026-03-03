@@ -10,21 +10,19 @@ import { createMsg } from "./utils/utils_seal";
 import { PrivilegeManager } from "./cmd/privilege";
 import { knowledgeMM } from "./AI/memory";
 import { CQTYPESALLOW } from "./config/config";
-import { cmd } from "./cmd/root";
+import { registerCmd } from "./cmd/root";
 
 function main() {
   ConfigManager.registerConfig();
   checkUpdate();
   ToolManager.registerTool();
   TimerManager.init();
-  PrivilegeManager.reviveCmdPriv();
   knowledgeMM.init();
 
   const ext = ConfigManager.ext;
 
-  // 将命令注册到扩展中
-  ext.cmdMap['AI'] = cmd;
-  ext.cmdMap['ai'] = cmd;
+  registerCmd();
+  PrivilegeManager.reviveCmdPriv();
 
   ext.onPoke = (ctx, event) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);

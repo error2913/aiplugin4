@@ -1,11 +1,12 @@
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root";
 
-export function getCmdStatus(): SubCmd {
+export function registerCmdStatus() {
     const cmd = new SubCmd('status');
+    cmd.desc = '查看当前AI状态';
     cmd.help = '';
     cmd.priv = { priv: U };
-    cmd.solve = async (scc: SubCmdContext) => {
+    cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, sid, ai, ret } = scc;
         const setting = ai.setting;
         const { start, end, segs } = setting.activeTimeInfo;
@@ -22,5 +23,5 @@ export function getCmdStatus(): SubCmd {
         return ret;
     }
 
-    return cmd;
+    SubCmd.map[cmd.name] = cmd;
 }

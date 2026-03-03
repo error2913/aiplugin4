@@ -3,8 +3,9 @@ import { buildSystemMessage } from "../../utils/utils_message";
 import { M } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root";
 
-export function getCmdPrompt(): SubCmd {
+export function registerCmdPrompt() {
     const cmd = new SubCmd('prompt');
+    cmd.desc = '查看system prompt';
     cmd.help = '';
     cmd.priv = { priv: M };
     cmd.solve = async (scc: SubCmdContext) => {
@@ -15,5 +16,5 @@ export function getCmdPrompt(): SubCmd {
         return ret;
     }
 
-    return cmd;
+    SubCmd.map[cmd.name] = cmd;
 }

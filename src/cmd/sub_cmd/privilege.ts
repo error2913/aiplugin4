@@ -4,8 +4,9 @@ import { aliasToCmd } from "../../utils/utils";
 import { M, PrivilegeManager, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root";
 
-export function getCmdPrivilege(): SubCmd {
+export function registerCmdPrivilege() {
     const cmd = new SubCmd('privilege');
+    cmd.desc = '权限相关';
     cmd.help = `帮助:
 【.ai priv ses st <ID> <会话权限>】修改会话权限
 【.ai priv ses ck <ID>】检查会话权限
@@ -152,5 +153,5 @@ ${HELPMAP["指令"]}`);
         }
     }
 
-    return cmd;
+    SubCmd.map[cmd.name] = cmd;
 }
