@@ -79,23 +79,57 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
     ]);
 }
 
+type TypeDescriptor<T> =
+    | 'string'
+    | 'number'
+    | 'boolean'
+    | TypeDescriptor<any>[] // 元组元素类型
+    | { array: TypeDescriptor<any> } // 数组元素类型
+    | RevivableConstructor<T>; // 嵌套类
+
+interface RevivableConstructor<T> {
+    new(): T;
+    validKeysMap: { [key in keyof T]?: TypeDescriptor<T[key]> };
+}
+
 /**
- * 恢复一个对象，只恢复构造函数中定义的属性，暂不支持嵌套属性
+ * 恢复一个对象，只恢复构造函数中定义的属性，支持嵌套属性  希望没有bug
  * @param constructor 传入构造函数，必须有 validKeys 属性
  * @param value 要恢复的对象
  * @returns 恢复后的对象
  */
-export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, value: any): T {
-    const obj = new constructor();
-
-    if (!constructor.validKeys) {
-        logger.error(`revive: ${constructor.name} 没有 validKeys 属性`);
-        return obj;
+export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
+    function reviveItem<T>(descriptor: TypeDescriptor<T>, defaultValue: any, value: any): any {
+        if (descriptor === 'string') {
+            if (typeof value === 'string') return value;
+        } else if (descriptor === 'number') {
+            if (typeof value === 'number') return value;
+        } else if (descriptor === 'boolean') {
+            if (typeof value === 'boolean') return value;
+        } else if (Array.isArray(descriptor)) {
+            if (Array.isArray(value)) return descriptor.map((d: any, index: number) => {
+                if (index < value.length && index < defaultValue.length) return reviveItem(d, defaultValue[index], value[index]);
+                if (index < defaultValue.length) return defaultValue[index];
+                return undefined;
+            });
+        } else if (typeof descriptor === 'object' && 'array' in descriptor) {
+            if (Array.isArray(value)) return value.map((item: any) => reviveItem(descriptor.array, defaultValue[0], item));
+        } else if (typeof descriptor === 'function') {
+            return revive(descriptor, value);
+        } else {
+            return value;
+        }
     }
 
-    for (const k of constructor.validKeys) {
-        if (value.hasOwnProperty(k)) {
-            obj[k] = value[k];
+    const obj: any = new constructor();
+
+    if (constructor.validKeysMap) {
+        for (const k in constructor.validKeysMap) {
+            const descriptor = constructor.validKeysMap[k];
+            if (value.hasOwnProperty(k)) {
+                const item = reviveItem(descriptor, obj[k], value[k]);
+                if (item !== undefined) obj[k] = item;
+            }
         }
     }
 
