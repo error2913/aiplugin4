@@ -1,6 +1,6 @@
 import { transformMsgIdBack, transformMsgId } from "../utils/utils";
 import { Tool } from "./tool";
-import { Image } from "../AI/image";
+import { Image } from "../image/image";
 import { transformArrayToContent } from "../utils/utils_string";
 import { deleteEssenceMsg, getEssenceMsgList, getGroupMemberInfo, netExists, setEssenceMsg } from "../utils/utils_ob11";
 

@@ -23,7 +23,7 @@ import { registerMusicPlay } from "./tool_music"
 import { registerMeme } from "./tool_meme"
 import { registerRender } from "./tool_render"
 import { logger } from "../logger"
-import { Image } from "../AI/image";
+import { Image } from "../image/image";
 import { fixJsonString } from "../utils/utils_string";
 
 export interface ToolInfoString {

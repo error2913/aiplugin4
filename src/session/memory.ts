@@ -3,11 +3,11 @@ import { AI, AIManager, GroupInfo, SessionInfo, UserInfo } from "./AI";
 import { Context } from "./context";
 import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive } from "../utils/utils";
 import { logger } from "../logger";
-import { fetchData, getEmbedding } from "../service";
+import { fetchData, getEmbedding } from "../agent/service";
 import { buildContent, getRoleSetting, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { fmtDate } from "../utils/utils_string";
-import { Image, ImageManager } from "./image";
+import { Image, ImageManager } from "../image/image";
 
 export interface searchOptions {
     topK: number;

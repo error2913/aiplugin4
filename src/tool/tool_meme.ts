@@ -1,5 +1,5 @@
 import { AIManager, GroupInfo, UserInfo } from "../AI/AI";
-import { Image, ImageManager } from "../AI/image";
+import { Image, ImageManager } from "../image/image";
 import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
 import { generateId } from "../utils/utils";

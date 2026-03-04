@@ -1,6 +1,6 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/configManager";
-import { Image, ImageManager } from "./image";
+import { Image, ImageManager } from "../image/image";
 import { getCtxAndMsg } from "../utils/utils_seal";
 import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager, GroupInfo, UserInfo } from "./AI";

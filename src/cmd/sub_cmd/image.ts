@@ -1,5 +1,5 @@
 import { AIManager } from "../../AI/AI";
-import { ImageManager } from "../../AI/image";
+import { ImageManager } from "../../image/image";
 import { aliasToCmd } from "../../utils/utils";
 import { transformArrayToContent, transformTextToArray } from "../../utils/utils_string";
 import { I, M, U } from "../privilege";

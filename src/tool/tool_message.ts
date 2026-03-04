@@ -7,7 +7,7 @@ import { Tool, ToolManager } from "./tool";
 import { CQTYPESALLOW, faceMap } from "../config/config";
 import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../utils/utils_ob11";
 import { logger } from "../logger";
-import { Image } from "../AI/image";
+import { Image } from "../image/image";
 
 export function registerMessage() {
     const toolSend = new Tool({

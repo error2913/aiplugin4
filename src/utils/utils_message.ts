@@ -1,9 +1,9 @@
 import { AI, GroupInfo, UserInfo } from "../AI/AI";
-import { Message } from "../AI/context";
+import { Message } from "../session/context";
 import { ConfigManager } from "../config/configManager";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./utils_string";
-import { knowledgeMM } from "../AI/memory";
+import { knowledgeMM } from "../session/memory";
 
 export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;

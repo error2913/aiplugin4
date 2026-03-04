@@ -2,7 +2,7 @@ import { AIManager, GroupInfo, SessionInfo, UserInfo } from "../AI/AI";
 import { ConfigManager } from "../config/configManager";
 import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool } from "./tool";
-import { knowledgeMM, searchOptions as SearchOptions } from "../AI/memory";
+import { knowledgeMM, searchOptions as SearchOptions } from "../session/memory";
 import { getRoleSetting } from "../utils/utils_message";
 
 export function registerMemory() {

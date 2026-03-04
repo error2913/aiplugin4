@@ -1,7 +1,7 @@
 import { Image, ImageManager } from "./image";
 import { ConfigManager } from "../config/configManager";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
-import { endStream, pollStream, sendChatRequest, startStream } from "../service";
+import { endStream, pollStream, sendChatRequest, startStream } from "../agent/service";
 import { Context } from "./context";
 import { MemoryManager } from "./memory";
 import { handleMessages, parseBody } from "../utils/utils_message";

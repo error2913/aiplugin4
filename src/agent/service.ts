@@ -1,9 +1,9 @@
-import { AIManager } from "./AI/AI";
-import { ToolCall, ToolInfo } from "./tool/tool";
-import { ConfigManager } from "./config/configManager";
-import { parseBody, parseEmbeddingBody } from "./utils/utils_message";
-import { logger } from "./logger";
-import { withTimeout } from "./utils/utils";
+import { AIManager } from "../AI/AI";
+import { ToolCall, ToolInfo } from "../tool/tool";
+import { ConfigManager } from "../config/configManager";
+import { parseBody, parseEmbeddingBody } from "../utils/utils_message";
+import { logger } from "../logger";
+import { withTimeout } from "../utils/utils";
 
 export async function sendChatRequest(messages: {
     role: string,

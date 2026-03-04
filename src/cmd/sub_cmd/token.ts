@@ -1,5 +1,5 @@
 import { AIManager } from "../../AI/AI";
-import { get_chart_url } from "../../service";
+import { get_chart_url } from "../../agent/service";
 import { aliasToCmd } from "../../utils/utils";
 import { S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root";

@@ -2,7 +2,7 @@ import { logger } from "../logger";
 import { Tool } from "./tool";
 import { ConfigManager } from "../config/configManager";
 import { AI, AIManager } from "../AI/AI";
-import { Image } from "../AI/image";
+import { Image } from "../image/image";
 import { generateId } from "../utils/utils";
 import { parseSpecialTokens } from "../utils/utils_string";
 

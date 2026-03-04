@@ -1,5 +1,5 @@
 import { ConfigManager } from "../config/configManager";
-import { sendITTRequest } from "../service";
+import { sendITTRequest } from "../agent/service";
 import { generateId } from "../utils/utils";
 import { logger } from "../logger";
 import { AI } from "./AI";
