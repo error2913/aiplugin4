@@ -35,7 +35,7 @@ export class ConfigManager {
 
     static getCache<T>(key: string, getFunc: () => T): T {
         const timestamp = Date.now()
-        if (this.cache?.[key] && timestamp - this.cache[key].timestamp < 3000) {
+        if (this.cache?.[key] && timestamp - this.cache[key].timestamp < 60000) {
             return this.cache[key].data;
         }
 
