@@ -30,6 +30,4 @@ export function registerCmdStandby() {
         AIManager.saveAI(sid);
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

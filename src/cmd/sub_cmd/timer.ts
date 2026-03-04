@@ -35,6 +35,4 @@ export function registerCmdTimer() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

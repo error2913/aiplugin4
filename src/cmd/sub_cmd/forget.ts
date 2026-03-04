@@ -40,6 +40,4 @@ export function registerCmdForget() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

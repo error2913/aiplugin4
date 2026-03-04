@@ -63,6 +63,4 @@ export function registerCmdCtxn() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

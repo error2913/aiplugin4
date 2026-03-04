@@ -10,6 +10,4 @@ export function registerCmdSample() {
         ctx; msg; cmdArgs; epId; uid; gid; sid; ai; page; ret;
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

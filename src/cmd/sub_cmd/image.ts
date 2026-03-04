@@ -111,6 +111,4 @@ export function registerCmdImage() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

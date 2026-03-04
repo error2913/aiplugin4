@@ -151,6 +151,4 @@ export function registerCmdTool() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

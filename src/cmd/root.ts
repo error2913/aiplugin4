@@ -46,6 +46,8 @@ export class SubCmd {
         this.help = '';
         this.priv = { priv: U };
         this.solve = async () => { return seal.ext.newCmdExecuteResult(false); };
+
+        SubCmd.map[name] = this;
     }
 
     static map: { [key: string]: SubCmd } = {};

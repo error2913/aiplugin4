@@ -77,6 +77,4 @@ export function registerCmdOff() {
         AIManager.saveAI(sid);
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

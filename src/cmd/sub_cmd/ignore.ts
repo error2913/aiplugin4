@@ -71,6 +71,4 @@ export function registerCmdIgnore() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

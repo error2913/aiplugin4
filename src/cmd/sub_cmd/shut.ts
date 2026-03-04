@@ -18,6 +18,4 @@ export function registerCmdShut() {
         seal.replyToSender(ctx, msg, '已停止当前对话');
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

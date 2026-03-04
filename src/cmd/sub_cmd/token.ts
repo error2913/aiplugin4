@@ -397,6 +397,4 @@ export function registerCmdToken() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

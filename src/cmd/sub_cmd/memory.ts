@@ -278,6 +278,4 @@ export function registerCmdMemory() {
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

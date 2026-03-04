@@ -22,6 +22,4 @@ export function registerCmdStatus() {
         待机模式: ${setting.standby ? '开启' : '关闭'}`);
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

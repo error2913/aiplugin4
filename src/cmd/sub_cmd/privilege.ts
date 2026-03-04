@@ -152,6 +152,4 @@ ${HELPMAP["指令"]}`);
             }
         }
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

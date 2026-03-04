@@ -15,6 +15,4 @@ export function registerCmdPrompt() {
         seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

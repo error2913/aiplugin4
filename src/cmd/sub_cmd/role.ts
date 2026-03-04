@@ -30,6 +30,4 @@ export function registerCmdRole() {
         seal.replyToSender(ctx, msg, `角色设定已切换到[${val2}]`);
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }

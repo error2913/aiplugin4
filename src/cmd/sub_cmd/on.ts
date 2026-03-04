@@ -122,6 +122,4 @@ export function registerCmdOn() {
         AIManager.saveAI(sid);
         return ret;
     }
-
-    SubCmd.map[cmd.name] = cmd;
 }
