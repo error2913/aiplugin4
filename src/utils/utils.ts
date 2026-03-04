@@ -78,8 +78,7 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
         })
     ]);
 }
-
-type TypeDescriptor<T> =
+export type TypeDescriptor<T> =
     | 'string'
     | 'number'
     | 'boolean'

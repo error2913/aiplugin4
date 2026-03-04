@@ -1,8 +1,7 @@
-import { GroupInfo } from "../agent/AI";
 import { Context } from "./context";
 import { User } from "./user";
 
-export class State{
+export class State {
     isPrivate: boolean;
     group: {
         groupId: string;

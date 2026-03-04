@@ -1,7 +1,7 @@
 import { ConfigManager } from "../config/configManager";
 import { AI, AIManager, GroupInfo, SessionInfo, UserInfo } from "./AI";
 import { Context } from "./context";
-import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive } from "../utils/utils";
+import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../agent/service";
 import { buildContent, getRoleSetting, parseBody } from "../utils/utils_message";
@@ -18,51 +18,57 @@ export interface searchOptions {
     method: 'weight' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
 }
 
-export class Memory {
-    static validKeys: (keyof Memory)[] = ['id', 'vector', 'text', 'sessionInfo', 'userList', 'groupList', 'createTime', 'lastMentionTime', 'keywords', 'weight', 'images'];
+export class MemoryItem {
+    static validKeysMap: { [key in keyof MemoryItem]: TypeDescriptor<MemoryItem[key]> } = {
+        'id': 'string',
+        'sourceSessionId': 'string',
+        'createTime': 'number',
+        'lastMentionTime': 'number',
+        'weight': 'number',
+        'content': 'string',
+        'vector': { array: 'number' },
+        'keywords': { array: 'string' },
+        'userIdList': { array: 'string' },
+        'imageIdList': { array: 'string' }
+    };
+
     id: string; // 记忆ID
-    vector: number[]; // 记忆向量
-    text: string; // 记忆内容
-    sessionInfo: SessionInfo;
-    userList: UserInfo[];
-    groupList: GroupInfo[];
+    sourceSessionId: string; // 记忆来源会话ID
     createTime: number; // 秒级时间戳
-    lastMentionTime: number;
-    keywords: string[];
+    lastMentionTime: number; // 最后被提及时间，秒级时间戳
     weight: number; // 记忆权重，0-10
-    images: Image[];
+
+    content: string; // 记忆内容
+    vector: number[]; // 记忆向量
+    keywords: string[]; // 记忆关键词列表
+    userIdList: string[]; // 记忆相关用户ID列表
+    imageIdList: string[]; // 记忆相关图片ID列表
 
     constructor() {
         this.id = '';
-        this.vector = [];
-        this.text = '';
-        this.sessionInfo = {
-            id: '',
-            isPrivate: false,
-            name: '',
-        };
-        this.userList = [];
-        this.groupList = [];
+        this.sourceSessionId = '';
         this.createTime = 0;
         this.lastMentionTime = 0;
-        this.keywords = [];
         this.weight = 0;
-        this.images = [];
+        this.content = '';
+        this.vector = [];
+        this.keywords = [];
+        this.userIdList = [];
+        this.imageIdList = [];
     }
 
-    get copy(): Memory {
-        const m = new Memory();
+    get copy(): MemoryItem {
+        const m = new MemoryItem();
         m.id = this.id;
-        m.vector = [...this.vector];
-        m.text = this.text;
-        m.sessionInfo = JSON.parse(JSON.stringify(this.sessionInfo));
-        m.userList = JSON.parse(JSON.stringify(this.userList));
-        m.groupList = JSON.parse(JSON.stringify(this.groupList));
+        m.sourceSessionId = this.sourceSessionId;
         m.createTime = this.createTime;
         m.lastMentionTime = this.lastMentionTime;
-        m.keywords = [...this.keywords];
         m.weight = this.weight;
-        m.images = [...this.images];
+        m.content = this.content;
+        m.vector = [...this.vector];
+        m.keywords = [...this.keywords];
+        m.userIdList = [...this.userIdList];
+        m.imageIdList = [...this.imageIdList];
         return m;
     }
 
@@ -127,7 +133,7 @@ export class Memory {
         const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
         if (isMemoryVector) {
             logger.info(`更新记忆向量: ${this.id}`);
-            const vector = await getEmbedding(this.text);
+            const vector = await getEmbedding(this.content);
             if (!vector.length) {
                 logger.error('返回向量为空');
                 return;
@@ -144,7 +150,7 @@ export class Memory {
 export class MemoryManager {
     static validKeys: (keyof MemoryManager)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
     persona: string;
-    memoryMap: { [id: string]: Memory };
+    memoryMap: { [id: string]: MemoryItem };
     useShortMemory: boolean;
     shortMemoryList: string[];
 
@@ -157,8 +163,8 @@ export class MemoryManager {
 
     reviveMemoryMap() {
         for (const id in this.memoryMap) {
-            this.memoryMap[id] = revive(Memory, this.memoryMap[id]);
-            if (!this.memoryMap[id].text) {
+            this.memoryMap[id] = revive(MemoryItem, this.memoryMap[id]);
+            if (!this.memoryMap[id].content) {
                 delete this.memoryMap[id];
                 continue;
             }
@@ -194,7 +200,7 @@ export class MemoryManager {
 
         for (const id of this.memoryIds) {
             const m = this.memoryMap[id];
-            if (text === m.text && m.sessionInfo.id === ai.id && getCommonUser(ul, m.userList).length > 0 && getCommonGroup(gl, m.groupList).length > 0) {
+            if (text === m.content && m.sessionInfo.id === ai.id && getCommonUser(ul, m.userList).length > 0 && getCommonGroup(gl, m.groupList).length > 0) {
                 m.keywords = Array.from(new Set([...m.keywords, ...kws]));
                 logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
                 return;
@@ -210,9 +216,9 @@ export class MemoryManager {
         });
 
         const now = Math.floor(Date.now() / 1000);
-        const m = new Memory();
+        const m = new MemoryItem();
         m.id = id;
-        m.text = text;
+        m.content = text;
         m.sessionInfo = {
             id: ai.id,
             isPrivate: ctx.isPrivate,
@@ -478,7 +484,7 @@ export class MemoryManager {
         return this.buildMemory(si, latestMemoryList) + `\n当前页码: ${p}/${Math.ceil(this.memoryList.length / 5)}`;
     }
 
-    buildMemory(si: SessionInfo, ml: Memory[]): string {
+    buildMemory(si: SessionInfo, ml: MemoryItem[]): string {
         if (this.persona === '无' && ml.length === 0) return '';
         const { showNumber } = ConfigManager.message;
         const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
@@ -501,7 +507,7 @@ export class MemoryManager {
                         "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "相关群聊": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "关键词": m.keywords.join(';'),
-                        "记忆内容": m.text
+                        "记忆内容": m.content
                     });
                 }).join('\n');
         }
@@ -571,7 +577,7 @@ export class MemoryManager {
         return null;
     }
 
-    findMemoryAndImageByImageIdPrefix(id: string): { memory: Memory, image: Image } | null {
+    findMemoryAndImageByImageIdPrefix(id: string): { memory: MemoryItem, image: Image } | null {
         for (const m of this.memoryList) {
             const image = m.images.find(img => img.id.replace(/_\d+$/, "") === id);
             if (image) {
@@ -603,7 +609,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
         const s = knowledgeMemoryStringList[roleIndex];
         if (!s) return;
 
-        const memoryMap: { [id: string]: Memory } = {}
+        const memoryMap: { [id: string]: MemoryItem } = {}
         const segs = s.split(/\n-{3,}\n/);
         for (const seg of segs) {
             if (!seg.trim()) continue;
@@ -611,7 +617,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
             const lines = seg.split('\n');
             if (lines.length === 0) continue;
 
-            const m = new Memory();
+            const m = new MemoryItem();
             for (let i = 0; i < lines.length; i++) {
                 const match = lines[i].match(/^\s*?(ID|用户|群聊|关键词|图片|内容)\s*?[:：](.*)/);
                 if (!match) {
@@ -665,14 +671,14 @@ export class KnowledgeMemoryManager extends MemoryManager {
                         break;
                     }
                     case '内容': {
-                        m.text = lines.slice(i).join('\n').trim().replace(/^内容[:：]/, '');
+                        m.content = lines.slice(i).join('\n').trim().replace(/^内容[:：]/, '');
                         break;
                     }
                     default: continue;
                 }
             }
 
-            if (!m.id && !m.text) continue;
+            if (!m.id && !m.content) continue;
 
             memoryMap[m.id] = m;
         }
@@ -682,7 +688,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
             if (this.memoryMap.hasOwnProperty(m.id)) {
                 const m2 = this.memoryMap[m.id];
                 m.vector = m2.vector;
-                if (m2.text !== m.text) await m.updateVector();
+                if (m2.content !== m.content) await m.updateVector();
                 m.createTime = m2.createTime;
                 m.lastMentionTime = m2.lastMentionTime;
                 m.weight = m2.weight;
@@ -698,7 +704,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
         this.save();
     }
 
-    buildKnowledgeMemory(memoryList: Memory[]) {
+    buildKnowledgeMemory(memoryList: MemoryItem[]) {
         const { showNumber } = ConfigManager.message;
         const { knowledgeMemorySingleShowTemplate } = ConfigManager.memory;
         if (memoryList.length === 0) return '';
@@ -715,7 +721,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
                         "用户列表": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "群聊列表": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "关键词": m.keywords.join(';'),
-                        "记忆内容": m.text
+                        "记忆内容": m.content
                     });
                 }).join('\n');
         }
