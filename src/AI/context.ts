@@ -1,4 +1,4 @@
-﻿import { ToolCall } from "../tool/tool";
+import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/configManager";
 import { Image, ImageManager } from "./image";
 import { getCtxAndMsg } from "../utils/utils_seal";
