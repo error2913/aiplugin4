@@ -230,9 +230,9 @@ export class Context {
     }
 
     async compressToolResponseIfNeeded(toolName: string, content: string, searchTarget: string = ''): Promise<string> {
-        const { isToolResponseCompress, toolResponseCompressPromptTemplate } = ConfigManager.tool;
-        if (!isToolResponseCompress) return content;
+        const { toolResponseCompressMinLength, toolResponseCompressPromptTemplate } = ConfigManager.tool;
         if (!content.trim()) return content;
+        if (content.length < toolResponseCompressMinLength) return content;
 
         let prompt = toolResponseCompressPromptTemplate({
             "函数名": toolName,
