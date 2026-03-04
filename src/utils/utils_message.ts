@@ -157,6 +157,7 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
 
 export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
     const { isMerge } = ConfigManager.message;
+
     const systemMessage = await buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
     const contextMessages = buildContextMessages(systemMessage, ai.context.messages);
