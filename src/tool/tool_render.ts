@@ -139,15 +139,15 @@ export function registerRender() {
                 }
 
                 const img = new Image();
-                img.id = `${name}_${generateId()}`;
+                img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
-                img.content = `Markdown 渲染图片<|img:${img.id}|>
+                img.description = `Markdown 渲染图片<|img:${img.imageId}|>
 主题：${theme}`;
 
-                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
+                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.description);
 
-                return { content: `渲染成功，请使用<|img:${img.id}|>发送`, images: [img] };
+                return { content: `渲染成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
             } else {
                 throw new Error(result.message || "渲染失败");
             }
@@ -206,14 +206,14 @@ export function registerRender() {
                 }
 
                 const img = new Image();
-                img.id = `${name}_${generateId()}`;
+                img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
-                img.content = `HTML 渲染图片<|img:${img.id}|>`;
+                img.description = `HTML 渲染图片<|img:${img.imageId}|>`;
 
-                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
+                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.description);
 
-                return { content: `渲染成功，请使用<|img:${img.id}|>发送`, images: [img] };
+                return { content: `渲染成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
             } else {
                 throw new Error(result.message || "渲染失败");
             }

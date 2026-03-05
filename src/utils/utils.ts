@@ -1,4 +1,3 @@
-import { AI } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformTextToArray } from "./utils_string";
@@ -86,6 +85,7 @@ export type TypeDescriptor<T> =
     | 'any'
     | TypeDescriptor<any>[] // 元组元素类型
     | { array: TypeDescriptor<any> } // 数组元素类型
+    | { objectValue: TypeDescriptor<any> } // 对象值类型
     | RevivableConstructor<T>; // 嵌套类
 
 interface RevivableConstructor<T> {
@@ -111,12 +111,19 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
             return value;
         } else if (Array.isArray(descriptor)) {
             if (Array.isArray(value)) return descriptor.map((d: any, index: number) => {
-                if (index < value.length && index < defaultValue.length) return reviveItem(d, defaultValue[index], value[index]);
-                if (index < defaultValue.length) return defaultValue[index];
-                return undefined;
+                if (index < value.length) return reviveItem(d, defaultValue?.[index], value[index]);
+                return defaultValue?.[index];
             });
         } else if (typeof descriptor === 'object' && 'array' in descriptor) {
-            if (Array.isArray(value)) return value.map((item: any) => reviveItem(descriptor.array, defaultValue[0], item));
+            if (Array.isArray(value)) return value.map((item: any) => reviveItem(descriptor.array, defaultValue?.[0], item));
+        } else if (typeof descriptor === 'object' && 'objectValue' in descriptor) {
+            if (typeof value === 'object' && value !== null) {
+                const obj: { [key: string]: any } = {};
+                for (const k in value) {
+                    obj[k] = reviveItem(descriptor.objectValue, defaultValue?.[k], value[k]);
+                }
+                return obj;
+            }
         } else if (typeof descriptor === 'function') {
             return revive(descriptor, value);
         } else {

@@ -40,6 +40,7 @@ export class GroupManager {
             } catch (error) {
                 logger.error(`加载群${groupId}失败: ${error}`);
             }
+            group.groupId = groupId;
             this.groupMap[groupId] = group;
         }
         return this.groupMap[groupId];

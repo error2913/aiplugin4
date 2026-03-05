@@ -38,6 +38,9 @@ export class Session {
 }
 
 export class SessionService {
+    static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
+        sessionMap: { objectValue: Session },
+    }
     sessionMap: { [key: string]: Session };
 
     constructor() {
@@ -53,6 +56,7 @@ export class SessionService {
             } catch (error) {
                 logger.error(`加载会话${sessionId}失败: ${error}`);
             }
+            session.sessionId = sessionId;
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];

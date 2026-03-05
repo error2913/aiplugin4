@@ -88,7 +88,7 @@ export function registerCmdImage() {
                 if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
                 const img = images[0];
                 await img.imageToText(cmdArgs.getRestArgsFrom(4))
-                seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content);
+                seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.description);
                 return ret;
             }
             case 'find': {

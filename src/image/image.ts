@@ -1,45 +1,46 @@
 import { ConfigManager } from "../config/configManager";
 import { sendITTRequest } from "../agent/service";
-import { generateId } from "../utils/utils";
+import { generateId, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
-import { AI } from "./AI";
 import { MessageSegment, parseSpecialTokens } from "../utils/utils_string";
+import { getSessionId } from "../utils/utils_seal";
 
 export class Image {
-    static validKeys: (keyof Image)[] = ['id', 'file', 'content'];
-    id: string;
-    file: string; // 图片url或本地路径
-    content: string;
+    static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
+        imageId: 'string',
+        sourceSessionId: 'string',
+        path: 'string',
+        url: 'string',
+        base64: 'string',
+        format: 'string',
+        description: 'string',
+    }
+    imageId: string;
+    sourceSessionId: string;
+    path: string;
+    url: string;
+    base64: string;
+    format: string;
+    description: string;
 
     constructor() {
-        this.id = generateId();
-        this.file = '';
-        this.content = '';
+        this.imageId = '';
+        this.sourceSessionId = '';
+        this.path = '';
+        this.url = '';
+        this.base64 = '';
+        this.format = '';
+        this.description = '';
     }
 
     get type(): 'url' | 'local' | 'base64' {
-        if (this.file.startsWith('http')) return 'url';
-        if (this.format) return 'base64';
+        if (this.base64) return 'base64';
+        if (this.url.startsWith('http')) return 'url';
         return 'local';
     }
 
-    get base64(): string {
-        return ConfigManager.ext.storageGet(`base64_${this.id}`) || '';
-    }
-    set base64(value: string) {
-        this.file = '';
-        ConfigManager.ext.storageSet(`base64_${this.id}`, value);
-    }
-
-    get format(): string {
-        return ConfigManager.ext.storageGet(`format_${this.id}`) || '';
-    }
-    set format(value: string) {
-        ConfigManager.ext.storageSet(`format_${this.id}`, value);
-    }
-
     get CQCode(): string {
-        const file = this.type === 'base64' ? seal.base64ToImage(this.base64) : this.file;
+        const file = this.type === 'base64' ? seal.base64ToImage(this.base64) : this.url;
         return `[CQ:image,file=${file}]`;
     }
 
@@ -52,15 +53,15 @@ export class Image {
     /**
      * 获取图片的URL，若为base64则返回base64Url
      */
-    get url(): string {
-        return this.type === 'base64' ? this.base64Url : this.file;
+    get src(): string {
+        return this.type === 'base64' ? this.base64Url : this.url;
     }
 
     async checkImageUrl(): Promise<boolean> {
         if (this.type !== 'url') return true;
         let isValid = false;
         try {
-            const response = await fetch(this.file, { method: 'GET' });
+            const response = await fetch(this.url, { method: 'GET' });
 
             if (response.ok) {
                 const contentType = response.headers.get('Content-Type');
@@ -94,7 +95,7 @@ export class Image {
                     "Content-Type": "application/json",
                     "Accept": "application/json"
                 },
-                body: JSON.stringify({ url: this.file })
+                body: JSON.stringify({ url: this.src })
             });
 
             const text = await response.text();
@@ -113,8 +114,11 @@ export class Image {
         } catch (error) {
             logger.error("在imageUrlToBase64中请求出错：", error);
         }
+
+        ImageManager.saveImage(this);
     }
 
+    // wip 接到imageAgent，然后加个save
     async imageToText(prompt = '') {
         const { defaultPrompt, urlToBase64, maxChars } = ConfigManager.image;
 
@@ -124,104 +128,109 @@ export class Image {
             role: "user",
             content: [{
                 "type": "image_url",
-                "image_url": { "url": this.url }
+                "image_url": { "url": this.src }
             }, {
                 "type": "text",
                 "text": prompt ? prompt : defaultPrompt
             }]
         }]
 
-        this.content = (await sendITTRequest(messages)).slice(0, maxChars);
+        this.description = (await sendITTRequest(messages)).slice(0, maxChars);
 
-        if (!this.content && urlToBase64 === '自动' && this.type === 'url') {
-            logger.info(`图片${this.id}第一次识别失败，自动尝试使用转换为base64`);
+        if (!this.description && urlToBase64 === '自动' && this.type === 'url') {
+            logger.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
             messages[0].content[0].image_url.url = this.base64Url;
-            this.content = (await sendITTRequest(messages)).slice(0, maxChars);
+            this.description = (await sendITTRequest(messages)).slice(0, maxChars);
         }
 
-        if (!this.content) logger.error(`图片${this.id}识别失败`);
+        if (!this.description) logger.error(`图片${this.imageId}识别失败`);
     }
 }
 
 export class ImageManager {
-    static validKeys: (keyof ImageManager)[] = ['stolenImages', 'stealStatus'];
-    stolenImages: Image[];
-    stealStatus: boolean;
+    static imageMap: { [key: string]: Image } = {};
 
-    constructor() {
-        this.stolenImages = [];
-        this.stealStatus = false;
+    static generateImageId(): string {
+        let id = generateId(), a = 0;
+        while (this.getImage(id)) {
+            id = generateId();
+            a++;
+            if (a > 1000) {
+                logger.error(`生成记忆id失败，已尝试1000次，放弃`);
+                throw new Error(`生成记忆id失败，已尝试1000次，放弃`);
+            }
+        }
+        return id;
+    }
+
+    static createUrlImage(sourceSessionId: string, url: string, imageId?: string): Image {
+        imageId = imageId || this.generateImageId();
+        const img = new Image();
+        img.imageId = imageId;
+        img.sourceSessionId = sourceSessionId;
+        img.url = url;
+        this.imageMap[imageId] = img;
+        return img;
+    }
+
+    static createLocalImage(imageId: string, path: string): Image {
+        const img = new Image();
+        img.imageId = imageId;
+        img.path = path;
+        this.imageMap[imageId] = img;
+        return img;
+    }
+
+    static getImage(imageId: string): Image | null {
+        if (!this.imageMap.hasOwnProperty(imageId)) {
+            let img = new Image();
+            try {
+                const text = ConfigManager.ext.storageGet(`image_${imageId}`);
+                if (!text) return null;
+                const data = JSON.parse(text || '{}');
+                img = revive(Image, data);
+            } catch (error) {
+                logger.error(`加载图片${imageId}失败: ${error}`);
+                return null;
+            }
+            this.imageMap[imageId] = img;
+        }
+        return this.imageMap[imageId];
+    }
+
+    static saveImage(img: Image) {
+        ConfigManager.ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
     }
 
     static getUserAvatar(uid: string): Image {
         const img = new Image();
-        img.id = `user_avatar:${uid}`;
-        img.file = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
+        img.imageId = `user_avatar:${uid}`;
+        img.url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
         return img;
     }
 
     static getGroupAvatar(gid: string): Image {
         const img = new Image();
-        img.id = `group_avatar:${gid}`;
-        img.file = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
+        img.imageId = `group_avatar:${gid}`;
+        img.url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
         return img;
     }
 
-    stealImages(images: Image[]) {
-        const { maxStolenImageNum } = ConfigManager.image;
-        this.stolenImages = this.stolenImages.concat(images).slice(-maxStolenImageNum);
+    static get LocalImageList() {
+        const { localImagePathMap } = ConfigManager.image;
+        return Object.keys(localImagePathMap).map(id => this.createLocalImage(id, localImagePathMap[id]));
     }
 
     static getLocalImageListText(p: number = 1): string {
-        const { localImagePathMap } = ConfigManager.image;
-        const images = Object.keys(localImagePathMap).map(id => {
-            const image = new Image();
-            image.id = id;
-            image.file = localImagePathMap[id];
-            return image;
-        });
+        const images = this.LocalImageList;
         if (images.length == 0) return '';
         if (p > Math.ceil(images.length / 5)) p = Math.ceil(images.length / 5);
         return images.slice((p - 1) * 5, p * 5)
             .map((img, i) => {
-                return `${i + 1 + (p - 1) * 5}. 名称:${img.id}
+                return `${i + 1 + (p - 1) * 5}. 名称:${img.imageId}
 ${img.CQCode}`;
             }).join('\n') + `\n当前页码:${p}/${Math.ceil(images.length / 5)}`;
-    }
-
-    async drawStolenImage(): Promise<Image> {
-        if (this.stolenImages.length === 0) return null;
-        const index = Math.floor(Math.random() * this.stolenImages.length);
-        const img = this.stolenImages.splice(index, 1)[0];
-        if (!await img.checkImageUrl()) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            return await this.drawStolenImage();
-        }
-        return img;
-    }
-
-    getStolenImageListText(p: number = 1): string {
-        if (this.stolenImages.length == 0) return '';
-        if (p > Math.ceil(this.stolenImages.length / 5)) p = Math.ceil(this.stolenImages.length / 5);
-        return this.stolenImages.slice((p - 1) * 5, p * 5)
-            .map((img, i) => {
-                return `${i + 1 + (p - 1) * 5}. ID:${img.id}
-${img.CQCode}`;
-            }).join('\n') + `\n当前页码:${p}/${Math.ceil(this.stolenImages.length / 5)}`;
-    }
-
-    async drawImage(): Promise<Image> {
-        const { localImagePathMap } = ConfigManager.image;
-        const localImages = Object.keys(localImagePathMap).map(id => {
-            const image = new Image();
-            image.id = id;
-            image.file = localImagePathMap[id];
-            return image;
-        });
-        if (this.stolenImages.length == 0 && localImages.length == 0) return null;
-        const index = Math.floor(Math.random() * (localImages.length + this.stolenImages.length));
-        return index < localImages.length ? localImages[index] : await this.drawStolenImage();
     }
 
     /**
@@ -230,7 +239,7 @@ ${img.CQCode}`;
      * @param message 
      * @returns 
      */
-    async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
+    static async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
         const { receiveImage } = ConfigManager.image;
         if (!receiveImage || seg.type !== 'image') return { content: '', images: [] };
 
@@ -240,30 +249,28 @@ ${img.CQCode}`;
             const file = seg.data.url || seg.data.file || '';
             if (!file) return { content: '', images: [] };
 
-            const image = new Image();
-            image.file = file;
+            const image = this.createUrlImage(getSessionId(ctx), file);
             const { condition } = ConfigManager.image;
             const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
             if (fmtCondition === 1) await image.imageToText();
 
-            content += image.content ? `<|img:${image.id}:${image.content}|>` : `<|img:${image.id}|>`;
+            content += image.description ? `<|img:${image.imageId}:${image.description}|>` : `<|img:${image.imageId}|>`;
             images.push(image);
         } catch (error) {
             logger.error('在handleImageMessage中处理图片时出错:', error);
         }
 
-        if (this.stealStatus) this.stealImages(images);
         return { content, images };
     }
 
-    static async extractExistingImagesToSave(ctx: seal.MsgContext, ai: AI, s: string): Promise<Image[]> {
+    static async extractExistingImagesToSave(s: string): Promise<Image[]> {
         const segs = parseSpecialTokens(s);
         const images: Image[] = [];
         for (const seg of segs) {
             switch (seg.type) {
                 case 'img': {
                     const id = seg.content;
-                    const image = await ai.context.findImage(ctx, id);
+                    const image = this.getImage(id);
 
                     if (image) {
                         if (image.type === 'url') await image.urlToBase64();

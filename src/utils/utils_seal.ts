@@ -34,3 +34,7 @@ export function getSessionCtxAndMsg(epId: string, sid: string, isPrivate: boolea
     const ctx = createCtx(epId, msg);
     return { ctx, msg };
 }
+
+export function getSessionId(ctx: seal.MsgContext): string {
+    return ctx.isPrivate ? ctx.player.userId : ctx.group.groupId;
+}

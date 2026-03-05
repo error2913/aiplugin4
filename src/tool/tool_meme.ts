@@ -180,7 +180,7 @@ export function registerMeme() {
         const result = ai.memory.findMemoryAndImageByImageIdPrefix(name);
         if (result) {
             const { memory, image } = result;
-            if (memory.keywords.every((v, i) => v === kws[i]) && memory.images.slice(1).every((v, i) => v.id === images[i].id)) {
+            if (memory.keywords.every((v, i) => v === kws[i]) && memory.images.slice(1).every((v, i) => v.id === images[i].imageId)) {
                 return { content: `${s}生成成功，请使用<|img:${image.id}|>发送`, images: [image] };
             }
         }
@@ -208,16 +208,16 @@ export function registerMeme() {
                 const imageText = image_ids.join(';');
 
                 const img = new Image();
-                img.id = `${name}_${generateId()}`;
+                img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
-                img.content = `表情包<|img:${img.id}|>
+                img.description = `表情包<|img:${img.imageId}|>
 ${textText ? `文字：${textText}` : ''}
 ${imageText ? `图片：${imageText}` : ''}`;
 
-                if (save) ai.memory.addMemory(ctx, ai, uiList, giList, kws, [img, ...images], img.content);
+                if (save) ai.memory.addMemory(ctx, ai, uiList, giList, kws, [img, ...images], img.description);
 
-                return { content: `${s}生成成功，请使用<|img:${img.id}|>发送`, images: [img] };
+                return { content: `${s}生成成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
             } else {
                 throw new Error(json.message);
             }

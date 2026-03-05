@@ -34,6 +34,7 @@ export class UserManager {
             } catch (error) {
                 logger.error(`加载用户${userId}失败: ${error}`);
             }
+            user.userId = userId;
             this.userMap[userId] = user;
         }
         return this.userMap[userId];

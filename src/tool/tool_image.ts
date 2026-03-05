@@ -87,7 +87,7 @@ export function registerImage() {
             if (globalThis.aiDrawing && typeof globalThis.aiDrawing.sendImageRequest === 'function') {
                 const result = await globalThis.aiDrawing.sendImageRequest(prompt, negative_prompt);
                 const img = new Image();
-                img.id = `${name}_${generateId()}`;
+                img.imageId = `${name}_${generateId()}`;
                 if (result.startsWith("http://") || result.startsWith("https://")) {
                     try {
                         await img.urlToBase64();
@@ -100,11 +100,11 @@ export function registerImage() {
                 }
 
                 img.format = img.format || 'unknown';
-                img.content = `AI绘图<|img:${img.id}|>\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
+                img.description = `AI绘图<|img:${img.imageId}|>\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
 
-                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.content);
+                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.description);
 
-                return { content: `生成成功，请使用<|img:${img.id}|>发送`, images: [img] };
+                return { content: `生成成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
             }
 
             // 兼容旧版 AIDrawing
