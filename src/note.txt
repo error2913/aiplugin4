@@ -1,0 +1,10 @@
+tool state
+
+summary count
+
+last reply 放进 send 里，所有send换成一个，除了指令调用。
+
+计数器、计时器逻辑移到trigger
+
+autoNameMod: number; // 自动修改上下文里的名字，0:不自动修改，1:修改为昵称，2:修改为群名片
+放到user manager

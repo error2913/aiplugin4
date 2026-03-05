@@ -11,8 +11,8 @@ export function registerCmdPrompt() {
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, ai, ret } = scc;
         const systemMessage = await buildSystemMessage(ctx, ai);
-        logger.info(`system prompt:\n`, systemMessage.msgArray[0].content);
-        seal.replyToSender(ctx, msg, systemMessage.msgArray[0].content);
+        logger.info(`system prompt:\n`, systemMessage.msgArray[0].text);
+        seal.replyToSender(ctx, msg, systemMessage.msgArray[0].text);
         return ret;
     }
 }

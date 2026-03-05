@@ -77,9 +77,9 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
         name: '',
         images: [],
         msgArray: [{
-            msgId: '',
+            messageId: '',
             time: Math.floor(Date.now() / 1000),
-            content: content
+            text: content
         }]
     };
 
@@ -297,9 +297,9 @@ export function buildContent(message: Message): string {
             `<|from:${message.name}${showNumber ? `(${message.uid.replace(/^.+:/, '')})` : ``}|>`
     ) : '';
     const content = message.msgArray.map(m =>
-        ((showMsgId && m.msgId) ? `<|msg_id:${m.msgId}|>` : '') +
+        ((showMsgId && m.messageId) ? `<|msg_id:${m.messageId}|>` : '') +
         (showTime ? `<|time:${fmtDate(m.time)}|>` : '') +
-        m.content
+        m.text
     ).join('\f');
     return prefix + content;
 }

@@ -348,7 +348,7 @@ export function checkRepeat(context: Context, s: string) {
         const message = messages[i];
         // 寻找最后一条文本消息
         if (message.role === 'assistant' && !message?.tool_calls) {
-            const content = message.msgArray[message.msgArray.length - 1].content || '';
+            const content = message.msgArray[message.msgArray.length - 1].text || '';
             const similarity = calculateSimilarity(content.trim(), s.trim());
             logger.info(`复读相似度：${similarity}`);
 

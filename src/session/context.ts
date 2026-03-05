@@ -6,79 +6,58 @@ import { levenshteinDistance } from "../utils/utils_string";
 import { AI, AIManager, GroupInfo, UserInfo } from "./AI";
 import { logger } from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/utils_ob11";
-import { revive } from "../utils/utils";
+import { revive, TypeDescriptor } from "../utils/utils";
 
-export interface MessageInfo {
-    msgId: string;
+export class MessageItem {
     time: number; // 秒
-    content: string;
+    text: string;
 }
 
-export interface Message {
-    role: string;
-    tool_calls?: ToolCall[];
-    tool_call_id?: string;
+export class UserMessageItem extends MessageItem {
+    userId: string;
+    messageId: string;
+}
 
-    uid: string;
-    name: string;
-    images: Image[];
-    msgArray: MessageInfo[];
+export class AssistantMessageItem extends MessageItem {
+    messageId: string;
+}
+
+export class SystemMessageItem extends MessageItem {
+    tip: string;
+}
+
+export class ToolCallsMessageItem extends MessageItem {
+    tool_calls: ToolCall[];
+}
+
+export class ToolCallbackMessageItem extends MessageItem {
+    tool_call_id: string;
 }
 
 export class Context {
-    static validKeys: (keyof Context)[] = ['messages', 'ignoreList', 'summaryCounter', 'autoNameMod'];
-    messages: Message[];
-    ignoreList: string[];
-    summaryCounter: number; // 用于短期记忆自动总结计数
-    autoNameMod: number; // 自动修改上下文里的名字，0:不自动修改，1:修改为昵称，2:修改为群名片
-
-    lastReply: string;
-    counter: number;
-    timer: number;
+    static validKeysMap: {[key in keyof Context]?: TypeDescriptor<Context[key]>} = {
+        messages: 'any'
+    }
+    messages: MessageItem[];
 
     constructor() {
         this.messages = [];
-        this.ignoreList = [];
-        this.summaryCounter = 0;
-        this.lastReply = '';
-        this.counter = 0;
-        this.timer = null;
     }
 
-    reviveMessages() {
-        this.messages = this.messages.map(message => {
-            if (!message.hasOwnProperty('role')) return null;
-            if (!message.hasOwnProperty('uid')) return null;
-            if (!message.hasOwnProperty('name')) return null;
-            if (!message.hasOwnProperty('images')) return null;
-            if (!message.hasOwnProperty('msgArray')) return null;
-
-            message.msgArray = message.msgArray.map(msgInfo => {
-                if (!msgInfo.hasOwnProperty('msgId')) return null;
-                if (!msgInfo.hasOwnProperty('time')) return null;
-                if (!msgInfo.hasOwnProperty('content')) return null;
-
-                return msgInfo;
-            }).filter(msgInfo => msgInfo);
-
-            message.images = message.images.map(image => revive(Image, image));
-
-            return message;
-        }).filter(message => message);
-    }
-
-    clearMessages(...roles: string[]) {
-        if (roles.length === 0) {
-            this.summaryCounter = 0;
-            this.messages = [];
-        } else {
-            this.messages = this.messages.filter(message => {
-                if (roles.includes(message.role)) {
-                    this.summaryCounter--;
-                    return false;
-                }
-                return true;
-            });
+    clearMessages(role?: 'user' | 'assistant') {
+        switch (role) {
+            case 'user': {
+                this.messages = this.messages.filter(m => !m.hasOwnProperty('userId'));
+                break;
+            }
+            case 'assistant': {
+                this.messages = this.messages.filter(m => m.hasOwnProperty('userId'));
+                break;
+            }
+            default: {
+                this.messages = [];
+                break;
+            }
         }
     }
 
@@ -123,9 +102,9 @@ export class Context {
         if (length !== 0 && messages[length - 1].uid === uid && !/<[\|│｜]?function(?:_call)?>/.test(content)) {
             messages[length - 1].images.push(...images);
             messages[length - 1].msgArray.push({
-                msgId: msgId,
+                messageId: msgId,
                 time: now,
-                content: content
+                text: content
             });
         } else {
             const message: Message = {
@@ -134,9 +113,9 @@ export class Context {
                 name: name,
                 images: images,
                 msgArray: [{
-                    msgId: msgId,
+                    messageId: msgId,
                     time: now,
-                    content: content
+                    text: content
                 }]
             };
             messages.push(message);
@@ -181,9 +160,9 @@ export class Context {
             name: '',
             images: images,
             msgArray: [{
-                msgId: '',
+                messageId: '',
                 time: now,
-                content: s
+                text: s
             }]
         };
 
@@ -205,9 +184,9 @@ export class Context {
             name: `_${name}`,
             images: images,
             msgArray: [{
-                msgId: '',
+                messageId: '',
                 time: now,
-                content: s
+                text: s
             }]
         };
         this.messages.push(message);

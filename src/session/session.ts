@@ -16,6 +16,7 @@ export class Session {
         context: Context,
         memory: MemoryService,
         // tool: ToolState; wip
+        ignoredUserIdList: { array: 'string' },
     }
     isPrivate: boolean;
     sessionId: string;
@@ -23,6 +24,17 @@ export class Session {
     context: Context;
     memory: MemoryService;
     // tool: ToolState; wip
+    ignoredUserIdList: string[];
+
+    constructor() {
+        this.isPrivate = false;
+        this.sessionId = '';
+        this.state = {};
+        this.context = new Context();
+        this.memory = new MemoryService();
+        // this.tool = new ToolState();
+        this.ignoredUserIdList = [];
+    }
 }
 
 export class SessionService {
