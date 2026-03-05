@@ -1,44 +1,48 @@
+import { ConfigManager } from "../config/configManager";
+import { logger } from "../logger";
+import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
-import { User } from "./user";
+import { MemoryService } from "./memory";
 
 export class State {
-    isPrivate: boolean;
-    group: {
-        groupId: string;
-        groupName: string;
-        owner: string;
-        adminList: string[];
-        memberList: string[];
-        description: string; // 自定义描述
-        impression: string; // ai可修改的印象
-    }
-    user: {
-        userId: string;
-        userName: string;
-        description: string; // 自定义描述
-        impression: string; // ai可修改的印象
-    }
-    tool: {}
     [key: string]: any;
 }
 
 export class Session {
-    sessionId: string;
-    state: { //储存状态信息
-        groupId: string;
-        userIdArray: string[];
-        [key: string]: any;
+    static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
+        isPrivate: 'boolean',
+        sessionId: 'string',
+        state: 'any',
+        context: Context,
+        memory: MemoryService,
+        // tool: ToolState; wip
     }
+    isPrivate: boolean;
+    sessionId: string;
+    state: State;
     context: Context;
-    memory: Memory;
-    image;
+    memory: MemoryService;
+    // tool: ToolState; wip
 }
 
 export class SessionService {
     sessionMap: { [key: string]: Session };
-    userMap: { [key: string]: User };
 
     constructor() {
+        this.sessionMap = {};
+    }
 
+    getSession(sessionId: string): Session {
+        if (!this.sessionMap.hasOwnProperty(sessionId)) {
+            let session = new Session();
+            try {
+                const data = JSON.parse(ConfigManager.ext.storageGet(`session_${sessionId}`) || '{}');
+                session = revive(Session, data);
+            } catch (error) {
+                logger.error(`加载会话${sessionId}失败: ${error}`);
+            }
+            this.sessionMap[sessionId] = session;
+        }
+        return this.sessionMap[sessionId];
     }
 }

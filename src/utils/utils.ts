@@ -1,4 +1,4 @@
-import { AI, GroupInfo, UserInfo } from "../AI/AI";
+import { AI } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformTextToArray } from "./utils_string";
@@ -78,10 +78,12 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
         })
     ]);
 }
+
 export type TypeDescriptor<T> =
     | 'string'
     | 'number'
     | 'boolean'
+    | 'any'
     | TypeDescriptor<any>[] // 元组元素类型
     | { array: TypeDescriptor<any> } // 数组元素类型
     | RevivableConstructor<T>; // 嵌套类
@@ -105,6 +107,8 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
             if (typeof value === 'number') return value;
         } else if (descriptor === 'boolean') {
             if (typeof value === 'boolean') return value;
+        } else if (descriptor === 'any') {
+            return value;
         } else if (Array.isArray(descriptor)) {
             if (Array.isArray(value)) return descriptor.map((d: any, index: number) => {
                 if (index < value.length && index < defaultValue.length) return reviveItem(d, defaultValue[index], value[index]);
@@ -129,6 +133,10 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
                 const item = reviveItem(descriptor, obj[k], value[k]);
                 if (item !== undefined) obj[k] = item;
             }
+        }
+    } else { // 没有定义 validKeysMap，直接赋值
+        for (const k in value) {
+            obj[k] = value[k];
         }
     }
 
