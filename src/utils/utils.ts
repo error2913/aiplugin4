@@ -87,7 +87,7 @@ export type TypeDescriptor<T> =
     | RevivableConstructor<T>; // 嵌套类
 
 interface RevivableConstructor<T> {
-    new(): T;
+    new(): T; // 构造函数必须无参数
     validKeysMap: { [key in keyof T]?: TypeDescriptor<T[key]> };
 }
 
@@ -160,15 +160,15 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-export function getCommonUser(a: UserInfo[], b: UserInfo[]): UserInfo[] {
+export function getCommonUser(a: string[], b: string[]): string[] {
     if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a.map(u => u.id));
-    return b.filter(u => aid.has(u.id));
+    const aid = new Set(a);
+    return b.filter(u => aid.has(u));
 }
-export function getCommonGroup(a: GroupInfo[], b: GroupInfo[]): GroupInfo[] {
+export function getCommonGroup(a: string[], b: string[]): string[] {
     if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a.map(g => g.id));
-    return b.filter(g => aid.has(g.id));
+    const aid = new Set(a);
+    return b.filter(g => aid.has(g));
 }
 export function getCommonKeyword(a: string[], b: string[]): string[] {
     if (a.length === 0 || b.length === 0) return [];

@@ -1,5 +1,4 @@
 import { ConfigManager } from "../config/configManager";
-import { AI, AIManager, GroupInfo, SessionInfo, UserInfo } from "./AI";
 import { Context } from "./context";
 import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
@@ -7,19 +6,19 @@ import { fetchData, getEmbedding } from "../agent/service";
 import { buildContent, getRoleSetting, parseBody } from "../utils/utils_message";
 import { ToolManager } from "../tool/tool";
 import { fmtDate } from "../utils/utils_string";
-import { Image, ImageManager } from "../image/image";
+import { Image } from "../image/image";
 
 export interface searchOptions {
     topK: number;
-    userList: UserInfo[];
-    groupList: GroupInfo[];
+    userIdList: string[];
+    groupIdList: string[];
     keywords: string[];
     includeImages: boolean;
     method: 'weight' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
 }
 
 export class MemoryItem {
-    static validKeysMap: { [key in keyof MemoryItem]: TypeDescriptor<MemoryItem[key]> } = {
+    static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
         'id': 'string',
         'sourceSessionId': 'string',
         'createTime': 'number',
@@ -29,6 +28,7 @@ export class MemoryItem {
         'vector': { array: 'number' },
         'keywords': { array: 'string' },
         'userIdList': { array: 'string' },
+        'groupIdList': { array: 'string' },
         'imageIdList': { array: 'string' }
     };
 
@@ -42,6 +42,7 @@ export class MemoryItem {
     vector: number[]; // 记忆向量
     keywords: string[]; // 记忆关键词列表
     userIdList: string[]; // 记忆相关用户ID列表
+    groupIdList: string[]; // 记忆相关群组ID列表
     imageIdList: string[]; // 记忆相关图片ID列表
 
     constructor() {
@@ -54,6 +55,7 @@ export class MemoryItem {
         this.vector = [];
         this.keywords = [];
         this.userIdList = [];
+        this.groupIdList = [];
         this.imageIdList = [];
     }
 
@@ -68,6 +70,7 @@ export class MemoryItem {
         m.vector = [...this.vector];
         m.keywords = [...this.keywords];
         m.userIdList = [...this.userIdList];
+        m.groupIdList = [...this.groupIdList];
         m.imageIdList = [...this.imageIdList];
         return m;
     }
@@ -96,18 +99,18 @@ export class MemoryItem {
      * @param kws 查询关键词列表
      * @returns 相似度分数（0-1）
      */
-    calculateSimilarity(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
+    calculateSimilarity(v: number[], ul: string[], gl: string[], kws: string[]): number {
         // 总权重 0-1
         const totalWeight = (v.length ? 0.4 : 0) + (ul.length ? 0.2 : 0) + (gl.length ? 0.2 : 0) + (kws.length ? 0.2 : 0);
         if (totalWeight === 0) return 0;
         // 向量相似度分数（如果提供了向量v） 0-1
         const vectorSimilarity = (v && v.length > 0 && this.vector && this.vector.length > 0) ? (cosineSimilarity(v, this.vector) + 1) / 2 : 0;
         // 用户相似度分数 0-1
-        const commonUser = getCommonUser(this.userList, ul);
-        const userSimilarity = (ul && ul.length > 0) ? commonUser.length / (this.userList.length + ul.length - commonUser.length) : 0;
+        const commonUser = getCommonUser(this.userIdList, ul);
+        const userSimilarity = (ul && ul.length > 0) ? commonUser.length / ul.length : 0;
         // 群组相似度分数 0-1
-        const commonGroup = getCommonGroup(this.groupList, gl);
-        const groupSimilarity = (gl && gl.length > 0) ? commonGroup.length / (this.groupList.length + gl.length - commonGroup.length) : 0;
+        const commonGroup = getCommonGroup(this.groupIdList, gl);
+        const groupSimilarity = (gl && gl.length > 0) ? commonGroup.length / gl.length : 0;
         // 关键词匹配分数 0-1
         const commonKeyword = getCommonKeyword(this.keywords, kws);
         const keywordSimilarity = (kws && kws.length > 0) ? commonKeyword.length / kws.length : 0;
@@ -125,7 +128,7 @@ export class MemoryItem {
      * @param kws 查询关键词列表
      * @returns 相似度分数（0-1）
      */
-    calculateScore(v: number[], ul: UserInfo[], gl: GroupInfo[], kws: string[]): number {
+    calculateScore(v: number[], ul: string[], gl: string[], kws: string[]): number {
         return this.weight * 0.03 + this.calculateSimilarity(v, ul, gl, kws) * 0.7;
     }
 
@@ -147,33 +150,17 @@ export class MemoryItem {
     }
 }
 
-export class MemoryManager {
-    static validKeys: (keyof MemoryManager)[] = ['persona', 'memoryMap', 'useShortMemory', 'shortMemoryList'];
-    persona: string;
+export class MemoryService {
+    static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
+        memoryMap: { array: MemoryItem }
+    };
     memoryMap: { [id: string]: MemoryItem };
-    useShortMemory: boolean;
-    shortMemoryList: string[];
 
     constructor() {
-        this.persona = '无';
         this.memoryMap = {};
-        this.useShortMemory = false;
-        this.shortMemoryList = [];
     }
 
-    reviveMemoryMap() {
-        for (const id in this.memoryMap) {
-            this.memoryMap[id] = revive(MemoryItem, this.memoryMap[id]);
-            if (!this.memoryMap[id].content) {
-                delete this.memoryMap[id];
-                continue;
-            }
-            if (!this.memoryMap[id].hasOwnProperty('images')) this.memoryMap[id].images = [];
-            this.memoryMap[id].images = this.memoryMap[id].images.map(image => revive(Image, image));
-        }
-    }
-
-    get memoryIds() {
+    get memoryIdList() {
         return Object.keys(this.memoryMap);
     }
 
@@ -187,7 +174,24 @@ export class MemoryManager {
         return Array.from(keywords);
     }
 
-    async addMemory(ctx: seal.MsgContext, ai: AI, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string) {
+    async addMemory(sid: string, ul: string[], gl: string[], kws: string[], il: string[], content: string) {
+        for (const id of this.memoryIdList) {
+            const m = this.memoryMap[id];
+            if (content === m.content && sid === m.sourceSessionId && getCommonUser(ul, m.userIdList).length > 0 && getCommonGroup(gl, m.groupIdList).length > 0) {
+                m.keywords = Array.from(new Set([...m.keywords, ...kws]));
+                logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
+                return;
+            }
+        }
+
+        // 添加文本内插入的图片
+        const imgIdSet = new Set(il);
+        (await ImageService.extractExistingImagesToSave(content)).forEach(img => {
+            if (imgIdSet.has(img.id)) return;
+            imgIdSet.add(img.id);
+            il.push(img.id);
+        });
+
         let id = generateId(), a = 0;
         while (this.memoryMap.hasOwnProperty(id)) {
             id = generateId();
@@ -198,48 +202,28 @@ export class MemoryManager {
             }
         }
 
-        for (const id of this.memoryIds) {
-            const m = this.memoryMap[id];
-            if (text === m.content && m.sessionInfo.id === ai.id && getCommonUser(ul, m.userList).length > 0 && getCommonGroup(gl, m.groupList).length > 0) {
-                m.keywords = Array.from(new Set([...m.keywords, ...kws]));
-                logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
-                return;
-            }
-        }
-
-        // 添加文本内插入的图片
-        const imgIdSet = new Set(images.map(img => img.id));
-        (await ImageManager.extractExistingImagesToSave(ctx, ai, text)).forEach(img => {
-            if (imgIdSet.has(img.id)) return;
-            imgIdSet.add(img.id);
-            images.push(img);
-        });
-
         const now = Math.floor(Date.now() / 1000);
         const m = new MemoryItem();
         m.id = id;
-        m.content = text;
-        m.sessionInfo = {
-            id: ai.id,
-            isPrivate: ctx.isPrivate,
-            name: ctx.isPrivate ? ctx.player.name : ctx.group.groupName,
-        };
-        m.userList = ul;
-        m.groupList = gl;
+        m.sourceSessionId = sid;
         m.createTime = now;
         m.lastMentionTime = now;
-        m.keywords = kws;
         m.weight = 5;
-        m.images = images;
+        m.content = content;
+        m.keywords = kws;
+        m.userIdList = ul;
+        m.groupIdList = gl;
+        m.imageIdList = il;
+
         await m.updateVector();
         this.limitMemory();
         this.memoryMap[id] = m;
     }
 
-    deleteMemory(ids: string[] = [], kws: string[] = []) {
-        if (ids.length === 0 && kws.length === 0) return;
+    deleteMemory(ml: string[] = [], kws: string[] = []) {
+        if (ml.length === 0 && kws.length === 0) return;
 
-        ids.forEach(id => delete this.memoryMap?.[id])
+        ml.forEach(id => delete this.memoryMap?.[id])
 
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
@@ -269,21 +253,239 @@ export class MemoryManager {
         this.memoryMap = {};
     }
 
-    limitShortMemory() {
-        const { shortMemoryLimit } = ConfigManager.memory;
-        if (this.shortMemoryList.length > shortMemoryLimit) {
-            this.shortMemoryList.splice(0, this.shortMemoryList.length - shortMemoryLimit);
+    async search(query: string, options: searchOptions = {
+        topK: 10,
+        userIdList: [],
+        groupIdList: [],
+        keywords: [],
+        includeImages: false,
+        method: 'score'
+    }) {
+        if (!this.memoryList.length) return [];
+        const { userIdList: ul, groupIdList: gl, keywords: kws, includeImages, method } = options;
+
+        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        let qv: number[] = [];
+        if (isMemoryVector && query) {
+            qv = await getEmbedding(query);
+            if (!qv.length) {
+                logger.error('查询向量为空');
+                return [];
+            }
+            await Promise.all(this.memoryList.map(async m => {
+                if (m.vector.length !== embeddingDimension) {
+                    logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
+                    await m.updateVector();
+                }
+            }))
+        }
+
+        return this.memoryList
+            .map(m => {
+                if (includeImages && m.imageIdList.length === 0) return null;
+                const mc = m.copy;
+                if (mc.keywords.some(kw => query.includes(kw))) mc.weight += 10; //提权
+                return mc;
+            })
+            .filter(m => m)
+            .sort((a, b) => {
+                switch (method) {
+                    case 'weight': return b.weight - a.weight;
+                    case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
+                    case 'score': return b.calculateScore(qv, ul, gl, kws) - a.calculateScore(qv, ul, gl, kws);
+                    case 'early': return a.createTime - b.createTime;
+                    case 'late': return b.createTime - a.createTime;
+                    case 'recent': return b.lastMentionTime - a.lastMentionTime;
+                }
+            })
+            .slice(0, options.topK || 10);
+    }
+
+    updateMemoryWeight(s: string, role: 'user' | 'assistant') {
+        const increase = role === 'user' ? 1 : 0.1;
+        const decrease = role === 'user' ? 0.1 : 0;
+        const now = Math.floor(Date.now() / 1000);
+
+        for (const id in this.memoryMap) {
+            const m = this.memoryMap[id];
+            if (m.keywords.some(kw => s.includes(kw))) {
+                m.weight = Math.max(10, m.weight + increase);
+                m.lastMentionTime = now;
+            } else {
+                m.weight = Math.min(0, m.weight - decrease);
+            }
         }
     }
 
-    clearShortMemory() {
-        this.shortMemoryList = [];
+    // wip
+    updateRelatedMemoryWeight(ctx: seal.MsgContext, context: Context, s: string, role: 'user' | 'assistant') {
+        // bot记忆权重更新
+        AIManager.getAI(ctx.endPoint.userId).memory.updateMemoryWeight(s, role);
+        // 知识库记忆权重更新
+        knowledgeService.updateMemoryWeight(s, role);
+        // 会话自身记忆权重更新
+        this.updateMemoryWeight(s, role);
+        // 群内用户的记忆权重更新
+        if (!ctx.isPrivate) context.userInfoList.forEach(ui => AIManager.getAI(ui.id).memory.updateMemoryWeight(s, role));
     }
 
-    async updateShortMemory(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
-        if (!this.useShortMemory) {
-            return;
+    async getTopScoreMemoryList(text: string = '', uid: string = '', gid: string = '') {
+        const { memoryShowNumber } = ConfigManager.memory;
+        return await this.search(text, {
+            topK: memoryShowNumber,
+            userIdList: uid ? [uid] : [],
+            groupIdList: gid ? [gid] : [],
+            keywords: [],
+            includeImages: false,
+            method: 'score'
+        });
+    }
+
+    getLatestMemoryListText(sid: string, p: number = 1): string {
+        if (this.memoryList.length === 0) return '';
+        if (p > Math.ceil(this.memoryList.length / 5)) p = Math.ceil(this.memoryList.length / 5);
+        const latestMemoryList = this.memoryList
+            .sort((a, b) => b.createTime - a.createTime)
+            .slice((p - 1) * 5, p * 5);
+        return this.buildMemory(sid, latestMemoryList) + `\n当前页码: ${p}/${Math.ceil(this.memoryList.length / 5)}`;
+    }
+
+    // wip 和默认配置一起改
+    buildMemory(sid: string, ml: MemoryItem[]): string {
+        if (ml.length === 0) return '';
+        const { showNumber } = ConfigManager.message;
+        const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
+
+        let memoryContent = '';
+        if (ml.length === 0) {
+            memoryContent = '无';
+        } else {
+            memoryContent = ml
+                .map((m, i) => {
+                    return memorySingleShowTemplate({
+                        "序号": i + 1,
+                        "记忆ID": m.id,
+                        "记忆时间": fmtDate(m.createTime),
+                        "个人记忆": si.isPrivate,
+                        "私聊": m.sessionInfo.isPrivate,
+                        "展示号码": showNumber,
+                        "群聊名称": m.sessionInfo.name,
+                        "群聊号码": m.sessionInfo.id,
+                        "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
+                        "相关群聊": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
+                        "关键词": m.keywords.join(';'),
+                        "记忆内容": m.content
+                    });
+                }).join('\n');
         }
+
+        return memoryShowTemplate({
+            "私聊": si.isPrivate,
+            "展示号码": showNumber,
+            "用户名称": si.name,
+            "用户号码": si.id.replace(/^.+:/, ''),
+            "群聊名称": si.name,
+            "群聊号码": si.id.replace(/^.+:/, ''),
+            "设定": this.persona,
+            "记忆列表": memoryContent
+        }) + '\n';
+    }
+
+    // wip
+    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
+        const ai = AIManager.getAI(ctx.endPoint.userId);
+        let s = ai.memory.buildMemory({
+            isPrivate: true,
+            id: ctx.endPoint.userId,
+            name: seal.formatTmpl(ctx, "核心:骰子名字")
+        }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
+
+        if (ctx.isPrivate) {
+            return this.buildMemory({
+                isPrivate: true,
+                id: ctx.player.userId,
+                name: ctx.player.name
+            }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
+        } else {
+            // 群聊记忆
+            s += this.buildMemory({
+                isPrivate: false,
+                id: ctx.group.groupId,
+                name: ctx.group.groupName
+            }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
+
+            // 群内用户的个人记忆
+            const set = new Set<string>();
+            for (const ui of context.userInfoList) {
+                const name = ui.name;
+                const uid = ui.id;
+                if (set.has(uid)) continue;
+                set.add(uid);
+
+                const ai = AIManager.getAI(uid);
+                s += ai.memory.buildMemory({
+                    isPrivate: true,
+                    id: uid,
+                    name: name
+                }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
+            }
+
+            return s;
+        }
+    }
+
+    includedImage(id: string): boolean {
+        for (const m of this.memoryList) {
+            const image = m.imageIdList.find(i => i === id);
+            if (image) {
+                m.weight += 0.2;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    findMemoryByImageIdPrefix(id: string): MemoryItem | null {
+        for (const m of this.memoryList) {
+            const image = m.imageIdList.find(img => img.replace(/_\d+$/, "") === id);
+            if (image) {
+                m.weight += 0.2;
+                return m;
+            }
+        }
+        return null;
+    }
+}
+
+export class SessionMemoryService extends MemoryService {
+    static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
+        memoryMap: { array: MemoryItem },
+        summaryStatus: 'boolean',
+        summaryList: { array: 'string' }
+    };
+    summaryStatus: boolean;
+    summaryList: string[];
+
+    constructor() {
+        super();
+        this.summaryStatus = false;
+        this.summaryList = [];
+    }
+
+    limitSummary() {
+        const { SummaryLimit } = ConfigManager.memory;
+        if (this.summaryList.length > SummaryLimit) {
+            this.summaryList.splice(0, this.summaryList.length - SummaryLimit);
+        }
+    }
+
+    clearSummary() {
+        this.summaryList = [];
+    }
+
+    // wip
+    async updateSummary(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
+        if (!this.summaryStatus) return;
 
         const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
         const { isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
@@ -387,222 +589,24 @@ export class MemoryManager {
             logger.error(`更新短期记忆失败: ${e.message}`);
         }
     }
-
-    async search(query: string, options: searchOptions = {
-        topK: 10,
-        userList: [],
-        groupList: [],
-        keywords: [],
-        includeImages: false,
-        method: 'score'
-    }) {
-        if (!this.memoryList.length) return [];
-        const { userList: ul, groupList: gl, keywords: kws, includeImages, method } = options;
-
-        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
-        let qv: number[] = [];
-        if (isMemoryVector && query) {
-            qv = await getEmbedding(query);
-            if (!qv.length) {
-                logger.error('查询向量为空');
-                return [];
-            }
-            await Promise.all(this.memoryList.map(async m => {
-                if (m.vector.length !== embeddingDimension) {
-                    logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
-                    await m.updateVector();
-                }
-            }))
-        }
-
-        return this.memoryList
-            .map(m => {
-                if (includeImages && m.images.length === 0) return null;
-                const mc = m.copy;
-                if (mc.keywords.some(kw => query.includes(kw))) mc.weight += 10; //提权
-                return mc;
-            })
-            .filter(m => m)
-            .sort((a, b) => {
-                switch (method) {
-                    case 'weight': return b.weight - a.weight;
-                    case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
-                    case 'score': return b.calculateScore(qv, ul, gl, kws) - a.calculateScore(qv, ul, gl, kws);
-                    case 'early': return a.createTime - b.createTime;
-                    case 'late': return b.createTime - a.createTime;
-                    case 'recent': return b.lastMentionTime - a.lastMentionTime;
-                }
-            })
-            .slice(0, options.topK || 10);
-    }
-
-    updateMemoryWeight(s: string, role: 'user' | 'assistant') {
-        const increase = role === 'user' ? 1 : 0.1;
-        const decrease = role === 'user' ? 0.1 : 0;
-        const now = Math.floor(Date.now() / 1000);
-
-        for (const id in this.memoryMap) {
-            const m = this.memoryMap[id];
-            if (m.keywords.some(kw => s.includes(kw))) {
-                m.weight = Math.max(10, m.weight + increase);
-                m.lastMentionTime = now;
-            } else {
-                m.weight = Math.min(0, m.weight - decrease);
-            }
-        }
-    }
-
-    updateRelatedMemoryWeight(ctx: seal.MsgContext, context: Context, s: string, role: 'user' | 'assistant') {
-        // bot记忆权重更新
-        AIManager.getAI(ctx.endPoint.userId).memory.updateMemoryWeight(s, role);
-        // 知识库记忆权重更新
-        knowledgeMM.updateMemoryWeight(s, role);
-        // 会话自身记忆权重更新
-        this.updateMemoryWeight(s, role);
-        // 群内用户的记忆权重更新
-        if (!ctx.isPrivate) context.userInfoList.forEach(ui => AIManager.getAI(ui.id).memory.updateMemoryWeight(s, role));
-    }
-
-    async getTopScoreMemoryList(text: string = '', ui: UserInfo = null, gi: GroupInfo = null) {
-        const { memoryShowNumber } = ConfigManager.memory;
-        return await this.search(text, {
-            topK: memoryShowNumber,
-            userList: ui ? [ui] : [],
-            groupList: gi ? [gi] : [],
-            keywords: [],
-            includeImages: false,
-            method: 'score'
-        });
-    }
-
-    getLatestMemoryListText(si: SessionInfo, p: number = 1): string {
-        if (this.memoryList.length === 0) return '';
-        if (p > Math.ceil(this.memoryList.length / 5)) p = Math.ceil(this.memoryList.length / 5);
-        const latestMemoryList = this.memoryList
-            .sort((a, b) => b.createTime - a.createTime)
-            .slice((p - 1) * 5, p * 5);
-        return this.buildMemory(si, latestMemoryList) + `\n当前页码: ${p}/${Math.ceil(this.memoryList.length / 5)}`;
-    }
-
-    buildMemory(si: SessionInfo, ml: MemoryItem[]): string {
-        if (this.persona === '无' && ml.length === 0) return '';
-        const { showNumber } = ConfigManager.message;
-        const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
-
-        let memoryContent = '';
-        if (ml.length === 0) {
-            memoryContent = '无';
-        } else {
-            memoryContent = ml
-                .map((m, i) => {
-                    return memorySingleShowTemplate({
-                        "序号": i + 1,
-                        "记忆ID": m.id,
-                        "记忆时间": fmtDate(m.createTime),
-                        "个人记忆": si.isPrivate,
-                        "私聊": m.sessionInfo.isPrivate,
-                        "展示号码": showNumber,
-                        "群聊名称": m.sessionInfo.name,
-                        "群聊号码": m.sessionInfo.id,
-                        "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
-                        "相关群聊": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
-                        "关键词": m.keywords.join(';'),
-                        "记忆内容": m.content
-                    });
-                }).join('\n');
-        }
-
-        return memoryShowTemplate({
-            "私聊": si.isPrivate,
-            "展示号码": showNumber,
-            "用户名称": si.name,
-            "用户号码": si.id.replace(/^.+:/, ''),
-            "群聊名称": si.name,
-            "群聊号码": si.id.replace(/^.+:/, ''),
-            "设定": this.persona,
-            "记忆列表": memoryContent
-        }) + '\n';
-    }
-
-    async buildMemoryPrompt(ctx: seal.MsgContext, context: Context, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
-        const ai = AIManager.getAI(ctx.endPoint.userId);
-        let s = ai.memory.buildMemory({
-            isPrivate: true,
-            id: ctx.endPoint.userId,
-            name: seal.formatTmpl(ctx, "核心:骰子名字")
-        }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
-
-        if (ctx.isPrivate) {
-            return this.buildMemory({
-                isPrivate: true,
-                id: ctx.player.userId,
-                name: ctx.player.name
-            }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
-        } else {
-            // 群聊记忆
-            s += this.buildMemory({
-                isPrivate: false,
-                id: ctx.group.groupId,
-                name: ctx.group.groupName
-            }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
-
-            // 群内用户的个人记忆
-            const set = new Set<string>();
-            for (const ui of context.userInfoList) {
-                const name = ui.name;
-                const uid = ui.id;
-                if (set.has(uid)) continue;
-                set.add(uid);
-
-                const ai = AIManager.getAI(uid);
-                s += ai.memory.buildMemory({
-                    isPrivate: true,
-                    id: uid,
-                    name: name
-                }, await ai.memory.getTopScoreMemoryList(text, ui, gi));
-            }
-
-            return s;
-        }
-    }
-
-    findImage(id: string): Image | null {
-        for (const m of this.memoryList) {
-            const image = m.images.find(img => img.id === id);
-            if (image) {
-                m.weight += 0.2;
-                return image;
-            }
-        }
-        return null;
-    }
-
-    findMemoryAndImageByImageIdPrefix(id: string): { memory: MemoryItem, image: Image } | null {
-        for (const m of this.memoryList) {
-            const image = m.images.find(img => img.id.replace(/_\d+$/, "") === id);
-            if (image) {
-                m.weight += 0.2;
-                return { memory: m, image };
-            }
-        }
-        return null;
-    }
 }
 
-export class KnowledgeMemoryManager extends MemoryManager {
+export class KnowledgeService extends MemoryService {
     constructor() {
         super();
     }
 
     init() {
-        this.memoryMap = JSON.parse(ConfigManager.ext.storageGet('knowledgeMemoryMap') || '{}');
-        this.reviveMemoryMap();
+        const data = JSON.parse(ConfigManager.ext.storageGet('knowledge') || '{}');
+        const ms = revive(MemoryService, data);
+        this.memoryMap = ms.memoryMap;
     }
 
     save() {
-        ConfigManager.ext.storageSet('knowledgeMemoryMap', JSON.stringify(this.memoryMap));
+        ConfigManager.ext.storageSet('knowledge', JSON.stringify(this.memoryMap));
     }
 
+    // wip 和配置一起改
     async updateKnowledgeMemory(roleIndex: number) {
         const { knowledgeMemoryStringList } = ConfigManager.memory;
         if (roleIndex < 0 || roleIndex >= knowledgeMemoryStringList.length) return;
@@ -704,6 +708,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
         this.save();
     }
 
+    // wip
     buildKnowledgeMemory(memoryList: MemoryItem[]) {
         const { showNumber } = ConfigManager.message;
         const { knowledgeMemorySingleShowTemplate } = ConfigManager.memory;
@@ -729,15 +734,16 @@ export class KnowledgeMemoryManager extends MemoryManager {
         return prompt;
     }
 
+    // wip
     async buildKnowledgeMemoryPrompt(roleIndex: number, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
         await this.updateKnowledgeMemory(roleIndex);
-        if (this.memoryIds.length === 0) return '';
+        if (this.memoryIdList.length === 0) return '';
 
         const { knowledgeMemoryShowNumber } = ConfigManager.memory;
         const memoryList = await this.search(text, {
             topK: knowledgeMemoryShowNumber,
-            userList: ui ? [ui] : [],
-            groupList: gi ? [gi] : [],
+            userIdList: ui ? [ui] : [],
+            groupIdList: gi ? [gi] : [],
             keywords: [],
             includeImages: false,
             method: 'score'
@@ -747,7 +753,7 @@ export class KnowledgeMemoryManager extends MemoryManager {
     }
 }
 
-export const knowledgeMM = new KnowledgeMemoryManager();
+export const knowledgeService = new KnowledgeService();
 
 // 可以通过维护一组索引来优化搜索性能。
 // 好麻烦，不想弄

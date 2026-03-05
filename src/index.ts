@@ -8,7 +8,7 @@ import { checkUpdate } from "./utils/utils_update";
 import { TimerManager } from "./timer";
 import { createMsg } from "./utils/utils_seal";
 import { PrivilegeManager } from "./cmd/privilege";
-import { knowledgeMM } from "./session/memory";
+import { knowledgeService } from "./session/memory";
 import { CQTYPESALLOW } from "./config/config";
 import { registerCmd } from "./cmd/root";
 
@@ -17,7 +17,7 @@ function main() {
   checkUpdate();
   ToolManager.registerTool();
   TimerManager.init();
-  knowledgeMM.init();
+  knowledgeService.init();
 
   const ext = ConfigManager.ext;
 

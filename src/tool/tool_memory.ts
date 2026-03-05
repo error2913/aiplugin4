@@ -2,7 +2,7 @@ import { AIManager, GroupInfo, SessionInfo, UserInfo } from "../AI/AI";
 import { ConfigManager } from "../config/configManager";
 import { getCtxAndMsg } from "../utils/utils_seal";
 import { Tool } from "./tool";
-import { knowledgeMM, searchOptions as SearchOptions } from "../session/memory";
+import { knowledgeService, searchOptions as SearchOptions } from "../session/memory";
 import { getRoleSetting } from "../utils/utils_message";
 
 export function registerMemory() {
@@ -242,20 +242,20 @@ export function registerMemory() {
             const options: SearchOptions = {
                 topK: topK,
                 keywords: keywords,
-                userList: userList,
-                groupList: groupList,
+                userIdList: userList,
+                groupIdList: groupList,
                 includeImages: includeImages,
                 method: method
             }
 
             const { roleIndex } = getRoleSetting(ctx);
-            await knowledgeMM.updateKnowledgeMemory(roleIndex);
-            if (knowledgeMM.memoryIds.length === 0) return { content: `暂无记忆`, images: [] };
+            await knowledgeService.updateKnowledgeMemory(roleIndex);
+            if (knowledgeService.memoryIdList.length === 0) return { content: `暂无记忆`, images: [] };
 
-            const memoryList = await knowledgeMM.search(query, options);
+            const memoryList = await knowledgeService.search(query, options);
             const images = Array.from(new Set([].concat(...memoryList.map(m => m.images))));
 
-            return { content: knowledgeMM.buildKnowledgeMemory(memoryList) || '暂无记忆', images: images };
+            return { content: knowledgeService.buildKnowledgeMemory(memoryList) || '暂无记忆', images: images };
         } else {
             return { content: `未知的记忆类型<${memory_type}>`, images: [] };
         }
@@ -276,8 +276,8 @@ export function registerMemory() {
         const options: SearchOptions = {
             topK: topK,
             keywords: keywords,
-            userList: userList,
-            groupList: groupList,
+            userIdList: userList,
+            groupIdList: groupList,
             includeImages: includeImages,
             method: method
         }

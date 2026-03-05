@@ -3,7 +3,7 @@ import { Message } from "../session/context";
 import { ConfigManager } from "../config/configManager";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./utils_string";
-import { knowledgeMM } from "../session/memory";
+import { knowledgeService } from "../session/memory";
 
 export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
@@ -38,7 +38,7 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
     }
 
     // 知识库
-    const knowledgePrompt = await knowledgeMM.buildKnowledgeMemoryPrompt(roleIndex, text, ui, gi);
+    const knowledgePrompt = await knowledgeService.buildKnowledgeMemoryPrompt(roleIndex, text, ui, gi);
     // 记忆
     const memoryPrompt = isMemory ? await ai.memory.buildMemoryPrompt(ctx, ai.context, text, ui, gi) : '';
     // 短期记忆
