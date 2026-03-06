@@ -1,9 +1,9 @@
 import { ConfigManager } from "../config/configManager";
-import { sendITTRequest } from "../agent/service";
 import { generateId, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
 import { MessageSegment, parseSpecialTokens } from "../utils/utils_string";
 import { getSessionId } from "../utils/utils_seal";
+import { ModelManager } from "../agent/model";
 
 export class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
@@ -118,30 +118,23 @@ export class Image {
         ImageManager.saveImage(this);
     }
 
-    // wip 接到imageAgent，然后加个save
     async imageToText(prompt = '') {
         const { defaultPrompt, urlToBase64, maxChars } = ConfigManager.image;
 
         if (urlToBase64 == '总是' && this.type === 'url') await this.urlToBase64();
 
-        const messages = [{
-            role: "user",
-            content: [{
-                "type": "image_url",
-                "image_url": { "url": this.src }
-            }, {
-                "type": "text",
-                "text": prompt ? prompt : defaultPrompt
-            }]
-        }]
+        const model = ModelManager.getImageModel('image-understanding');
+        if (!model) {
+            logger.error(`未找到支持image-understanding的模型`);
+            return;
+        }
 
-        this.description = (await sendITTRequest(messages)).slice(0, maxChars);
+        this.description = (await model.callITT(this.src, prompt ? prompt : defaultPrompt)).slice(0, maxChars);
 
         if (!this.description && urlToBase64 === '自动' && this.type === 'url') {
             logger.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
-            messages[0].content[0].image_url.url = this.base64Url;
-            this.description = (await sendITTRequest(messages)).slice(0, maxChars);
+            this.description = (await model.callITT(this.src, prompt ? prompt : defaultPrompt)).slice(0, maxChars);
         }
 
         if (!this.description) logger.error(`图片${this.imageId}识别失败`);

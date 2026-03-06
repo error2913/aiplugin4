@@ -1,10 +1,11 @@
+import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/tool";
 import { withTimeout } from "../utils/utils";
 import { Agent } from "./agent";
 import { UsageManager } from "./usage";
 
-export type ModelUse = 'chat' | 'image-understanding' | 'text-embedding'
+export type ModelUse = 'any' | 'chat' | 'image-understanding' | 'text-embedding'
 
 export interface ModelBody {
     max_tokens?: number,
@@ -17,13 +18,13 @@ export interface ModelBody {
 
 export class Model {
     name: string;
-    use: ModelUse;
+    use: ModelUse[];
     provider: string;
     base_url: string;
     api_key: string;
     body: ModelBody;
 
-    constructor(name: string, use: ModelUse, provider: string, base_url: string, api_key: string, body: ModelBody) {
+    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
         this.name = name;
         this.use = use;
         this.provider = provider;
@@ -42,7 +43,7 @@ export class Model {
 }
 
 export class ChatModel extends Model {
-    constructor(name: string, use: ModelUse, provider: string, base_url: string, api_key: string, body: ModelBody) {
+    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, use, provider, base_url, api_key, body);
     }
 
@@ -50,15 +51,15 @@ export class ChatModel extends Model {
         return `${this.base_url}/chat/completions`;
     }
 
-    // wip
-    async call(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
+    async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
+        const { timeout } = ConfigManager.request;
         try {
             const time = Date.now();
 
             const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
                 messages: agent.sessionService.getSession(sessionId).getMessages(),
                 tools: agent.getTools()
-            })), 10000);
+            })), timeout);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -86,113 +87,199 @@ export class ChatModel extends Model {
 }
 
 export class ImageModel extends Model {
-    constructor(name: string, use: ModelUse, provider: string, base_url: string, api_key: string, body: ModelBody) {
+    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, use, provider, base_url, api_key, body);
     }
 
-    // wip
-    async call() {
-
+    get url() {
+        return `${this.base_url}/chat/completions`;
     }
 
-    export async function sendITTRequest(messages: {
-        role: string,
-        content: {
-            type: string,
-            image_url?: { url: string }
-            text?: string
-        }[]
-    }[]): Promise<string> {
-    const { timeout } = ConfigManager.request;
-    const { url, apiKey, bodyTemplate } = ConfigManager.image;
+    async callITT(src: string, prompt = ''): Promise<string> {
+        const { timeout } = ConfigManager.request;
+        try {
+            const time = Date.now();
 
-    try {
-        const bodyObject = parseBody(bodyTemplate, messages, null, null);
-        const time = Date.now();
+            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
+                messages: [{
+                    role: "user",
+                    content: [{
+                        "type": "image_url",
+                        "image_url": { "url": src }
+                    }, {
+                        "type": "text",
+                        "text": prompt
+                    }]
+                }]
+            })), timeout);
 
-        const data = await withTimeout(() => fetchData(url, apiKey, bodyObject), timeout);
+            if (data.choices && data.choices.length > 0) {
+                UsageManager.updateUsage(data.model, data.usage);
 
-        if (data.choices && data.choices.length > 0) {
-            AIManager.updateUsage(data.model, data.usage);
+                const message = data.choices[0].message;
+                const content = message.content || '';
 
-            const message = data.choices[0].message;
-            const content = message.content || '';
+                logger.info(`响应内容:`, content, '\nlatency', Date.now() - time, 'ms');
 
-            logger.info(`响应内容:`, content, '\nlatency', Date.now() - time, 'ms');
-
-            return content;
-        } else {
-            throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
+                return content;
+            } else {
+                throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
+            }
+        } catch (e) {
+            logger.error(`在调用模型${this.name}中出错:`, e.message);
+            return '';
         }
-    } catch (e) {
-        logger.error("在sendITTRequest中请求出错:", e.message);
-        return '';
     }
-}
+
+    async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
+        const { timeout } = ConfigManager.request;
+        try {
+            const time = Date.now();
+
+            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
+                messages: agent.sessionService.getSession(sessionId).getImageMessages(),
+                tools: agent.getTools()
+            })), timeout);
+
+            if (data.choices && data.choices.length > 0) {
+                UsageManager.updateUsage(data.model, data.usage);
+
+                const message = data.choices[0].message;
+                const finish_reason = data.choices[0].finish_reason;
+
+                if (message.hasOwnProperty('reasoning_content')) {
+                    logger.info(`思维链内容:`, message.reasoning_content);
+                }
+
+                const content = message.content || '';
+
+                logger.info(`响应内容:`, content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+
+                return { content, tool_calls: message.tool_calls || [] };
+            } else {
+                throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
+            }
+        } catch (e) {
+            logger.error(`在调用模型${this.name}中出错:`, e.message);
+            return { content: '', tool_calls: [] };
+        }
+    }
 }
 
 export class EmbeddingModel extends Model {
-    constructor(name: string, provider: string, base_url: string, api_key: string) {
-        super(name, provider, base_url, api_key);
+    static vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
+
+    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body) {
+        super(name, use, provider, base_url, api_key, body);
     }
 
-    // wip
-    async call() {
-
+    get url() {
+        return `${this.base_url}/embeddings`;
     }
 
-    const vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
-    
-    export async function getEmbedding(text: string): Promise<number[]> {
-    if (!text) {
-        logger.warning(`getEmbedding: 文本为空`);
-        return [];
-    }
-
-    const { timeout } = ConfigManager.request;
-    const { embeddingDimension, embeddingUrl, embeddingApiKey, embeddingBodyTemplate } = ConfigManager.memory;
-
-    if (vectorCache.text === text && vectorCache.vector.length === embeddingDimension) {
-        const v = vectorCache.vector;
-        return v;
-    }
-
-    try {
-        const bodyObject = parseEmbeddingBody(embeddingBodyTemplate, text, embeddingDimension);
-        const time = Date.now();
-
-        const data = await withTimeout(() => fetchData(embeddingUrl, embeddingApiKey, bodyObject), timeout);
-
-        if (data.data && data.data.length > 0) {
-            AIManager.updateUsage(data.model, data.usage);
-
-            const embedding = data.data[0].embedding;
-
-            logger.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
-            vectorCache.text = text;
-            vectorCache.vector = embedding;
-
-            return embedding;
-        } else {
-            throw new Error(`服务器响应中没有data或data为空\n响应体:${JSON.stringify(data, null, 2)}`);
+    async callEmbedding(text: string): Promise<number[]> {
+        if (!text) {
+            logger.warning(`getEmbedding: 文本为空`);
+            return [];
         }
-    } catch (e) {
-        logger.error("在getEmbedding中出错:", e.message);
-        return [];
+
+        const { timeout } = ConfigManager.request;
+
+        if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === this.body.dimensions) {
+            const v = EmbeddingModel.vectorCache.vector;
+            return v;
+        }
+
+        try {
+            const time = Date.now();
+
+            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
+                input: text
+            })), timeout);
+
+            if (data.data && data.data.length > 0) {
+                UsageManager.updateUsage(data.model, data.usage);
+
+                const embedding = data.data[0].embedding;
+
+                logger.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
+                EmbeddingModel.vectorCache.text = text;
+                EmbeddingModel.vectorCache.vector = embedding;
+
+                return embedding;
+            } else {
+                throw new Error(`服务器响应中没有data或data为空\n响应体:${JSON.stringify(data, null, 2)}`);
+            }
+        } catch (e) {
+            logger.error(`在调用模型${this.name}中出错:`, e.message);
+            return [];
+        }
+
     }
-}
 }
 
 export class ModelManager {
-    chatModels: ChatModel[] = [];
-    imageModels: ImageModel[] = [];
-    embeddingModels: EmbeddingModel[] = [];
+    static chatModels: ChatModel[] = [];
+    static imageModels: ImageModel[] = [];
+    static embeddingModels: EmbeddingModel[] = [];
+
+    static getChatModel(use: ModelUse): ChatModel | ImageModel | null {
+        const chatModelList = ModelManager.chatModels.filter(model => model.use.includes(use));
+        if (chatModelList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * chatModelList.length);
+            return chatModelList[randomIndex];
+        }
+        const chatModelAnyList = ModelManager.chatModels.filter(model => model.use.includes('any'));
+        if (chatModelAnyList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * chatModelAnyList.length);
+            return chatModelAnyList[randomIndex];
+        }
+        const ImageModelList = ModelManager.imageModels.filter(model => model.use.includes(use));
+        if (ImageModelList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * ImageModelList.length);
+            return ImageModelList[randomIndex];
+        }
+        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.includes('any'));
+        if (ImageModelAnyList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
+            return ImageModelAnyList[randomIndex];
+        }
+        return null;
+    }
+
+    static getImageModel(use: ModelUse): ImageModel | null {
+        const ImageModelList = ModelManager.imageModels.filter(model => model.use.includes(use));
+        if (ImageModelList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * ImageModelList.length);
+            return ImageModelList[randomIndex];
+        }
+        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.includes('any'));
+        if (ImageModelAnyList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
+            return ImageModelAnyList[randomIndex];
+        }
+        return null;
+    }
+
+    static getEmbeddingModel(use: ModelUse): EmbeddingModel | null {
+        const EmbeddingModelList = ModelManager.embeddingModels.filter(model => model.use.includes(use));
+        if (EmbeddingModelList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * EmbeddingModelList.length);
+            return EmbeddingModelList[randomIndex];
+        }
+        const EmbeddingModelAnyList = ModelManager.embeddingModels.filter(model => model.use.includes('any'));
+        if (EmbeddingModelAnyList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * EmbeddingModelAnyList.length);
+            return EmbeddingModelAnyList[randomIndex];
+        }
+        return null;
+    }
 }
 
-export async function fetchData(url: string, apiKey: string, bodyObject: any): Promise<any> {
+export async function fetchData(url: string, apiKey: string, body: any): Promise<any> {
     // 打印请求发送前的上下文
-    if (bodyObject.hasOwnProperty('messages')) {
-        const s = JSON.stringify(bodyObject.messages, (key, value) => {
+    if (body.hasOwnProperty('messages')) {
+        const s = JSON.stringify(body.messages, (key, value) => {
             if (key === "" && Array.isArray(value)) {
                 return value.filter(item => item.role !== "system");
             }
@@ -208,7 +295,7 @@ export async function fetchData(url: string, apiKey: string, bodyObject: any): P
             "Content-Type": "application/json",
             "Accept": "application/json"
         },
-        body: JSON.stringify(bodyObject)
+        body: JSON.stringify(body)
     });
 
     // logger.info("响应体", JSON.stringify(response, null, 2));
