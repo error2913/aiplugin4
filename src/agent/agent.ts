@@ -24,6 +24,10 @@ export class Agent {
         this.tool = [];
     }
 
+    // wip
+    getTools() {
+    }
+
     async chat() {
 
     }

@@ -85,6 +85,7 @@ export type TypeDescriptor<T> =
     | 'any'
     | TypeDescriptor<any>[] // 元组元素类型
     | { array: TypeDescriptor<any> } // 数组元素类型
+    | { object: { [key: string]: TypeDescriptor<any> } } // 对象键值对类型
     | { objectValue: TypeDescriptor<any> } // 对象值类型
     | RevivableConstructor<T>; // 嵌套类
 
@@ -116,14 +117,17 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
             });
         } else if (typeof descriptor === 'object' && 'array' in descriptor) {
             if (Array.isArray(value)) return value.map((item: any) => reviveItem(descriptor.array, defaultValue?.[0], item));
-        } else if (typeof descriptor === 'object' && 'objectValue' in descriptor) {
-            if (typeof value === 'object' && value !== null) {
-                const obj: { [key: string]: any } = {};
-                for (const k in value) {
-                    obj[k] = reviveItem(descriptor.objectValue, defaultValue?.[k], value[k]);
-                }
+        } else if (typeof descriptor === 'object' && 'object' in descriptor) {
+            if (typeof value === 'object' && value !== null) return Object.keys(descriptor.object).reduce((obj: any, k: string) => {
+                if (value.hasOwnProperty(k)) obj[k] = reviveItem(descriptor.object[k], defaultValue?.[k], value[k]);
+                else obj[k] = defaultValue?.[k];
                 return obj;
-            }
+            }, {});
+        } else if (typeof descriptor === 'object' && 'objectValue' in descriptor) {
+            if (typeof value === 'object' && value !== null) return Object.keys(value).reduce((obj: any, k: string) => {
+                obj[k] = reviveItem(descriptor.objectValue, defaultValue?.[k], value[k]);
+                return obj;
+            }, {});
         } else if (typeof descriptor === 'function') {
             return revive(descriptor, value);
         } else {

@@ -1,11 +1,19 @@
 import { ConfigManager } from "../config/configManager";
 import { logger } from "../logger";
+import { ToolCall } from "../tool/tool";
 import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
 import { MemoryService } from "./memory";
 
 export class State {
     [key: string]: any;
+}
+
+export interface RequestMessage {
+    role: 'user' | 'assistant' | 'system' | 'tool';
+    content?: string;
+    tool_calls?: ToolCall[];
+    tool_call_id?: string;
 }
 
 export class Session {
@@ -34,6 +42,11 @@ export class Session {
         this.memory = new MemoryService();
         // this.tool = new ToolState();
         this.ignoredUserIdList = [];
+    }
+
+    // wip
+    getMessages(): RequestMessage[] {
+        return [];
     }
 }
 
