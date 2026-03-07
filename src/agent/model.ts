@@ -20,16 +20,16 @@ export class Model {
     name: string;
     use: ModelUse[];
     provider: string;
-    base_url: string;
-    api_key: string;
+    baseUrl: string;
+    apiKey: string;
     body: ModelBody;
 
     constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
         this.name = name;
         this.use = use;
         this.provider = provider;
-        this.base_url = base_url;
-        this.api_key = api_key;
+        this.baseUrl = base_url;
+        this.apiKey = api_key;
         this.body = body;
     }
 
@@ -48,7 +48,14 @@ export class ChatModel extends Model {
     }
 
     get url() {
-        return `${this.base_url}/chat/completions`;
+        return `${this.baseUrl}/chat/completions`;
+    }
+
+    buildChatBody(agent: Agent, sessionId: string) {
+        return this.buildBody({
+            messages: agent.sessionService.getSession(sessionId).getMessages(),
+            tools: agent.getTools()
+        });
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
@@ -56,10 +63,7 @@ export class ChatModel extends Model {
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
-                messages: agent.sessionService.getSession(sessionId).getMessages(),
-                tools: agent.getTools()
-            })), timeout);
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), timeout);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -92,7 +96,14 @@ export class ImageModel extends Model {
     }
 
     get url() {
-        return `${this.base_url}/chat/completions`;
+        return `${this.baseUrl}/chat/completions`;
+    }
+
+    buildChatBody(agent: Agent, sessionId: string) {
+        return this.buildBody({
+            messages: agent.sessionService.getSession(sessionId).getImageMessages(),
+            tools: agent.getTools()
+        });
     }
 
     async callITT(src: string, prompt = ''): Promise<string> {
@@ -100,7 +111,7 @@ export class ImageModel extends Model {
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
                 messages: [{
                     role: "user",
                     content: [{
@@ -136,10 +147,7 @@ export class ImageModel extends Model {
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
-                messages: agent.sessionService.getSession(sessionId).getImageMessages(),
-                tools: agent.getTools()
-            })), timeout);
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), timeout);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -174,7 +182,7 @@ export class EmbeddingModel extends Model {
     }
 
     get url() {
-        return `${this.base_url}/embeddings`;
+        return `${this.baseUrl}/embeddings`;
     }
 
     async callEmbedding(text: string): Promise<number[]> {
@@ -193,7 +201,7 @@ export class EmbeddingModel extends Model {
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.api_key, this.buildBody({
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
                 input: text
             })), timeout);
 
@@ -229,15 +237,15 @@ export class ModelManager {
             const randomIndex = Math.floor(Math.random() * chatModelList.length);
             return chatModelList[randomIndex];
         }
-        const chatModelAnyList = ModelManager.chatModels.filter(model => model.use.includes('any'));
-        if (chatModelAnyList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * chatModelAnyList.length);
-            return chatModelAnyList[randomIndex];
-        }
         const ImageModelList = ModelManager.imageModels.filter(model => model.use.includes(use));
         if (ImageModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelList.length);
             return ImageModelList[randomIndex];
+        }
+        const chatModelAnyList = ModelManager.chatModels.filter(model => model.use.includes('any'));
+        if (chatModelAnyList.length > 0) {
+            const randomIndex = Math.floor(Math.random() * chatModelAnyList.length);
+            return chatModelAnyList[randomIndex];
         }
         const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.includes('any'));
         if (ImageModelAnyList.length > 0) {

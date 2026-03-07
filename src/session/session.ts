@@ -48,6 +48,11 @@ export class Session {
     getMessages(): RequestMessage[] {
         return [];
     }
+
+    // wip
+    getImageMessages(): RequestMessage[] {
+        return [];
+    }
 }
 
 export class SessionService {
