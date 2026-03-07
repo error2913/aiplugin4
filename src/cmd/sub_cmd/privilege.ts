@@ -1,8 +1,8 @@
 import { AIManager } from "../../AI/AI";
-import { HELPMAP } from "../../config/config";
+import { HELPMAP } from "../../config/static_config";
 import { aliasToCmd } from "../../utils/utils";
 import { M, PrivilegeManager, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdPrivilege() {
     const cmd = new SubCmd('privilege');

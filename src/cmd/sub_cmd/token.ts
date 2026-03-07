@@ -2,7 +2,7 @@ import { AIManager } from "../../AI/AI";
 import { get_chart_url } from "../../agent/service";
 import { aliasToCmd } from "../../utils/utils";
 import { S, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdToken() {
     const cmd = new SubCmd('token');

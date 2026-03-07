@@ -1,42 +1,43 @@
 import { ToolCall } from "../tool/tool";
 import { ConfigManager } from "../config/configManager";
 import { Image, ImageManager } from "../image/image";
-import { getCtxAndMsg } from "../utils/utils_seal";
-import { levenshteinDistance } from "../utils/utils_string";
-import { AI, AIManager, GroupInfo, UserInfo } from "./AI";
+import { getCtxAndMsg } from "../utils/seal";
+import { levenshteinDistance } from "../utils/string";
 import { logger } from "../logger";
-import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/utils_ob11";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/ob11";
+import { TypeDescriptor } from "../utils/utils";
 
-export class MessageItem {
+export interface BaseMessageItem {
     time: number; // 秒
     text: string;
 }
 
-export class UserMessageItem extends MessageItem {
+export interface UserMessageItem extends BaseMessageItem {
     userId: string;
     messageId: string;
 }
 
-export class AssistantMessageItem extends MessageItem {
+export interface AssistantMessageItem extends BaseMessageItem {
     messageId: string;
 }
 
-export class SystemMessageItem extends MessageItem {
+export interface SystemUserMessageItem extends BaseMessageItem {
     tip: string;
 }
 
-export class ToolCallsMessageItem extends MessageItem {
+export interface ToolCallsMessageItem extends BaseMessageItem {
     tool_calls: ToolCall[];
 }
 
-export class ToolCallbackMessageItem extends MessageItem {
+export interface ToolCallbackMessageItem extends BaseMessageItem {
     tool_call_id: string;
 }
 
+export type MessageItem = UserMessageItem | AssistantMessageItem | SystemUserMessageItem | ToolCallsMessageItem | ToolCallbackMessageItem;
+
 export class Context {
-    static validKeysMap: {[key in keyof Context]?: TypeDescriptor<Context[key]>} = {
-        messages: 'any'
+    static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
+        messages: { array: 'any' }
     }
     messages: MessageItem[];
 
@@ -59,6 +60,28 @@ export class Context {
                 break;
             }
         }
+    }
+
+    // 添加后检查压缩条件，并对过长user进行压缩
+    addUserMessage() {
+
+    }
+
+    addAssistantMessage() {
+
+    }
+
+    addSystemUserMessage() {
+
+    }
+
+    addToolCallsMessage() {
+
+    }
+
+    // 同理，进行压缩
+    addToolCallbackMessage() {
+
     }
 
     async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, content: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
@@ -344,55 +367,6 @@ export class Context {
         return null;
     }
 
-    async findImage(ctx: seal.MsgContext, id: string): Promise<Image | null> {
-        // 从用户头像中查找图片
-        if (/^user_avatar[:：]/.test(id)) {
-            const ui = await this.findUserInfo(ctx, id.replace(/^user_avatar[:：]/, ''));
-            if (ui) return ImageManager.getUserAvatar(ui.id);
-        }
-        // 从群聊头像中查找图片
-        if (/^group_avatar[:：]/.test(id)) {
-            const gi = await this.findGroupInfo(ctx, id.replace(/^group_avatar[:：]/, ''));
-            if (gi) return ImageManager.getGroupAvatar(gi.id);
-        }
-
-        // 从上下文中查找图片
-        const messages = this.messages;
-        const userSet = new Set<string>();
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const image = messages[i].images.find(item => item.id === id);
-            if (image) return image;
-
-            const uid = messages[i].uid;
-            if (userSet.has(uid) || messages[i].role !== 'user') continue;
-            const name = messages[i].name;
-            if (name.startsWith('_')) continue;
-
-            const image2 = AIManager.getAI(uid).memory.findImage(id);
-            if (image2) return image2;
-        }
-
-        if (!ctx.isPrivate) {
-            const image = AIManager.getAI(ctx.group.groupId).memory.findImage(id);
-            if (image) return image;
-        }
-
-        // 从自己记忆中查找图片
-        const image = AIManager.getAI(ctx.endPoint.userId).memory.findImage(id);
-        if (image) return image;
-
-        // 从本地图片库中查找图片
-        const { localImagePathMap } = ConfigManager.image;
-        if (localImagePathMap.hasOwnProperty(id)) {
-            const image = new Image();
-            image.file = localImagePathMap[id];
-            return image;
-        }
-
-        logger.warning(`未找到图片<${id}>`);
-        return null;
-    }
-
     get userInfoList(): UserInfo[] {
         const userMap: { [key: string]: UserInfo } = {};
         this.messages.forEach(message => {
@@ -405,55 +379,5 @@ export class Context {
             }
         });
         return Object.values(userMap);
-    }
-
-    async setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card') {
-        let name = '';
-        switch (mod) {
-            case 'nickname': {
-                const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
-                if (!strangerInfo || !strangerInfo.nickname) {
-                    logger.warning(`未找到用户<${uid}>的昵称`);
-                    break;
-                }
-                name = strangerInfo.nickname;
-                break;
-            }
-            case 'card': {
-                if (!gid) break;
-                const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
-                if (!memberInfo) {
-                    logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
-                    this.setName(epId, gid, uid, 'nickname');
-                    break;
-                }
-                name = memberInfo.card || memberInfo.nickname;
-                if (!name) {
-                    this.setName(epId, gid, uid, 'nickname');
-                    return;
-                }
-                break;
-            }
-        }
-        if (!name) {
-            logger.warning(`用户<${uid}>未设置昵称或群名片`);
-            return;
-        }
-        const { ctx } = getCtxAndMsg(epId, uid, gid);
-        ctx.player.name = name;
-        this.messages.forEach(message => message.name = message.uid === uid ? name : message.name);
-    }
-
-    async updateName(epId: string, gid: string, uid: string) {
-        switch (this.autoNameMod) {
-            case 1: {
-                await this.setName(epId, gid, uid, 'nickname');
-                break;
-            }
-            case 2: {
-                await this.setName(epId, gid, uid, 'card');
-                break;
-            }
-        }
     }
 }

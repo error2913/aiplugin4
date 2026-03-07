@@ -13,13 +13,13 @@ export function registerModu() {
             }
         }
     });
-    toolRoll.cmdInfo = {
-        ext: 'story',
-        name: 'modu',
-        fixedArgs: ['roll']
+    toolRoll.ExtCmdInfo = {
+        extName: 'story',
+        cmd: 'modu',
+        staticArgs: ['roll']
     }
     toolRoll.solve = async (ctx, msg, ai, _) => {
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.cmdInfo, [], [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.ExtCmdInfo, [], [], []);
         if (!success) {
             return { content: '今日人品查询失败', images: [] };
         }
@@ -44,15 +44,15 @@ export function registerModu() {
             }
         }
     });
-    toolSearch.cmdInfo = {
-        ext: 'story',
-        name: 'modu',
-        fixedArgs: ['search']
+    toolSearch.ExtCmdInfo = {
+        extName: 'story',
+        cmd: 'modu',
+        staticArgs: ['search']
     }
     toolSearch.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolSearch.cmdInfo, [name], [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolSearch.ExtCmdInfo, [name], [], []);
         if (!success) {
             return { content: '今日人品查询失败', images: [] };
         }

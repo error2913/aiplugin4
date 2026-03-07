@@ -1,8 +1,8 @@
 import { ConfigManager } from "../config/configManager";
 import { generateId, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
-import { MessageSegment, parseSpecialTokens } from "../utils/utils_string";
-import { getSessionId } from "../utils/utils_seal";
+import { MessageSegment, parseSpecialTokens } from "../utils/string";
+import { getSessionId } from "../utils/seal";
 import { ModelManager } from "../agent/model";
 
 export class Image {

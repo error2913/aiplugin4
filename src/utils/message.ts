@@ -2,7 +2,7 @@ import { AI, GroupInfo, UserInfo } from "../AI/AI";
 import { Message } from "../session/context";
 import { ConfigManager } from "../config/configManager";
 import { ToolInfo } from "../tool/tool";
-import { fmtDate } from "./utils_string";
+import { fmtDate } from "./string";
 import { knowledgeService } from "../session/memory";
 
 export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {

@@ -20,10 +20,10 @@ export function registerJrrp() {
             }
         }
     });
-    tool.cmdInfo = {
-        ext: 'fun',
-        name: 'jrrp',
-        fixedArgs: []
+    tool.ExtCmdInfo = {
+        extName: 'fun',
+        cmd: 'jrrp',
+        staticArgs: []
     }
     tool.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
@@ -32,7 +32,7 @@ export function registerJrrp() {
         if (ui === null) return { content: `未找到<${name}>`, images: [] };
 
         ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, [], [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.ExtCmdInfo, [], [], []);
         if (!success) return { content: '今日人品查询失败', images: [] };
 
         return { content: s, images: [] };

@@ -2,7 +2,7 @@ import { AIManager } from "../../AI/AI";
 import { ConfigManager } from "../../config/configManager";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdMemory() {
     const cmd = new SubCmd('memory');

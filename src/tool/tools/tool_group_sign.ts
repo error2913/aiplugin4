@@ -15,7 +15,7 @@ export function registerGroupSign() {
             }
         }
     });
-    tool.type = 'group';
+    tool.sessionType = 'group';
     tool.solve = async (ctx, _, __, ___) => {
         if (ctx.isPrivate) {
             return { content: `群打卡只能在群聊中使用`, images: [] };

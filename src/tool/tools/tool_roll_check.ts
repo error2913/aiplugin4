@@ -41,10 +41,10 @@ export function registerRollCheck() {
             }
         }
     });
-    toolRoll.cmdInfo = {
-        ext: 'coc7',
-        name: 'ra',
-        fixedArgs: []
+    toolRoll.ExtCmdInfo = {
+        extName: 'coc7',
+        cmd: 'ra',
+        staticArgs: []
     }
     toolRoll.solve = async (ctx, msg, ai, args) => {
         const { name, expression, rank = '', times = 1, additional_dice = '', reason = '' } = args;
@@ -68,7 +68,7 @@ export function registerRollCheck() {
 
         if (parseInt(times) !== 1 && !isNaN(parseInt(times))) ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.cmdInfo, args2, [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.ExtCmdInfo, args2, [], []);
         ToolManager.cmdArgs.specialExecuteTimes = 1;
         if (!success) return { content: '检定执行失败', images: [] };
         return { content: s, images: [] };
@@ -103,10 +103,10 @@ export function registerRollCheck() {
             }
         }
     })
-    tool.cmdInfo = {
-        ext: 'coc7',
-        name: 'sc',
-        fixedArgs: []
+    tool.ExtCmdInfo = {
+        extName: 'coc7',
+        cmd: 'sc',
+        staticArgs: []
     }
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, expression, additional_dice } = args;
@@ -123,7 +123,7 @@ export function registerRollCheck() {
         if (additional_dice) args2.push(additional_dice);
         args2.push(expression);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.cmdInfo, args2, [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.ExtCmdInfo, args2, [], []);
         if (!success) return { content: 'san check执行失败', images: [] };
         return { content: s, images: [] };
     }

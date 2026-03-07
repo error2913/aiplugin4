@@ -1,8 +1,8 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
-import { transformTextToArray } from "./utils_string";
-import { aliasMap } from "../config/config";
-import { netExists, sendGroupMsg, sendPrivateMsg } from "./utils_ob11";
+import { transformTextToArray } from "./string";
+import { aliasMap } from "../config/static_config";
+import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {

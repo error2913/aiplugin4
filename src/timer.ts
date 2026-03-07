@@ -1,8 +1,8 @@
 import { ConfigManager } from "./config/configManager";
-import { getSessionCtxAndMsg } from "./utils/utils_seal";
+import { getSessionCtxAndMsg } from "./utils/seal";
 import { AI, AIManager } from "./AI/AI";
 import { logger } from "./logger";
-import { fmtDate } from "./utils/utils_string";
+import { fmtDate } from "./utils/string";
 import { revive } from "./utils/utils";
 
 export class TimerInfo {

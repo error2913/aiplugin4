@@ -1,7 +1,7 @@
 import { AIManager } from "../../AI/AI";
 import { TimerManager } from "../../timer";
 import { I } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdOff() {
     const cmd = new SubCmd('off');

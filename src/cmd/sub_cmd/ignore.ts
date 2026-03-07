@@ -1,7 +1,7 @@
 import { AIManager } from "../../AI/AI";
 import { aliasToCmd } from "../../utils/utils";
 import { U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdIgnore() {
     const cmd = new SubCmd('ignore');

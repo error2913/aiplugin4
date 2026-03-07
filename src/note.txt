@@ -7,6 +7,55 @@ last reply 放进 sendService 里，所有send换成一个，除了指令调用�
 计数器、计时器逻辑移到trigger
 
 autoNameMod: number; // 自动修改上下文里的名字，0:不自动修改，1:修改为昵称，2:修改为群名片
+    async setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card') {
+        let name = '';
+        switch (mod) {
+            case 'nickname': {
+                const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
+                if (!strangerInfo || !strangerInfo.nickname) {
+                    logger.warning(`未找到用户<${uid}>的昵称`);
+                    break;
+                }
+                name = strangerInfo.nickname;
+                break;
+            }
+            case 'card': {
+                if (!gid) break;
+                const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
+                if (!memberInfo) {
+                    logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
+                    this.setName(epId, gid, uid, 'nickname');
+                    break;
+                }
+                name = memberInfo.card || memberInfo.nickname;
+                if (!name) {
+                    this.setName(epId, gid, uid, 'nickname');
+                    return;
+                }
+                break;
+            }
+        }
+        if (!name) {
+            logger.warning(`用户<${uid}>未设置昵称或群名片`);
+            return;
+        }
+        const { ctx } = getCtxAndMsg(epId, uid, gid);
+        ctx.player.name = name;
+        this.messages.forEach(message => message.name = message.uid === uid ? name : message.name);
+    }
+
+    async updateName(epId: string, gid: string, uid: string) {
+        switch (this.autoNameMod) {
+            case 1: {
+                await this.setName(epId, gid, uid, 'nickname');
+                break;
+            }
+            case 2: {
+                await this.setName(epId, gid, uid, 'card');
+                break;
+            }
+        }
+    }
 放到user manager
 
 tool分为触发callback和不触发callback两种，将tool choice删除

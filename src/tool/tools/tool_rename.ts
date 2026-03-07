@@ -26,7 +26,7 @@ export function registerRename() {
             }
         }
     });
-    tool.type = 'group';
+    tool.sessionType = 'group';
     tool.solve = async (ctx, msg, ai, args) => {
         const { name, new_name } = args;
 

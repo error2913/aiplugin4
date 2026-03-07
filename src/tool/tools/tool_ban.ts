@@ -25,7 +25,7 @@ export function registerBan() {
             }
         }
     });
-    toolBan.type = 'group';
+    toolBan.sessionType = 'group';
     toolBan.solve = async (ctx, _, ai, args) => {
         const { name, duration } = args;
 
@@ -65,7 +65,7 @@ export function registerBan() {
             }
         }
     });
-    toolWhole.type = 'group';
+    toolWhole.sessionType = 'group';
     toolWhole.solve = async (ctx, _, __, args) => {
         const { enable } = args;
 
@@ -91,7 +91,7 @@ export function registerBan() {
             }
         }
     });
-    toolList.type = 'group';
+    toolList.sessionType = 'group';
     toolList.solve = async (ctx, _, __, ___) => {
         if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
 

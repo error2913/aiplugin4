@@ -1,7 +1,7 @@
 import { TimerManager } from "../../timer";
 import { aliasToCmd } from "../../utils/utils";
 import { I, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdTimer() {
     const cmd = new SubCmd('timer');

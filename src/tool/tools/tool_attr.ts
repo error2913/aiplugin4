@@ -20,10 +20,10 @@ export function registerAttr() {
             }
         }
     });
-    toolShow.cmdInfo = {
-        ext: 'coc7',
-        name: 'st',
-        fixedArgs: ['show']
+    toolShow.ExtCmdInfo = {
+        extName: 'coc7',
+        cmd: 'st',
+        staticArgs: ['show']
     }
     toolShow.solve = async (ctx, msg, ai, args) => {
         const { name } = args;
@@ -33,7 +33,7 @@ export function registerAttr() {
 
         ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolShow.cmdInfo, [], [], []);
+        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolShow.ExtCmdInfo, [], [], []);
         if (!success) return { content: '展示失败', images: [] };
 
         return { content: s, images: [] };

@@ -1,6 +1,6 @@
 import Handlebars from "handlebars";
 import { logger } from "../logger";
-import { AUTHOR, NAME, VERSION } from "./config";
+import { AUTHOR, NAME, VERSION } from "./static_config";
 import { BackendConfig } from "./config_backend";
 import { ImageConfig } from "./config_image";
 import { LogConfig } from "./config_log";

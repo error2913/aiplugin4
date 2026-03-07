@@ -4,7 +4,7 @@ import { replyToSender, transformMsgIdBack } from "../utils/utils";
 import { getCtxAndMsg } from "../utils/utils_seal";
 import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../utils/utils_string";
 import { Tool, ToolManager } from "./tool";
-import { CQTYPESALLOW, faceMap } from "../config/config";
+import { CQTYPESALLOW, faceMap } from "../config/static_config";
 import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../utils/utils_ob11";
 import { logger } from "../logger";
 import { Image } from "../image/image";

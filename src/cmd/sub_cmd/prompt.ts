@@ -1,7 +1,7 @@
 import { logger } from "../../logger";
-import { buildSystemMessage } from "../../utils/utils_message";
+import { buildSystemMessage } from "../../utils/message";
 import { M } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdPrompt() {
     const cmd = new SubCmd('prompt');

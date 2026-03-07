@@ -4,10 +4,10 @@ import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../agent/service";
 import { Context } from "./context";
 import { MemoryManager } from "./memory";
-import { handleMessages, parseBody } from "../utils/utils_message";
+import { handleMessages, parseBody } from "../utils/message";
 import { ToolManager } from "../tool/tool";
 import { logger } from "../logger";
-import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/utils_string";
+import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
 import { TimerManager } from "../timer";
 
 export interface GroupInfo {

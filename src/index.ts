@@ -3,14 +3,14 @@ import { ToolManager } from "./tool/tool";
 import { ConfigManager } from "./config/configManager";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
-import { transformTextToArray } from "./utils/utils_string";
-import { checkUpdate } from "./utils/utils_update";
+import { transformTextToArray } from "./utils/string";
+import { checkUpdate } from "./utils/update";
 import { TimerManager } from "./timer";
-import { createMsg } from "./utils/utils_seal";
+import { createMsg } from "./utils/seal";
 import { PrivilegeManager } from "./cmd/privilege";
 import { knowledgeService } from "./session/memory";
-import { CQTYPESALLOW } from "./config/config";
-import { registerCmd } from "./cmd/root";
+import { CQTYPESALLOW } from "./config/static_config";
+import { registerCmd } from "./cmd/root_cmd";
 
 function main() {
   ConfigManager.registerConfig();

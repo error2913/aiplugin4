@@ -5,27 +5,30 @@ import { revive, TypeDescriptor } from "../utils/utils";
 
 export class Agent {
     static validKeysMap: { [key in keyof Agent]?: TypeDescriptor<Agent[key]> } = {
-        name: 'string',
-        description: 'string',
-        instruction: 'string',
         sessionService: SessionService,
-        tool: { array: 'string' },
+        tools: { array: 'string' },
+        subAgents: { array: 'string' }
     }
+
     name: string;
     description: string;
-    instruction: string;
+    instruction: string | ((sessionService: SessionService) => string);
+
     sessionService: SessionService;
-    tool: string[];
+    tools: string[];
+    subAgents: string[];
 
     constructor() {
+        this.name = "";
         this.description = "";
         this.instruction = "";
         this.sessionService = new SessionService();
-        this.tool = [];
+        this.tools = [];
+        this.subAgents = [];
     }
 
     // wip
-    getTools() {
+    getRequestTools() {
     }
 
     async chat() {
@@ -51,7 +54,11 @@ export class AgentManager {
         return this.agentMap[name];
     }
 
-    static save() {
+    static saveAgent(agent: Agent) {
+        ConfigManager.ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
+    }
+
+    static initAgent() {
 
     }
 }

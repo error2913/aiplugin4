@@ -4,7 +4,7 @@ import { logger } from "../../logger";
 import { ToolManager } from "../../tool/tool";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdTool() {
     const cmd = new SubCmd('tool');
@@ -78,13 +78,13 @@ export function registerCmdTool() {
                 }
 
                 const tool = ToolManager.toolMap[val3];
-                const s = `${tool.info.function.name}
-      描述:${tool.info.function.description}
+                const s = `${tool.toolInfo.function.name}
+      描述:${tool.toolInfo.function.description}
       
       参数信息:
-      ${JSON.stringify(tool.info.function.parameters.properties, null, 2)}
+      ${JSON.stringify(tool.toolInfo.function.parameters.properties, null, 2)}
       
-      必需参数:${tool.info.function.parameters.required.join(',')}`;
+      必需参数:${tool.toolInfo.function.parameters.required.join(',')}`;
 
                 seal.replyToSender(ctx, msg, s);
                 return ret;
@@ -100,7 +100,7 @@ export function registerCmdTool() {
                     return ret;
                 }
                 const tool = ToolManager.toolMap[val3];
-                if (tool.cmdInfo.ext !== '' && ToolManager.cmdArgs == null) {
+                if (tool.ExtCmdInfo.extName !== '' && ToolManager.cmdArgs == null) {
                     seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
                     return ret;
                 }
@@ -116,7 +116,7 @@ export function registerCmdTool() {
                         return acc;
                     }, {});
 
-                    for (const key of tool.info.function.parameters.required) {
+                    for (const key of tool.toolInfo.function.parameters.required) {
                         if (!args.hasOwnProperty(key)) {
                             logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                             seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);

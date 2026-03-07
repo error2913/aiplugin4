@@ -1,7 +1,7 @@
 import { logger } from "../logger";
 import { updateInfo } from "../update";
 import { ConfigManager } from "../config/configManager";
-import { VERSION } from "../config/config";
+import { VERSION } from "../config/static_config";
 
 /**
  * 比较两个版本号的大小。

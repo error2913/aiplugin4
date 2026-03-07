@@ -1,4 +1,3 @@
-import { AI } from "../AI/AI"
 import { ConfigManager } from "../config/configManager"
 import { registerAttr } from "./tool_attr"
 import { registerBan } from "./tool_ban"
@@ -24,7 +23,8 @@ import { registerMeme } from "./tool_meme"
 import { registerRender } from "./tool_render"
 import { logger } from "../logger"
 import { Image } from "../image/image";
-import { fixJsonString } from "../utils/utils_string";
+import { fixJsonString } from "../utils/string";
+import { Agent } from "../agent/agent"
 
 export interface ToolInfoString {
     type: "string";
@@ -115,27 +115,27 @@ export interface ToolCall {
     }
 }
 
-export interface CmdInfo {
-    ext: string, // 使用的扩展名称
-    name: string, // 指令名称
-    fixedArgs: string[] // 参数
+export interface ExtCmdInfo {
+    extName: string, // 使用的扩展名称
+    cmd: string, // 指令名称
+    staticArgs: string[] // 参数
 }
 
 export class Tool {
-    info: ToolInfo;
-    cmdInfo: CmdInfo; // 海豹指令信息
-    type: string; // 可使用函数的聊天场景类型："private" | "group" | "all"
-    tool_choice: string; // 是否可以继续调用函数："none" | "auto" | "required"
-    solve: (ctx: seal.MsgContext, msg: seal.Message, ai: AI, args: { [key: string]: any }) => Promise<{ content: string, images: Image[] }>;
+    toolInfo: ToolInfo;
+    ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
+    sessionType: 'any' | 'user' | 'group'; // 可使用函数的会话类型
+    callBack: boolean; // 是否回调函数
+    solve: (ctx: seal.MsgContext, msg: seal.Message, agent: Agent, args: { [key: string]: any }) => Promise<{ content: string, images: Image[] }>;
 
     constructor(info: ToolInfo) {
-        this.info = info;
-        this.cmdInfo = {
-            ext: '',
-            name: '',
-            fixedArgs: []
+        this.toolInfo = info;
+        this.ExtCmdInfo = {
+            extName: '',
+            cmd: '',
+            staticArgs: []
         }
-        this.type = "all"
+        this.sessionType = "all"
         this.tool_choice = 'auto';
         this.solve = async (_, __, ___, ____) => ({ content: "函数未实现", images: [] });
 
@@ -212,10 +212,10 @@ export class ToolManager {
      * @param cmdArgs
      * @param args
      */
-    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, ai: AI, cmdInfo: CmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
+    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, ai: AI, cmdInfo: ExtCmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
         const cmdArgs = this.cmdArgs;
-        cmdArgs.command = cmdInfo.name;
-        cmdArgs.args = cmdInfo.fixedArgs.concat(args);
+        cmdArgs.command = cmdInfo.cmd;
+        cmdArgs.args = cmdInfo.staticArgs.concat(args);
         cmdArgs.kwargs = kwargs;
         cmdArgs.at = at;
         cmdArgs.rawArgs = `${cmdArgs.args.join(' ')} ${kwargs.map(item => `--${item.name}${item.valueExists ? `=${item.value}` : ``}`).join(' ')}`;
@@ -225,9 +225,9 @@ export class ToolManager {
         cmdArgs.specialExecuteTimes = 0;
         cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
 
-        const ext = seal.ext.find(cmdInfo.ext);
-        if (!ext.cmdMap.hasOwnProperty(cmdInfo.name)) {
-            logger.warning(`扩展${cmdInfo.ext}中未找到指令:${cmdInfo.name}`);
+        const ext = seal.ext.find(cmdInfo.extName);
+        if (!ext.cmdMap.hasOwnProperty(cmdInfo.cmd)) {
+            logger.warning(`扩展${cmdInfo.extName}中未找到指令:${cmdInfo.cmd}`);
             return ['', false];
         }
 
@@ -253,7 +253,7 @@ export class ToolManager {
             };
 
             try {
-                ext.cmdMap[cmdInfo.name].solve(ctx, msg, cmdArgs);
+                ext.cmdMap[cmdInfo.cmd].solve(ctx, msg, cmdArgs);
             } catch (err) {
                 reject(new Error(`solve中发生错误:${err.message}`));
                 ai.tool.listen.cleanup();
@@ -339,14 +339,14 @@ export class ToolManager {
 
 
         const tool = this.toolMap[name];
-        if (tool.cmdInfo.ext !== '' && this.cmdArgs == null) {
+        if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs == null) {
             logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
             await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
             return "none";
         }
-        if (tool.type !== "all" && tool.type !== msg.messageType) {
-            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
-            await ai.context.addToolMessage(tool_call.id, `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`, []);
+        if (tool.sessionType !== "all" && tool.sessionType !== msg.messageType) {
+            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`);
+            await ai.context.addToolMessage(tool_call.id, `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`, []);
             return "none";
         }
 
@@ -376,7 +376,7 @@ export class ToolManager {
                 await ai.context.addToolMessage(tool_call.id, `调用函数失败:arguement不是一个object`, []);
                 return "auto";
             }
-            for (const key of tool.info.function.parameters.required) {
+            for (const key of tool.toolInfo.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                     logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                     await ai.context.addToolMessage(tool_call.id, `调用函数失败:缺少必需参数 ${key}`, []);
@@ -453,14 +453,14 @@ export class ToolManager {
 
 
         const tool = this.toolMap[name];
-        if (tool.cmdInfo.ext !== '' && this.cmdArgs == null) {
+        if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs == null) {
             logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
             await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
             return;
         }
-        if (tool.type !== "all" && tool.type !== msg.messageType) {
-            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:函数${name}可使用的场景类型为${tool.type}，当前场景类型为${msg.messageType}`, []);
+        if (tool.sessionType !== "all" && tool.sessionType !== msg.messageType) {
+            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`);
+            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`, []);
             return;
         }
 
@@ -471,7 +471,7 @@ export class ToolManager {
                 await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:arguement不是一个object`, []);
                 return;
             }
-            for (const key of tool.info.function.parameters.required) {
+            for (const key of tool.toolInfo.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                     logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                     await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:缺少必需参数 ${key}`, []);
@@ -515,10 +515,10 @@ export class ToolManager {
                         return null;
                     }
                     const tool = ToolManager.toolMap[key];
-                    if (tool.type !== "all" && tool.type !== type) {
+                    if (tool.sessionType !== "all" && tool.sessionType !== type) {
                         return null;
                     }
-                    return tool.info;
+                    return tool.toolInfo;
                 } else {
                     return null;
                 }

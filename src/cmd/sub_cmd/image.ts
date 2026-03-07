@@ -1,9 +1,9 @@
 import { AIManager } from "../../AI/AI";
 import { ImageManager } from "../../image/image";
 import { aliasToCmd } from "../../utils/utils";
-import { transformArrayToContent, transformTextToArray } from "../../utils/utils_string";
+import { transformArrayToContent, transformTextToArray } from "../../utils/string";
 import { I, M, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdImage() {
     const cmd = new SubCmd('image');

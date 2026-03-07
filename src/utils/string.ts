@@ -4,8 +4,8 @@ import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformMsgId, transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
-import { getCtxAndMsg } from "./utils_seal";
-import { faceMap } from "../config/config";
+import { getCtxAndMsg } from "./seal";
+import { faceMap } from "../config/static_config";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 

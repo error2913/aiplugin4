@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { MessageSegment } from "./utils_string";
+import { MessageSegment } from "./string";
 
 export function getNet() {
     const net = globalThis.net || globalThis.http;

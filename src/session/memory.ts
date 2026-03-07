@@ -3,9 +3,9 @@ import { Context } from "./context";
 import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../agent/service";
-import { buildContent, getRoleSetting, parseBody } from "../utils/utils_message";
+import { buildContent, getRoleSetting, parseBody } from "../utils/message";
 import { ToolManager } from "../tool/tool";
-import { fmtDate } from "../utils/utils_string";
+import { fmtDate } from "../utils/string";
 import { Image } from "../image/image";
 
 export interface searchOptions {

@@ -1,5 +1,5 @@
 import { U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdStatus() {
     const cmd = new SubCmd('status');

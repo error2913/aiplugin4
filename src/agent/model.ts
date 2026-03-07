@@ -54,7 +54,7 @@ export class ChatModel extends Model {
     buildChatBody(agent: Agent, sessionId: string) {
         return this.buildBody({
             messages: agent.sessionService.getSession(sessionId).getMessages(),
-            tools: agent.getTools()
+            tools: agent.getRequestTools()
         });
     }
 
@@ -102,7 +102,7 @@ export class ImageModel extends Model {
     buildChatBody(agent: Agent, sessionId: string) {
         return this.buildBody({
             messages: agent.sessionService.getSession(sessionId).getImageMessages(),
-            tools: agent.getTools()
+            tools: agent.getRequestTools()
         });
     }
 

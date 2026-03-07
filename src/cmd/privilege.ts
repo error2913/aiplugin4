@@ -2,7 +2,7 @@ import { AI } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { aliasToCmd } from "../utils/utils";
-import { PRIVILEGELEVELMAP } from "../config/config";
+import { PRIVILEGELEVELMAP } from "../config/static_config";
 
 
 export interface CmdPrivInfo {

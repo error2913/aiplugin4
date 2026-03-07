@@ -1,7 +1,7 @@
 import { ConfigManager } from "../../config/configManager";
-import { getRoleSetting } from "../../utils/utils_message";
+import { getRoleSetting } from "../../utils/message";
 import { I } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdRole() {
     const cmd = new SubCmd('role');

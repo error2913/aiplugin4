@@ -1,6 +1,6 @@
 import { aliasToCmd } from "../../utils/utils";
 import { I, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdCtxn() {
     const cmd = new SubCmd('ctxn');
