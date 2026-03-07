@@ -2,9 +2,9 @@ export const VERSION = "4.12.0";
 export const AUTHOR = "baiyu&错误";
 export const NAME = "aiplugin4";
 
-export const CQTYPESALLOW = ["at", "image", "reply", "face", "poke"];
+export const CQ_TYPES_ALLOW = ["at", "image", "reply", "face", "poke"];
 
-export const PRIVILEGELEVELMAP = {
+export const PRIVILEGE_LEVEL_MAP = {
     "master": 100,
     "whitelist": 70,
     "owner": 60,
@@ -14,7 +14,7 @@ export const PRIVILEGELEVELMAP = {
     "blacklist": -30
 }
 
-export const HELPMAP = {
+export const HELP_MAP = {
     "ID": `<ID>:
 【QQ:1234567890】 私聊窗口
 【QQ-Group:1234】 群聊窗口
@@ -41,7 +41,7 @@ export const HELPMAP = {
 格式为"开始时间-结束时间-活跃次数"(如"09:00-18:00-5")`
 }
 
-export const aliasMap = {
+export const ALIAS_MAP = {
     "AI": "ai",
     "priv": "privilege",
     "ses": "session",
@@ -69,7 +69,7 @@ export const aliasMap = {
     "nick": "nickname"
 }
 
-export const faceMap = {
+export const FACE_MAP = {
     "0": "惊讶",
     "1": "撇嘴",
     "2": "色",
@@ -367,3 +367,170 @@ export const faceMap = {
     "431": "蛇尾",
     "432": "灵蛇献瑞"
 }
+
+export interface ModelInfo {
+    provider: string;
+    model: string[];
+    baseUrl: string;
+}
+
+export const CHAT_MODEL_MAP = {
+    // 海外厂商
+    "openai": {
+        provider: "openai",
+        model: ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1-mini", "o1-preview"],
+        baseUrl: "https://api.openai.com/v1"
+    },
+    "anthropic": {
+        provider: "anthropic",
+        model: ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+        baseUrl: "https://api.anthropic.com/v1"
+    },
+    "google": {
+        provider: "google",
+        model: ["gemini-2.5-pro-exp-03-25", "gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"],
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta" // 或使用 Vertex AI 的端点
+    },
+    "meta": { // 通过特定服务商调用，如Replicate, Together AI，或自托管
+        provider: "meta",
+        model: ["llama-3.1-405b-instruct", "llama-3.1-70b-instruct", "llama-3.1-8b-instruct"],
+        baseUrl: "https://api.together.xyz/v1" // 示例：使用 Together AI 作为代理
+    },
+    "mistralai": {
+        provider: "mistralai",
+        model: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
+        baseUrl: "https://api.mistral.ai/v1"
+    },
+    "cohere": {
+        provider: "cohere",
+        model: ["command-r-plus", "command-r", "command-light"],
+        baseUrl: "https://api.cohere.ai/v1"
+    },
+    "xai": {
+        provider: "xai",
+        model: ["grok-2", "grok-2-mini"],
+        baseUrl: "https://api.x.ai/v1" // 示例地址，实际需确认
+    },
+    "deepseek": { // 深度求索，以推理能力见长 [citation:8]
+        provider: "deepseek",
+        model: ["deepseek-chat", "deepseek-reasoner"], // 对应 V3 和 R1 系列
+        baseUrl: "https://api.deepseek.com/v1"
+    },
+    // 国内厂商
+    "alibaba": {
+        provider: "alibaba",
+        model: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen2.5-72b-instruct"],
+        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" // 通义千问 DashScope 兼容OpenAI的地址
+    },
+    "baidu": {
+        provider: "baidu",
+        model: ["ernie-4.0-turbo-8k", "ernie-3.5-8k", "ernie-lite-8k"],
+        baseUrl: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop" // 文心一言 API 地址
+    },
+    "tencent": {
+        provider: "tencent",
+        model: ["hunyuan-pro", "hunyuan-standard", "hunyuan-lite"],
+        baseUrl: "https://api.hunyuan.cloud.tencent.com/v1" // 示例地址，实际需确认
+    },
+    "zhipu": { // 智谱AI [citation:8]
+        provider: "zhipu",
+        model: ["glm-4-plus", "glm-4-0520", "glm-4-air", "glm-3-turbo"],
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4" // 智谱AI API 地址
+    },
+    "minimax": {
+        provider: "minimax",
+        model: ["abab6.5s-chat", "abab5.5s-chat"],
+        baseUrl: "https://api.minimax.chat/v1" // 示例地址
+    },
+    "moonshot": { // 月之暗面 Kimi [citation:8]
+        provider: "moonshot",
+        model: ["moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k"],
+        baseUrl: "https://api.moonshot.cn/v1"
+    }
+};
+
+export const IMAGE_MODEL_MAP = {
+    "openai": {
+        provider: "openai",
+        model: ["dall-e-3", "dall-e-2", "gpt-image-1.5"], // GPT Image 1.5 是2025年底的新模型 [citation:2]
+        baseUrl: "https://api.openai.com/v1"
+    },
+    "google": {
+        provider: "google",
+        model: ["imagen-3.0-generate-001", "imagen-3.0-fast-001"], // Imagen 3 系列 [citation:2][citation:10]
+        baseUrl: "https://us-central1-aiplatform.googleapis.com/v1" // Vertex AI 端点
+    },
+    "stabilityai": {
+        provider: "stabilityai",
+        model: ["stable-diffusion-3-5-large", "stable-diffusion-3-5-large-turbo", "stable-diffusion-3-medium"],
+        baseUrl: "https://api.stability.ai/v2beta" // Stability AI 官方API
+    },
+    "black-forest-labs": { // 黑森林实验室，由前 Stability AI 成员创建，Flux 模型表现优异 [citation:2]
+        provider: "black-forest-labs",
+        model: ["flux-1.1-pro", "flux-1-pro", "flux-1-dev"],
+        baseUrl: "https://api.bfl.ml/v1" // Black Forest Labs 官方API
+    },
+    "ideogram": {
+        provider: "ideogram",
+        model: ["ideogram-v2", "ideogram-v2-turbo"],
+        baseUrl: "https://api.ideogram.ai/v1"
+    },
+    "midjourney": { // Midjourney 通常通过 Discord 调用，或通过第三方API [citation:5][citation:10]
+        provider: "midjourney",
+        model: ["midjourney-v7", "midjourney-v6"],
+        baseUrl: "https://api.midjourney.com/v1" // 官方API，可能需要申请
+    },
+    "bytedance": { // 字节跳动 [citation:2]
+        provider: "bytedance",
+        model: ["seedream-4.5", "seedream-3.0"],
+        baseUrl: "https://api.bytedance.com/v1" // 示例地址
+    },
+    "tencent": {
+        provider: "tencent",
+        model: ["hunyuan-image-3.0"],
+        baseUrl: "https://api.hunyuan.cloud.tencent.com/v1" // 示例地址 [citation:2]
+    }
+};
+
+export const EMBEDDING_MODEL_MAP = {
+    "openai": {
+        provider: "openai",
+        model: ["text-embedding-3-large", "text-embedding-3-small", "text-embedding-ada-002"],
+        baseUrl: "https://api.openai.com/v1"
+    },
+    "google": {
+        provider: "google",
+        model: ["text-embedding-004", "text-multilingual-embedding-002"],
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta" // 或 Vertex AI
+    },
+    "cohere": {
+        provider: "cohere",
+        model: ["embed-english-v3.0", "embed-multilingual-v3.0"],
+        baseUrl: "https://api.cohere.ai/v1"
+    },
+    "alibaba": {
+        provider: "alibaba",
+        model: ["text-embedding-v3", "text-embedding-v2"],
+        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" // DashScope 兼容地址
+    },
+    "baidu": {
+        provider: "baidu",
+        model: ["embedding-v1"],
+        baseUrl: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop" // 文心 Embedding API
+    },
+    "zhipu": {
+        provider: "zhipu",
+        model: ["embedding-3", "embedding-2"],
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4" // 智谱AI API
+    },
+    "siliconflow": { // SiliconFlow 提供多种开源嵌入模型的托管服务 [citation:6]
+        provider: "siliconflow",
+        model: ["BAAI/bge-large-zh-v1.5", "BAAI/bge-large-en-v1.5", "Pro/BAAI/bge-m3"],
+        baseUrl: "https://api.siliconflow.cn/v1"
+    },
+    "huggingface": { // Hugging Face 的 Inference API 可以调用多种嵌入模型 [citation:6]
+        provider: "huggingface",
+        model: ["sentence-transformers/all-MiniLM-L6-v2", "intfloat/multilingual-e5-large-instruct"],
+        baseUrl: "https://api-inference.huggingface.co/models/"
+    }
+};

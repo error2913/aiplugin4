@@ -2,7 +2,7 @@ import { AI } from "../AI/AI";
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { aliasToCmd } from "../utils/utils";
-import { PRIVILEGELEVELMAP } from "../config/static_config";
+import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
 
 
 export interface CmdPrivInfo {
@@ -12,10 +12,10 @@ export interface CmdPrivInfo {
 
 export interface CmdPriv { [key: string]: CmdPrivInfo };
 
-export const U: [number, number, number] = [0, PRIVILEGELEVELMAP.user, PRIVILEGELEVELMAP.user]; // user
-export const M: [number, number, number] = [0, PRIVILEGELEVELMAP.master, PRIVILEGELEVELMAP.master]; // master
-export const I: [number, number, number] = [0, PRIVILEGELEVELMAP.inviter, PRIVILEGELEVELMAP.inviter]; // inviter
-export const S: [number, number, number] = [1, PRIVILEGELEVELMAP.inviter, PRIVILEGELEVELMAP.master]; // spesial，会话所需权限为1，是才能被邀请者使用，否则需为骰主
+export const U: [number, number, number] = [0, PRIVILEGE_LEVEL_MAP.user, PRIVILEGE_LEVEL_MAP.user]; // user
+export const M: [number, number, number] = [0, PRIVILEGE_LEVEL_MAP.master, PRIVILEGE_LEVEL_MAP.master]; // master
+export const I: [number, number, number] = [0, PRIVILEGE_LEVEL_MAP.inviter, PRIVILEGE_LEVEL_MAP.inviter]; // inviter
+export const S: [number, number, number] = [1, PRIVILEGE_LEVEL_MAP.inviter, PRIVILEGE_LEVEL_MAP.master]; // spesial，会话所需权限为1，是才能被邀请者使用，否则需为骰主
 
 export const defaultCmdPriv: CmdPriv = { ai: { priv: U } };
 

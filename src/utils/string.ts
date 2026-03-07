@@ -5,7 +5,7 @@ import { ConfigManager } from "../config/configManager";
 import { transformMsgId, transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
 import { getCtxAndMsg } from "./seal";
-import { faceMap } from "../config/static_config";
+import { FACE_MAP } from "../config/static_config";
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
@@ -212,7 +212,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
                 break;
             }
             case 'face': {
-                const faceName = faceMap[seg.data.id] || '';
+                const faceName = FACE_MAP[seg.data.id] || '';
                 content += faceName ? `<|face:${faceName}|>` : '';
                 break;
             }
@@ -277,7 +277,7 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
                 break;
             }
             case 'face': {
-                const faceId = Object.keys(faceMap).find(key => faceMap[key] === seg.content) || '';
+                const faceId = Object.keys(FACE_MAP).find(key => FACE_MAP[key] === seg.content) || '';
                 text += faceId ? `[CQ:face,id=${faceId}]` : '';
                 break;
             }

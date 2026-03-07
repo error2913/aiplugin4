@@ -9,7 +9,7 @@ import { TimerManager } from "./timer";
 import { createMsg } from "./utils/seal";
 import { PrivilegeManager } from "./cmd/privilege";
 import { knowledgeService } from "./session/memory";
-import { CQTYPESALLOW } from "./config/static_config";
+import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { registerCmd } from "./cmd/root_cmd";
 
 function main() {
@@ -58,7 +58,7 @@ function main() {
 
       // 检查CQ码
       const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
-      if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
+      if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
         clearTimeout(ai.context.timer);
         ai.context.timer = null;
 
@@ -144,7 +144,7 @@ function main() {
         const messageArray = transformTextToArray(message);
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
-        if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
+        if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
           const setting = ai.setting;
           if (setting.standby) {
             ai.handleReceipt(ctx, msg, ai, messageArray);
@@ -180,7 +180,7 @@ function main() {
         }
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
-        if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
+        if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
           const setting = ai.setting;
           if (setting.standby) {
             ai.handleReceipt(ctx, msg, ai, messageArray);

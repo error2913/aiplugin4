@@ -1,7 +1,7 @@
 import { logger } from "../logger";
 import { ConfigManager } from "../config/configManager";
 import { transformTextToArray } from "./string";
-import { aliasMap } from "../config/static_config";
+import { ALIAS_MAP } from "../config/static_config";
 import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
 
 export function transformMsgId(msgId: string | number | null): string {
@@ -155,7 +155,7 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
 }
 
 export function aliasToCmd(val: string) {
-    return aliasMap[val] || val;
+    return ALIAS_MAP[val] || val;
 }
 
 // 计算余弦相似度

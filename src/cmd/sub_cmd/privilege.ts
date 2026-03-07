@@ -1,5 +1,5 @@
 import { AIManager } from "../../AI/AI";
-import { HELPMAP } from "../../config/static_config";
+import { HELP_MAP } from "../../config/static_config";
 import { aliasToCmd } from "../../utils/utils";
 import { M, PrivilegeManager, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -13,10 +13,10 @@ export function registerCmdPrivilege() {
 【.ai priv st <指令> <权限限制>】修改指令权限
 【.ai priv show <指令>】检查指令权限
 【.ai priv reset】重置指令权限
-${HELPMAP["ID"]}
-${HELPMAP["会话权限"]}
-${HELPMAP["指令"]}
-${HELPMAP["权限限制"]}`;
+${HELP_MAP["ID"]}
+${HELP_MAP["会话权限"]}
+${HELP_MAP["指令"]}
+${HELP_MAP["权限限制"]}`;
     cmd.priv = {
         priv: M, args: {
             session: {
@@ -43,8 +43,8 @@ ${HELPMAP["权限限制"]}`;
                         if (!val4 || val4 == 'help') {
                             seal.replyToSender(ctx, msg, `帮助:
 【.ai priv ses st <ID> <会话权限>】修改会话权限
-${HELPMAP["ID"]}
-${HELPMAP["会话权限"]}`);
+${HELP_MAP["ID"]}
+${HELP_MAP["会话权限"]}`);
                             return ret;
                         }
 
@@ -69,7 +69,7 @@ ${HELPMAP["会话权限"]}`);
                         if (!val4 || val4 == 'help') {
                             seal.replyToSender(ctx, msg, `帮助:
 【.ai priv ses ck <ID>】检查会话权限
-${HELPMAP["ID"]}`);
+${HELP_MAP["ID"]}`);
                             return ret;
                         }
 
@@ -82,8 +82,8 @@ ${HELPMAP["ID"]}`);
                         seal.replyToSender(ctx, msg, `帮助:
 【.ai priv ses st <ID> <会话权限>】修改会话权限
 【.ai priv ses ck <ID>】检查会话权限
-${HELPMAP["ID"]}
-${HELPMAP["会话权限"]}`);
+${HELP_MAP["ID"]}
+${HELP_MAP["会话权限"]}`);
                         return ret;
                     }
                 }
@@ -93,8 +93,8 @@ ${HELPMAP["会话权限"]}`);
                 if (!val3 || val3 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
 【.ai priv st <指令> <权限限制>】修改指令权限
-${HELPMAP["指令"]}
-${HELPMAP["权限限制"]}`);
+${HELP_MAP["指令"]}
+${HELP_MAP["权限限制"]}`);
                     return ret;
                 }
                 const cmdChain = val3.split('-').map(cmd => aliasToCmd(cmd));
@@ -129,7 +129,7 @@ ${HELPMAP["权限限制"]}`);
                 if (!val3 || val3 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
 【.ai priv show <指令>】检查指令权限
-${HELPMAP["指令"]}`);
+${HELP_MAP["指令"]}`);
                     return ret;
                 }
                 const cmdChain = val3.split('-');
