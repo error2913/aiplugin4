@@ -374,7 +374,7 @@ export interface ModelInfo {
     baseUrl: string;
 }
 
-export const CHAT_MODEL_MAP = {
+export const CHAT_MODEL_MAP: { [key: string]: ModelInfo } = {
     // 海外厂商
     "openai": {
         provider: "openai",
@@ -449,7 +449,7 @@ export const CHAT_MODEL_MAP = {
     }
 };
 
-export const IMAGE_MODEL_MAP = {
+export const IMAGE_MODEL_MAP: { [key: string]: ModelInfo } = {
     "openai": {
         provider: "openai",
         model: ["dall-e-3", "dall-e-2", "gpt-image-1.5"], // GPT Image 1.5 是2025年底的新模型 [citation:2]
@@ -492,7 +492,7 @@ export const IMAGE_MODEL_MAP = {
     }
 };
 
-export const EMBEDDING_MODEL_MAP = {
+export const EMBEDDING_MODEL_MAP: { [key: string]: ModelInfo } = {
     "openai": {
         provider: "openai",
         model: ["text-embedding-3-large", "text-embedding-3-small", "text-embedding-ada-002"],
@@ -510,7 +510,7 @@ export const EMBEDDING_MODEL_MAP = {
     },
     "alibaba": {
         provider: "alibaba",
-        model: ["text-embedding-v3", "text-embedding-v2"],
+        model: ["text-embedding-v4", "text-embedding-v3"],
         baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" // DashScope 兼容地址
     },
     "baidu": {

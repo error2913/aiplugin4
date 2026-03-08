@@ -16,7 +16,7 @@ export interface ModelBody {
     [key: string]: any
 }
 
-export class Model {
+export class BaseModel {
     name: string;
     use: ModelUse[];
     provider: string;
@@ -42,7 +42,7 @@ export class Model {
     }
 }
 
-export class ChatModel extends Model {
+export class ChatModel extends BaseModel {
     constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, use, provider, base_url, api_key, body);
     }
@@ -90,7 +90,7 @@ export class ChatModel extends Model {
     }
 }
 
-export class ImageModel extends Model {
+export class ImageModel extends BaseModel {
     constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, use, provider, base_url, api_key, body);
     }
@@ -174,7 +174,7 @@ export class ImageModel extends Model {
     }
 }
 
-export class EmbeddingModel extends Model {
+export class EmbeddingModel extends BaseModel {
     static vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
 
     constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body) {
@@ -225,6 +225,8 @@ export class EmbeddingModel extends Model {
 
     }
 }
+
+export type Model = ChatModel | ImageModel | EmbeddingModel;
 
 export class ModelManager {
     static chatModels: ChatModel[] = [];

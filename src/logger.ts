@@ -18,7 +18,7 @@ class Logger {
             } else {
                 return s;
             }
-        } else if (logLevel === "详细") {
+        } else if (logLevel === "详细" || logLevel === "调试") {
             return data.map(item => `${item}`).join(" ");
         } else {
             return '';
@@ -47,6 +47,16 @@ class Logger {
             return;
         }
         console.error(`【${this.name}】: ${s}`);
+    }
+
+    debug(...data: any[]) {
+        const { logLevel } = ConfigManager.log;
+        if (logLevel !== "调试") return;
+        const s = this.handleLog(...data);
+        if (!s) {
+            return;
+        }
+        console.info(`【${this.name}】: ${s}`);
     }
 }
 

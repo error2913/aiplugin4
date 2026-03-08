@@ -1,15 +1,8 @@
 import Handlebars from "handlebars";
 import { logger } from "../logger";
 import { AUTHOR, NAME, VERSION } from "./static_config";
-import { BackendConfig } from "./config_backend";
-import { ImageConfig } from "./config_image";
-import { LogConfig } from "./config_log";
-import { MemoryConfig } from "./config_memory";
-import { MessageConfig } from "./config_message";
-import { ReceivedConfig } from "./config_received";
-import { ReplyConfig } from "./config_reply";
-import { RequestConfig } from "./config_request";
-import { ToolConfig } from "./config_tool";
+import { LogConfig } from "./configs/log";
+import { ModelConfig } from "./configs/model";
 
 export class ConfigManager {
     static ext: seal.ExtInfo;
@@ -23,14 +16,7 @@ export class ConfigManager {
     static registerConfig() {
         this.ext = ConfigManager.getExt(NAME);
         LogConfig.register();
-        RequestConfig.register();
-        MessageConfig.register();
-        ToolConfig.register();
-        ReceivedConfig.register();
-        ReplyConfig.register();
-        ImageConfig.register();
-        BackendConfig.register();
-        MemoryConfig.register();
+        ModelConfig.register();
     }
 
     static getCache<T>(key: string, getFunc: () => T): T {
@@ -49,14 +35,7 @@ export class ConfigManager {
     }
 
     static get log() { return this.getCache('log', LogConfig.get) }
-    static get request() { return this.getCache('request', RequestConfig.get) }
-    static get message() { return this.getCache('message', MessageConfig.get) }
-    static get tool() { return this.getCache('tool', ToolConfig.get) }
-    static get received() { return this.getCache('received', ReceivedConfig.get) }
-    static get reply() { return this.getCache('reply', ReplyConfig.get) }
-    static get image() { return this.getCache('image', ImageConfig.get) }
-    static get backend() { return this.getCache('backend', BackendConfig.get) }
-    static get memory() { return this.getCache('memory', MemoryConfig.get) }
+    static get model() { return this.getCache('model', ModelConfig.get) }
 
     static getExt(name: string): seal.ExtInfo {
         if (name == NAME && ConfigManager.ext) {

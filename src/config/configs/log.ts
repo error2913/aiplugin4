@@ -1,0 +1,17 @@
+import { ConfigManager } from "../configManager";
+
+export class LogConfig {
+    static ext: seal.ExtInfo;
+
+    static register() {
+        LogConfig.ext = ConfigManager.getExt('aiplugin4');
+
+        seal.ext.registerOptionConfig(LogConfig.ext, "日志打印方式", "简短", ["永不", "简短", "详细", "调试"]);
+    }
+
+    static get() {
+        return {
+            logLevel: seal.ext.getOptionConfig(LogConfig.ext, "日志打印方式") as "永不" | "简短" | "详细" | "调试"
+        }
+    }
+}
