@@ -87,7 +87,7 @@ export class Image {
 
     async urlToBase64() {
         if (this.type !== 'url') return;
-        const { imageTobase64Url } = Config.backend;
+        const { IMAGE_TO_BASE64: imageTobase64Url } = Config.backend;
         try {
             const response = await fetch(`${imageTobase64Url}/image-to-base64`, {
                 method: 'POST',

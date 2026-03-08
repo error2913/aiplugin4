@@ -1,10 +1,10 @@
-import { ConfigManager } from "./configManager";
+import { Config } from "../config";
 
 export class ImageConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ImageConfig.ext = ConfigManager.getExt('aiplugin4_5:图片');
+        ImageConfig.ext = Config.getExt('aiplugin4_5:图片');
 
         seal.ext.registerTemplateConfig(ImageConfig.ext, "本地图片路径", ['data/images/sealdice.png'], "如不需要可以不填写，修改完需要重载js");
         seal.ext.registerBoolConfig(ImageConfig.ext, "是否接收图片", true, "");

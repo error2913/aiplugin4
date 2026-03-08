@@ -1,4 +1,4 @@
-import { ConfigManager } from "./configManager";
+import { Config } from "../config";
 
 export class MemoryConfig {
     static ext: seal.ExtInfo;

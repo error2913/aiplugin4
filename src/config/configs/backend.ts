@@ -16,12 +16,12 @@ export class BackendConfig {
 
     static get() {
         return {
-            streamUrl: seal.ext.getStringConfig(BackendConfig.ext, "流式输出"),
-            imageTobase64Url: seal.ext.getStringConfig(BackendConfig.ext, "图片转base64"),
-            webSearchUrl: seal.ext.getStringConfig(BackendConfig.ext, "联网搜索"),
-            webReadUrl: seal.ext.getStringConfig(BackendConfig.ext, "网页读取"),
-            usageChartUrl: seal.ext.getStringConfig(BackendConfig.ext, "用量图表"),
-            renderUrl: seal.ext.getStringConfig(BackendConfig.ext, "md和html图片渲染")
+            STREAM: seal.ext.getStringConfig(BackendConfig.ext, "流式输出"),
+            IMAGE_TO_BASE64: seal.ext.getStringConfig(BackendConfig.ext, "图片转base64"),
+            WEB_SEARCH: seal.ext.getStringConfig(BackendConfig.ext, "联网搜索"),
+            WEB_READ: seal.ext.getStringConfig(BackendConfig.ext, "网页读取"),
+            USAGE_CHART: seal.ext.getStringConfig(BackendConfig.ext, "用量图表"),
+            RENDER: seal.ext.getStringConfig(BackendConfig.ext, "md和html图片渲染")
         }
     }
 }

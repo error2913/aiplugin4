@@ -11,7 +11,7 @@ export class SampleConfig {
 
     static get() {
         return {
-            enabled: seal.ext.getBoolConfig(SampleConfig.ext, "是否启用"),
+            ENABLED: seal.ext.getBoolConfig(SampleConfig.ext, "是否启用"),
         }
     }
 }

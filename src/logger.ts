@@ -8,7 +8,7 @@ class Logger {
     }
 
     handleLog(...data: any[]): string {
-        const { logLevel } = Config.base;
+        const { LOG_LEVEL: logLevel } = Config.base;
         if (logLevel === "永不") {
             return '';
         } else if (logLevel === "简短") {
@@ -50,7 +50,7 @@ class Logger {
     }
 
     debug(...data: any[]) {
-        const { logLevel } = Config.base;
+        const { LOG_LEVEL: logLevel } = Config.base;
         if (logLevel !== "调试") return;
         const s = this.handleLog(...data);
         if (!s) {
