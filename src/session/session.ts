@@ -1,6 +1,7 @@
 import { Config } from "../config/config";
 import { logger } from "../logger";
-import { ToolCall } from "../tool/tool";
+import { ToolCall, toolMap, ToolName, ToolState } from "../tool/tool";
+import { ToolListen } from "../tool/types";
 import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
 import { MemoryService } from "./memory";
@@ -23,7 +24,11 @@ export class Session {
         state: 'any',
         context: Context,
         memory: MemoryService,
-        // tool: ToolState; wip
+        tool: {
+            object: {
+                state: { objectValue: 'boolean' }
+            }
+        },
         ignoredUserIdList: { array: 'string' },
     }
     isPrivate: boolean;
@@ -31,7 +36,11 @@ export class Session {
     state: State;
     context: Context;
     memory: MemoryService;
-    // tool: ToolState; wip
+    tool: {
+        state: ToolState,
+        callCount: number, // 单次触发调用函数计数
+        listen: ToolListen // 监听调用函数发送的内容
+    }
     ignoredUserIdList: string[];
 
     constructor() {
@@ -40,7 +49,24 @@ export class Session {
         this.state = {};
         this.context = new Context();
         this.memory = new MemoryService();
-        // this.tool = new ToolState();
+        this.tool = {
+            state: Object.keys(toolMap).reduce((acc, key) => {
+                acc[key as ToolName] = false;
+                return acc;
+            }, {} as ToolState),
+            callCount: 0,
+            listen: {
+                timeoutId: null,
+                resolve: null,
+                reject: null,
+                cleanup: () => {
+                    if (this.tool.listen.timeoutId) clearTimeout(this.tool.listen.timeoutId);
+                    this.tool.listen.timeoutId = null;
+                    this.tool.listen.resolve = null;
+                    this.tool.listen.reject = null;
+                }
+            }
+        }
         this.ignoredUserIdList = [];
     }
 

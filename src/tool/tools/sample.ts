@@ -1,6 +1,6 @@
 import { Tool } from "../tool";
 
-const toolSample = new Tool({
+const tool = new Tool({
     type: "function",
     function: {
         name: "sample",
@@ -17,10 +17,10 @@ const toolSample = new Tool({
         }
     }
 });
-toolSample.solve = async (ctx, msg, agent, args) => {
+tool.solve = async (ctx, msg, agent, args) => {
     const { arg } = args;
     arg; ctx; msg; agent;
     return "调用示例函数成功";
 }
 
-export { toolSample };
+export { tool as toolSample };

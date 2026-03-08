@@ -2,11 +2,15 @@ import { Config } from "../config/config"
 import { logger } from "../logger"
 import { fixJsonString } from "../utils/string";
 import { Agent } from "../agent/agent"
-import { ExtCmdInfo, ToolInfo } from "./types";
+import { ExtCmdInfo, ToolInfo, ToolListen } from "./types";
+import { toolJrrp } from "./tools/jrrp";
 
-const toolMap = {
-    
+export const toolMap = {
+    jrrp: toolJrrp,
 }
+
+export type ToolName = keyof typeof toolMap;
+export type ToolState = { [key in ToolName]: boolean };
 
 export class Tool {
     toolInfo: ToolInfo;
@@ -32,76 +36,14 @@ export class Tool {
 
 export class ToolService {
     static cmdArgs: seal.CmdArgs = null;
-    static toolMap: { [key: string]: Tool } = {};
-    toolStatus: { [key: string]: boolean };
-    toolCallCount: number; // 一次性调用函数计数
-
-    // 监听调用函数发送的内容
-    listen: {
-        timeoutId: number,
-        resolve: (content: string) => void,
-        reject: (err: Error) => void,
-        cleanup: () => void
-    }
-
-    constructor() {
-        const { toolsNotAllow, toolsDefaultClosed } = Config.tool;
-        this.toolStatus = Object.keys(ToolService.toolMap).reduce((acc, key) => {
-            acc[key] = !toolsNotAllow.includes(key) && !toolsDefaultClosed.includes(key);
-            return acc;
-        }, {});
-        this.toolCallCount = 0;
-
-        this.listen = {
-            timeoutId: null,
-            resolve: null,
-            reject: null,
-            cleanup: () => {
-                if (this.listen.timeoutId) {
-                    clearTimeout(this.listen.timeoutId);
-                }
-
-                this.listen.timeoutId = null;
-                this.listen.resolve = null;
-                this.listen.reject = null;
-            }
-        };
-    }
-
-    static registerTool() {
-        registerMemory();
-        registerDeck();
-        registerJrrp();
-        registerModu();
-        registerRollCheck();
-        registerRename();
-        registerAttr();
-        registerBan();
-        registerRecord();
-        registerTime();
-        registerWeb();
-        registerImage();
-        registerGroupSign();
-        registerGetPersonInfo();
-        registerMessage();
-        registerEssenceMsg();
-        registerContext();
-        registerQQList();
-        registerSetTrigger();
-        registerMusicPlay();
-        registerMeme();
-        registerRender();
-    }
 
     /**
-     * 利用预存的指令信息和额外输入的参数构建一个cmdArgs, 并调用solve函数
-     * @param cmdArgs
-     * @param args
+     * 利用预存的指令信息和额外输入的参数构建一个cmdArgs并调用solve函数，监听消息并返回结果
      */
-    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, ai: AI, cmdInfo: ExtCmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
+    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, listen: ToolListen, eci: ExtCmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
         const cmdArgs = this.cmdArgs;
-        cmdArgs.command = cmdInfo.cmd;
-        cmdArgs.args = cmdInfo.staticArgs.concat(args);
+        cmdArgs.command = eci.cmd;
+        cmdArgs.args = eci.staticArgs.concat(args);
         cmdArgs.kwargs = kwargs;
         cmdArgs.at = at;
         cmdArgs.rawArgs = `${cmdArgs.args.join(' ')} ${kwargs.map(item => `--${item.name}${item.valueExists ? `=${item.value}` : ``}`).join(' ')}`;
@@ -111,38 +53,35 @@ export class ToolService {
         cmdArgs.specialExecuteTimes = 0;
         cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
 
-        const ext = seal.ext.find(cmdInfo.extName);
-        if (!ext.cmdMap.hasOwnProperty(cmdInfo.cmd)) {
-            logger.warning(`扩展${cmdInfo.extName}中未找到指令:${cmdInfo.cmd}`);
+        const ext = seal.ext.find(eci.extName);
+        if (!ext.cmdMap.hasOwnProperty(eci.cmd)) {
+            logger.warning(`扩展${eci.extName}中未找到指令:${eci.cmd}`);
             return ['', false];
         }
 
-        ai.tool.listen.reject?.(new Error('中断当前监听'));
+        listen.reject?.(new Error('中断当前监听'));
 
         return new Promise((
             resolve: (result: [string, boolean]) => void,
             reject: (err: Error) => void
         ) => {
-            ai.tool.listen.timeoutId = setTimeout(() => {
+            listen.timeoutId = setTimeout(() => {
                 reject(new Error('监听消息超时'));
-                ai.tool.listen.cleanup();
+                listen.cleanup();
             }, 10 * 1000);
-
-            ai.tool.listen.resolve = (content: string) => {
+            listen.resolve = (content: string) => {
                 resolve([content, true]);
-                ai.tool.listen.cleanup();
+                listen.cleanup();
             };
-
-            ai.tool.listen.reject = (err: Error) => {
+            listen.reject = (err: Error) => {
                 reject(err);
-                ai.tool.listen.cleanup();
+                listen.cleanup();
             };
-
             try {
-                ext.cmdMap[cmdInfo.cmd].solve(ctx, msg, cmdArgs);
+                ext.cmdMap[eci.cmd].solve(ctx, msg, cmdArgs);
             } catch (err) {
                 reject(new Error(`solve中发生错误:${err.message}`));
-                ai.tool.listen.cleanup();
+                listen.cleanup();
             }
         }).catch((err) => {
             logger.error(`在extensionSolve中: 调用函数失败:${err.message}`);

@@ -92,3 +92,10 @@ export interface ExtCmdInfo {
     cmd: string, // 指令名称
     staticArgs: string[] // 参数
 }
+
+export interface ToolListen {
+    timeoutId: number,
+    resolve: (content: string) => void,
+    reject: (err: Error) => void,
+    cleanup: () => void
+}
