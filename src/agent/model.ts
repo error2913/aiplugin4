@@ -1,6 +1,6 @@
 import { Config } from "../config/config";
 import { logger } from "../logger";
-import { ToolCall } from "../tool/tool";
+import { ToolCall } from "../tool/types";
 import { withTimeout } from "../utils/utils";
 import { Agent } from "./agent";
 import { UsageManager } from "./usage";
@@ -59,11 +59,11 @@ export class ChatModel extends BaseModel {
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
-        const { timeout } = Config.request;
+        const { TIMEOUT } = Config.base;
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), timeout);
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), TIMEOUT);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -107,7 +107,7 @@ export class ImageModel extends BaseModel {
     }
 
     async callITT(src: string, prompt = ''): Promise<string> {
-        const { timeout } = Config.request;
+        const { TIMEOUT } = Config.base;
         try {
             const time = Date.now();
 
@@ -122,7 +122,7 @@ export class ImageModel extends BaseModel {
                         "text": prompt
                     }]
                 }]
-            })), timeout);
+            })), TIMEOUT);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -143,11 +143,11 @@ export class ImageModel extends BaseModel {
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
-        const { timeout } = Config.request;
+        const { TIMEOUT } = Config.base;
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), timeout);
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), TIMEOUT);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -191,7 +191,7 @@ export class EmbeddingModel extends BaseModel {
             return [];
         }
 
-        const { timeout } = Config.request;
+        const { TIMEOUT } = Config.base;
 
         if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === this.body.dimensions) {
             const v = EmbeddingModel.vectorCache.vector;
@@ -203,7 +203,7 @@ export class EmbeddingModel extends BaseModel {
 
             const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
                 input: text
-            })), timeout);
+            })), TIMEOUT);
 
             if (data.data && data.data.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);

@@ -1,5 +1,5 @@
 import { AIManager } from "./AI/AI";
-import { ToolManager } from "./tool/tool";
+import { ToolService } from "./tool/tool";
 import { Config } from "./config/config";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
@@ -15,7 +15,7 @@ import { registerCmd } from "./cmd/root_cmd";
 function main() {
   Config.registerConfig();
   checkUpdate();
-  ToolManager.registerTool();
+  ToolService.registerTool();
   TimerManager.init();
   knowledgeService.init();
 
@@ -126,8 +126,8 @@ function main() {
   //接受的指令
   ext.onCommandReceived = (ctx, msg, cmdArgs) => {
     try {
-      if (ToolManager.cmdArgs === null) {
-        ToolManager.cmdArgs = cmdArgs;
+      if (ToolService.cmdArgs === null) {
+        ToolService.cmdArgs = cmdArgs;
       }
 
       const { allcmd } = Config.received;

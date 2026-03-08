@@ -1,39 +1,11 @@
-import { ToolCall } from "../tool/tool";
 import { Config } from "../config/config";
-import { Image, ImageManager } from "../image/image";
+import { Image, ImageService } from "../image/image";
 import { getCtxAndMsg } from "../utils/seal";
 import { levenshteinDistance } from "../utils/string";
 import { logger } from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/ob11";
 import { TypeDescriptor } from "../utils/utils";
-
-export interface BaseMessageItem {
-    time: number; // 秒
-    text: string;
-}
-
-export interface UserMessageItem extends BaseMessageItem {
-    userId: string;
-    messageId: string;
-}
-
-export interface AssistantMessageItem extends BaseMessageItem {
-    messageId: string;
-}
-
-export interface SystemUserMessageItem extends BaseMessageItem {
-    tip: string;
-}
-
-export interface ToolCallsMessageItem extends BaseMessageItem {
-    tool_calls: ToolCall[];
-}
-
-export interface ToolCallbackMessageItem extends BaseMessageItem {
-    tool_call_id: string;
-}
-
-export type MessageItem = UserMessageItem | AssistantMessageItem | SystemUserMessageItem | ToolCallsMessageItem | ToolCallbackMessageItem;
+import { MessageItem } from "./types";
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {

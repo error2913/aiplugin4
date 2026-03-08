@@ -5,7 +5,7 @@ import { endStream, pollStream, sendChatRequest, startStream } from "../agent/se
 import { Context } from "./context";
 import { MemoryManager } from "./memory";
 import { handleMessages, parseBody } from "../utils/message";
-import { ToolManager } from "../tool/tool";
+import { ToolService } from "../tool/tool";
 import { logger } from "../logger";
 import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
 import { TimerManager } from "../timer";
@@ -55,7 +55,7 @@ export class AI {
     static validKeys: (keyof AI)[] = ['context', 'tool', 'memory', 'imageManager', 'setting'];
     id: string;
     context: Context;
-    tool: ToolManager;
+    tool: ToolService;
     memory: MemoryManager;
     imageManager: ImageManager;
     setting: Setting;
@@ -75,7 +75,7 @@ export class AI {
     constructor() {
         this.id = '';
         this.context = new Context();
-        this.tool = new ToolManager();
+        this.tool = new ToolService();
         this.memory = new MemoryManager();
         this.imageManager = new ImageManager();
         this.setting = new Setting();
@@ -190,7 +190,7 @@ export class AI {
 
                         await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
                         try {
-                            await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
+                            await ToolService.handlePromptToolCall(ctx, msg, this, match[1]);
                             await this.chat(ctx, msg, '函数回调触发');
                         } catch (e) {
                             logger.error(`在handlePromptToolCall中出错:`, e.message);
@@ -206,7 +206,7 @@ export class AI {
 
                         this.context.addToolCallsMessage(tool_calls);
                         try {
-                            tool_choice = await ToolManager.handleToolCalls(ctx, msg, this, tool_calls);
+                            tool_choice = await ToolService.handleToolCalls(ctx, msg, this, tool_calls);
                             await this.chat(ctx, msg, '函数回调触发', tool_choice);
                         } catch (e) {
                             logger.error(`在handleToolCalls中出错:`, e.message);
@@ -298,7 +298,7 @@ export class AI {
                             await this.context.addMessage(ctx, msg, this, match[0], [], "assistant", '');
 
                             try {
-                                await ToolManager.handlePromptToolCall(ctx, msg, this, match[1]);
+                                await ToolService.handlePromptToolCall(ctx, msg, this, match[1]);
                             } catch (e) {
                                 logger.error(`在handlePromptToolCall中出错：`, e.message);
                                 return;
@@ -443,7 +443,7 @@ export class AIManager {
                         return context;
                     }
                     if (key === "tool") {
-                        const tm = revive(ToolManager, value);
+                        const tm = revive(ToolService, value);
                         tm.reviveToolStauts();
                         return tm;
                     }

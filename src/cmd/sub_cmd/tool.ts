@@ -1,7 +1,7 @@
 import { AIManager } from "../../AI/AI";
 import { Config } from "../../config/config";
 import { logger } from "../../logger";
-import { ToolManager } from "../../tool/tool";
+import { ToolService } from "../../tool/tool";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -72,12 +72,12 @@ export function registerCmdTool() {
                     return ret;
                 }
 
-                if (!ToolManager.toolMap.hasOwnProperty(val3)) {
+                if (!ToolService.toolMap.hasOwnProperty(val3)) {
                     seal.replyToSender(ctx, msg, '没有这个工具函数');
                     return ret;
                 }
 
-                const tool = ToolManager.toolMap[val3];
+                const tool = ToolService.toolMap[val3];
                 const s = `${tool.toolInfo.function.name}
       描述:${tool.toolInfo.function.description}
       
@@ -95,12 +95,12 @@ export function registerCmdTool() {
                     seal.replyToSender(ctx, msg, `调用函数缺少工具函数名`);
                     return ret;
                 }
-                if (!ToolManager.toolMap.hasOwnProperty(val3)) {
+                if (!ToolService.toolMap.hasOwnProperty(val3)) {
                     seal.replyToSender(ctx, msg, `调用函数失败:未注册的函数:${val3}`);
                     return ret;
                 }
-                const tool = ToolManager.toolMap[val3];
-                if (tool.ExtCmdInfo.extName !== '' && ToolManager.cmdArgs == null) {
+                const tool = ToolService.toolMap[val3];
+                if (tool.ExtCmdInfo.extName !== '' && ToolService.cmdArgs == null) {
                     seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
                     return ret;
                 }

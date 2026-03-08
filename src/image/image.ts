@@ -115,7 +115,7 @@ export class Image {
             logger.error("在imageUrlToBase64中请求出错：", error);
         }
 
-        ImageManager.saveImage(this);
+        ImageService.saveImage(this);
     }
 
     async imageToText(prompt = '') {
@@ -141,7 +141,7 @@ export class Image {
     }
 }
 
-export class ImageManager {
+export class ImageService {
     static imageMap: { [key: string]: Image } = {};
 
     static generateImageId(): string {

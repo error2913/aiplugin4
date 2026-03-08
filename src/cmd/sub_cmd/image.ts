@@ -1,5 +1,5 @@
 import { AIManager } from "../../AI/AI";
-import { ImageManager } from "../../image/image";
+import { ImageService } from "../../image/image";
 import { aliasToCmd } from "../../utils/utils";
 import { transformArrayToContent, transformTextToArray } from "../../utils/string";
 import { I, M, U } from "../privilege";
@@ -41,7 +41,7 @@ export function registerCmdImage() {
                         return ret;
                     }
                     case 'local': {
-                        seal.replyToSender(ctx, msg, ImageManager.getLocalImageListText(page) || '暂无本地图片');
+                        seal.replyToSender(ctx, msg, ImageService.getLocalImageListText(page) || '暂无本地图片');
                         return ret;
                     }
                     default: {

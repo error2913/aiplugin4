@@ -4,7 +4,7 @@ import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getComm
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../agent/service";
 import { buildContent, getRoleSetting, parseBody } from "../utils/message";
-import { ToolManager } from "../tool/tool";
+import { ToolService } from "../tool/tool";
 import { fmtDate } from "../utils/string";
 import { Image } from "../image/image";
 
@@ -582,7 +582,7 @@ export class SessionMemoryService extends MemoryService {
                 this.limitShortMemory();
 
                 memoryData.memories.forEach(m => {
-                    ToolManager.toolMap["add_memory"].solve(ctx, msg, ai, m);
+                    ToolService.toolMap["add_memory"].solve(ctx, msg, ai, m);
                 });
             }
         } catch (e) {

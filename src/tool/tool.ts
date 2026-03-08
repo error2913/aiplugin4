@@ -1,132 +1,19 @@
 import { Config } from "../config/config"
-import { registerAttr } from "./tool_attr"
-import { registerBan } from "./tool_ban"
-import { registerDeck } from "./tool_deck"
-import { registerImage } from "./tool_image"
-import { registerJrrp } from "./tool_jrrp"
-import { registerMemory } from "./tool_memory"
-import { registerModu } from "./tool_modu"
-import { registerRename } from "./tool_rename"
-import { registerRollCheck } from "./tool_roll_check"
-import { registerTime } from "./tool_time"
-import { registerRecord } from "./tool_voice"
-import { registerWeb } from "./tool_web"
-import { registerGroupSign } from "./tool_group_sign"
-import { registerGetPersonInfo } from "./tool_person_info"
-import { registerMessage } from "./tool_message"
-import { registerEssenceMsg } from "./tool_essence_msg"
-import { registerContext } from "./tool_context"
-import { registerQQList } from "./tool_qq_list"
-import { registerSetTrigger } from "./tool_trigger"
-import { registerMusicPlay } from "./tool_music"
-import { registerMeme } from "./tool_meme"
-import { registerRender } from "./tool_render"
 import { logger } from "../logger"
-import { Image } from "../image/image";
 import { fixJsonString } from "../utils/string";
 import { Agent } from "../agent/agent"
+import { ExtCmdInfo, ToolInfo } from "./types";
 
-export interface ToolInfoString {
-    type: "string";
-    description?: string;
-    enum?: string[];
-    minLength?: number;
-    maxLength?: number;
-    pattern?: string;
-    format?: "date-time" | "email" | "uri" | "uuid" | "hostname" | "ipv4" | "ipv6";
-}
-
-export interface ToolInfoNumber {
-    type: "number";
-    description?: string;
-    minimum?: number;
-    maximum?: number;
-    exclusiveMinimum?: number;
-    exclusiveMaximum?: number;
-    multipleOf?: number;
-}
-
-export interface ToolInfoInteger {
-    type: "integer";
-    description?: string;
-    minimum?: number;
-    maximum?: number;
-    exclusiveMinimum?: number;
-    exclusiveMaximum?: number;
-    multipleOf?: number;
-}
-
-export interface ToolInfoBoolean {
-    type: "boolean";
-    description?: string;
-}
-
-export interface ToolInfoNull {
-    type: "null";
-    description?: string;
-}
-
-export interface ToolInfoArray {
-    type: "array";
-    description?: string;
-    items: ToolInfoItem;
-    minItems?: number;
-    maxItems?: number;
-    uniqueItems?: boolean;
-}
-
-export interface ToolInfoObject {
-    type: "object";
-    description?: string;
-    properties?: {
-        [key: string]: ToolInfoItem;
-    };
-    required?: (keyof ToolInfoObject["properties"])[];
-    additionalProperties?: boolean | ToolInfoItem;
-    minProperties?: number;
-    maxProperties?: number;
-}
-
-export type ToolInfoItem =
-    | ToolInfoString
-    | ToolInfoNumber
-    | ToolInfoInteger
-    | ToolInfoBoolean
-    | ToolInfoNull
-    | ToolInfoArray
-    | ToolInfoObject;
-
-export interface ToolInfo {
-    type: "function",
-    function: {
-        name: string,
-        description: string,
-        parameters: ToolInfoObject
-    }
-}
-
-export interface ToolCall {
-    index: number,
-    id: string,
-    type: "function",
-    function: {
-        name: string,
-        arguments: string
-    }
-}
-
-export interface ExtCmdInfo {
-    extName: string, // 使用的扩展名称
-    cmd: string, // 指令名称
-    staticArgs: string[] // 参数
+const toolMap = {
+    
 }
 
 export class Tool {
     toolInfo: ToolInfo;
     ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
     sessionType: 'any' | 'user' | 'group'; // 可使用函数的会话类型
-    callBack: boolean; // 是否回调函数
-    solve: (ctx: seal.MsgContext, msg: seal.Message, agent: Agent, args: { [key: string]: any }) => Promise<{ content: string, images: Image[] }>;
+    callBack: boolean; // 是否回调智能体
+    solve: (ctx: seal.MsgContext, msg: seal.Message, agent: Agent, args: { [key: string]: any }) => Promise<string>;
 
     constructor(info: ToolInfo) {
         this.toolInfo = info;
@@ -135,16 +22,15 @@ export class Tool {
             cmd: '',
             staticArgs: []
         }
-        this.sessionType = "all"
-        this.tool_choice = 'auto';
-        this.solve = async (_, __, ___, ____) => ({ content: "函数未实现", images: [] });
+        this.sessionType = "any";
+        this.callBack = true;
+        this.solve = async (_, __, ___, ____) => "函数未实现";
 
-        ToolManager.toolMap[info.function.name] = this;
+        ToolService.toolMap[info.function.name] = this;
     }
 }
 
-export class ToolManager {
-    static validKeys: (keyof ToolManager)[] = ['toolStatus'];
+export class ToolService {
     static cmdArgs: seal.CmdArgs = null;
     static toolMap: { [key: string]: Tool } = {};
     toolStatus: { [key: string]: boolean };
@@ -160,7 +46,7 @@ export class ToolManager {
 
     constructor() {
         const { toolsNotAllow, toolsDefaultClosed } = Config.tool;
-        this.toolStatus = Object.keys(ToolManager.toolMap).reduce((acc, key) => {
+        this.toolStatus = Object.keys(ToolService.toolMap).reduce((acc, key) => {
             acc[key] = !toolsNotAllow.includes(key) && !toolsDefaultClosed.includes(key);
             return acc;
         }, {});
@@ -490,7 +376,7 @@ export class ToolManager {
     reviveToolStauts() {
         const { toolsNotAllow, toolsDefaultClosed } = Config.tool;
         const toolStatus: { [key: string]: boolean } = {};
-        for (const k in ToolManager.toolMap) {
+        for (const k in ToolService.toolMap) {
             if (!this.toolStatus.hasOwnProperty(k)) {
                 toolStatus[k] = !toolsNotAllow.includes(k) && !toolsDefaultClosed.includes(k);
             } else if (toolsNotAllow.includes(k)) {
@@ -510,11 +396,11 @@ export class ToolManager {
         const tools = Object.keys(this.toolStatus)
             .map(key => {
                 if (this.toolStatus[key]) {
-                    if (!ToolManager.toolMap.hasOwnProperty(key)) {
+                    if (!ToolService.toolMap.hasOwnProperty(key)) {
                         logger.error(`在getToolsInfo中找不到工具:${key}`);
                         return null;
                     }
-                    const tool = ToolManager.toolMap[key];
+                    const tool = ToolService.toolMap[key];
                     if (tool.sessionType !== "all" && tool.sessionType !== type) {
                         return null;
                     }
