@@ -1,5 +1,5 @@
 import { Image, ImageManager } from "./image";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { replyToSender, revive, transformMsgId } from "../utils/utils";
 import { endStream, pollStream, sendChatRequest, startStream } from "../agent/service";
 import { Context } from "./context";
@@ -112,7 +112,7 @@ export class AI {
         }
 
         //发送偷来的图片
-        const { p } = ConfigManager.image;
+        const { p } = Config.image;
         if (Math.random() * 100 <= p) {
             const img = await this.imageManager.drawImage();
             if (img) seal.replyToSender(ctx, msg, img.CQCode);
@@ -123,7 +123,7 @@ export class AI {
         logger.info('触发回复:', reason || '未知原因');
 
         if (reason !== '函数回调触发') {
-            const { bucketLimit, fillInterval } = ConfigManager.received;
+            const { bucketLimit, fillInterval } = Config.received;
             // 补充并检查触发次数
             if (Date.now() - this.bucket.lastTime > fillInterval * 1000) {
                 const fillCount = (Date.now() - this.bucket.lastTime) / (fillInterval * 1000);
@@ -137,7 +137,7 @@ export class AI {
         }
 
         // 检查toolsNotAllow状态
-        const { toolsNotAllow } = ConfigManager.tool;
+        const { toolsNotAllow } = Config.tool;
         toolsNotAllow.forEach(key => {
             if (this.tool.toolStatus.hasOwnProperty(key)) {
                 this.tool.toolStatus[key] = false;
@@ -150,7 +150,7 @@ export class AI {
         // 解析body，检查是否为流式
         let stream = false;
         try {
-            const bodyTemplate = ConfigManager.request.bodyTemplate;
+            const bodyTemplate = Config.request.bodyTemplate;
             const bodyObject = parseBody(bodyTemplate, [], null, null);
             stream = bodyObject?.stream === true;
         } catch (err) {
@@ -164,7 +164,7 @@ export class AI {
         }
 
 
-        const { isTool, usePromptEngineering } = ConfigManager.tool;
+        const { isTool, usePromptEngineering } = Config.tool;
         const toolInfos = this.tool.getToolsInfo(msg.messageType);
 
         let result = { contextArray: [], replyArray: [], images: [] };
@@ -238,7 +238,7 @@ export class AI {
     }
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
-        const { isTool, usePromptEngineering } = ConfigManager.tool;
+        const { isTool, usePromptEngineering } = Config.tool;
 
         await this.stopCurrentChatStream();
 
@@ -415,7 +415,7 @@ export class AIManager {
     static get usageMap(): { [model: string]: { [time: number]: UsageInfo } } {
         if (!this.usageMapCache) {
             try {
-                this.usageMapCache = JSON.parse(ConfigManager.ext.storageGet('usageMap') || '{}');
+                this.usageMapCache = JSON.parse(Config.ext.storageGet('usageMap') || '{}');
             } catch (error) {
                 logger.error(`从数据库中获取usageMap失败:`, error);
             }
@@ -432,7 +432,7 @@ export class AIManager {
             let ai = new AI();
 
             try {
-                ai = JSON.parse(ConfigManager.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
+                ai = JSON.parse(Config.ext.storageGet(`AI_${id}`) || '{}', (key, value) => {
                     if (key === "") {
                         return revive(AI, value);
                     }
@@ -474,7 +474,7 @@ export class AIManager {
 
     static saveAI(id: string) {
         if (this.cache.hasOwnProperty(id)) {
-            ConfigManager.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
+            Config.ext.storageSet(`AI_${id}`, JSON.stringify(this.cache[id]));
         }
     }
 
@@ -526,7 +526,7 @@ export class AIManager {
     }
 
     static saveUsageMap() {
-        ConfigManager.ext.storageSet('usageMap', JSON.stringify(this.usageMapCache));
+        Config.ext.storageSet('usageMap', JSON.stringify(this.usageMapCache));
     }
 
     static updateUsage(model: string, usage: {

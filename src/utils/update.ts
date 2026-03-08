@@ -1,6 +1,6 @@
 import { logger } from "../logger";
 import { updateInfo } from "../update";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { VERSION } from "../config/static_config";
 
 /**
@@ -31,11 +31,11 @@ export function compareVersions(version1: string, version2: string): number {
 }
 
 export function checkUpdate() {
-    const oldVersion = ConfigManager.ext.storageGet("version") || "0.0.0";
+    const oldVersion = Config.ext.storageGet("version") || "0.0.0";
 
     try {
         if (compareVersions(oldVersion, VERSION) < 0) {
-            ConfigManager.ext.storageSet("version", VERSION);
+            Config.ext.storageSet("version", VERSION);
             let info = [];
             for (const v in updateInfo) {
                 if (compareVersions(oldVersion, v) >= 0) {

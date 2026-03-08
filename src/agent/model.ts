@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/tool";
 import { withTimeout } from "../utils/utils";
@@ -59,7 +59,7 @@ export class ChatModel extends BaseModel {
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
-        const { timeout } = ConfigManager.request;
+        const { timeout } = Config.request;
         try {
             const time = Date.now();
 
@@ -107,7 +107,7 @@ export class ImageModel extends BaseModel {
     }
 
     async callITT(src: string, prompt = ''): Promise<string> {
-        const { timeout } = ConfigManager.request;
+        const { timeout } = Config.request;
         try {
             const time = Date.now();
 
@@ -143,7 +143,7 @@ export class ImageModel extends BaseModel {
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
-        const { timeout } = ConfigManager.request;
+        const { timeout } = Config.request;
         try {
             const time = Date.now();
 
@@ -191,7 +191,7 @@ export class EmbeddingModel extends BaseModel {
             return [];
         }
 
-        const { timeout } = ConfigManager.request;
+        const { timeout } = Config.request;
 
         if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === this.body.dimensions) {
             const v = EmbeddingModel.vectorCache.vector;

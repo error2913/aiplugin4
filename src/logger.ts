@@ -1,5 +1,5 @@
 import { NAME } from "./config/static_config";
-import { ConfigManager } from "./config/configManager";
+import { Config } from "./config/config";
 
 class Logger {
     name: string;
@@ -8,7 +8,7 @@ class Logger {
     }
 
     handleLog(...data: any[]): string {
-        const { logLevel } = ConfigManager.log;
+        const { logLevel } = Config.base;
         if (logLevel === "永不") {
             return '';
         } else if (logLevel === "简短") {
@@ -50,7 +50,7 @@ class Logger {
     }
 
     debug(...data: any[]) {
-        const { logLevel } = ConfigManager.log;
+        const { logLevel } = Config.base;
         if (logLevel !== "调试") return;
         const s = this.handleLog(...data);
         if (!s) {

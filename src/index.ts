@@ -1,6 +1,6 @@
 import { AIManager } from "./AI/AI";
 import { ToolManager } from "./tool/tool";
-import { ConfigManager } from "./config/configManager";
+import { Config } from "./config/config";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
 import { transformTextToArray } from "./utils/string";
@@ -13,13 +13,13 @@ import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { registerCmd } from "./cmd/root_cmd";
 
 function main() {
-  ConfigManager.registerConfig();
+  Config.registerConfig();
   checkUpdate();
   ToolManager.registerTool();
   TimerManager.init();
   knowledgeService.init();
 
-  const ext = ConfigManager.ext;
+  const ext = Config.ext;
 
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
@@ -34,7 +34,7 @@ function main() {
   //接受非指令消息
   ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
     try {
-      const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = ConfigManager.received;
+      const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = Config.received;
       if (ctx.isPrivate && disabledInPrivate) {
         return;
       }
@@ -130,7 +130,7 @@ function main() {
         ToolManager.cmdArgs = cmdArgs;
       }
 
-      const { allcmd } = ConfigManager.received;
+      const { allcmd } = Config.received;
       if (allcmd) {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
@@ -172,7 +172,7 @@ function main() {
 
       ai.tool.listen.resolve?.(message); // 将消息传递给监听工具
 
-      const { allmsg } = ConfigManager.received;
+      const { allmsg } = Config.received;
       if (allmsg) {
         if (message === ai.context.lastReply) {
           ai.context.lastReply = '';

@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 
 export class UsageManager {
@@ -15,7 +15,7 @@ export async function get_chart_url(chart_type: string, usage_data: {
         completion_tokens: number;
     }
 }) {
-    const { usageChartUrl } = ConfigManager.backend;
+    const { usageChartUrl } = Config.backend;
     try {
         const response = await fetch(`${usageChartUrl}/chart`, {
             method: 'POST',

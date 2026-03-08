@@ -1,6 +1,6 @@
 import { AI } from "../AI/AI";
 import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { aliasToCmd } from "../utils/utils";
 import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
 
@@ -24,7 +24,7 @@ export class PrivilegeManager {
 
     static reviveCmdPriv() {
         try {
-            const cmdPriv = JSON.parse(ConfigManager.ext.storageGet('cmdPriv') || '{}');
+            const cmdPriv = JSON.parse(Config.ext.storageGet('cmdPriv') || '{}');
             if (typeof cmdPriv === 'object' && !Array.isArray(cmdPriv)) {
                 this.cmdPriv = this.updateCmdPriv(cmdPriv, JSON.parse(JSON.stringify(defaultCmdPriv)));
                 this.saveCmdPriv();
@@ -37,7 +37,7 @@ export class PrivilegeManager {
     }
 
     static saveCmdPriv() {
-        ConfigManager.ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
+        Config.ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
     }
 
     static updateCmdPriv(cp: CmdPriv, defaultCp: CmdPriv): CmdPriv {

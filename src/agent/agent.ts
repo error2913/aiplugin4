@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { SessionService } from "../session/session";
 import { revive, TypeDescriptor } from "../utils/utils";
@@ -43,7 +43,7 @@ export class AgentManager {
         if (!this.agentMap.hasOwnProperty(name)) {
             let agent = new Agent();
             try {
-                const data = JSON.parse(ConfigManager.ext.storageGet(`agent_${name}`) || '{}');
+                const data = JSON.parse(Config.ext.storageGet(`agent_${name}`) || '{}');
                 agent = revive(Agent, data);
             } catch (error) {
                 logger.error(`加载智能体${name}失败: ${error}`);
@@ -55,7 +55,7 @@ export class AgentManager {
     }
 
     static saveAgent(agent: Agent) {
-        ConfigManager.ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
+        Config.ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
     }
 
     static initAgent() {

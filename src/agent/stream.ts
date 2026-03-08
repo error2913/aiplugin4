@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { withTimeout } from "../utils/utils";
 import { Agent } from "./agent";
@@ -7,8 +7,8 @@ import { UsageManager } from "./usage";
 
 export class streamService {
     static async startStream(agent: Agent, sessionId: string): Promise<string> {
-        const { timeout } = ConfigManager.request;
-        const { streamUrl } = ConfigManager.backend;
+        const { timeout } = Config.request;
+        const { streamUrl } = Config.backend;
         const model = ModelManager.getChatModel('chat');
         try {
             const body = model.buildChatBody(agent, sessionId);
@@ -64,7 +64,7 @@ export class streamService {
     }
 
     static async pollStream(streamId: string, after: number): Promise<{ status: string, reply: string, nextAfter: number }> {
-        const { streamUrl } = ConfigManager.backend;
+        const { streamUrl } = Config.backend;
 
         try {
             const response = await fetch(`${streamUrl}/poll?id=${streamId}&after=${after}`, {
@@ -107,7 +107,7 @@ export class streamService {
     }
 
     static async endStream(streamId: string): Promise<string> {
-        const { streamUrl } = ConfigManager.backend;
+        const { streamUrl } = Config.backend;
 
         try {
             const response = await fetch(`${streamUrl}/end?id=${streamId}`, {

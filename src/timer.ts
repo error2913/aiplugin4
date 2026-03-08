@@ -1,4 +1,4 @@
-import { ConfigManager } from "./config/configManager";
+import { Config } from "./config/config";
 import { getSessionCtxAndMsg } from "./utils/seal";
 import { AI, AIManager } from "./AI/AI";
 import { logger } from "./logger";
@@ -37,7 +37,7 @@ export class TimerManager {
 
     static getTimerQueue() {
         try {
-            const data = JSON.parse(ConfigManager.ext.storageGet(`timerQueue`) || '[]')
+            const data = JSON.parse(Config.ext.storageGet(`timerQueue`) || '[]')
             if (!Array.isArray(data)) throw new Error('timerQueue不是数组');
             data.forEach((item: any) => {
                 if (!item.hasOwnProperty('sessionId')) return;
@@ -50,7 +50,7 @@ export class TimerManager {
     }
 
     static saveTimerQueue() {
-        ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
+        Config.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
     static addTargetTimer(ctx: seal.MsgContext, ai: AI, target: number, content: string) {

@@ -2,6 +2,8 @@ export const VERSION = "4.12.0";
 export const AUTHOR = "baiyu&错误";
 export const NAME = "aiplugin4";
 
+export const CONFIG_CACHE_TTL = 60000;
+
 export const CQ_TYPES_ALLOW = ["at", "image", "reply", "face", "poke"];
 
 export const PRIVILEGE_LEVEL_MAP = {

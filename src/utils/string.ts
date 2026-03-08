@@ -1,7 +1,7 @@
 import { Context } from "../session/context";
 import { Image } from "../image/image";
 import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { transformMsgId, transformMsgIdBack } from "./utils";
 import { AI } from "../AI/AI";
 import { getCtxAndMsg } from "./seal";
@@ -174,7 +174,7 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
 }
 
 export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, messageArray: MessageSegment[]): Promise<{ content: string, images: Image[] }> {
-    const { showNumber, showMsgId } = ConfigManager.message;
+    const { showNumber, showMsgId } = Config.message;
     let content = '';
     const images: Image[] = [];
     for (const seg of messageArray) {
@@ -287,7 +287,7 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
 }
 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
-    const { replymsg, isTrim } = ConfigManager.reply;
+    const { replymsg, isTrim } = Config.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
@@ -337,7 +337,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
 }
 
 export function checkRepeat(context: Context, s: string) {
-    const { stopRepeat, similarityLimit } = ConfigManager.reply;
+    const { stopRepeat, similarityLimit } = Config.reply;
 
     if (!stopRepeat) {
         return false;
@@ -378,7 +378,7 @@ export function checkRepeat(context: Context, s: string) {
 }
 
 function filterString(s: string): { contextArray: string[], replyArray: string[] } {
-    const { maxChar, filterRegex, filterRegexes, contextTemplates, replyTemplates } = ConfigManager.reply;
+    const { maxChar, filterRegex, filterRegexes, contextTemplates, replyTemplates } = Config.reply;
 
     const contextArray: string[] = [];
     const replyArray: string[] = [];

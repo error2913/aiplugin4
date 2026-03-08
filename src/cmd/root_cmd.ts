@@ -1,5 +1,5 @@
 import { AI, AIManager } from "../AI/AI";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
 import { aliasToCmd } from "../utils/utils";
@@ -127,6 +127,6 @@ export function registerCmd() {
         }
     }
 
-    ConfigManager.ext.cmdMap['AI'] = cmd;
-    ConfigManager.ext.cmdMap['ai'] = cmd;
+    Config.ext.cmdMap['AI'] = cmd;
+    Config.ext.cmdMap['ai'] = cmd;
 }

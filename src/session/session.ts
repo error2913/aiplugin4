@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/tool";
 import { revive, TypeDescriptor } from "../utils/utils";
@@ -69,7 +69,7 @@ export class SessionService {
         if (!this.sessionMap.hasOwnProperty(sessionId)) {
             let session = new Session();
             try {
-                const data = JSON.parse(ConfigManager.ext.storageGet(`session_${sessionId}`) || '{}');
+                const data = JSON.parse(Config.ext.storageGet(`session_${sessionId}`) || '{}');
                 session = revive(Session, data);
             } catch (error) {
                 logger.error(`加载会话${sessionId}失败: ${error}`);

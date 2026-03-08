@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 import { MemoryService } from "./memory";
@@ -35,7 +35,7 @@ export class GroupManager {
         if (!this.groupMap.hasOwnProperty(groupId)) {
             let group = new Group();
             try {
-                const data = JSON.parse(ConfigManager.ext.storageGet(`group_${groupId}`) || '{}');
+                const data = JSON.parse(Config.ext.storageGet(`group_${groupId}`) || '{}');
                 group = revive(Group, data);
             } catch (error) {
                 logger.error(`加载群${groupId}失败: ${error}`);

@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 import { MemoryService } from "./memory";
@@ -29,7 +29,7 @@ export class UserManager {
         if (!this.userMap.hasOwnProperty(userId)) {
             let user = new User();
             try {
-                const data = JSON.parse(ConfigManager.ext.storageGet(`user_${userId}`) || '{}');
+                const data = JSON.parse(Config.ext.storageGet(`user_${userId}`) || '{}');
                 user = revive(User, data);
             } catch (error) {
                 logger.error(`加载用户${userId}失败: ${error}`);

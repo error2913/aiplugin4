@@ -1,5 +1,5 @@
 import { ToolCall } from "../tool/tool";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { Image, ImageManager } from "../image/image";
 import { getCtxAndMsg } from "../utils/seal";
 import { levenshteinDistance } from "../utils/string";
@@ -85,7 +85,7 @@ export class Context {
     }
 
     async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, content: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { isShortMemory, shortMemorySummaryRound } = ConfigManager.memory;
+        const { isShortMemory, shortMemorySummaryRound } = Config.memory;
         const messages = this.messages;
 
         const now = Math.floor(Date.now() / 1000);
@@ -216,7 +216,7 @@ export class Context {
     }
 
     limitMessages() {
-        const { maxRounds } = ConfigManager.message;
+        const { maxRounds } = Config.message;
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {

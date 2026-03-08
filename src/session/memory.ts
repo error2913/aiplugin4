@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { Context } from "./context";
 import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
@@ -133,7 +133,7 @@ export class MemoryItem {
     }
 
     async updateVector() {
-        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        const { isMemoryVector, embeddingDimension } = Config.memory;
         if (isMemoryVector) {
             logger.info(`更新记忆向量: ${this.id}`);
             const vector = await getEmbedding(this.content);
@@ -235,7 +235,7 @@ export class MemoryService {
     }
 
     limitMemory() {
-        const { memoryLimit } = ConfigManager.memory;
+        const { memoryLimit } = Config.memory;
         const limit = memoryLimit > 0 ? memoryLimit - 1 : 0; // 预留1个位置用于存储最新记忆
         if (this.memoryList.length <= limit) return;
         this.memoryList.map((m) => {
@@ -264,7 +264,7 @@ export class MemoryService {
         if (!this.memoryList.length) return [];
         const { userIdList: ul, groupIdList: gl, keywords: kws, includeImages, method } = options;
 
-        const { isMemoryVector, embeddingDimension } = ConfigManager.memory;
+        const { isMemoryVector, embeddingDimension } = Config.memory;
         let qv: number[] = [];
         if (isMemoryVector && query) {
             qv = await getEmbedding(query);
@@ -330,7 +330,7 @@ export class MemoryService {
     }
 
     async getTopScoreMemoryList(text: string = '', uid: string = '', gid: string = '') {
-        const { memoryShowNumber } = ConfigManager.memory;
+        const { memoryShowNumber } = Config.memory;
         return await this.search(text, {
             topK: memoryShowNumber,
             userIdList: uid ? [uid] : [],
@@ -353,8 +353,8 @@ export class MemoryService {
     // wip 和默认配置一起改
     buildMemory(sid: string, ml: MemoryItem[]): string {
         if (ml.length === 0) return '';
-        const { showNumber } = ConfigManager.message;
-        const { memoryShowTemplate, memorySingleShowTemplate } = ConfigManager.memory;
+        const { showNumber } = Config.message;
+        const { memoryShowTemplate, memorySingleShowTemplate } = Config.memory;
 
         let memoryContent = '';
         if (ml.length === 0) {
@@ -473,7 +473,7 @@ export class SessionMemoryService extends MemoryService {
     }
 
     limitSummary() {
-        const { SummaryLimit } = ConfigManager.memory;
+        const { SummaryLimit } = Config.memory;
         if (this.summaryList.length > SummaryLimit) {
             this.summaryList.splice(0, this.summaryList.length - SummaryLimit);
         }
@@ -487,9 +487,9 @@ export class SessionMemoryService extends MemoryService {
     async updateSummary(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
         if (!this.summaryStatus) return;
 
-        const { url: chatUrl, apiKey: chatApiKey } = ConfigManager.request;
-        const { isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
-        const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = ConfigManager.memory;
+        const { url: chatUrl, apiKey: chatApiKey } = Config.request;
+        const { isPrefix, showNumber, showMsgId, showTime } = Config.message;
+        const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = Config.memory;
 
         const { roleSetting } = getRoleSetting(ctx);
 
@@ -597,18 +597,18 @@ export class KnowledgeService extends MemoryService {
     }
 
     init() {
-        const data = JSON.parse(ConfigManager.ext.storageGet('knowledge') || '{}');
+        const data = JSON.parse(Config.ext.storageGet('knowledge') || '{}');
         const ms = revive(MemoryService, data);
         this.memoryMap = ms.memoryMap;
     }
 
     save() {
-        ConfigManager.ext.storageSet('knowledge', JSON.stringify(this.memoryMap));
+        Config.ext.storageSet('knowledge', JSON.stringify(this.memoryMap));
     }
 
     // wip 和配置一起改
     async updateKnowledgeMemory(roleIndex: number) {
-        const { knowledgeMemoryStringList } = ConfigManager.memory;
+        const { knowledgeMemoryStringList } = Config.memory;
         if (roleIndex < 0 || roleIndex >= knowledgeMemoryStringList.length) return;
         const s = knowledgeMemoryStringList[roleIndex];
         if (!s) return;
@@ -661,7 +661,7 @@ export class KnowledgeService extends MemoryService {
                         break;
                     }
                     case '图片': {
-                        const { localImagePathMap } = ConfigManager.image;
+                        const { localImagePathMap } = Config.image;
 
                         m.images = value.split(/[,，]/).map(id => id.trim()).map(id => {
                             if (localImagePathMap.hasOwnProperty(id)) {
@@ -710,8 +710,8 @@ export class KnowledgeService extends MemoryService {
 
     // wip
     buildKnowledgeMemory(memoryList: MemoryItem[]) {
-        const { showNumber } = ConfigManager.message;
-        const { knowledgeMemorySingleShowTemplate } = ConfigManager.memory;
+        const { showNumber } = Config.message;
+        const { knowledgeMemorySingleShowTemplate } = Config.memory;
         if (memoryList.length === 0) return '';
 
         let prompt = '';
@@ -739,7 +739,7 @@ export class KnowledgeService extends MemoryService {
         await this.updateKnowledgeMemory(roleIndex);
         if (this.memoryIdList.length === 0) return '';
 
-        const { knowledgeMemoryShowNumber } = ConfigManager.memory;
+        const { knowledgeMemoryShowNumber } = Config.memory;
         const memoryList = await this.search(text, {
             topK: knowledgeMemoryShowNumber,
             userIdList: ui ? [ui] : [],

@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { transformTextToArray } from "./string";
 import { ALIAS_MAP } from "../config/static_config";
 import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
@@ -29,7 +29,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         return '';
     }
 
-    const { showMsgId } = ConfigManager.message;
+    const { showMsgId } = Config.message;
     if (showMsgId && netExists()) {
         const rawMessageArray = transformTextToArray(s);
         const messageArray = rawMessageArray.filter(item => item.type !== 'poke');

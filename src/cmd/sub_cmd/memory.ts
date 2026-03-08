@@ -1,5 +1,5 @@
 import { AIManager } from "../../AI/AI";
-import { ConfigManager } from "../../config/configManager";
+import { Config } from "../../config/config";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -62,7 +62,7 @@ export function registerCmdMemory() {
                 if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== epId)) {
                     ai3 = ai2;
                 }
-                const { isMemory, isShortMemory } = ConfigManager.memory;
+                const { isMemory, isShortMemory } = Config.memory;
                 seal.replyToSender(ctx, msg, `${ai3.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
      长期记忆条数: ${ai3.memory.memoryIds.length}

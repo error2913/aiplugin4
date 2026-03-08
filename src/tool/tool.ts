@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager"
+import { Config } from "../config/config"
 import { registerAttr } from "./tool_attr"
 import { registerBan } from "./tool_ban"
 import { registerDeck } from "./tool_deck"
@@ -159,7 +159,7 @@ export class ToolManager {
     }
 
     constructor() {
-        const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
+        const { toolsNotAllow, toolsDefaultClosed } = Config.tool;
         this.toolStatus = Object.keys(ToolManager.toolMap).reduce((acc, key) => {
             acc[key] = !toolsNotAllow.includes(key) && !toolsDefaultClosed.includes(key);
             return acc;
@@ -273,7 +273,7 @@ export class ToolManager {
      * @returns tool_choice
      */
     static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: ToolCall[]): Promise<string> {
-        const { maxCallCount } = ConfigManager.tool;
+        const { maxCallCount } = Config.tool;
 
         if (tool_calls.length !== 0) {
             logger.info(`调用函数:`, tool_calls.map((item, i) => {
@@ -326,7 +326,7 @@ export class ToolManager {
         }
     }): Promise<string> {
         const name = tool_call.function.name;
-        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+        if (Config.tool.toolsNotAllow.includes(name)) {
             logger.warning(`调用函数失败:禁止调用的函数:${name}`);
             await ai.context.addToolMessage(tool_call.id, `调用函数失败:禁止调用的函数:${name}`, []);
             return "none";
@@ -395,7 +395,7 @@ export class ToolManager {
     }
 
     static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call_str: string): Promise<void> {
-        const { maxCallCount } = ConfigManager.tool;
+        const { maxCallCount } = Config.tool;
 
         ai.tool.toolCallCount++;
         if (ai.tool.toolCallCount === maxCallCount) {
@@ -440,7 +440,7 @@ export class ToolManager {
         }
 
         const name = tool_call.name;
-        if (ConfigManager.tool.toolsNotAllow.includes(name)) {
+        if (Config.tool.toolsNotAllow.includes(name)) {
             logger.warning(`调用函数失败:禁止调用的函数:${name}`);
             await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:禁止调用的函数:${name}`, []);
             return;
@@ -488,7 +488,7 @@ export class ToolManager {
     }
 
     reviveToolStauts() {
-        const { toolsNotAllow, toolsDefaultClosed } = ConfigManager.tool;
+        const { toolsNotAllow, toolsDefaultClosed } = Config.tool;
         const toolStatus: { [key: string]: boolean } = {};
         for (const k in ToolManager.toolMap) {
             if (!this.toolStatus.hasOwnProperty(k)) {
@@ -533,7 +533,7 @@ export class ToolManager {
     }
 
     getToolsPrompt(ctx: seal.MsgContext): string {
-        const { toolsPromptTemplate } = ConfigManager.tool;
+        const { toolsPromptTemplate } = Config.tool;
 
         const tools = this.getToolsInfo(ctx.isPrivate ? 'private' : 'group');
         if (tools && tools.length > 0) {

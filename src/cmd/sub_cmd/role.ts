@@ -1,4 +1,4 @@
-import { ConfigManager } from "../../config/configManager";
+import { Config } from "../../config/config";
 import { getRoleSetting } from "../../utils/message";
 import { I } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -11,7 +11,7 @@ export function registerCmdRole() {
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, ret } = scc;
 
-        const { roleSettingNames, roleSettingTemplate } = ConfigManager.message;
+        const { roleSettingNames, roleSettingTemplate } = Config.message;
         const { roleName } = getRoleSetting(ctx);
         const val2 = cmdArgs.getArgN(2);
         if (!val2) {

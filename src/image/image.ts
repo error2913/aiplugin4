@@ -1,4 +1,4 @@
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { generateId, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
 import { MessageSegment, parseSpecialTokens } from "../utils/string";
@@ -87,7 +87,7 @@ export class Image {
 
     async urlToBase64() {
         if (this.type !== 'url') return;
-        const { imageTobase64Url } = ConfigManager.backend;
+        const { imageTobase64Url } = Config.backend;
         try {
             const response = await fetch(`${imageTobase64Url}/image-to-base64`, {
                 method: 'POST',
@@ -119,7 +119,7 @@ export class Image {
     }
 
     async imageToText(prompt = '') {
-        const { defaultPrompt, urlToBase64, maxChars } = ConfigManager.image;
+        const { defaultPrompt, urlToBase64, maxChars } = Config.image;
 
         if (urlToBase64 == '总是' && this.type === 'url') await this.urlToBase64();
 
@@ -179,7 +179,7 @@ export class ImageManager {
         if (!this.imageMap.hasOwnProperty(imageId)) {
             let img = new Image();
             try {
-                const text = ConfigManager.ext.storageGet(`image_${imageId}`);
+                const text = Config.ext.storageGet(`image_${imageId}`);
                 if (!text) return null;
                 const data = JSON.parse(text || '{}');
                 img = revive(Image, data);
@@ -193,7 +193,7 @@ export class ImageManager {
     }
 
     static saveImage(img: Image) {
-        ConfigManager.ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
+        Config.ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
     }
 
     static getUserAvatar(uid: string): Image {
@@ -211,7 +211,7 @@ export class ImageManager {
     }
 
     static get LocalImageList() {
-        const { localImagePathMap } = ConfigManager.image;
+        const { localImagePathMap } = Config.image;
         return Object.keys(localImagePathMap).map(id => this.createLocalImage(id, localImagePathMap[id]));
     }
 
@@ -233,7 +233,7 @@ ${img.CQCode}`;
      * @returns 
      */
     static async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
-        const { receiveImage } = ConfigManager.image;
+        const { receiveImage } = Config.image;
         if (!receiveImage || seg.type !== 'image') return { content: '', images: [] };
 
         let content = '';
@@ -243,7 +243,7 @@ ${img.CQCode}`;
             if (!file) return { content: '', images: [] };
 
             const image = this.createUrlImage(getSessionId(ctx), file);
-            const { condition } = ConfigManager.image;
+            const { condition } = Config.image;
             const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
             if (fmtCondition === 1) await image.imageToText();
 

@@ -1,5 +1,5 @@
 import { AIManager } from "../../AI/AI";
-import { ConfigManager } from "../../config/configManager";
+import { Config } from "../../config/config";
 import { logger } from "../../logger";
 import { ToolManager } from "../../tool/tool";
 import { aliasToCmd } from "../../utils/utils";
@@ -27,7 +27,7 @@ export function registerCmdTool() {
             case 'on': {
                 const val3 = cmdArgs.getArgN(3);
                 if (val3) {
-                    const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
+                    const toolsNotAllow = Config.tool.toolsNotAllow;
                     if (toolsNotAllow.includes(val3)) {
                         seal.replyToSender(ctx, msg, `工具函数 ${val3} 不被允许开启`);
                         return ret;
@@ -38,7 +38,7 @@ export function registerCmdTool() {
                     AIManager.saveAI(sid);
                     return ret;
                 }
-                const toolsNotAllow = ConfigManager.tool.toolsNotAllow;
+                const toolsNotAllow = Config.tool.toolsNotAllow;
                 for (const key in ai.tool.toolStatus) {
                     ai.tool.toolStatus[key] = toolsNotAllow.includes(key) ? false : true;
                 }

@@ -1,13 +1,13 @@
 import { ChatModel, EmbeddingModel, ImageModel } from "../../agent/model";
 import { logger } from "../../logger";
-import { ConfigManager } from "../configManager";
+import { Config } from "../config";
 import { CHAT_MODEL_MAP, EMBEDDING_MODEL_MAP, IMAGE_MODEL_MAP } from "../static_config";
 
 export class ModelConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ModelConfig.ext = ConfigManager.getExt('aiplugin4:模型');
+        ModelConfig.ext = Config.getExt('aiplugin4:模型');
 
         seal.ext.registerOptionConfig(ModelConfig.ext, "快速选择对话模型", "", getChatModelOptions(), '');
         seal.ext.registerStringConfig(ModelConfig.ext, "快速填入对话模型api key", "", '');

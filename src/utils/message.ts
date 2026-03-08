@@ -1,15 +1,15 @@
 import { AI, GroupInfo, UserInfo } from "../AI/AI";
 import { Message } from "../session/context";
-import { ConfigManager } from "../config/configManager";
+import { Config } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./string";
 import { knowledgeService } from "../session/memory";
 
 export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
-    const { systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
-    const { localImagePathMap, receiveImage, condition } = ConfigManager.image;
-    const { isMemory, isShortMemory } = ConfigManager.memory;
+    const { systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = Config.message;
+    const { isTool, usePromptEngineering } = Config.tool;
+    const { localImagePathMap, receiveImage, condition } = Config.image;
+    const { isMemory, isShortMemory } = Config.memory;
 
     // 可发送的图片提示
     const sandableImagesPrompt: string = Object.keys(localImagePathMap)
@@ -87,7 +87,7 @@ export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<
 }
 
 function buildSamplesMessages(ctx: seal.MsgContext): Message[] {
-    const { samples } = ConfigManager.message;
+    const { samples } = Config.message;
 
     const samplesMessages: Message[] = samples
         .map((item, index) => {
@@ -125,7 +125,7 @@ function buildSamplesMessages(ctx: seal.MsgContext): Message[] {
 }
 
 function buildContextMessages(systemMessage: Message, messages: Message[]): Message[] {
-    const { insertCount } = ConfigManager.message;
+    const { insertCount } = Config.message;
 
     const contextMessages = messages.slice();
 
@@ -156,7 +156,7 @@ function buildContextMessages(systemMessage: Message, messages: Message[]): Mess
 }
 
 export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
-    const { isMerge } = ConfigManager.message;
+    const { isMerge } = Config.message;
 
     const systemMessage = await buildSystemMessage(ctx, ai);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -219,7 +219,7 @@ export async function handleMessages(ctx: seal.MsgContext, ai: AI) {
 }
 
 export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
-    const { isTool, usePromptEngineering } = ConfigManager.tool;
+    const { isTool, usePromptEngineering } = Config.tool;
     const bodyObject: any = {};
 
     for (let i = 0; i < template.length; i++) {
@@ -290,7 +290,7 @@ export function parseEmbeddingBody(template: string[], input: string, dimensions
 }
 
 export function buildContent(message: Message): string {
-    const { isPrefix, showNumber, showMsgId, showTime } = ConfigManager.message;
+    const { isPrefix, showNumber, showMsgId, showTime } = Config.message;
     const prefix = (isPrefix && message.name) ? (
         message.name.startsWith('_') ?
             `<|${message.name}|>` :
@@ -305,7 +305,7 @@ export function buildContent(message: Message): string {
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {
-    const { roleSettingNames, roleSettingTemplate } = ConfigManager.message;
+    const { roleSettingNames, roleSettingTemplate } = Config.message;
     // 角色设定
     const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
     let roleIndex = 0;
