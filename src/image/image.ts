@@ -5,7 +5,7 @@ import { MessageSegment, parseSpecialTokens } from "../utils/string";
 import { getSessionId } from "../utils/seal";
 import { ModelManager } from "../agent/model";
 
-export class Image {
+export default class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
         imageId: 'string',
         sourceSessionId: 'string',
@@ -115,11 +115,11 @@ export class Image {
             logger.error("在imageUrlToBase64中请求出错：", error);
         }
 
-        ImageService.saveImage(this);
+        Image.save(this);
     }
 
     async imageToText(prompt = '') {
-        const { defaultPrompt, urlToBase64, maxChars } = Config.image;
+        const { defaultPrompt, urlToBase64, maxChars } = Config.image; // wip
 
         if (urlToBase64 == '总是' && this.type === 'url') await this.urlToBase64();
 
@@ -139,14 +139,13 @@ export class Image {
 
         if (!this.description) logger.error(`图片${this.imageId}识别失败`);
     }
-}
 
-export class ImageService {
+
     static imageMap: { [key: string]: Image } = {};
 
     static generateImageId(): string {
         let id = generateId(), a = 0;
-        while (this.getImage(id)) {
+        while (this.get(id)) {
             id = generateId();
             a++;
             if (a > 1000) {
@@ -175,7 +174,7 @@ export class ImageService {
         return img;
     }
 
-    static getImage(imageId: string): Image | null {
+    static get(imageId: string): Image | null {
         if (!this.imageMap.hasOwnProperty(imageId)) {
             let img = new Image();
             try {
@@ -191,8 +190,7 @@ export class ImageService {
         }
         return this.imageMap[imageId];
     }
-
-    static saveImage(img: Image) {
+    static save(img: Image) {
         Config.ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
     }
 
@@ -211,7 +209,7 @@ export class ImageService {
     }
 
     static get LocalImageList() {
-        const { localImagePathMap } = Config.image;
+        const { localImagePathMap } = Config.image; // wip
         return Object.keys(localImagePathMap).map(id => this.createLocalImage(id, localImagePathMap[id]));
     }
 
@@ -263,7 +261,7 @@ ${img.CQCode}`;
             switch (seg.type) {
                 case 'img': {
                     const id = seg.content;
-                    const image = this.getImage(id);
+                    const image = this.get(id);
 
                     if (image) {
                         if (image.type === 'url') await image.urlToBase64();

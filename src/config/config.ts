@@ -1,11 +1,11 @@
 import Handlebars from "handlebars";
 import { logger } from "../logger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
-import { BaseConfig } from "./configs/base";
-import { ModelConfig } from "./configs/model";
-import { BackendConfig } from "./configs/backend";
-import { ReceivedConfig } from "./configs/received";
-import { TriggerConfig } from "./configs/trigger";
+import BaseConfig from "./configs/base";
+import ModelConfig from "./configs/model";
+import BackendConfig from "./configs/backend";
+import ReceivedConfig from "./configs/received";
+import TriggerConfig from "./configs/trigger";
 
 const configMap = {
     base: BaseConfig,

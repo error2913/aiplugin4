@@ -1,32 +1,21 @@
 import { Config } from "../config/config";
+import { DEFAULT_CHAT_MODEL_BODY, DEFAULT_EMBEDDING_MODEL_BODY, DEFAULT_IMAGE_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/types";
 import { withTimeout } from "../utils/utils";
 import { Agent } from "./agent";
+import { ChatModelUse, EmbeddingModelUse, ImageModelUse, ModelBody } from "./types";
 import { UsageManager } from "./usage";
-
-export type ModelUse = 'any' | 'chat' | 'image-understanding' | 'text-embedding'
-
-export interface ModelBody {
-    max_tokens?: number,
-    stop?: string[] | null,
-    stream?: boolean,
-    temperature?: number,
-    top_p?: number,
-    [key: string]: any
-}
 
 export class BaseModel {
     name: string;
-    use: ModelUse[];
     provider: string;
     baseUrl: string;
     apiKey: string;
     body: ModelBody;
 
-    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
+    constructor(name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
         this.name = name;
-        this.use = use;
         this.provider = provider;
         this.baseUrl = base_url;
         this.apiKey = api_key;
@@ -43,19 +32,14 @@ export class BaseModel {
 }
 
 export class ChatModel extends BaseModel {
-    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
-        super(name, use, provider, base_url, api_key, body);
+    use: ChatModelUse[];
+    constructor(use: ChatModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
+        super(name, provider, base_url, api_key, body);
+        this.use = use;
     }
 
     get url() {
         return `${this.baseUrl}/chat/completions`;
-    }
-
-    buildChatBody(agent: Agent, sessionId: string) {
-        return this.buildBody({
-            messages: agent.sessionService.getSession(sessionId).getMessages(),
-            tools: agent.getRequestTools()
-        });
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
@@ -63,7 +47,11 @@ export class ChatModel extends BaseModel {
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), TIMEOUT);
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
+                ...DEFAULT_CHAT_MODEL_BODY,
+                messages: agent.sessionService.getSession(sessionId).getMessages(),
+                tools: agent.getRequestTools()
+            })), TIMEOUT);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -91,19 +79,14 @@ export class ChatModel extends BaseModel {
 }
 
 export class ImageModel extends BaseModel {
-    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body: ModelBody) {
-        super(name, use, provider, base_url, api_key, body);
+    use: ImageModelUse[];
+    constructor(use: ImageModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
+        super(name, provider, base_url, api_key, body);
+        this.use = use;
     }
 
     get url() {
         return `${this.baseUrl}/chat/completions`;
-    }
-
-    buildChatBody(agent: Agent, sessionId: string) {
-        return this.buildBody({
-            messages: agent.sessionService.getSession(sessionId).getImageMessages(),
-            tools: agent.getRequestTools()
-        });
     }
 
     async callITT(src: string, prompt = ''): Promise<string> {
@@ -112,6 +95,7 @@ export class ImageModel extends BaseModel {
             const time = Date.now();
 
             const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
+                ...DEFAULT_IMAGE_MODEL_BODY,
                 messages: [{
                     role: "user",
                     content: [{
@@ -147,7 +131,11 @@ export class ImageModel extends BaseModel {
         try {
             const time = Date.now();
 
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildChatBody(agent, sessionId)), TIMEOUT);
+            const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
+                ...DEFAULT_IMAGE_MODEL_BODY,
+                messages: agent.sessionService.getSession(sessionId).getImageMessages(),
+                tools: agent.getRequestTools()
+            })), TIMEOUT);
 
             if (data.choices && data.choices.length > 0) {
                 UsageManager.updateUsage(data.model, data.usage);
@@ -177,8 +165,10 @@ export class ImageModel extends BaseModel {
 export class EmbeddingModel extends BaseModel {
     static vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
 
-    constructor(name: string, use: ModelUse[], provider: string, base_url: string, api_key: string, body) {
-        super(name, use, provider, base_url, api_key, body);
+    use: EmbeddingModelUse[];
+    constructor(use: EmbeddingModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
+        super(name, provider, base_url, api_key, body);
+        this.use = use;
     }
 
     get url() {
@@ -202,6 +192,7 @@ export class EmbeddingModel extends BaseModel {
             const time = Date.now();
 
             const data = await withTimeout(() => fetchData(this.url, this.apiKey, this.buildBody({
+                ...DEFAULT_EMBEDDING_MODEL_BODY,
                 input: text
             })), TIMEOUT);
 
@@ -233,7 +224,7 @@ export class ModelManager {
     static imageModels: ImageModel[] = [];
     static embeddingModels: EmbeddingModel[] = [];
 
-    static getChatModel(use: ModelUse): ChatModel | ImageModel | null {
+    static getChatModel(use: ChatModelUse): ChatModel | ImageModel | null {
         const chatModelList = ModelManager.chatModels.filter(model => model.use.includes(use));
         if (chatModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * chatModelList.length);
@@ -244,12 +235,12 @@ export class ModelManager {
             const randomIndex = Math.floor(Math.random() * ImageModelList.length);
             return ImageModelList[randomIndex];
         }
-        const chatModelAnyList = ModelManager.chatModels.filter(model => model.use.includes('any'));
+        const chatModelAnyList = ModelManager.chatModels.filter(model => model.use.length === 0);
         if (chatModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * chatModelAnyList.length);
             return chatModelAnyList[randomIndex];
         }
-        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.includes('any'));
+        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
             return ImageModelAnyList[randomIndex];
@@ -257,13 +248,13 @@ export class ModelManager {
         return null;
     }
 
-    static getImageModel(use: ModelUse): ImageModel | null {
+    static getImageModel(use: ImageModelUse): ImageModel | null {
         const ImageModelList = ModelManager.imageModels.filter(model => model.use.includes(use));
         if (ImageModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelList.length);
             return ImageModelList[randomIndex];
         }
-        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.includes('any'));
+        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
             return ImageModelAnyList[randomIndex];
@@ -271,13 +262,13 @@ export class ModelManager {
         return null;
     }
 
-    static getEmbeddingModel(use: ModelUse): EmbeddingModel | null {
+    static getEmbeddingModel(use: EmbeddingModelUse): EmbeddingModel | null {
         const EmbeddingModelList = ModelManager.embeddingModels.filter(model => model.use.includes(use));
         if (EmbeddingModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * EmbeddingModelList.length);
             return EmbeddingModelList[randomIndex];
         }
-        const EmbeddingModelAnyList = ModelManager.embeddingModels.filter(model => model.use.includes('any'));
+        const EmbeddingModelAnyList = ModelManager.embeddingModels.filter(model => model.use.length === 0);
         if (EmbeddingModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * EmbeddingModelAnyList.length);
             return EmbeddingModelAnyList[randomIndex];

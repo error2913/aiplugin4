@@ -4,7 +4,7 @@ import { revive, TypeDescriptor } from "../utils/utils";
 import { MemoryService } from "./memory";
 import { State } from "./session";
 
-export class User {
+export default class User {
     static validKeysMap: { [key in keyof User]?: TypeDescriptor<User[key]> } = {
         userId: 'string',
         userName: 'string',
@@ -20,12 +20,11 @@ export class User {
 
     state: State; //储存状态信息
     memory: MemoryService;
-}
 
-export class UserManager {
+
     static userMap: { [key: string]: User };
 
-    static getUser(userId: string): User {
+    static get(userId: string): User {
         if (!this.userMap.hasOwnProperty(userId)) {
             let user = new User();
             try {
@@ -38,5 +37,8 @@ export class UserManager {
             this.userMap[userId] = user;
         }
         return this.userMap[userId];
+    }
+    static save(user: User) {
+        Config.ext.storageSet(`user_${user.userId}`, JSON.stringify(user));
     }
 }

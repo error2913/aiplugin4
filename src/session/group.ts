@@ -4,7 +4,7 @@ import { revive, TypeDescriptor } from "../utils/utils";
 import { MemoryService } from "./memory";
 import { State } from "./session";
 
-export class Group {
+export default class Group {
     static validKeysMap: { [key in keyof Group]?: TypeDescriptor<Group[key]> } = {
         groupId: 'string',
         groupName: 'string',
@@ -26,12 +26,11 @@ export class Group {
 
     state: State; //储存状态信息
     memory: MemoryService;
-}
 
-export class GroupManager {
+    
     static groupMap: { [key: string]: Group };
 
-    static getGroup(groupId: string): Group {
+    static get(groupId: string): Group {
         if (!this.groupMap.hasOwnProperty(groupId)) {
             let group = new Group();
             try {
@@ -44,5 +43,8 @@ export class GroupManager {
             this.groupMap[groupId] = group;
         }
         return this.groupMap[groupId];
+    }
+    static save(group: Group) {
+        Config.ext.storageSet(`group_${group.groupId}`, JSON.stringify(group));
     }
 }

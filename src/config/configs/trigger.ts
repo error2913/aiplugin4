@@ -1,6 +1,6 @@
 import { Config, getRegexConfig } from "../config";
 
-export class TriggerConfig {
+export default class TriggerConfig {
     static ext: seal.ExtInfo;
 
     static register() {

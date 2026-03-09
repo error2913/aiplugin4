@@ -1,6 +1,6 @@
 import { Config } from "../config";
 
-export class BaseConfig {
+export default class BaseConfig {
     static ext: seal.ExtInfo;
 
     static register() {
