@@ -119,9 +119,9 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        const { defaultPrompt, urlToBase64, maxChars } = Config.image; // wip
+        const { IMAGE_DEFAULT_PROMPT, URL_TO_BASE64, MAX_CHARS } = Config.image;
 
-        if (urlToBase64 == '总是' && this.type === 'url') await this.urlToBase64();
+        if (URL_TO_BASE64 == '总是' && this.type === 'url') await this.urlToBase64();
 
         const model = ModelManager.getImageModel('image-understanding');
         if (!model) {
@@ -129,12 +129,12 @@ export default class Image {
             return;
         }
 
-        this.description = (await model.callITT(this.src, prompt ? prompt : defaultPrompt)).slice(0, maxChars);
+        this.description = (await model.callITT(this.src, prompt ? prompt : IMAGE_DEFAULT_PROMPT)).slice(0, MAX_CHARS);
 
-        if (!this.description && urlToBase64 === '自动' && this.type === 'url') {
+        if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url') {
             logger.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
-            this.description = (await model.callITT(this.src, prompt ? prompt : defaultPrompt)).slice(0, maxChars);
+            this.description = (await model.callITT(this.src, prompt ? prompt : IMAGE_DEFAULT_PROMPT)).slice(0, MAX_CHARS);
         }
 
         if (!this.description) logger.error(`图片${this.imageId}识别失败`);
@@ -209,8 +209,8 @@ export default class Image {
     }
 
     static get LocalImageList() {
-        const { localImagePathMap } = Config.image; // wip
-        return Object.keys(localImagePathMap).map(id => this.createLocalImage(id, localImagePathMap[id]));
+        const { LOCAL_IMAGE_PATH_MAP } = Config.image;
+        return Object.keys(LOCAL_IMAGE_PATH_MAP).map(id => this.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]));
     }
 
     static getLocalImageListText(p: number = 1): string {
@@ -225,14 +225,14 @@ ${img.CQCode}`;
     }
 
     /**
-     * 提取并替换CQ码中的图片
+     * 提取并替换CQ码中的图片 wip
      * @param ctx 
      * @param message 
      * @returns 
      */
     static async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment): Promise<{ content: string, images: Image[] }> {
-        const { receiveImage } = Config.image;
-        if (!receiveImage || seg.type !== 'image') return { content: '', images: [] };
+        const { RECEIVE_IMAGE } = Config.received;
+        if (!RECEIVE_IMAGE || seg.type !== 'image') return { content: '', images: [] };
 
         let content = '';
         const images: Image[] = [];
@@ -241,8 +241,8 @@ ${img.CQCode}`;
             if (!file) return { content: '', images: [] };
 
             const image = this.createUrlImage(getSessionId(ctx), file);
-            const { condition } = Config.image;
-            const fmtCondition = parseInt(seal.format(ctx, `{${condition}}`));
+            const { IMAGE_CONDITION } = Config.image;
+            const fmtCondition = parseInt(seal.format(ctx, `{${IMAGE_CONDITION}}`));
             if (fmtCondition === 1) await image.imageToText();
 
             content += image.description ? `<|img:${image.imageId}:${image.description}|>` : `<|img:${image.imageId}|>`;

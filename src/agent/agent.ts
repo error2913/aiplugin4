@@ -34,12 +34,10 @@ export class Agent {
     async chat() {
 
     }
-}
 
-export class AgentManager {
     static agentMap: { [key: string]: Agent } = {};
 
-    static getAgent(name: string): Agent {
+    static get(name: string): Agent {
         if (!this.agentMap.hasOwnProperty(name)) {
             let agent = new Agent();
             try {
@@ -54,11 +52,11 @@ export class AgentManager {
         return this.agentMap[name];
     }
 
-    static saveAgent(agent: Agent) {
+    static save(agent: Agent) {
         Config.ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
     }
 
-    static initAgent() {
+    static init() {
 
     }
 }

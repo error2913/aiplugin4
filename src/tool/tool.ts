@@ -2,7 +2,7 @@ import { Config } from "../config/config"
 import { logger } from "../logger"
 import { fixJsonString } from "../utils/string";
 import { Agent } from "../agent/agent"
-import { ExtCmdInfo, ToolInfo, ToolListen } from "./types";
+import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { toolJrrp } from "./tools/jrrp";
 
 export const toolMap = {
@@ -30,11 +30,9 @@ export class Tool {
         this.callBack = true;
         this.solve = async (_, __, ___, ____) => "函数未实现";
 
-        ToolService.toolMap[info.function.name] = this;
+        toolMap[info.function.name] = this;
     }
-}
 
-export class ToolService {
     static cmdArgs: seal.CmdArgs = null;
 
     /**
@@ -90,14 +88,9 @@ export class ToolService {
     }
 
     /**
-     * 调用函数并返回tool_choice
-     * @param ctx 
-     * @param msg 
-     * @param ai 
-     * @param tool_calls 
-     * @returns tool_choice
+     * 调用多个函数
      */
-    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_calls: ToolCall[]): Promise<string> {
+    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, agent: Agent, tool_calls: ToolCall[]): Promise<ToolCallResult[]> {
         const { maxCallCount } = Config.tool;
 
         if (tool_calls.length !== 0) {
@@ -141,15 +134,7 @@ export class ToolService {
         return tool_choice;
     }
 
-    static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call: {
-        index: number,
-        id: string,
-        type: "function",
-        function: {
-            name: string,
-            arguments: string
-        }
-    }): Promise<string> {
+    static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, agent: Agent, tool_call: ToolCall): Promise<ToolCallResult> {
         const name = tool_call.function.name;
         if (Config.tool.toolsNotAllow.includes(name)) {
             logger.warning(`调用函数失败:禁止调用的函数:${name}`);
@@ -219,7 +204,7 @@ export class ToolService {
         }
     }
 
-    static async handlePromptToolCall(ctx: seal.MsgContext, msg: seal.Message, ai: AI, tool_call_str: string): Promise<void> {
+    static async handlePromptToolCalls(ctx: seal.MsgContext, msg: seal.Message, agent: Agent, tool_call_str: string): Promise<void> {
         const { maxCallCount } = Config.tool;
 
         ai.tool.toolCallCount++;

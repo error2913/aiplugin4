@@ -6,6 +6,7 @@ export default class ReceivedConfig {
     static register() {
         ReceivedConfig.ext = Config.getExt('aiplugin4:消息接收');
 
+        seal.ext.registerBoolConfig(ReceivedConfig.ext, "接收图片", true, "");
         seal.ext.registerBoolConfig(ReceivedConfig.ext, "接收指令消息", false, "");
         seal.ext.registerBoolConfig(ReceivedConfig.ext, "接收骰子发送的消息", false, "");
         seal.ext.registerBoolConfig(ReceivedConfig.ext, "忽略私聊消息", false, "");
@@ -17,6 +18,7 @@ export default class ReceivedConfig {
 
     static get() {
         return {
+            RECEIVE_IMAGE: seal.ext.getBoolConfig(ReceivedConfig.ext, "接收图片"),
             RECEIVE_CMD: seal.ext.getBoolConfig(ReceivedConfig.ext, "接收指令消息"),
             RECEIVE_MSG_BY_BOT: seal.ext.getBoolConfig(ReceivedConfig.ext, "接收骰子发送的消息"),
             IGNORE_PRIVATE: seal.ext.getBoolConfig(ReceivedConfig.ext, "忽略私聊消息"),

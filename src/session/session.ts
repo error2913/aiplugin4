@@ -79,6 +79,10 @@ export class Session {
     getImageMessages(): RequestMessage[] {
         return [];
     }
+
+    getToolState(): ToolState {// 刷新工具状态
+        return this.tool.state;
+    }
 }
 
 export class SessionService {

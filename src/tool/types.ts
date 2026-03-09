@@ -86,6 +86,10 @@ export interface ToolCall {
         arguments: string
     }
 }
+export interface ToolCallResult {
+    tool_call_id: string,
+    content: string
+}
 
 export interface ExtCmdInfo {
     extName: string, // 使用的扩展名称
