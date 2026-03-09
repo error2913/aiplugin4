@@ -2,8 +2,10 @@ import { Config } from "../config/config";
 import { logger } from "../logger";
 import { SessionService } from "../session/session";
 import { revive, TypeDescriptor } from "../utils/utils";
+import Model from "./model";
+import { ChatModelUse, ModelUse } from "./types";
 
-export class Agent {
+export default class Agent {
     static validKeysMap: { [key in keyof Agent]?: TypeDescriptor<Agent[key]> } = {
         sessionService: SessionService,
         tools: { array: 'string' },
@@ -13,6 +15,7 @@ export class Agent {
     name: string;
     description: string;
     instruction: string | ((sessionService: SessionService) => string);
+    use: ChatModelUse;
 
     sessionService: SessionService;
     tools: string[];
@@ -22,6 +25,7 @@ export class Agent {
         this.name = "";
         this.description = "";
         this.instruction = "";
+        this.use = "chat";
         this.sessionService = new SessionService();
         this.tools = [];
         this.subAgents = [];
@@ -31,8 +35,8 @@ export class Agent {
     getRequestTools() {
     }
 
-    async chat() {
-
+    async chat(prompt: string): Promise<string> {
+        const model = Model.getChatModel(this.use);
     }
 
     static agentMap: { [key: string]: Agent } = {};

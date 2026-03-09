@@ -217,30 +217,28 @@ export class EmbeddingModel extends BaseModel {
     }
 }
 
-export type Model = ChatModel | ImageModel | EmbeddingModel;
-
-export class ModelManager {
+export default class Model {
     static chatModels: ChatModel[] = [];
     static imageModels: ImageModel[] = [];
     static embeddingModels: EmbeddingModel[] = [];
 
     static getChatModel(use: ChatModelUse): ChatModel | ImageModel | null {
-        const chatModelList = ModelManager.chatModels.filter(model => model.use.includes(use));
+        const chatModelList = Model.chatModels.filter(model => model.use.includes(use));
         if (chatModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * chatModelList.length);
             return chatModelList[randomIndex];
         }
-        const ImageModelList = ModelManager.imageModels.filter(model => model.use.includes(use));
+        const ImageModelList = Model.imageModels.filter(model => model.use.includes(use));
         if (ImageModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelList.length);
             return ImageModelList[randomIndex];
         }
-        const chatModelAnyList = ModelManager.chatModels.filter(model => model.use.length === 0);
+        const chatModelAnyList = Model.chatModels.filter(model => model.use.length === 0);
         if (chatModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * chatModelAnyList.length);
             return chatModelAnyList[randomIndex];
         }
-        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.length === 0);
+        const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
             return ImageModelAnyList[randomIndex];
@@ -249,12 +247,12 @@ export class ModelManager {
     }
 
     static getImageModel(use: ImageModelUse): ImageModel | null {
-        const ImageModelList = ModelManager.imageModels.filter(model => model.use.includes(use));
+        const ImageModelList = Model.imageModels.filter(model => model.use.includes(use));
         if (ImageModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelList.length);
             return ImageModelList[randomIndex];
         }
-        const ImageModelAnyList = ModelManager.imageModels.filter(model => model.use.length === 0);
+        const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
             return ImageModelAnyList[randomIndex];
@@ -263,12 +261,12 @@ export class ModelManager {
     }
 
     static getEmbeddingModel(use: EmbeddingModelUse): EmbeddingModel | null {
-        const EmbeddingModelList = ModelManager.embeddingModels.filter(model => model.use.includes(use));
+        const EmbeddingModelList = Model.embeddingModels.filter(model => model.use.includes(use));
         if (EmbeddingModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * EmbeddingModelList.length);
             return EmbeddingModelList[randomIndex];
         }
-        const EmbeddingModelAnyList = ModelManager.embeddingModels.filter(model => model.use.length === 0);
+        const EmbeddingModelAnyList = Model.embeddingModels.filter(model => model.use.length === 0);
         if (EmbeddingModelAnyList.length > 0) {
             const randomIndex = Math.floor(Math.random() * EmbeddingModelAnyList.length);
             return EmbeddingModelAnyList[randomIndex];
