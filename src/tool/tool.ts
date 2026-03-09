@@ -1,12 +1,13 @@
 import { Config } from "../config/config"
 import { logger } from "../logger"
 import { fixJsonString } from "../utils/string";
-import { Agent } from "../agent/agent"
+import Agent from "../agent/agent"
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { toolJrrp } from "./tools/jrrp";
 import { Session } from "../session/session";
+import { SessionType } from "../session/types";
 
-export const toolMap: { [key: string]: Tool } = {
+export const toolMap = {
     jrrp: toolJrrp,
 }
 
@@ -16,7 +17,7 @@ export type ToolState = { [key in ToolName]: boolean };
 export class Tool {
     toolInfo: ToolInfo;
     ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
-    sessionType: 'any' | 'user' | 'group'; // 可使用函数的会话类型
+    sessionType: 'any' | SessionType; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
     solve: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => Promise<string>;
 
@@ -88,41 +89,13 @@ export class Tool {
         });
     }
 
-    /**
-     * 调用多个函数
-     */
-    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_calls: ToolCall[]): Promise<{ result: ToolCallResult[], callBack: boolean }> {
-        const { MAX_CALL_COUNT } = Config.tool;
-
-        const ret = { result: [], callBack: true };
-
-        for (let i = 0; i < tool_calls.length; i++) {
-            const tool_call = tool_calls[i];
-            if (session.tool.callCount > MAX_CALL_COUNT) {
-                logger.warning('工具调用超过上限');
-                ret.result.push({
-                    tool_call_id: tool_call.id,
-                    content: '工具调用超过上限'
-                });
-                ret.callBack = false;
-                continue;
-            }
-            const { result, callBack } = await this.handleToolCall(ctx, msg, session, tool_call);
-            ret.result.push(result);
-            ret.callBack = ret.callBack && callBack;
-            session.tool.callCount++;
-        }
-
-        return ret;
-    }
-
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
         if (!toolMap.hasOwnProperty(name)) {
             logger.warning(`调用函数失败:未注册的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
         }
-        if (session.getToolState()?.[name]) {
+        if (session.toolState?.[name]) {
             logger.warning(`调用函数失败:未经许可的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未经许可的函数:${name}` }, callBack: true };
         }
@@ -176,7 +149,30 @@ export class Tool {
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
         }
     }
+    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_calls: ToolCall[]): Promise<{ result: ToolCallResult[], callBack: boolean }> {
+        const { MAX_CALL_COUNT } = Config.tool;
 
+        const ret = { result: [], callBack: true };
+
+        for (let i = 0; i < tool_calls.length; i++) {
+            const tool_call = tool_calls[i];
+            if (session.tool.callCount > MAX_CALL_COUNT) {
+                logger.warning('工具调用超过上限');
+                ret.result.push({
+                    tool_call_id: tool_call.id,
+                    content: '工具调用超过上限'
+                });
+                ret.callBack = false;
+                continue;
+            }
+            const { result, callBack } = await this.handleToolCall(ctx, msg, session, tool_call);
+            ret.result.push(result);
+            ret.callBack = ret.callBack && callBack;
+            session.tool.callCount++;
+        }
+
+        return ret;
+    }
     static async handlePromptToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, toolCallStr: string): Promise<{ result: ToolCallResult[], callBack: boolean }> {
         try {
             const data = JSON.parse(toolCallStr);
@@ -204,23 +200,18 @@ export class Tool {
         }
     }
 
-    // 生成prompt的逻辑 wip
-    static getToolsInfo(type: string): ToolInfo[] {
-        if (type !== "private" && type !== "group") {
-            type = "all";
-        }
-
-        const tools = Object.keys(this.toolStatus)
+    static getToolsInfo(session: Session): ToolInfo[] | null {
+        const toolState = session.toolState;
+        const sessionType = session.sessionType;
+        const tools = Object.keys(toolState)
             .map(key => {
-                if (this.toolStatus[key]) {
-                    if (!ToolService.toolMap.hasOwnProperty(key)) {
-                        logger.error(`在getToolsInfo中找不到工具:${key}`);
+                if (toolState[key]) {
+                    if (!toolMap.hasOwnProperty(key)) {
+                        logger.warning(`在getToolsInfo中找不到工具:${key}`);
                         return null;
                     }
-                    const tool = ToolService.toolMap[key];
-                    if (tool.sessionType !== "all" && tool.sessionType !== type) {
-                        return null;
-                    }
+                    const tool: Tool = toolMap[key];
+                    if (tool.sessionType !== "any" && tool.sessionType !== sessionType) return null;
                     return tool.toolInfo;
                 } else {
                     return null;
@@ -228,20 +219,15 @@ export class Tool {
             })
             .filter(item => item !== null);
 
-        if (tools.length === 0) {
-            return null;
-        } else {
-            return tools;
-        }
+        return tools.length > 0 ? tools : null;
     }
+    static getToolsInfoPrompt(session: Session): string {
+        const { TOOLS_PROMPT_TEMPLATE } = Config.tool;
 
-    static getToolsPrompt(ctx: seal.MsgContext): string {
-        const { toolsPromptTemplate } = Config.tool;
-
-        const tools = this.getToolsInfo(ctx.isPrivate ? 'private' : 'group');
+        const tools = this.getToolsInfo(session);
         if (tools && tools.length > 0) {
             return tools.map((item, index) => {
-                return toolsPromptTemplate({
+                return TOOLS_PROMPT_TEMPLATE({
                     "序号": index + 1,
                     "函数名称": item.function.name,
                     "函数描述": item.function.description,

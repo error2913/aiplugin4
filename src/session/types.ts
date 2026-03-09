@@ -27,3 +27,16 @@ export interface ToolCallbackMessageItem extends BaseMessageItem {
 }
 
 export type MessageItem = UserMessageItem | AssistantMessageItem | SystemUserMessageItem | ToolCallsMessageItem | ToolCallbackMessageItem;
+
+export interface State {
+    [key: string]: any;
+}
+
+export interface RequestMessage {
+    role: 'user' | 'assistant' | 'system' | 'tool';
+    content?: string;
+    tool_calls?: ToolCall[];
+    tool_call_id?: string;
+}
+
+export type SessionType = 'user' | 'group';

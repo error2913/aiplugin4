@@ -1,10 +1,22 @@
+export interface ToolInfoObject {
+    type: "object";
+    description?: string;
+    properties?: {
+        [key: string]: ToolInfoItem;
+    };
+    required?: (keyof ToolInfoObject["properties"])[];
+    additionalProperties?: boolean | ToolInfoItem;
+    minProperties?: number;
+    maxProperties?: number;
+}
+
 export interface ToolInfoString {
     type: "string";
     description?: string;
     enum?: string[];
     minLength?: number;
     maxLength?: number;
-    pattern?: string;
+    pattern?: string; // 正则表达式
     format?: "date-time" | "email" | "uri" | "uuid" | "hostname" | "ipv4" | "ipv6";
 }
 
@@ -28,16 +40,6 @@ export interface ToolInfoInteger {
     multipleOf?: number;
 }
 
-export interface ToolInfoBoolean {
-    type: "boolean";
-    description?: string;
-}
-
-export interface ToolInfoNull {
-    type: "null";
-    description?: string;
-}
-
 export interface ToolInfoArray {
     type: "array";
     description?: string;
@@ -47,16 +49,14 @@ export interface ToolInfoArray {
     uniqueItems?: boolean;
 }
 
-export interface ToolInfoObject {
-    type: "object";
+export interface ToolInfoBoolean {
+    type: "boolean";
     description?: string;
-    properties?: {
-        [key: string]: ToolInfoItem;
-    };
-    required?: (keyof ToolInfoObject["properties"])[];
-    additionalProperties?: boolean | ToolInfoItem;
-    minProperties?: number;
-    maxProperties?: number;
+}
+
+export interface ToolInfoNull {
+    type: "null";
+    description?: string;
 }
 
 export type ToolInfoItem =

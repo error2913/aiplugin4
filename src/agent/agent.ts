@@ -1,6 +1,7 @@
 import { Config } from "../config/config";
 import { logger } from "../logger";
 import { SessionService } from "../session/session";
+import { ToolName } from "../tool/tool";
 import { revive, TypeDescriptor } from "../utils/utils";
 import Model from "./model";
 import { ChatModelUse, ModelUse } from "./types";
@@ -18,7 +19,7 @@ export default class Agent {
     use: ChatModelUse;
 
     sessionService: SessionService;
-    tools: string[];
+    tools: ToolName[];
     subAgents: string[];
 
     constructor() {

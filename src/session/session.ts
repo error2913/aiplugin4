@@ -1,26 +1,16 @@
 import { Config } from "../config/config";
 import { logger } from "../logger";
-import { ToolCall, toolMap, ToolName, ToolState } from "../tool/tool";
+import { toolMap, ToolName, ToolState } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
 import { MemoryService } from "./memory";
-
-export class State {
-    [key: string]: any;
-}
-
-export interface RequestMessage {
-    role: 'user' | 'assistant' | 'system' | 'tool';
-    content?: string;
-    tool_calls?: ToolCall[];
-    tool_call_id?: string;
-}
+import { RequestMessage, SessionType, State } from "./types";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
-        isPrivate: 'boolean',
         sessionId: 'string',
+        sessionType: 'string',
         state: 'any',
         context: Context,
         memory: MemoryService,
@@ -31,8 +21,8 @@ export class Session {
         },
         ignoredUserIdList: { array: 'string' },
     }
-    isPrivate: boolean;
     sessionId: string;
+    sessionType: SessionType;
     state: State;
     context: Context;
     memory: MemoryService;
@@ -44,8 +34,8 @@ export class Session {
     ignoredUserIdList: string[];
 
     constructor() {
-        this.isPrivate = false;
         this.sessionId = '';
+        this.sessionType = 'group';
         this.state = {};
         this.context = new Context();
         this.memory = new MemoryService();
@@ -80,7 +70,7 @@ export class Session {
         return [];
     }
 
-    getToolState(): ToolState {// 刷新工具状态
+    get toolState(): ToolState {// 刷新工具状态 wip
         return this.tool.state;
     }
 }
@@ -105,6 +95,7 @@ export class SessionService {
                 logger.error(`加载会话${sessionId}失败: ${error}`);
             }
             session.sessionId = sessionId;
+            if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];
