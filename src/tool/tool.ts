@@ -4,8 +4,9 @@ import { fixJsonString } from "../utils/string";
 import { Agent } from "../agent/agent"
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { toolJrrp } from "./tools/jrrp";
+import { Session } from "../session/session";
 
-export const toolMap = {
+export const toolMap: { [key: string]: Tool } = {
     jrrp: toolJrrp,
 }
 
@@ -17,7 +18,7 @@ export class Tool {
     ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
     sessionType: 'any' | 'user' | 'group'; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
-    solve: (ctx: seal.MsgContext, msg: seal.Message, agent: Agent, args: { [key: string]: any }) => Promise<string>;
+    solve: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => Promise<string>;
 
     constructor(info: ToolInfo) {
         this.toolInfo = info;
@@ -90,74 +91,52 @@ export class Tool {
     /**
      * 调用多个函数
      */
-    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, agent: Agent, tool_calls: ToolCall[]): Promise<ToolCallResult[]> {
-        const { maxCallCount } = Config.tool;
+    static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_calls: ToolCall[]): Promise<{ result: ToolCallResult[], callBack: boolean }> {
+        const { MAX_CALL_COUNT } = Config.tool;
 
-        if (tool_calls.length !== 0) {
-            logger.info(`调用函数:`, tool_calls.map((item, i) => {
-                return `(${i}) ${item.function.name}:${item.function.arguments}`;
-            }).join('\n'));
-        }
+        const ret = { result: [], callBack: true };
 
-        if (tool_calls.length + ai.tool.toolCallCount > maxCallCount) {
-            logger.warning('一次性调用超过上限，将进行截断操作……');
-            tool_calls.splice(Math.max(0, maxCallCount - ai.tool.toolCallCount));
-        }
-
-        ai.tool.toolCallCount += tool_calls.length;
-        if (ai.tool.toolCallCount === maxCallCount) {
-            logger.warning('连续调用函数次数达到上限');
-        } else if (ai.tool.toolCallCount === maxCallCount + tool_calls.length) {
-            logger.warning('连续调用函数次数超过上限');
-            for (let i = 0; i < tool_calls.length; i++) {
-                const tool_call = tool_calls[i];
-                await ai.context.addToolMessage(tool_call.id, `连续调用函数次数超过上限`, []);
-                ai.tool.toolCallCount++;
-            }
-            return "none";
-        } else if (ai.tool.toolCallCount > maxCallCount + tool_calls.length) {
-            throw new Error('连续调用函数次数超过上限，已终止对话');
-        }
-
-        let tool_choice = 'none';
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
-            const tool_choice2 = await this.handleToolCall(ctx, msg, ai, tool_call);
-
-            if (tool_choice2 === 'required') {
-                tool_choice = 'required';
-            } else if (tool_choice === 'none' && tool_choice2 === 'auto') {
-                tool_choice = 'auto';
+            if (session.tool.callCount > MAX_CALL_COUNT) {
+                logger.warning('工具调用超过上限');
+                ret.result.push({
+                    tool_call_id: tool_call.id,
+                    content: '工具调用超过上限'
+                });
+                ret.callBack = false;
+                continue;
             }
+            const { result, callBack } = await this.handleToolCall(ctx, msg, session, tool_call);
+            ret.result.push(result);
+            ret.callBack = ret.callBack && callBack;
+            session.tool.callCount++;
         }
 
-        return tool_choice;
+        return ret;
     }
 
-    static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, agent: Agent, tool_call: ToolCall): Promise<ToolCallResult> {
+    static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
-        if (Config.tool.toolsNotAllow.includes(name)) {
-            logger.warning(`调用函数失败:禁止调用的函数:${name}`);
-            await ai.context.addToolMessage(tool_call.id, `调用函数失败:禁止调用的函数:${name}`, []);
-            return "none";
-        }
-        if (!this.toolMap.hasOwnProperty(name)) {
+        if (!toolMap.hasOwnProperty(name)) {
             logger.warning(`调用函数失败:未注册的函数:${name}`);
-            await ai.context.addToolMessage(tool_call.id, `调用函数失败:未注册的函数:${name}`, []);
-            return "none";
+            return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
+        }
+        if (session.getToolState()?.[name]) {
+            logger.warning(`调用函数失败:未经许可的函数:${name}`);
+            return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未经许可的函数:${name}` }, callBack: true };
         }
 
-
-        const tool = this.toolMap[name];
-        if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs == null) {
+        const tool = toolMap[name];
+        if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs === null) {
             logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
-            await ai.context.addToolMessage(tool_call.id, `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
-            return "none";
+            return { result: { tool_call_id: tool_call.id, content: `暂时无法调用函数，请先提示用户使用 .r 指令` }, callBack: true };
         }
-        if (tool.sessionType !== "all" && tool.sessionType !== msg.messageType) {
-            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`);
-            await ai.context.addToolMessage(tool_call.id, `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`, []);
-            return "none";
+
+        const msgType = msg.messageType === 'private' ? 'user' : 'group';
+        if (tool.sessionType !== "any" && tool.sessionType !== msgType) {
+            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);
+            return { result: { tool_call_id: tool_call.id, content: `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}` }, callBack: true };
         }
 
         let args = null;
@@ -167,15 +146,13 @@ export class Tool {
             const fixedStr = fixJsonString(tool_call.function.arguments);
             if (fixedStr === '') {
                 logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
-                await ai.context.addToolMessage(tool_call.id, `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`, []);
-                return "none";
+                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
             }
             try {
                 args = JSON.parse(fixedStr);
             } catch (e) {
                 logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
-                await ai.context.addToolMessage(tool_call.id, `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`, []);
-                return "none";
+                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
             }
 
         }
@@ -183,136 +160,52 @@ export class Tool {
         try {
             if (args !== null && typeof args !== 'object') {
                 logger.warning(`调用函数失败:arguement不是一个object`);
-                await ai.context.addToolMessage(tool_call.id, `调用函数失败:arguement不是一个object`, []);
-                return "auto";
+                return { result: { tool_call_id: tool_call.id, content: `调用函数失败:arguement不是一个object` }, callBack: true };
             }
             for (const key of tool.toolInfo.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
                     logger.warning(`调用函数失败:缺少必需参数 ${key}`);
-                    await ai.context.addToolMessage(tool_call.id, `调用函数失败:缺少必需参数 ${key}`, []);
-                    return "auto";
+                    return { result: { tool_call_id: tool_call.id, content: `调用函数失败:缺少必需参数 ${key}` }, callBack: true };
                 }
             }
 
-            const { content, images } = await tool.solve(ctx, msg, ai, args);
-            await ai.context.addToolMessage(tool_call.id, content, images);
-            return tool.tool_choice;
+            const content = await tool.solve(ctx, msg, session, args);
+            return { result: { tool_call_id: tool_call.id, content }, callBack: true };
         } catch (e) {
             logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
-            await ai.context.addToolMessage(tool_call.id, `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`, []);
-            return "none";
+            return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
         }
     }
 
-    static async handlePromptToolCalls(ctx: seal.MsgContext, msg: seal.Message, agent: Agent, tool_call_str: string): Promise<void> {
-        const { maxCallCount } = Config.tool;
-
-        ai.tool.toolCallCount++;
-        if (ai.tool.toolCallCount === maxCallCount) {
-            logger.warning('连续调用函数次数达到上限');
-        } else if (ai.tool.toolCallCount === maxCallCount + 1) {
-            logger.warning('连续调用函数次数超过上限');
-            await ai.context.addSystemUserMessage('调用函数返回', `连续调用函数次数超过上限`, []);
-            return;
-        } else if (ai.tool.toolCallCount > maxCallCount + 1) {
-            throw new Error('连续调用函数次数超过上限，已终止对话');
-        }
-
-        let tool_call: {
-            name: string,
-            arguments: {
-                [key: string]: any
-            }
-        } = null;
-
+    static async handlePromptToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, toolCallStr: string): Promise<{ result: ToolCallResult[], callBack: boolean }> {
         try {
-            tool_call = JSON.parse(tool_call_str);
+            const data = JSON.parse(toolCallStr);
+            if (!Array.isArray(data)) {
+                logger.warning(`解析函数调用失败:tool_calls不是一个数组`);
+                return { result: [{ tool_call_id: '', content: `解析函数调用失败:tool_calls不是一个数组` }], callBack: true };
+            }
+            const tool_calls = data.map((item, index) => {
+                if (!item.hasOwnProperty('name') || !item.hasOwnProperty('arguments')) throw new Error(`缺少name或arguments属性`);
+                if (typeof item.name !== 'string' || typeof item.arguments !== 'string') throw new Error(`name或arguments不是字符串`);
+                return {
+                    index: index,
+                    id: index.toString(),
+                    type: "function" as const,
+                    function: {
+                        name: item.name,
+                        arguments: item.arguments
+                    }
+                };
+            });
+            return await this.handleToolCalls(ctx, msg, session, tool_calls);
         } catch (e) {
-            const fixedStr = fixJsonString(tool_call_str);
-            if (fixedStr === '') {
-                logger.error('解析tool_call时出现错误:', e);
-                await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
-                return;
-            }
-            try {
-                tool_call = JSON.parse(fixedStr);
-            } catch (e) {
-                logger.error('解析tool_call时出现错误:', e);
-                await ai.context.addSystemUserMessage('调用函数返回', `解析tool_call时出现错误:${e.message}`, []);
-                return;
-            }
-        }
-
-        if (!tool_call.hasOwnProperty('name') || !tool_call.hasOwnProperty('arguments')) {
-            logger.warning(`调用函数失败:缺少name或arguments`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:缺少name或arguments`, []);
-            return;
-        }
-
-        const name = tool_call.name;
-        if (Config.tool.toolsNotAllow.includes(name)) {
-            logger.warning(`调用函数失败:禁止调用的函数:${name}`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:禁止调用的函数:${name}`, []);
-            return;
-        }
-        if (!this.toolMap.hasOwnProperty(name)) {
-            logger.warning(`调用函数失败:未注册的函数:${name}`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:未注册的函数:${name}`, []);
-            return;
-        }
-
-
-        const tool = this.toolMap[name];
-        if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs == null) {
-            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
-            await ai.context.addSystemUserMessage('调用函数返回', `暂时无法调用函数，请先提示用户使用 .r 指令`, []);
-            return;
-        }
-        if (tool.sessionType !== "all" && tool.sessionType !== msg.messageType) {
-            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msg.messageType}`, []);
-            return;
-        }
-
-        try {
-            const args = tool_call.arguments;
-            if (args !== null && typeof args !== 'object') {
-                logger.warning(`调用函数失败:arguement不是一个object`);
-                await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:arguement不是一个object`, []);
-                return;
-            }
-            for (const key of tool.toolInfo.function.parameters.required) {
-                if (!args.hasOwnProperty(key)) {
-                    logger.warning(`调用函数失败:缺少必需参数 ${key}`);
-                    await ai.context.addSystemUserMessage('调用函数返回', `调用函数失败:缺少必需参数 ${key}`, []);
-                    return;
-                }
-            }
-
-            const { content, images } = await tool.solve(ctx, msg, ai, args);
-            await ai.context.addSystemUserMessage('调用函数返回', content, images);
-        } catch (e) {
-            logger.error(`调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`);
-            await ai.context.addSystemUserMessage('调用函数返回', `调用函数 (${name}:${JSON.stringify(tool_call.arguments, null, 2)}) 失败:${e.message}`, []);
+            logger.error(`解析函数调用失败:${e.message}`);
+            return { result: [{ tool_call_id: '', content: `解析函数调用失败:${e.message}` }], callBack: true };
         }
     }
 
-    reviveToolStauts() {
-        const { toolsNotAllow, toolsDefaultClosed } = Config.tool;
-        const toolStatus: { [key: string]: boolean } = {};
-        for (const k in ToolService.toolMap) {
-            if (!this.toolStatus.hasOwnProperty(k)) {
-                toolStatus[k] = !toolsNotAllow.includes(k) && !toolsDefaultClosed.includes(k);
-            } else if (toolsNotAllow.includes(k)) {
-                toolStatus[k] = false;
-            } else {
-                toolStatus[k] = this.toolStatus[k];
-            }
-        }
-        this.toolStatus = toolStatus;
-    }
-
-    getToolsInfo(type: string): ToolInfo[] {
+    // 生成prompt的逻辑 wip
+    static getToolsInfo(type: string): ToolInfo[] {
         if (type !== "private" && type !== "group") {
             type = "all";
         }
@@ -342,7 +235,7 @@ export class Tool {
         }
     }
 
-    getToolsPrompt(ctx: seal.MsgContext): string {
+    static getToolsPrompt(ctx: seal.MsgContext): string {
         const { toolsPromptTemplate } = Config.tool;
 
         const tools = this.getToolsInfo(ctx.isPrivate ? 'private' : 'group');

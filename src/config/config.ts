@@ -7,6 +7,7 @@ import BackendConfig from "./configs/backend";
 import ReceivedConfig from "./configs/received";
 import TriggerConfig from "./configs/trigger";
 import ImageConfig from "./configs/image";
+import ToolConfig from "./configs/tool";
 
 const configMap = {
     base: BaseConfig,
@@ -15,6 +16,7 @@ const configMap = {
     received: ReceivedConfig,
     trigger: TriggerConfig,
     image: ImageConfig,
+    tool: ToolConfig,
 } as const;
 
 type ConfigMap = typeof configMap;

@@ -1,3 +1,4 @@
+import { getCtxAndMsg } from "../../utils/seal";
 import { Tool } from "../tool";
 
 const tool = new Tool({
@@ -22,17 +23,17 @@ tool.ExtCmdInfo = {
     cmd: 'jrrp',
     staticArgs: []
 }
-tool.solve = async (ctx, msg, agent, args) => {
+tool.solve = async (ctx, msg, session, args) => {
     const { name } = args;
 
-    const ui = await ai.context.findUserInfo(ctx, name);
-    if (ui === null) return { content: `未找到<${name}>`, images: [] };
+    const uid = await session.findUserId(ctx, name);
+    if (uid === '') return `未找到<${name}>`;
 
-    ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
-    const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.ExtCmdInfo, [], [], []);
-    if (!success) return { content: '今日人品查询失败', images: [] };
+    ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, uid, ctx.group.groupId));
+    const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, tool.ExtCmdInfo, [], [], []);
+    if (!success) return '今日人品查询失败';
 
-    return { content: s, images: [] };
+    return s;
 }
 
 export { tool as toolJrrp }

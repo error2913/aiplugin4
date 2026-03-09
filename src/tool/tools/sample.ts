@@ -17,9 +17,9 @@ const tool = new Tool({
         }
     }
 });
-tool.solve = async (ctx, msg, agent, args) => {
+tool.solve = async (ctx, msg, session, args) => {
     const { arg } = args;
-    arg; ctx; msg; agent;
+    arg; ctx; msg; session;
     return "调用示例函数成功";
 }
 
