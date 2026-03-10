@@ -28,6 +28,7 @@ export default class Agent {
         this.instruction = "";
         this.use = "chat";
         this.sessionService = new SessionService();
+        this.sessionService.agentName = this.name;
         this.tools = [];
         this.subAgents = [];
     }

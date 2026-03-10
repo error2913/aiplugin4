@@ -1,3 +1,4 @@
+import Agent from "../agent/agent";
 import { Config } from "../config/config";
 import { logger } from "../logger";
 import { toolMap, ToolName, ToolState } from "../tool/tool";
@@ -11,6 +12,7 @@ export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
         sessionId: 'string',
         sessionType: 'string',
+        agentName: 'string',
         state: 'any',
         context: Context,
         memory: MemoryService,
@@ -23,6 +25,7 @@ export class Session {
     }
     sessionId: string;
     sessionType: SessionType;
+    agentName: string;
     state: State;
     context: Context;
     memory: MemoryService;
@@ -36,6 +39,7 @@ export class Session {
     constructor() {
         this.sessionId = '';
         this.sessionType = 'group';
+        this.agentName = '';
         this.state = {};
         this.context = new Context();
         this.memory = new MemoryService();
@@ -70,18 +74,29 @@ export class Session {
         return [];
     }
 
-    get toolState(): ToolState {// 刷新工具状态 wip
+    get toolState(): ToolState {
+        const { BLOCKED, DEFAULT_CLOSED } = Config.tool;
+        const tools = Agent.get(this.agentName).tools;
+        const state: ToolState = {};
+        tools.forEach(tool => {
+            if (BLOCKED.includes(tool)) return;
+            if (!this.state.hasOwnProperty(tool)) this.state[tool] = !DEFAULT_CLOSED.includes(tool);
+            state[tool] = this.state[tool];
+        })
         return this.tool.state;
     }
 }
 
 export class SessionService {
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
+        agentName: 'string',
         sessionMap: { objectValue: Session },
     }
+    agentName: string;
     sessionMap: { [key: string]: Session };
 
     constructor() {
+        this.agentName = '';
         this.sessionMap = {};
     }
 
@@ -96,6 +111,7 @@ export class SessionService {
             }
             session.sessionId = sessionId;
             if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
+            session.agentName = this.agentName;
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];

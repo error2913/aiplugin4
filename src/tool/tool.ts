@@ -1,7 +1,6 @@
 import { Config } from "../config/config"
 import { logger } from "../logger"
 import { fixJsonString } from "../utils/string";
-import Agent from "../agent/agent"
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { toolJrrp } from "./tools/jrrp";
 import { Session } from "../session/session";
@@ -12,7 +11,7 @@ export const toolMap = {
 }
 
 export type ToolName = keyof typeof toolMap;
-export type ToolState = { [key in ToolName]: boolean };
+export type ToolState = { [key in ToolName]?: boolean };
 
 export class Tool {
     toolInfo: ToolInfo;
