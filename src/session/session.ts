@@ -15,7 +15,6 @@ export class Session {
         agentName: 'string',
         state: 'any',
         context: Context,
-        memory: MemoryService,
         tool: {
             object: {
                 state: { objectValue: 'boolean' }
@@ -28,7 +27,6 @@ export class Session {
     agentName: string;
     state: State;
     context: Context;
-    memory: MemoryService;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -42,7 +40,6 @@ export class Session {
         this.agentName = '';
         this.state = {};
         this.context = new Context();
-        this.memory = new MemoryService();
         this.tool = {
             state: Object.keys(toolMap).reduce((acc, key) => {
                 acc[key as ToolName] = false;

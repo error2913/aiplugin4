@@ -2,12 +2,12 @@ import { Config } from "../config/config"
 import { logger } from "../logger"
 import { fixJsonString } from "../utils/string";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
-import { toolJrrp } from "./tools/jrrp";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
+import { builtinCmdToolMap } from "./tools/builtin_cmd.ts/init";
 
 export const toolMap = {
-    jrrp: toolJrrp,
+    ...builtinCmdToolMap,
 }
 
 export type ToolName = keyof typeof toolMap;

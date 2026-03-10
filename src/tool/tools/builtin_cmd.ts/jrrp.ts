@@ -1,5 +1,5 @@
-import { getCtxAndMsg } from "../../utils/seal";
-import { Tool } from "../tool";
+import { getCtxAndMsg } from "../../../utils/seal";
+import { Tool } from "../../tool";
 
 const tool = new Tool({
     type: "function",

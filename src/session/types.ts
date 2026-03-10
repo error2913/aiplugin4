@@ -40,3 +40,12 @@ export interface RequestMessage {
 }
 
 export type SessionType = 'user' | 'group';
+
+export interface searchOptions {
+    topK: number;
+    userIdList: string[];
+    groupIdList: string[];
+    tags: string[];
+    includeImages: boolean;
+    method: 'weight' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
+}

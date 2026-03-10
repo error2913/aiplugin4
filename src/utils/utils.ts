@@ -179,18 +179,8 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-export function getCommonUser(a: string[], b: string[]): string[] {
+export function getCommonItem(a: string[], b: string[]): string[] {
     if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a);
-    return b.filter(u => aid.has(u));
-}
-export function getCommonGroup(a: string[], b: string[]): string[] {
-    if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a);
-    return b.filter(g => aid.has(g));
-}
-export function getCommonKeyword(a: string[], b: string[]): string[] {
-    if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a);
-    return b.filter(k => aid.has(k));
+    const aset = new Set(a);
+    return b.filter(u => aset.has(u));
 }

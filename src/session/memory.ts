@@ -1,6 +1,6 @@
 import { Config } from "../config/config";
 import { Context } from "./context";
-import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonUser, revive, TypeDescriptor } from "../utils/utils";
+import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../agent/service";
 import { buildContent, getRoleSetting, parseBody } from "../utils/message";
@@ -8,71 +8,60 @@ import { ToolService } from "../tool/tool";
 import { fmtDate } from "../utils/string";
 import { Image } from "../image/image";
 
-export interface searchOptions {
-    topK: number;
-    userIdList: string[];
-    groupIdList: string[];
-    keywords: string[];
-    includeImages: boolean;
-    method: 'weight' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
-}
-
 export class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
         'id': 'string',
-        'sourceSessionId': 'string',
-        'createTime': 'number',
-        'lastMentionTime': 'number',
-        'weight': 'number',
+        'sessionId': 'string',
+        'visibility': 'string',
+        'createAt': 'number',
+        'lastAccessedAt': 'number',
+        'accessCount': 'number',
+        'importance': 'number',
         'content': 'string',
         'vector': { array: 'number' },
-        'keywords': { array: 'string' },
-        'userIdList': { array: 'string' },
-        'groupIdList': { array: 'string' },
-        'imageIdList': { array: 'string' }
+        'tags': { array: 'string' },
+        'relatedMemories': { array: 'string' },
+        'users': { array: 'string' },
+        'groups': { array: 'string' }
     };
 
+    // 核心字段
     id: string; // 记忆ID
-    sourceSessionId: string; // 记忆来源会话ID
-    createTime: number; // 秒级时间戳
-    lastMentionTime: number; // 最后被提及时间，秒级时间戳
-    weight: number; // 记忆权重，0-10
+    sessionId: string; // 记忆来源会话ID
+    visibility: 'public' | 'private'; // 记忆可见性
 
+    // 淘汰策略相关
+    createAt: number; // 创建时间 TTL
+    lastAccessedAt: number; // 最后访问时间 LRU
+    accessCount: number; // 访问次数 LFU
+    importance: number; // 重要性0-1
+
+    // 内容
     content: string; // 记忆内容
     vector: number[]; // 记忆向量
-    keywords: string[]; // 记忆关键词列表
-    userIdList: string[]; // 记忆相关用户ID列表
-    groupIdList: string[]; // 记忆相关群组ID列表
-    imageIdList: string[]; // 记忆相关图片ID列表
+    tags: string[]; // 记忆标签列表
+    relatedMemories: string[]; // 相关记忆ID列表
+    users: string[]; // 记忆相关用户ID列表
+    groups: string[]; // 记忆相关群组ID列表
 
     constructor() {
         this.id = '';
-        this.sourceSessionId = '';
-        this.createTime = 0;
-        this.lastMentionTime = 0;
-        this.weight = 0;
+        this.sessionId = '';
+        this.visibility = 'public';
+        this.createAt = 0;
+        this.lastAccessedAt = 0;
+        this.accessCount = 0;
+        this.importance = 0;
         this.content = '';
         this.vector = [];
-        this.keywords = [];
-        this.userIdList = [];
-        this.groupIdList = [];
-        this.imageIdList = [];
+        this.tags = [];
+        this.relatedMemories = [];
+        this.users = [];
+        this.groups = [];
     }
 
     get copy(): MemoryItem {
-        const m = new MemoryItem();
-        m.id = this.id;
-        m.sourceSessionId = this.sourceSessionId;
-        m.createTime = this.createTime;
-        m.lastMentionTime = this.lastMentionTime;
-        m.weight = this.weight;
-        m.content = this.content;
-        m.vector = [...this.vector];
-        m.keywords = [...this.keywords];
-        m.userIdList = [...this.userIdList];
-        m.groupIdList = [...this.groupIdList];
-        m.imageIdList = [...this.imageIdList];
-        return m;
+        return revive(MemoryItem, JSON.parse(JSON.stringify(this)));
     }
 
     /**
@@ -81,55 +70,61 @@ export class MemoryItem {
      */
     get decay() {
         const now = Math.floor(Date.now() / 1000);
-        const ageInDays = (now - this.createTime) / (24 * 60 * 60);
-        const activityInHours = (now - this.lastMentionTime) / (60 * 60);
-        // 基础新鲜度: exp(-ageInDays / 7)
-        const ageDecay = Math.exp(-ageInDays / 7);
-        // 活跃度: exp(-activityInHours / 4)
-        const activityDecay = Math.exp(-activityInHours / 4);
-        // 衰减因子，取年龄衰减和活跃度衰减的较大值
-        return Math.max(ageDecay, activityDecay);
+        // 年龄（天）
+        const age = (now - this.createAt) / (24 * 60 * 60);
+        // 活跃时间（小时）
+        const activity = (now - this.lastAccessedAt) / (60 * 60);
+        // 年龄衰减: 半衰期7天
+        const ageDecay = Math.exp(-age / 7 * Math.LN2);
+        // 活跃衰减: 半衰期4小时
+        const activityDecay = Math.exp(-activity / 4 * Math.LN2);
+        // 衰减因子
+        return ageDecay * 0.7 + activityDecay * 0.3; // 一拍脑门决定的加权
+    }
+
+    get accessScore() {
+        // 饱和函数，访问次数归一化
+        const accessNorm = 1 - 1 / (this.accessCount + 1);
+        return accessNorm * this.decay;
     }
 
     /**
      * 计算记忆与查询的相似度分数
      * @param v  查询向量
-     * @param ul 查询用户列表
-     * @param gl 查询群组列表
-     * @param kws 查询关键词列表
+     * @param u 查询用户列表
+     * @param g 查询群组列表
+     * @param t 查询标签列表
      * @returns 相似度分数（0-1）
      */
-    calculateSimilarity(v: number[], ul: string[], gl: string[], kws: string[]): number {
+    calculateSimilarity(v: number[], u: string[], g: string[], t: string[]): number {
         // 总权重 0-1
-        const totalWeight = (v.length ? 0.4 : 0) + (ul.length ? 0.2 : 0) + (gl.length ? 0.2 : 0) + (kws.length ? 0.2 : 0);
-        if (totalWeight === 0) return 0;
+        const tw = (v.length ? 0.4 : 0) + (u.length ? 0.2 : 0) + (g.length ? 0.2 : 0) + (t.length ? 0.2 : 0);
+        if (tw === 0) return 0;
         // 向量相似度分数（如果提供了向量v） 0-1
-        const vectorSimilarity = (v && v.length > 0 && this.vector && this.vector.length > 0) ? (cosineSimilarity(v, this.vector) + 1) / 2 : 0;
+        const vs = (v && v.length > 0 && this.vector && this.vector.length > 0) ? (cosineSimilarity(v, this.vector) + 1) / 2 : 0;
         // 用户相似度分数 0-1
-        const commonUser = getCommonUser(this.userIdList, ul);
-        const userSimilarity = (ul && ul.length > 0) ? commonUser.length / ul.length : 0;
+        const us = u.length ? getCommonItem(this.users, u).length / new Set([...this.users, ...u]).size : 0;
         // 群组相似度分数 0-1
-        const commonGroup = getCommonGroup(this.groupIdList, gl);
-        const groupSimilarity = (gl && gl.length > 0) ? commonGroup.length / gl.length : 0;
-        // 关键词匹配分数 0-1
-        const commonKeyword = getCommonKeyword(this.keywords, kws);
-        const keywordSimilarity = (kws && kws.length > 0) ? commonKeyword.length / kws.length : 0;
+        const gs = g.length ? getCommonItem(this.groups, g).length / new Set([...this.groups, ...g]).size : 0;
+        // 标签匹配分数 0-1
+        const ts = t.length ? getCommonItem(this.tags, t).length / new Set([...this.tags, ...t]).size : 0;
         // 综合相似度分数 0-1
-        const avgSimilarity = vectorSimilarity * 0.4 + userSimilarity * 0.2 + groupSimilarity * 0.2 + keywordSimilarity * 0.2;
+        const avs = vs * 0.4 + us * 0.2 + gs * 0.2 + ts * 0.2;
         // 相似度增强因子 0-1
-        return avgSimilarity / totalWeight;
+        return avs / tw;
     }
 
     /**
      * 计算记忆的最终分数
      * @param v  查询向量
-     * @param ul 查询用户列表
-     * @param gl 查询群组列表
-     * @param kws 查询关键词列表
+     * @param u 查询用户列表
+     * @param g 查询群组列表
+     * @param t 查询标签列表
      * @returns 相似度分数（0-1）
      */
-    calculateScore(v: number[], ul: string[], gl: string[], kws: string[]): number {
-        return this.weight * 0.03 + this.calculateSimilarity(v, ul, gl, kws) * 0.7;
+    calculateScore(v: number[], u: string[], g: string[], t: string[]): number {
+        const similarity = this.calculateSimilarity(v, u, g, t);
+        return this.importance * 0.2 + this.accessScore * 0.2 + similarity * 0.6;
     }
 
     async updateVector() {
@@ -170,16 +165,16 @@ export class MemoryService {
 
     get keywords() {
         const keywords = new Set<string>();
-        this.memoryList.forEach(m => m.keywords.forEach(kw => keywords.add(kw)));
+        this.memoryList.forEach(m => m.tags.forEach(kw => keywords.add(kw)));
         return Array.from(keywords);
     }
 
     async addMemory(sid: string, ul: string[], gl: string[], kws: string[], il: string[], content: string) {
         for (const id of this.memoryIdList) {
             const m = this.memoryMap[id];
-            if (content === m.content && sid === m.sourceSessionId && getCommonUser(ul, m.userIdList).length > 0 && getCommonGroup(gl, m.groupIdList).length > 0) {
-                m.keywords = Array.from(new Set([...m.keywords, ...kws]));
-                logger.info(`记忆已存在，id:${id}，合并关键词:${m.keywords.join(',')}`);
+            if (content === m.content && sid === m.sessionId && getCommonItem(ul, m.users).length > 0 && getCommonGroup(gl, m.groups).length > 0) {
+                m.tags = Array.from(new Set([...m.tags, ...kws]));
+                logger.info(`记忆已存在，id:${id}，合并关键词:${m.tags.join(',')}`);
                 return;
             }
         }
@@ -205,14 +200,14 @@ export class MemoryService {
         const now = Math.floor(Date.now() / 1000);
         const m = new MemoryItem();
         m.id = id;
-        m.sourceSessionId = sid;
-        m.createTime = now;
-        m.lastMentionTime = now;
+        m.sessionId = sid;
+        m.createAt = now;
+        m.lastAccessedAt = now;
         m.weight = 5;
         m.content = content;
-        m.keywords = kws;
-        m.userIdList = ul;
-        m.groupIdList = gl;
+        m.tags = kws;
+        m.users = ul;
+        m.groups = gl;
         m.imageIdList = il;
 
         await m.updateVector();
@@ -227,7 +222,7 @@ export class MemoryService {
 
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
-                if (kws.some(kw => this.memoryMap[id].keywords.includes(kw))) {
+                if (kws.some(kw => this.memoryMap[id].tags.includes(kw))) {
                     delete this.memoryMap[id];
                 }
             }
@@ -257,12 +252,12 @@ export class MemoryService {
         topK: 10,
         userIdList: [],
         groupIdList: [],
-        keywords: [],
+        tags: [],
         includeImages: false,
         method: 'score'
     }) {
         if (!this.memoryList.length) return [];
-        const { userIdList: ul, groupIdList: gl, keywords: kws, includeImages, method } = options;
+        const { userIdList: ul, groupIdList: gl, tags: kws, includeImages, method } = options;
 
         const { isMemoryVector, embeddingDimension } = Config.memory;
         let qv: number[] = [];
@@ -284,7 +279,7 @@ export class MemoryService {
             .map(m => {
                 if (includeImages && m.imageIdList.length === 0) return null;
                 const mc = m.copy;
-                if (mc.keywords.some(kw => query.includes(kw))) mc.weight += 10; //提权
+                if (mc.tags.some(kw => query.includes(kw))) mc.weight += 10; //提权
                 return mc;
             })
             .filter(m => m)
@@ -293,9 +288,9 @@ export class MemoryService {
                     case 'weight': return b.weight - a.weight;
                     case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
                     case 'score': return b.calculateScore(qv, ul, gl, kws) - a.calculateScore(qv, ul, gl, kws);
-                    case 'early': return a.createTime - b.createTime;
-                    case 'late': return b.createTime - a.createTime;
-                    case 'recent': return b.lastMentionTime - a.lastMentionTime;
+                    case 'early': return a.createAt - b.createAt;
+                    case 'late': return b.createAt - a.createAt;
+                    case 'recent': return b.lastAccessedAt - a.lastAccessedAt;
                 }
             })
             .slice(0, options.topK || 10);
@@ -308,9 +303,9 @@ export class MemoryService {
 
         for (const id in this.memoryMap) {
             const m = this.memoryMap[id];
-            if (m.keywords.some(kw => s.includes(kw))) {
+            if (m.tags.some(kw => s.includes(kw))) {
                 m.weight = Math.max(10, m.weight + increase);
-                m.lastMentionTime = now;
+                m.lastAccessedAt = now;
             } else {
                 m.weight = Math.min(0, m.weight - decrease);
             }
@@ -335,7 +330,7 @@ export class MemoryService {
             topK: memoryShowNumber,
             userIdList: uid ? [uid] : [],
             groupIdList: gid ? [gid] : [],
-            keywords: [],
+            tags: [],
             includeImages: false,
             method: 'score'
         });
@@ -345,7 +340,7 @@ export class MemoryService {
         if (this.memoryList.length === 0) return '';
         if (p > Math.ceil(this.memoryList.length / 5)) p = Math.ceil(this.memoryList.length / 5);
         const latestMemoryList = this.memoryList
-            .sort((a, b) => b.createTime - a.createTime)
+            .sort((a, b) => b.createAt - a.createAt)
             .slice((p - 1) * 5, p * 5);
         return this.buildMemory(sid, latestMemoryList) + `\n当前页码: ${p}/${Math.ceil(this.memoryList.length / 5)}`;
     }
@@ -365,7 +360,7 @@ export class MemoryService {
                     return memorySingleShowTemplate({
                         "序号": i + 1,
                         "记忆ID": m.id,
-                        "记忆时间": fmtDate(m.createTime),
+                        "记忆时间": fmtDate(m.createAt),
                         "个人记忆": si.isPrivate,
                         "私聊": m.sessionInfo.isPrivate,
                         "展示号码": showNumber,
@@ -373,7 +368,7 @@ export class MemoryService {
                         "群聊号码": m.sessionInfo.id,
                         "相关用户": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "相关群聊": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
-                        "关键词": m.keywords.join(';'),
+                        "关键词": m.tags.join(';'),
                         "记忆内容": m.content
                     });
                 }).join('\n');
@@ -657,7 +652,7 @@ export class KnowledgeService extends MemoryService {
                         break;
                     }
                     case '关键词': {
-                        m.keywords = value.split(/[,，]/).map(kw => kw.trim()).filter(kw => kw);
+                        m.tags = value.split(/[,，]/).map(kw => kw.trim()).filter(kw => kw);
                         break;
                     }
                     case '图片': {
@@ -693,13 +688,13 @@ export class KnowledgeService extends MemoryService {
                 const m2 = this.memoryMap[m.id];
                 m.vector = m2.vector;
                 if (m2.content !== m.content) await m.updateVector();
-                m.createTime = m2.createTime;
-                m.lastMentionTime = m2.lastMentionTime;
+                m.createAt = m2.createAt;
+                m.lastAccessedAt = m2.lastAccessedAt;
                 m.weight = m2.weight;
             } else {
                 await m.updateVector();
-                m.createTime = now;
-                m.lastMentionTime = now;
+                m.createAt = now;
+                m.lastAccessedAt = now;
                 m.weight = 5;
             }
         }))
@@ -725,7 +720,7 @@ export class KnowledgeService extends MemoryService {
                         "记忆ID": m.id,
                         "用户列表": m.userList.map(u => u.name + (showNumber ? `(${u.id.replace(/^.+:/, '')})` : '')).join(';'),
                         "群聊列表": m.groupList.map(g => g.name + (showNumber ? `(${g.id.replace(/^.+:/, '')})` : '')).join(';'),
-                        "关键词": m.keywords.join(';'),
+                        "关键词": m.tags.join(';'),
                         "记忆内容": m.content
                     });
                 }).join('\n');
@@ -744,7 +739,7 @@ export class KnowledgeService extends MemoryService {
             topK: knowledgeMemoryShowNumber,
             userIdList: ui ? [ui] : [],
             groupIdList: gi ? [gi] : [],
-            keywords: [],
+            tags: [],
             includeImages: false,
             method: 'score'
         });
