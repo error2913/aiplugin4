@@ -4,7 +4,7 @@ export default class ToolConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ToolConfig.ext = Config.getExt('aiplugin4_2:函数调用');
+        ToolConfig.ext = Config.getExt('aiplugin4:工具');
 
         seal.ext.registerBoolConfig(ToolConfig.ext, "开启调用函数功能", true, "");
         seal.ext.registerBoolConfig(ToolConfig.ext, "切换为提示词工程", false, "API在不支持function calling功能的时候开启");
@@ -27,14 +27,14 @@ export default class ToolConfig {
 可调用多个函数，每个调用需包含name字段和arguments字段，且arguments字段必须是JSON字符串。
 
 可用函数列表:
-{{#each tools}}
+    {{#each tools}}
 {{index @index}}. 名称:{{{name}}}
     - 描述:{{{description}}}
     - 参数信息:{{{json_stringify parameters.properties}}}
-    - 必需参数:{{{string_array parameters.required}}}
-{{else}}
-    暂无可用函数。
-{{/each}}
+    - 必需参数:{{#each parameters.required}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
+    {{else}}
+暂无可用函数。
+    {{/each}}
 {{/if}}`
         ], "");
         seal.ext.registerIntConfig(ToolConfig.ext, "允许连续调用函数次数", 5, "单次对话中允许连续调用函数的次数");

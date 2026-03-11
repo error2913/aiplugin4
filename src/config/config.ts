@@ -8,6 +8,7 @@ import ReceivedConfig from "./configs/received";
 import TriggerConfig from "./configs/trigger";
 import ImageConfig from "./configs/image";
 import ToolConfig from "./configs/tool";
+import MemoryConfig from "./configs/memory";
 
 const configMap = {
     base: BaseConfig,
@@ -17,6 +18,7 @@ const configMap = {
     trigger: TriggerConfig,
     image: ImageConfig,
     tool: ToolConfig,
+    memory: MemoryConfig,
 } as const;
 
 type ConfigMap = typeof configMap;

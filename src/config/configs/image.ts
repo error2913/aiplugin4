@@ -4,7 +4,7 @@ export default class ImageConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ImageConfig.ext = Config.getExt('aiplugin4_5:图片');
+        ImageConfig.ext = Config.getExt('aiplugin4:图片');
 
         seal.ext.registerTemplateConfig(ImageConfig.ext, "本地图片路径", ['data/images/sealdice.png'], "如不需要可以不填写，修改完需要重载js");
         seal.ext.registerStringConfig(ImageConfig.ext, "图片全局识别豹语条件", '0', "使用豹语表达式，例如：$t群号_RAW=='2001'。若要开启所有图片自动识别转文字，请填写'1'");

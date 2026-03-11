@@ -15,7 +15,6 @@ import { registerCmd } from "./cmd/root_cmd";
 function main() {
   Handlebars.registerHelper('index', (index: number) => index + 1);
   Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));
-  Handlebars.registerHelper('string_array', (arr: string[]) => arr.join(', '));
 
   Config.registerConfig();
   checkUpdate();

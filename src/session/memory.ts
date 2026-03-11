@@ -1,12 +1,13 @@
 import { Config } from "../config/config";
 import { Context } from "./context";
-import { cosineSimilarity, generateId, getCommonGroup, getCommonKeyword, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
+import { cosineSimilarity, generateId, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
 import { fetchData, getEmbedding } from "../agent/service";
 import { buildContent, getRoleSetting, parseBody } from "../utils/message";
-import { ToolService } from "../tool/tool";
+import { Tool } from "../tool/tool";
 import { fmtDate } from "../utils/string";
-import { Image } from "../image/image";
+import Image from "../image/image";
+import Model from "../agent/model";
 
 export class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
@@ -75,9 +76,9 @@ export class MemoryItem {
         // 活跃时间（小时）
         const activity = (now - this.lastAccessedAt) / (60 * 60);
         // 年龄衰减: 半衰期7天
-        const ageDecay = Math.exp(-age / 7 * Math.LN2);
+        const ageDecay = this.createAt === 0 ? 1 : Math.exp(-age / 7 * Math.LN2);
         // 活跃衰减: 半衰期4小时
-        const activityDecay = Math.exp(-activity / 4 * Math.LN2);
+        const activityDecay = this.lastAccessedAt === 0 ? 1 : Math.exp(-activity / 4 * Math.LN2);
         // 衰减因子
         return ageDecay * 0.7 + activityDecay * 0.3; // 一拍脑门决定的加权
     }
@@ -128,20 +129,13 @@ export class MemoryItem {
     }
 
     async updateVector() {
-        const { isMemoryVector, embeddingDimension } = Config.memory;
-        if (isMemoryVector) {
-            logger.info(`更新记忆向量: ${this.id}`);
-            const vector = await getEmbedding(this.content);
-            if (!vector.length) {
-                logger.error('返回向量为空');
-                return;
-            }
-            if (vector.length !== embeddingDimension) {
-                logger.error(`向量维度不匹配。期望: ${embeddingDimension}, 实际: ${vector.length}`);
-                return;
-            }
-            this.vector = vector;
-        }
+        const { DIMENSION } = Config.memory;
+        logger.info(`更新记忆向量: ${this.id}`);
+        const model = Model.getEmbeddingModel('text-embedding');
+        const vector = await model.callEmbedding(this.content);
+        if (!vector.length) return logger.error('返回向量为空');
+        if (vector.length !== DIMENSION) return logger.error(`向量维度不匹配。期望: ${DIMENSION}, 实际: ${vector.length}`);
+        this.vector = vector;
     }
 }
 
@@ -577,7 +571,7 @@ export class SessionMemoryService extends MemoryService {
                 this.limitShortMemory();
 
                 memoryData.memories.forEach(m => {
-                    ToolService.toolMap["add_memory"].solve(ctx, msg, ai, m);
+                    Tool.toolMap["add_memory"].solve(ctx, msg, ai, m);
                 });
             }
         } catch (e) {
