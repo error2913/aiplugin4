@@ -1,25 +1,29 @@
 import { Config } from "../config";
+import { load } from 'js-toml'
 
-export class MemoryConfig {
+export default class MemoryConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        MemoryConfig.ext = ConfigManager.getExt('aiplugin4_7:记忆');
+        MemoryConfig.ext = Config.getExt('aiplugin4_7:记忆');
 
         seal.ext.registerIntConfig(MemoryConfig.ext, "知识库记忆展示数量", 10, "");
-        seal.ext.registerTemplateConfig(MemoryConfig.ext, "知识库记忆", [
-            ``,
-            `ID:测试
-用户:用户1:114514,用户2:1919810
-群聊:群聊1:114514,群聊2:1919810
-关键词:关键词1,关键词2
-图片:本地图片1的名字,本地图片2的名字
-内容:这是内容
-内容放在最后，可以换行
----
-ID:上面是分割符
-内容:用于多个知识词条的分割`
-        ], "与角色设定一一对应");
+        seal.ext.registerTemplateConfig(MemoryConfig.ext, "知识库记忆", [`# 采用toml进行格式化
+roles = ["正确"] # 当数组为空或不存在时，默认对所有角色生效
+            
+[测试]
+content = """
+这是内容
+可以换行
+"""
+importance = 0.9 # 记忆重要性，0-1之间的浮点数，默认0.5
+tags = ["标签1", "标签2"] # 标签列表
+relatedMemories = ["测试2"] # 相关记忆ID列表
+users = ["114514", "1919810"] # 相关用户ID列表
+groups = ["114514", "1919810"] # 相关群组ID列表
+
+[测试2]
+content = "单行形式，只有content字段是必须的"`], "");
         seal.ext.registerTemplateConfig(MemoryConfig.ext, "单条知识库记忆展示模板", [
             `   {{{序号}}}. 记忆ID:{{{记忆ID}}}
     相关用户:{{{用户列表}}}

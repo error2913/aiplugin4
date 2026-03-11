@@ -4,7 +4,7 @@ import { fixJsonString } from "../utils/string";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
-import { builtinCmdToolMap } from "./tools/builtin_cmd.ts/init";
+import builtinCmdToolMap from "./tools/builtin_cmd.ts/init";
 
 export const toolMap = {
     ...builtinCmdToolMap,
@@ -221,19 +221,14 @@ export class Tool {
         return tools.length > 0 ? tools : null;
     }
     static getToolsInfoPrompt(session: Session): string {
-        const { TOOLS_PROMPT_TEMPLATE } = Config.tool;
+        const { PROMPT_ENGINEERING, TOOLS_PROMPT_TEMPLATE } = Config.tool;
 
         const tools = this.getToolsInfo(session);
         if (tools && tools.length > 0) {
-            return tools.map((item, index) => {
-                return TOOLS_PROMPT_TEMPLATE({
-                    "序号": index + 1,
-                    "函数名称": item.function.name,
-                    "函数描述": item.function.description,
-                    "参数信息": JSON.stringify(item.function.parameters.properties, null, 2),
-                    "必需参数": item.function.parameters.required.join('\n')
-                });
-            }).join('\n');
+            return TOOLS_PROMPT_TEMPLATE({
+                "PROMPT_ENGINEERING": PROMPT_ENGINEERING,
+                "tools": tools
+            });
         }
 
         return '';

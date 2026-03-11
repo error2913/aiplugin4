@@ -9,11 +9,34 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ToolConfig.ext, "开启调用函数功能", true, "");
         seal.ext.registerBoolConfig(ToolConfig.ext, "切换为提示词工程", false, "API在不支持function calling功能的时候开启");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "工具函数prompt模板", [
-            `{{序号}}. 名称:{{{函数名称}}}
-    - 描述:{{{函数描述}}}
-    - 参数信息:{{{参数信息}}}
-    - 必需参数:{{{必需参数}}}`
-        ], "提示词工程中每个函数的prompt");
+            `{{#if PROMPT_ENGINEERING}}
+
+## 调用函数
+当需要调用函数功能时，请严格使用以下JSON格式，示例：
+
+<function>
+[
+{
+    "name": "函数名",
+    "arguments": "{\\"参数1\\": \\"值1\\",\\"参数2\\": \\"值2\\"}"
+}
+]
+</function>
+
+要使用成对的标签：\`<function>\`在前面，\`</function>\`在后面包裹调用工具的数组。
+可调用多个函数，每个调用需包含name字段和arguments字段，且arguments字段必须是JSON字符串。
+
+可用函数列表:
+{{#each tools}}
+{{index @index}}. 名称:{{{name}}}
+    - 描述:{{{description}}}
+    - 参数信息:{{{json_stringify parameters.properties}}}
+    - 必需参数:{{{string_array parameters.required}}}
+{{else}}
+    暂无可用函数。
+{{/each}}
+{{/if}}`
+        ], "");
         seal.ext.registerIntConfig(ToolConfig.ext, "允许连续调用函数次数", 5, "单次对话中允许连续调用函数的次数");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "禁止调用的函数", [''], "修改后保存并重载js");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "默认关闭的函数", [''], "");

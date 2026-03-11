@@ -81,3 +81,5 @@ kwarg，p，存在页码和概率撞车的情况
 https://api-docs.deepseek.com/zh-cn/guides/thinking_mode#%E5%B7%A5%E5%85%B7%E8%B0%83%E7%94%A8
 
 https://api-docs.deepseek.com/zh-cn/guides/tool_calls#%E6%80%9D%E8%80%83%E6%A8%A1%E5%BC%8F
+
+检查调用并修复的agent
