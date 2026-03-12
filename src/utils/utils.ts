@@ -79,14 +79,17 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
 }
 
 export type TypeDescriptor<T> =
+    'default'
     | 'string'
     | 'number'
     | 'boolean'
     | 'any'
     | TypeDescriptor<any>[] // 元组元素类型
     | { array: TypeDescriptor<any> } // 数组元素类型
-    | { object: { [key: string]: TypeDescriptor<any> } } // 对象键值对类型
-    | { objectValue: TypeDescriptor<any> } // 对象值类型
+    | {
+        object?: { [key: string]: TypeDescriptor<any> },
+        objectValue?: TypeDescriptor<any>
+    } // 对象键值对类型，对象值类型
     | RevivableConstructor<T>; // 嵌套类
 
 interface RevivableConstructor<T> {
@@ -108,31 +111,23 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
             if (typeof value === 'number') return value;
         } else if (descriptor === 'boolean') {
             if (typeof value === 'boolean') return value;
-        } else if (descriptor === 'any') {
-            return value;
         } else if (Array.isArray(descriptor)) {
-            if (Array.isArray(value)) return descriptor.map((d: any, index: number) => {
-                if (index < value.length) return reviveItem(d, defaultValue?.[index], value[index]);
-                return defaultValue?.[index];
-            });
+            if (Array.isArray(value)) return descriptor.map((d: any, i: number) => reviveItem(d, defaultValue?.[i], value?.[i]));
         } else if (typeof descriptor === 'object' && 'array' in descriptor) {
-            if (Array.isArray(value)) return value.map((item: any) => reviveItem(descriptor.array, defaultValue?.[0], item));
-        } else if (typeof descriptor === 'object' && 'object' in descriptor) {
-            if (typeof value === 'object' && value !== null) return Object.keys(descriptor.object).reduce((obj: any, k: string) => {
-                if (value.hasOwnProperty(k)) obj[k] = reviveItem(descriptor.object[k], defaultValue?.[k], value[k]);
-                else obj[k] = defaultValue?.[k];
-                return obj;
-            }, {});
-        } else if (typeof descriptor === 'object' && 'objectValue' in descriptor) {
-            if (typeof value === 'object' && value !== null) return Object.keys(value).reduce((obj: any, k: string) => {
-                obj[k] = reviveItem(descriptor.objectValue, defaultValue?.[k], value[k]);
-                return obj;
-            }, {});
+            if (Array.isArray(value)) return value.map((v: any, i: number) => reviveItem(descriptor.array, defaultValue?.[i], v));
+        } else if (typeof descriptor === 'object' && ('object' in descriptor || 'objectValue' in descriptor)) {
+            const ov: any = {}, o: any = {};
+            if (typeof value === 'object' && value !== null) {
+                if ('objectValue' in descriptor) Object.keys(value).forEach(k => ov[k] = reviveItem(descriptor.objectValue, defaultValue?.[k], value?.[k]));
+                if ('object' in descriptor) Object.keys(descriptor.object).forEach(k => o[k] = reviveItem(descriptor.object[k], defaultValue?.[k], value?.[k]));
+                return { ...o, ...ov };
+            }
         } else if (typeof descriptor === 'function') {
             return revive(descriptor, value);
         } else {
             return value;
         }
+        return defaultValue;
     }
 
     const obj: any = new constructor();

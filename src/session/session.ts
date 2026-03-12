@@ -5,28 +5,37 @@ import { toolMap, ToolName, ToolState } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
-import { MemoryService } from "./memory";
+import { MemoryService } from "../memory/memory";
 import { RequestMessage, SessionType, State } from "./types";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
+        agentName: 'string',
         sessionId: 'string',
         sessionType: 'string',
-        agentName: 'string',
-        state: 'any',
+        state: {
+            object: {
+                description: 'string',
+                impression: 'string',
+            },
+            objectValue: 'any'
+        },
         context: Context,
+        memory: MemoryService,
         tool: {
             object: {
                 state: { objectValue: 'boolean' }
-            }
+            },
+            objectValue: 'default'
         },
         ignoredUserIdList: { array: 'string' },
     }
+    agentName: string;
     sessionId: string;
     sessionType: SessionType;
-    agentName: string;
     state: State;
     context: Context;
+    memory: MemoryService;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -35,10 +44,13 @@ export class Session {
     ignoredUserIdList: string[];
 
     constructor() {
+        this.agentName = '';
         this.sessionId = '';
         this.sessionType = 'group';
-        this.agentName = '';
-        this.state = {};
+        this.state = {
+            description: '',
+            impression: '',
+        };
         this.context = new Context();
         this.tool = {
             state: Object.keys(toolMap).reduce((acc, key) => {
@@ -87,9 +99,11 @@ export class Session {
 export class SessionService {
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
         agentName: 'string',
-        sessionMap: { objectValue: Session },
+        memory: MemoryService,
+        sessionMap: { objectValue: Session }
     }
     agentName: string;
+    memory: MemoryService; // 全局记忆服务
     sessionMap: { [key: string]: Session };
 
     constructor() {

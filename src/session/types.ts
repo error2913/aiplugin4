@@ -29,6 +29,8 @@ export interface ToolCallbackMessageItem extends BaseMessageItem {
 export type MessageItem = UserMessageItem | AssistantMessageItem | SystemUserMessageItem | ToolCallsMessageItem | ToolCallbackMessageItem;
 
 export interface State {
+    description: string; // 自定义描述
+    impression: string; // ai可修改的印象
     [key: string]: any;
 }
 
@@ -43,9 +45,10 @@ export type SessionType = 'user' | 'group';
 
 export interface searchOptions {
     topK: number;
-    userIdList: string[];
-    groupIdList: string[];
     tags: string[];
+    relatedMemories: string[];
+    users: string[];
+    groups: string[];
     includeImages: boolean;
-    method: 'weight' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
+    method: 'importance' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
 }

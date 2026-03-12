@@ -1,26 +1,14 @@
 import { Config } from "../config/config";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
-import { MemoryService } from "./memory";
-import { State } from "./session";
 
 export default class User {
     static validKeysMap: { [key in keyof User]?: TypeDescriptor<User[key]> } = {
         userId: 'string',
-        userName: 'string',
-        description: 'string',
-        impression: 'string',
-        state: 'any',
-        memory: MemoryService
+        userName: 'string'
     }
     userId: string;
     userName: string;
-    description: string;
-    impression: string; // ai可修改的印象
-
-    state: State; //储存状态信息
-    memory: MemoryService;
-
 
     static userMap: { [key: string]: User };
 

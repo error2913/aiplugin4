@@ -8,7 +8,7 @@ import { checkUpdate } from "./utils/update";
 import { TimerManager } from "./timer";
 import { createMsg } from "./utils/seal";
 import { PrivilegeManager } from "./cmd/privilege";
-import { knowledgeService } from "./session/memory";
+import { knowledgeService } from "./memory/memory";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { registerCmd } from "./cmd/root_cmd";
 

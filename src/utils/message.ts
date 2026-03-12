@@ -3,7 +3,7 @@ import { Message } from "../session/context";
 import { Config } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./string";
-import { knowledgeService } from "../session/memory";
+import { knowledgeService } from "../memory/memory";
 
 export async function buildSystemMessage(ctx: seal.MsgContext, ai: AI): Promise<Message> {
     const { systemMessageTemplate, isPrefix, showNumber, showMsgId, showTime } = Config.message;

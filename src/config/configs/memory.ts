@@ -1,4 +1,4 @@
-import { MemoryItem } from "../../session/memory";
+import { MemoryItem } from "../../memory/memory";
 import { revive, TypeDescriptor } from "../../utils/utils";
 import { Config, getHandlebarsTemplateConfig } from "../config";
 import { load } from 'js-toml'
@@ -186,7 +186,7 @@ content = "单行形式，只有content字段是必须的"`
             SUMMARY_LIMIT: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆上限"),
             SUMMARY_INTERVAL: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆间隔轮数"),
             SUMMARY_SIZE: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆参与轮数"),
-            KNOWLEGE_MAPS: getKnowledgeMapsConfig(),
+            KNOWLEGE_MEMORIES_MAP: getKnowledgeMemoriesMapConfig(),
             KNOWLEGE_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "知识库记忆展示模板"),
             MEMORY_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "长期记忆展示模板"),
             SUMMARY_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "总结记忆展示模板"),
@@ -229,16 +229,11 @@ class KnowlegeConfigItem {
     }
 }
 
-interface KnowlegeMap {
-    [id: string]: MemoryItem
-}
-
-function getKnowledgeMapsConfig(): { [role: string]: KnowlegeMap } {
-    const tomlArray = seal.ext.getTemplateConfig(MemoryConfig.ext, "知识库记忆");
-    const knowlegeConfigArray = tomlArray.map((tomlString) => revive(KnowlegeConfigItem, load(tomlString)));
-    const knowlegeMaps: { [role: string]: KnowlegeMap } = {};
-    for (const kc of knowlegeConfigArray) {
-        const knowlegeMap: KnowlegeMap = {};
+function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
+    const knowlegeMaps: { [role: string]: { [id: string]: MemoryItem } } = {};
+    seal.ext.getTemplateConfig(MemoryConfig.ext, "知识库记忆").forEach(tomlString => {
+        const kc = revive(KnowlegeConfigItem, load(tomlString));
+        const mmap: { [id: string]: MemoryItem } = {};
         for (const id in kc.knowleges) {
             const k = kc.knowleges[id];
             const m = new MemoryItem();
@@ -249,13 +244,16 @@ function getKnowledgeMapsConfig(): { [role: string]: KnowlegeMap } {
             m.relatedMemories = k.relatedMemories;
             m.users = k.users.map(u => String(u));
             m.groups = k.groups.map(g => String(g));
-            knowlegeMap[id] = m;
+            mmap[id] = m;
         }
         if (kc.roles.length === 0) kc.roles.push('*');
         for (const role of kc.roles) {
             if (!knowlegeMaps.hasOwnProperty(role)) knowlegeMaps[role] = {};
-            knowlegeMaps[role] = { ...knowlegeMaps[role], ...knowlegeMap };
+            knowlegeMaps[role] = { ...knowlegeMaps[role], ...mmap };
         }
-    }
-    return knowlegeMaps;
+    });
+
+    const knowlegeMemoriesMap: { [role: string]: MemoryItem[] } = {};
+    for (const role of Object.keys(knowlegeMaps)) knowlegeMemoriesMap[role] = Object.values(knowlegeMaps[role]);
+    return knowlegeMemoriesMap;
 }

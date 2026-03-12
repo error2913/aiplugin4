@@ -1,9 +1,6 @@
 import { Config } from "../config/config";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
-import { MemoryService } from "./memory";
-import { State } from "./session";
-
 export default class Group {
     static validKeysMap: { [key in keyof Group]?: TypeDescriptor<Group[key]> } = {
         groupId: 'string',
@@ -11,11 +8,7 @@ export default class Group {
         role: 'string',
         owner: 'string',
         adminList: { array: 'string' },
-        memberList: { array: 'string' },
-        description: 'string',
-        impression: 'string',
-        state: 'any',
-        memory: MemoryService
+        memberList: { array: 'string' }
     }
     groupId: string;
     groupName: string;
@@ -23,13 +16,7 @@ export default class Group {
     owner: string; // 群主id
     adminList: string[]; // 管理员id列表
     memberList: string[]; // 普通成员id列表
-    description: string; // 自定义描述
-    impression: string; // ai可修改的印象
 
-    state: State; //储存状态信息
-    memory: MemoryService;
-
-    
     static groupMap: { [key: string]: Group };
 
     static get(groupId: string): Group {

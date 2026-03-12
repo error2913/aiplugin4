@@ -149,8 +149,8 @@ export default class Image {
             id = generateId();
             a++;
             if (a > 1000) {
-                logger.error(`生成记忆id失败，已尝试1000次，放弃`);
-                throw new Error(`生成记忆id失败，已尝试1000次，放弃`);
+                logger.error(`生成图片id失败，已尝试1000次，放弃`);
+                throw new Error(`生成图片id失败，已尝试1000次，放弃`);
             }
         }
         return id;
