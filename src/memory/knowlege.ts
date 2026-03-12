@@ -1,3 +1,5 @@
+import MemoryService from "./memory";
+
 export default class KnowledgeService extends MemoryService {
     constructor() {
         super();

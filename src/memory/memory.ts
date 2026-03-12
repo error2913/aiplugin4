@@ -8,6 +8,9 @@ import { Tool } from "../tool/tool";
 import { fmtDate } from "../utils/string";
 import Image from "../image/image";
 import Model from "../agent/model";
+import { searchOptions } from "./types";
+import Agent from "../agent/agent";
+import { Session } from "../session/session";
 
 export class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
@@ -92,12 +95,12 @@ export class MemoryItem {
     /**
      * 计算记忆与查询的相似度分数
      * @param v  查询向量
+     * @param t 查询标签列表
      * @param u 查询用户列表
      * @param g 查询群组列表
-     * @param t 查询标签列表
      * @returns 相似度分数（0-1）
      */
-    calculateSimilarity(v: number[], u: string[], g: string[], t: string[]): number {
+    calculateSimilarity(v: number[], t: string[], u: string[], g: string[]): number {
         // 总权重 0-1
         const tw = (v.length ? 0.4 : 0) + (u.length ? 0.2 : 0) + (g.length ? 0.2 : 0) + (t.length ? 0.2 : 0);
         if (tw === 0) return 0;
@@ -118,13 +121,13 @@ export class MemoryItem {
     /**
      * 计算记忆的最终分数
      * @param v  查询向量
+     * @param t 查询标签列表
      * @param u 查询用户列表
      * @param g 查询群组列表
-     * @param t 查询标签列表
      * @returns 相似度分数（0-1）
      */
-    calculateScore(v: number[], u: string[], g: string[], t: string[]): number {
-        const similarity = this.calculateSimilarity(v, u, g, t);
+    calculateScore(v: number[], t: string[], u: string[], g: string[]): number {
+        const similarity = this.calculateSimilarity(v, t, u, g);
         return this.importance * 0.2 + this.accessScore * 0.2 + similarity * 0.6;
     }
 
@@ -268,25 +271,30 @@ export default class MemoryService {
 
     async search(query: string, options: searchOptions = {
         topK: 10,
-        userIdList: [],
-        groupIdList: [],
         tags: [],
-        includeImages: false,
+        relatedMemories: [],
+        users: [],
+        groups: [],
         method: 'score'
     }) {
         if (!this.memories.length) return [];
-        const { userIdList: ul, groupIdList: gl, tags: kws, includeImages, method } = options;
+        const { topK = 10, tags = [], relatedMemories = [], users = [], groups = [], method = 'score' } = options;
 
-        const { isMemoryVector, embeddingDimension } = Config.memory;
-        let qv: number[] = [];
-        if (isMemoryVector && query) {
-            qv = await getEmbedding(query);
-            if (!qv.length) {
+        const { DIMENSION } = Config.memory;
+        let v: number[] = [];
+        if (DIMENSION > 0 && query) {
+            const model = Model.getEmbeddingModel('text-embedding');
+            v = await model.callEmbedding(query);
+            if (!v.length) {
                 logger.error('查询向量为空');
                 return [];
             }
+            if (v.length !== DIMENSION) {
+                logger.error(`查询向量维度不匹配。期望: ${DIMENSION}, 实际: ${v.length}`);
+                return [];
+            }
             await Promise.all(this.memories.map(async m => {
-                if (m.vector.length !== embeddingDimension) {
+                if (m.vector.length !== DIMENSION) {
                     logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
                     await m.updateVector();
                 }
@@ -295,61 +303,59 @@ export default class MemoryService {
 
         return this.memories
             .map(m => {
-                if (includeImages && m.imageIdList.length === 0) return null;
-                const mc = m.copy;
-                if (mc.tags.some(kw => query.includes(kw))) mc.weight += 10; //提权
-                return mc;
+                if (relatedMemories.length > 0 && relatedMemories.some(r => m.id === r || m.relatedMemories.includes(r))) return m;
+                return null;
             })
-            .filter(m => m)
+            .filter(m => m !== null)
             .sort((a, b) => {
                 switch (method) {
-                    case 'weight': return b.weight - a.weight;
-                    case 'similarity': return b.calculateSimilarity(qv, ul, gl, kws) - a.calculateSimilarity(qv, ul, gl, kws);
-                    case 'score': return b.calculateScore(qv, ul, gl, kws) - a.calculateScore(qv, ul, gl, kws);
+                    case 'importance': return b.importance - a.importance;
+                    case 'similarity': return b.calculateSimilarity(v, tags, users, groups) - a.calculateSimilarity(v, tags, users, groups);
+                    case 'score': return b.calculateScore(v, tags, users, groups) - a.calculateScore(v, tags, users, groups);
                     case 'early': return a.createAt - b.createAt;
                     case 'late': return b.createAt - a.createAt;
                     case 'recent': return b.lastAccessedAt - a.lastAccessedAt;
                 }
             })
-            .slice(0, options.topK || 10);
+            .slice(0, topK);
     }
 
-    updateMemoryWeight(s: string, role: 'user' | 'assistant') {
-        const increase = role === 'user' ? 1 : 0.1;
-        const decrease = role === 'user' ? 0.1 : 0;
+    async accessMemory(s: string) {
         const now = Math.floor(Date.now() / 1000);
-
-        for (const id in this.memoryMap) {
-            const m = this.memoryMap[id];
-            if (m.tags.some(kw => s.includes(kw))) {
-                m.weight = Math.max(10, m.weight + increase);
-                m.lastAccessedAt = now;
-            } else {
-                m.weight = Math.min(0, m.weight - decrease);
-            }
-        }
-    }
-
-    // wip
-    updateRelatedMemoryWeight(ctx: seal.MsgContext, context: Context, s: string, role: 'user' | 'assistant') {
-        // bot记忆权重更新
-        AIManager.getAI(ctx.endPoint.userId).memory.updateMemoryWeight(s, role);
-        // 知识库记忆权重更新
-        knowledgeService.updateMemoryWeight(s, role);
-        // 会话自身记忆权重更新
-        this.updateMemoryWeight(s, role);
-        // 群内用户的记忆权重更新
-        if (!ctx.isPrivate) context.userInfoList.forEach(ui => AIManager.getAI(ui.id).memory.updateMemoryWeight(s, role));
-    }
-
-    async getTopScoreMemoryList(text: string = '', uid: string = '', gid: string = '') {
-        const { memoryShowNumber } = Config.memory;
-        return await this.search(text, {
-            topK: memoryShowNumber,
-            userIdList: uid ? [uid] : [],
-            groupIdList: gid ? [gid] : [],
+        (await this.search(s, {
+            topK: 5,
             tags: [],
-            includeImages: false,
+            relatedMemories: [],
+            users: [],
+            groups: [],
+            method: 'similarity'
+        })).forEach(m => {
+            m.lastAccessedAt = now;
+            m.accessCount++;
+        })
+    }
+
+    static async accessRelatedMemory(agent: Agent, session: Session, s: string, role: 'user' | 'assistant') {
+        const task: Promise<void>[] = [];
+        // bot记忆权重更新
+        task.push(agent.sessionService.memory.accessMemory(s));
+        // 知识库记忆权重更新
+        task.push(agent.sessionService.knowledge.accessMemory(s));
+        // 会话自身记忆权重更新
+        task.push(session.memory.accessMemory(s));
+        // 群内用户的记忆权重更新
+        if (session.sessionType === 'group') task.push(...session.context.users.map(u => agent.sessionService.getSession(u).memory.accessMemory(s)));
+        await Promise.all(task);
+    }
+
+    async getTopScoreMemories(text: string = '', uid: string = '', gid: string = '') {
+        const { MEMORY_SHOW_NUMBER } = Config.memory;
+        return await this.search(text, {
+            topK: MEMORY_SHOW_NUMBER,
+            tags: [],
+            relatedMemories: [],
+            users: uid ? [uid] : [],
+            groups: gid ? [gid] : [],
             method: 'score'
         });
     }

@@ -339,7 +339,7 @@ export class Context {
         return null;
     }
 
-    get userInfoList(): UserInfo[] {
+    get users(): UserInfo[] {
         const userMap: { [key: string]: UserInfo } = {};
         this.messages.forEach(message => {
             if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {

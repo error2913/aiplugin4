@@ -23,7 +23,7 @@ export default class MemoryConfig {
             `# 采用toml进行格式化
 roles = ["正确"] # 当数组为空或不存在时，默认对所有角色生效
             
-[knowleges.测试]
+[knowledges.测试]
 content = """
 这是内容
 可以换行
@@ -34,14 +34,14 @@ relatedMemories = ["测试2"] # 相关记忆ID列表
 users = ["114514", "1919810"] # 相关用户ID列表
 groups = ["114514", "1919810"] # 相关群组ID列表
 
-[knowleges.测试2]
+[knowledges.测试2]
 content = "单行形式，只有content字段是必须的"`
         ], "");
         seal.ext.registerTemplateConfig(MemoryConfig.ext, "知识库记忆展示模板", [
-            `{{#if KNOWLEGE}}
+            `{{#if KNOWLEDGE}}
 
 ## 知识库
-    {{#each knowleges}}
+    {{#each knowledges}}
 {{index @index}}. ID:{{id}}
     重要性:{{importance}}
     {{#each tags}}{{#if @first}}标签:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
@@ -177,8 +177,8 @@ content = "单行形式，只有content字段是必须的"`
     static get() {
         return {
             DIMENSION: seal.ext.getIntConfig(MemoryConfig.ext, "向量维度"),
-            KNOWLEGE: seal.ext.getBoolConfig(MemoryConfig.ext, "启用知识库记忆"),
-            KNOWLEGE_SHOW_NUMBER: seal.ext.getIntConfig(MemoryConfig.ext, "知识库记忆展示数量"),
+            KNOWLEDGE: seal.ext.getBoolConfig(MemoryConfig.ext, "启用知识库记忆"),
+            KNOWLEDGE_SHOW_NUMBER: seal.ext.getIntConfig(MemoryConfig.ext, "知识库记忆展示数量"),
             MEMORY: seal.ext.getBoolConfig(MemoryConfig.ext, "启用长期记忆"),
             MEMORY_LIMIT: seal.ext.getIntConfig(MemoryConfig.ext, "长期记忆上限"),
             MEMORY_SHOW_NUMBER: seal.ext.getIntConfig(MemoryConfig.ext, "长期记忆展示数量"),
@@ -186,8 +186,8 @@ content = "单行形式，只有content字段是必须的"`
             SUMMARY_LIMIT: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆上限"),
             SUMMARY_INTERVAL: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆间隔轮数"),
             SUMMARY_SIZE: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆参与轮数"),
-            KNOWLEGE_MEMORIES_MAP: getKnowledgeMemoriesMapConfig(),
-            KNOWLEGE_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "知识库记忆展示模板"),
+            KNOWLEDGE_MEMORIES_MAP: getKnowledgeMemoriesMapConfig(),
+            KNOWLEDGE_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "知识库记忆展示模板"),
             MEMORY_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "长期记忆展示模板"),
             SUMMARY_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "总结记忆展示模板"),
             SUMMARY_PROMPT_TEMPLATE: getHandlebarsTemplateConfig(MemoryConfig.ext, "记忆总结prompt模板")
@@ -195,10 +195,10 @@ content = "单行形式，只有content字段是必须的"`
     }
 }
 
-class KnowlegeConfigItem {
-    static validKeysMap: { [key in keyof KnowlegeConfigItem]?: TypeDescriptor<KnowlegeConfigItem[key]> } = {
+class KnowledgeConfigItem {
+    static validKeysMap: { [key in keyof KnowledgeConfigItem]?: TypeDescriptor<KnowledgeConfigItem[key]> } = {
         roles: { array: 'string' },
-        knowleges: {
+        knowledges: {
             objectValue: {
                 object: {
                     content: 'string',
@@ -212,7 +212,7 @@ class KnowlegeConfigItem {
         }
     }
     roles: string[];
-    knowleges: {
+    knowledges: {
         [id: string]: {
             content: string,
             importance: number,
@@ -225,17 +225,17 @@ class KnowlegeConfigItem {
 
     constructor() {
         this.roles = [];
-        this.knowleges = {};
+        this.knowledges = {};
     }
 }
 
 function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
-    const knowlegeMaps: { [role: string]: { [id: string]: MemoryItem } } = {};
+    const knowledgeMaps: { [role: string]: { [id: string]: MemoryItem } } = {};
     seal.ext.getTemplateConfig(MemoryConfig.ext, "知识库记忆").forEach(tomlString => {
-        const kc = revive(KnowlegeConfigItem, load(tomlString));
+        const kc = revive(KnowledgeConfigItem, load(tomlString));
         const mmap: { [id: string]: MemoryItem } = {};
-        for (const id in kc.knowleges) {
-            const k = kc.knowleges[id];
+        for (const id in kc.knowledges) {
+            const k = kc.knowledges[id];
             const m = new MemoryItem();
             m.id = id;
             m.importance = k.importance;
@@ -248,12 +248,12 @@ function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
         }
         if (kc.roles.length === 0) kc.roles.push('*');
         for (const role of kc.roles) {
-            if (!knowlegeMaps.hasOwnProperty(role)) knowlegeMaps[role] = {};
-            knowlegeMaps[role] = { ...knowlegeMaps[role], ...mmap };
+            if (!knowledgeMaps.hasOwnProperty(role)) knowledgeMaps[role] = {};
+            knowledgeMaps[role] = { ...knowledgeMaps[role], ...mmap };
         }
     });
 
-    const knowlegeMemoriesMap: { [role: string]: MemoryItem[] } = {};
-    for (const role of Object.keys(knowlegeMaps)) knowlegeMemoriesMap[role] = Object.values(knowlegeMaps[role]);
-    return knowlegeMemoriesMap;
+    const knowledgeMemoriesMap: { [role: string]: MemoryItem[] } = {};
+    for (const role of Object.keys(knowledgeMaps)) knowledgeMemoriesMap[role] = Object.values(knowledgeMaps[role]);
+    return knowledgeMemoriesMap;
 }

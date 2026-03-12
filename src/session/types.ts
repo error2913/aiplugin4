@@ -42,13 +42,3 @@ export interface RequestMessage {
 }
 
 export type SessionType = 'user' | 'group';
-
-export interface searchOptions {
-    topK: number;
-    tags: string[];
-    relatedMemories: string[];
-    users: string[];
-    groups: string[];
-    includeImages: boolean;
-    method: 'importance' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
-}

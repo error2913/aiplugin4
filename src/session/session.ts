@@ -7,6 +7,7 @@ import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
 import { MemoryService } from "../memory/memory";
 import { RequestMessage, SessionType, State } from "./types";
+import KnowledgeService from "../memory/knowlege";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
@@ -126,5 +127,10 @@ export class SessionService {
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];
+    }
+
+    get knowledge(): KnowledgeService {
+        if (!knowledgeServiceMap.hasOwnProperty(this.agentName)) return knowledgeServiceMap['*'];
+        return knowledgeServiceMap[this.agentName];
     }
 }
