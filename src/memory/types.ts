@@ -1,3 +1,5 @@
+import { MemoryItem } from "./memory";
+
 export interface searchOptions {
     topK: number;
     tags: string[];
@@ -5,4 +7,8 @@ export interface searchOptions {
     users: string[];
     groups: string[];
     method: 'importance' | 'similarity' | 'score' | 'early' | 'late' | 'recent';
+}
+export interface MemorySource {
+    source: string;
+    memories: MemoryItem[];
 }

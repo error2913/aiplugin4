@@ -1,31 +1,26 @@
+import { Config } from "../config/config";
+import { logger } from "../logger";
+import { TypeDescriptor } from "../utils/utils";
+import MemoryService from "./memory";
+import { MemoryItem } from "./memory_item";
+
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
         memoryMap: { array: MemoryItem },
         summaryStatus: 'boolean',
-        summaryList: { array: 'string' }
+        summaries: { array: 'string' }
     };
     summaryStatus: boolean;
-    summaryList: string[];
+    summaries: string[];
 
     constructor() {
         super();
         this.summaryStatus = false;
-        this.summaryList = [];
+        this.summaries = [];
     }
 
-    limitSummary() {
-        const { SummaryLimit } = Config.memory;
-        if (this.summaryList.length > SummaryLimit) {
-            this.summaryList.splice(0, this.summaryList.length - SummaryLimit);
-        }
-    }
-
-    clearSummary() {
-        this.summaryList = [];
-    }
-
-    // wip
-    async updateSummary(ctx: seal.MsgContext, msg: seal.Message, ai: AI) {
+    // wip 使用总结智能体
+    async summarize(session: Session) {
         if (!this.summaryStatus) return;
 
         const { url: chatUrl, apiKey: chatApiKey } = Config.request;
@@ -129,5 +124,14 @@ export default class SessionMemoryService extends MemoryService {
         } catch (e) {
             logger.error(`更新短期记忆失败: ${e.message}`);
         }
+    }
+
+    limitSummaries() {
+        const { SUMMARY_LIMIT } = Config.memory;
+        if (this.summaries.length > SUMMARY_LIMIT) this.summaries.splice(0, this.summaries.length - SUMMARY_LIMIT);
+    }
+
+    clearSummaries() {
+        this.summaries = [];
     }
 }
