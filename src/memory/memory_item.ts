@@ -1,9 +1,9 @@
-import Model from "../agent/model";
-import { Config } from "../config/config";
-import { logger } from "../logger";
+import Model from "../model/model";
+import Config from "../config/config";
+import Logger from "../logger";
 import { cosineSimilarity, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 
-export class MemoryItem {
+export default class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
         'id': 'string',
         'sessionId': 'string',
@@ -136,11 +136,11 @@ export class MemoryItem {
 
     async updateVector() {
         const { DIMENSION } = Config.memory;
-        logger.info(`更新记忆向量: ${this.id}`);
+        Logger.info(`更新记忆向量: ${this.id}`);
         const model = Model.getEmbeddingModel('text-embedding');
         const vector = await model.callEmbedding(this.content);
-        if (!vector.length) return logger.error('返回向量为空');
-        if (vector.length !== DIMENSION) return logger.error(`向量维度不匹配。期望: ${DIMENSION}, 实际: ${vector.length}`);
+        if (!vector.length) return Logger.error('返回向量为空');
+        if (vector.length !== DIMENSION) return Logger.error(`向量维度不匹配。期望: ${DIMENSION}, 实际: ${vector.length}`);
         this.vector = vector;
     }
 }

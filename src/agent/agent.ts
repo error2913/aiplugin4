@@ -1,10 +1,10 @@
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { logger } from "../logger";
 import { SessionService } from "../session/session";
 import { ToolName } from "../tool/tool";
 import { revive, TypeDescriptor } from "../utils/utils";
 import Model from "./model";
-import { ChatModelUse, ModelUse } from "./types";
+import { ChatModelUse, ModelUse } from "../model/types";
 
 export default class Agent {
     static validKeysMap: { [key in keyof Agent]?: TypeDescriptor<Agent[key]> } = {

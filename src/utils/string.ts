@@ -1,5 +1,5 @@
 import { Context } from "../session/context";
-import { Image } from "../image/image";
+import { Image } from "../image";
 import { logger } from "../logger";
 import { Config } from "../config/config";
 import { transformMsgId, transformMsgIdBack } from "./utils";

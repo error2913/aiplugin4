@@ -1,5 +1,5 @@
 import { Config } from "../config/config";
-import { Image, ImageService } from "../image/image";
+import { Image, ImageService } from "../image";
 import { getCtxAndMsg } from "../utils/seal";
 import { levenshteinDistance } from "../utils/string";
 import { logger } from "../logger";

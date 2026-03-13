@@ -1,22 +1,56 @@
-import { Config } from "../config/config";
-import { logger } from "../logger";
+import Agent from "../agent/agent";
+import Config from "../config/config";
+import Logger from "../logger";
 import { TypeDescriptor } from "../utils/utils";
 import MemoryService from "./memory";
-import { MemoryItem } from "./memory_item";
+import MemoryItem from "./memory_item";
+import { MemorySource } from "./types";
 
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
         memoryMap: { array: MemoryItem },
+        sessionId: 'string',
         summaryStatus: 'boolean',
         summaries: { array: 'string' }
     };
+    sessionId: string;
     summaryStatus: boolean;
     summaries: string[];
 
     constructor() {
         super();
+        this.sessionId = '';
         this.summaryStatus = false;
         this.summaries = [];
+    }
+
+    async buildMemoryPrompt(agent: Agent, text: string): Promise<string> {
+        // 获取users、groups
+        const session = agent.sessionService.getSession(this.sessionId);
+        const users = session.sessionType === 'group' ? session.context.users : [session.sessionId];
+        const groups = session.sessionType === 'group' ? [session.sessionId] : [];
+        const sources: MemorySource[] = [];
+        // bot记忆
+        sources.push({
+            source: '核心记忆',
+            memories: await agent.sessionService.memory.getTopScoreMemories(text, users, groups)
+        })
+        // 会话记忆
+        sources.push({
+            source: '会话记忆',
+            memories: await session.memory.getTopScoreMemories(text, users, groups)
+        })
+        // 群内用户的记忆
+        if (session.sessionType === 'group') {
+            for (const u of session.context.users) {
+                sources.push({
+                    source: `用户${u}记忆`,
+                    memories: await agent.sessionService.getSession(u).memory.getTopScoreMemories(text, users, groups)
+                })
+            }
+        }
+
+        return this.buildMemoriesPrompt(sources);
     }
 
     // wip 使用总结智能体
@@ -75,7 +109,7 @@ export default class SessionMemoryService extends MemoryService {
                 }).join('\n') : JSON.stringify(sumMessages)
             })
 
-            logger.info(`记忆总结prompt:\n`, prompt);
+            Logger.info(`记忆总结prompt:\n`, prompt);
 
             const messages = [
                 {
@@ -95,11 +129,11 @@ export default class SessionMemoryService extends MemoryService {
                 const finish_reason = data.choices[0].finish_reason;
 
                 if (message.hasOwnProperty('reasoning_content')) {
-                    logger.info(`思维链内容:`, message.reasoning_content);
+                    Logger.info(`思维链内容:`, message.reasoning_content);
                 }
 
                 const reply = message.content || '';
-                logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+                Logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
                 const memoryData = JSON.parse(reply) as {
                     content: string,
@@ -122,7 +156,7 @@ export default class SessionMemoryService extends MemoryService {
                 });
             }
         } catch (e) {
-            logger.error(`更新短期记忆失败: ${e.message}`);
+            Logger.error(`更新短期记忆失败: ${e.message}`);
         }
     }
 
@@ -133,5 +167,14 @@ export default class SessionMemoryService extends MemoryService {
 
     clearSummaries() {
         this.summaries = [];
+    }
+
+    buildSummaryPrompt(): string {
+        if (this.summaries.length === 0) return '';
+        const { SUMMARY, SUMMARY_TEMPLATE } = Config.memory;
+        return SUMMARY_TEMPLATE({
+            "SUMMARY": SUMMARY,
+            "summaries": this.summaries
+        });
     }
 }

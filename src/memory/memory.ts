@@ -1,11 +1,11 @@
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { generateId, TypeDescriptor } from "../utils/utils";
-import { logger } from "../logger";
-import Model from "../agent/model";
+import Logger from "../logger";
+import Model from "../model/model";
 import { MemorySource, searchOptions } from "./types";
 import Agent from "../agent/agent";
 import { Session } from "../session/session";
-import { MemoryItem } from "./memory_item";
+import MemoryItem from "./memory_item";
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
@@ -35,7 +35,7 @@ export default class MemoryService {
             id = generateId();
             a++;
             if (a > 1000) {
-                logger.error(`生成记忆id失败，已尝试1000次，放弃`);
+                Logger.error(`生成记忆id失败，已尝试1000次，放弃`);
                 throw new Error(`生成记忆id失败，已尝试1000次，放弃`);
             }
         }
@@ -48,7 +48,7 @@ export default class MemoryService {
         for (const m of memories) {
             for (const om of this.memories) {
                 if (om.compareWith(m)) {
-                    logger.info(`记忆已存在，id:${om.id}，进行合并`);
+                    Logger.info(`记忆已存在，id:${om.id}，进行合并`);
                     om.merge(m);
                     om.accessCount++;
                     om.lastAccessedAt = now;
@@ -139,16 +139,16 @@ export default class MemoryService {
             const model = Model.getEmbeddingModel('text-embedding');
             v = await model.callEmbedding(query);
             if (!v.length) {
-                logger.error('查询向量为空');
+                Logger.error('查询向量为空');
                 return [];
             }
             if (v.length !== DIMENSION) {
-                logger.error(`查询向量维度不匹配。期望: ${DIMENSION}, 实际: ${v.length}`);
+                Logger.error(`查询向量维度不匹配。期望: ${DIMENSION}, 实际: ${v.length}`);
                 return [];
             }
             await Promise.all(this.memories.map(async m => {
                 if (m.vector.length !== DIMENSION) {
-                    logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
+                    Logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
                     await m.updateVector();
                 }
             }))
@@ -196,9 +196,9 @@ export default class MemoryService {
         // 知识库记忆权重更新
         task.push(agent.sessionService.knowledge.accessMemories(s));
         // 会话自身记忆权重更新
-        task.push(session.memory.accessMemory(s));
+        task.push(session.memory.accessMemories(s));
         // 群内用户的记忆权重更新
-        if (session.sessionType === 'group') task.push(...session.context.users.map(u => agent.sessionService.getSession(u).memory.accessMemory(s)));
+        if (session.sessionType === 'group') task.push(...session.context.users.map(u => agent.sessionService.getSession(u).memory.accessMemories(s)));
         await Promise.all(task);
     }
 
@@ -213,6 +213,7 @@ export default class MemoryService {
             method: 'score'
         });
     }
+
     getLatestMemories(p: number = 1): MemoryItem[] {
         if (this.memories.length === 0) return [];
         if (p > Math.ceil(this.memories.length / 5)) p = Math.ceil(this.memories.length / 5);
@@ -236,35 +237,6 @@ export default class MemoryService {
             memories: this.getLatestMemories(p)
         }]
         return this.buildMemoriesPrompt(sources) + `\n当前页码: ${p}/${Math.ceil(this.memories.length / 5)}`;
-    }
-
-    async buildMemoryPrompt(session: Session, text: string): Promise<string> {
-        // 获取users、groups
-        const users = session.sessionType === 'group' ? session.context.users : [session.sessionId];
-        const groups = session.sessionType === 'group' ? [session.sessionId] : [];
-        const agent = Agent.get(session.agentName);
-        const sources: MemorySource[] = [];
-        // bot记忆
-        sources.push({
-            source: '核心记忆',
-            memories: await agent.sessionService.memory.getTopScoreMemories(text, users, groups)
-        })
-        // 会话记忆
-        sources.push({
-            source: '会话记忆',
-            memories: await session.memory.getTopScoreMemories(text, users, groups)
-        })
-        // 群内用户的记忆
-        if (session.sessionType === 'group') {
-            for (const u of session.context.users) {
-                sources.push({
-                    source: `用户${u}记忆`,
-                    memories: await agent.sessionService.getSession(u).memory.getTopScoreMemories(text, users, groups)
-                })
-            }
-        }
-
-        return this.buildMemoriesPrompt(sources);
     }
 }
 

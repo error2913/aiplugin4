@@ -1,8 +1,8 @@
-import { Config } from "../config/config";
-import { generateId, revive, TypeDescriptor } from "../utils/utils";
-import { logger } from "../logger";
-import { MessageSegment, parseSpecialTokens } from "../utils/string";
-import { getSessionId } from "../utils/seal";
+import { Config } from "./config/config";
+import { generateId, revive, TypeDescriptor } from "./utils/utils";
+import { logger } from "./logger";
+import { MessageSegment, parseSpecialTokens } from "./utils/string";
+import { getSessionId } from "./utils/seal";
 import { ModelManager } from "../agent/model";
 
 export default class Image {

@@ -1,4 +1,4 @@
-export type ChatModelUse = 'chat' | 'compression';
+export type ChatModelUse = 'chat' | 'compression' | 'summarization';
 export type ImageModelUse = 'image-understanding' | ChatModelUse;
 export type EmbeddingModelUse = 'text-embedding';
 export interface ModelBody {

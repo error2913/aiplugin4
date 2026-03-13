@@ -3,7 +3,7 @@ import { ToolService } from "./tool/tool";
 import { Config } from "./config/config";
 import { triggerConditionMap } from "./tool/tool_trigger";
 import { logger } from "./logger";
-import { transformTextToArray } from "./utils/string";
+import { fmtDate, transformTextToArray } from "./utils/string";
 import { checkUpdate } from "./utils/update";
 import { TimerManager } from "./timer";
 import { createMsg } from "./utils/seal";
@@ -15,6 +15,7 @@ import { registerCmd } from "./cmd/root_cmd";
 function main() {
   Handlebars.registerHelper('index', (index: number) => index + 1);
   Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));
+  Handlebars.registerHelper('time', (t: number) => fmtDate(t));
 
   Config.registerConfig();
   checkUpdate();

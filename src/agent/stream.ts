@@ -1,4 +1,4 @@
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { logger } from "../logger";
 import { withTimeout } from "../utils/utils";
 import { Agent } from "./agent";

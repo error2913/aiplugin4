@@ -1,13 +1,8 @@
 import { NAME } from "./config/static_config";
-import { Config } from "./config/config";
+import Config from "./config/config";
 
-class Logger {
-    name: string;
-    constructor(name: string) {
-        this.name = name;
-    }
-
-    handleLog(...data: any[]): string {
+export default class Logger {
+    static handleLog(...data: any[]): string {
         const { LOG_LEVEL: logLevel } = Config.base;
         if (logLevel === "永不") {
             return '';
@@ -25,39 +20,45 @@ class Logger {
         }
     }
 
-    info(...data: any[]) {
+    static info(...data: any[]) {
         const s = this.handleLog(...data);
         if (!s) {
             return;
         }
-        console.log(`【${this.name}】: ${s}`);
+        console.log(`【${NAME}】: ${s}`);
     }
 
-    warning(...data: any[]) {
+    static warning(...data: any[]) {
         const s = this.handleLog(...data);
         if (!s) {
             return;
         }
-        console.warn(`【${this.name}】: ${s}`);
+        console.warn(`【${NAME}】: ${s}`);
     }
 
-    error(...data: any[]) {
+    static error(...data: any[]) {
         const s = this.handleLog(...data);
         if (!s) {
             return;
         }
-        console.error(`【${this.name}】: ${s}`);
+        console.error(`【${NAME}】: ${s}`);
     }
 
-    debug(...data: any[]) {
+    static debug(...data: any[]) {
         const { LOG_LEVEL: logLevel } = Config.base;
         if (logLevel !== "调试") return;
         const s = this.handleLog(...data);
         if (!s) {
             return;
         }
-        console.info(`【${this.name}】: ${s}`);
+        console.info(`【${NAME}】: ${s}`);
+    }
+
+    static logMessages(body: any) {
+        if (body.hasOwnProperty('messages')) {
+            const messages = body.messages.filter(item => item.role !== "system");
+            if (messages.length === 0) return;
+            this.info(`请求发送前的上下文:\n`, JSON.stringify(messages));
+        }
     }
 }
-
-export const logger = new Logger(NAME);

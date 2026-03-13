@@ -1,7 +1,7 @@
 import { ChatModel, EmbeddingModel, ImageModel } from "../../agent/model";
-import { ModelBody } from "../../agent/types";
+import { ModelBody } from "../../model/types";
 import { logger } from "../../logger";
-import { Config } from "../config";
+import Config from "../config";
 import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, IMAGE_MODEL_TO_PROVIDER, PROVIDER_MAP } from "../static_config";
 
 export default class ModelConfig {

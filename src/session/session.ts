@@ -8,6 +8,7 @@ import { Context } from "./context";
 import { MemoryService } from "../memory/memory";
 import { RequestMessage, SessionType, State } from "./types";
 import KnowledgeService from "../memory/knowlege";
+import SessionMemoryService from "../memory/session_memory";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
@@ -22,7 +23,7 @@ export class Session {
             objectValue: 'any'
         },
         context: Context,
-        memory: MemoryService,
+        memory: SessionMemoryService,
         tool: {
             object: {
                 state: { objectValue: 'boolean' }
@@ -36,7 +37,7 @@ export class Session {
     sessionType: SessionType;
     state: State;
     context: Context;
-    memory: MemoryService;
+    memory: SessionMemoryService;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数

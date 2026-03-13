@@ -1,4 +1,4 @@
-import { MemoryItem } from "./memory";
+import { MemoryItem } from "./memory_item";
 
 export interface searchOptions {
     topK: number;

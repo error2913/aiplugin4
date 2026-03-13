@@ -1,6 +1,6 @@
-import { MemoryItem } from "../../memory/memory";
+import MemoryItem from "../../memory/memory_item";
 import { revive, TypeDescriptor } from "../../utils/utils";
-import { Config, getHandlebarsTemplateConfig } from "../config";
+import Config, { getHandlebarsTemplateConfig } from "../config";
 import { load } from 'js-toml'
 
 export default class MemoryConfig {
@@ -63,7 +63,7 @@ content = "单行形式，只有content字段是必须的"`
         {{#each memories}}
 {{index @index}}. ID:{{id}}
     重要性:{{importance}}
-    创建时间:{{{createAt}}}
+    创建时间:{{{time createAt}}}
     {{#each tags}}{{#if @first}}标签:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
     {{#each relatedMemories}}{{#if @first}}相关记忆:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
     {{#each users}}{{#if @first}}相关用户:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}

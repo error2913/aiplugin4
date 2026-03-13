@@ -31,12 +31,12 @@ interface ConfigCache {
     data: ConfigProp
 }
 
-class Config {
+class _Config {
     static ext: seal.ExtInfo;
     static cache: { [K in ConfigKey]?: ConfigCache } = {}
 
     static registerConfig() {
-        this.ext = Config.getExt(NAME);
+        this.ext = this.getExt(NAME);
         for (const k of Object.keys(configMap) as ConfigKey[]) {
             configMap[k].register();
             Object.defineProperty(this, k, {
@@ -59,8 +59,8 @@ class Config {
     }
 
     static getExt(name: string): seal.ExtInfo {
-        if (name == NAME && Config.ext) {
-            return Config.ext;
+        if (name == NAME && this.ext) {
+            return this.ext;
         }
 
         let ext = seal.ext.find(name);
@@ -73,8 +73,8 @@ class Config {
     }
 }
 
-const _Config = Config as typeof Config & ConfigProps;
-export { _Config as Config };
+const Config = _Config as typeof _Config & ConfigProps;
+export default Config;
 
 export function getRegexConfig(ext: seal.ExtInfo, key: string): RegExp {
     const patterns = seal.ext.getTemplateConfig(ext, key).filter(x => x);
