@@ -6,4 +6,4 @@ sampleAgent.description = "示例智能体";
 sampleAgent.instruction = "你是一个示例智能体。";
 sampleAgent.use = "chat";
 Agent.save(sampleAgent);
-export { sampleAgent };
+export default sampleAgent;
