@@ -1,5 +1,5 @@
 import Handlebars from "handlebars";
-import { logger } from "../logger";
+import Logger from "../logger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
 import BaseConfig from "./configs/base";
 import ModelConfig from "./configs/model";
@@ -9,6 +9,9 @@ import TriggerConfig from "./configs/trigger";
 import ImageConfig from "./configs/image";
 import ToolConfig from "./configs/tool";
 import MemoryConfig from "./configs/memory";
+import ReplyConfig from "./configs/reply";
+import MessageConfig from "./configs/message";
+import PromptConfig from "./configs/prompt";
 
 const configMap = {
     base: BaseConfig,
@@ -19,6 +22,9 @@ const configMap = {
     image: ImageConfig,
     tool: ToolConfig,
     memory: MemoryConfig,
+    reply: ReplyConfig,
+    message: MessageConfig,
+    prompt: PromptConfig
 } as const;
 
 type ConfigMap = typeof configMap;
@@ -59,16 +65,12 @@ class _Config {
     }
 
     static getExt(name: string): seal.ExtInfo {
-        if (name == NAME && this.ext) {
-            return this.ext;
-        }
-
-        let ext = seal.ext.find(name);
+        const n = `${NAME}:${name}`;
+        let ext = seal.ext.find(n);
         if (!ext) {
-            ext = seal.ext.new(name, AUTHOR, VERSION);
+            ext = seal.ext.new(n, AUTHOR, VERSION);
             seal.ext.register(ext);
         }
-
         return ext;
     }
 }
@@ -83,7 +85,7 @@ export function getRegexConfig(ext: seal.ExtInfo, key: string): RegExp {
         try {
             return new RegExp(pattern);
         } catch (e) {
-            logger.error(`正则表达式错误，内容:${pattern}，错误信息:${e.message}`);
+            Logger.error(`正则表达式错误，内容:${pattern}，错误信息:${e.message}`);
             return /(?!)/;
         }
     }
@@ -95,7 +97,7 @@ export function getRegexesConfig(ext: seal.ExtInfo, key: string): RegExp[] {
         try {
             return new RegExp(x);
         } catch (e) {
-            logger.error(`正则表达式错误，内容:${x}，错误信息:${e.message}`);
+            Logger.error(`正则表达式错误，内容:${x}，错误信息:${e.message}`);
             return /(?!)/;
         }
     });
@@ -118,7 +120,7 @@ export function getPathMapConfig(ext: seal.ExtInfo, key: string): { [id: string]
             if (!id) throw new Error(`本地路径格式错误:${path}`);
             acc[id] = path;
         } catch (e) {
-            logger.error(`本地路径格式错误:${path}，错误信息:${e.message}`);
+            Logger.error(`本地路径格式错误:${path}，错误信息:${e.message}`);
         }
         return acc;
     }, {});

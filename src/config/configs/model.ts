@@ -1,14 +1,16 @@
-import { ChatModel, EmbeddingModel, ImageModel } from "../../agent/model";
 import { ModelBody } from "../../model/types";
-import { logger } from "../../logger";
+import Logger from "../../logger";
 import Config from "../config";
 import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, IMAGE_MODEL_TO_PROVIDER, PROVIDER_MAP } from "../static_config";
+import ChatModel from "../../model/chat";
+import ImageModel from "../../model/image";
+import EmbeddingModel from "../../model/embedding";
 
 export default class ModelConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ModelConfig.ext = Config.getExt('aiplugin4:模型');
+        ModelConfig.ext = Config.getExt('模型');
 
         seal.ext.registerTemplateConfig(ModelConfig.ext, "对话模型", [`{
     "use": ["chat"],
@@ -60,7 +62,7 @@ function getModelsConfig<T extends ChatModel | ImageModel | EmbeddingModel>(
             }
             return new modelConstructor(data.use, data.name, data.provider, data.base_url, data.api_key, data.body);
         } catch (e) {
-            logger.error(`${key}解析错误，内容:${x}，错误信息:${e.message}`);
+            Logger.error(`${key}解析错误，内容:${x}，错误信息:${e.message}`);
             return null;
         }
     }).filter(x => x !== null);

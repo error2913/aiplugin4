@@ -1,10 +1,10 @@
-import { Config, getRegexConfig } from "../config";
+import Config, { getRegexConfig } from "../config";
 
 export default class TriggerConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        TriggerConfig.ext = Config.getExt('aiplugin4:消息触发');
+        TriggerConfig.ext = Config.getExt('消息触发');
 
         seal.ext.registerIntConfig(TriggerConfig.ext, "默认计数器", 10, "");
         seal.ext.registerFloatConfig(TriggerConfig.ext, "默认计时器/s", 60, "");

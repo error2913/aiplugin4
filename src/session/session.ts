@@ -7,7 +7,7 @@ import { revive, TypeDescriptor } from "../utils/utils";
 import { Context } from "./context";
 import { MemoryService } from "../memory/memory";
 import { RequestMessage, SessionType, State } from "./types";
-import KnowledgeService from "../memory/knowlege";
+import KnowledgeService from "../memory/knowledge";
 import SessionMemoryService from "../memory/session_memory";
 
 export class Session {
@@ -54,6 +54,7 @@ export class Session {
             impression: '',
         };
         this.context = new Context();
+        this.memory = new SessionMemoryService();
         this.tool = {
             state: Object.keys(toolMap).reduce((acc, key) => {
                 acc[key as ToolName] = false;
@@ -73,6 +74,10 @@ export class Session {
             }
         }
         this.ignoredUserIdList = [];
+    }
+
+    get agent(): Agent {
+        return Agent.get(this.agentName);
     }
 
     // wip

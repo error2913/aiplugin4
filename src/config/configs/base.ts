@@ -1,10 +1,10 @@
-import { Config } from "../config";
+import Config from "../config";
 
 export default class BaseConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        BaseConfig.ext = Config.getExt('aiplugin4');
+        BaseConfig.ext = Config.getExt('基础');
 
         seal.ext.registerOptionConfig(BaseConfig.ext, "日志打印方式", "简短", ["永不", "简短", "详细", "调试"]);
         seal.ext.registerIntConfig(BaseConfig.ext, "请求超时时限/ms", 180000, '');

@@ -1,10 +1,10 @@
-import { Config, getRegexConfig } from "../config";
+import Config, { getRegexConfig } from "../config";
 
 export default class ReceivedConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ReceivedConfig.ext = Config.getExt('aiplugin4:消息接收');
+        ReceivedConfig.ext = Config.getExt('消息接收');
 
         seal.ext.registerBoolConfig(ReceivedConfig.ext, "接收图片", true, "");
         seal.ext.registerBoolConfig(ReceivedConfig.ext, "接收指令消息", false, "");

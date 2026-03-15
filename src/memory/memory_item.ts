@@ -7,6 +7,7 @@ export default class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
         'id': 'string',
         'sessionId': 'string',
+        'type': 'string',
         'visibility': 'string',
         'createAt': 'number',
         'lastAccessedAt': 'number',
@@ -23,6 +24,7 @@ export default class MemoryItem {
     // 核心字段
     id: string; // 记忆ID
     sessionId: string; // 记忆来源会话ID
+    type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'other'; // 记忆类型
     visibility: 'public' | 'private'; // 记忆可见性
 
     // 淘汰策略相关
@@ -42,6 +44,7 @@ export default class MemoryItem {
     constructor() {
         this.id = '';
         this.sessionId = '';
+        this.type = 'text';
         this.visibility = 'public';
         this.createAt = 0;
         this.lastAccessedAt = 0;

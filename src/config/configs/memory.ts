@@ -7,7 +7,7 @@ export default class MemoryConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        MemoryConfig.ext = Config.getExt('aiplugin4:记忆');
+        MemoryConfig.ext = Config.getExt('记忆');
 
         seal.ext.registerIntConfig(MemoryConfig.ext, "向量维度", 1024, "");
         seal.ext.registerBoolConfig(MemoryConfig.ext, "启用知识库记忆", false, "");
@@ -28,6 +28,7 @@ content = """
 这是内容
 可以换行
 """
+type = "text"
 importance = 0.9 # 记忆重要性，0-1之间的浮点数，默认0.5
 tags = ["标签1", "标签2"] # 标签列表
 relatedMemories = ["测试2"] # 相关记忆ID列表
@@ -202,6 +203,7 @@ class KnowledgeConfigItem {
             objectValue: {
                 object: {
                     content: 'string',
+                    type: 'string',
                     importance: 'number',
                     tags: { array: 'string' },
                     relatedMemories: { array: 'string' },
@@ -215,6 +217,7 @@ class KnowledgeConfigItem {
     knowledges: {
         [id: string]: {
             content: string,
+            type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'other',
             importance: number,
             tags: string[],
             relatedMemories: string[]
@@ -240,6 +243,7 @@ function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
             m.id = id;
             m.importance = k.importance;
             m.content = k.content;
+            m.type = k.type;
             m.tags = k.tags;
             m.relatedMemories = k.relatedMemories;
             m.users = k.users.map(u => String(u));

@@ -1,10 +1,10 @@
-import { Config } from "../config";
+import Config from "../config";
 
 export default class SampleConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        SampleConfig.ext = Config.getExt('aiplugin4:示例');
+        SampleConfig.ext = Config.getExt('示例');
 
         seal.ext.registerBoolConfig(SampleConfig.ext, "是否启用", true, '');
     }

@@ -1,14 +1,15 @@
-import { Config } from "../config";
+import Config, { getHandlebarsTemplatesConfig, getRegexConfig, getRegexesConfig } from "../config";
 
-export class ReplyConfig {
+export default class ReplyConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ReplyConfig.ext = ConfigManager.getExt('aiplugin4_4:回复');
+        ReplyConfig.ext = Config.getExt('回复');
 
-        seal.ext.registerBoolConfig(ReplyConfig.ext, "回复是否引用", false, "开启将会引用触发该条回复的消息");
+        seal.ext.registerBoolConfig(ReplyConfig.ext, "回复引用", false, "开启将会引用触发该条回复的消息");
         seal.ext.registerIntConfig(ReplyConfig.ext, "回复最大字数", 5000, "防止最大tokens限制不起效");
-        seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止AI复读", false, "");
+        seal.ext.registerBoolConfig(ReplyConfig.ext, "回复文本去除首尾空白字符", true, "");
+        seal.ext.registerBoolConfig(ReplyConfig.ext, "禁止回复复读", false, "");
         seal.ext.registerFloatConfig(ReplyConfig.ext, "视作复读的最低相似度", 0.8, "");
         seal.ext.registerTemplateConfig(ReplyConfig.ext, "回复消息过滤正则表达式", [
             "<think>[\\s\\S]*<\\/think>|<[\\|│｜]?func[^>]{0,9}$|[<＜][\\|│｜](?!at|poke|quote|img|face).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|^[^\\|│｜>＞]{0,10}[\\|│｜][>＞]|[<＜][\\|│｜][^\\|│｜>＞]{0,20}$",
@@ -37,20 +38,19 @@ export class ReplyConfig {
             "\n{{{match.[1]}}}",
             "\n{{{match.[1]}}}"
         ], "替换匹配到的文本，与上面正则表达式序号对应");
-        seal.ext.registerBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符", true, "");
     }
 
     static get() {
         return {
-            maxChar: seal.ext.getIntConfig(ReplyConfig.ext, "回复最大字数"),
-            replymsg: seal.ext.getBoolConfig(ReplyConfig.ext, "回复是否引用"),
-            stopRepeat: seal.ext.getBoolConfig(ReplyConfig.ext, "禁止AI复读"),
-            similarityLimit: seal.ext.getFloatConfig(ReplyConfig.ext, "视作复读的最低相似度"),
-            filterRegex: ConfigManager.getRegexConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
-            filterRegexes: ConfigManager.getRegexesConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
-            contextTemplates: ConfigManager.getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
-            replyTemplates: ConfigManager.getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理回复消息模板"),
-            isTrim: seal.ext.getBoolConfig(ReplyConfig.ext, "回复文本是否去除首尾空白字符")
+            QUOTE_REPLY: seal.ext.getBoolConfig(ReplyConfig.ext, "回复引用"),
+            MAX_CHARS: seal.ext.getIntConfig(ReplyConfig.ext, "回复最大字数"),
+            TRIM: seal.ext.getBoolConfig(ReplyConfig.ext, "回复文本去除首尾空白字符"),
+            STOP_REPEAT: seal.ext.getBoolConfig(ReplyConfig.ext, "禁止回复复读"),
+            REPEAT_SIMILARITY: seal.ext.getFloatConfig(ReplyConfig.ext, "视作复读的最低相似度"),
+            FILTER_REGEX: getRegexConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
+            FILTER_REGEXES: getRegexesConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
+            CONTEXT_TEMPLATES: getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
+            REPLY_TEMPLATES: getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理回复消息模板")
         }
     }
 }

@@ -6,15 +6,30 @@ import { logger } from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/ob11";
 import { TypeDescriptor } from "../utils/utils";
 import { MessageItem } from "./types";
+import Agent from "../agent/agent";
+import { Session } from "./session";
+import { ToolCall } from "../tool/types";
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
+        agentName: 'string',
+        sessionId: 'string',
         messages: { array: 'any' }
     }
+    agentName: string;
+    sessionId: string;
     messages: MessageItem[];
 
     constructor() {
         this.messages = [];
+    }
+
+    get agent(): Agent {
+        return Agent.get(this.agentName);
+    }
+
+    get session(): Session {
+        return this.agent.sessionService.getSession(this.sessionId);
     }
 
     clearMessages(role?: 'user' | 'assistant') {
@@ -34,26 +49,49 @@ export class Context {
         }
     }
 
-    // 添加后检查压缩条件，并对过长user进行压缩
-    addUserMessage() {
-
+    // 添加后检查压缩条件，并对过长user进行压缩 wip
+    addUserMessage(text: string, userId: string, messageId: string) {
+        this.messages.push({
+            time: Math.floor(Date.now() / 1000),
+            text,
+            userId,
+            messageId
+        });
+        this.session.memory.accessMemories(text);
     }
 
-    addAssistantMessage() {
-
+    addAssistantMessage(text: string, messageId: string) {
+        this.messages.push({
+            time: Math.floor(Date.now() / 1000),
+            text,
+            messageId
+        });
+        this.session.memory.accessMemories(text);
     }
 
-    addSystemUserMessage() {
-
+    addSystemUserMessage(text: string, tip: string) {
+        this.messages.push({
+            time: Math.floor(Date.now() / 1000),
+            text,
+            tip
+        });
     }
 
-    addToolCallsMessage() {
-
+    addToolCallsMessage(text: string, tool_calls: ToolCall[]) {
+        this.messages.push({
+            time: Math.floor(Date.now() / 1000),
+            text,
+            tool_calls
+        });
     }
 
-    // 同理，进行压缩
-    addToolCallbackMessage() {
-
+    // 同理，进行压缩 wip
+    addToolCallbackMessage(text: string, tool_call_id: string) {
+        this.messages.push({
+            time: Math.floor(Date.now() / 1000),
+            text,
+            tool_call_id
+        });
     }
 
     async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, content: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
@@ -351,5 +389,15 @@ export class Context {
             }
         });
         return Object.values(userMap);
+    }
+
+    static getMessageItemType(m: MessageItem): 'user' | 'assistant' | 'system_user' | 'tool_calls' | 'tool_callback' {
+        if (m.hasOwnProperty('messageId')) {
+            if (m.hasOwnProperty('userId')) return 'user';
+            else return 'assistant';
+        } else if (m.hasOwnProperty('tip')) return 'system_user';
+        else if (m.hasOwnProperty('tool_calls')) return 'tool_calls';
+        else if (m.hasOwnProperty('tool_call_id')) return 'tool_callback';
+        else throw new Error('Unknown message type');
     }
 }

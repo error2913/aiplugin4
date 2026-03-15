@@ -1,10 +1,10 @@
-import { Config, getHandlebarsTemplateConfig, getPathMapConfig } from "../config";
+import Config, { getHandlebarsTemplateConfig, getPathMapConfig } from "../config";
 
 export default class ToolConfig {
     static ext: seal.ExtInfo;
 
     static register() {
-        ToolConfig.ext = Config.getExt('aiplugin4:工具');
+        ToolConfig.ext = Config.getExt('工具');
 
         seal.ext.registerBoolConfig(ToolConfig.ext, "开启调用函数功能", true, "");
         seal.ext.registerBoolConfig(ToolConfig.ext, "切换为提示词工程", false, "API在不支持function calling功能的时候开启");
