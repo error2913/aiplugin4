@@ -36,7 +36,7 @@ export default class ImageModel extends BaseModel {
                     }]
                 }]
             });
-            Logger.logMessages(body);
+            Logger.printRequestMessages(body.messages);
 
             const time = Date.now();
             const data = await withTimeout(() => fetchData(this.url, this.apiKey, body), TIMEOUT);
@@ -66,7 +66,7 @@ export default class ImageModel extends BaseModel {
                 messages: agent.sessionService.getSession(sessionId).getImageMessages(),
                 tools: agent.getRequestTools()
             });
-            Logger.logMessages(body);
+            Logger.printRequestMessages(body.messages);
 
             const time = Date.now();
             const data = await withTimeout(() => fetchData(this.url, this.apiKey, body), TIMEOUT);
