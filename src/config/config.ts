@@ -1,4 +1,3 @@
-import Handlebars from "handlebars";
 import Logger from "../logger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
 import BaseConfig from "./configs/base";
@@ -12,6 +11,7 @@ import MemoryConfig from "./configs/memory";
 import ReplyConfig from "./configs/reply";
 import MessageConfig from "./configs/message";
 import PromptConfig from "./configs/prompt";
+import ResourceConfig from "./configs/resource";
 
 const configMap = {
     base: BaseConfig,
@@ -24,7 +24,8 @@ const configMap = {
     memory: MemoryConfig,
     reply: ReplyConfig,
     message: MessageConfig,
-    prompt: PromptConfig
+    prompt: PromptConfig,
+    resource: ResourceConfig,
 } as const;
 
 type ConfigMap = typeof configMap;
@@ -90,39 +91,4 @@ export function getRegexConfig(ext: seal.ExtInfo, key: string): RegExp {
         }
     }
     return /(?!)/;
-}
-
-export function getRegexesConfig(ext: seal.ExtInfo, key: string): RegExp[] {
-    return seal.ext.getTemplateConfig(ext, key).map(x => {
-        try {
-            return new RegExp(x);
-        } catch (e) {
-            Logger.error(`正则表达式错误，内容:${x}，错误信息:${e.message}`);
-            return /(?!)/;
-        }
-    });
-}
-
-export function getHandlebarsTemplateConfig(ext: seal.ExtInfo, key: string): HandlebarsTemplateDelegate<any> {
-    return Handlebars.compile(seal.ext.getTemplateConfig(ext, key)[0] || '');
-}
-
-export function getHandlebarsTemplatesConfig(ext: seal.ExtInfo, key: string): HandlebarsTemplateDelegate<any>[] {
-    return seal.ext.getTemplateConfig(ext, key).map(x => Handlebars.compile(x || ''));
-}
-
-export function getPathMapConfig(ext: seal.ExtInfo, key: string): { [id: string]: string } {
-    const paths = seal.ext.getTemplateConfig(ext, key).filter(x => x);
-    const pathMap: { [id: string]: string } = paths.reduce((acc: { [id: string]: string }, path: string) => {
-        if (path.trim() === '') return acc;
-        try {
-            const id = path.split('/').pop().replace(/\.[^/.]+$/, '');
-            if (!id) throw new Error(`本地路径格式错误:${path}`);
-            acc[id] = path;
-        } catch (e) {
-            Logger.error(`本地路径格式错误:${path}，错误信息:${e.message}`);
-        }
-        return acc;
-    }, {});
-    return pathMap;
 }

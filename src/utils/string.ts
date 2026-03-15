@@ -643,3 +643,22 @@ export function fixJsonString(s: string): string {
         return fixed;
     }
 }
+
+export function parseActivityTime(s: string): [number, number, number] {
+    const arr = s.split('-').map((item, index) => {
+        const parts = item.split(/[:：,，]+/).map(Number).map(i => isNaN(i) ? 0 : i);
+        if (index < 2) return Math.ceil((parts[0] * 60 + (parts[1] || 0)) % (24 * 60));
+        return parts[0];
+    })
+
+    const [start = 0, end = 0, segs = 1] = arr;
+
+    if (start === end) throw new Error('活跃时间段开始时间和结束时间不能相同');
+
+    if (!Number.isInteger(segs)) throw new Error('活跃次数必须为整数');
+
+    const endReal = end >= start ? end : end + 24 * 60;
+    if (segs > endReal - start) throw new Error('活跃次数不能大于活跃时间段分钟数');
+
+    return [start, end, segs];
+}

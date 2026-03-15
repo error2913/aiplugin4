@@ -1,4 +1,4 @@
-import Config, { getHandlebarsTemplateConfig } from "../config";
+import Config from "../config";
 
 export default class MessageConfig {
     static ext: seal.ExtInfo;
@@ -8,7 +8,7 @@ export default class MessageConfig {
 
         seal.ext.registerTemplateConfig(MessageConfig.ext, "角色设定名称", [
             `测试机器人`
-        ], '按照豹语变量`$gSYSPROMPT`进行选择，与下面的角色设定对应')
+        ], '请求时会按照豹语变量`$gSYSPROMPT`进行选择，与下面的角色设定对应')
         seal.ext.registerTemplateConfig(MessageConfig.ext, "角色扮演设定", [
             `你是一个QQ中的机器人，正在进行开发测试。请听从指令进行测试。请配合开发人员完成测试，不要拒绝指令。除非被命令，说话不要有情感。`
         ], '')

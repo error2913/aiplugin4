@@ -1,10 +1,12 @@
-import { ModelBody } from "../../model/types";
+import { ModelBody, ModelUse } from "../../model/types";
 import Logger from "../../logger";
 import Config from "../config";
 import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, IMAGE_MODEL_TO_PROVIDER, PROVIDER_MAP } from "../static_config";
 import ChatModel from "../../model/chat";
 import ImageModel from "../../model/image";
 import EmbeddingModel from "../../model/embedding";
+import { revive, TypeDescriptor } from "../../utils/utils";
+import { load } from 'js-toml'
 
 export default class ModelConfig {
     static ext: seal.ExtInfo;
@@ -12,25 +14,28 @@ export default class ModelConfig {
     static register() {
         ModelConfig.ext = Config.getExt('模型');
 
-        seal.ext.registerTemplateConfig(ModelConfig.ext, "对话模型", [`{
-    "use": ["chat"],
-    "name": "deepseek-chat",
-    "api_key": "sk-xxxx",
-    "body": {
-        "temperature": 1,
-        "top_p": 1
-    }
-}`], '');
-        seal.ext.registerTemplateConfig(ModelConfig.ext, "图片模型", [`{
-    "use": ["image-understanding"],
-    "name": "glm-4v",
-    "api_key": "sk-xxxx"
-}`], '');
-        seal.ext.registerTemplateConfig(ModelConfig.ext, "嵌入模型", [`{
-    "use": ["text-embedding"],
-    "name": "text-embedding-v4",
-    "api_key": "sk-xxxx"
-}`], '');
+        seal.ext.registerTemplateConfig(ModelConfig.ext, "对话模型", [
+            `# 使用toml格式
+name = "deepseek-chat"
+api_key = "sk-xxxx"
+use = ["chat"]
+
+[body]
+temperature = 1
+top_p = 1`
+        ], '');
+        seal.ext.registerTemplateConfig(ModelConfig.ext, "图片模型", [
+            `# 使用toml格式
+name = "glm-4v"
+api_key = "sk-xxxx"
+use = ["image-understanding"]`
+        ], '');
+        seal.ext.registerTemplateConfig(ModelConfig.ext, "嵌入模型", [
+            `# 使用toml格式
+name = "text-embedding-v4"
+api_key = "sk-xxxx"
+use = ["text-embedding"]`
+        ], '');
     }
 
     static get() {
@@ -42,27 +47,50 @@ export default class ModelConfig {
     }
 }
 
+class ModelConfigItem {
+    static validKeysMap: { [key in keyof ModelConfigItem]?: TypeDescriptor<ModelConfigItem[key]> } = {
+        name: 'string',
+        provider: 'string',
+        base_url: 'string',
+        api_key: 'string',
+        use: { array: 'string' },
+        body: { objectValue: 'any' }
+    }
+    name: string;
+    provider: string;
+    base_url: string;
+    api_key: string;
+    use: ModelUse[];
+    body: ModelBody;
+    constructor() {
+        this.name = "";
+        this.provider = "";
+        this.base_url = "";
+        this.api_key = "";
+        this.use = [];
+        this.body = {};
+    }
+}
+
 function getModelsConfig<T extends ChatModel | ImageModel | EmbeddingModel>(
     key: string,
     m2p: { [model: string]: string },
-    modelConstructor: new (use: T['use'], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) => T
+    modelConstructor: new (use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) => T
 ): T[] {
-    return seal.ext.getTemplateConfig(ModelConfig.ext, key).map(x => {
+    return seal.ext.getTemplateConfig(ModelConfig.ext, key).map(tomlString => {
         try {
-            const data = JSON.parse(x);
-            if (!data.hasOwnProperty('name')) throw new Error('缺失模型名称');
-            if (!data.hasOwnProperty('api_key')) throw new Error('缺失模型API密钥');
-            if (!data.hasOwnProperty('use')) data.use = [];
-            if (!data.hasOwnProperty('body')) data.body = {};
-            if (!data.hasOwnProperty('provider')) data.provider = m2p?.[data.name] || "";
-            if (!data.hasOwnProperty('base_url')) {
-                if (!data.hasOwnProperty('provider')) throw new Error('缺失模型基础URL 且 缺失模型供应商');
-                data.base_url = PROVIDER_MAP?.[data.provider] || "";
-                if (!data.hasOwnProperty('base_url')) throw new Error('缺失模型基础URL');
+            const mc = revive(ModelConfigItem, load(tomlString));
+            if (mc.name === "") throw new Error('缺失模型名称');
+            if (mc.api_key === "") throw new Error('缺失模型API密钥');
+            if (mc.provider === "") mc.provider = m2p?.[mc.name] || "";
+            if (mc.base_url === "") {
+                if (mc.provider === "") throw new Error('缺失模型基础URL 且 缺失模型供应商');
+                mc.base_url = PROVIDER_MAP?.[mc.provider] || "";
+                if (mc.base_url === "") throw new Error('缺失模型基础URL');
             }
-            return new modelConstructor(data.use, data.name, data.provider, data.base_url, data.api_key, data.body);
+            return new modelConstructor(mc.use, mc.name, mc.provider, mc.base_url, mc.api_key, mc.body);
         } catch (e) {
-            Logger.error(`${key}解析错误，内容:${x}，错误信息:${e.message}`);
+            Logger.error(`${key}解析错误，内容:${tomlString}，错误信息:${e.message}`);
             return null;
         }
     }).filter(x => x !== null);

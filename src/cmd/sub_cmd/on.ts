@@ -1,5 +1,6 @@
 import { AIManager } from "../../AI/AI";
 import { TimerManager } from "../../timer";
+import { parseActivityTime } from "../../utils/string";
 import { S } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
@@ -69,49 +70,29 @@ export function registerCmdOn() {
                         return ret;
                     }
 
-                    const arr = valStr.split('-').map((item, index) => {
-                        const parts = item.split(/[:：,，]+/).map(Number).map(i => isNaN(i) ? 0 : i);
-                        if (index < 2) {
-                            return Math.ceil((parts[0] * 60 + (parts[1] || 0)) % (24 * 60));
-                        } else {
-                            return parts[0];
+                    try {
+                        const [start, end, segs] = parseActivityTime(valStr);
+
+                        TimerManager.removeTimers(sid, '', ['activeTime'], []);
+                        setting.activeTimeInfo = {
+                            start,
+                            end,
+                            segs,
                         }
-                    })
 
-                    const [start = 0, end = 0, segs = 1] = arr;
+                        text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
+                        text += `\n活跃次数:${segs}`;
 
-                    if (start === end) {
-                        seal.replyToSender(ctx, msg, '活跃时间段开始时间和结束时间不能相同');
+                        const curSegIndex = ai.curActiveTimeSegIndex;
+                        const nextTimePoint = ai.getNextTimePoint(curSegIndex);
+                        if (nextTimePoint !== -1) {
+                            TimerManager.addActiveTimeTimer(ctx, ai, nextTimePoint);
+                        }
+                        break;
+                    } catch (e) {
+                        seal.replyToSender(ctx, msg, e.message);
                         return ret;
                     }
-
-                    if (!Number.isInteger(segs)) {
-                        seal.replyToSender(ctx, msg, '活跃次数必须为整数');
-                        return ret;
-                    }
-
-                    const endReal = end >= start ? end : end + 24 * 60;
-                    if (segs > endReal - start) {
-                        seal.replyToSender(ctx, msg, '活跃次数不能大于活跃时间段分钟数');
-                        return ret;
-                    }
-
-                    TimerManager.removeTimers(sid, '', ['activeTime'], []);
-                    setting.activeTimeInfo = {
-                        start,
-                        end,
-                        segs,
-                    }
-
-                    text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
-                    text += `\n活跃次数:${segs}`;
-
-                    const curSegIndex = ai.curActiveTimeSegIndex;
-                    const nextTimePoint = ai.getNextTimePoint(curSegIndex);
-                    if (nextTimePoint !== -1) {
-                        TimerManager.addActiveTimeTimer(ctx, ai, nextTimePoint);
-                    }
-                    break;
                 }
             }
         };

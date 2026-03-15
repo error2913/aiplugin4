@@ -1,4 +1,6 @@
-import Config, { getHandlebarsTemplatesConfig, getRegexConfig, getRegexesConfig } from "../config";
+import Handlebars from "handlebars";
+import Logger from "../../logger";
+import Config, { getRegexConfig } from "../config";
 
 export default class ReplyConfig {
     static ext: seal.ExtInfo;
@@ -48,9 +50,24 @@ export default class ReplyConfig {
             STOP_REPEAT: seal.ext.getBoolConfig(ReplyConfig.ext, "禁止回复复读"),
             REPEAT_SIMILARITY: seal.ext.getFloatConfig(ReplyConfig.ext, "视作复读的最低相似度"),
             FILTER_REGEX: getRegexConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
-            FILTER_REGEXES: getRegexesConfig(ReplyConfig.ext, "回复消息过滤正则表达式"),
-            CONTEXT_TEMPLATES: getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理上下文消息模板"),
-            REPLY_TEMPLATES: getHandlebarsTemplatesConfig(ReplyConfig.ext, "正则处理回复消息模板")
+            FILTER_REGEXES: getRegexesConfig("回复消息过滤正则表达式"),
+            CONTEXT_TEMPLATES: getHandlebarsTemplatesConfig("正则处理上下文消息模板"),
+            REPLY_TEMPLATES: getHandlebarsTemplatesConfig("正则处理回复消息模板")
         }
     }
+}
+
+function getRegexesConfig(key: string): RegExp[] {
+    return seal.ext.getTemplateConfig(ReplyConfig.ext, key).map(x => {
+        try {
+            return new RegExp(x);
+        } catch (e) {
+            Logger.error(`正则表达式错误，内容:${x}，错误信息:${e.message}`);
+            return /(?!)/;
+        }
+    });
+}
+
+function getHandlebarsTemplatesConfig(key: string): HandlebarsTemplateDelegate<any>[] {
+    return seal.ext.getTemplateConfig(ReplyConfig.ext, key).map(x => Handlebars.compile(x || ''));
 }
