@@ -15,7 +15,7 @@ export default class ResourceConfig {
     static get() {
         return {
             LOCAL_IMAGES: getLocalImagesConfig(),
-            LOCAL_RECORDS: null // 整个audio类 wip
+            LOCAL_AUDIOS: null // 整个audio类 wip
         }
     }
 }
@@ -36,7 +36,7 @@ function getPathMapConfig(key: string): { [id: string]: string } {
     return pathMap;
 }
 
-function getLocalImagesConfig() {
+function getLocalImagesConfig(): Image[] {
     const pathMap = getPathMapConfig("本地图片路径");
     return Object.keys(pathMap).map(id => Image.createLocalImage(id, pathMap[id]));
 }

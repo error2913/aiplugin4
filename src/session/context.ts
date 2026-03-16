@@ -1,14 +1,14 @@
-import { Config } from "../config/config";
-import { Image, ImageService } from "../image";
+import Config from "../config/config";
 import { getCtxAndMsg } from "../utils/seal";
 import { levenshteinDistance } from "../utils/string";
-import { logger } from "../logger";
+import Logger from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo } from "../utils/ob11";
 import { TypeDescriptor } from "../utils/utils";
-import { MessageItem } from "./types";
+import { AssistantMessage, AssistantMessageItem, Message, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 import Agent from "../agent/agent";
 import { Session } from "./session";
 import { ToolCall } from "../tool/types";
+import { get } from "lodash-es";
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
@@ -18,19 +18,16 @@ export class Context {
     }
     agentName: string;
     sessionId: string;
-    messages: MessageItem[];
+    messages: Message[];
 
     constructor() {
+        this.agentName = '';
+        this.sessionId = '';
         this.messages = [];
     }
 
-    get agent(): Agent {
-        return Agent.get(this.agentName);
-    }
-
-    get session(): Session {
-        return this.agent.sessionService.getSession(this.sessionId);
-    }
+    get agent(): Agent { return Agent.get(this.agentName); }
+    get session(): Session { return this.agent.sessionService.getSession(this.sessionId); }
 
     clearMessages(role?: 'user' | 'assistant') {
         switch (role) {
@@ -51,189 +48,78 @@ export class Context {
 
     // 添加后检查压缩条件，并对过长user进行压缩 wip
     addUserMessage(text: string, userId: string, messageId: string) {
-        this.messages.push({
-            time: Math.floor(Date.now() / 1000),
+        const umi: UserMessageItem = {
             text,
+            time: Math.floor(Date.now() / 1000),
             userId,
             messageId
+        };
+        const lastMessage = this.messages[this.messages.length - 1];
+        if (getMessageType(lastMessage) === 'user') (lastMessage as UserMessage).contentItems.push(umi);
+        else this.messages.push({
+            role: 'user',
+            contentItems: [umi]
         });
         this.session.memory.accessMemories(text);
     }
 
     addAssistantMessage(text: string, messageId: string) {
-        this.messages.push({
-            time: Math.floor(Date.now() / 1000),
+        const ami: AssistantMessageItem = {
             text,
+            time: Math.floor(Date.now() / 1000),
             messageId
+        };
+        const lastMessage = this.messages[this.messages.length - 1];
+        if (getMessageType(lastMessage) === 'assistant') (lastMessage as AssistantMessage).contentItems.push(ami);
+        else this.messages.push({
+            role: 'assistant',
+            contentItems: [ami]
+        });
+        this.session.memory.accessMemories(text);
+        this.session.memory.summarize();
+        this.limitMessages();
+    }
+
+    addSystemUserMessage(text: string, systemName: string) {
+        const sumi: SystemUserMessageItem = {
+            text,
+            time: Math.floor(Date.now() / 1000),
+            systemName
+        };
+        const lastMessage = this.messages[this.messages.length - 1];
+        if (getMessageType(lastMessage) === 'user') (lastMessage as UserMessage).contentItems.push(sumi);
+        else this.messages.push({
+            role: 'user',
+            contentItems: [sumi]
         });
         this.session.memory.accessMemories(text);
     }
 
-    addSystemUserMessage(text: string, tip: string) {
-        this.messages.push({
-            time: Math.floor(Date.now() / 1000),
-            text,
-            tip
-        });
-    }
-
-    addToolCallsMessage(text: string, tool_calls: ToolCall[]) {
-        this.messages.push({
-            time: Math.floor(Date.now() / 1000),
-            text,
-            tool_calls
-        });
+    addToolCallsMessage(toolCalls: ToolCall[]) {
+        const tcm: ToolCallsMessage = {
+            role: 'assistant',
+            toolCalls
+        }
+        this.messages.push(tcm);
     }
 
     // 同理，进行压缩 wip
-    addToolCallbackMessage(text: string, tool_call_id: string) {
-        this.messages.push({
-            time: Math.floor(Date.now() / 1000),
-            text,
-            tool_call_id
-        });
-    }
-
-    async addMessage(ctx: seal.MsgContext, msg: seal.Message, ai: AI, content: string, images: Image[], role: 'user' | 'assistant', msgId: string = '') {
-        const { isShortMemory, shortMemorySummaryRound } = Config.memory;
-        const messages = this.messages;
-
-        const now = Math.floor(Date.now() / 1000);
-        const uid = role == 'user' ? ctx.player.userId : ctx.endPoint.userId;
-
-        // 自动更新上下文里的名字，发言时间一小时内不更新
-        if (!messages.some(message => message.uid === uid && message.msgArray.some(msgInfo => msgInfo.time >= now - 3600))) {
-            await this.updateName(ctx.endPoint.userId, ctx.group.groupId, uid);
-        }
-
-        // 检查清除上下文，1:清除所有上下文，2:清除assistant和tool上下文，3:清除user上下文
-        const [clrmsgs, _] = seal.vars.intGet(ctx, "$gCLRMSGS");
-        switch (clrmsgs) {
-            case 1: {
-                ai.context.clearMessages();
-                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
-                logger.info('标志位为1，清除所有上下文');
-                break;
-            }
-            case 2: {
-                ai.context.clearMessages('assistant', 'tool');
-                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
-                logger.info('标志位为2，清除assistant和tool上下文');
-                break;
-            }
-            case 3: {
-                ai.context.clearMessages('user');
-                seal.vars.intSet(ctx, "$gCLRMSGS", 0);
-                logger.info('标志位为3，清除user上下文');
-                break;
-            }
-        }
-
-        // 添加消息到上下文
-        const name = role == 'user' ? ctx.player.name : seal.formatTmpl(ctx, "核心:骰子名字");
-        const length = messages.length;
-        if (length !== 0 && messages[length - 1].uid === uid && !/<[\|│｜]?function(?:_call)?>/.test(content)) {
-            messages[length - 1].images.push(...images);
-            messages[length - 1].msgArray.push({
-                messageId: msgId,
-                time: now,
-                text: content
-            });
-        } else {
-            const message: Message = {
-                role: role,
-                uid: uid,
-                name: name,
-                images: images,
-                msgArray: [{
-                    messageId: msgId,
-                    time: now,
-                    text: content
-                }]
-            };
-            messages.push(message);
-
-            // 更新短期记忆
-            if (isShortMemory) {
-                if (role === 'user') {
-                    this.summaryCounter++;
-                }
-                if (this.summaryCounter >= shortMemorySummaryRound) {
-                    this.summaryCounter = 0;
-                    ai.memory.updateShortMemory(ctx, msg, ai);
-                }
-            }
-        }
-
-        //更新记忆权重
-        ai.memory.updateRelatedMemoryWeight(ctx, ai.context, content, role);
-
-        //删除多余的上下文
-        this.limitMessages();
-    }
-
-    async addToolCallsMessage(tool_calls: ToolCall[]) {
-        const message: Message = {
-            role: 'assistant',
-            tool_calls: tool_calls,
-            uid: '',
-            name: '',
-            images: [],
-            msgArray: []
-        };
-        this.messages.push(message);
-    }
-
-    async addToolMessage(tool_call_id: string, s: string, images: Image[]) {
-        const now = Math.floor(Date.now() / 1000);
-        const message: Message = {
+    addToolCallbackMessage(text: string, toolCallId: string) {
+        const tcbm: ToolCallbackMessage = {
             role: 'tool',
-            tool_call_id: tool_call_id,
-            uid: '',
-            name: '',
-            images: images,
-            msgArray: [{
-                messageId: '',
-                time: now,
-                text: s
-            }]
-        };
-
-        for (let i = this.messages.length - 1; i >= 0; i--) {
-            if (this.messages[i]?.tool_calls && this.messages[i].tool_calls.some(tool_call => tool_call.id === tool_call_id)) {
-                this.messages.splice(i + 1, 0, message);
-                return;
-            }
+            text,
+            toolCallId
         }
-
-        logger.error(`在添加时找不到对应的 tool_call_id: ${tool_call_id}`);
-    }
-
-    async addSystemUserMessage(name: string, s: string, images: Image[]) {
-        const now = Math.floor(Date.now() / 1000);
-        const message: Message = {
-            role: 'user',
-            uid: '',
-            name: `_${name}`,
-            images: images,
-            msgArray: [{
-                messageId: '',
-                time: now,
-                text: s
-            }]
-        };
-        this.messages.push(message);
+        this.messages.push(tcbm);
     }
 
     limitMessages() {
-        const { maxRounds } = Config.message;
+        const { MAX_ROUNDS } = Config.message;
         const messages = this.messages;
         let round = 0;
         for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'user' && !messages[i].name.startsWith('_')) {
-                round++;
-            }
-            if (round > maxRounds) {
+            if (messages[i].role === 'user') round++;
+            if (round > MAX_ROUNDS) {
                 messages.splice(0, i);
                 break;
             }
@@ -319,10 +205,9 @@ export class Context {
             }
         }
 
-        logger.warning(`未找到用户<${name}>`);
+        Logger.warning(`未找到用户<${name}>`);
         return null;
     }
-
     async findGroupInfo(ctx: seal.MsgContext, groupName: string | number): Promise<GroupInfo> {
         groupName = String(groupName);
         if (!groupName) return null;
@@ -373,31 +258,33 @@ export class Context {
             if (distance <= 2) return { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
         }
 
-        logger.warning(`未找到群聊<${groupName}>`);
+        Logger.warning(`未找到群聊<${groupName}>`);
         return null;
     }
 
     get users(): string[] {
-        const userMap: { [key: string]: UserInfo } = {};
-        this.messages.forEach(message => {
-            if (message.role === 'user' && message.name && message.uid && !message.name.startsWith('_')) {
-                userMap[message.uid] = {
-                    isPrivate: true,
-                    id: message.uid,
-                    name: message.name
-                };
-            }
+        const userSet = new Set<string>();
+        this.messages.forEach(m => {
+            if (m.role === 'user') m.contentItems.forEach(umi => {
+                if (getUserMessageItemType(umi) === 'user') userSet.add((umi as UserMessageItem).userId);
+            });
         });
-        return Object.values(userMap);
+        return Array.from(userSet);
     }
+}
 
-    static getMessageItemType(m: MessageItem): 'user' | 'assistant' | 'system_user' | 'tool_calls' | 'tool_callback' {
-        if (m.hasOwnProperty('messageId')) {
-            if (m.hasOwnProperty('userId')) return 'user';
-            else return 'assistant';
-        } else if (m.hasOwnProperty('tip')) return 'system_user';
-        else if (m.hasOwnProperty('tool_calls')) return 'tool_calls';
-        else if (m.hasOwnProperty('tool_call_id')) return 'tool_callback';
-        else throw new Error('Unknown message type');
+function getMessageType(m: Message): 'user' | 'assistant' | 'tool_calls' | 'tool_callback' {
+    if (m.role === 'user') return 'user';
+    else if (m.role === 'assistant') {
+        if (m.hasOwnProperty('toolCalls')) return 'tool_calls';
+        else return 'assistant';
     }
+    else if (m.role === 'tool') return 'tool_callback';
+    else throw new Error('Unknown message type');
+}
+
+function getUserMessageItemType(umi: UserMessageItem | SystemUserMessageItem): 'user' | 'system' {
+    if (umi.hasOwnProperty('userId')) return 'user';
+    else if (umi.hasOwnProperty('systemName')) return 'system';
+    else throw new Error('Unknown message type');
 }

@@ -224,7 +224,8 @@ export default class MemoryService {
 
     buildMemoriesPrompt(sources: MemorySource[]): string {
         if (sources.length === 0) return '';
-        const { MEMORY, MEMORY_TEMPLATE } = Config.memory;
+        const { MEMORY } = Config.memory;
+        const { MEMORY_TEMPLATE } = Config.prompt;
         return MEMORY_TEMPLATE({
             "MEMORY": MEMORY,
             "sources": sources

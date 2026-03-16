@@ -1,6 +1,7 @@
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
+import { Session } from "../session/session";
 import { TypeDescriptor } from "../utils/utils";
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
@@ -9,43 +10,48 @@ import { MemorySource } from "./types";
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
         memoryMap: { array: MemoryItem },
+        agentName: 'string',
         sessionId: 'string',
         summaryStatus: 'boolean',
         summaries: { array: 'string' }
     };
+    agentName: string;
     sessionId: string;
     summaryStatus: boolean;
     summaries: string[];
 
     constructor() {
         super();
+        this.agentName = '';
         this.sessionId = '';
         this.summaryStatus = false;
         this.summaries = [];
     }
 
-    async buildMemoryPrompt(agent: Agent, text: string): Promise<string> {
+    get agent(): Agent { return Agent.get(this.agentName); }
+    get session(): Session { return this.agent.sessionService.getSession(this.sessionId); }
+
+    async buildMemoryPrompt(text: string): Promise<string> {
         // 获取users、groups
-        const session = agent.sessionService.getSession(this.sessionId);
-        const users = session.sessionType === 'group' ? session.context.users : [session.sessionId];
-        const groups = session.sessionType === 'group' ? [session.sessionId] : [];
+        const users = this.session.sessionType === 'group' ? this.session.context.users : [this.session.sessionId];
+        const groups = this.session.sessionType === 'group' ? [this.session.sessionId] : [];
         const sources: MemorySource[] = [];
         // bot记忆
         sources.push({
             source: '核心记忆',
-            memories: await agent.sessionService.memory.getTopScoreMemories(text, users, groups)
+            memories: await this.agent.sessionService.memory.getTopScoreMemories(text, users, groups)
         })
         // 会话记忆
         sources.push({
             source: '会话记忆',
-            memories: await session.memory.getTopScoreMemories(text, users, groups)
+            memories: await this.session.memory.getTopScoreMemories(text, users, groups)
         })
         // 群内用户的记忆
-        if (session.sessionType === 'group') {
-            for (const u of session.context.users) {
+        if (this.session.sessionType === 'group') {
+            for (const u of this.session.context.users) {
                 sources.push({
                     source: `用户${u}记忆`,
-                    memories: await agent.sessionService.getSession(u).memory.getTopScoreMemories(text, users, groups)
+                    memories: await this.agent.sessionService.getSession(u).memory.getTopScoreMemories(text, users, groups)
                 })
             }
         }
@@ -54,7 +60,7 @@ export default class SessionMemoryService extends MemoryService {
     }
 
     // wip 使用总结智能体
-    async summarize(session: Session) {
+    async summarize() {
         if (!this.summaryStatus) return;
 
         const { url: chatUrl, apiKey: chatApiKey } = Config.request;
@@ -171,7 +177,8 @@ export default class SessionMemoryService extends MemoryService {
 
     buildSummaryPrompt(): string {
         if (this.summaries.length === 0) return '';
-        const { SUMMARY, SUMMARY_TEMPLATE } = Config.memory;
+        const { SUMMARY } = Config.memory;
+        const { SUMMARY_TEMPLATE } = Config.prompt;
         return SUMMARY_TEMPLATE({
             "SUMMARY": SUMMARY,
             "summaries": this.summaries

@@ -4,29 +4,36 @@ export interface BaseMessageItem {
     time: number; // 秒
     text: string;
 }
-
 export interface UserMessageItem extends BaseMessageItem {
     userId: string;
     messageId: string;
 }
-
 export interface AssistantMessageItem extends BaseMessageItem {
     messageId: string;
 }
-
 export interface SystemUserMessageItem extends BaseMessageItem {
-    tip: string;
+    systemName: string; // 系统用户消息的名义
 }
 
-export interface ToolCallsMessageItem extends BaseMessageItem {
-    tool_calls: ToolCall[];
+export interface UserMessage {
+    role: 'user';
+    contentItems: (UserMessageItem | SystemUserMessageItem)[];
+}
+export interface AssistantMessage {
+    role: 'assistant';
+    contentItems: AssistantMessageItem[];
+}
+export interface ToolCallsMessage {
+    role: 'assistant';
+    toolCalls: ToolCall[];
+}
+export interface ToolCallbackMessage {
+    role: 'tool';
+    text: string;
+    toolCallId: string;
 }
 
-export interface ToolCallbackMessageItem extends BaseMessageItem {
-    tool_call_id: string;
-}
-
-export type MessageItem = UserMessageItem | AssistantMessageItem | SystemUserMessageItem | ToolCallsMessageItem | ToolCallbackMessageItem;
+export type Message = UserMessage | AssistantMessage | ToolCallsMessage | ToolCallbackMessage;
 
 export interface State {
     description: string; // 自定义描述

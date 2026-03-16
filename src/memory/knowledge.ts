@@ -54,7 +54,8 @@ export default class KnowledgeService extends MemoryService {
         const session = agent.sessionService.getSession(sessionId);
         const users = session.sessionType === 'group' ? session.context.users : [session.sessionId];
         const groups = session.sessionType === 'group' ? [session.sessionId] : [];
-        const { KNOWLEDGE, KNOWLEDGE_TEMPLATE } = Config.memory;
+        const { KNOWLEDGE } = Config.memory;
+        const { KNOWLEDGE_TEMPLATE } = Config.prompt;
         return KNOWLEDGE_TEMPLATE({
             "KNOWLEDGE": KNOWLEDGE,
             "memories": this.getTopScoreMemories(text, users, groups)
