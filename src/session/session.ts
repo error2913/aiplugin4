@@ -4,11 +4,12 @@ import { logger } from "../logger";
 import { toolMap, ToolName, ToolState } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { revive, TypeDescriptor } from "../utils/utils";
-import { Context } from "./context";
+import { Context } from "../context/context";
 import { MemoryService } from "../memory/memory";
 import { RequestMessage, SessionType, State } from "./types";
 import KnowledgeService from "../memory/knowledge";
 import SessionMemoryService from "../memory/session_memory";
+import Group from "./group";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
@@ -29,8 +30,7 @@ export class Session {
                 state: { objectValue: 'boolean' }
             },
             objectValue: 'default'
-        },
-        ignoredUserIdList: { array: 'string' },
+        }
     }
     agentName: string;
     sessionId: string;
@@ -43,7 +43,6 @@ export class Session {
         callCount: number, // 单次触发调用函数计数
         listen: ToolListen // 监听调用函数发送的内容
     }
-    ignoredUserIdList: string[];
 
     constructor() {
         this.agentName = '';
@@ -73,21 +72,10 @@ export class Session {
                 }
             }
         }
-        this.ignoredUserIdList = [];
     }
 
     get agent(): Agent {
         return Agent.get(this.agentName);
-    }
-
-    // wip
-    getMessages(): RequestMessage[] {
-        return [];
-    }
-
-    // wip
-    getImageMessages(): RequestMessage[] {
-        return [];
     }
 
     get toolState(): ToolState {
@@ -100,6 +88,20 @@ export class Session {
             state[tool] = this.state[tool];
         })
         return this.tool.state;
+    }
+
+    // wip
+    getMessages(): RequestMessage[] {
+        return [];
+    }
+
+    // wip
+    getImageMessages(): RequestMessage[] {
+        return [];
+    }
+
+    checkIgnoredUserId(userId: string): boolean {
+        return this.sessionType === 'group' && Group.get(this.sessionId).ignoredUserIdList.includes(userId);
     }
 }
 

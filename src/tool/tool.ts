@@ -1,5 +1,5 @@
-import { Config } from "../config/config"
-import { logger } from "../logger"
+import Config from "../config/config"
+import Logger from "../logger"
 import { fixJsonString } from "../utils/string";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { Session } from "../session/session";
@@ -13,7 +13,7 @@ export const toolMap = {
 export type ToolName = keyof typeof toolMap;
 export type ToolState = { [key in ToolName]?: boolean };
 
-export class Tool {
+export default class Tool {
     toolInfo: ToolInfo;
     ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
     sessionType: 'any' | SessionType; // 可使用函数的会话类型
@@ -54,7 +54,7 @@ export class Tool {
 
         const ext = seal.ext.find(eci.extName);
         if (!ext.cmdMap.hasOwnProperty(eci.cmd)) {
-            logger.warning(`扩展${eci.extName}中未找到指令:${eci.cmd}`);
+            Logger.warning(`扩展${eci.extName}中未找到指令:${eci.cmd}`);
             return ['', false];
         }
 
@@ -83,7 +83,7 @@ export class Tool {
                 listen.cleanup();
             }
         }).catch((err) => {
-            logger.error(`在extensionSolve中: 调用函数失败:${err.message}`);
+            Logger.error(`在extensionSolve中: 调用函数失败:${err.message}`);
             return ['', false];
         });
     }
@@ -91,23 +91,23 @@ export class Tool {
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
         if (!toolMap.hasOwnProperty(name)) {
-            logger.warning(`调用函数失败:未注册的函数:${name}`);
+            Logger.warning(`调用函数失败:未注册的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
         }
         if (session.toolState?.[name]) {
-            logger.warning(`调用函数失败:未经许可的函数:${name}`);
+            Logger.warning(`调用函数失败:未经许可的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未经许可的函数:${name}` }, callBack: true };
         }
 
         const tool = toolMap[name];
         if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs === null) {
-            logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
+            Logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
             return { result: { tool_call_id: tool_call.id, content: `暂时无法调用函数，请先提示用户使用 .r 指令` }, callBack: true };
         }
 
         const msgType = msg.messageType === 'private' ? 'user' : 'group';
         if (tool.sessionType !== "any" && tool.sessionType !== msgType) {
-            logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);
+            Logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}` }, callBack: true };
         }
 
@@ -117,13 +117,13 @@ export class Tool {
         } catch (e) {
             const fixedStr = fixJsonString(tool_call.function.arguments);
             if (fixedStr === '') {
-                logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
+                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
             }
             try {
                 args = JSON.parse(fixedStr);
             } catch (e) {
-                logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
+                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
             }
 
@@ -131,12 +131,12 @@ export class Tool {
 
         try {
             if (args !== null && typeof args !== 'object') {
-                logger.warning(`调用函数失败:arguement不是一个object`);
+                Logger.warning(`调用函数失败:arguement不是一个object`);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数失败:arguement不是一个object` }, callBack: true };
             }
             for (const key of tool.toolInfo.function.parameters.required) {
                 if (!args.hasOwnProperty(key)) {
-                    logger.warning(`调用函数失败:缺少必需参数 ${key}`);
+                    Logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                     return { result: { tool_call_id: tool_call.id, content: `调用函数失败:缺少必需参数 ${key}` }, callBack: true };
                 }
             }
@@ -144,7 +144,7 @@ export class Tool {
             const content = await tool.solve(ctx, msg, session, args);
             return { result: { tool_call_id: tool_call.id, content }, callBack: true };
         } catch (e) {
-            logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
+            Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
         }
     }
@@ -156,7 +156,7 @@ export class Tool {
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
             if (session.tool.callCount > MAX_CALL_COUNT) {
-                logger.warning('工具调用超过上限');
+                Logger.warning('工具调用超过上限');
                 ret.result.push({
                     tool_call_id: tool_call.id,
                     content: '工具调用超过上限'
@@ -176,7 +176,7 @@ export class Tool {
         try {
             const data = JSON.parse(toolCallStr);
             if (!Array.isArray(data)) {
-                logger.warning(`解析函数调用失败:tool_calls不是一个数组`);
+                Logger.warning(`解析函数调用失败:tool_calls不是一个数组`);
                 return { result: [{ tool_call_id: '', content: `解析函数调用失败:tool_calls不是一个数组` }], callBack: true };
             }
             const tool_calls = data.map((item, index) => {
@@ -194,7 +194,7 @@ export class Tool {
             });
             return await this.handleToolCalls(ctx, msg, session, tool_calls);
         } catch (e) {
-            logger.error(`解析函数调用失败:${e.message}`);
+            Logger.error(`解析函数调用失败:${e.message}`);
             return { result: [{ tool_call_id: '', content: `解析函数调用失败:${e.message}` }], callBack: true };
         }
     }
@@ -206,7 +206,7 @@ export class Tool {
             .map(key => {
                 if (toolState[key]) {
                     if (!toolMap.hasOwnProperty(key)) {
-                        logger.warning(`在getToolsInfo中找不到工具:${key}`);
+                        Logger.warning(`在getToolsInfo中找不到工具:${key}`);
                         return null;
                     }
                     const tool: Tool = toolMap[key];
@@ -221,7 +221,8 @@ export class Tool {
         return tools.length > 0 ? tools : null;
     }
     static getToolsInfoPrompt(session: Session): string {
-        const { PROMPT_ENGINEERING, TOOLS_PROMPT_TEMPLATE } = Config.tool;
+        const { PROMPT_ENGINEERING } = Config.tool;
+        const { TOOLS_PROMPT_TEMPLATE } = Config.prompt;
 
         const tools = this.getToolsInfo(session);
         if (tools && tools.length > 0) {

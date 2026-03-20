@@ -1,5 +1,5 @@
-import { Config } from "../config/config";
-import { logger } from "../logger";
+import Config from "../config/config";
+import Logger from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 
 export default class User {
@@ -9,6 +9,10 @@ export default class User {
     }
     userId: string;
     userName: string;
+    constructor() {
+        this.userId = '';
+        this.userName = '';
+    }
 
     static userMap: { [key: string]: User };
 
@@ -19,7 +23,7 @@ export default class User {
                 const data = JSON.parse(Config.ext.storageGet(`user_${userId}`) || '{}');
                 user = revive(User, data);
             } catch (error) {
-                logger.error(`加载用户${userId}失败: ${error}`);
+                Logger.error(`加载用户${userId}失败: ${error}`);
             }
             user.userId = userId;
             this.userMap[userId] = user;

@@ -1,4 +1,4 @@
-import { Context } from "../session/context";
+import { Context } from "../context/context";
 import { Image } from "../image";
 import { logger } from "../logger";
 import { Config } from "../config/config";

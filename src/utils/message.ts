@@ -1,5 +1,5 @@
 import { AI, GroupInfo, UserInfo } from "../AI/AI";
-import { Message } from "../session/context";
+import { Message } from "../context/context";
 import { Config } from "../config/config";
 import { ToolInfo } from "../tool/tool";
 import { fmtDate } from "./string";

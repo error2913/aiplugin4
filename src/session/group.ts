@@ -1,5 +1,5 @@
-import { Config } from "../config/config";
-import { logger } from "../logger";
+import Config from "../config/config";
+import Logger from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 export default class Group {
     static validKeysMap: { [key in keyof Group]?: TypeDescriptor<Group[key]> } = {
@@ -8,7 +8,8 @@ export default class Group {
         role: 'string',
         owner: 'string',
         adminList: { array: 'string' },
-        memberList: { array: 'string' }
+        memberList: { array: 'string' },
+        ignoredUserIdList: { array: 'string' }
     }
     groupId: string;
     groupName: string;
@@ -16,6 +17,16 @@ export default class Group {
     owner: string; // 群主id
     adminList: string[]; // 管理员id列表
     memberList: string[]; // 普通成员id列表
+    ignoredUserIdList: string[];
+    constructor() {
+        this.groupId = '';
+        this.groupName = '';
+        this.role = 'member';
+        this.owner = '';
+        this.adminList = [];
+        this.memberList = [];
+        this.ignoredUserIdList = [];
+    }
 
     static groupMap: { [key: string]: Group };
 
@@ -26,7 +37,7 @@ export default class Group {
                 const data = JSON.parse(Config.ext.storageGet(`group_${groupId}`) || '{}');
                 group = revive(Group, data);
             } catch (error) {
-                logger.error(`加载群${groupId}失败: ${error}`);
+                Logger.error(`加载群${groupId}失败: ${error}`);
             }
             group.groupId = groupId;
             this.groupMap[groupId] = group;

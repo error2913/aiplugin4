@@ -23,6 +23,16 @@ export default class MemoryService {
     get memories() {
         return Object.values(this.memoryMap);
     }
+    get users() {
+        const users = new Set<string>();
+        this.memories.forEach(m => m.users.forEach(u => users.add(u)));
+        return Array.from(users);
+    }
+    get groups() {
+        const groups = new Set<string>();
+        this.memories.forEach(m => m.groups.forEach(g => groups.add(g)));
+        return Array.from(groups);
+    }
     get tags() {
         const tags = new Set<string>();
         this.memories.forEach(m => m.tags.forEach(t => tags.add(t)));
@@ -200,6 +210,20 @@ export default class MemoryService {
         // 群内用户的记忆权重更新
         if (session.sessionType === 'group') task.push(...session.context.users.map(u => agent.sessionService.getSession(u).memory.accessMemories(s)));
         await Promise.all(task);
+    }
+
+    static getItemsFromRelatedMemories(session: Session, item: 'tags' | 'users' | 'groups') {
+        const agent = Agent.get(session.agentName);
+        const items: string[] = [];
+        // bot记忆
+        items.push(...agent.sessionService.memory[item]);
+        // 知识库记忆
+        items.push(...agent.sessionService.knowledge[item]);
+        // 会话自身记忆
+        items.push(...session.memory[item]);
+        // 群内用户的记忆
+        if (session.sessionType === 'group') session.context.users.forEach(u => items.push(...agent.sessionService.getSession(u).memory[item]));
+        return Array.from(new Set(items));
     }
 
     async getTopScoreMemories(text: string = '', users: string[] = [], groups: string[] = []) {
