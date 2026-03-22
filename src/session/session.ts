@@ -10,6 +10,7 @@ import { RequestMessage, SessionType, State } from "./types";
 import KnowledgeService from "../memory/knowledge";
 import SessionMemoryService from "../memory/session_memory";
 import Group from "./group";
+import User from "./user";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
@@ -77,7 +78,12 @@ export class Session {
     get agent(): Agent {
         return Agent.get(this.agentName);
     }
-
+    get user(): User | null {
+        return this.sessionType === 'user' ? User.get(this.sessionId) : null;
+    }
+    get group(): Group | null {
+        return this.sessionType === 'group' ? Group.get(this.sessionId) : null;
+    }
     get toolState(): ToolState {
         const { BLOCKED, DEFAULT_CLOSED } = Config.tool;
         const tools = Agent.get(this.agentName).tools;
@@ -102,43 +108,5 @@ export class Session {
 
     checkIgnoredUserId(userId: string): boolean {
         return this.sessionType === 'group' && Group.get(this.sessionId).ignoredUserIdList.includes(userId);
-    }
-}
-
-export class SessionService {
-    static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
-        agentName: 'string',
-        memory: MemoryService,
-        sessionMap: { objectValue: Session }
-    }
-    agentName: string;
-    memory: MemoryService; // 全局记忆服务
-    sessionMap: { [key: string]: Session };
-
-    constructor() {
-        this.agentName = '';
-        this.sessionMap = {};
-    }
-
-    getSession(sessionId: string): Session {
-        if (!this.sessionMap.hasOwnProperty(sessionId)) {
-            let session = new Session();
-            try {
-                const data = JSON.parse(Config.ext.storageGet(`session_${sessionId}`) || '{}');
-                session = revive(Session, data);
-            } catch (error) {
-                logger.error(`加载会话${sessionId}失败: ${error}`);
-            }
-            session.sessionId = sessionId;
-            if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
-            session.agentName = this.agentName;
-            this.sessionMap[sessionId] = session;
-        }
-        return this.sessionMap[sessionId];
-    }
-
-    get knowledge(): KnowledgeService {
-        if (!knowledgeServiceMap.hasOwnProperty(this.agentName)) return knowledgeServiceMap['*'];
-        return knowledgeServiceMap[this.agentName];
     }
 }

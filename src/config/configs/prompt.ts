@@ -23,6 +23,7 @@ export default class PromptConfig {
 - <|poke:xxx|>表示戳一戳某个群成员
 
 ## 特殊消息标签
+- <|system:xxx|>表示系统消息，xxx为系统提示来源，不要在生成的回复中使用
 - <|from:xxx|>表示消息来源，不要在生成的回复中使用
 - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
 - <|quote:xxx|>表示引用消息，xxx为对应的消息ID

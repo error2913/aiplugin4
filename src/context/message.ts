@@ -1,4 +1,6 @@
 import Logger from "../logger";
+import User from "../session/user";
+import { fmtDate } from "../utils/string";
 import { AssistantMessage, MessageType, RequestMessage, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
 export default class Message {
@@ -18,18 +20,28 @@ export default class Message {
         else throw new Error('Unknown message type');
     }
 
-    static buildRequestMessages(messages: MessageType[]): RequestMessage[] { // 添加system message，对content进行模板处理 wip
+    static buildRequestMessages(messages: MessageType[]): RequestMessage[] { // 添加system message，sample message,增加前缀、时间等配置
         const res: RequestMessage[] = [];
         for (const m of messages) {
             switch (Message.getMessageType(m)) {
                 case 'user': {
+                    let currentUserId = '';
                     let content = "";
                     for (const umi of (m as UserMessage).contentItems) {
+                        if (content.length > 0) content += '\\f';
                         if (Message.getUserMessageItemType(umi) == 'user') {
-                            content += umi.text;
+                            if ((umi as UserMessageItem).userId !== currentUserId) {
+                                currentUserId = (umi as UserMessageItem).userId;
+                                const u = User.get(currentUserId);
+                                content += `<|from:${u.userName}(${u.userId})|>`;
+                            }
+                            content += `<|time:${fmtDate(umi.time)}|>`;
+                            content += `<|msg_id:${(umi as UserMessageItem).messageId}|>`;
                         } else if (Message.getUserMessageItemType(umi) == 'system') {
-                            content += umi.text;
+                            content += `<|system:${(umi as SystemUserMessageItem).systemName}|>`;
+                            content += `<|time:${fmtDate(umi.time)}|>`;
                         }
+                        content += umi.text;
                     }
                     res.push({ role: 'user', content });
                     break;
@@ -37,6 +49,9 @@ export default class Message {
                 case 'assistant': {
                     let content = "";
                     for (const ami of (m as AssistantMessage).contentItems) {
+                        if (content.length > 0) content += '\\f';
+                        content += `<|time:${fmtDate(ami.time)}|>`;
+                        content += `<|msg_id:${(ami as UserMessageItem).messageId}|>`;
                         content += ami.text;
                     }
                     res.push({ role: 'assistant', content });
