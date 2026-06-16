@@ -44,7 +44,8 @@ export function registerBan() {
 
         const memberInfo2 = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), ui.userId.replace(/^.+:/, ''));
         if (!memberInfo2) return `获取用户 ${ui.userId} 信息失败`;
-        if (memberInfo2.role === 'owner' || memberInfo2.role === 'admin') return `你无法禁言${memberInfo2.role === 'owner' ? '群主' : '管理员'}`;
+        if (memberInfo2.role === 'owner') return `你无法禁言群主`;
+        if (memberInfo2.role === 'admin' && memberInfo.role !== 'owner') return `你无法禁言管理员，因为你不是群主`;
 
         await setGroupBan(epId, gid.replace(/^.+:/, ''), ui.userId.replace(/^.+:/, ''), duration);
         return `已禁言<${name}> ${duration}秒`;
