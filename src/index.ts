@@ -28,7 +28,7 @@ function main() {
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
 
-  ext.onPoke = (ctx, event) => {
+  ext.onPoke = (ctx: seal.MsgContext, event: seal.PokeEvent) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
     if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);
@@ -36,7 +36,7 @@ function main() {
   }
 
   //接受非指令消息
-  ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
+  ext.onNotCommandReceived = (ctx: seal.MsgContext, msg: seal.Message): void | Promise<void> => {
     try {
       const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = Config.received;
       if (ctx.isPrivate && disabledInPrivate) {
@@ -128,7 +128,7 @@ function main() {
   }
 
   //接受的指令
-  ext.onCommandReceived = (ctx, msg, cmdArgs) => {
+  ext.onCommandReceived = (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs) => {
     try {
       if (ToolService.cmdArgs === null) {
         ToolService.cmdArgs = cmdArgs;
@@ -161,7 +161,7 @@ function main() {
   }
 
   //骰子发送的消息
-  ext.onMessageSend = (ctx, msg) => {
+  ext.onMessageSend = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
