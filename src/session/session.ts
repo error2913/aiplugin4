@@ -173,6 +173,10 @@ export class Session {
     get toolState(): ToolState {
         const { BLOCKED, DEFAULT_CLOSED } = Config.tool;
         const state = this.tool.state;
+        // 清理已不存在工具的残留状态（如已删除的 call_subagent）
+        for (const key of Object.keys(state)) {
+            if (!Object.prototype.hasOwnProperty.call(toolMap, key)) delete state[key];
+        }
         Object.keys(toolMap).forEach(tool => {
             if (BLOCKED.includes(tool)) return;
             if (!Object.prototype.hasOwnProperty.call(state, tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
