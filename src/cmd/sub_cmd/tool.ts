@@ -28,8 +28,8 @@ export function registerCmdTool() {
             case 'on': {
                 const val3 = cmdArgs.getArgN(3);
                 if (val3) {
-                    const toolsNotAllow = Config.tool.BLOCKED;
-                    if (toolsNotAllow.includes(val3)) {
+                    const blockedTools = Config.tool.BLOCKED;
+                    if (blockedTools.includes(val3)) {
                         seal.replyToSender(ctx, msg, `工具函数 ${val3} 不被允许开启`);
                         return ret;
                     }
@@ -39,9 +39,9 @@ export function registerCmdTool() {
                     session.save();
                     return ret;
                 }
-                const toolsNotAllow = Config.tool.BLOCKED;
+                const blockedTools = Config.tool.BLOCKED;
                 for (const key in session.toolState) {
-                    session.tool.state[key] = toolsNotAllow.includes(key) ? false : true;
+                    session.tool.state[key] = blockedTools.includes(key) ? false : true;
                 }
                 seal.replyToSender(ctx, msg, '已开启全部工具函数');
                 session.save();
@@ -126,6 +126,7 @@ export function registerCmdTool() {
                     }
 
                     const content = await tool.solve(ctx, msg, session, args);
+                    logger.info(`[tool] 指令调用 session=${session.sessionId} tool=${val3}`);
                     seal.replyToSender(ctx, msg, `返回内容:
       ${content}`);
                     return ret;

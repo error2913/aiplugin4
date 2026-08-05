@@ -76,14 +76,14 @@ export default class Agent {
     async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const toolInfos = Tool.getToolsInfo(session);
-        const runCtx = new AgentRunContext();
+        const trace = new AgentRunContext();
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
         let toolTurn = 0;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
-            runCtx.beginTurn();
+            trace.beginTurn();
             const messages = await handleMessages(ctx, session);
             const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos, tool_choice || 'auto', session.setting.modelName);
             result = await handleReply(ctx, msg, session, raw_reply);
@@ -97,7 +97,7 @@ export default class Agent {
                             break;
                         }
                         logger.info('prompt tool call triggered');
-                        runCtx.recordToolCall();
+                        trace.recordToolCall();
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images);
                         await session.context.addAssistantMessage(match[0], '');
@@ -119,7 +119,7 @@ export default class Agent {
                             break;
                         }
                         logger.info('tool call triggered');
-                        runCtx.recordToolCall();
+                        trace.recordToolCall();
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images);
                         session.context.addToolCallsMessage(tool_calls);
@@ -152,13 +152,13 @@ export default class Agent {
 
         const { contextArray, replyArray, images } = result;
         await session.reply(ctx, msg, contextArray, replyArray, images);
-        logger.info(`[run] ${runCtx.summary()}`);
+        logger.info(`[run] ${trace.summary()}`);
     }
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），带轮次上限 */
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-        const runCtx = new AgentRunContext();
+        const trace = new AgentRunContext();
         let turns = 0;
 
         await session.stopCurrentChatStream();
@@ -173,7 +173,7 @@ export default class Agent {
         let interval = 1000;
 
         while (status === 'processing' && session.stream.id === id) {
-            runCtx.beginTurn();
+            trace.beginTurn();
             const result = await streamService.pollStream(session.stream.id, after);
             status = result.status;
             const raw_reply = result.reply;
@@ -218,7 +218,7 @@ export default class Agent {
                             await session.context.addAssistantMessage(match[0], '');
 
                             try {
-                                runCtx.recordToolCall();
+                                trace.recordToolCall();
                                 turns++;
                                 if (turns >= MAX_TOOL_TURNS) {
                                     logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
@@ -254,7 +254,7 @@ export default class Agent {
 
         if (session.stream.id !== id) return;
         await session.stopCurrentChatStream();
-        logger.info(`[run] ${runCtx.summary()}`);
+        logger.info(`[run] ${trace.summary()}`);
     }
 
     static agentMap: { [key: string]: Agent } = {};

@@ -13,7 +13,7 @@ export default class ImageConfig {
     static register() {
         seal.ext.registerStringConfig(ext, "图片全局识别豹语条件", '0', "使用豹语表达式，例如：$t群号_RAW=='2001'。若要开启所有图片自动识别转文字，请填写'1'", "图片");
         seal.ext.registerOptionConfig(ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题", "图片");
-        seal.ext.registerIntConfig(ext, "图片转文字最大字符数", 500, "图片");
+        seal.ext.registerIntConfig(ext, "图片转文字最大字符数", 500, "图片转文字后保留的最大字符数", "图片");
         seal.ext.registerTemplateConfig(ext, "本地图片路径", ['data/images/sealdice.png'], "如不需要可以不填写，修改完需要重载js", "图片");
         seal.ext.registerIntConfig(ext, "发送图片的概率/%", 0, "在回复后发送本地图片或偷取图片的概率", "图片");
         seal.ext.registerStringConfig(ext, "图片识别默认prompt", "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出", "", "图片");

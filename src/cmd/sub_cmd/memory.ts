@@ -52,24 +52,24 @@ export function registerCmdMemory() {
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, epId, session, page, ret  } = scc;
 
-        const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
-        const muid = mctx.player.userId;
+        const sessionCtx = seal.getCtxProxyFirst(ctx, cmdArgs);
+        const targetUserId = sessionCtx.player.userId;
 
-        const ai2 = getSession(muid);
+        const targetSession = getSession(targetUserId);
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
             case 'status': {
-                let ai3 = session;
+                let statusSession = session;
                 if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== epId)) {
-                    ai3 = ai2;
+                    statusSession = targetSession;
                 }
                 const { MEMORY: isMemory, SUMMARY: isShortMemory } = Config.memory;
-                seal.replyToSender(ctx, msg, `${ai3.id}
+                seal.replyToSender(ctx, msg, `${statusSession.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
-     长期记忆条数: ${ai3.memory.memoryIds.length}
-     关键词库: ${ai3.memory.keywords.join('、') || '无'}
-     短期记忆开启状态: ${(isShortMemory && ai3.memory.useShortMemory) ? '是' : '否'}
-     短期记忆条数: ${ai3.memory.shortMemoryList.length}`);
+     长期记忆条数: ${statusSession.memory.memoryIds.length}
+     关键词库: ${statusSession.memory.keywords.join('、') || '无'}
+     短期记忆开启状态: ${(isShortMemory && statusSession.memory.useShortMemory) ? '是' : '否'}
+     短期记忆条数: ${statusSession.memory.shortMemoryList.length}`);
                 return ret;
             }
             case 'private': {
@@ -83,9 +83,9 @@ export function registerCmdMemory() {
                                 return ret;
                             }
                             case 'clear': {
-                                ai2.memory.persona = '无';
+                                targetSession.memory.persona = '无';
                                 seal.replyToSender(ctx, msg, '设定已清除');
-                                ai2.save();
+                                targetSession.save();
                                 return ret;
                             }
                             default: {
@@ -93,9 +93,9 @@ export function registerCmdMemory() {
                                     seal.replyToSender(ctx, msg, '设定过长，请控制在20字以内');
                                     return ret;
                                 }
-                                ai2.memory.persona = s;
+                                targetSession.memory.persona = s;
                                 seal.replyToSender(ctx, msg, '设定已修改');
-                                ai2.save();
+                                targetSession.save();
                                 return ret;
                             }
                         }
@@ -107,27 +107,27 @@ export function registerCmdMemory() {
                             seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
                             return ret;
                         }
-                        ai2.memory.deleteMemory(idList, kw);
-                        seal.replyToSender(ctx, msg, ai2.memory.getLatestMemoryListText({
+                        targetSession.memory.deleteMemory(idList, kw);
+                        seal.replyToSender(ctx, msg, targetSession.memory.getLatestMemoryListText({
                             isPrivate: true,
-                            id: mctx.player.userId,
-                            name: mctx.player.name
+                            id: sessionCtx.player.userId,
+                            name: sessionCtx.player.name
                         }, page) || '记忆已全部清除');
-                        ai2.save();
+                        targetSession.save();
                         return ret;
                     }
                     case 'list': {
-                        seal.replyToSender(ctx, msg, ai2.memory.getLatestMemoryListText({
+                        seal.replyToSender(ctx, msg, targetSession.memory.getLatestMemoryListText({
                             isPrivate: true,
-                            id: mctx.player.userId,
-                            name: mctx.player.name
+                            id: sessionCtx.player.userId,
+                            name: sessionCtx.player.name
                         }, page) || '无记忆');
                         return ret;
                     }
                     case 'clear': {
-                        ai2.memory.clearMemory();
+                        targetSession.memory.clearMemory();
                         seal.replyToSender(ctx, msg, '个人记忆已清除');
-                        ai2.save();
+                        targetSession.save();
                         return ret;
                     }
                     default: {
