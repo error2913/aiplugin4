@@ -83,7 +83,4 @@ export default class Agent {
         ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
     }
 
-    static init() {
-
-    }
 }

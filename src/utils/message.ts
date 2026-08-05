@@ -58,7 +58,12 @@ export async function buildSystemMessage(ctx: seal.MsgContext, session: Session)
         gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
     }
 
-    const knowledgePrompt = KNOWLEDGE ? await knowledgeService.buildKnowledgeMemoryPrompt(roleIndex, text, ui, gi) : '';
+    let knowledgePrompt = '';
+    if (KNOWLEDGE) {
+        // 按角色加载知识库，并用知识库 prompt 模板渲染
+        await knowledgeService.updateKnowledgeMemory(roleIndex);
+        knowledgePrompt = knowledgeService.buildKnowledgePrompt(session.context.sessionId, text);
+    }
     const memoryPrompt = MEMORY ? await session.memory.buildMemoryPrompt(ctx, session.context, text, ui, gi) : '';
     const summaryPrompt = SUMMARY ? session.memory.buildSummaryPrompt() : '';
     const toolsPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';

@@ -38,7 +38,8 @@ export default class SessionMemoryService extends MemoryService {
 
     // 短期记忆总结（每轮对话后由 context.addAssistantMessage 触发）
     async summarize() {
-        if (!this.summaryStatus) return;
+        // 开关：.ai memo short on/off 控制 useShortMemory；summaryStatus 兼容旧存档
+        if (!this.useShortMemory && !this.summaryStatus) return;
 
         const { SUMMARY_SIZE } = Config.memory;
         const messages = this.session.context.messages;
@@ -96,6 +97,9 @@ export default class SessionMemoryService extends MemoryService {
 
             this.shortMemoryList.push(memoryData.content);
             this.limitShortMemory();
+            // 同时写入总结记忆，供 buildSummaryPrompt 使用
+            this.summaries.push(memoryData.content);
+            this.limitSummaries();
 
             memoryData.memories.forEach(m => {
                 this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text);

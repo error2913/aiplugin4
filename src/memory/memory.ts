@@ -312,6 +312,10 @@ export default class MemoryService {
         let v: number[] = [];
         if (DIMENSION > 0 && query) {
             const model = Model.getEmbeddingModel('text-embedding');
+            if (!model) {
+                Logger.error('未找到可用的嵌入模型');
+                return [];
+            }
             v = await model.callEmbedding(query);
             if (!v.length) {
                 Logger.error('查询向量为空');
@@ -329,12 +333,20 @@ export default class MemoryService {
             }))
         }
 
+        const { VECTOR_SIMILARITY } = Config.trigger;
         return this.memories
             .map(m => {
-                if (relatedMemories.length > 0 && relatedMemories.some(r => m.id === r || m.relatedMemories.includes(r))) return m;
-                return null;
+                // 未指定关联记忆时返回全部；指定时仅保留命中关联的记忆
+                if (relatedMemories.length > 0 && !relatedMemories.some(r => m.id === r || m.relatedMemories.includes(r))) return null;
+                return m;
             })
             .filter(m => m !== null)
+            .filter(m => {
+                // 向量相似度下限：仅对普通检索的 similarity/score 方法生效
+                if (relatedMemories.length > 0) return true;
+                if (v.length === 0 || (method !== 'similarity' && method !== 'score')) return true;
+                return m.calculateSimilarity(v, tags, users, groups) >= VECTOR_SIMILARITY;
+            })
             .sort((a, b) => {
                 switch (method) {
                     case 'importance': return b.importance - a.importance;

@@ -113,7 +113,8 @@ export class Context {
             role: 'user',
             contentItems: [umi]
         });
-        this.session.memory.accessMemories(text);
+        // 关联记忆权重更新：bot 记忆 + 知识库 + 会话记忆 + 群内用户记忆
+        MemoryService.accessRelatedMemories(this.session, text);
     }
 
     addAssistantMessage(text: string, messageId: string) {
@@ -128,7 +129,7 @@ export class Context {
             role: 'assistant',
             contentItems: [ami]
         });
-        this.session.memory.accessMemories(text);
+        MemoryService.accessRelatedMemories(this.session, text);
         // 按配置的间隔轮数触发短期记忆总结
         this.summaryCounter++;
         if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
@@ -161,8 +162,17 @@ export class Context {
         this.messages.push(tcm);
     }
 
-    // 同理，进行压缩 wip
-    addToolCallbackMessage(text: string, toolCallId: string) {
+    // 工具回调消息：过长的结果同样交给压缩智能体压缩后再存入上下文
+    async addToolCallbackMessage(text: string, toolCallId: string) {
+        const { COMPRESS_THRESHOLD } = Config.message;
+        if (text.length > COMPRESS_THRESHOLD) {
+            try {
+                const compressed = await Agent.get('compress_agent').chat(text);
+                if (compressed) text = compressed;
+            } catch (e) {
+                Logger.warning('压缩工具回调失败，保留原文: ' + e.message);
+            }
+        }
         const tcbm: ToolCallbackMessage = {
             role: 'tool',
             text,

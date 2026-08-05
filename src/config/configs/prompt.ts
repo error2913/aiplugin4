@@ -115,7 +115,7 @@ export default class PromptConfig {
     {{/each}}
 {{/if}}`
         ], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "工具函数prompt模板", [ // 加入subagent实现 wip
+        seal.ext.registerTemplateConfig(ext, "工具函数prompt模板", [ // 子智能体通过 call_subagent 工具暴露给 AI
             `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数

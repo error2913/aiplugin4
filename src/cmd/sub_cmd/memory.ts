@@ -257,6 +257,13 @@ export function registerCmdMemory() {
                 }
             }
             case 'sum': {
+                const val3 = cmdArgs.getArgN(3);
+                if (aliasToCmd(val3) === 'clr') {
+                    session.memory.clearSummaries();
+                    session.save();
+                    seal.replyToSender(ctx, msg, '总结记忆已清除');
+                    return ret;
+                }
                 session.context.summaryCounter = 0;
                 await session.memory.updateShortMemory(ctx, msg, session)
                 seal.replyToSender(ctx, msg, session.memory.shortMemoryList
@@ -274,7 +281,8 @@ export function registerCmdMemory() {
      【.ai memo [p/g/short] list】展示个人/群聊/短期记忆
      【.ai memo [p/g/short] clr】清除个人/群聊/短期记忆
      【.ai memo short [on/off]】开启/关闭短期记忆
-     【.ai memo sum】立即总结一次短期记忆`);
+     【.ai memo sum】立即总结一次短期记忆
+     【.ai memo sum clr】清除总结记忆`);
                 return ret;
             }
         }

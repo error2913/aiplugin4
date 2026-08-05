@@ -334,7 +334,7 @@ export class Session {
                         await this.context.addAssistantMessage(match[0], '');
                         try {
                             const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, this, match[1]);
-                            callResults.forEach(r => this.context.addToolCallbackMessage(r.content, r.tool_call_id));
+                            for (const r of callResults) await this.context.addToolCallbackMessage(r.content, r.tool_call_id);
                             await this.chat(ctx, msg, '函数回调触发');
                         } catch (e) {
                             logger.error('handlePromptToolCalls error:', e.message);
@@ -349,7 +349,7 @@ export class Session {
                         this.context.addToolCallsMessage(tool_calls);
                         try {
                             const { result: callResults } = await Tool.handleToolCalls(ctx, msg, this, tool_calls);
-                            callResults.forEach(r => this.context.addToolCallbackMessage(r.content, r.tool_call_id));
+                            for (const r of callResults) await this.context.addToolCallbackMessage(r.content, r.tool_call_id);
                             await this.chat(ctx, msg, '函数回调触发');
                         } catch (e) {
                             logger.error('handleToolCalls error:', e.message);
@@ -438,7 +438,7 @@ export class Session {
 
                             try {
                                 const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, this, match[1]);
-                                callResults.forEach(r => this.context.addToolCallbackMessage(r.content, r.tool_call_id));
+                                for (const r of callResults) await this.context.addToolCallbackMessage(r.content, r.tool_call_id);
                             } catch (e) {
                                 logger.error('handlePromptToolCalls error:', e.message);
                                 return;

@@ -23,6 +23,7 @@ import { registerContext } from "./tools/tool_context";
 import { registerMemory } from "./tools/tool_memory";
 import { registerMessage } from "./tools/tool_message";
 import { registerMusicPlay } from "./tools/tool_music";
+import { registerSubAgent } from "./tools/tool_subagent";
 import { registerTime } from "./tools/tool_time";
 import { registerSetTrigger } from "./tools/tool_trigger";
 import { registerRecord } from "./tools/tool_voice";
@@ -80,6 +81,7 @@ export default class Tool {
         registerSetTrigger();
         registerRecord();
         registerWeb();
+        registerSubAgent();
     }
 
 
