@@ -40,7 +40,7 @@ export function registerCmdTool() {
                     return ret;
                 }
                 const toolsNotAllow = Config.tool.BLOCKED;
-                for (const key in session.tool.state) {
+                for (const key in session.toolState) {
                     session.tool.state[key] = toolsNotAllow.includes(key) ? false : true;
                 }
                 seal.replyToSender(ctx, msg, '已开启全部工具函数');
@@ -55,7 +55,7 @@ export function registerCmdTool() {
                     session.save();
                     return ret;
                 }
-                for (const key in session.tool.state) {
+                for (const key in session.toolState) {
                     session.tool.state[key] = false;
                 }
                 seal.replyToSender(ctx, msg, '已关闭全部工具函数');
