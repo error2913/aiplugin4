@@ -65,7 +65,7 @@ export default class Agent {
             });
         }
         messages.push({ role: 'user', content: prompt });
-        const { content } = await streamService.sendChatRequest(messages, null, 'none');
+        const { content } = await streamService.sendChatRequest(messages, [], 'none');
         return content;
     }
 
@@ -85,7 +85,7 @@ export default class Agent {
         for (let retry = 1; retry <= MaxRetry; retry++) {
             trace.beginTurn();
             const messages = await handleMessages(ctx, session);
-            const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos, tool_choice || 'auto', session.setting.modelName);
+            const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName);
             result = await handleReply(ctx, msg, session, raw_reply);
 
             if (STATUS) {
@@ -107,7 +107,7 @@ export default class Agent {
                             trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
                             Logger.exception('handlePromptToolCalls error', e);
-                            trace.recordToolCall('prompt-call', Date.now() - callTime, false, e.message);
+                            trace.recordToolCall('prompt-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
                         session.tool.callCount = 0;
                         toolTurn++;
@@ -131,7 +131,7 @@ export default class Agent {
                             trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
                             Logger.exception('handleToolCalls error', e);
-                            trace.recordToolCall('function-call', Date.now() - callTime, false, e.message);
+                            trace.recordToolCall('function-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
                         session.tool.callCount = 0;
                         toolTurn++;
@@ -231,7 +231,7 @@ export default class Agent {
                                 const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
                                 for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
                             } catch (e) {
-                                logger.error('handlePromptToolCalls error:', e.message);
+                                logger.error('handlePromptToolCalls error:', e instanceof Error ? e.message : String(e));
                                 return;
                             }
 

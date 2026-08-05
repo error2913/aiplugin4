@@ -10,7 +10,7 @@ import { searchOptions } from "./types";
 
 export class MemoryManager {
     /** 长期记忆段：按开关与检索构建（记忆条目 + 权重更新） */
-    static async buildLongTermPrompt(ctx: seal.MsgContext, session: Session, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
+    static async buildLongTermPrompt(ctx: seal.MsgContext, session: Session, text: string, ui: UserInfo | null, gi: GroupInfo | null): Promise<string> {
         const { MEMORY } = Config.memory;
         return MEMORY ? session.memory.buildMemoryPrompt(ctx, session.context, text, ui, gi) : '';
     }
@@ -30,7 +30,7 @@ export class MemoryManager {
     }
 
     /** 写入记忆：统一入口（内部含去重合并与向量生成） */
-    static async addMemory(ctx: seal.MsgContext, session: Session, uiList: UserInfo[], giList: GroupInfo[], keywords: string[], images: Image[], text: string) {
+    static async addMemory(ctx: seal.MsgContext | null, session: Session, uiList: UserInfo[], giList: GroupInfo[], keywords: string[], images: Image[], text: string) {
         return session.memory.addMemory(ctx, session, uiList, giList, keywords, images, text);
     }
 

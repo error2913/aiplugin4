@@ -13,7 +13,7 @@ const MAX_RETRIES = 2;
  */
 export async function requestModel(url: string, apiKey: string, body: any): Promise<any> {
     const { TIMEOUT } = Config.base;
-    let lastError: Error = null;
+    let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -23,8 +23,8 @@ export async function requestModel(url: string, apiKey: string, body: any): Prom
             }
             return data;
         } catch (e) {
-            lastError = e;
-            const message = e && e.message ? String(e.message) : '';
+            lastError = e instanceof Error ? e : new Error(String(e));
+            const message = lastError ? lastError.message : '';
             // 客户端错误（4xx）不重试，属于请求本身问题
             if (/状态码: [45]\d\d/.test(message)) break;
             if (attempt < MAX_RETRIES) {

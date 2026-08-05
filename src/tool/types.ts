@@ -1,11 +1,13 @@
 // 工具类型定义
+export interface ToolInfoProperties {
+    [key: string]: ToolInfoItem;
+}
+
 export interface ToolInfoObject {
     type: "object";
     description?: string;
-    properties?: {
-        [key: string]: ToolInfoItem;
-    };
-    required?: (keyof ToolInfoObject["properties"])[];
+    properties?: ToolInfoProperties;
+    required?: (keyof ToolInfoProperties)[];
     additionalProperties?: boolean | ToolInfoItem;
     minProperties?: number;
     maxProperties?: number;
@@ -99,8 +101,8 @@ export interface ExtCmdInfo {
 }
 
 export interface ToolListen {
-    timeoutId: number,
-    resolve: (content: string) => void,
-    reject: (err: Error) => void,
+    timeoutId: number | null,
+    resolve: ((content: string) => void) | null,
+    reject: ((err: Error) => void) | null,
     cleanup: () => void
 }

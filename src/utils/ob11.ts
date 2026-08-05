@@ -78,7 +78,7 @@ export async function getGroupMemberInfo(epId: string, group_id: string, user_id
     }
 }
 
-export async function getGroupMemberList(epId: string, group_id: string): Promise<any[]> {
+export async function getGroupMemberList(epId: string, group_id: string): Promise<any[] | null> {
     const net = getNet();
     if (!net) return null;
     try {
@@ -93,7 +93,7 @@ export async function getGroupMemberList(epId: string, group_id: string): Promis
     }
 }
 
-export async function getFriendList(epId: string): Promise<any[]> {
+export async function getFriendList(epId: string): Promise<any[] | null> {
     const net = getNet();
     if (!net) return null;
     try {
@@ -105,7 +105,7 @@ export async function getFriendList(epId: string): Promise<any[]> {
     }
 }
 
-export async function getGroupList(epId: string): Promise<any[]> {
+export async function getGroupList(epId: string): Promise<any[] | null> {
     const net = getNet();
     if (!net) return null;
     try {
@@ -146,7 +146,7 @@ export async function setGroupWholeBan(epId: string, group_id: string, enable: b
     }
 }
 
-export async function getGroupShutList(epId: string, group_id: string): Promise<any[]> {
+export async function getGroupShutList(epId: string, group_id: string): Promise<any[] | null> {
     const net = getNet();
     if (!net) return null;
     try {
@@ -174,7 +174,7 @@ export async function setEssenceMsg(epId: string, message_id: number): Promise<v
     }
 }
 
-export async function getEssenceMsgList(epId: string, group_id: string): Promise<any[]> {
+export async function getEssenceMsgList(epId: string, group_id: string): Promise<any[] | null> {
     const net = getNet();
     if (!net) return null;
     try {
@@ -254,7 +254,7 @@ export async function sendGroupAISound(epId: string, characterId: string, group_
 }
 
 export async function sendPrivateForwardMsg(epId: string, user_id: string,
-    messages: MessageSegment[],
+    messages: any[],
     news: string[],
     prompt: string,
     summary: string,
@@ -278,7 +278,7 @@ export async function sendPrivateForwardMsg(epId: string, user_id: string,
 }
 
 export async function sendGroupForwardMsg(epId: string, group_id: string,
-    messages: MessageSegment[],
+    messages: any[],
     news: string[],
     prompt: string,
     summary: string,

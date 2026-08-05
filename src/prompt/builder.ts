@@ -32,7 +32,7 @@ export async function buildSystemPromptContent(
 
     // 取最后一条用户消息，作为记忆/知识库查询的上下文
     const userMessages = session.context.messages.filter(m => m.role === 'user');
-    let text = '', ui: UserInfo = null, gi: GroupInfo = null;
+    let text = '', ui: UserInfo | null = null, gi: GroupInfo | null = null;
     const lastUser = userMessages[userMessages.length - 1] as any;
     if (lastUser && Array.isArray(lastUser.contentItems) && lastUser.contentItems.length > 0) {
         const lastItem = lastUser.contentItems[lastUser.contentItems.length - 1];
@@ -45,7 +45,7 @@ export async function buildSystemPromptContent(
     }
 
     // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
-    const memoryPrompt = await MemoryManager.buildLongTermPrompt(ctx, session, text, ui, gi);
+    const memoryPrompt = await MemoryManager.buildLongTermPrompt(ctx, session, text, ui || null, gi || null);
     const summaryPrompt = MemoryManager.buildSummaryPrompt(session);
     const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, roleIndex, text);
 

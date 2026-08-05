@@ -5,7 +5,7 @@ import { Session } from "../session/session";
 import { getSession } from "../session/session_service";
 import { aliasToCmd } from "../utils/utils";
 
-import { CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
+import { CmdPriv, CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
 import { registerCmdCtxn } from "./sub_cmd/ctxn";
 import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
@@ -74,7 +74,7 @@ export class SubCmd {
         registerCmdShut();
         registerCmdModel();
 
-        defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc, sc) => {
+        defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc: CmdPriv, sc) => {
             acc[sc.name] = sc.priv;
             return acc;
         }, {});
@@ -131,8 +131,8 @@ export function registerCmd() {
                 return ret;
             }
         } catch (e) {
-            logger.error(`指令.ai执行失败:${e.message}`);
-            seal.replyToSender(ctx, msg, `指令.ai执行失败:${e.message}`);
+            logger.error(`指令.ai执行失败:${e instanceof Error ? e.message : String(e)}`);
+            seal.replyToSender(ctx, msg, `指令.ai执行失败:${e instanceof Error ? e.message : String(e)}`);
             return seal.ext.newCmdExecuteResult(true);
         }
     }

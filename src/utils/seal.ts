@@ -26,6 +26,7 @@ export function createCtx(epId: string, msg: seal.Message): seal.MsgContext | un
 export function getCtxAndMsg(epId: string, uid: string, gid: string): { ctx: seal.MsgContext, msg: seal.Message } {
     const msg = createMsg(gid ? 'group' : 'private', uid, gid);
     const ctx = createCtx(epId, msg);
+    if (!ctx) throw new Error(`未找到通信端点: ${epId}`);
     return { ctx, msg };
 }
 
@@ -33,6 +34,7 @@ export function getSessionCtxAndMsg(epId: string, sid: string, isPrivate: boolea
     const args: ["group" | "private", string, string] = isPrivate ? ['private', sid, ''] : ['group', '', sid];
     const msg = createMsg(...args);
     const ctx = createCtx(epId, msg);
+    if (!ctx) throw new Error(`未找到通信端点: ${epId}`);
     return { ctx, msg };
 }
 

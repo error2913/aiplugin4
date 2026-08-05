@@ -21,11 +21,11 @@ function getPathMapConfig(key: string): { [id: string]: string } {
     const pathMap: { [id: string]: string } = paths.reduce((acc: { [id: string]: string }, path: string) => {
         if (path.trim() === '') return acc;
         try {
-            const id = path.split('/').pop().replace(/\.[^/.]+$/, '');
+            const id = (path.split('/').pop() || '').replace(/\.[^/.]+$/, '');
             if (!id) throw new Error(`本地路径格式错误:${path}`);
             acc[id] = path;
         } catch (e) {
-            Logger.error(`本地路径格式错误:${path}，错误信息:${e.message}`);
+            Logger.error(`本地路径格式错误:${path}，错误信息:${e instanceof Error ? e.message : String(e)}`);
         }
         return acc;
     }, {});

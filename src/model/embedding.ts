@@ -4,15 +4,15 @@ import { logger } from "../logger";
 
 import { BaseModel } from "./model";
 import { requestModel } from "./provider";
-import { EmbeddingModelUse, ModelBody } from "./types";
+import { EmbeddingModelUse, ModelBody, ModelUse } from "./types";
 
 export default class EmbeddingModel extends BaseModel {
     static vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
 
     use: EmbeddingModelUse[];
-    constructor(use: EmbeddingModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
+    constructor(use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, provider, base_url, api_key, body);
-        this.use = use;
+        this.use = use as EmbeddingModelUse[];
     }
 
     get url() {
@@ -50,7 +50,7 @@ export default class EmbeddingModel extends BaseModel {
                 throw new Error(`服务器响应中没有data或data为空\n响应体:${JSON.stringify(data, null, 2)}`);
             }
         } catch (e) {
-            logger.error(`在调用模型${this.name}中出错:`, e.message);
+            logger.error(`在调用模型${this.name}中出错:`, e instanceof Error ? e.message : String(e));
             return [];
         }
 

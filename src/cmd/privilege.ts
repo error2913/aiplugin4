@@ -51,7 +51,7 @@ export class PrivilegeManager {
                 const cpi = cp[cmd];
                 if (Object.prototype.hasOwnProperty.call(defaultCpi, 'args')) {
                     if (Object.prototype.hasOwnProperty.call(cpi, 'args')) {
-                        cpi.args = this.updateCmdPriv(cpi.args, defaultCpi.args);
+                        cpi.args = this.updateCmdPriv(cpi.args || {}, defaultCpi.args || {});
                     } else {
                         cpi.args = defaultCpi.args;
                     }

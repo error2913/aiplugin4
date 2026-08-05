@@ -54,7 +54,7 @@ export function registerContext() {
         const s = messages.map(message => {
             const toolCalls = (message as any).toolCalls || (message as any).tool_calls;
             if (message.role === 'assistant' && toolCalls && toolCalls.length > 0) {
-                return `\n[function_call]: ${toolCalls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
+                return `\n[function_call]: ${toolCalls.map((tool_call: any, index: number) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
             }
 
             return `[${message.role}]: ${buildContent(message)}`;

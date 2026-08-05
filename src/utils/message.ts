@@ -113,7 +113,7 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session): Pr
         const toolCallIdSet = new Set<string>();
         for (let j = i + 1; j < messages.length; j++) {
             if (messages[j].role !== 'tool') break;
-            toolCallIdSet.add(messages[j].toolCallId || messages[j].tool_call_id);
+            toolCallIdSet.add(messages[j].toolCallId || messages[j].tool_call_id || '');
         }
 
         for (let j = 0; j < toolCalls.length; j++) {

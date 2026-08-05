@@ -116,7 +116,7 @@ export class Session {
         count: number,
         lastTime: number
     }
-    lastCtx: seal.MsgContext;
+    lastCtx: seal.MsgContext | null = null;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -144,6 +144,7 @@ export class Session {
             lastTime: 0
         }
         this.memory = new SessionMemoryService();
+        this.lastCtx = null;
         this.tool = {
             state: {} as ToolState,
             callCount: 0,
@@ -207,7 +208,7 @@ export class Session {
     }
 
     resetState() {
-        clearTimeout(this.context.timer);
+        if (this.context.timer) clearTimeout(this.context.timer);
         this.context.timer = null;
         this.context.counter = 0;
         this.bucket.count--;

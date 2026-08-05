@@ -12,7 +12,7 @@ export function registerCmdPrompt() {
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, session, ret } = scc;
         const systemMessage = await buildSystemMessage(ctx, session);
-        const text = systemMessage.contentItems[0].text;
+        const text = (systemMessage.contentItems || [])[0]?.text || '';
         logger.info(`system prompt:\n`, text);
         seal.replyToSender(ctx, msg, text);
         return ret;

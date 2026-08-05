@@ -323,7 +323,7 @@ ${lastTimePrompt}
 
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (e) {
-                    logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e.message}`);
+                    logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
                 }
             }
 
@@ -333,7 +333,7 @@ ${lastTimePrompt}
 
             this.isTaskRunning = false;
         } catch (e) {
-            logger.error(`定时任务处理出错，错误信息:${e.message}`);
+            logger.error(`定时任务处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
         }
     }
 

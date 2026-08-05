@@ -6,13 +6,13 @@ import { ToolCall } from "../tool/types";
 
 import { BaseModel } from "./model";
 import { requestModel } from "./provider";
-import { ImageModelUse, ModelBody } from "./types";
+import { ImageModelUse, ModelBody, ModelUse } from "./types";
 
 export default class ImageModel extends BaseModel {
     use: ImageModelUse[];
-    constructor(use: ImageModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
+    constructor(use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, provider, base_url, api_key, body);
-        this.use = use;
+        this.use = use as ImageModelUse[];
     }
 
     get url() {
@@ -49,7 +49,7 @@ export default class ImageModel extends BaseModel {
                 throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
             }
         } catch (e) {
-            Logger.error(`在调用模型${this.name}中出错:`, e.message);
+            Logger.error(`在调用模型${this.name}中出错:`, e instanceof Error ? e.message : String(e));
             return '';
         }
     }
@@ -82,7 +82,7 @@ export default class ImageModel extends BaseModel {
                 throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
             }
         } catch (e) {
-            Logger.error(`在调用模型${this.name}中出错:`, e.message);
+            Logger.error(`在调用模型${this.name}中出错:`, e instanceof Error ? e.message : String(e));
             return { content: '', tool_calls: [] };
         }
     }

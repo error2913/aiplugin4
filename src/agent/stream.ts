@@ -69,7 +69,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
-            logger.error("在startStream中出错:", e.message);
+            logger.error("在startStream中出错:", e instanceof Error ? e.message : String(e));
             return '';
         }
     }
@@ -123,7 +123,7 @@ export class streamService {
                 throw new Error('服务器响应中没有choices或choices为空\n响应体:' + JSON.stringify(data, null, 2));
             }
         } catch (e) {
-            logger.error('在sendChatRequest中出错:', e.message);
+            logger.error('在sendChatRequest中出错:', e instanceof Error ? e.message : String(e));
             return { content: '', tool_calls: [] };
         }
     }
@@ -166,7 +166,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
-            logger.error("在pollStream中出错:", e.message);
+            logger.error("在pollStream中出错:", e instanceof Error ? e.message : String(e));
             return { status: 'failed', reply: '', nextAfter: 0 };
         }
     }
@@ -209,7 +209,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
-            logger.error("在endStream中出错:", e.message);
+            logger.error("在endStream中出错:", e instanceof Error ? e.message : String(e));
             return '';
         }
     }

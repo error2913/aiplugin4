@@ -31,7 +31,7 @@ export class Context {
     ignoreList: string[];
     lastReply: string;
     counter: number;
-    timer: number;
+    timer: number | null;
     autoNameMod: number;
     summaryCounter: number;
 
@@ -88,7 +88,7 @@ export class Context {
             try {
                 await this.updateName(ctx.endPoint.userId, ctx.group.groupId, userId);
             } catch (e) {
-                Logger.warning('自动改名失败: ' + e.message);
+                Logger.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
         // 过长的用户消息交给压缩智能体压缩后再存入上下文，节省 token
@@ -98,7 +98,7 @@ export class Context {
                 const compressed = await Agent.get('compress_agent').chat(text);
                 if (compressed) text = compressed;
             } catch (e) {
-                Logger.warning('压缩消息失败，保留原文: ' + e.message);
+                Logger.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
         const umi: UserMessageItem = {
@@ -170,7 +170,7 @@ export class Context {
                 const compressed = await Agent.get('compress_agent').chat(text);
                 if (compressed) text = compressed;
             } catch (e) {
-                Logger.warning('压缩工具回调失败，保留原文: ' + e.message);
+                Logger.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
         const tcbm: ToolCallbackMessage = {

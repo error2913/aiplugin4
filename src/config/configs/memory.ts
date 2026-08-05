@@ -99,7 +99,7 @@ function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
         try {
             kc = revive(KnowledgeConfigItem, load(tomlString));
         } catch (e) {
-            Logger.error(`知识库记忆 TOML 解析失败，已跳过该条配置: ${e.message}`);
+            Logger.error(`知识库记忆 TOML 解析失败，已跳过该条配置: ${e instanceof Error ? e.message : String(e)}`);
             return;
         }
         const mmap: { [id: string]: MemoryItem } = {};

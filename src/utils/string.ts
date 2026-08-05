@@ -325,7 +325,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
 
     // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
-        s = segments.find(segment => !/[<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞])/.test(segment));
+        s = segments.find((segment: string) => !/[<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞])/.test(segment)) || '';
         if (!s || !s.trim()) return { contextArray: [], replyArray: [], images: [] };
     }
 
@@ -564,7 +564,7 @@ export function calculateSimilarity(s1: string, s2: string): number {
 function advancedSplit(s: string, r: RegExp) {
     const parts = [];
     let lastIndex = 0;
-    let match: RegExpExecArray;
+    let match: RegExpExecArray | null;
 
     // 确保是全局正则
     if (!r.global) {

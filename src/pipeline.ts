@@ -41,7 +41,7 @@ export class MessagePipeline {
         // 检查CQ码
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
-            clearTimeout(session.context.timer);
+            if (session.context.timer) clearTimeout(session.context.timer);
             session.context.timer = null;
 
             // 非指令消息触发
@@ -63,7 +63,7 @@ export class MessagePipeline {
                         try {
                             keywordMatched = new RegExp(condition.keyword).test(message);
                         } catch (e) {
-                            logger.error(`触发关键词正则错误，已忽略该条件:${condition.keyword}，错误信息:${e.message}`);
+                            logger.error(`触发关键词正则错误，已忽略该条件:${condition.keyword}，错误信息:${e instanceof Error ? e.message : String(e)}`);
                             keywordMatched = false;
                         }
                     }

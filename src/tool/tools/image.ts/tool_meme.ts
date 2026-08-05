@@ -50,7 +50,7 @@ export function registerMeme() {
             const json = await res.json();
             return json.map((item: string[]) => item[0]).join("、");
         } catch (err) {
-            return "获取表情包列表失败:" + err.message;
+            return "获取表情包列表失败:" + (err instanceof Error ? err.message : String(err));
         }
     }
 
@@ -223,7 +223,7 @@ ${imageText ? `图片：${imageText}` : ''}`;
                 throw new Error(json.message);
             }
         } catch (err) {
-            return "生成表情包失败:" + err.message;
+            return "生成表情包失败:" + (err instanceof Error ? err.message : String(err));
         }
     }
 }

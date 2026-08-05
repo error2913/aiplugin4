@@ -104,7 +104,7 @@ export default class MemoryService {
         }
     }
 
-    async addMemory(_ctx: seal.MsgContext, session: Session, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string) {
+    async addMemory(_ctx: seal.MsgContext | null, session: Session, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string) {
         const id = this.generateMemoryId();
         const now = Math.floor(Date.now() / 1000);
         const m = new MemoryItem();
@@ -186,7 +186,7 @@ export default class MemoryService {
         return null;
     }
 
-    async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
+    async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, ui: UserInfo | null, gi: GroupInfo | null): Promise<string> {
         let s = '';
         const users = ui ? [ui.id] : [];
         const groups = gi ? [gi.id] : [];

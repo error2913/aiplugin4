@@ -61,7 +61,7 @@ function getRegexesConfig(key: string): RegExp[] {
         try {
             return new RegExp(x);
         } catch (e) {
-            Logger.error(`正则表达式错误，内容:${x}，错误信息:${e.message}`);
+            Logger.error(`正则表达式错误，内容:${x}，错误信息:${e instanceof Error ? e.message : String(e)}`);
             return /(?!)/;
         }
     });
@@ -72,7 +72,7 @@ function getHandlebarsTemplatesConfig(key: string): HandlebarsTemplateDelegate<a
         try {
             return Handlebars.compile(x || '');
         } catch (e) {
-            Logger.error(`模板${key}解析失败，已跳过该条配置: ${e.message}`);
+            Logger.error(`模板${key}解析失败，已跳过该条配置: ${e instanceof Error ? e.message : String(e)}`);
             return () => '';
         }
     });

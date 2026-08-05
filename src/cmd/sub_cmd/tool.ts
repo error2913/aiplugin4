@@ -85,7 +85,7 @@ export function registerCmdTool() {
       参数信息:
       ${JSON.stringify(tool.toolInfo.function.parameters.properties, null, 2)}
       
-      必需参数:${tool.toolInfo.function.parameters.required.join(',')}`;
+      必需参数:${(tool.toolInfo.function.parameters.required || []).join(',')}`;
 
                 seal.replyToSender(ctx, msg, s);
                 return ret;
@@ -107,7 +107,7 @@ export function registerCmdTool() {
                 }
 
                 try {
-                    const args = cmdArgs.kwargs.reduce((acc, kwarg) => {
+                    const args = cmdArgs.kwargs.reduce((acc: { [key: string]: any }, kwarg) => {
                         const valueString = kwarg.value;
                         try {
                             acc[kwarg.name] = JSON.parse(`[${valueString}]`)[0];
@@ -115,9 +115,9 @@ export function registerCmdTool() {
                             acc[kwarg.name] = valueString;
                         }
                         return acc;
-                    }, {});
+                    }, {} as { [key: string]: any });
 
-                    for (const key of tool.toolInfo.function.parameters.required) {
+                    for (const key of (tool.toolInfo.function.parameters.required || [])) {
                         if (!Object.prototype.hasOwnProperty.call(args, key)) {
                             logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                             seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
@@ -131,7 +131,7 @@ export function registerCmdTool() {
       ${content}`);
                     return ret;
                 } catch (e) {
-                    const s = `调用函数 (${val3}) 失败:${e.message}`;
+                    const s = `调用函数 (${val3}) 失败:${e instanceof Error ? e.message : String(e)}`;
                     seal.replyToSender(ctx, msg, s);
                     return ret;
                 }

@@ -106,7 +106,7 @@ interface RevivableConstructor<T> {
  * @returns 恢复后的对象
  */
 export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
-    function reviveItem<T>(descriptor: TypeDescriptor<T>, defaultValue: any, value: any): any {
+    function reviveItem(descriptor: any, defaultValue: any, value: any): any {
         if (descriptor === 'string') {
             if (typeof value === 'string') return value;
         } else if (descriptor === 'number') {
@@ -120,8 +120,8 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
         } else if (typeof descriptor === 'object' && ('object' in descriptor || 'objectValue' in descriptor)) {
             const ov: any = {}, o: any = {};
             if (typeof value === 'object' && value !== null) {
-                if ('objectValue' in descriptor) Object.keys(value).forEach(k => ov[k] = reviveItem(descriptor.objectValue, defaultValue?.[k], value?.[k]));
-                if ('object' in descriptor) Object.keys(descriptor.object).forEach(k => o[k] = reviveItem(descriptor.object[k], defaultValue?.[k], value?.[k]));
+                if ('objectValue' in descriptor) Object.keys(value).forEach(k => ov[k] = reviveItem((descriptor as any).objectValue, defaultValue?.[k], value?.[k]));
+                if ('object' in descriptor) Object.keys((descriptor as any).object || {}).forEach(k => o[k] = reviveItem((descriptor as any).object[k], defaultValue?.[k], value?.[k]));
                 return { ...o, ...ov };
             }
         } else if (typeof descriptor === 'function') {
@@ -136,7 +136,7 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
 
     if (constructor.validKeysMap) {
         for (const k in constructor.validKeysMap) {
-            const descriptor = constructor.validKeysMap[k];
+            const descriptor: TypeDescriptor<T[Extract<keyof T, string>]> | undefined = (constructor.validKeysMap as any)[k];
             if (Object.prototype.hasOwnProperty.call(value, k)) {
                 const item = reviveItem(descriptor, obj[k], value[k]);
                 if (item !== undefined) obj[k] = item;
@@ -152,7 +152,7 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
 }
 
 export function aliasToCmd(val: string) {
-    return ALIAS_MAP[val] || val;
+    return ALIAS_MAP[val as keyof typeof ALIAS_MAP] || val;
 }
 
 // 计算余弦相似度

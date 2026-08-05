@@ -27,6 +27,6 @@ export async function fetchData(url: string, apiKey: string, body: any): Promise
         }
         return data;
     } catch (e) {
-        throw new Error(`解析响应体时出错:${e.message}\n响应体:${text}`);
+        throw new Error(`解析响应体时出错:${e instanceof Error ? e.message : String(e)}\n响应体:${text}`);
     }
 }

@@ -5,7 +5,7 @@ import { netExists, sendGroupAISound } from "../../utils/ob11";
 import { resolveLocalPath } from "../../utils/utils";
 import Tool from "../tool";
 
-const characterMap = {
+const characterMap: { [key: string]: string } = {
     "小新": "lucy-voice-laibixiaoxin",
     "猴哥": "lucy-voice-houge",
     "四郎": "lucy-voice-silang",
@@ -94,6 +94,7 @@ export function registerRecord() {
                 return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
             }
             try {
+                if (!globalThis.ttsHandler) return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
             } catch (e) {
                 logger.error(e);

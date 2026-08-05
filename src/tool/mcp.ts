@@ -37,7 +37,7 @@ function getMCPServers(): MCPServer[] {
                     const j = JSON.parse(line);
                     return { name: String(j.name || '').trim(), url: String(j.url || '').trim(), token: String(j.token || '').trim() };
                 } catch (e) {
-                    Logger.error(`MCP服务器配置 JSON 解析失败: ${e.message}，内容: ${line}`);
+                    Logger.error(`MCP服务器配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
                     return { name: '', url: '', token: '' };
                 }
             }
@@ -93,7 +93,7 @@ function formatError(status: number, body: any): string {
     return `HTTP ${status} ${JSON.stringify(body)}`;
 }
 
-async function initialize(server: MCPServer): Promise<string> {
+async function initialize(server: MCPServer): Promise<string | undefined> {
     const res = await mcpRequest(server.url, server.token, {
         jsonrpc: '2.0',
         id: 1,
@@ -145,7 +145,7 @@ async function doCallTool(server: MCPServer, sessionId: string, name: string, ar
 async function getSessionId(server: MCPServer, force = false): Promise<string> {
     const state = serverStates[server.name];
     if (!force && state && state.sessionId) return state.sessionId;
-    const sessionId = await initialize(server);
+    const sessionId = await initialize(server) || '';
     serverStates[server.name] = { server, sessionId, tools: [], toolsFetchedAt: 0 };
     return sessionId;
 }
@@ -156,7 +156,7 @@ async function callTool(server: MCPServer, name: string, args: any): Promise<str
         return await doCallTool(server, sessionId, name, args);
     } catch (e) {
         // 会话失效时重新 initialize 并重试一次
-        if (e instanceof Error && /会话不存在|已失效|session/i.test(e.message)) {
+        if (e instanceof Error && /会话不存在|已失效|session/i.test(e instanceof Error ? e.message : String(e))) {
             Logger.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
             const sessionId = await getSessionId(server, true);
             return await doCallTool(server, sessionId, name, args);
@@ -209,7 +209,7 @@ export async function registerMCPTools() {
         try {
             await syncTools(server);
         } catch (e) {
-            Logger.error(`MCP 服务器 ${server.name} 注册失败: ${e.message}`);
+            Logger.error(`MCP 服务器 ${server.name} 注册失败: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 }

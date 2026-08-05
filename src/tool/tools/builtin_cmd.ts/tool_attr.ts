@@ -107,11 +107,11 @@ export function registerAttr() {
 
         const value = seal.vars.intGet(ctx, attr)[0];
 
-        const attrs = expr.split(/[\s\dDd+\-*/=]+/).filter(item => item);
-        const values = attrs.map(item => seal.vars.intGet(ctx, item)[0]);
+        const attrs = expr.split(/[\s\dDd+\-*/=]+/).filter((item: string) => item);
+        const values = attrs.map((item: string) => seal.vars.intGet(ctx, item)[0]);
 
         let s = expr;
-        attrs.forEach((a, i) => s = s.replace(a, values[i].toString()));
+        attrs.forEach((a: string, i: number) => s = s.replace(a, values[i].toString()));
 
         const result = parseInt(seal.format(ctx, `{${s}}`));
 

@@ -67,10 +67,10 @@ export function registerRollCheck() {
 
         if (reason) args2.push(reason);
 
-        if (parseInt(times) !== 1 && !isNaN(parseInt(times))) Tool.cmdArgs.specialExecuteTimes = parseInt(times);
+        if (Tool.cmdArgs && parseInt(times) !== 1 && !isNaN(parseInt(times))) Tool.cmdArgs.specialExecuteTimes = parseInt(times);
 
         const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, toolRoll.ExtCmdInfo, args2, [], []);
-        Tool.cmdArgs.specialExecuteTimes = 1;
+        if (Tool.cmdArgs) Tool.cmdArgs.specialExecuteTimes = 1;
         if (!success) return '检定执行失败';
         return s;
     }

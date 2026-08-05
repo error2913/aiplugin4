@@ -4,7 +4,7 @@ import Config from "./config/config";
 import { logger } from "./logger";
 
 export class UsageManager {
-    static usageMapCache: { [model: string]: { [time: string]: { prompt_tokens: number, completion_tokens: number } } } = null;
+    static usageMapCache: { [model: string]: { [time: string]: { prompt_tokens: number, completion_tokens: number } } } | null = null;
 
     static get usageMap(): { [model: string]: { [time: string]: { prompt_tokens: number, completion_tokens: number } } } {
         if (!this.usageMapCache) {
@@ -14,7 +14,7 @@ export class UsageManager {
                 logger.error('从存储中获取 usageMap 失败:', error);
             }
         }
-        return this.usageMapCache;
+        return this.usageMapCache || (this.usageMapCache = {});
     }
 
     static updateUsage(model: string, usage: { prompt_tokens: number, completion_tokens: number, total_tokens: number }) {
@@ -123,7 +123,7 @@ export async function get_chart_url(chart_type: string, usage_data: {
             throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
     } catch (e) {
-        logger.error("在get_chart_url中请求出错:", e.message);
+        logger.error("在get_chart_url中请求出错:", e instanceof Error ? e.message : String(e));
         return '';
     }
 }

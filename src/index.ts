@@ -51,7 +51,7 @@ function main() {
     try {
       return MessagePipeline.handleNonCommand(ctx, msg);
     } catch (e) {
-      logger.error(`非指令消息处理出错，错误信息:${e.message}`);
+      logger.error(`非指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -60,7 +60,7 @@ function main() {
     try {
       MessagePipeline.handleCommand(ctx, msg, cmdArgs);
     } catch (e) {
-      logger.error(`指令消息处理出错，错误信息:${e.message}`);
+      logger.error(`指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -69,7 +69,7 @@ function main() {
     try {
       MessagePipeline.handleBotMessage(ctx, msg);
     } catch (e) {
-      logger.error(`获取发送消息处理出错，错误信息:${e.message}`);
+      logger.error(`获取发送消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
   }
 }

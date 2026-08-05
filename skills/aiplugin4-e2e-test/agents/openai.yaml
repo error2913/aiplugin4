@@ -1,0 +1,4 @@
+interface:
+  display_name: "aiplugin4 全量E2E测试"
+  short_description: "通过 qqmcp 对群内 aiplugin4 机器人逐条验证全部子指令"
+  default_prompt: "Use $aiplugin4-e2e-test to run the full command suite against the aiplugin4 bot in the test group via qqmcp."

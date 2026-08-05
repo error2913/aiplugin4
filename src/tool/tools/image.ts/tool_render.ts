@@ -31,7 +31,7 @@ async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<Re
         const json: RenderResponse = await res.json();
         return json;
     } catch (err) {
-        throw new Error('渲染内容失败: ' + err.message);
+        throw new Error('渲染内容失败: ' + (err instanceof Error ? err.message : String(err)));
     }
 }
 
@@ -153,8 +153,8 @@ export function registerRender() {
                 throw new Error(result.message || "渲染失败");
             }
         } catch (err) {
-            logger.error(`Markdown 渲染失败: ${err.message}`);
-            return `渲染图片失败: ${err.message}`;
+            logger.error(`Markdown 渲染失败: ${err instanceof Error ? err.message : String(err)}`);
+            return `渲染图片失败: ${err instanceof Error ? err.message : String(err)}`;
         }
     }
 
@@ -219,8 +219,8 @@ export function registerRender() {
                 throw new Error(result.message || "渲染失败");
             }
         } catch (err) {
-            logger.error(`HTML 渲染失败: ${err.message}`);
-            return `渲染图片失败: ${err.message}`;
+            logger.error(`HTML 渲染失败: ${err instanceof Error ? err.message : String(err)}`);
+            return `渲染图片失败: ${err instanceof Error ? err.message : String(err)}`;
         }
     }
 }

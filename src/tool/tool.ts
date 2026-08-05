@@ -60,7 +60,7 @@ export default class Tool {
         toolMap[info.function.name] = this;
     }
 
-    static cmdArgs: seal.CmdArgs = null;
+    static cmdArgs: seal.CmdArgs | null = null;
 
     /** 清空工具注册表（用于测试/热重载） */
     static reset() {
@@ -144,11 +144,11 @@ export default class Tool {
             try {
                 ext.cmdMap[eci.cmd].solve(ctx, msg, cmdArgs);
             } catch (err) {
-                reject(new Error(`solve中发生错误:${err.message}`));
+                reject(new Error(`solve中发生错误:${err instanceof Error ? err.message : String(err)}`));
                 listen.cleanup();
             }
         }).catch((err) => {
-            Logger.error(`在extensionSolve中: 调用函数失败:${err.message}`);
+            Logger.error(`在extensionSolve中: 调用函数失败:${err instanceof Error ? err.message : String(err)}`);
             return ['', false];
         });
     }
@@ -182,14 +182,14 @@ export default class Tool {
         } catch (e) {
             const fixedStr = fixJsonString(tool_call.function.arguments);
             if (fixedStr === '') {
-                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
-                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
+                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
+                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
             }
             try {
                 args = JSON.parse(fixedStr);
             } catch (e) {
-                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
-                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
+                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
+                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
             }
 
         }
@@ -199,7 +199,7 @@ export default class Tool {
                 Logger.warning(`调用函数失败:arguement不是一个object`);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数失败:arguement不是一个object` }, callBack: true };
             }
-            for (const key of tool.toolInfo.function.parameters.required) {
+            for (const key of (tool.toolInfo.function.parameters.required || [])) {
                 if (!Object.prototype.hasOwnProperty.call(args, key)) {
                     Logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                     return { result: { tool_call_id: tool_call.id, content: `调用函数失败:缺少必需参数 ${key}` }, callBack: true };
@@ -218,8 +218,8 @@ export default class Tool {
             Logger.info(`[tool] ${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
             return { result: { tool_call_id: tool_call.id, content }, callBack: true };
         } catch (e) {
-            Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
-            return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
+            Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
+            return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
         }
     }
 
@@ -240,7 +240,7 @@ export default class Tool {
     static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_calls: ToolCall[]): Promise<{ result: ToolCallResult[], callBack: boolean }> {
         const { MAX_CALL_COUNT } = Config.tool;
 
-        const ret = { result: [], callBack: true };
+        const ret: { result: ToolCallResult[], callBack: boolean } = { result: [], callBack: true };
 
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
@@ -283,8 +283,8 @@ export default class Tool {
             });
             return await this.handleToolCalls(ctx, msg, session, tool_calls);
         } catch (e) {
-            Logger.error(`解析函数调用失败:${e.message}`);
-            return { result: [{ tool_call_id: '', content: `解析函数调用失败:${e.message}` }], callBack: true };
+            Logger.error(`解析函数调用失败:${e instanceof Error ? e.message : String(e)}`);
+            return { result: [{ tool_call_id: '', content: `解析函数调用失败:${e instanceof Error ? e.message : String(e)}` }], callBack: true };
         }
     }
 

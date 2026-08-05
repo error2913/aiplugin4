@@ -255,20 +255,20 @@ export default class PromptConfig {
 
 function getHandlebarsTemplateConfig(key: string): HandlebarsTemplateDelegate<any> {
     const template = seal.ext.getTemplateConfig(ext, key)[0] || '';
-    let compiled: HandlebarsTemplateDelegate<any>;
+    let compiled: HandlebarsTemplateDelegate<any> | null;
     try {
         compiled = Handlebars.compile(template);
     } catch (e) {
-        Logger.error(`模板${key}解析失败: ${e.message}`);
+        Logger.error(`模板${key}解析失败: ${e instanceof Error ? e.message : String(e)}`);
         compiled = null;
     }
 
     // 默认模板兜底：存档配置损坏或渲染失败时回退到默认模板
-    let defaultCompiled: HandlebarsTemplateDelegate<any>;
+    let defaultCompiled: HandlebarsTemplateDelegate<any> | null;
     try {
         defaultCompiled = Handlebars.compile(DEFAULT_TEMPLATES[key] || '');
     } catch (e) {
-        Logger.error(`默认模板${key}解析失败: ${e.message}`);
+        Logger.error(`默认模板${key}解析失败: ${e instanceof Error ? e.message : String(e)}`);
         defaultCompiled = null;
     }
     const fallback = defaultCompiled || (() => '');
@@ -279,7 +279,7 @@ function getHandlebarsTemplateConfig(key: string): HandlebarsTemplateDelegate<an
         try {
             return compiled(context, options);
         } catch (e) {
-            Logger.error(`模板${key}渲染失败，已回退到默认模板: ${e.message}`);
+            Logger.error(`模板${key}渲染失败，已回退到默认模板: ${e instanceof Error ? e.message : String(e)}`);
             return fallback(context, options);
         }
     }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "aiplugin4 单功能定向测试"
+  short_description: "通过 qqmcp 只验证 aiplugin4 某一条具体指令"
+  default_prompt: "Use $aiplugin4-single-test to verify just one specific aiplugin4 command (e.g. .ai memo or .ai tool) in the test group via qqmcp."

@@ -52,7 +52,7 @@ export function registerCmdOn() {
                 }
                 case 't':
                 case 'timer': {
-                    clearTimeout(session.context.timer);
+                    if (session.context.timer) clearTimeout(session.context.timer);
                     session.context.timer = null;
                     setting.timer = exist && !isNaN(valFloat) ? valFloat : Config.trigger.TIMER;
                     text += `\n计时器模式:${setting.timer}秒`;
@@ -87,7 +87,7 @@ export function registerCmdOn() {
                         }
                         break;
                     } catch (e) {
-                        seal.replyToSender(ctx, msg, e.message);
+                        seal.replyToSender(ctx, msg, e instanceof Error ? e.message : String(e));
                         return ret;
                     }
                 }

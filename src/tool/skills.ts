@@ -28,7 +28,7 @@ function getSkills(): Skill[] {
                         content: String(j.content || '').trim()
                     };
                 } catch (e) {
-                    Logger.error(`技能配置 JSON 解析失败: ${e.message}，内容: ${line}`);
+                    Logger.error(`技能配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
                     return { name: '', description: '', content: '' };
                 }
             }

@@ -342,7 +342,7 @@ export function registerMessage() {
             });
         }
 
-        const news = null;
+        const news: string[] = [];
         const prompt = "";
         const summary = "";
         const source = "";

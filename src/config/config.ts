@@ -86,7 +86,7 @@ export function getRegexConfig(ext: seal.ExtInfo, key: string): RegExp {
         try {
             return new RegExp(pattern);
         } catch (e) {
-            Logger.error(`正则表达式错误，内容:${pattern}，错误信息:${e.message}`);
+            Logger.error(`正则表达式错误，内容:${pattern}，错误信息:${e instanceof Error ? e.message : String(e)}`);
             return /(?!)/;
         }
     }

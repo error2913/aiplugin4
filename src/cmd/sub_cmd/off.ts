@@ -47,7 +47,7 @@ export function registerCmdOff() {
                 }
                 case 't':
                 case 'timer': {
-                    clearTimeout(session.context.timer);
+                    if (session.context.timer) clearTimeout(session.context.timer);
                     session.context.timer = null;
                     setting.timer = -1;
                     text += `\n计时器模式`;
