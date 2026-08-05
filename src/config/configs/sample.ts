@@ -1,4 +1,4 @@
-// 示例开关配置
+// 示例配置：仅作开发参考，不注册进 configMap（configMap 见 ../config.ts）
 import { ext } from "../config";
 export default class SampleConfig {
     static register() {

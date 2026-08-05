@@ -10,7 +10,6 @@ import PromptConfig from "./configs/prompt";
 import ReceivedConfig from "./configs/received";
 import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
-import SampleConfig from "./configs/sample";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
@@ -36,7 +35,6 @@ const configMap = {
     message: MessageConfig,
     prompt: PromptConfig,
     resource: ResourceConfig,
-    sample: SampleConfig,
 } as const;
 
 type ConfigMap = typeof configMap;
