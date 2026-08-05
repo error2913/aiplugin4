@@ -59,6 +59,12 @@ export default class Tool {
 
     static cmdArgs: seal.CmdArgs = null;
 
+    /** 清空工具注册表（用于测试/热重载） */
+    static reset() {
+        for (const key of Object.keys(toolMap)) delete toolMap[key];
+        Tool.cmdArgs = null;
+    }
+
     static registerTool() {
         registerBuiltinCmds();
         registerAttr();

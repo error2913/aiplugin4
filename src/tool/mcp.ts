@@ -21,6 +21,16 @@ function getMCPServers(): MCPServer[] {
         .map(line => (line || '').trim())
         .filter(Boolean)
         .map(line => {
+            // 支持 JSON 格式：{"name":"qq","url":"http://...","token":"..."}
+            if (line.startsWith('{')) {
+                try {
+                    const j = JSON.parse(line);
+                    return { name: String(j.name || '').trim(), url: String(j.url || '').trim(), token: String(j.token || '').trim() };
+                } catch (e) {
+                    Logger.error(`MCP服务器配置 JSON 解析失败: ${e.message}，内容: ${line}`);
+                    return { name: '', url: '', token: '' };
+                }
+            }
             const [name, url, token = ''] = line.split('|').map(s => s.trim());
             return { name, url, token };
         })

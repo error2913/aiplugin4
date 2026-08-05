@@ -4,6 +4,7 @@ import { MemoryManager } from "../memory/manager";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
+import { getSkillNames } from "../tool/skills";
 import Tool from "../tool/tool";
 
 export interface SystemPromptSection {
@@ -51,7 +52,7 @@ export async function buildSystemPromptContent(
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
     const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
 
-    return Config.prompt.SYSTEM_MESSAGE_TEMPLATE({
+    let content = Config.prompt.SYSTEM_MESSAGE_TEMPLATE({
         instruction: roleSetting,
         platform: ctx.endPoint.platform,
         sessionType: ctx.isPrivate ? 'private' : 'group',
@@ -65,4 +66,11 @@ export async function buildSystemPromptContent(
         knowledgePrompt,
         toolPrompt
     });
+
+    // 能力段：技能在两种工具模式下都可见（函数调用模式无工具提示词段时也能发现技能）
+    const skillNames = getSkillNames();
+    if (skillNames.length > 0) {
+        content += `\n\n## 可用技能\n- ${skillNames.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
+    }
+    return content;
 }

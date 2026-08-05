@@ -12,6 +12,7 @@ export default class MessageConfig {
         ], '', "对话")
         seal.ext.registerTemplateConfig(ext, "示例对话", [""], "role顺序为user和assistant轮流出现", "对话");
         seal.ext.registerIntConfig(ext, "对话保存轮数", 15, "", "对话");
+        seal.ext.registerIntConfig(ext, "上下文最大token", 0, "0为不限制；超过后从最早的消息开始丢弃", "对话");
         seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，示例对话不计入轮数", "对话");
         seal.ext.registerBoolConfig(ext, "展示号码", true, "在工具描述/上下文显示中使用QQ号", "对话");
         seal.ext.registerIntConfig(ext, "消息压缩阈值", 800, "用户消息超过该字符数时，使用压缩智能体压缩后存入上下文", "对话");
@@ -23,6 +24,7 @@ export default class MessageConfig {
             INSTRUCTIONS: seal.ext.getTemplateConfig(ext, "角色扮演设定"),
             SAMPLE_MESSAGES: seal.ext.getTemplateConfig(ext, "示例对话"),
             MAX_ROUNDS: seal.ext.getIntConfig(ext, "对话保存轮数"),
+            MAX_CONTEXT_TOKENS: seal.ext.getIntConfig(ext, "上下文最大token"),
             INSERT_COUNT: seal.ext.getIntConfig(ext, "插入system message间隔轮数"),
             SHOW_NUMBER: seal.ext.getBoolConfig(ext, "展示号码"),
             COMPRESS_THRESHOLD: seal.ext.getIntConfig(ext, "消息压缩阈值")

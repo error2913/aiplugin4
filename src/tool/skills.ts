@@ -15,6 +15,20 @@ function getSkills(): Skill[] {
         .map(line => (line || '').trim())
         .filter(Boolean)
         .map(line => {
+            // 支持 JSON 格式：{"name":"骰点","description":"...","content":"..."}
+            if (line.startsWith('{')) {
+                try {
+                    const j = JSON.parse(line);
+                    return {
+                        name: String(j.name || '').trim(),
+                        description: String(j.description || '').trim(),
+                        content: String(j.content || '').trim()
+                    };
+                } catch (e) {
+                    Logger.error(`技能配置 JSON 解析失败: ${e.message}，内容: ${line}`);
+                    return { name: '', description: '', content: '' };
+                }
+            }
             const [name, description = '', ...rest] = line.split('|');
             return {
                 name: name.trim(),

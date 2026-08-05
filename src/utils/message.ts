@@ -67,6 +67,17 @@ function buildContextMessages(systemMessage: ContextMessage, messages: ContextMe
 
     const contextMessages = messages.slice();
 
+    // token 预算裁剪（0 = 不限制）：超出后从最早的消息开始丢弃，保持窗口有界
+    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
+    if (maxTokens > 0) {
+        const estimateTokens = (m: ContextMessage) => Math.ceil(buildContent(m).length / 2);
+        let tokens = contextMessages.reduce((acc, m) => acc + estimateTokens(m), 0);
+        while (tokens > maxTokens && contextMessages.length > 1) {
+            tokens -= estimateTokens(contextMessages[0]);
+            contextMessages.shift();
+        }
+    }
+
     if (INSERT_COUNT <= 0) return contextMessages;
 
     const userPositions = contextMessages

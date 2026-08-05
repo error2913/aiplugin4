@@ -33,6 +33,13 @@ export default class Model {
     static imageModels: ImageModel[] = [];
     static embeddingModels: EmbeddingModel[] = [];
 
+    /** 重置注册表（用于测试/热重载） */
+    static reset() {
+        Model.chatModels = [];
+        Model.imageModels = [];
+        Model.embeddingModels = [];
+    }
+
     static getChatModel(use: ChatModelUse, name: string = ''): ChatModel | ImageModel | null {
         if (name) {
             const namedList = Model.chatModels.filter(model => model.name === name && model.use.includes(use));

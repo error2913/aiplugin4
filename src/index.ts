@@ -6,6 +6,7 @@ import { PrivilegeManager } from "./cmd/privilege";
 import { registerCmd } from "./cmd/root_cmd";
 import { ext } from "./config/config";
 import Config from "./config/config";
+import { STORAGE_VERSION } from "./config/static_config";
 import { logger } from "./logger";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
@@ -30,6 +31,13 @@ function main() {
 
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
+
+  // 存储版本标记：结构变更时递增，供后续迁移使用
+  const storedVersion = parseInt(ext.storageGet('storage_version') || '0');
+  if (storedVersion < STORAGE_VERSION) {
+    ext.storageSet('storage_version', String(STORAGE_VERSION));
+    logger.info(`存储版本升级: ${storedVersion} -> ${STORAGE_VERSION}`);
+  }
 
   ext.onPoke = (ctx: seal.MsgContext, event: seal.PokeEvent) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
