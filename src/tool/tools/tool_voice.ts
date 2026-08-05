@@ -31,7 +31,11 @@ const characterMap: { [key: string]: string } = {
 };
 
 export function registerRecord() {
-    const { RECORD_PATH_MAP: recordPathMap } = Config.tool;
+    // 本地语音统一走“资源”配置（支持 语音名=路径 或纯路径）
+    const recordPathMap: { [key: string]: string } = {};
+    for (const audio of Config.resource.LOCAL_AUDIOS || []) {
+        recordPathMap[audio.audioId] = audio.path;
+    }
 
     if (Object.keys(recordPathMap).length !== 0) {
         const toolRecord = new Tool({

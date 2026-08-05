@@ -25,19 +25,19 @@ use = ["chat"]
 [body]
 temperature = 1
 top_p = 1`
-        ], '每行一个模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）；默认对话模型取列表第一项；可选 [body] 覆盖请求参数（如 temperature、max_tokens）', "模型");
+        ], '每行一个模型（TOML），name/api_key/use 必填；use 可选项：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）；provider/base_url 可省略（自动识别 deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）；默认对话模型取列表第一项；可选 [body] 覆盖请求参数（如 temperature、max_tokens）', "模型");
         seal.ext.registerTemplateConfig(ext, "图片模型", [
             `# 使用toml格式
 name = "glm-4v"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`
-        ], '每行一个图片模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 zhipu/alibaba/openai/google/siliconflow）；use 填 image-understanding', "模型");
+        ], '每行一个图片模型（TOML），name/api_key/use 必填；use 可选项：image-understanding（图片理解）；provider/base_url 可省略（自动识别 zhipu/alibaba/openai/google/siliconflow）', "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
             `# 使用toml格式
 name = "text-embedding-v4"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`
-        ], '每行一个嵌入模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 alibaba/openai/zhipu/siliconflow）；输出维度需与“向量维度”配置一致', "模型");
+        ], '每行一个嵌入模型（TOML），name/api_key/use 必填；use 可选项：text-embedding（文本嵌入）；provider/base_url 可省略（自动识别 alibaba/openai/zhipu/siliconflow）；输出维度需与“向量维度”配置一致', "模型");
     }
 
     static get() {

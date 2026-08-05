@@ -1,17 +1,6 @@
-// 工具配置：函数调用开关/提示词工程/上限/禁用与默认关闭/本地录音路径
+// 工具配置：函数调用开关/提示词工程/上限/禁用与默认关闭
 import { ext } from "../config";
 export default class ToolConfig {
-
-    static getPathMapConfig(ext: seal.ExtInfo, key: string): { [id: string]: string } {
-        const map: { [id: string]: string } = {};
-        seal.ext.getTemplateConfig(ext, key).forEach(s => {
-            const [id, ...rest] = s.split(/[=，,]/);
-            if (id && rest.length > 0) map[id.trim()] = rest.join('=').trim();
-            else if (id) map[id.trim()] = id.trim();
-        });
-        return map;
-    }
-
     static register() {
 
         seal.ext.registerBoolConfig(ext, "开启调用函数功能", true, "", "工具");
@@ -20,9 +9,8 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后保存并重载js", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
-        seal.ext.registerTemplateConfig(ext, "本地录音路径", [''], "每行一个本地语音：语音名=路径，示例：早安=records/早安.mp3", "工具");
-        seal.ext.registerTemplateConfig(ext, "MCP服务器配置", ['qq|http://127.0.0.1:8888/mcp|your_token'], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP），示例中的地址可换成你实际的 MCP 服务", "工具");
-        seal.ext.registerTemplateConfig(ext, "技能配置", ['骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败'], "每行一个技能：名称|描述|内容，AI 可通过 use_skill 工具按需调用", "工具");
+        seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [''], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP），示例：qq|http://127.0.0.1:8888/mcp|your_token，地址换成你自己的 MCP 服务即可；修改后保存并重载js", "工具");
+        seal.ext.registerTemplateConfig(ext, "技能配置", [''], "每行一个技能：名称|描述|内容，示例：骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败；AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",
@@ -58,10 +46,7 @@ export default class ToolConfig {
             BLOCKED: seal.ext.getTemplateConfig(ext, "禁止调用的函数"),
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ext, "默认关闭的函数"),
             DECKS: seal.ext.getTemplateConfig(ext, "提供给AI的牌堆名称"),
-            RECORD_PATH_MAP: ToolConfig.getPathMapConfig(ext, "本地录音路径"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色")
         }
     }
 }
-
-// 需要为 ToolConfig 提供 getPathMapConfig 静态方法（与 ImageConfig 类似）

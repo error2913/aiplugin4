@@ -4,8 +4,8 @@ import Image from "../../resource/image";
 import { ext } from "../config";
 export default class ResourceConfig {
     static register() {
-        seal.ext.registerTemplateConfig(ext, "本地图片路径", ['data/images/sealdice.png'], "如不需要可以不填写，修改完需要重载js", "资源");
-        seal.ext.registerTemplateConfig(ext, "本地语音路径", ['data/records/钢管落地.mp3'], "如不需要可以不填写，修改完需要重载js。发送语音需要配置ffmpeg到环境变量中", "资源");
+        seal.ext.registerTemplateConfig(ext, "本地图片路径", [''], "如不需要可以不填写，修改完需要重载js；每行一个本地图片路径，示例：data/images/sealdice.png", "资源");
+        seal.ext.registerTemplateConfig(ext, "本地语音路径", [''], "每行一个本地语音：语音名=路径（省略语音名时默认用文件名），示例：早安=records/早安.mp3；发送语音需要配置ffmpeg到环境变量中，修改完需要重载js", "资源");
     }
 
     static get() {
@@ -18,14 +18,24 @@ export default class ResourceConfig {
 
 function getPathMapConfig(key: string): { [id: string]: string } {
     const paths = seal.ext.getTemplateConfig(ext, key).filter(x => x);
-    const pathMap: { [id: string]: string } = paths.reduce((acc: { [id: string]: string }, path: string) => {
-        if (path.trim() === '') return acc;
+    const pathMap: { [id: string]: string } = paths.reduce((acc: { [id: string]: string }, line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return acc;
         try {
-            const id = (path.split('/').pop() || '').replace(/\.[^/.]+$/, '');
-            if (!id) throw new Error(`本地路径格式错误:${path}`);
+            // 支持“语音名=路径”，省略语音名时默认用文件名（去扩展名）
+            const eq = trimmed.indexOf('=');
+            let id = trimmed;
+            let path = trimmed;
+            if (eq > 0) {
+                id = trimmed.slice(0, eq).trim();
+                path = trimmed.slice(eq + 1).trim();
+            } else {
+                id = (trimmed.split('/').pop() || '').replace(/\.[^/.]+$/, '');
+            }
+            if (!id || !path) throw new Error(`本地路径格式错误:${line}`);
             acc[id] = path;
         } catch (e) {
-            Logger.error(`本地路径格式错误:${path}，错误信息:${e instanceof Error ? e.message : String(e)}`);
+            Logger.error(`本地路径格式错误:${line}，错误信息:${e instanceof Error ? e.message : String(e)}`);
         }
         return acc;
     }, {});
