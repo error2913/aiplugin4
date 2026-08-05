@@ -14,7 +14,7 @@ import Tool, { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { RequestMessage } from "../utils/message";
 import { handleMessages } from "../utils/message";
-import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
+import { handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 import { replyToSender, transformMsgId } from "../utils/utils";
 
@@ -313,66 +313,8 @@ export class Session {
             return;
         }
 
-        const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-        const toolInfos = Tool.getToolsInfo(this);
-
-        let result = { contextArray: [], replyArray: [], images: [] };
-        const MaxRetry = 3;
-        for (let retry = 1; retry <= MaxRetry; retry++) {
-            const messages = await handleMessages(ctx, this);
-            const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos, tool_choice || 'auto', this.setting.modelName);
-            result = await handleReply(ctx, msg, this, raw_reply);
-
-            if (STATUS) {
-                if (PROMPT_ENGINEERING) {
-                    const match = raw_reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
-                    if (match) {
-                        logger.info('prompt tool call triggered');
-                        const { contextArray, replyArray, images } = result;
-                        await this.reply(ctx, msg, contextArray, replyArray, images);
-                        await this.context.addAssistantMessage(match[0], '');
-                        try {
-                            const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, this, match[1]);
-                            for (const r of callResults) await this.context.addToolCallbackMessage(r.content, r.tool_call_id);
-                            await this.chat(ctx, msg, '函数回调触发');
-                        } catch (e) {
-                            logger.error('handlePromptToolCalls error:', e.message);
-                        }
-                        return;
-                    }
-                } else {
-                    if (tool_calls.length > 0) {
-                        logger.info('tool call triggered');
-                        const { contextArray, replyArray, images } = result;
-                        await this.reply(ctx, msg, contextArray, replyArray, images);
-                        this.context.addToolCallsMessage(tool_calls);
-                        try {
-                            const { result: callResults } = await Tool.handleToolCalls(ctx, msg, this, tool_calls);
-                            for (const r of callResults) await this.context.addToolCallbackMessage(r.content, r.tool_call_id);
-                            await this.chat(ctx, msg, '函数回调触发');
-                        } catch (e) {
-                            logger.error('handleToolCalls error:', e.message);
-                        }
-                        return;
-                    }
-                }
-            }
-
-            if (checkRepeat(this.context, result.contextArray.join('')) && result.replyArray.join('').trim()) {
-                if (retry >= MaxRetry) {
-                    logger.warning('repeat detected, clear assistant/tool messages');
-                    this.context.clearMessages('assistant', 'tool');
-                    break;
-                }
-                logger.warning(`repeat detected, retry [${retry}/3]`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                continue;
-            }
-            break;
-        }
-
-        const { contextArray, replyArray, images } = result;
-        await this.reply(ctx, msg, contextArray, replyArray, images);
+        // 对话与工具调用编排统一由智能体 run() 处理（构建消息 → 模型 → 工具执行 → 回填 → 最终回复）
+        await this.agent.run(this, ctx, msg, tool_choice);
         this.save();
     }
 

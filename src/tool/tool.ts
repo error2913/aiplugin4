@@ -6,7 +6,7 @@ import { SessionType } from "../session/types";
 import { fixJsonString } from "../utils/string";
 
 import { registerMCPTools } from "./mcp";
-import { registerSkills } from "./skills";
+import { getSkillNames, registerSkills } from "./skills";
 import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
 import { registerAttr } from "./tools/builtin_cmd.ts/tool_attr";
 import { registerModu } from "./tools/builtin_cmd.ts/tool_modu";
@@ -281,13 +281,19 @@ export default class Tool {
         const { TOOLS_PROMPT_TEMPLATE } = Config.prompt;
 
         const tools = this.getToolsInfo(session);
+        let s = '';
         if (tools && tools.length > 0) {
-            return TOOLS_PROMPT_TEMPLATE({
+            s = TOOLS_PROMPT_TEMPLATE({
                 "PROMPT_ENGINEERING": PROMPT_ENGINEERING,
                 "tools": tools
             });
         }
 
-        return '';
+        // 可用技能（Skills）：随工具提示词一起注入，AI 可调用 use_skill 获取内容
+        const skillNames = getSkillNames();
+        if (skillNames.length > 0) {
+            s += `\n\n## 可用技能\n- ${skillNames.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
+        }
+        return s;
     }
 }

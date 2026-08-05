@@ -25,6 +25,11 @@ function getSkills(): Skill[] {
         .filter(s => s.name);
 }
 
+/** 返回已配置的技能名称列表 */
+export function getSkillNames(): string[] {
+    return getSkills().map(s => s.name);
+}
+
 /**
  * 读取“技能配置”，注册 use_skill 工具
  */
