@@ -17,10 +17,10 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "开启调用函数功能", true, "", "工具");
         seal.ext.registerBoolConfig(ext, "切换为提示词工程", false, "API在不支持function calling功能的时候开启", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 5, "单次对话中允许连续调用函数的次数", "工具");
-        seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "修改后保存并重载js", "工具");
-        seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "", "工具");
-        seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "没有的话建议把draw_deck这个函数加入不允许调用", "工具");
-        seal.ext.registerTemplateConfig(ext, "本地录音路径", [''], "语音名称和路径，如：语音名=路径", "工具");
+        seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后保存并重载js", "工具");
+        seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg", "工具");
+        seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
+        seal.ext.registerTemplateConfig(ext, "本地录音路径", [''], "每行一个本地语音：语音名=路径，示例：早安=records/早安.mp3", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", ['qq|http://127.0.0.1:8888/mcp|your_token'], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP），示例中的地址可换成你实际的 MCP 服务", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", ['骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败'], "每行一个技能：名称|描述|内容，AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
