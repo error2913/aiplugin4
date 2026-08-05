@@ -24,7 +24,11 @@ use = ["chat"]`,
             `# 默认对话模型（若需调整默认值，把想要的模型放到第一行）
 name = "deepseek-chat"
 api_key = "sk-xxxx"
-use = ["chat"]`,
+use = ["chat"]
+
+[body]
+temperature = 1
+top_p = 1`,
             `# deepseek 推理模型
 name = "deepseek-reasoner"
 api_key = "sk-xxxx"
@@ -47,34 +51,6 @@ use = ["chat"]`,
             `# 通义千问
 name = "qwen-max"
 api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# 智谱 GLM-4.7-Flash（免费）
-name = "glm-4.7-flash"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# 通义千问 Qwen3.5-Plus
-name = "qwen3.5-plus"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# Anthropic Claude
-name = "claude-sonnet-4-5"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# Moonshot Kimi K2
-name = "kimi-k2-0905-preview"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# xAI Grok
-name = "grok-3"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# Mistral
-name = "mistral-large-latest"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `# 硅基流动（SiliconFlow）
-name = "deepseek-ai/DeepSeek-V3.2"
-api_key = "sk-xxxx"
 use = ["chat"]`
         ], '每行一个模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）；默认对话模型取列表第一项；可选 [body] 覆盖请求参数（如 temperature、max_tokens）', "模型");
         seal.ext.registerTemplateConfig(ext, "图片模型", [
@@ -95,18 +71,6 @@ use = ["image-understanding"]`,
             `# OpenAI 视觉
 name = "gpt-4o"
 api_key = "sk-xxxx"
-use = ["image-understanding"]`,
-            `# Google Gemini 视觉
-name = "gemini-2.5-flash"
-api_key = "sk-xxxx"
-use = ["image-understanding"]`,
-            `# 通义千问 Qwen2.5-VL
-name = "qwen2.5-vl-72b-instruct"
-api_key = "sk-xxxx"
-use = ["image-understanding"]`,
-            `# 硅基流动（SiliconFlow）
-name = "Qwen/Qwen2.5-VL-72B-Instruct"
-api_key = "sk-xxxx"
 use = ["image-understanding"]`
         ], '每行一个图片模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 zhipu/alibaba/openai/google/siliconflow）；use 填 image-understanding', "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
@@ -122,14 +86,6 @@ name = "text-embedding-3-large"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`,
             `name = "text-embedding-3-small"
-api_key = "sk-xxxx"
-use = ["text-embedding"]`,
-            `# 智谱嵌入
-name = "embedding-3"
-api_key = "sk-xxxx"
-use = ["text-embedding"]`,
-            `# 硅基流动（SiliconFlow）
-name = "BAAI/bge-m3"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`
         ], '每行一个嵌入模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 alibaba/openai/zhipu/siliconflow）；输出维度需与“向量维度”配置一致', "模型");
