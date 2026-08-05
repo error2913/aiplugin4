@@ -40,7 +40,7 @@ export default class ChatModel extends BaseModel {
 
                 const content = message.content || '';
 
-                logger.info(`响应内容:`, content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+                logger.info(`响应内容:`, content.length > 500 ? content.slice(0, 500) + `…(+${content.length - 500})` : content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
                 return { content, tool_calls: message.tool_calls || [] };
             } else {

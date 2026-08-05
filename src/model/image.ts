@@ -42,7 +42,7 @@ export default class ImageModel extends BaseModel {
                 const message = data.choices[0].message;
                 const content = message.content || '';
 
-                Logger.info(`响应内容:`, content, '\nlatency', Date.now() - time, 'ms');
+                Logger.info(`响应内容:`, content.length > 500 ? content.slice(0, 500) + `…(+${content.length - 500})` : content, '\nlatency', Date.now() - time, 'ms');
 
                 return content;
             } else {
@@ -75,7 +75,7 @@ export default class ImageModel extends BaseModel {
 
                 const content = message.content || '';
 
-                Logger.info(`响应内容:`, content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
+                Logger.info(`响应内容:`, content.length > 500 ? content.slice(0, 500) + `…(+${content.length - 500})` : content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
 
                 return { content, tool_calls: message.tool_calls || [] };
             } else {

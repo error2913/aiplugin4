@@ -1,7 +1,7 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
 import Config from "../config/config";
 import { ext } from "../config/config";
-import { logger } from "../logger";
+import Logger, { logger } from "../logger";
 import ChatModel from "../model/chat";
 import Model from "../model/model";
 import { ChatModelUse } from "../model/types";
@@ -106,7 +106,7 @@ export default class Agent {
                             for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
-                            logger.error('handlePromptToolCalls error:', e.message);
+                            Logger.exception('handlePromptToolCalls error', e);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, false, e.message);
                         }
                         session.tool.callCount = 0;
@@ -130,7 +130,7 @@ export default class Agent {
                             for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
                             trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
-                            logger.error('handleToolCalls error:', e.message);
+                            Logger.exception('handleToolCalls error', e);
                             trace.recordToolCall('function-call', Date.now() - callTime, false, e.message);
                         }
                         session.tool.callCount = 0;
@@ -192,7 +192,7 @@ export default class Agent {
                 await new Promise(resolve => setTimeout(resolve, interval));
                 continue;
             }
-            logger.info('stream reply:', raw_reply);
+            logger.info('stream reply:', raw_reply.length > 200 ? raw_reply.slice(0, 200) + `…(+${raw_reply.length - 200})` : raw_reply);
 
             if (STATUS && PROMPT_ENGINEERING) {
                 if (!session.stream.toolCallStatus && /<[\||｜]?function(?:_call)?>/.test(session.stream.reply + raw_reply)) {

@@ -41,7 +41,7 @@ export default class EmbeddingModel extends BaseModel {
             if (data.data && data.data.length > 0) {
                 const embedding = data.data[0].embedding;
 
-                logger.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
+                logger.info(`文本:`, text.length > 200 ? text.slice(0, 200) + `…(+${text.length - 200})` : text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
                 EmbeddingModel.vectorCache.text = text;
                 EmbeddingModel.vectorCache.vector = embedding;
 
