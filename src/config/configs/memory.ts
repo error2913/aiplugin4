@@ -21,7 +21,7 @@ export default class MemoryConfig {
         seal.ext.registerIntConfig(ext, "知识库记忆展示数量", 10, "", "记忆");
         seal.ext.registerTemplateConfig(ext, "知识库记忆", [
             `# 采用toml进行格式化
-roles = ["正确"] # 当数组为空或不存在时，默认对所有角色生效
+roles = [] # 当数组为空或不存在时，默认对所有角色生效
             
 [knowledges.test]
 content = """
@@ -107,13 +107,13 @@ function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
             const k = kc.knowledges[id];
             const m = new MemoryItem();
             m.id = id;
-            m.importance = k.importance;
+            m.importance = k.importance || 0.5;
             m.content = k.content;
-            m.type = k.type;
-            m.tags = k.tags;
-            m.relatedMemories = k.relatedMemories;
-            m.users = k.users.map(u => String(u));
-            m.groups = k.groups.map(g => String(g));
+            m.type = k.type || 'text';
+            m.tags = k.tags || [];
+            m.relatedMemories = k.relatedMemories || [];
+            m.users = (k.users || []).map(u => String(u));
+            m.groups = (k.groups || []).map(g => String(g));
             mmap[id] = m;
         }
         if (kc.roles.length === 0) kc.roles.push('*');

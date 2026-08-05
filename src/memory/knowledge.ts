@@ -78,7 +78,12 @@ export default class KnowledgeService extends MemoryService {
 
     async updateKnowledgeMemory(roleIndex: number) {
         const { ROLE_NAMES } = Config.message as any;
-        const role = (ROLE_NAMES && ROLE_NAMES[roleIndex]) || '*';
+        const { KNOWLEDGE_MEMORIES_MAP } = Config.memory;
+        let role = (ROLE_NAMES && ROLE_NAMES[roleIndex]) || '*';
+        // 角色没有专属知识时，回退到“对所有角色生效”的全局知识（roles 为空的知识）
+        if (!Object.prototype.hasOwnProperty.call(KNOWLEDGE_MEMORIES_MAP, role) || (KNOWLEDGE_MEMORIES_MAP[role] || []).length === 0) {
+            role = '*';
+        }
         if (this.role !== role) {
             const ks = await KnowledgeService.get(role);
             this.role = role;

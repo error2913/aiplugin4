@@ -10,7 +10,7 @@ import Model from "../model/model";
 import Image, { ImageManager } from "../resource/image";
 import { TimerManager } from "../timer";
 import { ToolState } from "../tool/tool";
-import Tool from "../tool/tool";
+import Tool, { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { RequestMessage } from "../utils/message";
 import { handleMessages } from "../utils/message";
@@ -172,9 +172,8 @@ export class Session {
     }
     get toolState(): ToolState {
         const { BLOCKED, DEFAULT_CLOSED } = Config.tool;
-        const tools = Agent.get(this.agentName).tools;
         const state = this.tool.state;
-        tools.forEach(tool => {
+        Object.keys(toolMap).forEach(tool => {
             if (BLOCKED.includes(tool)) return;
             if (!Object.prototype.hasOwnProperty.call(state, tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
         })

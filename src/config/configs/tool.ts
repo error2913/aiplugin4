@@ -21,6 +21,8 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "没有的话建议把draw_deck这个函数加入不允许调用", "工具");
         seal.ext.registerTemplateConfig(ext, "本地录音路径", [''], "语音名称和路径，如：语音名=路径", "工具");
+        seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP），如：qq|http://127.0.0.1:8888/mcp|token", "工具");
+        seal.ext.registerTemplateConfig(ext, "技能配置", [], "每行一个技能：名称|描述|内容，AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",

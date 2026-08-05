@@ -125,7 +125,7 @@ export default class PromptConfig {
     {{/each}}
 {{/if}}`
         ], "", "prompt模板");
-        registerTemplate("工具函数prompt模板", [ // 子智能体通过 call_subagent 工具暴露给 AI
+        registerTemplate("工具函数prompt模板", [
             `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数

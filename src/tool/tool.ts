@@ -5,6 +5,8 @@ import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { fixJsonString } from "../utils/string";
 
+import { registerMCPTools } from "./mcp";
+import { registerSkills } from "./skills";
 import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
 import { registerAttr } from "./tools/builtin_cmd.ts/tool_attr";
 import { registerModu } from "./tools/builtin_cmd.ts/tool_modu";
@@ -23,7 +25,6 @@ import { registerContext } from "./tools/tool_context";
 import { registerMemory } from "./tools/tool_memory";
 import { registerMessage } from "./tools/tool_message";
 import { registerMusicPlay } from "./tools/tool_music";
-import { registerSubAgent } from "./tools/tool_subagent";
 import { registerTime } from "./tools/tool_time";
 import { registerSetTrigger } from "./tools/tool_trigger";
 import { registerRecord } from "./tools/tool_voice";
@@ -81,7 +82,8 @@ export default class Tool {
         registerSetTrigger();
         registerRecord();
         registerWeb();
-        registerSubAgent();
+        registerSkills();
+        registerMCPTools().catch(e => Logger.error(`注册MCP工具失败:${e.message}`));
     }
 
 
