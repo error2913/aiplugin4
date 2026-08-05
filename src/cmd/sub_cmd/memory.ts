@@ -258,7 +258,7 @@ export function registerCmdMemory() {
             }
             case 'sum': {
                 const val3 = cmdArgs.getArgN(3);
-                if (aliasToCmd(val3) === 'clr') {
+                if (aliasToCmd(val3) === 'clear') {
                     session.memory.clearSummaries();
                     session.save();
                     seal.replyToSender(ctx, msg, '总结记忆已清除');

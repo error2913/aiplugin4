@@ -22,7 +22,7 @@ export function registerCmdModel() {
             return ret;
         }
 
-        if (aliasToCmd(val2) === 'clr') {
+        if (aliasToCmd(val2) === 'clear') {
             session.setting.modelName = '';
             session.save();
             seal.replyToSender(ctx, msg, '已清除当前会话的模型设置');
