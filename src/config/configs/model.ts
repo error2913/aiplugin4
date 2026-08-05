@@ -17,45 +17,33 @@ export default class ModelConfig {
     static register() {
 
         seal.ext.registerTemplateConfig(ext, "对话模型", [
-            `# 使用toml格式
-name = "deepseek-v4-flash"
+            `name = "deepseek-v4-flash"
 api_key = "sk-xxxx"
 use = ["chat"]`,
-            `# 默认对话模型（若需调整默认值，把想要的模型放到第一行）
-name = "deepseek-chat"
+            `name = "deepseek-chat"
 api_key = "sk-xxxx"
-use = ["chat"]
-
-[body]
-temperature = 1
-top_p = 1`,
-            `# deepseek 推理模型
-name = "deepseek-reasoner"
+use = ["chat"]`,
+            `name = "deepseek-reasoner"
 api_key = "sk-xxxx"
 use = ["chat"]`,
             `name = "deepseek-v4-pro"
 api_key = "sk-xxxx"
 use = ["chat"]`,
-            `# Google Gemini（OpenAI 兼容端点）
-name = "gemini-3-pro-preview-low"
+            `name = "gemini-3-pro-preview-low"
 api_key = "sk-xxxx"
 use = ["chat"]`,
-            `# OpenAI
-name = "gpt-4o"
+            `name = "gpt-4o"
 api_key = "sk-xxxx"
 use = ["chat"]`,
-            `# 智谱
-name = "glm-4"
+            `name = "glm-4"
 api_key = "sk-xxxx"
 use = ["chat"]`,
-            `# 通义千问
-name = "qwen-max"
+            `name = "qwen-max"
 api_key = "sk-xxxx"
 use = ["chat"]`
-        ], '', "模型");
+        ], '每行一个模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 deepseek/openai/google/zhipu/alibaba）；默认对话模型取列表第一项；可选 [body] 覆盖请求参数（如 temperature、max_tokens）', "模型");
         seal.ext.registerTemplateConfig(ext, "图片模型", [
-            `# 使用toml格式
-name = "glm-4v"
+            `name = "glm-4v"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`,
             `name = "glm-4v-plus-0111"
@@ -64,31 +52,27 @@ use = ["image-understanding"]`,
             `name = "glm-4v-flash"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`,
-            `# 通义千问视觉
-name = "qwen-vl-max"
+            `name = "qwen-vl-max"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`,
-            `# OpenAI 视觉
-name = "gpt-4o"
+            `name = "gpt-4o"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`
-        ], '', "模型");
+        ], '每行一个图片模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 zhipu/alibaba/openai）；use 填 image-understanding', "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
-            `# 使用toml格式
-name = "text-embedding-v4"
+            `name = "text-embedding-v4"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`,
             `name = "text-embedding-v3"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`,
-            `# OpenAI 嵌入
-name = "text-embedding-3-large"
+            `name = "text-embedding-3-large"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`,
             `name = "text-embedding-3-small"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`
-        ], '', "模型");
+        ], '每行一个嵌入模型（TOML），name/api_key/use 必填；provider/base_url 可省略（自动识别 alibaba/openai）；输出维度需与“向量维度”配置一致', "模型");
     }
 
     static get() {
