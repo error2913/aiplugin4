@@ -3,23 +3,23 @@ import Agent from "../../agent/agent";
 import Tool from "../tool";
 
 export function registerSubAgent() {
-    // 排除默认主智能体 '*'
-    const agents = Object.keys(Agent.agentMap).filter(name => name !== '*');
-    const agentList = agents.length > 0 ? agents.join('、') : 'compress_agent、summarize_agent';
+    // 只暴露实际可用的子智能体；示例智能体仅作开发示例，不进入工具列表
+    const agents = ['compress_agent', 'summarize_agent'];
+    const agentList = agents.join('、');
 
     const tool = new Tool({
         type: "function",
         function: {
             name: "call_subagent",
             description: `调用子智能体处理指定文本，返回子智能体的处理结果。可用子智能体: ${agentList}。` +
-                `compress_agent 用于压缩长文本；summarize_agent 用于总结文本；sample_agent 为示例智能体。`,
+                `compress_agent 用于压缩长文本；summarize_agent 用于总结文本。`,
             parameters: {
                 type: "object",
                 properties: {
                     agent: {
                         type: "string",
                         description: "子智能体名称，取可用列表中的一项",
-                        enum: agents.length > 0 ? agents : ['compress_agent', 'summarize_agent', 'sample_agent']
+                        enum: agents
                     },
                     input: {
                         type: "string",
@@ -32,8 +32,8 @@ export function registerSubAgent() {
     });
     tool.solve = async (_ctx, _msg, _session, args) => {
         const { agent: agentName, input } = args;
+        if (!agents.includes(agentName)) return `子智能体 ${agentName} 不存在`;
         const agent = Agent.get(agentName);
-        if (!agent || agentName === '*') return `子智能体 ${agentName} 不存在`;
         const content = await agent.chat(input);
         return content || `子智能体 ${agentName} 未返回内容`;
     }

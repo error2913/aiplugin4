@@ -1,6 +1,7 @@
 // prompt 模板配置：system/记忆/总结/知识库/工具/图片识别等 Handlebars 模板
 import Handlebars from "handlebars";
 
+import Logger from "../../logger";
 import { ext } from "../config";
 export default class PromptConfig {
     static register() {
@@ -244,5 +245,11 @@ export default class PromptConfig {
 }
 
 function getHandlebarsTemplateConfig(key: string): HandlebarsTemplateDelegate<any> {
-    return Handlebars.compile(seal.ext.getTemplateConfig(ext, key)[0] || '');
+    const template = seal.ext.getTemplateConfig(ext, key)[0] || '';
+    try {
+        return Handlebars.compile(template);
+    } catch (e) {
+        Logger.error(`模板${key}解析失败，已使用空模板: ${e.message}`);
+        return () => '';
+    }
 }

@@ -1,6 +1,7 @@
 // 记忆配置：向量维度/长期记忆/总结记忆/知识库 TOML
 import { load } from 'js-toml'
 
+import Logger from "../../logger";
 import MemoryItem from "../../memory/memory_item";
 import { revive, TypeDescriptor } from "../../utils/utils";
 import { ext } from "../config";
@@ -22,7 +23,7 @@ export default class MemoryConfig {
             `# 采用toml进行格式化
 roles = ["正确"] # 当数组为空或不存在时，默认对所有角色生效
             
-[knowledges.测试]
+[knowledges.test]
 content = """
 这是内容
 可以换行
@@ -30,11 +31,11 @@ content = """
 type = "text"
 importance = 0.9 # 记忆重要性，0-1之间的浮点数，默认0.5
 tags = ["标签1", "标签2"] # 标签列表
-relatedMemories = ["测试2"] # 相关记忆ID列表
+relatedMemories = ["test2"] # 相关记忆ID列表
 users = ["114514", "1919810"] # 相关用户ID列表
 groups = ["114514", "1919810"] # 相关群组ID列表
 
-[knowledges.测试2]
+[knowledges.test2]
 content = "单行形式，只有content字段是必须的"`
         ], "", "记忆");
     }
@@ -94,7 +95,13 @@ class KnowledgeConfigItem {
 function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
     const knowledgeMaps: { [role: string]: { [id: string]: MemoryItem } } = {};
     seal.ext.getTemplateConfig(ext, "知识库记忆").forEach(tomlString => {
-        const kc = revive(KnowledgeConfigItem, load(tomlString));
+        let kc: KnowledgeConfigItem;
+        try {
+            kc = revive(KnowledgeConfigItem, load(tomlString));
+        } catch (e) {
+            Logger.error(`知识库记忆 TOML 解析失败，已跳过该条配置: ${e.message}`);
+            return;
+        }
         const mmap: { [id: string]: MemoryItem } = {};
         for (const id in kc.knowledges) {
             const k = kc.knowledges[id];

@@ -91,7 +91,17 @@ function main() {
         if (Object.prototype.hasOwnProperty.call(triggerConditionMap, sid) && triggerConditionMap[sid].length !== 0) {
           for (let i = 0; i < triggerConditionMap[sid].length; i++) {
             const condition = triggerConditionMap[sid][i];
-            if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
+            // 关键词正则非法时跳过该条件，避免解析异常中断整条消息处理
+            let keywordMatched = true;
+            if (condition.keyword) {
+              try {
+                keywordMatched = new RegExp(condition.keyword).test(message);
+              } catch (e) {
+                logger.error(`触发关键词正则错误，已忽略该条件:${condition.keyword}，错误信息:${e.message}`);
+                keywordMatched = false;
+              }
+            }
+            if (!keywordMatched) {
               continue;
             }
             if (condition.uid && condition.uid !== uid) {

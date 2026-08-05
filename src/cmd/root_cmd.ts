@@ -120,7 +120,12 @@ export function registerCmd() {
                     return ret;
                 }
 
-                return SubCmd.map[subCmd].solve({ ctx, msg, cmdArgs, epId, uid, gid, sid, session, page, ret });
+                // 兜住子命令异步异常，避免“无响应”（SealDice 不会消费未捕获的 Promise 拒绝）
+                return Promise.resolve(SubCmd.map[subCmd].solve({ ctx, msg, cmdArgs, epId, uid, gid, sid, session, page, ret })).catch((e) => {
+                    logger.error(`指令.ai执行失败:${e.message}`);
+                    seal.replyToSender(ctx, msg, `指令.ai执行失败:${e.message}`);
+                    return ret;
+                });
             } else {
                 ret.showHelp = true;
                 return ret;

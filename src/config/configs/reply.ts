@@ -68,5 +68,12 @@ function getRegexesConfig(key: string): RegExp[] {
 }
 
 function getHandlebarsTemplatesConfig(key: string): HandlebarsTemplateDelegate<any>[] {
-    return seal.ext.getTemplateConfig(ext, key).map(x => Handlebars.compile(x || ''));
+    return seal.ext.getTemplateConfig(ext, key).map(x => {
+        try {
+            return Handlebars.compile(x || '');
+        } catch (e) {
+            Logger.error(`模板${key}解析失败，已跳过该条配置: ${e.message}`);
+            return () => '';
+        }
+    });
 }
