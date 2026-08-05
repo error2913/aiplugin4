@@ -26,6 +26,8 @@ Codex 中调用名形如 `mcp__QQ-MCP-Server__qq_send_group_message`。服务端
 1. 发送指令，记录返回的 `message_id` 与本地时间。
 2. 每 2~3 秒轮询一次 `qq_get_group_messages(group_id, count=20, reverse_order=true)`，最长 45 秒。
 3. 发送节奏：相邻指令间隔 ≥ 3 秒；每 5 条暂停 10 秒；每个用例域完成后暂停 30 秒；单次运行默认上限 60 条，超限分批执行。任何情况下不得连续快速发送。
+   - 群里消息以验证连通为主：可以发，但不能发一堆，验证能发就行。
+   - 重载 JS 是写操作：**两次重载间隔必须 ≥ 1 分钟**（见 panel.md）。
 4. 过滤待测机器人回复：`user_id == 待测机器人QQ` 且 `time >= 发送时间 - 1`。
    - NapCat 的 `message_seq` 按发送者独立计数，**不能**跨发送者比较大小。
    - `message_id` 同样按发送者计数，不能用来判断先后。

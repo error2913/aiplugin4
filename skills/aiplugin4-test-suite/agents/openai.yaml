@@ -1,0 +1,4 @@
+interface:
+  display_name: "aiplugin4 综合测试与调试"
+  short_description: "aiplugin4 全量/单项/重载/配置调试一体化技能"
+  default_prompt: "Use $aiplugin4-test-suite to run full or single aiplugin4 tests, reload JS, or debug plugin config via qqmcp and the SealDice panel."
