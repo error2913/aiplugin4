@@ -1,6 +1,6 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
 import Config from "../config/config";
-import { knowledgeService } from "../memory/knowledge";
+import { MemoryManager } from "../memory/manager";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
@@ -23,7 +23,6 @@ export async function buildSystemPromptContent(
     roleSetting: string
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
-    const { MEMORY, SUMMARY, KNOWLEDGE } = Config.memory;
     const { STATUS, PROMPT_ENGINEERING } = Config.tool;
 
     // 本地可发送资源（图片/语音）来自“资源”配置
@@ -44,16 +43,10 @@ export async function buildSystemPromptContent(
         gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
     }
 
-    // 知识库段（按角色加载，角色无知识时回退全局知识）
-    let knowledgePrompt = '';
-    if (KNOWLEDGE) {
-        await knowledgeService.updateKnowledgeMemory(roleIndex);
-        knowledgePrompt = knowledgeService.buildKnowledgePrompt(session.context.sessionId, text);
-    }
-
-    // 记忆段：长期记忆 + 总结记忆
-    const memoryPrompt = MEMORY ? await session.memory.buildMemoryPrompt(ctx, session.context, text, ui, gi) : '';
-    const summaryPrompt = SUMMARY ? session.memory.buildSummaryPrompt() : '';
+    // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
+    const memoryPrompt = await MemoryManager.buildLongTermPrompt(ctx, session, text, ui, gi);
+    const summaryPrompt = MemoryManager.buildSummaryPrompt(session);
+    const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, roleIndex, text);
 
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
     const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
