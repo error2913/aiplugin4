@@ -1,16 +1,18 @@
-import { AIManager } from "./AI/AI";
-import { ToolService } from "./tool/tool";
-import { Config } from "./config/config";
-import { triggerConditionMap } from "./tool/tool_trigger";
+// 插件入口：注册配置、工具、命令与事件处理器，并启动各模块（含智能体初始化）
+import { getSession } from "./session/session_service";
+import Tool from "./tool/tool";
+import Config from "./config/config";
+import { triggerConditionMap } from "./tool/tools/tool_trigger";
 import { logger } from "./logger";
 import { fmtDate, transformTextToArray } from "./utils/string";
 import { checkUpdate } from "./utils/update";
 import { TimerManager } from "./timer";
 import { createMsg } from "./utils/seal";
 import { PrivilegeManager } from "./cmd/privilege";
-import { knowledgeService } from "./memory/memory";
+import { knowledgeService } from "./memory/knowledge";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { registerCmd } from "./cmd/root_cmd";
+import "./agent/agents";
 
 function main() {
   Handlebars.registerHelper('index', (index: number) => index + 1);
@@ -19,7 +21,7 @@ function main() {
 
   Config.registerConfig();
   checkUpdate();
-  ToolService.registerTool();
+  Tool.registerTool();
   TimerManager.init();
   knowledgeService.init();
 
@@ -38,7 +40,8 @@ function main() {
   //接受非指令消息
   ext.onNotCommandReceived = (ctx: seal.MsgContext, msg: seal.Message): void | Promise<void> => {
     try {
-      const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = Config.received;
+      const { IGNORE_PRIVATE: disabledInPrivate, IGNORE_REGEX: ignoreRegex, IGNORE_CONDITION } = Config.received;
+      const { TRIGGER_REGEX: triggerRegex, TRIGGER_CONDITION: triggerCondition } = Config.trigger;
       if (ctx.isPrivate && disabledInPrivate) {
         return;
       }
@@ -46,15 +49,21 @@ function main() {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
       const sid = ctx.isPrivate ? uid : gid;
-      const ai = AIManager.getAI(sid);
+      const session = getSession(sid);
 
       // 检查活跃时间定时器
-      ai.checkActiveTimer(ctx);
+      session.checkActiveTimer(ctx);
 
       const message = msg.message;
       const messageArray = transformTextToArray(message);
 
       // 非指令消息忽略
+      // 忽略条件（豹语表达式）命中时直接忽略
+      if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
+        logger.info('忽略消息条件命中，跳过');
+        return;
+      }
+
       if (ignoreRegex.test(message)) {
         logger.info(`非指令消息忽略:${message}`);
         return;
@@ -63,15 +72,15 @@ function main() {
       // 检查CQ码
       const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
       if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
-        clearTimeout(ai.context.timer);
-        ai.context.timer = null;
+        clearTimeout(session.context.timer);
+        session.context.timer = null;
 
         // 非指令消息触发
         if (triggerRegex.test(message)) {
           const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
           if (fmtCondition === 1) {
-            return ai.handleReceipt(ctx, msg, ai, messageArray)
-              .then(() => ai.chat(ctx, msg, '非指令'));
+            return session.handleReceipt(ctx, msg, messageArray)
+              .then(() => session.chat(ctx, msg, '非指令'));
           }
         }
 
@@ -86,40 +95,41 @@ function main() {
               continue;
             }
 
-            return ai.handleReceipt(ctx, msg, ai, messageArray)
-              .then(() => ai.context.addSystemUserMessage('触发原因提示', condition.reason, []))
+            return session.handleReceipt(ctx, msg, messageArray)
+              .then(() => session.context.addSystemUserMessage(condition.reason, '触发原因提示'))
               .then(() => triggerConditionMap[sid].splice(i, 1))
-              .then(() => ai.chat(ctx, msg, 'AI设定触发条件'));
+              .then(() => session.chat(ctx, msg, 'AI设定触发条件'));
           }
         }
 
         // 开启任一模式时
-        const setting = ai.setting;
-        if (setting.standby || globalStandby) {
-          ai.handleReceipt(ctx, msg, ai, messageArray)
+        const setting = session.setting;
+        if (setting.standby || Config.base.GLOBAL_STANDBY) {
+          session.handleReceipt(ctx, msg, messageArray)
             .then((): void | Promise<void> => {
               if (setting.counter > -1) {
-                ai.context.counter += 1;
-                if (ai.context.counter >= setting.counter) {
-                  ai.context.counter = 0;
-                  return ai.chat(ctx, msg, '计数器');
+                session.context.counter += 1;
+                if (session.context.counter >= setting.counter) {
+                  session.context.counter = 0;
+                  return session.chat(ctx, msg, '计数器');
                 }
               }
 
               if (setting.prob > -1) {
                 const ran = Math.random() * 100;
                 if (ran <= setting.prob) {
-                  return ai.chat(ctx, msg, '概率');
+                  return session.chat(ctx, msg, '概率');
                 }
               }
 
               if (setting.timer > -1) {
-                ai.context.timer = setTimeout(() => {
-                  ai.context.timer = null;
-                  ai.chat(ctx, msg, '计时器');
+                session.context.timer = setTimeout(() => {
+                  session.context.timer = null;
+                  session.chat(ctx, msg, '计时器');
                 }, setting.timer * 1000 + Math.floor(Math.random() * 500));
               }
-            });
+            })
+            .then(() => session.save());
         }
       }
     } catch (e) {
@@ -130,28 +140,28 @@ function main() {
   //接受的指令
   ext.onCommandReceived = (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs) => {
     try {
-      if (ToolService.cmdArgs === null) {
-        ToolService.cmdArgs = cmdArgs;
+      if (Tool.cmdArgs === null) {
+        Tool.cmdArgs = cmdArgs;
       }
 
-      const { allcmd } = Config.received;
+      const { RECEIVE_CMD: allcmd } = Config.received;
       if (allcmd) {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
         const sid = ctx.isPrivate ? uid : gid;
-        const ai = AIManager.getAI(sid);
+        const session = getSession(sid);
 
         // 检查活跃时间定时器
-        ai.checkActiveTimer(ctx);
+        session.checkActiveTimer(ctx);
 
         const message = msg.message;
         const messageArray = transformTextToArray(message);
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
-          const setting = ai.setting;
+          const setting = session.setting;
           if (setting.standby) {
-            ai.handleReceipt(ctx, msg, ai, messageArray);
+            session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
           }
         }
       }
@@ -166,28 +176,28 @@ function main() {
       const uid = ctx.player.userId;
       const gid = ctx.group.groupId;
       const sid = ctx.isPrivate ? uid : gid;
-      const ai = AIManager.getAI(sid);
+      const session = getSession(sid);
 
       // 检查活跃时间定时器
-      ai.checkActiveTimer(ctx);
+      session.checkActiveTimer(ctx);
 
       const message = msg.message;
       const messageArray = transformTextToArray(message);
 
-      ai.tool.listen.resolve?.(message); // 将消息传递给监听工具
+      session.tool.listen.resolve?.(message); // 将消息传递给监听工具
 
-      const { allmsg } = Config.received;
+      const { RECEIVE_MSG_BY_BOT: allmsg } = Config.received;
       if (allmsg) {
-        if (message === ai.context.lastReply) {
-          ai.context.lastReply = '';
+        if (message === session.context.lastReply) {
+          session.context.lastReply = '';
           return;
         }
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
-          const setting = ai.setting;
+          const setting = session.setting;
           if (setting.standby) {
-            ai.handleReceipt(ctx, msg, ai, messageArray);
+            session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
           }
         }
       }

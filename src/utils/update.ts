@@ -1,6 +1,7 @@
+// 版本校验与更新日志展示
 import { logger } from "../logger";
 import { updateInfo } from "../update";
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { VERSION } from "../config/static_config";
 
 /**

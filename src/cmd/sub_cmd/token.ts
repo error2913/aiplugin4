@@ -1,5 +1,6 @@
-import { AIManager } from "../../AI/AI";
-import { get_chart_url } from "../../agent/service";
+// .ai token：查看/清除 token 用量记录
+import { UsageManager } from "../../usage";
+import { get_chart_url } from "../../usage";
 import { aliasToCmd } from "../../utils/utils";
 import { S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -34,7 +35,7 @@ export function registerCmdToken() {
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
             case 'list': {
-                const s = Object.keys(AIManager.usageMap).join('\n');
+                const s = Object.keys(UsageManager.usageMap).join('\n');
                 seal.replyToSender(ctx, msg, `有使用记录的模型:\n${s}`);
                 return ret;
             }
@@ -44,8 +45,8 @@ export function registerCmdToken() {
                     completion_tokens: 0
                 };
 
-                for (const model in AIManager.usageMap) {
-                    const modelUsage = AIManager.getModelUsage(model);
+                for (const model in UsageManager.usageMap) {
+                    const modelUsage = UsageManager.getModelUsage(model);
                     usage.prompt_tokens += modelUsage.prompt_tokens;
                     usage.completion_tokens += modelUsage.completion_tokens;
                 }
@@ -62,8 +63,8 @@ export function registerCmdToken() {
                 return ret;
             }
             case 'all': {
-                const s = Object.keys(AIManager.usageMap).map((model, index) => {
-                    const usage = AIManager.getModelUsage(model);
+                const s = Object.keys(UsageManager.usageMap).map((model, index) => {
+                    const usage = UsageManager.getModelUsage(model);
 
                     if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                         return `${index + 1}. ${model}: 没有使用记录`;
@@ -94,8 +95,8 @@ export function registerCmdToken() {
                 const currentYear = now.getFullYear();
                 const currentMonth = now.getMonth() + 1;
                 const currentYM = currentYear * 12 + currentMonth;
-                for (const model in AIManager.usageMap) {
-                    const modelUsage = AIManager.usageMap[model];
+                for (const model in UsageManager.usageMap) {
+                    const modelUsage = UsageManager.usageMap[model];
                     for (const key in modelUsage) {
                         const usage = modelUsage[key];
                         const [year, month, _] = key.split('-').map(v => parseInt(v));
@@ -161,8 +162,8 @@ export function registerCmdToken() {
                 const currentMonth = now.getMonth() + 1;
                 const currentDay = now.getDate();
                 const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
-                for (const model in AIManager.usageMap) {
-                    const modelUsage = AIManager.usageMap[model];
+                for (const model in UsageManager.usageMap) {
+                    const modelUsage = UsageManager.usageMap[model];
                     for (const key in modelUsage) {
                         const usage = modelUsage[key];
                         const [year, month, day] = key.split('-').map(v => parseInt(v));
@@ -214,20 +215,20 @@ export function registerCmdToken() {
             case 'clear': {
                 const val3 = cmdArgs.getArgN(3);
                 if (!val3) {
-                    AIManager.clearUsageMap();
+                    UsageManager.clearUsageMap();
                     seal.replyToSender(ctx, msg, '已清除token使用记录');
-                    AIManager.saveUsageMap();
+                    UsageManager.saveUsageMap();
                     return ret;
                 }
 
-                if (!AIManager.usageMap.hasOwnProperty(val3)) {
+                if (!UsageManager.usageMap.hasOwnProperty(val3)) {
                     seal.replyToSender(ctx, msg, '没有这个模型，请使用【.ai tk lst】查看所有模型');
                     return ret;
                 }
 
-                delete AIManager.usageMap[val3];
+                delete UsageManager.usageMap[val3];
                 seal.replyToSender(ctx, msg, `已清除 ${val3} 的token使用记录`);
-                AIManager.saveUsageMap();
+                UsageManager.saveUsageMap();
                 return ret;
             }
             case '':
@@ -244,7 +245,7 @@ export function registerCmdToken() {
                 return ret;
             }
             default: {
-                if (!AIManager.usageMap.hasOwnProperty(val2)) {
+                if (!UsageManager.usageMap.hasOwnProperty(val2)) {
                     seal.replyToSender(ctx, msg, '没有这个模型，请使用【.ai tk lst】查看所有模型');
                     return ret;
                 }
@@ -264,7 +265,7 @@ export function registerCmdToken() {
                         const currentYM = currentYear * 12 + currentMonth;
                         const model = val2;
 
-                        const modelUsage = AIManager.usageMap[model];
+                        const modelUsage = UsageManager.usageMap[model];
                         for (const key in modelUsage) {
                             const usage = modelUsage[key];
                             const [year, month, _] = key.split('-').map(v => parseInt(v));
@@ -331,7 +332,7 @@ export function registerCmdToken() {
                         const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
                         const model = val2;
 
-                        const modelUsage = AIManager.usageMap[model];
+                        const modelUsage = UsageManager.usageMap[model];
                         for (const key in modelUsage) {
                             const usage = modelUsage[key];
                             const [year, month, day] = key.split('-').map(v => parseInt(v));
@@ -380,7 +381,7 @@ export function registerCmdToken() {
                         return ret;
                     }
                     default: {
-                        const usage = AIManager.getModelUsage(val2);
+                        const usage = UsageManager.getModelUsage(val2);
 
                         if (usage.prompt_tokens === 0 && usage.completion_tokens === 0) {
                             seal.replyToSender(ctx, msg, `没有使用记录`);

@@ -1,3 +1,4 @@
+// 配置中心：按模块注册 seal 配置并缓存，动态挂载 Config.<模块> 访问器
 import Logger from "../logger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
 import BaseConfig from "./configs/base";
@@ -12,6 +13,7 @@ import ReplyConfig from "./configs/reply";
 import MessageConfig from "./configs/message";
 import PromptConfig from "./configs/prompt";
 import ResourceConfig from "./configs/resource";
+import SampleConfig from "./configs/sample";
 
 const configMap = {
     base: BaseConfig,
@@ -26,6 +28,7 @@ const configMap = {
     message: MessageConfig,
     prompt: PromptConfig,
     resource: ResourceConfig,
+    sample: SampleConfig,
 } as const;
 
 type ConfigMap = typeof configMap;
@@ -50,6 +53,8 @@ class _Config {
                 get: () => this.getCache(k, configMap[k].get)
             })
         }
+        // 预热模型配置，填充 Model 静态列表（Model.getChatModel 依赖）
+        ModelConfig.get();
     }
 
     static getCache(key: ConfigKey, getFunc: () => ConfigProp): ConfigProp {

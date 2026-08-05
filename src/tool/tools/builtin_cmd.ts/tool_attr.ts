@@ -1,6 +1,7 @@
-import { ConfigManager } from "../config/configManager";
-import { getCtxAndMsg } from "../utils/utils_seal";
-import { Tool, ToolManager } from "./tool";
+// 属性工具：coc 属性展示/获取/修改
+import Config from "../../../config/config";
+import { getCtxAndMsg } from "../../../utils/seal";
+import Tool from "../../tool";
 
 export function registerAttr() {
     const toolShow = new Tool({
@@ -13,7 +14,7 @@ export function registerAttr() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     }
                 },
                 required: ['name']
@@ -25,18 +26,18 @@ export function registerAttr() {
         cmd: 'st',
         staticArgs: ['show']
     }
-    toolShow.solve = async (ctx, msg, ai, args) => {
+    toolShow.solve = async (ctx, msg, session, args) => {
         const { name } = args;
 
-        const ui = await ai.context.findUserInfo(ctx, name);
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await session.context.findUser(ctx, name);
+        if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolShow.ExtCmdInfo, [], [], []);
-        if (!success) return { content: '展示失败', images: [] };
+        const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, toolShow.ExtCmdInfo, [], [], []);
+        if (!success) return '展示失败';
 
-        return { content: s, images: [] };
+        return s;
     }
 
     const toolGet = new Tool({
@@ -49,7 +50,7 @@ export function registerAttr() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     },
                     attr: {
                         type: 'string',
@@ -60,16 +61,16 @@ export function registerAttr() {
             }
         }
     });
-    toolGet.solve = async (ctx, _, ai, args) => {
+    toolGet.solve = async (ctx, _, session, args) => {
         const { name, attr } = args;
 
-        const ui = await ai.context.findUserInfo(ctx, name);
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await session.context.findUser(ctx, name);
+        if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
+        ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
 
         const value = seal.vars.intGet(ctx, attr)[0];
-        return { content: `${attr}: ${value}`, images: [] };
+        return `${attr}: ${value}`;
     }
 
     const toolSet = new Tool({
@@ -82,7 +83,7 @@ export function registerAttr() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: 'string',
@@ -93,16 +94,16 @@ export function registerAttr() {
             }
         }
     });
-    toolSet.solve = async (ctx, msg, ai, args) => {
+    toolSet.solve = async (ctx, msg, session, args) => {
         const { name, expression } = args;
 
-        const ui = await ai.context.findUserInfo(ctx, name);
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await session.context.findUser(ctx, name);
+        if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
 
         const [attr, expr] = expression.split('=');
-        if (expr === undefined) return { content: `修改失败，表达式 ${expression} 格式错误`, images: [] };
+        if (expr === undefined) return `修改失败，表达式 ${expression} 格式错误`;
 
         const value = seal.vars.intGet(ctx, attr)[0];
 
@@ -114,11 +115,11 @@ export function registerAttr() {
 
         const result = parseInt(seal.format(ctx, `{${s}}`));
 
-        if (isNaN(result)) return { content: `修改失败，表达式 ${expression} 格式化错误`, images: [] };
+        if (isNaN(result)) return `修改失败，表达式 ${expression} 格式化错误`;
 
         seal.vars.intSet(ctx, attr, result);
 
         seal.replyToSender(ctx, msg, `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`);
-        return { content: `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`, images: [] };
+        return `进行了 ${expression} 修改\n${attr}: ${value}=>${result}`;
     }
 }

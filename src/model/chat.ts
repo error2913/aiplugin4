@@ -1,6 +1,7 @@
+// 对话模型：callChat 构建请求并解析响应
 import Agent from "../agent/agent";
-import { UsageManager } from "../agent/usage";
-import { Config } from "../config/config";
+import { UsageManager } from "../usage";
+import Config from "../config/config";
 import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/types";
@@ -25,10 +26,10 @@ export default class ChatModel extends BaseModel {
         try {
             const body = this.buildBody({
                 ...DEFAULT_CHAT_MODEL_BODY,
-                messages: agent.sessionService.getSession(sessionId).getMessages(),
-                tools: agent.getRequestTools()
+                messages: await agent.sessionService.getSession(sessionId).getMessages(),
+                tools: agent.getRequestTools(agent.sessionService.getSession(sessionId))
             });
-            logger.logMessages(body)
+            logger.printRequestMessages(body.messages)
 
             const time = Date.now();
             const data = await withTimeout(() => fetchData(this.url, this.apiKey, body), TIMEOUT);

@@ -1,3 +1,4 @@
+// 回复配置：引用/最大字数/去空白/复读检测/过滤正则与模板
 import Handlebars from "handlebars";
 import Logger from "../../logger";
 import Config, { getRegexConfig } from "../config";

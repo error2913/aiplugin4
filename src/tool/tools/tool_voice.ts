@@ -1,7 +1,9 @@
-import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
-import { Tool } from "./tool";
-import { netExists, sendGroupAISound } from "../utils/utils_ob11";
+// 语音工具：本地语音/文字转语音（TTS）
+import { logger } from "../../logger";
+import Config from "../../config/config";
+import Tool from "../tool";
+import { resolveLocalPath } from "../../utils/utils";
+import { netExists, sendGroupAISound } from "../../utils/ob11";
 
 const characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
@@ -29,7 +31,7 @@ const characterMap = {
 };
 
 export function registerRecord() {
-    const { recordPathMap } = ConfigManager.tool;
+    const { RECORD_PATH_MAP: recordPathMap } = Config.tool;
 
     if (Object.keys(recordPathMap).length !== 0) {
         const toolRecord = new Tool({
@@ -53,11 +55,11 @@ export function registerRecord() {
             const { name } = args;
 
             if (recordPathMap.hasOwnProperty(name)) {
-                seal.replyToSender(ctx, msg, `[语音:${recordPathMap[name]}]`);
-                return { content: '发送成功', images: [] };
+                seal.replyToSender(ctx, msg, `[语音:${resolveLocalPath(recordPathMap[name])}]`);
+                return '发送成功';
             } else {
                 logger.error(`本地语音${name}不存在`);
-                return { content: `本地语音${name}不存在`, images: [] };
+                return `本地语音${name}不存在`;
             }
         }
     }
@@ -82,24 +84,24 @@ export function registerRecord() {
     toolTTS.solve = async (ctx, msg, _, args) => {
         const { text } = args;
 
-        const { character } = ConfigManager.tool;
+        const { TTS_CHARACTER: character } = Config.tool;
         if (character === '自定义') {
             const aittsExt = seal.ext.find('AITTS');
             if (!aittsExt) {
                 logger.error(`未找到AITTS依赖`);
-                return { content: `未找到AITTS依赖，请提示用户安装AITTS依赖`, images: [] };
+                return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
             }
             try {
                 await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
             } catch (e) {
                 logger.error(e);
-                return { content: `发送语音失败`, images: [] };
+                return `发送语音失败`;
             }
 
-            return { content: `发送语音成功`, images: [] };
+            return `发送语音成功`;
         }
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
@@ -107,6 +109,6 @@ export function registerRecord() {
         const characterId = characterMap[character];
         await sendGroupAISound(epId, characterId, gid.replace(/^.+:/, ''), text);
 
-        return { content: `发送语音成功`, images: [] };
+        return `发送语音成功`;
     }
 }

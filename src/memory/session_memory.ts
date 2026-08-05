@@ -1,3 +1,4 @@
+// 会话记忆：短期记忆总结（调用摘要智能体）与记忆 prompt 构建
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
@@ -5,7 +6,7 @@ import { Session } from "../session/session";
 import { TypeDescriptor } from "../utils/utils";
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
-import { MemorySource } from "./types";
+import { buildContent } from "../utils/message";
 
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
@@ -13,7 +14,10 @@ export default class SessionMemoryService extends MemoryService {
         agentName: 'string',
         sessionId: 'string',
         summaryStatus: 'boolean',
-        summaries: { array: 'string' }
+        summaries: { array: 'string' },
+        useShortMemory: 'boolean',
+        shortMemoryList: { array: 'string' },
+        persona: 'string'
     };
     agentName: string;
     sessionId: string;
@@ -31,138 +35,72 @@ export default class SessionMemoryService extends MemoryService {
     get agent(): Agent { return Agent.get(this.agentName); }
     get session(): Session { return this.agent.sessionService.getSession(this.sessionId); }
 
-    async buildMemoryPrompt(text: string): Promise<string> {
-        // 获取users、groups
-        const users = this.session.sessionType === 'group' ? this.session.context.users : [this.session.sessionId];
-        const groups = this.session.sessionType === 'group' ? [this.session.sessionId] : [];
-        const sources: MemorySource[] = [];
-        // bot记忆
-        sources.push({
-            source: '核心记忆',
-            memories: await this.agent.sessionService.memory.getTopScoreMemories(text, users, groups)
-        })
-        // 会话记忆
-        sources.push({
-            source: '会话记忆',
-            memories: await this.session.memory.getTopScoreMemories(text, users, groups)
-        })
-        // 群内用户的记忆
-        if (this.session.sessionType === 'group') {
-            for (const u of this.session.context.users) {
-                sources.push({
-                    source: `用户${u}记忆`,
-                    memories: await this.agent.sessionService.getSession(u).memory.getTopScoreMemories(text, users, groups)
-                })
-            }
-        }
-
-        return this.buildMemoriesPrompt(sources);
-    }
-
-    // wip 使用总结智能体
+    // 短期记忆总结（每轮对话后由 context.addAssistantMessage 触发）
     async summarize() {
         if (!this.summaryStatus) return;
 
-        const { url: chatUrl, apiKey: chatApiKey } = Config.request;
-        const { isPrefix, showNumber, showMsgId, showTime } = Config.message;
-        const { shortMemorySummaryRound, memoryUrl, memoryApiKey, memoryBodyTemplate, memoryPromptTemplate } = Config.memory;
-
-        const { roleSetting } = getRoleSetting(ctx);
-
-        const messages = ai.context.messages;
+        const { SUMMARY_SIZE } = Config.memory;
+        const messages = this.session.context.messages;
         let sumMessages = messages.slice();
         let round = 0;
         for (let i = 0; i < messages.length; i++) {
-            if (messages[i].role === 'user' && !messages[i].name.startsWith('_')) {
-                round++;
-            }
-            if (round > shortMemorySummaryRound) {
-                sumMessages = messages.slice(0, i); // 只保留最近的shortMemorySummaryRound轮对话
+            if (messages[i].role === 'user') round++;
+            if (round > SUMMARY_SIZE) {
+                sumMessages = messages.slice(0, i);
                 break;
             }
         }
-
-        if (sumMessages.length === 0) {
-            return;
-        }
-
-        let url = chatUrl;
-        let apiKey = chatApiKey;
-        if (memoryUrl.trim()) {
-            url = memoryUrl;
-            apiKey = memoryApiKey;
-        }
+        if (sumMessages.length === 0) return;
 
         try {
-            const prompt = memoryPromptTemplate({
+            const roleSetting = (Config.message.INSTRUCTIONS || [])[0] || '';
+            const prompt = Config.prompt.SUMMARY_PROMPT_TEMPLATE({
                 "角色设定": roleSetting,
-                "平台": ctx.endPoint.platform,
-                "私聊": ctx.isPrivate,
-                "展示号码": showNumber,
-                "用户名称": ctx.player.name,
-                "用户号码": ctx.player.userId.replace(/^.+:/, ''),
-                "群聊名称": ctx.group.groupName,
-                "群聊号码": ctx.group.groupId.replace(/^.+:/, ''),
-                "添加前缀": isPrefix,
-                "展示消息ID": showMsgId,
-                "展示时间": showTime,
-                "对话内容": isPrefix ? sumMessages.map(message => {
-                    if (message.role === 'assistant' && message?.tool_calls && message?.tool_calls.length > 0) {
-                        return `\n[function_call]: ${message.tool_calls.map((tool_call, index) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
+                "平台": '',
+                "私聊": this.session.sessionType !== 'group',
+                "展示号码": false,
+                "用户名称": '',
+                "用户号码": '',
+                "群聊名称": this.session.sessionType === 'group' ? this.session.sessionId : '',
+                "群聊号码": '',
+                "添加前缀": false,
+                "展示消息ID": false,
+                "展示时间": false,
+                "对话内容": sumMessages.map(message => {
+                    const toolCalls = (message as any).toolCalls || (message as any).tool_calls;
+                    if (message.role === 'assistant' && toolCalls && toolCalls.length > 0) {
+                        return `\n[function_call]: ${toolCalls.map((tool_call: any, index: number) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
                     }
+                    return `[${message.role}]: ${buildContent(message as any)}`;
+                }).join('\n')
+            });
 
-                    return `[${message.role}]: ${buildContent(message)}`;
-                }).join('\n') : JSON.stringify(sumMessages)
-            })
+            Logger.info('记忆总结prompt:\n', prompt);
 
-            Logger.info(`记忆总结prompt:\n`, prompt);
+            // 使用摘要智能体进行总结（按其 use 选择模型）
+            const reply = await Agent.get('summarize_agent').chat(prompt);
+            if (!reply) return;
 
-            const messages = [
-                {
-                    role: "system",
-                    content: prompt
-                }
-            ]
-            const bodyObject = parseBody(memoryBodyTemplate, messages, [], "none");
+            const memoryData = JSON.parse(reply) as {
+                content: string,
+                memories: {
+                    memory_type: 'private' | 'group',
+                    name: string,
+                    text: string,
+                    keywords?: string[],
+                    userList?: string[],
+                    groupList?: string[],
+                }[]
+            };
 
-            const time = Date.now();
-            const data = await fetchData(url, apiKey, bodyObject);
+            this.shortMemoryList.push(memoryData.content);
+            this.limitShortMemory();
 
-            if (data.choices && data.choices.length > 0) {
-                AIManager.updateUsage(data.model, data.usage);
-
-                const message = data.choices[0].message;
-                const finish_reason = data.choices[0].finish_reason;
-
-                if (message.hasOwnProperty('reasoning_content')) {
-                    Logger.info(`思维链内容:`, message.reasoning_content);
-                }
-
-                const reply = message.content || '';
-                Logger.info(`响应内容:`, reply, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
-
-                const memoryData = JSON.parse(reply) as {
-                    content: string,
-                    memories: {
-                        memory_type: 'private' | 'group',
-                        name: string,
-                        text: string,
-                        keywords?: string[],
-                        userList?: string[],
-                        groupList?: string[],
-                    }[]
-                };
-
-
-                this.shortMemoryList.push(memoryData.content);
-                this.limitShortMemory();
-
-                memoryData.memories.forEach(m => {
-                    Tool.toolMap["add_memory"].solve(ctx, msg, ai, m);
-                });
-            }
+            memoryData.memories.forEach(m => {
+                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text);
+            });
         } catch (e) {
-            Logger.error(`更新短期记忆失败: ${e.message}`);
+            Logger.error('更新短期记忆失败: ' + e.message);
         }
     }
 

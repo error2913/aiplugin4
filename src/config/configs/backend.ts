@@ -1,3 +1,4 @@
+// 后端服务配置：流式/图片转base64/搜索/用量图/渲染等 URL
 import Config from "../config";
 
 export default class BackendConfig {

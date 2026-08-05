@@ -1,3 +1,4 @@
+// 示例工具（未注册）
 import Tool from "../tool";
 
 const tool = new Tool({

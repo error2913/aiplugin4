@@ -1,6 +1,7 @@
-import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
-import { Tool } from "./tool";
+// 联网工具：搜索与网页阅读
+import { logger } from "../../logger";
+import Config from "../../config/config";
+import Tool from "../tool";
 
 export function registerWeb() {
     const toolSearch = new Tool({
@@ -36,7 +37,7 @@ export function registerWeb() {
     });
     toolSearch.solve = async (_, __, ___, args) => {
         const { q, page, categories, time_range = '' } = args;
-        const { webSearchUrl } = ConfigManager.backend;
+        const { WEB_SEARCH: webSearchUrl } = Config.backend;
 
         let part = 1;
         let pageno = '';
@@ -66,7 +67,7 @@ export function registerWeb() {
             const results_length = data.results.length;
             const results = part == 1 ? data.results.slice(0, Math.ceil(results_length / 2)) : data.results.slice(Math.ceil(results_length / 2));
             if (number_of_results == 0 || results.length == 0) {
-                return { content: `没有搜索到结果`, images: [] };
+                return `没有搜索到结果`;
             }
 
             const s = `搜索结果长度:${number_of_results}\n` + results.map((result: any, index: number) => {
@@ -76,10 +77,10 @@ export function registerWeb() {
 - 相关性:${result.score}`;
             }).join('\n');
 
-            return { content: s, images: [] };
+            return s;
         } catch (error) {
             logger.error("在web_search中请求出错：", error);
-            return { content: `使用搜索引擎搜索失败:${error}`, images: [] };
+            return `使用搜索引擎搜索失败:${error}`;
         }
     }
 
@@ -102,7 +103,7 @@ export function registerWeb() {
     });
     tool.solve = async (_, __, ___, args) => {
         const { url } = args;
-        const { webReadUrl } = ConfigManager.backend;
+        const { WEB_READ: webReadUrl } = Config.backend;
 
         try {
             logger.info(`读取网页内容: ${url}`);
@@ -124,7 +125,7 @@ export function registerWeb() {
             const { title, content, links } = data;
 
             if (!title && !content && (!links || links.length === 0)) {
-                return { content: `未能从网页中提取到有效内容`, images: [] };
+                return `未能从网页中提取到有效内容`;
             }
 
             const result = `标题: ${title || "无标题"}\n内容: ${content || "无内容"}\n网页包含链接:\n` +
@@ -132,10 +133,10 @@ export function registerWeb() {
                     ? links.map((link: string, index: number) => `${index + 1}. ${link}`).join('\n')
                     : "无链接");
 
-            return { content: result, images: [] };
+            return result;
         } catch (error) {
             logger.error("在web_read中请求出错：", error);
-            return { content: `读取网页内容失败: ${error}`, images: [] };
+            return `读取网页内容失败: ${error}`;
         }
     }
 }

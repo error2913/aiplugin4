@@ -1,20 +1,29 @@
+// 记忆服务：MemoryItem 存取/检索/权重/短期记忆（含旧格式迁移）
 import Config from "../config/config";
-import { generateId, TypeDescriptor } from "../utils/utils";
+import { generateId, revive, TypeDescriptor } from "../utils/utils";
 import Logger from "../logger";
 import Model from "../model/model";
 import { MemorySource, searchOptions } from "./types";
 import Agent from "../agent/agent";
 import { Session } from "../session/session";
 import MemoryItem from "./memory_item";
+import Image from "../resource/image";
+import { GroupInfo, SessionInfo, UserInfo } from "../session/types";
+import type { Context } from "../context/context";
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
-        memoryMap: { array: MemoryItem }
+        memoryMap: { array: MemoryItem },
+        persona: 'string',
+        useShortMemory: 'boolean',
+        shortMemoryList: { array: 'string' }
     };
     memoryMap: { [id: string]: MemoryItem };
+    persona: string;
 
     constructor() {
         this.memoryMap = {};
+        this.persona = '无';
     }
 
     get memoryIds() {
@@ -37,6 +46,160 @@ export default class MemoryService {
         const tags = new Set<string>();
         this.memories.forEach(m => m.tags.forEach(t => tags.add(t)));
         return Array.from(tags);
+    }
+    get keywords() {
+        return this.tags;
+    }
+
+    reviveMemoryMap() {
+        for (const id in this.memoryMap) {
+            const m = this.memoryMap[id];
+            if (!(m instanceof MemoryItem)) {
+                this.memoryMap[id] = revive(MemoryItem, m);
+            }
+        }
+    }
+
+
+    // ===== methods ported from legacy src/AI/memory.ts =====
+
+    useShortMemory: boolean;
+    shortMemoryList: string[];
+
+    async updateShortMemory(_ctx: seal.MsgContext, _msg: seal.Message, _ai: any) {
+        if (typeof (this as any).summarize === 'function') {
+            await (this as any).summarize();
+        }
+    }
+
+    limitShortMemory() {
+        const { SHORT_MEMORY_LIMIT } = Config.memory as any;
+        const limit = SHORT_MEMORY_LIMIT > 0 ? SHORT_MEMORY_LIMIT : 10;
+        if (this.shortMemoryList.length > limit) {
+            this.shortMemoryList.splice(0, this.shortMemoryList.length - limit);
+        }
+    }
+
+    clearShortMemory() {
+        this.shortMemoryList = [];
+    }
+
+    clearMemory() {
+        this.memoryMap = {};
+    }
+
+    deleteMemory(ids: string[] = [], kws: string[] = []) {
+        if (ids.length === 0 && kws.length === 0) return;
+        ids.forEach(id => delete this.memoryMap?.[id]);
+        if (kws.length > 0) {
+            for (const id in this.memoryMap) {
+                if (kws.some(kw => this.memoryMap[id].tags.includes(kw))) {
+                    delete this.memoryMap[id];
+                }
+            }
+        }
+    }
+
+    async addMemory(_ctx: seal.MsgContext, session: Session, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string) {
+        const id = this.generateMemoryId();
+        const now = Math.floor(Date.now() / 1000);
+        const m = new MemoryItem();
+        m.id = id;
+        m.sessionId = session.sessionId;
+        m.content = text;
+        m.createAt = now;
+        m.lastAccessedAt = now;
+        m.tags = kws;
+        m.users = ul.map(u => u.id);
+        m.groups = gl.map(g => g.id);
+        m.importance = 0.5;
+        images.forEach(img => {
+            if (!img.imageId) img.imageId = generateId();
+            Image.save(img);
+        });
+        await m.updateVector();
+        this.limitMemory();
+        this.memoryMap[id] = m;
+    }
+
+    limitMemory() {
+        const { MEMORY_LIMIT } = Config.memory;
+        const limit = MEMORY_LIMIT > 0 ? MEMORY_LIMIT - 1 : 0;
+        if (this.memories.length <= limit) return;
+        this.memories
+            .map(m => ({ id: m.id, score: m.decay * m.importance }))
+            .sort((a, b) => b.score - a.score)
+            .slice(limit)
+            .forEach(item => delete this.memoryMap?.[item.id]);
+    }
+
+    buildMemory(si: SessionInfo, ml: MemoryItem[]): string {
+        if (ml.length === 0) return '';
+        const listText = ml.map((m, i) =>
+            (i + 1) + '. [' + m.id + '] ' + m.content
+        ).join('\n');
+        return '私聊:' + si.isPrivate + '\n群聊名称:' + si.name + '\n记忆列表:\n' + listText;
+    }
+
+    getLatestMemoryListText(si: SessionInfo, p: number = 1): string {
+        if (this.memories.length === 0) return '';
+        if (p > Math.ceil(this.memories.length / 5)) p = Math.ceil(this.memories.length / 5);
+        const latest = this.memories
+            .sort((a, b) => b.createAt - a.createAt)
+            .slice((p - 1) * 5, p * 5);
+        return this.buildMemory(si, latest) + '\n当前页码: ' + p + '/' + Math.ceil(this.memories.length / 5);
+    }
+
+    async getTopScoreMemoryList(text: string = '', users: string[] = [], groups: string[] = []) {
+        const { MEMORY_SHOW_NUMBER } = Config.memory;
+        return await this.search(text, {
+            topK: MEMORY_SHOW_NUMBER,
+            tags: [],
+            relatedMemories: [],
+            users,
+            groups,
+            method: 'score'
+        });
+    }
+
+    findMemoryAndImageByImageIdPrefix(id: string): { memory: MemoryItem, image: Image } | null {
+        for (const m of this.memories) {
+            const match = m.content.match(/<\|img:([^|]+)\|>/);
+            if (match && match[1].replace(/_\d+$/, '') === id) {
+                const img = Image.get(match[1]);
+                if (img) return { memory: m, image: img };
+            }
+        }
+        return null;
+    }
+
+    findImage(id: string): Image | null {
+        for (const m of this.memories) {
+            if (m.content.includes('<|img:' + id + '|')) {
+                return Image.get(id);
+            }
+        }
+        return null;
+    }
+
+    async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
+        let s = '';
+        const users = ui ? [ui.id] : [];
+        const groups = gi ? [gi.id] : [];
+        s += this.buildMemory({
+            isPrivate: true,
+            id: ctx.endPoint.userId,
+            name: seal.formatTmpl(ctx, '核心:骰子名字')
+        }, await this.getTopScoreMemoryList(text, users, groups));
+
+        if (!ctx.isPrivate) {
+            s += this.buildMemory({
+                isPrivate: false,
+                id: ctx.group.groupId,
+                name: ctx.group.groupName
+            }, await this.getTopScoreMemoryList(text, users, groups));
+        }
+        return s;
     }
 
     generateMemoryId(): string {
@@ -202,7 +365,7 @@ export default class MemoryService {
         const agent = Agent.get(session.agentName);
         const task: Promise<void>[] = [];
         // bot记忆权重更新
-        task.push(agent.sessionService.memory.accessMemory(s));
+        task.push(agent.sessionService.memory.accessMemories(s));
         // 知识库记忆权重更新
         task.push(agent.sessionService.knowledge.accessMemories(s));
         // 会话自身记忆权重更新
@@ -268,3 +431,54 @@ export default class MemoryService {
 // 可以通过维护一组索引来优化搜索性能。
 // 好麻烦，不想弄
 // 目前数量级应该没什么优化的需求
+
+/**
+ * 兼容旧存储格式（src/AI/memory.ts 中的 MemoryManager）的过渡类。
+ * 负责把历史 AI_* 存档里的旧 Memory 字段迁移成新 MemoryItem，
+ * 迁移完成后可删除。
+ */
+export class MemoryManager extends MemoryService {
+    static validKeysMap: { [key in keyof MemoryManager]?: TypeDescriptor<MemoryManager[key]> } = {
+        memoryMap: { array: MemoryItem },
+        persona: 'string',
+        useShortMemory: 'boolean',
+        shortMemoryList: { array: 'string' }
+    }
+    persona: string;
+    useShortMemory: boolean;
+    shortMemoryList: string[];
+
+    constructor() {
+        super();
+        this.persona = '无';
+        this.useShortMemory = false;
+        this.shortMemoryList = [];
+    }
+
+    reviveMemoryMap() {
+        for (const id in this.memoryMap) {
+            const m = this.memoryMap[id] as any;
+            if (!m || (!m.content && !m.text)) {
+                delete this.memoryMap[id];
+                continue;
+            }
+            const item = revive(MemoryItem, {
+                id: m.id || id,
+                sessionId: m.sessionId || (m.sessionInfo && m.sessionInfo.id) || '',
+                type: m.type || 'text',
+                visibility: m.visibility || 'public',
+                createAt: m.createAt || m.createTime || 0,
+                lastAccessedAt: m.lastAccessedAt || m.lastMentionTime || 0,
+                accessCount: m.accessCount || 0,
+                importance: m.importance != null ? m.importance : (m.weight || 0) / 10,
+                content: m.content || m.text || '',
+                vector: m.vector || [],
+                tags: m.tags || m.keywords || [],
+                relatedMemories: m.relatedMemories || [],
+                users: m.users || (m.userList || []).map((u: any) => u.id),
+                groups: m.groups || (m.groupList || []).map((g: any) => g.id)
+            });
+            this.memoryMap[id] = item;
+        }
+    }
+}

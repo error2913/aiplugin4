@@ -1,4 +1,4 @@
-import { AIManager } from "../../AI/AI";
+// .ai forget：遗忘（清除）上下文
 import { aliasToCmd } from "../../utils/utils";
 import { I, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -14,28 +14,28 @@ export function registerCmdForget() {
         }
     };
     cmd.solve = (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, sid, ai, ret } = scc;
+        const { ctx, msg, cmdArgs, session, ret  } = scc;
 
-        ai.resetState();
+        session.resetState();
 
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
             case 'assistant': {
-                ai.context.clearMessages('assistant', 'tool');
+                session.context.clearMessages('assistant', 'tool');
                 seal.replyToSender(ctx, msg, 'ai上下文已清除');
-                AIManager.saveAI(sid);
+                session.save();
                 return ret;
             }
             case 'user': {
-                ai.context.clearMessages('user');
+                session.context.clearMessages('user');
                 seal.replyToSender(ctx, msg, '用户上下文已清除');
-                AIManager.saveAI(sid);
+                session.save();
                 return ret;
             }
             default: {
-                ai.context.clearMessages();
+                session.context.clearMessages();
                 seal.replyToSender(ctx, msg, '上下文已清除');
-                AIManager.saveAI(sid);
+                session.save();
                 return ret;
             }
         }

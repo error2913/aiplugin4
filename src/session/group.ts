@@ -1,3 +1,4 @@
+// 群档案：存储与读取
 import Config from "../config/config";
 import Logger from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
@@ -28,7 +29,7 @@ export default class Group {
         this.ignoredUserIdList = [];
     }
 
-    static groupMap: { [key: string]: Group };
+    static groupMap: { [key: string]: Group } = {};
 
     static get(groupId: string): Group {
         if (!this.groupMap.hasOwnProperty(groupId)) {

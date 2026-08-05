@@ -1,3 +1,4 @@
+// .ai ctxn：上下文内名字自动修改相关
 import { aliasToCmd } from "../../utils/utils";
 import { I, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -20,12 +21,12 @@ export function registerCmdCtxn() {
         }
     };
     cmd.solve = (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, epId, gid, ai, ret } = scc;
+        const { ctx, msg, cmdArgs, epId, gid, session, ret  } = scc;
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
             case 'status': {
-                seal.replyToSender(ctx, msg, `自动修改上下文里的名字状态：${ai.context.autoNameMod}
-上下文里的名字有：\n${ai.context.userInfoList.map(ui => `${ui.name}(${ui.id})`).join('\n')}`);
+                seal.replyToSender(ctx, msg, `自动修改上下文里的名字状态：${session.context.autoNameMod}
+上下文里的名字有：\n${session.context.userInfoList.map(ui => `${ui.name}(${ui.id})`).join('\n')}`);
                 return ret;
             }
             case 'set': {
@@ -36,9 +37,9 @@ export function registerCmdCtxn() {
 【.ai ctxn set [nick/card]】设置上下文里的名字为昵称/群名片`);
                     return ret;
                 }
-                const promises = ai.context.userInfoList.map(ui => ai.context.setName(epId, gid, ui.id, mod));
+                const promises = session.context.userInfoList.map(ui => session.context.setName(epId, gid, ui.id, mod));
                 Promise.all(promises).then(() => {
-                    seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${ai.context.userInfoList.map(uni => `${uni.name}(${uni.id})`).join('\n')}`);
+                    seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${session.context.userInfoList.map(uni => `${uni.name}(${uni.id})`).join('\n')}`);
                 });
                 return ret;
             }
@@ -53,7 +54,8 @@ export function registerCmdCtxn() {
 2: 自动修改为群名片`);
                     return ret;
                 }
-                ai.context.autoNameMod = mod;
+                session.context.autoNameMod = mod;
+                session.save();
                 seal.replyToSender(ctx, msg, `设置成功，将自动修改上下文里的名字为${mod === 1 ? '昵称' : '群名片'}`);
                 return ret;
             }

@@ -1,3 +1,4 @@
+// 消息结构工具：消息类型判断等静态方法
 import Logger from "../logger";
 import User from "../session/user";
 import { fmtDate } from "../utils/string";

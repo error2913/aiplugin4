@@ -1,4 +1,5 @@
-import { Tool, ToolManager } from "./tool";
+// 模组工具：COC 模组抽取/搜索
+import Tool from "../../tool";
 
 export function registerModu() {
     const toolRoll = new Tool({
@@ -18,13 +19,13 @@ export function registerModu() {
         cmd: 'modu',
         staticArgs: ['roll']
     }
-    toolRoll.solve = async (ctx, msg, ai, _) => {
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.ExtCmdInfo, [], [], []);
+    toolRoll.solve = async (ctx, msg, session, _) => {
+        const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, toolRoll.ExtCmdInfo, [], [], []);
         if (!success) {
-            return { content: '今日人品查询失败', images: [] };
+            return '今日人品查询失败';
         }
 
-        return { content: s, images: [] };
+        return s;
     }
 
     const toolSearch = new Tool({
@@ -49,14 +50,14 @@ export function registerModu() {
         cmd: 'modu',
         staticArgs: ['search']
     }
-    toolSearch.solve = async (ctx, msg, ai, args) => {
+    toolSearch.solve = async (ctx, msg, session, args) => {
         const { name } = args;
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolSearch.ExtCmdInfo, [name], [], []);
+        const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, toolSearch.ExtCmdInfo, [name], [], []);
         if (!success) {
-            return { content: '今日人品查询失败', images: [] };
+            return '今日人品查询失败';
         }
 
-        return { content: s, images: [] };
+        return s;
     }
 }

@@ -1,3 +1,4 @@
+// 压缩智能体：用于压缩过长的用户消息（use=compression）
 import Agent from "../agent";
 
 const compressAgent = Agent.get("compress_agent");

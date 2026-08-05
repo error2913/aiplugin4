@@ -1,9 +1,9 @@
+// 字符串工具：消息段转换/回复拆分过滤/复读检测等
 import { Context } from "../context/context";
-import { Image } from "../image";
+import Image from "../resource/image";
 import { logger } from "../logger";
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { transformMsgId, transformMsgIdBack } from "./utils";
-import { AI } from "../AI/AI";
 import { getCtxAndMsg } from "./seal";
 import { FACE_MAP } from "../config/static_config";
 
@@ -173,8 +173,7 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
     return text;
 }
 
-export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, messageArray: MessageSegment[]): Promise<{ content: string, images: Image[] }> {
-    const { showNumber, showMsgId } = Config.message;
+export async function transformArrayToContent(ctx: seal.MsgContext, messageArray: MessageSegment[]): Promise<{ content: string, images: Image[] }> {
     let content = '';
     const images: Image[] = [];
     for (const seg of messageArray) {
@@ -189,7 +188,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
                 const uid = `QQ:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player.name || '未知用户';
-                content += `<|at:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
+                content += `<|at:${name}|>`;
                 break;
             }
             case 'poke': {
@@ -198,15 +197,15 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
                 const uid = `QQ:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player.name || '未知用户';
-                content += `<|poke:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>`;
+                content += `<|poke:${name}|>`;
                 break;
             }
             case 'reply': {
-                content += showMsgId ? `<|quote:${transformMsgId(seg.data.id || '')}|>` : ``;
+                content += `<|quote:${transformMsgId(seg.data.id || '')}|>`;
                 break;
             }
             case 'image': {
-                const result = await ai.imageManager.handleImageMessageSegment(ctx, seg);
+                const result = await Image.handleImageMessageSegment(ctx, seg);
                 content += result.content;
                 images.push(...result.images);
                 break;
@@ -228,7 +227,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, ai: AI, mess
  * @param content 文本内容
  * @returns 包含处理后的结果和图片列表的对象
  */
-async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: string): Promise<{ text: string, images: Image[] }> {
+async function transformContentToText(ctx: seal.MsgContext, session: { context: Context }, content: string): Promise<{ text: string, images: Image[] }> {
     const segs = parseSpecialTokens(content);
     let text = '';
     const images: Image[] = [];
@@ -240,9 +239,9 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'at': {
                 const name = seg.content;
-                const ui = await ai.context.findUserInfo(ctx, name);
+                const ui = await session.context.findUser(ctx, name);
                 if (ui !== null) {
-                    text += `[CQ:at,qq=${ui.id.replace(/^.+:/, "")}]`;
+                    text += `[CQ:at,qq=${ui.userId.replace(/^.+:/, "")}]`;
                 } else {
                     logger.warning(`无法找到用户：${name}`);
                     text += ` @${name} `;
@@ -251,9 +250,9 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'poke': {
                 const name = seg.content;
-                const ui = await ai.context.findUserInfo(ctx, name);
+                const ui = await session.context.findUser(ctx, name);
                 if (ui !== null) {
-                    text += `[CQ:poke,qq=${ui.id.replace(/^.+:/, "")}]`;
+                    text += `[CQ:poke,qq=${ui.userId.replace(/^.+:/, "")}]`;
                 } else {
                     logger.warning(`无法找到用户：${name}`);
                 }
@@ -266,7 +265,7 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
             }
             case 'img': {
                 const id = seg.content;
-                const image = await ai.context.findImage(ctx, id);
+                const image = await session.context.findImage(ctx, id);
 
                 if (image) {
                     images.push(image);
@@ -286,8 +285,8 @@ async function transformContentToText(ctx: seal.MsgContext, ai: AI, content: str
     return { text, images };
 }
 
-export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
-    const { replymsg, isTrim } = Config.reply;
+export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, session: { context: Context }, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
+    const { QUOTE_REPLY: replymsg, TRIM: isTrim } = Config.reply;
 
     // 分离AI臆想出来的多轮对话
     const segments = s
@@ -303,8 +302,8 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
         const match = segment.match(/[<＜][\|│｜]from[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
         if (match) {
             // 如果臆想对象是自己，那么将下一条消息添加到s中
-            const ui = await ai.context.findUserInfo(ctx, match[1]);
-            if (ui.id === ctx.endPoint.userId && i < segments.length - 1) s += segments[i + 1];
+            const ui = await session.context.findUser(ctx, match[1]);
+            if (ui && ui.userId === ctx.endPoint.userId && i < segments.length - 1) s += segments[i + 1];
         } else if (i === 0) {
             s = segment;
         }
@@ -325,7 +324,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
 
     // 处理回复消息
     for (let i = 0; i < replyArray.length; i++) {
-        const result = await transformContentToText(ctx, ai, replyArray[i]);
+        const result = await transformContentToText(ctx, session, replyArray[i]);
         const reply = isTrim ? result.text.trim() : result.text;
 
         const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
@@ -337,7 +336,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, ai: A
 }
 
 export function checkRepeat(context: Context, s: string) {
-    const { stopRepeat, similarityLimit } = Config.reply;
+    const { STOP_REPEAT: stopRepeat, REPEAT_SIMILARITY: similarityLimit } = Config.reply;
 
     if (!stopRepeat) {
         return false;
@@ -347,8 +346,10 @@ export function checkRepeat(context: Context, s: string) {
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
         // 寻找最后一条文本消息
-        if (message.role === 'assistant' && !message?.tool_calls) {
-            const content = message.msgArray[message.msgArray.length - 1].text || '';
+        if (message.role === 'assistant' && !((message as any).toolCalls || (message as any).tool_calls)) {
+            const items = ((message as any).contentItems || (message as any).msgArray) || [];
+            const last = items[items.length - 1];
+            const content = last ? (last.text || '') : '';
             const similarity = calculateSimilarity(content.trim(), s.trim());
             logger.info(`复读相似度：${similarity}`);
 
@@ -358,7 +359,7 @@ export function checkRepeat(context: Context, s: string) {
                 let count = 1;
                 for (let j = i - 1; j >= 0; j--) {
                     const message = messages[j];
-                    if (message.role === 'tool' || (message.role === 'assistant' && message?.tool_calls)) {
+                    if (message.role === 'tool' || (message.role === 'assistant' && ((message as any).toolCalls || (message as any).tool_calls))) {
                         start = j;
                         count++;
                     } else {
@@ -378,7 +379,7 @@ export function checkRepeat(context: Context, s: string) {
 }
 
 function filterString(s: string): { contextArray: string[], replyArray: string[] } {
-    const { maxChar, filterRegex, filterRegexes, contextTemplates, replyTemplates } = Config.reply;
+    const { MAX_CHARS: maxChar, FILTER_REGEX: filterRegex, FILTER_REGEXES: filterRegexes, CONTEXT_TEMPLATES: contextTemplates, REPLY_TEMPLATES: replyTemplates } = Config.reply;
 
     const contextArray: string[] = [];
     const replyArray: string[] = [];

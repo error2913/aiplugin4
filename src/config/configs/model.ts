@@ -1,3 +1,4 @@
+// 模型配置：对话/图片/嵌入模型 TOML 解析，并同步 Model 静态列表
 import { ModelBody, ModelUse } from "../../model/types";
 import Logger from "../../logger";
 import Config from "../config";
@@ -5,6 +6,7 @@ import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, IMAGE_MODEL_TO_PRO
 import ChatModel from "../../model/chat";
 import ImageModel from "../../model/image";
 import EmbeddingModel from "../../model/embedding";
+import Model from "../../model/model";
 import { revive, TypeDescriptor } from "../../utils/utils";
 import { load } from 'js-toml'
 
@@ -39,11 +41,16 @@ use = ["text-embedding"]`
     }
 
     static get() {
-        return {
+        const config = {
             CHAT_MODELS: getModelsConfig("对话模型", CHAT_MODEL_TO_PROVIDER, ChatModel),
             IMAGE_MODELS: getModelsConfig("图片模型", IMAGE_MODEL_TO_PROVIDER, ImageModel),
             EMBEDDING_MODELS: getModelsConfig("嵌入模型", EMBEDDING_MODEL_TO_PROVIDER, EmbeddingModel),
-        }
+        };
+        // 同步到 Model 静态列表，供 Model.getChatModel 等使用
+        Model.chatModels = config.CHAT_MODELS;
+        Model.imageModels = config.IMAGE_MODELS;
+        Model.embeddingModels = config.EMBEDDING_MODELS;
+        return config;
     }
 }
 

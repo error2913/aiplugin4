@@ -1,3 +1,4 @@
+// 模型类型定义
 export type ChatModelUse = 'chat' | 'compression' | 'summarization';
 export type ImageModelUse = 'image-understanding' | ChatModelUse;
 export type EmbeddingModelUse = 'text-embedding';

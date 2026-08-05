@@ -1,16 +1,62 @@
+// 会话：聊天编排（chat/chatStream/回复/接收）、设定、工具状态与活跃时间
+import { TimerManager } from "../timer";
 import Agent from "../agent/agent";
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { logger } from "../logger";
-import { toolMap, ToolName, ToolState } from "../tool/tool";
+import { ToolState } from "../tool/tool";
 import { ToolListen } from "../tool/types";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { TypeDescriptor } from "../utils/utils";
 import { Context } from "../context/context";
-import { MemoryService } from "../memory/memory";
-import { RequestMessage, SessionType, State } from "./types";
-import KnowledgeService from "../memory/knowledge";
+import { SessionType, State } from "./types";
+import { RequestMessage } from "../utils/message";
 import SessionMemoryService from "../memory/session_memory";
 import Group from "./group";
 import User from "./user";
+import Model from "../model/model";
+import Tool from "../tool/tool";
+import { streamService } from "../agent/stream";
+import { handleMessages } from "../utils/message";
+import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
+import { replyToSender, transformMsgId } from "../utils/utils";
+import Image, { ImageManager } from "../resource/image";
+
+export class Setting {
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName'];
+    static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
+        priv: 'number',
+        standby: 'boolean',
+        counter: 'number',
+        timer: 'number',
+        prob: 'number',
+        modelName: 'string',
+        activeTimeInfo: { objectValue: 'any' }
+    }
+    priv: number;
+    standby: boolean;
+    counter: number;
+    timer: number;
+    prob: number;
+    modelName: string;
+    activeTimeInfo: {
+        start: number;
+        end: number;
+        segs: number;
+    }
+
+    constructor() {
+        this.priv = 0;
+        this.standby = false;
+        this.counter = -1;
+        this.timer = -1;
+        this.prob = -1;
+        this.modelName = '';
+        this.activeTimeInfo = {
+            start: 0,
+            end: 0,
+            segs: 0
+        }
+    }
+}
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
@@ -26,6 +72,23 @@ export class Session {
         },
         context: Context,
         memory: SessionMemoryService,
+        setting: Setting,
+        imageManager: ImageManager,
+        stream: {
+            object: {
+                id: 'string',
+                reply: 'string',
+                toolCallStatus: 'boolean'
+            },
+            objectValue: 'any'
+        },
+        bucket: {
+            object: {
+                count: 'number',
+                lastTime: 'number'
+            },
+            objectValue: 'any'
+        },
         tool: {
             object: {
                 state: { objectValue: 'boolean' }
@@ -39,6 +102,18 @@ export class Session {
     state: State;
     context: Context;
     memory: SessionMemoryService;
+    setting: Setting;
+    imageManager: ImageManager;
+    stream: {
+        id: string,
+        reply: string,
+        toolCallStatus: boolean
+    }
+    bucket: {
+        count: number,
+        lastTime: number
+    }
+    lastCtx: seal.MsgContext;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -54,12 +129,20 @@ export class Session {
             impression: '',
         };
         this.context = new Context();
+        this.setting = new Setting();
+        this.imageManager = new ImageManager();
+        this.stream = {
+            id: '',
+            reply: '',
+            toolCallStatus: false
+        }
+        this.bucket = {
+            count: 0,
+            lastTime: 0
+        }
         this.memory = new SessionMemoryService();
         this.tool = {
-            state: Object.keys(toolMap).reduce((acc, key) => {
-                acc[key as ToolName] = false;
-                return acc;
-            }, {} as ToolState),
+            state: {} as ToolState,
             callCount: 0,
             listen: {
                 timeoutId: null,
@@ -87,26 +170,313 @@ export class Session {
     get toolState(): ToolState {
         const { BLOCKED, DEFAULT_CLOSED } = Config.tool;
         const tools = Agent.get(this.agentName).tools;
-        const state: ToolState = {};
+        const state = this.tool.state;
         tools.forEach(tool => {
             if (BLOCKED.includes(tool)) return;
-            if (!this.state.hasOwnProperty(tool)) this.state[tool] = !DEFAULT_CLOSED.includes(tool);
-            state[tool] = this.state[tool];
+            if (!state.hasOwnProperty(tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
         })
-        return this.tool.state;
+        return state;
     }
 
-    // wip
-    getMessages(): RequestMessage[] {
-        return [];
+    async getMessages(): Promise<RequestMessage[]> {
+        if (this.lastCtx) {
+            return await handleMessages(this.lastCtx, this);
+        }
+        return (this.context.messages as any[]).map(m => ({
+            role: m.role,
+            content: Array.isArray(m.contentItems) ? m.contentItems.map((i: any) => i.text || '').join('\f') : (m.text || '')
+        }));
     }
 
-    // wip
-    getImageMessages(): RequestMessage[] {
-        return [];
+    async getImageMessages(): Promise<RequestMessage[]> {
+        return this.getMessages();
     }
 
     checkIgnoredUserId(userId: string): boolean {
         return this.sessionType === 'group' && Group.get(this.sessionId).ignoredUserIdList.includes(userId);
+    }
+
+    get id(): string {
+        return this.sessionId;
+    }
+
+    resetState() {
+        clearTimeout(this.context.timer);
+        this.context.timer = null;
+        this.context.counter = 0;
+        this.bucket.count--;
+        this.tool.callCount = 0;
+    }
+
+    save() {
+        Config.ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => key === 'lastCtx' ? undefined : value));
+    }
+
+    get curActiveTimeSegIndex(): number {
+        const now = new Date();
+        const cur = now.getHours() * 60 + now.getMinutes();
+        const { start, end, segs } = this.setting.activeTimeInfo;
+        const endReal = end >= start ? end : end + 24 * 60;
+        const curReal = cur >= start ? cur : cur + 24 * 60;
+
+        if (curReal >= endReal) return -1;
+
+        const segLen = (endReal - start) / segs;
+        const index = Math.floor((curReal - start) / segLen);
+        return Math.min(index, segs - 1);
+    }
+
+    getNextTimePoint(curSegIndex: number): number {
+        const { start, end, segs } = this.setting.activeTimeInfo;
+
+        if (start === 0 && end === 0) return -1;
+
+        const endReal = end >= start ? end : end + 24 * 60;
+        const segLen = (endReal - start) / segs;
+        const nextSegIndex = (curSegIndex + 1) % segs;
+        const todayMin = Math.floor(start + nextSegIndex * segLen + Math.random() * segLen) % (24 * 60);
+
+        const nextTime = new Date();
+        nextTime.setHours(Math.floor(todayMin / 60), todayMin % 60, Math.floor(Math.random() * 60), 0);
+
+        if (nextTime.getTime() <= Date.now()) {
+            nextTime.setDate(nextTime.getDate() + 1);
+        }
+
+        return Math.floor(nextTime.getTime() / 1000);
+    }
+
+    checkActiveTimer(ctx: seal.MsgContext) {
+        const { segs, start, end } = this.setting.activeTimeInfo;
+        if (segs !== 0 && (start !== 0 || end !== 0)) {
+            const timers = TimerManager.getTimers(this.sessionId, '', ['activeTime']);
+            if (timers.length === 0) {
+                const curSegIndex = this.curActiveTimeSegIndex;
+                const nextTimePoint = this.getNextTimePoint(curSegIndex);
+                if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
+                else logger.error('active time timer add failed');
+            }
+        }
+    }
+
+    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
+        this.lastCtx = ctx;
+        const { content } = await transformArrayToContent(ctx, messageArray);
+        await this.context.addUserMessage(content, ctx.player.userId, transformMsgId(msg.rawId));
+    }
+
+    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[]) {
+        for (let i = 0; i < contextArray.length; i++) {
+            const content = contextArray[i];
+            const reply = replyArray[i];
+            const msgId = await replyToSender(ctx, msg, this, reply);
+            await this.context.addAssistantMessage(content, msgId);
+        }
+
+        const { P } = Config.image;
+        if (P > 0 && Math.random() * 100 <= P) {
+            const img = await this.imageManager.drawImage();
+            if (img) seal.replyToSender(ctx, msg, img.CQCode);
+        }
+    }
+
+    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string): Promise<void> {
+        this.lastCtx = ctx;
+        logger.info('trigger reply:', reason || 'unknown');
+
+        if (reason !== '函数回调触发') {
+            const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
+            if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
+                const fillCount = (Date.now() - this.bucket.lastTime) / (FILL_INTERVAL * 1000);
+                this.bucket.count = Math.min(this.bucket.count + fillCount, BUCKET_LIMIT);
+                this.bucket.lastTime = Date.now();
+            }
+            if (this.bucket.count <= 0) {
+                logger.warning('bucket empty, skip reply');
+                return;
+            }
+        }
+
+        const { BLOCKED } = Config.tool;
+        BLOCKED.forEach(key => {
+            if (this.tool.state.hasOwnProperty(key)) this.tool.state[key] = false;
+        });
+
+        this.resetState();
+
+        const model = Model.getChatModel('chat', this.setting.modelName);
+        if (model && (model.body as any).stream === true) {
+            await this.chatStream(ctx, msg);
+            this.save();
+            return;
+        }
+
+        const { STATUS, PROMPT_ENGINEERING } = Config.tool;
+        const toolInfos = Tool.getToolsInfo(this);
+
+        let result = { contextArray: [], replyArray: [], images: [] };
+        const MaxRetry = 3;
+        for (let retry = 1; retry <= MaxRetry; retry++) {
+            const messages = await handleMessages(ctx, this);
+            const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos, tool_choice || 'auto', this.setting.modelName);
+            result = await handleReply(ctx, msg, this, raw_reply);
+
+            if (STATUS) {
+                if (PROMPT_ENGINEERING) {
+                    const match = raw_reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                    if (match) {
+                        logger.info('prompt tool call triggered');
+                        const { contextArray, replyArray, images } = result;
+                        await this.reply(ctx, msg, contextArray, replyArray, images);
+                        await this.context.addAssistantMessage(match[0], '');
+                        try {
+                            const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, this, match[1]);
+                            callResults.forEach(r => this.context.addToolCallbackMessage(r.content, r.tool_call_id));
+                            await this.chat(ctx, msg, '函数回调触发');
+                        } catch (e) {
+                            logger.error('handlePromptToolCalls error:', e.message);
+                        }
+                        return;
+                    }
+                } else {
+                    if (tool_calls.length > 0) {
+                        logger.info('tool call triggered');
+                        const { contextArray, replyArray, images } = result;
+                        await this.reply(ctx, msg, contextArray, replyArray, images);
+                        this.context.addToolCallsMessage(tool_calls);
+                        try {
+                            const { result: callResults } = await Tool.handleToolCalls(ctx, msg, this, tool_calls);
+                            callResults.forEach(r => this.context.addToolCallbackMessage(r.content, r.tool_call_id));
+                            await this.chat(ctx, msg, '函数回调触发');
+                        } catch (e) {
+                            logger.error('handleToolCalls error:', e.message);
+                        }
+                        return;
+                    }
+                }
+            }
+
+            if (checkRepeat(this.context, result.contextArray.join('')) && result.replyArray.join('').trim()) {
+                if (retry >= MaxRetry) {
+                    logger.warning('repeat detected, clear assistant/tool messages');
+                    this.context.clearMessages('assistant', 'tool');
+                    break;
+                }
+                logger.warning(`repeat detected, retry [${retry}/3]`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+            break;
+        }
+
+        const { contextArray, replyArray, images } = result;
+        await this.reply(ctx, msg, contextArray, replyArray, images);
+        this.save();
+    }
+
+    async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        this.lastCtx = ctx;
+        const { STATUS, PROMPT_ENGINEERING } = Config.tool;
+
+        await this.stopCurrentChatStream();
+
+        const messages = await handleMessages(ctx, this);
+        const id = await streamService.startStream(messages, this.setting.modelName);
+        if (!id) return;
+
+        this.stream.id = id;
+        let status = 'processing';
+        let after = 0;
+        let interval = 1000;
+
+        while (status === 'processing' && this.stream.id === id) {
+            const result = await streamService.pollStream(this.stream.id, after);
+            status = result.status;
+            const raw_reply = result.reply;
+
+            if (raw_reply.length <= 8) interval = 1500;
+            else if (raw_reply.length <= 20) interval = 1000;
+            else if (raw_reply.length <= 30) interval = 500;
+            else interval = 200;
+
+            if (raw_reply.trim() === '') {
+                after = result.nextAfter;
+                await new Promise(resolve => setTimeout(resolve, interval));
+                continue;
+            }
+            logger.info('stream reply:', raw_reply);
+
+            if (STATUS && PROMPT_ENGINEERING) {
+                if (!this.stream.toolCallStatus && /<[\||｜]?function(?:_call)?>/.test(this.stream.reply + raw_reply)) {
+                    logger.info('tool call start tag found');
+                    const match = raw_reply.match(/([\s\S]*)<[\||｜]?function(?:_call)?>/);
+                    if (match && match[1].trim()) {
+                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
+                        if (this.stream.id !== id) return;
+                        await this.reply(ctx, msg, contextArray, replyArray, images);
+                    }
+                    this.stream.toolCallStatus = true;
+                }
+
+                if (this.stream.id !== id) return;
+
+                if (this.stream.toolCallStatus) {
+                    this.stream.reply += raw_reply;
+
+                    if (/<\/function(?:_call)?>/.test(this.stream.reply)) {
+                        logger.info('tool call end tag found');
+                        const match = this.stream.reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                        if (match) {
+                            this.stream.reply = '';
+                            this.stream.toolCallStatus = false;
+                            await this.stopCurrentChatStream();
+
+                            await this.context.addAssistantMessage(match[0], '');
+
+                            try {
+                                const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, this, match[1]);
+                                callResults.forEach(r => this.context.addToolCallbackMessage(r.content, r.tool_call_id));
+                            } catch (e) {
+                                logger.error('handlePromptToolCalls error:', e.message);
+                                return;
+                            }
+
+                            await this.chatStream(ctx, msg);
+                            return;
+                        }
+                        await this.stopCurrentChatStream();
+                        return;
+                    } else {
+                        after = result.nextAfter;
+                        await new Promise(resolve => setTimeout(resolve, interval));
+                        continue;
+                    }
+                }
+            }
+
+            const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, raw_reply);
+            if (this.stream.id !== id) return;
+            this.reply(ctx, msg, contextArray, replyArray, images);
+
+            after = result.nextAfter;
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+
+        if (this.stream.id !== id) return;
+        await this.stopCurrentChatStream();
+    }
+
+    async stopCurrentChatStream(): Promise<void> {
+        const { id, reply, toolCallStatus } = this.stream;
+        this.stream = {
+            id: '',
+            reply: '',
+            toolCallStatus: false
+        }
+        if (id) {
+            logger.info('end stream:', id);
+            if (reply && toolCallStatus) logger.warning('unfinished tool call:', reply);
+            await streamService.endStream(id);
+        }
     }
 }

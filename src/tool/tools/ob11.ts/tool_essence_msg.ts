@@ -1,8 +1,9 @@
-import { transformMsgIdBack, transformMsgId } from "../utils/utils";
-import { Tool } from "./tool";
-import { Image } from "../image/image";
-import { transformArrayToContent } from "../utils/utils_string";
-import { deleteEssenceMsg, getEssenceMsgList, getGroupMemberInfo, netExists, setEssenceMsg } from "../utils/utils_ob11";
+// 精华消息工具：设置/获取/删除
+import { transformMsgIdBack, transformMsgId } from "../../../utils/utils";
+import Tool from "../../tool";
+import Image from "../../../resource/image";
+import { transformArrayToContent } from "../../../utils/string";
+import { deleteEssenceMsg, getEssenceMsgList, getGroupMemberInfo, netExists, setEssenceMsg } from "../../../utils/ob11";
 
 export function registerEssenceMsg() {
     const toolSet = new Tool({
@@ -25,17 +26,17 @@ export function registerEssenceMsg() {
     toolSet.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
 
         const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
-        if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
-        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
+        if (!memberInfo) return `获取权限信息失败`;
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
 
         await setEssenceMsg(epId, transformMsgIdBack(msg_id));
-        return { content: `已将消息${msg_id}设置为精华消息`, images: [] };
+        return `已将消息${msg_id}设置为精华消息`;
     }
 
     const toolGet = new Tool({
@@ -51,20 +52,20 @@ export function registerEssenceMsg() {
             }
         }
     });
-    toolGet.solve = async (ctx, _, ai, __) => {
+    toolGet.solve = async (ctx, _, _session, __) => {
         if (ctx.isPrivate) {
-            return { content: `精华消息功能仅在群聊中可用`, images: [] };
+            return `精华消息功能仅在群聊中可用`;
         }
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
 
         const essenceMsgList = await getEssenceMsgList(epId, gid.replace(/^.+:/, ''));
-        if (!essenceMsgList || !Array.isArray(essenceMsgList)) return { content: `获取群 ${gid} 精华消息列表失败`, images: [] };
+        if (!essenceMsgList || !Array.isArray(essenceMsgList)) return `获取群 ${gid} 精华消息列表失败`;
 
-        if (essenceMsgList.length === 0) return { content: `该群暂无精华消息`, images: [] };
+        if (essenceMsgList.length === 0) return `该群暂无精华消息`;
 
         let s = `群精华消息列表 (${essenceMsgList.length}条):\n`;
         const images: Image[] = [];
@@ -79,7 +80,7 @@ export function registerEssenceMsg() {
             if (essence.content) {
                 let content = '';
                 if (Array.isArray(essence.content)) {
-                    const result = await transformArrayToContent(ctx, ai, essence.content);
+                    const result = await transformArrayToContent(ctx, essence.content);
                     content = result.content;
                     images.push(...result.images);
                 } else if (typeof essence.content === 'string') {
@@ -96,7 +97,7 @@ export function registerEssenceMsg() {
             }
         }
 
-        return { content: s.trim(), images: images };
+        return s.trim();
     };
 
     const toolDel = new Tool({
@@ -120,19 +121,19 @@ export function registerEssenceMsg() {
         const { msg_id } = args;
 
         if (ctx.isPrivate) {
-            return { content: `精华消息功能仅在群聊中可用`, images: [] };
+            return `精华消息功能仅在群聊中可用`;
         }
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
 
         const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
-        if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
-        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
+        if (!memberInfo) return `获取权限信息失败`;
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
 
         await deleteEssenceMsg(epId, transformMsgIdBack(msg_id));
-        return { content: `已删除精华消息 ${msg_id}`, images: [] };
+        return `已删除精华消息 ${msg_id}`;
     };
 }

@@ -1,17 +1,37 @@
+// 工具系统：Tool 注册表、工具调用（含扩展指令/提示词工程）与注册
 import Config from "../config/config"
 import Logger from "../logger"
 import { fixJsonString } from "../utils/string";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
-import builtinCmdToolMap from "./tools/builtin_cmd.ts/init";
+import { registerAttr } from "./tools/builtin_cmd.ts/tool_attr";
+import { registerModu } from "./tools/builtin_cmd.ts/tool_modu";
+import { registerRollCheck } from "./tools/builtin_cmd.ts/tool_roll_check";
+import { registerImage } from "./tools/image.ts/tool_image";
+import { registerMeme } from "./tools/image.ts/tool_meme";
+import { registerRender } from "./tools/image.ts/tool_render";
+import { registerBan } from "./tools/ob11.ts/tool_ban";
+import { registerEssenceMsg } from "./tools/ob11.ts/tool_essence_msg";
+import { registerGroupSign } from "./tools/ob11.ts/tool_group_sign";
+import { registerQQList } from "./tools/ob11.ts/tool_qq_list";
+import { registerGetPersonInfo } from "./tools/ob11.ts/tool_person_info";
+import { registerRename } from "./tools/ob11.ts/tool_rename";
+import { registerDeck } from "./tools/seal.ts/tool_deck";
+import { registerContext } from "./tools/tool_context";
+import { registerMemory } from "./tools/tool_memory";
+import { registerMessage } from "./tools/tool_message";
+import { registerMusicPlay } from "./tools/tool_music";
+import { registerTime } from "./tools/tool_time";
+import { registerSetTrigger } from "./tools/tool_trigger";
+import { registerRecord } from "./tools/tool_voice";
+import { registerWeb } from "./tools/tool_web";
+import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
 
-export const toolMap = {
-    ...builtinCmdToolMap,
-}
+export const toolMap: { [key: string]: Tool } = {};
 
-export type ToolName = keyof typeof toolMap;
-export type ToolState = { [key in ToolName]?: boolean };
+export type ToolName = string;
+export type ToolState = { [key: string]: boolean };
 
 export default class Tool {
     toolInfo: ToolInfo;
@@ -36,10 +56,41 @@ export default class Tool {
 
     static cmdArgs: seal.CmdArgs = null;
 
+    static registerTool() {
+        registerBuiltinCmds();
+        registerAttr();
+        registerModu();
+        registerRollCheck();
+        registerImage();
+        registerMeme();
+        registerRender();
+        registerBan();
+        registerEssenceMsg();
+        registerGroupSign();
+        registerQQList();
+        registerGetPersonInfo();
+        registerRename();
+        registerDeck();
+        registerContext();
+        registerMemory();
+        registerMessage();
+        registerMusicPlay();
+        registerTime();
+        registerSetTrigger();
+        registerRecord();
+        registerWeb();
+    }
+
+
+
     /**
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs并调用solve函数，监听消息并返回结果
      */
     static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, listen: ToolListen, eci: ExtCmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
+        if (!this.cmdArgs) {
+            Logger.warning('扩展指令调用失败：尚未收到过指令（cmdArgs 为空）');
+            return ['', false];
+        }
         const cmdArgs = this.cmdArgs;
         cmdArgs.command = eci.cmd;
         cmdArgs.args = eci.staticArgs.concat(args);
@@ -94,7 +145,7 @@ export default class Tool {
             Logger.warning(`调用函数失败:未注册的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
         }
-        if (session.toolState?.[name]) {
+        if (!session.toolState?.[name]) {
             Logger.warning(`调用函数失败:未经许可的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未经许可的函数:${name}` }, callBack: true };
         }
@@ -155,7 +206,7 @@ export default class Tool {
 
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
-            if (session.tool.callCount > MAX_CALL_COUNT) {
+            if (session.tool.callCount >= MAX_CALL_COUNT) {
                 Logger.warning('工具调用超过上限');
                 ret.result.push({
                     tool_call_id: tool_call.id,

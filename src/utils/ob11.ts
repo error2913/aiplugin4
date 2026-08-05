@@ -1,3 +1,4 @@
+// ob11 API 封装：消息/群/好友/禁言等
 import { logger } from "../logger";
 import { MessageSegment } from "./string";
 

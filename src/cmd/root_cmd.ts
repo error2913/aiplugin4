@@ -1,5 +1,7 @@
-import { AI, AIManager } from "../AI/AI";
-import { Config } from "../config/config";
+// 根命令 .ai：子命令注册与分发、会话上下文组装
+import { getSession } from "../session/session_service";
+import { Session } from "../session/session";
+import Config from "../config/config";
 import { logger } from "../logger";
 import { CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
 import { aliasToCmd } from "../utils/utils";
@@ -19,6 +21,7 @@ import { registerCmdTool } from "./sub_cmd/tool";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdShut } from "./sub_cmd/shut";
+import { registerCmdModel } from "./sub_cmd/model";
 
 export interface SubCmdContext {
     ctx: seal.MsgContext;
@@ -28,7 +31,7 @@ export interface SubCmdContext {
     uid: string;
     gid: string;
     sid: string;
-    ai: AI;
+    session: Session;
     page: number;
     ret: seal.CmdExecuteResult;
 }
@@ -68,6 +71,7 @@ export class SubCmd {
         registerCmdIgnore();
         registerCmdToken();
         registerCmdShut();
+        registerCmdModel();
 
         defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc, sc) => {
             acc[sc.name] = sc.priv;
@@ -108,14 +112,14 @@ export function registerCmd() {
                     }
                 }
 
-                const ai = AIManager.getAI(sid);
-                const { success, exist } = PrivilegeManager.checkPriv(ctx, cmdArgs, ai);
+                const session = getSession(sid);
+                const { success, exist } = PrivilegeManager.checkPriv(ctx, cmdArgs, session);
                 if (!success) {
                     seal.replyToSender(ctx, msg, exist ? '权限不足' : '命令不存在');
                     return ret;
                 }
 
-                return SubCmd.map[subCmd].solve({ ctx, msg, cmdArgs, epId, uid, gid, sid, ai, page, ret });
+                return SubCmd.map[subCmd].solve({ ctx, msg, cmdArgs, epId, uid, gid, sid, session, page, ret });
             } else {
                 ret.showHelp = true;
                 return ret;

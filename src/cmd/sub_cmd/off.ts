@@ -1,4 +1,4 @@
-import { AIManager } from "../../AI/AI";
+// .ai off：关闭 AI（整体或按模式）
 import { TimerManager } from "../../timer";
 import { I } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -9,13 +9,13 @@ export function registerCmdOff() {
     cmd.help = '';
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, sid, ai, ret } = scc;
+        const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
 
-        const setting = ai.setting;
+        const setting = session.setting;
 
         const kwargs = cmdArgs.kwargs;
         if (kwargs.length == 0) {
-            ai.resetState();
+            session.resetState();
             TimerManager.removeTimers(sid, '', ['activeTime'], []);
 
             setting.counter = -1;
@@ -29,7 +29,7 @@ export function registerCmdOff() {
             }
 
             seal.replyToSender(ctx, msg, 'AI已关闭');
-            AIManager.saveAI(sid);
+            session.save();
             return ret;
         }
 
@@ -40,15 +40,15 @@ export function registerCmdOff() {
             switch (name) {
                 case 'c':
                 case 'counter': {
-                    ai.context.counter = 0;
+                    session.context.counter = 0;
                     setting.counter = -1;
                     text += `\n计数器模式`;
                     break;
                 }
                 case 't':
                 case 'timer': {
-                    clearTimeout(ai.context.timer);
-                    ai.context.timer = null;
+                    clearTimeout(session.context.timer);
+                    session.context.timer = null;
                     setting.timer = -1;
                     text += `\n计时器模式`;
                     break;
@@ -74,7 +74,7 @@ export function registerCmdOff() {
         });
 
         seal.replyToSender(ctx, msg, text);
-        AIManager.saveAI(sid);
+        session.save();
         return ret;
     }
 }

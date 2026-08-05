@@ -1,3 +1,4 @@
+// 记忆条目：向量/标签/用户群组/相似度与新鲜度计算
 import Model from "../model/model";
 import Config from "../config/config";
 import Logger from "../logger";
@@ -141,6 +142,7 @@ export default class MemoryItem {
         const { DIMENSION } = Config.memory;
         Logger.info(`更新记忆向量: ${this.id}`);
         const model = Model.getEmbeddingModel('text-embedding');
+        if (!model) return Logger.error('未找到可用的嵌入模型');
         const vector = await model.callEmbedding(this.content);
         if (!vector.length) return Logger.error('返回向量为空');
         if (vector.length !== DIMENSION) return Logger.error(`向量维度不匹配。期望: ${DIMENSION}, 实际: ${vector.length}`);

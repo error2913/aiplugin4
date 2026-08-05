@@ -1,6 +1,7 @@
-import { TimerManager } from "../timer";
-import { fmtDate } from "../utils/utils_string";
-import { Tool } from "./tool";
+// 时间/定时器工具：当前时间与目标/间隔定时器设置
+import { TimerManager } from "../../timer";
+import { fmtDate } from "../../utils/string";
+import Tool from "../tool";
 
 export function registerTime() {
     const toolGet = new Tool({
@@ -17,7 +18,7 @@ export function registerTime() {
         }
     });
     toolGet.solve = async (_, __, ___, ____) => {
-        return { content: fmtDate(Math.floor(Date.now() / 1000)), images: [] };
+        return fmtDate(Math.floor(Date.now() / 1000));
     }
 
     const toolSet = new Tool({
@@ -66,7 +67,7 @@ export function registerTime() {
             }
         }
     });
-    toolSet.solve = async (ctx, _, ai, args) => {
+    toolSet.solve = async (ctx, _, session, args) => {
         const { types, years = 0, months = 0, days = 0, hours = 0, minutes, count = 1, content } = args;
 
         const y = parseInt(years);
@@ -75,54 +76,54 @@ export function registerTime() {
         const h = parseInt(hours);
         const min = parseInt(minutes);
         const c = parseInt(count);
-        if (isNaN(y)) return { content: '年数应为数字', images: [] };
-        if (isNaN(m)) return { content: '月数应为数字', images: [] };
-        if (isNaN(d)) return { content: '天数应为数字', images: [] };
-        if (isNaN(h)) return { content: '小时数应为数字', images: [] };
-        if (isNaN(min)) return { content: '分钟数应为数字', images: [] };
-        if (isNaN(c)) return { content: '触发次数应为数字', images: [] };
+        if (isNaN(y)) return '年数应为数字';
+        if (isNaN(m)) return '月数应为数字';
+        if (isNaN(d)) return '天数应为数字';
+        if (isNaN(h)) return '小时数应为数字';
+        if (isNaN(min)) return '分钟数应为数字';
+        if (isNaN(c)) return '触发次数应为数字';
 
         switch (types) {
             case 'target': {
                 const t = new Date(y, m - 1, d, h, min).getTime();
                 const now = Date.now();
                 if (isNaN(t)) {
-                    return { content: '时间设置错误', images: [] };
+                    return '时间设置错误';
                 }
                 if (t < now) {
-                    return { content: '目标时间不能早于当前时间', images: [] };
+                    return '目标时间不能早于当前时间';
                 }
                 if (t - now > 365 * 24 * 60 * 60 * 1000) {
-                    return { content: '目标时间不能超过1年', images: [] };
+                    return '目标时间不能超过1年';
                 }
-                TimerManager.addTargetTimer(ctx, ai, Math.floor(t / 1000), content);
+                TimerManager.addTargetTimer(ctx, session, Math.floor(t / 1000), content);
                 break;
             }
             case 'interval': {
                 const mins = y * 365 * 24 * 60 + m * 30 * 24 * 60 + d * 24 * 60 + h * 60 + min;
                 if (mins <= 0) {
-                    return { content: '间隔时间必须大于0', images: [] };
+                    return '间隔时间必须大于0';
                 }
                 if (mins > 365 * 24 * 60) {
-                    return { content: '间隔时间不能大于1年', images: [] };
+                    return '间隔时间不能大于1年';
                 }
                 if (c < -1 || c === 0) {
-                    return { content: '触发次数不能小于-1或等于0', images: [] };
+                    return '触发次数不能小于-1或等于0';
                 }
                 if (c === -1 && mins < 12 * 60) {
-                    return { content: '无限次触发间隔时间不能小于12小时', images: [] };
+                    return '无限次触发间隔时间不能小于12小时';
                 }
                 if (c > 30) {
-                    return { content: '触发次数不能大于30次', images: [] };
+                    return '触发次数不能大于30次';
                 }
-                TimerManager.addIntervalTimer(ctx, ai, mins * 60, c, content);
+                TimerManager.addIntervalTimer(ctx, session, mins * 60, c, content);
                 break;
             } default: {
-                return { content: '定时器类型错误', images: [] };
+                return '定时器类型错误';
             }
         }
 
-        return { content: `设置定时器成功，请等待`, images: [] };
+        return `设置定时器成功，请等待`;
     }
 
     const toolShow = new Tool({
@@ -138,11 +139,11 @@ export function registerTime() {
             }
         }
     });
-    toolShow.solve = async (_, __, ai, ___) => {
-        const timers = TimerManager.getTimers(ai.id, '', ['target', 'interval']);
+    toolShow.solve = async (_, __, session, ___) => {
+        const timers = TimerManager.getTimers(session.sessionId, '', ['target', 'interval']);
 
         if (timers.length === 0) {
-            return { content: '当前对话没有定时器', images: [] };
+            return '当前对话没有定时器';
         }
 
         const s = timers.map((t, i) => {
@@ -163,7 +164,7 @@ export function registerTime() {
             }
         }).join('\n');
 
-        return { content: s, images: [] };
+        return s;
     }
 
     const toolCancel = new Tool({
@@ -186,20 +187,20 @@ export function registerTime() {
             }
         }
     });
-    toolCancel.solve = async (_, __, ai, args) => {
+    toolCancel.solve = async (_, __, session, args) => {
         const { index_list } = args;
-        const timers = TimerManager.getTimers(ai.id, '', ['target', 'interval']);
+        const timers = TimerManager.getTimers(session.sessionId, '', ['target', 'interval']);
 
         if (timers.length === 0) {
-            return { content: '当前对话没有定时器', images: [] };
+            return '当前对话没有定时器';
         }
 
         if (index_list.length === 0) {
-            return { content: '请输入要取消的定时器序号', images: [] };
+            return '请输入要取消的定时器序号';
         }
 
-        TimerManager.removeTimers(ai.id, '', ['target', 'interval'], index_list);
+        TimerManager.removeTimers(session.sessionId, '', ['target', 'interval'], index_list);
 
-        return { content: '定时器取消成功', images: [] };
+        return '定时器取消成功';
     }
 }

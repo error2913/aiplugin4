@@ -1,3 +1,4 @@
+// prompt 模板配置：system/记忆/总结/知识库/工具/图片识别等 Handlebars 模板
 import Handlebars from "handlebars";
 import Config from "../config";
 

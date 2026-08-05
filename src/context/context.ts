@@ -1,4 +1,6 @@
+// 会话上下文：消息增删/忽略名单/压缩与总结触发/用户群查找/图片查找
 import Config from "../config/config";
+import Image from "../resource/image";
 import { levenshteinDistance } from "../utils/string";
 import Logger from "../logger";
 import { netExists, getFriendList, getGroupList, getGroupMemberList } from "../utils/ob11";
@@ -11,21 +13,37 @@ import Message from "./message";
 import Group from "../session/group";
 import User from "../session/user";
 import MemoryService from "../memory/memory";
+import { getStrangerInfo, getGroupMemberInfo } from "../utils/ob11";
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
         agentName: 'string',
         sessionId: 'string',
-        messages: { array: 'any' }
+        messages: { array: 'any' },
+        ignoreList: { array: 'string' },
+        autoNameMod: 'number',
+        summaryCounter: 'number'
     }
     agentName: string;
     sessionId: string;
     messages: MessageType[];
+    ignoreList: string[];
+    lastReply: string;
+    counter: number;
+    timer: number;
+    autoNameMod: number;
+    summaryCounter: number;
 
     constructor() {
         this.agentName = '';
         this.sessionId = '';
         this.messages = [];
+        this.ignoreList = [];
+        this.lastReply = '';
+        this.counter = 0;
+        this.timer = null;
+        this.autoNameMod = 0;
+        this.summaryCounter = 0;
     }
 
     get agent(): Agent { return Agent.get(this.agentName); }
@@ -43,25 +61,37 @@ export class Context {
         return Array.from(userSet);
     }
 
-    clearMessages(role?: 'user' | 'assistant') {
-        switch (role) {
-            case 'user': {
-                this.messages = this.messages.filter(m => !m.hasOwnProperty('userId'));
-                break;
-            }
-            case 'assistant': {
-                this.messages = this.messages.filter(m => m.hasOwnProperty('userId'));
-                break;
-            }
-            default: {
-                this.messages = [];
-                break;
-            }
+    clearMessages(...roles: Array<'user' | 'assistant' | 'tool'>) {
+        if (roles.length === 0) {
+            this.summaryCounter = 0;
+            this.messages = [];
+            return;
         }
+        this.messages = this.messages.filter(m => !roles.includes(m.role as any));
+    }
+
+    reviveMessages() {
+        this.messages = this.messages.map(m => {
+            if (!m || typeof m.role !== 'string') return null;
+            if (Array.isArray((m as any).contentItems)) {
+                (m as any).contentItems = (m as any).contentItems.filter((i: any) => i && typeof i.text === 'string');
+            }
+            return m;
+        }).filter(m => m !== null);
     }
 
     // 添加后检查压缩条件，并对过长user进行压缩 wip
-    addUserMessage(text: string, userId: string, messageId: string) {
+    async addUserMessage(text: string, userId: string, messageId: string) {
+        // 过长的用户消息交给压缩智能体压缩后再存入上下文，节省 token
+        const { COMPRESS_THRESHOLD } = Config.message;
+        if (text.length > COMPRESS_THRESHOLD) {
+            try {
+                const compressed = await Agent.get('compress_agent').chat(text);
+                if (compressed) text = compressed;
+            } catch (e) {
+                Logger.warning('压缩消息失败，保留原文: ' + e.message);
+            }
+        }
         const umi: UserMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
@@ -90,7 +120,12 @@ export class Context {
             contentItems: [ami]
         });
         this.session.memory.accessMemories(text);
-        this.session.memory.summarize();
+        // 按配置的间隔轮数触发短期记忆总结
+        this.summaryCounter++;
+        if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
+            this.summaryCounter = 0;
+            this.session.memory.summarize();
+        }
         this.limitMessages();
     }
 
@@ -190,6 +225,61 @@ export class Context {
         Logger.warning(`未找到用户<${name}>`);
         return '';
     }
+    get userInfoList(): { isPrivate: true, id: string, name: string }[] {
+        const userMap: { [key: string]: { isPrivate: true, id: string, name: string } } = {};
+        for (const m of this.messages) {
+            if (m.role !== 'user' || !(m as any).contentItems) continue;
+            for (const item of (m as any).contentItems) {
+                if (!item.userId) continue;
+                if (!userMap[item.userId]) {
+                    const u = User.get(item.userId);
+                    userMap[item.userId] = {
+                        isPrivate: true,
+                        id: item.userId,
+                        name: u.userName || item.userId
+                    };
+                }
+            }
+        }
+        return Object.values(userMap);
+    }
+
+    async setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card') {
+        let name = '';
+        switch (mod) {
+            case 'nickname': {
+                const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
+                if (!strangerInfo || !strangerInfo.nickname) {
+                    Logger.warning(`未找到用户<${uid}>的昵称`);
+                    break;
+                }
+                name = strangerInfo.nickname;
+                break;
+            }
+            case 'card': {
+                if (!gid) break;
+                const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
+                if (!memberInfo) {
+                    Logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
+                    await this.setName(epId, gid, uid, 'nickname');
+                    return;
+                }
+                name = memberInfo.card || memberInfo.nickname;
+                if (!name) {
+                    await this.setName(epId, gid, uid, 'nickname');
+                    return;
+                }
+                break;
+            }
+        }
+        if (!name) {
+            Logger.warning(`用户<${uid}>未设置昵称或群名片`);
+            return;
+        }
+        const u = User.get(uid);
+        u.userName = name;
+        User.save(u);
+    }
     async findGroupId(ctx: seal.MsgContext, groupName: string | number): Promise<string> {
         groupName = String(groupName);
         if (!groupName) return '';
@@ -228,6 +318,24 @@ export class Context {
         if (!userId) return null;
         return User.get(userId);
     }
+    async findImage(ctx: seal.MsgContext, id: string): Promise<Image | null> {
+        if (/^user_avatar[:?]/.test(id)) {
+            const ui = await this.findUser(ctx, id.replace(/^user_avatar[:?]/, ''));
+            if (ui) return Image.getUserAvatar(ui.userId);
+        }
+        if (/^group_avatar[:?]/.test(id)) {
+            const gi = await this.findGroup(ctx, id.replace(/^group_avatar[:?]/, ''));
+            if (gi) return Image.getGroupAvatar(gi.groupId);
+        }
+        const img = Image.get(id);
+        if (img) return img;
+        const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
+        if (LOCAL_IMAGE_PATH_MAP && LOCAL_IMAGE_PATH_MAP.hasOwnProperty(id)) {
+            return Image.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]);
+        }
+        return this.session.memory.findImage(id);
+    }
+
     async findGroup(ctx: seal.MsgContext, groupName: string | number): Promise<Group | null> {
         const groupId = await this.findGroupId(ctx, groupName);
         if (!groupId) return null;

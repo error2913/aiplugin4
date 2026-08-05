@@ -1,3 +1,4 @@
+// 用户档案：存储与读取
 import Config from "../config/config";
 import Logger from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
@@ -14,7 +15,7 @@ export default class User {
         this.userName = '';
     }
 
-    static userMap: { [key: string]: User };
+    static userMap: { [key: string]: User } = {};
 
     static get(userId: string): User {
         if (!this.userMap.hasOwnProperty(userId)) {

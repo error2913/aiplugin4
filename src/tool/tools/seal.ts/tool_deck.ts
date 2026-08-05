@@ -1,9 +1,10 @@
-import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
-import { Tool } from "./tool"
+// 牌堆工具：抽取牌堆
+import { logger } from "../../../logger";
+import Config from "../../../config/config";
+import Tool from "../../tool"
 
 export function registerDeck() {
-    const { decks } = ConfigManager.tool;
+    const { DECKS: decks } = Config.tool;
 
     const toolDraw = new Tool({
         type: "function",
@@ -28,16 +29,16 @@ export function registerDeck() {
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
             logger.error(`牌堆${name}不存在:${dr.err}`);
-            return { content: `牌堆${name}不存在:${dr.err}`, images: [] };
+            return `牌堆${name}不存在:${dr.err}`;
         }
 
         const result = dr.result;
         if (result == null) {
             logger.error(`牌堆${name}结果为空:${dr.err}`);
-            return { content: `牌堆${name}结果为空:${dr.err}`, images: [] };
+            return `牌堆${name}结果为空:${dr.err}`;
         }
 
         seal.replyToSender(ctx, msg, result);
-        return { content: result, images: [] };
+        return result;
     }
 }

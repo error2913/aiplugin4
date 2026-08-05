@@ -1,5 +1,6 @@
-import { AIManager } from "../../AI/AI";
-import { Config } from "../../config/config";
+// .ai memo：个人/群聊/短期记忆与设定管理
+import { getSession } from "../../session/session_service";
+import Config from "../../config/config";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -49,20 +50,20 @@ export function registerCmdMemory() {
         }
     };
     cmd.solve = async (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, epId, sid, ai, page, ret } = scc;
+        const { ctx, msg, cmdArgs, epId, session, page, ret  } = scc;
 
         const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
         const muid = mctx.player.userId;
 
-        const ai2 = AIManager.getAI(muid);
+        const ai2 = getSession(muid);
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
             case 'status': {
-                let ai3 = ai;
+                let ai3 = session;
                 if (cmdArgs.at.length > 0 && (cmdArgs.at.length !== 1 || cmdArgs.at[0].userId !== epId)) {
                     ai3 = ai2;
                 }
-                const { isMemory, isShortMemory } = Config.memory;
+                const { MEMORY: isMemory, SUMMARY: isShortMemory } = Config.memory;
                 seal.replyToSender(ctx, msg, `${ai3.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
      长期记忆条数: ${ai3.memory.memoryIds.length}
@@ -84,7 +85,7 @@ export function registerCmdMemory() {
                             case 'clear': {
                                 ai2.memory.persona = '无';
                                 seal.replyToSender(ctx, msg, '设定已清除');
-                                AIManager.saveAI(muid);
+                                ai2.save();
                                 return ret;
                             }
                             default: {
@@ -94,7 +95,7 @@ export function registerCmdMemory() {
                                 }
                                 ai2.memory.persona = s;
                                 seal.replyToSender(ctx, msg, '设定已修改');
-                                AIManager.saveAI(muid);
+                                ai2.save();
                                 return ret;
                             }
                         }
@@ -112,7 +113,7 @@ export function registerCmdMemory() {
                             id: mctx.player.userId,
                             name: mctx.player.name
                         }, page) || '记忆已全部清除');
-                        AIManager.saveAI(muid);
+                        ai2.save();
                         return ret;
                     }
                     case 'list': {
@@ -126,7 +127,7 @@ export function registerCmdMemory() {
                     case 'clear': {
                         ai2.memory.clearMemory();
                         seal.replyToSender(ctx, msg, '个人记忆已清除');
-                        AIManager.saveAI(muid);
+                        ai2.save();
                         return ret;
                     }
                     default: {
@@ -156,9 +157,9 @@ export function registerCmdMemory() {
                                 return ret;
                             }
                             case 'clear': {
-                                ai.memory.persona = '无';
+                                session.memory.persona = '无';
                                 seal.replyToSender(ctx, msg, '设定已清除');
-                                AIManager.saveAI(sid);
+                                session.save();
                                 return ret;
                             }
                             default: {
@@ -166,9 +167,9 @@ export function registerCmdMemory() {
                                     seal.replyToSender(ctx, msg, '设定过长，请控制在30字以内');
                                     return ret;
                                 }
-                                ai.memory.persona = s;
+                                session.memory.persona = s;
                                 seal.replyToSender(ctx, msg, '设定已修改');
-                                AIManager.saveAI(sid);
+                                session.save();
                                 return ret;
                             }
                         }
@@ -180,17 +181,17 @@ export function registerCmdMemory() {
                             seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g del <ID1> <ID2>】删除群聊记忆');
                             return ret;
                         }
-                        ai.memory.deleteMemory(idList, kw);
-                        seal.replyToSender(ctx, msg, ai.memory.getLatestMemoryListText({
+                        session.memory.deleteMemory(idList, kw);
+                        seal.replyToSender(ctx, msg, session.memory.getLatestMemoryListText({
                             isPrivate: false,
                             id: ctx.group.groupId,
                             name: ctx.group.groupName
                         }, page) || '记忆已全部清除');
-                        AIManager.saveAI(sid);
+                        session.save();
                         return ret;
                     }
                     case 'list': {
-                        seal.replyToSender(ctx, msg, ai.memory.getLatestMemoryListText({
+                        seal.replyToSender(ctx, msg, session.memory.getLatestMemoryListText({
                             isPrivate: false,
                             id: ctx.group.groupId,
                             name: ctx.group.groupName
@@ -198,9 +199,9 @@ export function registerCmdMemory() {
                         return ret;
                     }
                     case 'clear': {
-                        ai.memory.clearMemory();
+                        session.memory.clearMemory();
                         seal.replyToSender(ctx, msg, '群聊记忆已清除');
-                        AIManager.saveAI(sid);
+                        session.save();
                         return ret;
                     }
                     default: {
@@ -218,32 +219,32 @@ export function registerCmdMemory() {
                 const val3 = cmdArgs.getArgN(3);
                 switch (aliasToCmd(val3)) {
                     case 'on': {
-                        ai.memory.useShortMemory = true;
+                        session.memory.useShortMemory = true;
                         seal.replyToSender(ctx, msg, '短期记忆已开启');
-                        AIManager.saveAI(sid);
+                        session.save();
                         return ret;
                     }
                     case 'off': {
-                        ai.memory.useShortMemory = false;
+                        session.memory.useShortMemory = false;
                         seal.replyToSender(ctx, msg, '短期记忆已关闭');
-                        AIManager.saveAI(sid);
+                        session.save();
                         return ret;
                     }
                     case 'list': {
-                        if (ai.memory.shortMemoryList.length === 0) {
+                        if (session.memory.shortMemoryList.length === 0) {
                             seal.replyToSender(ctx, msg, '短期记忆为空');
                             return ret;
                         }
-                        seal.replyToSender(ctx, msg, ai.memory.shortMemoryList
+                        seal.replyToSender(ctx, msg, session.memory.shortMemoryList
                             .map((item, index) => `${index + 1}. ${item}`)
                             .slice((page - 1) * 10, page * 10)
-                            .join('\n') + `\n当前页码: ${page}/${Math.ceil(ai.memory.shortMemoryList.length / 10)}`);
+                            .join('\n') + `\n当前页码: ${page}/${Math.ceil(session.memory.shortMemoryList.length / 10)}`);
                         return ret;
                     }
                     case 'clear': {
-                        ai.memory.clearShortMemory();
+                        session.memory.clearShortMemory();
                         seal.replyToSender(ctx, msg, '短期记忆已清除');
-                        AIManager.saveAI(sid);
+                        session.save();
                         return ret;
                     }
                     default: {
@@ -256,12 +257,12 @@ export function registerCmdMemory() {
                 }
             }
             case 'sum': {
-                ai.context.summaryCounter = 0;
-                await ai.memory.updateShortMemory(ctx, msg, ai)
-                seal.replyToSender(ctx, msg, ai.memory.shortMemoryList
+                session.context.summaryCounter = 0;
+                await session.memory.updateShortMemory(ctx, msg, session)
+                seal.replyToSender(ctx, msg, session.memory.shortMemoryList
                     .map((item, index) => `${index + 1}. ${item}`)
                     .slice((page - 1) * 10, page * 10)
-                    .join('\n') + `\n当前页码: ${page}/${Math.ceil(ai.memory.shortMemoryList.length / 10)}`);
+                    .join('\n') + `\n当前页码: ${page}/${Math.ceil(session.memory.shortMemoryList.length / 10)}`);
                 return ret;
             }
             default: {

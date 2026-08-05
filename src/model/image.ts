@@ -1,5 +1,6 @@
+// 图片模型：图片理解（callITT）与图片对话
 import Agent from "../agent/agent";
-import { UsageManager } from "../agent/usage";
+import { UsageManager } from "../usage";
 import Config from "../config/config";
 import { DEFAULT_IMAGE_MODEL_BODY } from "../config/static_config";
 import Logger from "../logger";
@@ -63,8 +64,8 @@ export default class ImageModel extends BaseModel {
         try {
             const body = this.buildBody({
                 ...DEFAULT_IMAGE_MODEL_BODY,
-                messages: agent.sessionService.getSession(sessionId).getImageMessages(),
-                tools: agent.getRequestTools()
+                messages: await agent.sessionService.getSession(sessionId).getImageMessages(),
+                tools: agent.getRequestTools(agent.sessionService.getSession(sessionId))
             });
             Logger.printRequestMessages(body.messages);
 

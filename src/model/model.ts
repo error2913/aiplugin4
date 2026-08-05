@@ -1,3 +1,4 @@
+// 模型管理器：按 use/名称选择对话/图片/嵌入模型
 import ChatModel from "./chat";
 import EmbeddingModel from "./embedding";
 import ImageModel from "./image";
@@ -32,7 +33,19 @@ export default class Model {
     static imageModels: ImageModel[] = [];
     static embeddingModels: EmbeddingModel[] = [];
 
-    static getChatModel(use: ChatModelUse): ChatModel | ImageModel | null {
+    static getChatModel(use: ChatModelUse, name: string = ''): ChatModel | ImageModel | null {
+        if (name) {
+            const namedList = Model.chatModels.filter(model => model.name === name && model.use.includes(use));
+            if (namedList.length > 0) {
+                return namedList[0];
+            }
+            const namedAnyList = Model.chatModels.filter(model => model.name === name && model.use.length === 0);
+            if (namedAnyList.length > 0) {
+                return namedAnyList[0];
+            }
+            // 指定名称不存在时回退到全局选择
+            return Model.getChatModel(use);
+        }
         const chatModelList = Model.chatModels.filter(model => model.use.includes(use));
         if (chatModelList.length > 0) {
             const randomIndex = Math.floor(Math.random() * chatModelList.length);

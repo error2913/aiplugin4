@@ -1,6 +1,7 @@
-import { AI } from "../AI/AI";
+// 命令权限系统：命令权限定义、存储与校验
+import { Session } from "../session/session";
 import { logger } from "../logger";
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { aliasToCmd } from "../utils/utils";
 import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
 
@@ -86,8 +87,8 @@ export class PrivilegeManager {
         return cpi;
     }
 
-    static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, ai: AI): { success: boolean, exist: boolean } {
-        const sessionPriv = ai.setting.priv;
+    static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, session: Session): { success: boolean, exist: boolean } {
+        const sessionPriv = session.setting.priv;
         const userPriv = ctx.privilegeLevel;
         const cmdChain = [cmdArgs.command, ...cmdArgs.args].map(cmd => aliasToCmd(cmd));
 

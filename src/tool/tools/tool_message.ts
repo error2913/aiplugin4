@@ -1,13 +1,14 @@
-import { AIManager } from "../AI/AI";
-import { ConfigManager } from "../config/configManager";
-import { replyToSender, transformMsgIdBack } from "../utils/utils";
-import { getCtxAndMsg } from "../utils/utils_seal";
-import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../utils/utils_string";
-import { Tool, ToolManager } from "./tool";
-import { CQTYPESALLOW, faceMap } from "../config/static_config";
-import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../utils/utils_ob11";
-import { logger } from "../logger";
-import { Image } from "../image/image";
+// 消息工具：发送消息/取消息/撤回/合并转发
+import { getSession, SessionService } from "../../session/session_service";
+import Config from "../../config/config";
+import { replyToSender, transformMsgIdBack } from "../../utils/utils";
+import { getCtxAndMsg } from "../../utils/seal";
+import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../../utils/string";
+import Tool from "../tool";
+import { CQ_TYPES_ALLOW as CQTYPESALLOW, FACE_MAP as faceMap } from "../../config/static_config";
+import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../../utils/ob11";
+import { logger } from "../../logger";
+import Image from "../../resource/image";
 
 export function registerMessage() {
     const toolSend = new Tool({
@@ -25,7 +26,7 @@ export function registerMessage() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
+                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
                     },
                     content: {
                         type: 'string',
@@ -44,10 +45,10 @@ export function registerMessage() {
             }
         }
     });
-    toolSend.solve = async (ctx, msg, ai, args) => {
+    toolSend.solve = async (ctx, msg, session, args) => {
         const { msg_type, name, content, function: tool_call, reason = '' } = args;
 
-        const { showNumber } = ConfigManager.message;
+        const { SHOW_NUMBER: showNumber = true } = Config.message;
         const source = ctx.isPrivate ?
             `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/^.+:/, '')})` : ``}` :
             `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/^.+:/, '')})` : ``}`;
@@ -58,7 +59,7 @@ export function registerMessage() {
             switch (seg.type) {
                 case 'img': {
                     const id = seg.content;
-                    const image = await ai.context.findImage(ctx, id);
+                    const image = await session.context.findImage(ctx, id);
                     if (image) originalImages.push(image);
                     else logger.warning(`无法找到图片：${id}`);
                     break;
@@ -67,41 +68,41 @@ export function registerMessage() {
         }
 
         if (msg_type === "private") {
-            const ui = await ai.context.findUserInfo(ctx, name, true);
-            if (ui === null) return { content: `未找到<${name}>`, images: [] };
-            if (ui.id === ctx.player.userId && ctx.isPrivate) return { content: `向当前私聊发送消息无需调用函数`, images: [] };
-            if (ui.id === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
+            const ui = await session.context.findUser(ctx, name, true);
+            if (ui === null) return `未找到<${name}>`;
+            if (ui.userId === ctx.player.userId && ctx.isPrivate) return `向当前私聊发送消息无需调用函数`;
+            if (ui.userId === ctx.endPoint.userId) return `禁止向自己发送消息`;
 
-            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ''));
-            ai = AIManager.getAI(ui.id);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
+            session = getSession(ui.userId);
         } else if (msg_type === "group") {
-            const gi = await ai.context.findGroupInfo(ctx, name);
-            if (gi === null) return { content: `未找到<${name}>`, images: [] };
-            if (gi.id === ctx.group.groupId) return { content: `向当前群聊发送消息无需调用函数`, images: [] };
+            const gi = await session.context.findGroup(ctx, name);
+            if (gi === null) return `未找到<${name}>`;
+            if (gi.groupId === ctx.group.groupId) return `向当前群聊发送消息无需调用函数`;
 
-            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.id));
-            ai = AIManager.getAI(gi.id);
+            ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
+            session = getSession(gi.groupId);
         } else {
-            return { content: `未知的消息类型<${msg_type}>`, images: [] };
+            return `未知的消息类型<${msg_type}>`;
         }
 
-        ai.resetState();
+        session.resetState();
 
-        await ai.context.addSystemUserMessage("来自其他对话的消息发送提示", `${source}: 原因: ${reason || '无'}`, originalImages);
+        await session.context.addSystemUserMessage(`${source}: 原因: ${reason || '无'}`, "来自其他对话的消息发送提示");
 
-        const { contextArray, replyArray, images } = await handleReply(ctx, msg, ai, content);
+        const { contextArray, replyArray } = await handleReply(ctx, msg, session, content);
 
         for (let i = 0; i < contextArray.length; i++) {
             const content = contextArray[i];
             const reply = replyArray[i];
-            const msgId = await replyToSender(ctx, msg, ai, reply);
-            await ai.context.addMessage(ctx, msg, ai, content, images, 'assistant', msgId);
+            const msgId = await replyToSender(ctx, msg, session, reply);
+            await session.context.addAssistantMessage(content, msgId);
         }
 
-        if (tool_call) await ToolManager.handlePromptToolCall(ctx, msg, ai, tool_call);
+        if (tool_call) await Tool.handlePromptToolCalls(ctx, msg, session, tool_call);
 
-        AIManager.saveAI(ai.id);
-        return { content: "消息发送成功", images: [] };
+        SessionService.save(session);
+        return "消息发送成功";
     }
 
     const toolGet = new Tool({
@@ -121,19 +122,20 @@ export function registerMessage() {
             }
         }
     });
-    toolGet.solve = async (ctx, _, ai, args) => {
+    toolGet.solve = async (ctx, _, _session, args) => {
         const { msg_id } = args;
-        const { isPrefix, showNumber } = ConfigManager.message;
+        const { SHOW_NUMBER: showNumber = true } = Config.message;
+        const isPrefix = false;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
 
         const result = await getMsg(epId, transformMsgIdBack(msg_id));
-        if (!result) return { content: `获取消息 ${msg_id} 失败`, images: [] };
+        if (!result) return `获取消息 ${msg_id} 失败`;
         const messageArray: MessageSegment[] = result.message.filter((item: MessageSegment) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
 
-        const { content, images } = await transformArrayToContent(ctx, ai, messageArray);
+        const { content } = await transformArrayToContent(ctx, messageArray);
 
         const gid = ctx.group.groupId;
         const uid = `QQ:${result.sender.user_id}`;
@@ -141,7 +143,7 @@ export function registerMessage() {
         const name = ctx.player.name || '未知用户';
         const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
 
-        return { content: prefix + content, images: images };
+        return prefix + content;
     }
 
     const toolDel = new Tool({
@@ -164,25 +166,25 @@ export function registerMessage() {
     toolDel.solve = async (ctx, _, __, args) => {
         const { msg_id } = args;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
 
         const result = await getMsg(epId, transformMsgIdBack(msg_id));
-        if (!result) return { content: `获取消息 ${msg_id} 失败`, images: [] };
+        if (!result) return `获取消息 ${msg_id} 失败`;
         if (result.sender.user_id != epId.replace(/^.+:/, '')) {
             if (result.sender.role == 'owner' || result.sender.role == 'admin') {
-                return { content: `你没有权限撤回该消息`, images: [] };
+                return `你没有权限撤回该消息`;
             }
 
             const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
-            if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
-            if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
+            if (!memberInfo) return `获取权限信息失败`;
+            if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
         }
 
         await deleteMsg(epId, transformMsgIdBack(msg_id));
-        return { content: `已撤回消息${msg_id}`, images: [] };
+        return `已撤回消息${msg_id}`;
     }
 
     const toolMerge = new Tool({
@@ -200,7 +202,7 @@ export function registerMessage() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
+                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
                     },
                     messages: {
                         type: 'array',
@@ -210,7 +212,7 @@ export function registerMessage() {
                             properties: {
                                 name: {
                                     type: 'string',
-                                    description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                                    description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                                 },
                                 nickname: {
                                     type: 'string',
@@ -229,10 +231,10 @@ export function registerMessage() {
             }
         }
     });
-    toolMerge.solve = async (ctx, _, ai, args) => {
+    toolMerge.solve = async (ctx, _, session, args) => {
         const { msg_type, name, messages } = args;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const messagesToSend = [];
         const images: Image[] = [];
@@ -254,12 +256,12 @@ export function registerMessage() {
                     }
                     case 'at': {
                         const name = seg.content;
-                        const ui = await ai.context.findUserInfo(ctx, name);
+                        const ui = await session.context.findUser(ctx, name);
                         if (ui !== null) {
                             content.push({
                                 type: 'at',
                                 data: {
-                                    qq: ui.id.replace(/^.+:/, "")
+                                    qq: ui.userId.replace(/^.+:/, "")
                                 }
                             })
                         } else {
@@ -283,14 +285,14 @@ export function registerMessage() {
                     }
                     case 'img': {
                         const id = seg.content;
-                        const image = await ai.context.findImage(ctx, id);
+                        const image = await session.context.findImage(ctx, id);
 
                         if (image) {
                             if (image.type === 'local') break;
                             images.push(image);
                             content.push({
                                 type: 'image',
-                                data: { file: image.type === 'base64' ? seal.base64ToImage(image.base64) : image.file }
+                                data: { file: image.type === 'base64' ? seal.base64ToImage(image.base64) : (image.url || image.path) }
                             })
                         } else {
                             logger.warning(`无法找到图片：${id}`);
@@ -309,15 +311,15 @@ export function registerMessage() {
             }
 
             if (content.length === 0) {
-                return { content: `消息长度不能为0`, images: [] };
+                return `消息长度不能为0`;
             }
 
             let userId = '';
             let name = '';
-            const ui = await ai.context.findUserInfo(ctx, messageItem.name, true);
+            const ui = await session.context.findUser(ctx, messageItem.name, true);
             if (ui !== null) {
-                userId = ui.id.replace(/^.+:/, "");
-                name = ui.name;
+                userId = ui.userId.replace(/^.+:/, "");
+                name = ui.userName;
             } else {
                 let unknowUserIndex = unknowUserArray.indexOf(messageItem.name);
                 if (unknowUserIndex === -1) {
@@ -344,21 +346,21 @@ export function registerMessage() {
         const source = "";
 
         if (msg_type === "private") {
-            const ui = await ai.context.findUserInfo(ctx, name, true);
-            if (ui === null) return { content: `未找到<${name}>`, images: [] };
-            if (ui.id === ctx.endPoint.userId) return { content: `禁止向自己发送消息`, images: [] };
+            const ui = await session.context.findUser(ctx, name, true);
+            if (ui === null) return `未找到<${name}>`;
+            if (ui.userId === ctx.endPoint.userId) return `禁止向自己发送消息`;
 
-            await sendPrivateForwardMsg(ctx.endPoint.userId, ui.id.replace(/^.+:/, ""), messagesToSend, news, prompt, summary, source);
+            await sendPrivateForwardMsg(ctx.endPoint.userId, ui.userId.replace(/^.+:/, ""), messagesToSend, news, prompt, summary, source);
         } else if (msg_type === "group") {
-            const gi = await ai.context.findGroupInfo(ctx, name);
-            if (gi === null) return { content: `未找到<${name}>`, images: [] };
+            const gi = await session.context.findGroup(ctx, name);
+            if (gi === null) return `未找到<${name}>`;
 
-            await sendGroupForwardMsg(ctx.endPoint.userId, gi.id.replace(/^.+:/, ""), messagesToSend, news, prompt, summary, source);
+            await sendGroupForwardMsg(ctx.endPoint.userId, gi.groupId.replace(/^.+:/, ""), messagesToSend, news, prompt, summary, source);
         } else {
-            return { content: `未知的消息类型<${msg_type}>`, images: [] };
+            return `未知的消息类型<${msg_type}>`;
         }
 
-        return { content: `发送合并消息成功`, images: images };
+        return `发送合并消息成功`;
     }
 }
 

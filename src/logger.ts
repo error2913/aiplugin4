@@ -1,3 +1,4 @@
+// 日志模块：统一封装 seal 插件日志输出（debug/info/warning/error）
 import { NAME } from "./config/static_config";
 import Config from "./config/config";
 
@@ -49,3 +50,4 @@ export default class Logger {
         this.info(`请求上下文:\n`, JSON.stringify(filteredMessages));
     }
 }
+export const logger = Logger;

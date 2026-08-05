@@ -1,10 +1,11 @@
-import { logger } from "../logger";
-import { Tool } from "./tool";
-import { ConfigManager } from "../config/configManager";
-import { AI, AIManager } from "../AI/AI";
-import { Image } from "../image/image";
-import { generateId } from "../utils/utils";
-import { parseSpecialTokens } from "../utils/utils_string";
+// 渲染工具：Markdown/HTML 转图片
+import { logger } from "../../../logger";
+import Tool from "../../tool";
+import Config from "../../../config/config";
+import { Session } from "../../../session/session";
+import Image from "../../../resource/image";
+import { generateId } from "../../../utils/utils";
+import { parseSpecialTokens } from "../../../utils/string";
 
 interface RenderResponse {
     status: string;
@@ -18,7 +19,7 @@ interface RenderResponse {
 
 async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<RenderResponse> {
     try {
-        const { renderUrl } = ConfigManager.backend;
+        const { RENDER: renderUrl } = Config.backend;
         const res = await fetch(renderUrl + endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -34,7 +35,7 @@ async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<Re
     }
 }
 
-async function transformContentToUrlText(ctx: seal.MsgContext, ai: AI, content: string): Promise<{ text: string, images: Image[] }> {
+async function transformContentToUrlText(ctx: seal.MsgContext, session: Session, content: string): Promise<{ text: string, images: Image[] }> {
     const segs = parseSpecialTokens(content);
     let text = '';
     const images: Image[] = [];
@@ -46,9 +47,9 @@ async function transformContentToUrlText(ctx: seal.MsgContext, ai: AI, content: 
             }
             case 'at': {
                 const name = seg.content;
-                const ui = await ai.context.findUserInfo(ctx, name);
+                const ui = await session.context.findUser(ctx, name);
                 if (ui !== null) {
-                    text += ` @${ui.name} `;
+                    text += ` @${ui.userName} `;
                 } else {
                     logger.warning(`无法找到用户：${name}`);
                     text += ` @${name} `;
@@ -57,7 +58,7 @@ async function transformContentToUrlText(ctx: seal.MsgContext, ai: AI, content: 
             }
             case 'img': {
                 const id = seg.content;
-                const image = await ai.context.findImage(ctx, id);
+                const image = await session.context.findImage(ctx, id);
 
                 if (image) {
                     if (image.type === 'local') throw new Error(`图片<|img:${id}|>为本地图片，暂不支持`);
@@ -94,7 +95,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用markdown语法显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
+                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用markdown语法显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
                     },
                     name: {
                         type: "string",
@@ -115,19 +116,19 @@ export function registerRender() {
         }
     });
 
-    toolMd.solve = async (ctx, _, ai, args) => {
+    toolMd.solve = async (ctx, _, session, args) => {
         const { content, name, theme = 'light', save } = args;
-        if (!content || !content.trim()) return { content: `内容不能为空`, images: [] };
-        if (!name || !name.trim()) return { content: `图片名称不能为空`, images: [] };
-        if (!['light', 'dark', 'gradient'].includes(theme)) return { content: `无效的主题: ${theme}。支持: light, dark, gradient`, images: [] };
+        if (!content || !content.trim()) return `内容不能为空`;
+        if (!name || !name.trim()) return `图片名称不能为空`;
+        if (!['light', 'dark', 'gradient'].includes(theme)) return `无效的主题: ${theme}。支持: light, dark, gradient`;
 
         // 切换到当前会话ai
-        if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
+        // 会话已由 Tool.handleToolCall 传入，直接使用 session
 
         const kws = ["render", "markdown", name, theme];
 
         try {
-            const { text, images } = await transformContentToUrlText(ctx, ai, content);
+            const { text, images } = await transformContentToUrlText(ctx, session, content);
             const hasImages = images.length > 0;
 
             const result = await renderMarkdown(text, theme, 1200, hasImages);
@@ -135,7 +136,7 @@ export function registerRender() {
                 const base64 = result.base64;
                 if (!base64) {
                     logger.error(`生成的base64为空`);
-                    return { content: "生成的base64为空", images: [] };
+                    return "生成的base64为空";
                 }
 
                 const img = new Image();
@@ -145,15 +146,15 @@ export function registerRender() {
                 img.description = `Markdown 渲染图片<|img:${img.imageId}|>
 主题：${theme}`;
 
-                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.description);
+                if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return { content: `渲染成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
+                return `渲染成功，请使用<|img:${img.imageId}|>发送`;
             } else {
                 throw new Error(result.message || "渲染失败");
             }
         } catch (err) {
             logger.error(`Markdown 渲染失败: ${err.message}`);
-            return { content: `渲染图片失败: ${err.message}`, images: [] };
+            return `渲染图片失败: ${err.message}`;
         }
     }
 
@@ -167,7 +168,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用html元素显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
+                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用html元素显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
                     },
                     name: {
                         type: "string",
@@ -183,18 +184,18 @@ export function registerRender() {
         }
     });
 
-    toolHtml.solve = async (ctx, _, ai, args) => {
+    toolHtml.solve = async (ctx, _, session, args) => {
         const { content, name, save } = args;
-        if (!content || !content.trim()) return { content: `内容不能为空`, images: [] };
-        if (!name || !name.trim()) return { content: `图片名称不能为空`, images: [] };
+        if (!content || !content.trim()) return `内容不能为空`;
+        if (!name || !name.trim()) return `图片名称不能为空`;
 
         // 切换到当前会话ai
-        if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
+        // 会话已由 Tool.handleToolCall 传入，直接使用 session
 
         const kws = ["render", "html", name];
 
         try {
-            const { text, images } = await transformContentToUrlText(ctx, ai, content);
+            const { text, images } = await transformContentToUrlText(ctx, session, content);
             const hasImages = images.length > 0;
 
             const result = await renderHtml(text, 1200, hasImages);
@@ -202,7 +203,7 @@ export function registerRender() {
                 const base64 = result.base64;
                 if (!base64) {
                     logger.error(`生成的base64为空`);
-                    return { content: "生成的base64为空", images: [] };
+                    return "生成的base64为空";
                 }
 
                 const img = new Image();
@@ -211,15 +212,15 @@ export function registerRender() {
                 img.format = 'unknown';
                 img.description = `HTML 渲染图片<|img:${img.imageId}|>`;
 
-                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.description);
+                if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return { content: `渲染成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
+                return `渲染成功，请使用<|img:${img.imageId}|>发送`;
             } else {
                 throw new Error(result.message || "渲染失败");
             }
         } catch (err) {
             logger.error(`HTML 渲染失败: ${err.message}`);
-            return { content: `渲染图片失败: ${err.message}`, images: [] };
+            return `渲染图片失败: ${err.message}`;
         }
     }
 }

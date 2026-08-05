@@ -1,6 +1,7 @@
-import { ConfigManager } from "../config/configManager";
-import { Tool } from "./tool";
-import { getStrangerInfo, netExists } from "../utils/utils_ob11";
+// 个人信息工具：资料/生日/星座等
+import Config from "../../../config/config";
+import Tool from "../../tool";
+import { getStrangerInfo, netExists } from "../../../utils/ob11";
 
 const constellations = ["水瓶座", "双鱼座", "白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座"];
 const shengXiao = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
@@ -16,25 +17,25 @@ export function registerGetPersonInfo() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     }
                 },
                 required: ['name']
             }
         }
     });
-    tool.solve = async (ctx, _, ai, args) => {
+    tool.solve = async (ctx, _, session, args) => {
         const { name } = args;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
-        const ui = await ai.context.findUserInfo(ctx, name, true);
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await session.context.findUser(ctx, name, true);
+        if (ui === null) return `未找到<${name}>`;
 
         const epId = ctx.endPoint.userId;
 
-        const strangerInfo = await getStrangerInfo(epId, ui.id.replace(/^.+:/, ''));
-        if (!strangerInfo) return { content: `获取用户${ui.id}信息失败`, images: [] };
+        const strangerInfo = await getStrangerInfo(epId, ui.userId.replace(/^.+:/, ''));
+        if (!strangerInfo) return `获取用户${ui.userId}信息失败`;
 
         let s = `昵称: ${strangerInfo.nickname}
 QQ号: ${strangerInfo.user_id}
@@ -55,6 +56,6 @@ QQ等级: ${strangerInfo.qqLevel}
         if (strangerInfo.labels && strangerInfo.labels.length > 0) s += `\n标签: ${strangerInfo.labels.join(',')}`;
         if (strangerInfo.long_nick) s += `\n个性签名: ${strangerInfo.long_nick}`;
 
-        return { content: s, images: [] };
+        return s;
     }
 }

@@ -1,3 +1,4 @@
+// 基础配置：日志级别/超时/SealDice 路径/全局待机
 import Config from "../config";
 
 export default class BaseConfig {

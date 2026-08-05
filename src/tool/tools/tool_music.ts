@@ -1,5 +1,6 @@
-import { logger } from "../logger";
-import { Tool } from "./tool";
+// 点歌工具
+import { logger } from "../../logger";
+import Tool from "../tool";
 
 export function registerMusicPlay() {
     const tool = new Tool({
@@ -38,7 +39,7 @@ export function registerMusicPlay() {
                 break;
             }
             default: {
-                return { content: `不支持的平台: ${platform}`, images: [] };
+                return `不支持的平台: ${platform}`;
             }
         }
 
@@ -61,7 +62,7 @@ export function registerMusicPlay() {
                 case '网易云': {
                     const song = data.result.songs[0];
                     if (!song) {
-                        return { content: "网易云没找到这首歌", images: [] };
+                        return "网易云没找到这首歌";
                     }
 
                     const id = song.id;
@@ -82,24 +83,24 @@ export function registerMusicPlay() {
                     const url = downloadData.data.url;
 
                     seal.replyToSender(ctx, msg, `[CQ:music,type=163,url=${url},audio=${url},title=${name},content=${artist},image=${img}]`);
-                    return { content: `发送成功，歌名:${name}，歌手:${artist}`, images: [] };
+                    return `发送成功，歌名:${name}，歌手:${artist}`;
                 }
                 case 'qq': {
                     const song = data.data.list[0];
                     if (!song) {
-                        return { content: "QQ音乐没找到这首歌...", images: [] };
+                        return "QQ音乐没找到这首歌...";
                     }
 
                     seal.replyToSender(ctx, msg, `[CQ:music,type=qq,id=${song.songid}]`);
-                    return { content: '发送成功', images: [] };
+                    return '发送成功';
                 }
                 default: {
-                    return { content: "不支持的平台", images: [] };
+                    return "不支持的平台";
                 }
             }
         } catch (error) {
             logger.warning(`音乐搜索请求错误: ${error}`);
-            return { content: `音乐搜索请求错误: ${error}`, images: [] };
+            return `音乐搜索请求错误: ${error}`;
         }
     };
 }

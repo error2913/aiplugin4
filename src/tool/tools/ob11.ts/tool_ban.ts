@@ -1,7 +1,8 @@
-import { ConfigManager } from "../config/configManager";
-import { Tool } from "./tool";
-import { fmtDate } from "../utils/utils_string";
-import { getGroupMemberInfo, getGroupShutList, netExists, setGroupBan, setGroupWholeBan } from "../utils/utils_ob11";
+// 禁言工具：禁言/全员禁言/禁言列表
+import Config from "../../../config/config";
+import Tool from "../../tool";
+import { fmtDate } from "../../../utils/string";
+import { getGroupMemberInfo, getGroupShutList, netExists, setGroupBan, setGroupWholeBan } from "../../../utils/ob11";
 
 export function registerBan() {
     const toolBan = new Tool({
@@ -14,7 +15,7 @@ export function registerBan() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     },
                     duration: {
                         type: 'integer',
@@ -26,26 +27,26 @@ export function registerBan() {
         }
     });
     toolBan.sessionType = 'group';
-    toolBan.solve = async (ctx, _, ai, args) => {
+    toolBan.solve = async (ctx, _, session, args) => {
         const { name, duration } = args;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
-        const ui = await ai.context.findUserInfo(ctx, name);
+        const ui = await session.context.findUser(ctx, name);
 
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        if (ui === null) return `未找到<${name}>`;
         const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
-        if (!memberInfo) return { content: `获取权限信息失败`, images: [] };
-        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return { content: `你没有管理员权限`, images: [] };
+        if (!memberInfo) return `获取权限信息失败`;
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
 
-        const memberInfo2 = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), ui.id.replace(/^.+:/, ''));
-        if (!memberInfo2) return { content: `获取用户 ${ui.id} 信息失败`, images: [] };
-        if (memberInfo2.role === 'owner' || memberInfo2.role === 'admin') return { content: `你无法禁言${memberInfo2.role === 'owner' ? '群主' : '管理员'}`, images: [] };
+        const memberInfo2 = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), ui.userId.replace(/^.+:/, ''));
+        if (!memberInfo2) return `获取用户 ${ui.userId} 信息失败`;
+        if (memberInfo2.role === 'owner' || memberInfo2.role === 'admin') return `你无法禁言${memberInfo2.role === 'owner' ? '群主' : '管理员'}`;
 
-        await setGroupBan(epId, gid.replace(/^.+:/, ''), ui.id.replace(/^.+:/, ''), duration);
-        return { content: `已禁言<${name}> ${duration}秒`, images: [] };
+        await setGroupBan(epId, gid.replace(/^.+:/, ''), ui.userId.replace(/^.+:/, ''), duration);
+        return `已禁言<${name}> ${duration}秒`;
     }
 
     const toolWhole = new Tool({
@@ -69,13 +70,13 @@ export function registerBan() {
     toolWhole.solve = async (ctx, _, __, args) => {
         const { enable } = args;
 
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
 
         await setGroupWholeBan(epId, gid.replace(/^.+:/, ''), enable);
-        return { content: `已${enable ? '开启' : '关闭'}全员禁言`, images: [] };
+        return `已${enable ? '开启' : '关闭'}全员禁言`;
     }
 
     const toolList = new Tool({
@@ -93,19 +94,19 @@ export function registerBan() {
     });
     toolList.sessionType = 'group';
     toolList.solve = async (ctx, _, __, ___) => {
-        if (!netExists()) return { content: `未找到ob11网络连接依赖，请提示用户安装`, images: [] };
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group.groupId;
 
         const groupShutList = await getGroupShutList(epId, gid.replace(/^.+:/, ''));
-        if (!groupShutList || !Array.isArray(groupShutList)) return { content: `获取禁言列表失败`, images: [] };
+        if (!groupShutList || !Array.isArray(groupShutList)) return `获取禁言列表失败`;
 
         const s = `被禁言成员数量: ${groupShutList.length}\n` +
             groupShutList.slice(0, 50)
                 .map((item: any, index: number) => `${index + 1}. ${item.nick}(${item.uin}) ${item.cardName && item.cardName !== item.nick ? `群名片: ${item.cardName}` : ''} 禁言结束时间: ${fmtDate(item.shutUpTime)}`)
                 .join('\n');
 
-        return { content: s, images: [] };
+        return s;
     }
 }

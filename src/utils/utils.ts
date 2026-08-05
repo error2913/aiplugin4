@@ -1,5 +1,6 @@
+// 通用工具：消息ID转换/回复发送/超时/revive/路径解析等
 import { logger } from "../logger";
-import { Config } from "../config/config";
+import Config from "../config/config";
 import { transformTextToArray } from "./string";
 import { ALIAS_MAP } from "../config/static_config";
 import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
@@ -24,12 +25,12 @@ export function generateId() {
     return (timestamp + random).slice(-6); // 截取最后6位
 }
 
-export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<string> {
+export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, session: { context: { lastReply: string } }, s: string): Promise<string> {
     if (!s) {
         return '';
     }
 
-    const { showMsgId } = Config.message;
+    const { showMsgId = true } = Config.message as any;
     if (showMsgId && netExists()) {
         const rawMessageArray = transformTextToArray(s);
         const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
@@ -39,7 +40,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         if (pokeMsgArr.length > 0) {
             pokeMsgArr.forEach(item => {
                 const s = `[CQ:poke,qq=${item.data.qq}]`;
-                ai.context.lastReply = s;
+                session.context.lastReply = s;
                 seal.replyToSender(ctx, msg, s);
             });
         }
@@ -64,7 +65,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         }
         logger.warning(`无法获取message_id`);
     }
-    ai.context.lastReply = s;
+    session.context.lastReply = s;
     seal.replyToSender(ctx, msg, s);
     return '';
 }
@@ -178,4 +179,16 @@ export function getCommonItem(a: string[], b: string[]): string[] {
     if (a.length === 0 || b.length === 0) return [];
     const aset = new Set(a);
     return b.filter(u => aset.has(u));
+}
+
+/**
+ * 将本地资源路径解析为绝对路径：
+ * 相对路径（不以 / 或盘符开头）会拼接 SealDice 核心路径 Config.base.SEALDICE_PATH。
+ */
+export function resolveLocalPath(p: string): string {
+    if (!p) return p;
+    if (/^([a-zA-Z]:[\\/]|\/)/.test(p)) return p;
+    const { SEALDICE_PATH } = Config.base;
+    if (!SEALDICE_PATH) return p;
+    return `${SEALDICE_PATH}/${p}`;
 }

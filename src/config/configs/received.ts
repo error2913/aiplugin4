@@ -1,3 +1,4 @@
+// 消息接收配置：接收范围/忽略条件与正则
 import Config, { getRegexConfig } from "../config";
 
 export default class ReceivedConfig {

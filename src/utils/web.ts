@@ -1,3 +1,4 @@
+// 网络请求封装（fetch）
 export async function fetchData(url: string, apiKey: string, body: any): Promise<any> {
     const response = await fetch(url, {
         method: 'POST',

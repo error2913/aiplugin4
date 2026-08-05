@@ -1,3 +1,4 @@
+// 工具类型定义
 export interface ToolInfoObject {
     type: "object";
     description?: string;

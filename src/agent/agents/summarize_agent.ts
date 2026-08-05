@@ -1,3 +1,4 @@
+// 摘要智能体：用于短期记忆总结（use=summarization）
 import Agent from "../agent";
 
 const summarizeAgent = Agent.get("summarize_agent");

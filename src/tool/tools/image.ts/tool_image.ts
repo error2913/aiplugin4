@@ -1,9 +1,9 @@
-import { AIManager } from "../AI/AI";
-import { Image } from "../image/image";
-import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
-import { Tool } from "./tool";
-import { generateId } from "../utils/utils";
+// 图片工具：图片转文字/文生图（AIDrawing）
+import Image from "../../../resource/image";
+import { logger } from "../../../logger";
+import Config from "../../../config/config";
+import Tool from "../../tool";
+import { generateId } from "../../../utils/utils";
 
 export function registerImage() {
     const toolITT = new Tool({
@@ -16,7 +16,7 @@ export function registerImage() {
                 properties: {
                     id: {
                         type: "string",
-                        description: `图片id，或user_avatar:用户名称` + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (ConfigManager.message.showNumber ? '或纯数字群号' : '')
+                        description: `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
                     },
                     content: {
                         type: "string",
@@ -27,16 +27,16 @@ export function registerImage() {
             }
         }
     });
-    toolITT.solve = async (ctx, _, ai, args) => {
+    toolITT.solve = async (ctx, _, session, args) => {
         const { id, content } = args;
 
-        const image = await ai.context.findImage(ctx, id);
-        if (!image) return { content: `未找到图片${id}`, images: [] };
+        const image = await session.context.findImage(ctx, id);
+        if (!image) return `未找到图片${id}`;
         const text = content ? `请帮我用简短的语言概括这张图片中出现的:${content}` : ``;
 
-        if (image.type === 'local') return { content: '本地图片暂时无法识别', images: [] };
+        if (image.type === 'local') return '本地图片暂时无法识别';
         await image.imageToText(text);
-        return { content: image.content || '图片识别失败', images: [] };
+        return image.description || '图片识别失败';
     }
 
     const toolTTI = new Tool({
@@ -68,17 +68,17 @@ export function registerImage() {
             }
         }
     });
-    toolTTI.solve = async (ctx, msg, ai, args) => {
+    toolTTI.solve = async (ctx, msg, session, args) => {
         const { prompt, negative_prompt, save, name } = args;
 
         const ext = seal.ext.find('AIDrawing');
         if (!ext) {
             logger.error(`未找到AIDrawing依赖`);
-            return { content: `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`, images: [] };
+            return `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`;
         }
 
         // 切换到当前会话ai
-        if (!ctx.isPrivate) ai = AIManager.getAI(ctx.group.groupId);
+        // 会话已由 Tool.handleToolCall 传入，直接使用 session
 
         const kws = ["tti", name];
 
@@ -93,18 +93,18 @@ export function registerImage() {
                         await img.urlToBase64();
                     } catch (e) {
                         logger.error(`将图片URL转换为base64失败: ${e}`);
-                        img.file = result;
+                        img.url = result;
                     }
                 } else {
-                    img.file = result;
+                    img.url = result;
                 }
 
                 img.format = img.format || 'unknown';
                 img.description = `AI绘图<|img:${img.imageId}|>\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
 
-                if (save) ai.memory.addMemory(ctx, ai, [], [], kws, [img], img.description);
+                if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return { content: `生成成功，请使用<|img:${img.imageId}|>发送`, images: [img] };
+                return `生成成功，请使用<|img:${img.imageId}|>发送`;
             }
 
             // 兼容旧版 AIDrawing
@@ -113,19 +113,19 @@ export function registerImage() {
                     await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
                     if (save) {
                         logger.warning('旧版 AIDrawing，无法直接保存图片');
-                        return { content: `图像生成请求已发送`, images: [] };
+                        return `图像生成请求已发送`;
                     }
-                    return { content: `图像生成请求已发送`, images: [] };
+                    return `图像生成请求已发送`;
                 } catch (e) {
                     logger.error(`图像生成失败：：${e}`);
-                    return { content: `图像生成失败：${e}`, images: [] };
+                    return `图像生成失败：${e}`;
                 }
             }
             logger.error('未找到可用的 AIDrawing 接口，AIDrawing插件可能存在问题');
-            return { content: `未找到可用的 AIDrawing 接口， AIDrawing插件可能存在问题`, images: [] };
+            return `未找到可用的 AIDrawing 接口， AIDrawing插件可能存在问题`;
         } catch (e) {
             logger.error(`图像生成失败：${e}`);
-            return { content: `图像生成失败：${e}`, images: [] };
+            return `图像生成失败：${e}`;
         }
     }
 }

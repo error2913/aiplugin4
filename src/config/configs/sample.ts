@@ -1,3 +1,4 @@
+// 示例开关配置
 import Config from "../config";
 
 export default class SampleConfig {

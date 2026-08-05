@@ -1,6 +1,7 @@
-import { ConfigManager } from "../config/configManager";
-import { getCtxAndMsg } from "../utils/utils_seal";
-import { Tool, ToolManager } from "./tool";
+// 检定工具：技能/属性检定与 san check
+import Config from "../../../config/config";
+import { getCtxAndMsg } from "../../../utils/seal";
+import Tool from "../../tool";
 
 export function registerRollCheck() {
     const toolRoll = new Tool({
@@ -13,7 +14,7 @@ export function registerRollCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "被检定的人的名称" + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: "被检定的人的名称" + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: "string",
@@ -46,13 +47,13 @@ export function registerRollCheck() {
         cmd: 'ra',
         staticArgs: []
     }
-    toolRoll.solve = async (ctx, msg, ai, args) => {
+    toolRoll.solve = async (ctx, msg, session, args) => {
         const { name, expression, rank = '', times = 1, additional_dice = '', reason = '' } = args;
 
-        const ui = await ai.context.findUserInfo(ctx, name);
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await session.context.findUser(ctx, name);
+        if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
 
         const args2 = [];
         if (additional_dice) args2.push(additional_dice);
@@ -66,12 +67,12 @@ export function registerRollCheck() {
 
         if (reason) args2.push(reason);
 
-        if (parseInt(times) !== 1 && !isNaN(parseInt(times))) ToolManager.cmdArgs.specialExecuteTimes = parseInt(times);
+        if (parseInt(times) !== 1 && !isNaN(parseInt(times))) Tool.cmdArgs.specialExecuteTimes = parseInt(times);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, toolRoll.ExtCmdInfo, args2, [], []);
-        ToolManager.cmdArgs.specialExecuteTimes = 1;
-        if (!success) return { content: '检定执行失败', images: [] };
-        return { content: s, images: [] };
+        const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, toolRoll.ExtCmdInfo, args2, [], []);
+        Tool.cmdArgs.specialExecuteTimes = 1;
+        if (!success) return '检定执行失败';
+        return s;
     }
 
     // 该函数疑似无法正常工作。无法找到原因。
@@ -88,7 +89,7 @@ export function registerRollCheck() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: "进行sancheck的人的名称" + (ConfigManager.message.showNumber ? '或纯数字QQ号' : '')
+                        description: "进行sancheck的人的名称" + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
                     },
                     expression: {
                         type: "string",
@@ -108,13 +109,13 @@ export function registerRollCheck() {
         cmd: 'sc',
         staticArgs: []
     }
-    tool.solve = async (ctx, msg, ai, args) => {
+    tool.solve = async (ctx, msg, session, args) => {
         const { name, expression, additional_dice } = args;
 
-        const ui = await ai.context.findUserInfo(ctx, name);
-        if (ui === null) return { content: `未找到<${name}>`, images: [] };
+        const ui = await session.context.findUser(ctx, name);
+        if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.id, ctx.group.groupId));
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
 
         const value = seal.vars.intGet(ctx, 'san')[0];
         if (value === 0) seal.vars.intSet(ctx, 'san', 60);
@@ -123,8 +124,8 @@ export function registerRollCheck() {
         if (additional_dice) args2.push(additional_dice);
         args2.push(expression);
 
-        const [s, success] = await ToolManager.extensionSolve(ctx, msg, ai, tool.ExtCmdInfo, args2, [], []);
-        if (!success) return { content: 'san check执行失败', images: [] };
-        return { content: s, images: [] };
+        const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, tool.ExtCmdInfo, args2, [], []);
+        if (!success) return 'san check执行失败';
+        return s;
     }
 }

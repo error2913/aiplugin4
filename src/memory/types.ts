@@ -1,4 +1,5 @@
-import { MemoryItem } from "./memory_item";
+// 记忆类型定义
+import MemoryItem from "./memory_item";
 
 export interface searchOptions {
     topK: number;

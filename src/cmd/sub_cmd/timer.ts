@@ -1,3 +1,4 @@
+// .ai timer：查看/清除定时器
 import { TimerManager } from "../../timer";
 import { aliasToCmd } from "../../utils/utils";
 import { I, U } from "../privilege";

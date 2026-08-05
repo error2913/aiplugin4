@@ -1,3 +1,4 @@
+// 资源配置：本地图片/语音路径（供 system prompt 列出可发送资源）
 import Logger from "../../logger";
 import Image from "../../resource/image";
 import Config from "../config";

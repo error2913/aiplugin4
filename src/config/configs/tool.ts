@@ -1,7 +1,18 @@
+// 工具配置：函数调用开关/提示词工程/上限/禁用与默认关闭/本地录音路径
 import Config from "../config";
 
 export default class ToolConfig {
     static ext: seal.ExtInfo;
+
+    static getPathMapConfig(ext: seal.ExtInfo, key: string): { [id: string]: string } {
+        const map: { [id: string]: string } = {};
+        seal.ext.getTemplateConfig(ext, key).forEach(s => {
+            const [id, ...rest] = s.split(/[=，,]/);
+            if (id && rest.length > 0) map[id.trim()] = rest.join('=').trim();
+            else if (id) map[id.trim()] = id.trim();
+        });
+        return map;
+    }
 
     static register() {
         ToolConfig.ext = Config.getExt('工具');
@@ -12,6 +23,7 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ToolConfig.ext, "禁止调用的函数", [''], "修改后保存并重载js");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "默认关闭的函数", [''], "");
         seal.ext.registerTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称", [''], "没有的话建议把draw_deck这个函数加入不允许调用");
+        seal.ext.registerTemplateConfig(ToolConfig.ext, "本地录音路径", [''], "语音名称和路径，如：语音名=路径");
         seal.ext.registerOptionConfig(ToolConfig.ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",
@@ -47,7 +59,10 @@ export default class ToolConfig {
             BLOCKED: seal.ext.getTemplateConfig(ToolConfig.ext, "禁止调用的函数"),
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ToolConfig.ext, "默认关闭的函数"),
             DECKS: seal.ext.getTemplateConfig(ToolConfig.ext, "提供给AI的牌堆名称"),
+            RECORD_PATH_MAP: ToolConfig.getPathMapConfig(ToolConfig.ext, "本地录音路径"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ToolConfig.ext, "ai语音使用的音色")
         }
     }
 }
+
+// 需要为 ToolConfig 提供 getPathMapConfig 静态方法（与 ImageConfig 类似）

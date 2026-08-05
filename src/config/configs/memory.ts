@@ -1,3 +1,4 @@
+// 记忆配置：向量维度/长期记忆/总结记忆/知识库 TOML
 import MemoryItem from "../../memory/memory_item";
 import { revive, TypeDescriptor } from "../../utils/utils";
 import Config from "../config";

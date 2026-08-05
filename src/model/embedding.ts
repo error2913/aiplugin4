@@ -1,5 +1,6 @@
-import { UsageManager } from "../agent/usage";
-import { Config } from "../config/config";
+// 嵌入模型：文本向量化（带缓存）
+import { UsageManager } from "../usage";
+import Config from "../config/config";
 import { DEFAULT_EMBEDDING_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { withTimeout } from "../utils/utils";

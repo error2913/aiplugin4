@@ -1,3 +1,4 @@
+// 上下文消息类型定义
 import { ToolCall } from "../tool/types";
 
 export interface BaseMessageItem {

@@ -1,3 +1,4 @@
+// seal 上下文工具：构造 ctx/msg/会话ID
 export function createMsg(messageType: "group" | "private", uid: string, gid: string = ''): seal.Message {
     let msg = seal.newMessage();
     if (messageType === 'group') {

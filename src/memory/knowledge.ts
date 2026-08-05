@@ -1,8 +1,10 @@
+// 知识库服务：按角色加载知识库记忆与检索（继承记忆服务）
 import Logger from "../logger";
 import Config from "../config/config";
 import { revive, TypeDescriptor } from "../utils/utils";
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
+import { GroupInfo, UserInfo } from "../session/types";
 import Agent from "../agent/agent";
 
 export default class KnowledgeService extends MemoryService {
@@ -62,6 +64,49 @@ export default class KnowledgeService extends MemoryService {
         });
     }
 
+
+    get memoryIdList() {
+        return Object.keys(this.memoryMap);
+    }
+
+    async init() {
+        await KnowledgeService.get('*');
+    }
+
+    async updateKnowledgeMemory(roleIndex: number) {
+        const { ROLE_NAMES } = Config.message as any;
+        const role = (ROLE_NAMES && ROLE_NAMES[roleIndex]) || '*';
+        if (this.role !== role) {
+            const ks = await KnowledgeService.get(role);
+            this.role = role;
+            this.memoryMap = ks.memoryMap;
+        }
+    }
+
+    buildKnowledgeMemory(memoryList: MemoryItem[]): string {
+        if (memoryList.length === 0) return '';
+        return memoryList.map((m, i) =>
+            (i + 1) + '. [' + m.id + '] ' + m.content
+        ).join('\n');
+    }
+
+    async buildKnowledgeMemoryPrompt(roleIndex: number, text: string, ui: UserInfo, gi: GroupInfo): Promise<string> {
+        await this.updateKnowledgeMemory(roleIndex);
+        if (this.memoryIds.length === 0) return '';
+
+        const { KNOWLEDGE_SHOW_NUMBER } = Config.memory;
+        const memoryList = await this.search(text, {
+            topK: KNOWLEDGE_SHOW_NUMBER,
+            tags: [],
+            relatedMemories: [],
+            users: ui ? [ui.id] : [],
+            groups: gi ? [gi.id] : [],
+            method: 'score'
+        });
+
+        return this.buildKnowledgeMemory(memoryList);
+    }
+
     static knowledgeServiceMap: { [role: string]: KnowledgeService } = {};
 
     static async get(role: string) {
@@ -84,3 +129,4 @@ export default class KnowledgeService extends MemoryService {
         Config.ext.storageSet(`knowledge_${knowledgeService.role}`, JSON.stringify(knowledgeService));
     }
 }
+export const knowledgeService = new KnowledgeService();

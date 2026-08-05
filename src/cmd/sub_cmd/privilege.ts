@@ -1,4 +1,5 @@
-import { AIManager } from "../../AI/AI";
+// .ai priv：会话/指令权限修改
+import { getSession } from "../../session/session_service";
 import { HELP_MAP } from "../../config/static_config";
 import { aliasToCmd } from "../../utils/utils";
 import { M, PrivilegeManager, U } from "../privilege";
@@ -56,12 +57,12 @@ ${HELP_MAP["会话权限"]}`);
                         }
 
                         const id2 = val4 === 'now' ? sid : val4;
-                        const ai2 = AIManager.getAI(id2);
+                        const ai2 = getSession(id2);
 
                         ai2.setting.priv = limit;
 
                         seal.replyToSender(ctx, msg, '权限修改完成');
-                        AIManager.saveAI(id2);
+                        ai2.save();
                         return ret;
                     }
                     case 'check': {
@@ -74,7 +75,7 @@ ${HELP_MAP["ID"]}`);
                         }
 
                         const id2 = val4 === 'now' ? sid : val4;
-                        const ai2 = AIManager.getAI(id2);
+                        const ai2 = getSession(id2);
                         seal.replyToSender(ctx, msg, `${id2}\n会话权限:${ai2.setting.priv}`);
                         return ret;
                     }

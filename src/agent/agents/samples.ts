@@ -1,3 +1,4 @@
+// 示例智能体：示例命令展示用（use=chat）
 import Agent from "../agent";
 
 const sampleAgent = Agent.get("sample_agent");
