@@ -8,6 +8,7 @@ import { ChatModelUse } from "../model/types";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionService } from "../session/session_service";
+import { ToolRunner } from "../tool/runner";
 import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
@@ -15,6 +16,7 @@ import { handleMessages } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, TypeDescriptor } from "../utils/utils";
 
+import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
 
 // 单次对话中允许的连续工具调用轮次上限（防止模型无限调用工具）
@@ -74,12 +76,14 @@ export default class Agent {
     async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const toolInfos = Tool.getToolsInfo(session);
+        const runCtx = new AgentRunContext();
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
         let toolTurn = 0;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
+            runCtx.beginTurn();
             const messages = await handleMessages(ctx, session);
             const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos, tool_choice || 'auto', session.setting.modelName);
             result = await handleReply(ctx, msg, session, raw_reply);
@@ -93,11 +97,12 @@ export default class Agent {
                             break;
                         }
                         logger.info('prompt tool call triggered');
+                        runCtx.recordToolCall();
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images);
                         await session.context.addAssistantMessage(match[0], '');
                         try {
-                            const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, session, match[1]);
+                            const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
                             for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
                         } catch (e) {
                             logger.error('handlePromptToolCalls error:', e.message);
@@ -114,11 +119,12 @@ export default class Agent {
                             break;
                         }
                         logger.info('tool call triggered');
+                        runCtx.recordToolCall();
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images);
                         session.context.addToolCallsMessage(tool_calls);
                         try {
-                            const { result: callResults } = await Tool.handleToolCalls(ctx, msg, session, tool_calls);
+                            const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
                             for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
                         } catch (e) {
                             logger.error('handleToolCalls error:', e.message);
@@ -146,6 +152,7 @@ export default class Agent {
 
         const { contextArray, replyArray, images } = result;
         await session.reply(ctx, msg, contextArray, replyArray, images);
+        logger.info(`[run] ${runCtx.summary()}`);
     }
 
     static agentMap: { [key: string]: Agent } = {};

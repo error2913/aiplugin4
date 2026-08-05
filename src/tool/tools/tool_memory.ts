@@ -1,6 +1,7 @@
 // 记忆工具：添加/删除/搜索/清除记忆（含知识库）
 import Config from "../../config/config";
 import { knowledgeService } from "../../memory/knowledge";
+import { MemoryManager } from "../../memory/manager";
 import { searchOptions as SearchOptions } from "../../memory/types";
 import { getSession, SessionService } from "../../session/session_service";
 import { GroupInfo, SessionInfo, UserInfo } from "../../session/types";
@@ -87,7 +88,7 @@ export function registerMemory() {
         }
 
         //记忆相关处理
-        await session.memory.addMemory(ctx, session, uiList, giList, Array.isArray(keywords) ? keywords : [], [], text);
+        await MemoryManager.addMemory(ctx, session, uiList, giList, Array.isArray(keywords) ? keywords : [], [], text);
         SessionService.save(session);
 
         return `添加记忆成功`;
