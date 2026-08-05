@@ -4,6 +4,7 @@ import Logger from "../logger"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { fixJsonString } from "../utils/string";
+import { withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
 import { getSkillNames, registerSkills } from "./skills";
@@ -41,10 +42,12 @@ export default class Tool {
     ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
     sessionType: 'any' | SessionType; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
+    sensitive: boolean; // 敏感工具（发送消息/封禁/改名等），调用会显著记录
     solve: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => Promise<string>;
 
-    constructor(info: ToolInfo) {
+    constructor(info: ToolInfo, sensitive = false) {
         this.toolInfo = info;
+        this.sensitive = sensitive;
         this.ExtCmdInfo = {
             extName: '',
             cmd: '',
@@ -203,12 +206,36 @@ export default class Tool {
                 }
             }
 
-            const content = await tool.solve(ctx, msg, session, args);
+            const validateError = Tool.validateArgs(tool, args);
+            if (validateError) {
+                Logger.warning(`调用函数失败:${validateError}`);
+                return { result: { tool_call_id: tool_call.id, content: `调用函数失败:${validateError}` }, callBack: true };
+            }
+
+            const { TIMEOUT } = Config.base;
+            const time = Date.now();
+            const content = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT);
+            Logger.info(`[tool] ${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
             return { result: { tool_call_id: tool_call.id, content }, callBack: true };
         } catch (e) {
             Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e.message}` }, callBack: true };
         }
+    }
+
+    /** 轻量参数校验：按 parameters.properties 的 type 检查 */
+    static validateArgs(tool: Tool, args: any): string | null {
+        const props = (tool.toolInfo.function.parameters && tool.toolInfo.function.parameters.properties) || {};
+        for (const key of Object.keys(props)) {
+            if (args[key] === undefined) continue;
+            const expected = props[key].type;
+            if (expected === 'string' && typeof args[key] !== 'string') return `参数 ${key} 应为字符串`;
+            if (expected === 'number' && typeof args[key] !== 'number') return `参数 ${key} 应为数字`;
+            if (expected === 'boolean' && typeof args[key] !== 'boolean') return `参数 ${key} 应为布尔值`;
+            if (expected === 'array' && !Array.isArray(args[key])) return `参数 ${key} 应为数组`;
+            if (expected === 'object' && (typeof args[key] !== 'object' || args[key] === null)) return `参数 ${key} 应为对象`;
+        }
+        return null;
     }
     static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_calls: ToolCall[]): Promise<{ result: ToolCallResult[], callBack: boolean }> {
         const { MAX_CALL_COUNT } = Config.tool;

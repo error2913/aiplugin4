@@ -25,6 +25,7 @@ export function registerMusicPlay() {
             }
         }
     });
+    tool.sensitive = true; // 发送点歌属敏感操作
     tool.solve = async (ctx, msg, _, args) => {
         const { platform, song_name } = args;
 

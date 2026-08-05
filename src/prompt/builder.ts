@@ -4,7 +4,7 @@ import { MemoryManager } from "../memory/manager";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { getSkillNames } from "../tool/skills";
+import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 
 export interface SystemPromptSection {
@@ -68,9 +68,9 @@ export async function buildSystemPromptContent(
     });
 
     // 能力段：技能在两种工具模式下都可见（函数调用模式无工具提示词段时也能发现技能）
-    const skillNames = getSkillNames();
-    if (skillNames.length > 0) {
-        content += `\n\n## 可用技能\n- ${skillNames.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
+    const skillSummaries = getSkillSummaries();
+    if (skillSummaries.length > 0) {
+        content += `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
     }
     return content;
 }

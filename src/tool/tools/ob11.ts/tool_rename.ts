@@ -28,6 +28,7 @@ export function registerRename() {
         }
     });
     tool.sessionType = 'group';
+    tool.sensitive = true; // 改名属敏感操作
     tool.solve = async (ctx, msg, session, args) => {
         const { name, new_name } = args;
 

@@ -10,6 +10,9 @@ interface Skill {
     content: string;
 }
 
+const MAX_SKILL_CONTENT_LENGTH = 4000; // 单次返回的技能内容上限
+const MAX_REF_DEPTH = 2; // 技能间引用的最大解析深度
+
 function getSkills(): Skill[] {
     return seal.ext.getTemplateConfig(ext, "技能配置")
         .map(line => (line || '').trim())
@@ -44,6 +47,11 @@ export function getSkillNames(): string[] {
     return getSkills().map(s => s.name);
 }
 
+/** 返回技能摘要（名称 + 描述），用于注入 system prompt 的能力段 */
+export function getSkillSummaries(): string[] {
+    return getSkills().map(s => s.description ? `${s.name}：${s.description}` : s.name);
+}
+
 /**
  * 读取“技能配置”，注册 use_skill 工具
  */
@@ -70,8 +78,25 @@ export function registerSkills() {
         }
     });
     tool.solve = async (_ctx, _msg, _session, args) => {
-        const skill = skills.find(s => s.name === args?.name);
-        return skill ? skill.content : `技能 ${args?.name} 不存在`;
+        return resolveSkillContent(skills, args?.name, 0);
     };
     Logger.info(`已注册技能工具 use_skill，可用技能: ${skills.map(s => s.name).join('、')}`);
+}
+
+/** 解析技能内容：支持 {{skill:名称}} 引用（限深度），并截断超长内容 */
+function resolveSkillContent(skills: Skill[], name: string, depth: number): string {
+    const skill = skills.find(s => s.name === name);
+    if (!skill) return `技能 ${name} 不存在`;
+
+    let content = skill.content;
+    if (depth < MAX_REF_DEPTH) {
+        content = content.replace(/\{\{\s*skill:([^}]+)\s*\}\}/g, (_, refName: string) => {
+            return resolveSkillContent(skills, refName.trim(), depth + 1);
+        });
+    }
+
+    if (content.length > MAX_SKILL_CONTENT_LENGTH) {
+        content = content.slice(0, MAX_SKILL_CONTENT_LENGTH) + `\n…（技能内容过长，已截断，共 ${skill.content.length} 字符）`;
+    }
+    return content;
 }

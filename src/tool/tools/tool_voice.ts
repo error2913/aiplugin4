@@ -51,6 +51,7 @@ export function registerRecord() {
                 }
             }
         });
+        toolRecord.sensitive = true; // 发送语音属敏感操作
         toolRecord.solve = async (ctx, msg, _, args) => {
             const { name } = args;
 
@@ -81,6 +82,7 @@ export function registerRecord() {
             }
         }
     });
+    toolTTS.sensitive = true; // AI 声聊合成语音属敏感操作
     toolTTS.solve = async (ctx, msg, _, args) => {
         const { text } = args;
 

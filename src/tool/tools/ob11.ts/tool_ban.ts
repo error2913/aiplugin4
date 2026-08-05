@@ -27,6 +27,7 @@ export function registerBan() {
         }
     });
     toolBan.sessionType = 'group';
+    toolBan.sensitive = true; // 禁言属敏感操作
     toolBan.solve = async (ctx, _, session, args) => {
         const { name, duration } = args;
 
@@ -67,6 +68,7 @@ export function registerBan() {
         }
     });
     toolWhole.sessionType = 'group';
+    toolWhole.sensitive = true; // 全员禁言属敏感操作
     toolWhole.solve = async (ctx, _, __, args) => {
         const { enable } = args;
 

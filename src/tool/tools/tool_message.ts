@@ -45,6 +45,7 @@ export function registerMessage() {
             }
         }
     });
+    toolSend.sensitive = true; // 发送消息属敏感操作
     toolSend.solve = async (ctx, msg, session, args) => {
         const { msg_type, name, content, function: tool_call, reason = '' } = args;
 
@@ -231,6 +232,7 @@ export function registerMessage() {
             }
         }
     });
+    toolMerge.sensitive = true; // 发送合并转发属敏感操作
     toolMerge.solve = async (ctx, _, session, args) => {
         const { msg_type, name, messages } = args;
 

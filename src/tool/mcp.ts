@@ -16,6 +16,16 @@ interface MCPToolDef {
     inputSchema?: any;
 }
 
+interface MCPServerState {
+    server: MCPServer;
+    sessionId: string;
+    tools: MCPToolDef[];
+    toolsFetchedAt: number;
+}
+
+const TOOLS_CACHE_TTL = 60 * 1000; // 工具列表缓存 60s
+const serverStates: { [name: string]: MCPServerState } = {};
+
 function getMCPServers(): MCPServer[] {
     return seal.ext.getTemplateConfig(ext, "MCP服务器配置")
         .map(line => (line || '').trim())
@@ -63,6 +73,26 @@ async function mcpRequest(url: string, token: string, payload: object, sessionId
     return { status: response.status, body, sessionId: response.headers.get('mcp-session-id') || sessionId };
 }
 
+/** JSON-RPC 错误码 → 可读错误信息 */
+function formatError(status: number, body: any): string {
+    const err = body && body.error;
+    if (err && typeof err === 'object') {
+        const codeMsg: { [code: number]: string } = {
+            [-32700]: '解析错误（请求不是合法 JSON）',
+            [-32600]: '请求无效',
+            [-32601]: '方法不存在',
+            [-32602]: '参数无效',
+            [-32603]: '服务器内部错误',
+            [-32001]: '服务器未初始化',
+            [-32002]: '会话不存在或已失效',
+            [-32003]: '服务器繁忙'
+        };
+        const readable = codeMsg[err.code] || `错误码 ${err.code}`;
+        return `${readable}${err.message ? `：${err.message}` : ''}`;
+    }
+    return `HTTP ${status} ${JSON.stringify(body)}`;
+}
+
 async function initialize(server: MCPServer): Promise<string> {
     const res = await mcpRequest(server.url, server.token, {
         jsonrpc: '2.0',
@@ -75,7 +105,7 @@ async function initialize(server: MCPServer): Promise<string> {
         }
     });
     if (!res.body || !res.body.result) {
-        throw new Error(`MCP initialize 失败: HTTP ${res.status} ${JSON.stringify(res.body)}`);
+        throw new Error(`MCP initialize 失败: ${formatError(res.status, res.body)}`);
     }
     const sessionId = res.sessionId;
     await mcpRequest(server.url, server.token, { jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
@@ -84,11 +114,14 @@ async function initialize(server: MCPServer): Promise<string> {
 
 async function listTools(server: MCPServer, sessionId: string): Promise<MCPToolDef[]> {
     const res = await mcpRequest(server.url, server.token, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, sessionId);
+    if (res.body && res.body.error) {
+        throw new Error(`MCP tools/list 失败: ${formatError(res.status, res.body)}`);
+    }
     const tools = res.body && res.body.result && res.body.result.tools;
     return Array.isArray(tools) ? tools : [];
 }
 
-async function callTool(server: MCPServer, sessionId: string, name: string, args: any): Promise<string> {
+async function doCallTool(server: MCPServer, sessionId: string, name: string, args: any): Promise<string> {
     const res = await mcpRequest(server.url, server.token, {
         jsonrpc: '2.0',
         id: 3,
@@ -96,46 +129,85 @@ async function callTool(server: MCPServer, sessionId: string, name: string, args
         params: { name, arguments: args }
     }, sessionId);
     const result = res.body && res.body.result;
+    if (res.body && res.body.error) {
+        throw new Error(`MCP 工具 ${name} 调用失败: ${formatError(res.status, res.body)}`);
+    }
     if (!result) {
-        throw new Error(`MCP tools/call 失败: HTTP ${res.status} ${JSON.stringify(res.body)}`);
+        throw new Error(`MCP tools/call 失败: ${formatError(res.status, res.body)}`);
     }
     const text = Array.isArray(result.content) ? result.content.map((b: any) => b.text || '').join('\n') : JSON.stringify(result);
     if (result.isError) {
-        throw new Error(text || 'MCP 工具调用返回错误');
+        throw new Error(text || `MCP 工具 ${name} 返回错误`);
     }
     return text;
 }
 
+async function getSessionId(server: MCPServer, force = false): Promise<string> {
+    const state = serverStates[server.name];
+    if (!force && state && state.sessionId) return state.sessionId;
+    const sessionId = await initialize(server);
+    serverStates[server.name] = { server, sessionId, tools: [], toolsFetchedAt: 0 };
+    return sessionId;
+}
+
+async function callTool(server: MCPServer, name: string, args: any): Promise<string> {
+    try {
+        const sessionId = await getSessionId(server);
+        return await doCallTool(server, sessionId, name, args);
+    } catch (e) {
+        // 会话失效时重新 initialize 并重试一次
+        if (e instanceof Error && /会话不存在|已失效|session/i.test(e.message)) {
+            Logger.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
+            const sessionId = await getSessionId(server, true);
+            return await doCallTool(server, sessionId, name, args);
+        }
+        throw e;
+    }
+}
+
+/** 获取工具列表（TTL 缓存），并注册新出现的工具 */
+async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]> {
+    const state = serverStates[server.name];
+    if (!force && state && state.tools.length > 0 && Date.now() - state.toolsFetchedAt < TOOLS_CACHE_TTL) {
+        return state.tools;
+    }
+
+    const sessionId = await getSessionId(server);
+    const tools = await listTools(server, sessionId);
+    serverStates[server.name] = { server, sessionId, tools, toolsFetchedAt: Date.now() };
+
+    for (const t of tools) {
+        if (!t.name) continue;
+        const toolName = `${server.name}_${t.name}`;
+        if (Object.prototype.hasOwnProperty.call(toolMap, toolName)) continue;
+
+        const schema = t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object', properties: {} };
+        const tool = new Tool({
+            type: 'function',
+            function: {
+                name: toolName,
+                description: `${t.description || 'MCP 工具'}（MCP:${server.name}）`,
+                parameters: {
+                    ...schema,
+                    required: Array.isArray(schema.required) ? schema.required : []
+                }
+            }
+        }, true);
+        tool.solve = async (_ctx, _msg, _session, args) => {
+            return await callTool(server, t.name, args || {});
+        };
+        Logger.info(`已注册 MCP 工具 ${toolName}`);
+    }
+    return tools;
+}
+
 /**
- * 读取“MCP服务器配置”，初始化每个服务器并注册其工具（工具名为 服务器名_工具名）
+ * 注册所有已配置 MCP 服务器的工具；工具列表按 TTL 缓存，可随时调用刷新。
  */
 export async function registerMCPTools() {
     for (const server of getMCPServers()) {
         try {
-            const sessionId = await initialize(server);
-            const tools = await listTools(server, sessionId);
-            for (const t of tools) {
-                if (!t.name) continue;
-                const toolName = `${server.name}_${t.name}`;
-                if (Object.prototype.hasOwnProperty.call(toolMap, toolName)) continue;
-
-                const schema = t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object', properties: {} };
-                const tool = new Tool({
-                    type: 'function',
-                    function: {
-                        name: toolName,
-                        description: `${t.description || 'MCP 工具'}（MCP:${server.name}）`,
-                        parameters: {
-                            ...schema,
-                            required: Array.isArray(schema.required) ? schema.required : []
-                        }
-                    }
-                });
-                tool.solve = async (_ctx, _msg, _session, args) => {
-                    return await callTool(server, sessionId, t.name, args || {});
-                };
-                Logger.info(`已注册 MCP 工具 ${toolName}`);
-            }
+            await syncTools(server);
         } catch (e) {
             Logger.error(`MCP 服务器 ${server.name} 注册失败: ${e.message}`);
         }

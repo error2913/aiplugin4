@@ -97,15 +97,17 @@ export default class Agent {
                             break;
                         }
                         logger.info('prompt tool call triggered');
-                        trace.recordToolCall();
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images);
                         await session.context.addAssistantMessage(match[0], '');
+                        const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
                             for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
+                            trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
                             logger.error('handlePromptToolCalls error:', e.message);
+                            trace.recordToolCall('prompt-call', Date.now() - callTime, false, e.message);
                         }
                         session.tool.callCount = 0;
                         toolTurn++;
@@ -119,15 +121,17 @@ export default class Agent {
                             break;
                         }
                         logger.info('tool call triggered');
-                        trace.recordToolCall();
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images);
                         session.context.addToolCallsMessage(tool_calls);
+                        const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
                             for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
+                            trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
                             logger.error('handleToolCalls error:', e.message);
+                            trace.recordToolCall('function-call', Date.now() - callTime, false, e.message);
                         }
                         session.tool.callCount = 0;
                         toolTurn++;
@@ -218,7 +222,7 @@ export default class Agent {
                             await session.context.addAssistantMessage(match[0], '');
 
                             try {
-                                trace.recordToolCall();
+                                trace.recordToolCall('stream-tool-call', 0, true);
                                 turns++;
                                 if (turns >= MAX_TOOL_TURNS) {
                                     logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
