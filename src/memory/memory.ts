@@ -26,6 +26,8 @@ export default class MemoryService {
     constructor() {
         this.memoryMap = {};
         this.persona = '无';
+        this.useShortMemory = false;
+        this.shortMemoryList = [];
     }
 
     get memoryIds() {
