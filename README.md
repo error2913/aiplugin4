@@ -163,9 +163,9 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 对话模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 填 `["chat"]`；`provider` / `base_url` 可省略自动识别；默认对话模型取列表第一项；可选 `[body]` 覆盖请求参数 |
-| 图片模型 | TOML 格式，`use` 填 `["image-understanding"]`，用于图片识别 |
-| 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`，输出维度需与「向量维度」配置一致 |
+| 对话模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）；`provider` / `base_url` 可省略自动识别；默认对话模型取列表第一项；可选 `[body]` 覆盖请求参数 |
+| 图片模型 | TOML 格式，`use` 填 `["image-understanding"]`（图片理解），用于图片识别 |
+| 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`（文本嵌入），输出维度需与「向量维度」配置一致 |
 
 ```toml
 # 对话模型示例
@@ -234,7 +234,6 @@ max_tokens = 2048
 | 图片全局识别豹语条件 | 填 `'1'` 开启所有图片自动识别转文字；或填豹语表达式限制群/用户范围 |
 | 识别图片时将url转换为base64 | 永不 / 自动 / 总是，解决大模型无法正常获取 QQ 图床图片的问题 |
 | 图片转文字最大字符数 | 图片转文字后保留的最大字符数 |
-| 本地图片路径 | 如不需要可以不填写，修改完需要重载 JS |
 | 发送图片的概率/% | 在 AI 触发回复后随机抽取一张本地或偷取的图片发送的概率 |
 | 图片识别默认prompt | 识图时的默认提示词 |
 | 偷取图片存储上限 | 每个群聊或私聊单独储存 |
@@ -249,9 +248,8 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启；修改后保存并重载 JS |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启；修改后保存并重载 JS |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
-| 本地录音路径 | 每行一个本地语音：`语音名=路径` |
-| MCP服务器配置 | 每行一个：`名称|URL|Token`，或 JSON `{"name":"qq","url":"...","token":"..."}`；修改后重载 JS |
-| 技能配置 | 每行一个：`名称|描述|内容`，或 JSON；修改后重载 JS |
+| MCP服务器配置 | 每行一个：`名称|URL|Token`，示例 `qq|http://127.0.0.1:8888/mcp|your_token`，或 JSON `{"name":"qq","url":"...","token":"..."}`；修改后重载 JS |
+| 技能配置 | 每行一个：`名称|描述|内容`，示例 `骰点|TRPG百分比检定|使用 1d100 进行检定…`，或 JSON；修改后重载 JS |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要 aitts 依赖插件和 ffmpeg |
 
 ### 记忆
@@ -299,7 +297,7 @@ max_tokens = 2048
 | 设置项 | 说明 |
 |:---:|:---|
 | 本地图片路径 | 每行一个本地图片路径，供 system prompt 列出可发送资源；修改后重载 JS |
-| 本地语音路径 | 每行一个本地语音路径，供 system prompt 列出；发送语音需要配置 ffmpeg 到环境变量 |
+| 本地语音路径 | 每行一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 system prompt 列出；发送语音需要配置 ffmpeg 到环境变量；修改后重载 JS |
 
 ### prompt 模板
 
@@ -523,9 +521,10 @@ aiplugin4/
 │   ├── update.ts         # 版本更新日志
 │   └── usage.ts          # token 用量统计与图表
 ├── tools/                # 构建脚本（build.js / build-config.js）
-├── scripts/              # smoke.js 冒烟测试
+├── scripts/              # smoke.js 冒烟、prepare-sealpack.js 打包同步、release-notes.js 发布正文
 ├── types/                # seal.d.ts（SealDice API 类型定义）
 ├── dist/                 # 构建产物 aiplugin4.js
+├── sealpack/             # SealRepo 打包源（info.toml / assets/icon.png，scripts/main.js 自动同步）
 ├── 相关后端项目/         # 配套后端服务源码
 ├── .github/workflows/    # build-check.yml / release.yml
 ├── header.txt            # 打包时拼接到产物头部的 UserScript 注释
@@ -540,6 +539,8 @@ npm run build       # 生产构建 → dist/aiplugin4.js（头部拼接 header.t
 npm run build-dev   # 开发构建 → dev/aiplugin4.js（带 sourcemap）
 npm run smoke       # 冒烟：在 Node 中用 seal 桩加载 dist/aiplugin4.js
 npm run lint        # ESLint 检查 src/**/*.ts
+npm run package:check  # 构建 + 同步 sealpack 源 + 校验包格式与体积
+npm run pack:sealpack  # 打包 → dist/aiplugin4.sealpack
 ```
 
 构建使用 esbuild，入口 `src/index.ts`，`external: ['csharp','puerts']`；生产构建不压缩，保持可读、便于用户自行查错。改完核心逻辑建议执行 `npm run build && npm run smoke`。
@@ -611,9 +612,15 @@ registerSay();
 
 ### 发布流程
 
-- `.github/workflows/build-check.yml`：main 分支 push / PR 时执行构建检查；
-- `.github/workflows/release.yml`：手动触发，输入版本号与更新日志，构建后创建 tag（`v<版本>`）并发布 GitHub Release；
-- 发版前记得同步三处版本号：`src/config/static_config.ts` 的 `VERSION`、`header.txt` 的 `@version`、`src/update.ts` 的 `updateInfo`。
+- `.github/workflows/build-check.yml`：main 分支 push / PR 时执行 lint、tsc strict、构建并校验 sealpack 包、冒烟测试；
+- `.github/workflows/release.yml`：推送 `v*` 标签（如 `v4.13.0`）时自动发版：
+  1. verify：lint / tsc / `npm run package:check`（构建 + sealpack 校验）/ 冒烟，并校验标签与 `VERSION`、`update.ts` 版本日志一致；
+  2. 打包 `.sealpack`（`sealpack pack sealpack`）并上传构建产物；
+  3. publish-sealrepo：用 `SEALPACK_TOKEN` 发布到 [SealRepo](https://repo.sealdice.com/)；
+  4. github-release：从 `src/update.ts` 提取对应版本日志作为 Release 正文，附带 `aiplugin4-v<版本>.sealpack` 与 `dist/aiplugin4.js`。
+- 打包源在 `sealpack/`：`scripts/main.js` 为构建产物自动同步，`info.toml` 的版本由 `scripts/prepare-sealpack.js` 自动同步；
+- SealRepo 发布 Token：仓库 Settings → Secrets and variables → Actions → 新建 `SEALPACK_TOKEN`（值在 repo.sealdice.com 后台复制）；包图标放 `sealpack/assets/icon.png`（`info.toml` 已引用）；
+- 发版前需同步：`src/config/static_config.ts` 的 `VERSION`、`header.txt` 的 `@version`、`src/update.ts` 的 `updateInfo`（并确认 `updateInfo` 含新版本条目）。
 
 ---
 
