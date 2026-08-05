@@ -376,26 +376,34 @@ export const FACE_MAP = {
 export const PROVIDER_MAP = {
     "deepseek": "https://api.deepseek.com/v1",
     "zhipu": "https://open.bigmodel.cn/api/paas/v4",
-    "alibaba": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
+    "alibaba": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "openai": "https://api.openai.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai"
 }
 
 export const CHAT_MODEL_MAP = {
-    "deepseek": ["deepseek-chat", "deepseek-reasoner"]
+    "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro", "deepseek-v4-flash"],
+    "openai": ["gpt-4o", "gpt-4o-mini"],
+    "google": ["gemini-3-pro-preview-low"],
+    "zhipu": ["glm-4", "glm-4-flash"],
+    "alibaba": ["qwen-max", "qwen-plus", "qwen-turbo"]
 };
 export const CHAT_MODEL_TO_PROVIDER = Object.entries(CHAT_MODEL_MAP).reduce((acc, [provider, models]) => {
     models.forEach(model => acc[model] = provider);
     return acc;
 }, {} as { [model: string]: string });
 export const IMAGE_MODEL_MAP = {
-    "zhipu": ["glm-4v-plus-0111", "glm-4v"]
+    "zhipu": ["glm-4v-plus-0111", "glm-4v", "glm-4v-flash"],
+    "alibaba": ["qwen-vl-max", "qwen-vl-plus"],
+    "openai": ["gpt-4o", "gpt-4o-mini"]
 };
 export const IMAGE_MODEL_TO_PROVIDER = Object.entries(IMAGE_MODEL_MAP).reduce((acc, [provider, models]) => {
     models.forEach(model => acc[model] = provider);
     return acc;
 }, {} as { [model: string]: string });
 export const EMBEDDING_MODEL_MAP = {
-    "alibaba": ["text-embedding-v4", "text-embedding-v3"]
+    "alibaba": ["text-embedding-v4", "text-embedding-v3"],
+    "openai": ["text-embedding-3-large", "text-embedding-3-small"]
 };
 export const EMBEDDING_MODEL_TO_PROVIDER = Object.entries(EMBEDDING_MODEL_MAP).reduce((acc, [provider, models]) => {
     models.forEach(model => acc[model] = provider);

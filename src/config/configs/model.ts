@@ -24,17 +24,67 @@ use = ["chat"]
 
 [body]
 temperature = 1
-top_p = 1`
+top_p = 1`,
+            `# deepseek 推理模型
+name = "deepseek-reasoner"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `name = "deepseek-v4-pro"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `name = "deepseek-v4-flash"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `# Google Gemini（OpenAI 兼容端点）
+name = "gemini-3-pro-preview-low"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `# OpenAI
+name = "gpt-4o"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `# 智谱
+name = "glm-4"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `# 通义千问
+name = "qwen-max"
+api_key = "sk-xxxx"
+use = ["chat"]`
         ], '', "模型");
         seal.ext.registerTemplateConfig(ext, "图片模型", [
             `# 使用toml格式
 name = "glm-4v"
+api_key = "sk-xxxx"
+use = ["image-understanding"]`,
+            `name = "glm-4v-plus-0111"
+api_key = "sk-xxxx"
+use = ["image-understanding"]`,
+            `name = "glm-4v-flash"
+api_key = "sk-xxxx"
+use = ["image-understanding"]`,
+            `# 通义千问视觉
+name = "qwen-vl-max"
+api_key = "sk-xxxx"
+use = ["image-understanding"]`,
+            `# OpenAI 视觉
+name = "gpt-4o"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`
         ], '', "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
             `# 使用toml格式
 name = "text-embedding-v4"
+api_key = "sk-xxxx"
+use = ["text-embedding"]`,
+            `name = "text-embedding-v3"
+api_key = "sk-xxxx"
+use = ["text-embedding"]`,
+            `# OpenAI 嵌入
+name = "text-embedding-3-large"
+api_key = "sk-xxxx"
+use = ["text-embedding"]`,
+            `name = "text-embedding-3-small"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`
         ], '', "模型");
