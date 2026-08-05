@@ -10,11 +10,11 @@ import Model from "../model/model";
 import Image, { ImageManager } from "../resource/image";
 import { TimerManager } from "../timer";
 import { ToolState } from "../tool/tool";
-import Tool, { toolMap } from "../tool/tool";
+import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { RequestMessage } from "../utils/message";
 import { handleMessages } from "../utils/message";
-import { handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
+import { MessageSegment, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 import { replyToSender, transformMsgId } from "../utils/utils";
 
@@ -320,94 +320,8 @@ export class Session {
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         this.lastCtx = ctx;
-        const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-
-        await this.stopCurrentChatStream();
-
-        const messages = await handleMessages(ctx, this);
-        const id = await streamService.startStream(messages, this.setting.modelName);
-        if (!id) return;
-
-        this.stream.id = id;
-        let status = 'processing';
-        let after = 0;
-        let interval = 1000;
-
-        while (status === 'processing' && this.stream.id === id) {
-            const result = await streamService.pollStream(this.stream.id, after);
-            status = result.status;
-            const raw_reply = result.reply;
-
-            if (raw_reply.length <= 8) interval = 1500;
-            else if (raw_reply.length <= 20) interval = 1000;
-            else if (raw_reply.length <= 30) interval = 500;
-            else interval = 200;
-
-            if (raw_reply.trim() === '') {
-                after = result.nextAfter;
-                await new Promise(resolve => setTimeout(resolve, interval));
-                continue;
-            }
-            logger.info('stream reply:', raw_reply);
-
-            if (STATUS && PROMPT_ENGINEERING) {
-                if (!this.stream.toolCallStatus && /<[\||｜]?function(?:_call)?>/.test(this.stream.reply + raw_reply)) {
-                    logger.info('tool call start tag found');
-                    const match = raw_reply.match(/([\s\S]*)<[\||｜]?function(?:_call)?>/);
-                    if (match && match[1].trim()) {
-                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, match[1]);
-                        if (this.stream.id !== id) return;
-                        await this.reply(ctx, msg, contextArray, replyArray, images);
-                    }
-                    this.stream.toolCallStatus = true;
-                }
-
-                if (this.stream.id !== id) return;
-
-                if (this.stream.toolCallStatus) {
-                    this.stream.reply += raw_reply;
-
-                    if (/<\/function(?:_call)?>/.test(this.stream.reply)) {
-                        logger.info('tool call end tag found');
-                        const match = this.stream.reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
-                        if (match) {
-                            this.stream.reply = '';
-                            this.stream.toolCallStatus = false;
-                            await this.stopCurrentChatStream();
-
-                            await this.context.addAssistantMessage(match[0], '');
-
-                            try {
-                                const { result: callResults } = await Tool.handlePromptToolCalls(ctx, msg, this, match[1]);
-                                for (const r of callResults) await this.context.addToolCallbackMessage(r.content, r.tool_call_id);
-                            } catch (e) {
-                                logger.error('handlePromptToolCalls error:', e.message);
-                                return;
-                            }
-
-                            await this.chatStream(ctx, msg);
-                            return;
-                        }
-                        await this.stopCurrentChatStream();
-                        return;
-                    } else {
-                        after = result.nextAfter;
-                        await new Promise(resolve => setTimeout(resolve, interval));
-                        continue;
-                    }
-                }
-            }
-
-            const { contextArray, replyArray, images } = await handleReply(ctx, msg, this, raw_reply);
-            if (this.stream.id !== id) return;
-            this.reply(ctx, msg, contextArray, replyArray, images);
-
-            after = result.nextAfter;
-            await new Promise(resolve => setTimeout(resolve, interval));
-        }
-
-        if (this.stream.id !== id) return;
-        await this.stopCurrentChatStream();
+        // 流式编排统一由智能体 runStream() 处理
+        await this.agent.runStream(this, ctx, msg);
     }
 
     async stopCurrentChatStream(): Promise<void> {

@@ -155,6 +155,108 @@ export default class Agent {
         logger.info(`[run] ${runCtx.summary()}`);
     }
 
+    /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），带轮次上限 */
+    async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        const { STATUS, PROMPT_ENGINEERING } = Config.tool;
+        const runCtx = new AgentRunContext();
+        let turns = 0;
+
+        await session.stopCurrentChatStream();
+
+        const messages = await handleMessages(ctx, session);
+        const id = await streamService.startStream(messages, session.setting.modelName);
+        if (!id) return;
+
+        session.stream.id = id;
+        let status = 'processing';
+        let after = 0;
+        let interval = 1000;
+
+        while (status === 'processing' && session.stream.id === id) {
+            runCtx.beginTurn();
+            const result = await streamService.pollStream(session.stream.id, after);
+            status = result.status;
+            const raw_reply = result.reply;
+
+            if (raw_reply.length <= 8) interval = 1500;
+            else if (raw_reply.length <= 20) interval = 1000;
+            else if (raw_reply.length <= 30) interval = 500;
+            else interval = 200;
+
+            if (raw_reply.trim() === '') {
+                after = result.nextAfter;
+                await new Promise(resolve => setTimeout(resolve, interval));
+                continue;
+            }
+            logger.info('stream reply:', raw_reply);
+
+            if (STATUS && PROMPT_ENGINEERING) {
+                if (!session.stream.toolCallStatus && /<[\||｜]?function(?:_call)?>/.test(session.stream.reply + raw_reply)) {
+                    logger.info('tool call start tag found');
+                    const match = raw_reply.match(/([\s\S]*)<[\||｜]?function(?:_call)?>/);
+                    if (match && match[1].trim()) {
+                        const { contextArray, replyArray, images } = await handleReply(ctx, msg, session, match[1]);
+                        if (session.stream.id !== id) return;
+                        await session.reply(ctx, msg, contextArray, replyArray, images);
+                    }
+                    session.stream.toolCallStatus = true;
+                }
+
+                if (session.stream.id !== id) return;
+
+                if (session.stream.toolCallStatus) {
+                    session.stream.reply += raw_reply;
+
+                    if (/<\/function(?:_call)?>/.test(session.stream.reply)) {
+                        logger.info('tool call end tag found');
+                        const match = session.stream.reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                        if (match) {
+                            session.stream.reply = '';
+                            session.stream.toolCallStatus = false;
+                            await session.stopCurrentChatStream();
+
+                            await session.context.addAssistantMessage(match[0], '');
+
+                            try {
+                                runCtx.recordToolCall();
+                                turns++;
+                                if (turns >= MAX_TOOL_TURNS) {
+                                    logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
+                                    return;
+                                }
+                                const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
+                                for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
+                            } catch (e) {
+                                logger.error('handlePromptToolCalls error:', e.message);
+                                return;
+                            }
+
+                            await this.runStream(session, ctx, msg);
+                            return;
+                        }
+                        await session.stopCurrentChatStream();
+                        return;
+                    } else {
+                        after = result.nextAfter;
+                        await new Promise(resolve => setTimeout(resolve, interval));
+                        continue;
+                    }
+                }
+            }
+
+            const { contextArray, replyArray, images } = await handleReply(ctx, msg, session, raw_reply);
+            if (session.stream.id !== id) return;
+            session.reply(ctx, msg, contextArray, replyArray, images);
+
+            after = result.nextAfter;
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+
+        if (session.stream.id !== id) return;
+        await session.stopCurrentChatStream();
+        logger.info(`[run] ${runCtx.summary()}`);
+    }
+
     static agentMap: { [key: string]: Agent } = {};
 
     static get(name: string): Agent {
