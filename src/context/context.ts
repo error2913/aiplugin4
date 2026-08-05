@@ -167,11 +167,16 @@ export class Context {
     }
 
     // 工具回调消息：过长的结果同样交给压缩智能体压缩后再存入上下文
-    async addToolCallbackMessage(text: string, toolCallId: string) {
-        const { COMPRESS_THRESHOLD } = Config.message;
-        if (text.length > COMPRESS_THRESHOLD) {
+    // 独立于用户消息压缩阈值；web_search 压缩时附带搜索目标，帮助保留与问题相关的信息
+    async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, searchTarget?: string) {
+        const { TOOL_RESPONSE_COMPRESS_MIN_LENGTH } = Config.tool;
+        if (TOOL_RESPONSE_COMPRESS_MIN_LENGTH > 0 && text.length > TOOL_RESPONSE_COMPRESS_MIN_LENGTH) {
             try {
-                const compressed = await Agent.get('compress_agent').chat(text);
+                let prompt = text;
+                if (toolName === 'web_search' && searchTarget) {
+                    prompt = `搜索目标:${searchTarget}\n\n工具返回结果:\n${text}`;
+                }
+                const compressed = await Agent.get('compress_agent').chat(prompt);
                 if (compressed) text = compressed;
             } catch (e) {
                 Logger.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));

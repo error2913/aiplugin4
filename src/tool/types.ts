@@ -91,7 +91,9 @@ export interface ToolCall {
 }
 export interface ToolCallResult {
     tool_call_id: string,
-    content: string
+    content: string,
+    toolName?: string,     // 工具名（回调压缩/审计用）
+    searchTarget?: string  // web_search 的搜索目标（压缩时附带，保留与问题相关的信息）
 }
 
 export interface ExtCmdInfo {

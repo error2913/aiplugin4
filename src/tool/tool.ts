@@ -216,7 +216,11 @@ export default class Tool {
             const time = Date.now();
             const content = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT);
             Logger.info(`[tool] ${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
-            return { result: { tool_call_id: tool_call.id, content }, callBack: true };
+            const result: ToolCallResult = { tool_call_id: tool_call.id, content };
+            if (name === 'web_search' && args && typeof args.q === 'string' && args.q.trim()) {
+                result.searchTarget = args.q.trim();
+            }
+            return { result, callBack: true };
         } catch (e) {
             Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
@@ -254,6 +258,7 @@ export default class Tool {
                 continue;
             }
             const { result, callBack } = await this.handleToolCall(ctx, msg, session, tool_call);
+            result.toolName = tool_call.function.name;
             ret.result.push(result);
             ret.callBack = ret.callBack && callBack;
             session.tool.callCount++;

@@ -103,7 +103,7 @@ export default class Agent {
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
-                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
+                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
                             Logger.exception('handlePromptToolCalls error', e);
@@ -127,7 +127,7 @@ export default class Agent {
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
-                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
+                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
                             trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
                             Logger.exception('handleToolCalls error', e);
@@ -229,7 +229,7 @@ export default class Agent {
                                     return;
                                 }
                                 const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
-                                for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id);
+                                for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
                             } catch (e) {
                                 logger.error('handlePromptToolCalls error:', e instanceof Error ? e.message : String(e));
                                 return;
