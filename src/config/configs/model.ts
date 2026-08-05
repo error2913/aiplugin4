@@ -18,6 +18,10 @@ export default class ModelConfig {
 
         seal.ext.registerTemplateConfig(ext, "对话模型", [
             `# 使用toml格式
+name = "deepseek-v4-flash"
+api_key = "sk-xxxx"
+use = ["chat"]`,
+            `# 默认对话模型（若需调整默认值，把想要的模型放到第一行）
 name = "deepseek-chat"
 api_key = "sk-xxxx"
 use = ["chat"]
@@ -30,9 +34,6 @@ name = "deepseek-reasoner"
 api_key = "sk-xxxx"
 use = ["chat"]`,
             `name = "deepseek-v4-pro"
-api_key = "sk-xxxx"
-use = ["chat"]`,
-            `name = "deepseek-v4-flash"
 api_key = "sk-xxxx"
 use = ["chat"]`,
             `# Google Gemini（OpenAI 兼容端点）
