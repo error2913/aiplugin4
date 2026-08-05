@@ -56,7 +56,8 @@ export function registerCmdCtxn() {
                 }
                 session.context.autoNameMod = mod;
                 session.save();
-                seal.replyToSender(ctx, msg, `设置成功，将自动修改上下文里的名字为${mod === 1 ? '昵称' : '群名片'}`);
+                const modText = mod === 0 ? '不自动修改' : (mod === 1 ? '自动修改为昵称' : '自动修改为群名片');
+                seal.replyToSender(ctx, msg, `设置成功，${modText}`);
                 return ret;
             }
             default: {
