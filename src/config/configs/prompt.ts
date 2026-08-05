@@ -3,9 +3,18 @@ import Handlebars from "handlebars";
 
 import Logger from "../../logger";
 import { ext } from "../config";
+
+// 注册时记录默认模板；存档配置损坏（如 Handlebars 语法错误）时回退到默认模板
+const DEFAULT_TEMPLATES: { [key: string]: string } = {};
+
+function registerTemplate(key: string, templates: string[], desc: string, group: string) {
+    DEFAULT_TEMPLATES[key] = templates[0] || '';
+    seal.ext.registerTemplateConfig(ext, key, templates, desc, group);
+}
+
 export default class PromptConfig {
     static register() {
-        seal.ext.registerTemplateConfig(ext, "system prompt模板", [
+        registerTemplate("system prompt模板", [
             `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。
 
 ## 扮演设定
@@ -38,7 +47,7 @@ export default class PromptConfig {
 {{#if LOCAL_IMAGES}}
 - 可使用<|img:图片ID|>发送本地图片，本地图片列表如下：
     {{#each LOCAL_IMAGES}}
-{{{imageId}}}{{unless @last}}、{{/unless}}
+{{{imageId}}}{{#unless @last}}、{{/unless}}
     {{else}}
 暂无本地图片
     {{/each}}
@@ -48,7 +57,7 @@ export default class PromptConfig {
 {{#if LOCAL_AUDIOS}}
 - 可使用<|audio:音频ID|>发送本地音频，本地音频列表如下：
     {{#each LOCAL_AUDIOS}}
-{{{audioId}}}{{unless @last}}、{{/unless}}
+{{{audioId}}}{{#unless @last}}、{{/unless}}
     {{else}}
 暂无本地音频
     {{/each}}
@@ -62,7 +71,7 @@ export default class PromptConfig {
 
 {{{toolPrompt}}}`
         ], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "长期记忆prompt模板", [
+        registerTemplate("长期记忆prompt模板", [
             `{{#if MEMORY}}
 
 ## 长期记忆
@@ -87,7 +96,7 @@ export default class PromptConfig {
     {{/each}}
 {{/if}}`
         ], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "总结记忆prompt模板", [
+        registerTemplate("总结记忆prompt模板", [
             `{{#if SUMMARY}}
 
 ## 总结记忆
@@ -98,7 +107,7 @@ export default class PromptConfig {
     {{/each}}
 {{/if}}`
         ], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "知识库记忆prompt模板", [
+        registerTemplate("知识库记忆prompt模板", [
             `{{#if KNOWLEDGE}}
 
 ## 知识库
@@ -116,7 +125,7 @@ export default class PromptConfig {
     {{/each}}
 {{/if}}`
         ], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "工具函数prompt模板", [ // 子智能体通过 call_subagent 工具暴露给 AI
+        registerTemplate("工具函数prompt模板", [ // 子智能体通过 call_subagent 工具暴露给 AI
             `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数
@@ -145,8 +154,8 @@ export default class PromptConfig {
     {{/each}}
 {{/if}}`
         ], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "", "prompt模板");
-        seal.ext.registerTemplateConfig(ext, "记忆总结prompt模板", [ // wip
+        registerTemplate("图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "", "prompt模板");
+        registerTemplate("记忆总结prompt模板", [ // wip
             `你现在扮演的角色如下:
 ## 扮演详情
 {{{角色设定}}}
@@ -246,10 +255,32 @@ export default class PromptConfig {
 
 function getHandlebarsTemplateConfig(key: string): HandlebarsTemplateDelegate<any> {
     const template = seal.ext.getTemplateConfig(ext, key)[0] || '';
+    let compiled: HandlebarsTemplateDelegate<any>;
     try {
-        return Handlebars.compile(template);
+        compiled = Handlebars.compile(template);
     } catch (e) {
-        Logger.error(`模板${key}解析失败，已使用空模板: ${e.message}`);
-        return () => '';
+        Logger.error(`模板${key}解析失败: ${e.message}`);
+        compiled = null;
+    }
+
+    // 默认模板兜底：存档配置损坏或渲染失败时回退到默认模板
+    let defaultCompiled: HandlebarsTemplateDelegate<any>;
+    try {
+        defaultCompiled = Handlebars.compile(DEFAULT_TEMPLATES[key] || '');
+    } catch (e) {
+        Logger.error(`默认模板${key}解析失败: ${e.message}`);
+        defaultCompiled = null;
+    }
+    const fallback = defaultCompiled || (() => '');
+
+    if (!compiled) return fallback;
+
+    return (context, options) => {
+        try {
+            return compiled(context, options);
+        } catch (e) {
+            Logger.error(`模板${key}渲染失败，已回退到默认模板: ${e.message}`);
+            return fallback(context, options);
+        }
     }
 }
