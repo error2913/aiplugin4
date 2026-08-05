@@ -6,7 +6,7 @@ import { logger } from "../logger";
 import Image from "../resource/image";
 
 import { getCtxAndMsg } from "./seal";
-import { transformMsgId, transformMsgIdBack } from "./utils";
+import { resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
 
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
@@ -277,6 +277,18 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 }
                 break;
             }
+            case 'audio': {
+                const id = seg.content;
+                const audios: { audioId: string, path: string }[] = Config.resource.LOCAL_AUDIOS || [];
+                const audio = audios.find(a => a.audioId === id);
+
+                if (audio) {
+                    text += `[语音:${resolveLocalPath(audio.path)}]`;
+                } else {
+                    logger.warning(`无法找到本地语音：${id}`);
+                }
+                break;
+            }
             case 'face': {
                 const faceId = Object.keys(FACE_MAP).find(key => FACE_MAP[key] === seg.content) || '';
                 text += faceId ? `[CQ:face,id=${faceId}]` : '';
@@ -474,7 +486,7 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
 }
 
 interface TokenSegment {
-    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'face';
+    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'face' | 'audio';
     content: string;
 }
 
@@ -491,14 +503,14 @@ export function parseSpecialTokens(s: string): TokenSegment[] {
             })
         } else {
             const [_, type = 'text', content = ''] = match;
-            if (!['at', 'poke', 'quote', 'img', 'face'].includes(type)) {
+            if (!['at', 'poke', 'quote', 'img', 'face', 'audio'].includes(type)) {
                 result.push({
                     type: 'text',
                     content: seg
                 })
             } else {
                 result.push({
-                    type: type as 'at' | 'poke' | 'quote' | 'img' | 'face',
+                    type: type as TokenSegment['type'],
                     content: content
                 })
             }
