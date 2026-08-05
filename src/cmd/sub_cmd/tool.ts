@@ -136,7 +136,7 @@ export function registerCmdTool() {
                 }
             }
             default: {
-                const toolStatus = session.tool.state;
+                const toolStatus = session.toolState;
 
                 let i = 1;
                 let s = '工具函数如下:';
