@@ -1,10 +1,7 @@
-// 消息构建：system prompt/上下文消息组装与 body 解析
+// 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
-import { knowledgeService } from "../memory/knowledge";
+import { buildSystemPromptContent } from "../prompt/builder";
 import { Session } from "../session/session";
-import { GroupInfo, UserInfo } from "../session/types";
-import User from "../session/user";
-import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { ToolCall } from "../tool/types";
 
@@ -34,54 +31,8 @@ interface ContextMessage {
 }
 
 export async function buildSystemMessage(ctx: seal.MsgContext, session: Session): Promise<ContextMessage> {
-    const { RECEIVE_IMAGE } = Config.received;
-    const { MEMORY, SUMMARY, KNOWLEDGE } = Config.memory;
-    const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-
-    // 本地可发送资源（图片/语音）来自“资源”配置
-    const localImages = (Config.resource.LOCAL_IMAGES || []).map(img => ({ imageId: img.imageId }));
-    const localAudios: any[] = Config.resource.LOCAL_AUDIOS || [];
-
     const { roleIndex, roleSetting } = getRoleSetting(ctx);
-
-    // 取最后一条用户消息，作为记忆/知识库查询的上下文
-    const userMessages = session.context.messages.filter(m => m.role === 'user');
-    let text = '', ui: UserInfo = null, gi: GroupInfo = null;
-    const lastUser = userMessages[userMessages.length - 1] as any;
-    if (lastUser && Array.isArray(lastUser.contentItems) && lastUser.contentItems.length > 0) {
-        const lastItem = lastUser.contentItems[lastUser.contentItems.length - 1];
-        text = lastItem.text || '';
-        if (lastItem.userId) {
-            const u = User.get(lastItem.userId);
-            ui = { isPrivate: true, id: lastItem.userId, name: u.userName || lastItem.userId };
-        }
-        gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
-    }
-
-    let knowledgePrompt = '';
-    if (KNOWLEDGE) {
-        // 按角色加载知识库，并用知识库 prompt 模板渲染
-        await knowledgeService.updateKnowledgeMemory(roleIndex);
-        knowledgePrompt = knowledgeService.buildKnowledgePrompt(session.context.sessionId, text);
-    }
-    const memoryPrompt = MEMORY ? await session.memory.buildMemoryPrompt(ctx, session.context, text, ui, gi) : '';
-    const summaryPrompt = SUMMARY ? session.memory.buildSummaryPrompt() : '';
-    const toolsPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
-
-    const content = Config.prompt.SYSTEM_MESSAGE_TEMPLATE({
-        instruction: roleSetting,
-        platform: ctx.endPoint.platform,
-        sessionType: ctx.isPrivate ? 'private' : 'group',
-        sessionName: ctx.isPrivate ? ctx.player.name : ctx.group.groupName,
-        sessionId: ctx.isPrivate ? ctx.player.userId : ctx.group.groupId,
-        RECEIVE_IMAGE,
-        LOCAL_IMAGES: localImages,
-        LOCAL_AUDIOS: localAudios,
-        memoryPrompt,
-        summaryPrompt,
-        knowledgePrompt,
-        toolPrompt: toolsPrompt
-    });
+    const content = await buildSystemPromptContent(ctx, session, roleIndex, roleSetting);
 
     return {
         role: 'system',
