@@ -24,7 +24,7 @@ export default class TriggerConfig {
             TIMER: seal.ext.getFloatConfig(ext, "默认计时器"),
             PROBABILITY: seal.ext.getFloatConfig(ext, "默认概率"),
             ACTIVE_TIME: seal.ext.getStringConfig(ext, "默认触发活跃时间"),
-            // 默认向量相似度：预留作向量记忆检索的相似度下限（当前检索未使用阈值过滤）
+            // 默认向量相似度：向量记忆检索的相似度下限（低于该值的记忆不返回）
             VECTOR_SIMILARITY: seal.ext.getFloatConfig(ext, "默认向量相似度"),
             TRIGGER_REGEX: getRegexConfig(ext, "触发正则表达式"),
             TRIGGER_CONDITION: seal.ext.getStringConfig(ext, "触发需要满足的条件"),

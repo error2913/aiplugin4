@@ -23,10 +23,9 @@ export default class ChatModel extends BaseModel {
         try {
             const body = this.buildBody({
                 model: this.name,
-                ...DEFAULT_CHAT_MODEL_BODY,
                 messages: await agent.sessionService.getSession(sessionId).getMessages(),
                 tools: agent.getRequestTools(agent.sessionService.getSession(sessionId))
-            });
+            }, DEFAULT_CHAT_MODEL_BODY);
             logger.printRequestMessages(body.messages)
 
             const time = Date.now();

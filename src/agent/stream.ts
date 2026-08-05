@@ -21,9 +21,8 @@ export class streamService {
         try {
             const body = model.buildBody({
                 model: model.name,
-                ...DEFAULT_CHAT_MODEL_BODY,
                 messages
-            });
+            }, DEFAULT_CHAT_MODEL_BODY);
 
             // 打印请求发送前的上下文
             const s = JSON.stringify(body.messages, (key, value) => {
@@ -95,9 +94,8 @@ export class streamService {
             const { STATUS, PROMPT_ENGINEERING } = Config.tool;
             const body = model.buildBody({
                 model: model.name,
-                ...DEFAULT_CHAT_MODEL_BODY,
                 messages
-            });
+            }, DEFAULT_CHAT_MODEL_BODY);
             if (STATUS && !PROMPT_ENGINEERING) {
                 if (tools && tools.length > 0) body.tools = tools;
                 body.tool_choice = tool_choice;

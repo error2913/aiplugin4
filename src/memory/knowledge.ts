@@ -53,7 +53,7 @@ export default class KnowledgeService extends MemoryService {
         KnowledgeService.save(this);
     }
 
-    buildKnowledgePrompt(sessionId: string, text: string): string {
+    async buildKnowledgePrompt(sessionId: string, text: string): Promise<string> {
         if (this.memories.length === 0) return '';
         const agent = Agent.get(this.role);
         const session = agent.sessionService.getSession(sessionId);
@@ -63,7 +63,7 @@ export default class KnowledgeService extends MemoryService {
         const { KNOWLEDGE_TEMPLATE } = Config.prompt;
         return KNOWLEDGE_TEMPLATE({
             "KNOWLEDGE": KNOWLEDGE,
-            "memories": this.getTopScoreMemories(text, users, groups)
+            "memories": await this.getTopScoreMemories(text, users, groups)
         });
     }
 

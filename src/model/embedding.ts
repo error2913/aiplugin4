@@ -33,9 +33,8 @@ export default class EmbeddingModel extends BaseModel {
         try {
             const body = this.buildBody({
                 model: this.name,
-                ...DEFAULT_EMBEDDING_MODEL_BODY,
                 input: text
-            });
+            }, DEFAULT_EMBEDDING_MODEL_BODY);
 
             const time = Date.now();
             const data = await requestModel(this.url, this.apiKey, body);

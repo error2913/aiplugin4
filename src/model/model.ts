@@ -19,12 +19,9 @@ export class BaseModel {
         this.body = body;
     }
 
-    buildBody(args: { [key: string]: any }) {
-        const body = JSON.parse(JSON.stringify(this.body));
-        for (const key in args) {
-            body[key] = args[key];
-        }
-        return body;
+    buildBody(args: { [key: string]: any }, defaults: { [key: string]: any } = {}) {
+        // 优先级：默认值 < 用户 TOML [body] 配置 < 调用方显式参数
+        return { ...defaults, ...this.body, ...args };
     }
 }
 

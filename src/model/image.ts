@@ -23,7 +23,6 @@ export default class ImageModel extends BaseModel {
         try {
             const body = this.buildBody({
                 model: this.name,
-                ...DEFAULT_IMAGE_MODEL_BODY,
                 messages: [{
                     role: "user",
                     content: [{
@@ -59,10 +58,9 @@ export default class ImageModel extends BaseModel {
         try {
             const body = this.buildBody({
                 model: this.name,
-                ...DEFAULT_IMAGE_MODEL_BODY,
                 messages: await agent.sessionService.getSession(sessionId).getImageMessages(),
                 tools: agent.getRequestTools(agent.sessionService.getSession(sessionId))
-            });
+            }, DEFAULT_IMAGE_MODEL_BODY);
             Logger.printRequestMessages(body.messages);
 
             const time = Date.now();
