@@ -1,7 +1,7 @@
-// 示例智能体：示例命令展示用（use=chat）
+// 示例智能体：仅作开发参考，不参与运行时初始化（未在 initAgents 中调用）
 import Agent from "../agent";
 
-// 示例智能体：懒初始化（需在 Config.registerConfig 之后调用）
+// 示例智能体：如需启用请手动调用 init()，默认不进入实际使用
 export function init() {
     const sampleAgent = Agent.get("sample_agent");
     sampleAgent.name = "sample_agent";

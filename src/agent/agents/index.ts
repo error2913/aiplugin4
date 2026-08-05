@@ -4,11 +4,9 @@
  * 因为 Agent.get 依赖 ext（过早初始化会抛 "Value is not object coercible"）。
  */
 import { init as initCompress } from "./compress_agent";
-import { init as initSample } from "./samples";
 import { init as initSummarize } from "./summarize_agent";
 
 export function initAgents() {
     initCompress();
-    initSample();
     initSummarize();
 }
