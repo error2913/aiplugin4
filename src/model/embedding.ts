@@ -1,12 +1,9 @@
 // 嵌入模型：文本向量化（带缓存）
-import Config from "../config/config";
 import { DEFAULT_EMBEDDING_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
-import { UsageManager } from "../usage";
-import { withTimeout } from "../utils/utils";
-import { fetchData } from "../utils/web";
 
 import { BaseModel } from "./model";
+import { requestModel } from "./provider";
 import { EmbeddingModelUse, ModelBody } from "./types";
 
 export default class EmbeddingModel extends BaseModel {
@@ -28,8 +25,6 @@ export default class EmbeddingModel extends BaseModel {
             return [];
         }
 
-        const { TIMEOUT } = Config.base;
-
         if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === this.body.dimensions) {
             const v = EmbeddingModel.vectorCache.vector;
             return v;
@@ -42,10 +37,8 @@ export default class EmbeddingModel extends BaseModel {
             });
 
             const time = Date.now();
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, body), TIMEOUT);
+            const data = await requestModel(this.url, this.apiKey, body);
             if (data.data && data.data.length > 0) {
-                UsageManager.updateUsage(data.model, data.usage);
-
                 const embedding = data.data[0].embedding;
 
                 logger.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');

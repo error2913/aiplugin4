@@ -1,14 +1,11 @@
 // 图片模型：图片理解（callITT）与图片对话
 import Agent from "../agent/agent";
-import Config from "../config/config";
 import { DEFAULT_IMAGE_MODEL_BODY } from "../config/static_config";
 import Logger from "../logger";
 import { ToolCall } from "../tool/types";
-import { UsageManager } from "../usage";
-import { withTimeout } from "../utils/utils";
-import { fetchData } from "../utils/web";
 
 import { BaseModel } from "./model";
+import { requestModel } from "./provider";
 import { ImageModelUse, ModelBody } from "./types";
 
 export default class ImageModel extends BaseModel {
@@ -23,7 +20,6 @@ export default class ImageModel extends BaseModel {
     }
 
     async callITT(src: string, prompt = ''): Promise<string> {
-        const { TIMEOUT } = Config.base;
         try {
             const body = this.buildBody({
                 ...DEFAULT_IMAGE_MODEL_BODY,
@@ -41,10 +37,8 @@ export default class ImageModel extends BaseModel {
             Logger.printRequestMessages(body.messages);
 
             const time = Date.now();
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, body), TIMEOUT);
+            const data = await requestModel(this.url, this.apiKey, body);
             if (data.choices && data.choices.length > 0) {
-                UsageManager.updateUsage(data.model, data.usage);
-
                 const message = data.choices[0].message;
                 const content = message.content || '';
 
@@ -61,7 +55,6 @@ export default class ImageModel extends BaseModel {
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
-        const { TIMEOUT } = Config.base;
         try {
             const body = this.buildBody({
                 ...DEFAULT_IMAGE_MODEL_BODY,
@@ -71,10 +64,8 @@ export default class ImageModel extends BaseModel {
             Logger.printRequestMessages(body.messages);
 
             const time = Date.now();
-            const data = await withTimeout(() => fetchData(this.url, this.apiKey, body), TIMEOUT);
+            const data = await requestModel(this.url, this.apiKey, body);
             if (data.choices && data.choices.length > 0) {
-                UsageManager.updateUsage(data.model, data.usage);
-
                 const message = data.choices[0].message;
                 const finish_reason = data.choices[0].finish_reason;
 

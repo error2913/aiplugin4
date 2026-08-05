@@ -48,18 +48,16 @@ export default class Model {
         }
         const chatModelList = Model.chatModels.filter(model => model.use.includes(use));
         if (chatModelList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * chatModelList.length);
-            return chatModelList[randomIndex];
+            // 确定性选择：同一用途下取第一个匹配模型（避免随机导致行为不稳定）
+            return chatModelList[0];
         }
         const ImageModelList = Model.imageModels.filter(model => model.use.includes(use));
         if (ImageModelList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * ImageModelList.length);
-            return ImageModelList[randomIndex];
+            return ImageModelList[0];
         }
         const chatModelAnyList = Model.chatModels.filter(model => model.use.length === 0);
         if (chatModelAnyList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * chatModelAnyList.length);
-            return chatModelAnyList[randomIndex];
+            return chatModelAnyList[0];
         }
         const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
