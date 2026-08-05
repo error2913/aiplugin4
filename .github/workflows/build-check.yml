@@ -28,8 +28,8 @@ jobs:
       - name: Type check (strict)
         run: npx tsc --noEmit --strict
 
-      - name: Build
-        run: npm run build
+      - name: Build and validate package
+        run: npm run package:check
 
       - name: Smoke test
         run: npm run smoke

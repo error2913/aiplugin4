@@ -1,0 +1,46 @@
+# 包格式版本，当前 CLI 支持 1.0.0。
+format_version = "1.0.0"
+
+# 包基础信息。id 必须使用 namespace/package 格式；version 必须是 semver，
+# 与插件版本（src/config/static_config.ts 的 VERSION）保持一致，
+# 构建时会由 scripts/prepare-sealpack.js 自动同步。
+[package]
+id = "error2913/aiplugin4"
+name = "aiplugin4"
+version = "4.13.0"
+authors = ["错误、白鼠"]
+license = "MIT"
+description = "适用于大部分 OpenAI API 兼容格式 AI 的 Sealdice 模型插件，支持对话、记忆、工具调用、MCP/Skills 等。"
+keywords = ["ai", "chatgpt", "sealdice", "插件"]
+
+# SealDice 兼容范围。min_version 表示安装此包所需的最低 SealDice 版本。
+[package.seal]
+min_version = "1.6.0"
+
+# 依赖的其他 sealpack 包。
+[dependencies]
+
+# 权限声明。插件需要联网调用模型 API，因此 network 必须为 true。
+[permissions]
+network = true
+file_read = []
+file_write = []
+
+# 内容清单。scripts/main.js 为构建产物，由 scripts/prepare-sealpack.js 自动生成。
+[contents]
+scripts = ["scripts/*.js"]
+decks = []
+reply = []
+helpdoc = []
+templates = []
+
+# 商店展示信息。icon、banner、screenshots 填写 assets/ 下的图片路径。
+[store]
+readme = "README.md"
+icon = "assets/icon.png"
+banner = ""
+screenshots = []
+category = "tool"
+
+# 包配置项，当前模板不预置配置。
+[config]

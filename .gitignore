@@ -12,3 +12,4 @@ yarn.lock
 .dev/
 dist/
 dev/
+sealpack/scripts/

@@ -11,7 +11,9 @@
     "build": "cross-env NODE_ENV=production node tools/build.js",
     "build-dev": "cross-env NODE_ENV=dev node tools/build.js",
     "smoke": "node scripts/smoke.js",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\"",
+    "package:check": "npm run build && node scripts/prepare-sealpack.js && sealpack validate sealpack && sealpack size sealpack",
+    "pack:sealpack": "node scripts/prepare-sealpack.js && sealpack pack sealpack --out dist/aiplugin4.sealpack"
   },
   "engines": {
     "node": ">=10"
@@ -34,6 +36,7 @@
     "eslint-plugin-functional": "^6.6.3",
     "eslint-plugin-import": "^2.32.0",
     "fs-extra": "^11.2.0",
+    "sealpack": "^0.1.2",
     "source-map-support": "^0.5.21",
     "typescript": "^5.5.4"
   },
