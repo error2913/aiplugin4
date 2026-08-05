@@ -1,30 +1,45 @@
-import { AIManager } from "./AI/AI";
-import { ToolManager } from "./tool/tool";
-import { ConfigManager } from "./config/configManager";
-import { triggerConditionMap } from "./tool/tool_trigger";
-import { logger } from "./logger";
-import { transformTextToArray } from "./utils/utils_string";
-import { checkUpdate } from "./utils/utils_update";
-import { TimerManager } from "./timer";
-import { createMsg } from "./utils/utils_seal";
+// 插件入口：装配配置、模型、记忆、工具、命令与事件管线
+import Handlebars from "handlebars";
+
+import { initAgents } from "./agent/agents";
 import { PrivilegeManager } from "./cmd/privilege";
-import { knowledgeMM } from "./AI/memory";
-import { CQTYPESALLOW } from "./config/config";
-import { registerCmd } from "./cmd/root";
+import { registerCmd } from "./cmd/root_cmd";
+import { ext } from "./config/config";
+import Config from "./config/config";
+import { STORAGE_VERSION } from "./config/static_config";
+import { logger } from "./logger";
+import { knowledgeService } from "./memory/knowledge";
+import { MessagePipeline } from "./pipeline";
+import { TimerManager } from "./timer";
+import Tool from "./tool/tool";
+import { createMsg } from "./utils/seal";
+import { fmtDate } from "./utils/string";
+import { checkUpdate } from "./utils/update";
+
 
 function main() {
-  ConfigManager.registerConfig();
-  checkUpdate();
-  ToolManager.registerTool();
-  TimerManager.init();
-  knowledgeMM.init();
+  Handlebars.registerHelper('index', (index: number) => index + 1);
+  Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));
+  Handlebars.registerHelper('time', (t: number) => fmtDate(t));
 
-  const ext = ConfigManager.ext;
+  Config.registerConfig();
+  initAgents();
+  checkUpdate();
+  Tool.registerTool();
+  TimerManager.init();
+  knowledgeService.init();
 
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
 
-  ext.onPoke = (ctx, event) => {
+  // 存储版本标记：结构变更时递增，供后续迁移使用
+  const storedVersion = parseInt(ext.storageGet('storage_version') || '0');
+  if (storedVersion < STORAGE_VERSION) {
+    ext.storageSet('storage_version', String(STORAGE_VERSION));
+    logger.info(`存储版本升级: ${storedVersion} -> ${STORAGE_VERSION}`);
+  }
+
+  ext.onPoke = (ctx: seal.MsgContext, event: seal.PokeEvent) => {
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
     if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);
@@ -32,163 +47,35 @@ function main() {
   }
 
   //接受非指令消息
-  ext.onNotCommandReceived = (ctx, msg): void | Promise<void> => {
+  ext.onNotCommandReceived = (ctx: seal.MsgContext, msg: seal.Message): void | Promise<void> => {
     try {
-      const { disabledInPrivate, globalStandby, triggerRegex, ignoreRegex, triggerCondition } = ConfigManager.received;
-      if (ctx.isPrivate && disabledInPrivate) {
-        return;
+      const p = MessagePipeline.handleNonCommand(ctx, msg);
+      if (p && typeof (p as Promise<void>).catch === 'function') {
+        (p as Promise<void>).catch((e: any) => {
+          logger.error(`非指令消息处理异步出错:${e instanceof Error ? e.message : String(e)}`);
+        });
       }
-
-      const uid = ctx.player.userId;
-      const gid = ctx.group.groupId;
-      const sid = ctx.isPrivate ? uid : gid;
-      const ai = AIManager.getAI(sid);
-
-      // 检查活跃时间定时器
-      ai.checkActiveTimer(ctx);
-
-      const message = msg.message;
-      const messageArray = transformTextToArray(message);
-
-      // 非指令消息忽略
-      if (ignoreRegex.test(message)) {
-        logger.info(`非指令消息忽略:${message}`);
-        return;
-      }
-
-      // 检查CQ码
-      const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
-      if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
-        clearTimeout(ai.context.timer);
-        ai.context.timer = null;
-
-        // 非指令消息触发
-        if (triggerRegex.test(message)) {
-          const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
-          if (fmtCondition === 1) {
-            return ai.handleReceipt(ctx, msg, ai, messageArray)
-              .then(() => ai.chat(ctx, msg, '非指令'));
-          }
-        }
-
-        // AI自己设定的触发条件触发
-        if (triggerConditionMap.hasOwnProperty(sid) && triggerConditionMap[sid].length !== 0) {
-          for (let i = 0; i < triggerConditionMap[sid].length; i++) {
-            const condition = triggerConditionMap[sid][i];
-            if (condition.keyword && !new RegExp(condition.keyword).test(message)) {
-              continue;
-            }
-            if (condition.uid && condition.uid !== uid) {
-              continue;
-            }
-
-            return ai.handleReceipt(ctx, msg, ai, messageArray)
-              .then(() => ai.context.addSystemUserMessage('触发原因提示', condition.reason, []))
-              .then(() => triggerConditionMap[sid].splice(i, 1))
-              .then(() => ai.chat(ctx, msg, 'AI设定触发条件'));
-          }
-        }
-
-        // 开启任一模式时
-        const setting = ai.setting;
-        if (setting.standby || globalStandby) {
-          ai.handleReceipt(ctx, msg, ai, messageArray)
-            .then((): void | Promise<void> => {
-              if (setting.counter > -1) {
-                ai.context.counter += 1;
-                if (ai.context.counter >= setting.counter) {
-                  ai.context.counter = 0;
-                  return ai.chat(ctx, msg, '计数器');
-                }
-              }
-
-              if (setting.prob > -1) {
-                const ran = Math.random() * 100;
-                if (ran <= setting.prob) {
-                  return ai.chat(ctx, msg, '概率');
-                }
-              }
-
-              if (setting.timer > -1) {
-                ai.context.timer = setTimeout(() => {
-                  ai.context.timer = null;
-                  ai.chat(ctx, msg, '计时器');
-                }, setting.timer * 1000 + Math.floor(Math.random() * 500));
-              }
-            });
-        }
-      }
+      return p;
     } catch (e) {
-      logger.error(`非指令消息处理出错，错误信息:${e.message}`);
+      logger.error(`非指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   //接受的指令
-  ext.onCommandReceived = (ctx, msg, cmdArgs) => {
+  ext.onCommandReceived = (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs) => {
     try {
-      if (ToolManager.cmdArgs === null) {
-        ToolManager.cmdArgs = cmdArgs;
-      }
-
-      const { allcmd } = ConfigManager.received;
-      if (allcmd) {
-        const uid = ctx.player.userId;
-        const gid = ctx.group.groupId;
-        const sid = ctx.isPrivate ? uid : gid;
-        const ai = AIManager.getAI(sid);
-
-        // 检查活跃时间定时器
-        ai.checkActiveTimer(ctx);
-
-        const message = msg.message;
-        const messageArray = transformTextToArray(message);
-
-        const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
-        if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
-          const setting = ai.setting;
-          if (setting.standby) {
-            ai.handleReceipt(ctx, msg, ai, messageArray);
-          }
-        }
-      }
+      MessagePipeline.handleCommand(ctx, msg, cmdArgs);
     } catch (e) {
-      logger.error(`指令消息处理出错，错误信息:${e.message}`);
+      logger.error(`指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   //骰子发送的消息
-  ext.onMessageSend = (ctx, msg) => {
+  ext.onMessageSend = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const uid = ctx.player.userId;
-      const gid = ctx.group.groupId;
-      const sid = ctx.isPrivate ? uid : gid;
-      const ai = AIManager.getAI(sid);
-
-      // 检查活跃时间定时器
-      ai.checkActiveTimer(ctx);
-
-      const message = msg.message;
-      const messageArray = transformTextToArray(message);
-
-      ai.tool.listen.resolve?.(message); // 将消息传递给监听工具
-
-      const { allmsg } = ConfigManager.received;
-      if (allmsg) {
-        if (message === ai.context.lastReply) {
-          ai.context.lastReply = '';
-          return;
-        }
-
-        const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
-        if (CQTypes.length === 0 || CQTypes.every(item => CQTYPESALLOW.includes(item))) {
-          const setting = ai.setting;
-          if (setting.standby) {
-            ai.handleReceipt(ctx, msg, ai, messageArray);
-          }
-        }
-      }
+      MessagePipeline.handleBotMessage(ctx, msg);
     } catch (e) {
-      logger.error(`获取发送消息处理出错，错误信息:${e.message}`);
+      logger.error(`获取发送消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
   }
 }

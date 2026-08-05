@@ -1,8 +1,9 @@
-import { AIManager } from "../../AI/AI";
-import { HELPMAP } from "../../config/config";
+// .ai priv：会话/指令权限修改
+import { HELP_MAP } from "../../config/static_config";
+import { getSession } from "../../session/session_service";
 import { aliasToCmd } from "../../utils/utils";
 import { M, PrivilegeManager, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdPrivilege() {
     const cmd = new SubCmd('privilege');
@@ -13,10 +14,10 @@ export function registerCmdPrivilege() {
 【.ai priv st <指令> <权限限制>】修改指令权限
 【.ai priv show <指令>】检查指令权限
 【.ai priv reset】重置指令权限
-${HELPMAP["ID"]}
-${HELPMAP["会话权限"]}
-${HELPMAP["指令"]}
-${HELPMAP["权限限制"]}`;
+${HELP_MAP["ID"]}
+${HELP_MAP["会话权限"]}
+${HELP_MAP["指令"]}
+${HELP_MAP["权限限制"]}`;
     cmd.priv = {
         priv: M, args: {
             session: {
@@ -43,8 +44,8 @@ ${HELPMAP["权限限制"]}`;
                         if (!val4 || val4 == 'help') {
                             seal.replyToSender(ctx, msg, `帮助:
 【.ai priv ses st <ID> <会话权限>】修改会话权限
-${HELPMAP["ID"]}
-${HELPMAP["会话权限"]}`);
+${HELP_MAP["ID"]}
+${HELP_MAP["会话权限"]}`);
                             return ret;
                         }
 
@@ -56,12 +57,12 @@ ${HELPMAP["会话权限"]}`);
                         }
 
                         const id2 = val4 === 'now' ? sid : val4;
-                        const ai2 = AIManager.getAI(id2);
+                        const ai2 = getSession(id2);
 
                         ai2.setting.priv = limit;
 
                         seal.replyToSender(ctx, msg, '权限修改完成');
-                        AIManager.saveAI(id2);
+                        ai2.save();
                         return ret;
                     }
                     case 'check': {
@@ -69,12 +70,12 @@ ${HELPMAP["会话权限"]}`);
                         if (!val4 || val4 == 'help') {
                             seal.replyToSender(ctx, msg, `帮助:
 【.ai priv ses ck <ID>】检查会话权限
-${HELPMAP["ID"]}`);
+${HELP_MAP["ID"]}`);
                             return ret;
                         }
 
                         const id2 = val4 === 'now' ? sid : val4;
-                        const ai2 = AIManager.getAI(id2);
+                        const ai2 = getSession(id2);
                         seal.replyToSender(ctx, msg, `${id2}\n会话权限:${ai2.setting.priv}`);
                         return ret;
                     }
@@ -82,8 +83,8 @@ ${HELPMAP["ID"]}`);
                         seal.replyToSender(ctx, msg, `帮助:
 【.ai priv ses st <ID> <会话权限>】修改会话权限
 【.ai priv ses ck <ID>】检查会话权限
-${HELPMAP["ID"]}
-${HELPMAP["会话权限"]}`);
+${HELP_MAP["ID"]}
+${HELP_MAP["会话权限"]}`);
                         return ret;
                     }
                 }
@@ -93,8 +94,8 @@ ${HELPMAP["会话权限"]}`);
                 if (!val3 || val3 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
 【.ai priv st <指令> <权限限制>】修改指令权限
-${HELPMAP["指令"]}
-${HELPMAP["权限限制"]}`);
+${HELP_MAP["指令"]}
+${HELP_MAP["权限限制"]}`);
                     return ret;
                 }
                 const cmdChain = val3.split('-').map(cmd => aliasToCmd(cmd));
@@ -129,7 +130,7 @@ ${HELPMAP["权限限制"]}`);
                 if (!val3 || val3 == 'help') {
                     seal.replyToSender(ctx, msg, `帮助:
 【.ai priv show <指令>】检查指令权限
-${HELPMAP["指令"]}`);
+${HELP_MAP["指令"]}`);
                     return ret;
                 }
                 const cmdChain = val3.split('-');

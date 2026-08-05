@@ -1,7 +1,7 @@
-import { AIManager } from "../../AI/AI";
+// .ai ignore：群内忽略名单管理
 import { aliasToCmd } from "../../utils/utils";
 import { U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdIgnore() {
     const cmd = new SubCmd('ignore');
@@ -15,7 +15,7 @@ export function registerCmdIgnore() {
         }
     };
     cmd.solve = (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, epId, sid, ai, ret } = scc;
+        const { ctx, msg, cmdArgs, epId, session, ret  } = scc;
 
         if (ctx.isPrivate) {
             seal.replyToSender(ctx, msg, '忽略名单仅在群聊可用');
@@ -32,13 +32,13 @@ export function registerCmdIgnore() {
                     seal.replyToSender(ctx, msg, '参数缺失，【.ai ign add @xxx】添加忽略名单');
                     return ret;
                 }
-                if (ai.context.ignoreList.includes(muid)) {
+                if (session.context.ignoreList.includes(muid)) {
                     seal.replyToSender(ctx, msg, '已经在忽略名单中');
                     return ret;
                 }
-                ai.context.ignoreList.push(muid);
+                session.context.ignoreList.push(muid);
                 seal.replyToSender(ctx, msg, '已添加到忽略名单');
-                AIManager.saveAI(sid);
+                session.save();
                 return ret;
             }
             case 'remove': {
@@ -46,17 +46,17 @@ export function registerCmdIgnore() {
                     seal.replyToSender(ctx, msg, '参数缺失，【.ai ign rm @xxx】移除忽略名单');
                     return ret;
                 }
-                if (!ai.context.ignoreList.includes(muid)) {
+                if (!session.context.ignoreList.includes(muid)) {
                     seal.replyToSender(ctx, msg, '不在忽略名单中');
                     return ret;
                 }
-                ai.context.ignoreList = ai.context.ignoreList.filter(item => item !== muid);
+                session.context.ignoreList = session.context.ignoreList.filter(item => item !== muid);
                 seal.replyToSender(ctx, msg, '已从忽略名单中移除');
-                AIManager.saveAI(sid);
+                session.save();
                 return ret;
             }
             case 'list': {
-                const s = ai.context.ignoreList.length === 0 ? '忽略名单为空' : `忽略名单如下:\n${ai.context.ignoreList.join('\n')}`;
+                const s = session.context.ignoreList.length === 0 ? '忽略名单为空' : `忽略名单如下:\n${session.context.ignoreList.join('\n')}`;
                 seal.replyToSender(ctx, msg, s);
                 return ret;
             }

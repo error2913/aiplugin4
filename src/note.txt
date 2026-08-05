@@ -1,0 +1,121 @@
+tool state
+
+summary count
+
+last reply 放进 sendService 里，所有send换成一个，除了指令调用。
+
+计数器、计时器逻辑移到trigger
+
+autoNameMod: number; // 自动修改上下文里的名字，0:不自动修改，1:修改为昵称，2:修改为群名片
+async setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card') {
+    let name = '';
+    switch (mod) {
+        case 'nickname': {
+            const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
+            if (!strangerInfo || !strangerInfo.nickname) {
+                logger.warning(`未找到用户<${uid}>的昵称`);
+                break;
+            }
+            name = strangerInfo.nickname;
+            break;
+        }
+        case 'card': {
+            if (!gid) break;
+            const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
+            if (!memberInfo) {
+                logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
+                this.setName(epId, gid, uid, 'nickname');
+                break;
+            }
+            name = memberInfo.card || memberInfo.nickname;
+            if (!name) {
+                this.setName(epId, gid, uid, 'nickname');
+                return;
+            }
+            break;
+        }
+    }
+    if (!name) {
+        logger.warning(`用户<${uid}>未设置昵称或群名片`);
+        return;
+    }
+    const { ctx } = getCtxAndMsg(epId, uid, gid);
+    ctx.player.name = name;
+    this.messages.forEach(message => message.name = message.uid === uid ? name : message.name);
+}
+
+async updateName(epId: string, gid: string, uid: string) {
+    switch (this.autoNameMod) {
+        case 1: {
+            await this.setName(epId, gid, uid, 'nickname');
+            break;
+        }
+        case 2: {
+            await this.setName(epId, gid, uid, 'card');
+            break;
+        }
+    }
+}
+放到user和group
+
+tool分为触发callback和不触发callback两种，将tool choice删除
+
+请求时多条消息合并到一条user消息中
+
+把生成本地图片列表的逻辑也做进config
+
+把所有new Image()的地方整进imageMana
+
+model可以设置其提供给特定agent或all
+
+ai读取所有插件的指令并调用的功能
+
+连续多条user时，对后面几条进行压缩
+
+提供api给其他插件，实现kp agent
+
+kwarg，p，存在页码和概率撞车的情况
+
+把manager合并入实例类里面，减少命名冗余
+
+https://api-docs.deepseek.com/zh-cn/guides/thinking_mode#%E5%B7%A5%E5%85%B7%E8%B0%83%E7%94%A8
+
+https://api-docs.deepseek.com/zh-cn/guides/tool_calls#%E6%80%9D%E8%80%83%E6%A8%A1%E5%BC%8F
+
+检查调用并修复的agent
+
+更新文本向量是不是要用一起吧标签，user，group之类的信息塞进去啊
+
+知识库记忆加进去的时候别忘了更新向量
+
+提供add各种msg的模板，包含来源，时间，msgid之类的。
+
+msg依旧是role：user、ass的格式，便于计算轮数，但是user消息段里保存多个小的msg，在请求时再构建成一个
+
+处理请求时：
+非流式-可以把消息堆入一个缓存中，等请求结束再加入；
+流式-直接暂停请求并进行新的对话
+
+// 检查清除上下文，1:清除所有上下文，2:清除assistant和tool上下文，3:清除user上下文
+const [clrmsgs, _] = seal.vars.intGet(ctx, "$gCLRMSGS");
+switch (clrmsgs) {
+    case 1: {
+        ai.context.clearMessages();
+        seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+        logger.info('标志位为1，清除所有上下文');
+        break;
+    }
+    case 2: {
+        ai.context.clearMessages('assistant', 'tool');
+        seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+        logger.info('标志位为2，清除assistant和tool上下文');
+        break;
+    }
+    case 3: {
+        ai.context.clearMessages('user');
+        seal.vars.intSet(ctx, "$gCLRMSGS", 0);
+        logger.info('标志位为3，清除user上下文');
+        break;
+    }
+}
+放到其他地方

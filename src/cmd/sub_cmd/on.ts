@@ -1,7 +1,9 @@
-import { AIManager } from "../../AI/AI";
+// .ai on：开启 AI 及计数器/计时器/概率/活跃时间模式
+import Config from "../../config/config";
 import { TimerManager } from "../../timer";
+import { parseActivityTime } from "../../utils/string";
 import { S } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdOn() {
     const cmd = new SubCmd('on');
@@ -22,9 +24,9 @@ export function registerCmdOn() {
 【.ai on --t --p=42】使用示例`;
     cmd.priv = { priv: S };
     cmd.solve = (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, sid, ai, ret } = scc;
+        const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
 
-        const setting = ai.setting;
+        const setting = session.setting;
 
         const kwargs = cmdArgs.kwargs;
         if (kwargs.length == 0) {
@@ -43,75 +45,51 @@ export function registerCmdOn() {
             switch (name) {
                 case 'c':
                 case 'counter': {
-                    ai.context.counter = 0;
-                    setting.counter = exist && !isNaN(valInt) ? valInt : 10;
+                    session.context.counter = 0;
+                    setting.counter = exist && !isNaN(valInt) ? valInt : Config.trigger.COUNTER;
                     text += `\n计数器模式:${setting.counter}条`;
                     break;
                 }
                 case 't':
                 case 'timer': {
-                    clearTimeout(ai.context.timer);
-                    ai.context.timer = null;
-                    setting.timer = exist && !isNaN(valFloat) ? valFloat : 60;
+                    if (session.context.timer) clearTimeout(session.context.timer);
+                    session.context.timer = null;
+                    setting.timer = exist && !isNaN(valFloat) ? valFloat : Config.trigger.TIMER;
                     text += `\n计时器模式:${setting.timer}秒`;
                     break;
                 }
                 case 'p':
                 case 'prob': {
-                    setting.prob = exist && !isNaN(valFloat) ? valFloat : 10;
+                    setting.prob = exist && !isNaN(valFloat) ? valFloat : Config.trigger.PROBABILITY;
                     text += `\n概率模式:${setting.prob}%`;
                     break;
                 }
                 case 'a':
                 case 'active': {
-                    if (!exist) {
-                        seal.replyToSender(ctx, msg, '请输入活跃时间段');
-                        return ret;
-                    }
+                    try {
+                        // 未提供具体时间时，使用“触发”配置中的默认活跃时间
+                        const [start, end, segs] = parseActivityTime(exist ? valStr : Config.trigger.ACTIVE_TIME);
 
-                    const arr = valStr.split('-').map((item, index) => {
-                        const parts = item.split(/[:：,，]+/).map(Number).map(i => isNaN(i) ? 0 : i);
-                        if (index < 2) {
-                            return Math.ceil((parts[0] * 60 + (parts[1] || 0)) % (24 * 60));
-                        } else {
-                            return parts[0];
+                        TimerManager.removeTimers(sid, '', ['activeTime'], []);
+                        setting.activeTimeInfo = {
+                            start,
+                            end,
+                            segs,
                         }
-                    })
 
-                    const [start = 0, end = 0, segs = 1] = arr;
+                        text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
+                        text += `\n活跃次数:${segs}`;
 
-                    if (start === end) {
-                        seal.replyToSender(ctx, msg, '活跃时间段开始时间和结束时间不能相同');
+                        const curSegIndex = session.curActiveTimeSegIndex;
+                        const nextTimePoint = session.getNextTimePoint(curSegIndex);
+                        if (nextTimePoint !== -1) {
+                            TimerManager.addActiveTimeTimer(ctx, session, nextTimePoint);
+                        }
+                        break;
+                    } catch (e) {
+                        seal.replyToSender(ctx, msg, e instanceof Error ? e.message : String(e));
                         return ret;
                     }
-
-                    if (!Number.isInteger(segs)) {
-                        seal.replyToSender(ctx, msg, '活跃次数必须为整数');
-                        return ret;
-                    }
-
-                    const endReal = end >= start ? end : end + 24 * 60;
-                    if (segs > endReal - start) {
-                        seal.replyToSender(ctx, msg, '活跃次数不能大于活跃时间段分钟数');
-                        return ret;
-                    }
-
-                    TimerManager.removeTimers(sid, '', ['activeTime'], []);
-                    setting.activeTimeInfo = {
-                        start,
-                        end,
-                        segs,
-                    }
-
-                    text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
-                    text += `\n活跃次数:${segs}`;
-
-                    const curSegIndex = ai.curActiveTimeSegIndex;
-                    const nextTimePoint = ai.getNextTimePoint(curSegIndex);
-                    if (nextTimePoint !== -1) {
-                        TimerManager.addActiveTimeTimer(ctx, ai, nextTimePoint);
-                    }
-                    break;
                 }
             }
         };
@@ -119,7 +97,7 @@ export function registerCmdOn() {
         setting.standby = true;
 
         seal.replyToSender(ctx, msg, text);
-        AIManager.saveAI(sid);
+        session.save();
         return ret;
     }
 }

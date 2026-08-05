@@ -1,7 +1,7 @@
-import { AIManager } from "../../AI/AI";
+// .ai standby：开启待机模式（记录对话内容）
 import { TimerManager } from "../../timer";
 import { I } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdStandby() {
     const cmd = new SubCmd('standby');
@@ -9,11 +9,11 @@ export function registerCmdStandby() {
     cmd.help = '';
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
-        const { ctx, msg, sid, ai, ret } = scc;
+        const { ctx, msg, sid, session, ret  } = scc;
 
-        const setting = ai.setting;
+        const setting = session.setting;
 
-        ai.resetState();
+        session.resetState();
         TimerManager.removeTimers(sid, '', ['activeTime'], []);
 
         setting.counter = -1;
@@ -27,7 +27,7 @@ export function registerCmdStandby() {
         }
 
         seal.replyToSender(ctx, msg, 'AI已开启待机模式');
-        AIManager.saveAI(sid);
+        session.save();
         return ret;
     }
 }

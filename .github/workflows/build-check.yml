@@ -2,12 +2,12 @@ name: Build Check
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'refactor/**']
   pull_request:
     branches: [main]
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
 
     steps:
@@ -15,18 +15,27 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Run build
-        run: npm run build
+      - name: Lint
+        run: npm run lint
 
-      - name: Check build status
+      - name: Type check (strict)
+        run: npx tsc --noEmit --strict
+
+      - name: Build and validate package
+        run: npm run package:check
+
+      - name: Smoke test
+        run: npm run smoke
+
+      - name: Check status
         if: failure()
         run: |
-          echo "Build failed. Please check the errors above."
+          echo "Check failed. Please check the errors above."
           exit 1

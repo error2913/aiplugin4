@@ -20,7 +20,7 @@ declare namespace seal {
     // 谨慎使用角色卡相关 api ，有可能写坏数据库
 
     /** 绑定角色卡到当前群 */
-    chBindCur(name: string)
+    chBindCur(name: string): void
     /* 获取当前群绑定角色 返回名字或者空字符串*/
     chBindCurGet(): string
     /** 获取一个正在绑定状态的卡，可用于该卡片是否绑卡检测 */
@@ -62,17 +62,17 @@ declare namespace seal {
 
   export interface ValueMap {
     /** 获取 */
-    get(k): [any, boolean]
+    get(k: string): [any, boolean]
     /** 添加 */
-    set(k, v): void
+    set(k: string, v: any): void
     /** 删除 */
-    del(k): void
+    del(k: string): void
     /** 数量 */
     len(): number
     /** 迭代 */
     next(): [any, any, boolean]
     /** 遍历 参数不能传入 `()=>null`，但可以传入 `()=>{}` 或者 `function(){}` */
-    iterate(fun: (k, v) => void): void
+    iterate(fun: (k: string, v: any) => void): void
     // 加锁
     lock(): void
     // 解锁
@@ -267,7 +267,7 @@ declare namespace seal {
     /** 是否加载完成 */
     isLoaded: boolean
     /** 存放数据 */
-    storageSet(key: string, value: string);
+    storageSet(key: string, value: string): void;
     /** 取数据 */
     storageGet(key: string): string;
     /** 匹配非指令消息 */
@@ -287,11 +287,11 @@ declare namespace seal {
     /** 监听 加载时 事件，如 deck 模块需要读取牌堆文件 */
     onLoad: (...any: any) => void
     /** 初始化数据，读写数据时会自动调用 */
-    storageInit()
+    storageInit(): void
     /** 读数据 如果无需自定义错误处理就无需使用 */
-    storageGetRaw(k: string)
+    storageGetRaw(k: string): string
     /** 写数据 如果无需自定义错误处理就无需使用 */
-    storageSetRaw(k: string, v: string)
+    storageSetRaw(k: string, v: string): void
   }
 
 
@@ -375,7 +375,8 @@ declare namespace seal {
     value: any,
     option: any,
     deprecated: boolean,
-    description: string
+    description: string,
+    group?: string
   }
   type TimeOutTaskType = 'cron' | 'daily'
   export const ext: {
@@ -410,7 +411,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerStringConfig(ext: ExtInfo, key: string, defaultValue: string, desc?: string): unknown;
+    registerStringConfig(ext: ExtInfo, key: string, defaultValue: string, desc?: string, group?: string): unknown;
     /**
      * 注册一个整型的配置项
      * @param ext 扩展对象
@@ -418,7 +419,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerIntConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string): unknown;
+    registerIntConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string, group?: string): unknown;
     /**
      * 注册一个布尔类型的配置项
      * @param ext 扩展对象
@@ -426,7 +427,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerBoolConfig(ext: ExtInfo, key: string, defaultValue: boolean, desc?: string): unknown;
+    registerBoolConfig(ext: ExtInfo, key: string, defaultValue: boolean, desc?: string, group?: string): unknown;
     /**
      * 注册一个浮点数类型的配置项
      * @param ext 扩展对象
@@ -434,7 +435,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerFloatConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string): unknown;
+    registerFloatConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string, group?: string): unknown;
     /**
      * 注册一个template类型的配置项
      * @param ext 扩展对象
@@ -442,7 +443,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerTemplateConfig(ext: ExtInfo, key: string, defaultValue: string[], desc?: string): unknown;
+    registerTemplateConfig(ext: ExtInfo, key: string, defaultValue: string[], desc?: string, group?: string): unknown;
     /**
      * 注册一个option类型的配置项
      * @param ext 扩展对象
@@ -451,7 +452,7 @@ declare namespace seal {
      * @param option 可选项
      * @param desc 描述
      */
-    registerOptionConfig(ext: ExtInfo, key: string, defaultValue: string, option: string[], desc?: string): unknown;
+    registerOptionConfig(ext: ExtInfo, key: string, defaultValue: string, option: string[], desc?: string, group?: string): unknown;
     /**
      * 创建一个新的配置项
      * @param ext 扩展对象

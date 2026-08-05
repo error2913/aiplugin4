@@ -1,12 +1,25 @@
-import { ConfigManager } from "./config/configManager";
-import { getSessionCtxAndMsg } from "./utils/utils_seal";
-import { AI, AIManager } from "./AI/AI";
+// 定时器模块：目标/间隔/活跃时间段三类定时任务的调度与持久化
+import { ext } from "./config/config";
 import { logger } from "./logger";
-import { fmtDate } from "./utils/utils_string";
-import { revive } from "./utils/utils";
+import { Session } from "./session/session";
+import { getSession } from "./session/session_service";
+import { getSessionCtxAndMsg } from "./utils/seal";
+import { fmtDate } from "./utils/string";
+import { revive, TypeDescriptor } from "./utils/utils";
 
 export class TimerInfo {
     static validKeys: (keyof TimerInfo)[] = ['sid', 'isPrivate', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content'];
+    static validKeysMap: { [key in keyof TimerInfo]?: TypeDescriptor<TimerInfo[key]> } = {
+        sid: 'string',
+        isPrivate: 'boolean',
+        epId: 'string',
+        set: 'number',
+        target: 'number',
+        interval: 'number',
+        count: 'number',
+        type: 'string',
+        content: 'string'
+    }
     sid: string;
     isPrivate: boolean;
     epId: string;
@@ -37,11 +50,11 @@ export class TimerManager {
 
     static getTimerQueue() {
         try {
-            const data = JSON.parse(ConfigManager.ext.storageGet(`timerQueue`) || '[]')
+            const data = JSON.parse(ext.storageGet(`timerQueue`) || '[]')
             if (!Array.isArray(data)) throw new Error('timerQueue不是数组');
             data.forEach((item: any) => {
-                if (!item.hasOwnProperty('sessionId')) return;
-                if (!item.hasOwnProperty('sessionType')) return;
+                if (!Object.prototype.hasOwnProperty.call(item, 'sessionId')) return;
+                if (!Object.prototype.hasOwnProperty.call(item, 'sessionType')) return;
                 this.timerQueue.push(revive(TimerInfo, item));
             });
         } catch (e) {
@@ -50,10 +63,10 @@ export class TimerManager {
     }
 
     static saveTimerQueue() {
-        ConfigManager.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
+        ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
-    static addTargetTimer(ctx: seal.MsgContext, ai: AI, target: number, content: string) {
+    static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string) {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
         const sessionId = ctx.isPrivate ? uid : gid;
@@ -73,12 +86,12 @@ export class TimerManager {
             this.executeTask();
         }
 
-        logger.info(`添加${timer.type}定时器${ai.id}:
+        logger.info(`添加${timer.type}定时器${session.id}:
 触发时间:${fmtDate(target)}
 内容:${content}`);
     }
 
-    static addIntervalTimer(ctx: seal.MsgContext, ai: AI, interval: number, count: number, content: string) {
+    static addIntervalTimer(ctx: seal.MsgContext, session: Session, interval: number, count: number, content: string) {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
         const sessionId = ctx.isPrivate ? uid : gid;
@@ -100,13 +113,13 @@ export class TimerManager {
             this.executeTask();
         }
 
-        logger.info(`添加${timer.type}定时器${ai.id}:
+        logger.info(`添加${timer.type}定时器${session.id}:
 间隔:${interval}秒
 次数:${count}次
 内容:${content}`);
     }
 
-    static addActiveTimeTimer(ctx: seal.MsgContext, ai: AI, target: number) {
+    static addActiveTimeTimer(ctx: seal.MsgContext, session: Session, target: number) {
         const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
         const sessionId = ctx.isPrivate ? uid : gid;
@@ -126,7 +139,7 @@ export class TimerManager {
             this.executeTask();
         }
 
-        logger.info(`添加${timer.type}定时器${ai.id}:
+        logger.info(`添加${timer.type}定时器${session.id}:
 触发时间:${fmtDate(target)}`);
     }
 
@@ -218,7 +231,7 @@ export class TimerManager {
 
                             const { sid, isPrivate, epId, set, content } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
-                            const ai = AIManager.getAI(sid);
+                            const session = getSession(sid);
 
                             const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${fmtDate(set)}
@@ -226,8 +239,8 @@ export class TimerManager {
 当前触发时间：${fmtDate(Math.floor(Date.now() / 1000))}
 提示内容：${content}`;
 
-                            await ai.context.addSystemUserMessage("定时器触发提示", s, []);
-                            await ai.chat(ctx, msg, '定时任务');
+                            await session.context.addSystemUserMessage(s, "定时器触发提示");
+                            await session.chat(ctx, msg, '定时任务');
 
                             changed = true;
                             break;
@@ -244,7 +257,7 @@ export class TimerManager {
 
                             const { sid, isPrivate, epId, set, interval, count, content } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
-                            const ai = AIManager.getAI(sid);
+                            const session = getSession(sid);
 
                             if (count === -1 || count > 1) {
                                 timer.set = Math.floor(Date.now() / 1000);
@@ -261,8 +274,8 @@ export class TimerManager {
 当前触发时间：${fmtDate(Math.floor(Date.now() / 1000))}
 提示内容：${content}`;
 
-                            await ai.context.addSystemUserMessage("定时器触发提示", s, []);
-                            await ai.chat(ctx, msg, '定时任务');
+                            await session.context.addSystemUserMessage(s, "定时器触发提示");
+                            await session.chat(ctx, msg, '定时任务');
 
                             changed = true;
                             break;
@@ -279,28 +292,29 @@ export class TimerManager {
 
                             const { sid, isPrivate, epId, set } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
-                            const ai = AIManager.getAI(sid);
+                            const session = getSession(sid);
 
-                            const curSegIndex = ai.curActiveTimeSegIndex;
-                            const nextTimePoint = ai.getNextTimePoint(curSegIndex);
+                            const curSegIndex = session.curActiveTimeSegIndex;
+                            const nextTimePoint = session.getNextTimePoint(curSegIndex);
                             if (curSegIndex === -1) {
                                 logger.error(`${sid} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
                                 continue;
                             }
                             if (nextTimePoint !== -1) {
-                                this.addActiveTimeTimer(ctx, ai, nextTimePoint);
+                                this.addActiveTimeTimer(ctx, session, nextTimePoint);
                             }
 
-                            const messages = ai.context.messages;
-                            const lastMsgArray = messages[messages.length - 1].msgArray;
-                            const lastTime = lastMsgArray[lastMsgArray.length - 1].time;
+                            const messages = session.context.messages;
+                            const lastMsg = messages[messages.length - 1] as any;
+                            const items = lastMsg?.contentItems || [];
+                            const lastTime = items[items.length - 1]?.time || 0;
                             const lastTimePrompt = `最后一条消息时间：${fmtDate(lastTime)}`;
                             const s = `现在是你的活跃时间：${fmtDate(Math.floor(Date.now() / 1000))}
 ${lastTimePrompt}
 请说点什么`;
 
-                            await ai.context.addSystemUserMessage("活跃时间触发提示", s, []);
-                            await ai.chat(ctx, msg, '活跃时间');
+                            await session.context.addSystemUserMessage(s, "活跃时间触发提示");
+                            await session.chat(ctx, msg, '活跃时间');
 
                             changed = true;
                             break;
@@ -309,7 +323,7 @@ ${lastTimePrompt}
 
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (e) {
-                    logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e.message}`);
+                    logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
                 }
             }
 
@@ -319,7 +333,7 @@ ${lastTimePrompt}
 
             this.isTaskRunning = false;
         } catch (e) {
-            logger.error(`定时任务处理出错，错误信息:${e.message}`);
+            logger.error(`定时任务处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
         }
     }
 

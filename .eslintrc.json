@@ -14,17 +14,14 @@
   ],
   "plugins": [
     "import",
-    "eslint-comments",
-    "functional"
+    "eslint-comments"
   ],
   "extends": [
     "eslint:recommended",
     "plugin:eslint-comments/recommended",
     "plugin:@typescript-eslint/recommended",
     "plugin:import/typescript",
-    "plugin:functional/lite",
-    "prettier",
-    "prettier/@typescript-eslint"
+    "prettier"
   ],
   "globals": {
     "BigInt": true,
@@ -32,6 +29,16 @@
     "WebAssembly": true
   },
   "rules": {
+    "no-useless-escape": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
     "@typescript-eslint/explicit-module-boundary-types": "off",
     "eslint-comments/disable-enable-pair": [
       "error",
@@ -39,7 +46,7 @@
         "allowWholeFile": true
       }
     ],
-    "eslint-comments/no-unused-disable": "warning",
+    "eslint-comments/no-unused-disable": "warn",
     "import/order": [
       "error",
       {

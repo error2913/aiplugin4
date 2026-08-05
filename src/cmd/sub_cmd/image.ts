@@ -1,9 +1,9 @@
-import { AIManager } from "../../AI/AI";
-import { ImageManager } from "../../AI/image";
+// .ai image：图片管理（本地/偷取/识别/查找）
+import Image from "../../resource/image";
+import { transformArrayToContent, transformTextToArray } from "../../utils/string";
 import { aliasToCmd } from "../../utils/utils";
-import { transformArrayToContent, transformTextToArray } from "../../utils/utils_string";
 import { I, M, U } from "../privilege";
-import { SubCmd, SubCmdContext } from "../root";
+import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdImage() {
     const cmd = new SubCmd('image');
@@ -29,7 +29,7 @@ export function registerCmdImage() {
         }
     };
     cmd.solve = async (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, sid, ai, page, ret } = scc;
+        const { ctx, msg, cmdArgs, session, page, ret  } = scc;
 
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
@@ -37,11 +37,11 @@ export function registerCmdImage() {
                 const type = cmdArgs.getArgN(3);
                 switch (aliasToCmd(type)) {
                     case 'steal': {
-                        seal.replyToSender(ctx, msg, ai.imageManager.getStolenImageListText(page) || '暂无偷取图片');
+                        seal.replyToSender(ctx, msg, session.imageManager.getStolenImageListText(page) || '暂无偷取图片');
                         return ret;
                     }
                     case 'local': {
-                        seal.replyToSender(ctx, msg, ImageManager.getLocalImageListText(page) || '暂无本地图片');
+                        seal.replyToSender(ctx, msg, Image.getLocalImageListText(page) || '暂无本地图片');
                         return ret;
                     }
                     default: {
@@ -54,25 +54,25 @@ export function registerCmdImage() {
                 const op = cmdArgs.getArgN(3);
                 switch (aliasToCmd(op)) {
                     case 'on': {
-                        ai.imageManager.stealStatus = true;
-                        seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${ai.imageManager.stolenImages.length}`);
-                        AIManager.saveAI(sid);
+                        session.imageManager.stealStatus = true;
+                        seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${session.imageManager.stolenImages.length}`);
+                        session.save();
                         return ret;
                     }
                     case 'off': {
-                        ai.imageManager.stealStatus = false;
-                        seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${ai.imageManager.stolenImages.length}`);
-                        AIManager.saveAI(sid);
+                        session.imageManager.stealStatus = false;
+                        seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${session.imageManager.stolenImages.length}`);
+                        session.save();
                         return ret;
                     }
                     case 'forget': {
-                        ai.imageManager.stolenImages = [];
+                        session.imageManager.stolenImages = [];
                         seal.replyToSender(ctx, msg, '偷取图片已遗忘');
-                        AIManager.saveAI(sid);
+                        session.save();
                         return ret;
                     }
                     default: {
-                        seal.replyToSender(ctx, msg, `图片偷取状态:${ai.imageManager.stealStatus},当前偷取数量:${ai.imageManager.stolenImages.length}`);
+                        seal.replyToSender(ctx, msg, `图片偷取状态:${session.imageManager.stealStatus},当前偷取数量:${session.imageManager.stolenImages.length}`);
                         return ret;
                     }
                 }
@@ -84,11 +84,12 @@ export function registerCmdImage() {
                     return ret;
                 }
                 const messageArray = transformTextToArray(val3);
-                const { images } = await transformArrayToContent(ctx, ai, messageArray);
+                const { images } = await transformArrayToContent(ctx, messageArray);
                 if (images.length === 0) seal.replyToSender(ctx, msg, '请附带图片');
                 const img = images[0];
+                if (!img) return ret;
                 await img.imageToText(cmdArgs.getRestArgsFrom(4))
-                seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.content);
+                seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.description);
                 return ret;
             }
             case 'find': {
@@ -97,7 +98,7 @@ export function registerCmdImage() {
                     seal.replyToSender(ctx, msg, '【.ai img find <图片ID>】查找图片');
                     return ret;
                 }
-                const img = await ai.context.findImage(ctx, id);
+                const img = await session.context.findImage(ctx, id);
                 seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片');
                 return ret;
             }

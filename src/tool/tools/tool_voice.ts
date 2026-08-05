@@ -1,0 +1,121 @@
+// 语音工具：本地语音/文字转语音（TTS）
+import Config from "../../config/config";
+import { logger } from "../../logger";
+import { netExists, sendGroupAISound } from "../../utils/ob11";
+import { resolveLocalPath } from "../../utils/utils";
+import Tool from "../tool";
+
+const characterMap: { [key: string]: string } = {
+    "小新": "lucy-voice-laibixiaoxin",
+    "猴哥": "lucy-voice-houge",
+    "四郎": "lucy-voice-silang",
+    "东北老妹儿": "lucy-voice-guangdong-f1",
+    "广西大表哥": "lucy-voice-guangxi-m1",
+    "妲己": "lucy-voice-daji",
+    "霸道总裁": "lucy-voice-lizeyan",
+    "酥心御姐": "lucy-voice-suxinjiejie",
+    "说书先生": "lucy-voice-m8",
+    "憨憨小弟": "lucy-voice-male1",
+    "憨厚老哥": "lucy-voice-male3",
+    "吕布": "lucy-voice-lvbu",
+    "元气少女": "lucy-voice-xueling",
+    "文艺少女": "lucy-voice-f37",
+    "磁性大叔": "lucy-voice-male2",
+    "邻家小妹": "lucy-voice-female1",
+    "低沉男声": "lucy-voice-m14",
+    "傲娇少女": "lucy-voice-f38",
+    "爹系男友": "lucy-voice-m101",
+    "暖心姐姐": "lucy-voice-female2",
+    "温柔妹妹": "lucy-voice-f36",
+    "书香少女": "lucy-voice-f34"
+};
+
+export function registerRecord() {
+    // 本地语音统一走“资源”配置（支持 语音名=路径 或纯路径）
+    const recordPathMap: { [key: string]: string } = {};
+    for (const audio of Config.resource.LOCAL_AUDIOS || []) {
+        recordPathMap[audio.audioId] = audio.path;
+    }
+
+    if (Object.keys(recordPathMap).length !== 0) {
+        const toolRecord = new Tool({
+            type: "function",
+            function: {
+                name: "record",
+                description: `发送语音，语音名称有:${Object.keys(recordPathMap).join("、")}`,
+                parameters: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string",
+                            description: "语音名称"
+                        }
+                    },
+                    required: ["name"]
+                }
+            }
+        });
+        toolRecord.sensitive = true; // 发送语音属敏感操作
+        toolRecord.solve = async (ctx, msg, _, args) => {
+            const { name } = args;
+
+            if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
+                seal.replyToSender(ctx, msg, `[语音:${resolveLocalPath(recordPathMap[name])}]`);
+                return '发送成功';
+            } else {
+                logger.error(`本地语音${name}不存在`);
+                return `本地语音${name}不存在`;
+            }
+        }
+    }
+
+    const toolTTS = new Tool({
+        type: 'function',
+        function: {
+            name: 'text_to_sound',
+            description: '发送AI声聊合成语音',
+            parameters: {
+                type: 'object',
+                properties: {
+                    text: {
+                        type: 'string',
+                        description: '要合成的文本'
+                    }
+                },
+                required: ['text']
+            }
+        }
+    });
+    toolTTS.sensitive = true; // AI 声聊合成语音属敏感操作
+    toolTTS.solve = async (ctx, msg, _, args) => {
+        const { text } = args;
+
+        const { TTS_CHARACTER: character } = Config.tool;
+        if (character === '自定义') {
+            const aittsExt = seal.ext.find('AITTS');
+            if (!aittsExt) {
+                logger.error(`未找到AITTS依赖`);
+                return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
+            }
+            try {
+                if (!globalThis.ttsHandler) return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
+                await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
+            } catch (e) {
+                logger.error(e);
+                return `发送语音失败`;
+            }
+
+            return `发送语音成功`;
+        }
+
+        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
+
+        const epId = ctx.endPoint.userId;
+        const gid = ctx.group.groupId;
+
+        const characterId = characterMap[character];
+        await sendGroupAISound(epId, characterId, gid.replace(/^.+:/, ''), text);
+
+        return `发送语音成功`;
+    }
+}

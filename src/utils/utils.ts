@@ -1,9 +1,10 @@
-import { AI, GroupInfo, UserInfo } from "../AI/AI";
+// 通用工具：消息ID转换/回复发送/超时/revive/路径解析等
+import Config from "../config/config";
+import { ALIAS_MAP } from "../config/static_config";
 import { logger } from "../logger";
-import { ConfigManager } from "../config/configManager";
-import { transformTextToArray } from "./utils_string";
-import { aliasMap } from "../config/config";
-import { netExists, sendGroupMsg, sendPrivateMsg } from "./utils_ob11";
+
+import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
+import { transformTextToArray } from "./string";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {
@@ -25,12 +26,12 @@ export function generateId() {
     return (timestamp + random).slice(-6); // 截取最后6位
 }
 
-export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai: AI, s: string): Promise<string> {
+export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, session: { context: { lastReply: string } }, s: string): Promise<string> {
     if (!s) {
         return '';
     }
 
-    const { showMsgId } = ConfigManager.message;
+    const { showMsgId = true } = Config.message as any;
     if (showMsgId && netExists()) {
         const rawMessageArray = transformTextToArray(s);
         const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
@@ -40,7 +41,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         if (pokeMsgArr.length > 0) {
             pokeMsgArr.forEach(item => {
                 const s = `[CQ:poke,qq=${item.data.qq}]`;
-                ai.context.lastReply = s;
+                session.context.lastReply = s;
                 seal.replyToSender(ctx, msg, s);
             });
         }
@@ -65,7 +66,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ai:
         }
         logger.warning(`无法获取message_id`);
     }
-    ai.context.lastReply = s;
+    session.context.lastReply = s;
     seal.replyToSender(ctx, msg, s);
     return '';
 }
@@ -79,22 +80,70 @@ export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): 
     ]);
 }
 
+export type TypeDescriptor<T> =
+    'default'
+    | 'string'
+    | 'number'
+    | 'boolean'
+    | 'any'
+    | TypeDescriptor<any>[] // 元组元素类型
+    | { array: TypeDescriptor<any> } // 数组元素类型
+    | {
+        object?: { [key: string]: TypeDescriptor<any> },
+        objectValue?: TypeDescriptor<any>
+    } // 对象键值对类型，对象值类型
+    | RevivableConstructor<T>; // 嵌套类
+
+interface RevivableConstructor<T> {
+    new(): T; // 构造函数必须无参数
+    validKeysMap: { [key in keyof T]?: TypeDescriptor<T[key]> };
+}
+
 /**
- * 恢复一个对象，只恢复构造函数中定义的属性，暂不支持嵌套属性
+ * 恢复一个对象，只恢复构造函数中定义的属性，支持嵌套属性  希望没有bug
  * @param constructor 传入构造函数，必须有 validKeys 属性
  * @param value 要恢复的对象
  * @returns 恢复后的对象
  */
-export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, value: any): T {
-    const obj = new constructor();
-
-    if (!constructor.validKeys) {
-        logger.error(`revive: ${constructor.name} 没有 validKeys 属性`);
-        return obj;
+export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
+    function reviveItem(descriptor: any, defaultValue: any, value: any): any {
+        if (descriptor === 'string') {
+            if (typeof value === 'string') return value;
+        } else if (descriptor === 'number') {
+            if (typeof value === 'number') return value;
+        } else if (descriptor === 'boolean') {
+            if (typeof value === 'boolean') return value;
+        } else if (Array.isArray(descriptor)) {
+            if (Array.isArray(value)) return descriptor.map((d: any, i: number) => reviveItem(d, defaultValue?.[i], value?.[i]));
+        } else if (typeof descriptor === 'object' && 'array' in descriptor) {
+            if (Array.isArray(value)) return value.map((v: any, i: number) => reviveItem(descriptor.array, defaultValue?.[i], v));
+        } else if (typeof descriptor === 'object' && ('object' in descriptor || 'objectValue' in descriptor)) {
+            const ov: any = {}, o: any = {};
+            if (typeof value === 'object' && value !== null) {
+                if ('objectValue' in descriptor) Object.keys(value).forEach(k => ov[k] = reviveItem((descriptor as any).objectValue, defaultValue?.[k], value?.[k]));
+                if ('object' in descriptor) Object.keys((descriptor as any).object || {}).forEach(k => o[k] = reviveItem((descriptor as any).object[k], defaultValue?.[k], value?.[k]));
+                return { ...o, ...ov };
+            }
+        } else if (typeof descriptor === 'function') {
+            return revive(descriptor, value);
+        } else {
+            return value;
+        }
+        return defaultValue;
     }
 
-    for (const k of constructor.validKeys) {
-        if (value.hasOwnProperty(k)) {
+    const obj: any = new constructor();
+
+    if (constructor.validKeysMap) {
+        for (const k in constructor.validKeysMap) {
+            const descriptor: TypeDescriptor<T[Extract<keyof T, string>]> | undefined = (constructor.validKeysMap as any)[k];
+            if (Object.prototype.hasOwnProperty.call(value, k)) {
+                const item = reviveItem(descriptor, obj[k], value[k]);
+                if (item !== undefined) obj[k] = item;
+            }
+        }
+    } else { // 没有定义 validKeysMap，直接赋值
+        for (const k in value) {
             obj[k] = value[k];
         }
     }
@@ -103,7 +152,7 @@ export function revive<T>(constructor: { new(): T, validKeys: (keyof T)[] }, val
 }
 
 export function aliasToCmd(val: string) {
-    return aliasMap[val] || val;
+    return ALIAS_MAP[val as keyof typeof ALIAS_MAP] || val;
 }
 
 // 计算余弦相似度
@@ -127,18 +176,20 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-export function getCommonUser(a: UserInfo[], b: UserInfo[]): UserInfo[] {
+export function getCommonItem(a: string[], b: string[]): string[] {
     if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a.map(u => u.id));
-    return b.filter(u => aid.has(u.id));
+    const aset = new Set(a);
+    return b.filter(u => aset.has(u));
 }
-export function getCommonGroup(a: GroupInfo[], b: GroupInfo[]): GroupInfo[] {
-    if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a.map(g => g.id));
-    return b.filter(g => aid.has(g.id));
-}
-export function getCommonKeyword(a: string[], b: string[]): string[] {
-    if (a.length === 0 || b.length === 0) return [];
-    const aid = new Set(a);
-    return b.filter(k => aid.has(k));
+
+/**
+ * 将本地资源路径解析为绝对路径：
+ * 相对路径（不以 / 或盘符开头）会拼接 SealDice 核心路径 Config.base.SEALDICE_PATH。
+ */
+export function resolveLocalPath(p: string): string {
+    if (!p) return p;
+    if (/^([a-zA-Z]:[\\/]|\/)/.test(p)) return p;
+    const { SEALDICE_PATH } = Config.base;
+    if (!SEALDICE_PATH) return p;
+    return `${SEALDICE_PATH}/${p}`;
 }

@@ -9,7 +9,8 @@ coverage
 yarn.lock
 *.zip
 *.xlsx
-package-lock.json
 .dev/
 dist/
 dev/
+sealpack/scripts/
+skills/**/.env
