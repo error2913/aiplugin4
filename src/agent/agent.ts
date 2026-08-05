@@ -1,16 +1,18 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
-import Config from "../config/config";
+import { ext } from "../config/config";
 import { logger } from "../logger";
-import { SessionService } from "../session/session_service";
-import { ToolName } from "../tool/tool";
-import { revive, TypeDescriptor } from "../utils/utils";
+import ChatModel from "../model/chat";
 import Model from "../model/model";
 import { ChatModelUse } from "../model/types";
+import { Session } from "../session/session";
+import { SessionService } from "../session/session_service";
+import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
-import ChatModel from "../model/chat";
+import { revive, TypeDescriptor } from "../utils/utils";
+
 import { streamService } from "./stream";
-import { Session } from "../session/session";
+
 
 export default class Agent {
     static validKeysMap: { [key in keyof Agent]?: TypeDescriptor<Agent[key]> } = {
@@ -62,10 +64,10 @@ export default class Agent {
     static agentMap: { [key: string]: Agent } = {};
 
     static get(name: string): Agent {
-        if (!this.agentMap.hasOwnProperty(name)) {
+        if (!Object.prototype.hasOwnProperty.call(this.agentMap, name)) {
             let agent = new Agent();
             try {
-                const data = JSON.parse(Config.ext.storageGet(`agent_${name}`) || '{}');
+                const data = JSON.parse(ext.storageGet(`agent_${name}`) || '{}');
                 agent = revive(Agent, data);
             } catch (error) {
                 logger.error(`加载智能体${name}失败: ${error}`);
@@ -78,7 +80,7 @@ export default class Agent {
     }
 
     static save(agent: Agent) {
-        Config.ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
+        ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
     }
 
     static init() {

@@ -375,7 +375,8 @@ declare namespace seal {
     value: any,
     option: any,
     deprecated: boolean,
-    description: string
+    description: string,
+    group?: string
   }
   type TimeOutTaskType = 'cron' | 'daily'
   export const ext: {
@@ -410,7 +411,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerStringConfig(ext: ExtInfo, key: string, defaultValue: string, desc?: string): unknown;
+    registerStringConfig(ext: ExtInfo, key: string, defaultValue: string, desc?: string, group?: string): unknown;
     /**
      * 注册一个整型的配置项
      * @param ext 扩展对象
@@ -418,7 +419,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerIntConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string): unknown;
+    registerIntConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string, group?: string): unknown;
     /**
      * 注册一个布尔类型的配置项
      * @param ext 扩展对象
@@ -426,7 +427,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerBoolConfig(ext: ExtInfo, key: string, defaultValue: boolean, desc?: string): unknown;
+    registerBoolConfig(ext: ExtInfo, key: string, defaultValue: boolean, desc?: string, group?: string): unknown;
     /**
      * 注册一个浮点数类型的配置项
      * @param ext 扩展对象
@@ -434,7 +435,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerFloatConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string): unknown;
+    registerFloatConfig(ext: ExtInfo, key: string, defaultValue: number, desc?: string, group?: string): unknown;
     /**
      * 注册一个template类型的配置项
      * @param ext 扩展对象
@@ -442,7 +443,7 @@ declare namespace seal {
      * @param defaultValue 配置项值
      * @param desc 描述
      */
-    registerTemplateConfig(ext: ExtInfo, key: string, defaultValue: string[], desc?: string): unknown;
+    registerTemplateConfig(ext: ExtInfo, key: string, defaultValue: string[], desc?: string, group?: string): unknown;
     /**
      * 注册一个option类型的配置项
      * @param ext 扩展对象
@@ -451,7 +452,7 @@ declare namespace seal {
      * @param option 可选项
      * @param desc 描述
      */
-    registerOptionConfig(ext: ExtInfo, key: string, defaultValue: string, option: string[], desc?: string): unknown;
+    registerOptionConfig(ext: ExtInfo, key: string, defaultValue: string, option: string[], desc?: string, group?: string): unknown;
     /**
      * 创建一个新的配置项
      * @param ext 扩展对象

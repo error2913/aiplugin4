@@ -1,14 +1,14 @@
 // 消息工具：发送消息/取消息/撤回/合并转发
-import { getSession, SessionService } from "../../session/session_service";
 import Config from "../../config/config";
-import { replyToSender, transformMsgIdBack } from "../../utils/utils";
-import { getCtxAndMsg } from "../../utils/seal";
-import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../../utils/string";
-import Tool from "../tool";
 import { CQ_TYPES_ALLOW as CQTYPESALLOW, FACE_MAP as faceMap } from "../../config/static_config";
-import { deleteMsg, getGroupMemberInfo, getMsg, sendGroupForwardMsg, sendPrivateForwardMsg, netExists } from "../../utils/ob11";
 import { logger } from "../../logger";
 import Image from "../../resource/image";
+import { getSession, SessionService } from "../../session/session_service";
+import { deleteMsg, getGroupMemberInfo, getMsg, netExists, sendGroupForwardMsg, sendPrivateForwardMsg } from "../../utils/ob11";
+import { getCtxAndMsg } from "../../utils/seal";
+import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../../utils/string";
+import { replyToSender, transformMsgIdBack } from "../../utils/utils";
+import Tool from "../tool";
 
 export function registerMessage() {
     const toolSend = new Tool({
@@ -239,7 +239,7 @@ export function registerMessage() {
         const messagesToSend = [];
         const images: Image[] = [];
         const randomId = Math.floor(Math.random() * 1000000000);
-        let unknowUserArray: string[] = [];
+        const unknowUserArray: string[] = [];
         for (const messageItem of messages) {
             const segs = parseSpecialTokens(messageItem.content);
             const content: MessageSegment[] = [];

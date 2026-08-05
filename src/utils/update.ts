@@ -1,8 +1,8 @@
 // 版本校验与更新日志展示
+import { ext } from "../config/config";
+import { VERSION } from "../config/static_config";
 import { logger } from "../logger";
 import { updateInfo } from "../update";
-import Config from "../config/config";
-import { VERSION } from "../config/static_config";
 
 /**
  * 比较两个版本号的大小。
@@ -32,12 +32,12 @@ export function compareVersions(version1: string, version2: string): number {
 }
 
 export function checkUpdate() {
-    const oldVersion = Config.ext.storageGet("version") || "0.0.0";
+    const oldVersion = ext.storageGet("version") || "0.0.0";
 
     try {
         if (compareVersions(oldVersion, VERSION) < 0) {
-            Config.ext.storageSet("version", VERSION);
-            let info = [];
+            ext.storageSet("version", VERSION);
+            const info = [];
             for (const v in updateInfo) {
                 if (compareVersions(oldVersion, v) >= 0) {
                     break;

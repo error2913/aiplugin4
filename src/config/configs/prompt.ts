@@ -1,14 +1,10 @@
 // prompt 模板配置：system/记忆/总结/知识库/工具/图片识别等 Handlebars 模板
 import Handlebars from "handlebars";
-import Config from "../config";
 
+import { ext } from "../config";
 export default class PromptConfig {
-    static ext: seal.ExtInfo;
-
     static register() {
-        PromptConfig.ext = Config.getExt('提示词');
-
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "system prompt模板", [
+        seal.ext.registerTemplateConfig(ext, "system prompt模板", [
             `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。
 
 ## 扮演设定
@@ -64,8 +60,8 @@ export default class PromptConfig {
 {{{knowledgePrompt}}}
 
 {{{toolPrompt}}}`
-        ], "");
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "长期记忆prompt模板", [
+        ], "", "prompt模板");
+        seal.ext.registerTemplateConfig(ext, "长期记忆prompt模板", [
             `{{#if MEMORY}}
 
 ## 长期记忆
@@ -89,8 +85,8 @@ export default class PromptConfig {
 长期记忆为空
     {{/each}}
 {{/if}}`
-        ], "");
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "总结记忆prompt模板", [
+        ], "", "prompt模板");
+        seal.ext.registerTemplateConfig(ext, "总结记忆prompt模板", [
             `{{#if SUMMARY}}
 
 ## 总结记忆
@@ -100,8 +96,8 @@ export default class PromptConfig {
 总结记忆为空
     {{/each}}
 {{/if}}`
-        ], "");
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "知识库记忆prompt模板", [
+        ], "", "prompt模板");
+        seal.ext.registerTemplateConfig(ext, "知识库记忆prompt模板", [
             `{{#if KNOWLEDGE}}
 
 ## 知识库
@@ -118,8 +114,8 @@ export default class PromptConfig {
 知识库为空
     {{/each}}
 {{/if}}`
-        ], "");
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "工具函数prompt模板", [ // 加入subagent实现 wip
+        ], "", "prompt模板");
+        seal.ext.registerTemplateConfig(ext, "工具函数prompt模板", [ // 加入subagent实现 wip
             `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数
@@ -147,9 +143,9 @@ export default class PromptConfig {
 暂无可用函数。
     {{/each}}
 {{/if}}`
-        ], "");
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "");
-        seal.ext.registerTemplateConfig(PromptConfig.ext, "记忆总结prompt模板", [ // wip
+        ], "", "prompt模板");
+        seal.ext.registerTemplateConfig(ext, "图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "", "prompt模板");
+        seal.ext.registerTemplateConfig(ext, "记忆总结prompt模板", [ // wip
             `你现在扮演的角色如下:
 ## 扮演详情
 {{{角色设定}}}
@@ -231,7 +227,7 @@ export default class PromptConfig {
         }
     }
 }`
-        ], "");
+        ], "", "prompt模板");
     }
 
     static get() {
@@ -248,5 +244,5 @@ export default class PromptConfig {
 }
 
 function getHandlebarsTemplateConfig(key: string): HandlebarsTemplateDelegate<any> {
-    return Handlebars.compile(seal.ext.getTemplateConfig(PromptConfig.ext, key)[0] || '');
+    return Handlebars.compile(seal.ext.getTemplateConfig(ext, key)[0] || '');
 }

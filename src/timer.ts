@@ -1,9 +1,9 @@
 // 定时器模块：目标/间隔/活跃时间段三类定时任务的调度与持久化
-import Config from "./config/config";
-import { getSessionCtxAndMsg } from "./utils/seal";
-import { getSession } from "./session/session_service";
-import { Session } from "./session/session";
+import { ext } from "./config/config";
 import { logger } from "./logger";
+import { Session } from "./session/session";
+import { getSession } from "./session/session_service";
+import { getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
 import { revive, TypeDescriptor } from "./utils/utils";
 
@@ -50,11 +50,11 @@ export class TimerManager {
 
     static getTimerQueue() {
         try {
-            const data = JSON.parse(Config.ext.storageGet(`timerQueue`) || '[]')
+            const data = JSON.parse(ext.storageGet(`timerQueue`) || '[]')
             if (!Array.isArray(data)) throw new Error('timerQueue不是数组');
             data.forEach((item: any) => {
-                if (!item.hasOwnProperty('sessionId')) return;
-                if (!item.hasOwnProperty('sessionType')) return;
+                if (!Object.prototype.hasOwnProperty.call(item, 'sessionId')) return;
+                if (!Object.prototype.hasOwnProperty.call(item, 'sessionType')) return;
                 this.timerQueue.push(revive(TimerInfo, item));
             });
         } catch (e) {
@@ -63,7 +63,7 @@ export class TimerManager {
     }
 
     static saveTimerQueue() {
-        Config.ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
+        ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
     static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string) {

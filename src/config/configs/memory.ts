@@ -1,26 +1,24 @@
 // 记忆配置：向量维度/长期记忆/总结记忆/知识库 TOML
-import MemoryItem from "../../memory/memory_item";
-import { revive, TypeDescriptor } from "../../utils/utils";
-import Config from "../config";
 import { load } from 'js-toml'
 
+import MemoryItem from "../../memory/memory_item";
+import { revive, TypeDescriptor } from "../../utils/utils";
+import { ext } from "../config";
+
+
 export default class MemoryConfig {
-    static ext: seal.ExtInfo;
-
     static register() {
-        MemoryConfig.ext = Config.getExt('记忆');
-
-        seal.ext.registerIntConfig(MemoryConfig.ext, "向量维度", 1024, "");
-        seal.ext.registerBoolConfig(MemoryConfig.ext, "启用长期记忆", true, "");
-        seal.ext.registerIntConfig(MemoryConfig.ext, "长期记忆上限", 50, "");
-        seal.ext.registerIntConfig(MemoryConfig.ext, "长期记忆展示数量", 5, "");
-        seal.ext.registerBoolConfig(MemoryConfig.ext, "启用总结记忆", true, "");
-        seal.ext.registerIntConfig(MemoryConfig.ext, "总结记忆上限", 10, "");
-        seal.ext.registerIntConfig(MemoryConfig.ext, "总结记忆间隔轮数", 10, "");
-        seal.ext.registerIntConfig(MemoryConfig.ext, "总结记忆参与轮数", 10, "");
-        seal.ext.registerBoolConfig(MemoryConfig.ext, "启用知识库记忆", false, "");
-        seal.ext.registerIntConfig(MemoryConfig.ext, "知识库记忆展示数量", 10, "");
-        seal.ext.registerTemplateConfig(MemoryConfig.ext, "知识库记忆", [
+        seal.ext.registerIntConfig(ext, "向量维度", 1024, "", "记忆");
+        seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "", "记忆");
+        seal.ext.registerIntConfig(ext, "长期记忆上限", 50, "", "记忆");
+        seal.ext.registerIntConfig(ext, "长期记忆展示数量", 5, "", "记忆");
+        seal.ext.registerBoolConfig(ext, "启用总结记忆", true, "", "记忆");
+        seal.ext.registerIntConfig(ext, "总结记忆上限", 10, "", "记忆");
+        seal.ext.registerIntConfig(ext, "总结记忆间隔轮数", 10, "", "记忆");
+        seal.ext.registerIntConfig(ext, "总结记忆参与轮数", 10, "", "记忆");
+        seal.ext.registerBoolConfig(ext, "启用知识库记忆", false, "", "记忆");
+        seal.ext.registerIntConfig(ext, "知识库记忆展示数量", 10, "", "记忆");
+        seal.ext.registerTemplateConfig(ext, "知识库记忆", [
             `# 采用toml进行格式化
 roles = ["正确"] # 当数组为空或不存在时，默认对所有角色生效
             
@@ -38,21 +36,21 @@ groups = ["114514", "1919810"] # 相关群组ID列表
 
 [knowledges.测试2]
 content = "单行形式，只有content字段是必须的"`
-        ], "");
+        ], "", "记忆");
     }
 
     static get() {
         return {
-            DIMENSION: seal.ext.getIntConfig(MemoryConfig.ext, "向量维度"),
-            MEMORY: seal.ext.getBoolConfig(MemoryConfig.ext, "启用长期记忆"),
-            MEMORY_LIMIT: seal.ext.getIntConfig(MemoryConfig.ext, "长期记忆上限"),
-            MEMORY_SHOW_NUMBER: seal.ext.getIntConfig(MemoryConfig.ext, "长期记忆展示数量"),
-            SUMMARY: seal.ext.getBoolConfig(MemoryConfig.ext, "启用总结记忆"),
-            SUMMARY_LIMIT: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆上限"),
-            SUMMARY_INTERVAL: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆间隔轮数"),
-            SUMMARY_SIZE: seal.ext.getIntConfig(MemoryConfig.ext, "总结记忆参与轮数"),
-            KNOWLEDGE: seal.ext.getBoolConfig(MemoryConfig.ext, "启用知识库记忆"),
-            KNOWLEDGE_SHOW_NUMBER: seal.ext.getIntConfig(MemoryConfig.ext, "知识库记忆展示数量"),
+            DIMENSION: seal.ext.getIntConfig(ext, "向量维度"),
+            MEMORY: seal.ext.getBoolConfig(ext, "启用长期记忆"),
+            MEMORY_LIMIT: seal.ext.getIntConfig(ext, "长期记忆上限"),
+            MEMORY_SHOW_NUMBER: seal.ext.getIntConfig(ext, "长期记忆展示数量"),
+            SUMMARY: seal.ext.getBoolConfig(ext, "启用总结记忆"),
+            SUMMARY_LIMIT: seal.ext.getIntConfig(ext, "总结记忆上限"),
+            SUMMARY_INTERVAL: seal.ext.getIntConfig(ext, "总结记忆间隔轮数"),
+            SUMMARY_SIZE: seal.ext.getIntConfig(ext, "总结记忆参与轮数"),
+            KNOWLEDGE: seal.ext.getBoolConfig(ext, "启用知识库记忆"),
+            KNOWLEDGE_SHOW_NUMBER: seal.ext.getIntConfig(ext, "知识库记忆展示数量"),
             KNOWLEDGE_MEMORIES_MAP: getKnowledgeMemoriesMapConfig()
         }
     }
@@ -95,7 +93,7 @@ class KnowledgeConfigItem {
 
 function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
     const knowledgeMaps: { [role: string]: { [id: string]: MemoryItem } } = {};
-    seal.ext.getTemplateConfig(MemoryConfig.ext, "知识库记忆").forEach(tomlString => {
+    seal.ext.getTemplateConfig(ext, "知识库记忆").forEach(tomlString => {
         const kc = revive(KnowledgeConfigItem, load(tomlString));
         const mmap: { [id: string]: MemoryItem } = {};
         for (const id in kc.knowledges) {
@@ -113,7 +111,7 @@ function getKnowledgeMemoriesMapConfig(): { [role: string]: MemoryItem[] } {
         }
         if (kc.roles.length === 0) kc.roles.push('*');
         for (const role of kc.roles) {
-            if (!knowledgeMaps.hasOwnProperty(role)) knowledgeMaps[role] = {};
+            if (!Object.prototype.hasOwnProperty.call(knowledgeMaps, role)) knowledgeMaps[role] = {};
             knowledgeMaps[role] = { ...knowledgeMaps[role], ...mmap };
         }
     });

@@ -1,5 +1,6 @@
 // ob11 API 封装：消息/群/好友/禁言等
 import { logger } from "../logger";
+
 import { MessageSegment } from "./string";
 
 export function getNet() {
@@ -25,7 +26,7 @@ export async function sendPrivateMsg(epId: string, user_id: string, message: Mes
             message
         })
         return data;
-    } catch (e) {
+    } catch (_e) {
         logger.error(`发送私聊消息失败`);
         return null;
     }
@@ -40,7 +41,7 @@ export async function sendGroupMsg(epId: string, group_id: string, message: Mess
             message
         })
         return data;
-    } catch (e) {
+    } catch (_e) {
         logger.error(`发送群聊消息失败`);
         return null;
     }

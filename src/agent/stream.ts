@@ -1,14 +1,13 @@
 // 流式/非流式请求服务：基于 Model 配置构建请求体并调用后端
 import Config from "../config/config";
-import { logger } from "../logger";
-import { withTimeout } from "../utils/utils";
-import ChatModel from "../model/chat";
 import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
-import { ToolCall } from "../tool/types";
-import { fetchData } from "../utils/web";
-
+import { logger } from "../logger";
+import ChatModel from "../model/chat";
 import Model from "../model/model";
+import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
+import { withTimeout } from "../utils/utils";
+import { fetchData } from "../utils/web";
 
 export class streamService {
     static async startStream(messages: any[], modelName: string = ''): Promise<string> {
@@ -111,7 +110,7 @@ export class streamService {
                 const message = data.choices[0].message;
                 const finish_reason = data.choices[0].finish_reason;
 
-                if (message.hasOwnProperty('reasoning_content')) {
+                if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
                     logger.info('思维链内容:', message.reasoning_content);
                 }
 

@@ -1,11 +1,11 @@
 // 消息构建：system prompt/上下文消息组装与 body 解析
+import Config from "../config/config";
+import { knowledgeService } from "../memory/knowledge";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
-import Config from "../config/config";
-import { ToolInfo } from "../tool/types";
-import Tool from "../tool/tool";
-import { knowledgeService } from "../memory/knowledge";
 import User from "../session/user";
+import Tool from "../tool/tool";
+import { ToolInfo } from "../tool/types";
 import { ToolCall } from "../tool/types";
 
 export interface RequestMessage {
@@ -194,17 +194,17 @@ export function parseBody(template: string[], messages: any[], tools: ToolInfo[]
         }
     }
 
-    if (!bodyObject.hasOwnProperty('messages')) {
+    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'messages')) {
         bodyObject.messages = messages;
     }
 
-    if (!bodyObject.hasOwnProperty('model')) {
+    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'model')) {
         throw new Error('body 中没有 model');
     }
 
     if (STATUS && !PROMPT_ENGINEERING) {
-        if (!bodyObject.hasOwnProperty('tools')) bodyObject.tools = tools;
-        if (!bodyObject.hasOwnProperty('tool_choice')) bodyObject.tool_choice = tool_choice;
+        if (!Object.prototype.hasOwnProperty.call(bodyObject, 'tools')) bodyObject.tools = tools;
+        if (!Object.prototype.hasOwnProperty.call(bodyObject, 'tool_choice')) bodyObject.tool_choice = tool_choice;
     } else {
         delete bodyObject?.tools;
         delete bodyObject?.tool_choice;
@@ -228,8 +228,8 @@ export function parseEmbeddingBody(template: string[], input: string, dimensions
         }
     }
 
-    if (!bodyObject.hasOwnProperty('input')) bodyObject.input = input;
-    if (!bodyObject.hasOwnProperty('dimensions')) bodyObject.dimensions = dimensions;
+    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'input')) bodyObject.input = input;
+    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'dimensions')) bodyObject.dimensions = dimensions;
 
     return bodyObject;
 }

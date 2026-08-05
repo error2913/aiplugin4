@@ -1,7 +1,7 @@
 // 记忆条目：向量/标签/用户群组/相似度与新鲜度计算
-import Model from "../model/model";
 import Config from "../config/config";
 import Logger from "../logger";
+import Model from "../model/model";
 import { cosineSimilarity, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 
 export default class MemoryItem {

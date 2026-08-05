@@ -1,27 +1,28 @@
 // 根命令 .ai：子命令注册与分发、会话上下文组装
-import { getSession } from "../session/session_service";
-import { Session } from "../session/session";
-import Config from "../config/config";
+import { ext } from "../config/config";
 import { logger } from "../logger";
-import { CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
+import { Session } from "../session/session";
+import { getSession } from "../session/session_service";
 import { aliasToCmd } from "../utils/utils";
-import { registerCmdPrivilege } from "./sub_cmd/privilege";
-import { registerCmdPrompt } from "./sub_cmd/prompt";
-import { registerCmdStatus } from "./sub_cmd/status";
+
+import { CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
 import { registerCmdCtxn } from "./sub_cmd/ctxn";
-import { registerCmdTimer } from "./sub_cmd/timer";
-import { registerCmdOn } from "./sub_cmd/on";
-import { registerCmdStandby } from "./sub_cmd/standby";
-import { registerCmdOff } from "./sub_cmd/off";
 import { registerCmdForget } from "./sub_cmd/forget";
-import { registerCmdRole } from "./sub_cmd/role";
+import { registerCmdIgnore } from "./sub_cmd/ignore";
 import { registerCmdImage } from "./sub_cmd/image";
 import { registerCmdMemory } from "./sub_cmd/memory";
-import { registerCmdTool } from "./sub_cmd/tool";
-import { registerCmdIgnore } from "./sub_cmd/ignore";
-import { registerCmdToken } from "./sub_cmd/token";
-import { registerCmdShut } from "./sub_cmd/shut";
 import { registerCmdModel } from "./sub_cmd/model";
+import { registerCmdOff } from "./sub_cmd/off";
+import { registerCmdOn } from "./sub_cmd/on";
+import { registerCmdPrivilege } from "./sub_cmd/privilege";
+import { registerCmdPrompt } from "./sub_cmd/prompt";
+import { registerCmdRole } from "./sub_cmd/role";
+import { registerCmdShut } from "./sub_cmd/shut";
+import { registerCmdStandby } from "./sub_cmd/standby";
+import { registerCmdStatus } from "./sub_cmd/status";
+import { registerCmdTimer } from "./sub_cmd/timer";
+import { registerCmdToken } from "./sub_cmd/token";
+import { registerCmdTool } from "./sub_cmd/tool";
 
 export interface SubCmdContext {
     ctx: seal.MsgContext;
@@ -92,7 +93,7 @@ export function registerCmd() {
             const ret = seal.ext.newCmdExecuteResult(true);
 
             const subCmd = aliasToCmd(cmdArgs.getArgN(1));
-            if (SubCmd.map.hasOwnProperty(aliasToCmd(subCmd))) {
+            if (Object.prototype.hasOwnProperty.call(SubCmd.map, aliasToCmd(subCmd))) {
                 const uid = ctx.player.userId;
                 const gid = ctx.group.groupId;
                 const epId = ctx.endPoint.userId;
@@ -131,6 +132,6 @@ export function registerCmd() {
         }
     }
 
-    Config.ext.cmdMap['AI'] = cmd;
-    Config.ext.cmdMap['ai'] = cmd;
+    ext.cmdMap['AI'] = cmd;
+    ext.cmdMap['ai'] = cmd;
 }

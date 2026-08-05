@@ -1,19 +1,20 @@
 // 会话上下文：消息增删/忽略名单/压缩与总结触发/用户群查找/图片查找
-import Config from "../config/config";
-import Image from "../resource/image";
-import { levenshteinDistance } from "../utils/string";
-import Logger from "../logger";
-import { netExists, getFriendList, getGroupList, getGroupMemberList } from "../utils/ob11";
-import { TypeDescriptor } from "../utils/utils";
-import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 import Agent from "../agent/agent";
-import { Session } from "../session/session";
-import { ToolCall } from "../tool/types";
-import Message from "./message";
-import Group from "../session/group";
-import User from "../session/user";
+import Config from "../config/config";
+import Logger from "../logger";
 import MemoryService from "../memory/memory";
-import { getStrangerInfo, getGroupMemberInfo } from "../utils/ob11";
+import Image from "../resource/image";
+import Group from "../session/group";
+import { Session } from "../session/session";
+import User from "../session/user";
+import { ToolCall } from "../tool/types";
+import { getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo, netExists } from "../utils/ob11";
+import { levenshteinDistance } from "../utils/string";
+import { TypeDescriptor } from "../utils/utils";
+
+import Message from "./message";
+import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
+
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
@@ -81,7 +82,15 @@ export class Context {
     }
 
     // 添加后检查压缩条件，并对过长user进行压缩 wip
-    async addUserMessage(text: string, userId: string, messageId: string) {
+    async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
+        // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
+        if (this.autoNameMod > 0) {
+            try {
+                await this.updateName(ctx.endPoint.userId, ctx.group.groupId, userId);
+            } catch (e) {
+                Logger.warning('自动改名失败: ' + e.message);
+            }
+        }
         // 过长的用户消息交给压缩智能体压缩后再存入上下文，节省 token
         const { COMPRESS_THRESHOLD } = Config.message;
         if (text.length > COMPRESS_THRESHOLD) {
@@ -330,10 +339,23 @@ export class Context {
         const img = Image.get(id);
         if (img) return img;
         const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
-        if (LOCAL_IMAGE_PATH_MAP && LOCAL_IMAGE_PATH_MAP.hasOwnProperty(id)) {
+        if (LOCAL_IMAGE_PATH_MAP && Object.prototype.hasOwnProperty.call(LOCAL_IMAGE_PATH_MAP, id)) {
             return Image.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]);
         }
         return this.session.memory.findImage(id);
+    }
+
+    async updateName(epId: string, gid: string, uid: string) {
+        switch (this.autoNameMod) {
+            case 1: {
+                await this.setName(epId, gid, uid, 'nickname');
+                break;
+            }
+            case 2: {
+                await this.setName(epId, gid, uid, 'card');
+                break;
+            }
+        }
     }
 
     async findGroup(ctx: seal.MsgContext, groupName: string | number): Promise<Group | null> {

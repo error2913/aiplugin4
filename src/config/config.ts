@@ -1,20 +1,28 @@
-// 配置中心：按模块注册 seal 配置并缓存，动态挂载 Config.<模块> 访问器
 import Logger from "../logger";
-import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
-import BaseConfig from "./configs/base";
-import ModelConfig from "./configs/model";
+
 import BackendConfig from "./configs/backend";
-import ReceivedConfig from "./configs/received";
-import TriggerConfig from "./configs/trigger";
+import BaseConfig from "./configs/base";
 import ImageConfig from "./configs/image";
-import ToolConfig from "./configs/tool";
 import MemoryConfig from "./configs/memory";
-import ReplyConfig from "./configs/reply";
 import MessageConfig from "./configs/message";
+import ModelConfig from "./configs/model";
 import PromptConfig from "./configs/prompt";
+import ReceivedConfig from "./configs/received";
+import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
 import SampleConfig from "./configs/sample";
+import ToolConfig from "./configs/tool";
+import TriggerConfig from "./configs/trigger";
+import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
 
+export const ext: seal.ExtInfo = (() => {
+    let e = seal.ext.find(NAME);
+    if (!e) {
+        e = seal.ext.new(NAME, AUTHOR, VERSION);
+        seal.ext.register(e);
+    }
+    return e;
+})();
 const configMap = {
     base: BaseConfig,
     model: ModelConfig,
@@ -42,11 +50,9 @@ interface ConfigCache {
 }
 
 class _Config {
-    static ext: seal.ExtInfo;
     static cache: { [K in ConfigKey]?: ConfigCache } = {}
 
     static registerConfig() {
-        this.ext = this.getExt(NAME);
         for (const k of Object.keys(configMap) as ConfigKey[]) {
             configMap[k].register();
             Object.defineProperty(this, k, {
@@ -70,15 +76,6 @@ class _Config {
         return data;
     }
 
-    static getExt(name: string): seal.ExtInfo {
-        const n = `${NAME}:${name}`;
-        let ext = seal.ext.find(n);
-        if (!ext) {
-            ext = seal.ext.new(n, AUTHOR, VERSION);
-            seal.ext.register(ext);
-        }
-        return ext;
-    }
 }
 
 const Config = _Config as typeof _Config & ConfigProps;

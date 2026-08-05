@@ -1,4 +1,5 @@
 // token 用量统计：按模型按天记录，支持过期归并/汇总/图表
+import { ext } from "./config/config";
 import Config from "./config/config";
 import { logger } from "./logger";
 
@@ -8,7 +9,7 @@ export class UsageManager {
     static get usageMap(): { [model: string]: { [time: string]: { prompt_tokens: number, completion_tokens: number } } } {
         if (!this.usageMapCache) {
             try {
-                this.usageMapCache = JSON.parse(Config.ext.storageGet('usageMap') || '{}');
+                this.usageMapCache = JSON.parse(ext.storageGet('usageMap') || '{}');
             } catch (error) {
                 logger.error('从存储中获取 usageMap 失败:', error);
             }
@@ -23,10 +24,10 @@ export class UsageManager {
         const month = now.getMonth() + 1;
         const day = now.getDate();
         const key = `${year}-${month}-${day}`;
-        if (!this.usageMap.hasOwnProperty(model)) {
+        if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) {
             this.usageMap[model] = {};
         }
-        if (!this.usageMap[model].hasOwnProperty(key)) {
+        if (!Object.prototype.hasOwnProperty.call(this.usageMap[model], key)) {
             this.usageMap[model][key] = { prompt_tokens: 0, completion_tokens: 0 };
             this.clearExpiredUsage(model);
         }
@@ -43,7 +44,7 @@ export class UsageManager {
         const currentYM = currentYear * 12 + currentMonth;
         const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
 
-        if (!this.usageMap.hasOwnProperty(model)) return;
+        if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) return;
 
         for (const key in this.usageMap[model]) {
             const [year, month, day] = key.split('-').map(Number);
@@ -55,7 +56,7 @@ export class UsageManager {
             if (ym < currentYM - 11) newKey = `0-0-0`;
 
             if (newKey) {
-                if (!this.usageMap[model].hasOwnProperty(newKey)) {
+                if (!Object.prototype.hasOwnProperty.call(this.usageMap[model], newKey)) {
                     this.usageMap[model][newKey] = { prompt_tokens: 0, completion_tokens: 0 };
                 }
                 this.usageMap[model][newKey].prompt_tokens += this.usageMap[model][key].prompt_tokens;
@@ -66,7 +67,7 @@ export class UsageManager {
     }
 
     static getModelUsage(model: string): { prompt_tokens: number, completion_tokens: number } {
-        if (!this.usageMap.hasOwnProperty(model)) return { prompt_tokens: 0, completion_tokens: 0 };
+        if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) return { prompt_tokens: 0, completion_tokens: 0 };
         const usage = { prompt_tokens: 0, completion_tokens: 0 };
         for (const key in this.usageMap[model]) {
             usage.prompt_tokens += this.usageMap[model][key].prompt_tokens;
@@ -76,7 +77,7 @@ export class UsageManager {
     }
 
     static saveUsageMap() {
-        Config.ext.storageSet('usageMap', JSON.stringify(this.usageMapCache));
+        ext.storageSet('usageMap', JSON.stringify(this.usageMapCache));
     }
 
     static clearUsageMap() {

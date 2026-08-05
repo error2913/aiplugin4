@@ -2,13 +2,14 @@
 import Logger from "../logger";
 import User from "../session/user";
 import { fmtDate } from "../utils/string";
+
 import { AssistantMessage, MessageType, RequestMessage, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
 export default class Message {
     static getMessageType(m: MessageType): 'user' | 'assistant' | 'tool_calls' | 'tool_callback' {
         if (m.role === 'user') return 'user';
         else if (m.role === 'assistant') {
-            if (m.hasOwnProperty('toolCalls')) return 'tool_calls';
+            if (Object.prototype.hasOwnProperty.call(m, 'toolCalls')) return 'tool_calls';
             else return 'assistant';
         }
         else if (m.role === 'tool') return 'tool_callback';
@@ -16,8 +17,8 @@ export default class Message {
     }
 
     static getUserMessageItemType(umi: UserMessageItem | SystemUserMessageItem): 'user' | 'system' {
-        if (umi.hasOwnProperty('userId')) return 'user';
-        else if (umi.hasOwnProperty('systemName')) return 'system';
+        if (Object.prototype.hasOwnProperty.call(umi, 'userId')) return 'user';
+        else if (Object.prototype.hasOwnProperty.call(umi, 'systemName')) return 'system';
         else throw new Error('Unknown message type');
     }
 

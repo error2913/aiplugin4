@@ -1,9 +1,9 @@
 // 改名工具：设置群名片
-import { logger } from "../../../logger";
 import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import { getGroupMemberInfo, netExists } from "../../../utils/ob11";
 import { getCtxAndMsg } from "../../../utils/seal";
 import Tool from "../../tool";
-import { getGroupMemberInfo, netExists } from "../../../utils/ob11";
 
 export function registerRename() {
     const tool = new Tool({

@@ -1,24 +1,27 @@
 // 会话：聊天编排（chat/chatStream/回复/接收）、设定、工具状态与活跃时间
-import { TimerManager } from "../timer";
 import Agent from "../agent/agent";
-import Config from "../config/config";
-import { logger } from "../logger";
-import { ToolState } from "../tool/tool";
-import { ToolListen } from "../tool/types";
-import { TypeDescriptor } from "../utils/utils";
-import { Context } from "../context/context";
-import { SessionType, State } from "./types";
-import { RequestMessage } from "../utils/message";
-import SessionMemoryService from "../memory/session_memory";
-import Group from "./group";
-import User from "./user";
-import Model from "../model/model";
-import Tool from "../tool/tool";
 import { streamService } from "../agent/stream";
+import { ext } from "../config/config";
+import Config from "../config/config";
+import { Context } from "../context/context";
+import { logger } from "../logger";
+import SessionMemoryService from "../memory/session_memory";
+import Model from "../model/model";
+import Image, { ImageManager } from "../resource/image";
+import { TimerManager } from "../timer";
+import { ToolState } from "../tool/tool";
+import Tool from "../tool/tool";
+import { ToolListen } from "../tool/types";
+import { RequestMessage } from "../utils/message";
 import { handleMessages } from "../utils/message";
 import { checkRepeat, handleReply, MessageSegment, transformArrayToContent } from "../utils/string";
+import { TypeDescriptor } from "../utils/utils";
 import { replyToSender, transformMsgId } from "../utils/utils";
-import Image, { ImageManager } from "../resource/image";
+
+import Group from "./group";
+import { SessionType, State } from "./types";
+import User from "./user";
+
 
 export class Setting {
     static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName'];
@@ -173,7 +176,7 @@ export class Session {
         const state = this.tool.state;
         tools.forEach(tool => {
             if (BLOCKED.includes(tool)) return;
-            if (!state.hasOwnProperty(tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
+            if (!Object.prototype.hasOwnProperty.call(state, tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
         })
         return state;
     }
@@ -209,7 +212,7 @@ export class Session {
     }
 
     save() {
-        Config.ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => key === 'lastCtx' ? undefined : value));
+        ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => key === 'lastCtx' ? undefined : value));
     }
 
     get curActiveTimeSegIndex(): number {
@@ -262,7 +265,7 @@ export class Session {
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
         this.lastCtx = ctx;
         const { content } = await transformArrayToContent(ctx, messageArray);
-        await this.context.addUserMessage(content, ctx.player.userId, transformMsgId(msg.rawId));
+        await this.context.addUserMessage(ctx, content, ctx.player.userId, transformMsgId(msg.rawId));
     }
 
     async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[]) {
@@ -299,7 +302,7 @@ export class Session {
 
         const { BLOCKED } = Config.tool;
         BLOCKED.forEach(key => {
-            if (this.tool.state.hasOwnProperty(key)) this.tool.state[key] = false;
+            if (Object.prototype.hasOwnProperty.call(this.tool.state, key)) this.tool.state[key] = false;
         });
 
         this.resetState();

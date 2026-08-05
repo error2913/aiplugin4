@@ -1,15 +1,17 @@
 // 记忆服务：MemoryItem 存取/检索/权重/短期记忆（含旧格式迁移）
+import Agent from "../agent/agent";
 import Config from "../config/config";
-import { generateId, revive, TypeDescriptor } from "../utils/utils";
+import type { Context } from "../context/context";
 import Logger from "../logger";
 import Model from "../model/model";
-import { MemorySource, searchOptions } from "./types";
-import Agent from "../agent/agent";
-import { Session } from "../session/session";
-import MemoryItem from "./memory_item";
 import Image from "../resource/image";
+import { Session } from "../session/session";
 import { GroupInfo, SessionInfo, UserInfo } from "../session/types";
-import type { Context } from "../context/context";
+import { generateId, revive, TypeDescriptor } from "../utils/utils";
+
+import MemoryItem from "./memory_item";
+import { MemorySource, searchOptions } from "./types";
+
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
@@ -204,7 +206,7 @@ export default class MemoryService {
 
     generateMemoryId(): string {
         let id = generateId(), a = 0;
-        while (this.memoryMap.hasOwnProperty(id)) {
+        while (Object.prototype.hasOwnProperty.call(this.memoryMap, id)) {
             id = generateId();
             a++;
             if (a > 1000) {
@@ -252,7 +254,7 @@ export default class MemoryService {
 
         if (ids.length > 0) {
             ids.forEach(id => {
-                if (this.memoryMap.hasOwnProperty(id)) {
+                if (Object.prototype.hasOwnProperty.call(this.memoryMap, id)) {
                     const m = this.memoryMap[id];
                     if (
                         tags.every(t => m.tags.includes(t)) &&

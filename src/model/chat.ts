@@ -1,12 +1,13 @@
 // 对话模型：callChat 构建请求并解析响应
 import Agent from "../agent/agent";
-import { UsageManager } from "../usage";
 import Config from "../config/config";
 import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/types";
+import { UsageManager } from "../usage";
 import { withTimeout } from "../utils/utils";
 import { fetchData } from "../utils/web";
+
 import { BaseModel } from "./model";
 import { ChatModelUse, ModelBody } from "./types";
 
@@ -39,7 +40,7 @@ export default class ChatModel extends BaseModel {
                 const message = data.choices[0].message;
                 const finish_reason = data.choices[0].finish_reason;
 
-                if (message.hasOwnProperty('reasoning_content')) {
+                if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
                     logger.info(`思维链内容:`, message.reasoning_content);
                 }
 

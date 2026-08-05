@@ -1,18 +1,22 @@
 // 插件入口：注册配置、工具、命令与事件处理器，并启动各模块（含智能体初始化）
-import { getSession } from "./session/session_service";
-import Tool from "./tool/tool";
+import Handlebars from "handlebars";
+
+import { initAgents } from "./agent/agents";
+import { PrivilegeManager } from "./cmd/privilege";
+import { registerCmd } from "./cmd/root_cmd";
+import { ext } from "./config/config";
 import Config from "./config/config";
-import { triggerConditionMap } from "./tool/tools/tool_trigger";
+import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
+import { knowledgeService } from "./memory/knowledge";
+import { getSession } from "./session/session_service";
+import { TimerManager } from "./timer";
+import Tool from "./tool/tool";
+import { triggerConditionMap } from "./tool/tools/tool_trigger";
+import { createMsg } from "./utils/seal";
 import { fmtDate, transformTextToArray } from "./utils/string";
 import { checkUpdate } from "./utils/update";
-import { TimerManager } from "./timer";
-import { createMsg } from "./utils/seal";
-import { PrivilegeManager } from "./cmd/privilege";
-import { knowledgeService } from "./memory/knowledge";
-import { CQ_TYPES_ALLOW } from "./config/static_config";
-import { registerCmd } from "./cmd/root_cmd";
-import "./agent/agents";
+
 
 function main() {
   Handlebars.registerHelper('index', (index: number) => index + 1);
@@ -20,12 +24,11 @@ function main() {
   Handlebars.registerHelper('time', (t: number) => fmtDate(t));
 
   Config.registerConfig();
+  initAgents();
   checkUpdate();
   Tool.registerTool();
   TimerManager.init();
   knowledgeService.init();
-
-  const ext = Config.ext;
 
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
@@ -85,7 +88,7 @@ function main() {
         }
 
         // AI自己设定的触发条件触发
-        if (triggerConditionMap.hasOwnProperty(sid) && triggerConditionMap[sid].length !== 0) {
+        if (Object.prototype.hasOwnProperty.call(triggerConditionMap, sid) && triggerConditionMap[sid].length !== 0) {
           for (let i = 0; i < triggerConditionMap[sid].length; i++) {
             const condition = triggerConditionMap[sid][i];
             if (condition.keyword && !new RegExp(condition.keyword).test(message)) {

@@ -1,6 +1,6 @@
 // .ai on：开启 AI 及计数器/计时器/概率/活跃时间模式
-import { TimerManager } from "../../timer";
 import Config from "../../config/config";
+import { TimerManager } from "../../timer";
 import { parseActivityTime } from "../../utils/string";
 import { S } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";

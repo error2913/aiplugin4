@@ -1,12 +1,12 @@
 // 记忆工具：添加/删除/搜索/清除记忆（含知识库）
-import { getSession, SessionService } from "../../session/session_service";
-import { GroupInfo, SessionInfo, UserInfo } from "../../session/types";
 import Config from "../../config/config";
-import { getCtxAndMsg } from "../../utils/seal";
-import Tool from "../tool";
 import { knowledgeService } from "../../memory/knowledge";
 import { searchOptions as SearchOptions } from "../../memory/types";
+import { getSession, SessionService } from "../../session/session_service";
+import { GroupInfo, SessionInfo, UserInfo } from "../../session/types";
 import { getRoleSetting } from "../../utils/message";
+import { getCtxAndMsg } from "../../utils/seal";
+import Tool from "../tool";
 
 export function registerMemory() {
     const toolAdd = new Tool({
@@ -218,7 +218,7 @@ export function registerMemory() {
     toolSearch.solve = async (ctx, _, session, args) => {
         const { memory_type, name = '', query = '', topK = 5, keywords = [], userList = [], groupList = [], method = 'similarity' } = args;
 
-        let si: SessionInfo = {
+        const si: SessionInfo = {
             isPrivate: false,
             id: '',
             name: ''

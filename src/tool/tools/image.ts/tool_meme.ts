@@ -1,8 +1,8 @@
 // 表情包工具：列表/信息/制作（meme 服务）
-import { GroupInfo, UserInfo } from "../../../session/types";
-import Image from "../../../resource/image";
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
+import Image from "../../../resource/image";
+import { GroupInfo, UserInfo } from "../../../session/types";
 import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
@@ -25,7 +25,7 @@ async function getInfo(name: string): Promise<{ key: string, info: MemeInfo }> {
         const res2 = await fetch(baseurl + key + "/info");
         const json2 = await res2.json();
         return { key, info: json2 };
-    } catch (err) {
+    } catch (_err) {
         throw new Error("获取表情包信息失败");
     }
 }

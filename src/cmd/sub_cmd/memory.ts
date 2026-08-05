@@ -1,6 +1,6 @@
 // .ai memo：个人/群聊/短期记忆与设定管理
-import { getSession } from "../../session/session_service";
 import Config from "../../config/config";
+import { getSession } from "../../session/session_service";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";

@@ -1,6 +1,6 @@
 // .ai sample：查看示例智能体（受示例开关控制）
-import Config from "../../config/config";
 import Agent from "../../agent/agent";
+import Config from "../../config/config";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

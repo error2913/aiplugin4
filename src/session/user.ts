@@ -1,5 +1,5 @@
 // 用户档案：存储与读取
-import Config from "../config/config";
+import { ext } from "../config/config";
 import Logger from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 
@@ -18,10 +18,10 @@ export default class User {
     static userMap: { [key: string]: User } = {};
 
     static get(userId: string): User {
-        if (!this.userMap.hasOwnProperty(userId)) {
+        if (!Object.prototype.hasOwnProperty.call(this.userMap, userId)) {
             let user = new User();
             try {
-                const data = JSON.parse(Config.ext.storageGet(`user_${userId}`) || '{}');
+                const data = JSON.parse(ext.storageGet(`user_${userId}`) || '{}');
                 user = revive(User, data);
             } catch (error) {
                 Logger.error(`加载用户${userId}失败: ${error}`);
@@ -32,6 +32,6 @@ export default class User {
         return this.userMap[userId];
     }
     static save(user: User) {
-        Config.ext.storageSet(`user_${user.userId}`, JSON.stringify(user));
+        ext.storageSet(`user_${user.userId}`, JSON.stringify(user));
     }
 }

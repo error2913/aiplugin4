@@ -9,7 +9,9 @@
   "keywords": [],
   "scripts": {
     "build": "cross-env NODE_ENV=production node tools/build.js",
-    "build-dev": "cross-env NODE_ENV=dev node tools/build.js"
+    "build-dev": "cross-env NODE_ENV=dev node tools/build.js",
+    "smoke": "node scripts/smoke.js",
+    "lint": "eslint \"src/**/*.ts\""
   },
   "engines": {
     "node": ">=10"
@@ -22,10 +24,18 @@
   },
   "devDependencies": {
     "@types/lodash-es": "^4.17.12",
+    "@typescript-eslint/eslint-plugin": "^8.66.0",
+    "@typescript-eslint/parser": "^8.66.0",
     "cross-env": "^7.0.3",
     "esbuild": "^0.21.4",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^8.10.2",
+    "eslint-plugin-eslint-comments": "^3.2.0",
+    "eslint-plugin-functional": "^6.6.3",
+    "eslint-plugin-import": "^2.32.0",
     "fs-extra": "^11.2.0",
-    "source-map-support": "^0.5.21"
+    "source-map-support": "^0.5.21",
+    "typescript": "^5.5.4"
   },
   "files": [
     "build/main",

@@ -1,6 +1,6 @@
 // 牌堆工具：抽取牌堆
-import { logger } from "../../../logger";
 import Config from "../../../config/config";
+import { logger } from "../../../logger";
 import Tool from "../../tool"
 
 export function registerDeck() {

@@ -1,22 +1,22 @@
 // 模型配置：对话/图片/嵌入模型 TOML 解析，并同步 Model 静态列表
-import { ModelBody, ModelUse } from "../../model/types";
-import Logger from "../../logger";
-import Config from "../config";
-import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, IMAGE_MODEL_TO_PROVIDER, PROVIDER_MAP } from "../static_config";
-import ChatModel from "../../model/chat";
-import ImageModel from "../../model/image";
-import EmbeddingModel from "../../model/embedding";
-import Model from "../../model/model";
-import { revive, TypeDescriptor } from "../../utils/utils";
 import { load } from 'js-toml'
 
+import Logger from "../../logger";
+import ChatModel from "../../model/chat";
+import EmbeddingModel from "../../model/embedding";
+import ImageModel from "../../model/image";
+import Model from "../../model/model";
+import { ModelBody, ModelUse } from "../../model/types";
+import { revive, TypeDescriptor } from "../../utils/utils";
+import { ext } from "../config";
+import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, IMAGE_MODEL_TO_PROVIDER, PROVIDER_MAP } from "../static_config";
+
+
 export default class ModelConfig {
-    static ext: seal.ExtInfo;
 
     static register() {
-        ModelConfig.ext = Config.getExt('模型');
 
-        seal.ext.registerTemplateConfig(ModelConfig.ext, "对话模型", [
+        seal.ext.registerTemplateConfig(ext, "对话模型", [
             `# 使用toml格式
 name = "deepseek-chat"
 api_key = "sk-xxxx"
@@ -25,19 +25,19 @@ use = ["chat"]
 [body]
 temperature = 1
 top_p = 1`
-        ], '');
-        seal.ext.registerTemplateConfig(ModelConfig.ext, "图片模型", [
+        ], '', "模型");
+        seal.ext.registerTemplateConfig(ext, "图片模型", [
             `# 使用toml格式
 name = "glm-4v"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`
-        ], '');
-        seal.ext.registerTemplateConfig(ModelConfig.ext, "嵌入模型", [
+        ], '', "模型");
+        seal.ext.registerTemplateConfig(ext, "嵌入模型", [
             `# 使用toml格式
 name = "text-embedding-v4"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`
-        ], '');
+        ], '', "模型");
     }
 
     static get() {
@@ -84,7 +84,7 @@ function getModelsConfig<T extends ChatModel | ImageModel | EmbeddingModel>(
     m2p: { [model: string]: string },
     modelConstructor: new (use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) => T
 ): T[] {
-    return seal.ext.getTemplateConfig(ModelConfig.ext, key).map(tomlString => {
+    return seal.ext.getTemplateConfig(ext, key).map(tomlString => {
         try {
             const mc = revive(ModelConfigItem, load(tomlString));
             if (mc.name === "") throw new Error('缺失模型名称');

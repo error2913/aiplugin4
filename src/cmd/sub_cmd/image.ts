@@ -1,7 +1,7 @@
 // .ai image：图片管理（本地/偷取/识别/查找）
 import Image from "../../resource/image";
-import { aliasToCmd } from "../../utils/utils";
 import { transformArrayToContent, transformTextToArray } from "../../utils/string";
+import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

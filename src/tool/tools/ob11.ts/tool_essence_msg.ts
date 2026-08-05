@@ -1,9 +1,9 @@
 // 精华消息工具：设置/获取/删除
-import { transformMsgIdBack, transformMsgId } from "../../../utils/utils";
-import Tool from "../../tool";
 import Image from "../../../resource/image";
-import { transformArrayToContent } from "../../../utils/string";
 import { deleteEssenceMsg, getEssenceMsgList, getGroupMemberInfo, netExists, setEssenceMsg } from "../../../utils/ob11";
+import { transformArrayToContent } from "../../../utils/string";
+import { transformMsgId, transformMsgIdBack } from "../../../utils/utils";
+import Tool from "../../tool";
 
 export function registerEssenceMsg() {
     const toolSet = new Tool({

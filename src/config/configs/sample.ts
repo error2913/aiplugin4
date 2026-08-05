@@ -1,18 +1,13 @@
 // 示例开关配置
-import Config from "../config";
-
+import { ext } from "../config";
 export default class SampleConfig {
-    static ext: seal.ExtInfo;
-
     static register() {
-        SampleConfig.ext = Config.getExt('示例');
-
-        seal.ext.registerBoolConfig(SampleConfig.ext, "是否启用", true, '');
+        seal.ext.registerBoolConfig(ext, "是否启用", true, '', "示例");
     }
 
     static get() {
         return {
-            ENABLED: seal.ext.getBoolConfig(SampleConfig.ext, "是否启用"),
+            ENABLED: seal.ext.getBoolConfig(ext, "是否启用"),
         }
     }
 }

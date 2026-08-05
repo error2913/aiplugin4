@@ -1,6 +1,6 @@
 // 联网工具：搜索与网页阅读
-import { logger } from "../../logger";
 import Config from "../../config/config";
+import { logger } from "../../logger";
 import Tool from "../tool";
 
 export function registerWeb() {

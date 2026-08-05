@@ -1,9 +1,9 @@
 // 命令权限系统：命令权限定义、存储与校验
-import { Session } from "../session/session";
-import { logger } from "../logger";
-import Config from "../config/config";
-import { aliasToCmd } from "../utils/utils";
+import { ext } from "../config/config";
 import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
+import { logger } from "../logger";
+import { Session } from "../session/session";
+import { aliasToCmd } from "../utils/utils";
 
 
 export interface CmdPrivInfo {
@@ -25,7 +25,7 @@ export class PrivilegeManager {
 
     static reviveCmdPriv() {
         try {
-            const cmdPriv = JSON.parse(Config.ext.storageGet('cmdPriv') || '{}');
+            const cmdPriv = JSON.parse(ext.storageGet('cmdPriv') || '{}');
             if (typeof cmdPriv === 'object' && !Array.isArray(cmdPriv)) {
                 this.cmdPriv = this.updateCmdPriv(cmdPriv, JSON.parse(JSON.stringify(defaultCmdPriv)));
                 this.saveCmdPriv();
@@ -38,24 +38,24 @@ export class PrivilegeManager {
     }
 
     static saveCmdPriv() {
-        Config.ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
+        ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
     }
 
     static updateCmdPriv(cp: CmdPriv, defaultCp: CmdPriv): CmdPriv {
         const newCp: CmdPriv = {};
         for (const cmd in defaultCp) {
             const defaultCpi = defaultCp[cmd];
-            if (!cp.hasOwnProperty(cmd)) {
+            if (!Object.prototype.hasOwnProperty.call(cp, cmd)) {
                 newCp[cmd] = defaultCpi;
             } else {
                 const cpi = cp[cmd];
-                if (defaultCpi.hasOwnProperty('args')) {
-                    if (cpi.hasOwnProperty('args')) {
+                if (Object.prototype.hasOwnProperty.call(defaultCpi, 'args')) {
+                    if (Object.prototype.hasOwnProperty.call(cpi, 'args')) {
                         cpi.args = this.updateCmdPriv(cpi.args, defaultCpi.args);
                     } else {
                         cpi.args = defaultCpi.args;
                     }
-                } else if (cpi.hasOwnProperty('args')) {
+                } else if (Object.prototype.hasOwnProperty.call(cpi, 'args')) {
                     delete cpi.args;
                 }
                 newCp[cmd] = cpi;
@@ -75,7 +75,7 @@ export class PrivilegeManager {
         }
 
         const cmd = aliasToCmd(cmdChain[0]);
-        if (!cp.hasOwnProperty(cmd)) {
+        if (!Object.prototype.hasOwnProperty.call(cp, cmd)) {
             return null;
         }
 
@@ -98,7 +98,7 @@ export class PrivilegeManager {
             }
 
             const cmd = cmdChain[i];
-            if (!cp.hasOwnProperty(cmd) && !cp.hasOwnProperty("*")) {
+            if (!Object.prototype.hasOwnProperty.call(cp, cmd) && !Object.prototype.hasOwnProperty.call(cp, "*")) {
                 logger.warning(`权限检查失败，命令：[${cmdChain.join(' ')}]，未在权限列表中找到匹配项`);
                 return { success: false, exist: false };
             }

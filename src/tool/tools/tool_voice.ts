@@ -1,9 +1,9 @@
 // 语音工具：本地语音/文字转语音（TTS）
-import { logger } from "../../logger";
 import Config from "../../config/config";
-import Tool from "../tool";
-import { resolveLocalPath } from "../../utils/utils";
+import { logger } from "../../logger";
 import { netExists, sendGroupAISound } from "../../utils/ob11";
+import { resolveLocalPath } from "../../utils/utils";
+import Tool from "../tool";
 
 const characterMap = {
     "小新": "lucy-voice-laibixiaoxin",
@@ -54,7 +54,7 @@ export function registerRecord() {
         toolRecord.solve = async (ctx, msg, _, args) => {
             const { name } = args;
 
-            if (recordPathMap.hasOwnProperty(name)) {
+            if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
                 seal.replyToSender(ctx, msg, `[语音:${resolveLocalPath(recordPathMap[name])}]`);
                 return '发送成功';
             } else {

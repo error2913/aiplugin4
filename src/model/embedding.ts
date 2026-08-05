@@ -1,10 +1,11 @@
 // 嵌入模型：文本向量化（带缓存）
-import { UsageManager } from "../usage";
 import Config from "../config/config";
 import { DEFAULT_EMBEDDING_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
+import { UsageManager } from "../usage";
 import { withTimeout } from "../utils/utils";
 import { fetchData } from "../utils/web";
+
 import { BaseModel } from "./model";
 import { EmbeddingModelUse, ModelBody } from "./types";
 

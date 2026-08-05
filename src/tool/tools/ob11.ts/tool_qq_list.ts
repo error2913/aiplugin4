@@ -1,7 +1,7 @@
 // 列表工具：好友/群/成员/共同群搜索
 import Config from "../../../config/config";
-import Tool from "../../tool";
 import { getFriendList, getGroupList, getGroupMemberList, netExists } from "../../../utils/ob11";
+import Tool from "../../tool";
 
 export function registerQQList() {
     const toolList = new Tool({

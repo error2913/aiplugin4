@@ -1,7 +1,7 @@
 // .ai tool：查看/开关/调用工具函数
-import { toolMap } from "../../tool/tool";
 import Config from "../../config/config";
 import { logger } from "../../logger";
+import { toolMap } from "../../tool/tool";
 import Tool from "../../tool/tool";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
@@ -73,7 +73,7 @@ export function registerCmdTool() {
                     return ret;
                 }
 
-                if (!toolMap.hasOwnProperty(val3)) {
+                if (!Object.prototype.hasOwnProperty.call(toolMap, val3)) {
                     seal.replyToSender(ctx, msg, '没有这个工具函数');
                     return ret;
                 }
@@ -96,7 +96,7 @@ export function registerCmdTool() {
                     seal.replyToSender(ctx, msg, `调用函数缺少工具函数名`);
                     return ret;
                 }
-                if (!toolMap.hasOwnProperty(val3)) {
+                if (!Object.prototype.hasOwnProperty.call(toolMap, val3)) {
                     seal.replyToSender(ctx, msg, `调用函数失败:未注册的函数:${val3}`);
                     return ret;
                 }
@@ -111,14 +111,14 @@ export function registerCmdTool() {
                         const valueString = kwarg.value;
                         try {
                             acc[kwarg.name] = JSON.parse(`[${valueString}]`)[0];
-                        } catch (e) {
+                        } catch (_e) {
                             acc[kwarg.name] = valueString;
                         }
                         return acc;
                     }, {});
 
                     for (const key of tool.toolInfo.function.parameters.required) {
-                        if (!args.hasOwnProperty(key)) {
+                        if (!Object.prototype.hasOwnProperty.call(args, key)) {
                             logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                             seal.replyToSender(ctx, msg, `调用函数失败:缺少必需参数 ${key}`);
                             return ret;

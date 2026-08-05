@@ -1,5 +1,5 @@
 // 群档案：存储与读取
-import Config from "../config/config";
+import { ext } from "../config/config";
 import Logger from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 export default class Group {
@@ -32,10 +32,10 @@ export default class Group {
     static groupMap: { [key: string]: Group } = {};
 
     static get(groupId: string): Group {
-        if (!this.groupMap.hasOwnProperty(groupId)) {
+        if (!Object.prototype.hasOwnProperty.call(this.groupMap, groupId)) {
             let group = new Group();
             try {
-                const data = JSON.parse(Config.ext.storageGet(`group_${groupId}`) || '{}');
+                const data = JSON.parse(ext.storageGet(`group_${groupId}`) || '{}');
                 group = revive(Group, data);
             } catch (error) {
                 Logger.error(`加载群${groupId}失败: ${error}`);
@@ -46,6 +46,6 @@ export default class Group {
         return this.groupMap[groupId];
     }
     static save(group: Group) {
-        Config.ext.storageSet(`group_${group.groupId}`, JSON.stringify(group));
+        ext.storageSet(`group_${group.groupId}`, JSON.stringify(group));
     }
 }

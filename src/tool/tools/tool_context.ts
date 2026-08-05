@@ -1,9 +1,9 @@
 // 上下文工具：查看指定会话上下文
 import Config from "../../config/config";
+import { getSession } from "../../session/session_service";
 import { buildContent } from "../../utils/message";
 import { getCtxAndMsg } from "../../utils/seal";
 import Tool from "../tool";
-import { getSession } from "../../session/session_service";
 
 export function registerContext() {
     const toolGet = new Tool({

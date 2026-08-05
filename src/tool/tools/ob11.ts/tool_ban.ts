@@ -1,8 +1,8 @@
 // 禁言工具：禁言/全员禁言/禁言列表
 import Config from "../../../config/config";
-import Tool from "../../tool";
-import { fmtDate } from "../../../utils/string";
 import { getGroupMemberInfo, getGroupShutList, netExists, setGroupBan, setGroupWholeBan } from "../../../utils/ob11";
+import { fmtDate } from "../../../utils/string";
+import Tool from "../../tool";
 
 export function registerBan() {
     const toolBan = new Tool({

@@ -1,13 +1,15 @@
 // 会话服务：会话的创建/复活/保存，getSession 入口与知识库访问
 import Agent from "../agent/agent";
-import Config from "../config/config";
-import { logger } from "../logger";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { ext } from "../config/config";
 import { Context } from "../context/context";
-import MemoryService from "../memory/memory";
+import { logger } from "../logger";
 import KnowledgeService from "../memory/knowledge";
-import { Session, Setting } from "./session";
+import MemoryService from "../memory/memory";
 import { ImageManager } from "../resource/image";
+import { revive, TypeDescriptor } from "../utils/utils";
+
+import { Session, Setting } from "./session";
+
 
 /**
  * 获取默认 Agent 下某个会话（旧 AIManager.getAI 的替代）
@@ -18,7 +20,7 @@ export function getSession(sessionId: string): Session {
 
 export class SessionService {
     static save(session: Session) {
-        Config.ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => key === 'lastCtx' ? undefined : value));
+        ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => key === 'lastCtx' ? undefined : value));
     }
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
         agentName: 'string',
@@ -36,10 +38,10 @@ export class SessionService {
     }
 
     getSession(sessionId: string): Session {
-        if (!this.sessionMap.hasOwnProperty(sessionId)) {
+        if (!Object.prototype.hasOwnProperty.call(this.sessionMap, sessionId)) {
             let session = new Session();
             try {
-                const data = JSON.parse(Config.ext.storageGet(`session_${sessionId}`) || '{}');
+                const data = JSON.parse(ext.storageGet(`session_${sessionId}`) || '{}');
                 session = revive(Session, data);
             } catch (error) {
                 logger.error(`加载会话${sessionId}失败: ${error}`);

@@ -43,7 +43,7 @@ export function registerSetTrigger() {
             try {
                 new RegExp(keyword);
                 condition.keyword = keyword;
-            } catch (e) {
+            } catch (_e) {
                 return `触发关键词格式错误`;
             }
         }
@@ -55,7 +55,7 @@ export function registerSetTrigger() {
             condition.uid = ui.userId;
         }
 
-        if (!triggerConditionMap.hasOwnProperty(session.sessionId)) triggerConditionMap[session.sessionId] = [];
+        if (!Object.prototype.hasOwnProperty.call(triggerConditionMap, session.sessionId)) triggerConditionMap[session.sessionId] = [];
         triggerConditionMap[session.sessionId].push(condition);
 
         return "触发条件设置成功";

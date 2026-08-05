@@ -1,9 +1,9 @@
 // 图片工具：图片转文字/文生图（AIDrawing）
-import Image from "../../../resource/image";
-import { logger } from "../../../logger";
 import Config from "../../../config/config";
-import Tool from "../../tool";
+import { logger } from "../../../logger";
+import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
+import Tool from "../../tool";
 
 export function registerImage() {
     const toolITT = new Tool({

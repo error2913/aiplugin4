@@ -1,10 +1,11 @@
 // 工具系统：Tool 注册表、工具调用（含扩展指令/提示词工程）与注册
 import Config from "../config/config"
 import Logger from "../logger"
-import { fixJsonString } from "../utils/string";
-import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
+import { fixJsonString } from "../utils/string";
+
+import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
 import { registerAttr } from "./tools/builtin_cmd.ts/tool_attr";
 import { registerModu } from "./tools/builtin_cmd.ts/tool_modu";
 import { registerRollCheck } from "./tools/builtin_cmd.ts/tool_roll_check";
@@ -14,8 +15,8 @@ import { registerRender } from "./tools/image.ts/tool_render";
 import { registerBan } from "./tools/ob11.ts/tool_ban";
 import { registerEssenceMsg } from "./tools/ob11.ts/tool_essence_msg";
 import { registerGroupSign } from "./tools/ob11.ts/tool_group_sign";
-import { registerQQList } from "./tools/ob11.ts/tool_qq_list";
 import { registerGetPersonInfo } from "./tools/ob11.ts/tool_person_info";
+import { registerQQList } from "./tools/ob11.ts/tool_qq_list";
 import { registerRename } from "./tools/ob11.ts/tool_rename";
 import { registerDeck } from "./tools/seal.ts/tool_deck";
 import { registerContext } from "./tools/tool_context";
@@ -26,7 +27,7 @@ import { registerTime } from "./tools/tool_time";
 import { registerSetTrigger } from "./tools/tool_trigger";
 import { registerRecord } from "./tools/tool_voice";
 import { registerWeb } from "./tools/tool_web";
-import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
+import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 
 export const toolMap: { [key: string]: Tool } = {};
 
@@ -104,7 +105,7 @@ export default class Tool {
         cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
 
         const ext = seal.ext.find(eci.extName);
-        if (!ext.cmdMap.hasOwnProperty(eci.cmd)) {
+        if (!Object.prototype.hasOwnProperty.call(ext.cmdMap, eci.cmd)) {
             Logger.warning(`扩展${eci.extName}中未找到指令:${eci.cmd}`);
             return ['', false];
         }
@@ -141,7 +142,7 @@ export default class Tool {
 
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
-        if (!toolMap.hasOwnProperty(name)) {
+        if (!Object.prototype.hasOwnProperty.call(toolMap, name)) {
             Logger.warning(`调用函数失败:未注册的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
         }
@@ -186,7 +187,7 @@ export default class Tool {
                 return { result: { tool_call_id: tool_call.id, content: `调用函数失败:arguement不是一个object` }, callBack: true };
             }
             for (const key of tool.toolInfo.function.parameters.required) {
-                if (!args.hasOwnProperty(key)) {
+                if (!Object.prototype.hasOwnProperty.call(args, key)) {
                     Logger.warning(`调用函数失败:缺少必需参数 ${key}`);
                     return { result: { tool_call_id: tool_call.id, content: `调用函数失败:缺少必需参数 ${key}` }, callBack: true };
                 }
@@ -231,7 +232,7 @@ export default class Tool {
                 return { result: [{ tool_call_id: '', content: `解析函数调用失败:tool_calls不是一个数组` }], callBack: true };
             }
             const tool_calls = data.map((item, index) => {
-                if (!item.hasOwnProperty('name') || !item.hasOwnProperty('arguments')) throw new Error(`缺少name或arguments属性`);
+                if (!Object.prototype.hasOwnProperty.call(item, 'name') || !Object.prototype.hasOwnProperty.call(item, 'arguments')) throw new Error(`缺少name或arguments属性`);
                 if (typeof item.name !== 'string' || typeof item.arguments !== 'string') throw new Error(`name或arguments不是字符串`);
                 return {
                     index: index,
@@ -256,7 +257,7 @@ export default class Tool {
         const tools = Object.keys(toolState)
             .map(key => {
                 if (toolState[key]) {
-                    if (!toolMap.hasOwnProperty(key)) {
+                    if (!Object.prototype.hasOwnProperty.call(toolMap, key)) {
                         Logger.warning(`在getToolsInfo中找不到工具:${key}`);
                         return null;
                     }

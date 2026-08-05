@@ -1,11 +1,11 @@
 // 渲染工具：Markdown/HTML 转图片
-import { logger } from "../../../logger";
-import Tool from "../../tool";
 import Config from "../../../config/config";
-import { Session } from "../../../session/session";
+import { logger } from "../../../logger";
 import Image from "../../../resource/image";
-import { generateId } from "../../../utils/utils";
+import { Session } from "../../../session/session";
 import { parseSpecialTokens } from "../../../utils/string";
+import { generateId } from "../../../utils/utils";
+import Tool from "../../tool";
 
 interface RenderResponse {
     status: string;

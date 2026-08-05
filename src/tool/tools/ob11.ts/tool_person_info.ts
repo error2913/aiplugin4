@@ -1,7 +1,7 @@
 // 个人信息工具：资料/生日/星座等
 import Config from "../../../config/config";
-import Tool from "../../tool";
 import { getStrangerInfo, netExists } from "../../../utils/ob11";
+import Tool from "../../tool";
 
 const constellations = ["水瓶座", "双鱼座", "白羊座", "金牛座", "双子座", "巨蟹座", "狮子座", "处女座", "天秤座", "天蝎座", "射手座", "摩羯座"];
 const shengXiao = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];

@@ -1,11 +1,14 @@
 // 知识库服务：按角色加载知识库记忆与检索（继承记忆服务）
-import Logger from "../logger";
+import Agent from "../agent/agent";
+import { ext } from "../config/config";
 import Config from "../config/config";
+import Logger from "../logger";
+import { GroupInfo, UserInfo } from "../session/types";
 import { revive, TypeDescriptor } from "../utils/utils";
+
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
-import { GroupInfo, UserInfo } from "../session/types";
-import Agent from "../agent/agent";
+
 
 export default class KnowledgeService extends MemoryService {
     static validKeysMap: { [key in keyof KnowledgeService]?: TypeDescriptor<KnowledgeService[key]> } = {
@@ -24,7 +27,7 @@ export default class KnowledgeService extends MemoryService {
         const knowledges = KNOWLEDGE_MEMORIES_MAP[this.role] || [];
         await Promise.all(knowledges.map(async m => m.updateVector()));
         this.memoryMap = knowledges.reduce((map, m) => {
-            if (this.memoryMap.hasOwnProperty(m.id)) {
+            if (Object.prototype.hasOwnProperty.call(this.memoryMap, m.id)) {
                 m.lastAccessedAt = Math.max(m.lastAccessedAt, this.memoryMap[m.id].lastAccessedAt);
                 m.accessCount = Math.max(m.accessCount, this.memoryMap[m.id].accessCount);
             }
@@ -110,10 +113,10 @@ export default class KnowledgeService extends MemoryService {
     static knowledgeServiceMap: { [role: string]: KnowledgeService } = {};
 
     static async get(role: string) {
-        if (!this.knowledgeServiceMap.hasOwnProperty(role)) {
+        if (!Object.prototype.hasOwnProperty.call(this.knowledgeServiceMap, role)) {
             let knowledgeService = new KnowledgeService();
             try {
-                const data = JSON.parse(Config.ext.storageGet(`knowledge_${role}`) || '{}');
+                const data = JSON.parse(ext.storageGet(`knowledge_${role}`) || '{}');
                 knowledgeService = revive(KnowledgeService, data);
             } catch (error) {
                 Logger.error(`加载知识库${role}失败: ${error}`);
@@ -126,7 +129,7 @@ export default class KnowledgeService extends MemoryService {
     }
 
     static save(knowledgeService: KnowledgeService) {
-        Config.ext.storageSet(`knowledge_${knowledgeService.role}`, JSON.stringify(knowledgeService));
+        ext.storageSet(`knowledge_${knowledgeService.role}`, JSON.stringify(knowledgeService));
     }
 }
 export const knowledgeService = new KnowledgeService();

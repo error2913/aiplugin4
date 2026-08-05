@@ -1,12 +1,13 @@
 // 图片模型：图片理解（callITT）与图片对话
 import Agent from "../agent/agent";
-import { UsageManager } from "../usage";
 import Config from "../config/config";
 import { DEFAULT_IMAGE_MODEL_BODY } from "../config/static_config";
 import Logger from "../logger";
 import { ToolCall } from "../tool/types";
+import { UsageManager } from "../usage";
 import { withTimeout } from "../utils/utils";
 import { fetchData } from "../utils/web";
+
 import { BaseModel } from "./model";
 import { ImageModelUse, ModelBody } from "./types";
 
@@ -77,7 +78,7 @@ export default class ImageModel extends BaseModel {
                 const message = data.choices[0].message;
                 const finish_reason = data.choices[0].finish_reason;
 
-                if (message.hasOwnProperty('reasoning_content')) {
+                if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
                     Logger.info(`思维链内容:`, message.reasoning_content);
                 }
 

@@ -3,10 +3,11 @@ import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
 import { Session } from "../session/session";
+import { buildContent } from "../utils/message";
 import { TypeDescriptor } from "../utils/utils";
+
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
-import { buildContent } from "../utils/message";
 
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {

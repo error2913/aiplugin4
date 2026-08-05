@@ -104,7 +104,7 @@ export function registerCmdToken() {
 
                         if (ym >= currentYM - 11 && ym <= currentYM) {
                             const key = `${year}-${month}`;
-                            if (!obj.hasOwnProperty(key)) {
+                            if (!Object.prototype.hasOwnProperty.call(obj, key)) {
                                 obj[key] = {
                                     prompt_tokens: 0,
                                     completion_tokens: 0
@@ -171,7 +171,7 @@ export function registerCmdToken() {
 
                         if (ymd >= currentYMD - 30 && ymd <= currentYMD) {
                             const key = `${year}-${month}-${day}`;
-                            if (!obj.hasOwnProperty(key)) {
+                            if (!Object.prototype.hasOwnProperty.call(obj, key)) {
                                 obj[key] = {
                                     prompt_tokens: 0,
                                     completion_tokens: 0
@@ -221,7 +221,7 @@ export function registerCmdToken() {
                     return ret;
                 }
 
-                if (!UsageManager.usageMap.hasOwnProperty(val3)) {
+                if (!Object.prototype.hasOwnProperty.call(UsageManager.usageMap, val3)) {
                     seal.replyToSender(ctx, msg, '没有这个模型，请使用【.ai tk lst】查看所有模型');
                     return ret;
                 }
@@ -245,7 +245,7 @@ export function registerCmdToken() {
                 return ret;
             }
             default: {
-                if (!UsageManager.usageMap.hasOwnProperty(val2)) {
+                if (!Object.prototype.hasOwnProperty.call(UsageManager.usageMap, val2)) {
                     seal.replyToSender(ctx, msg, '没有这个模型，请使用【.ai tk lst】查看所有模型');
                     return ret;
                 }
@@ -273,7 +273,7 @@ export function registerCmdToken() {
 
                             if (ym >= currentYM - 11 && ym <= currentYM) {
                                 const key = `${year}-${month}`;
-                                if (!obj.hasOwnProperty(key)) {
+                                if (!Object.prototype.hasOwnProperty.call(obj, key)) {
                                     obj[key] = {
                                         prompt_tokens: 0,
                                         completion_tokens: 0
@@ -340,7 +340,7 @@ export function registerCmdToken() {
 
                             if (ymd >= currentYMD - 30 && ymd <= currentYMD) {
                                 const key = `${year}-${month}-${day}`;
-                                if (!obj.hasOwnProperty(key)) {
+                                if (!Object.prototype.hasOwnProperty.call(obj, key)) {
                                     obj[key] = {
                                         prompt_tokens: 0,
                                         completion_tokens: 0

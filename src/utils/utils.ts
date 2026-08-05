@@ -1,9 +1,10 @@
 // 通用工具：消息ID转换/回复发送/超时/revive/路径解析等
-import { logger } from "../logger";
 import Config from "../config/config";
-import { transformTextToArray } from "./string";
 import { ALIAS_MAP } from "../config/static_config";
+import { logger } from "../logger";
+
 import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
+import { transformTextToArray } from "./string";
 
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null) {
@@ -136,7 +137,7 @@ export function revive<T>(constructor: RevivableConstructor<T>, value: any): T {
     if (constructor.validKeysMap) {
         for (const k in constructor.validKeysMap) {
             const descriptor = constructor.validKeysMap[k];
-            if (value.hasOwnProperty(k)) {
+            if (Object.prototype.hasOwnProperty.call(value, k)) {
                 const item = reviveItem(descriptor, obj[k], value[k]);
                 if (item !== undefined) obj[k] = item;
             }

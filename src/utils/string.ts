@@ -1,11 +1,13 @@
 // 字符串工具：消息段转换/回复拆分过滤/复读检测等
-import { Context } from "../context/context";
-import Image from "../resource/image";
-import { logger } from "../logger";
 import Config from "../config/config";
-import { transformMsgId, transformMsgIdBack } from "./utils";
-import { getCtxAndMsg } from "./seal";
 import { FACE_MAP } from "../config/static_config";
+import { Context } from "../context/context";
+import { logger } from "../logger";
+import Image from "../resource/image";
+
+import { getCtxAndMsg } from "./seal";
+import { transformMsgId, transformMsgIdBack } from "./utils";
+
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
@@ -605,7 +607,7 @@ export function fixJsonString(s: string): string {
     try {
         JSON.parse(s);
         return s;
-    } catch (err) {
+    } catch (_err) {
         const patterns = [
             // 匹配键缺少前半引号: {key": 或 ,key":
             /([{,][\s\n]*)([a-zA-Z_$][a-zA-Z0-9_$]*)("[\s\n]*:)/g,
@@ -630,7 +632,7 @@ export function fixJsonString(s: string): string {
                 try {
                     JSON.parse(fixed);
                     return fixed;
-                } catch (err) {
+                } catch (_err) {
                     matched = false;
                     continue;
                 }

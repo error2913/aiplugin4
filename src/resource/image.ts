@@ -1,10 +1,11 @@
 // 图片资源：URL/base64/本地路径图片，图片识别与存储
+import { ext } from "../config/config";
 import Config from "../config/config";
-import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 import { logger } from "../logger";
-import { MessageSegment, parseSpecialTokens } from "../utils/string";
-import { getSessionId } from "../utils/seal";
 import Model from "../model/model";
+import { getSessionId } from "../utils/seal";
+import { MessageSegment, parseSpecialTokens } from "../utils/string";
+import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 
 export default class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
@@ -177,10 +178,10 @@ export default class Image {
     }
 
     static get(imageId: string): Image | null {
-        if (!this.imageMap.hasOwnProperty(imageId)) {
+        if (!Object.prototype.hasOwnProperty.call(this.imageMap, imageId)) {
             let img = new Image();
             try {
-                const text = Config.ext.storageGet(`image_${imageId}`);
+                const text = ext.storageGet(`image_${imageId}`);
                 if (!text) return null;
                 const data = JSON.parse(text || '{}');
                 img = revive(Image, data);
@@ -193,7 +194,7 @@ export default class Image {
         return this.imageMap[imageId];
     }
     static save(img: Image) {
-        Config.ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
+        ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
     }
 
     static getUserAvatar(uid: string): Image {
