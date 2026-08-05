@@ -4,8 +4,8 @@
 Usage:
     python verify.py [BASE_URL] [TOKEN]
 
-Defaults: http://127.0.0.1:8888 and the token from QQ_MCP_ACCESS_TOKEN env or
-the .env file in the current directory.
+Token resolution order: command line > QQ_MCP_ACCESS_TOKEN env > skill .env
+(skills/qqmcp-install/.env, gitignored) > .env in the current directory.
 """
 
 from __future__ import annotations
@@ -19,6 +19,21 @@ from pathlib import Path
 import httpx
 
 
+def _load_skill_env() -> None:
+    """把技能目录 .env（skills/qqmcp-install/.env）读入进程环境，不覆盖已有值。"""
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key and os.environ.get(key) is None:
+            os.environ[key] = value.strip()
+
+
 def _token_from_env_file() -> str:
     env_path = Path(".env")
     if not env_path.exists():
@@ -30,6 +45,7 @@ def _token_from_env_file() -> str:
 
 
 def main() -> int:
+    _load_skill_env()
     parser = argparse.ArgumentParser()
     parser.add_argument("base_url", nargs="?", default="http://127.0.0.1:8888")
     parser.add_argument("token", nargs="?", default=os.environ.get("QQ_MCP_ACCESS_TOKEN", ""))

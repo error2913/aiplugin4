@@ -23,7 +23,20 @@
  * at least 60 seconds must pass between reloads.
  */
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { puppeteer } from "file:///C:/Users/26335/Desktop/chrome-devtools-mcp/node_modules/chrome-devtools-mcp/build/src/third_party/index.js";
+
+// 优先从技能目录的 .env 读取凭据（该文件已 gitignore，不会提交）；缺失时回退到环境变量
+{
+  const envFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".env");
+  if (fs.existsSync(envFile)) {
+    for (const line of fs.readFileSync(envFile, "utf-8").split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+    }
+  }
+}
 
 const PANEL = process.env.SEALDICE_PANEL_URL;
 const PASSWORD = process.env.SEALDICE_PANEL_PASSWORD || process.env.SEALDICE_PANEL_TOKEN;

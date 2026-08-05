@@ -13,3 +13,4 @@ yarn.lock
 dist/
 dev/
 sealpack/scripts/
+skills/**/.env

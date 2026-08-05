@@ -56,6 +56,10 @@ QQ_MCP_LISTEN_GROUPS=<GROUP_ID>
 必填项只有 `QQ_MCP_ACCESS_TOKEN` 和 `NAPCAT_BASE_URL`。协议按 URL 前缀自动识别：
 `ws://` 走 WebSocket、`http://` 走 HTTP。
 
+本技能与 aiplugin4-test-suite 统一：凭据另存一份在技能目录 `skills/qqmcp-install/.env`
+（已被 `.gitignore` 的 `skills/**/.env` 覆盖，不会提交），`scripts/verify.py` 会自动从
+技能目录 `.env` 读取凭据；服务端运行配置仍在服务项目目录的 `.env`。
+
 ### 4. 启动
 
 ```powershell
@@ -104,4 +108,5 @@ python scripts\verify.py http://127.0.0.1:8888 <MCP_ACCESS_TOKEN>
 
 - 所有示例与输出一律使用占位符，禁止写入真实 token / QQ 号 / 群号 / IP；
 - 不要把 `.env`、`messages.log`、运行日志提交或外发；
+- 技能目录 `.env`（`skills/qqmcp-install/.env`）与 aiplugin4-test-suite 同款 gitignore 保护；
 - `QQ_MCP_LOG_MESSAGE_CONTENT` 保持 `false`。

@@ -16,7 +16,7 @@ description: aiplugin4 插件综合测试与调试技能（整合原 aiplugin4-e
 ## 环境与前提
 
 - qqmcp：`mcp__QQ-MCP-Server__*` 工具，用法与轮询约定见 [qqmcp.md](references/qqmcp.md)。
-- 海豹面板：`SEALDICE_PANEL_URL` / `SEALDICE_PANEL_PASSWORD` 从环境变量读取（本机已写入用户级环境变量；缺失时才向用户索要）。面板自动化见 [panel.md](references/panel.md) 与 [panel.mjs](scripts/panel.mjs)。
+- 海豹面板：`SEALDICE_PANEL_URL` / `SEALDICE_PANEL_PASSWORD` 从技能目录的 `.env` 读取（`skills/aiplugin4-test-suite/.env`，已加入 `.gitignore` 不会提交）；`.env` 缺失时才向用户索要或回退环境变量。面板自动化见 [panel.md](references/panel.md) 与 [panel.mjs](scripts/panel.mjs)。
 - Node：`C:\Users\26335\.codex\tools\node-v22.23.2-win-x64\node.exe`（勿用系统 Node）。
 - Edge：`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`。
 - 测试群与机器人：按模式一第 1 步预检。
