@@ -49,7 +49,13 @@ function main() {
   //接受非指令消息
   ext.onNotCommandReceived = (ctx: seal.MsgContext, msg: seal.Message): void | Promise<void> => {
     try {
-      return MessagePipeline.handleNonCommand(ctx, msg);
+      const p = MessagePipeline.handleNonCommand(ctx, msg);
+      if (p && typeof (p as Promise<void>).catch === 'function') {
+        (p as Promise<void>).catch((e: any) => {
+          logger.error(`非指令消息处理异步出错:${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
+      return p;
     } catch (e) {
       logger.error(`非指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }

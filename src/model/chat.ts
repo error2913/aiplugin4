@@ -22,6 +22,7 @@ export default class ChatModel extends BaseModel {
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
         try {
             const body = this.buildBody({
+                model: this.name,
                 ...DEFAULT_CHAT_MODEL_BODY,
                 messages: await agent.sessionService.getSession(sessionId).getMessages(),
                 tools: agent.getRequestTools(agent.sessionService.getSession(sessionId))

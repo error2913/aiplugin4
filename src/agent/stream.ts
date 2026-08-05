@@ -20,6 +20,7 @@ export class streamService {
         }
         try {
             const body = model.buildBody({
+                model: model.name,
                 ...DEFAULT_CHAT_MODEL_BODY,
                 messages
             });
@@ -93,6 +94,7 @@ export class streamService {
         try {
             const { STATUS, PROMPT_ENGINEERING } = Config.tool;
             const body = model.buildBody({
+                model: model.name,
                 ...DEFAULT_CHAT_MODEL_BODY,
                 messages
             });

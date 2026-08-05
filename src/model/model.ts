@@ -22,7 +22,7 @@ export class BaseModel {
     buildBody(args: { [key: string]: any }) {
         const body = JSON.parse(JSON.stringify(this.body));
         for (const key in args) {
-            if (!Object.prototype.hasOwnProperty.call(args, key)) body[key] = args[key];
+            body[key] = args[key];
         }
         return body;
     }

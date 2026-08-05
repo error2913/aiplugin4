@@ -108,13 +108,17 @@ export class Context {
             messageId
         };
         const lastMessage = this.messages[this.messages.length - 1];
-        if (Message.getMessageType(lastMessage) === 'user') (lastMessage as UserMessage).contentItems.push(umi);
+        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) (lastMessage as UserMessage).contentItems.push(umi);
         else this.messages.push({
             role: 'user',
             contentItems: [umi]
         });
         // 关联记忆权重更新：bot 记忆 + 知识库 + 会话记忆 + 群内用户记忆
-        MemoryService.accessRelatedMemories(this.session, text);
+        try {
+            await MemoryService.accessRelatedMemories(this.session, text);
+        } catch (e) {
+            Logger.warning('记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
+        }
     }
 
     addAssistantMessage(text: string, messageId: string) {
@@ -124,7 +128,7 @@ export class Context {
             messageId
         };
         const lastMessage = this.messages[this.messages.length - 1];
-        if (Message.getMessageType(lastMessage) === 'assistant') (lastMessage as AssistantMessage).contentItems.push(ami);
+        if (lastMessage && Message.getMessageType(lastMessage) === 'assistant' && Array.isArray((lastMessage as AssistantMessage).contentItems)) (lastMessage as AssistantMessage).contentItems.push(ami);
         else this.messages.push({
             role: 'assistant',
             contentItems: [ami]
@@ -146,7 +150,7 @@ export class Context {
             systemName
         };
         const lastMessage = this.messages[this.messages.length - 1];
-        if (Message.getMessageType(lastMessage) === 'user') (lastMessage as UserMessage).contentItems.push(sumi);
+        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) (lastMessage as UserMessage).contentItems.push(sumi);
         else this.messages.push({
             role: 'user',
             contentItems: [sumi]

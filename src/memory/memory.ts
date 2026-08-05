@@ -364,14 +364,15 @@ export default class MemoryService {
 
     async accessMemories(s: string) {
         const now = Math.floor(Date.now() / 1000);
-        (await this.search(s, {
+        const r = await this.search(s, {
             topK: 5,
             tags: [],
             relatedMemories: [],
             users: [],
             groups: [],
             method: 'similarity'
-        })).forEach(m => {
+        });
+        r.forEach(m => {
             m.lastAccessedAt = now;
             m.accessCount++;
         })

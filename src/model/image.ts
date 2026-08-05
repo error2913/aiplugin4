@@ -22,6 +22,7 @@ export default class ImageModel extends BaseModel {
     async callITT(src: string, prompt = ''): Promise<string> {
         try {
             const body = this.buildBody({
+                model: this.name,
                 ...DEFAULT_IMAGE_MODEL_BODY,
                 messages: [{
                     role: "user",
@@ -57,6 +58,7 @@ export default class ImageModel extends BaseModel {
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
         try {
             const body = this.buildBody({
+                model: this.name,
                 ...DEFAULT_IMAGE_MODEL_BODY,
                 messages: await agent.sessionService.getSession(sessionId).getImageMessages(),
                 tools: agent.getRequestTools(agent.sessionService.getSession(sessionId))

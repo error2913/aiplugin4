@@ -32,6 +32,7 @@ export default class EmbeddingModel extends BaseModel {
 
         try {
             const body = this.buildBody({
+                model: this.name,
                 ...DEFAULT_EMBEDDING_MODEL_BODY,
                 input: text
             });

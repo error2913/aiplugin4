@@ -6,7 +6,8 @@ import { fmtDate } from "../utils/string";
 import { AssistantMessage, MessageType, RequestMessage, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
 export default class Message {
-    static getMessageType(m: MessageType): 'user' | 'assistant' | 'tool_calls' | 'tool_callback' {
+    static getMessageType(m: MessageType | undefined | null): 'user' | 'assistant' | 'tool_calls' | 'tool_callback' {
+        if (!m) return 'user';
         if (m.role === 'user') return 'user';
         else if (m.role === 'assistant') {
             if (Object.prototype.hasOwnProperty.call(m, 'toolCalls')) return 'tool_calls';
