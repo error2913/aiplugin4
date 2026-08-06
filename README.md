@@ -533,10 +533,11 @@ aiplugin4/
 │   ├── update.ts         # 版本更新日志
 │   └── usage.ts          # token 用量统计与图表
 ├── tools/                # 构建脚本（build.js / build-config.js）
-├── scripts/              # smoke.js 冒烟、prepare-sealpack.js 打包同步、release-notes.js 发布正文
+├── scripts/              # smoke.js 冒烟、prepare-sealpack.js / build-release.js 打包、deps.cjs 依赖清单、release-notes.js 发布正文
 ├── types/                # seal.d.ts（SealDice API 类型定义）
 ├── dist/                 # 构建产物 aiplugin4.js
-├── sealpack/             # SealRepo 打包源（info.toml / assets/icon.png，scripts/main.js 自动同步）
+├── sealpack/             # 本体 SealRepo 打包源（info.toml / assets/icon.png，scripts/main.js 自动同步）
+├── sealpack-full/        # 完整包打包源（生成目录：本体 + 依赖插件，已 gitignore）
 ├── 相关后端项目/         # 配套后端服务源码
 ├── .github/workflows/    # build-check.yml / release.yml
 ├── header.txt            # 打包时拼接到产物头部的 UserScript 注释
@@ -553,6 +554,7 @@ npm run smoke       # 冒烟：在 Node 中用 seal 桩加载 dist/aiplugin4.js
 npm run lint        # ESLint 检查 src/**/*.ts
 npm run package:check  # 构建 + 同步 sealpack 源 + 校验包格式与体积
 npm run pack:sealpack  # 打包 → dist/aiplugin4.sealpack
+npm run pack:release   # 发布打包：本体 JS + 本体豹包 + 完整豹包（含依赖插件）
 ```
 
 构建使用 esbuild，入口 `src/index.ts`，`external: ['csharp','puerts']`；生产构建不压缩，保持可读、便于用户自行查错。改完核心逻辑建议执行 `npm run build && npm run smoke`。
@@ -647,10 +649,11 @@ await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' });
 - `.github/workflows/build-check.yml`：main 分支 push / PR 时执行 lint、tsc strict、构建并校验 sealpack 包、冒烟测试；
 - `.github/workflows/release.yml`：推送 `v*` 标签（如 `v4.13.0`）时自动发版：
   1. verify：lint / tsc / `npm run package:check`（构建 + sealpack 校验）/ 冒烟，并校验标签与 `VERSION`、`update.ts` 版本日志一致；
-  2. 打包 `.sealpack`（`sealpack pack sealpack`）并上传构建产物；
-  3. publish-sealrepo：用 `SEALPACK_TOKEN` 发布到 [SealRepo](https://repo.sealdice.com/)；
-  4. github-release：从 `src/update.ts` 提取对应版本日志作为 Release 正文，附带 `aiplugin4-v<版本>.sealpack` 与 `dist/aiplugin4.js`。
-- 打包源在 `sealpack/`：`scripts/main.js` 为构建产物自动同步，`info.toml` 的版本由 `scripts/prepare-sealpack.js` 自动同步；
+  2. `node scripts/build-release.js` 产出三类发布物并上传：`dist/aiplugin4.js`（本体 JS）、`aiplugin4-v<版本>.sealpack`（只含本体的豹包）、`aiplugin4-full-v<版本>.sealpack`（本体 + 依赖插件的完整豹包）；
+  3. publish-sealrepo：用 `SEALPACK_TOKEN` 把本体包与完整包分别发布到 [SealRepo](https://repo.sealdice.com/)；
+  4. github-release：从 `src/update.ts` 提取对应版本日志作为 Release 正文，附带两个豹包与 `dist/aiplugin4.js`。
+- 打包源：`sealpack/` 为本体（`scripts/main.js` 与 `info.toml` 版本由 `scripts/prepare-sealpack.js` 自动同步）；`sealpack-full/` 为完整包（生成目录，复制本体并下载依赖插件）；
+- 完整包依赖插件：在 `scripts/deps.cjs` 的 `dependencies` 中配置 `url`（依赖插件 JS 的 raw 地址）与可选 `filename`，当前为空待补充；下载失败会导致发版失败；
 - SealRepo 发布 Token：仓库 Settings → Secrets and variables → Actions → 新建 `SEALPACK_TOKEN`（值在 repo.sealdice.com 后台复制）；包图标放 `sealpack/assets/icon.png`（`info.toml` 已引用）；
 - 发版前需同步：`src/config/static_config.ts` 的 `VERSION`、`header.txt` 的 `@version`、`src/update.ts` 的 `updateInfo`（并确认 `updateInfo` 含新版本条目）。
 

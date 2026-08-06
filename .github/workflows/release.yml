@@ -60,8 +60,7 @@ jobs:
         if: github.event_name != 'pull_request'
         shell: bash
         run: |
-          version="$(node scripts/prepare-sealpack.js)"
-          npx sealpack pack sealpack --out "dist/aiplugin4-${version}.sealpack"
+          node scripts/build-release.js
 
       - name: Upload build artifacts
         if: github.event_name != 'pull_request'
@@ -73,6 +72,7 @@ jobs:
             dist/*.sealpack
             dist/aiplugin4.js
             sealpack/**
+            sealpack-full/**
 
   publish-sealrepo:
     if: startsWith(github.ref, 'refs/tags/')
@@ -96,11 +96,21 @@ jobs:
         with:
           name: release-assets-${{ github.run_id }}
 
+      - name: Prepare release packages
+        run: node scripts/build-release.js
+
       - name: Publish to SealRepo
         env:
           SEALPACK_TOKEN: ${{ secrets.SEALPACK_TOKEN }}
         run: >-
           npx sealpack publish sealpack
+          --server "${SEALPACK_SERVER}"
+
+      - name: Publish full bundle to SealRepo
+        env:
+          SEALPACK_TOKEN: ${{ secrets.SEALPACK_TOKEN }}
+        run: >-
+          npx sealpack publish sealpack-full
           --server "${SEALPACK_SERVER}"
 
   github-release:
