@@ -2,12 +2,13 @@
 import Config from "../config/config";
 import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
+import { buildProviderBody, parseProviderResponse } from "../model/adapter";
 import ChatModel from "../model/chat";
 import Model from "../model/model";
+import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
 import { withTimeout } from "../utils/utils";
-import { fetchData } from "../utils/web";
 
 export class streamService {
     static async startStream(messages: any[], modelName: string = ''): Promise<string> {
@@ -84,7 +85,6 @@ export class streamService {
         tool_calls?: ToolCall[],
         tool_call_id?: string
     }[], tools: any[], tool_choice: string, modelName: string = ''): Promise<{ content: string, tool_calls: ToolCall[] }> {
-        const { TIMEOUT } = Config.base;
         const model = Model.getChatModel('chat', modelName) as ChatModel;
         if (!model) {
             logger.error('未找到可用的对话模型');
@@ -103,12 +103,11 @@ export class streamService {
             logger.printRequestMessages(body.messages);
 
             const time = Date.now();
-            const data = await withTimeout(() => fetchData(model.url, model.apiKey, body), TIMEOUT);
-            if (data.choices && data.choices.length > 0) {
-                UsageManager.updateUsage(data.model, data.usage);
-
-                const message = data.choices[0].message;
-                const finish_reason = data.choices[0].finish_reason;
+            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider });
+            const response = parseProviderResponse(model.provider, data);
+            if (response.choices && response.choices.length > 0) {
+                const message = response.choices[0].message;
+                const finish_reason = response.choices[0].finish_reason;
 
                 if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
                     logger.info('思维链内容:', message.reasoning_content);

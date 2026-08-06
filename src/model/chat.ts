@@ -4,6 +4,7 @@ import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { ToolCall } from "../tool/types";
 
+import { buildProviderBody, parseProviderResponse } from "./adapter";
 import { BaseModel } from "./model";
 import { requestModel } from "./provider";
 import { ChatModelUse, ModelBody, ModelUse } from "./types";
@@ -16,7 +17,7 @@ export default class ChatModel extends BaseModel {
     }
 
     get url() {
-        return `${this.baseUrl}/chat/completions`;
+        return this.provider === 'anthropic' ? `${this.baseUrl}/messages` : `${this.baseUrl}/chat/completions`;
     }
 
     async callChat(agent: Agent, sessionId: string): Promise<{ content: string, tool_calls: ToolCall[] }> {
@@ -29,10 +30,11 @@ export default class ChatModel extends BaseModel {
             logger.printRequestMessages(body.messages)
 
             const time = Date.now();
-            const data = await requestModel(this.url, this.apiKey, body);
-            if (data.choices && data.choices.length > 0) {
-                const message = data.choices[0].message;
-                const finish_reason = data.choices[0].finish_reason;
+            const data = await requestModel(this.url, this.apiKey, buildProviderBody(this.provider, body), { provider: this.provider });
+            const response = parseProviderResponse(this.provider, data);
+            if (response.choices && response.choices.length > 0) {
+                const message = response.choices[0].message;
+                const finish_reason = response.choices[0].finish_reason;
 
                 if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
                     logger.info(`思维链内容:`, message.reasoning_content);

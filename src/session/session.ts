@@ -330,7 +330,10 @@ export class Session {
         this.resetState();
 
         const model = Model.getChatModel('chat', this.setting.modelName);
-        if (model && (model.body as any).stream === true) {
+        if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
+            logger.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
+        }
+        if (model && (model.body as any).stream === true && model.provider !== 'anthropic') {
             await this.chatStream(ctx, msg);
             this.save();
             return;
