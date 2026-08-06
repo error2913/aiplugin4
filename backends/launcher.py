@@ -7,9 +7,9 @@ aiplugin4 后端一键配置与启动器（仅依赖 Python 标准库，纯命�
   list                        列出后端与启用/运行状态
   enable <name...>            启用指定后端（写入 launcher.json）
   disable <name...>           停用指定后端
-  setup [name...|--all]       安装依赖（默认安装已启用的后端）
-  start [name...|--all]       启动后端（默认启动已启用的后端；--setup 先装依赖；
-                              进程异常退出会自动拉起）
+  setup [name...|--all]       安装依赖（默认安装已启用的后端，幂等）
+  start [name...|--all]       启动后端（默认启动已启用的后端；首次运行自动创建 venv /
+                              安装依赖，进程异常退出会自动拉起）
   stop [name...|--all]        停止后端（默认停止全部）
   status                      查看运行状态
   package                     打包 backends/ 为 dist/aiplugin4-backends-<版本>.zip
@@ -19,13 +19,14 @@ aiplugin4 后端一键配置与启动器（仅依赖 Python 标准库，纯命�
   python launcher.py enable stream-output web-read
   python launcher.py setup --all
   python launcher.py start
-  python launcher.py start --setup stream-output
+  python launcher.py start stream-output
   python launcher.py stop --all
   python launcher.py status
   python launcher.py package
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -42,6 +43,8 @@ ROOT_DIR = os.path.dirname(BACKENDS_DIR)
 CONFIG_FILE = os.path.join(BACKENDS_DIR, "launcher.json")
 MANIFEST_FILE = "backend.json"
 DEFAULT_LOG_DIR = "logs"
+VENV_DIR_NAME = ".venv"
+DEPS_MARKER = ".deps_ready"
 
 # 打包时排除的目录/文件
 EXCLUDE_DIRS = {"logs", "node_modules", "__pycache__", ".venv", "venv", "dist", ".git"}
@@ -57,9 +60,6 @@ class Backend:
     deps: str
     port: int
     dir: str
-
-    def command(self) -> list:
-        return [sys.executable if self.type == "python" else "node", self.entry]
 
 
 def load_config() -> dict:
@@ -92,6 +92,61 @@ def discover_backends() -> list:
             dir=os.path.join(BACKENDS_DIR, entry),
         ))
     return backends
+
+
+def venv_python_path(backend_dir: str) -> str:
+    if os.name == "nt":
+        return os.path.join(backend_dir, VENV_DIR_NAME, "Scripts", "python.exe")
+    return os.path.join(backend_dir, VENV_DIR_NAME, "bin", "python")
+
+
+def deps_hash(backend: Backend) -> str:
+    dep_file = os.path.join(backend.dir, backend.deps)
+    try:
+        with open(dep_file, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def ensure_venv(backend: Backend) -> str:
+    """为 python 后端创建/复用独立 venv 并按需安装依赖，返回 venv 内的 python 路径"""
+    py = venv_python_path(backend.dir)
+    marker = os.path.join(backend.dir, VENV_DIR_NAME, DEPS_MARKER)
+    current = deps_hash(backend)
+    if os.path.isfile(py):
+        try:
+            with open(marker, encoding="utf-8") as f:
+                if f.read().strip() == current:
+                    return py
+        except OSError:
+            pass
+        print(f"[launcher] {backend.name} 依赖清单有变化，重新安装")
+    else:
+        print(f"[launcher] {backend.name} 首次运行，创建独立虚拟环境...")
+        subprocess.check_call([sys.executable, "-m", "venv", os.path.join(backend.dir, VENV_DIR_NAME)])
+    if not current:
+        print(f"[launcher] 跳过 {backend.name}: 缺少 {backend.deps}")
+    else:
+        subprocess.check_call([py, "-m", "pip", "install", "-r", os.path.join(backend.dir, backend.deps)])
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write(current)
+    return py
+
+
+def ensure_node(backend: Backend) -> str:
+    """为 node 后端确保 node_modules 存在（缺失时 npm install）"""
+    if not os.path.isdir(os.path.join(backend.dir, "node_modules")):
+        print(f"[launcher] {backend.name} 首次运行，npm install...")
+        subprocess.check_call(["npm", "install"], cwd=backend.dir)
+    return "node"
+
+
+def ensure_environment(backend: Backend) -> list:
+    """一键启动：确保依赖就绪，返回启动命令前缀（python 用 venv 内解释器）"""
+    if backend.type == "python":
+        return [ensure_venv(backend)]
+    return [ensure_node(backend)]
 
 
 class Supervisor:
@@ -171,7 +226,7 @@ class Supervisor:
         log_file.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} 启动 {backend.name} (port {backend.port}) =====\n")
         log_file.flush()
         proc = subprocess.Popen(
-            backend.command(),
+            ensure_environment(backend) + [backend.entry],
             cwd=backend.dir,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -264,15 +319,11 @@ class Supervisor:
 
 
 def setup_backend(backend: Backend) -> None:
-    print(f"[launcher] 配置环境: {backend.name} ...")
-    dep_file = os.path.join(backend.dir, backend.deps)
-    if not os.path.isfile(dep_file):
-        print(f"[launcher] 跳过 {backend.name}: 缺少 {backend.deps}")
-        return
+    """安装依赖（幂等，python 后端装入独立 venv）"""
     if backend.type == "python":
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", dep_file])
+        ensure_venv(backend)
     else:
-        subprocess.check_call(["npm", "install"], cwd=backend.dir)
+        ensure_node(backend)
 
 
 def read_version() -> str:
@@ -314,15 +365,20 @@ def main() -> None:
     sub.add_parser("list", help="列出后端与启用/运行状态")
     sub.add_parser("enable", help="启用指定后端").add_argument("names", nargs="+")
     sub.add_parser("disable", help="停用指定后端").add_argument("names", nargs="+")
-    sub.add_parser("setup", help="安装依赖").add_argument("names", nargs="*")
-    start_p = sub.add_parser("start", help="启动后端")
+    setup_p = sub.add_parser("setup", help="安装依赖（幂等，python 后端装入独立 venv）")
+    setup_p.add_argument("names", nargs="*")
+    setup_p.add_argument("--all", action="store_true", help="安装全部后端")
+    start_p = sub.add_parser("start", help="启动后端（首次自动创建 venv 并安装依赖）")
     start_p.add_argument("names", nargs="*")
     start_p.add_argument("--all", action="store_true", help="启动全部后端")
-    start_p.add_argument("--setup", action="store_true", help="启动前先安装依赖")
     start_p.add_argument("--background", action="store_true", help="后台运行（Linux 用 setsid，Windows 用 DETACHED_PROCESS）")
     sub.add_parser("stop", help="停止后端").add_argument("names", nargs="*")
     sub.add_parser("status", help="查看运行状态")
     sub.add_parser("package", help="打包 backends/ 为 zip")
+    webui_p = sub.add_parser("webui", help="启动 Web 管理界面")
+    webui_p.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1，仅本机）")
+    webui_p.add_argument("--port", type=int, default=8910, help="监听端口（默认 8910）")
+    webui_p.add_argument("--no-browser", action="store_true", help="启动后不自动打开浏览器")
     args = parser.parse_args()
 
     config = load_config()
@@ -373,7 +429,7 @@ def main() -> None:
         return
 
     if args.command == "setup":
-        targets = find(args.names) if args.names else enabled_names()
+        targets = backends if args.all else (find(args.names) if args.names else enabled_names())
         if not targets:
             print("[launcher] 没有可安装的后端（请先 python launcher.py enable <name> 或指定名称）")
             return
@@ -387,8 +443,6 @@ def main() -> None:
             cmd = [sys.executable, script, "start"] + list(args.names)
             if args.all:
                 cmd.append("--all")
-            if args.setup:
-                cmd.append("--setup")
             kwargs = {}
             if os.name == "nt":
                 kwargs["creationflags"] = (
@@ -417,9 +471,6 @@ def main() -> None:
         if not targets:
             print("[launcher] 没有可启动的后端（请先 python launcher.py enable <name>）")
             return
-        if args.setup:
-            for backend in targets:
-                setup_backend(backend)
         for backend in targets:
             if backend.name in supervisor.state.setdefault("stopped", []):
                 supervisor.state["stopped"].remove(backend.name)  # 手动启动清除停止标记
@@ -444,6 +495,15 @@ def main() -> None:
 
     if args.command == "package":
         package_backends()
+        return
+
+    if args.command == "webui":
+        try:
+            from webui import run_webui
+        except ImportError:
+            print("[launcher] webui 模块缺失（backends/webui.py）")
+            sys.exit(1)
+        run_webui(backends, config, supervisor, host=args.host, port=args.port, open_browser=not args.no_browser)
         return
 
     parser.error(f"未知命令: {args.command}")
