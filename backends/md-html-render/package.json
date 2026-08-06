@@ -1,0 +1,15 @@
+{
+  "name": "aiplugin4-backend-md-html-render",
+  "version": "1.0.0",
+  "private": true,
+  "description": "aiplugin4 后端：Markdown/HTML 渲染为图片",
+  "main": "render.js",
+  "scripts": {
+    "start": "node render.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "marked": "^12.0.2",
+    "puppeteer": "^22.15.0"
+  }
+}

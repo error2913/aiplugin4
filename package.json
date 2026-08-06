@@ -14,7 +14,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "package:check": "npm run build && node scripts/prepare-sealpack.js && sealpack validate sealpack && sealpack size sealpack",
     "pack:sealpack": "node scripts/prepare-sealpack.js && sealpack pack sealpack --out dist/aiplugin4.sealpack",
-    "pack:release": "node scripts/build-release.js"
+    "pack:release": "node scripts/build-release.js",
+    "pack:backends": "python backends/launcher.py package"
   },
   "engines": {
     "node": ">=10"

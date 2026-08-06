@@ -48,6 +48,10 @@ jobs:
       - name: Smoke test
         run: npm run smoke
 
+      - name: Backend launcher check (Linux)
+        run: |
+          python3 backends/launcher.py list
+
       - name: Verify tag, version and changelog
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -62,6 +66,12 @@ jobs:
         run: |
           node scripts/build-release.js
 
+      - name: Pack backends archive
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          python3 backends/launcher.py package
+
       - name: Upload build artifacts
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
@@ -70,6 +80,7 @@ jobs:
           if-no-files-found: error
           path: |
             dist/*.sealpack
+            dist/*.zip
             dist/aiplugin4.js
             sealpack/**
             sealpack-full/**
@@ -139,6 +150,7 @@ jobs:
         with:
           files: |
             dist/aiplugin4-*.sealpack
+            dist/*.zip
             dist/aiplugin4.js
           body_path: release-notes.md
           fail_on_unmatched_files: true

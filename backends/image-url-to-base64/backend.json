@@ -1,0 +1,8 @@
+{
+  "name": "image-url-to-base64",
+  "description": "图片 URL 转 base64（配合插件「后端 → 图片转base64」）",
+  "type": "python",
+  "entry": "urltobase64.py",
+  "deps": "requirements.txt",
+  "port": 46678
+}

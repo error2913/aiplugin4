@@ -1,0 +1,8 @@
+{
+  "name": "stream-output",
+  "description": "流式输出中转：SSE 分块与增量轮询（配合插件「后端 → 流式输出」）",
+  "type": "python",
+  "entry": "stream_backend.py",
+  "deps": "requirements.txt",
+  "port": 3010
+}

@@ -1,0 +1,8 @@
+{
+  "name": "md-html-render",
+  "description": "Markdown/HTML 渲染为图片（配合插件「后端 → md和html图片渲染」）",
+  "type": "node",
+  "entry": "render.js",
+  "deps": "package.json",
+  "port": 37632
+}
