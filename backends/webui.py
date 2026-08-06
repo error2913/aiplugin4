@@ -28,47 +28,150 @@ PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>aiplugin4 后端管理</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    --bg: #0e1116;
+    --panel: #161b24;
+    --panel-2: #1b2230;
+    --border: #262f3d;
+    --text: #e6ebf2;
+    --muted: #8b96a8;
+    --green: #34d399;
+    --green-bg: rgba(52, 211, 153, .12);
+    --red: #f87171;
+    --red-bg: rgba(248, 113, 113, .12);
+    --blue: #60a5fa;
+    --blue-bg: rgba(96, 165, 250, .14);
+    --amber: #fbbf24;
+    --radius: 14px;
+  }
   * { box-sizing: border-box; }
-  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #12151b; color: #d7dde6; margin: 0; padding: 24px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: #8b94a3; font-size: 13px; margin-bottom: 18px; }
-  .bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-  button { background: #232a35; color: #d7dde6; border: 1px solid #39424f; border-radius: 6px; padding: 7px 14px; cursor: pointer; font-size: 13px; }
-  button:hover { background: #2c3542; }
-  button.primary { background: #2f6fed; border-color: #2f6fed; }
-  button.danger { background: #b3403a; border-color: #b3403a; }
-  table { width: 100%; border-collapse: collapse; background: #181d25; border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #232a35; font-size: 13px; }
-  th { color: #8b94a3; font-weight: 600; }
-  .run { color: #4ade80; }
-  .stop { color: #8b94a3; }
-  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-  .tag.on { background: #1d3a2b; color: #4ade80; }
-  .tag.off { background: #2a2f3a; color: #8b94a3; }
-  .ops button { margin-right: 6px; padding: 4px 10px; }
-  #logs { margin-top: 14px; background: #0d1015; border: 1px solid #232a35; border-radius: 8px; padding: 12px; display: none; }
-  #logs pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; font-size: 12px; color: #aab4c2; }
-  #toast { position: fixed; top: 16px; right: 16px; background: #232a35; border: 1px solid #39424f; border-radius: 6px; padding: 10px 16px; font-size: 13px; display: none; max-width: 60vw; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1a2334 0%, var(--bg) 55%);
+    color: var(--text); margin: 0; min-height: 100vh; padding: 32px 28px 60px;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .logo {
+    width: 44px; height: 44px; border-radius: 12px; flex: none;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; box-shadow: 0 8px 24px rgba(96, 165, 250, .35);
+  }
+  h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: .3px; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat {
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px;
+  }
+  .stat b { font-size: 26px; display: block; line-height: 1.1; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .stat.green b { color: var(--green); }
+  .stat.blue b { color: var(--blue); }
+  .bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 9px; padding: 8px 15px; cursor: pointer; font-size: 13px;
+    transition: transform .12s ease, background .15s ease, border-color .15s ease;
+  }
+  button:hover { background: #232c3d; border-color: #354152; }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--blue-bg); border-color: rgba(96,165,250,.45); color: #bfdbfe; }
+  button.primary:hover { background: rgba(96,165,250,.22); }
+  button.danger { background: var(--red-bg); border-color: rgba(248,113,113,.4); color: #fecaca; }
+  button.danger:hover { background: rgba(248,113,113,.2); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0));
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+    display: flex; flex-direction: column; gap: 12px; transition: border-color .2s ease, transform .2s ease;
+  }
+  .card:hover { border-color: #354152; transform: translateY(-2px); }
+  .card.running { border-color: rgba(52,211,153,.35); }
+  .row1 { display: flex; align-items: center; gap: 10px; }
+  .name { font-family: Consolas, "Courier New", monospace; font-size: 15px; font-weight: 600; }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 600; letter-spacing: .4px; }
+  .badge.py { background: var(--blue-bg); color: #93c5fd; }
+  .badge.node { background: rgba(52,211,153,.12); color: #6ee7b7; }
+  .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--green); box-shadow: 0 0 0 0 rgba(52,211,153,.5); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,.45); } 70% { box-shadow: 0 0 0 7px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+  .status.on { color: var(--green); }
+  .status.off { color: var(--muted); }
+  .desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; min-height: 36px; }
+  .meta { display: flex; gap: 8px; align-items: center; }
+  .chip { font-family: Consolas, monospace; font-size: 12px; color: var(--amber); background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.25); padding: 3px 9px; border-radius: 8px; }
+  .chip.idle { color: var(--muted); background: rgba(139,150,168,.08); border-color: rgba(139,150,168,.22); }
+  .ops { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ops button { padding: 6px 12px; font-size: 12.5px; }
+  .ops button.small { padding: 6px 10px; }
+  .modal {
+    position: fixed; inset: 0; background: rgba(5,8,12,.72); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  .modal.open { display: flex; }
+  .dialog {
+    width: min(860px, 100%); max-height: 82vh; background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  }
+  .dialog-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .dialog-head b { font-size: 14px; }
+  .dialog-head .spacer { flex: 1; }
+  .dialog pre {
+    margin: 0; padding: 16px 18px; overflow: auto; font-size: 12.5px; line-height: 1.55;
+    font-family: Consolas, "Courier New", monospace; color: #b6c2d4; white-space: pre-wrap; word-break: break-all;
+  }
+  .close { background: transparent; border: none; font-size: 18px; color: var(--muted); cursor: pointer; padding: 2px 8px; }
+  .close:hover { color: var(--text); }
+  #toast {
+    position: fixed; top: 20px; right: 20px; z-index: 99; max-width: 70vw;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 16px; font-size: 13px; display: none; box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  }
+  footer { margin-top: 26px; color: #5b6676; font-size: 12px; text-align: center; }
 </style>
 </head>
 <body>
-  <h1>aiplugin4 后端管理</h1>
-  <div class="sub">launcher WebUI · 每 3 秒自动刷新状态 · 后端异常退出会自动拉起</div>
-  <div class="bar">
-    <button class="primary" onclick="all('start')">启动全部</button>
-    <button class="danger" onclick="all('stop')">停止全部</button>
-    <button onclick="pkg()">打包后端 zip</button>
-    <button onclick="refresh()">刷新</button>
+<div class="wrap">
+  <header>
+    <div class="logo">🤖</div>
+    <div>
+      <h1>aiplugin4 后端管理</h1>
+      <div class="sub">launcher WebUI · 每 3 秒自动刷新 · 后端异常退出会自动拉起</div>
+    </div>
+  </header>
+  <div class="stats">
+    <div class="stat"><b id="stTotal">0</b><span>后端总数</span></div>
+    <div class="stat green"><b id="stRun">0</b><span>运行中</span></div>
+    <div class="stat blue"><b id="stOn">0</b><span>已启用</span></div>
   </div>
-  <table>
-    <thead><tr><th>后端</th><th>端口</th><th>类型</th><th>状态</th><th>启用</th><th>操作</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <div id="logs"><b id="logTitle"></b><button onclick="loadLog()">刷新日志</button><pre id="logBody"></pre></div>
-  <div id="toast"></div>
+  <div class="bar">
+    <button class="primary" onclick="all('start')">▶ 启动全部</button>
+    <button class="danger" onclick="all('stop')">■ 停止全部</button>
+    <button onclick="pkg()">📦 打包后端 zip</button>
+    <button onclick="refresh()">⟳ 刷新</button>
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="modal" id="modal">
+  <div class="dialog">
+    <div class="dialog-head">
+      <b id="logTitle">日志</b>
+      <span class="spacer"></span>
+      <button onclick="loadLog()">刷新日志</button>
+      <button class="close" onclick="closeLog()">✕</button>
+    </div>
+    <pre id="logBody"></pre>
+  </div>
+</div>
+<div id="toast"></div>
+<footer>aiplugin4 · backends/launcher.py webui</footer>
 <script>
 let current = null;
 function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -83,39 +186,53 @@ async function api(path, method){
 }
 async function refresh(){
   const j = await api('/api/backends');
-  const rows = document.getElementById('rows');
-  rows.innerHTML = j.backends.map(b => `
-    <tr>
-      <td>${esc(b.name)}<br><span style="color:#8b94a3;font-size:12px">${esc(b.description)}</span></td>
-      <td>${b.port}</td>
-      <td>${esc(b.type)}</td>
-      <td class="${b.running?'run':'stop'}">${b.running ? '运行中' : '已停止'}${b.running && b.pid ? ' (pid ' + b.pid + ')' : ''}</td>
-      <td><span class="tag ${b.enabled?'on':'off'}">${b.enabled?'已启用':'已停用'}</span></td>
-      <td class="ops">
-        <button onclick="toggle('${b.name}')">${b.enabled?'停用':'启用'}</button>
+  const list = j.backends;
+  document.getElementById('stTotal').textContent = list.length;
+  document.getElementById('stRun').textContent = list.filter(b => b.running).length;
+  document.getElementById('stOn').textContent = list.filter(b => b.enabled).length;
+  document.getElementById('grid').innerHTML = list.map(b => `
+    <div class="card ${b.running ? 'running' : ''}">
+      <div class="row1">
+        <span class="name">${esc(b.name)}</span>
+        <span class="badge ${b.type === 'python' ? 'py' : 'node'}">${esc(b.type).toUpperCase()}</span>
+        <span class="status ${b.running ? 'on' : 'off'}"><span class="dot ${b.running ? 'on' : ''}"></span>${b.running ? '运行中' : '已停止'}</span>
+      </div>
+      <div class="desc">${esc(b.description)}</div>
+      <div class="meta">
+        <span class="chip ${b.port ? '' : 'idle'}">:${b.port || '—'}</span>
+        <span class="chip ${b.enabled ? '' : 'idle'}">${b.enabled ? '已启用' : '已停用'}</span>
+        ${b.running && b.pid ? `<span class="chip idle">pid ${b.pid}</span>` : ''}
+      </div>
+      <div class="ops">
+        <button onclick="toggle('${b.name}')">${b.enabled ? '停用' : '启用'}</button>
         <button onclick="setup('${b.name}')">安装依赖</button>
-        <button class="primary" onclick="run('${b.name}','start')">启动</button>
-        <button class="danger" onclick="run('${b.name}','stop')">停止</button>
-        <button onclick="showLog('${b.name}')">日志</button>
-      </td>
-    </tr>`).join('');
+        ${b.running
+          ? `<button class="danger" onclick="run('${b.name}','stop')">停止</button>`
+          : `<button class="primary" onclick="run('${b.name}','start')">启动</button>`}
+        <button class="small" onclick="showLog('${b.name}')">日志</button>
+      </div>
+    </div>`).join('');
 }
 async function toggle(name){ await api('/api/enable/' + name, 'POST'); toast('已更新启用状态'); refresh(); }
 async function setup(name){ toast('开始安装依赖：' + name); await api('/api/setup/' + name, 'POST'); toast('安装完成：' + name); refresh(); }
 async function run(name, act){ await api('/api/' + act + '/' + name, 'POST'); toast(act==='start' ? '已启动：' + name : '已停止：' + name); refresh(); }
 async function all(act){ await api('/api/' + act + '-all', 'POST'); toast('已' + (act==='start'?'启动':'停止') + '全部'); refresh(); }
-async function pkg(){ toast('打包已在后台开始，完成后见 dist/aiplugin4-backends-*.zip'); await api('/api/package', 'POST'); refresh(); }
+async function pkg(){ toast('打包已在后台开始，完成后见 dist/aiplugin4-backends-*.zip'); await api('/api/package', 'POST'); }
 async function showLog(name){
   current = name;
-  document.getElementById('logs').style.display = 'block';
   document.getElementById('logTitle').textContent = '日志：' + name;
-  loadLog();
+  document.getElementById('modal').classList.add('open');
+  await loadLog();
 }
+function closeLog(){ document.getElementById('modal').classList.remove('open'); current = null; }
 async function loadLog(){
   if (!current) return;
   const j = await api('/api/logs/' + current);
-  document.getElementById('logBody').textContent = j.log || '(暂无日志)';
+  const pre = document.getElementById('logBody');
+  pre.textContent = j.log || '(暂无日志)';
+  pre.scrollTop = pre.scrollHeight;
 }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLog(); });
 refresh();
 setInterval(refresh, 3000);
 </script>
