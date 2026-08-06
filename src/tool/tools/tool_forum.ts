@@ -2,8 +2,8 @@
 import Config from "../../config/config";
 import { logger } from "../../logger";
 import Image from "../../resource/image";
-import Tool from "../tool";
 import { parseSpecialTokens } from "../../utils/string";
+import Tool from "../tool";
 
 /**
  * FNV-1a 签名算法
