@@ -14,10 +14,6 @@ dist/
 dev/
 sealpack/scripts/
 sealpack-full/
-backends/logs/
-backends/**/.venv/
-backends/**/node_modules/
-backends/.runtime.json
 skills/**/.env
 __pycache__/
 *.pyc

@@ -1,5 +1,0 @@
-{
-  "auto_restart": true,
-  "restart_backoff_seconds": [2, 5, 10, 30],
-  "log_dir": "logs"
-}

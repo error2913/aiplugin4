@@ -1,8 +1,0 @@
-{
-  "name": "web-read",
-  "description": "网页 URL 内容读取（配合插件「后端 → 网页读取」）",
-  "type": "node",
-  "entry": "puppeteer.js",
-  "deps": "package.json",
-  "port": 46799
-}

@@ -1,8 +1,0 @@
-{
-  "name": "usage-chart",
-  "description": "token 用量图表绘制（配合插件「后端 → 用量图表」）",
-  "type": "python",
-  "entry": "usage_chart.py",
-  "deps": "requirements.txt",
-  "port": 3009
-}

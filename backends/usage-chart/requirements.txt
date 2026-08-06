@@ -1,4 +1,0 @@
-fastapi==0.115.12
-matplotlib==3.10.1
-python_dateutil==2.9.0.post0
-uvicorn==0.34.0
