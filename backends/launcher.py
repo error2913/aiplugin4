@@ -225,12 +225,17 @@ class Supervisor:
         log_file = open(log_path, "a", encoding="utf-8")
         log_file.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} 启动 {backend.name} (port {backend.port}) =====\n")
         log_file.flush()
+        # 强制子进程以 UTF-8 输出，避免 Windows 下 GBK 与 launcher 的 UTF-8 日志混编码导致乱码
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         proc = subprocess.Popen(
             ensure_environment(backend) + [backend.entry],
             cwd=backend.dir,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            env=env,
         )
         self.procs[backend.name] = proc
         self.state[backend.name] = {"pid": proc.pid, "started_at": time.strftime("%Y-%m-%d %H:%M:%S")}
