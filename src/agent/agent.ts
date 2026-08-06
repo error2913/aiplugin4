@@ -98,7 +98,7 @@ export default class Agent {
                         }
                         logger.info('prompt tool call triggered');
                         const { contextArray, replyArray, images } = result;
-                        await session.reply(ctx, msg, contextArray, replyArray, images, { withNonStreamDelay: true });
+                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
                         await session.context.addAssistantMessage(match[0], '');
                         const callTime = Date.now();
                         try {
@@ -122,7 +122,7 @@ export default class Agent {
                         }
                         logger.info('tool call triggered');
                         const { contextArray, replyArray, images } = result;
-                        await session.reply(ctx, msg, contextArray, replyArray, images, { withNonStreamDelay: true });
+                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
                         session.context.addToolCallsMessage(tool_calls);
                         const callTime = Date.now();
                         try {
@@ -155,7 +155,7 @@ export default class Agent {
         }
 
         const { contextArray, replyArray, images } = result;
-        await session.reply(ctx, msg, contextArray, replyArray, images, { withNonStreamDelay: true });
+        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
         logger.info(`[run] ${trace.summary()}`);
     }
 
@@ -201,7 +201,7 @@ export default class Agent {
                     if (match && match[1].trim()) {
                         const { contextArray, replyArray, images } = await handleReply(ctx, msg, session, match[1]);
                         if (session.stream.id !== id) return;
-                        await session.reply(ctx, msg, contextArray, replyArray, images);
+                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
                     }
                     session.stream.toolCallStatus = true;
                 }
@@ -250,7 +250,7 @@ export default class Agent {
 
             const { contextArray, replyArray, images } = await handleReply(ctx, msg, session, raw_reply);
             if (session.stream.id !== id) return;
-            session.reply(ctx, msg, contextArray, replyArray, images);
+            await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
 
             after = result.nextAfter;
             await new Promise(resolve => setTimeout(resolve, interval));

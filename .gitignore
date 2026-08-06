@@ -14,3 +14,6 @@ dist/
 dev/
 sealpack/scripts/
 skills/**/.env
+__pycache__/
+*.pyc
+*.pyo

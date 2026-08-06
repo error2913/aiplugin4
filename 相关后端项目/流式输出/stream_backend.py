@@ -201,7 +201,7 @@ async def start_completion(
         
         with stream_lock:
             stream_data[stream_id] = {
-                'timestamp': time.time(),
+                'time': time.time(),
                 'model': body_obj['model'],
                 'prompt_tokens': prompt_tokens,
                 'parts': [],
