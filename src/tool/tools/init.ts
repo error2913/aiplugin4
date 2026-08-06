@@ -13,6 +13,7 @@ import { registerTime } from "./tool_time";
 import { registerSetTrigger } from "./tool_trigger";
 import { registerRecord } from "./tool_voice";
 import { registerWeb } from "./tool_web";
+import { registerForum } from "./tool_forum";
 
 /** 注册 tools/ 下全部内置工具（含子目录），调用顺序与原先 tool.ts 内一致 */
 export function registerTools() {
@@ -29,4 +30,5 @@ export function registerTools() {
     registerRecord();
     registerWeb();
     registerBlockTool();
+    registerForum();
 }

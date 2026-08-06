@@ -296,6 +296,9 @@ max_tokens = 2048
 | 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/web-read)，为 AI 提供网页详细内容获取功能 |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/usage-chart)，token 使用情况图表生成 |
 | md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/md-html-render)，将 Markdown/HTML 渲染为图片 |
+| 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
+| 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
+| 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
@@ -436,6 +439,7 @@ max_tokens = 2048
 | 精华消息 | `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
 | 音乐 | `music_play` |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
+| 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | MCP / 技能 | `<服务器名>_<工具名>`（MCP 工具）、`use_skill`（技能） |
 
 > 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要 AITTS 依赖与 ffmpeg；`text_to_image` 需要 AIDrawing 依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
