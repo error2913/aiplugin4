@@ -341,7 +341,8 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
         const result = await transformContentToText(ctx, session, replyArray[i]);
         const reply = isTrim ? result.text.trim() : result.text;
 
-        const prefix = (replymsg && msg.rawId && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
+        // 含戳戳时引用前缀会导致消息无法显示，故跳过引用
+        const prefix = (replymsg && msg.rawId && !/\[CQ:poke,/i.test(reply) && !/^\[CQ:reply,id=-?\d+\]/.test(reply)) ? `[CQ:reply,id=${msg.rawId}]` : ``;
         replyArray[i] = prefix + reply;
         images.push(...result.images);
     }
