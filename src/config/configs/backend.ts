@@ -8,9 +8,9 @@ export default class BackendConfig {
         seal.ext.registerStringConfig(ext, "网页读取", "https://webread.fishwhite.top", '可自行搭建', "后端");
         seal.ext.registerStringConfig(ext, "用量图表", "http://usagechart.error2913.com", '可自行搭建', "后端");
         seal.ext.registerStringConfig(ext, "md和html图片渲染", "https://md.fishwhite.top", '可自行搭建', "后端");
-        seal.ext.registerStringConfig(ext, "论坛服务地址", "", '论坛后端服务的根 URL，如 http://localhost:8080', "后端");
-        seal.ext.registerStringConfig(ext, "论坛API Token", "", '用于论坛接口鉴权的 Bearer Token', "后端");
-        seal.ext.registerStringConfig(ext, "论坛签名密钥", "", '用于请求签名验证的 Secret Key', "后端");
+        seal.ext.registerStringConfig(ext, "论坛地址", "https://aiplugin-forum.fishwhite.top", 'aiplugin4专用论坛地址', "后端");
+        seal.ext.registerStringConfig(ext, "论坛API Token", "", '论坛注册后获取的api_token，用于发帖等写操作的鉴权', "后端");
+        seal.ext.registerStringConfig(ext, "论坛签名密钥", "", '论坛注册后获取的secret_key，用于请求签名', "后端");
     }
 
     static get() {
@@ -21,7 +21,7 @@ export default class BackendConfig {
             WEB_READ: seal.ext.getStringConfig(ext, "网页读取"),
             USAGE_CHART: seal.ext.getStringConfig(ext, "用量图表"),
             RENDER: seal.ext.getStringConfig(ext, "md和html图片渲染"),
-            FORUM_URL: seal.ext.getStringConfig(ext, "论坛服务地址"),
+            FORUM_URL: seal.ext.getStringConfig(ext, "论坛地址"),
             FORUM_API_TOKEN: seal.ext.getStringConfig(ext, "论坛API Token"),
             FORUM_SECRET_KEY: seal.ext.getStringConfig(ext, "论坛签名密钥")
         }

@@ -296,9 +296,9 @@ max_tokens = 2048
 | 网页读取 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/%E7%BD%91%E9%A1%B5url%E5%86%85%E5%AE%B9%E8%AF%BB%E5%8F%96)，为 AI 提供网页详细内容获取功能 |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/%E7%94%A8%E9%87%8F%E5%9B%BE%E8%A1%A8%E7%BB%98%E5%88%B6)，token 使用情况图表生成 |
 | md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/md%E5%92%8Chtml%E5%9B%BE%E7%89%87%E6%B8%B2%E6%9F%93)，将 Markdown/HTML 渲染为图片 |
-| 论坛服务地址 | 论坛后端服务的根 URL，如 `http://localhost:8080`；为空时论坛类工具不可用 |
-| 论坛API Token | 用于论坛接口鉴权的 Bearer Token，需与论坛后端配置一致 |
-| 论坛签名密钥 | 用于论坛请求签名验证的 Secret Key，需与论坛后端配置一致 |
+| 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
+| 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
+| 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
