@@ -2,6 +2,9 @@
 import { NAME, VERSION } from "../config/static_config";
 import { logger } from "../logger";
 import { Session } from "../session/session";
+import { SessionType } from "../session/types";
+import Tool, { toolMap } from "../tool/tool";
+import { ToolInfo } from "../tool/types";
 
 import Agent from "./agent";
 
@@ -18,6 +21,18 @@ export interface AgentRunOptions {
     toolChoice?: string;
 }
 
+/** 外部插件注册工具时的可选项 */
+export interface RegisterToolOptions {
+    /** 敏感工具（发送消息/封禁/改名等），调用会显著记录 */
+    sensitive?: boolean;
+    /** 可使用的会话类型，缺省 any（群聊/私聊均可用） */
+    sessionType?: "any" | SessionType;
+    /** 是否把工具结果回调给智能体（写回上下文），缺省 true */
+    callBack?: boolean;
+    /** 工具执行函数，返回给 AI 的文本 */
+    solve?: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => string | Promise<string>;
+}
+
 /** 暴露给其他插件的智能体 API */
 export interface AgentGlobalApi {
     readonly name: string;
@@ -32,6 +47,8 @@ export interface AgentGlobalApi {
     chat(prompt: string, agentName?: string): Promise<string>;
     /** 在当前聊天中触发一次完整对话编排（上下文/工具/回复发送），等价于该会话收到一次触发 */
     run(ctx: seal.MsgContext, msg: seal.Message, options?: AgentRunOptions): Promise<void>;
+    /** 注册一个工具，供 AI 通过函数调用/提示词工程使用；同名内置工具不可覆盖，成功返回 true */
+    registerTool(info: ToolInfo, options?: RegisterToolOptions): boolean;
 }
 
 /** 把智能体 API 挂载到 globalThis，重复加载/重载时保持幂等 */
@@ -50,6 +67,30 @@ export function registerAgentApi(): void {
             const sessionId = ctx.isPrivate ? ctx.player.userId : ctx.group.groupId;
             const session = agent.sessionService.getSession(sessionId);
             await session.chat(ctx, msg, options.reason || '外部插件调用', options.toolChoice);
+        },
+        registerTool: (info: ToolInfo, options: RegisterToolOptions = {}) => {
+            const name = info?.function?.name;
+            if (!name) {
+                logger.warning('注册工具失败：缺少函数名');
+                return false;
+            }
+            const existing = toolMap[name];
+            if (existing && !(existing as any).apiRegistered) {
+                logger.warning(`注册工具失败：工具 ${name} 已存在（内置或其他插件注册）`);
+                return false;
+            }
+            try {
+                const tool = new Tool(info, options.sensitive || false);
+                (tool as any).apiRegistered = true; // 允许同名 API 工具在 JS 重载后重新注册
+                tool.sessionType = options.sessionType || 'any';
+                if (options.callBack !== undefined) tool.callBack = options.callBack;
+                tool.solve = async (ctx, msg, session, args) => options.solve ? await options.solve(ctx, msg, session, args) : '函数未实现';
+                logger.info(`外部插件注册工具: ${name}`);
+                return true;
+            } catch (e) {
+                logger.error(`注册工具 ${name} 失败: ${e instanceof Error ? e.message : String(e)}`);
+                return false;
+            }
         }
     };
 

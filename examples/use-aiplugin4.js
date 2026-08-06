@@ -17,6 +17,7 @@
  *   .apitest chat <内容>    单轮对话（api.chat），把模型回复原样发回
  *   .apitest agent <内容>   用 api.getAgent 拿 Agent 实例后调用实例的 chat
  *   .apitest run            在当前会话触发完整编排（api.run），AI 走上下文/工具/分段发送
+ *   .apitest tool           查看示例工具注册状态（加载时通过 api.registerTool 自动注册 apitest_echo）
  *
  * 注意：
  * - 必须调用 seal.ext.register(ext) 注册扩展，命令才会进入海豹指令表；
@@ -37,7 +38,8 @@ cmd.help = `帮助
 【.apitest status】查看 aiplugin4 API 版本与可用方法
 【.apitest chat <内容>】单轮对话，直接返回模型回复
 【.apitest agent <内容>】通过 Agent 实例进行单轮对话
-【.apitest run】在当前会话触发完整对话编排`;
+【.apitest run】在当前会话触发完整对话编排
+【.apitest tool】查看示例工具注册状态`;
 cmd.solve = (ctx, msg, cmdArgs) => {
     const ret = seal.ext.newCmdExecuteResult(true);
     const api = globalThis.aiplugin4;
@@ -74,6 +76,11 @@ cmd.solve = (ctx, msg, cmdArgs) => {
                 .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
             break;
         }
+        case 'tool': {
+            const ok = toolRegistered ? '已注册' : '注册失败（未找到 aiplugin4 或注册被拒绝）';
+            seal.replyToSender(ctx, msg, `示例工具 ${REGISTERED_TOOL}: ${ok}\n可用 .ai tool call ${REGISTERED_TOOL} --text=你好 测试调用`);
+            break;
+        }
         default:
             ret.showHelp = true;
     }
@@ -81,3 +88,28 @@ cmd.solve = (ctx, msg, cmdArgs) => {
 };
 
 ext.cmdMap['apitest'] = cmd;
+
+// 加载时通过对外 API 注册一个示例工具，供 AI 函数调用/提示词工程使用
+const REGISTERED_TOOL = 'apitest_echo';
+let toolRegistered = false;
+{
+    const api = globalThis.aiplugin4;
+    if (api && typeof api.registerTool === 'function') {
+        toolRegistered = api.registerTool({
+            type: 'function',
+            function: {
+                name: REGISTERED_TOOL,
+                description: '示例工具：把传入的 text 原样回显',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        text: { type: 'string', description: '要回显的内容' }
+                    },
+                    required: ['text']
+                }
+            }
+        }, {
+            solve: async (_ctx, _msg, _session, args) => `回显: ${args.text}`
+        });
+    }
+}

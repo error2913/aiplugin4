@@ -73,6 +73,15 @@ try {
         'getSession 方法': !!api && typeof api.getSession === 'function',
         'chat 方法': !!api && typeof api.chat === 'function',
         'run 方法': !!api && typeof api.run === 'function',
+        'registerTool 方法': !!api && typeof api.registerTool === 'function',
+        'registerTool 注册成功': !!api && api.registerTool({
+            type: 'function',
+            function: {
+                name: 'smoke_api_tool',
+                description: 'smoke test tool',
+                parameters: { type: 'object', properties: {} }
+            }
+        }, { solve: async () => 'ok' }) === true,
         'getAgent(*) 返回智能体实例': !!api && typeof api.getAgent('*').chat === 'function',
     };
     const failedChecks = Object.entries(apiChecks).filter(([, ok]) => !ok).map(([name]) => name);
