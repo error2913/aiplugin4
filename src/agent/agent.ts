@@ -12,6 +12,7 @@ import { ToolRunner } from "../tool/runner";
 import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
+import { requestLimiter } from "../utils/concurrency";
 import { handleMessages } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, TypeDescriptor } from "../utils/utils";
@@ -74,6 +75,15 @@ export default class Agent {
      * 循环直到模型给出最终回复（带轮次上限），最后统一拆分并发送回复。
      */
     async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
+        if (!(await requestLimiter.acquire())) return;
+        try {
+            await this.runInternal(session, ctx, msg, tool_choice);
+        } finally {
+            requestLimiter.release();
+        }
+    }
+
+    private async runInternal(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const toolInfos = Tool.getToolsInfo(session);
         const trace = new AgentRunContext();
@@ -161,6 +171,15 @@ export default class Agent {
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），带轮次上限 */
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+        if (!(await requestLimiter.acquire())) return;
+        try {
+            await this.runStreamInner(session, ctx, msg);
+        } finally {
+            requestLimiter.release();
+        }
+    }
+
+    private async runStreamInner(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const trace = new AgentRunContext();
         let turns = 0;
@@ -235,7 +254,7 @@ export default class Agent {
                                 return;
                             }
 
-                            await this.runStream(session, ctx, msg);
+                            await this.runStreamInner(session, ctx, msg);
                             return;
                         }
                         await session.stopCurrentChatStream();
