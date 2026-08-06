@@ -13,6 +13,7 @@ yarn.lock
 dist/
 dev/
 sealpack/scripts/
+sealpack-full/
 skills/**/.env
 __pycache__/
 *.pyc
