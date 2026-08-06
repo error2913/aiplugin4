@@ -618,21 +618,23 @@ registerSay();
 
 ### 为其他插件提供 API
 
-插件启动时会把智能体 API 挂载到 `globalThis.aiplugin4`，其他海豹插件可直接调用（建议先判空以兼容本插件未安装的情况）：
+插件启动时会把对外 API 挂载到 `globalThis.aiplugin4`（幂等，重载不重复覆盖），其他海豹插件可直接调用（建议先判空以兼容本插件未安装的情况）：
+
+| 方法 | 说明 |
+| --- | --- |
+| `chat(prompt, agentName?)` | 单轮对话，返回模型回复文本 |
+| `run(ctx, msg, options?)` | 当前会话触发完整编排（`agentName`/`reason`/`toolChoice`） |
+| `getAgent(name?)` / `getSession(agentName, sessionId)` | 获取智能体实例 / 会话 |
+| `registerTool(info, options?)` | 注册工具供 AI 调用（`solve` 返回给 AI 的文本，同名内置工具不可覆盖） |
 
 ```javascript
 const api = globalThis.aiplugin4;
 if (!api) return;
-
-const reply = await api.chat('用一句话介绍你自己');               // 单轮对话，直接返回文本
-await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' }); // 完整编排：上下文/工具/回复发送
+const reply = await api.chat('用一句话介绍你自己');
+await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' });
 ```
 
-`getAgent(name?)` 可获取 `Agent` 实例；`run` 的 `options` 支持 `agentName`/`reason`/`toolChoice`。详见 [07-开发指南](docs/07-开发指南.md)。
-
-`registerTool(info, options?)` 可让其他插件向 AI 注册工具（`solve` 返回给 AI 的文本，同名内置工具不可覆盖）。
-
-仓库附带可直接加载的示例插件 [`examples/use-aiplugin4.js`](examples/use-aiplugin4.js)，只注册一个 `.apitest` 命令（`status`/`chat`/`agent`/`run`/`tool` 子命令）演示智能体调用与 `registerTool` 注册工具，可复制到海豹 WebUI 加载体验。
+仓库附带可加载示例插件 [`examples/use-aiplugin4.js`](examples/use-aiplugin4.js)（单个 `.apitest` 命令，`status`/`chat`/`agent`/`run`/`tool` 子命令），完整说明见 [07-开发指南](docs/07-开发指南.md)「为其他插件提供 API」。
 
 ### 修改 prompt 模板
 

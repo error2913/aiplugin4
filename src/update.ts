@@ -4,7 +4,7 @@ export const updateInfo: { [version: string]: string } = {
     "4.13.0": `## 新功能
 - 重构智能体编排：Agent.run/runStream 统一消息构建、工具调用与回复流程
 - 新增子智能体（压缩/摘要）与示例智能体
-- 新增对外 API：智能体暴露到 globalThis（globalThis.aiplugin4），其他海豹插件可直接调用智能体进行单轮对话或完整对话编排
+- 新增对外 API（globalThis.aiplugin4）：其他海豹插件可直接调用智能体（chat/run/getAgent）或注册工具（registerTool）
 - 新增 MCP 工具注册与技能（Skills）系统
 - 新增黑名单功能：AI 建议拉黑（suggest_block 带冷却，骰主用 .ai block 确认）、unblock_user/get_block_list 工具；拉黑后不触发对话
 - 黑名单支持「拉黑前需要骰主确认」开关，关闭后 AI 可直接拉黑
@@ -25,6 +25,7 @@ export const updateInfo: { [version: string]: string } = {
 - 修复模型请求体构造：缺失 model 字段、参数优先级与默认值覆盖问题
 - 修复空上下文消息入库崩溃与异步异常静默
 - 修复记忆检索（向量相似度过滤、知识库渲染）
+- 修复工具 callBack 配置不生效：callBack=false 时工具静默执行，结果不回调对话
 - 修复开启「回复引用」时回复含戳戳（poke）导致消息无法显示：含戳戳时不再添加引用
 - 类型检查全面修复（strict 模式全绿）`,
     "4.12.1": `- 新增按时间搜索记忆
