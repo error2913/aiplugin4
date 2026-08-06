@@ -63,6 +63,33 @@ globalThis.seal = new Proxy(sealStub, {
 try {
     require('../dist/aiplugin4.js');
     console.log('SMOKE OK: 插件加载无异常');
+
+    // 校验对外 API：globalThis.aiplugin4 已暴露且方法齐全
+    const api = globalThis.aiplugin4;
+    const apiChecks = {
+        'globalThis.aiplugin4 存在': !!api,
+        'Agent 类': !!api && typeof api.Agent === 'function',
+        'getAgent 方法': !!api && typeof api.getAgent === 'function',
+        'getSession 方法': !!api && typeof api.getSession === 'function',
+        'chat 方法': !!api && typeof api.chat === 'function',
+        'run 方法': !!api && typeof api.run === 'function',
+        'registerTool 方法': !!api && typeof api.registerTool === 'function',
+        'registerTool 注册成功': !!api && api.registerTool({
+            type: 'function',
+            function: {
+                name: 'smoke_api_tool',
+                description: 'smoke test tool',
+                parameters: { type: 'object', properties: {} }
+            }
+        }, { solve: async () => 'ok' }) === true,
+        'getAgent(*) 返回智能体实例': !!api && typeof api.getAgent('*').chat === 'function',
+    };
+    const failedChecks = Object.entries(apiChecks).filter(([, ok]) => !ok).map(([name]) => name);
+    if (failedChecks.length > 0) {
+        console.error('SMOKE FAIL(api):', failedChecks.join(', '));
+        process.exit(1);
+    }
+    console.log('SMOKE OK: globalThis.aiplugin4 API 可用');
 } catch (e) {
     console.error('SMOKE FAIL:', e.message);
     console.error(e.stack);

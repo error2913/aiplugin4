@@ -113,7 +113,14 @@ export default class Agent {
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
-                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                            for (const r of callResults) {
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                            }
+                            if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
+                                logger.info('工具执行完成且不回调（callBack=false），结束本轮编排');
+                                result = { contextArray: [], replyArray: [], images: [] };
+                                break;
+                            }
                             trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
                             Logger.exception('handlePromptToolCalls error', e);
@@ -137,7 +144,14 @@ export default class Agent {
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
-                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                            for (const r of callResults) {
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                            }
+                            if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
+                                logger.info('工具执行完成且不回调（callBack=false），结束本轮编排');
+                                result = { contextArray: [], replyArray: [], images: [] };
+                                break;
+                            }
                             trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
                             Logger.exception('handleToolCalls error', e);

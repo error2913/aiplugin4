@@ -8,29 +8,7 @@ import { withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
 import { getSkillNames, registerSkills } from "./skills";
-import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
-import { registerAttr } from "./tools/builtin_cmd.ts/tool_attr";
-import { registerModu } from "./tools/builtin_cmd.ts/tool_modu";
-import { registerRollCheck } from "./tools/builtin_cmd.ts/tool_roll_check";
-import { registerImage } from "./tools/image.ts/tool_image";
-import { registerMeme } from "./tools/image.ts/tool_meme";
-import { registerRender } from "./tools/image.ts/tool_render";
-import { registerBan } from "./tools/ob11.ts/tool_ban";
-import { registerEssenceMsg } from "./tools/ob11.ts/tool_essence_msg";
-import { registerGroupSign } from "./tools/ob11.ts/tool_group_sign";
-import { registerGetPersonInfo } from "./tools/ob11.ts/tool_person_info";
-import { registerQQList } from "./tools/ob11.ts/tool_qq_list";
-import { registerRename } from "./tools/ob11.ts/tool_rename";
-import { registerDeck } from "./tools/seal.ts/tool_deck";
-import { registerBlockTool } from "./tools/tool_block";
-import { registerContext } from "./tools/tool_context";
-import { registerMemory } from "./tools/tool_memory";
-import { registerMessage } from "./tools/tool_message";
-import { registerMusicPlay } from "./tools/tool_music";
-import { registerTime } from "./tools/tool_time";
-import { registerSetTrigger } from "./tools/tool_trigger";
-import { registerRecord } from "./tools/tool_voice";
-import { registerWeb } from "./tools/tool_web";
+import { registerTools } from "./tools/init";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 
 export const toolMap: { [key: string]: Tool } = {};
@@ -70,29 +48,7 @@ export default class Tool {
     }
 
     static registerTool() {
-        registerBuiltinCmds();
-        registerAttr();
-        registerModu();
-        registerRollCheck();
-        registerImage();
-        registerMeme();
-        registerRender();
-        registerBan();
-        registerEssenceMsg();
-        registerGroupSign();
-        registerQQList();
-        registerGetPersonInfo();
-        registerRename();
-        registerDeck();
-        registerContext();
-        registerMemory();
-        registerMessage();
-        registerMusicPlay();
-        registerTime();
-        registerSetTrigger();
-        registerRecord();
-        registerWeb();
-        registerBlockTool();
+        registerTools();
         registerSkills();
         registerMCPTools().catch(e => Logger.error(`注册MCP工具失败:${e.message}`));
     }
@@ -222,7 +178,7 @@ export default class Tool {
             if (name === 'web_search' && args && typeof args.q === 'string' && args.q.trim()) {
                 result.searchTarget = args.q.trim();
             }
-            return { result, callBack: true };
+            return { result, callBack: tool.callBack };
         } catch (e) {
             Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
@@ -254,13 +210,15 @@ export default class Tool {
                 Logger.warning('工具调用超过上限');
                 ret.result.push({
                     tool_call_id: tool_call.id,
-                    content: '工具调用超过上限'
+                    content: '工具调用超过上限',
+                    callBack: true
                 });
                 ret.callBack = false;
                 continue;
             }
             const { result, callBack } = await this.handleToolCall(ctx, msg, session, tool_call);
             result.toolName = tool_call.function.name;
+            result.callBack = callBack;
             ret.result.push(result);
             ret.callBack = ret.callBack && callBack;
             session.tool.callCount++;

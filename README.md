@@ -616,6 +616,26 @@ registerSay();
 2. 在 `src/agent/agents/index.ts` 的 `initAgents()` 中调用；
 3. 若需要独立的模型用途（如 `compression`、`summarization`），在模型配置的 `use` 列表中登记对应模型；用途匹配失败会回退到 `chat` 模型。
 
+### 为其他插件提供 API
+
+插件启动时会把对外 API 挂载到 `globalThis.aiplugin4`（幂等，重载不重复覆盖），其他海豹插件可直接调用（建议先判空以兼容本插件未安装的情况）：
+
+| 方法 | 说明 |
+| --- | --- |
+| `chat(prompt, agentName?)` | 单轮对话，返回模型回复文本 |
+| `run(ctx, msg, options?)` | 当前会话触发完整编排（`agentName`/`reason`/`toolChoice`） |
+| `getAgent(name?)` / `getSession(agentName, sessionId)` | 获取智能体实例 / 会话 |
+| `registerTool(info, options?)` | 注册工具供 AI 调用（`solve` 返回给 AI 的文本，同名内置工具不可覆盖） |
+
+```javascript
+const api = globalThis.aiplugin4;
+if (!api) return;
+const reply = await api.chat('用一句话介绍你自己');
+await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' });
+```
+
+仓库附带可加载示例插件 [`examples/use-aiplugin4.js`](examples/use-aiplugin4.js)（单个 `.apitest` 命令，`status`/`chat`/`agent`/`run`/`tool` 子命令），完整说明见 [07-开发指南](docs/07-开发指南.md)「为其他插件提供 API」。
+
 ### 修改 prompt 模板
 
 - 模板在 `src/config/configs/prompt.ts` 中定义默认值（改动需同步更新默认注册内容，WebUI 中「刷子」可还原默认）；

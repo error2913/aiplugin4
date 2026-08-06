@@ -2,6 +2,7 @@
 import Handlebars from "handlebars";
 
 import { initAgents } from "./agent/agents";
+import { registerAgentApi } from "./agent/api";
 import { BlockManager } from "./block";
 import { PrivilegeManager } from "./cmd/privilege";
 import { registerCmd } from "./cmd/root_cmd";
@@ -25,6 +26,7 @@ function main() {
 
   Config.registerConfig();
   initAgents();
+  registerAgentApi();
   checkUpdate();
   Tool.registerTool();
   TimerManager.init();
