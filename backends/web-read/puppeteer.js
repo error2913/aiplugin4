@@ -2,7 +2,7 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
-const port = 46799;
+const port = Number(process.env.AIPLUGIN4_BACKEND_PORT || 46799);
 
 app.use(express.json());
 

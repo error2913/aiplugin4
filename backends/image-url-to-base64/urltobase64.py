@@ -4,6 +4,7 @@ from io import BytesIO
 from PIL import Image
 import imageio
 import base64
+import os
 
 app = Flask(__name__)
 
@@ -98,4 +99,5 @@ def image_to_base64():
         return jsonify({'error': f'An error occurred while processing the image: {e}'}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=46678)
+    port = int(os.environ.get("AIPLUGIN4_BACKEND_PORT", "46678"))
+    app.run(host='0.0.0.0', port=port)

@@ -299,7 +299,7 @@ max_tokens = 2048
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
-后端目录自带一键管理脚本 `backends/launcher.py`（Windows / Linux 通用，仅依赖 Python 标准库）：`list` 查看、`enable`/`disable` 选择启用、`start` 一键启动（首次自动创建独立 venv 并安装依赖，异常退出自动拉起，可 `--background` 后台运行）、`stop`/`status` 管理、`webui` 启动 Web 管理界面（默认 http://127.0.0.1:8910）、`package` 打包。详见 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
+后端目录自带一键管理脚本 `backends/launcher.py`（Windows / Linux 通用，仅依赖 Python 标准库）：`list` 查看、`enable`/`disable` 选择启用、`start` 一键启动（首次自动创建独立 venv 并安装依赖，异常退出自动拉起，可 `--background` 后台运行）、`stop`/`status` 管理、`port` 修改端口（默认值不变，写入 `.runtime.json`）、`webui` 启动 Web 管理界面（默认 http://127.0.0.1:8910，支持改端口/看日志，主题跟随系统可切换）、`package` 打包（打包只用于发版，WebUI 不提供）。详见 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
 
 ### 资源
 

@@ -164,4 +164,5 @@ async def get_chart_url(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=3009)
+    port = int(os.environ.get("AIPLUGIN4_BACKEND_PORT", "3009"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

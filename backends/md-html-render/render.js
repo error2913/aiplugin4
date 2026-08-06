@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs').promises;
 
 const app = express();
-const port = 37632;
+const port = Number(process.env.AIPLUGIN4_BACKEND_PORT || 37632);
 
 // 配置 marked 选项
 marked.setOptions({

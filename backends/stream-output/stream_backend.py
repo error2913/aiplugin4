@@ -3,6 +3,7 @@ VERSION = "1.0.2"
 
 import asyncio
 from contextlib import asynccontextmanager
+import os
 import time
 import uuid
 from fastapi import BackgroundTasks, FastAPI, Query, Request, HTTPException
@@ -291,5 +292,6 @@ async def end_completion(id: str = Query(...)):
 
 if __name__ == "__main__":
     logger.info(f"服务开始启动，版本号：{VERSION}")
-    uvicorn.run(app, host="0.0.0.0", port=3010)
+    port = int(os.environ.get("AIPLUGIN4_BACKEND_PORT", "3010"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
     logger.info("服务退出成功")

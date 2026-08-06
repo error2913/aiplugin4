@@ -18,8 +18,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from launcher import (
     DEFAULT_LOG_DIR,
     Supervisor,
-    package_backends,
+    effective_port,
+    load_runtime,
     save_config,
+    save_runtime,
     setup_backend,
 )
 
@@ -32,41 +34,56 @@ PAGE = """<!DOCTYPE html>
 <title>aiplugin4 后端管理</title>
 <style>
   :root {
-    --bg: #0e1116;
-    --panel: #161b24;
-    --panel-2: #1b2230;
-    --border: #262f3d;
-    --text: #e6ebf2;
-    --muted: #8b96a8;
-    --green: #34d399;
-    --green-bg: rgba(52, 211, 153, .12);
-    --red: #f87171;
-    --red-bg: rgba(248, 113, 113, .12);
-    --blue: #60a5fa;
-    --blue-bg: rgba(96, 165, 250, .14);
-    --amber: #fbbf24;
-    --radius: 14px;
+    --bg: #eef1f6; --panel: #ffffff; --panel-2: #f4f6fa;
+    --border: #dde3ec; --text: #1d2635; --muted: #64748b;
+    --green: #16a34a; --green-bg: rgba(22,163,74,.1);
+    --red: #dc2626; --red-bg: rgba(220,38,38,.1);
+    --blue: #2563eb; --blue-bg: rgba(37,99,235,.1);
+    --amber: #b45309; --amber-bg: rgba(180,83,9,.1);
+    --shadow: rgba(15,23,42,.08);
+  }
+  [data-theme="dark"] {
+    --bg: #0e1116; --panel: #161b24; --panel-2: #1b2230;
+    --border: #262f3d; --text: #e6ebf2; --muted: #8b96a8;
+    --green: #34d399; --green-bg: rgba(52,211,153,.12);
+    --red: #f87171; --red-bg: rgba(248,113,113,.12);
+    --blue: #60a5fa; --blue-bg: rgba(96,165,250,.14);
+    --amber: #fbbf24; --amber-bg: rgba(251,191,36,.1);
+    --shadow: rgba(0,0,0,.45);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1116; --panel: #161b24; --panel-2: #1b2230;
+      --border: #262f3d; --text: #e6ebf2; --muted: #8b96a8;
+      --green: #34d399; --green-bg: rgba(52,211,153,.12);
+      --red: #f87171; --red-bg: rgba(248,113,113,.12);
+      --blue: #60a5fa; --blue-bg: rgba(96,165,250,.14);
+      --amber: #fbbf24; --amber-bg: rgba(251,191,36,.1);
+      --shadow: rgba(0,0,0,.45);
+    }
   }
   * { box-sizing: border-box; }
   body {
     font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-    background: radial-gradient(1200px 600px at 20% -10%, #1a2334 0%, var(--bg) 55%);
+    background: radial-gradient(1100px 520px at 18% -12%, color-mix(in srgb, var(--blue) 14%, transparent), transparent 60%), var(--bg);
     color: var(--text); margin: 0; min-height: 100vh; padding: 32px 28px 60px;
+    transition: background .25s ease, color .25s ease;
   }
   .wrap { max-width: 1200px; margin: 0 auto; }
   header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
   .logo {
     width: 44px; height: 44px; border-radius: 12px; flex: none;
-    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    background: linear-gradient(135deg, var(--blue), #a78bfa);
     display: flex; align-items: center; justify-content: center;
-    font-size: 22px; box-shadow: 0 8px 24px rgba(96, 165, 250, .35);
+    font-size: 22px; box-shadow: 0 8px 24px color-mix(in srgb, var(--blue) 35%, transparent);
   }
   h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: .3px; }
   .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .header-right { margin-left: auto; display: flex; gap: 10px; }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
   .stat {
-    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));
-    border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--text) 4%, transparent), transparent);
+    border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px;
   }
   .stat b { font-size: 26px; display: block; line-height: 1.1; }
   .stat span { color: var(--muted); font-size: 12px; }
@@ -78,63 +95,65 @@ PAGE = """<!DOCTYPE html>
     border-radius: 9px; padding: 8px 15px; cursor: pointer; font-size: 13px;
     transition: transform .12s ease, background .15s ease, border-color .15s ease;
   }
-  button:hover { background: #232c3d; border-color: #354152; }
+  button:hover { border-color: color-mix(in srgb, var(--muted) 50%, transparent); }
   button:active { transform: scale(.97); }
-  button.primary { background: var(--blue-bg); border-color: rgba(96,165,250,.45); color: #bfdbfe; }
-  button.primary:hover { background: rgba(96,165,250,.22); }
-  button.danger { background: var(--red-bg); border-color: rgba(248,113,113,.4); color: #fecaca; }
-  button.danger:hover { background: rgba(248,113,113,.2); }
+  button.primary { background: var(--blue-bg); border-color: color-mix(in srgb, var(--blue) 45%, transparent); color: var(--blue); }
+  button.danger { background: var(--red-bg); border-color: color-mix(in srgb, var(--red) 40%, transparent); color: var(--red); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
   .card {
-    background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0));
-    border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
-    display: flex; flex-direction: column; gap: 12px; transition: border-color .2s ease, transform .2s ease;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 3px var(--shadow);
+    transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease;
   }
-  .card:hover { border-color: #354152; transform: translateY(-2px); }
-  .card.running { border-color: rgba(52,211,153,.35); }
+  .card:hover { border-color: color-mix(in srgb, var(--muted) 55%, transparent); transform: translateY(-2px); box-shadow: 0 8px 20px var(--shadow); }
+  .card.running { border-color: color-mix(in srgb, var(--green) 40%, transparent); }
   .row1 { display: flex; align-items: center; gap: 10px; }
   .name { font-family: Consolas, "Courier New", monospace; font-size: 15px; font-weight: 600; }
   .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 600; letter-spacing: .4px; }
-  .badge.py { background: var(--blue-bg); color: #93c5fd; }
-  .badge.node { background: rgba(52,211,153,.12); color: #6ee7b7; }
+  .badge.py { background: var(--blue-bg); color: var(--blue); }
+  .badge.node { background: var(--green-bg); color: var(--green); }
   .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .dot.on { background: var(--green); box-shadow: 0 0 0 0 rgba(52,211,153,.5); animation: pulse 1.8s infinite; }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,.45); } 70% { box-shadow: 0 0 0 7px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+  .dot.on { background: var(--green); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
   .status.on { color: var(--green); }
   .status.off { color: var(--muted); }
   .desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; min-height: 36px; }
-  .meta { display: flex; gap: 8px; align-items: center; }
-  .chip { font-family: Consolas, monospace; font-size: 12px; color: var(--amber); background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.25); padding: 3px 9px; border-radius: 8px; }
-  .chip.idle { color: var(--muted); background: rgba(139,150,168,.08); border-color: rgba(139,150,168,.22); }
+  .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .portbox { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .port {
+    width: 76px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 4px 8px; font-family: Consolas, monospace; font-size: 12.5px;
+  }
+  .port:focus { outline: none; border-color: var(--blue); }
+  button.mini { padding: 4px 8px; font-size: 12px; }
+  .chip { font-family: Consolas, monospace; font-size: 12px; color: var(--amber); background: var(--amber-bg); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); padding: 3px 9px; border-radius: 8px; }
+  .chip.idle { color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, transparent); border-color: color-mix(in srgb, var(--muted) 22%, transparent); }
   .ops { display: flex; gap: 8px; flex-wrap: wrap; }
   .ops button { padding: 6px 12px; font-size: 12.5px; }
-  .ops button.small { padding: 6px 10px; }
   .modal {
-    position: fixed; inset: 0; background: rgba(5,8,12,.72); backdrop-filter: blur(4px);
+    position: fixed; inset: 0; background: rgba(5,8,12,.55); backdrop-filter: blur(4px);
     display: none; align-items: center; justify-content: center; z-index: 50; padding: 24px;
   }
   .modal.open { display: flex; }
   .dialog {
     width: min(860px, 100%); max-height: 82vh; background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden;
-    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+    border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 60px var(--shadow);
   }
   .dialog-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
   .dialog-head b { font-size: 14px; }
   .dialog-head .spacer { flex: 1; }
   .dialog pre {
     margin: 0; padding: 16px 18px; overflow: auto; font-size: 12.5px; line-height: 1.55;
-    font-family: Consolas, "Courier New", monospace; color: #b6c2d4; white-space: pre-wrap; word-break: break-all;
+    font-family: Consolas, "Courier New", monospace; color: var(--muted); white-space: pre-wrap; word-break: break-all;
   }
   .close { background: transparent; border: none; font-size: 18px; color: var(--muted); cursor: pointer; padding: 2px 8px; }
-  .close:hover { color: var(--text); }
   #toast {
     position: fixed; top: 20px; right: 20px; z-index: 99; max-width: 70vw;
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
-    padding: 11px 16px; font-size: 13px; display: none; box-shadow: 0 12px 32px rgba(0,0,0,.45);
+    padding: 11px 16px; font-size: 13px; display: none; box-shadow: 0 12px 32px var(--shadow);
   }
-  footer { margin-top: 26px; color: #5b6676; font-size: 12px; text-align: center; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 12px; text-align: center; opacity: .7; }
 </style>
 </head>
 <body>
@@ -145,6 +164,10 @@ PAGE = """<!DOCTYPE html>
       <h1>aiplugin4 后端管理</h1>
       <div class="sub">launcher WebUI · 每 3 秒自动刷新 · 后端异常退出会自动拉起</div>
     </div>
+    <div class="header-right">
+      <button id="themeBtn" onclick="cycleTheme()">主题</button>
+      <button onclick="refresh()">⟳ 刷新</button>
+    </div>
   </header>
   <div class="stats">
     <div class="stat"><b id="stTotal">0</b><span>后端总数</span></div>
@@ -154,8 +177,6 @@ PAGE = """<!DOCTYPE html>
   <div class="bar">
     <button class="primary" onclick="all('start')">▶ 启动全部</button>
     <button class="danger" onclick="all('stop')">■ 停止全部</button>
-    <button onclick="pkg()">📦 打包后端 zip</button>
-    <button onclick="refresh()">⟳ 刷新</button>
   </div>
   <div class="grid" id="grid"></div>
 </div>
@@ -176,13 +197,24 @@ PAGE = """<!DOCTYPE html>
 let current = null;
 function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3000); }
-async function api(path, method){
+async function api(path, method, body){
   try {
-    const r = await fetch(path, {method: method||'GET'});
+    const r = await fetch(path, {method: method||'GET', body: body || undefined});
     const j = await r.json();
     if (!j.ok) throw new Error(j.message || ('HTTP ' + r.status));
     return j;
   } catch(e){ toast('请求失败: ' + e.message); throw e; }
+}
+function applyTheme(){
+  const t = localStorage.getItem('theme') || 'auto';
+  document.documentElement.dataset.theme = t === 'auto' ? '' : t;
+  document.getElementById('themeBtn').textContent = t === 'auto' ? '🌓 主题：跟随系统' : (t === 'light' ? '☀️ 主题：浅色' : '🌙 主题：深色');
+}
+function cycleTheme(){
+  const cur = localStorage.getItem('theme') || 'auto';
+  const next = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto';
+  localStorage.setItem('theme', next);
+  applyTheme();
 }
 async function refresh(){
   const j = await api('/api/backends');
@@ -199,7 +231,8 @@ async function refresh(){
       </div>
       <div class="desc">${esc(b.description)}</div>
       <div class="meta">
-        <span class="chip ${b.port ? '' : 'idle'}">:${b.port || '—'}</span>
+        <span class="portbox">端口 <input class="port" type="number" min="1" max="65535" value="${b.port}" onchange="setPort('${b.name}', this.value)" title="修改后重启后端生效"></span>
+        <button class="mini" onclick="resetPort('${b.name}')" title="恢复默认端口">↺</button>
         <span class="chip ${b.enabled ? '' : 'idle'}">${b.enabled ? '已启用' : '已停用'}</span>
         ${b.running && b.pid ? `<span class="chip idle">pid ${b.pid}</span>` : ''}
       </div>
@@ -209,7 +242,7 @@ async function refresh(){
         ${b.running
           ? `<button class="danger" onclick="run('${b.name}','stop')">停止</button>`
           : `<button class="primary" onclick="run('${b.name}','start')">启动</button>`}
-        <button class="small" onclick="showLog('${b.name}')">日志</button>
+        <button onclick="showLog('${b.name}')">日志</button>
       </div>
     </div>`).join('');
 }
@@ -217,7 +250,14 @@ async function toggle(name){ await api('/api/enable/' + name, 'POST'); toast('�
 async function setup(name){ toast('开始安装依赖：' + name); await api('/api/setup/' + name, 'POST'); toast('安装完成：' + name); refresh(); }
 async function run(name, act){ await api('/api/' + act + '/' + name, 'POST'); toast(act==='start' ? '已启动：' + name : '已停止：' + name); refresh(); }
 async function all(act){ await api('/api/' + act + '-all', 'POST'); toast('已' + (act==='start'?'启动':'停止') + '全部'); refresh(); }
-async function pkg(){ toast('打包已在后台开始，完成后见 dist/aiplugin4-backends-*.zip'); await api('/api/package', 'POST'); }
+async function setPort(name, val){
+  const n = parseInt(val, 10);
+  if (!n || n < 1 || n > 65535){ toast('端口必须是 1-65535'); refresh(); return; }
+  await api('/api/port/' + name, 'POST', JSON.stringify({port: n}));
+  toast('端口已保存：' + name + ' → ' + n + '（重启后端生效）');
+  refresh();
+}
+async function resetPort(name){ await api('/api/port/' + name + '/reset', 'POST'); toast('已恢复默认端口'); refresh(); }
 async function showLog(name){
   current = name;
   document.getElementById('logTitle').textContent = '日志：' + name;
@@ -233,6 +273,7 @@ async function loadLog(){
   pre.scrollTop = pre.scrollHeight;
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLog(); });
+applyTheme();
 refresh();
 setInterval(refresh, 3000);
 </script>
@@ -260,6 +301,14 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
         def _err(self, message, status=500):
             self._json({"ok": False, "message": message}, status)
 
+        def _read_json(self) -> dict:
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                return json.loads(raw or b"{}")
+            except ValueError:
+                return {}
+
         def do_GET(self):
             if self.path == "/":
                 body = PAGE.encode("utf-8")
@@ -278,7 +327,8 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
                         "name": b.name,
                         "description": b.description,
                         "type": b.type,
-                        "port": b.port,
+                        "port": effective_port(b),
+                        "default_port": b.port,
                         "enabled": b.name in enabled,
                         "running": supervisor.is_running(b.name),
                         "pid": info.get("pid"),
@@ -308,9 +358,37 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
                     supervisor.stop(backends)
                     self._json({"ok": True, "message": "stopped"})
                     return
-                if path == "/api/package":
-                    threading.Thread(target=lambda: (package_backends(), None), daemon=True).start()
-                    self._json({"ok": True, "message": "packaging started"})
+                if path.startswith("/api/port/"):
+                    rest = path[len("/api/port/"):]
+                    if rest.endswith("/reset"):
+                        name = rest[:-len("/reset")]
+                        backend = by_name.get(name)
+                        if not backend:
+                            self._err(f"未知后端: {name}", 404)
+                            return
+                        runtime = load_runtime()
+                        runtime.setdefault("ports", {}).pop(name, None)
+                        save_runtime(runtime)
+                        self._json({"ok": True, "port": backend.port})
+                        return
+                    name = rest
+                    backend = by_name.get(name)
+                    if not backend:
+                        self._err(f"未知后端: {name}", 404)
+                        return
+                    value = self._read_json().get("port")
+                    try:
+                        value = int(value)
+                    except (TypeError, ValueError):
+                        self._err("端口必须是 1-65535 的整数", 400)
+                        return
+                    if not 1 <= value <= 65535:
+                        self._err("端口必须是 1-65535 的整数", 400)
+                        return
+                    runtime = load_runtime()
+                    runtime.setdefault("ports", {})[name] = value
+                    save_runtime(runtime)
+                    self._json({"ok": True, "port": value})
                     return
                 parts = path.strip("/").split("/")
                 if len(parts) == 3 and parts[0] == "api":

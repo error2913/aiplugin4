@@ -8,6 +8,7 @@ aiplugin4 后端一键配置与启动器（仅依赖 Python 标准库，纯命�
   enable <name...>            启用指定后端（写入 launcher.json）
   disable <name...>           停用指定后端
   setup [name...|--all]       安装依赖（默认安装已启用的后端，幂等）
+  port <name> [value|reset]   查看/修改后端端口（写入 .runtime.json，重启后端生效）
   start [name...|--all]       启动后端（默认启动已启用的后端；首次运行自动创建 venv /
                               安装依赖，进程异常退出会自动拉起）
   stop [name...|--all]        停止后端（默认停止全部）
@@ -43,6 +44,7 @@ ROOT_DIR = os.path.dirname(BACKENDS_DIR)
 CONFIG_FILE = os.path.join(BACKENDS_DIR, "launcher.json")
 MANIFEST_FILE = "backend.json"
 DEFAULT_LOG_DIR = "logs"
+RUNTIME_FILE = ".runtime.json"
 VENV_DIR_NAME = ".venv"
 DEPS_MARKER = ".deps_ready"
 
@@ -72,6 +74,25 @@ def load_config() -> dict:
 def save_config(config: dict) -> None:
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def load_runtime() -> dict:
+    """运行时配置（端口覆盖等），位于 backends/.runtime.json，不随源码提交"""
+    try:
+        with open(os.path.join(BACKENDS_DIR, RUNTIME_FILE), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_runtime(runtime: dict) -> None:
+    with open(os.path.join(BACKENDS_DIR, RUNTIME_FILE), "w", encoding="utf-8") as f:
+        json.dump(runtime, f, ensure_ascii=False, indent=2)
+
+
+def effective_port(backend: Backend) -> int:
+    """有效端口：优先 .runtime.json 中的覆盖值，否则用 backend.json 默认值"""
+    return int(load_runtime().get("ports", {}).get(backend.name, backend.port))
 
 
 def discover_backends() -> list:
@@ -229,6 +250,7 @@ class Supervisor:
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
+        env["AIPLUGIN4_BACKEND_PORT"] = str(effective_port(backend))
         proc = subprocess.Popen(
             ensure_environment(backend) + [backend.entry],
             cwd=backend.dir,
@@ -319,7 +341,7 @@ class Supervisor:
             ok = self.is_running(backend.name)
             running += ok
             state = "[运行中]" if ok else "[已停止]"
-            print(f"{state} {backend.name:24s} port={backend.port:<6d} {backend.description}")
+            print(f"{state} {backend.name:24s} port={effective_port(backend):<6d} {backend.description}")
         print(f"共 {running}/{len(backends)} 个后端在运行")
 
 
@@ -373,6 +395,9 @@ def main() -> None:
     setup_p = sub.add_parser("setup", help="安装依赖（幂等，python 后端装入独立 venv）")
     setup_p.add_argument("names", nargs="*")
     setup_p.add_argument("--all", action="store_true", help="安装全部后端")
+    port_p = sub.add_parser("port", help="查看/修改后端端口（重启后端生效）")
+    port_p.add_argument("name")
+    port_p.add_argument("value", nargs="?", help="新端口(1-65535)，或 reset 恢复默认")
     start_p = sub.add_parser("start", help="启动后端（首次自动创建 venv 并安装依赖）")
     start_p.add_argument("names", nargs="*")
     start_p.add_argument("--all", action="store_true", help="启动全部后端")
@@ -410,7 +435,7 @@ def main() -> None:
         for backend in backends:
             mark = "[启用]" if backend.name in enabled else "[停用]"
             state = "运行中" if supervisor.is_running(backend.name) else "已停止"
-            print(f"{mark} {backend.name:24s} port={backend.port:<6d} [{state}] {backend.description}")
+            print(f"{mark} {backend.name:24s} port={effective_port(backend):<6d} [{state}] {backend.description}")
         return
 
     if args.command == "enable":
@@ -440,6 +465,31 @@ def main() -> None:
             return
         for backend in targets:
             setup_backend(backend)
+        return
+
+    if args.command == "port":
+        backend = find([args.name])[0]
+        runtime = load_runtime()
+        ports = runtime.setdefault("ports", {})
+        if args.value is None:
+            print(f"{backend.name} 端口: {effective_port(backend)}（默认 {backend.port}）")
+            return
+        if args.value == "reset":
+            ports.pop(backend.name, None)
+            save_runtime(runtime)
+            print(f"{backend.name} 端口已恢复默认 {backend.port}")
+            return
+        try:
+            value = int(args.value)
+        except ValueError:
+            print("[launcher] 端口必须是 1-65535 的整数")
+            sys.exit(1)
+        if not 1 <= value <= 65535:
+            print("[launcher] 端口必须是 1-65535 的整数")
+            sys.exit(1)
+        ports[backend.name] = value
+        save_runtime(runtime)
+        print(f"{backend.name} 端口已设为 {value}（重启后端后生效）")
         return
 
     if args.command == "start":
