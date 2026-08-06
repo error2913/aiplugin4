@@ -17,6 +17,10 @@ export function registerDeck() {
                     name: {
                         type: 'string',
                         description: "牌堆名称"
+                    },
+                    send: {
+                        type: 'boolean',
+                        description: "是否直接将抽牌结果发送给用户：true 时直接发送原始抽牌结果；false 或省略时返回结果由你转述，可结合剧情再加工"
                     }
                 },
                 required: ["name"]
@@ -24,7 +28,7 @@ export function registerDeck() {
         }
     });
     toolDraw.solve = async (ctx, msg, _, args) => {
-        const { name } = args;
+        const { name, send = false } = args;
 
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
@@ -38,7 +42,9 @@ export function registerDeck() {
             return `牌堆${name}结果为空:${dr.err}`;
         }
 
-        seal.replyToSender(ctx, msg, result);
+        if (send) {
+            seal.replyToSender(ctx, msg, result);
+        }
         return result;
     }
 }
