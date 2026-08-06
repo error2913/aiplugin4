@@ -6,6 +6,7 @@ import { registerOb11Tools } from "./ob11.ts/init";
 import { registerSealTools } from "./seal.ts/init";
 import { registerBlockTool } from "./tool_block";
 import { registerContext } from "./tool_context";
+import { registerForum } from "./tool_forum";
 import { registerMemory } from "./tool_memory";
 import { registerMessage } from "./tool_message";
 import { registerMusicPlay } from "./tool_music";
@@ -29,4 +30,5 @@ export function registerTools() {
     registerRecord();
     registerWeb();
     registerBlockTool();
+    registerForum();
 }
