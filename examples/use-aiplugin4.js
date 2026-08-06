@@ -12,16 +12,15 @@
  * 示例插件：展示如何从其他海豹插件调用 aiplugin4 暴露的智能体 API。
  *
  * 依赖：先加载/安装 aiplugin4（本仓库），再加载本示例。
- *
- * 命令：
- *   .ai4status        打印 API 版本与可用方法
- *   .ai4chat <内容>   单轮对话（api.chat），把模型回复原样发回
- *   .ai4agent <内容>  用 api.getAgent 拿 Agent 实例后调用实例的 chat
- *   .ai4run <内容>    在当前会话触发完整编排（api.run），AI 走上下文/工具/分段发送
+ * 只注册一个 .apitest 命令，子命令：
+ *   .apitest status         打印 API 版本与可用方法
+ *   .apitest chat <内容>    单轮对话（api.chat），把模型回复原样发回
+ *   .apitest agent <内容>   用 api.getAgent 拿 Agent 实例后调用实例的 chat
+ *   .apitest run            在当前会话触发完整编排（api.run），AI 走上下文/工具/分段发送
  *
  * 注意：
  * - 必须调用 seal.ext.register(ext) 注册扩展，命令才会进入海豹指令表；
- * - 海豹按「最长命令名前缀」匹配指令（.ai4chat 长于 .ai），注册后不会被 .ai 截胡。
+ * - 海豹按「最长命令名前缀」匹配指令，注册后 .apitest 不会被 .a 快捷指令截胡。
  */
 
 // 与 src/config/config.ts 一致：先 find 复用已注册扩展，不存在才 new + register，
@@ -32,72 +31,53 @@ if (!ext) {
     seal.ext.register(ext);
 }
 
-function getApi() {
-    return globalThis.aiplugin4 || null;
-}
-
-function apiMissing(ctx, msg) {
-    seal.replyToSender(ctx, msg, '未找到 aiplugin4，请先加载 aiplugin4.js');
-}
-
-function registerCmd(name, solve) {
-    const cmd = seal.ext.newCmdItemInfo();
-    cmd.name = name;
-    cmd.allowDelegate = true;
-    cmd.solve = solve;
-    ext.cmdMap[name] = cmd;
-}
-
-registerCmd('ai4status', (ctx, msg) => {
+const cmd = seal.ext.newCmdItemInfo();
+cmd.name = 'apitest';
+cmd.help = `帮助
+【.apitest status】查看 aiplugin4 API 版本与可用方法
+【.apitest chat <内容>】单轮对话，直接返回模型回复
+【.apitest agent <内容>】通过 Agent 实例进行单轮对话
+【.apitest run】在当前会话触发完整对话编排`;
+cmd.solve = (ctx, msg, cmdArgs) => {
     const ret = seal.ext.newCmdExecuteResult(true);
-    const api = getApi();
+    const api = globalThis.aiplugin4;
     if (!api) {
-        apiMissing(ctx, msg);
+        seal.replyToSender(ctx, msg, '未找到 aiplugin4，请先加载 aiplugin4.js');
         return ret;
     }
-    const methods = ['getAgent', 'getSession', 'chat', 'run'].filter((m) => typeof api[m] === 'function');
-    seal.replyToSender(ctx, msg, `aiplugin4 v${api.version}，可用方法：${methods.join('、')}`);
-    return ret;
-});
 
-registerCmd('ai4chat', (ctx, msg) => {
-    const ret = seal.ext.newCmdExecuteResult(true);
-    const api = getApi();
-    if (!api) {
-        apiMissing(ctx, msg);
-        return ret;
-    }
-    const prompt = msg.message.replace(/^\.ai4chat\s*/i, '').trim() || '请用一句话介绍你自己';
-    api.chat(prompt)
-        .then((reply) => seal.replyToSender(ctx, msg, reply || '（模型未返回内容，请检查 aiplugin4 的模型配置）'))
-        .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
-    return ret;
-});
+    const sub = cmdArgs.getArgN(1);
+    const content = cmdArgs.getRestArgsFrom(2).trim() || '请用一句话介绍你自己';
 
-registerCmd('ai4agent', (ctx, msg) => {
-    const ret = seal.ext.newCmdExecuteResult(true);
-    const api = getApi();
-    if (!api) {
-        apiMissing(ctx, msg);
-        return ret;
+    switch (sub) {
+        case 'status': {
+            const methods = ['getAgent', 'getSession', 'chat', 'run'].filter((m) => typeof api[m] === 'function');
+            seal.replyToSender(ctx, msg, `aiplugin4 v${api.version}，可用方法：${methods.join('、')}`);
+            break;
+        }
+        case 'chat': {
+            api.chat(content)
+                .then((reply) => seal.replyToSender(ctx, msg, reply || '（模型未返回内容，请检查 aiplugin4 的模型配置）'))
+                .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
+            break;
+        }
+        case 'agent': {
+            const agent = api.getAgent('*');
+            agent.chat(content)
+                .then((reply) => seal.replyToSender(ctx, msg, `[${agent.name}] ${reply || '（模型未返回内容）'}`))
+                .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
+            break;
+        }
+        case 'run': {
+            // 完整编排：AI 会在当前聊天中按 aiplugin4 的触发/回复逻辑输出
+            api.run(ctx, msg, { agentName: '*', reason: 'apitest' })
+                .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
+            break;
+        }
+        default:
+            ret.showHelp = true;
     }
-    const prompt = msg.message.replace(/^\.ai4agent\s*/i, '').trim() || '请用一句话介绍你自己';
-    const agent = api.getAgent('*');
-    agent.chat(prompt)
-        .then((reply) => seal.replyToSender(ctx, msg, `[${agent.name}] ${reply || '（模型未返回内容）'}`))
-        .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
     return ret;
-});
+};
 
-registerCmd('ai4run', (ctx, msg) => {
-    const ret = seal.ext.newCmdExecuteResult(true);
-    const api = getApi();
-    if (!api) {
-        apiMissing(ctx, msg);
-        return ret;
-    }
-    // 完整编排：AI 会在当前聊天中按 aiplugin4 的触发/回复逻辑输出
-    api.run(ctx, msg, { agentName: '*', reason: '示例插件调用' })
-        .catch((e) => seal.replyToSender(ctx, msg, `调用失败: ${e && e.message ? e.message : e}`));
-    return ret;
-});
+ext.cmdMap['apitest'] = cmd;

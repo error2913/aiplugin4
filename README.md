@@ -630,7 +630,7 @@ await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' }); //
 
 `getAgent(name?)` 可获取 `Agent` 实例；`run` 的 `options` 支持 `agentName`/`reason`/`toolChoice`。详见 [07-开发指南](docs/07-开发指南.md)。
 
-仓库附带可直接加载的示例插件 [`examples/use-aiplugin4.js`](examples/use-aiplugin4.js)，提供 `.ai4chat`/`.ai4run`/`.ai4agent`/`.ai4status` 四个命令演示三种调用方式，可复制到海豹 WebUI 加载体验。
+仓库附带可直接加载的示例插件 [`examples/use-aiplugin4.js`](examples/use-aiplugin4.js)，只注册一个 `.apitest` 命令（`status`/`chat`/`agent`/`run` 子命令）演示三种调用方式，可复制到海豹 WebUI 加载体验。
 
 ### 修改 prompt 模板
 
