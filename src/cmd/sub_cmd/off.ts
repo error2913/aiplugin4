@@ -5,7 +5,7 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdOff() {
     const cmd = new SubCmd('off');
-    cmd.desc = '关闭AI，此时仍能用正则匹配触发';
+    cmd.desc = '关闭AI（含非指令正则触发）';
     cmd.help = '';
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
@@ -21,6 +21,7 @@ export function registerCmdOff() {
             setting.counter = -1;
             setting.timer = -1;
             setting.prob = -1;
+            setting.regexTrigger = false;
             setting.standby = false;
             setting.activeTimeInfo = {
                 start: 0,
@@ -38,6 +39,12 @@ export function registerCmdOff() {
             const name = kwarg.name;
 
             switch (name) {
+                case 'r':
+                case 'regex': {
+                    setting.regexTrigger = false;
+                    text += `\n非指令正则触发`;
+                    break;
+                }
                 case 'c':
                 case 'counter': {
                     session.context.counter = 0;
