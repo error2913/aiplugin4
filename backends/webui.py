@@ -20,7 +20,6 @@ from launcher import (
     Supervisor,
     effective_port,
     load_runtime,
-    save_config,
     save_runtime,
     setup_backend,
 )
@@ -70,7 +69,7 @@ PAGE = """<!DOCTYPE html>
     transition: background .25s ease, color .25s ease;
   }
   .wrap { max-width: 1200px; margin: 0 auto; }
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  header { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 22px; position: relative; }
   .logo {
     width: 44px; height: 44px; border-radius: 12px; flex: none;
     background: linear-gradient(135deg, var(--blue), #a78bfa);
@@ -79,7 +78,7 @@ PAGE = """<!DOCTYPE html>
   }
   h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: .3px; }
   .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
-  .header-right { margin-left: auto; display: flex; gap: 10px; }
+  .header-right { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; gap: 10px; }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
   .stat {
     background: linear-gradient(180deg, color-mix(in srgb, var(--text) 4%, transparent), transparent);
@@ -149,7 +148,7 @@ PAGE = """<!DOCTYPE html>
   }
   .close { background: transparent; border: none; font-size: 18px; color: var(--muted); cursor: pointer; padding: 2px 8px; }
   #toast {
-    position: fixed; top: 20px; right: 20px; z-index: 99; max-width: 70vw;
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 99; max-width: 70vw;
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
     padding: 11px 16px; font-size: 13px; display: none; box-shadow: 0 12px 32px var(--shadow);
   }
@@ -172,7 +171,6 @@ PAGE = """<!DOCTYPE html>
   <div class="stats">
     <div class="stat"><b id="stTotal">0</b><span>后端总数</span></div>
     <div class="stat green"><b id="stRun">0</b><span>运行中</span></div>
-    <div class="stat blue"><b id="stOn">0</b><span>已启用</span></div>
   </div>
   <div class="bar">
     <button class="primary" onclick="all('start')">▶ 启动全部</button>
@@ -221,7 +219,6 @@ async function refresh(){
   const list = j.backends;
   document.getElementById('stTotal').textContent = list.length;
   document.getElementById('stRun').textContent = list.filter(b => b.running).length;
-  document.getElementById('stOn').textContent = list.filter(b => b.enabled).length;
   document.getElementById('grid').innerHTML = list.map(b => `
     <div class="card ${b.running ? 'running' : ''}">
       <div class="row1">
@@ -233,11 +230,9 @@ async function refresh(){
       <div class="meta">
         <span class="portbox">端口 <input class="port" type="number" min="1" max="65535" value="${b.port}" onchange="setPort('${b.name}', this.value)" title="修改后重启后端生效"></span>
         <button class="mini" onclick="resetPort('${b.name}')" title="恢复默认端口">↺</button>
-        <span class="chip ${b.enabled ? '' : 'idle'}">${b.enabled ? '已启用' : '已停用'}</span>
         ${b.running && b.pid ? `<span class="chip idle">pid ${b.pid}</span>` : ''}
       </div>
       <div class="ops">
-        <button onclick="toggle('${b.name}')">${b.enabled ? '停用' : '启用'}</button>
         <button onclick="setup('${b.name}')">安装依赖</button>
         ${b.running
           ? `<button class="danger" onclick="run('${b.name}','stop')">停止</button>`
@@ -246,7 +241,6 @@ async function refresh(){
       </div>
     </div>`).join('');
 }
-async function toggle(name){ await api('/api/enable/' + name, 'POST'); toast('已更新启用状态'); refresh(); }
 async function setup(name){ toast('开始安装依赖：' + name); await api('/api/setup/' + name, 'POST'); toast('安装完成：' + name); refresh(); }
 async function run(name, act){ await api('/api/' + act + '/' + name, 'POST'); toast(act==='start' ? '已启动：' + name : '已停止：' + name); refresh(); }
 async function all(act){ await api('/api/' + act + '-all', 'POST'); toast('已' + (act==='start'?'启动':'停止') + '全部'); refresh(); }
@@ -319,7 +313,6 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
                 self.wfile.write(body)
                 return
             if self.path == "/api/backends":
-                enabled = set(config.get("enabled", []))
                 rows = []
                 for b in backends:
                     info = supervisor.state.get(b.name) or {}
@@ -329,7 +322,6 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
                         "type": b.type,
                         "port": effective_port(b),
                         "default_port": b.port,
-                        "enabled": b.name in enabled,
                         "running": supervisor.is_running(b.name),
                         "pid": info.get("pid"),
                     })
@@ -351,7 +343,7 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
             path = self.path
             try:
                 if path == "/api/start-all":
-                    supervisor.start([b for b in backends if b.name in config.get("enabled", [])])
+                    supervisor.start(backends)
                     self._json({"ok": True, "message": "started"})
                     return
                 if path == "/api/stop-all":
@@ -396,20 +388,6 @@ def run_webui(backends, config, supervisor: Supervisor, host: str = "127.0.0.1",
                     backend = by_name.get(name)
                     if not backend:
                         self._err(f"未知后端: {name}", 404)
-                        return
-                    if action == "enable":
-                        enabled = config.setdefault("enabled", [])
-                        if name not in enabled:
-                            enabled.append(name)
-                        save_config(config)
-                        self._json({"ok": True})
-                        return
-                    if action == "disable":
-                        enabled = config.get("enabled", [])
-                        if name in enabled:
-                            enabled.remove(name)
-                        save_config(config)
-                        self._json({"ok": True})
                         return
                     if action == "setup":
                         setup_backend(backend)
