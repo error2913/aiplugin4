@@ -290,14 +290,16 @@ max_tokens = 2048
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 流式输出 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/%E6%B5%81%E5%BC%8F%E8%BE%93%E5%87%BA)，`body.stream = true` 的模型才会走流式 |
-| 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/%E5%9B%BE%E7%89%87url%E8%BD%ACbase64)，解决 QQ 图床图片无法被大模型访问的问题 |
+| 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/stream-output)，`body.stream = true` 的模型才会走流式 |
+| 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
 | 联网搜索 | [searxng](https://github.com/searxng/searxng)，有能力建议自己搭建，为 AI 提供联网搜索功能 |
-| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/%E7%BD%91%E9%A1%B5url%E5%86%85%E5%AE%B9%E8%AF%BB%E5%8F%96)，为 AI 提供网页详细内容获取功能 |
-| 用量图表 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/%E7%94%A8%E9%87%8F%E5%9B%BE%E8%A1%A8%E7%BB%98%E5%88%B6)，token 使用情况图表生成 |
-| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4/tree/main/%E7%9B%B8%E5%85%B3%E5%90%8E%E7%AB%AF%E9%A1%B9%E7%9B%AE/md%E5%92%8Chtml%E5%9B%BE%E7%89%87%E6%B8%B2%E6%9F%93)，将 Markdown/HTML 渲染为图片 |
+| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/web-read)，为 AI 提供网页详细内容获取功能 |
+| 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/usage-chart)，token 使用情况图表生成 |
+| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/md-html-render)，将 Markdown/HTML 渲染为图片 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
+
+后端服务已迁移到独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)：自带 `launcher.py` 一键管理（Windows / Linux 通用，默认不启动任何后端，首次启动某后端时才自动创建 venv 并安装依赖，异常退出自动拉起；`webui` 提供管理界面，可改端口/看日志，主题跟随系统）。详见其仓库 README 与 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
 
 ### 资源
 
@@ -538,7 +540,6 @@ aiplugin4/
 ├── dist/                 # 构建产物 aiplugin4.js
 ├── sealpack/             # 本体 SealRepo 打包源（info.toml / assets/icon.png，scripts/main.js 自动同步）
 ├── sealpack-full/        # 完整包打包源（生成目录：本体 + 依赖插件，已 gitignore）
-├── 相关后端项目/         # 配套后端服务源码
 ├── .github/workflows/    # build-check.yml / release.yml
 ├── header.txt            # 打包时拼接到产物头部的 UserScript 注释
 └── package.json
@@ -654,6 +655,7 @@ await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' });
   4. github-release：从 `src/update.ts` 提取对应版本日志作为 Release 正文，附带两个豹包与 `dist/aiplugin4.js`。
 - 打包源：`sealpack/` 为本体（`scripts/main.js` 与 `info.toml` 版本由 `scripts/prepare-sealpack.js` 自动同步）；`sealpack-full/` 为完整包（生成目录，复制本体并下载依赖插件）；
 - 完整包依赖插件：在 `scripts/deps.cjs` 的 `dependencies` 中配置 `url`（依赖插件 JS 的 raw 地址）与可选 `filename`，当前为空待补充；下载失败会导致发版失败；
+- 配套后端服务在独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)，由其自身发版流程打包发布；
 - SealRepo 发布 Token：仓库 Settings → Secrets and variables → Actions → 新建 `SEALPACK_TOKEN`（值在 repo.sealdice.com 后台复制）；包图标放 `sealpack/assets/icon.png`（`info.toml` 已引用）；
 - 发版前需同步：`src/config/static_config.ts` 的 `VERSION`、`header.txt` 的 `@version`、`src/update.ts` 的 `updateInfo`（并确认 `updateInfo` 含新版本条目）。
 
