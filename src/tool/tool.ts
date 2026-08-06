@@ -22,6 +22,7 @@ import { registerGetPersonInfo } from "./tools/ob11.ts/tool_person_info";
 import { registerQQList } from "./tools/ob11.ts/tool_qq_list";
 import { registerRename } from "./tools/ob11.ts/tool_rename";
 import { registerDeck } from "./tools/seal.ts/tool_deck";
+import { registerBlockTool } from "./tools/tool_block";
 import { registerContext } from "./tools/tool_context";
 import { registerMemory } from "./tools/tool_memory";
 import { registerMessage } from "./tools/tool_message";
@@ -91,6 +92,7 @@ export default class Tool {
         registerSetTrigger();
         registerRecord();
         registerWeb();
+        registerBlockTool();
         registerSkills();
         registerMCPTools().catch(e => Logger.error(`注册MCP工具失败:${e.message}`));
     }

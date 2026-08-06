@@ -322,6 +322,9 @@ max_tokens = 2048
 | `.ai priv show <指令>` | - | 检查指定指令的权限限制 |
 | `.ai priv reset` | - | 重置所有指令权限为默认 |
 | `.ai prompt` | - | 查看当前 system prompt（骰主） |
+| `.ai block add <统一ID/@xxx> <原因>` | `.ai block add QQ:1234567890 乱发广告` | 拉黑用户/群（骰主），被拉黑对象无法触发 AI 对话 |
+| `.ai block rm <统一ID/@xxx>` | - | 移除黑名单 |
+| `.ai block list` | - | 查看黑名单列表 |
 
 > 权限数值：-30 黑名单 / 0 普通用户 / 40 邀请者 / 50 群管理员 / 60 群主 / 70 白名单 / 100 骰主。
 
@@ -423,6 +426,7 @@ max_tokens = 2048
 | 群资料 | `get_list`、`get_group_member_list`、`search_chat`、`search_common_group`、`get_person_info` |
 | 精华消息 | `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
 | 音乐 | `music_play` |
+| 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | MCP / 技能 | `<服务器名>_<工具名>`（MCP 工具）、`use_skill`（技能） |
 
 > 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要 AITTS 依赖与 ffmpeg；`text_to_image` 需要 AIDrawing 依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。

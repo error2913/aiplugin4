@@ -2,6 +2,7 @@
 import Handlebars from "handlebars";
 
 import { initAgents } from "./agent/agents";
+import { BlockManager } from "./block";
 import { PrivilegeManager } from "./cmd/privilege";
 import { registerCmd } from "./cmd/root_cmd";
 import { ext } from "./config/config";
@@ -28,6 +29,7 @@ function main() {
   Tool.registerTool();
   TimerManager.init();
   knowledgeService.init();
+  BlockManager.initBlockList();
 
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
@@ -40,6 +42,22 @@ function main() {
   }
 
   ext.onPoke = (ctx: seal.MsgContext, event: seal.PokeEvent) => {
+    const uid = event.senderId;
+    const blockReason = BlockManager.checkBlock(uid);
+    if (blockReason) {
+      logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略戳一戳`);
+      return;
+    }
+
+    if (!event.isPrivate) {
+      const gid = event.groupId;
+      const groupBlockReason = BlockManager.checkBlock(gid);
+      if (groupBlockReason) {
+        logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略戳一戳`);
+        return;
+      }
+    }
+
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
     if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);

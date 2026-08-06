@@ -5,6 +5,7 @@ export default class ToolConfig {
 
         seal.ext.registerBoolConfig(ext, "开启调用函数功能", true, "", "工具");
         seal.ext.registerBoolConfig(ext, "切换为提示词工程", false, "API在不支持function calling功能的时候开启", "工具");
+        seal.ext.registerBoolConfig(ext, "拉黑前需要骰主确认", true, "AI 建议拉黑时需骰主确认后才生效；关闭后 AI 可直接拉黑", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 5, "单次对话中允许连续调用函数的次数", "工具");
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后保存并重载js", "工具");
@@ -43,6 +44,7 @@ export default class ToolConfig {
         return {
             STATUS: seal.ext.getBoolConfig(ext, "开启调用函数功能"),
             PROMPT_ENGINEERING: seal.ext.getBoolConfig(ext, "切换为提示词工程"),
+            BLOCK_REQUIRE_OWNER_CONFIRM: seal.ext.getBoolConfig(ext, "拉黑前需要骰主确认"),
             MAX_CALL_COUNT: seal.ext.getIntConfig(ext, "允许连续调用函数次数"),
             TOOL_RESPONSE_COMPRESS_MIN_LENGTH: seal.ext.getIntConfig(ext, "工具响应压缩触发字数"),
             BLOCKED: seal.ext.getTemplateConfig(ext, "禁止调用的函数"),

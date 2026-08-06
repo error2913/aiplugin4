@@ -6,6 +6,7 @@ import { getSession } from "../session/session_service";
 import { aliasToCmd } from "../utils/utils";
 
 import { CmdPriv, CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
+import { registerCmdBlock } from "./sub_cmd/block";
 import { registerCmdCtxn } from "./sub_cmd/ctxn";
 import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
@@ -73,6 +74,7 @@ export class SubCmd {
         registerCmdToken();
         registerCmdShut();
         registerCmdModel();
+        registerCmdBlock();
 
         defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc: CmdPriv, sc) => {
             acc[sc.name] = sc.priv;

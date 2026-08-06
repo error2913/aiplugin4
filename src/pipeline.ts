@@ -1,4 +1,5 @@
 // 消息管线：接收 → 过滤（忽略/触发）→ 会话 → 智能体，统一处理非指令/指令/机器人自身消息
+import { BlockManager } from "./block";
 import Config from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
@@ -12,11 +13,27 @@ export class MessagePipeline {
     static async handleNonCommand(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { IGNORE_PRIVATE: disabledInPrivate, IGNORE_REGEX: ignoreRegex, IGNORE_CONDITION } = Config.received;
         const { TRIGGER_REGEX: triggerRegex, TRIGGER_CONDITION: triggerCondition } = Config.trigger;
+
+        // 黑名单用户/群的消息不接收不处理
+        const uid = ctx.player.userId;
+        const blockReason = BlockManager.checkBlock(uid);
+        if (blockReason) {
+            logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略消息`);
+            return;
+        }
+        if (!ctx.isPrivate) {
+            const gid = ctx.group.groupId;
+            const groupBlockReason = BlockManager.checkBlock(gid);
+            if (groupBlockReason) {
+                logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略消息`);
+                return;
+            }
+        }
+
         if (ctx.isPrivate && disabledInPrivate) {
             return;
         }
 
-        const uid = ctx.player.userId;
         const gid = ctx.group.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
