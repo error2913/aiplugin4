@@ -178,7 +178,7 @@ export default class Tool {
             if (name === 'web_search' && args && typeof args.q === 'string' && args.q.trim()) {
                 result.searchTarget = args.q.trim();
             }
-            return { result, callBack: true };
+            return { result, callBack: tool.callBack };
         } catch (e) {
             Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
@@ -210,13 +210,15 @@ export default class Tool {
                 Logger.warning('工具调用超过上限');
                 ret.result.push({
                     tool_call_id: tool_call.id,
-                    content: '工具调用超过上限'
+                    content: '工具调用超过上限',
+                    callBack: true
                 });
                 ret.callBack = false;
                 continue;
             }
             const { result, callBack } = await this.handleToolCall(ctx, msg, session, tool_call);
             result.toolName = tool_call.function.name;
+            result.callBack = callBack;
             ret.result.push(result);
             ret.callBack = ret.callBack && callBack;
             session.tool.callCount++;

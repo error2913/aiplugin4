@@ -27,7 +27,7 @@ export interface RegisterToolOptions {
     sensitive?: boolean;
     /** 可使用的会话类型，缺省 any（群聊/私聊均可用） */
     sessionType?: "any" | SessionType;
-    /** 是否把工具结果回调给智能体（写回上下文），缺省 true */
+    /** 是否回调对话：工具结果写回上下文并继续生成，缺省 true；false 时工具静默执行、结果不回调 */
     callBack?: boolean;
     /** 工具执行函数，返回给 AI 的文本 */
     solve?: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => string | Promise<string>;
