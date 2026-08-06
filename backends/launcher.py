@@ -4,12 +4,10 @@
 aiplugin4 后端一键配置与启动器（仅依赖 Python 标准库，纯命令行管理）。
 
 子命令：
-  list                        列出后端与启用/运行状态
-  enable <name...>            启用指定后端（写入 launcher.json）
-  disable <name...>           停用指定后端
-  setup [name...|--all]       安装依赖（默认安装已启用的后端，幂等）
+  list                        列出后端与运行状态
+  setup [name...|--all]       安装依赖（幂等；默认不自动安装，仅首次启动时按需安装）
   port <name> [value|reset]   查看/修改后端端口（写入 .runtime.json，重启后端生效）
-  start [name...|--all]       启动后端（默认启动已启用的后端；首次运行自动创建 venv /
+  start <name...>|--all       启动后端（需显式指定；首次启动该后端时自动创建 venv /
                               安装依赖，进程异常退出会自动拉起）
   stop [name...|--all]        停止后端（默认停止全部）
   status                      查看运行状态
@@ -17,10 +15,9 @@ aiplugin4 后端一键配置与启动器（仅依赖 Python 标准库，纯命�
 
 示例：
   python launcher.py list
-  python launcher.py enable stream-output web-read
   python launcher.py setup --all
-  python launcher.py start
-  python launcher.py start stream-output
+  python launcher.py start --all
+  python launcher.py start stream-output web-read
   python launcher.py stop --all
   python launcher.py status
   python launcher.py package
@@ -66,7 +63,7 @@ class Backend:
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
-        return {"enabled": [], "auto_restart": True, "restart_backoff_seconds": [2, 5, 10, 30], "log_dir": DEFAULT_LOG_DIR}
+        return {"auto_restart": True, "restart_backoff_seconds": [2, 5, 10, 30], "log_dir": DEFAULT_LOG_DIR}
     with open(CONFIG_FILE, encoding="utf-8") as f:
         return json.load(f)
 
@@ -390,8 +387,6 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("list", help="列出后端与启用/运行状态")
-    sub.add_parser("enable", help="启用指定后端").add_argument("names", nargs="+")
-    sub.add_parser("disable", help="停用指定后端").add_argument("names", nargs="+")
     setup_p = sub.add_parser("setup", help="安装依赖（幂等，python 后端装入独立 venv）")
     setup_p.add_argument("names", nargs="*")
     setup_p.add_argument("--all", action="store_true", help="安装全部后端")
@@ -428,40 +423,16 @@ def main() -> None:
             sys.exit(1)
         return [by_name[n] for n in names]
 
-    enabled_names = lambda: [b for b in backends if b.name in config.get("enabled", [])]
-
     if args.command == "list":
-        enabled = set(config.get("enabled", []))
         for backend in backends:
-            mark = "[启用]" if backend.name in enabled else "[停用]"
             state = "运行中" if supervisor.is_running(backend.name) else "已停止"
-            print(f"{mark} {backend.name:24s} port={effective_port(backend):<6d} [{state}] {backend.description}")
-        return
-
-    if args.command == "enable":
-        enabled = config.setdefault("enabled", [])
-        for name in args.names:
-            find([name])
-            if name not in enabled:
-                enabled.append(name)
-                print(f"[launcher] 已启用 {name}")
-        save_config(config)
-        return
-
-    if args.command == "disable":
-        enabled = config.get("enabled", [])
-        for name in args.names:
-            find([name])
-            if name in enabled:
-                enabled.remove(name)
-                print(f"[launcher] 已停用 {name}")
-        save_config(config)
+            print(f"{backend.name:24s} port={effective_port(backend):<6d} [{state}] {backend.description}")
         return
 
     if args.command == "setup":
-        targets = backends if args.all else (find(args.names) if args.names else enabled_names())
+        targets = backends if args.all else find(args.names) if args.names else []
         if not targets:
-            print("[launcher] 没有可安装的后端（请先 python launcher.py enable <name> 或指定名称）")
+            print("[launcher] 请指定后端名称或使用 --all 安装全部")
             return
         for backend in targets:
             setup_backend(backend)
@@ -522,9 +493,7 @@ def main() -> None:
         elif args.all:
             targets = backends
         else:
-            targets = enabled_names()
-        if not targets:
-            print("[launcher] 没有可启动的后端（请先 python launcher.py enable <name>）")
+            print("[launcher] 请指定后端名称或使用 --all 启动全部（默认不启动任何后端）")
             return
         for backend in targets:
             if backend.name in supervisor.state.setdefault("stopped", []):

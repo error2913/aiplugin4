@@ -1,5 +1,4 @@
 {
-  "enabled": ["stream-output", "image-url-to-base64", "usage-chart", "web-read", "md-html-render"],
   "auto_restart": true,
   "restart_backoff_seconds": [2, 5, 10, 30],
   "log_dir": "logs"
