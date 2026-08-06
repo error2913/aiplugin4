@@ -34,6 +34,7 @@ max_tokens = 2048
 ```
 
 - `provider` / `base_url` 可以省略（deepseek / openai / google / zhipu / alibaba / anthropic / moonshot / xai / mistral / siliconflow 会自动识别），也可以显式填写 `base_url`；
+- `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式；
 - 图片识别需要配置「图片模型」（`use = ["image-understanding"]`），向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度需与「向量维度」配置一致）；
 - 默认对话模型取列表第一项，可在群里用 `.ai model <模型名>` 切换，`.ai model clr` 恢复默认。
 
