@@ -9,6 +9,7 @@ export const updateInfo: { [version: string]: string } = {
 - 新增黑名单功能：AI 建议拉黑（suggest_block 带冷却，骰主用 .ai block 确认）、unblock_user/get_block_list 工具；拉黑后不触发对话
 - 黑名单支持「拉黑前需要骰主确认」开关，关闭后 AI 可直接拉黑
 - 分段发送延时（回复配置）：流式/非流式输出共用，多段回复从第二条起按配置延时发送，含图消息额外延时，防止乱序
+- 新增非指令正则触发开关（.ai on --r / .ai off --r，排在计数器/计时器之前，默认开启）：关闭 AI 后不可用正则触发，.ai on 或 .ai on --r 重新开启
 - 模型请求统一走 Provider（超时/重试/用量上报）
 - 修复模型请求体构造：缺失 model 字段、参数优先级与默认值覆盖问题
 - 日志优化：级别语义化、密钥脱敏、超长截断、异常堆栈

@@ -61,8 +61,8 @@ export class MessagePipeline {
             if (session.context.timer) clearTimeout(session.context.timer);
             session.context.timer = null;
 
-            // 非指令消息触发
-            if (triggerRegex.test(message)) {
+            // 非指令消息触发（受会话开关控制）
+            if (session.setting.regexTrigger && triggerRegex.test(message)) {
                 const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
                 if (fmtCondition === 1) {
                     return session.handleReceipt(ctx, msg, messageArray)

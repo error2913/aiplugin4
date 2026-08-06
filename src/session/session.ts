@@ -24,13 +24,14 @@ import User from "./user";
 
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName'];
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
         standby: 'boolean',
         counter: 'number',
         timer: 'number',
         prob: 'number',
+        regexTrigger: 'boolean',
         modelName: 'string',
         activeTimeInfo: { objectValue: 'any' }
     }
@@ -39,6 +40,7 @@ export class Setting {
     counter: number;
     timer: number;
     prob: number;
+    regexTrigger: boolean;
     modelName: string;
     activeTimeInfo: {
         start: number;
@@ -52,6 +54,7 @@ export class Setting {
         this.counter = -1;
         this.timer = -1;
         this.prob = -1;
+        this.regexTrigger = true;
         this.modelName = '';
         this.activeTimeInfo = {
             start: 0,

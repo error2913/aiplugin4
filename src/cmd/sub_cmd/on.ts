@@ -12,6 +12,7 @@ export function registerCmdOn() {
 【.ai on --<参数>=<数字>】
 
 <参数>:
+【r】非指令正则触发开关
 【c】计数器模式，接收消息数达到后触发
 单位/条，默认10条
 【t】计时器模式，最后一条消息后达到时限触发
@@ -30,7 +31,9 @@ export function registerCmdOn() {
 
         const kwargs = cmdArgs.kwargs;
         if (kwargs.length == 0) {
-            seal.replyToSender(ctx, msg, cmd.help);
+            setting.regexTrigger = true;
+            seal.replyToSender(ctx, msg, 'AI已开启：非指令正则触发');
+            session.save();
             return ret;
         }
 
@@ -43,6 +46,12 @@ export function registerCmdOn() {
             const valStr = kwarg.value.trim();
 
             switch (name) {
+                case 'r':
+                case 'regex': {
+                    setting.regexTrigger = true;
+                    text += `\n非指令正则触发: 开启`;
+                    break;
+                }
                 case 'c':
                 case 'counter': {
                     session.context.counter = 0;

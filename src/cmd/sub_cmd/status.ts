@@ -15,6 +15,7 @@ export function registerCmdStatus() {
         seal.replyToSender(ctx, msg, `${sid}
         权限: ${setting.priv}
         上下文轮数: ${session.context.messages.filter(m => m.role === 'user').length}
+        非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}
         计数器模式(c): ${setting.counter > -1 ? `${setting.counter}条` : '关闭'}
         计时器模式(t): ${setting.timer > -1 ? `${setting.timer}秒` : '关闭'}
         概率模式(p): ${setting.prob > -1 ? `${setting.prob}%` : '关闭'}
