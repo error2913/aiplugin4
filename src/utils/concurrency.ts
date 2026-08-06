@@ -2,19 +2,6 @@
 import Config from "../config/config";
 import { logger } from "../logger";
 
-const LOG_COOLDOWN_MS = 10000;
-
-const lastLogTime: { [key: string]: number } = {};
-
-/** 同一类超限日志在冷却时间内只提示一次，避免刷屏 */
-function logOnce(key: string, level: 'warning' | 'error', message: string): void {
-    const now = Date.now();
-    if (now - (lastLogTime[key] || 0) < LOG_COOLDOWN_MS) return;
-    lastLogTime[key] = now;
-    if (level === 'warning') logger.warning(message);
-    else logger.error(message);
-}
-
 class RequestLimiter {
     private active = 0;
     private queue: Array<() => void> = [];
@@ -31,11 +18,11 @@ class RequestLimiter {
 
         const maxQueue = Config.base.REQUEST_QUEUE;
         if (this.queue.length >= maxQueue) {
-            logOnce('request-queue-full', 'error', `请求队列已满（上限 ${maxQueue}），请求被丢弃`);
+            logger.error(`请求达到并发上限（${maxConcurrent}）且队列已满（上限 ${maxQueue}），请求被丢弃`);
             return false;
         }
 
-        logOnce('request-queued', 'warning', `请求超过并发上限（${maxConcurrent}），已加入队列等待`);
+        logger.warning(`请求达到并发上限（${maxConcurrent}），已加入队列等待（队列 ${this.queue.length + 1}/${maxQueue}）`);
         return new Promise<boolean>(resolve => {
             this.queue.push(() => resolve(true));
         });
