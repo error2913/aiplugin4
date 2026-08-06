@@ -69,7 +69,7 @@ PAGE = """<!DOCTYPE html>
     transition: background .25s ease, color .25s ease;
   }
   .wrap { max-width: 1200px; margin: 0 auto; }
-  header { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 22px; position: relative; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
   .logo {
     width: 44px; height: 44px; border-radius: 12px; flex: none;
     background: linear-gradient(135deg, var(--blue), #a78bfa);
@@ -78,7 +78,7 @@ PAGE = """<!DOCTYPE html>
   }
   h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: .3px; }
   .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
-  .header-right { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; gap: 10px; }
+  .header-right { margin-left: auto; display: flex; gap: 10px; }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
   .stat {
     background: linear-gradient(180deg, color-mix(in srgb, var(--text) 4%, transparent), transparent);
@@ -101,17 +101,17 @@ PAGE = """<!DOCTYPE html>
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
   .card {
     background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
-    display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 3px var(--shadow);
+    display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; box-shadow: 0 1px 3px var(--shadow);
     transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease;
   }
   .card:hover { border-color: color-mix(in srgb, var(--muted) 55%, transparent); transform: translateY(-2px); box-shadow: 0 8px 20px var(--shadow); }
   .card.running { border-color: color-mix(in srgb, var(--green) 40%, transparent); }
-  .row1 { display: flex; align-items: center; gap: 10px; }
+  .row1 { display: flex; align-items: center; justify-content: center; gap: 10px; }
   .name { font-family: Consolas, "Courier New", monospace; font-size: 15px; font-weight: 600; }
   .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 600; letter-spacing: .4px; }
   .badge.py { background: var(--blue-bg); color: var(--blue); }
   .badge.node { background: var(--green-bg); color: var(--green); }
-  .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .dot.on { background: var(--green); animation: pulse 1.8s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -119,6 +119,7 @@ PAGE = """<!DOCTYPE html>
   .status.off { color: var(--muted); }
   .desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; min-height: 36px; }
   .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meta { justify-content: center; }
   .portbox { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
   .port {
     width: 76px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
@@ -129,6 +130,7 @@ PAGE = """<!DOCTYPE html>
   .chip { font-family: Consolas, monospace; font-size: 12px; color: var(--amber); background: var(--amber-bg); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent); padding: 3px 9px; border-radius: 8px; }
   .chip.idle { color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, transparent); border-color: color-mix(in srgb, var(--muted) 22%, transparent); }
   .ops { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ops { justify-content: center; }
   .ops button { padding: 6px 12px; font-size: 12.5px; }
   .modal {
     position: fixed; inset: 0; background: rgba(5,8,12,.55); backdrop-filter: blur(4px);
