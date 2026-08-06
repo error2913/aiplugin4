@@ -272,10 +272,25 @@ export class Session {
         await this.context.addUserMessage(ctx, content, ctx.player.userId, transformMsgId(msg.rawId));
     }
 
-    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[]) {
+    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withNonStreamDelay?: boolean } = {}) {
+        const { withNonStreamDelay = false } = options;
+        const { NON_STREAM_SEGMENT_DELAY_ENABLED, NON_STREAM_SEGMENT_DELAY_MS, NON_STREAM_SEGMENT_IMAGE_EXTRA_DELAY_MS } = Config.reply;
+
         for (let i = 0; i < contextArray.length; i++) {
             const content = contextArray[i];
             const reply = replyArray[i];
+
+            // 非流式分段发送延时：从第二条起，发送前等待配置的毫秒数，防止乱序
+            if (withNonStreamDelay && NON_STREAM_SEGMENT_DELAY_ENABLED && i > 0) {
+                let delayMs = Math.max(0, NON_STREAM_SEGMENT_DELAY_MS);
+                if (/\[CQ:image(?:,[^\]]*)?\]/.test(reply)) {
+                    delayMs += Math.max(0, NON_STREAM_SEGMENT_IMAGE_EXTRA_DELAY_MS);
+                }
+                if (delayMs > 0) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+            }
+
             const msgId = await replyToSender(ctx, msg, this, reply);
             await this.context.addAssistantMessage(content, msgId);
         }
