@@ -8,29 +8,7 @@ import { withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
 import { getSkillNames, registerSkills } from "./skills";
-import registerBuiltinCmds from "./tools/builtin_cmd.ts/init";
-import { registerAttr } from "./tools/builtin_cmd.ts/tool_attr";
-import { registerModu } from "./tools/builtin_cmd.ts/tool_modu";
-import { registerRollCheck } from "./tools/builtin_cmd.ts/tool_roll_check";
-import { registerImage } from "./tools/image.ts/tool_image";
-import { registerMeme } from "./tools/image.ts/tool_meme";
-import { registerRender } from "./tools/image.ts/tool_render";
-import { registerBan } from "./tools/ob11.ts/tool_ban";
-import { registerEssenceMsg } from "./tools/ob11.ts/tool_essence_msg";
-import { registerGroupSign } from "./tools/ob11.ts/tool_group_sign";
-import { registerGetPersonInfo } from "./tools/ob11.ts/tool_person_info";
-import { registerQQList } from "./tools/ob11.ts/tool_qq_list";
-import { registerRename } from "./tools/ob11.ts/tool_rename";
-import { registerDeck } from "./tools/seal.ts/tool_deck";
-import { registerBlockTool } from "./tools/tool_block";
-import { registerContext } from "./tools/tool_context";
-import { registerMemory } from "./tools/tool_memory";
-import { registerMessage } from "./tools/tool_message";
-import { registerMusicPlay } from "./tools/tool_music";
-import { registerTime } from "./tools/tool_time";
-import { registerSetTrigger } from "./tools/tool_trigger";
-import { registerRecord } from "./tools/tool_voice";
-import { registerWeb } from "./tools/tool_web";
+import { registerTools } from "./tools/init";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 
 export const toolMap: { [key: string]: Tool } = {};
@@ -70,29 +48,7 @@ export default class Tool {
     }
 
     static registerTool() {
-        registerBuiltinCmds();
-        registerAttr();
-        registerModu();
-        registerRollCheck();
-        registerImage();
-        registerMeme();
-        registerRender();
-        registerBan();
-        registerEssenceMsg();
-        registerGroupSign();
-        registerQQList();
-        registerGetPersonInfo();
-        registerRename();
-        registerDeck();
-        registerContext();
-        registerMemory();
-        registerMessage();
-        registerMusicPlay();
-        registerTime();
-        registerSetTrigger();
-        registerRecord();
-        registerWeb();
-        registerBlockTool();
+        registerTools();
         registerSkills();
         registerMCPTools().catch(e => Logger.error(`注册MCP工具失败:${e.message}`));
     }
