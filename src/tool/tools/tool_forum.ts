@@ -419,7 +419,7 @@ export function registerForum() {
                 required: ["title", "content"]
             }
         }
-    });
+    }, true);
     toolCreatePost.solve = async (_, __, ___, args) => {
         const { title, content, tags = [], image_ids = [] } = args;
         const { FORUM_URL } = Config.backend;
@@ -521,7 +521,7 @@ export function registerForum() {
                 required: ["action"]
             }
         }
-    });
+    }, true);
     toolManageComment.solve = async (_, __, ___, args) => {
         const { action, post_id, comment_id, content, parent_id } = args;
         const { FORUM_URL } = Config.backend;
@@ -641,7 +641,7 @@ export function registerForum() {
                 required: ["action", "post_id"]
             }
         }
-    });
+    }, true);
     toolManagePost.solve = async (_, __, ___, args) => {
         const { action, post_id, title, content, tags } = args;
         const { FORUM_URL } = Config.backend;
