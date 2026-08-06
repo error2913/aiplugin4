@@ -82,7 +82,7 @@ PAGE = """<!DOCTYPE html>
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
   .stat {
     background: linear-gradient(180deg, color-mix(in srgb, var(--text) 4%, transparent), transparent);
-    border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px;
+    border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; text-align: center;
   }
   .stat b { font-size: 26px; display: block; line-height: 1.1; }
   .stat span { color: var(--muted); font-size: 12px; }
