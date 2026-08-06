@@ -10,5 +10,21 @@
 //   filename: "ob11.js"
 // }
 module.exports = {
-  dependencies: []
+  dependencies: [
+    {
+      name: "ob11 网络连接依赖",
+      url: "https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js",
+      filename: "ob11-net-connection.js"
+    },
+    {
+      name: "AITTS",
+      url: "https://raw.githubusercontent.com/baiyu-yu/plug-in/main/AITTS.js",
+      filename: "AITTS.js"
+    },
+    {
+      name: "AIDrawing",
+      url: "https://raw.githubusercontent.com/baiyu-yu/plug-in/main/AIDrawing.js",
+      filename: "AIDrawing.js"
+    }
+  ]
 };
