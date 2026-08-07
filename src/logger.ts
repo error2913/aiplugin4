@@ -88,5 +88,17 @@ export default class Logger {
         });
         this.info(`请求上下文:\n`, JSON.stringify(summary));
     }
+
+    /** 分段打印长文本，避免日志截断丢失内容 */
+    static logLong(label: string, text: string, chunkSize = 1500) {
+        if (!text) return;
+        if (text.length <= chunkSize) {
+            this.info(label, text);
+            return;
+        }
+        for (let i = 0; i < text.length; i += chunkSize) {
+            this.info(`${label}[${i}]:`, text.slice(i, i + chunkSize));
+        }
+    }
 }
 export const logger = Logger;
