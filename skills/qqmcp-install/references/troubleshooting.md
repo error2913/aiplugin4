@@ -27,6 +27,5 @@
 ## 服务与日志
 
 - `/health` 返回 `{"ok": true, "service": "QQ-MCP-Server", "version": "0.1.0"}`。
-- `messages.log` 为 UTF-8；Windows 控制台用 `Get-Content -Encoding UTF8 -Wait` 查看，
-  否则中文会乱码。
+- `messages.log` 可用 `Get-Content -Wait` 实时查看。
 - 服务进程需保持运行，MCP 客户端连接的是本机 `http://127.0.0.1:8888/mcp`。

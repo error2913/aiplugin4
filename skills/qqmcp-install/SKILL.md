@@ -23,7 +23,7 @@ QQ-MCP-Server 是轻量 Python 服务：对外提供 MCP Streamable HTTP 接口�
 
 官方仓库 `print-yuhuan/QQ-MCP-Server` 可能不可公开访问（404/私有）。先尝试
 `git clone https://github.com/print-yuhuan/QQ-MCP-Server.git`；若失败，使用本机已有的
-接口兼容实现（`qq_mcp_server/` 包 + `pyproject.toml`，包含 10 个读/写工具、消息监听、
+接口兼容实现（`qq_mcp_server/` 包 + `pyproject.toml`，包含 11 个读/写工具、消息监听、
 WebSocket 客户端），并向用户说明这不是官方源码。
 
 ### 2. 安装
