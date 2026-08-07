@@ -13,7 +13,14 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ext, "可调用指令白名单", [''], "每行一个 AI 可调用的海豹指令；格式：扩展名|指令名（指令与插件同名时可只写指令名）。示例：wifeOfTheDay|今日老婆、fun|jrrp、coc7|st。修改后保存并重载 js", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [''], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP）。\n示例：mcp-files-exec|http://127.0.0.1:3910|token\n地址换成你自己的 MCP 服务即可；修改后保存并重载js", "工具");
-        seal.ext.registerTemplateConfig(ext, "技能配置", [''], "每行一个技能：名称|描述|内容。\n示例：骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败\nAI 可通过 use_skill 工具按需调用", "工具");
+        seal.ext.registerTemplateConfig(ext, "技能配置", [
+            "今日人品|查询指定用户的今日人品值|使用 run_command 工具执行：action=call，command=\"fun|jrrp\"，args=[\"用户名或QQ号\"]；fun|jrrp 需在「可调用指令白名单」中",
+            "COC模组抽取|随机抽取一个 COC 模组|使用 run_command 工具执行：action=call，command=\"story|modu\"，args=[\"roll\"]；story|modu 需在「可调用指令白名单」中",
+            "COC模组搜索|按关键词搜索 COC 模组|使用 run_command 工具执行：action=call，command=\"story|modu\"，args=[\"search\",\"关键词\"]；story|modu 需在「可调用指令白名单」中",
+            "属性展示|展示指定玩家的 COC 全部个人属性|使用 run_command 工具执行：action=call，command=\"coc7|st\"，args=[\"show\",\"玩家名称或QQ号\"]；coc7|st 需在「可调用指令白名单」中",
+            "属性检定|对指定玩家进行一次属性/技能检定（ra）|使用 run_command 工具执行：action=call，command=\"coc7|ra\"，args 按顺序：奖励/惩罚骰（可选，如 b、p3）、检定表达式（含难度等级或数值运算时直接用，普通属性名时用该属性，属性为0时补50）、检定原因（可选）；coc7|ra 需在「可调用指令白名单」中",
+            "san检定|对指定玩家进行 san check（sc）|使用 run_command 工具执行：action=call，command=\"coc7|sc\"，args 按顺序：奖励/惩罚骰（可选，如 b、p2）、表达式（成功时掉san/失败时掉san，如 0/1d6、0/1）；coc7|sc 需在「可调用指令白名单」中"
+        ], "每行一个技能：名称|描述|内容；默认包含基于 run_command 统一调用的指令技能（今日人品/COC模组/属性展示/检定等），指令需加入「可调用指令白名单」，可自行增删。示例：骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败\nAI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",
