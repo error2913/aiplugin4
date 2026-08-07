@@ -425,7 +425,7 @@ export const EMBEDDING_MODEL_TO_PROVIDER = Object.entries(EMBEDDING_MODEL_MAP).r
 }, {} as { [model: string]: string });
 
 export const DEFAULT_CHAT_MODEL_BODY = {
-    "max_tokens": 4096,
+    "max_tokens": 8192,
     "stop": null,
     "stream": false
 }
