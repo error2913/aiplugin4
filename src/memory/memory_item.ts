@@ -139,6 +139,7 @@ export default class MemoryItem {
     }
 
     async updateVector() {
+        if (!Config.memory.EMBEDDING_MODEL_ENABLED) return;
         const { DIMENSION } = Config.memory;
         Logger.info(`更新记忆向量: ${this.id}`);
         const model = Model.getEmbeddingModel('text-embedding');

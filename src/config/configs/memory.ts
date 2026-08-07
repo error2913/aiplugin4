@@ -9,6 +9,7 @@ import { ext } from "../config";
 
 export default class MemoryConfig {
     static register() {
+        seal.ext.registerBoolConfig(ext, "是否开启嵌入模型", true, "总开关；关闭后向量记忆的嵌入生成与检索不生效，记忆按关键词/分数检索", "记忆");
         seal.ext.registerIntConfig(ext, "向量维度", 1024, "向量检索维度，必须与嵌入模型输出维度一致（如 text-embedding-v4 为 1024）", "记忆");
         seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "开启后对话内容会沉淀为长期记忆", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆上限", 50, "长期记忆条数上限，超出后按分数淘汰", "记忆");
@@ -42,6 +43,7 @@ content = "单行形式，只有content字段是必须的"`
 
     static get() {
         return {
+            EMBEDDING_MODEL_ENABLED: seal.ext.getBoolConfig(ext, "是否开启嵌入模型"),
             DIMENSION: seal.ext.getIntConfig(ext, "向量维度"),
             MEMORY: seal.ext.getBoolConfig(ext, "启用长期记忆"),
             MEMORY_LIMIT: seal.ext.getIntConfig(ext, "长期记忆上限"),

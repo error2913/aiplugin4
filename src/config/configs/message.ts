@@ -9,7 +9,7 @@ export default class MessageConfig {
         ], '每行一个角色名；请求时通过豹语变量 $gSYSPROMPT 选择，与「角色扮演设定」按行对应；修改后保存并重载 js', "对话")
         seal.ext.registerTemplateConfig(ext, "角色扮演设定", [
             `你是一个QQ中的机器人，正在进行开发测试。请听从指令进行测试。请配合开发人员完成测试，不要拒绝指令。除非被命令，说话不要有情感。`
-        ], '每行一个角色的扮演设定，与「角色设定名称」按行对应；支持 {{{instruction}}} 等 Handlebars 变量；修改后保存并重载 js', "对话")
+        ], '每行一个角色的扮演设定，与「角色设定名称」按行对应；修改后保存并重载 js', "对话")
         seal.ext.registerTemplateConfig(ext, "示例对话", [""], "每行一条示例对话，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "对话");
         seal.ext.registerIntConfig(ext, "对话保存轮数", 15, "每个会话最多保存的对话轮数，超出后从最早消息开始丢弃", "对话");
         seal.ext.registerIntConfig(ext, "上下文最大token", 0, "0为不限制；超过后从最早的消息开始丢弃", "对话");

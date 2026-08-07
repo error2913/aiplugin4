@@ -6,7 +6,7 @@ export default class ReceivedConfig {
     static register() {
         seal.ext.registerBoolConfig(ext, "接收图片", true, "开启后接收并识别图片消息（需要配置图片模型）", "消息接收");
         seal.ext.registerBoolConfig(ext, "接收指令消息", false, "开启后指令消息也会计入上下文（指令仍会执行）", "消息接收");
-        seal.ext.registerBoolConfig(ext, "接收骰子发送的消息", false, "开启后机器人自己发送的消息也会进入上下文", "消息接收");
+        seal.ext.registerBoolConfig(ext, "接收骰子发送的消息", false, "开启后处理机器人自己发送的消息（要记录进上下文需同时开启待机）", "消息接收");
         seal.ext.registerBoolConfig(ext, "忽略私聊消息", false, "开启后私聊消息不触发 AI", "消息接收");
         seal.ext.registerStringConfig(ext, "忽略消息豹语条件", '0', "0 不忽略；1 忽略所有消息；也可填豹语表达式，命中为 1 时忽略", "消息接收");
         seal.ext.registerTemplateConfig(ext, "忽略消息正则表达式", [

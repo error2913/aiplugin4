@@ -23,16 +23,16 @@ export const ext: seal.ExtInfo = (() => {
     return e;
 })();
 const configMap = {
-    base: BaseConfig,
     model: ModelConfig,
-    backend: BackendConfig,
+    message: MessageConfig,
     received: ReceivedConfig,
     trigger: TriggerConfig,
-    image: ImageConfig,
     tool: ToolConfig,
     memory: MemoryConfig,
+    image: ImageConfig,
     reply: ReplyConfig,
-    message: MessageConfig,
+    backend: BackendConfig,
+    base: BaseConfig,
     prompt: PromptConfig,
     resource: ResourceConfig,
 } as const;
