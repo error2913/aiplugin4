@@ -16,6 +16,17 @@ export const toolMap: { [key: string]: Tool } = {};
 export type ToolName = string;
 export type ToolState = { [key: string]: boolean };
 
+// 核心常驻工具：始终注入函数 schema，保证基本对话能力与“发现/执行”入口；
+// 其余工具按需加载：AI 先用 search_tools 查找工具，再用 call_tool 执行，避免全量工具定义浪费 token
+export const CORE_TOOL_NAMES: string[] = [
+    'search_tools', // 按需发现工具（返回完整参数说明）
+    'call_tool',    // 统一执行入口（调用任意已开启工具）
+    'use_skill',    // 技能调用
+    'run_command',  // 海豹指令调用
+    'get_cmd_help', // 指令帮助
+    'get_time'      // 当前时间
+];
+
 export default class Tool {
     toolInfo: ToolInfo;
     ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
@@ -258,6 +269,7 @@ export default class Tool {
         const sessionType = session.sessionType;
         const tools = Object.keys(toolState)
             .map(key => {
+                if (!CORE_TOOL_NAMES.includes(key)) return null; // 非核心工具按需加载，不注入 schema
                 if (toolState[key]) {
                     if (!Object.prototype.hasOwnProperty.call(toolMap, key)) {
                         Logger.warning(`在getToolsInfo中找不到工具:${key}`);
@@ -274,6 +286,25 @@ export default class Tool {
 
         return tools.length > 0 ? tools : null;
     }
+
+    /** 按需加载工具：非核心且当前会话已开启的工具，供 search_tools 发现 */
+    static getOnDemandTools(session: Session): ToolInfo[] {
+        const toolState = session.toolState;
+        const sessionType = session.sessionType;
+        const tools: ToolInfo[] = [];
+        for (const key of Object.keys(toolState)) {
+            if (CORE_TOOL_NAMES.includes(key) || !toolState[key]) continue;
+            if (!Object.prototype.hasOwnProperty.call(toolMap, key)) {
+                Logger.warning(`在getOnDemandTools中找不到工具:${key}`);
+                continue;
+            }
+            const tool: Tool = toolMap[key];
+            if (tool.sessionType !== "any" && tool.sessionType !== sessionType) continue;
+            tools.push(tool.toolInfo);
+        }
+        return tools;
+    }
+
     static getToolsInfoPrompt(session: Session): string {
         const { PROMPT_ENGINEERING } = Config.tool;
         const { TOOLS_PROMPT_TEMPLATE } = Config.prompt;
@@ -291,6 +322,17 @@ export default class Tool {
                 "PROMPT_ENGINEERING": PROMPT_ENGINEERING,
                 "tools": flatTools
             });
+        }
+
+        // 按需工具：只给名称 + 一行描述，详细参数通过 search_tools 获取，控制 token 占用
+        const onDemand = this.getOnDemandTools(session);
+        if (onDemand.length > 0) {
+            const summaries = onDemand.map((t, i) => {
+                const desc = t.function.description.replace(/\s+/g, ' ').trim();
+                const truncated = desc.length > 120 ? desc.slice(0, 120) + '…' : desc;
+                return `${i + 1}. ${t.function.name}：${truncated}`;
+            });
+            s += `\n\n## 其他可用工具（按需加载）\n${summaries.join('\n')}\n需要使用上述工具时，先调用 search_tools 获取参数说明，再通过 call_tool 执行。`;
         }
         return s;
     }
