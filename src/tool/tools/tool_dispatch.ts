@@ -6,6 +6,7 @@ import Logger from "../../logger";
 import { Session } from "../../session/session";
 import { withTimeout } from "../../utils/utils";
 import Tool, { toolMap } from "../tool";
+import { ToolInfo } from "../types";
 
 const MAX_SEARCH_RESULTS = 8; // search_tools 单次返回工具数上限
 
@@ -36,11 +37,14 @@ export function registerDispatchTools() {
         const { query = '', limit = MAX_SEARCH_RESULTS } = args || {};
         const tools = Tool.getOnDemandTools(session);
         const q = String(query || '').trim().toLowerCase();
-        const matched = q
-            ? tools.filter(t =>
-                t.function.name.toLowerCase().includes(q) ||
-                t.function.description.toLowerCase().includes(q))
-            : tools;
+        // 按空格分词，任一关键词命中即匹配（如 “新闻 搜索” 可命中 web_search），并按命中数排序
+        const keywords = q.split(/\s+/).filter(Boolean);
+        const matched = keywords.length === 0
+            ? tools
+            : tools.map(t => ({ tool: t, hits: countKeywordHits(t, keywords) }))
+                .filter(x => x.hits > 0)
+                .sort((a, b) => b.hits - a.hits)
+                .map(x => x.tool);
         const n = Math.max(1, Math.min(20, parseInt(limit, 10) || MAX_SEARCH_RESULTS));
         const list = matched.slice(0, n);
         if (list.length === 0) {
@@ -121,4 +125,10 @@ export function registerDispatchTools() {
             return `工具 ${toolName} 执行失败: ${e instanceof Error ? e.message : String(e)}`;
         }
     };
+}
+
+/** 统计工具被命中的关键词数（匹配名称或描述） */
+function countKeywordHits(tool: ToolInfo, keywords: string[]): number {
+    const haystack = `${tool.function.name} ${tool.function.description}`.toLowerCase();
+    return keywords.reduce((acc, kw) => acc + (haystack.includes(kw) ? 1 : 0), 0);
 }
