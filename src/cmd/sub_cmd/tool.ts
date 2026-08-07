@@ -129,7 +129,7 @@ export function registerCmdTool() {
                     logger.info(`[tool] 指令调用 session=${session.sessionId} tool=${val3}`);
                     const MAX_TOOL_CALL_OUTPUT_LENGTH = 500;
                     if (content.length > MAX_TOOL_CALL_OUTPUT_LENGTH) {
-                        logger.info(`[tool] 返回内容过长(${content.length}字符)，已仅记录日志，未发送:\n${content}`);
+                        logger.logLong(`[tool] 返回内容过长(${content.length}字符)，已仅记录日志，未发送`, content);
                         seal.replyToSender(ctx, msg, `返回内容过长（${content.length} 字符），未发送，已记录到海豹日志（[tool] 指令调用 tool=${val3}）`);
                     } else {
                         seal.replyToSender(ctx, msg, `返回内容:

@@ -7,7 +7,7 @@ import { fixJsonString } from "../utils/string";
 import { withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
-import { getSkillNames, registerSkills } from "./skills";
+import { registerSkills } from "./skills";
 import { registerTools } from "./tools/init";
 import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
 
@@ -281,16 +281,16 @@ export default class Tool {
         const tools = this.getToolsInfo(session);
         let s = '';
         if (tools && tools.length > 0) {
+            // 模板按扁平结构读取（name/description/parameters），从 function 字段映射后传入
+            const flatTools = tools.map(t => ({
+                name: t.function.name,
+                description: t.function.description,
+                parameters: t.function.parameters
+            }));
             s = TOOLS_PROMPT_TEMPLATE({
                 "PROMPT_ENGINEERING": PROMPT_ENGINEERING,
-                "tools": tools
+                "tools": flatTools
             });
-        }
-
-        // 可用技能（Skills）：随工具提示词一起注入，AI 可调用 use_skill 获取内容
-        const skillNames = getSkillNames();
-        if (skillNames.length > 0) {
-            s += `\n\n## 可用技能\n- ${skillNames.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
         }
         return s;
     }

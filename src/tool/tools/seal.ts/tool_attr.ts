@@ -1,45 +1,9 @@
-// 属性工具：coc 属性展示/获取/修改
+// 属性工具（seal API）：获取/修改指定玩家的 COC 属性
 import Config from "../../../config/config";
 import { getCtxAndMsg } from "../../../utils/seal";
 import Tool from "../../tool";
 
-export function registerAttr() {
-    const toolShow = new Tool({
-        type: 'function',
-        function: {
-            name: 'attr_show',
-            description: '展示指定玩家的全部个人属性',
-            parameters: {
-                type: 'object',
-                properties: {
-                    name: {
-                        type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
-                    }
-                },
-                required: ['name']
-            }
-        }
-    });
-    toolShow.ExtCmdInfo = {
-        extName: 'coc7',
-        cmd: 'st',
-        staticArgs: ['show']
-    }
-    toolShow.solve = async (ctx, msg, session, args) => {
-        const { name } = args;
-
-        const ui = await session.context.findUser(ctx, name);
-        if (ui === null) return `未找到<${name}>`;
-
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
-
-        const [s, success] = await Tool.extensionSolve(ctx, msg, session.tool.listen, toolShow.ExtCmdInfo, [], [], []);
-        if (!success) return '展示失败';
-
-        return s;
-    }
-
+export function registerAttrSeal() {
     const toolGet = new Tool({
         type: 'function',
         function: {
