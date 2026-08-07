@@ -15,14 +15,8 @@
 
 Codex 中调用名形如 `mcp__QQ-MCP-Server__qq_send_group_message`。服务端实现见 `C:/Users/26335/Desktop/qq-mcp-server/qq_mcp_server/tools.py`。
 
+发送/读取消息统一使用 `scripts/qqmcp.ps1`：参数经环境变量 `QQMCP_ARGS_JSON` 传入（避免命令行引号丢失），可直接传中文消息。
 
-## 中文消息编码（重要，PowerShell 5.1）
-
-- 发送含中文的指令时，**必须用 UTF-8 字节数组作为请求体**：`Invoke-WebRequest -Body ([System.Text.Encoding]::UTF8.GetBytes($json))`，且 `Content-Type` 带 `charset=utf-8`。
-- 原因：PowerShell 5.1 的 `ConvertTo-Json` 输出真实中文（不转义 `\uXXXX`），`Invoke-WebRequest -Body` 传字符串时按系统 ANSI 编码发送，中文会变成 `?`（群里表现为 `.ai role ??`）。
-- 检查：发送后若机器人回复"角色设定名称错误/名称不存在"等，先拉群消息确认原文是否 `?`；`messages.log`/`run.err.log` 里 `message='????'` 也是同一现象。
-- 命令行传参也一样：外层 PowerShell 把中文参数传给子 `powershell -File` 会被破坏，**改用环境变量传消息列表**（UTF-16 继承无损），脚本内再转 JSON。
-- qqmcp 服务端到 NapCat 的链路无编码问题（`json.dumps` 默认 `ensure_ascii=True` 输出 `\uXXXX`，NapCat 正常还原）。
 ## 消息格式
 
 - 纯文本指令：`{"group_id": <群号>, "message": ".ai status"}`

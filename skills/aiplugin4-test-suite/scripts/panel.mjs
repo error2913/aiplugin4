@@ -25,7 +25,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { puppeteer } from "file:///C:/Users/26335/Desktop/chrome-devtools-mcp/node_modules/chrome-devtools-mcp/build/src/third_party/index.js";
+import { puppeteer } from "file:///C:/Users/26335/chrome-devtools-mcp/node_modules/chrome-devtools-mcp/build/src/third_party/index.js";
 
 // 优先从技能目录的 .env 读取凭据（该文件已 gitignore，不会提交）；缺失时回退到环境变量
 {

@@ -56,7 +56,6 @@
 ## 故障排查
 
 - 导航超时：SPA 长轮询导致 `networkidle` 永不满足，改用 `domcontentloaded`。
-- 中文乱码：数据本身是 UTF-8，Windows 控制台/工具输出需按 UTF-8 解码。
 - 面板锁着：所有业务接口 403；先解锁再抓接口。
 - 浏览器实例冲突：每次用独立临时 user-data-dir（`puppeteer.launch` 默认）即可，勿复用运行中 Edge 的用户目录。
 
