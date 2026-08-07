@@ -46,8 +46,9 @@ function resolveEntry(entry: string): ResolvedCmd | null {
     return null;
 }
 
-/** 指令是否允许调用：必须在白名单内 */
+/** 指令是否允许调用：开启「允许所有指令」时放行，否则必须在白名单内 */
 function isAllowed(command: string): boolean {
+    if (Config.tool.ALLOW_ALL_CMDS) return true;
     return Config.tool.CMD_WHITELIST.some(entry => {
         const rc = resolveEntry(entry);
         return rc !== null && (rc.cmd === command || `${rc.extName}|${rc.cmd}` === command);
@@ -92,7 +93,7 @@ export function registerCmdTool() {
         type: 'function',
         function: {
             name: 'run_command',
-            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出指令及其帮助，默认只列白名单内指令，all=true 时额外列出核心内置扩展与插件自身的指令（第三方插件指令无法枚举，需加入白名单才能列出）；action=call：调用 command 指定的指令并返回执行结果，仅能调用白名单内的指令。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
+            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出指令及其帮助，默认只列白名单内指令，all=true 时额外列出核心内置扩展与插件自身的指令（第三方插件指令无法枚举，需加入白名单才能列出）；action=call：调用 command 指定的指令并返回执行结果，默认仅能调用白名单内的指令（开启「是否允许调用所有指令」后可调用任意指令）。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
             parameters: {
                 type: 'object',
                 properties: {

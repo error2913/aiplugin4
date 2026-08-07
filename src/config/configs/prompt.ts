@@ -152,16 +152,8 @@ export default class PromptConfig {
     {{else}}
 暂无可用函数。
     {{/each}}
-{{else}}
-
-## 可用函数列表
-    {{#each tools}}
-{{index @index}}. {{{name}}}：{{{description}}}
-    {{else}}
-暂无可用函数。
-    {{/each}}
 {{/if}}`
-        ], "工具调用说明与函数列表模板：提示词工程模式含调用说明与完整参数，函数调用模式显示精简函数列表；可用变量 PROMPT_ENGINEERING、tools（含 name/description/parameters/required）", "prompt模板");
+        ], "提示词工程模式下工具调用说明模板；可用变量 PROMPT_ENGINEERING、tools（含 name/description/parameters/required）", "prompt模板");
         registerTemplate("图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "图片转文字的提示词模板；一般无需修改", "prompt模板");
         registerTemplate("记忆总结prompt模板", [ // wip
             `你现在扮演的角色如下:

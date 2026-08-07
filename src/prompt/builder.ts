@@ -24,7 +24,7 @@ export async function buildSystemPromptContent(
     roleSetting: string
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
-    const { STATUS } = Config.tool;
+    const { STATUS, PROMPT_ENGINEERING } = Config.tool;
 
     // 本地可发送资源（图片/语音）来自“资源”配置
     const localImages = (Config.resource.LOCAL_IMAGES || []).map(img => ({ imageId: img.imageId }));
@@ -50,7 +50,7 @@ export async function buildSystemPromptContent(
     const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, roleIndex, text);
 
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
-    const toolPrompt = STATUS ? Tool.getToolsInfoPrompt(session) : '';
+    const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
 
     let content = Config.prompt.SYSTEM_MESSAGE_TEMPLATE({
         instruction: roleSetting,
