@@ -10,6 +10,8 @@ export default class ToolConfig {
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后保存并重载js", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg", "工具");
+        seal.ext.registerTemplateConfig(ext, "可调用指令白名单", [''], "每行一个 AI 可调用的海豹指令；格式：指令名（与插件同名时可只写指令名）或 扩展名|指令名。示例：今日老婆、fun|jrrp、coc7|st。修改后保存并重载 js", "工具");
+        seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的指令；默认关闭，建议保持关闭以限制权限", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [''], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP）。\n示例：mcp-files-exec|http://127.0.0.1:3910|token\n地址换成你自己的 MCP 服务即可；修改后保存并重载js", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [''], "每行一个技能：名称|描述|内容。\n示例：骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败\nAI 可通过 use_skill 工具按需调用", "工具");
@@ -49,6 +51,8 @@ export default class ToolConfig {
             TOOL_RESPONSE_COMPRESS_MIN_LENGTH: seal.ext.getIntConfig(ext, "工具响应压缩触发字数"),
             BLOCKED: seal.ext.getTemplateConfig(ext, "禁止调用的函数"),
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ext, "默认关闭的函数"),
+            CMD_WHITELIST: seal.ext.getTemplateConfig(ext, "可调用指令白名单"),
+            ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
             DECKS: seal.ext.getTemplateConfig(ext, "提供给AI的牌堆名称"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色")
         }

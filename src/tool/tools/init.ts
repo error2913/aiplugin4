@@ -5,6 +5,7 @@ import { registerImageTools } from "./image.ts/init";
 import { registerOb11Tools } from "./ob11.ts/init";
 import { registerSealTools } from "./seal.ts/init";
 import { registerBlockTool } from "./tool_block";
+import { registerCmdTool } from "./tool_cmd";
 import { registerContext } from "./tool_context";
 import { registerForum } from "./tool_forum";
 import { registerMemory } from "./tool_memory";
@@ -30,5 +31,6 @@ export function registerTools() {
     registerRecord();
     registerWeb();
     registerBlockTool();
+    registerCmdTool();
     registerForum();
 }
