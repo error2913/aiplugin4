@@ -68,6 +68,11 @@ export default class Model {
             const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
             return ImageModelAnyList[randomIndex];
         }
+        // 用途匹配失败时回退到 chat 用途的模型（与文档约定一致），避免压缩/总结等静默失败
+        const chatFallbackList = Model.chatModels.filter(model => model.use.includes('chat'));
+        if (chatFallbackList.length > 0) {
+            return chatFallbackList[0];
+        }
         return null;
     }
 
