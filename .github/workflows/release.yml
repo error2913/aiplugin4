@@ -101,18 +101,30 @@ jobs:
       - name: Publish to SealRepo
         env:
           SEALPACK_TOKEN: ${{ secrets.SEALPACK_TOKEN }}
-        run: >-
-          npx sealpack publish sealpack
-          --create
-          --server "${SEALPACK_SERVER}"
+        shell: bash
+        run: |
+          output="$(npx sealpack publish sealpack --create --server "${SEALPACK_SERVER}" 2>&1)" || {
+            if echo "${output}" | grep -q "already exists"; then
+              echo "本体包该版本已发布，跳过"
+            else
+              echo "${output}"
+              exit 1
+            fi
+          }
 
       - name: Publish full bundle to SealRepo
         env:
           SEALPACK_TOKEN: ${{ secrets.SEALPACK_TOKEN }}
-        run: >-
-          npx sealpack publish sealpack-full
-          --create
-          --server "${SEALPACK_SERVER}"
+        shell: bash
+        run: |
+          output="$(npx sealpack publish sealpack-full --create --server "${SEALPACK_SERVER}" 2>&1)" || {
+            if echo "${output}" | grep -q "already exists"; then
+              echo "完整包该版本已发布，跳过"
+            else
+              echo "${output}"
+              exit 1
+            fi
+          }
 
   github-release:
     if: startsWith(github.ref, 'refs/tags/')
