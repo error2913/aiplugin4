@@ -16,8 +16,8 @@ const fullDir = path.join(root, 'sealpack-full');
 const depsFile = path.join(__dirname, 'deps.cjs');
 
 const FULL_PACKAGE_ID = 'error2913/aiplugin4-full';
-const FULL_PACKAGE_NAME = 'aiplugin4-full';
-const FULL_PACKAGE_DESC = 'aiplugin4 完整包：包含本体与依赖插件，安装即用';
+const FULL_PACKAGE_NAME = 'AI骰娘4-扩展';
+const FULL_PACKAGE_DESC = 'AI骰娘4 扩展包（完整包）：包含本体与依赖插件，安装即用';
 
 function getVersion() {
   const src = fs.readFileSync(path.join(root, 'src', 'config', 'static_config.ts'), 'utf8');
