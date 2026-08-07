@@ -20,24 +20,20 @@ export default class ModelConfig {
             `# 使用toml格式
 name = "deepseek-v4-flash"
 api_key = "sk-xxxx"
-use = ["chat"]
-
-[body]
-temperature = 1
-top_p = 1`
-        ], '每行一个模型（TOML），name/api_key/use 必填；use 可选项：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）；provider/base_url 可省略（自动识别 deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）；默认对话模型取列表第一项；可选 [body] 覆盖请求参数（如 temperature、max_tokens）', "模型");
+use = ["chat"]`
+        ], '每行一个模型（TOML 格式）。必填：name（模型名）、api_key（API 密钥）、use（用途，可多个）。可选：provider（服务商，省略时按模型名自动识别：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）。默认对话模型取列表第一项；body 不配置时使用默认值：max_tokens=8192、stop=null、stream=false。完整示例：\n# 使用toml格式\nname = "deepseek-v4-flash"          # 必填，模型名\napi_key = "sk-xxxx"                 # 必填，API 密钥\nuse = ["chat", "compression"]       # 必填，用途，可多个：chat/compression/summarization\nprovider = "deepseek"               # 可选，服务商，省略时自动识别\nbase_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取服务商默认\n\n[body]                              # 可选，请求参数覆盖；默认 max_tokens=8192、stop=null、stream=false\ntemperature = 1                     # 可选\nmax_tokens = 8192                   # 可选', "模型");
         seal.ext.registerTemplateConfig(ext, "图片模型", [
             `# 使用toml格式
 name = "glm-4v"
 api_key = "sk-xxxx"
 use = ["image-understanding"]`
-        ], '每行一个图片模型（TOML），name/api_key/use 必填；use 可选项：image-understanding（图片理解）；provider/base_url 可省略（自动识别 zhipu/alibaba/openai/google/siliconflow）', "模型");
+        ], '每行一个图片模型（TOML 格式）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：zhipu/alibaba/openai/google/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：image-understanding（图片理解/图片转文字）。body 不配置时使用默认值：max_tokens=4096、stop=null、stream=false。完整示例：\n# 使用toml格式\nname = "glm-4v"                     # 必填，模型名\napi_key = "sk-xxxx"                 # 必填，API 密钥\nuse = ["image-understanding"]       # 必填，用途：image-understanding\nprovider = "zhipu"                  # 可选，服务商，省略时自动识别\nbase_url = "https://open.bigmodel.cn/api/paas/v4"  # 可选，API 地址，省略时取服务商默认\n\n[body]                              # 可选，请求参数覆盖；默认 max_tokens=4096、stop=null、stream=false\ntemperature = 1                     # 可选\nmax_tokens = 4096                   # 可选', "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
             `# 使用toml格式
 name = "text-embedding-v4"
 api_key = "sk-xxxx"
 use = ["text-embedding"]`
-        ], '每行一个嵌入模型（TOML），name/api_key/use 必填；use 可选项：text-embedding（文本嵌入）；provider/base_url 可省略（自动识别 alibaba/openai/zhipu/siliconflow）；输出维度需与“向量维度”配置一致', "模型");
+        ], '每行一个嵌入模型（TOML 格式）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：alibaba/openai/zhipu/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：text-embedding（文本嵌入）。body 不配置时使用默认值：encoding_format=float。输出向量维度需与「向量维度」配置一致。完整示例：\n# 使用toml格式\nname = "text-embedding-v4"          # 必填，模型名\napi_key = "sk-xxxx"                 # 必填，API 密钥\nuse = ["text-embedding"]            # 必填，用途：text-embedding\nprovider = "alibaba"                # 可选，服务商，省略时自动识别\nbase_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 可选，API 地址，省略时取服务商默认\n\n[body]                              # 可选，请求参数覆盖；默认 encoding_format=float\ndimensions = 1024                   # 可选，输出维度，需与「向量维度」配置一致', "模型");
     }
 
     static get() {
