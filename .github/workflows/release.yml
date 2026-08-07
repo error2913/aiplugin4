@@ -103,6 +103,7 @@ jobs:
           SEALPACK_TOKEN: ${{ secrets.SEALPACK_TOKEN }}
         run: >-
           npx sealpack publish sealpack
+          --create
           --server "${SEALPACK_SERVER}"
 
       - name: Publish full bundle to SealRepo
@@ -110,6 +111,7 @@ jobs:
           SEALPACK_TOKEN: ${{ secrets.SEALPACK_TOKEN }}
         run: >-
           npx sealpack publish sealpack-full
+          --create
           --server "${SEALPACK_SERVER}"
 
   github-release:
