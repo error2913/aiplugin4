@@ -95,7 +95,7 @@ export function registerCmdTool() {
         type: 'function',
         function: {
             name: 'run_command',
-            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出可调用指令及其帮助（默认只列白名单内指令；开启「是否允许调用所有指令」后列出全部可解析指令）；action=call：调用 command 指定的指令并返回执行结果。指令需在白名单内（或已开启允许所有指令）。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
+            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出可调用指令及其帮助（默认只列白名单内指令；开启「是否允许调用所有指令」后额外列出核心内置扩展与插件自身的指令，第三方插件指令无法枚举，需加入白名单才能列出）；action=call：调用 command 指定的指令并返回执行结果。指令需在白名单内（或已开启允许所有指令）。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
             parameters: {
                 type: 'object',
                 properties: {
