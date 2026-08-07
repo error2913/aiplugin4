@@ -11,8 +11,8 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后保存并重载js", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
-        seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [''], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP），示例：mcp-files-exec|http://127.0.0.1:3910|token，地址换成你自己的 MCP 服务即可；修改后保存并重载js", "工具");
-        seal.ext.registerTemplateConfig(ext, "技能配置", [''], "每行一个技能：名称|描述|内容，示例：骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败；AI 可通过 use_skill 工具按需调用", "工具");
+        seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [''], "每行一个 MCP 服务器：名称|地址|Token（Streamable HTTP）。\n示例：mcp-files-exec|http://127.0.0.1:3910|token\n地址换成你自己的 MCP 服务即可；修改后保存并重载js", "工具");
+        seal.ext.registerTemplateConfig(ext, "技能配置", [''], "每行一个技能：名称|描述|内容。\n示例：骰点|TRPG百分比检定|使用 1d100 进行检定，出目小于等于技能值即成功，1为大成功，100为大失败\nAI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",
@@ -37,7 +37,7 @@ export default class ToolConfig {
             "温柔妹妹",
             "书香少女",
             "自定义"
-        ], "该功能在选择预设音色时，需要安装http依赖插件，且需要可以调用ai语音api版本的napcat/lagrange等。选择自定义音色时，则需要aitts依赖插件和ffmpeg", "工具");
+        ], "该功能在选择预设音色时，需要安装 http 依赖插件，且需要可调用 AI 语音 API 的 napcat/lagrange 等。\n选择自定义音色时，则需要 aitts 依赖插件和 ffmpeg", "工具");
     }
 
     static get() {

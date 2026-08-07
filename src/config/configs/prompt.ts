@@ -70,7 +70,7 @@ export default class PromptConfig {
 {{{knowledgePrompt}}}
 
 {{{toolPrompt}}}`
-        ], "Handlebars 模板，生成 system 提示词；可用变量：instruction、platform、sessionType、sessionName、sessionId、RECEIVE_IMAGE、LOCAL_IMAGES、LOCAL_AUDIOS、memoryPrompt、summaryPrompt、knowledgePrompt、toolPrompt；修改后保存并重载 js", "prompt模板");
+        ], "Handlebars 模板，生成 system 提示词。\n可用变量：instruction、platform、sessionType、sessionName、sessionId、RECEIVE_IMAGE、LOCAL_IMAGES、LOCAL_AUDIOS、memoryPrompt、summaryPrompt、knowledgePrompt、toolPrompt。\n修改后保存并重载 js", "prompt模板");
         registerTemplate("长期记忆prompt模板", [
             `{{#if MEMORY}}
 

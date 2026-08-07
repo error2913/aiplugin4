@@ -2,7 +2,7 @@
 import { ext } from "../config";
 export default class BackendConfig {
     static register() {
-        seal.ext.registerStringConfig(ext, "流式输出", "http://localhost:3010", '流式输出后端地址（aiplugin4-backends 的 stream-output）；模型 body.stream=true 且非 anthropic 提供商时走流式，经该地址对接后端', "后端");
+        seal.ext.registerStringConfig(ext, "流式输出", "http://localhost:3010", '流式输出后端地址（aiplugin4-backends 的 stream-output）。\n模型 body.stream=true 且非 anthropic 提供商时走流式，经该地址对接后端', "后端");
         seal.ext.registerStringConfig(ext, "图片转base64", "http://127.0.0.1:46678", '图片转 base64 后端地址（aiplugin4-backends 的 image-url-to-base64），用于把图片 URL 转成 base64 供模型读取', "后端");
         seal.ext.registerStringConfig(ext, "联网搜索", "https://searxng.fishwhite.top", '联网搜索后端地址（SearXNG 兼容实例），供 web_search 工具使用', "后端");
         seal.ext.registerStringConfig(ext, "网页读取", "http://127.0.0.1:46799", '网页读取后端地址（aiplugin4-backends 的 web-read），供读取网页内容工具使用', "后端");
