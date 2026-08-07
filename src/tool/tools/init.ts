@@ -6,6 +6,7 @@ import { registerSealTools } from "./seal.ts/init";
 import { registerBlockTool } from "./tool_block";
 import { registerCmdTool } from "./tool_cmd";
 import { registerContext } from "./tool_context";
+import { registerDispatchTools } from "./tool_dispatch";
 import { registerForum } from "./tool_forum";
 import { registerMemory } from "./tool_memory";
 import { registerMessage } from "./tool_message";
@@ -31,4 +32,5 @@ export function registerTools() {
     registerBlockTool();
     registerCmdTool();
     registerForum();
+    registerDispatchTools();
 }
