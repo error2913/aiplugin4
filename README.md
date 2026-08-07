@@ -9,7 +9,7 @@
 
 ### 1. 下载插件
 
-- 通过 GitHub 下载最新稳定版：[下载链接](https://github.com/error2913/aiplugin4/releases/download)；
+- 通过 GitHub 下载最新稳定版：[下载链接](https://github.com/error2913/aiplugin4/releases/latest)；
 - 在 QQ 交流群（143412516）中获取；
 - 想体验最新开发版，可以自行编译，见[下载](#下载)。
 
@@ -126,7 +126,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 下载
 
-- 通过 GitHub 下载最新稳定版：[下载链接](https://github.com/error2913/aiplugin4/releases/download)
+- 通过 GitHub 下载最新稳定版：[下载链接](https://github.com/error2913/aiplugin4/releases/latest)
 
 - 通过 GitHub 下载后自编译最新开发版：
 
