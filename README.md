@@ -10,7 +10,7 @@
 ### 1. 下载插件
 
 - 通过 GitHub 下载最新稳定版：[下载链接](https://github.com/error2913/aiplugin4/releases/download)；
-- 在 QQ 交流群（940049120）中获取；
+- 在 QQ 交流群（143412516）中获取；
 - 想体验最新开发版，可以自行编译，见[下载](#下载)。
 
 ### 2. 安装插件
@@ -683,6 +683,6 @@ Permission is hereby granted...
 ## 📞 技术支持
 
 - GitHub Issues: [问题提交](https://github.com/error2913/aiplugin4/issues)
-- QQ交流群: 940049120
+- QQ交流群: 143412516
 
 > "才、才不是专门给你写的文档呢！只是...只是顺便而已！(///ω///)" —— 正确·改
