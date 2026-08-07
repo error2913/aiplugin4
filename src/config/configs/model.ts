@@ -47,11 +47,8 @@ name = "text-embedding-v4"          # 必填，模型名
 api_key = "sk-xxxx"                 # 必填，API 密钥
 use = ["text-embedding"]            # 必填，用途：text-embedding
 provider = "alibaba"                # 可选，服务商，省略时自动识别
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 可选，API 地址，省略时取服务商默认
-
-[body]                              # 可选，请求参数覆盖；默认 encoding_format=float
-dimensions = 1024                   # 可选，输出维度，需与「向量维度」配置一致`
-        ], '每行一个嵌入模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：alibaba/openai/zhipu/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：text-embedding（文本嵌入）。body 未配置时使用 encoding_format=float；输出向量维度需与「向量维度」配置一致。下方默认值即完整示例，可直接修改。', "模型");
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 可选，API 地址，省略时取服务商默认`
+        ], '每行一个嵌入模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：alibaba/openai/zhipu/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：text-embedding（文本嵌入）。body 未配置时使用 encoding_format=float；输出向量维度自动处理，无需手动配置。下方默认值即完整示例，可直接修改。', "模型");
     }
 
     static get() {
