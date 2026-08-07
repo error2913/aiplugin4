@@ -1,4 +1,4 @@
-// 指令调用工具：读取海豹扩展 cmdMap 列出可用指令（含帮助），并调用指令获取返回
+// 指令调用工具：读取海豹扩展 cmdMap 列出可用指令、查看指令帮助，并调用指令获取返回
 import Config from "../../config/config";
 import { NAME } from "../../config/static_config";
 import Logger from "../../logger";
@@ -93,14 +93,14 @@ export function registerCmdTool() {
         type: 'function',
         function: {
             name: 'run_command',
-            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出指令及其帮助，默认只列白名单内指令，all=true 时额外列出核心内置扩展与插件自身的指令（第三方插件指令无法枚举，需加入白名单才能列出）；action=call：调用 command 指定的指令并返回执行结果，默认仅能调用白名单内的指令（开启「是否允许调用所有指令」后可调用任意指令）。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
+            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出可用指令名（不含帮助），默认只列白名单内指令，all=true 时额外列出核心内置扩展与插件自身的指令（第三方插件指令无法枚举，需加入白名单才能列出）；action=call：调用 command 指定的指令并返回执行结果，默认仅能调用白名单内的指令（开启「是否允许调用所有指令」后可调用任意指令）。查看指令帮助请用 get_cmd_help 工具。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
             parameters: {
                 type: 'object',
                 properties: {
                     action: {
                         type: 'string',
                         enum: ['list', 'call'],
-                        description: 'list=列出指令及帮助；call=调用指令'
+                        description: 'list=列出指令名（帮助请用 get_cmd_help）；call=调用指令'
                     },
                     command: {
                         type: 'string',
@@ -130,7 +130,7 @@ export function registerCmdTool() {
                     ? '当前没有可列举的指令'
                     : '可调用指令白名单为空：请先在「工具」配置的「可调用指令白名单」中添加指令';
             }
-            return list.map((rc, i) => `${i + 1}. ${rc.cmd}（扩展：${rc.extName}）${rc.help ? '\n' + rc.help : ''}`).join('\n\n');
+            return `可调用指令（共 ${list.length} 个）：\n${list.map((rc, i) => `${i + 1}. ${rc.extName}|${rc.cmd}`).join('\n')}\n查看帮助：调用 get_cmd_help（command=指令名，如 fun|jrrp）`;
         }
         if (action === 'call') {
             const cmdStr = (command || '').trim();
@@ -155,5 +155,35 @@ export function registerCmdTool() {
         }
         return 'action 仅支持 list 或 call';
     };
+
+    // 指令帮助查看工具：只读取 cmdMap 中的帮助文本，不执行任何指令
+    const toolHelp = new Tool({
+        type: 'function',
+        function: {
+            name: 'get_cmd_help',
+            description: '查看海豹指令的帮助文本（只读，不执行指令）；先用 run_command 的 action=list 查看可用指令名，再用本工具获取某个指令的详细帮助',
+            parameters: {
+                type: 'object',
+                properties: {
+                    command: {
+                        type: 'string',
+                        description: '指令名（如 今日老婆、jrrp），也支持 扩展名|指令名 格式'
+                    }
+                },
+                required: ['command']
+            }
+        }
+    });
+    toolHelp.solve = async (_, __, ___, args) => {
+        const { command = '' } = args || {};
+        const rc = resolveEntry(command);
+        if (!rc) {
+            return `无法解析指令 ${command}：请确认插件已安装，或使用 扩展名|指令名 格式（如 fun|jrrp）`;
+        }
+        return rc.help
+            ? `指令 ${rc.cmd}（扩展：${rc.extName}）帮助：\n${rc.help}`
+            : `指令 ${rc.cmd}（扩展：${rc.extName}）暂无帮助文本`;
+    };
+
     return tool;
 }
