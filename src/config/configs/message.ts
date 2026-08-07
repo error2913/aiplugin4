@@ -15,7 +15,7 @@ export default class MessageConfig {
         seal.ext.registerIntConfig(ext, "上下文最大token", 0, "0为不限制；超过后从最早的消息开始丢弃", "对话");
         seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，示例对话不计入轮数", "对话");
         seal.ext.registerBoolConfig(ext, "展示号码", true, "在工具描述/上下文显示中使用QQ号", "对话");
-        seal.ext.registerIntConfig(ext, "消息压缩阈值", 800, "用户消息超过该字符数时，使用压缩智能体压缩后存入上下文", "对话");
+        seal.ext.registerIntConfig(ext, "消息压缩阈值", 2000, "用户消息（含连续多条合并后）超过该字符数时，使用压缩智能体压缩后存入上下文", "对话");
     }
 
     static get() {

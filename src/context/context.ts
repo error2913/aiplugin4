@@ -81,7 +81,20 @@ export class Context {
         }).filter(m => m !== null);
     }
 
-    // 添加后检查压缩条件，并对过长user进行压缩 wip
+    /** 文本超过压缩阈值时交给压缩智能体，返回压缩结果；未超阈值或失败时返回原文 */
+    private async compressIfLong(text: string): Promise<string> {
+        const { COMPRESS_THRESHOLD } = Config.message;
+        if (text.length <= COMPRESS_THRESHOLD) return text;
+        try {
+            const compressed = await Agent.get('compress_agent').chat(text);
+            return compressed || text;
+        } catch (e) {
+            Logger.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
+            return text;
+        }
+    }
+
+    // 用户消息入库：单条超长或连续多条合并后超阈值时，交给压缩智能体压缩后存入上下文
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
         // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
         if (this.autoNameMod > 0) {
@@ -91,16 +104,7 @@ export class Context {
                 Logger.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
-        // 过长的用户消息交给压缩智能体压缩后再存入上下文，节省 token
-        const { COMPRESS_THRESHOLD } = Config.message;
-        if (text.length > COMPRESS_THRESHOLD) {
-            try {
-                const compressed = await Agent.get('compress_agent').chat(text);
-                if (compressed) text = compressed;
-            } catch (e) {
-                Logger.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
-            }
-        }
+        text = await this.compressIfLong(text);
         const umi: UserMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
@@ -108,11 +112,21 @@ export class Context {
             messageId
         };
         const lastMessage = this.messages[this.messages.length - 1];
-        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) (lastMessage as UserMessage).contentItems.push(umi);
-        else this.messages.push({
-            role: 'user',
-            contentItems: [umi]
-        });
+        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) {
+            const userMsg = lastMessage as UserMessage;
+            userMsg.contentItems.push(umi);
+            // 连续多条 user 消息合并后总长超阈值 → 合并压缩，替换为该条压缩结果
+            const merged = userMsg.contentItems.map(item => item.text).join('\\f');
+            const compressed = await this.compressIfLong(merged);
+            if (compressed !== merged) {
+                userMsg.contentItems = [{ text: compressed, time: umi.time, userId: umi.userId, messageId: umi.messageId }];
+            }
+        } else {
+            this.messages.push({
+                role: 'user',
+                contentItems: [umi]
+            });
+        }
         // 关联记忆权重更新：bot 记忆 + 知识库 + 会话记忆 + 群内用户记忆
         try {
             await MemoryService.accessRelatedMemories(this.session, text);
