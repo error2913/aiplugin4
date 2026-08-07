@@ -305,6 +305,12 @@ export default class Tool {
         return tools;
     }
 
+    /** 全部可用工具：核心常驻 + 按需加载（均已开启且匹配会话类型），供 search_tools 列名/查详情 */
+    static getAvailableTools(session: Session): ToolInfo[] {
+        const core = this.getToolsInfo(session) || [];
+        return core.concat(this.getOnDemandTools(session));
+    }
+
     static getToolsInfoPrompt(session: Session): string {
         const { PROMPT_ENGINEERING } = Config.tool;
         const { TOOLS_PROMPT_TEMPLATE } = Config.prompt;
