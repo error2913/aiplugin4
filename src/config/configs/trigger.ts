@@ -4,18 +4,18 @@ import { getRegexConfig } from "../config";
 
 export default class TriggerConfig {
     static register() {
-        seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下的默认触发条数", "消息触发");
-        seal.ext.registerFloatConfig(ext, "默认计时器", 60, "单位：秒", "消息触发");
-        seal.ext.registerFloatConfig(ext, "默认概率", 10, "单位：%", "消息触发");
-        seal.ext.registerStringConfig(ext, "默认触发活跃时间", "10:00-20:00-5", "格式：HH:mm-HH:mm-次数", "消息触发");
-        seal.ext.registerFloatConfig(ext, "默认向量相似度", 0.8, "记忆检索的相似度下限，0-1 之间的浮点数", "消息触发");
+        seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "消息触发");
+        seal.ext.registerFloatConfig(ext, "默认计时器", 60, "计时器模式下间隔多少秒触发回复", "消息触发");
+        seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "消息触发");
+        seal.ext.registerStringConfig(ext, "默认触发活跃时间", "10:00-20:00-5", "格式：HH:mm-HH:mm-次数，示例 10:00-20:00-5 表示 10:00-20:00 之间最多触发 5 次", "消息触发");
+        seal.ext.registerFloatConfig(ext, "默认向量相似度", 0.8, "向量记忆检索的相似度下限，0-1 浮点数；低于该值的记忆不返回", "消息触发");
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [
             "\\[CQ:at,qq=3893625976\\]",
             "^正确.*[。？！?!]$"
-        ], "", "消息触发");
-        seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "使用豹语表达式，例如：$t群号_RAW=='2001'", "消息触发");
-        seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量", "消息触发");
-        seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "单位：秒", "消息触发");
+        ], "每行一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后保存并重载 js", "消息触发");
+        seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "消息触发");
+        seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "消息触发");
+        seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "消息触发");
     }
 
     static get() {

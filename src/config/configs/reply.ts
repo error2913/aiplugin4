@@ -8,7 +8,7 @@ import { getRegexConfig } from "../config";
 export default class ReplyConfig {
     static register() {
         seal.ext.registerBoolConfig(ext, "回复引用", false, "开启将会引用触发该条回复的消息", "回复");
-        seal.ext.registerIntConfig(ext, "回复最大字数", 5000, "防止最大tokens限制不起效", "回复");
+        seal.ext.registerIntConfig(ext, "回复最大字数", 5000, "回复的最大字数，防止 max_tokens 限制不起效", "回复");
         seal.ext.registerBoolConfig(ext, "回复文本去除首尾空白字符", true, "发送前去除回复首尾空白", "回复");
         seal.ext.registerBoolConfig(ext, "分段发送延时", true, "流式/非流式输出共用，消息间隔是否开启延时防止乱序", "回复");
         seal.ext.registerIntConfig(ext, "分段发送基础延时/ms", 350, "流式/非流式输出共用，从第二条消息开始每条发送前等待的毫秒数", "回复");
@@ -23,7 +23,7 @@ export default class ReplyConfig {
             "~~(.*?)~~",
             "(?:^|\\n)\\s{0,12}[-*]\\s+(.*)",
             "(?:^|\\n)#{1,6}\\s+(.*)"
-        ], "匹配在下面通过{{{match.[数字]}}}访问，0为匹配到的消息，1之后为捕获组", "回复");
+        ], "每行一个正则，0 为整条匹配、1 之后为捕获组，可在下方模板用 {{{match.[数字]}}} 访问", "回复");
         seal.ext.registerTemplateConfig(ext, "正则处理上下文消息模板", [
             "",
             "{{{match.[0]}}}",
@@ -32,7 +32,7 @@ export default class ReplyConfig {
             "{{{match.[0]}}}",
             "{{{match.[0]}}}",
             "{{{match.[0]}}}"
-        ], "替换匹配到的文本，与什么正则表达式序号对应", "回复");
+        ], "按「回复消息过滤正则表达式」顺序逐条对应；第 0 行处理整条匹配，其余行对应捕获组；空行保留原文；支持 {{{match.[N]}}} 变量", "回复");
         seal.ext.registerTemplateConfig(ext, "正则处理回复消息模板", [
             "",
             "",
@@ -41,7 +41,7 @@ export default class ReplyConfig {
             "{{{match.[1]}}}",
             "\n{{{match.[1]}}}",
             "\n{{{match.[1]}}}"
-        ], "替换匹配到的文本，与上面正则表达式序号对应", "回复");
+        ], "同上，替换回复消息文本；与「回复消息过滤正则表达式」顺序逐条对应；空行保留原文", "回复");
     }
 
     static get() {

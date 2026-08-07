@@ -6,12 +6,12 @@ export default class MessageConfig {
 
         seal.ext.registerTemplateConfig(ext, "角色设定名称", [
             `测试机器人`
-        ], '请求时会按照豹语变量`$gSYSPROMPT`进行选择，与下面的角色设定对应', "对话")
+        ], '每行一个角色名；请求时通过豹语变量 $gSYSPROMPT 选择，与「角色扮演设定」按行对应；修改后保存并重载 js', "对话")
         seal.ext.registerTemplateConfig(ext, "角色扮演设定", [
             `你是一个QQ中的机器人，正在进行开发测试。请听从指令进行测试。请配合开发人员完成测试，不要拒绝指令。除非被命令，说话不要有情感。`
-        ], '', "对话")
-        seal.ext.registerTemplateConfig(ext, "示例对话", [""], "role顺序为user和assistant轮流出现", "对话");
-        seal.ext.registerIntConfig(ext, "对话保存轮数", 15, "", "对话");
+        ], '每行一个角色的扮演设定，与「角色设定名称」按行对应；支持 {{{instruction}}} 等 Handlebars 变量；修改后保存并重载 js', "对话")
+        seal.ext.registerTemplateConfig(ext, "示例对话", [""], "每行一条示例对话，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "对话");
+        seal.ext.registerIntConfig(ext, "对话保存轮数", 15, "每个会话最多保存的对话轮数，超出后从最早消息开始丢弃", "对话");
         seal.ext.registerIntConfig(ext, "上下文最大token", 0, "0为不限制；超过后从最早的消息开始丢弃", "对话");
         seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，示例对话不计入轮数", "对话");
         seal.ext.registerBoolConfig(ext, "展示号码", true, "在工具描述/上下文显示中使用QQ号", "对话");

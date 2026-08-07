@@ -9,7 +9,7 @@ import { ext } from "../config";
 
 export default class MemoryConfig {
     static register() {
-        seal.ext.registerIntConfig(ext, "向量维度", 1024, "向量检索的维度，需与嵌入模型输出维度一致", "记忆");
+        seal.ext.registerIntConfig(ext, "向量维度", 1024, "向量检索维度，必须与嵌入模型输出维度一致（如 text-embedding-v4 为 1024）", "记忆");
         seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "开启后对话内容会沉淀为长期记忆", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆上限", 50, "长期记忆条数上限，超出后按分数淘汰", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆展示数量", 5, "构造记忆 prompt 时展示的长期记忆条数", "记忆");
