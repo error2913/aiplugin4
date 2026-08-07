@@ -9,7 +9,8 @@ import { ext } from "../config";
 
 export default class MemoryConfig {
     static register() {
-        seal.ext.registerIntConfig(ext, "向量维度", 1024, "向量检索的维度，需与嵌入模型输出维度一致", "记忆");
+        seal.ext.registerBoolConfig(ext, "是否开启嵌入模型", false, "总开关，默认关闭。\n配置好嵌入模型后再开启；关闭时向量记忆的嵌入生成与检索不生效，记忆按关键词/分数检索", "记忆");
+        seal.ext.registerIntConfig(ext, "向量维度", 1024, "向量检索维度，必须与嵌入模型输出维度一致（如 text-embedding-v4 为 1024）", "记忆");
         seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "开启后对话内容会沉淀为长期记忆", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆上限", 50, "长期记忆条数上限，超出后按分数淘汰", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆展示数量", 5, "构造记忆 prompt 时展示的长期记忆条数", "记忆");
@@ -37,11 +38,12 @@ groups = ["114514", "1919810"] # 相关群组ID列表
 
 [knowledges.test2]
 content = "单行形式，只有content字段是必须的"`
-        ], "", "记忆");
+        ], "TOML 格式，每行一个知识库条目。\nroles：生效角色列表，为空时对所有角色生效。\n[knowledges.ID]：content 必填；type/importance/tags/relatedMemories/users/groups 可选。\n修改后保存并重载 js", "记忆");
     }
 
     static get() {
         return {
+            EMBEDDING_MODEL_ENABLED: seal.ext.getBoolConfig(ext, "是否开启嵌入模型"),
             DIMENSION: seal.ext.getIntConfig(ext, "向量维度"),
             MEMORY: seal.ext.getBoolConfig(ext, "启用长期记忆"),
             MEMORY_LIMIT: seal.ext.getIntConfig(ext, "长期记忆上限"),

@@ -5,7 +5,7 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 
 export function registerCmdStandby() {
     const cmd = new SubCmd('standby');
-    cmd.desc = '开启待机模式，此时AI将记录聊天内容';
+    cmd.desc = '开启待机模式：记录聊天内容、不主动发言（非指令关键词触发仍可发言）';
     cmd.help = '';
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {

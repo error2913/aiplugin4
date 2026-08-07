@@ -312,7 +312,7 @@ export default class MemoryService {
 
         const { DIMENSION } = Config.memory;
         let v: number[] = [];
-        if (DIMENSION > 0 && query) {
+        if (Config.memory.EMBEDDING_MODEL_ENABLED && DIMENSION > 0 && query) {
             const model = Model.getEmbeddingModel('text-embedding');
             if (!model) {
                 Logger.error('未找到可用的嵌入模型');

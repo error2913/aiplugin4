@@ -70,7 +70,7 @@ export default class PromptConfig {
 {{{knowledgePrompt}}}
 
 {{{toolPrompt}}}`
-        ], "", "prompt模板");
+        ], "Handlebars 模板，生成 system 提示词。\n可用变量：instruction、platform、sessionType、sessionName、sessionId、RECEIVE_IMAGE、LOCAL_IMAGES、LOCAL_AUDIOS、memoryPrompt、summaryPrompt、knowledgePrompt、toolPrompt。\n修改后保存并重载 js", "prompt模板");
         registerTemplate("长期记忆prompt模板", [
             `{{#if MEMORY}}
 
@@ -95,7 +95,7 @@ export default class PromptConfig {
 长期记忆为空
     {{/each}}
 {{/if}}`
-        ], "", "prompt模板");
+        ], "长期记忆渲染模板，可用变量 MEMORY、sources（含 source/memories）等；一般无需修改", "prompt模板");
         registerTemplate("总结记忆prompt模板", [
             `{{#if SUMMARY}}
 
@@ -106,7 +106,7 @@ export default class PromptConfig {
 总结记忆为空
     {{/each}}
 {{/if}}`
-        ], "", "prompt模板");
+        ], "总结记忆渲染模板，可用变量 SUMMARY、summaries 等；一般无需修改", "prompt模板");
         registerTemplate("知识库记忆prompt模板", [
             `{{#if KNOWLEDGE}}
 
@@ -124,7 +124,7 @@ export default class PromptConfig {
 知识库为空
     {{/each}}
 {{/if}}`
-        ], "", "prompt模板");
+        ], "知识库渲染模板，可用变量 KNOWLEDGE、knowledges（含 id/type/importance/tags/content 等）等；一般无需修改", "prompt模板");
         registerTemplate("工具函数prompt模板", [
             `{{#if PROMPT_ENGINEERING}}
 
@@ -153,8 +153,8 @@ export default class PromptConfig {
 暂无可用函数。
     {{/each}}
 {{/if}}`
-        ], "", "prompt模板");
-        registerTemplate("图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "", "prompt模板");
+        ], "提示词工程模式下工具调用说明模板；可用变量 PROMPT_ENGINEERING、tools（含 name/description/parameters/required）", "prompt模板");
+        registerTemplate("图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "图片转文字的提示词模板；一般无需修改", "prompt模板");
         registerTemplate("记忆总结prompt模板", [ // wip
             `你现在扮演的角色如下:
 ## 扮演详情
@@ -237,7 +237,7 @@ export default class PromptConfig {
         }
     }
 }`
-        ], "", "prompt模板");
+        ], "记忆总结任务模板；可用变量 角色设定、平台、私聊、群聊名称、对话内容 等；一般无需修改", "prompt模板");
     }
 
     static get() {

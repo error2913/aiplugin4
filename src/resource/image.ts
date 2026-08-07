@@ -121,6 +121,10 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
+        if (!Config.image.IMAGE_MODEL_ENABLED) {
+            logger.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
+            return;
+        }
         const { IMAGE_DEFAULT_PROMPT, URL_TO_BASE64, MAX_CHARS } = Config.image;
         const defaultPrompt = Config.prompt.IMAGE_PROMPT_TEMPLATE({}) || IMAGE_DEFAULT_PROMPT;
 
