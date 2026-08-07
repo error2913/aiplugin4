@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.13.1-green)
+![Version](https://img.shields.io/badge/Version-4.13.2-green)
 
 ## 快速开始
 
@@ -652,7 +652,7 @@ await api.run(ctx, msg, { agentName: 'kp_agent', reason: 'KP插件调用' });
 ### 发布流程
 
 - `.github/workflows/build-check.yml`：main 分支 push / PR 时执行 lint、tsc strict、构建并校验 sealpack 包、冒烟测试；
-- `.github/workflows/release.yml`：推送 `v*` 标签（如 `v4.13.1`）时自动发版：
+- `.github/workflows/release.yml`：推送 `v*` 标签（如 `v4.13.2`）时自动发版：
   1. verify：lint / tsc / `npm run package:check`（构建 + sealpack 校验）/ 冒烟，并校验标签与 `VERSION`、`update.ts` 版本日志一致；
   2. `node scripts/build-release.js` 产出三类发布物并上传：`dist/aiplugin4.js`（本体 JS）、`aiplugin4-v<版本>.sealpack`（只含本体的豹包）、`aiplugin4-full-v<版本>.sealpack`（本体 + 依赖插件的完整豹包）；
   3. publish-sealrepo：用 `SEALPACK_TOKEN` 把本体包与完整包分别发布到 [SealRepo](https://repo.sealdice.com/)；
