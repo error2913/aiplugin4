@@ -1,4 +1,0 @@
-interface:
-  display_name: "QQ-MCP 安装与配置"
-  short_description: "安装、配置、注册并验证 QQ-MCP-Server"
-  default_prompt: "帮我安装并配置 QQ-MCP-Server（qqmcp）"
