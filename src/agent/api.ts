@@ -1,6 +1,9 @@
 // 对外 API：把智能体暴露到 globalThis，供其他海豹插件调用
+import Config from "../config/config";
 import { NAME, VERSION } from "../config/static_config";
 import { logger } from "../logger";
+import Model from "../model/model";
+import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import Tool, { toolMap } from "../tool/tool";
@@ -45,6 +48,12 @@ export interface AgentGlobalApi {
     getSession(agentName: string, sessionId: string): Session;
     /** 单轮对话：不经过会话上下文与工具，直接返回模型回复文本（无可用模型时返回空串） */
     chat(prompt: string, agentName?: string): Promise<string>;
+    /** 对话：直接发送 OpenAI 风格 messages 数组到对话模型，返回回复文本（无可用模型时返回空串） */
+    chatMessages(messages: { role: string, content: string }[], agentName?: string): Promise<string>;
+    /** 识图：对图片 id 或 http(s) 图片地址调用图片识别模型，返回描述文本；未开启图片模型/未配置模型/找不到图片时返回错误说明 */
+    imageToText(source: string, prompt?: string): Promise<string>;
+    /** 嵌入：调用嵌入模型返回文本向量；未配置嵌入模型时返回空数组 */
+    embed(text: string): Promise<number[]>;
     /** 在当前聊天中触发一次完整对话编排（上下文/工具/回复发送），等价于该会话收到一次触发 */
     run(ctx: seal.MsgContext, msg: seal.Message, options?: AgentRunOptions): Promise<void>;
     /** 注册一个工具，供 AI 通过函数调用/提示词工程使用；同名内置工具不可覆盖，成功返回 true */
@@ -62,6 +71,26 @@ export function registerAgentApi(): void {
         getAgent: (name?: string) => Agent.get(name || '*'),
         getSession: (agentName: string, sessionId: string) => Agent.get(agentName).sessionService.getSession(sessionId),
         chat: async (prompt: string, agentName?: string) => Agent.get(agentName || '*').chat(prompt),
+        chatMessages: async (messages: { role: string, content: string }[], agentName?: string) => Agent.get(agentName || '*').chatMessages(messages),
+        imageToText: async (source: string, prompt?: string) => {
+            if (!Config.image.IMAGE_MODEL_ENABLED) return '图片模型开关未开启';
+            if (!Model.getImageModel('image-understanding')) return '未找到支持 image-understanding 的图片模型';
+            let img = Image.get(source);
+            if (!img && /^https?:\/\//i.test(source)) {
+                img = Image.createUrlImage('', source);
+            }
+            if (!img) return `未找到图片 ${source}（支持图片 id 或 http(s) 图片地址）`;
+            await img.imageToText(prompt);
+            return img.description || `图片 ${source} 识别失败`;
+        },
+        embed: async (text: string) => {
+            const model = Model.getEmbeddingModel('text-embedding');
+            if (!model) {
+                logger.warning('外部调用 embed 失败：未找到嵌入模型');
+                return [];
+            }
+            return await model.callEmbedding(text);
+        },
         run: async (ctx: seal.MsgContext, msg: seal.Message, options: AgentRunOptions = {}) => {
             const agent = Agent.get(options.agentName || '*');
             const sessionId = ctx.isPrivate ? ctx.player.userId : ctx.group.groupId;

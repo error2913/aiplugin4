@@ -70,6 +70,14 @@ export default class Agent {
         return content;
     }
 
+    /** 直接发送自定义 messages（OpenAI 风格数组）到对话模型，返回回复文本；供外部插件构建消息后调用 */
+    async chatMessages(messages: { role: string, content: string }[]): Promise<string> {
+        const model = Model.getChatModel(this.use) as ChatModel;
+        if (!model) return '';
+        const { content } = await streamService.sendChatRequest(messages, [], 'none');
+        return content;
+    }
+
     /**
      * 标准智能体编排：构建消息 → 请求模型 → 执行工具调用（函数调用/提示词工程）→ 回填上下文 →
      * 循环直到模型给出最终回复（带轮次上限），最后统一拆分并发送回复。
