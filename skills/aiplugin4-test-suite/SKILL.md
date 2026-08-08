@@ -7,19 +7,15 @@ description: aiplugin4 插件综合测试与调试技能：通过 qqmcp 对测�
 
 ## 测试环境（复用 sealdice-plugin-dev）
 
-- 海豹面板/WebUI（解锁、日志、JS 扩展页、上传/重载插件、截图）：使用 sealdice-plugin-dev 技能 §4 与 `references/test-environment.md`、`scripts/test-sealdice.ps1`、`scripts/screenshot.ps1`（或 Chrome DevTools MCP，见其 `references/mcp-setup.md`）。
-- QQ 环境测试（qqmcp）：使用 sealdice-plugin-dev 技能 §4.4 / `references/test-environment.md` §5 的发送→轮询→断言流程与纪律。
-- 重载 JS 是写操作且影响所有 JS 插件：**两次重载间隔必须 ≥ 1 分钟**；上传/重载/删除插件默认需用户批准。
+- 面板/WebUI（解锁、日志、JS 扩展页、上传/重载插件、截图）与 QQ 环境（qqmcp）全部复用 sealdice-plugin-dev：先按其 §4.0 确认环境（面板凭据、qqmcp 是否已配置）；面板操作见其 §4 / `references/test-environment.md`、`scripts/test-sealdice.ps1`、`scripts/screenshot.ps1`（或 Chrome DevTools MCP，见 `references/mcp-setup.md`）；qqmcp 发送→轮询→断言流程与纪律见其 §4.4 / `references/test-environment.md` §5。
+- 测试纪律（群里少发、发送频率、重载 JS 间隔与批准）统一按 sealdice-plugin-dev §4 执行，不重复列举。
 
 ## 共同注意事项（必须遵守）
 
-1. 群里消息以验证连通为主：可以发，但不能发一堆，验证能发就行。
-2. 测试群与机器人按模式一第 1 步预检；重载 JS 的间隔与批准要求见上文。
-3. 配置修改后必须恢复原样：只修改 aiplugin4 设置中「后端」二级页签内的配置项；页面上不属于二级页签的项一律不碰；其他插件配置不乱动。
-4. 发送频率控制：相邻指令 ≥ 3 秒、每发 5 条暂停 10 秒、单次运行上限、用户喊停立即停（见 sealdice-plugin-dev 的 qqmcp 纪律）。
-5. 指令回复出现「指令.ai执行失败」等异常时，立即按 sealdice-plugin-dev 的日志读取方式查看海豹日志，并把相关日志摘要写入报告。
-6. 破坏性指令（`memo clr`/`forget`/`timer clr` 等）按用例表"清理"步骤执行，做到自清理；全局破坏性操作（`token clr`、`priv st`/`priv reset`）默认只测错误路径，完整操作需用户确认。
-7. 依赖环境的指令（图片识别需视觉模型、图表需用量后端、语音需 ffmpeg 等）：无对应配置时记 `SKIP(env)` 并注明原因。
+1. 配置修改后必须恢复原样：只修改 aiplugin4 设置中「后端」二级页签内的配置项；页面上不属于二级页签的项一律不碰；其他插件配置不乱动。
+2. 指令回复出现「指令.ai执行失败」等异常时，立即按 sealdice-plugin-dev 的日志读取方式查看海豹日志，并把相关日志摘要写入报告。
+3. 破坏性指令（`memo clr`/`forget`/`timer clr` 等）按用例表"清理"步骤执行，做到自清理；全局破坏性操作（`token clr`、`priv st`/`priv reset`）默认只测错误路径，完整操作需用户确认。
+4. 依赖环境的指令（图片识别需视觉模型、图表需用量后端、语音需 ffmpeg 等）：无对应配置时记 `SKIP(env)` 并注明原因。
 
 ## 模式一：全量测试
 
