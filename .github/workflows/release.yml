@@ -1,9 +1,6 @@
 name: Build and Release
 
 on:
-  pull_request:
-    branches:
-      - main
   push:
     tags:
       - 'v*'
@@ -57,13 +54,11 @@ jobs:
           node scripts/release-notes.js "${version}" > /dev/null
 
       - name: Pack SealRepo artifact
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           node scripts/build-release.js
 
       - name: Upload build artifacts
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: release-assets-${{ github.run_id }}
