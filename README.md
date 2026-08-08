@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.13.2-green)
+![Version](https://img.shields.io/badge/Version-4.13.3-green)
 
 ## 快速开始
 
@@ -420,10 +420,12 @@ max_tokens = 2048
 | 消息 | `send_msg`、`get_msg`、`delete_msg`、`send_forward_msg`、`get_context` |
 | 定时 | `get_time`、`set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
+| 指令 | `run_command`（列出/调用海豹指令）、`get_cmd_help`（查看指令帮助） |
+| 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
 | 语音 | `record`、`text_to_sound` |
 | 网页 | `web_search`、`web_read` |
-| TRPG | `roll_check`、`san_check`、`jrrp`、`modu_roll`、`modu_search`、`draw_deck` |
-| 属性 | `attr_show`、`attr_get`、`attr_set` |
+| TRPG | `draw_deck` |
+| 属性 | `attr_get`、`attr_set` |
 | 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
 | QQ 管理 | `ban`、`whole_ban`、`get_ban_list`、`rename`、`group_sign` |
 | 群资料 | `get_list`、`get_group_member_list`、`search_chat`、`search_common_group`、`get_person_info` |
@@ -433,9 +435,11 @@ max_tokens = 2048
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | MCP / 技能 | `<服务器名>_<工具名>`（MCP 工具）、`use_skill`（技能） |
 
+> 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
+
 > 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要 AITTS 依赖与 ffmpeg；`text_to_image` 需要 AIDrawing 依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
 
-> 依赖海豹内置指令的工具（如 `attr_show`、`roll_check`、`draw_deck`、`send_msg` 等）需要会话中先出现过指令消息（如先使用 `.r`），否则工具会提示"请先使用 .r 指令"。
+> 依赖海豹内置指令的工具（如 `draw_deck`、`send_msg` 等）需要会话中先出现过指令消息（如先使用 `.r`），否则工具会提示"请先使用 .r 指令"。
 
 ---
 
