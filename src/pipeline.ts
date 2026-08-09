@@ -6,9 +6,27 @@ import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/tool_trigger";
-import { transformTextToArray } from "./utils/string";
+import { expandForwardMessage } from "./utils/ob11";
+import { MessageSegment, transformTextToArray } from "./utils/string";
 
 export class MessagePipeline {
+    /** 展开消息中的合并转发段（走 ob11 get_forward_msg，支持嵌套），返回替换后的消息段 */
+    private static async expandForwardSegments(epId: string, segs: MessageSegment[]): Promise<MessageSegment[]> {
+        const result: MessageSegment[] = [];
+        for (const seg of segs) {
+            if (seg.type === 'forward') {
+                const text = await expandForwardMessage(epId, (seg.data && seg.data.id) || '');
+                result.push({
+                    type: 'text',
+                    data: { text: text ? `【合并转发】\n${text}` : '[合并转发消息，展开失败]' }
+                });
+            } else {
+                result.push(seg);
+            }
+        }
+        return result;
+    }
+
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */
     static async handleNonCommand(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { IGNORE_PRIVATE: disabledInPrivate, IGNORE_REGEX: ignoreRegex, IGNORE_CONDITION } = Config.received;
@@ -42,7 +60,12 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        const messageArray = transformTextToArray(message);
+        let messageArray = transformTextToArray(message);
+
+        // 展开合并转发（走 ob11 get_forward_msg），替换为可读文本段后再走后续过滤/触发
+        if (messageArray.some(seg => seg.type === 'forward')) {
+            messageArray = await this.expandForwardSegments(ctx.endPoint.userId, messageArray);
+        }
 
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
@@ -131,7 +154,7 @@ export class MessagePipeline {
     }
 
     /** 指令消息：记录 cmdArgs，并按配置决定是否写入会话上下文 */
-    static handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): void {
+    static async handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): Promise<void> {
         if (Tool.cmdArgs === null) {
             Tool.cmdArgs = cmdArgs;
         }
@@ -147,7 +170,12 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        const messageArray = transformTextToArray(message);
+        let messageArray = transformTextToArray(message);
+
+        // 展开合并转发（走 ob11 get_forward_msg），替换为可读文本段
+        if (messageArray.some(seg => seg.type === 'forward')) {
+            messageArray = await this.expandForwardSegments(ctx.endPoint.userId, messageArray);
+        }
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
@@ -159,7 +187,7 @@ export class MessagePipeline {
     }
 
     /** 机器人自身发送的消息：转发给监听工具，并按配置决定是否记录上下文 */
-    static handleBotMessage(ctx: seal.MsgContext, msg: seal.Message): void {
+    static async handleBotMessage(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const uid = ctx.player!.userId;
         const gid = ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
@@ -168,7 +196,12 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        const messageArray = transformTextToArray(message);
+        let messageArray = transformTextToArray(message);
+
+        // 展开合并转发（走 ob11 get_forward_msg），替换为可读文本段
+        if (messageArray.some(seg => seg.type === 'forward')) {
+            messageArray = await this.expandForwardSegments(ctx.endPoint.userId, messageArray);
+        }
 
         session.tool.listen.resolve?.(message); // 将消息传递给监听工具
 

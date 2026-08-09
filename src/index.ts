@@ -84,7 +84,12 @@ function main() {
   //接受的指令
   ext.onCommandReceived = (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs) => {
     try {
-      MessagePipeline.handleCommand(ctx, msg, cmdArgs);
+      const p = MessagePipeline.handleCommand(ctx, msg, cmdArgs);
+      if (p && typeof (p as Promise<void>).catch === 'function') {
+        (p as Promise<void>).catch((e: any) => {
+          logger.error(`指令消息处理异步出错:${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
     } catch (e) {
       logger.error(`指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
@@ -93,7 +98,12 @@ function main() {
   //骰子发送的消息
   ext.onMessageSend = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      MessagePipeline.handleBotMessage(ctx, msg);
+      const p = MessagePipeline.handleBotMessage(ctx, msg);
+      if (p && typeof (p as Promise<void>).catch === 'function') {
+        (p as Promise<void>).catch((e: any) => {
+          logger.error(`获取发送消息处理异步出错:${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
     } catch (e) {
       logger.error(`获取发送消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }

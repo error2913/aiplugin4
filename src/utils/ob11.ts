@@ -62,6 +62,63 @@ export async function getStrangerInfo(epId: string, user_id: string): Promise<an
     }
 }
 
+/** 获取合并转发消息（OneBot get_forward_msg），返回消息数组 */
+export async function getForwardMessage(epId: string, id: string): Promise<any[]> {
+    const net = getNet();
+    if (!net) return [];
+    try {
+        const data = await net.callApi(epId, 'get_forward_msg', { id });
+        return (data && Array.isArray(data.messages)) ? data.messages : [];
+    } catch (e) {
+        logger.error(`获取合并转发消息 ${id} 失败：${e}`);
+        return [];
+    }
+}
+
+/** 合并转发单条消息内容转可读文本（支持嵌套 forward） */
+async function forwardSegmentsToText(epId: string, message: any): Promise<string> {
+    if (typeof message === 'string') return message;
+    if (!Array.isArray(message)) return '';
+
+    let text = '';
+    for (const seg of message) {
+        if (!seg || typeof seg !== 'object') continue;
+        switch (seg.type) {
+            case 'text': text += (seg.data && seg.data.text) || ''; break;
+            case 'at': text += `@${(seg.data && seg.data.qq) || ''} `; break;
+            case 'face': text += `[表情${(seg.data && seg.data.id) || ''}]`; break;
+            case 'image': text += '[图片]'; break;
+            case 'record': text += '[语音]'; break;
+            case 'video': text += '[视频]'; break;
+            case 'forward': {
+                const sub = await getForwardMessage(epId, (seg.data && seg.data.id) || '');
+                text += await forwardMessagesToText(epId, sub);
+                break;
+            }
+            default: text += `[${seg.type}]`;
+        }
+    }
+    return text;
+}
+
+/** 合并转发消息数组转可读文本（发送者 + 内容） */
+async function forwardMessagesToText(epId: string, messages: any[]): Promise<string> {
+    const lines: string[] = [];
+    for (const m of messages) {
+        const sender = m.sender || {};
+        const name = sender.card || sender.nickname || `用户${sender.user_id || ''}`;
+        const content = await forwardSegmentsToText(epId, m.message);
+        lines.push(`${name}: ${content}`);
+    }
+    return lines.join('\n');
+}
+
+/** 展开合并转发消息 id，返回可读文本（含嵌套） */
+export async function expandForwardMessage(epId: string, id: string): Promise<string> {
+    const messages = await getForwardMessage(epId, id);
+    return forwardMessagesToText(epId, messages);
+}
+
 export async function getGroupMemberInfo(epId: string, group_id: string, user_id: string): Promise<any> {
     const net = getNet();
     if (!net) return null;
