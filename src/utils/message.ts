@@ -113,6 +113,20 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
 
     const messages: ContextMessage[] = [systemMessage, ...samplesMessages, ...contextMessages];
 
+    // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
+    // 工具结果转成 user 文本（带【工具返回】标记），保证模型能看到结果而不会反复调用工具
+    if (Config.tool.PROMPT_ENGINEERING) {
+        return await Promise.all(messages.map(async message => {
+            if (message.role === 'tool') {
+                return { role: 'user', content: `【工具返回】${buildContent(message)}` };
+            }
+            return {
+                role: message.role,
+                content: multimodal ? await buildMultimodalContent(message) : buildContent(message)
+            };
+        }));
+    }
+
     // 过滤没有对应 tool_call_id 的 tool_calls
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
