@@ -1,13 +1,22 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
+import { logger } from "../logger";
 import { buildSystemPromptContent } from "../prompt/builder";
+import Image from "../resource/image";
 import { Session } from "../session/session";
 import { ToolInfo } from "../tool/types";
 import { ToolCall } from "../tool/types";
 
+import { withTimeout } from "./utils";
+
+/** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
+export type RequestMessageContent =
+    | string
+    | Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }>;
+
 export interface RequestMessage {
     role: string;
-    content: string;
+    content: RequestMessageContent;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
 }
@@ -97,7 +106,7 @@ function buildContextMessages(systemMessage: ContextMessage, messages: ContextMe
     return contextMessages;
 }
 
-export async function handleMessages(ctx: seal.MsgContext, session: Session): Promise<RequestMessage[]> {
+export async function handleMessages(ctx: seal.MsgContext, session: Session, multimodal = false): Promise<RequestMessage[]> {
     const systemMessage = await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
     const contextMessages = buildContextMessages(systemMessage, session.context.messages as ContextMessage[]);
@@ -150,12 +159,12 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session): Pr
         if (!toolCallIdSet.has(id)) messages.splice(i, 1);
     }
 
-    return messages.map(message => ({
+    return await Promise.all(messages.map(async message => ({
         role: message.role,
-        content: buildContent(message),
+        content: multimodal ? await buildMultimodalContent(message) : buildContent(message),
         tool_calls: message.toolCalls || message.tool_calls,
         tool_call_id: message.toolCallId || message.tool_call_id
-    }));
+    })));
 }
 
 export function buildContent(message: ContextMessage): string {
@@ -164,6 +173,49 @@ export function buildContent(message: ContextMessage): string {
     }
     if (message.text) return message.text;
     return '';
+}
+
+/** 解析 <|img:...|> 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */
+function resolveImageById(id: string): Image | null {
+    if (/^user_avatar[:?]/.test(id)) return Image.getUserAvatar(id.replace(/^user_avatar[:?]/, ''));
+    if (/^group_avatar[:?]/.test(id)) return Image.getGroupAvatar(id.replace(/^group_avatar[:?]/, ''));
+    const img = Image.get(id);
+    if (img) return img;
+    // 兼容 <|img:imageId:描述|>：描述部分可能带冒号，取首个冒号前作为图片 id
+    return Image.get(id.split(':')[0]);
+}
+
+/**
+ * 多模态消息内容：把用户消息里的 <|img:...|> 图片标签转成 image_url 内容块直接传给模型，
+ * 而不是让模型只看到文本标签；无法解析的图片（如本地路径无可用 URL）保留原标签。
+ */
+export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
+    if (message.role !== 'user') return buildContent(message);
+    const text = buildContent(message);
+    if (!text.includes('img')) return text;
+
+    const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
+    const segs = text.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/).filter(Boolean);
+    for (const seg of segs) {
+        const match = seg.match(/^[<＜][\|│｜]img[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])$/i);
+        if (!match) {
+            parts.push({ type: 'text', text: seg });
+            continue;
+        }
+        const image = resolveImageById(match[1].trim());
+        // URL 图片优先转成 base64（模型常无法直接访问 QQ 临时链接）；转换失败保留原 URL
+        if (image && image.type === 'url' && !image.base64) {
+            try {
+                await withTimeout(() => image.urlToBase64(), 10000);
+            } catch (e) {
+                logger.warning(`多模态图片转 base64 失败，改用原 URL: ${image.imageId}（${e instanceof Error ? e.message : String(e)}）`);
+            }
+        }
+        const src = image && image.src;
+        if (src) parts.push({ type: 'image_url', image_url: { url: src } });
+        else parts.push({ type: 'text', text: seg });
+    }
+    return parts;
 }
 
 export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {

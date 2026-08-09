@@ -47,6 +47,15 @@ export default class Model {
             if (namedAnyList.length > 0) {
                 return namedAnyList[0];
             }
+            // 图片模型里配置的多模态模型也可按名称用于 chat（use 含 chat 或未指定用途）
+            const namedImageList = Model.imageModels.filter(model => model.name === name && model.use.includes(use));
+            if (namedImageList.length > 0) {
+                return namedImageList[0];
+            }
+            const namedImageAnyList = Model.imageModels.filter(model => model.name === name && model.use.length === 0);
+            if (namedImageAnyList.length > 0) {
+                return namedImageAnyList[0];
+            }
             // 指定名称不存在时回退到全局选择
             return Model.getChatModel(use);
         }

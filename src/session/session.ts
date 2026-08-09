@@ -188,9 +188,9 @@ export class Session {
         return state;
     }
 
-    async getMessages(): Promise<RequestMessage[]> {
+    async getMessages(multimodal = false): Promise<RequestMessage[]> {
         if (this.lastCtx) {
-            return await handleMessages(this.lastCtx, this);
+            return await handleMessages(this.lastCtx, this, multimodal);
         }
         return (this.context.messages as any[]).map(m => ({
             role: m.role,
@@ -198,8 +198,9 @@ export class Session {
         }));
     }
 
+    /** 图片对话使用的消息：多模态模型直接携带图片内容块 */
     async getImageMessages(): Promise<RequestMessage[]> {
-        return this.getMessages();
+        return this.getMessages(true);
     }
 
     checkIgnoredUserId(userId: string): boolean {
