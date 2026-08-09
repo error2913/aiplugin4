@@ -62,7 +62,7 @@ function main() {
 
     const msg = createMsg(event.isPrivate ? 'private' : 'group', event.senderId, event.groupId);
     msg.message = `[CQ:poke,qq=${event.targetId.replace(/^.+:/, '')}]`;
-    if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg);
+    if (event.senderId === ctx.endPoint.userId) ext.onMessageSend(ctx, msg, '');
     else ext.onNotCommandReceived(ctx, msg);
   }
 
