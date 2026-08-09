@@ -94,7 +94,7 @@ async function forwardSegmentsToText(epId: string, message: any): Promise<string
             case 'at': text += `@${(seg.data && seg.data.qq) || ''} `; break;
             case 'face': text += `[表情${(seg.data && seg.data.id) || ''}]`; break;
             case 'image': text += '[图片]'; break;
-            case 'record': text += '[语音]'; break;
+            case 'record': text += '【语音】'; break;
             case 'video': text += `【视频】${(seg.data && (seg.data.file || seg.data.url)) || ''}`; break;
             case 'file': text += `【文件】${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || ''}`; break;
             case 'json': text += parseCardToText(seg.data && seg.data.data); break;

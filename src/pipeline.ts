@@ -11,7 +11,7 @@ import { createCtx, createMsg } from "./utils/seal";
 import { MessageSegment, parseCardToText, parseMusicToText, transformTextToArray } from "./utils/string";
 
 /** 海豹核心原生 milky 接收路径会过滤掉的段类型，只能通过 ob11 依赖的事件分发（milky → OB11 转接）收到 */
-const OB11_EXTRA_SEGMENT_TYPES = new Set(['json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
+const OB11_EXTRA_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
 
 export class MessagePipeline {
     /** ob11 数组消息段 → MessageSegment[]：把卡片/视频/音乐/文件/消息节点/合并转发展开为文本段，其余段保留 */
@@ -24,6 +24,11 @@ export class MessagePipeline {
             switch (seg.type) {
                 case 'json': {
                     result.push({ type: 'text', data: { text: parseCardToText(data.data) } });
+                    break;
+                }
+                case 'record': {
+                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收并转成可读文本
+                    result.push({ type: 'text', data: { text: '【语音】' } });
                     break;
                 }
                 case 'file': {
