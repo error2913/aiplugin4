@@ -6,7 +6,7 @@ import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/tool_trigger";
-import { expandForwardMessage } from "./utils/ob11";
+import { expandForwardMessage, getGroupFileDownloadUrl, getPrivateFileDownloadUrl } from "./utils/ob11";
 import { MessageSegment, transformTextToArray } from "./utils/string";
 
 /** 解析 QQ 卡片消息（CQ:json 的 data 字段），提取标题/描述/链接等可读文本 */
@@ -34,9 +34,17 @@ function parseCardToText(raw: string): string {
 }
 
 export class MessagePipeline {
+    /** 统一消息形态：CQ 码字符串或 OneBot 消息段数组 → MessageSegment[] */
+    private static toMessageArray(message: string | any[] | any): MessageSegment[] {
+        if (typeof message === 'string') return transformTextToArray(message);
+        if (Array.isArray(message)) return message as MessageSegment[];
+        return [];
+    }
+
     /** 展开消息中的特殊段（合并转发走 ob11 / 文件 / 卡片），返回替换后的消息段 */
-    private static async expandSpecialSegments(epId: string, segs: MessageSegment[]): Promise<MessageSegment[]> {
+    private static async expandSpecialSegments(ctx: seal.MsgContext, segs: MessageSegment[]): Promise<MessageSegment[]> {
         const result: MessageSegment[] = [];
+        const epId = ctx.endPoint.userId;
         for (const seg of segs) {
             switch (seg.type) {
                 case 'forward': {
@@ -49,7 +57,15 @@ export class MessagePipeline {
                 }
                 case 'file': {
                     const name = (seg.data && seg.data.file) || '';
-                    const url = (seg.data && seg.data.url) || '';
+                    const fileId = (seg.data && seg.data.file) || '';
+                    const busid = (seg.data && seg.data.busid) || '';
+                    let url = (seg.data && seg.data.url) || '';
+                    // 缺少下载链接时走 ob11 依赖获取（与合并转发同路径）
+                    if (!url && fileId) {
+                        url = ctx.isPrivate
+                            ? await getPrivateFileDownloadUrl(epId, ctx.player!.userId, fileId, busid)
+                            : await getGroupFileDownloadUrl(epId, ctx.group!.groupId, fileId, busid);
+                    }
                     result.push({
                         type: 'text',
                         data: { text: `【文件】${name}${url ? ` ${url}` : ''}` }
@@ -109,11 +125,11 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        let messageArray = transformTextToArray(message);
+        let messageArray = this.toMessageArray(message);
 
         // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段后再走后续过滤/触发
         if (this.hasSpecialSegment(messageArray)) {
-            messageArray = await this.expandSpecialSegments(ctx.endPoint.userId, messageArray);
+            messageArray = await this.expandSpecialSegments(ctx, messageArray);
         }
 
         // 忽略条件（豹语表达式）命中时直接忽略
@@ -219,11 +235,11 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        let messageArray = transformTextToArray(message);
+        let messageArray = this.toMessageArray(message);
 
         // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段
         if (this.hasSpecialSegment(messageArray)) {
-            messageArray = await this.expandSpecialSegments(ctx.endPoint.userId, messageArray);
+            messageArray = await this.expandSpecialSegments(ctx, messageArray);
         }
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
@@ -245,11 +261,11 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        let messageArray = transformTextToArray(message);
+        let messageArray = this.toMessageArray(message);
 
         // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段
         if (this.hasSpecialSegment(messageArray)) {
-            messageArray = await this.expandSpecialSegments(ctx.endPoint.userId, messageArray);
+            messageArray = await this.expandSpecialSegments(ctx, messageArray);
         }
 
         session.tool.listen.resolve?.(message); // 将消息传递给监听工具

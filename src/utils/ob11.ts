@@ -75,6 +75,40 @@ export async function getForwardMessage(epId: string, id: string): Promise<any[]
     }
 }
 
+/** 获取群文件下载 URL（走 ob11 get_group_file_download_url） */
+export async function getGroupFileDownloadUrl(epId: string, group_id: string, file_id: string, busid?: string): Promise<string> {
+    const net = getNet();
+    if (!net) return '';
+    try {
+        const data = await net.callApi(epId, 'get_group_file_download_url', {
+            group_id,
+            file_id,
+            busid: busid ? Number(busid) : undefined
+        });
+        return (data && data.url) || '';
+    } catch (e) {
+        logger.error(`获取群文件 ${file_id} 下载地址失败：${e}`);
+        return '';
+    }
+}
+
+/** 获取私聊文件下载 URL（走 ob11 get_private_file_download_url） */
+export async function getPrivateFileDownloadUrl(epId: string, user_id: string, file_id: string, busid?: string): Promise<string> {
+    const net = getNet();
+    if (!net) return '';
+    try {
+        const data = await net.callApi(epId, 'get_private_file_download_url', {
+            user_id,
+            file_id,
+            busid: busid ? Number(busid) : undefined
+        });
+        return (data && data.url) || '';
+    } catch (e) {
+        logger.error(`获取私聊文件 ${file_id} 下载地址失败：${e}`);
+        return '';
+    }
+}
+
 /** 合并转发单条消息内容转可读文本（支持嵌套 forward） */
 async function forwardSegmentsToText(epId: string, message: any): Promise<string> {
     if (typeof message === 'string') return message;
