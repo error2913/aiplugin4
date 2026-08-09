@@ -86,28 +86,51 @@ export class MessagePipeline {
     /** 订阅 ob11 网络连接依赖的事件分发：核心原生 milky 路径会丢弃视频/文件/卡片/合并转发等段，
      *  这些段只有依赖的 OneBot 事件流（milky → OB11 转接）能拿到，在此接入并走同一套非指令管线 */
     static subscribeOb11Receive(): void {
-        const net = (globalThis as any).net;
-        if (!net || typeof net.getEventDispatcher !== 'function') return;
-        net.getEventDispatcher(ext).then((ed: any) => {
-            ed.onMessageEvent = async (_epId: string, event: any) => {
-                try {
-                    await MessagePipeline.handleOb11Event(event);
-                } catch (e) {
-                    logger.error(`ob11 事件消息处理出错:${e instanceof Error ? e.message : String(e)}`);
+        const trySubscribe = (attempt: number): void => {
+            const net = (globalThis as any).net;
+            if (!net || typeof net.getEventDispatcher !== 'function') {
+                if (attempt < 10) {
+                    // ob11 依赖可能在 aiplugin4 之后加载，轮询等待就绪
+                    setTimeout(() => trySubscribe(attempt + 1), 3000);
+                } else {
+                    logger.info('[debug] 未找到 ob11 网络连接依赖，跳过 ob11 额外消息接收订阅');
                 }
-            };
-        }).catch((e: any) => {
-            logger.error(`订阅 ob11 事件分发失败:${e instanceof Error ? e.message : String(e)}`);
-        });
+                return;
+            }
+            net.getEventDispatcher(ext).then((ed: any) => {
+                ed.onMessageEvent = async (_epId: string, event: any) => {
+                    try {
+                        await MessagePipeline.handleOb11Event(event);
+                    } catch (e) {
+                        logger.error(`ob11 事件消息处理出错:${e instanceof Error ? e.message : String(e)}`);
+                    }
+                };
+                logger.info('[debug] 已订阅 ob11 事件分发，额外接收卡片/视频/音乐/文件/语音/合并转发等消息段');
+            }).catch((e: any) => {
+                logger.error(`订阅 ob11 事件分发失败:${e instanceof Error ? e.message : String(e)}`);
+            });
+        };
+        trySubscribe(0);
     }
 
     /** ob11 事件消息（OneBot 消息段数组）：仅处理核心原生路径收不到的段类型，避免与核心回调重复处理 */
     private static async handleOb11Event(event: any): Promise<void> {
         if (!event || event.post_type !== 'message') return;
         const message = event.message;
-        if (!Array.isArray(message)) return;
-        if (event.user_id === event.self_id) return; // 机器人自己的消息（核心原生路径会忽略，这里保持一致）
-        if (!message.some((seg: any) => seg && OB11_EXTRA_SEGMENT_TYPES.has(seg.type))) return;
+        if (!Array.isArray(message)) {
+            logger.debug(`ob11 事件消息为字符串（${String(message).slice(0, 50)}），由核心原生路径处理，跳过`);
+            return;
+        }
+        if (event.user_id === event.self_id) {
+            logger.debug(`ob11 事件消息来自机器人自身（${event.user_id}），跳过`);
+            return;
+        }
+        const segTypes = message.filter((seg: any) => seg && seg.type).map((seg: any) => seg.type);
+        if (!segTypes.some((t: string) => OB11_EXTRA_SEGMENT_TYPES.has(t))) {
+            logger.debug(`ob11 事件消息无额外段（types=[${segTypes.join(',')}]），由核心原生路径处理，跳过`);
+            return;
+        }
+        logger.info(`[debug] ob11 额外消息接收: ${event.message_type === 'group' ? '群' : '私聊'} uid=${event.user_id} segTypes=[${segTypes.join(',')}]`);
 
         // 按端点解析平台前缀（默认 QQ），并构造与核心回调一致的 ctx/msg
         const eps = seal.getEndPoints();
@@ -116,6 +139,7 @@ export class MessagePipeline {
             if (ep.userId === epId) break;
             if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
         }
+        logger.debug(`[debug] ob11 事件 端点解析完成 ep=${epId}`);
         const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
         const uid = `${prefix}:${event.user_id}`;
         const isPrivate = event.message_type !== 'group';
@@ -123,7 +147,7 @@ export class MessagePipeline {
 
         const msg = createMsg(isPrivate ? 'private' : 'group', uid, gid);
         msg.platform = prefix;
-        msg.message = message as any; // 消息段数组，交给 expandOb11Segments 展开
+        // seal.Message.message 是 string 绑定，数组塞进去会被强转成字符串，段数组改走参数传入
         msg.time = event.time || 0;
         msg.rawId = event.message_id ?? 0;
         msg.sender.nickname = (event.sender && (event.sender.card || event.sender.nickname)) || '';
@@ -134,11 +158,12 @@ export class MessagePipeline {
             logger.warning(`ob11 事件消息未找到通信端点: ${epId}，跳过`);
             return;
         }
-        await MessagePipeline.handleNonCommand(ctx, msg);
+        logger.debug(`[debug] ob11 事件 ctx 构建完成 isPrivate=${ctx.isPrivate} player=${ctx.player && ctx.player.userId} group=${ctx.group && ctx.group.groupId}`);
+        await MessagePipeline.handleNonCommand(ctx, msg, message);
     }
 
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */
-    static async handleNonCommand(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    static async handleNonCommand(ctx: seal.MsgContext, msg: seal.Message, ob11Segments?: any[]): Promise<void> {
         const { IGNORE_PRIVATE: disabledInPrivate, IGNORE_REGEX: ignoreRegex, IGNORE_CONDITION } = Config.received;
         const { TRIGGER_REGEX: triggerRegex, TRIGGER_CONDITION: triggerCondition } = Config.trigger;
 
@@ -172,13 +197,24 @@ export class MessagePipeline {
         const message = msg.message;
         // ob11 网络连接依赖以 OneBot 消息段数组传入时，走独立解析（卡片/视频/音乐/文件/消息节点/合并转发）；
         // 海豹原生 CQ 码字符串路径保持不变
-        const messageArray = Array.isArray(message)
+        if (Array.isArray(ob11Segments) || Array.isArray(message)) {
+            logger.debug('[debug] handleNonCommand 数组消息开始展开');
+        }
+        const messageArray = Array.isArray(ob11Segments)
+            ? await this.expandOb11Segments(ctx, ob11Segments)
+            : Array.isArray(message)
             ? await this.expandOb11Segments(ctx, message)
             : transformTextToArray(message);
+        if (Array.isArray(ob11Segments) || Array.isArray(message)) {
+            logger.debug('[debug] handleNonCommand 数组消息展开完成');
+        }
         // 正则匹配统一使用可读文本：原生路径保持原字符串，数组路径用展开后的文本
-        const messageText = Array.isArray(message)
+        const messageText = Array.isArray(ob11Segments) || Array.isArray(message)
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;
+        if (Array.isArray(ob11Segments) || Array.isArray(message)) {
+            logger.info(`[debug] ob11 消息展开: ${messageText.slice(0, 200)}`);
+        }
 
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
