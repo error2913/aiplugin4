@@ -1,7 +1,7 @@
 // 版本更新日志（updateInfo），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const updateInfo: { [version: string]: string } = {
-    "4.14.0": `## 新功能
+    "4.13.5": `## 新功能
 - 接收卡片/视频/音乐/文件/语音/合并转发消息：订阅 ob11 网络连接依赖事件分发，把核心 milky 原生路径过滤掉的段接入非指令管线（黑名单/忽略/触发/待机全部生效），合并转发自动展开为可读文本，过长走既有压缩
 - 多模态模型支持：图片模型配置 use=chat 后可直接当对话模型用（.ai model 选择），上下文中的图片以 image_url 内容直接传给模型，不再转成文本标签；URL 图片自动转 base64（失败保留原 URL），兼容 anthropic 视觉模型
 - 技能配置兼容标准 SKILL.md：可直接粘贴 Claude/Codex/Cursor 的技能文件，frontmatter 的 name/description 自动解析为技能名与摘要
