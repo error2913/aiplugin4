@@ -1,6 +1,15 @@
 // 版本更新日志（updateInfo），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const updateInfo: { [version: string]: string } = {
+    "4.13.4": `## 新功能
+- 对外 API（globalThis.aiplugin4）新增三种模型直接调用：chatMessages（传入 OpenAI 风格 messages 数组调用对话模型）、imageToText（识图）、embed（文本向量），其他插件可构建消息直接拿回复
+- web_read 工具新增网页截图能力（screenshot=true，支持宽高/整页/延时），截图返回图片可直接发送
+## 优化
+- seal.d.ts 类型补齐（配置注册 group 参数、async solve），启用 strict 类型检查
+- 移除 globalThis.http 旧依赖兜底，统一使用 ob11 网络连接依赖
+- 新增 AGENT.md 代理协作速查文档
+## 修复
+- 修复工具调用后孤立 tool 消息导致的 API 报错（tool 消息缺少对应 tool_calls）`,
     "4.13.3": `## 新功能
 - 新增 run_command 工具：读取海豹扩展指令表列出可用指令（action=list 不含帮助），并可调用白名单内的海豹指令（action=call，开启「是否允许调用所有指令」后可调用任意指令）；配套 get_cmd_help 工具按名查看指令帮助
 - 新增「可调用指令白名单」「是否允许调用所有指令」配置（工具页签）；指令技能（今日人品/COC 模组/属性展示/检定/san检定）统一改为通过 run_command 调用
