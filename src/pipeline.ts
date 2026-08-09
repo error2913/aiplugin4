@@ -1,45 +1,17 @@
 // 消息管线：接收 → 过滤（忽略/触发）→ 会话 → 智能体，统一处理非指令/指令/机器人自身消息
 import { BlockManager } from "./block";
-import Config from "./config/config";
+import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
-import { MessageSegment, transformTextToArray } from "./utils/string";
+import { createCtx, createMsg } from "./utils/seal";
+import { MessageSegment, parseCardToText, parseMusicToText, transformTextToArray } from "./utils/string";
 
-/** 解析 QQ 卡片消息（CQ:json 的 data 字段），提取标题/描述/链接等可读文本 */
-function parseCardToText(raw: string): string {
-    if (!raw) return '[卡片消息]';
-
-    let obj: any = null;
-    try {
-        obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    } catch (_e) {
-        return `[卡片消息] ${raw.slice(0, 200)}`;
-    }
-
-    const str = (v: any): string => (typeof v === 'string' && v.trim()) ? v.trim() : '';
-
-    // 常见卡片结构：view / meta.news / meta.detail 等
-    const view = (obj && (obj.view || (obj.meta && (obj.meta.news || obj.meta.detail || obj.meta.article)))) || obj || {};
-    const title = str(view.title) || str(obj.desc) || str(view.desc) || '';
-    const desc = str(view.desc) || str(view.summary) || (view.news && str(view.news.desc)) || '';
-    const url = str(view.url) || str(view.jumpUrl) || (view.news && str(view.news.jumpUrl)) || (view.detail && str(view.detail.jumpUrl)) || '';
-
-    const parts = [title, desc].filter(Boolean);
-    if (parts.length === 0) return '[卡片消息]';
-    return `【卡片】${parts.join('\n')}${url ? `\n${url}` : ''}`;
-}
-
-/** 音乐段转可读文本（data 为 qq/163 id 或 custom 对象） */
-function parseMusicToText(data: any): string {
-    if (data && data.title) return `【音乐】${data.title}`;
-    const type = data && data.type ? String(data.type) : '';
-    const id = data && data.id ? String(data.id) : '';
-    return `【音乐】${type}${id ? ` ${id}` : ''}`;
-}
+/** 海豹核心原生 milky 接收路径会过滤掉的段类型，只能通过 ob11 依赖的事件分发（milky → OB11 转接）收到 */
+const OB11_EXTRA_SEGMENT_TYPES = new Set(['json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
 
 export class MessagePipeline {
     /** ob11 数组消息段 → MessageSegment[]：把卡片/视频/音乐/文件/消息节点/合并转发展开为文本段，其余段保留 */
@@ -55,7 +27,8 @@ export class MessagePipeline {
                     break;
                 }
                 case 'file': {
-                    result.push({ type: 'text', data: { text: `【文件】${data.file || ''}` } });
+                    // milky 转接与 NapCat 的 file 段字段略有差异（file/name/file_id），统一取可用值
+                    result.push({ type: 'text', data: { text: `【文件】${data.name || data.file || data.file_id || ''}` } });
                     break;
                 }
                 case 'video': {
@@ -87,6 +60,9 @@ export class MessagePipeline {
     /** 消息节点（node）转可读文本：完整节点递归内容，仅 id 时走 ob11 获取 */
     private static async parseNodeToText(ctx: seal.MsgContext, data: any): Promise<string> {
         const name = (data && (data.nickname || data.name)) || (data && data.user_id ? `用户${data.user_id}` : '');
+        if (data && typeof data.content === 'string') {
+            return `${name}: ${data.content}`;
+        }
         if (data && Array.isArray(data.content)) {
             const segs = await this.expandOb11Segments(ctx, data.content);
             let text = '';
@@ -100,6 +76,60 @@ export class MessagePipeline {
             return text ? `${name}:\n${text}` : `【消息节点】${name}`;
         }
         return `【消息节点】${name}`;
+    }
+
+    /** 订阅 ob11 网络连接依赖的事件分发：核心原生 milky 路径会丢弃视频/文件/卡片/合并转发等段，
+     *  这些段只有依赖的 OneBot 事件流（milky → OB11 转接）能拿到，在此接入并走同一套非指令管线 */
+    static subscribeOb11Receive(): void {
+        const net = (globalThis as any).net;
+        if (!net || typeof net.getEventDispatcher !== 'function') return;
+        net.getEventDispatcher(ext).then((ed: any) => {
+            ed.onMessageEvent = async (_epId: string, event: any) => {
+                try {
+                    await MessagePipeline.handleOb11Event(event);
+                } catch (e) {
+                    logger.error(`ob11 事件消息处理出错:${e instanceof Error ? e.message : String(e)}`);
+                }
+            };
+        }).catch((e: any) => {
+            logger.error(`订阅 ob11 事件分发失败:${e instanceof Error ? e.message : String(e)}`);
+        });
+    }
+
+    /** ob11 事件消息（OneBot 消息段数组）：仅处理核心原生路径收不到的段类型，避免与核心回调重复处理 */
+    private static async handleOb11Event(event: any): Promise<void> {
+        if (!event || event.post_type !== 'message') return;
+        const message = event.message;
+        if (!Array.isArray(message)) return;
+        if (event.user_id === event.self_id) return; // 机器人自己的消息（核心原生路径会忽略，这里保持一致）
+        if (!message.some((seg: any) => seg && OB11_EXTRA_SEGMENT_TYPES.has(seg.type))) return;
+
+        // 按端点解析平台前缀（默认 QQ），并构造与核心回调一致的 ctx/msg
+        const eps = seal.getEndPoints();
+        let epId = `QQ:${event.self_id}`;
+        for (const ep of eps) {
+            if (ep.userId === epId) break;
+            if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
+        }
+        const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+        const uid = `${prefix}:${event.user_id}`;
+        const isPrivate = event.message_type !== 'group';
+        const gid = isPrivate ? '' : `${prefix}-Group:${event.group_id}`;
+
+        const msg = createMsg(isPrivate ? 'private' : 'group', uid, gid);
+        msg.platform = prefix;
+        msg.message = message as any; // 消息段数组，交给 expandOb11Segments 展开
+        msg.time = event.time || 0;
+        msg.rawId = event.message_id ?? 0;
+        msg.sender.nickname = (event.sender && (event.sender.card || event.sender.nickname)) || '';
+        msg.sender.userId = uid;
+
+        const ctx = createCtx(epId, msg);
+        if (!ctx) {
+            logger.warning(`ob11 事件消息未找到通信端点: ${epId}，跳过`);
+            return;
+        }
+        await MessagePipeline.handleNonCommand(ctx, msg);
     }
 
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */
@@ -140,6 +170,10 @@ export class MessagePipeline {
         const messageArray = Array.isArray(message)
             ? await this.expandOb11Segments(ctx, message)
             : transformTextToArray(message);
+        // 正则匹配统一使用可读文本：原生路径保持原字符串，数组路径用展开后的文本
+        const messageText = Array.isArray(message)
+            ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
+            : message;
 
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
@@ -147,8 +181,8 @@ export class MessagePipeline {
             return;
         }
 
-        if (ignoreRegex.test(message)) {
-            logger.info(`非指令消息忽略:${message}`);
+        if (ignoreRegex.test(messageText)) {
+            logger.info(`非指令消息忽略:${messageText}`);
             return;
         }
 
@@ -159,7 +193,7 @@ export class MessagePipeline {
             session.context.timer = null;
 
             // 非指令消息触发（受会话开关控制）
-            if (session.setting.regexTrigger && triggerRegex.test(message)) {
+            if (session.setting.regexTrigger && triggerRegex.test(messageText)) {
                 const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
                 if (fmtCondition === 1) {
                     return session.handleReceipt(ctx, msg, messageArray)
@@ -175,7 +209,7 @@ export class MessagePipeline {
                     let keywordMatched = true;
                     if (condition.keyword) {
                         try {
-                            keywordMatched = new RegExp(condition.keyword).test(message);
+                            keywordMatched = new RegExp(condition.keyword).test(messageText);
                         } catch (e) {
                             logger.error(`触发关键词正则错误，已忽略该条件:${condition.keyword}，错误信息:${e instanceof Error ? e.message : String(e)}`);
                             keywordMatched = false;
