@@ -34,7 +34,7 @@ export function registerContext() {
         if (ctx_type === "private") {
             const ui = await session.context.findUser(ctx, name, true);
             if (ui === null) return `未找到<${name}>`;
-            if (ui.userId === ctx.player.userId && ctx.isPrivate) return `向当前私聊发送消息无需调用函数`;
+            if (ui.userId === ctx.player!.userId && ctx.isPrivate) return `向当前私聊发送消息无需调用函数`;
             if (ui.userId === ctx.endPoint.userId) return `禁止向自己发送消息`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
@@ -42,7 +42,7 @@ export function registerContext() {
         } else if (ctx_type === "group") {
             const gi = await session.context.findGroup(ctx, name);
             if (gi === null) return `未找到<${name}>`;
-            if (gi.groupId === ctx.group.groupId) return `向当前群聊发送消息无需调用函数`;
+            if (gi.groupId === ctx.group!.groupId) return `向当前群聊发送消息无需调用函数`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);

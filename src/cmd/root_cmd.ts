@@ -96,8 +96,8 @@ export function registerCmd() {
 
             const subCmd = aliasToCmd(cmdArgs.getArgN(1));
             if (Object.prototype.hasOwnProperty.call(SubCmd.map, aliasToCmd(subCmd))) {
-                const uid = ctx.player.userId;
-                const gid = ctx.group.groupId;
+                const uid = ctx.player!.userId;
+                const gid = ctx.group!.groupId;
                 const epId = ctx.endPoint.userId;
                 const sid = ctx.isPrivate ? uid : gid;
 

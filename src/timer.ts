@@ -67,8 +67,8 @@ export class TimerManager {
     }
 
     static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string) {
-        const uid = ctx.player.userId;
-        const gid = ctx.group.groupId;
+        const uid = ctx.player!.userId;
+        const gid = ctx.group!.groupId;
         const sessionId = ctx.isPrivate ? uid : gid;
         const timer = new TimerInfo();
         timer.sid = sessionId;
@@ -92,8 +92,8 @@ export class TimerManager {
     }
 
     static addIntervalTimer(ctx: seal.MsgContext, session: Session, interval: number, count: number, content: string) {
-        const uid = ctx.player.userId;
-        const gid = ctx.group.groupId;
+        const uid = ctx.player!.userId;
+        const gid = ctx.group!.groupId;
         const sessionId = ctx.isPrivate ? uid : gid;
         const timer = new TimerInfo();
         timer.sid = sessionId;
@@ -120,8 +120,8 @@ export class TimerManager {
     }
 
     static addActiveTimeTimer(ctx: seal.MsgContext, session: Session, target: number) {
-        const uid = ctx.player.userId;
-        const gid = ctx.group.groupId;
+        const uid = ctx.player!.userId;
+        const gid = ctx.group!.groupId;
         const sessionId = ctx.isPrivate ? uid : gid;
         const timer = new TimerInfo();
         timer.sid = sessionId;

@@ -49,8 +49,8 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
         if (messageArray.length === 0) return '';
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
-        const uid = ctx.player.userId;
+        const gid = ctx.group!.groupId;
+        const uid = ctx.player!.userId;
         if (msg.messageType === 'private') {
             const result = await sendPrivateMsg(epId, uid.replace(/^.+:/, ''), messageArray);
             if (result?.message_id) {

@@ -53,7 +53,7 @@ export function registerCmdMemory() {
         const { ctx, msg, cmdArgs, epId, session, page, ret  } = scc;
 
         const sessionCtx = seal.getCtxProxyFirst(ctx, cmdArgs);
-        const targetUserId = sessionCtx.player.userId;
+        const targetUserId = sessionCtx.player!.userId;
 
         const targetSession = getSession(targetUserId);
         const val2 = cmdArgs.getArgN(2);
@@ -110,8 +110,8 @@ export function registerCmdMemory() {
                         targetSession.memory.deleteMemory(idList, kw);
                         seal.replyToSender(ctx, msg, targetSession.memory.getLatestMemoryListText({
                             isPrivate: true,
-                            id: sessionCtx.player.userId,
-                            name: sessionCtx.player.name
+                            id: sessionCtx.player!.userId,
+                            name: sessionCtx.player!.name
                         }, page) || '记忆已全部清除');
                         targetSession.save();
                         return ret;
@@ -119,8 +119,8 @@ export function registerCmdMemory() {
                     case 'list': {
                         seal.replyToSender(ctx, msg, targetSession.memory.getLatestMemoryListText({
                             isPrivate: true,
-                            id: sessionCtx.player.userId,
-                            name: sessionCtx.player.name
+                            id: sessionCtx.player!.userId,
+                            name: sessionCtx.player!.name
                         }, page) || '无记忆');
                         return ret;
                     }
@@ -184,8 +184,8 @@ export function registerCmdMemory() {
                         session.memory.deleteMemory(idList, kw);
                         seal.replyToSender(ctx, msg, session.memory.getLatestMemoryListText({
                             isPrivate: false,
-                            id: ctx.group.groupId,
-                            name: ctx.group.groupName
+                            id: ctx.group!.groupId,
+                            name: ctx.group!.groupName
                         }, page) || '记忆已全部清除');
                         session.save();
                         return ret;
@@ -193,8 +193,8 @@ export function registerCmdMemory() {
                     case 'list': {
                         seal.replyToSender(ctx, msg, session.memory.getLatestMemoryListText({
                             isPrivate: false,
-                            id: ctx.group.groupId,
-                            name: ctx.group.groupName
+                            id: ctx.group!.groupId,
+                            name: ctx.group!.groupName
                         }, page) || '无记忆');
                         return ret;
                     }

@@ -87,8 +87,8 @@ export default class Tool {
         cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
 
         const ext = seal.ext.find(eci.extName);
-        if (!Object.prototype.hasOwnProperty.call(ext.cmdMap, eci.cmd)) {
-            Logger.warning(`扩展${eci.extName}中未找到指令:${eci.cmd}`);
+        if (!ext || !Object.prototype.hasOwnProperty.call(ext.cmdMap, eci.cmd)) {
+            Logger.warning(`扩展${eci.extName}未找到或缺少指令:${eci.cmd}`);
             return ['', false];
         }
 

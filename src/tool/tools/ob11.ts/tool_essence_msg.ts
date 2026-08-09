@@ -29,7 +29,7 @@ export function registerEssenceMsg() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
         if (!memberInfo) return `获取权限信息失败`;
@@ -60,7 +60,7 @@ export function registerEssenceMsg() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const essenceMsgList = await getEssenceMsgList(epId, gid.replace(/^.+:/, ''));
         if (!essenceMsgList || !Array.isArray(essenceMsgList)) return `获取群 ${gid} 精华消息列表失败`;
@@ -127,7 +127,7 @@ export function registerEssenceMsg() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
         if (!memberInfo) return `获取权限信息失败`;

@@ -23,7 +23,7 @@ export function registerCmdIgnore() {
         }
 
         const mctx = seal.getCtxProxyFirst(ctx, cmdArgs);
-        const muid = cmdArgs.amIBeMentionedFirst ? epId : mctx.player.userId;
+        const muid = cmdArgs.amIBeMentionedFirst ? epId : mctx.player!.userId;
 
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {

@@ -34,7 +34,7 @@ export function registerRename() {
 
         if (netExists()) {
             const epId = ctx.endPoint.userId;
-            const gid = ctx.group.groupId;
+            const gid = ctx.group!.groupId;
 
             const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
             if (!memberInfo) return `获取权限信息失败`;
@@ -44,14 +44,14 @@ export function registerRename() {
         const ui = await session.context.findUser(ctx, name);
         if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group!.groupId));
 
         try {
             seal.setPlayerGroupCard(ctx, new_name);
             if (session.context.autoNameMod === 2) {
-                ctx.player.name = new_name;
+                ctx.player!.name = new_name;
             }
-            seal.replyToSender(ctx, msg, `已将<${ctx.player.name}>的群名片设置为<${new_name}>`);
+            seal.replyToSender(ctx, msg, `已将<${ctx.player!.name}>的群名片设置为<${new_name}>`);
             return '设置成功';
         } catch (e) {
             logger.error(e);

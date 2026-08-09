@@ -93,7 +93,7 @@ export function registerAgentApi(): void {
         },
         run: async (ctx: seal.MsgContext, msg: seal.Message, options: AgentRunOptions = {}) => {
             const agent = Agent.get(options.agentName || '*');
-            const sessionId = ctx.isPrivate ? ctx.player.userId : ctx.group.groupId;
+            const sessionId = ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId;
             const session = agent.sessionService.getSession(sessionId);
             await session.chat(ctx, msg, options.reason || '外部插件调用', options.toolChoice);
         },

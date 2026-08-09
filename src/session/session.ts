@@ -272,7 +272,7 @@ export class Session {
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
         this.lastCtx = ctx;
         const { content } = await transformArrayToContent(ctx, messageArray);
-        await this.context.addUserMessage(ctx, content, ctx.player.userId, transformMsgId(msg.rawId));
+        await this.context.addUserMessage(ctx, content, ctx.player!.userId, transformMsgId(msg.rawId));
     }
 
     async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}) {

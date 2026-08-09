@@ -15,14 +15,14 @@ export class MessagePipeline {
         const { TRIGGER_REGEX: triggerRegex, TRIGGER_CONDITION: triggerCondition } = Config.trigger;
 
         // 黑名单用户/群的消息不接收不处理
-        const uid = ctx.player.userId;
+        const uid = ctx.player!.userId;
         const blockReason = BlockManager.checkBlock(uid);
         if (blockReason) {
             logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略消息`);
             return;
         }
         if (!ctx.isPrivate) {
-            const gid = ctx.group.groupId;
+            const gid = ctx.group!.groupId;
             const groupBlockReason = BlockManager.checkBlock(gid);
             if (groupBlockReason) {
                 logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略消息`);
@@ -34,7 +34,7 @@ export class MessagePipeline {
             return;
         }
 
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
 
@@ -139,8 +139,8 @@ export class MessagePipeline {
         const { RECEIVE_CMD: allcmd } = Config.received;
         if (!allcmd) return;
 
-        const uid = ctx.player.userId;
-        const gid = ctx.group.groupId;
+        const uid = ctx.player!.userId;
+        const gid = ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
 
@@ -160,8 +160,8 @@ export class MessagePipeline {
 
     /** 机器人自身发送的消息：转发给监听工具，并按配置决定是否记录上下文 */
     static handleBotMessage(ctx: seal.MsgContext, msg: seal.Message): void {
-        const uid = ctx.player.userId;
-        const gid = ctx.group.groupId;
+        const uid = ctx.player!.userId;
+        const gid = ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
 
