@@ -284,9 +284,9 @@ max_tokens = 2048
 | 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/stream-output)，`body.stream = true` 的模型才会走流式 |
 | 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
 | 联网搜索 | [searxng](https://github.com/searxng/searxng)，有能力建议自己搭建，为 AI 提供联网搜索功能 |
-| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/web-read)，为 AI 提供网页详细内容获取功能 |
+| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/web-read)，为 AI 提供网页详细内容获取功能（MCP，默认 `http://127.0.0.1:46799/mcp`） |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/usage-chart)，token 使用情况图表生成 |
-| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/md-html-render)，将 Markdown/HTML 渲染为图片 |
+| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/md-html-render)，将 Markdown/HTML 渲染为图片（MCP，默认 `http://127.0.0.1:37632/mcp`） |
 | 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
 | 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
 | 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |

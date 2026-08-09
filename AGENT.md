@@ -25,11 +25,14 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 ## 代码导航
 
 - `src/index.ts`：装配入口，只做注册；事件处理统一走 `src/pipeline.ts`。
+- `src/event/`：事件接入与分发（含 ob11 数组消息、文件/卡片/合并转发展开等特殊路径）。
 - `src/agent/`：智能体编排（run/runStream、对外 API `globalThis.aiplugin4`）。
+- `src/context/`、`src/session/`：会话与上下文管理；`src/prompt/`：提示词组装。
 - `src/tool/`：工具系统（注册表、MCP、skills、按需加载；内置工具在 `src/tool/tools/`）。
 - `src/config/`：配置注册/读取与静态常量；`src/model/`：对话/图片/嵌入模型。
-- `src/cmd/`：`.ai` 命令系统与权限；`src/memory/`：记忆与知识库。
+- `src/cmd/`：`.ai` 命令系统与权限；`src/memory/`：记忆与知识库；`src/resource/`：资源；`src/utils/`：通用工具。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 04 工具系统 / 05 命令配置 / 07 开发指南 / 09 常见问题）。
+- `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）。
 - `examples/use-aiplugin4.js`：演示外部插件调用对外 API 的可加载示例。
 
 ## 开发约定（务必遵守）
@@ -59,10 +62,15 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 2. 推送 `v<版本>` 标签 → GitHub Actions `release.yml` 自动：verify（校验标签与 VERSION/update.ts 一致）→ `node scripts/build-release.js` 打包（本体 JS + 本体豹包 + 完整豹包）→ 用 `SEALPACK_TOKEN` 发布两个豹包到 SealRepo → 从 `update.ts` 提取版本日志创建 GitHub Release。
 3. 完整包依赖插件在 `scripts/deps.cjs` 的 `dependencies` 配置（`url` 为 raw 地址）；包图标 `sealpack/assets/icon.png`；SealRepo Token 放仓库 secrets（`SEALPACK_TOKEN`）。
 
+## CI 工作流
+
+- `build-check.yml`：push 到 main / `refactor/**` 及 PR 时跑 lint、类型检查与构建，保证主分支可编译。
+- `release.yml`：推送 `v<版本>` 标签触发发布（流程见上）。
+
 ## 测试
 
 - 本地冒烟：`npm run build && npm run smoke`。
-- 海豹面板 / QQ 环境测试：使用 Codex 技能 `aiplugin4-test-suite`（全量/单项/重载/配置调试用例），面板自动化与 qqmcp 复用 `sealdice-plugin-dev` 技能。
+- 海豹面板 / QQ 环境测试：使用 Codex 技能 `aiplugin4-test-suite`（全量/单项/重载/配置调试用例，技能本体在 `skills/aiplugin4-test-suite/`），面板自动化与 qqmcp 复用 `sealdice-plugin-dev` 技能。
 - 面板 API 登录注意：新版海豹 signin 不是明文密码——先 `GET /sd-api/signin/salt` 拿盐，密码经 PBKDF2-SHA512(password, salt, 1000, 32) 哈希后拼成 `base64("v01"+salt+迭代数+derived)` 提交（本机工具脚本见 `.dev/panel-api.ps1`、`.dev/sign-hash.mjs`，`.dev/` 已 gitignore）。
 
 ## 常见坑速查

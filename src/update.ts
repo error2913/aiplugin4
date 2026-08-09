@@ -4,6 +4,7 @@ export const updateInfo: { [version: string]: string } = {
     "4.13.4": `## 新功能
 - 对外 API（globalThis.aiplugin4）新增三种模型直接调用：chatMessages（传入 OpenAI 风格 messages 数组调用对话模型）、imageToText（识图）、embed（文本向量），其他插件可构建消息直接拿回复
 - web_read 工具新增网页截图能力（screenshot=true，支持宽高/整页/延时），截图返回图片可直接发送
+- web_read / render_markdown / render_html 后端改为 MCP（Streamable HTTP）调用，配置默认值指向 /mcp 端点；后端 REST 接口保留兼容
 ## 优化
 - seal.d.ts 类型补齐（配置注册 group 参数、async solve），启用 strict 类型检查
 - 移除 globalThis.http 旧依赖兜底，统一使用 ob11 网络连接依赖
