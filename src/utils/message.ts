@@ -124,9 +124,30 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session): Pr
         }
 
         if (toolCalls.length === 0) {
+            // assistant 的 tool_calls 全部被过滤时，同步删除其后跟随的 tool 消息，避免孤立
+            for (let j = i + 1; j < messages.length && messages[j].role === 'tool'; j++) {
+                messages.splice(j, 1);
+                j--;
+            }
             messages.splice(i, 1);
             i--;
         }
+    }
+
+    // 清理孤立 tool 消息：前面不存在对应 assistant tool_calls 的 tool 结果直接丢弃，
+    // 避免发送给 API 时出现 "role 'tool' 必须跟在对应 tool_calls 之后" 报错（如上下文被裁剪后残留）
+    const toolCallIdSet = new Set<string>();
+    for (const message of messages) {
+        const toolCalls = message.toolCalls || message.tool_calls;
+        if (message.role === 'assistant' && toolCalls) {
+            for (const tc of toolCalls) toolCallIdSet.add(tc.id);
+        }
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (message.role !== 'tool') continue;
+        const id = message.toolCallId || message.tool_call_id || '';
+        if (!toolCallIdSet.has(id)) messages.splice(i, 1);
     }
 
     return messages.map(message => ({
