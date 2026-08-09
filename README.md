@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.13.4-green)
+![Version](https://img.shields.io/badge/Version-4.14.0-green)
 
 ## 快速开始
 
@@ -35,7 +35,7 @@ max_tokens = 2048
 
 - `provider` / `base_url` 可以省略（deepseek / openai / google / zhipu / alibaba / anthropic / moonshot / xai / mistral / siliconflow 会自动识别），也可以显式填写 `base_url`；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式；
-- 图片识别需要配置「图片模型」（`use = ["image-understanding"]`），向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度需与「向量维度」配置一致）；
+- 图片识别需要配置「图片模型」（`use = ["image-understanding"]`）；如果模型支持视觉，可在「图片模型」的 `use` 里加 `chat` 把它当多模态对话模型用（上下文中的图片直接传给模型）；向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度需与「向量维度」配置一致）；
 - 默认对话模型取列表第一项，可在群里用 `.ai model <模型名>` 切换，`.ai model clr` 恢复默认。
 
 ### 4. 设置触发与角色
@@ -156,7 +156,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 对话模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）；`provider` / `base_url` 可省略自动识别；默认对话模型取列表第一项；可选 `[body]` 覆盖请求参数 |
-| 图片模型 | TOML 格式，`use` 填 `["image-understanding"]`（图片理解），用于图片识别 |
+| 图片模型 | TOML 格式，`use` 可选 `["image-understanding"]`（图片理解/图片转文字）或 `["chat"]`（多模态对话：作为对话模型使用，上下文中的图片直接传给模型），也可两者并存 |
 | 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`（文本嵌入），输出维度需与「向量维度」配置一致 |
 
 ```toml
@@ -209,6 +209,7 @@ max_tokens = 2048
 | 忽略私聊消息 | 开启后私聊消息不触发 AI |
 | 忽略消息豹语条件 | 命中为 1 时忽略，可填豹语表达式限制忽略范围 |
 | 忽略消息正则表达式 | 匹配的消息不会被接收录入上下文 |
+| ob11 额外消息接收 | 安装 ob11 网络连接依赖后，卡片/视频/音乐/文件/语音/合并转发消息经其事件分发接入（核心 milky 原生路径会过滤这些段），合并转发自动展开为可读文本 |
 
 ### 消息触发
 
@@ -243,8 +244,8 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启；修改后保存并重载 JS |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启；修改后保存并重载 JS |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
-| MCP服务器配置 | 每行一个：`名称|URL|Token`，示例 `mcp-files-exec|http://127.0.0.1:3910|token`，或 JSON `{"name":"qq","url":"...","token":"..."}`；修改后重载 JS |
-| 技能配置 | 每行一个：`名称|描述|内容`，示例 `骰点|TRPG百分比检定|使用 1d100 进行检定…`，或 JSON；修改后重载 JS |
+| MCP服务器配置 | 每条配置项一个：`名称|URL|Token`（示例 `mcp-files-exec|http://127.0.0.1:3910|token`）、单服务器 JSON，或直接粘贴标准 `mcpServers` JSON（Claude/Cursor/.mcp.json 格式，支持自定义 headers）；stdio 服务器会跳过；修改后重载 JS |
+| 技能配置 | 每条配置项一个：`名称|描述|内容`、JSON，或直接粘贴标准 SKILL.md（其他 agent 的技能文件，frontmatter 的 name/description 自动解析）；修改后重载 JS |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要 aitts 依赖插件和 ffmpeg |
 
 ### 记忆
@@ -449,7 +450,7 @@ max_tokens = 2048
 - 嵌入模型输出维度必须与「向量维度」配置一致，否则记忆/知识库向量生成会报错；
 - 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；`body.stream = true` 的模型才会走流式；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
-- CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）。
+- CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）；卡片/视频/文件/语音/合并转发等段经 ob11 事件分发接收，不受该白名单限制。
 
 ### 常见问题处理
 
