@@ -99,7 +99,7 @@ export class Context {
         // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
         if (this.autoNameMod > 0) {
             try {
-                await this.updateName(ctx.endPoint.userId, ctx.group.groupId, userId);
+                await this.updateName(ctx.endPoint.userId, ctx.group!.groupId, userId);
             } catch (e) {
                 Logger.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
@@ -229,7 +229,7 @@ export class Context {
         const match = name.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
         if (match) name = match[1] || match[2];
 
-        if (name === ctx.player.name) return returnUserId(ctx.player.userId);
+        if (name === ctx.player!.name) return returnUserId(ctx.player!.userId);
         if (name === seal.formatTmpl(ctx, "核心:骰子名字")) return returnUserId(ctx.endPoint.userId);
 
         // 在上下文和记忆中查找用户
@@ -243,7 +243,7 @@ export class Context {
         // 在群成员列表、好友列表中查找用户
         if (netExists()) {
             const epId = ctx.endPoint.userId;
-            const gid = ctx.group.groupId;
+            const gid = ctx.group!.groupId;
 
             if (!ctx.isPrivate) {
                 const groupMemberList = await getGroupMemberList(epId, gid.replace(/^.+:/, ''));
@@ -262,7 +262,7 @@ export class Context {
             }
         }
 
-        if (name.length > 4 && levenshteinDistance(name, ctx.player.name) <= 2) return returnUserId(ctx.player.userId);
+        if (name.length > 4 && levenshteinDistance(name, ctx.player!.name) <= 2) return returnUserId(ctx.player!.userId);
 
         Logger.warning(`未找到用户<${name}>`);
         return '';
@@ -331,7 +331,7 @@ export class Context {
         const match = groupName.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
         if (match) groupName = match[1] || match[2];
 
-        if (groupName === ctx.group.groupName) return ctx.group.groupId;
+        if (groupName === ctx.group!.groupName) return ctx.group!.groupId;
 
         // 在记忆中查找群聊
         for (const groupId of MemoryService.getItemsFromRelatedMemories(this.session, 'groups')) {
@@ -350,7 +350,7 @@ export class Context {
             }
         }
 
-        if (groupName.length > 4 && levenshteinDistance(groupName, ctx.group.groupName) <= 2) return ctx.group.groupId;
+        if (groupName.length > 4 && levenshteinDistance(groupName, ctx.group!.groupName) <= 2) return ctx.group!.groupId;
 
         Logger.warning(`未找到群聊<${groupName}>`);
         return '';

@@ -186,19 +186,19 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
             }
             case 'at': {
                 const epId = ctx.endPoint.userId;
-                const gid = ctx.group.groupId;
+                const gid = ctx.group!.groupId;
                 const uid = `QQ:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
-                const name = ctx.player.name || '未知用户';
+                const name = ctx.player!.name || '未知用户';
                 content += `<|at:${name}|>`;
                 break;
             }
             case 'poke': {
                 const epId = ctx.endPoint.userId;
-                const gid = ctx.group.groupId;
+                const gid = ctx.group!.groupId;
                 const uid = `QQ:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
-                const name = ctx.player.name || '未知用户';
+                const name = ctx.player!.name || '未知用户';
                 content += `<|poke:${name}|>`;
                 break;
             }

@@ -41,7 +41,7 @@ export async function buildSystemPromptContent(
             const u = User.get(lastItem.userId);
             ui = { isPrivate: true, id: lastItem.userId, name: u.userName || lastItem.userId };
         }
-        gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
+        gi = { isPrivate: false, id: ctx.group!.groupId, name: ctx.group!.groupName };
     }
 
     // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
@@ -56,8 +56,8 @@ export async function buildSystemPromptContent(
         instruction: roleSetting,
         platform: ctx.endPoint.platform,
         sessionType: ctx.isPrivate ? 'private' : 'group',
-        sessionName: ctx.isPrivate ? ctx.player.name : ctx.group.groupName,
-        sessionId: ctx.isPrivate ? ctx.player.userId : ctx.group.groupId,
+        sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
+        sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
         RECEIVE_IMAGE,
         LOCAL_IMAGES: localImages,
         LOCAL_AUDIOS: localAudios,

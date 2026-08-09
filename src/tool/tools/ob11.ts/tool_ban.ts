@@ -34,7 +34,7 @@ export function registerBan() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
         const ui = await session.context.findUser(ctx, name);
 
         if (ui === null) return `未找到<${name}>`;
@@ -76,7 +76,7 @@ export function registerBan() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         await setGroupWholeBan(epId, gid.replace(/^.+:/, ''), enable);
         return `已${enable ? '开启' : '关闭'}全员禁言`;
@@ -100,7 +100,7 @@ export function registerBan() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const groupShutList = await getGroupShutList(epId, gid.replace(/^.+:/, ''));
         if (!groupShutList || !Array.isArray(groupShutList)) return `获取禁言列表失败`;

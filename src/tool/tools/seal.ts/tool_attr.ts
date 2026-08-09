@@ -31,7 +31,7 @@ export function registerAttrSeal() {
         const ui = await session.context.findUser(ctx, name);
         if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
+        ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group!.groupId));
 
         const value = seal.vars.intGet(ctx, attr)[0];
         return `${attr}: ${value}`;
@@ -64,7 +64,7 @@ export function registerAttrSeal() {
         const ui = await session.context.findUser(ctx, name);
         if (ui === null) return `未找到<${name}>`;
 
-        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group.groupId));
+        ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group!.groupId));
 
         const [attr, expr] = expression.split('=');
         if (expr === undefined) return `修改失败，表达式 ${expression} 格式错误`;

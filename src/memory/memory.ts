@@ -199,8 +199,8 @@ export default class MemoryService {
         if (!ctx.isPrivate) {
             s += this.buildMemory({
                 isPrivate: false,
-                id: ctx.group.groupId,
-                name: ctx.group.groupName
+                id: ctx.group!.groupId,
+                name: ctx.group!.groupName
             }, await this.getTopScoreMemoryList(text, users, groups));
         }
         return s;

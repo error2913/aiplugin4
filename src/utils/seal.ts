@@ -16,7 +16,7 @@ export function createCtx(epId: string, msg: seal.Message): seal.MsgContext | un
         if (eps[i].userId === epId) {
             const ctx = seal.createTempCtx(eps[i], msg);
             ctx.isPrivate = msg.messageType === 'private';
-            if (ctx.player.userId === epId) ctx.player.name = seal.formatTmpl(ctx, "核心:骰子名字");
+            if (ctx.player!.userId === epId) ctx.player!.name = seal.formatTmpl(ctx, "核心:骰子名字");
             return ctx;
         }
     }
@@ -39,5 +39,5 @@ export function getSessionCtxAndMsg(epId: string, sid: string, isPrivate: boolea
 }
 
 export function getSessionId(ctx: seal.MsgContext): string {
-    return ctx.isPrivate ? ctx.player.userId : ctx.group.groupId;
+    return ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId;
 }

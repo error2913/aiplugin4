@@ -111,7 +111,7 @@ export function registerRecord() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const characterId = characterMap[character];
         await sendGroupAISound(epId, characterId, gid.replace(/^.+:/, ''), text);

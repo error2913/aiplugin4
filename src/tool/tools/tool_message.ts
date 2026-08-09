@@ -51,8 +51,8 @@ export function registerMessage() {
 
         const { SHOW_NUMBER: showNumber = true } = Config.message;
         const source = ctx.isPrivate ?
-            `来自<${ctx.player.name}>${showNumber ? `(${ctx.player.userId.replace(/^.+:/, '')})` : ``}` :
-            `来自群聊<${ctx.group.groupName}>${showNumber ? `(${ctx.group.groupId.replace(/^.+:/, '')})` : ``}`;
+            `来自<${ctx.player!.name}>${showNumber ? `(${ctx.player!.userId.replace(/^.+:/, '')})` : ``}` :
+            `来自群聊<${ctx.group!.groupName}>${showNumber ? `(${ctx.group!.groupId.replace(/^.+:/, '')})` : ``}`;
 
         const segs = parseSpecialTokens(content);
         const originalImages: Image[] = [];
@@ -71,7 +71,7 @@ export function registerMessage() {
         if (msg_type === "private") {
             const ui = await session.context.findUser(ctx, name, true);
             if (ui === null) return `未找到<${name}>`;
-            if (ui.userId === ctx.player.userId && ctx.isPrivate) return `向当前私聊发送消息无需调用函数`;
+            if (ui.userId === ctx.player!.userId && ctx.isPrivate) return `向当前私聊发送消息无需调用函数`;
             if (ui.userId === ctx.endPoint.userId) return `禁止向自己发送消息`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
@@ -79,7 +79,7 @@ export function registerMessage() {
         } else if (msg_type === "group") {
             const gi = await session.context.findGroup(ctx, name);
             if (gi === null) return `未找到<${name}>`;
-            if (gi.groupId === ctx.group.groupId) return `向当前群聊发送消息无需调用函数`;
+            if (gi.groupId === ctx.group!.groupId) return `向当前群聊发送消息无需调用函数`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);
@@ -138,10 +138,10 @@ export function registerMessage() {
 
         const { content } = await transformArrayToContent(ctx, messageArray);
 
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
         const uid = `QQ:${result.sender.user_id}`;
         ({ ctx } = getCtxAndMsg(epId, uid, gid));
-        const name = ctx.player.name || '未知用户';
+        const name = ctx.player!.name || '未知用户';
         const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
 
         return prefix + content;
@@ -170,7 +170,7 @@ export function registerMessage() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const result = await getMsg(epId, transformMsgIdBack(msg_id));
         if (!result) return `获取消息 ${msg_id} 失败`;

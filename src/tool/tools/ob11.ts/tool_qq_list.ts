@@ -76,7 +76,7 @@ export function registerQQList() {
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group.groupId;
+        const gid = ctx.group!.groupId;
 
         const groupMemberList = await getGroupMemberList(epId, gid.replace(/^.+:/, ''));
         if (!groupMemberList || !Array.isArray(groupMemberList)) return `获取群聊成员列表失败`;
