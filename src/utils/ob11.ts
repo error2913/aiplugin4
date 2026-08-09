@@ -4,7 +4,7 @@ import { logger } from "../logger";
 import { MessageSegment } from "./string";
 
 export function getNet() {
-    const net = globalThis.net || globalThis.http;
+    const net = globalThis.net;
     if (!net) {
         logger.warning(`未找到ob11网络连接依赖`);
         return null;
@@ -13,7 +13,7 @@ export function getNet() {
 }
 
 export function netExists(): boolean {
-    const net = globalThis.net || globalThis.http;
+    const net = globalThis.net;
     return net !== null && net !== undefined;
 }
 
