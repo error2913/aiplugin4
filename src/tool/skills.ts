@@ -13,32 +13,61 @@ interface Skill {
 const MAX_SKILL_CONTENT_LENGTH = 4000; // 单次返回的技能内容上限
 const MAX_REF_DEPTH = 2; // 技能间引用的最大解析深度
 
+/** 解析标准 SKILL.md frontmatter（--- 开头，name/description 键值对），兼容 Claude/Codex/Cursor 等 agent 的技能文件 */
+function parseSkillFrontmatter(raw: string): { name?: string, description?: string } {
+    const meta: { name?: string, description?: string } = {};
+    for (const line of raw.split('\n')) {
+        const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+        if (!m) continue;
+        const key = m[1].toLowerCase();
+        const value = m[2].trim().replace(/^['"]|['"]$/g, '');
+        if (!value) continue;
+        if (key === 'name') meta.name = value;
+        else if (key === 'description') meta.description = value;
+    }
+    return meta;
+}
+
+/** 解析单条技能配置：JSON / 标准 SKILL.md / 旧格式 名称|描述|内容 */
+function parseSkillEntry(line: string): { name: string, description: string, content: string } {
+    // JSON 格式：{"name":"骰点","description":"...","content":"..."}
+    if (line.startsWith('{')) {
+        try {
+            const j = JSON.parse(line);
+            return {
+                name: String(j.name || '').trim(),
+                description: String(j.description || '').trim(),
+                content: String(j.content || '').trim()
+            };
+        } catch (e) {
+            Logger.error(`技能配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+            return { name: '', description: '', content: '' };
+        }
+    }
+    // 标准 SKILL.md：--- frontmatter（name/description）--- 正文，可直接粘贴其他 agent 的技能文件
+    const fmMatch = line.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+    if (fmMatch) {
+        const meta = parseSkillFrontmatter(fmMatch[1]);
+        return {
+            name: (meta.name || '').trim(),
+            description: (meta.description || '').trim(),
+            content: fmMatch[2].trim()
+        };
+    }
+    // 旧格式：名称|描述|内容
+    const [name, description = '', ...rest] = line.split('|');
+    return {
+        name: name.trim(),
+        description: description.trim(),
+        content: rest.join('|').trim()
+    };
+}
+
 function getSkills(): Skill[] {
     return seal.ext.getTemplateConfig(ext, "技能配置")
-        .map(line => (line || '').trim())
+        .map(line => (line || '').replace(/\r\n/g, '\n').trim())
         .filter(Boolean)
-        .map(line => {
-            // 支持 JSON 格式：{"name":"骰点","description":"...","content":"..."}
-            if (line.startsWith('{')) {
-                try {
-                    const j = JSON.parse(line);
-                    return {
-                        name: String(j.name || '').trim(),
-                        description: String(j.description || '').trim(),
-                        content: String(j.content || '').trim()
-                    };
-                } catch (e) {
-                    Logger.error(`技能配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
-                    return { name: '', description: '', content: '' };
-                }
-            }
-            const [name, description = '', ...rest] = line.split('|');
-            return {
-                name: name.trim(),
-                description: description.trim(),
-                content: rest.join('|').trim()
-            };
-        })
+        .map(parseSkillEntry)
         .filter(s => s.name);
 }
 

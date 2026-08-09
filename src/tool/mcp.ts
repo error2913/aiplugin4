@@ -8,6 +8,7 @@ interface MCPServer {
     name: string;
     url: string;
     token: string;
+    headers: { [key: string]: string };
 }
 
 interface MCPToolDef {
@@ -26,36 +27,92 @@ interface MCPServerState {
 const TOOLS_CACHE_TTL = 60 * 1000; // 工具列表缓存 60s
 const serverStates: { [name: string]: MCPServerState } = {};
 
-function getMCPServers(): MCPServer[] {
-    return seal.ext.getTemplateConfig(ext, "MCP服务器配置")
-        .map(line => (line || '').trim())
-        .filter(Boolean)
-        .map(line => {
-            // 支持 JSON 格式：{"name":"qq","url":"http://...","token":"..."}
-            if (line.startsWith('{')) {
-                try {
-                    const j = JSON.parse(line);
-                    return { name: String(j.name || '').trim(), url: String(j.url || '').trim(), token: String(j.token || '').trim() };
-                } catch (e) {
-                    Logger.error(`MCP服务器配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
-                    return { name: '', url: '', token: '' };
-                }
-            }
-            const [name, url, token = ''] = line.split('|').map(s => s.trim());
-            return { name, url, token };
-        })
-        .filter(s => s.name && s.url);
+/** 归一化一个 MCP 服务器配置（兼容 Claude Desktop / Cursor .mcp.json 的 mcpServers 条目） */
+function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
+    if (typeof cfg === 'string') {
+        // 简写：{ "name": "http://..." }
+        return { name, url: cfg, token: '', headers: {} };
+    }
+    if (!cfg || typeof cfg !== 'object') return null;
+
+    // stdio 需要拉起子进程，海豹 goja 环境不支持，明确提示后跳过
+    if (cfg.command) {
+        Logger.warning(`MCP 服务器 ${name} 使用 stdio 传输，海豹运行环境无法拉起进程，已跳过；请改用 Streamable HTTP（type=http + url）`);
+        return null;
+    }
+    const type = String(cfg.type || 'http').toLowerCase();
+    if (type !== 'http' && type !== 'streamable-http') {
+        Logger.warning(`MCP 服务器 ${name} 传输类型 ${type} 不受支持（当前仅支持 Streamable HTTP），已跳过`);
+        return null;
+    }
+
+    const headers: { [key: string]: string } = {};
+    if (cfg.headers && typeof cfg.headers === 'object') {
+        for (const [key, value] of Object.entries(cfg.headers)) {
+            if (typeof value === 'string' && value) headers[key] = value;
+        }
+    }
+    let token = String(cfg.token || '').trim();
+    if (token && !headers['Authorization']) headers['Authorization'] = `Bearer ${token}`;
+    // 未单独给 token 时，从 headers 的 Authorization 里取，保持请求逻辑一致
+    const auth = headers['Authorization'] || '';
+    if (!token && auth.startsWith('Bearer ')) token = auth.slice(7).trim();
+
+    return {
+        name: String(cfg.name || name || '').trim(),
+        url: String(cfg.url || '').trim(),
+        token,
+        headers
+    };
 }
 
-async function mcpRequest(url: string, token: string, payload: object, sessionId?: string): Promise<{ status: number, body: any, sessionId?: string }> {
+function getMCPServers(): MCPServer[] {
+    const servers: MCPServer[] = [];
+    for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置").map(l => (l || '').trim()).filter(Boolean)) {
+        if (line.startsWith('{') || line.startsWith('[')) {
+            try {
+                const j = JSON.parse(line);
+                // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
+                if (j && typeof j === 'object' && j.mcpServers && typeof j.mcpServers === 'object') {
+                    for (const [name, cfg] of Object.entries(j.mcpServers)) {
+                        const s = normalizeMCPServer(name, cfg);
+                        if (s) servers.push(s);
+                    }
+                    continue;
+                }
+                // JSON 数组：[{name/url/type/headers...}]
+                if (Array.isArray(j)) {
+                    for (const cfg of j) {
+                        const s = normalizeMCPServer(String((cfg && (cfg.name || cfg.url)) || 'mcp'), cfg);
+                        if (s) servers.push(s);
+                    }
+                    continue;
+                }
+                // 单服务器 JSON：{"name":"qq","url":"http://...","token":"..."} 或 {name: "url"}
+                const s = normalizeMCPServer(String(j.name || j.url || ''), j);
+                if (s) servers.push(s);
+            } catch (e) {
+                Logger.error(`MCP服务器配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+            }
+            continue;
+        }
+        // 旧格式：名称|地址|Token
+        const [name, url, token = ''] = line.split('|').map(s => s.trim());
+        servers.push({ name, url, token, headers: {} });
+    }
+    return servers.filter(s => s.name && s.url);
+}
+
+async function mcpRequest(server: MCPServer, payload: object, sessionId?: string): Promise<{ status: number, body: any, sessionId?: string }> {
     const headers: { [key: string]: string } = {
         "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream"
+        "Accept": "application/json, text/event-stream",
+        ...server.headers
     };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (server.token && !headers["Authorization"]) headers["Authorization"] = `Bearer ${server.token}`;
     if (sessionId) headers["Mcp-Session-Id"] = sessionId;
 
-    const response = await fetch(url, {
+    const response = await fetch(server.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload)
@@ -94,7 +151,7 @@ function formatError(status: number, body: any): string {
 }
 
 async function initialize(server: MCPServer): Promise<string | undefined> {
-    const res = await mcpRequest(server.url, server.token, {
+    const res = await mcpRequest(server, {
         jsonrpc: '2.0',
         id: 1,
         method: 'initialize',
@@ -108,12 +165,12 @@ async function initialize(server: MCPServer): Promise<string | undefined> {
         throw new Error(`MCP initialize 失败: ${formatError(res.status, res.body)}`);
     }
     const sessionId = res.sessionId;
-    await mcpRequest(server.url, server.token, { jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
+    await mcpRequest(server, { jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
     return sessionId;
 }
 
 async function listTools(server: MCPServer, sessionId: string): Promise<MCPToolDef[]> {
-    const res = await mcpRequest(server.url, server.token, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, sessionId);
+    const res = await mcpRequest(server, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, sessionId);
     if (res.body && res.body.error) {
         throw new Error(`MCP tools/list 失败: ${formatError(res.status, res.body)}`);
     }
@@ -122,7 +179,7 @@ async function listTools(server: MCPServer, sessionId: string): Promise<MCPToolD
 }
 
 async function doCallTool(server: MCPServer, sessionId: string, name: string, args: any): Promise<string> {
-    const res = await mcpRequest(server.url, server.token, {
+    const res = await mcpRequest(server, {
         jsonrpc: '2.0',
         id: 3,
         method: 'tools/call',
