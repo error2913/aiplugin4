@@ -3,6 +3,7 @@ import Config from "../../config/config";
 import { logger } from "../../logger";
 import Image from "../../resource/image";
 import { generateId } from "../../utils/utils";
+import { callServerTool } from "../mcp";
 import Tool from "../tool";
 
 export function registerWeb() {
@@ -126,29 +127,17 @@ export function registerWeb() {
     tool.solve = async (_, __, ___, args) => {
         const { url, screenshot = false, width, height, fullPage = false, delay } = args;
         const { WEB_READ: webReadUrl } = Config.backend;
+        const mcpServer = { name: 'web-read', url: webReadUrl, token: '', headers: {} };
 
         if (screenshot) {
             try {
                 logger.info(`网页截图: ${url}`);
-                const response = await fetch(`${webReadUrl}/screenshot`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({ url, width, height, fullPage, delay })
-                });
-
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(`请求失败: ${JSON.stringify(data)}`);
-                }
-                if (data.status !== 'success' || !data.base64) {
-                    throw new Error(data.message || '截图失败');
-                }
+                const base64 = await callServerTool(mcpServer, 'screenshot_url', { url, width, height, fullPage, delay });
+                if (!base64) throw new Error('截图失败');
 
                 const img = new Image();
                 img.imageId = `web_${generateId()}`;
-                img.base64 = data.base64;
+                img.base64 = base64;
                 img.format = 'png';
                 img.description = `网页截图<|img:${img.imageId}|>`;
                 Image.save(img);
@@ -162,33 +151,7 @@ export function registerWeb() {
 
         try {
             logger.info(`读取网页内容: ${url}`);
-
-            const response = await fetch(`${webReadUrl}/scrape`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ url })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(`请求失败: ${JSON.stringify(data)}`);
-            }
-
-            const { title, content, links } = data;
-
-            if (!title && !content && (!links || links.length === 0)) {
-                return `未能从网页中提取到有效内容`;
-            }
-
-            const result = `标题: ${title || "无标题"}\n内容: ${content || "无内容"}\n网页包含链接:\n` +
-                (links && links.length > 0
-                    ? links.map((link: string, index: number) => `${index + 1}. ${link}`).join('\n')
-                    : "无链接");
-
-            return result;
+            return await callServerTool(mcpServer, 'scrape_url', { url });
         } catch (error) {
             logger.error("在web_read中请求出错：", error);
             return `读取网页内容失败: ${error}`;

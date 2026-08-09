@@ -4,7 +4,7 @@ import Logger from "../logger";
 
 import Tool, { toolMap } from "./tool";
 
-interface MCPServer {
+export interface MCPServer {
     name: string;
     url: string;
     token: string;
@@ -220,6 +220,11 @@ async function callTool(server: MCPServer, name: string, args: any): Promise<str
         }
         throw e;
     }
+}
+
+/** 供内置工具直接调用某个 MCP 服务器的工具（如 web-read / md-html-render 后端） */
+export async function callServerTool(server: MCPServer, toolName: string, args: any): Promise<string> {
+    return await callTool(server, toolName, args || {});
 }
 
 /** 获取工具列表（TTL 缓存），并注册新出现的工具 */

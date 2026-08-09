@@ -5,6 +5,7 @@ import Image from "../../../resource/image";
 import { Session } from "../../../session/session";
 import { parseSpecialTokens } from "../../../utils/string";
 import { generateId } from "../../../utils/utils";
+import { callServerTool } from "../../mcp";
 import Tool from "../../tool";
 
 interface RenderResponse {
@@ -15,24 +16,6 @@ interface RenderResponse {
     contentType?: string;
     base64?: string;
     message?: string;
-}
-
-async function postToRenderEndpoint(endpoint: string, bodyData: any): Promise<RenderResponse> {
-    try {
-        const { RENDER: renderUrl } = Config.backend;
-        const res = await fetch(renderUrl + endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(bodyData)
-        });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-
-        const json: RenderResponse = await res.json();
-        return json;
-    } catch (err) {
-        throw new Error('渲染内容失败: ' + (err instanceof Error ? err.message : String(err)));
-    }
 }
 
 async function transformContentToUrlText(ctx: seal.MsgContext, session: Session, content: string): Promise<{ text: string, images: Image[] }> {
@@ -76,12 +59,20 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
 
 // Markdown 渲染
 async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradient' = 'light', width = 1200, hasImages = false) {
-    return postToRenderEndpoint('/render/markdown', { markdown, theme, width, quality: 90, hasImages });
+    const { RENDER: renderUrl } = Config.backend;
+    const mcpServer = { name: 'md-html-render', url: renderUrl, token: '', headers: {} };
+    const base64 = await callServerTool(mcpServer, 'render_markdown', { markdown, theme, width, quality: 90, hasImages });
+    if (!base64) throw new Error('渲染结果为空');
+    return { status: 'success', base64 } as RenderResponse;
 }
 
 // HTML 渲染
 async function renderHtml(html: string, width = 1200, hasImages = false) {
-    return postToRenderEndpoint('/render/html', { html, width, quality: 90, hasImages });
+    const { RENDER: renderUrl } = Config.backend;
+    const mcpServer = { name: 'md-html-render', url: renderUrl, token: '', headers: {} };
+    const base64 = await callServerTool(mcpServer, 'render_html', { html, theme: 'light', width, quality: 90, hasImages });
+    if (!base64) throw new Error('渲染结果为空');
+    return { status: 'success', base64 } as RenderResponse;
 }
 
 export function registerRender() {
