@@ -116,6 +116,38 @@ export interface MessageSegment {
     };
 }
 
+/** 解析 QQ 卡片消息（CQ:json / OB11 json 段的 data 字段），提取标题/描述/链接等可读文本 */
+export function parseCardToText(raw: any): string {
+    if (!raw) return '[卡片消息]';
+
+    let obj: any = null;
+    try {
+        obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (_e) {
+        return `[卡片消息] ${String(raw).slice(0, 200)}`;
+    }
+
+    const str = (v: any): string => (typeof v === 'string' && v.trim()) ? v.trim() : '';
+
+    // 常见卡片结构：view / meta.news / meta.detail 等
+    const view = (obj && (obj.view || (obj.meta && (obj.meta.news || obj.meta.detail || obj.meta.article)))) || obj || {};
+    const title = str(view.title) || str(obj.desc) || str(view.desc) || '';
+    const desc = str(view.desc) || str(view.summary) || (view.news && str(view.news.desc)) || '';
+    const url = str(view.url) || str(view.jumpUrl) || (view.news && str(view.news.jumpUrl)) || (view.detail && str(view.detail.jumpUrl)) || '';
+
+    const parts = [title, desc].filter(Boolean);
+    if (parts.length === 0) return '[卡片消息]';
+    return `【卡片】${parts.join('\n')}${url ? `\n${url}` : ''}`;
+}
+
+/** 音乐段转可读文本（data 为 qq/163 id 或 custom 对象） */
+export function parseMusicToText(data: any): string {
+    if (data && data.title) return `【音乐】${data.title}`;
+    const type = data && data.type ? String(data.type) : '';
+    const id = data && data.id ? String(data.id) : '';
+    return `【音乐】${type}${id ? ` ${id}` : ''}`;
+}
+
 export function transformTextToArray(text: string): MessageSegment[] {
     const segments = text.split(/(\[CQ:.*?\])/).filter(segment => segment);
     const messageArray: MessageSegment[] = [];

@@ -35,6 +35,8 @@ function main() {
 
   registerCmd();
   PrivilegeManager.reviveCmdPriv();
+  // ob11 依赖存在时订阅其事件分发，接收核心原生 milky 路径过滤掉的卡片/视频/文件/合并转发等段
+  MessagePipeline.subscribeOb11Receive();
 
   // 存储版本标记：结构变更时递增，供后续迁移使用
   const storedVersion = parseInt(ext.storageGet('storage_version') || '0');
