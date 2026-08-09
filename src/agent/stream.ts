@@ -8,6 +8,7 @@ import Model from "../model/model";
 import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
+import { RequestMessage } from "../utils/message";
 import { withTimeout } from "../utils/utils";
 
 export class streamService {
@@ -79,12 +80,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: {
-        role: string,
-        content: string,
-        tool_calls?: ToolCall[],
-        tool_call_id?: string
-    }[], tools: any[], tool_choice: string, modelName: string = ''): Promise<{ content: string, tool_calls: ToolCall[] }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = ''): Promise<{ content: string, tool_calls: ToolCall[] }> {
         const model = Model.getChatModel('chat', modelName) as ChatModel;
         if (!model) {
             logger.error('未找到可用的对话模型');

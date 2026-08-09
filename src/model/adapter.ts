@@ -108,6 +108,24 @@ function buildAnthropicMessages(messages: any[]): { system: string, messages: an
             continue;
         }
         let content: any = msg.content;
+        // 多模态内容块：OpenAI image_url → Anthropic image（base64 或 url 两种 source）
+        if (Array.isArray(content)) {
+            content = content.map((block: any) => {
+                if (block.type === 'image_url') {
+                    const url = (block.image_url && block.image_url.url) || '';
+                    const m = url.match(/^data:image\/([^;]+);base64,(.+)$/);
+                    if (m) {
+                        return {
+                            type: 'image',
+                            source: { type: 'base64', media_type: `image/${m[1]}`, data: m[2] }
+                        };
+                    }
+                    return { type: 'image', source: { type: 'url', url } };
+                }
+                if (block.type === 'text') return { type: 'text', text: block.text };
+                return block;
+            });
+        }
         if (role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
             const blocks: any[] = [];
             if (msg.content) blocks.push({ type: 'text', text: typeof msg.content === 'string' ? msg.content : '' });

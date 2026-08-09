@@ -3,6 +3,7 @@ import Config from "../config/config";
 import { ext } from "../config/config";
 import Logger, { logger } from "../logger";
 import ChatModel from "../model/chat";
+import ImageModel from "../model/image";
 import Model from "../model/model";
 import { ChatModelUse } from "../model/types";
 import Image from "../resource/image";
@@ -55,6 +56,19 @@ export default class Agent {
         return null;
     }
 
+    /**
+     * 当前会话使用的对话模型是否为多模态：
+     * 1) 直接命中「图片模型」里 use=chat 的条目（ImageModel 实例）；
+     * 2) 对话模型的名字出现在「图片模型」列表里（即该模型声明为视觉/多模态模型）。
+     * 多模态时上下文中的图片以 image_url 内容块直接传给模型，而不是文本标签。
+     */
+    private isMultimodalChat(session: Session): boolean {
+        const model = Model.getChatModel('chat', session.setting.modelName);
+        if (!model) return false;
+        if (model instanceof ImageModel) return true;
+        return Model.imageModels.some(im => im.name === model.name);
+    }
+
     async chat(prompt: string): Promise<string> {
         const model = Model.getChatModel(this.use) as ChatModel;
         if (!model) return '';
@@ -102,7 +116,7 @@ export default class Agent {
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             trace.beginTurn();
-            const messages = await handleMessages(ctx, session);
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
             const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName);
             result = await handleReply(ctx, msg, session, raw_reply);
 
@@ -208,7 +222,7 @@ export default class Agent {
 
         await session.stopCurrentChatStream();
 
-        const messages = await handleMessages(ctx, session);
+        const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
         const id = await streamService.startStream(messages, session.setting.modelName);
         if (!id) return;
 
