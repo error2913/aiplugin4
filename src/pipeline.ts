@@ -6,7 +6,7 @@ import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/tool_trigger";
-import { expandForwardMessage, getGroupFileDownloadUrl, getPrivateFileDownloadUrl } from "./utils/ob11";
+import { expandForwardMessage } from "./utils/ob11";
 import { MessageSegment, transformTextToArray } from "./utils/string";
 
 /** 解析 QQ 卡片消息（CQ:json 的 data 字段），提取标题/描述/链接等可读文本 */
@@ -33,63 +33,73 @@ function parseCardToText(raw: string): string {
     return `【卡片】${parts.join('\n')}${url ? `\n${url}` : ''}`;
 }
 
-export class MessagePipeline {
-    /** 统一消息形态：CQ 码字符串或 OneBot 消息段数组 → MessageSegment[] */
-    private static toMessageArray(message: string | any[] | any): MessageSegment[] {
-        if (typeof message === 'string') return transformTextToArray(message);
-        if (Array.isArray(message)) return message as MessageSegment[];
-        return [];
-    }
+/** 音乐段转可读文本（data 为 qq/163 id 或 custom 对象） */
+function parseMusicToText(data: any): string {
+    if (data && data.title) return `【音乐】${data.title}`;
+    const type = data && data.type ? String(data.type) : '';
+    const id = data && data.id ? String(data.id) : '';
+    return `【音乐】${type}${id ? ` ${id}` : ''}`;
+}
 
-    /** 展开消息中的特殊段（合并转发走 ob11 / 文件 / 卡片），返回替换后的消息段 */
-    private static async expandSpecialSegments(ctx: seal.MsgContext, segs: MessageSegment[]): Promise<MessageSegment[]> {
+export class MessagePipeline {
+    /** ob11 数组消息段 → MessageSegment[]：把卡片/视频/音乐/文件/消息节点/合并转发展开为文本段，其余段保留 */
+    private static async expandOb11Segments(ctx: seal.MsgContext, segs: any[]): Promise<MessageSegment[]> {
         const result: MessageSegment[] = [];
         const epId = ctx.endPoint.userId;
         for (const seg of segs) {
+            if (!seg || typeof seg !== 'object') continue;
+            const data = seg.data || {};
             switch (seg.type) {
+                case 'json': {
+                    result.push({ type: 'text', data: { text: parseCardToText(data.data) } });
+                    break;
+                }
+                case 'file': {
+                    result.push({ type: 'text', data: { text: `【文件】${data.file || ''}` } });
+                    break;
+                }
+                case 'video': {
+                    result.push({ type: 'text', data: { text: `【视频】${data.file || ''}` } });
+                    break;
+                }
+                case 'music': {
+                    result.push({ type: 'text', data: { text: parseMusicToText(data) } });
+                    break;
+                }
+                case 'node': {
+                    result.push({ type: 'text', data: { text: await MessagePipeline.parseNodeToText(ctx, data) } });
+                    break;
+                }
                 case 'forward': {
-                    const text = await expandForwardMessage(epId, (seg.data && seg.data.id) || '');
+                    const text = await expandForwardMessage(epId, data.id || data.file || '');
                     result.push({
                         type: 'text',
                         data: { text: text ? `【合并转发】\n${text}` : '[合并转发消息，展开失败]' }
                     });
                     break;
                 }
-                case 'file': {
-                    const name = (seg.data && seg.data.file) || '';
-                    const fileId = (seg.data && seg.data.file) || '';
-                    const busid = (seg.data && seg.data.busid) || '';
-                    let url = (seg.data && seg.data.url) || '';
-                    // 缺少下载链接时走 ob11 依赖获取（与合并转发同路径）
-                    if (!url && fileId) {
-                        url = ctx.isPrivate
-                            ? await getPrivateFileDownloadUrl(epId, ctx.player!.userId, fileId, busid)
-                            : await getGroupFileDownloadUrl(epId, ctx.group!.groupId, fileId, busid);
-                    }
-                    result.push({
-                        type: 'text',
-                        data: { text: `【文件】${name}${url ? ` ${url}` : ''}` }
-                    });
-                    break;
-                }
-                case 'json': {
-                    result.push({
-                        type: 'text',
-                        data: { text: parseCardToText(seg.data && seg.data.data) }
-                    });
-                    break;
-                }
-                default: {
-                    result.push(seg);
-                }
+                default: result.push(seg as MessageSegment);
             }
         }
         return result;
     }
 
-    /** 判断消息段是否需要展开（合并转发/文件/卡片） */
-    private static hasSpecialSegment(segs: MessageSegment[]): boolean {
-        return segs.some(seg => seg.type === 'forward' || seg.type === 'file' || seg.type === 'json');
+    /** 消息节点（node）转可读文本：完整节点递归内容，仅 id 时走 ob11 获取 */
+    private static async parseNodeToText(ctx: seal.MsgContext, data: any): Promise<string> {
+        const name = (data && (data.nickname || data.name)) || (data && data.user_id ? `用户${data.user_id}` : '');
+        if (data && Array.isArray(data.content)) {
+            const segs = await this.expandOb11Segments(ctx, data.content);
+            let text = '';
+            for (const s of segs) {
+                text += s.type === 'text' ? ((s.data && s.data.text) || '') : `[${s.type}]`;
+            }
+            return `${name}: ${text}`;
+        }
+        if (data && data.id) {
+            const text = await expandForwardMessage(ctx.endPoint.userId, String(data.id));
+            return text ? `${name}:\n${text}` : `【消息节点】${name}`;
+        }
+        return `【消息节点】${name}`;
     }
 
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */
@@ -125,12 +135,11 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        let messageArray = this.toMessageArray(message);
-
-        // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段后再走后续过滤/触发
-        if (this.hasSpecialSegment(messageArray)) {
-            messageArray = await this.expandSpecialSegments(ctx, messageArray);
-        }
+        // ob11 网络连接依赖以 OneBot 消息段数组传入时，走独立解析（卡片/视频/音乐/文件/消息节点/合并转发）；
+        // 海豹原生 CQ 码字符串路径保持不变
+        const messageArray = Array.isArray(message)
+            ? await this.expandOb11Segments(ctx, message)
+            : transformTextToArray(message);
 
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
@@ -219,7 +228,7 @@ export class MessagePipeline {
     }
 
     /** 指令消息：记录 cmdArgs，并按配置决定是否写入会话上下文 */
-    static async handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): Promise<void> {
+    static handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): void {
         if (Tool.cmdArgs === null) {
             Tool.cmdArgs = cmdArgs;
         }
@@ -235,12 +244,7 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        let messageArray = this.toMessageArray(message);
-
-        // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段
-        if (this.hasSpecialSegment(messageArray)) {
-            messageArray = await this.expandSpecialSegments(ctx, messageArray);
-        }
+        const messageArray = transformTextToArray(message);
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
@@ -252,7 +256,7 @@ export class MessagePipeline {
     }
 
     /** 机器人自身发送的消息：转发给监听工具，并按配置决定是否记录上下文 */
-    static async handleBotMessage(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    static handleBotMessage(ctx: seal.MsgContext, msg: seal.Message): void {
         const uid = ctx.player!.userId;
         const gid = ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
@@ -261,12 +265,7 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        let messageArray = this.toMessageArray(message);
-
-        // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段
-        if (this.hasSpecialSegment(messageArray)) {
-            messageArray = await this.expandSpecialSegments(ctx, messageArray);
-        }
+        const messageArray = transformTextToArray(message);
 
         session.tool.listen.resolve?.(message); // 将消息传递给监听工具
 
