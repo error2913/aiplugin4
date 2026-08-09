@@ -9,22 +9,71 @@ import { triggerConditionMap } from "./tool/tools/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { MessageSegment, transformTextToArray } from "./utils/string";
 
+/** 解析 QQ 卡片消息（CQ:json 的 data 字段），提取标题/描述/链接等可读文本 */
+function parseCardToText(raw: string): string {
+    if (!raw) return '[卡片消息]';
+
+    let obj: any = null;
+    try {
+        obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (_e) {
+        return `[卡片消息] ${raw.slice(0, 200)}`;
+    }
+
+    const str = (v: any): string => (typeof v === 'string' && v.trim()) ? v.trim() : '';
+
+    // 常见卡片结构：view / meta.news / meta.detail 等
+    const view = (obj && (obj.view || (obj.meta && (obj.meta.news || obj.meta.detail || obj.meta.article)))) || obj || {};
+    const title = str(view.title) || str(obj.desc) || str(view.desc) || '';
+    const desc = str(view.desc) || str(view.summary) || (view.news && str(view.news.desc)) || '';
+    const url = str(view.url) || str(view.jumpUrl) || (view.news && str(view.news.jumpUrl)) || (view.detail && str(view.detail.jumpUrl)) || '';
+
+    const parts = [title, desc].filter(Boolean);
+    if (parts.length === 0) return '[卡片消息]';
+    return `【卡片】${parts.join('\n')}${url ? `\n${url}` : ''}`;
+}
+
 export class MessagePipeline {
-    /** 展开消息中的合并转发段（走 ob11 get_forward_msg，支持嵌套），返回替换后的消息段 */
-    private static async expandForwardSegments(epId: string, segs: MessageSegment[]): Promise<MessageSegment[]> {
+    /** 展开消息中的特殊段（合并转发走 ob11 / 文件 / 卡片），返回替换后的消息段 */
+    private static async expandSpecialSegments(epId: string, segs: MessageSegment[]): Promise<MessageSegment[]> {
         const result: MessageSegment[] = [];
         for (const seg of segs) {
-            if (seg.type === 'forward') {
-                const text = await expandForwardMessage(epId, (seg.data && seg.data.id) || '');
-                result.push({
-                    type: 'text',
-                    data: { text: text ? `【合并转发】\n${text}` : '[合并转发消息，展开失败]' }
-                });
-            } else {
-                result.push(seg);
+            switch (seg.type) {
+                case 'forward': {
+                    const text = await expandForwardMessage(epId, (seg.data && seg.data.id) || '');
+                    result.push({
+                        type: 'text',
+                        data: { text: text ? `【合并转发】\n${text}` : '[合并转发消息，展开失败]' }
+                    });
+                    break;
+                }
+                case 'file': {
+                    const name = (seg.data && seg.data.file) || '';
+                    const url = (seg.data && seg.data.url) || '';
+                    result.push({
+                        type: 'text',
+                        data: { text: `【文件】${name}${url ? ` ${url}` : ''}` }
+                    });
+                    break;
+                }
+                case 'json': {
+                    result.push({
+                        type: 'text',
+                        data: { text: parseCardToText(seg.data && seg.data.data) }
+                    });
+                    break;
+                }
+                default: {
+                    result.push(seg);
+                }
             }
         }
         return result;
+    }
+
+    /** 判断消息段是否需要展开（合并转发/文件/卡片） */
+    private static hasSpecialSegment(segs: MessageSegment[]): boolean {
+        return segs.some(seg => seg.type === 'forward' || seg.type === 'file' || seg.type === 'json');
     }
 
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */
@@ -62,9 +111,9 @@ export class MessagePipeline {
         const message = msg.message;
         let messageArray = transformTextToArray(message);
 
-        // 展开合并转发（走 ob11 get_forward_msg），替换为可读文本段后再走后续过滤/触发
-        if (messageArray.some(seg => seg.type === 'forward')) {
-            messageArray = await this.expandForwardSegments(ctx.endPoint.userId, messageArray);
+        // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段后再走后续过滤/触发
+        if (this.hasSpecialSegment(messageArray)) {
+            messageArray = await this.expandSpecialSegments(ctx.endPoint.userId, messageArray);
         }
 
         // 忽略条件（豹语表达式）命中时直接忽略
@@ -172,9 +221,9 @@ export class MessagePipeline {
         const message = msg.message;
         let messageArray = transformTextToArray(message);
 
-        // 展开合并转发（走 ob11 get_forward_msg），替换为可读文本段
-        if (messageArray.some(seg => seg.type === 'forward')) {
-            messageArray = await this.expandForwardSegments(ctx.endPoint.userId, messageArray);
+        // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段
+        if (this.hasSpecialSegment(messageArray)) {
+            messageArray = await this.expandSpecialSegments(ctx.endPoint.userId, messageArray);
         }
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
@@ -198,9 +247,9 @@ export class MessagePipeline {
         const message = msg.message;
         let messageArray = transformTextToArray(message);
 
-        // 展开合并转发（走 ob11 get_forward_msg），替换为可读文本段
-        if (messageArray.some(seg => seg.type === 'forward')) {
-            messageArray = await this.expandForwardSegments(ctx.endPoint.userId, messageArray);
+        // 展开特殊段（合并转发走 ob11 / 文件 / 卡片），替换为可读文本段
+        if (this.hasSpecialSegment(messageArray)) {
+            messageArray = await this.expandSpecialSegments(ctx.endPoint.userId, messageArray);
         }
 
         session.tool.listen.resolve?.(message); // 将消息传递给监听工具
