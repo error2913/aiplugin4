@@ -68,8 +68,7 @@ export class TimerManager {
 
     static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string) {
         const uid = ctx.player!.userId;
-        const gid = ctx.group!.groupId;
-        const sessionId = ctx.isPrivate ? uid : gid;
+        const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
         const timer = new TimerInfo();
         timer.sid = sessionId;
         timer.isPrivate = ctx.isPrivate;
@@ -93,8 +92,7 @@ export class TimerManager {
 
     static addIntervalTimer(ctx: seal.MsgContext, session: Session, interval: number, count: number, content: string) {
         const uid = ctx.player!.userId;
-        const gid = ctx.group!.groupId;
-        const sessionId = ctx.isPrivate ? uid : gid;
+        const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
         const timer = new TimerInfo();
         timer.sid = sessionId;
         timer.isPrivate = ctx.isPrivate;
@@ -121,8 +119,7 @@ export class TimerManager {
 
     static addActiveTimeTimer(ctx: seal.MsgContext, session: Session, target: number) {
         const uid = ctx.player!.userId;
-        const gid = ctx.group!.groupId;
-        const sessionId = ctx.isPrivate ? uid : gid;
+        const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
         const timer = new TimerInfo();
         timer.sid = sessionId;
         timer.isPrivate = ctx.isPrivate;

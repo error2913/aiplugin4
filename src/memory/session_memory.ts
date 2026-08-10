@@ -2,7 +2,9 @@
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
+import Group from "../session/group";
 import { Session } from "../session/session";
+import User from "../session/user";
 import { buildContent } from "../utils/message";
 import { TypeDescriptor } from "../utils/utils";
 
@@ -56,18 +58,20 @@ export default class SessionMemoryService extends MemoryService {
 
         try {
             const roleSetting = (Config.message.INSTRUCTIONS || [])[0] || '';
+            const isPrivate = this.session.sessionType !== 'group';
+            const sessionId = this.session.sessionId;
+            const userNumber = isPrivate ? sessionId.replace(/^.+:/, '') : '';
+            const groupNumber = isPrivate ? '' : sessionId.replace(/^.+:/, '');
+            const userName = isPrivate ? (User.get(sessionId).userName || userNumber) : '';
+            const groupName = isPrivate ? '' : (Group.get(sessionId).groupName || groupNumber);
             const prompt = Config.prompt.SUMMARY_PROMPT_TEMPLATE({
                 "角色设定": roleSetting,
                 "平台": '',
-                "私聊": this.session.sessionType !== 'group',
-                "展示号码": false,
-                "用户名称": '',
-                "用户号码": '',
-                "群聊名称": this.session.sessionType === 'group' ? this.session.sessionId : '',
-                "群聊号码": '',
-                "添加前缀": false,
-                "展示消息ID": false,
-                "展示时间": false,
+                "私聊": isPrivate,
+                "用户名称": userName,
+                "用户号码": userNumber,
+                "群聊名称": groupName,
+                "群聊号码": groupNumber,
                 "对话内容": sumMessages.map(message => {
                     const toolCalls = (message as any).toolCalls || (message as any).tool_calls;
                     if (message.role === 'assistant' && toolCalls && toolCalls.length > 0) {

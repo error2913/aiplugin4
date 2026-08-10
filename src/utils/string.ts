@@ -116,6 +116,72 @@ export interface MessageSegment {
     };
 }
 
+/**
+ * 把海豹 milky 消息段（seal.MessageSegment，独立 Go 结构体 + type() 编号）直接映射为
+ * 项目内部统一段格式。不经过 CQ 码：milky 下 msg.message 只有纯文本拼接，
+ * at/图片/回复等富文本信息必须从 segment 取。
+ */
+export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSegment[] {
+    const result: MessageSegment[] = [];
+    for (const seg of segments) {
+        if (!seg || typeof seg !== 'object' || typeof seg.type !== 'function') continue;
+        switch (seg.type()) {
+            case 0: { // 文本 Text
+                const content = 'content' in seg ? seg.content : '';
+                result.push({ type: 'text', data: { text: content || '' } });
+                break;
+            }
+            case 1: { // 艾特 At
+                const target = 'target' in seg ? seg.target : '';
+                result.push({ type: 'at', data: { qq: target || '' } });
+                break;
+            }
+            case 2: { // 文件 File
+                const url = 'url' in seg ? seg.url : '';
+                const file = 'file' in seg && typeof seg.file === 'string' ? seg.file : '';
+                const fileText = url || file;
+                result.push({ type: 'text', data: { text: fileText ? `【文件】${fileText}` : '【文件】' } });
+                break;
+            }
+            case 3: { // 图片 Image
+                const url = 'url' in seg ? seg.url : '';
+                const file = 'file' in seg && seg.file && typeof seg.file === 'object' ? (seg.file.url || seg.file.file) : '';
+                result.push({ type: 'image', data: { url: url || file || '' } });
+                break;
+            }
+            case 4: { // 文字转语音 TTS
+                const content = 'content' in seg ? seg.content : '';
+                result.push({ type: 'text', data: { text: content || '' } });
+                break;
+            }
+            case 5: { // 回复 Reply
+                const replySeq = 'replySeq' in seg ? seg.replySeq : '';
+                result.push({ type: 'reply', data: { id: replySeq || '' } });
+                break;
+            }
+            case 6: { // 语音 Record
+                result.push({ type: 'text', data: { text: '【语音】' } });
+                break;
+            }
+            case 7: { // 表情 Face
+                const faceID = 'faceID' in seg ? seg.faceID : '';
+                result.push({ type: 'face', data: { id: faceID || '' } });
+                break;
+            }
+            case 8: { // 戳一戳 Poke
+                const target = 'target' in seg ? seg.target : '';
+                result.push({ type: 'poke', data: { qq: target || '' } });
+                break;
+            }
+            default: {
+                logger.debug(`milky 未知消息段类型: ${seg.type()}，按文本占位处理`);
+                result.push({ type: 'text', data: { text: '[未知消息段]' } });
+            }
+        }
+    }
+    return result;
+}
+
 /** 解析 QQ 卡片消息（CQ:json / OB11 json 段的 data 字段），提取标题/描述/链接等可读文本 */
 export function parseCardToText(raw: any): string {
     if (!raw) return '[卡片消息]';
@@ -218,8 +284,9 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
             }
             case 'at': {
                 const epId = ctx.endPoint.userId;
-                const gid = ctx.group!.groupId;
-                const uid = `QQ:${seg.data.qq || ''}`;
+                const gid = ctx.group ? ctx.group.groupId : '';
+                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+                const uid = `${prefix}:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player!.name || '未知用户';
                 content += `[at:${name}]`;
@@ -227,15 +294,17 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
             }
             case 'poke': {
                 const epId = ctx.endPoint.userId;
-                const gid = ctx.group!.groupId;
-                const uid = `QQ:${seg.data.qq || ''}`;
+                const gid = ctx.group ? ctx.group.groupId : '';
+                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+                const uid = `${prefix}:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player!.name || '未知用户';
                 content += `[poke:${name}]`;
                 break;
             }
             case 'reply': {
-                content += `[quote:${transformMsgId(seg.data.id || '')}]`;
+                const quoteId = transformMsgId(seg.data.id || '');
+                if (quoteId) content += `[quote:${quoteId}]`;
                 break;
             }
             case 'image': {
@@ -294,7 +363,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
             }
             case 'quote': {
                 const msgId = seg.content;
-                text += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
+                if (msgId) text += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
                 break;
             }
             case 'img': {
@@ -561,8 +630,9 @@ export function normalizeRenderTags(s: string): string {
             user ? `[avatar:${user}]` : group ? `[group_avatar:${group}]` : `[img:${img}]`
     );
     return s.replace(
-        new RegExp(`[<＜][\\|│｜](at|poke|quote|face|img|audio|from)[:：]?\\s?(${RENDER_TAG_CONTENT})${RENDER_TAG_CLOSE}`, 'gi'),
-        '[$1:$2]'
+        new RegExp(`[<＜][\\|│｜](at|poke|quote|face|img|audio|from|user_avatar|group_avatar)[:：]?\\s?(${RENDER_TAG_CONTENT})${RENDER_TAG_CLOSE}`, 'gi'),
+        (_all: string, type: string, content: string) =>
+            type === 'user_avatar' ? `[avatar:${content}]` : `[${type}:${content}]`
     );
 }
 

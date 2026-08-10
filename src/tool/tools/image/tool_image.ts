@@ -1,5 +1,4 @@
 // 图片工具：图片转文字/文生图（AIDrawing）
-import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
@@ -16,7 +15,7 @@ export function registerImage() {
                 properties: {
                     id: {
                         type: "string",
-                        description: `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
+                        description: '图片id，或user_avatar:用户名称或纯数字QQ号，或group_avatar:群聊名称或纯数字群号'
                     },
                     content: {
                         type: "string",

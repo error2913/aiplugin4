@@ -14,7 +14,7 @@ import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
-import { replyToSender, transformMsgId } from "../utils/utils";
+import { getRecordMessageId, replyToSender } from "../utils/utils";
 
 import Group from "./group";
 import { SessionType, State } from "./types";
@@ -256,7 +256,7 @@ export class Session {
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
         this.lastCtx = ctx;
         const { content } = await transformArrayToContent(ctx, messageArray);
-        await this.context.addUserMessage(ctx, content, ctx.player!.userId, transformMsgId(msg.rawId));
+        await this.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
     }
 
     async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}) {

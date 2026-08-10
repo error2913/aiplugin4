@@ -1,5 +1,4 @@
 // 改名工具：设置群名片
-import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import { getGroupMemberInfo, netExists } from "../../../utils/ob11";
 import { getCtxAndMsg } from "../../../utils/seal";
@@ -16,7 +15,7 @@ export function registerRename() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     },
                     new_name: {
                         type: 'string',

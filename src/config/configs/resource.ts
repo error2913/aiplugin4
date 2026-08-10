@@ -1,4 +1,4 @@
-// 资源配置：本地图片/语音路径（供 system prompt 列出可发送资源）
+// 资源配置：本地图片/语音/文件/视频路径（供 system prompt 列出可发送资源）
 import Logger from "../../logger";
 import Image from "../../resource/image";
 import { ext } from "../config";
@@ -6,12 +6,16 @@ export default class ResourceConfig {
     static register() {
         seal.ext.registerTemplateConfig(ext, "本地图片路径", [''], "如不需要可以不填写，修改完需要重载js；每行一个本地图片路径，示例：data/images/sealdice.png", "资源");
         seal.ext.registerTemplateConfig(ext, "本地语音路径", [''], "每行一个本地语音：语音名=路径（省略语音名时默认用文件名），示例：早安=records/早安.mp3；发送语音需要配置ffmpeg到环境变量中，修改完需要重载js", "资源");
+        seal.ext.registerTemplateConfig(ext, "本地文件路径", [''], "每行一个本地文件：文件名=路径（省略文件名时默认用文件名），示例：规则书=data/files/规则书.pdf；发送文件需安装ob11网络连接依赖，修改完需要重载js", "资源");
+        seal.ext.registerTemplateConfig(ext, "本地视频路径", [''], "每行一个本地视频：视频名=路径（省略视频名时默认用文件名），示例：开场动画=data/videos/开场.mp4；发送视频需安装ob11网络连接依赖，修改完需要重载js", "资源");
     }
 
     static get() {
         return {
             LOCAL_IMAGES: getLocalImagesConfig(),
-            LOCAL_AUDIOS: getLocalAudiosConfig()
+            LOCAL_AUDIOS: getLocalAudiosConfig(),
+            LOCAL_FILES: getLocalFilesConfig(),
+            LOCAL_VIDEOS: getLocalVideosConfig()
         }
     }
 }
@@ -22,7 +26,7 @@ function getPathMapConfig(key: string): { [id: string]: string } {
         const trimmed = line.trim();
         if (!trimmed) return acc;
         try {
-            // 支持“语音名=路径”，省略语音名时默认用文件名（去扩展名）
+            // 支持“资源名=路径”，省略资源名时默认用文件名（去扩展名）
             const eq = trimmed.indexOf('=');
             let id = trimmed;
             let path = trimmed;
@@ -50,4 +54,14 @@ function getLocalImagesConfig(): Image[] {
 function getLocalAudiosConfig(): { audioId: string, path: string }[] {
     const pathMap = getPathMapConfig("本地语音路径");
     return Object.keys(pathMap).map(audioId => ({ audioId, path: pathMap[audioId] }));
+}
+
+function getLocalFilesConfig(): { fileId: string, path: string }[] {
+    const pathMap = getPathMapConfig("本地文件路径");
+    return Object.keys(pathMap).map(fileId => ({ fileId, path: pathMap[fileId] }));
+}
+
+function getLocalVideosConfig(): { videoId: string, path: string }[] {
+    const pathMap = getPathMapConfig("本地视频路径");
+    return Object.keys(pathMap).map(videoId => ({ videoId, path: pathMap[videoId] }));
 }

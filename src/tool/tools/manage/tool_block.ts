@@ -1,7 +1,7 @@
 // 黑名单相关工具：suggest_block（AI 只建议拉黑，由骰主用指令确认）+ unblock_user / get_block_list
-import { BlockManager } from "../../block";
-import Config from "../../config/config";
-import Tool from "../tool";
+import { BlockManager } from "../../../block";
+import Config from "../../../config/config";
+import Tool from "../../tool";
 
 const SUGGEST_COOLDOWN_MS = 5 * 60 * 1000; // 同一目标 5 分钟内不重复建议，防吵吵（内存态，不落库）
 const suggestCooldown: { [id: string]: number } = {};
@@ -18,7 +18,7 @@ export function registerBlockTool() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     },
                     reason: {
                         type: 'string',
@@ -65,7 +65,7 @@ export function registerBlockTool() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     }
                 },
                 required: ['name']

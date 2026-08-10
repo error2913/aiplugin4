@@ -1,5 +1,4 @@
 // 属性工具（seal API）：获取/修改指定玩家的 COC 属性
-import Config from "../../../config/config";
 import { getCtxAndMsg } from "../../../utils/seal";
 import Tool from "../../tool";
 
@@ -14,7 +13,7 @@ export function registerAttrSeal() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     },
                     attr: {
                         type: 'string',
@@ -47,7 +46,7 @@ export function registerAttrSeal() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     },
                     expression: {
                         type: 'string',

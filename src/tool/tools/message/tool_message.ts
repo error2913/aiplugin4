@@ -1,14 +1,13 @@
 // 消息工具：发送消息/取消息/撤回/合并转发
-import Config from "../../config/config";
-import { CQ_TYPES_ALLOW as CQTYPESALLOW, FACE_MAP as faceMap } from "../../config/static_config";
-import { logger } from "../../logger";
-import Image from "../../resource/image";
-import { getSession, SessionService } from "../../session/session_service";
-import { deleteMsg, getGroupMemberInfo, getMsg, netExists, sendGroupForwardMsg, sendPrivateForwardMsg } from "../../utils/ob11";
-import { getCtxAndMsg } from "../../utils/seal";
-import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../../utils/string";
-import { replyToSender, transformMsgIdBack } from "../../utils/utils";
-import Tool from "../tool";
+import { CQ_TYPES_ALLOW as CQTYPESALLOW, FACE_MAP as faceMap } from "../../../config/static_config";
+import { logger } from "../../../logger";
+import Image from "../../../resource/image";
+import { getSession, SessionService } from "../../../session/session_service";
+import { deleteMsg, getGroupMemberInfo, getMsg, netExists, sendGroupForwardMsg, sendPrivateForwardMsg } from "../../../utils/ob11";
+import { getCtxAndMsg } from "../../../utils/seal";
+import { handleReply, MessageSegment, parseSpecialTokens, transformArrayToContent } from "../../../utils/string";
+import { replyToSender, transformMsgIdBack } from "../../../utils/utils";
+import Tool from "../../tool";
 
 export function registerMessage() {
     const toolSend = new Tool({
@@ -26,7 +25,7 @@ export function registerMessage() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
+                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与消息类型对应'
                     },
                     content: {
                         type: 'string',
@@ -49,10 +48,9 @@ export function registerMessage() {
     toolSend.solve = async (ctx, msg, session, args) => {
         const { msg_type, name, content, function: tool_call, reason = '' } = args;
 
-        const { SHOW_NUMBER: showNumber = true } = Config.message;
         const source = ctx.isPrivate ?
-            `来自<${ctx.player!.name}>${showNumber ? `(${ctx.player!.userId.replace(/^.+:/, '')})` : ``}` :
-            `来自群聊<${ctx.group!.groupName}>${showNumber ? `(${ctx.group!.groupId.replace(/^.+:/, '')})` : ``}`;
+            `来自<${ctx.player!.name}>(${ctx.player!.userId.replace(/^.+:/, '')})` :
+            `来自群聊<${ctx.group!.groupName}>(${ctx.group!.groupId.replace(/^.+:/, '')})`;
 
         const segs = parseSpecialTokens(content);
         const originalImages: Image[] = [];
@@ -140,8 +138,6 @@ export function registerMessage() {
     });
     toolGet.solve = async (ctx, _, _session, args) => {
         const { msg_id } = args;
-        const { SHOW_NUMBER: showNumber = true } = Config.message;
-        const isPrefix = false;
 
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
@@ -157,7 +153,7 @@ export function registerMessage() {
         const uid = `QQ:${result.sender.user_id}`;
         ({ ctx } = getCtxAndMsg(epId, uid, gid));
         const name = ctx.player!.name || '未知用户';
-        const prefix = isPrefix ? `[from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}]` : '';
+        const prefix = `[from:${name}(${uid.replace(/^.+:/, '')})]`;
 
         return prefix + content;
     }
@@ -218,7 +214,7 @@ export function registerMessage() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与消息类型对应'
+                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与消息类型对应'
                     },
                     messages: {
                         type: 'array',
@@ -228,7 +224,7 @@ export function registerMessage() {
                             properties: {
                                 name: {
                                     type: 'string',
-                                    description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                                    description: '用户名称或纯数字QQ号'
                                 },
                                 nickname: {
                                     type: 'string',

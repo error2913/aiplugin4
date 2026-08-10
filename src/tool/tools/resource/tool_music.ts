@@ -1,7 +1,7 @@
 // 点歌工具
-import Config from "../../config/config";
-import { logger } from "../../logger";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import Tool from "../../tool";
 
 interface MusicServiceConfig {
     api: string;

@@ -1,5 +1,4 @@
 // 表情包工具：列表/信息/制作（meme 服务）
-import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { GroupInfo, UserInfo } from "../../../session/types";
@@ -102,7 +101,7 @@ export function registerMeme() {
                     image_ids: {
                         type: "array",
                         items: { type: "string" },
-                        description: `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
+                        description: '图片id，或user_avatar:用户名称或纯数字QQ号，或group_avatar:群聊名称或纯数字群号'
                     },
                     save: {
                         type: "boolean",

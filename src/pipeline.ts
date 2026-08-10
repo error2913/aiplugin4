@@ -5,10 +5,10 @@ import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import Tool from "./tool/tool";
-import { triggerConditionMap } from "./tool/tools/tool_trigger";
+import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
-import { MessageSegment, parseCardToText, parseMusicToText, transformTextToArray } from "./utils/string";
+import { expandMilkySegments, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray } from "./utils/string";
 
 /** 海豹核心原生 milky 接收路径会过滤掉的段类型，只能通过 ob11 依赖的事件分发（milky → OB11 转接）收到 */
 const OB11_EXTRA_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
@@ -187,7 +187,7 @@ export class MessagePipeline {
             return;
         }
 
-        const gid = ctx.group!.groupId;
+        const gid = ctx.isPrivate ? '' : ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
 
@@ -195,25 +195,25 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        // ob11 网络连接依赖以 OneBot 消息段数组传入时，走独立解析（卡片/视频/音乐/文件/消息节点/合并转发）；
-        // 海豹原生 CQ 码字符串路径保持不变
-        if (Array.isArray(ob11Segments) || Array.isArray(message)) {
-            logger.debug('[debug] handleNonCommand 数组消息开始展开');
-        }
+        // 消息段来源优先级：
+        //  1. ob11 事件段数组（卡片/视频/音乐/文件/消息节点/合并转发等核心收不到的段）
+        //  2. milky 原生消息段 msg.segment（非空时直接映射，不转 CQ 码）
+        //  3. 其他平台原生 CQ 码字符串 msg.message
+        const milkySegments = (msg as any).segment;
+        const hasMilkySegments = Array.isArray(milkySegments) && milkySegments.length > 0;
         const messageArray = Array.isArray(ob11Segments)
             ? await this.expandOb11Segments(ctx, ob11Segments)
+            : hasMilkySegments
+            ? expandMilkySegments(milkySegments)
             : Array.isArray(message)
             ? await this.expandOb11Segments(ctx, message)
             : transformTextToArray(message);
-        if (Array.isArray(ob11Segments) || Array.isArray(message)) {
-            logger.debug('[debug] handleNonCommand 数组消息展开完成');
-        }
         // 正则匹配统一使用可读文本：原生路径保持原字符串，数组路径用展开后的文本
-        const messageText = Array.isArray(ob11Segments) || Array.isArray(message)
+        const messageText = Array.isArray(ob11Segments) || hasMilkySegments || Array.isArray(message)
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;
-        if (Array.isArray(ob11Segments) || Array.isArray(message)) {
-            logger.info(`[debug] ob11 消息展开: ${messageText.slice(0, 200)}`);
+        if (hasMilkySegments) {
+            logger.debug(`[debug] milky 消息段展开: ${messageText.slice(0, 200)}`);
         }
 
         // 忽略条件（豹语表达式）命中时直接忽略
@@ -273,7 +273,7 @@ export class MessagePipeline {
             // 开启任一模式时
             const setting = session.setting;
             if (setting.standby || Config.base.GLOBAL_STANDBY) {
-                session.handleReceipt(ctx, msg, messageArray)
+                return session.handleReceipt(ctx, msg, messageArray)
                     .then((): void | Promise<void> => {
                         if (setting.counter > -1) {
                             session.context.counter += 1;
@@ -311,14 +311,16 @@ export class MessagePipeline {
         if (!allcmd) return;
 
         const uid = ctx.player!.userId;
-        const gid = ctx.group!.groupId;
+        const gid = ctx.isPrivate ? '' : ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
 
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        const messageArray = transformTextToArray(message);
+        const milkySegments = (msg as any).segment;
+        const hasMilkySegments = Array.isArray(milkySegments) && milkySegments.length > 0;
+        const messageArray = hasMilkySegments ? expandMilkySegments(milkySegments) : transformTextToArray(message);
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
@@ -332,16 +334,21 @@ export class MessagePipeline {
     /** 机器人自身发送的消息：转发给监听工具，并按配置决定是否记录上下文 */
     static handleBotMessage(ctx: seal.MsgContext, msg: seal.Message): void {
         const uid = ctx.player!.userId;
-        const gid = ctx.group!.groupId;
+        const gid = ctx.isPrivate ? '' : ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
 
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        const messageArray = transformTextToArray(message);
+        const milkySegments = (msg as any).segment;
+        const hasMilkySegments = Array.isArray(milkySegments) && milkySegments.length > 0;
+        const messageArray = hasMilkySegments ? expandMilkySegments(milkySegments) : transformTextToArray(message);
+        const messageText = hasMilkySegments
+            ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
+            : message;
 
-        session.tool.listen.resolve?.(message); // 将消息传递给监听工具
+        session.tool.listen.resolve?.(messageText); // 将消息传递给监听工具
 
         const { RECEIVE_MSG_BY_BOT: allmsg } = Config.received;
         if (!allmsg) return;

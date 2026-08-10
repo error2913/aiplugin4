@@ -1,6 +1,9 @@
 // seal 上下文工具：构造 ctx/msg/会话ID
 export function createMsg(messageType: "group" | "private", uid: string, gid: string = ''): seal.Message {
     const msg = seal.newMessage();
+    // goja 运行时下新建 Message 可能缺 segment 字段（jsbind 数组默认不初始化），
+    // 显式置空数组，供 milky 回调按 msg.segment 是否非空判断消息来源
+    (msg as any).segment = [];
     if (messageType === 'group') {
         msg.groupId = gid;
         msg.guildId = '';

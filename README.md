@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.14.0-green)
+![Version](https://img.shields.io/badge/Version-4.14.1-green)
 
 ## 快速开始
 
@@ -196,7 +196,6 @@ max_tokens = 2048
 | 对话保存轮数 | 出现一次 user 视作一轮，超过轮数会遗忘除示例对话外最早的对话，越长消耗 token 越多 |
 | 上下文最大token | 0 为不限制；超过后从最早的消息开始丢弃 |
 | 插入system message间隔轮数 | 需小于限制轮数的二分之一才能生效，为 0 时不生效，示例对话不计入轮数 |
-| 展示号码 | 在工具描述/上下文显示中使用 QQ 号 |
 | 消息压缩阈值 | 用户消息（含连续多条合并后）超过该字符数时，使用压缩智能体压缩后存入上下文（默认 2000） |
 
 ### 消息接收

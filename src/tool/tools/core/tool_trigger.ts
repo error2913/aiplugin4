@@ -1,6 +1,5 @@
 // 触发条件工具：AI 自行设定的触发条件
-import Config from "../../config/config";
-import Tool from "../tool";
+import Tool from "../../tool";
 
 export const triggerConditionMap: { [key: string]: { keyword: string, uid: string, reason: string }[] } = {};
 
@@ -19,7 +18,7 @@ export function registerSetTrigger() {
                     },
                     name: {
                         type: 'string',
-                        description: '指定触发必须满足的用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + '，为空时任意用户均可触发'
+                        description: '指定触发必须满足的用户名称或纯数字QQ号，为空时任意用户均可触发'
                     },
                     reason: {
                         type: 'string',

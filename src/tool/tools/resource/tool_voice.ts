@@ -1,9 +1,9 @@
 // 语音工具：本地语音/文字转语音（TTS）
-import Config from "../../config/config";
-import { logger } from "../../logger";
-import { netExists, sendGroupAISound } from "../../utils/ob11";
-import { resolveLocalPath } from "../../utils/utils";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import { netExists, sendGroupAISound } from "../../../utils/ob11";
+import { resolveLocalPath } from "../../../utils/utils";
+import Tool from "../../tool";
 
 const characterMap: { [key: string]: string } = {
     "小新": "lucy-voice-laibixiaoxin",

@@ -1,8 +1,8 @@
 // 指令调用工具：读取海豹扩展 cmdMap 列出可用指令、查看指令帮助，并调用指令获取返回
-import Config from "../../config/config";
-import { NAME } from "../../config/static_config";
-import Logger from "../../logger";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { NAME } from "../../../config/static_config";
+import Logger from "../../../logger";
+import Tool from "../../tool";
 
 interface ResolvedCmd {
     extName: string;

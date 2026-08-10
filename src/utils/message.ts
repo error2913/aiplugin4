@@ -4,6 +4,7 @@ import { logger } from "../logger";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
+import User from "../session/user";
 import { ToolCall } from "../tool/types";
 
 import { withTimeout } from "./utils";
@@ -182,7 +183,21 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
 
 export function buildContent(message: ContextMessage): string {
     if (message.contentItems && message.contentItems.length > 0) {
-        return message.contentItems.map(item => item.text || '').join('\f');
+        // 用户消息补上发送者前缀（名字 + QQ号），避免最终上下文丢失发送者信息
+        let prefix = '';
+        if (message.role === 'user') {
+            const userItem = message.contentItems.find(item => item.userId);
+            if (userItem && userItem.userId) {
+                const uid = userItem.userId;
+                const number = uid.replace(/^.+:/, '');
+                const name = User.get(uid).userName;
+                prefix = name ? `[from:${name}(${number})]` : `[from:${number}]`;
+            }
+        }
+        // 每条消息补消息 ID 标记，供模型在 [quote:xxx] 中引用；无 ID 时跳过避免空标签
+        return prefix + message.contentItems.map(item =>
+            (item.messageId ? `[msg_id:${item.messageId}]` : '') + (item.text || '')
+        ).join('\f');
     }
     if (message.text) return message.text;
     return '';

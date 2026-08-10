@@ -1,10 +1,10 @@
 // 联网工具：搜索与网页阅读
-import Config from "../../config/config";
-import { logger } from "../../logger";
-import Image from "../../resource/image";
-import { generateId } from "../../utils/utils";
-import { callServerTool } from "../mcp";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import Image from "../../../resource/image";
+import { generateId } from "../../../utils/utils";
+import { callServerTool } from "../../mcp";
+import Tool from "../../tool";
 
 export function registerWeb() {
     const toolSearch = new Tool({

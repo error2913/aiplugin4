@@ -1,12 +1,12 @@
 // 按需加载调度工具：search_tools（发现工具）+ call_tool（统一执行）
 // 非核心工具不再全量注入函数 schema；AI 先搜索工具获得参数说明，再通过 call_tool 执行，
 // 大幅降低每轮请求中工具定义占用的 token
-import Config from "../../config/config";
-import Logger from "../../logger";
-import { Session } from "../../session/session";
-import { withTimeout } from "../../utils/utils";
-import Tool, { toolMap } from "../tool";
-import { ToolInfo } from "../types";
+import Config from "../../../config/config";
+import Logger from "../../../logger";
+import { Session } from "../../../session/session";
+import { withTimeout } from "../../../utils/utils";
+import Tool, { toolMap } from "../../tool";
+import { ToolInfo } from "../../types";
 
 const MAX_SEARCH_RESULTS = 8; // search_tools 单次返回工具数上限
 

@@ -1,9 +1,9 @@
 // 论坛工具：帖子列表/详情/搜索/发帖/评论/动态通知/帖子管理
-import Config from "../../config/config";
-import { logger } from "../../logger";
-import Image from "../../resource/image";
-import { parseSpecialTokens } from "../../utils/string";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import Image from "../../../resource/image";
+import { parseSpecialTokens } from "../../../utils/string";
+import Tool from "../../tool";
 
 /**
  * FNV-1a 签名算法

@@ -1,5 +1,4 @@
 // 禁言工具：禁言/全员禁言/禁言列表
-import Config from "../../../config/config";
 import { getGroupMemberInfo, getGroupShutList, netExists, setGroupBan, setGroupWholeBan } from "../../../utils/ob11";
 import { fmtDate } from "../../../utils/string";
 import Tool from "../../tool";
@@ -15,7 +14,7 @@ export function registerBan() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     },
                     duration: {
                         type: 'integer',
