@@ -282,19 +282,19 @@ max_tokens = 2048
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/stream-output)，`body.stream = true` 的模型才会走流式 |
-| 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
+| 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/stream-output)，`body.stream = true` 的模型才会走流式 |
+| 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
 | 联网搜索 | [searxng](https://github.com/searxng/searxng)，有能力建议自己搭建，为 AI 提供联网搜索功能 |
-| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/web-read)，为 AI 提供网页详细内容获取功能（MCP，默认 `http://127.0.0.1:46799/mcp`） |
-| 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/usage-chart)，token 使用情况图表生成 |
-| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/md-html-render)，将 Markdown/HTML 渲染为图片（MCP，默认 `http://127.0.0.1:37632/mcp`） |
+| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/web-read)，为 AI 提供网页详细内容获取功能（MCP，默认 `http://127.0.0.1:46799/mcp`） |
+| 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/usage-chart)，token 使用情况图表生成 |
+| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/md-html-render)，将 Markdown/HTML 渲染为图片（MCP，默认 `http://127.0.0.1:37632/mcp`） |
 | 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
 | 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
 | 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
-后端服务已迁移到独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)：自带 `launcher.py` 一键管理（Windows / Linux 通用，默认不启动任何后端，首次启动某后端时才自动创建 venv 并安装依赖，异常退出自动拉起；`webui` 提供管理界面，可改端口/看日志，主题跟随系统）。详见其仓库 README 与 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
+后端服务已迁移到独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)：自带 `launcher.py` 一键管理（Windows / Linux 通用，默认不启动任何后端，首次启动某后端时才自动创建 venv 并安装依赖，异常退出自动拉起；`webui` 提供管理界面，可改端口/看日志，主题跟随系统）。后端清单与接口详见其仓库的 [docs/后端.md](https://github.com/error2913/aiplugin4-backends/blob/main/docs/后端.md)，插件侧配置文档见 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
 
 ### 资源
 
