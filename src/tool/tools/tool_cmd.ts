@@ -4,9 +4,6 @@ import { NAME } from "../../config/static_config";
 import Logger from "../../logger";
 import Tool from "../tool";
 
-// SealDice 核心内置扩展名，用于「允许所有指令」模式下的命令列举
-const BUILTIN_EXT_NAMES = ['fun', 'story', 'coc7', 'deck', 'dnd5e', 'exp', 'log', 'reply', 'template'];
-
 interface ResolvedCmd {
     extName: string;
     cmd: string;
@@ -37,7 +34,7 @@ function resolveEntry(entry: string): ResolvedCmd | null {
     if (byName && byName.cmdMap && Object.prototype.hasOwnProperty.call(byName.cmdMap, s)) {
         return { extName: byName.name || s, cmd: s, help: getCmdHelp(byName, s) };
     }
-    for (const extName of BUILTIN_EXT_NAMES) {
+    for (const extName of Config.tool.BUILTIN_EXT_NAMES) {
         const ext = seal.ext.find(extName);
         if (ext && ext.cmdMap && Object.prototype.hasOwnProperty.call(ext.cmdMap, s)) {
             return { extName, cmd: s, help: getCmdHelp(ext, s) };
@@ -70,7 +67,7 @@ function collectCommands(all: boolean): ResolvedCmd[] {
     for (const entry of CMD_WHITELIST) push(resolveEntry(entry));
     if (all) {
         // 查看全部：核心内置扩展 + 插件自身扩展（第三方插件指令无法枚举，需加入白名单）
-        for (const extName of BUILTIN_EXT_NAMES) {
+        for (const extName of Config.tool.BUILTIN_EXT_NAMES) {
             const ext = seal.ext.find(extName);
             if (ext && ext.cmdMap) {
                 for (const cmd of Object.keys(ext.cmdMap)) {

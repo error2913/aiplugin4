@@ -12,8 +12,6 @@ import { TimerManager } from "../timer";
 import { ToolState } from "../tool/tool";
 import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
-import { RequestMessage } from "../utils/message";
-import { handleMessages } from "../utils/message";
 import { MessageSegment, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 import { replyToSender, transformMsgId } from "../utils/utils";
@@ -186,21 +184,6 @@ export class Session {
             if (!Object.prototype.hasOwnProperty.call(state, tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
         })
         return state;
-    }
-
-    async getMessages(multimodal = false): Promise<RequestMessage[]> {
-        if (this.lastCtx) {
-            return await handleMessages(this.lastCtx, this, multimodal);
-        }
-        return (this.context.messages as any[]).map(m => ({
-            role: m.role,
-            content: Array.isArray(m.contentItems) ? m.contentItems.map((i: any) => i.text || '').join('\f') : (m.text || '')
-        }));
-    }
-
-    /** 图片对话使用的消息：多模态模型直接携带图片内容块 */
-    async getImageMessages(): Promise<RequestMessage[]> {
-        return this.getMessages(true);
     }
 
     checkIgnoredUserId(userId: string): boolean {

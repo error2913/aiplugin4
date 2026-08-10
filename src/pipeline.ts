@@ -89,11 +89,11 @@ export class MessagePipeline {
         const trySubscribe = (attempt: number): void => {
             const net = (globalThis as any).net;
             if (!net || typeof net.getEventDispatcher !== 'function') {
-                if (attempt < 10) {
+                if (attempt < 20) {
                     // ob11 依赖可能在 aiplugin4 之后加载，轮询等待就绪
-                    setTimeout(() => trySubscribe(attempt + 1), 3000);
+                    setTimeout(() => trySubscribe(attempt + 1), 5000);
                 } else {
-                    logger.info('[debug] 未找到 ob11 网络连接依赖，跳过 ob11 额外消息接收订阅');
+                    logger.info('[debug] 等待 ob11 网络连接依赖就绪超时（20 次×5s），跳过 ob11 额外消息接收订阅');
                 }
                 return;
             }
@@ -304,9 +304,8 @@ export class MessagePipeline {
 
     /** 指令消息：记录 cmdArgs，并按配置决定是否写入会话上下文 */
     static handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): void {
-        if (Tool.cmdArgs === null) {
-            Tool.cmdArgs = cmdArgs;
-        }
+        // 每次收到指令都刷新当前会话的 cmdArgs，供 run_command 等指令工具复用最新指令对象
+        Tool.setCmdArgs(ctx, cmdArgs);
 
         const { RECEIVE_CMD: allcmd } = Config.received;
         if (!allcmd) return;

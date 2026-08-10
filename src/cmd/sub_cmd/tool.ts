@@ -101,7 +101,7 @@ export function registerCmdTool() {
                     return ret;
                 }
                 const tool = toolMap[val3];
-                if (tool.ExtCmdInfo.extName !== '' && Tool.cmdArgs == null) {
+                if (tool.ExtCmdInfo.extName !== '' && !Tool.getCmdArgs(ctx)) {
                     seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
                     return ret;
                 }

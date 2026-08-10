@@ -11,7 +11,18 @@ export const updateInfo: { [version: string]: string } = {
 - 修复 ob11 事件消息数组被 seal.Message.message 字符串绑定强转导致无法展开的问题（改为显式传段数组）
 - 修复 get_forward_msg 响应字段读取错误（data.messages → data.message），兼容平铺与 node 两种返回形态，file 段字段兼容 milky/NapCat 差异
 ## 文档
-- 新增 docs/10-TODO.md：MCP Streamable HTTP 环境适配后的改动清单`,
+- 新增 docs/10-TODO.md：MCP Streamable HTTP 环境适配后的改动清单
+## 优化
+- 音乐服务配置化：网易云/qq 的域名与 Cookie 移入「工具-音乐服务配置」（平台|域名|Cookie），不再硬编码
+- cmdArgs 按会话隔离：每个会话独立保存最近一次指令，避免多会话共用同一可变对象相互污染（.ai tool call/run_command 等指令工具随之修正）
+- 内置扩展列表配置化：run_command 枚举指令使用的 SealDice 核心内置扩展名单移入「工具-内置扩展列表」，可自行增删
+- 模型选取确定性：对话/图片/嵌入模型匹配不再随机抽取，固定取第一个符合用途的模型
+- ob11 网络连接依赖订阅等待窗口延长（10 次×3s → 20 次×5s），兼容慢加载环境
+- 用量统计过期归并修正：先收集过期 key 统一归并后再替换，避免遍历同一对象时增删丢数据；0-0-0 长期桶不再参与归并
+## 修复
+- 修复提示词工程模式下非流式回复未剥离 <function> 调用块：发送前先截断标签块，标签原文不再进入发送内容与上下文，调用内容仍按原样记录
+- 修复 web_search 分页计算错误：page 为 0/负数/非法值时按第 1 页处理，前后半页映射修正
+- 清理死代码：删除未使用的 callChat、parseBody、buildRequestMessages、Session.getMessages 等旧实现`,
     "4.13.4": `## 新功能
 - 对外 API（globalThis.aiplugin4）新增三种模型直接调用：chatMessages（传入 OpenAI 风格 messages 数组调用对话模型）、imageToText（识图）、embed（文本向量），其他插件可构建消息直接拿回复
 - web_read 工具新增网页截图能力（screenshot=true，支持宽高/整页/延时），截图返回图片可直接发送

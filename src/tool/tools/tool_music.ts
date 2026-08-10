@@ -1,6 +1,25 @@
 // 点歌工具
+import Config from "../../config/config";
 import { logger } from "../../logger";
 import Tool from "../tool";
+
+interface MusicServiceConfig {
+    api: string;
+    cookie: string;
+}
+
+/** 从「音乐服务配置」模板配置中解析指定平台的 域名/Cookie；未配置时返回 null */
+function getMusicConfig(platform: string): MusicServiceConfig | null {
+    const list = Config.tool.MUSIC || [];
+    for (const line of list) {
+        const parts = (line || '').split('|');
+        if ((parts[0] || '').trim() !== platform) continue;
+        const api = (parts[1] || '').trim();
+        if (!api) continue;
+        return { api, cookie: parts.slice(2).join('|').trim() };
+    }
+    return null;
+}
 
 export function registerMusicPlay() {
     const tool = new Tool({
@@ -29,20 +48,17 @@ export function registerMusicPlay() {
     tool.solve = async (ctx, msg, _, args) => {
         const { platform, song_name } = args;
 
-        let api = '';
-        switch (platform) {
-            case '网易云': {
-                api = `http://net.ease.music.lovesealdice.online/search?keywords=${song_name}`;
-                break;
-            }
-            case 'qq': {
-                api = `http://qqmusic.lovesealdice.online/search?key=${song_name}`;
-                break;
-            }
-            default: {
-                return `不支持的平台: ${platform}`;
-            }
+        if (platform !== '网易云' && platform !== 'qq') {
+            return `不支持的平台: ${platform}`;
         }
+        const config = getMusicConfig(platform);
+        if (!config) {
+            return `未配置 ${platform} 的音乐服务：请在「工具」配置的「音乐服务配置」中添加 平台|域名|Cookie 条目`;
+        }
+
+        const api = platform === '网易云'
+            ? `${config.api}/search?keywords=${song_name}`
+            : `${config.api}/search?key=${song_name}`;
 
         try {
             logger.info(`搜索音乐: ${api}`);
@@ -70,16 +86,15 @@ export function registerMusicPlay() {
                     const name = song.name;
                     const artist = song.artists[0].name;
 
-                    const imgResponse = await fetch(`http://net.ease.music.lovesealdice.online/song/detail?ids=${id}`);
+                    const imgResponse = await fetch(`${config.api}/song/detail?ids=${id}`);
                     const imgData = await imgResponse.json();
                     const img = imgData.songs[0].al.picUrl;
 
-                    const downloadResponse = await fetch(`http://net.ease.music.lovesealdice.online/song/download/url?id=${id}`, {
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                            'Cookie': "_gid=GA1.2.2048499931.1737983161; _ga_MD3K4WETFE=GS1.1.1737983160.8.1.1737983827.0.0.0; _ga=GA1.1.1845263601.1736600307; MUSIC_U=00C10F470166570C36209E7E3E3649FEE210D3DB5B3C39C25214CFE5678DCC5773C63978903CEBA7BF4292B97ADADB566D96A055DCFDC860847761109F8986373FEC32BE2AFBF3DCFF015894EC61602562BF9D16AD12D76CED169C5052A470677A8D59F7B7D16D9FDE2A4ED237DE5C6956C0ED5F7A9EA151C3FA7367B0C6269FF7A74E6626B4D7F920D524718347659394CBB0DAE362991418070195FEFC730BCCE3CF4B03F24274075679FB4BFC884D099BD3CF679E4F1C9D5CBC2959CD29B0741BD52BCA155480116CE96393663B1A51D88AFDB57680F030CF93A305064A797B99874CA826D6760F616CB756B680591167AEE9AF31C4A187E61A19D7C1175961D4FE64CFD878F0BCEBB322A23E396DC5E8175A50D5E07B9788E4EBE8F8257FF139DB4FD03A89676F5C3DF1B70C101F4568C0A3657C24185218F975368ADB2DEF860760C59E9AFCCB214A4B51029E29ED; __csrf=85f3aa8cedc01f6d50b6b924efbf6f95; NMTID=00OG17oToz2Ne1rikTtgKPqOLaYuP0AAAGUqBEN0A"
-                        }
-                    });
+                    const headers: { [key: string]: string } = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    };
+                    if (config.cookie) headers['Cookie'] = config.cookie;
+                    const downloadResponse = await fetch(`${config.api}/song/download/url?id=${id}`, { headers });
                     const downloadData = await downloadResponse.json();
                     const url = downloadData.data.url;
 

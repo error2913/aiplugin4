@@ -3,6 +3,7 @@ import Config from "../config/config"
 import Logger from "../logger"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
+import { getSessionId } from "../utils/seal";
 import { fixJsonString } from "../utils/string";
 import { withTimeout } from "../utils/utils";
 
@@ -50,12 +51,23 @@ export default class Tool {
         toolMap[info.function.name] = this;
     }
 
-    static cmdArgs: seal.CmdArgs | null = null;
+    // 按会话保存最近一次收到的指令 cmdArgs，避免多个会话共用同一可变对象相互污染
+    static cmdArgsMap: { [sid: string]: seal.CmdArgs } = {};
+
+    /** 刷新某会话的 cmdArgs（每次收到指令都会更新） */
+    static setCmdArgs(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs) {
+        Tool.cmdArgsMap[getSessionId(ctx)] = cmdArgs;
+    }
+
+    /** 获取某会话最近一次指令的 cmdArgs；未收到过指令时返回 undefined */
+    static getCmdArgs(ctx: seal.MsgContext): seal.CmdArgs | undefined {
+        return Tool.cmdArgsMap[getSessionId(ctx)];
+    }
 
     /** 清空工具注册表（用于测试/热重载） */
     static reset() {
         for (const key of Object.keys(toolMap)) delete toolMap[key];
-        Tool.cmdArgs = null;
+        Tool.cmdArgsMap = {};
     }
 
     static registerTool() {
@@ -70,11 +82,11 @@ export default class Tool {
      * 利用预存的指令信息和额外输入的参数构建一个cmdArgs并调用solve函数，监听消息并返回结果
      */
     static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, listen: ToolListen, eci: ExtCmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
-        if (!this.cmdArgs) {
+        const cmdArgs = this.getCmdArgs(ctx);
+        if (!cmdArgs) {
             Logger.warning('扩展指令调用失败：尚未收到过指令（cmdArgs 为空）');
             return ['', false];
         }
-        const cmdArgs = this.cmdArgs;
         cmdArgs.command = eci.cmd;
         cmdArgs.args = eci.staticArgs.concat(args);
         cmdArgs.kwargs = kwargs;
@@ -134,7 +146,7 @@ export default class Tool {
         }
 
         const tool = toolMap[name];
-        if (tool.ExtCmdInfo.extName !== '' && this.cmdArgs === null) {
+        if (tool.ExtCmdInfo.extName !== '' && !this.getCmdArgs(ctx)) {
             Logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
             return { result: { tool_call_id: tool_call.id, content: `暂时无法调用函数，请先提示用户使用 .r 指令` }, callBack: true };
         }

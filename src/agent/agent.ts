@@ -118,11 +118,16 @@ export default class Agent {
             trace.beginTurn();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
             const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName);
-            result = await handleReply(ctx, msg, session, raw_reply);
+            // 提示词工程模式下模型可能返回 <function>...</function> 调用块：
+            // 发送前先剥离该块，避免标签原文进入回复/上下文；调用内容仍以 match[0] 原样记录
+            const promptCallMatch: RegExpMatchArray | null = (STATUS && PROMPT_ENGINEERING)
+                ? raw_reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/)
+                : null;
+            result = await handleReply(ctx, msg, session, promptCallMatch ? raw_reply.slice(0, promptCallMatch.index ?? 0) : raw_reply);
 
             if (STATUS) {
                 if (PROMPT_ENGINEERING) {
-                    const match = raw_reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
+                    const match = promptCallMatch;
                     if (match) {
                         if (toolTurn >= MAX_TOOL_TURNS) {
                             logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);

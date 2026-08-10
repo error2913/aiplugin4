@@ -4,7 +4,6 @@ import { logger } from "../logger";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
-import { ToolInfo } from "../tool/types";
 import { ToolCall } from "../tool/types";
 
 import { withTimeout } from "./utils";
@@ -230,62 +229,6 @@ export async function buildMultimodalContent(message: ContextMessage): Promise<R
         else parts.push({ type: 'text', text: seg });
     }
     return parts;
-}
-
-export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
-    const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-    const bodyObject: any = {};
-
-    for (let i = 0; i < template.length; i++) {
-        const s = template[i];
-        if (s.trim() === '') continue;
-        try {
-            const obj = JSON.parse(`{${s}}`);
-            const key = Object.keys(obj)[0];
-            bodyObject[key] = obj[key];
-        } catch (err) {
-            throw new Error(`parse body "${s}" error: ${err}`);
-        }
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'messages')) {
-        bodyObject.messages = messages;
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'model')) {
-        throw new Error('body 中没有 model');
-    }
-
-    if (STATUS && !PROMPT_ENGINEERING) {
-        if (!Object.prototype.hasOwnProperty.call(bodyObject, 'tools')) bodyObject.tools = tools;
-        if (!Object.prototype.hasOwnProperty.call(bodyObject, 'tool_choice')) bodyObject.tool_choice = tool_choice;
-    } else {
-        delete bodyObject?.tools;
-        delete bodyObject?.tool_choice;
-    }
-
-    return bodyObject;
-}
-
-export function parseEmbeddingBody(template: string[], input: string, dimensions: number) {
-    const bodyObject: any = {};
-
-    for (let i = 0; i < template.length; i++) {
-        const s = template[i];
-        if (s.trim() === '') continue;
-        try {
-            const obj = JSON.parse(`{${s}}`);
-            const key = Object.keys(obj)[0];
-            bodyObject[key] = obj[key];
-        } catch (err) {
-            throw new Error(`parse body "${s}" error: ${err}`);
-        }
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'input')) bodyObject.input = input;
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'dimensions')) bodyObject.dimensions = dimensions;
-
-    return bodyObject;
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {
