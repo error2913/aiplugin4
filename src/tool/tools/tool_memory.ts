@@ -29,7 +29,7 @@ export function registerMemory() {
                     },
                     text: {
                         type: 'string',
-                        description: '记忆内容，尽量简短，可用<|img:xxxxxx|>插入图片，无需附带时间与来源'
+                        description: '记忆内容，尽量简短，可用[img:xxxxxx]插入图片，无需附带时间与来源'
                     },
                     keywords: {
                         type: 'array',

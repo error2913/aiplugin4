@@ -168,9 +168,11 @@ export default class MemoryService {
 
     findMemoryAndImageByImageIdPrefix(id: string): { memory: MemoryItem, image: Image } | null {
         for (const m of this.memories) {
-            const match = m.content.match(/<\|img:([^|]+)\|>/);
-            if (match && match[1].replace(/_\d+$/, '') === id) {
-                const img = Image.get(match[1]);
+            // 兼容新旧标签格式：新版 [img:id]，历史 <|img:id|>
+            const match = m.content.match(/\[img:([^\]]+)\]|<\|img:([^|]+)\|>/);
+            const imageId = match?.[1] || match?.[2];
+            if (imageId && imageId.replace(/_\d+$/, '') === id) {
+                const img = Image.get(imageId);
                 if (img) return { memory: m, image: img };
             }
         }
@@ -179,7 +181,7 @@ export default class MemoryService {
 
     findImage(id: string): Image | null {
         for (const m of this.memories) {
-            if (m.content.includes('<|img:' + id + '|')) {
+            if (m.content.includes('[img:' + id + ']') || m.content.includes('<|img:' + id + '|')) {
                 return Image.get(id);
             }
         }

@@ -139,10 +139,10 @@ export function registerWeb() {
                 img.imageId = `web_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'png';
-                img.description = `网页截图<|img:${img.imageId}|>`;
+                img.description = `网页截图[img:${img.imageId}]`;
                 Image.save(img);
 
-                return `截图成功，请使用<|img:${img.imageId}|>发送`;
+                return `截图成功，请使用[img:${img.imageId}]发送`;
             } catch (error) {
                 logger.error("在web_read截图请求中出错：", error);
                 return `网页截图失败: ${error instanceof Error ? error.message : String(error)}`;

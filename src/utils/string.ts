@@ -222,7 +222,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 const uid = `QQ:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player!.name || '未知用户';
-                content += `<|at:${name}|>`;
+                content += `[at:${name}]`;
                 break;
             }
             case 'poke': {
@@ -231,11 +231,11 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 const uid = `QQ:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player!.name || '未知用户';
-                content += `<|poke:${name}|>`;
+                content += `[poke:${name}]`;
                 break;
             }
             case 'reply': {
-                content += `<|quote:${transformMsgId(seg.data.id || '')}|>`;
+                content += `[quote:${transformMsgId(seg.data.id || '')}]`;
                 break;
             }
             case 'image': {
@@ -246,7 +246,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
             }
             case 'face': {
                 const faceName = FACE_MAP[seg.data.id] || '';
-                content += faceName ? `<|face:${faceName}|>` : '';
+                content += faceName ? `[face:${faceName}]` : '';
                 break;
             }
         }
@@ -299,13 +299,38 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
             }
             case 'img': {
                 const id = seg.content;
-                const image = await session.context.findImage(ctx, id);
+                // 兼容 [img:imageId:描述]：描述部分可能带冒号，整体找不到时取首个冒号前作为图片 id
+                const image = await session.context.findImage(ctx, id) || (id.includes(':') ? await session.context.findImage(ctx, id.split(':')[0]) : null);
 
                 if (image) {
                     images.push(image);
                     text += image.CQCode;
                 } else {
                     logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
+            case 'avatar': {
+                const name = seg.content;
+                const ui = await session.context.findUser(ctx, name);
+                if (ui !== null) {
+                    const image = Image.getUserAvatar(ui.userId);
+                    images.push(image);
+                    text += image.CQCode;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                }
+                break;
+            }
+            case 'group_avatar': {
+                const name = seg.content;
+                const gi = await session.context.findGroup(ctx, name);
+                if (gi) {
+                    const image = Image.getGroupAvatar(gi.groupId);
+                    images.push(image);
+                    text += image.CQCode;
+                } else {
+                    logger.warning(`无法找到群聊：${name}`);
                 }
                 break;
             }
@@ -334,9 +359,12 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, session: { context: Context }, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
     const { QUOTE_REPLY: replymsg, TRIM: isTrim } = Config.reply;
 
+    // 历史 <|xxx|> 标签统一归一化为 [xxx]（新旧兼容），后续逻辑只认新格式
+    s = normalizeRenderTags(s);
+
     // 分离AI臆想出来的多轮对话
     const segments = s
-        .split(/([<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/)
+        .split(/([[［]from.+?[\]］])/)
         .filter(item => item.trim());
     if (segments.length === 0) {
         return { contextArray: [], replyArray: [], images: [] };
@@ -345,7 +373,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
     s = '';
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const match = segment.match(/[<＜][\|│｜]from[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
+        const match = segment.match(/^[[［]from[:：]?\s?(.+?)[\]］]$/);
         if (match) {
             // 如果臆想对象是自己，那么将下一条消息添加到s中
             const ui = await session.context.findUser(ctx, match[1]);
@@ -357,13 +385,13 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
 
     // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
-        s = segments.find((segment: string) => !/[<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞])/.test(segment)) || '';
+        s = segments.find((segment: string) => !/[[［]from.+?[\]］]/.test(segment)) || '';
         if (!s || !s.trim()) return { contextArray: [], replyArray: [], images: [] };
     }
 
     // 分离回复消息和戳一戳消息
-    s = s.replace(/[<＜][\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}`)
-        .replace(/[<＜][\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}\\f`);
+    s = s.replace(/[[［]quote[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}`)
+        .replace(/[[［]poke[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}\\f`);
 
     const { contextArray, replyArray } = filterString(s);
     const images: Image[] = [];
@@ -519,16 +547,35 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
 }
 
 interface TokenSegment {
-    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'face' | 'audio';
+    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'avatar' | 'group_avatar' | 'face' | 'audio';
     content: string;
+}
+
+/** 旧版 <|xxx|> 渲染标签统一归一化为新版 [xxx]（含全角/缺竖杠变体），历史数据与旧模板输出保持兼容 */
+const RENDER_TAG_CONTENT = '[^|｜>＞]+?';
+const RENDER_TAG_CLOSE = '(?:[\\|│｜][>＞]|[\\|│｜>＞])';
+
+export function normalizeRenderTags(s: string): string {
+    if (!s.includes('<')) return s;
+    // 图片标签特殊处理：user_avatar/group_avatar 前缀拆成独立标签 [avatar]/[group_avatar]
+    s = s.replace(
+        new RegExp(`[<＜][\\|│｜]img[:：]?\\s?(?:user_avatar[:：]?(${RENDER_TAG_CONTENT})|group_avatar[:：]?(${RENDER_TAG_CONTENT})|(${RENDER_TAG_CONTENT}))${RENDER_TAG_CLOSE}`, 'gi'),
+        (_all: string, user: string | undefined, group: string | undefined, img: string | undefined) =>
+            user ? `[avatar:${user}]` : group ? `[group_avatar:${group}]` : `[img:${img}]`
+    );
+    return s.replace(
+        new RegExp(`[<＜][\\|│｜](at|poke|quote|face|img|audio|from)[:：]?\\s?(${RENDER_TAG_CONTENT})${RENDER_TAG_CLOSE}`, 'gi'),
+        '[$1:$2]'
+    );
 }
 
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
-    const segs = s.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/);
+    s = normalizeRenderTags(s);
+    const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio)[:：]?[^\]］]*[\]］])/);
     segs.forEach(seg => {
         if (!seg) return;
-        const match = seg.match(/[<＜][\|│｜]([^:：]+)[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
+        const match = seg.match(/^[[［]([a-z_]+)[:：]?\s?([^\]］]*)[\]］]$/i);
         if (!match) {
             result.push({
                 type: 'text',
@@ -536,7 +583,7 @@ export function parseSpecialTokens(s: string): TokenSegment[] {
             })
         } else {
             const [_, type = 'text', content = ''] = match;
-            if (!['at', 'poke', 'quote', 'img', 'face', 'audio'].includes(type)) {
+            if (!['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'].includes(type)) {
                 result.push({
                     type: 'text',
                     content: seg

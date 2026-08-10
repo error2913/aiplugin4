@@ -60,9 +60,24 @@ export function registerMessage() {
             switch (seg.type) {
                 case 'img': {
                     const id = seg.content;
-                    const image = await session.context.findImage(ctx, id);
+                    // 兼容 [img:imageId:描述]：整体找不到时取首个冒号前作为图片 id
+                    const image = await session.context.findImage(ctx, id) || (id.includes(':') ? await session.context.findImage(ctx, id.split(':')[0]) : null);
                     if (image) originalImages.push(image);
                     else logger.warning(`无法找到图片：${id}`);
+                    break;
+                }
+                case 'avatar': {
+                    const name = seg.content;
+                    const ui = await session.context.findUser(ctx, name);
+                    if (ui !== null) originalImages.push(Image.getUserAvatar(ui.userId));
+                    else logger.warning(`无法找到用户：${name}`);
+                    break;
+                }
+                case 'group_avatar': {
+                    const name = seg.content;
+                    const gi = await session.context.findGroup(ctx, name);
+                    if (gi) originalImages.push(Image.getGroupAvatar(gi.groupId));
+                    else logger.warning(`无法找到群聊：${name}`);
                     break;
                 }
             }
@@ -142,7 +157,7 @@ export function registerMessage() {
         const uid = `QQ:${result.sender.user_id}`;
         ({ ctx } = getCtxAndMsg(epId, uid, gid));
         const name = ctx.player!.name || '未知用户';
-        const prefix = isPrefix ? `<|from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}|>` : '';
+        const prefix = isPrefix ? `[from:${name}${showNumber ? `(${uid.replace(/^.+:/, '')})` : ``}]` : '';
 
         return prefix + content;
     }
@@ -287,7 +302,8 @@ export function registerMessage() {
                     }
                     case 'img': {
                         const id = seg.content;
-                        const image = await session.context.findImage(ctx, id);
+                        // 兼容 [img:imageId:描述]：整体找不到时取首个冒号前作为图片 id
+                        const image = await session.context.findImage(ctx, id) || (id.includes(':') ? await session.context.findImage(ctx, id.split(':')[0]) : null);
 
                         if (image) {
                             if (image.type === 'local') break;
@@ -298,6 +314,38 @@ export function registerMessage() {
                             })
                         } else {
                             logger.warning(`无法找到图片：${id}`);
+                        }
+                        break;
+                    }
+                    case 'avatar': {
+                        const name = seg.content;
+                        const ui = await session.context.findUser(ctx, name);
+                        if (ui !== null) {
+                            const image = Image.getUserAvatar(ui.userId);
+                            if (image.type === 'local') break;
+                            images.push(image);
+                            content.push({
+                                type: 'image',
+                                data: { file: image.type === 'base64' ? seal.base64ToImage(image.base64) : (image.url || image.path) }
+                            })
+                        } else {
+                            logger.warning(`无法找到用户：${name}`);
+                        }
+                        break;
+                    }
+                    case 'group_avatar': {
+                        const name = seg.content;
+                        const gi = await session.context.findGroup(ctx, name);
+                        if (gi) {
+                            const image = Image.getGroupAvatar(gi.groupId);
+                            if (image.type === 'local') break;
+                            images.push(image);
+                            content.push({
+                                type: 'image',
+                                data: { file: image.type === 'base64' ? seal.base64ToImage(image.base64) : (image.url || image.path) }
+                            })
+                        } else {
+                            logger.warning(`无法找到群聊：${name}`);
                         }
                         break;
                     }

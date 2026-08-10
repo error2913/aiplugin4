@@ -6,6 +6,7 @@ import Image from "../resource/image";
 import { Session } from "../session/session";
 import { ToolCall } from "../tool/types";
 
+import { normalizeRenderTags } from "./string";
 import { withTimeout } from "./utils";
 
 /** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
@@ -204,18 +205,27 @@ function resolveImageById(id: string): Image | null {
  */
 export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
     if (message.role !== 'user') return buildContent(message);
-    const text = buildContent(message);
-    if (!text.includes('img')) return text;
+    const text = normalizeRenderTags(buildContent(message));
+    if (!/\[(?:img|avatar|group_avatar)[:：]/i.test(text)) return text;
 
     const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
-    const segs = text.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/).filter(Boolean);
+    const segs = text.split(/([[［](?:img|avatar|group_avatar)[:：]?[^\]］]*[\]］])/).filter(Boolean);
     for (const seg of segs) {
-        const match = seg.match(/^[<＜][\|│｜]img[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])$/i);
+        const match = seg.match(/^[[［](img|avatar|group_avatar)[:：]?\s?(.*?)[\]］]$/i);
         if (!match) {
             parts.push({ type: 'text', text: seg });
             continue;
         }
-        const image = resolveImageById(match[1].trim());
+        const type = match[1].toLowerCase();
+        const value = match[2].trim();
+        let image: Image | null = null;
+        if (type === 'avatar') {
+            image = Image.getUserAvatar(value);
+        } else if (type === 'group_avatar') {
+            image = Image.getGroupAvatar(value);
+        } else {
+            image = resolveImageById(value);
+        }
         // URL 图片优先转成 base64（模型常无法直接访问 QQ 临时链接）；转换失败保留原 URL
         if (image && image.type === 'url' && !image.base64) {
             try {

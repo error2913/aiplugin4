@@ -252,7 +252,7 @@ ${img.CQCode}`;
             const fmtCondition = parseInt(seal.format(ctx, `{${IMAGE_CONDITION}}`));
             if (fmtCondition === 1) await image.imageToText();
 
-            content += image.description ? `<|img:${image.imageId}:${image.description}|>` : `<|img:${image.imageId}|>`;
+            content += image.description ? `[img:${image.imageId}:${image.description}]` : `[img:${image.imageId}]`;
             images.push(image);
         } catch (error) {
             logger.error('在handleImageMessage中处理图片时出错:', error);

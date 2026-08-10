@@ -26,26 +26,20 @@ export default class PromptConfig {
 - 会话名称:{{{sessionName}}}
 - 会话ID:{{{sessionId}}}
 
-- <|at:xxx|>表示@某个群成员
-- <|poke:xxx|>表示戳一戳某个群成员
-
-## 特殊消息标签
-- <|system:xxx|>表示系统消息，xxx为系统提示来源，不要在生成的回复中使用
-- <|from:xxx|>表示消息来源，不要在生成的回复中使用
-- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
-- <|quote:xxx|>表示引用消息，xxx为对应的消息ID
-- <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
-- <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+- [at:xxx]表示@某个群成员
+- [poke:xxx]表示戳一戳某个群成员
+- [quote:xxx]表示引用消息，xxx为对应的消息ID
+- [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
 - \\f用于分割多条消息
 
 ## 图片相关
 {{#if RECEIVE_IMAGE}}
-- <|img:xxxxxx:yyy|>表示图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|img:xxxxxx|>的格式
+- [img:xxxxxx:yyy]表示图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用[img:xxxxxx]的格式
 {{/if}}
-- 可使用<|img:user_avatar:xxxxxx|>发送用户头像，其中xxxxxx为用户名称或用户ID
-- 可使用<|img:group_avatar:xxxxxx|>发送群聊头像，其中xxxxxx为群聊名称或群聊ID
+- 可使用[avatar:xxxxxx]发送用户头像，其中xxxxxx为用户名称或用户ID
+- 可使用[group_avatar:xxxxxx]发送群聊头像，其中xxxxxx为群聊名称或群聊ID
 {{#if LOCAL_IMAGES}}
-- 可使用<|img:图片ID|>发送本地图片，本地图片列表如下：
+- 可使用[img:图片ID]发送本地图片，本地图片列表如下：
     {{#each LOCAL_IMAGES}}
 {{{imageId}}}{{#unless @last}}、{{/unless}}
     {{else}}
@@ -55,7 +49,7 @@ export default class PromptConfig {
 
 ## 音频相关
 {{#if LOCAL_AUDIOS}}
-- 可使用<|audio:音频ID|>发送本地音频，本地音频列表如下：
+- 可使用[audio:音频ID]发送本地音频，本地音频列表如下：
     {{#each LOCAL_AUDIOS}}
 {{{audioId}}}{{#unless @last}}、{{/unless}}
     {{else}}
@@ -166,19 +160,10 @@ export default class PromptConfig {
     - 当前私聊:<{{{用户名称}}}>{{#if 展示号码}}({{{用户号码}}}){{/if}}
 {{else}}
     - 当前群聊:<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}
-    - <|at:xxx|>表示@某个群成员
-    - <|poke:xxx|>表示戳一戳某个群成员
-    - <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
-{{/if}}
-{{#if 添加前缀}}
-    - <|from:xxx|>表示消息来源，不要在生成的回复中使用
-{{/if}}
-{{#if 展示消息ID}}
-    - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
-    - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
-{{/if}}
-{{#if 展示时间}}
-    - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+    - [at:xxx]表示@某个群成员
+    - [poke:xxx]表示戳一戳某个群成员
+    - [quote:xxx]表示引用消息，xxx为对应的消息ID
+    - [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
 {{/if}}
     - \\f用于分割多条消息
 

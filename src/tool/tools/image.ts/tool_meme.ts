@@ -182,7 +182,7 @@ export function registerMeme() {
         if (result) {
             const { memory, image } = result;
             if (memory.tags.every((v, i) => v === kws[i])) {
-                return `${s}生成成功，请使用<|img:${image.imageId}|>发送`;
+                return `${s}生成成功，请使用[img:${image.imageId}]发送`;
             }
         }
 
@@ -212,13 +212,13 @@ export function registerMeme() {
                 img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
-                img.description = `表情包<|img:${img.imageId}|>
+                img.description = `表情包[img:${img.imageId}]
 ${textText ? `文字：${textText}` : ''}
 ${imageText ? `图片：${imageText}` : ''}`;
 
                 if (save) session.memory.addMemory(ctx, session, uiList, giList, kws, [img, ...images], img.description);
 
-                return `${s}生成成功，请使用<|img:${img.imageId}|>发送`;
+                return `${s}生成成功，请使用[img:${img.imageId}]发送`;
             } else {
                 throw new Error(json.message);
             }

@@ -100,11 +100,11 @@ export function registerImage() {
                 }
 
                 img.format = img.format || 'unknown';
-                img.description = `AI绘图<|img:${img.imageId}|>\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
+                img.description = `AI绘图[img:${img.imageId}]\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
 
                 if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return `生成成功，请使用<|img:${img.imageId}|>发送`;
+                return `生成成功，请使用[img:${img.imageId}]发送`;
             }
 
             // 兼容旧版 AIDrawing
