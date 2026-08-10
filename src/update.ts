@@ -1,6 +1,10 @@
 // 版本更新日志（updateInfo），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const updateInfo: { [version: string]: string } = {
+    "4.14.3": `## 修复
+- 修复 milky 协议纯文本消息被误判为「未知消息段」的问题：goja 反射会把 Go 命名 int 类型（ElementType）包装成 Number 对象而非原始值，导致类型分派时严格相等失败、纯文本被当成 [未知消息段] 占位，上下文看不到真实内容；现在先归一化为数字再做类型分派，文本/at/图片/回复等段按原类型正常展开
+## 说明
+- 无需恢复默认配置`,
     "4.14.2": `## 修复
 - 修复上下文存在空 tool_calls 数组时请求被后端拒绝的问题（Invalid 'messages[N].tool_calls': empty array）：构建请求时只在非空时附带 tool_calls，会话加载时自动清理历史遗留的空数组，并在流式/非流式请求入口统一兜底净化
 - 修复工具调用过滤时未剔除空 id 的 tool_call、tool 消息缺失 tool_call_id 时仍发送的问题

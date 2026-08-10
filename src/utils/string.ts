@@ -125,7 +125,10 @@ export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSeg
     const result: MessageSegment[] = [];
     for (const seg of segments) {
         if (!seg || typeof seg !== 'object' || typeof seg.type !== 'function') continue;
-        switch (seg.type()) {
+        // goja 反射会把 Go 命名 int（ElementType）包装成 Number 对象而非原始值，
+        // 导致严格相等 0 === seg.type() 不成立（字符串化却显示 "0"），必须先归一化为数字
+        const typeValue = Number(seg.type());
+        switch (typeValue) {
             case 0: { // 文本 Text
                 const content = 'content' in seg ? seg.content : '';
                 result.push({ type: 'text', data: { text: content || '' } });
@@ -174,7 +177,7 @@ export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSeg
                 break;
             }
             default: {
-                logger.debug(`milky 未知消息段类型: ${seg.type()}，按文本占位处理`);
+                logger.debug(`milky 未知消息段类型: ${typeValue}，按文本占位处理`);
                 result.push({ type: 'text', data: { text: '[未知消息段]' } });
             }
         }
