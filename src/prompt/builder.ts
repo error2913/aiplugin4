@@ -26,9 +26,11 @@ export async function buildSystemPromptContent(
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING } = Config.tool;
 
-    // 本地可发送资源（图片/语音）来自“资源”配置
+    // 本地可发送资源（图片/语音/文件/视频）来自“资源”配置
     const localImages = (Config.resource.LOCAL_IMAGES || []).map(img => ({ imageId: img.imageId }));
-    const localAudios: any[] = Config.resource.LOCAL_AUDIOS || [];
+    const localAudios = Config.resource.LOCAL_AUDIOS || [];
+    const localFiles = (Config.resource.LOCAL_FILES || []).map(f => ({ fileId: f.fileId }));
+    const localVideos = (Config.resource.LOCAL_VIDEOS || []).map(v => ({ videoId: v.videoId }));
 
     // 取最后一条用户消息，作为记忆/知识库查询的上下文
     const userMessages = session.context.messages.filter(m => m.role === 'user');
@@ -41,7 +43,9 @@ export async function buildSystemPromptContent(
             const u = User.get(lastItem.userId);
             ui = { isPrivate: true, id: lastItem.userId, name: u.userName || lastItem.userId };
         }
-        gi = { isPrivate: false, id: ctx.group!.groupId, name: ctx.group!.groupName };
+        if (!ctx.isPrivate && ctx.group) {
+            gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
+        }
     }
 
     // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
@@ -61,6 +65,8 @@ export async function buildSystemPromptContent(
         RECEIVE_IMAGE,
         LOCAL_IMAGES: localImages,
         LOCAL_AUDIOS: localAudios,
+        LOCAL_FILES: localFiles,
+        LOCAL_VIDEOS: localVideos,
         memoryPrompt,
         summaryPrompt,
         knowledgePrompt,

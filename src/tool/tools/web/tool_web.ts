@@ -1,10 +1,10 @@
 // 联网工具：搜索与网页阅读
-import Config from "../../config/config";
-import { logger } from "../../logger";
-import Image from "../../resource/image";
-import { generateId } from "../../utils/utils";
-import { callServerTool } from "../mcp";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import Image from "../../../resource/image";
+import { generateId } from "../../../utils/utils";
+import { callServerTool } from "../../mcp";
+import Tool from "../../tool";
 
 export function registerWeb() {
     const toolSearch = new Tool({
@@ -42,14 +42,14 @@ export function registerWeb() {
         const { q, page, categories, time_range = '' } = args;
         const { WEB_SEARCH: webSearchUrl } = Config.backend;
 
-        let part = 1;
-        let pageno = '';
-        if (page) {
-            part = parseInt(page) % 2;
-            pageno = page ? Math.ceil(parseInt(page) / 2).toString() : '';
-        }
+        // 页码映射：后端每页结果拆成两个半页（1=前半、2=后半、3=下一页前半……）
+        // page 为 0/负数/非法值时按第 1 页处理，避免 parseInt 边界导致 NaN
+        const rawPage = parseInt(String(page ?? ''), 10);
+        const safePage = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+        const part = ((safePage - 1) % 2) + 1;
+        const pageno = Math.ceil(safePage / 2).toString();
 
-        const url = `${webSearchUrl}/search?q=${q}&format=json${pageno ? `&pageno=${pageno}` : ''}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
+        const url = `${webSearchUrl}/search?q=${q}&format=json&pageno=${pageno}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
         try {
             logger.info(`使用搜索引擎搜索:${url}`);
 
@@ -139,10 +139,10 @@ export function registerWeb() {
                 img.imageId = `web_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'png';
-                img.description = `网页截图<|img:${img.imageId}|>`;
+                img.description = `网页截图[img:${img.imageId}]`;
                 Image.save(img);
 
-                return `截图成功，请使用<|img:${img.imageId}|>发送`;
+                return `截图成功，请使用[img:${img.imageId}]发送`;
             } catch (error) {
                 logger.error("在web_read截图请求中出错：", error);
                 return `网页截图失败: ${error instanceof Error ? error.message : String(error)}`;

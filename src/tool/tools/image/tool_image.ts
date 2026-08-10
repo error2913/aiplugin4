@@ -1,5 +1,4 @@
 // 图片工具：图片转文字/文生图（AIDrawing）
-import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
@@ -16,7 +15,7 @@ export function registerImage() {
                 properties: {
                     id: {
                         type: "string",
-                        description: `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
+                        description: '图片id，或user_avatar:用户名称或纯数字QQ号，或group_avatar:群聊名称或纯数字群号'
                     },
                     content: {
                         type: "string",
@@ -100,11 +99,11 @@ export function registerImage() {
                 }
 
                 img.format = img.format || 'unknown';
-                img.description = `AI绘图<|img:${img.imageId}|>\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
+                img.description = `AI绘图[img:${img.imageId}]\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
 
                 if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return `生成成功，请使用<|img:${img.imageId}|>发送`;
+                return `生成成功，请使用[img:${img.imageId}]发送`;
             }
 
             // 兼容旧版 AIDrawing

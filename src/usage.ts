@@ -46,23 +46,41 @@ export class UsageManager {
 
         if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) return;
 
-        for (const key in this.usageMap[model]) {
+        const map = this.usageMap[model];
+        // 先收集过期 key 与归并结果，完成后再统一替换，避免遍历同一对象时增删导致数据丢失/翻倍
+        const expiredKeys: string[] = [];
+        const merged: { [time: string]: { prompt_tokens: number, completion_tokens: number } } = {};
+        for (const key in map) {
+            if (key === '0-0-0') continue; // 长期汇总桶常驻，不再参与归并
             const [year, month, day] = key.split('-').map(Number);
             const ym = year * 12 + month;
             const ymd = year * 12 * 31 + month * 31 + day;
 
             let newKey = '';
-            if (ymd < currentYMD - 30) newKey = `${year}-${month}-0`;
-            if (ym < currentYM - 11) newKey = `0-0-0`;
+            if (ym < currentYM - 11) {
+                newKey = `0-0-0`;
+            } else if (day > 0 && ymd < currentYMD - 30) {
+                // 仅按天记录（day>0）的条目才需要按月归并；月度桶已聚合，只参与长期归并
+                newKey = `${year}-${month}-0`;
+            }
 
             if (newKey) {
-                if (!Object.prototype.hasOwnProperty.call(this.usageMap[model], newKey)) {
-                    this.usageMap[model][newKey] = { prompt_tokens: 0, completion_tokens: 0 };
+                expiredKeys.push(key);
+                if (!Object.prototype.hasOwnProperty.call(merged, newKey)) {
+                    merged[newKey] = { prompt_tokens: 0, completion_tokens: 0 };
                 }
-                this.usageMap[model][newKey].prompt_tokens += this.usageMap[model][key].prompt_tokens;
-                this.usageMap[model][newKey].completion_tokens += this.usageMap[model][key].completion_tokens;
-                delete this.usageMap[model][key];
+                merged[newKey].prompt_tokens += map[key].prompt_tokens;
+                merged[newKey].completion_tokens += map[key].completion_tokens;
             }
+        }
+        if (expiredKeys.length === 0) return;
+        for (const key of expiredKeys) delete map[key];
+        for (const key of Object.keys(merged)) {
+            if (!Object.prototype.hasOwnProperty.call(map, key)) {
+                map[key] = { prompt_tokens: 0, completion_tokens: 0 };
+            }
+            map[key].prompt_tokens += merged[key].prompt_tokens;
+            map[key].completion_tokens += merged[key].completion_tokens;
         }
     }
 

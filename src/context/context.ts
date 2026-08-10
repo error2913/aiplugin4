@@ -99,7 +99,7 @@ export class Context {
         // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
         if (this.autoNameMod > 0) {
             try {
-                await this.updateName(ctx.endPoint.userId, ctx.group!.groupId, userId);
+                await this.updateName(ctx.endPoint.userId, ctx.group ? ctx.group.groupId : '', userId);
             } catch (e) {
                 Logger.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
@@ -243,9 +243,9 @@ export class Context {
         // 在群成员列表、好友列表中查找用户
         if (netExists()) {
             const epId = ctx.endPoint.userId;
-            const gid = ctx.group!.groupId;
 
             if (!ctx.isPrivate) {
+                const gid = ctx.group!.groupId;
                 const groupMemberList = await getGroupMemberList(epId, gid.replace(/^.+:/, ''));
                 if (groupMemberList && Array.isArray(groupMemberList)) {
                     const user_id = groupMemberList.find(item => item.card === name || item.nickname === name)?.user_id;
@@ -331,7 +331,7 @@ export class Context {
         const match = groupName.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
         if (match) groupName = match[1] || match[2];
 
-        if (groupName === ctx.group!.groupName) return ctx.group!.groupId;
+        if (!ctx.isPrivate && ctx.group && groupName === ctx.group.groupName) return ctx.group.groupId;
 
         // 在记忆中查找群聊
         for (const groupId of MemoryService.getItemsFromRelatedMemories(this.session, 'groups')) {
@@ -350,7 +350,7 @@ export class Context {
             }
         }
 
-        if (groupName.length > 4 && levenshteinDistance(groupName, ctx.group!.groupName) <= 2) return ctx.group!.groupId;
+        if (!ctx.isPrivate && ctx.group && groupName.length > 4 && levenshteinDistance(groupName, ctx.group.groupName) <= 2) return ctx.group.groupId;
 
         Logger.warning(`未找到群聊<${groupName}>`);
         return '';

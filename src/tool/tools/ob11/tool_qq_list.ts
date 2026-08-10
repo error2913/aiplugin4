@@ -1,5 +1,4 @@
 // 列表工具：好友/群/成员/共同群搜索
-import Config from "../../../config/config";
 import { getFriendList, getGroupList, getGroupMemberList, netExists } from "../../../utils/ob11";
 import Tool from "../../tool";
 
@@ -193,7 +192,7 @@ export function registerQQList() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     }
                 },
                 required: ["name"]

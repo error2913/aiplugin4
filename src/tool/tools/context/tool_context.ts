@@ -1,9 +1,8 @@
 // 上下文工具：查看指定会话上下文
-import Config from "../../config/config";
-import { getSession } from "../../session/session_service";
-import { buildContent } from "../../utils/message";
-import { getCtxAndMsg } from "../../utils/seal";
-import Tool from "../tool";
+import { getSession } from "../../../session/session_service";
+import { buildContent } from "../../../utils/message";
+import { getCtxAndMsg } from "../../../utils/seal";
+import Tool from "../../tool";
 
 export function registerContext() {
     const toolGet = new Tool({
@@ -21,7 +20,7 @@ export function registerContext() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与上下文类型对应'
+                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与上下文类型对应'
                     }
                 },
                 required: ["ctx_type", "name"]

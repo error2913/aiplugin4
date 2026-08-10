@@ -20,6 +20,35 @@ export function transformMsgIdBack(msgId: string): number {
     return parseInt(msgId, 36); // 将36进制字符串转换为数字 
 }
 
+/**
+ * 消息记录用的唯一 ID。milky 格式（msg.segment 非空）下 msg.rawId 只是会话内的
+ * message_seq，经 ob11 依赖的 net.messageId 转成 OB11 唯一 message_id 后再按现有
+ * base36 规则记录；未装依赖、参数缺失或转换失败时回退原逻辑（transformMsgId(rawId)）。
+ * 注意：发送引用仍使用原始 rawId（milky 端需要 message_seq），此处仅用于上下文记录。
+ */
+export function getRecordMessageId(ctx: seal.MsgContext, msg: seal.Message): string {
+    const segments = (msg as any).segment;
+    if (Array.isArray(segments) && segments.length > 0) {
+        const net = (globalThis as any).net;
+        if (net && typeof net.messageId === 'function' && msg.rawId !== null && msg.rawId !== undefined && msg.rawId !== '') {
+            try {
+                const rawStr = String(msg.rawId);
+                const peerStr = ctx.isPrivate ? (ctx.player && ctx.player.userId) || '' : (ctx.group && ctx.group.groupId) || '';
+                const peerMatch = /(\d+)$/.exec(peerStr);
+                if (peerMatch && /^\d+$/.test(rawStr)) {
+                    const mid = net.messageId({ scene: ctx.isPrivate ? 'friend' : 'group', id: Number(peerMatch[1]), msgid: Number(rawStr) });
+                    if (mid !== null && mid !== undefined) {
+                        return transformMsgId(Number(mid));
+                    }
+                }
+            } catch (e) {
+                logger.warning(`milky 消息 ID 转换失败，回退原始 rawId:${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+    }
+    return transformMsgId(msg.rawId);
+}
+
 export function generateId() {
     const timestamp = Date.now().toString(36); // 将时间戳转换为36进制字符串
     const random = Math.random().toString(36).substring(2, 6); // 随机数部分
@@ -49,7 +78,6 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
         if (messageArray.length === 0) return '';
 
         const epId = ctx.endPoint.userId;
-        const gid = ctx.group!.groupId;
         const uid = ctx.player!.userId;
         if (msg.messageType === 'private') {
             const result = await sendPrivateMsg(epId, uid.replace(/^.+:/, ''), messageArray);
@@ -58,6 +86,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
                 return transformMsgId(result.message_id);
             }
         } else if (msg.messageType === 'group') {
+            const gid = ctx.group ? ctx.group.groupId : '';
             const result = await sendGroupMsg(epId, gid.replace(/^.+:/, ''), messageArray);
             if (result?.message_id) {
                 logger.info(`(${result.message_id})发送给${gid}:${s}`);

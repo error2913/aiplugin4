@@ -74,8 +74,7 @@ export default class Model {
         }
         const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
-            return ImageModelAnyList[randomIndex];
+            return ImageModelAnyList[0];
         }
         // 用途匹配失败时回退到 chat 用途的模型（与文档约定一致），避免压缩/总结等静默失败
         const chatFallbackList = Model.chatModels.filter(model => model.use.includes('chat'));
@@ -88,13 +87,11 @@ export default class Model {
     static getImageModel(use: ImageModelUse): ImageModel | null {
         const ImageModelList = Model.imageModels.filter(model => model.use.includes(use));
         if (ImageModelList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * ImageModelList.length);
-            return ImageModelList[randomIndex];
+            return ImageModelList[0];
         }
         const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
         if (ImageModelAnyList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * ImageModelAnyList.length);
-            return ImageModelAnyList[randomIndex];
+            return ImageModelAnyList[0];
         }
         return null;
     }
@@ -102,13 +99,11 @@ export default class Model {
     static getEmbeddingModel(use: EmbeddingModelUse): EmbeddingModel | null {
         const EmbeddingModelList = Model.embeddingModels.filter(model => model.use.includes(use));
         if (EmbeddingModelList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * EmbeddingModelList.length);
-            return EmbeddingModelList[randomIndex];
+            return EmbeddingModelList[0];
         }
         const EmbeddingModelAnyList = Model.embeddingModels.filter(model => model.use.length === 0);
         if (EmbeddingModelAnyList.length > 0) {
-            const randomIndex = Math.floor(Math.random() * EmbeddingModelAnyList.length);
-            return EmbeddingModelAnyList[randomIndex];
+            return EmbeddingModelAnyList[0];
         }
         return null;
     }

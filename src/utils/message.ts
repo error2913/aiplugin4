@@ -4,7 +4,7 @@ import { logger } from "../logger";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
-import { ToolInfo } from "../tool/types";
+import User from "../session/user";
 import { ToolCall } from "../tool/types";
 
 import { withTimeout } from "./utils";
@@ -113,6 +113,20 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
 
     const messages: ContextMessage[] = [systemMessage, ...samplesMessages, ...contextMessages];
 
+    // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
+    // 工具结果转成 user 文本（带【工具返回】标记），保证模型能看到结果而不会反复调用工具
+    if (Config.tool.PROMPT_ENGINEERING) {
+        return await Promise.all(messages.map(async message => {
+            if (message.role === 'tool') {
+                return { role: 'user', content: `【工具返回】${buildContent(message)}` };
+            }
+            return {
+                role: message.role,
+                content: multimodal ? await buildMultimodalContent(message) : buildContent(message)
+            };
+        }));
+    }
+
     // 过滤没有对应 tool_call_id 的 tool_calls
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
@@ -169,40 +183,63 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
 
 export function buildContent(message: ContextMessage): string {
     if (message.contentItems && message.contentItems.length > 0) {
-        return message.contentItems.map(item => item.text || '').join('\f');
+        // 用户消息补上发送者前缀（名字 + QQ号），避免最终上下文丢失发送者信息
+        let prefix = '';
+        if (message.role === 'user') {
+            const userItem = message.contentItems.find(item => item.userId);
+            if (userItem && userItem.userId) {
+                const uid = userItem.userId;
+                const number = uid.replace(/^.+:/, '');
+                const name = User.get(uid).userName;
+                prefix = name ? `[from:${name}(${number})]` : `[from:${number}]`;
+            }
+        }
+        // 每条消息补消息 ID 标记，供模型在 [quote:xxx] 中引用；无 ID 时跳过避免空标签
+        return prefix + message.contentItems.map(item =>
+            (item.messageId ? `[msg_id:${item.messageId}]` : '') + (item.text || '')
+        ).join('\f');
     }
     if (message.text) return message.text;
     return '';
 }
 
-/** 解析 <|img:...|> 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */
+/** 解析 [img:...] 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */
 function resolveImageById(id: string): Image | null {
     if (/^user_avatar[:?]/.test(id)) return Image.getUserAvatar(id.replace(/^user_avatar[:?]/, ''));
     if (/^group_avatar[:?]/.test(id)) return Image.getGroupAvatar(id.replace(/^group_avatar[:?]/, ''));
     const img = Image.get(id);
     if (img) return img;
-    // 兼容 <|img:imageId:描述|>：描述部分可能带冒号，取首个冒号前作为图片 id
+    // 兼容 [img:imageId:描述]：描述部分可能带冒号，取首个冒号前作为图片 id
     return Image.get(id.split(':')[0]);
 }
 
 /**
- * 多模态消息内容：把用户消息里的 <|img:...|> 图片标签转成 image_url 内容块直接传给模型，
+ * 多模态消息内容：把用户消息里的 [img:...] 图片标签转成 image_url 内容块直接传给模型，
  * 而不是让模型只看到文本标签；无法解析的图片（如本地路径无可用 URL）保留原标签。
  */
 export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
     if (message.role !== 'user') return buildContent(message);
     const text = buildContent(message);
-    if (!text.includes('img')) return text;
+    if (!/\[(?:img|avatar|group_avatar)[:：]/i.test(text)) return text;
 
     const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
-    const segs = text.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/).filter(Boolean);
+    const segs = text.split(/([[［](?:img|avatar|group_avatar)[:：]?[^\]］]*[\]］])/).filter(Boolean);
     for (const seg of segs) {
-        const match = seg.match(/^[<＜][\|│｜]img[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])$/i);
+        const match = seg.match(/^[[［](img|avatar|group_avatar)[:：]?\s?(.*?)[\]］]$/i);
         if (!match) {
             parts.push({ type: 'text', text: seg });
             continue;
         }
-        const image = resolveImageById(match[1].trim());
+        const type = match[1].toLowerCase();
+        const value = match[2].trim();
+        let image: Image | null = null;
+        if (type === 'avatar') {
+            image = Image.getUserAvatar(value);
+        } else if (type === 'group_avatar') {
+            image = Image.getGroupAvatar(value);
+        } else {
+            image = resolveImageById(value);
+        }
         // URL 图片优先转成 base64（模型常无法直接访问 QQ 临时链接）；转换失败保留原 URL
         if (image && image.type === 'url' && !image.base64) {
             try {
@@ -216,62 +253,6 @@ export async function buildMultimodalContent(message: ContextMessage): Promise<R
         else parts.push({ type: 'text', text: seg });
     }
     return parts;
-}
-
-export function parseBody(template: string[], messages: any[], tools: ToolInfo[], tool_choice: string) {
-    const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-    const bodyObject: any = {};
-
-    for (let i = 0; i < template.length; i++) {
-        const s = template[i];
-        if (s.trim() === '') continue;
-        try {
-            const obj = JSON.parse(`{${s}}`);
-            const key = Object.keys(obj)[0];
-            bodyObject[key] = obj[key];
-        } catch (err) {
-            throw new Error(`parse body "${s}" error: ${err}`);
-        }
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'messages')) {
-        bodyObject.messages = messages;
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'model')) {
-        throw new Error('body 中没有 model');
-    }
-
-    if (STATUS && !PROMPT_ENGINEERING) {
-        if (!Object.prototype.hasOwnProperty.call(bodyObject, 'tools')) bodyObject.tools = tools;
-        if (!Object.prototype.hasOwnProperty.call(bodyObject, 'tool_choice')) bodyObject.tool_choice = tool_choice;
-    } else {
-        delete bodyObject?.tools;
-        delete bodyObject?.tool_choice;
-    }
-
-    return bodyObject;
-}
-
-export function parseEmbeddingBody(template: string[], input: string, dimensions: number) {
-    const bodyObject: any = {};
-
-    for (let i = 0; i < template.length; i++) {
-        const s = template[i];
-        if (s.trim() === '') continue;
-        try {
-            const obj = JSON.parse(`{${s}}`);
-            const key = Object.keys(obj)[0];
-            bodyObject[key] = obj[key];
-        } catch (err) {
-            throw new Error(`parse body "${s}" error: ${err}`);
-        }
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'input')) bodyObject.input = input;
-    if (!Object.prototype.hasOwnProperty.call(bodyObject, 'dimensions')) bodyObject.dimensions = dimensions;
-
-    return bodyObject;
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {

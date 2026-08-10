@@ -1,5 +1,4 @@
 // 个人信息工具：资料/生日/星座等
-import Config from "../../../config/config";
 import { getStrangerInfo, netExists } from "../../../utils/ob11";
 import Tool from "../../tool";
 
@@ -17,7 +16,7 @@ export function registerGetPersonInfo() {
                 properties: {
                     name: {
                         type: 'string',
-                        description: '用户名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '')
+                        description: '用户名称或纯数字QQ号'
                     }
                 },
                 required: ['name']

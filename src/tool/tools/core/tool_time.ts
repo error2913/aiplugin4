@@ -1,7 +1,7 @@
 // 时间/定时器工具：当前时间与目标/间隔定时器设置
-import { TimerManager } from "../../timer";
-import { fmtDate } from "../../utils/string";
-import Tool from "../tool";
+import { TimerManager } from "../../../timer";
+import { fmtDate } from "../../../utils/string";
+import Tool from "../../tool";
 
 export function registerTime() {
     const toolGet = new Tool({

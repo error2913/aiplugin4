@@ -1,9 +1,9 @@
 // 论坛工具：帖子列表/详情/搜索/发帖/评论/动态通知/帖子管理
-import Config from "../../config/config";
-import { logger } from "../../logger";
-import Image from "../../resource/image";
-import { parseSpecialTokens } from "../../utils/string";
-import Tool from "../tool";
+import Config from "../../../config/config";
+import { logger } from "../../../logger";
+import Image from "../../../resource/image";
+import { parseSpecialTokens } from "../../../utils/string";
+import Tool from "../../tool";
 
 /**
  * FNV-1a 签名算法
@@ -134,7 +134,7 @@ async function imageToForumFormat(image: Image): Promise<{ name: string, mime_ty
 }
 
 /**
- * 从内容中提取 <|img:xxx|> 引用的图片 ID，通过 Image.get 查找
+ * 从内容中提取 [img:xxx] 引用的图片 ID，通过 Image.get 查找
  */
 function extractImagesFromContent(content: string): Image[] {
     const segs = parseSpecialTokens(content);
@@ -142,7 +142,8 @@ function extractImagesFromContent(content: string): Image[] {
     for (const seg of segs) {
         if (seg.type === 'img') {
             const id = seg.content;
-            const image = Image.get(id);
+            // 兼容 [img:imageId:描述]：整体找不到时取首个冒号前作为图片 id
+            const image = Image.get(id) || (id.includes(':') ? Image.get(id.split(':')[0]) : null);
             if (image) {
                 images.push(image);
             } else {
@@ -154,10 +155,10 @@ function extractImagesFromContent(content: string): Image[] {
 }
 
 /**
- * 从内容中移除 <|img:xxx|> 标记，保留纯文本/Markdown
+ * 从内容中移除 [img:xxx] 标记，保留纯文本/Markdown
  */
 function stripImageTokens(content: string): string {
-    return content.replace(/<\|img:[^|]*\|>/g, '').trim();
+    return content.replace(/\[img:[^\]]*\]/g, '').trim();
 }
 
 export function registerForum() {
@@ -389,7 +390,7 @@ export function registerForum() {
         function: {
             name: "forum_create_post",
             description: "在论坛创建新帖子。" +
-                "图片可通过 image_ids 参数传入图片ID列表，也可在 content 中使用 <|img:图片ID|> 引用。",
+                "图片可通过 image_ids 参数传入图片ID列表，也可在 content 中使用 [img:图片ID] 引用。",
             parameters: {
                 type: "object",
                 properties: {
@@ -399,7 +400,7 @@ export function registerForum() {
                     },
                     content: {
                         type: "string",
-                        description: "帖子内容，支持Markdown格式。可以在内容中使用<|img:图片ID|>引用图片，图片会自动上传并嵌入到帖子中"
+                        description: "帖子内容，支持Markdown格式。可以在内容中使用[img:图片ID]引用图片，图片会自动上传并嵌入到帖子中"
                     },
                     tags: {
                         type: "array",

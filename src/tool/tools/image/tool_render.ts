@@ -41,14 +41,39 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
             }
             case 'img': {
                 const id = seg.content;
-                const image = await session.context.findImage(ctx, id);
+                // 兼容 [img:imageId:描述]：整体找不到时取首个冒号前作为图片 id
+                const image = await session.context.findImage(ctx, id) || (id.includes(':') ? await session.context.findImage(ctx, id.split(':')[0]) : null);
 
                 if (image) {
-                    if (image.type === 'local') throw new Error(`图片<|img:${id}|>为本地图片，暂不支持`);
+                    if (image.type === 'local') throw new Error(`图片[img:${id}]为本地图片，暂不支持`);
                     images.push(image);
                     text += image.url;
                 } else {
                     logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
+            case 'avatar': {
+                const name = seg.content;
+                const ui = await session.context.findUser(ctx, name);
+                if (ui !== null) {
+                    const image = Image.getUserAvatar(ui.userId);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                }
+                break;
+            }
+            case 'group_avatar': {
+                const name = seg.content;
+                const gi = await session.context.findGroup(ctx, name);
+                if (gi) {
+                    const image = Image.getGroupAvatar(gi.groupId);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    logger.warning(`无法找到群聊：${name}`);
                 }
                 break;
             }
@@ -86,7 +111,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用markdown语法显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
+                        description: "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用[img:xxxxxx]替代图片url（注意使用markdown语法显示图片），xxxxxx为" + `图片id，或avatar:用户名称/ID，或group_avatar:群聊名称/ID`
                     },
                     name: {
                         type: "string",
@@ -134,12 +159,12 @@ export function registerRender() {
                 img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
-                img.description = `Markdown 渲染图片<|img:${img.imageId}|>
+                img.description = `Markdown 渲染图片[img:${img.imageId}]
 主题：${theme}`;
 
                 if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return `渲染成功，请使用<|img:${img.imageId}|>发送`;
+                return `渲染成功，请使用[img:${img.imageId}]发送`;
             } else {
                 throw new Error(result.message || "渲染失败");
             }
@@ -159,7 +184,7 @@ export function registerRender() {
                 properties: {
                     content: {
                         type: "string",
-                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用<|img:xxxxxx|>替代图片url（注意使用html元素显示图片），xxxxxx为" + `图片id，或user_avatar:用户名称` + (Config.message.SHOW_NUMBER ? '或纯数字QQ号' : '') + `，或group_avatar:群聊名称` + (Config.message.SHOW_NUMBER ? '或纯数字群号' : '')
+                        description: "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用[img:xxxxxx]替代图片url（注意使用html元素显示图片），xxxxxx为" + `图片id，或avatar:用户名称/ID，或group_avatar:群聊名称/ID`
                     },
                     name: {
                         type: "string",
@@ -201,11 +226,11 @@ export function registerRender() {
                 img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
-                img.description = `HTML 渲染图片<|img:${img.imageId}|>`;
+                img.description = `HTML 渲染图片[img:${img.imageId}]`;
 
                 if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 
-                return `渲染成功，请使用<|img:${img.imageId}|>发送`;
+                return `渲染成功，请使用[img:${img.imageId}]发送`;
             } else {
                 throw new Error(result.message || "渲染失败");
             }

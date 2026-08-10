@@ -1,13 +1,12 @@
 // 记忆工具：添加/删除/搜索/清除记忆（含知识库）
-import Config from "../../config/config";
-import { knowledgeService } from "../../memory/knowledge";
-import { MemoryManager } from "../../memory/manager";
-import { searchOptions as SearchOptions } from "../../memory/types";
-import { getSession, SessionService } from "../../session/session_service";
-import { GroupInfo, SessionInfo, UserInfo } from "../../session/types";
-import { getRoleSetting } from "../../utils/message";
-import { getCtxAndMsg } from "../../utils/seal";
-import Tool from "../tool";
+import { knowledgeService } from "../../../memory/knowledge";
+import { MemoryManager } from "../../../memory/manager";
+import { searchOptions as SearchOptions } from "../../../memory/types";
+import { getSession, SessionService } from "../../../session/session_service";
+import { GroupInfo, SessionInfo, UserInfo } from "../../../session/types";
+import { getRoleSetting } from "../../../utils/message";
+import { getCtxAndMsg } from "../../../utils/seal";
+import Tool from "../../tool";
 
 export function registerMemory() {
     const toolAdd = new Tool({
@@ -25,11 +24,11 @@ export function registerMemory() {
                     },
                     name: {
                         type: 'string',
-                        description: '目标用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
+                        description: '目标用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
                     },
                     text: {
                         type: 'string',
-                        description: '记忆内容，尽量简短，可用<|img:xxxxxx|>插入图片，无需附带时间与来源'
+                        description: '记忆内容，尽量简短，可用[img:xxxxxx]插入图片，无需附带时间与来源'
                     },
                     keywords: {
                         type: 'array',
@@ -109,7 +108,7 @@ export function registerMemory() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
+                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
                     },
                     id_list: {
                         type: 'array',
@@ -171,7 +170,7 @@ export function registerMemory() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
+                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
                     },
                     query: {
                         type: 'string',
@@ -308,7 +307,7 @@ export function registerMemory() {
                     },
                     name: {
                         type: 'string',
-                        description: '用户名称或群聊名称' + (Config.message.SHOW_NUMBER ? '或纯数字QQ号、群号' : '') + '，实际使用时与记忆类型对应'
+                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
                     }
                 },
                 required: ['memory_type', 'name']

@@ -26,26 +26,22 @@ export default class PromptConfig {
 - 会话名称:{{{sessionName}}}
 - 会话ID:{{{sessionId}}}
 
-- <|at:xxx|>表示@某个群成员
-- <|poke:xxx|>表示戳一戳某个群成员
-
-## 特殊消息标签
-- <|system:xxx|>表示系统消息，xxx为系统提示来源，不要在生成的回复中使用
-- <|from:xxx|>表示消息来源，不要在生成的回复中使用
-- <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
-- <|quote:xxx|>表示引用消息，xxx为对应的消息ID
-- <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
-- <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+- [at:xxx]表示@某个群成员
+- [poke:xxx]表示戳一戳某个群成员
+- [from:xxx]表示消息来源，xxx为发送者名称，用户消息均带此前缀（含QQ号）
+- [msg_id:xxx]表示消息ID，xxx为对应消息的ID，引用某条消息时使用[quote:xxx]
+- [quote:xxx]表示引用消息，xxx为对应的消息ID
+- [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
 - \\f用于分割多条消息
 
 ## 图片相关
 {{#if RECEIVE_IMAGE}}
-- <|img:xxxxxx:yyy|>表示图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用<|img:xxxxxx|>的格式
+- [img:xxxxxx:yyy]表示图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用[img:xxxxxx]的格式
 {{/if}}
-- 可使用<|img:user_avatar:xxxxxx|>发送用户头像，其中xxxxxx为用户名称或用户ID
-- 可使用<|img:group_avatar:xxxxxx|>发送群聊头像，其中xxxxxx为群聊名称或群聊ID
+- 可使用[avatar:xxxxxx]发送用户头像，其中xxxxxx为用户名称或用户ID
+- 可使用[group_avatar:xxxxxx]发送群聊头像，其中xxxxxx为群聊名称或群聊ID
 {{#if LOCAL_IMAGES}}
-- 可使用<|img:图片ID|>发送本地图片，本地图片列表如下：
+- 可使用[img:图片ID]发送本地图片，本地图片列表如下：
     {{#each LOCAL_IMAGES}}
 {{{imageId}}}{{#unless @last}}、{{/unless}}
     {{else}}
@@ -55,11 +51,29 @@ export default class PromptConfig {
 
 ## 音频相关
 {{#if LOCAL_AUDIOS}}
-- 可使用<|audio:音频ID|>发送本地音频，本地音频列表如下：
+- 可使用[audio:音频ID]发送本地音频，本地音频列表如下：
     {{#each LOCAL_AUDIOS}}
 {{{audioId}}}{{#unless @last}}、{{/unless}}
     {{else}}
 暂无本地音频
+    {{/each}}
+{{/if}}
+
+## 文件与视频相关
+{{#if LOCAL_FILES}}
+- 可使用send_file工具发送本地文件，本地文件列表如下：
+    {{#each LOCAL_FILES}}
+{{{fileId}}}{{#unless @last}}、{{/unless}}
+    {{else}}
+暂无本地文件
+    {{/each}}
+{{/if}}
+{{#if LOCAL_VIDEOS}}
+- 可使用send_video工具发送本地视频，本地视频列表如下：
+    {{#each LOCAL_VIDEOS}}
+{{{videoId}}}{{#unless @last}}、{{/unless}}
+    {{else}}
+暂无本地视频
     {{/each}}
 {{/if}}
 
@@ -70,7 +84,7 @@ export default class PromptConfig {
 {{{knowledgePrompt}}}
 
 {{{toolPrompt}}}`
-        ], "Handlebars 模板，生成 system 提示词。\n可用变量：instruction、platform、sessionType、sessionName、sessionId、RECEIVE_IMAGE、LOCAL_IMAGES、LOCAL_AUDIOS、memoryPrompt、summaryPrompt、knowledgePrompt、toolPrompt。\n修改后保存并重载 js", "prompt模板");
+        ], "Handlebars 模板，生成 system 提示词。\n可用变量：instruction、platform、sessionType、sessionName、sessionId、RECEIVE_IMAGE、LOCAL_IMAGES、LOCAL_AUDIOS、LOCAL_FILES、LOCAL_VIDEOS、memoryPrompt、summaryPrompt、knowledgePrompt、toolPrompt。\n修改后保存并重载 js", "prompt模板");
         registerTemplate("长期记忆prompt模板", [
             `{{#if MEMORY}}
 
@@ -129,18 +143,18 @@ export default class PromptConfig {
             `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数
-当需要调用函数功能时，请严格使用以下JSON格式，示例：
+当需要调用函数功能时，请将函数调用数组放入以 \`\`\`function 开头、\`\`\` 结尾的代码块中，严格使用以下JSON格式，示例：
 
-<function>
+\`\`\`function
 [
 {
     "name": "函数名",
     "arguments": "{\\"参数1\\": \\"值1\\",\\"参数2\\": \\"值2\\"}"
 }
 ]
-</function>
+\`\`\`
 
-要使用成对的标签：\`<function>\`在前面，\`</function>\`在后面包裹调用工具的数组。
+要使用成对的代码块围栏：\`\`\`function 在前面，\`\`\` 在后面包裹调用工具的数组。
 可调用多个函数，每个调用需包含name字段和arguments字段，且arguments字段必须是JSON字符串。
 
 可用函数列表:
@@ -163,22 +177,13 @@ export default class PromptConfig {
 ## 聊天相关
     - 当前平台:{{{平台}}}
 {{#if 私聊}}
-    - 当前私聊:<{{{用户名称}}}>{{#if 展示号码}}({{{用户号码}}}){{/if}}
+    - 当前私聊:<{{{用户名称}}}>({{{用户号码}}})
 {{else}}
-    - 当前群聊:<{{{群聊名称}}}>{{#if 展示号码}}({{{群聊号码}}}){{/if}}
-    - <|at:xxx|>表示@某个群成员
-    - <|poke:xxx|>表示戳一戳某个群成员
-    - <|face:xxx|>表示使用某个表情，xxx为表情名称，注意与img表情包区分
-{{/if}}
-{{#if 添加前缀}}
-    - <|from:xxx|>表示消息来源，不要在生成的回复中使用
-{{/if}}
-{{#if 展示消息ID}}
-    - <|msg_id:xxx|>表示消息ID，仅用于调用函数时使用，不要在生成的回复中提及或使用
-    - <|quote:xxx|>表示引用消息，xxx为对应的消息ID
-{{/if}}
-{{#if 展示时间}}
-    - <|time:xxxx-xx-xx xx:xx:xx|>表示消息发送时间，不要在生成的回复中提及或使用
+    - 当前群聊:<{{{群聊名称}}}>({{{群聊号码}}})
+    - [at:xxx]表示@某个群成员
+    - [poke:xxx]表示戳一戳某个群成员
+    - [quote:xxx]表示引用消息，xxx为对应的消息ID
+    - [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
 {{/if}}
     - \\f用于分割多条消息
 
@@ -205,7 +210,7 @@ export default class PromptConfig {
                 },
                 "name": {
                     type: 'string',
-                    description: '用户名称或群聊名称{{#if 展示号码}}或纯数字QQ号、群号{{/if}}，实际使用时与记忆类型对应'
+                    description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
                 },
                 "text": {
                     type: 'string',

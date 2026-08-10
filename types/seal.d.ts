@@ -132,16 +132,127 @@ declare namespace seal {
     /**
      * 消息段（富文本元素）。目前仅部分平台（如 Milky）支持，
      * 其他平台通常为空数组。
+     *
+     * 每个元素是独立的 Go 结构体（message 包），只暴露带 jsbind 标签的字段，
+     * 并带一个 type() 方法返回元素类型编号（见 MessageElementType）。
      */
     segment: MessageSegment[];
   }
 
-  /** 消息段（富文本元素），type 与 data 由各平台决定 */
-  export interface MessageSegment {
-    /** 元素类型，如 text / at / image / reply 等 */
-    type: string;
-    /** 元素数据（原始 JSON） */
-    data: any;
+  /**
+   * 消息段元素类型编号，对应 Go 中 message.ElementType 的枚举值，
+   * 由元素的 type() 方法返回。
+   */
+  export type MessageElementType =
+    | 0 // 文本 Text
+    | 1 // 艾特 At
+    | 2 // 文件 File
+    | 3 // 图片 Image
+    | 4 // 文字转语音 TTS
+    | 5 // 回复 Reply
+    | 6 // 语音 Record
+    | 7 // 表情 Face
+    | 8; // 戳一戳 Poke
+
+  /**
+   * 消息段（富文本元素）。
+   *
+   * v1.6.0 中每种元素是独立的具体结构体（对应 Go 的 message.*Element），
+   * 没有统一的 type/data 字段；实际类型可通过 type() 方法判断。
+   */
+  export type MessageSegment =
+    | TextElement
+    | AtElement
+    | FileElement
+    | ImageElement
+    | TTSElement
+    | ReplyElement
+    | RecordElement
+    | FaceElement
+    | PokeElement;
+
+  /** 文本元素（Go message.TextElement） */
+  export interface TextElement {
+    /** 文本内容 */
+    content: string;
+    /** 元素类型（Text = 0） */
+    type(): MessageElementType;
+  }
+
+  /** 艾特元素（Go message.AtElement） */
+  export interface AtElement {
+    /** 目标用户 ID */
+    target: string;
+    /** 元素类型（At = 1） */
+    type(): MessageElementType;
+  }
+
+  /** 文件元素（Go message.FileElement） */
+  export interface FileElement {
+    /** 文件 Content-Type，如 image/png */
+    contentType: string;
+    /** 文件路径（本地临时文件） */
+    file: string;
+    /** 文件 URL */
+    url: string;
+    /** 元素类型（File = 2） */
+    type(): MessageElementType;
+  }
+
+  /** 图片元素（Go message.ImageElement） */
+  export interface ImageElement {
+    /** 图片文件信息；URL 形式时可能为 null */
+    file: FileElement | null;
+    /** 图片 URL */
+    url: string;
+    /** 元素类型（Image = 3） */
+    type(): MessageElementType;
+  }
+
+  /** 文字转语音元素（Go message.TTSElement） */
+  export interface TTSElement {
+    /** 文本内容 */
+    content: string;
+    /** 元素类型（TTS = 4） */
+    type(): MessageElementType;
+  }
+
+  /** 回复元素（Go message.ReplyElement） */
+  export interface ReplyElement {
+    /** 回复的目标消息 ID */
+    replySeq: string;
+    /** 回复的目标消息发送者 ID */
+    sender: string;
+    /** 回复群聊消息时的群号 */
+    groupID: string;
+    /** 回复的消息内容（消息段） */
+    elements: MessageSegment[];
+    /** 元素类型（Reply = 5） */
+    type(): MessageElementType;
+  }
+
+  /** 语音元素（Go message.RecordElement） */
+  export interface RecordElement {
+    /** 语音文件信息；URL 形式时可能为 null */
+    file: FileElement | null;
+    /** 元素类型（Record = 6） */
+    type(): MessageElementType;
+  }
+
+  /** 表情元素（Go message.FaceElement） */
+  export interface FaceElement {
+    /** 表情 ID */
+    faceID: string;
+    /** 元素类型（Face = 7） */
+    type(): MessageElementType;
+  }
+
+  /** 戳一戳元素（Go message.PokeElement） */
+  export interface PokeElement {
+    /** 戳一戳的目标 ID */
+    target: string;
+    /** 元素类型（Poke = 8） */
+    type(): MessageElementType;
   }
 
   /** 发送者信息 */

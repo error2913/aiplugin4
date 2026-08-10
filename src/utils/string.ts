@@ -116,6 +116,72 @@ export interface MessageSegment {
     };
 }
 
+/**
+ * 把海豹 milky 消息段（seal.MessageSegment，独立 Go 结构体 + type() 编号）直接映射为
+ * 项目内部统一段格式。不经过 CQ 码：milky 下 msg.message 只有纯文本拼接，
+ * at/图片/回复等富文本信息必须从 segment 取。
+ */
+export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSegment[] {
+    const result: MessageSegment[] = [];
+    for (const seg of segments) {
+        if (!seg || typeof seg !== 'object' || typeof seg.type !== 'function') continue;
+        switch (seg.type()) {
+            case 0: { // 文本 Text
+                const content = 'content' in seg ? seg.content : '';
+                result.push({ type: 'text', data: { text: content || '' } });
+                break;
+            }
+            case 1: { // 艾特 At
+                const target = 'target' in seg ? seg.target : '';
+                result.push({ type: 'at', data: { qq: target || '' } });
+                break;
+            }
+            case 2: { // 文件 File
+                const url = 'url' in seg ? seg.url : '';
+                const file = 'file' in seg && typeof seg.file === 'string' ? seg.file : '';
+                const fileText = url || file;
+                result.push({ type: 'text', data: { text: fileText ? `【文件】${fileText}` : '【文件】' } });
+                break;
+            }
+            case 3: { // 图片 Image
+                const url = 'url' in seg ? seg.url : '';
+                const file = 'file' in seg && seg.file && typeof seg.file === 'object' ? (seg.file.url || seg.file.file) : '';
+                result.push({ type: 'image', data: { url: url || file || '' } });
+                break;
+            }
+            case 4: { // 文字转语音 TTS
+                const content = 'content' in seg ? seg.content : '';
+                result.push({ type: 'text', data: { text: content || '' } });
+                break;
+            }
+            case 5: { // 回复 Reply
+                const replySeq = 'replySeq' in seg ? seg.replySeq : '';
+                result.push({ type: 'reply', data: { id: replySeq || '' } });
+                break;
+            }
+            case 6: { // 语音 Record
+                result.push({ type: 'text', data: { text: '【语音】' } });
+                break;
+            }
+            case 7: { // 表情 Face
+                const faceID = 'faceID' in seg ? seg.faceID : '';
+                result.push({ type: 'face', data: { id: faceID || '' } });
+                break;
+            }
+            case 8: { // 戳一戳 Poke
+                const target = 'target' in seg ? seg.target : '';
+                result.push({ type: 'poke', data: { qq: target || '' } });
+                break;
+            }
+            default: {
+                logger.debug(`milky 未知消息段类型: ${seg.type()}，按文本占位处理`);
+                result.push({ type: 'text', data: { text: '[未知消息段]' } });
+            }
+        }
+    }
+    return result;
+}
+
 /** 解析 QQ 卡片消息（CQ:json / OB11 json 段的 data 字段），提取标题/描述/链接等可读文本 */
 export function parseCardToText(raw: any): string {
     if (!raw) return '[卡片消息]';
@@ -218,24 +284,27 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
             }
             case 'at': {
                 const epId = ctx.endPoint.userId;
-                const gid = ctx.group!.groupId;
-                const uid = `QQ:${seg.data.qq || ''}`;
+                const gid = ctx.group ? ctx.group.groupId : '';
+                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+                const uid = `${prefix}:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player!.name || '未知用户';
-                content += `<|at:${name}|>`;
+                content += `[at:${name}]`;
                 break;
             }
             case 'poke': {
                 const epId = ctx.endPoint.userId;
-                const gid = ctx.group!.groupId;
-                const uid = `QQ:${seg.data.qq || ''}`;
+                const gid = ctx.group ? ctx.group.groupId : '';
+                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+                const uid = `${prefix}:${seg.data.qq || ''}`;
                 ({ ctx } = getCtxAndMsg(epId, uid, gid));
                 const name = ctx.player!.name || '未知用户';
-                content += `<|poke:${name}|>`;
+                content += `[poke:${name}]`;
                 break;
             }
             case 'reply': {
-                content += `<|quote:${transformMsgId(seg.data.id || '')}|>`;
+                const quoteId = transformMsgId(seg.data.id || '');
+                if (quoteId) content += `[quote:${quoteId}]`;
                 break;
             }
             case 'image': {
@@ -246,7 +315,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
             }
             case 'face': {
                 const faceName = FACE_MAP[seg.data.id] || '';
-                content += faceName ? `<|face:${faceName}|>` : '';
+                content += faceName ? `[face:${faceName}]` : '';
                 break;
             }
         }
@@ -294,18 +363,43 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
             }
             case 'quote': {
                 const msgId = seg.content;
-                text += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
+                if (msgId) text += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
                 break;
             }
             case 'img': {
                 const id = seg.content;
-                const image = await session.context.findImage(ctx, id);
+                // 兼容 [img:imageId:描述]：描述部分可能带冒号，整体找不到时取首个冒号前作为图片 id
+                const image = await session.context.findImage(ctx, id) || (id.includes(':') ? await session.context.findImage(ctx, id.split(':')[0]) : null);
 
                 if (image) {
                     images.push(image);
                     text += image.CQCode;
                 } else {
                     logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
+            case 'avatar': {
+                const name = seg.content;
+                const ui = await session.context.findUser(ctx, name);
+                if (ui !== null) {
+                    const image = Image.getUserAvatar(ui.userId);
+                    images.push(image);
+                    text += image.CQCode;
+                } else {
+                    logger.warning(`无法找到用户：${name}`);
+                }
+                break;
+            }
+            case 'group_avatar': {
+                const name = seg.content;
+                const gi = await session.context.findGroup(ctx, name);
+                if (gi) {
+                    const image = Image.getGroupAvatar(gi.groupId);
+                    images.push(image);
+                    text += image.CQCode;
+                } else {
+                    logger.warning(`无法找到群聊：${name}`);
                 }
                 break;
             }
@@ -336,7 +430,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
 
     // 分离AI臆想出来的多轮对话
     const segments = s
-        .split(/([<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/)
+        .split(/([[［]from.+?[\]］])/)
         .filter(item => item.trim());
     if (segments.length === 0) {
         return { contextArray: [], replyArray: [], images: [] };
@@ -345,7 +439,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
     s = '';
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const match = segment.match(/[<＜][\|│｜]from[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
+        const match = segment.match(/^[[［]from[:：]?\s?(.+?)[\]］]$/);
         if (match) {
             // 如果臆想对象是自己，那么将下一条消息添加到s中
             const ui = await session.context.findUser(ctx, match[1]);
@@ -357,13 +451,13 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
 
     // 如果臆想对象不包含自己，那么就随便把第一条消息添加到s中吧，毁灭吧世界
     if (!s.trim()) {
-        s = segments.find((segment: string) => !/[<＜][\|│｜]from.+?(?:[\|│｜][>＞]|[\|│｜>＞])/.test(segment)) || '';
+        s = segments.find((segment: string) => !/[[［]from.+?[\]］]/.test(segment)) || '';
         if (!s || !s.trim()) return { contextArray: [], replyArray: [], images: [] };
     }
 
     // 分离回复消息和戳一戳消息
-    s = s.replace(/[<＜][\|│｜]quote[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}`)
-        .replace(/[<＜][\|│｜]poke[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/g, (match) => `\\f${match}\\f`);
+    s = s.replace(/[[［]quote[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}`)
+        .replace(/[[［]poke[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}\\f`);
 
     const { contextArray, replyArray } = filterString(s);
     const images: Image[] = [];
@@ -519,16 +613,35 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
 }
 
 interface TokenSegment {
-    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'face' | 'audio';
+    type: 'text' | 'at' | 'poke' | 'quote' | 'img' | 'avatar' | 'group_avatar' | 'face' | 'audio';
     content: string;
+}
+
+/** 旧版 <|xxx|> 渲染标签归一化为新版 [xxx]（含全角/缺竖杠变体）；仅用于 4.14.0 首次对话的历史数据迁移，解析层不再兼容旧标签 */
+const RENDER_TAG_CONTENT = '[^|｜>＞]+?';
+const RENDER_TAG_CLOSE = '(?:[\\|│｜][>＞]|[\\|│｜>＞])';
+
+export function normalizeRenderTags(s: string): string {
+    if (!s.includes('<')) return s;
+    // 图片标签特殊处理：user_avatar/group_avatar 前缀拆成独立标签 [avatar]/[group_avatar]
+    s = s.replace(
+        new RegExp(`[<＜][\\|│｜]img[:：]?\\s?(?:user_avatar[:：]?(${RENDER_TAG_CONTENT})|group_avatar[:：]?(${RENDER_TAG_CONTENT})|(${RENDER_TAG_CONTENT}))${RENDER_TAG_CLOSE}`, 'gi'),
+        (_all: string, user: string | undefined, group: string | undefined, img: string | undefined) =>
+            user ? `[avatar:${user}]` : group ? `[group_avatar:${group}]` : `[img:${img}]`
+    );
+    return s.replace(
+        new RegExp(`[<＜][\\|│｜](at|poke|quote|face|img|audio|from|user_avatar|group_avatar)[:：]?\\s?(${RENDER_TAG_CONTENT})${RENDER_TAG_CLOSE}`, 'gi'),
+        (_all: string, type: string, content: string) =>
+            type === 'user_avatar' ? `[avatar:${content}]` : `[${type}:${content}]`
+    );
 }
 
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
-    const segs = s.split(/([<＜][\|│｜][^:：]+[:：]?\s?.+?(?:[\|│｜][>＞]|[\|│｜>＞]))/);
+    const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio)[:：]?[^\]］]*[\]］])/);
     segs.forEach(seg => {
         if (!seg) return;
-        const match = seg.match(/[<＜][\|│｜]([^:：]+)[:：]?\s?(.+?)(?:[\|│｜][>＞]|[\|│｜>＞])/);
+        const match = seg.match(/^[[［]([a-z_]+)[:：]?\s?([^\]］]*)[\]］]$/i);
         if (!match) {
             result.push({
                 type: 'text',
@@ -536,7 +649,7 @@ export function parseSpecialTokens(s: string): TokenSegment[] {
             })
         } else {
             const [_, type = 'text', content = ''] = match;
-            if (!['at', 'poke', 'quote', 'img', 'face', 'audio'].includes(type)) {
+            if (!['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'].includes(type)) {
                 result.push({
                     type: 'text',
                     content: seg
