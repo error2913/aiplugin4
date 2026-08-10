@@ -487,7 +487,7 @@ export function checkRepeat(context: Context, s: string) {
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
         // 寻找最后一条文本消息
-        if (message.role === 'assistant' && !((message as any).toolCalls || (message as any).tool_calls)) {
+        if (message.role === 'assistant' && !(((message as any).toolCalls && (message as any).toolCalls.length > 0) || ((message as any).tool_calls && (message as any).tool_calls.length > 0))) {
             const items = ((message as any).contentItems || (message as any).msgArray) || [];
             const last = items[items.length - 1];
             const content = last ? (last.text || '') : '';
@@ -500,7 +500,7 @@ export function checkRepeat(context: Context, s: string) {
                 let count = 1;
                 for (let j = i - 1; j >= 0; j--) {
                     const message = messages[j];
-                    if (message.role === 'tool' || (message.role === 'assistant' && ((message as any).toolCalls || (message as any).tool_calls))) {
+                    if (message.role === 'tool' || (message.role === 'assistant' && (((message as any).toolCalls && (message as any).toolCalls.length > 0) || ((message as any).tool_calls && (message as any).tool_calls.length > 0)))) {
                         start = j;
                         count++;
                     } else {

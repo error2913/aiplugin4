@@ -11,6 +11,26 @@ import { UsageManager } from "../usage";
 import { RequestMessage } from "../utils/message";
 import { withTimeout } from "../utils/utils";
 
+/**
+ * 请求体消息净化（防御层）：剔除空 tool_calls 数组与缺少 tool_call_id 的 tool 消息。
+ * handleMessages 已保证正常路径不产生这些脏数据，此处兜底外部调用（如其他插件经
+ * globalThis.aiplugin4.chatMessages 传入的 messages）与历史持久化数据。
+ */
+function sanitizeRequestMessages(messages: any[]): any[] {
+    return (messages || []).filter(m => {
+        if (m && m.role === 'tool' && !m.tool_call_id) {
+            logger.warning('剔除缺少 tool_call_id 的 tool 消息（避免请求报错）');
+            return false;
+        }
+        return true;
+    }).map(m => {
+        if (!m || typeof m !== 'object') return m;
+        const out = { ...m };
+        if (Array.isArray(out.tool_calls) && out.tool_calls.length === 0) delete out.tool_calls;
+        return out;
+    });
+}
+
 export class streamService {
     static async startStream(messages: any[], modelName: string = ''): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
@@ -25,6 +45,7 @@ export class streamService {
                 model: model.name,
                 messages
             }, DEFAULT_CHAT_MODEL_BODY);
+            body.messages = sanitizeRequestMessages(body.messages);
 
             // 打印请求发送前的上下文
             const s = JSON.stringify(body.messages, (key, value) => {
@@ -92,6 +113,7 @@ export class streamService {
                 model: model.name,
                 messages
             }, DEFAULT_CHAT_MODEL_BODY);
+            body.messages = sanitizeRequestMessages(body.messages);
             if (STATUS && !PROMPT_ENGINEERING) {
                 if (tools && tools.length > 0) body.tools = tools;
                 body.tool_choice = tool_choice;

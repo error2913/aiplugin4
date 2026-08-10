@@ -77,6 +77,14 @@ export class Context {
             if (Array.isArray((m as any).contentItems)) {
                 (m as any).contentItems = (m as any).contentItems.filter((i: any) => i && typeof i.text === 'string');
             }
+            // 清理历史遗留的空 tool_calls（如旧版本异常写入的 []），避免空数组进入请求体
+            if ((m as any).role === 'assistant') {
+                const toolCalls = (m as any).toolCalls || (m as any).tool_calls;
+                if (Array.isArray(toolCalls) && toolCalls.length === 0) {
+                    delete (m as any).toolCalls;
+                    delete (m as any).tool_calls;
+                }
+            }
             return m;
         }).filter(m => m !== null);
     }
@@ -173,6 +181,11 @@ export class Context {
     }
 
     addToolCallsMessage(toolCalls: ToolCall[]) {
+        // 防御：空数组不应入库，避免后续请求体携带 "tool_calls":[] 被后端拒绝
+        if (!toolCalls || toolCalls.length === 0) {
+            Logger.warning('addToolCallsMessage 收到空数组，已忽略');
+            return;
+        }
         const tcm: ToolCallsMessage = {
             role: 'assistant',
             toolCalls

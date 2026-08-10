@@ -140,7 +140,7 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
         }
 
         for (let j = 0; j < toolCalls.length; j++) {
-            if (!toolCallIdSet.has(toolCalls[j].id)) {
+            if (!toolCalls[j].id || !toolCallIdSet.has(toolCalls[j].id)) {
                 toolCalls.splice(j, 1);
                 j--;
             }
@@ -173,12 +173,23 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
         if (!toolCallIdSet.has(id)) messages.splice(i, 1);
     }
 
-    return await Promise.all(messages.map(async message => ({
-        role: message.role,
-        content: multimodal ? await buildMultimodalContent(message) : buildContent(message),
-        tool_calls: message.toolCalls || message.tool_calls,
-        tool_call_id: message.toolCallId || message.tool_call_id
-    })));
+    return await Promise.all(messages.map(async message => {
+        const out: RequestMessage = {
+            role: message.role,
+            content: multimodal ? await buildMultimodalContent(message) : buildContent(message)
+        };
+        // 只在 assistant 且 tool_calls 非空时附带该字段：空数组在 JSON 里是合法值，
+        // 会被原样序列化为 "tool_calls":[]，部分后端直接报错拒绝请求
+        if (message.role === 'assistant') {
+            const toolCalls = message.toolCalls || message.tool_calls;
+            if (Array.isArray(toolCalls) && toolCalls.length > 0) out.tool_calls = toolCalls;
+        }
+        // tool 消息必须携带非空 tool_call_id；缺失的已在上方孤立清理流程中丢弃
+        if (message.role === 'tool' && (message.toolCallId || message.tool_call_id)) {
+            out.tool_call_id = message.toolCallId || message.tool_call_id;
+        }
+        return out;
+    }));
 }
 
 export function buildContent(message: ContextMessage): string {
