@@ -12,7 +12,7 @@ import { TimerManager } from "../timer";
 import { ToolState } from "../tool/tool";
 import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
-import { MessageSegment, transformArrayToContent } from "../utils/string";
+import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 import { replyToSender, transformMsgId } from "../utils/utils";
 
@@ -293,6 +293,9 @@ export class Session {
         this.lastCtx = ctx;
         logger.info('trigger reply:', reason || 'unknown');
 
+        // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
+        this.migrateStoredTags();
+
         if (reason !== '函数回调触发') {
             const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
             if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
@@ -330,8 +333,36 @@ export class Session {
 
     async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         this.lastCtx = ctx;
+        // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等）
+        this.migrateStoredTags();
         // 流式编排统一由智能体 runStream() 处理
         await this.agent.runStream(this, ctx, msg);
+    }
+
+    /** 迁移本会话上下文/记忆与全局记忆中的历史 <|...|> 标签为新格式 [xxx]（幂等） */
+    migrateStoredTags() {
+        for (const m of this.context.messages) {
+            const message = m as any;
+            if (Array.isArray(message.contentItems)) {
+                message.contentItems.forEach((item: any) => {
+                    if (item && typeof item.text === 'string') item.text = normalizeRenderTags(item.text);
+                });
+            }
+            if (message.role === 'tool' && typeof message.text === 'string') {
+                message.text = normalizeRenderTags(message.text);
+            }
+            const toolCalls = message.toolCalls || message.tool_calls;
+            if (Array.isArray(toolCalls)) {
+                toolCalls.forEach((tc: any) => {
+                    if (tc && tc.function && typeof tc.function.arguments === 'string') {
+                        tc.function.arguments = normalizeRenderTags(tc.function.arguments);
+                    }
+                });
+            }
+        }
+        this.memory?.migrateLegacyTags();
+        const globalMemory = Agent.get('*').sessionService.memory;
+        if (globalMemory && globalMemory !== this.memory) globalMemory.migrateLegacyTags();
     }
 
     async stopCurrentChatStream(): Promise<void> {

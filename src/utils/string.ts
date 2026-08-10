@@ -359,9 +359,6 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, session: { context: Context }, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
     const { QUOTE_REPLY: replymsg, TRIM: isTrim } = Config.reply;
 
-    // 历史 <|xxx|> 标签统一归一化为 [xxx]（新旧兼容），后续逻辑只认新格式
-    s = normalizeRenderTags(s);
-
     // 分离AI臆想出来的多轮对话
     const segments = s
         .split(/([[［]from.+?[\]］])/)
@@ -551,7 +548,7 @@ interface TokenSegment {
     content: string;
 }
 
-/** 旧版 <|xxx|> 渲染标签统一归一化为新版 [xxx]（含全角/缺竖杠变体），历史数据与旧模板输出保持兼容 */
+/** 旧版 <|xxx|> 渲染标签归一化为新版 [xxx]（含全角/缺竖杠变体）；仅用于 4.14.0 首次对话的历史数据迁移，解析层不再兼容旧标签 */
 const RENDER_TAG_CONTENT = '[^|｜>＞]+?';
 const RENDER_TAG_CLOSE = '(?:[\\|│｜][>＞]|[\\|│｜>＞])';
 
@@ -571,7 +568,6 @@ export function normalizeRenderTags(s: string): string {
 
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
-    s = normalizeRenderTags(s);
     const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio)[:：]?[^\]］]*[\]］])/);
     segs.forEach(seg => {
         if (!seg) return;

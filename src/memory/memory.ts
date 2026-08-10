@@ -7,6 +7,7 @@ import Model from "../model/model";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, SessionInfo, UserInfo } from "../session/types";
+import { normalizeRenderTags } from "../utils/string";
 import { generateId, revive, TypeDescriptor } from "../utils/utils";
 
 import MemoryItem from "./memory_item";
@@ -62,6 +63,22 @@ export default class MemoryService {
                 this.memoryMap[id] = revive(MemoryItem, m);
             }
         }
+    }
+
+    /** 4.14.0：把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，首次对话时调用） */
+    migrateLegacyTags() {
+        for (const id in this.memoryMap) {
+            const m = this.memoryMap[id];
+            if (m && typeof m.content === 'string') m.content = normalizeRenderTags(m.content);
+        }
+        if (Array.isArray(this.shortMemoryList)) {
+            this.shortMemoryList = this.shortMemoryList.map(s => normalizeRenderTags(s));
+        }
+        const summaries = (this as any).summaries;
+        if (Array.isArray(summaries)) {
+            (this as any).summaries = summaries.map((s: string) => normalizeRenderTags(s));
+        }
+        if (typeof this.persona === 'string') this.persona = normalizeRenderTags(this.persona);
     }
 
 
@@ -168,9 +185,9 @@ export default class MemoryService {
 
     findMemoryAndImageByImageIdPrefix(id: string): { memory: MemoryItem, image: Image } | null {
         for (const m of this.memories) {
-            // 兼容新旧标签格式：新版 [img:id]，历史 <|img:id|>
-            const match = m.content.match(/\[img:([^\]]+)\]|<\|img:([^|]+)\|>/);
-            const imageId = match?.[1] || match?.[2];
+            // 图片标签为新版 [img:id]（4.14.0 起不再兼容旧版 <|img:id|>）
+            const match = m.content.match(/\[img:([^\]]+)\]/);
+            const imageId = match?.[1];
             if (imageId && imageId.replace(/_\d+$/, '') === id) {
                 const img = Image.get(imageId);
                 if (img) return { memory: m, image: img };
@@ -181,7 +198,7 @@ export default class MemoryService {
 
     findImage(id: string): Image | null {
         for (const m of this.memories) {
-            if (m.content.includes('[img:' + id + ']') || m.content.includes('<|img:' + id + '|')) {
+            if (m.content.includes('[img:' + id + ']')) {
                 return Image.get(id);
             }
         }

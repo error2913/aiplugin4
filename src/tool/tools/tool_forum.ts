@@ -134,7 +134,7 @@ async function imageToForumFormat(image: Image): Promise<{ name: string, mime_ty
 }
 
 /**
- * 从内容中提取 [img:xxx]（兼容历史 <|img:xxx|>）引用的图片 ID，通过 Image.get 查找
+ * 从内容中提取 [img:xxx] 引用的图片 ID，通过 Image.get 查找
  */
 function extractImagesFromContent(content: string): Image[] {
     const segs = parseSpecialTokens(content);
@@ -155,10 +155,10 @@ function extractImagesFromContent(content: string): Image[] {
 }
 
 /**
- * 从内容中移除 [img:xxx]（兼容历史 <|img:xxx|>）标记，保留纯文本/Markdown
+ * 从内容中移除 [img:xxx] 标记，保留纯文本/Markdown
  */
 function stripImageTokens(content: string): string {
-    return content.replace(/<\|img:[^|]*\|>|\[img:[^\]]*\]/g, '').trim();
+    return content.replace(/\[img:[^\]]*\]/g, '').trim();
 }
 
 export function registerForum() {

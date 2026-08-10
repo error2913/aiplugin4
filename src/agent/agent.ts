@@ -118,10 +118,10 @@ export default class Agent {
             trace.beginTurn();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
             const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName);
-            // 提示词工程模式下模型可能返回 <function>...</function> 调用块：
-            // 发送前先剥离该块，避免标签原文进入回复/上下文；调用内容仍以 match[0] 原样记录
+            // 提示词工程模式下模型可能返回 ```function ... ``` 代码块包裹的工具调用：
+            // 发送前先剥离该块，避免代码块原文进入回复/上下文；调用内容仍以 match[0] 原样记录
             const promptCallMatch: RegExpMatchArray | null = (STATUS && PROMPT_ENGINEERING)
-                ? raw_reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/)
+                ? raw_reply.match(/```function([\s\S]*?)```/)
                 : null;
             result = await handleReply(ctx, msg, session, promptCallMatch ? raw_reply.slice(0, promptCallMatch.index ?? 0) : raw_reply);
 
@@ -255,14 +255,15 @@ export default class Agent {
             logger.info('stream reply:', raw_reply.length > 200 ? raw_reply.slice(0, 200) + `…(+${raw_reply.length - 200})` : raw_reply);
 
             if (STATUS && PROMPT_ENGINEERING) {
-                if (!session.stream.toolCallStatus && /<[\||｜]?function(?:_call)?>/.test(session.stream.reply + raw_reply)) {
+                if (!session.stream.toolCallStatus && /```function/.test(session.stream.reply + raw_reply)) {
                     logger.info('tool call start tag found');
-                    const match = raw_reply.match(/([\s\S]*)<[\||｜]?function(?:_call)?>/);
+                    const match = raw_reply.match(/([\s\S]*)```function/);
                     if (match && match[1].trim()) {
                         const { contextArray, replyArray, images } = await handleReply(ctx, msg, session, match[1]);
                         if (session.stream.id !== id) return;
                         await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
                     }
+                    session.stream.reply = '';
                     session.stream.toolCallStatus = true;
                 }
 
@@ -271,34 +272,31 @@ export default class Agent {
                 if (session.stream.toolCallStatus) {
                     session.stream.reply += raw_reply;
 
-                    if (/<\/function(?:_call)?>/.test(session.stream.reply)) {
+                    // 结束围栏 ``` 与起始围栏 ```function 区分：从起始围栏后取到首个 ``` 即视为调用块结束
+                    const match = session.stream.reply.match(/```function([\s\S]*?)```/);
+                    if (match) {
                         logger.info('tool call end tag found');
-                        const match = session.stream.reply.match(/<[\||｜]?function(?:_call)?>([\s\S]*)<\/function(?:_call)?>/);
-                        if (match) {
-                            session.stream.reply = '';
-                            session.stream.toolCallStatus = false;
-                            await session.stopCurrentChatStream();
+                        session.stream.reply = '';
+                        session.stream.toolCallStatus = false;
+                        await session.stopCurrentChatStream();
 
-                            await session.context.addAssistantMessage(match[0], '');
+                        await session.context.addAssistantMessage(match[0], '');
 
-                            try {
-                                trace.recordToolCall('stream-tool-call', 0, true);
-                                turns++;
-                                if (turns >= MAX_TOOL_TURNS) {
-                                    logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
-                                    return;
-                                }
-                                const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
-                                for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
-                            } catch (e) {
-                                logger.error('handlePromptToolCalls error:', e instanceof Error ? e.message : String(e));
+                        try {
+                            trace.recordToolCall('stream-tool-call', 0, true);
+                            turns++;
+                            if (turns >= MAX_TOOL_TURNS) {
+                                logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
                                 return;
                             }
-
-                            await this.runStreamInner(session, ctx, msg);
+                            const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
+                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                        } catch (e) {
+                            logger.error('handlePromptToolCalls error:', e instanceof Error ? e.message : String(e));
                             return;
                         }
-                        await session.stopCurrentChatStream();
+
+                        await this.runStreamInner(session, ctx, msg);
                         return;
                     } else {
                         after = result.nextAfter;

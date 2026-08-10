@@ -123,18 +123,18 @@ export default class PromptConfig {
             `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数
-当需要调用函数功能时，请严格使用以下JSON格式，示例：
+当需要调用函数功能时，请将函数调用数组放入以 \`\`\`function 开头、\`\`\` 结尾的代码块中，严格使用以下JSON格式，示例：
 
-<function>
+\`\`\`function
 [
 {
     "name": "函数名",
     "arguments": "{\\"参数1\\": \\"值1\\",\\"参数2\\": \\"值2\\"}"
 }
 ]
-</function>
+\`\`\`
 
-要使用成对的标签：\`<function>\`在前面，\`</function>\`在后面包裹调用工具的数组。
+要使用成对的代码块围栏：\`\`\`function 在前面，\`\`\` 在后面包裹调用工具的数组。
 可调用多个函数，每个调用需包含name字段和arguments字段，且arguments字段必须是JSON字符串。
 
 可用函数列表:

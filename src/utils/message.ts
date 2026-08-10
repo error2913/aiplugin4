@@ -6,7 +6,6 @@ import Image from "../resource/image";
 import { Session } from "../session/session";
 import { ToolCall } from "../tool/types";
 
-import { normalizeRenderTags } from "./string";
 import { withTimeout } from "./utils";
 
 /** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
@@ -189,23 +188,23 @@ export function buildContent(message: ContextMessage): string {
     return '';
 }
 
-/** 解析 <|img:...|> 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */
+/** 解析 [img:...] 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */
 function resolveImageById(id: string): Image | null {
     if (/^user_avatar[:?]/.test(id)) return Image.getUserAvatar(id.replace(/^user_avatar[:?]/, ''));
     if (/^group_avatar[:?]/.test(id)) return Image.getGroupAvatar(id.replace(/^group_avatar[:?]/, ''));
     const img = Image.get(id);
     if (img) return img;
-    // 兼容 <|img:imageId:描述|>：描述部分可能带冒号，取首个冒号前作为图片 id
+    // 兼容 [img:imageId:描述]：描述部分可能带冒号，取首个冒号前作为图片 id
     return Image.get(id.split(':')[0]);
 }
 
 /**
- * 多模态消息内容：把用户消息里的 <|img:...|> 图片标签转成 image_url 内容块直接传给模型，
+ * 多模态消息内容：把用户消息里的 [img:...] 图片标签转成 image_url 内容块直接传给模型，
  * 而不是让模型只看到文本标签；无法解析的图片（如本地路径无可用 URL）保留原标签。
  */
 export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
     if (message.role !== 'user') return buildContent(message);
-    const text = normalizeRenderTags(buildContent(message));
+    const text = buildContent(message);
     if (!/\[(?:img|avatar|group_avatar)[:：]/i.test(text)) return text;
 
     const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
