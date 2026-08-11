@@ -2,7 +2,7 @@
 import Config from "../config/config";
 import Logger from "../logger";
 import Model from "../model/model";
-import { cosineSimilarity, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
+import { cosineSimilarity, revive, TypeDescriptor } from "../utils/utils";
 
 export default class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
@@ -88,41 +88,22 @@ export default class MemoryItem {
     }
 
     /**
-     * 计算记忆与查询的相似度分数
-     * @param v  查询向量
-     * @param t 查询标签列表
-     * @param u 查询用户列表
-     * @param g 查询群组列表
+     * 计算记忆与查询的纯向量相似度（归一化到 0-1）
+     * @param v 查询向量
      * @returns 相似度分数（0-1）
      */
-    calculateSimilarity(v: number[], t: string[], u: string[], g: string[]): number {
-        // 总权重 0-1
-        const tw = (v.length ? 0.4 : 0) + (u.length ? 0.2 : 0) + (g.length ? 0.2 : 0) + (t.length ? 0.2 : 0);
-        if (tw === 0) return 0;
-        // 向量相似度分数（如果提供了向量v） 0-1
-        const vs = (v && v.length > 0 && this.vector && this.vector.length > 0) ? (cosineSimilarity(v, this.vector) + 1) / 2 : 0;
-        // 用户相似度分数 0-1
-        const us = u.length ? getCommonItem(this.users, u).length / new Set([...this.users, ...u]).size : 0;
-        // 群组相似度分数 0-1
-        const gs = g.length ? getCommonItem(this.groups, g).length / new Set([...this.groups, ...g]).size : 0;
-        // 标签匹配分数 0-1
-        const ts = t.length ? getCommonItem(this.tags, t).length / new Set([...this.tags, ...t]).size : 0;
-        // 综合相似度分数 0-1
-        const avs = vs * 0.4 + us * 0.2 + gs * 0.2 + ts * 0.2;
-        // 相似度增强因子 0-1
-        return avs / tw;
+    calculateSimilarity(v: number[]): number {
+        if (!v || v.length === 0 || !this.vector || this.vector.length === 0) return 0;
+        return (cosineSimilarity(v, this.vector) + 1) / 2;
     }
 
     /**
      * 计算记忆的最终分数
-     * @param v  查询向量
-     * @param t 查询标签列表
-     * @param u 查询用户列表
-     * @param g 查询群组列表
-     * @returns 相似度分数（0-1）
+     * @param v 查询向量
+     * @returns 综合分数（0-1）
      */
-    calculateScore(v: number[], t: string[], u: string[], g: string[]): number {
-        const similarity = this.calculateSimilarity(v, t, u, g);
+    calculateScore(v: number[]): number {
+        const similarity = this.calculateSimilarity(v);
         return this.importance * 0.2 + this.accessScore * 0.2 + similarity * 0.6;
     }
 
