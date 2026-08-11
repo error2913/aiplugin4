@@ -78,21 +78,11 @@ const TEMPLATES: { [key: string]: string } = {
 
 ## 长期记忆
     {{#each sources}}
-来源:{{{source}}}
         {{#each memories}}
-{{index @index}}. ID:{{id}}
-    类型:{{type}}
-    重要性:{{importance}}
-    创建时间:{{{time createAt}}}
-    {{#each tags}}{{#if @first}}标签:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each relatedMemories}}{{#if @first}}相关记忆:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each users}}{{#if @first}}相关用户:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each groups}}{{#if @first}}相关群组:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    内容:{{{content}}}
+{{index @index}}. [{{id}}] {{{content}}}
         {{else}}
 暂无记忆
         {{/each}}
-{{#unless @last}}---{{/unless}} 
     {{else}}
 长期记忆为空
     {{/each}}

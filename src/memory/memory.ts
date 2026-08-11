@@ -207,22 +207,27 @@ export default class MemoryService {
     }
 
     async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, ui: UserInfo | null, gi: GroupInfo | null): Promise<string> {
-        let s = '';
         const users = ui ? [ui.id] : [];
         const groups = gi ? [gi.id] : [];
-        s += this.buildMemory({
-            isPrivate: true,
-            id: ctx.endPoint.userId,
-            name: seal.formatTmpl(ctx, '核心:骰子名字')
-        }, await this.getTopScoreMemoryList(text, users, groups));
-
-        if (!ctx.isPrivate) {
-            s += this.buildMemory({
+        // 私聊/群聊检索的是同一份会话记忆，合并为一次查询（复用向量，避免重复嵌入）
+        const memories = await this.getTopScoreMemoryList(text, users, groups);
+        if (memories.length === 0 && (!this.persona || this.persona === '无')) return '';
+        let s = '';
+        // 个人设定注入私聊、群聊设定注入群聊：放在长期记忆段顶部
+        if (this.persona && this.persona !== '无') {
+            s += `${ctx.isPrivate ? '个人设定' : '群聊设定'}: ${this.persona}\n`;
+        }
+        s += ctx.isPrivate
+            ? this.buildMemory({
+                isPrivate: true,
+                id: ctx.endPoint.userId,
+                name: seal.formatTmpl(ctx, '核心:骰子名字')
+            }, memories)
+            : this.buildMemory({
                 isPrivate: false,
                 id: ctx.group!.groupId,
                 name: ctx.group!.groupName
-            }, await this.getTopScoreMemoryList(text, users, groups));
-        }
+            }, memories);
         return s;
     }
 
