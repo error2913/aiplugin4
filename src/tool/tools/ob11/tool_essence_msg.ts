@@ -35,7 +35,10 @@ export function registerEssenceMsg() {
         if (!memberInfo) return `获取权限信息失败`;
         if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
 
-        await setEssenceMsg(epId, transformMsgIdBack(msg_id));
+        const backId = transformMsgIdBack(msg_id);
+        if (!Number.isFinite(backId)) return `消息ID无效：${msg_id}`;
+
+        await setEssenceMsg(epId, backId);
         return `已将消息${msg_id}设置为精华消息`;
     }
 
@@ -133,7 +136,10 @@ export function registerEssenceMsg() {
         if (!memberInfo) return `获取权限信息失败`;
         if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
 
-        await deleteEssenceMsg(epId, transformMsgIdBack(msg_id));
+        const backId = transformMsgIdBack(msg_id);
+        if (!Number.isFinite(backId)) return `消息ID无效：${msg_id}`;
+
+        await deleteEssenceMsg(epId, backId);
         return `已删除精华消息 ${msg_id}`;
     };
 }

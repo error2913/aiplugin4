@@ -6,6 +6,7 @@ import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { buildContent } from "../utils/message";
+import { stripInternalTags } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 
 import MemoryService from "./memory";
@@ -99,10 +100,12 @@ export default class SessionMemoryService extends MemoryService {
                 }[]
             };
 
-            this.shortMemoryList.push(memoryData.content);
+            // 防注入：总结内容可能夹带内部上下文标签，入库前统一剥离
+            const summaryContent = stripInternalTags(memoryData.content);
+            this.shortMemoryList.push(summaryContent);
             this.limitShortMemory();
             // 同时写入总结记忆，供 buildSummaryPrompt 使用
-            this.summaries.push(memoryData.content);
+            this.summaries.push(summaryContent);
             this.limitSummaries();
 
             memoryData.memories.forEach(m => {

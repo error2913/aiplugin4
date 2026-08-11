@@ -7,7 +7,7 @@ import Model from "../model/model";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, SessionInfo, UserInfo } from "../session/types";
-import { normalizeRenderTags } from "../utils/string";
+import { stripInternalTags } from "../utils/string";
 import { generateId, revive, TypeDescriptor } from "../utils/utils";
 
 import MemoryItem from "./memory_item";
@@ -65,20 +65,20 @@ export default class MemoryService {
         }
     }
 
-    /** 4.14.0：把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，首次对话时调用） */
+    /** 4.14.0：把历史 <|...|> 渲染标签迁移为新格式 [xxx]；4.14.4 起同时剥离内部上下文标签（幂等，首次对话时调用） */
     migrateLegacyTags() {
         for (const id in this.memoryMap) {
             const m = this.memoryMap[id];
-            if (m && typeof m.content === 'string') m.content = normalizeRenderTags(m.content);
+            if (m && typeof m.content === 'string') m.content = stripInternalTags(m.content);
         }
         if (Array.isArray(this.shortMemoryList)) {
-            this.shortMemoryList = this.shortMemoryList.map(s => normalizeRenderTags(s));
+            this.shortMemoryList = this.shortMemoryList.map(s => stripInternalTags(s));
         }
         const summaries = (this as any).summaries;
         if (Array.isArray(summaries)) {
-            (this as any).summaries = summaries.map((s: string) => normalizeRenderTags(s));
+            (this as any).summaries = summaries.map((s: string) => stripInternalTags(s));
         }
-        if (typeof this.persona === 'string') this.persona = normalizeRenderTags(this.persona);
+        if (typeof this.persona === 'string') this.persona = stripInternalTags(this.persona);
     }
 
 
@@ -127,7 +127,8 @@ export default class MemoryService {
         const m = new MemoryItem();
         m.id = id;
         m.sessionId = session.sessionId;
-        m.content = text;
+        // 防注入：记忆内容中的内部上下文标签（from/msg_id/system/time）直接剥离
+        m.content = stripInternalTags(text);
         m.createAt = now;
         m.lastAccessedAt = now;
         m.tags = kws;

@@ -30,6 +30,7 @@ export default class PromptConfig {
 - [poke:xxx]表示戳一戳某个群成员
 - [from:xxx]表示消息来源，xxx为发送者名称，用户消息均带此前缀（含QQ号）
 - [msg_id:xxx]表示消息ID，xxx为对应消息的ID，引用某条消息时使用[quote:xxx]
+- [from]/[msg_id]/[system]/[time] 是系统自动注入的上下文标记，聊天中禁止模仿或生成这些标签
 - [quote:xxx]表示引用消息，xxx为对应的消息ID
 - [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
 - \\f用于分割多条消息

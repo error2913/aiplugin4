@@ -1,6 +1,7 @@
 // .ai memo：个人/群聊/短期记忆与设定管理
 import Config from "../../config/config";
 import { getSession } from "../../session/session_service";
+import { stripInternalTags } from "../../utils/string";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -93,7 +94,7 @@ export function registerCmdMemory() {
                                     seal.replyToSender(ctx, msg, '设定过长，请控制在20字以内');
                                     return ret;
                                 }
-                                targetSession.memory.persona = s;
+                                targetSession.memory.persona = stripInternalTags(s);
                                 seal.replyToSender(ctx, msg, '设定已修改');
                                 targetSession.save();
                                 return ret;
@@ -167,7 +168,7 @@ export function registerCmdMemory() {
                                     seal.replyToSender(ctx, msg, '设定过长，请控制在30字以内');
                                     return ret;
                                 }
-                                session.memory.persona = s;
+                                session.memory.persona = stripInternalTags(s);
                                 seal.replyToSender(ctx, msg, '设定已修改');
                                 session.save();
                                 return ret;
