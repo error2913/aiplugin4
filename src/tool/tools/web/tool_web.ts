@@ -49,7 +49,7 @@ export function registerWeb() {
         const part = ((safePage - 1) % 2) + 1;
         const pageno = Math.ceil(safePage / 2).toString();
 
-        const url = `${webSearchUrl}/search?q=${q}&format=json&pageno=${pageno}${categories ? `&categories=${categories}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
+        const url = `${webSearchUrl}/search?q=${encodeURIComponent(q)}&format=json&pageno=${pageno}${categories ? `&categories=${encodeURIComponent(categories)}` : ''}${time_range ? `&time_range=${time_range}` : ''}`;
         try {
             logger.info(`使用搜索引擎搜索:${url}`);
 

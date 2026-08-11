@@ -76,6 +76,9 @@ export function registerBan() {
 
         const epId = ctx.endPoint.userId;
         const gid = ctx.group!.groupId;
+        const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), epId.replace(/^.+:/, ''));
+        if (!memberInfo) return `获取权限信息失败`;
+        if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
 
         await setGroupWholeBan(epId, gid.replace(/^.+:/, ''), enable);
         return `已${enable ? '开启' : '关闭'}全员禁言`;

@@ -51,6 +51,7 @@ export function registerKnowledgeTools() {
     });
     toolRead.solve = async (_ctx, _msg, _session, args) => {
         const id = typeof args.id === 'string' ? args.id : '';
+        await knowledgeService.init();
         const chunk = knowledgeService.read(id);
         return chunk ? knowledgeService.formatChunk(chunk) : `未找到知识库条目:${id}`;
     };

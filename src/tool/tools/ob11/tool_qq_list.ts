@@ -146,7 +146,7 @@ export function registerQQList() {
         if (msg_type === "private") {
             const friendList = await getFriendList(epId);
             if (!friendList || !Array.isArray(friendList)) return `获取好友列表失败`;
-            const arr = friendList.filter((item: any) => item.nickname.includes(q) || item.remark.includes(q));
+            const arr = friendList.filter((item: any) => (item.nickname || '').includes(q) || (item.remark || '').includes(q));
 
             const s = `搜索结果好友数量: ${arr.length}\n` + arr.slice(0, 50).map((item: any, index: number) => {
                 return `${index + 1}. ${item.nickname}(${item.user_id}) ${item.remark && item.remark !== item.nickname ? `备注: ${item.remark}` : ''}`;
@@ -166,7 +166,7 @@ export function registerQQList() {
         } else {
             const friendList = await getFriendList(epId);
             if (!friendList || !Array.isArray(friendList)) return `获取好友列表失败`;
-            const arr1 = friendList.filter((item: any) => item.nickname.includes(q) || item.remark.includes(q));
+            const arr1 = friendList.filter((item: any) => (item.nickname || '').includes(q) || (item.remark || '').includes(q));
 
             const groupList = await getGroupList(epId);
             if (!groupList || !Array.isArray(groupList)) return `获取群聊列表失败`;

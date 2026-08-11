@@ -18,18 +18,14 @@ function buildPathMap(items: { [key: string]: string }[], key: string): { [key: 
 function registerResourceTool(
     name: string,
     desc: string,
-    pathMap: { [key: string]: string },
+    key: 'fileId' | 'videoId',
     segmentType: 'file' | 'video'
 ) {
-    const nameList = Object.keys(pathMap);
-    const pathDesc = nameList.length !== 0
-        ? `，或直接传 path（本地绝对路径，或相对海豹 data 目录的路径）`
-        : `，可传 path（本地绝对路径，或相对海豹 data 目录的路径）`;
     const tool = new Tool({
         type: 'function',
         function: {
             name,
-            description: `${desc}。可传 name（已登记资源）${pathDesc}${nameList.length !== 0 ? `，已登记的资源名有:${nameList.join('、')}` : ''}`,
+            description: `${desc}。可传 name（已登记资源，资源名以调用时的报错提示为准）或 path（本地绝对路径，或相对海豹 data 目录的路径）`,
             parameters: {
                 type: 'object',
                 properties: {
@@ -50,6 +46,11 @@ function registerResourceTool(
     tool.solve = async (ctx, _, __, args) => {
         const { name, path } = args;
 
+        // 每次调用实时读取配置，保证修改配置后无需重载即可生效
+        const items = key === 'fileId' ? (Config.resource.LOCAL_FILES || []) : (Config.resource.LOCAL_VIDEOS || []);
+        const pathMap = buildPathMap(items, key);
+        const nameList = Object.keys(pathMap);
+
         let filePath = '';
         if (name && path) {
             return `name 与 path 不能同时提供，请二选一：name（已登记资源）或 path（直接传路径）`;
@@ -57,7 +58,7 @@ function registerResourceTool(
         if (name) {
             if (!Object.prototype.hasOwnProperty.call(pathMap, name)) {
                 logger.error(`${desc}${name}不存在`);
-                return `${desc}${name}不存在，可发送的资源名有:${nameList.join('、')}`;
+                return `${desc}${name}不存在${nameList.length !== 0 ? `，可发送的资源名有:${nameList.join('、')}` : ''}`;
             }
             filePath = resolveLocalPath(pathMap[name]);
         } else if (path) {
@@ -83,9 +84,6 @@ function registerResourceTool(
 }
 
 export function registerResourceTools() {
-    const filePathMap = buildPathMap(Config.resource.LOCAL_FILES || [], 'fileId');
-    const videoPathMap = buildPathMap(Config.resource.LOCAL_VIDEOS || [], 'videoId');
-
-    registerResourceTool('send_file', '发送本地文件', filePathMap, 'file');
-    registerResourceTool('send_video', '发送本地视频', videoPathMap, 'video');
+    registerResourceTool('send_file', '发送本地文件', 'fileId', 'file');
+    registerResourceTool('send_video', '发送本地视频', 'videoId', 'video');
 }

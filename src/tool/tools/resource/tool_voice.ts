@@ -32,40 +32,40 @@ const characterMap: { [key: string]: string } = {
 
 export function registerRecord() {
     // 本地语音统一走“资源”配置（支持 语音名=路径 或纯路径）
-    const recordPathMap: { [key: string]: string } = {};
-    for (const audio of Config.resource.LOCAL_AUDIOS || []) {
-        recordPathMap[audio.audioId] = audio.path;
-    }
-
-    if (Object.keys(recordPathMap).length !== 0) {
-        const toolRecord = new Tool({
-            type: "function",
-            function: {
-                name: "record",
-                description: `发送语音，语音名称有:${Object.keys(recordPathMap).join("、")}`,
-                parameters: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string",
-                            description: "语音名称"
-                        }
-                    },
-                    required: ["name"]
-                }
+    const toolRecord = new Tool({
+        type: "function",
+        function: {
+            name: "record",
+            description: `发送本地语音，语音名以调用时的报错提示为准`,
+            parameters: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string",
+                        description: "语音名称"
+                    }
+                },
+                required: ["name"]
             }
-        });
-        toolRecord.sensitive = true; // 发送语音属敏感操作
-        toolRecord.solve = async (ctx, msg, _, args) => {
-            const { name } = args;
+        }
+    });
+    toolRecord.sensitive = true; // 发送语音属敏感操作
+    toolRecord.solve = async (ctx, msg, _, args) => {
+        const { name } = args;
 
-            if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
-                seal.replyToSender(ctx, msg, `[语音:${resolveLocalPath(recordPathMap[name])}]`);
-                return '发送成功';
-            } else {
-                logger.error(`本地语音${name}不存在`);
-                return `本地语音${name}不存在`;
-            }
+        // 每次调用实时读取配置，保证修改配置后无需重载即可生效
+        const recordPathMap: { [key: string]: string } = {};
+        for (const audio of Config.resource.LOCAL_AUDIOS || []) {
+            recordPathMap[audio.audioId] = audio.path;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
+            seal.replyToSender(ctx, msg, `[语音:${resolveLocalPath(recordPathMap[name])}]`);
+            return '发送成功';
+        } else {
+            const nameList = Object.keys(recordPathMap);
+            logger.error(`本地语音${name}不存在`);
+            return `本地语音${name}不存在${nameList.length !== 0 ? `，可发送的语音名有:${nameList.join('、')}` : ''}`;
         }
     }
 

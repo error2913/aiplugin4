@@ -290,7 +290,14 @@ export default class Agent {
                                 return;
                             }
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
-                            for (const r of callResults) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                            for (const r of callResults) {
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                            }
+                            if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
+                                logger.info('工具执行完成且不回调（callBack=false），结束本轮编排');
+                                logger.info(`[run] ${trace.summary()}`);
+                                return;
+                            }
                         } catch (e) {
                             logger.error('handlePromptToolCalls error:', e instanceof Error ? e.message : String(e));
                             return;

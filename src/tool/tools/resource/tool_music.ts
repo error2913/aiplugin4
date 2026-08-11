@@ -62,8 +62,8 @@ export function registerMusicPlay() {
         }
 
         const api = platform === '网易云'
-            ? `${config.api}/search?keywords=${song_name}`
-            : `${config.api}/search?key=${song_name}`;
+            ? `${config.api}/search?keywords=${encodeURIComponent(song_name)}`
+            : `${config.api}/search?key=${encodeURIComponent(song_name)}`;
 
         try {
             logger.info(`搜索音乐: ${api}`);
