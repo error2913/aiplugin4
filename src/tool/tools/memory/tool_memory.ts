@@ -208,7 +208,7 @@ export function registerMemory() {
                     method: {
                         type: 'string',
                         description: '搜索方法，默认similarity',
-                        enum: ['weight', 'similarity', 'score', 'early', 'late', 'recent']
+                        enum: ['similarity', 'score', 'early', 'late', 'recent']
                     }
                 },
                 required: ['memory_type']

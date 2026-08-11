@@ -31,6 +31,7 @@ export default class MemoryService {
         this.persona = '无';
         this.useShortMemory = false;
         this.shortMemoryList = [];
+        this.summaries = [];
     }
 
     get memoryIds() {
@@ -76,9 +77,8 @@ export default class MemoryService {
         if (Array.isArray(this.shortMemoryList)) {
             this.shortMemoryList = this.shortMemoryList.map(s => stripInternalTags(s));
         }
-        const summaries = (this as any).summaries;
-        if (Array.isArray(summaries)) {
-            (this as any).summaries = summaries.map((s: string) => stripInternalTags(s));
+        if (Array.isArray(this.summaries)) {
+            this.summaries = this.summaries.map(s => stripInternalTags(s));
         }
         if (typeof this.persona === 'string') this.persona = stripInternalTags(this.persona);
     }
@@ -88,10 +88,13 @@ export default class MemoryService {
 
     useShortMemory: boolean;
     shortMemoryList: string[];
+    summaries: string[];
 
     async updateShortMemory(_ctx: seal.MsgContext, _msg: seal.Message, _ai: any) {
-        if (typeof (this as any).summarize === 'function') {
-            await (this as any).summarize();
+        // 短期记忆总结入口；仅 SessionMemoryService 实现，基类不实现
+        const summarize = (this as MemoryService & { summarize?: () => Promise<void> }).summarize;
+        if (typeof summarize === 'function') {
+            await summarize.call(this);
         }
     }
 
@@ -112,8 +115,9 @@ export default class MemoryService {
     }
 
     deleteMemory(ids: string[] = [], kws: string[] = []) {
-        if (ids.length === 0 && kws.length === 0) return;
-        ids.forEach(id => delete this.memoryMap?.[id]);
+        // 按 id 精确删除（复用 deleteMemories 的严格匹配路径）
+        if (ids.length > 0) this.deleteMemories(ids);
+        // 按关键词宽松删除：命中任一关键词即删除
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
                 if (kws.some(kw => this.memoryMap[id].tags.includes(kw))) {
@@ -147,14 +151,8 @@ export default class MemoryService {
     }
 
     limitMemory() {
-        const { MEMORY_LIMIT } = Config.memory;
-        const limit = MEMORY_LIMIT > 0 ? MEMORY_LIMIT - 1 : 0;
-        if (this.memories.length <= limit) return;
-        this.memories
-            .map(m => ({ id: m.id, score: m.decay * m.importance }))
-            .sort((a, b) => b.score - a.score)
-            .slice(limit)
-            .forEach(item => delete this.memoryMap?.[item.id]);
+        // 单条写入入口：预留 1 个空位给待写入的新记忆
+        this.limitMemories(1);
     }
 
     buildMemory(si: SessionInfo, ml: MemoryItem[]): string {
