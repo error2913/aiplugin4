@@ -13,6 +13,8 @@ import { generateId, revive, TypeDescriptor } from "../utils/utils";
 import MemoryItem from "./memory_item";
 import { MemorySource, searchOptions } from "./types";
 
+// 向量记忆检索的相似度下限（低于该值的记忆不返回），内置硬编码
+const VECTOR_SIMILARITY = 0.8;
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
@@ -355,7 +357,6 @@ export default class MemoryService {
             }))
         }
 
-        const { VECTOR_SIMILARITY } = Config.trigger;
         return this.memories
             .map(m => {
                 // 未指定关联记忆时返回全部；指定时仅保留命中关联的记忆
