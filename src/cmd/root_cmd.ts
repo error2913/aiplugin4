@@ -128,6 +128,20 @@ export function registerCmd() {
                     seal.replyToSender(ctx, msg, `指令.ai执行失败:${e.message}`);
                     return ret;
                 });
+            } else if (subCmd === 'help') {
+                // .ai help <一级子指令>：查看对应子命令帮助；不带参数时展示根命令帮助
+                const target = aliasToCmd(cmdArgs.getArgN(2));
+                if (target) {
+                    const targetCmd = SubCmd.map[target];
+                    if (targetCmd) {
+                        seal.replyToSender(ctx, msg, `【.ai ${targetCmd.name}】${targetCmd.desc}${targetCmd.help ? `\n${targetCmd.help}` : ''}`);
+                    } else {
+                        seal.replyToSender(ctx, msg, `指令不存在:${target}`);
+                    }
+                    return ret;
+                }
+                ret.showHelp = true;
+                return ret;
             } else {
                 ret.showHelp = true;
                 return ret;

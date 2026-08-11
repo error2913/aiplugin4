@@ -621,8 +621,8 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
             for (let j = 0; j < segs.length; j++) {
                 let seg = segs[j];
 
-                // 长度超过最大限制，直接截断
-                if (replyLength + seg.length > maxChar) {
+                // 长度超过最大限制，直接截断（maxChar 为 0 时不限制）
+                if (maxChar > 0 && replyLength + seg.length > maxChar) {
                     seg = seg.slice(0, maxChar - replyLength);
                 }
 
@@ -636,7 +636,7 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
 
                 // 长度超过最大限制，直接退出
                 replyLength += seg.length;
-                if (replyLength > maxChar) {
+                if (maxChar > 0 && replyLength > maxChar) {
                     break;
                 }
             }
@@ -647,8 +647,8 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
             }
         }
 
-        // 长度超过最大限制，直接退出
-        if (replyLength > maxChar) {
+        // 长度超过最大限制，直接退出（maxChar 为 0 时不限制）
+        if (maxChar > 0 && replyLength > maxChar) {
             break;
         }
     }

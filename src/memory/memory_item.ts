@@ -139,8 +139,12 @@ export default class MemoryItem {
     }
 
     async updateVector() {
-        if (!Config.memory.EMBEDDING_MODEL_ENABLED) return;
-        const { DIMENSION } = Config.memory;
+        if (!Config.model.EMBEDDING_MODEL_ENABLED) return;
+        const DIMENSION = Model.getEmbeddingDimension();
+        if (DIMENSION <= 0) {
+            Logger.info(`未配置嵌入向量维度，跳过向量更新: ${this.id}`);
+            return;
+        }
         Logger.info(`更新记忆向量: ${this.id}`);
         const model = Model.getEmbeddingModel('text-embedding');
         if (!model) return Logger.error('未找到可用的嵌入模型');

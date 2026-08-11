@@ -5,7 +5,6 @@ import { Context } from "../context/context";
 import { logger } from "../logger";
 import KnowledgeService from "../memory/knowledge";
 import MemoryService from "../memory/memory";
-import { ImageManager } from "../resource/image";
 import { revive, TypeDescriptor } from "../utils/utils";
 
 import { Session, Setting } from "./session";
@@ -49,12 +48,11 @@ export class SessionService {
             session.sessionId = sessionId;
             if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
             session.agentName = this.agentName;
-            // 复活嵌套对象（Context/MemoryItem/Setting/ImageManager）
+            // 复活嵌套对象（Context/MemoryItem/Setting）
             session.context = revive(Context, session.context || {});
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
             if (session.setting) session.setting = revive(Setting, session.setting);
-            if (session.imageManager) session.imageManager = revive(ImageManager, session.imageManager);
             // 同步归属字段，确保 context/memory 能解析到正确的 agent/session
             session.context.agentName = session.agentName;
             session.context.sessionId = session.sessionId;

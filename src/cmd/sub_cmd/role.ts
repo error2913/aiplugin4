@@ -14,13 +14,15 @@ export function registerCmdRole() {
 
         const { ROLE_NAMES: roleSettingNames, INSTRUCTIONS: roleSettingTemplate } = Config.message;
         const { roleName } = getRoleSetting(ctx);
+        // 以 . 开头的角色设定为隐藏角色：不出现在列表中，但可通过 .ai role 直接切换
+        const visibleNames = roleSettingNames.filter(name => !name.startsWith('.'));
         const val2 = cmdArgs.getArgN(2);
         if (!val2) {
-            seal.replyToSender(ctx, msg, `当前角色设定名称为[${roleName}]，名称有:\n${roleSettingNames.join('、')}`);
+            seal.replyToSender(ctx, msg, `当前角色设定名称为[${roleName}]，名称有:\n${visibleNames.join('、')}`);
             return ret;
         }
         if (!roleSettingNames.includes(val2)) {
-            seal.replyToSender(ctx, msg, `【.ai role <名称>】切换角色设定\n角色设定名称错误，名称有:\n${roleSettingNames.join('、')}`);
+            seal.replyToSender(ctx, msg, `【.ai role <名称>】切换角色设定\n角色设定名称错误，名称有:\n${visibleNames.join('、')}`);
             return ret;
         }
         const roleSettingIndex = roleSettingNames.indexOf(val2);

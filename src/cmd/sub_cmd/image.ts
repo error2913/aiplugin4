@@ -1,4 +1,4 @@
-// .ai image：图片管理（本地/偷取/识别/查找）
+// .ai image：图片管理（本地/识别/查找）
 import Image from "../../resource/image";
 import { transformArrayToContent, transformTextToArray } from "../../utils/string";
 import { aliasToCmd } from "../../utils/utils";
@@ -13,15 +13,7 @@ export function registerCmdImage() {
         priv: U, args: {
             list: {
                 priv: U, args: {
-                    steal: { priv: U },
                     local: { priv: M }
-                }
-            },
-            steal: {
-                priv: I, args: {
-                    on: { priv: U },
-                    off: { priv: U },
-                    forget: { priv: U },
                 }
             },
             itt: { priv: M },
@@ -36,43 +28,12 @@ export function registerCmdImage() {
             case 'list': {
                 const type = cmdArgs.getArgN(3);
                 switch (aliasToCmd(type)) {
-                    case 'steal': {
-                        seal.replyToSender(ctx, msg, session.imageManager.getStolenImageListText(page) || '暂无偷取图片');
-                        return ret;
-                    }
                     case 'local': {
                         seal.replyToSender(ctx, msg, Image.getLocalImageListText(page) || '暂无本地图片');
                         return ret;
                     }
                     default: {
-                        seal.replyToSender(ctx, msg, '【.ai img list [stl/lcl]】展示偷取的图片/本地图片');
-                        return ret;
-                    }
-                }
-            }
-            case 'steal': {
-                const op = cmdArgs.getArgN(3);
-                switch (aliasToCmd(op)) {
-                    case 'on': {
-                        session.imageManager.stealStatus = true;
-                        seal.replyToSender(ctx, msg, `图片偷取已开启,当前偷取数量:${session.imageManager.stolenImages.length}`);
-                        session.save();
-                        return ret;
-                    }
-                    case 'off': {
-                        session.imageManager.stealStatus = false;
-                        seal.replyToSender(ctx, msg, `图片偷取已关闭,当前偷取数量:${session.imageManager.stolenImages.length}`);
-                        session.save();
-                        return ret;
-                    }
-                    case 'forget': {
-                        session.imageManager.stolenImages = [];
-                        seal.replyToSender(ctx, msg, '偷取图片已遗忘');
-                        session.save();
-                        return ret;
-                    }
-                    default: {
-                        seal.replyToSender(ctx, msg, `图片偷取状态:${session.imageManager.stealStatus},当前偷取数量:${session.imageManager.stolenImages.length}`);
+                        seal.replyToSender(ctx, msg, '【.ai img list [lcl]】展示本地图片');
                         return ret;
                     }
                 }
@@ -104,8 +65,7 @@ export function registerCmdImage() {
             }
             default: {
                 seal.replyToSender(ctx, msg, `帮助:
- 【.ai img list [stl/lcl]】展示偷取的图片/本地图片
- 【.ai img stl [on/off/f]】偷图 开启/关闭/遗忘
+ 【.ai img list [lcl]】展示本地图片
  【.ai img itt [图片] (附加提示词)】图片转文字
  【.ai img find <图片ID>】查找图片`);
                 return ret;

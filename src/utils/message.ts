@@ -1,5 +1,6 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
+import { parseRoleEntry } from "../config/configs/message";
 import { logger } from "../logger";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
@@ -277,5 +278,5 @@ export function getRoleSetting(ctx: seal.MsgContext) {
         const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
         if (exists2 && roleIndex2 >= 0 && roleIndex2 < INSTRUCTIONS.length) roleIndex = roleIndex2;
     }
-    return { roleName, roleIndex, roleSetting: INSTRUCTIONS[roleIndex] }
+    return { roleName, roleIndex, roleSetting: parseRoleEntry(INSTRUCTIONS[roleIndex]).setting }
 }

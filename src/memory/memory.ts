@@ -330,9 +330,9 @@ export default class MemoryService {
         if (!this.memories.length) return [];
         const { topK = 10, tags = [], relatedMemories = [], users = [], groups = [], method = 'score' } = options;
 
-        const { DIMENSION } = Config.memory;
+        const DIMENSION = Model.getEmbeddingDimension();
         let v: number[] = [];
-        if (Config.memory.EMBEDDING_MODEL_ENABLED && DIMENSION > 0 && query) {
+        if (Config.model.EMBEDDING_MODEL_ENABLED && DIMENSION > 0 && query) {
             const model = Model.getEmbeddingModel('text-embedding');
             if (!model) {
                 Logger.error('未找到可用的嵌入模型');

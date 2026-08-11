@@ -229,7 +229,7 @@ export default class Tool {
 
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
-            if (session.tool.callCount >= MAX_CALL_COUNT) {
+            if (MAX_CALL_COUNT > 0 && session.tool.callCount >= MAX_CALL_COUNT) {
                 Logger.warning('工具调用超过上限');
                 ret.result.push({
                     tool_call_id: tool_call.id,

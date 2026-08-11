@@ -28,39 +28,24 @@ function parseSkillFrontmatter(raw: string): { name?: string, description?: stri
     return meta;
 }
 
-/** 解析单条技能配置：JSON / 标准 SKILL.md / 旧格式 名称|描述|内容 */
+/** 解析单条技能配置：仅支持标准 SKILL.md（--- frontmatter + 正文） */
 function parseSkillEntry(line: string): { name: string, description: string, content: string } {
-    // JSON 格式：{"name":"骰点","description":"...","content":"..."}
-    if (line.startsWith('{')) {
-        try {
-            const j = JSON.parse(line);
-            return {
-                name: String(j.name || '').trim(),
-                description: String(j.description || '').trim(),
-                content: String(j.content || '').trim()
-            };
-        } catch (e) {
-            Logger.error(`技能配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
-            return { name: '', description: '', content: '' };
-        }
-    }
     // 标准 SKILL.md：--- frontmatter（name/description）--- 正文，可直接粘贴其他 agent 的技能文件
     const fmMatch = line.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
     if (fmMatch) {
         const meta = parseSkillFrontmatter(fmMatch[1]);
-        return {
-            name: (meta.name || '').trim(),
-            description: (meta.description || '').trim(),
-            content: fmMatch[2].trim()
-        };
+        if (meta.name) {
+            return {
+                name: meta.name.trim(),
+                description: (meta.description || '').trim(),
+                content: fmMatch[2].trim()
+            };
+        }
+        Logger.error(`技能配置缺少 name 字段，已跳过: ${line.split('\n')[0]}`);
+        return { name: '', description: '', content: '' };
     }
-    // 旧格式：名称|描述|内容
-    const [name, description = '', ...rest] = line.split('|');
-    return {
-        name: name.trim(),
-        description: description.trim(),
-        content: rest.join('|').trim()
-    };
+    Logger.error(`技能配置不是标准 SKILL.md 格式，已跳过: ${line.split('\n')[0]}`);
+    return { name: '', description: '', content: '' };
 }
 
 function getSkills(): Skill[] {
@@ -85,21 +70,17 @@ export function getSkillSummaries(): string[] {
  * 读取“技能配置”，注册 use_skill 工具
  */
 export function registerSkills() {
-    const skills = getSkills();
-    if (skills.length === 0) return;
-
     const tool = new Tool({
         type: "function",
         function: {
             name: "use_skill",
-            description: `使用指定技能完成当前任务。可用技能: ${skills.map(s => s.name).join('、')}`,
+            description: "使用指定技能完成当前任务，技能名称以 system prompt 中「可用技能」列表为准",
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: "string",
-                        description: "技能名称，取可用技能中的一项",
-                        enum: skills.map(s => s.name)
+                        description: "技能名称"
                     }
                 },
                 required: ["name"]
@@ -107,9 +88,10 @@ export function registerSkills() {
         }
     });
     tool.solve = async (_ctx, _msg, _session, args) => {
+        const skills = getSkills();
         return resolveSkillContent(skills, args?.name, 0);
     };
-    Logger.info(`已注册技能工具 use_skill，可用技能: ${skills.map(s => s.name).join('、')}`);
+    Logger.info('已注册技能工具 use_skill（技能内容按配置动态加载）');
 }
 
 /** 解析技能内容：支持 {{skill:名称}} 引用（限深度），并截断超长内容 */

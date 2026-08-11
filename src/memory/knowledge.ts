@@ -77,7 +77,7 @@ export default class KnowledgeService extends MemoryService {
     }
 
     async updateKnowledgeMemory(roleIndex: number) {
-        const { ROLE_NAMES } = Config.message as any;
+        const { ROLE_NAMES } = Config.message;
         const { KNOWLEDGE_MEMORIES_MAP } = Config.memory;
         let role = (ROLE_NAMES && ROLE_NAMES[roleIndex]) || '*';
         // 角色没有专属知识时，回退到“对所有角色生效”的全局知识（roles 为空的知识）
