@@ -12,7 +12,7 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "可调用指令白名单", ['fun|jrrp', 'story|modu', 'coc7|st', 'coc7|ra', 'coc7|sc'], "每行一个 AI 可调用的海豹指令；格式：扩展名|指令名（指令与插件同名时可只写指令名）。示例：wifeOfTheDay|今日老婆、fun|jrrp、coc7|st。默认包含内置技能所需指令，可自行增删。修改后自动生效", "工具");
         seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的指令；默认关闭，建议保持关闭以限制权限", "工具");
-        seal.ext.registerTemplateConfig(ext, "内置扩展列表", ['fun', 'story', 'coc7', 'deck', 'dnd5e', 'exp', 'log', 'reply', 'template'], "每行一个 SealDice 核心内置扩展名，用于「允许所有指令」模式下枚举其指令；可自行增删。修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "内置扩展列表", ['fun', 'story', 'coc7', 'deck', 'dnd5e', 'exp', 'log', 'reply'], "每行一个 SealDice 核心内置扩展名，用于「允许所有指令」模式下枚举其指令；可自行增删。修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [
             `{"mcpServers":{"mcp-files-exec":{"type":"http","url":"http://127.0.0.1:3910","headers":{"Authorization":"Bearer token"}}}}`
