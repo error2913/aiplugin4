@@ -7,17 +7,19 @@ import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
 import { transformTextToArray } from "./string";
 
 export function transformMsgId(msgId: string | number | null): string {
-    if (msgId === null) {
+    if (msgId === null || msgId === '') {
         return '';
     }
     if (typeof msgId === 'string') {
-        msgId = parseInt(msgId);
+        msgId = parseInt(msgId, 10); // 原始十进制 ID；负数保留符号
     }
-    return isNaN(msgId) ? '' : msgId.toString(36); // 将数字转换为36进制字符串
+    // 消息 ID 可能为负数（NapCat 等实现会产生负的 int64 ID），
+    // base36 转换会保留符号（如 -123 -> -3f），反向转换可无损还原
+    return isNaN(msgId) ? '' : msgId.toString(36);
 }
 
 export function transformMsgIdBack(msgId: string): number {
-    return parseInt(msgId, 36); // 将36进制字符串转换为数字 
+    return parseInt(msgId, 36); // 将36进制字符串转换为数字（负数保留符号）
 }
 
 /**

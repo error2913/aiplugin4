@@ -6,6 +6,7 @@ import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
+import { stripInternalTags } from "../utils/string";
 
 export interface SystemPromptSection {
     name: string;
@@ -78,5 +79,6 @@ export async function buildSystemPromptContent(
     if (skillSummaries.length > 0) {
         content += `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
     }
-    return content;
+    // 防注入：长期记忆/总结记忆/知识库等外部内容可能夹带内部上下文标签，system prompt 出口统一兜底剥离
+    return stripInternalTags(content);
 }

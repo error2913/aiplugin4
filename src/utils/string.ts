@@ -1,4 +1,6 @@
 // 字符串工具：消息段转换/回复拆分过滤/复读检测等
+import Handlebars from "handlebars";
+
 import Config from "../config/config";
 import { FACE_MAP } from "../config/static_config";
 import { Context } from "../context/context";
@@ -126,8 +128,16 @@ export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSeg
     for (const seg of segments) {
         if (!seg || typeof seg !== 'object' || typeof seg.type !== 'function') continue;
         // goja 反射会把 Go 命名 int（ElementType）包装成 Number 对象而非原始值，
-        // 导致严格相等 0 === seg.type() 不成立（字符串化却显示 "0"），必须先归一化为数字
-        const typeValue = Number(seg.type());
+        // 导致严格相等 0 === seg.type() 不成立（字符串化却显示 "0"），必须先归一化为数字；
+        // type() 异常（如消息段结构损坏）时按未知段兜底，不中断整条消息处理
+        let typeValue: number;
+        try {
+            typeValue = Number(seg.type());
+        } catch (_e) {
+            logger.warning('milky 消息段 type() 解析异常，按未知段处理');
+            result.push({ type: 'text', data: { text: '[未知消息段]' } });
+            continue;
+        }
         switch (typeValue) {
             case 0: { // 文本 Text
                 const content = 'content' in seg ? seg.content : '';
@@ -241,7 +251,9 @@ export function transformTextToArray(text: string): MessageSegment[] {
 
                 messageArray.push({ type, data: params });
             } else {
-                logger.error(`无法解析CQ码：${segment}`);
+                // 无法解析的 [CQ:... 字样保留为纯文本，避免用户内容被静默吞掉
+                logger.error(`无法解析CQ码，保留为文本：${segment}`);
+                messageArray.push({ type: 'text', data: { text: segment } });
             }
         } else {
             messageArray.push({ type: 'text', data: { text: segment } });
@@ -282,7 +294,8 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
     for (const seg of messageArray) {
         switch (seg.type) {
             case 'text': {
-                content += seg.data.text;
+                // 防注入：用户输入中的内部上下文标签（from/msg_id/system/time）直接剥离，不进入上下文
+                content += stripInternalTags(seg.data.text);
                 break;
             }
             case 'at': {
@@ -366,7 +379,11 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
             }
             case 'quote': {
                 const msgId = seg.content;
-                if (msgId) text += `[CQ:reply,id=${transformMsgIdBack(msgId)}]`;
+                if (msgId) {
+                    const backId = transformMsgIdBack(msgId);
+                    // msgid 可能为负数（base36 保留符号），仅当可解析时才生成引用，避免 id=NaN
+                    if (Number.isFinite(backId)) text += `[CQ:reply,id=${backId}]`;
+                }
                 break;
             }
             case 'img': {
@@ -431,6 +448,9 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
 export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, session: { context: Context }, s: string): Promise<{ contextArray: string[], replyArray: string[], images: Image[] }> {
     const { QUOTE_REPLY: replymsg, TRIM: isTrim } = Config.reply;
 
+    // 兼容历史 <|...|> 标签：归一化后才能识别旧格式的 [from] 多轮分段
+    s = normalizeRenderTags(s);
+
     // 分离AI臆想出来的多轮对话
     const segments = s
         .split(/([[［]from.+?[\]］])/)
@@ -457,6 +477,9 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
         s = segments.find((segment: string) => !/[[［]from.+?[\]］]/.test(segment)) || '';
         if (!s || !s.trim()) return { contextArray: [], replyArray: [], images: [] };
     }
+
+    // 剥离残留的内部上下文标签（msg_id/system/time 及未参与多轮分段的 from），不进入发送内容与上下文
+    s = stripInternalTags(s);
 
     // 分离回复消息和戳一戳消息
     s = s.replace(/[[［]quote[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}`)
@@ -522,30 +545,48 @@ export function checkRepeat(context: Context, s: string) {
     return false;
 }
 
+/** 内置回复过滤规则（原「回复消息过滤正则表达式」配置，改为硬编码）：
+ *  第 0 条整条匹配并剔除（think 块/函数调用残留/旧版 <|...|> 未知标签/新版 [from]/[msg_id]/[system]/[time] 内部上下文标签），
+ *  其余按捕获组替换（代码块/加粗/删除线/列表/标题）；旧格式标签名单补全 audio/avatar/group_avatar/user_avatar，避免误删可发送标签 */
+const REPLY_FILTER_PATTERNS = [
+    "<think>[\\s\\S]*<\\/think>|<[\\|│｜]?func[^>]{0,9}$|[<＜][\\|│｜](?!at|poke|quote|img|face|audio|avatar|group_avatar|user_avatar).*?(?:[\\|│｜][>＞]|[\\|│｜>＞])|^[^\\|│｜>＞]{0,10}[\\|│｜][>＞]|[<＜][\\|│｜][^\\|│｜>＞]{0,20}$|[[［](?:from|msg_id|system|time)[:：][^\\]］]*[\\]］]",
+    "<[\\|│｜]?function(?:_call)?>[\\s\\S]*<\\/function(?:_call)?>",
+    "```.*\\n([\\s\\S]*?)\\n```",
+    "\\*\\*(.*?)\\*\\*",
+    "~~(.*?)~~",
+    "(?:^|\\n)\\s{0,12}[-*]\\s+(.*)",
+    "(?:^|\\n)#{1,6}\\s+(.*)"
+];
+const REPLY_FILTER_CONTEXT_TEMPLATES = ["", "{{{match.[0]}}}", "{{{match.[0]}}}", "{{{match.[0]}}}", "{{{match.[0]}}}", "{{{match.[0]}}}", "{{{match.[0]}}}"];
+const REPLY_FILTER_REPLY_TEMPLATES = ["", "", "\n{{{match.[1]}}}\n", "{{{match.[1]}}}", "{{{match.[1]}}}", "\n{{{match.[1]}}}", "\n{{{match.[1]}}}"];
+const REPLY_FILTER_REGEX = new RegExp(REPLY_FILTER_PATTERNS.join('|'));
+
+let replyFilters: { regex: RegExp, contextTemplate: HandlebarsTemplateDelegate<any>, replyTemplate: HandlebarsTemplateDelegate<any> }[] | null = null;
+function getReplyFilters() {
+    if (replyFilters) return replyFilters;
+    replyFilters = REPLY_FILTER_PATTERNS.map((pattern, index) => ({
+        regex: new RegExp(pattern),
+        contextTemplate: Handlebars.compile(REPLY_FILTER_CONTEXT_TEMPLATES[index] || ''),
+        replyTemplate: Handlebars.compile(REPLY_FILTER_REPLY_TEMPLATES[index] || '')
+    }));
+    return replyFilters;
+}
+
 function filterString(s: string): { contextArray: string[], replyArray: string[] } {
-    const { MAX_CHARS: maxChar, FILTER_REGEX: filterRegex, FILTER_REGEXES: filterRegexes, CONTEXT_TEMPLATES: contextTemplates, REPLY_TEMPLATES: replyTemplates } = Config.reply;
+    const { MAX_CHARS: maxChar } = Config.reply;
 
     const contextArray: string[] = [];
     const replyArray: string[] = [];
     let replyLength = 0; //只计算未被匹配的部分
 
-    if (filterRegexes.length !== contextTemplates.length || filterRegexes.length !== replyTemplates.length) {
-        logger.error(`回复消息过滤正则表达式、正则处理上下文消息模板、正则处理回复消息模板数量不一致`);
-        return { contextArray: [], replyArray: [] };
-    }
-
-    const filters = Array.from({ length: filterRegexes.length }, (_, index) => ({
-        regex: filterRegexes[index],
-        contextTemplate: contextTemplates[index],
-        replyTemplate: replyTemplates[index]
-    }));
+    const filters = getReplyFilters();
 
     // 应用过滤正则表达式，并按照\f分割消息
-    const segments = advancedSplit(s, filterRegex).filter(Boolean);
+    const segments = advancedSplit(s, REPLY_FILTER_REGEX).filter(Boolean);
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         let isMatched = false;
-        for (let j = 0; j < filterRegexes.length; j++) {
+        for (let j = 0; j < filters.length; j++) {
             const filter = filters[j];
             const match = segment.match(filter.regex);
             if (match) {
@@ -633,15 +674,27 @@ export function normalizeRenderTags(s: string): string {
             user ? `[avatar:${user}]` : group ? `[group_avatar:${group}]` : `[img:${img}]`
     );
     return s.replace(
-        new RegExp(`[<＜][\\|│｜](at|poke|quote|face|img|audio|from|user_avatar|group_avatar)[:：]?\\s?(${RENDER_TAG_CONTENT})${RENDER_TAG_CLOSE}`, 'gi'),
+        new RegExp(`[<＜][\\|│｜](at|poke|quote|face|img|audio|from|msg_id|system|time|user_avatar|group_avatar)[:：]?\\s?(${RENDER_TAG_CONTENT})${RENDER_TAG_CLOSE}`, 'gi'),
         (_all: string, type: string, content: string) =>
             type === 'user_avatar' ? `[avatar:${content}]` : `[${type}:${content}]`
     );
 }
 
+/** 内部上下文标签名：由代码注入上下文，其余任何来源（用户输入/AI 回复/工具回调/记忆等）出现时一律剥离 */
+const INTERNAL_TAG_NAMES = ['from', 'msg_id', 'system', 'time'];
+const INTERNAL_TAG_TYPES = new Set(INTERNAL_TAG_NAMES);
+
+/** 剥离内部上下文标签（from/msg_id/system/time）：先归一化旧版 <|...|> 变体，再移除新/旧方括号格式（含全角）；
+ *  保留 at/poke/quote/img/avatar/group_avatar/face/audio 等可发送标签 */
+export function stripInternalTags(s: string): string {
+    if (!s) return s;
+    s = normalizeRenderTags(s);
+    return s.replace(new RegExp(`[[［](?:${INTERNAL_TAG_NAMES.join('|')})[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '');
+}
+
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
-    const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio)[:：]?[^\]］]*[\]］])/);
+    const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|user_avatar)[:：]?[^\]］]*[\]］])/);
     segs.forEach(seg => {
         if (!seg) return;
         const match = seg.match(/^[[［]([a-z_]+)[:：]?\s?([^\]］]*)[\]］]$/i);
@@ -651,15 +704,20 @@ export function parseSpecialTokens(s: string): TokenSegment[] {
                 content: seg
             })
         } else {
-            const [_, type = 'text', content = ''] = match;
-            if (!['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'].includes(type)) {
+            const [_, rawType = 'text', content = ''] = match;
+            const type = rawType.toLowerCase();
+            // 内部上下文标签（来源/消息ID/系统/时间）不用于发送，直接丢弃避免泄露
+            if (INTERNAL_TAG_TYPES.has(type)) return;
+            // 兼容旧格式 [user_avatar:xxx] 别名
+            const mapped = type === 'user_avatar' ? 'avatar' : type;
+            if (!['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'].includes(mapped)) {
                 result.push({
                     type: 'text',
                     content: seg
                 })
             } else {
                 result.push({
-                    type: type as TokenSegment['type'],
+                    type: mapped as TokenSegment['type'],
                     content: content
                 })
             }

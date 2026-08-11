@@ -9,7 +9,7 @@ import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall } from "../tool/types";
 import { getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo, netExists } from "../utils/ob11";
-import { levenshteinDistance } from "../utils/string";
+import { levenshteinDistance, stripInternalTags } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 
 import Message from "./message";
@@ -113,6 +113,8 @@ export class Context {
             }
         }
         text = await this.compressIfLong(text);
+        // 防注入：压缩智能体可能回带标签，入库前再兜底剥离一次（主入口在 transformArrayToContent）
+        text = stripInternalTags(text);
         const umi: UserMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
@@ -144,6 +146,8 @@ export class Context {
     }
 
     addAssistantMessage(text: string, messageId: string) {
+        // 防泄露：兜底剥离内部上下文标签（正常回复在 handleReply 已剥离）
+        text = stripInternalTags(text);
         const ami: AssistantMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
@@ -166,6 +170,7 @@ export class Context {
     }
 
     addSystemUserMessage(text: string, systemName: string) {
+        text = stripInternalTags(text);
         const sumi: SystemUserMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
@@ -209,6 +214,8 @@ export class Context {
                 Logger.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
+        // 防注入：工具返回内容（如历史消息、网页文本）中的内部上下文标签直接剥离，不进入上下文
+        text = stripInternalTags(text);
         const tcbm: ToolCallbackMessage = {
             role: 'tool',
             text,

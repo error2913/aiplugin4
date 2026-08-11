@@ -143,7 +143,10 @@ export function registerMessage() {
 
         const epId = ctx.endPoint.userId;
 
-        const result = await getMsg(epId, transformMsgIdBack(msg_id));
+        const backId = transformMsgIdBack(msg_id);
+        if (!Number.isFinite(backId)) return `消息ID无效：${msg_id}`;
+
+        const result = await getMsg(epId, backId);
         if (!result) return `获取消息 ${msg_id} 失败`;
         const messageArray: MessageSegment[] = result.message.filter((item: MessageSegment) => item.type === 'text' && !CQTYPESALLOW.includes(item.type));
 
@@ -183,7 +186,10 @@ export function registerMessage() {
         const epId = ctx.endPoint.userId;
         const gid = ctx.group!.groupId;
 
-        const result = await getMsg(epId, transformMsgIdBack(msg_id));
+        const backId = transformMsgIdBack(msg_id);
+        if (!Number.isFinite(backId)) return `消息ID无效：${msg_id}`;
+
+        const result = await getMsg(epId, backId);
         if (!result) return `获取消息 ${msg_id} 失败`;
         if (result.sender.user_id != epId.replace(/^.+:/, '')) {
             if (result.sender.role == 'owner' || result.sender.role == 'admin') {
@@ -195,7 +201,7 @@ export function registerMessage() {
             if (memberInfo.role !== 'owner' && memberInfo.role !== 'admin') return `你没有管理员权限`;
         }
 
-        await deleteMsg(epId, transformMsgIdBack(msg_id));
+        await deleteMsg(epId, backId);
         return `已撤回消息${msg_id}`;
     }
 
@@ -290,10 +296,14 @@ export function registerMessage() {
                     }
                     case 'quote': {
                         const msgId = seg.content;
-                        content.push({
-                            type: 'reply',
-                            data: { id: String(transformMsgIdBack(msgId)) }
-                        })
+                        // msgid 可能为负数（base36 保留符号），仅当可解析时才生成引用，避免 id=NaN
+                        const backId = transformMsgIdBack(msgId);
+                        if (Number.isFinite(backId)) {
+                            content.push({
+                                type: 'reply',
+                                data: { id: String(backId) }
+                            });
+                        }
                         break;
                     }
                     case 'img': {
