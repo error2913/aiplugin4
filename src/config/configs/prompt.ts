@@ -96,22 +96,6 @@ const TEMPLATES: { [key: string]: string } = {
 总结记忆为空
     {{/each}}
 {{/if}}`,
-    "知识库记忆prompt模板": `{{#if KNOWLEDGE}}
-
-## 知识库
-    {{#each knowledges}}
-{{index @index}}. ID:{{id}}
-    类型:{{type}}
-    重要性:{{importance}}
-    {{#each tags}}{{#if @first}}标签:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each relatedMemories}}{{#if @first}}相关记忆:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each users}}{{#if @first}}相关用户:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each groups}}{{#if @first}}相关群组:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    内容:{{{content}}}
-    {{else}}
-知识库为空
-    {{/each}}
-{{/if}}`,
     "工具函数prompt模板": `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数
@@ -224,7 +208,6 @@ export default class PromptConfig {
             SYSTEM_MESSAGE_TEMPLATE: compileTemplate("system prompt模板"),
             MEMORY_TEMPLATE: compileTemplate("长期记忆prompt模板"),
             SUMMARY_TEMPLATE: compileTemplate("总结记忆prompt模板"),
-            KNOWLEDGE_TEMPLATE: compileTemplate("知识库记忆prompt模板"),
             TOOLS_PROMPT_TEMPLATE: compileTemplate("工具函数prompt模板"),
             IMAGE_PROMPT_TEMPLATE: compileTemplate("图片识别prompt模板"),
             SUMMARY_PROMPT_TEMPLATE: compileTemplate("记忆总结prompt模板")

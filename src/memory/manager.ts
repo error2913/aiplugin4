@@ -21,12 +21,12 @@ export class MemoryManager {
         return SUMMARY ? session.memory.buildSummaryPrompt() : '';
     }
 
-    /** 知识库段：按角色加载（角色无知识时回退全局），再按开关构建 */
-    static async buildKnowledgePrompt(session: Session, roleIndex: number, text: string): Promise<string> {
+    /** 知识库段：按开关构建（配置驱动，全局单例加载） */
+    static async buildKnowledgePrompt(_session: Session, _text: string): Promise<string> {
         const { KNOWLEDGE } = Config.memory;
         if (!KNOWLEDGE) return '';
-        await knowledgeService.updateKnowledgeMemory(roleIndex);
-        return knowledgeService.buildKnowledgePrompt(session.context.sessionId, text);
+        await knowledgeService.init();
+        return knowledgeService.buildKnowledgePrompt();
     }
 
     /** 写入记忆：统一入口（内部含去重合并与向量生成） */

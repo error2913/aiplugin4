@@ -457,8 +457,6 @@ export default class MemoryService {
         const task: Promise<void>[] = [];
         // bot记忆权重更新
         task.push(agent.sessionService.memory.accessMemories(s));
-        // 知识库记忆权重更新
-        task.push(agent.sessionService.knowledge.accessMemories(s));
         // 会话自身记忆权重更新
         task.push(session.memory.accessMemories(s));
         // 群内用户的记忆权重更新
@@ -471,8 +469,6 @@ export default class MemoryService {
         const items: string[] = [];
         // bot记忆
         items.push(...agent.sessionService.memory[item]);
-        // 知识库记忆
-        items.push(...agent.sessionService.knowledge[item]);
         // 会话自身记忆
         items.push(...session.memory[item]);
         // 群内用户的记忆

@@ -23,7 +23,7 @@ export interface SystemPromptSection {
 export async function buildSystemPromptContent(
     ctx: seal.MsgContext,
     session: Session,
-    roleIndex: number,
+    _roleIndex: number,
     roleSetting: string
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
@@ -57,7 +57,7 @@ export async function buildSystemPromptContent(
     // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
     const memoryPrompt = await MemoryManager.buildLongTermPrompt(ctx, session, text, ui || null, gi || null);
     const summaryPrompt = MemoryManager.buildSummaryPrompt(session);
-    const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, roleIndex, text);
+    const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, text);
 
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
     const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';

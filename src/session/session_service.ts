@@ -1,9 +1,8 @@
-// 会话服务：会话的创建/复活/保存，getSession 入口与知识库访问
+// 会话服务：会话的创建/复活/保存与 getSession 入口
 import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import { Context } from "../context/context";
 import { logger } from "../logger";
-import KnowledgeService from "../memory/knowledge";
 import MemoryService from "../memory/memory";
 import { revive, TypeDescriptor } from "../utils/utils";
 
@@ -65,8 +64,4 @@ export class SessionService {
         return this.sessionMap[sessionId];
     }
 
-    get knowledge(): KnowledgeService {
-        const m = KnowledgeService.knowledgeServiceMap;
-        return m[this.agentName] || m['*'] || new KnowledgeService();
-    }
 }
