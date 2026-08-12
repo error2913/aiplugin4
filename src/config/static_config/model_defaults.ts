@@ -4,7 +4,7 @@ export const DEFAULT_CHAT_MODEL_BODY = {
     "stream": false
 }
 export const DEFAULT_IMAGE_MODEL_BODY = {
-    "max_tokens": 4096,
+    "max_tokens": 2048,
     "stop": null,
     "stream": false
 }

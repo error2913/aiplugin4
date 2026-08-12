@@ -38,10 +38,10 @@ use = ["image-understanding"]       # 必填，用途：image-understanding / ch
 provider = "zhipu"                  # 可选，服务商，省略时自动识别
 base_url = "https://open.bigmodel.cn/api/paas/v4"  # 可选，API 地址，省略时取服务商默认
 
-[body]                              # 可选，请求参数覆盖；默认 max_tokens=4096、stop=null、stream=false
+[body]                              # 可选，请求参数覆盖；默认 max_tokens=2048、stop=null、stream=false
 temperature = 1                     # 可选
-max_tokens = 4096                   # 可选`
-        ], '每行一个图片模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：zhipu/alibaba/openai/google/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：image-understanding（图片理解/图片转文字）、chat（多模态对话：把该模型同时当作对话模型，用 .ai model 选择它后，上下文里的图片会以图片内容直接传给模型，不再转成文本标签；对话模型名字出现在本列表时同样按多模态处理）。body 未配置时使用 max_tokens=4096、stop=null、stream=false。下方默认值即完整示例，可直接修改。', "模型");
+max_tokens = 2048                   # 可选`
+        ], '每行一个图片模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：zhipu/alibaba/openai/google/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：image-understanding（图片理解/图片转文字）、chat（多模态对话：把该模型同时当作对话模型，用 .ai model 选择它后，上下文里的图片会以图片内容直接传给模型，不再转成文本标签；对话模型名字出现在本列表时同样按多模态处理）。body 未配置时使用 max_tokens=2048、stop=null、stream=false。下方默认值即完整示例，可直接修改。', "模型");
         seal.ext.registerBoolConfig(ext, "是否开启嵌入模型", false, "总开关，默认关闭。\n配置好嵌入模型后再开启；关闭时向量记忆的嵌入生成与检索不生效，记忆按关键词/分数检索", "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
             `# 使用toml格式
