@@ -98,6 +98,7 @@ export default class SessionMemoryService extends MemoryService {
                     keywords?: string[],
                     userList?: string[],
                     groupList?: string[],
+                    visibility?: 'public' | 'private',
                 }[]
             };
 
@@ -110,7 +111,7 @@ export default class SessionMemoryService extends MemoryService {
             this.limitSummaries();
 
             await Promise.all(memoryData.memories.map(m =>
-                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text)
+                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text, m.visibility === 'private' ? 'private' : 'public')
             ));
         } catch (e) {
             Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));

@@ -11,7 +11,7 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'add_memory',
-            description: '添加个人记忆或群聊记忆，尽量不要重复记忆；visibility 为 private 时仅创建该记忆的会话可读取',
+            description: '添加个人记忆或群聊记忆，尽量不要重复记忆；仅当用户明确要求记忆只在本会话中生效时才传 visibility=private，其余情况不要传（默认 public，相关会话均可读取）',
             parameters: {
                 type: 'object',
                 properties: {
@@ -51,7 +51,7 @@ export function registerMemory() {
                     },
                     visibility: {
                         type: 'string',
-                        description: '可见性，public 为默认（相关会话均可读取）；private 表示仅创建该记忆的会话可读取，适合敏感内容',
+                        description: '仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不要传（默认 public，相关会话均可读取）',
                         enum: ['public', 'private']
                     }
                 },

@@ -152,14 +152,14 @@ const TEMPLATES: { [key: string]: string } = {
     },
     "memories": {
         type: 'array',
-        description: '记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组',
+        description: '记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组。除非用户明确要求记忆只在本会话中生效，否则不要传 visibility 字段（默认 public）',
         items: {
             type: 'object',
             description: '记忆对象',
             properties: {
                 "memory_type": {
                     type: "string",
-                    description: "记忆类型，个人或群聊。",
+                    description: "记忆归属，个人或群聊，与可见性无关。",
                     enum: ["private", "group"]
                 },
                 "name": {
@@ -190,6 +190,11 @@ const TEMPLATES: { [key: string]: string } = {
                     items: {
                         type: 'string'
                     }
+                },
+                "visibility": {
+                    type: "string",
+                    description: "记忆可见性，仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不传（默认 public）",
+                    enum: ["public", "private"]
                 }
             },
             "required": ['memory_type', 'name', 'text']
