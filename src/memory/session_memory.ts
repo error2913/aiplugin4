@@ -1,8 +1,8 @@
 // 会话记忆：短期记忆总结（调用摘要智能体）与记忆 prompt 构建
 import Agent from "../agent/agent";
 import Config from "../config/config";
-import { SUMMARY_PROMPT_TEMPLATE, SUMMARY_TEMPLATE } from "../config/static_config";
 import Logger from "../logger";
+import { SUMMARY_PROMPT_TEMPLATE, SUMMARY_TEMPLATE } from "../prompt/templates";
 import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
@@ -110,7 +110,7 @@ export default class SessionMemoryService extends MemoryService {
             this.limitSummaries();
 
             await Promise.all(memoryData.memories.map(m =>
-                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text, m.memory_type === 'private' ? 'private' : 'public')
+                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text)
             ));
         } catch (e) {
             Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));

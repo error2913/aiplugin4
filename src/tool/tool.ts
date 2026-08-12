@@ -1,7 +1,7 @@
 // 工具系统：Tool 注册表、工具调用（含扩展指令/提示词工程）与注册
 import Config from "../config/config"
-import { TOOLS_PROMPT_TEMPLATE } from "../config/static_config"
 import Logger from "../logger"
+import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { getSessionId } from "../utils/seal";

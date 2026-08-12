@@ -1,6 +1,5 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
 import Config from "../config/config";
-import { SYSTEM_MESSAGE_TEMPLATE } from "../config/static_config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
 import { MemoryManager } from "../memory/manager";
@@ -10,6 +9,8 @@ import User from "../session/user";
 import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 import { stripInternalTags } from "../utils/string";
+
+import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
 
 export interface SystemPromptSection {
     name: string;

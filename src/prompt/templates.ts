@@ -1,7 +1,7 @@
 // 内置 prompt 模板：Handlebars 模板常量（不再注册为可配置项，避免用户误改导致渲染损坏）
 import Handlebars from "handlebars";
 
-import Logger from "../../logger";
+import Logger from "../logger";
 
 const TEMPLATES: { [key: string]: string } = {
     "system prompt模板": `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。

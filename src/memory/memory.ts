@@ -1,10 +1,11 @@
 // 记忆服务：MemoryItem 存取/检索/权重/短期记忆（含旧格式迁移）
 import Agent from "../agent/agent";
 import Config from "../config/config";
-import { MEMORY_TEMPLATE, VECTOR_SIMILARITY } from "../config/static_config";
+import { VECTOR_SIMILARITY } from "../config/static_config";
 import type { Context } from "../context/context";
 import Logger from "../logger";
 import Model from "../model/model";
+import { MEMORY_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, SessionInfo, UserInfo } from "../session/types";

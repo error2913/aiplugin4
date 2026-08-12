@@ -2,9 +2,9 @@
 import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import Config from "../config/config";
-import { IMAGE_PROMPT_TEMPLATE } from "../config/static_config";
 import { logger } from "../logger";
 import Model from "../model/model";
+import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { getSessionId } from "../utils/seal";
 import { MessageSegment } from "../utils/string";
 import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";

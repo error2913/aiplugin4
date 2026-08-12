@@ -7,5 +7,4 @@ export * from "./alias";
 export * from "./face";
 export * from "./providers";
 export * from "./model_defaults";
-export * from "./prompts";
 export * from "./memory";
