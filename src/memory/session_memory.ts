@@ -1,6 +1,7 @@
 // 会话记忆：短期记忆总结（调用摘要智能体）与记忆 prompt 构建
 import Agent from "../agent/agent";
 import Config from "../config/config";
+import { SUMMARY_PROMPT_TEMPLATE, SUMMARY_TEMPLATE } from "../config/static_config";
 import Logger from "../logger";
 import Group from "../session/group";
 import { Session } from "../session/session";
@@ -65,7 +66,7 @@ export default class SessionMemoryService extends MemoryService {
             const groupNumber = isPrivate ? '' : sessionId.replace(/^.+:/, '');
             const userName = isPrivate ? (User.get(sessionId).userName || userNumber) : '';
             const groupName = isPrivate ? '' : (Group.get(sessionId).groupName || groupNumber);
-            const prompt = Config.prompt.SUMMARY_PROMPT_TEMPLATE({
+            const prompt = SUMMARY_PROMPT_TEMPLATE({
                 "角色设定": roleSetting,
                 "平台": '',
                 "私聊": isPrivate,
@@ -109,7 +110,7 @@ export default class SessionMemoryService extends MemoryService {
             this.limitSummaries();
 
             await Promise.all(memoryData.memories.map(m =>
-                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text)
+                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text, m.memory_type === 'private' ? 'private' : 'public')
             ));
         } catch (e) {
             Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));
@@ -128,7 +129,6 @@ export default class SessionMemoryService extends MemoryService {
     buildSummaryPrompt(): string {
         if (this.summaries.length === 0) return '';
         const { SUMMARY } = Config.memory;
-        const { SUMMARY_TEMPLATE } = Config.prompt;
         return SUMMARY_TEMPLATE({
             "SUMMARY": SUMMARY,
             "summaries": this.summaries

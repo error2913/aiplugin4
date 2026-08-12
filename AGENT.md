@@ -58,7 +58,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 
 ## 发布流程
 
-1. 版本推进：`src/config/static_config.ts` 的 `VERSION`、`header.txt` 的 `@version`、`sealpack/info.toml` 的 `version`（由 `scripts/prepare-sealpack.js` 自动同步）、`src/update.ts` 新增对应版本条目，走 PR 合并到 main。
+1. 版本推进：`src/config/static_config/meta.ts` 的 `VERSION`、`header.txt` 的 `@version`、`sealpack/info.toml` 的 `version`（由 `scripts/prepare-sealpack.js` 自动同步）、`src/update.ts` 新增对应版本条目，走 PR 合并到 main。
 2. 推送 `v<版本>` 标签 → GitHub Actions `release.yml` 自动：verify（校验标签与 VERSION/update.ts 一致）→ `node scripts/build-release.js` 打包（本体 JS + 本体豹包 + 完整豹包）→ 用 `SEALPACK_TOKEN` 发布两个豹包到 SealRepo → 从 `update.ts` 提取版本日志创建 GitHub Release。
 3. 完整包依赖插件在 `scripts/deps.cjs` 的 `dependencies` 配置（`url` 为 raw 地址）；包图标 `sealpack/assets/icon.png`；SealRepo Token 放仓库 secrets（`SEALPACK_TOKEN`）。
 

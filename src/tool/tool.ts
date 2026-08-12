@@ -1,5 +1,6 @@
 // 工具系统：Tool 注册表、工具调用（含扩展指令/提示词工程）与注册
 import Config from "../config/config"
+import { TOOLS_PROMPT_TEMPLATE } from "../config/static_config"
 import Logger from "../logger"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
@@ -325,7 +326,6 @@ export default class Tool {
 
     static getToolsInfoPrompt(session: Session): string {
         const { PROMPT_ENGINEERING } = Config.tool;
-        const { TOOLS_PROMPT_TEMPLATE } = Config.prompt;
 
         const tools = this.getToolsInfo(session);
         let s = '';

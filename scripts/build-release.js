@@ -20,10 +20,10 @@ const FULL_PACKAGE_NAME = 'AI骰娘4-扩展';
 const FULL_PACKAGE_DESC = 'AI骰娘4 扩展包（完整包）：包含本体与依赖插件，安装即用';
 
 function getVersion() {
-  const src = fs.readFileSync(path.join(root, 'src', 'config', 'static_config.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(root, 'src', 'config', 'static_config', 'meta.ts'), 'utf8');
   const m = src.match(/VERSION\s*=\s*["']([^"']+)["']/);
   if (!m) {
-    console.error('未能在 src/config/static_config.ts 中找到 VERSION');
+    console.error('未能在 src/config/static_config/meta.ts 中找到 VERSION');
     process.exit(1);
   }
   return m[1];

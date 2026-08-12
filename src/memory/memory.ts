@@ -1,6 +1,7 @@
 // 记忆服务：MemoryItem 存取/检索/权重/短期记忆（含旧格式迁移）
 import Agent from "../agent/agent";
 import Config from "../config/config";
+import { MEMORY_TEMPLATE } from "../config/static_config";
 import type { Context } from "../context/context";
 import Logger from "../logger";
 import Model from "../model/model";
@@ -127,12 +128,14 @@ export default class MemoryService {
         }
     }
 
-    async addMemory(_ctx: seal.MsgContext | null, session: Session, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string) {
+    async addMemory(_ctx: seal.MsgContext | null, session: Session, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string, visibility: 'public' | 'private' = 'public') {
         const id = this.generateMemoryId();
         const now = Math.floor(Date.now() / 1000);
         const m = new MemoryItem();
         m.id = id;
         m.sessionId = session.sessionId;
+        // 可见性：public 对相关会话开放；private 仅创建会话可读（search 时按调用方会话过滤）
+        m.visibility = visibility;
         // 防注入：记忆内容中的内部上下文标签（from/msg_id/system/time）直接剥离
         m.content = stripInternalTags(text);
         m.createAt = now;
@@ -351,7 +354,7 @@ export default class MemoryService {
             groups = [],
             filterUsers = [],
             filterGroups = [],
-            sessionId = '',
+            sessionId = (this as MemoryService & { sessionId?: string }).sessionId || '',
             method = 'score'
         } = options;
 
@@ -499,7 +502,6 @@ export default class MemoryService {
     buildMemoriesPrompt(sources: MemorySource[]): string {
         if (sources.length === 0) return '';
         const { MEMORY } = Config.memory;
-        const { MEMORY_TEMPLATE } = Config.prompt;
         return MEMORY_TEMPLATE({
             "MEMORY": MEMORY,
             "sources": sources

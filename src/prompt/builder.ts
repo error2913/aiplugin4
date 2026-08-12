@@ -1,5 +1,6 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
 import Config from "../config/config";
+import { SYSTEM_MESSAGE_TEMPLATE } from "../config/static_config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
 import { MemoryManager } from "../memory/manager";
@@ -62,7 +63,7 @@ export async function buildSystemPromptContent(
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
     const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
 
-    let content = Config.prompt.SYSTEM_MESSAGE_TEMPLATE({
+    let content = SYSTEM_MESSAGE_TEMPLATE({
         instruction: roleSetting,
         platform: ctx.endPoint.platform,
         sessionType: ctx.isPrivate ? 'private' : 'group',

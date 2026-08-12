@@ -6,7 +6,6 @@ import ImageConfig from "./configs/image";
 import MemoryConfig from "./configs/memory";
 import MessageConfig from "./configs/message";
 import ModelConfig from "./configs/model";
-import PromptConfig from "./configs/prompt";
 import ReceivedConfig from "./configs/received";
 import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
@@ -33,7 +32,6 @@ const configMap = {
     memory: MemoryConfig,
     image: ImageConfig,
     backend: BackendConfig,
-    prompt: PromptConfig,
     resource: ResourceConfig,
 } as const;
 

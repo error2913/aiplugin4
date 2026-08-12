@@ -2,6 +2,7 @@
 import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import Config from "../config/config";
+import { IMAGE_PROMPT_TEMPLATE } from "../config/static_config";
 import { logger } from "../logger";
 import Model from "../model/model";
 import { getSessionId } from "../utils/seal";
@@ -129,8 +130,8 @@ export default class Image {
             logger.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
             return;
         }
-        const { IMAGE_DEFAULT_PROMPT, URL_TO_BASE64 } = Config.image;
-        const defaultPrompt = Config.prompt.IMAGE_PROMPT_TEMPLATE({}) || IMAGE_DEFAULT_PROMPT;
+        const { URL_TO_BASE64 } = Config.image;
+        const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
 
         if (URL_TO_BASE64 == '总是' && this.type === 'url') await this.urlToBase64();
 

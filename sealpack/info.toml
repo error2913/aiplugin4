@@ -2,7 +2,7 @@
 format_version = "1.0.0"
 
 # 包基础信息。id 必须使用 namespace/package 格式；version 必须是 semver，
-# 与插件版本（src/config/static_config.ts 的 VERSION）保持一致，
+# 与插件版本（src/config/static_config/meta.ts 的 VERSION）保持一致，
 # 构建时会由 scripts/prepare-sealpack.js 自动同步。
 [package]
 id = "error2913/aiplugin4"

@@ -1,4 +1,4 @@
-// prompt 模板：内置 Handlebars 模板（不再注册为可配置项，避免用户误改导致渲染损坏）
+// 内置 prompt 模板：Handlebars 模板常量（不再注册为可配置项，避免用户误改导致渲染损坏）
 import Handlebars from "handlebars";
 
 import Logger from "../../logger";
@@ -198,23 +198,15 @@ const TEMPLATES: { [key: string]: string } = {
 }`
 };
 
-export default class PromptConfig {
-    static register() {
-        // prompt 模板已转为内置，不再注册配置项
-    }
+// 编译后的模板：模块加载即编译一次，渲染期异常不再兜底（避免掩盖模板 bug），由调用方自行处理
+export const SYSTEM_MESSAGE_TEMPLATE = compileTemplate("system prompt模板");
+export const MEMORY_TEMPLATE = compileTemplate("长期记忆prompt模板");
+export const SUMMARY_TEMPLATE = compileTemplate("总结记忆prompt模板");
+export const TOOLS_PROMPT_TEMPLATE = compileTemplate("工具函数prompt模板");
+export const IMAGE_PROMPT_TEMPLATE = compileTemplate("图片识别prompt模板");
+export const SUMMARY_PROMPT_TEMPLATE = compileTemplate("记忆总结prompt模板");
 
-    static get() {
-        return {
-            SYSTEM_MESSAGE_TEMPLATE: compileTemplate("system prompt模板"),
-            MEMORY_TEMPLATE: compileTemplate("长期记忆prompt模板"),
-            SUMMARY_TEMPLATE: compileTemplate("总结记忆prompt模板"),
-            TOOLS_PROMPT_TEMPLATE: compileTemplate("工具函数prompt模板"),
-            IMAGE_PROMPT_TEMPLATE: compileTemplate("图片识别prompt模板"),
-            SUMMARY_PROMPT_TEMPLATE: compileTemplate("记忆总结prompt模板")
-        }
-    }
-}
-
+/** 编译内置模板：仅编译期（Handlebars.compile）失败时回退空函数，渲染期异常由调用方处理 */
 function compileTemplate(key: string): HandlebarsTemplateDelegate<any> {
     try {
         return Handlebars.compile(TEMPLATES[key] || '');
