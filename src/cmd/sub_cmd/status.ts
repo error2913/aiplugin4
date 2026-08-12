@@ -5,7 +5,8 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdStatus() {
     const cmd = new SubCmd('status');
     cmd.desc = '查看当前AI状态';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai status】查看当前会话 AI 状态（权限/上下文轮数/各触发模式）`;
     cmd.priv = { priv: U };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, sid, session, ret } = scc;

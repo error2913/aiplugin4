@@ -2,6 +2,7 @@
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
+import { SUMMARY_PROMPT_TEMPLATE, SUMMARY_TEMPLATE } from "../prompt/templates";
 import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
@@ -65,7 +66,7 @@ export default class SessionMemoryService extends MemoryService {
             const groupNumber = isPrivate ? '' : sessionId.replace(/^.+:/, '');
             const userName = isPrivate ? (User.get(sessionId).userName || userNumber) : '';
             const groupName = isPrivate ? '' : (Group.get(sessionId).groupName || groupNumber);
-            const prompt = Config.prompt.SUMMARY_PROMPT_TEMPLATE({
+            const prompt = SUMMARY_PROMPT_TEMPLATE({
                 "角色设定": roleSetting,
                 "平台": '',
                 "私聊": isPrivate,
@@ -97,6 +98,7 @@ export default class SessionMemoryService extends MemoryService {
                     keywords?: string[],
                     userList?: string[],
                     groupList?: string[],
+                    visibility?: 'public' | 'private',
                 }[]
             };
 
@@ -109,7 +111,7 @@ export default class SessionMemoryService extends MemoryService {
             this.limitSummaries();
 
             await Promise.all(memoryData.memories.map(m =>
-                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text)
+                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text, m.visibility === 'private' ? 'private' : 'public')
             ));
         } catch (e) {
             Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));
@@ -128,7 +130,6 @@ export default class SessionMemoryService extends MemoryService {
     buildSummaryPrompt(): string {
         if (this.summaries.length === 0) return '';
         const { SUMMARY } = Config.memory;
-        const { SUMMARY_TEMPLATE } = Config.prompt;
         return SUMMARY_TEMPLATE({
             "SUMMARY": SUMMARY,
             "summaries": this.summaries

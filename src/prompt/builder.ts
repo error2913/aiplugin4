@@ -10,6 +10,8 @@ import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 import { stripInternalTags } from "../utils/string";
 
+import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
+
 export interface SystemPromptSection {
     name: string;
     content: string;
@@ -62,7 +64,7 @@ export async function buildSystemPromptContent(
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
     const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
 
-    let content = Config.prompt.SYSTEM_MESSAGE_TEMPLATE({
+    let content = SYSTEM_MESSAGE_TEMPLATE({
         instruction: roleSetting,
         platform: ctx.endPoint.platform,
         sessionType: ctx.isPrivate ? 'private' : 'group',

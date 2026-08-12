@@ -8,7 +8,15 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdToken() {
     const cmd = new SubCmd('token');
     cmd.desc = 'token相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+       【.ai tk lst】查看所有模型
+       【.ai tk sum】查看所有模型的token使用记录总和
+       【.ai tk all】查看所有模型的token使用记录
+       【.ai tk [y/m] (chart)】查看所有模型今年/这个月的token使用记录
+       【.ai tk <模型名称>】查看模型的token使用记录
+       【.ai tk <模型名称> [y/m] (chart)】查看模型今年/这个月的token使用记录
+       【.ai tk clr】清除token使用记录
+       【.ai tk clr <模型名称>】清除token使用记录`;
     cmd.priv = {
         priv: S, args: {
             list: { priv: U },

@@ -21,9 +21,6 @@ import { revive, TypeDescriptor } from "../utils/utils";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
 
-// 单次对话中允许的连续工具调用轮次上限（防止模型无限调用工具）
-export const MAX_TOOL_TURNS = 10;
-
 export default class Agent {
     static validKeysMap: { [key in keyof Agent]?: TypeDescriptor<Agent[key]> } = {
         sessionService: SessionService,
@@ -94,7 +91,7 @@ export default class Agent {
 
     /**
      * 标准智能体编排：构建消息 → 请求模型 → 执行工具调用（函数调用/提示词工程）→ 回填上下文 →
-     * 循环直到模型给出最终回复（带轮次上限），最后统一拆分并发送回复。
+     * 循环直到模型给出最终回复（工具轮数由「允许连续调用函数次数」配置控制，0 为不限制），最后统一拆分并发送回复。
      */
     async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         if (!(await requestLimiter.acquire())) return;
@@ -112,7 +109,6 @@ export default class Agent {
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
-        let toolTurn = 0;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             trace.beginTurn();
@@ -129,10 +125,6 @@ export default class Agent {
                 if (PROMPT_ENGINEERING) {
                     const match = promptCallMatch;
                     if (match) {
-                        if (toolTurn >= MAX_TOOL_TURNS) {
-                            logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
-                            break;
-                        }
                         logger.info('prompt tool call triggered');
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
@@ -153,16 +145,11 @@ export default class Agent {
                             Logger.exception('handlePromptToolCalls error', e);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
-                        toolTurn++;
                         retry = 0;
                         continue;
                     }
                 } else {
                     if (tool_calls.length > 0) {
-                        if (toolTurn >= MAX_TOOL_TURNS) {
-                            logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
-                            break;
-                        }
                         logger.info('tool call triggered');
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
@@ -183,7 +170,6 @@ export default class Agent {
                             Logger.exception('handleToolCalls error', e);
                             trace.recordToolCall('function-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
-                        toolTurn++;
                         retry = 0;
                         continue;
                     }
@@ -208,7 +194,7 @@ export default class Agent {
         logger.info(`[run] ${trace.summary()}`);
     }
 
-    /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），带轮次上限 */
+    /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         if (!(await requestLimiter.acquire())) return;
         try {
@@ -221,7 +207,6 @@ export default class Agent {
     private async runStreamInner(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const trace = new AgentRunContext();
-        let turns = 0;
 
         await session.stopCurrentChatStream();
 
@@ -282,11 +267,6 @@ export default class Agent {
 
                         try {
                             trace.recordToolCall('stream-tool-call', 0, true);
-                            turns++;
-                            if (turns >= MAX_TOOL_TURNS) {
-                                logger.warning(`工具调用轮次超限（${MAX_TOOL_TURNS}），停止继续调用`);
-                                return;
-                            }
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
                             for (const r of callResults) {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);

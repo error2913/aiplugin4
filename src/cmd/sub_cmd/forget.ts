@@ -6,7 +6,10 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdForget() {
     const cmd = new SubCmd('forget');
     cmd.desc = '遗忘上下文';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai forget】清除全部上下文
+【.ai forget user】仅清除用户消息
+【.ai forget assistant】清除 AI 回复与工具调用记录`;
     cmd.priv = {
         priv: I, args: {
             assistant: { priv: U },

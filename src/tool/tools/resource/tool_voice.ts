@@ -1,4 +1,4 @@
-// 语音工具：本地语音/文字转语音（TTS）
+// 语音工具：本地语音/文字转语音（tts）
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import { netExists, sendGroupAISound } from "../../../utils/ob11";
@@ -92,14 +92,24 @@ export function registerRecord() {
 
         const { TTS_CHARACTER: character } = Config.tool;
         if (character === '自定义') {
-            const aittsExt = seal.ext.find('AITTS');
-            if (!aittsExt) {
-                logger.error(`未找到AITTS依赖`);
-                return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
+            const ttsExt = seal.ext.find('tts');
+            if (!ttsExt) {
+                logger.error(`未找到生成音频依赖（tts）`);
+                return `未找到生成音频依赖（tts），请提示用户安装生成音频依赖`;
             }
             try {
-                if (!globalThis.ttsHandler) return `未找到AITTS依赖，请提示用户安装AITTS依赖`;
-                await globalThis.ttsHandler.generateSpeech(text, ctx, msg);
+                if (!globalThis.tts) return `未找到生成音频依赖（tts），请提示用户安装生成音频依赖`;
+                const result = await globalThis.tts.generate({ text });
+                if (!result.success) throw new Error(result.error || '生成音频失败');
+                let file = result.data;
+                if (!/^https?:\/\//i.test(file)) {
+                    try {
+                        file = seal.base64ToImage(file);
+                    } catch (e) {
+                        throw new Error(`已获取音频数据，但保存为本地文件失败:${e}`);
+                    }
+                }
+                seal.replyToSender(ctx, msg, `[CQ:record,file=${file}]`);
             } catch (e) {
                 logger.error(e);
                 return `发送语音失败`;

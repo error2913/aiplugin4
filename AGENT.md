@@ -43,7 +43,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 4. **新增消息级能力优先做成"工具"**（`src/tool/tools/` 下新建文件导出 `registerXxx()`，在 `src/tool/tools/init.ts` 注册）；敏感操作（发消息/禁言/改名等）置 `sensitive = true`；工具名不要与已有工具重复。
 5. **`registerTemplateConfig` 默认值不能是空数组**，至少保留一个元素（占位用 `['']`）。
 6. **配置项描述要引导用户**：写清格式、必填/可选参数、示例；配置页签按重要性排列（基础/模型/对话/消息接收/消息触发/回复/工具/记忆/图片/后端/prompt模板/资源）。
-7. **模板文案放配置模板**（`src/config/configs/prompt.ts`），不要硬编码在业务逻辑。
+7. **模板文案放内置模板**（`src/prompt/templates.ts`），不要硬编码在业务逻辑。
 8. **日志统一走 `Logger`**（脱敏/截断），不要直接打明文密钥；网络请求统一 `withTimeout` + `fetchData`/`requestModel`，避免卡死。
 9. **修改持久化类字段后检查 `validKeysMap`** 是否需要同步更新（用 `revive()` 恢复）。
 10. **新增对外 API**（`globalThis.aiplugin4`）时同步更新 `docs/07-开发指南.md` 的「为其他插件提供 API」表格与示例。
@@ -58,7 +58,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 
 ## 发布流程
 
-1. 版本推进：`src/config/static_config.ts` 的 `VERSION`、`header.txt` 的 `@version`、`sealpack/info.toml` 的 `version`（由 `scripts/prepare-sealpack.js` 自动同步）、`src/update.ts` 新增对应版本条目，走 PR 合并到 main。
+1. 版本推进：`src/config/static_config/meta.ts` 的 `VERSION`、`header.txt` 的 `@version`、`sealpack/info.toml` 的 `version`（由 `scripts/prepare-sealpack.js` 自动同步）、`src/update.ts` 新增对应版本条目，走 PR 合并到 main。
 2. 推送 `v<版本>` 标签 → GitHub Actions `release.yml` 自动：verify（校验标签与 VERSION/update.ts 一致）→ `node scripts/build-release.js` 打包（本体 JS + 本体豹包 + 完整豹包）→ 用 `SEALPACK_TOKEN` 发布两个豹包到 SealRepo → 从 `update.ts` 提取版本日志创建 GitHub Release。
 3. 完整包依赖插件在 `scripts/deps.cjs` 的 `dependencies` 配置（`url` 为 raw 地址）；包图标 `sealpack/assets/icon.png`；SealRepo Token 放仓库 secrets（`SEALPACK_TOKEN`）。
 

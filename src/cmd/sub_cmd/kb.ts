@@ -7,7 +7,10 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdKB() {
     const cmd = new SubCmd('kb');
     cmd.desc = '知识库相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+     【.ai kb list】列出知识库条目索引
+     【.ai kb search <关键词>】搜索知识库
+     【.ai kb read <ID>】按 ID 读取知识库条目`;
     cmd.priv = {
         priv: U, args: {
             list: { priv: U },

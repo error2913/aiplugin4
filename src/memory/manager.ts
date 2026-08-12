@@ -30,8 +30,8 @@ export class MemoryManager {
     }
 
     /** 写入记忆：统一入口（内部含去重合并与向量生成） */
-    static async addMemory(ctx: seal.MsgContext | null, session: Session, uiList: UserInfo[], giList: GroupInfo[], keywords: string[], images: Image[], text: string) {
-        return session.memory.addMemory(ctx, session, uiList, giList, keywords, images, text);
+    static async addMemory(ctx: seal.MsgContext | null, session: Session, uiList: UserInfo[], giList: GroupInfo[], keywords: string[], images: Image[], text: string, visibility: 'public' | 'private' = 'public') {
+        return session.memory.addMemory(ctx, session, uiList, giList, keywords, images, text, visibility);
     }
 
     /** 检索记忆：统一入口 */

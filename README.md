@@ -135,9 +135,9 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 以下依赖按需安装，均可通过 GitHub 下载或在 QQ 群中获取：
 
-- [aitts 依赖插件](https://github.com/baiyu-yu/plug-in/blob/main/AITTS.js)：自定义音色的 AI 语音；
+- [生成音频依赖插件](https://github.com/error2913/aiplugin4-dependencies/tree/main/tts)：自定义音色的 AI 语音；
 - [ob11 网络连接依赖.js](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js)（推荐）或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)：ob11 相关工具（发消息、用户/群信息、禁言、打卡、AI 语音等）；
-- [AIDrawing 依赖插件](https://github.com/baiyu-yu/plug-in/blob/main/AIDrawing.js)：AI 生图工具；
+- [生成图片依赖插件](https://github.com/error2913/aiplugin4-dependencies/tree/main/tti)：AI 生图工具；
 - ffmpeg：发送本地语音需要配置到环境变量中。
 
 ### 安装
@@ -225,7 +225,6 @@ max_tokens = 2048
 |:---:|:---|
 | 图片全局识别豹语条件 | 填 `'1'` 开启所有图片自动识别转文字；或填豹语表达式限制群/用户范围 |
 | 识别图片时将url转换为base64 | 永不 / 自动 / 总是，解决大模型无法正常获取 QQ 图床图片的问题 |
-| 图片识别默认prompt | 识图时的默认提示词 |
 
 ### 工具
 
@@ -240,7 +239,7 @@ max_tokens = 2048
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
 | MCP服务器配置 | 仅支持 JSON 格式：标准 `mcpServers` 块（Claude/Cursor/.mcp.json 可直接粘贴）、JSON 数组或单服务器 JSON；stdio 服务器会跳过；配置增删自动生效 |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件 |
-| ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要 aitts 依赖插件和 ffmpeg |
+| ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
 ### 记忆
 
@@ -325,6 +324,7 @@ max_tokens = 2048
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
 | `.ai status` | - | 查看当前会话设置 |
+| `.ai help <子指令>` / `.ai <子指令> help` | `.ai help tool` | 查看子命令帮助；`.ai <子指令> help` 带更多参数时交由子命令自身处理（如 `.ai tool help <函数名>`） |
 | `.ai ctxn status` | - | 查看上下文中的名字与自动修改状态 |
 | `.ai ctxn set [nick/card]` | - | 将上下文中的名字设置为昵称/群名片 |
 | `.ai ctxn mod <0\|1\|2>` | - | 自动修改上下文中的名字：0 不修改，1 昵称，2 群名片 |
@@ -428,7 +428,7 @@ max_tokens = 2048
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 
-> 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要 AITTS 依赖与 ffmpeg；`text_to_image` 需要 AIDrawing 依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
+> 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖与 ffmpeg；`text_to_image` 需要生成图片依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
 
 > 依赖海豹内置指令的工具（如 `draw_deck`、`send_msg` 等）需要会话中先出现过指令消息（如先使用 `.r`），否则工具会提示"请先使用 .r 指令"。
 
@@ -504,7 +504,7 @@ max_tokens = 2048
 本项目采用 MIT 开源协议，欢迎二次开发。原创作者保留署名权。
 
 ```text
-Copyright 2024 错误、白鱼
+Copyright 2026 error2913 and baiyu-yu
 
 Permission is hereby granted...
 ```

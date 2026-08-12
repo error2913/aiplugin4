@@ -10,7 +10,11 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdTool() {
     const cmd = new SubCmd('tool');
     cmd.desc = '工具相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+      【.ai tool】列出所有工具
+      【.ai tool [on/off] <函数名>】开启或关闭工具函数
+      【.ai tool help <函数名>】查看工具详情
+      【.ai tool call <函数名> --参数名=具体参数】试用工具函数`;
     cmd.priv = {
         priv: U, args: {
             on: { priv: I },

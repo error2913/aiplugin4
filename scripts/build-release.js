@@ -2,7 +2,7 @@
 //   1. dist/aiplugin4.js                  本体 JS（由 npm run build 生成）
 //   2. dist/aiplugin4-<版本>.sealpack     只含本体的豹包
 //   3. dist/aiplugin4-full-<版本>.sealpack 包含本体与依赖插件的完整豹包
-// 依赖插件地址在 scripts/deps.cjs 中配置（当前为空，待补充）。
+// 依赖插件地址在 scripts/deps.cjs 中配置（ob11 网络连接依赖 / 生成音频 tts / 生成图片 tti）。
 const { execFile, execSync } = require('child_process');
 const fs = require('fs');
 const http = require('http');
@@ -20,10 +20,10 @@ const FULL_PACKAGE_NAME = 'AI骰娘4-扩展';
 const FULL_PACKAGE_DESC = 'AI骰娘4 扩展包（完整包）：包含本体与依赖插件，安装即用';
 
 function getVersion() {
-  const src = fs.readFileSync(path.join(root, 'src', 'config', 'static_config.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(root, 'src', 'config', 'static_config', 'meta.ts'), 'utf8');
   const m = src.match(/VERSION\s*=\s*["']([^"']+)["']/);
   if (!m) {
-    console.error('未能在 src/config/static_config.ts 中找到 VERSION');
+    console.error('未能在 src/config/static_config/meta.ts 中找到 VERSION');
     process.exit(1);
   }
   return m[1];

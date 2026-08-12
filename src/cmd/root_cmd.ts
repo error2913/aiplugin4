@@ -98,6 +98,15 @@ export function registerCmd() {
 
             const subCmd = aliasToCmd(cmdArgs.getArgN(1));
             if (Object.prototype.hasOwnProperty.call(SubCmd.map, aliasToCmd(subCmd))) {
+                // .ai <子指令> help：查看对应子命令帮助（不校验权限，与 .ai help <子指令> 一致）；
+                // 带更多参数时（如 .ai tool help <函数名>）交由子命令自身处理
+                const subHelpArg = aliasToCmd(cmdArgs.getArgN(2));
+                if (subHelpArg === 'help' && !cmdArgs.getArgN(3)) {
+                    const helpCmd = SubCmd.map[subCmd];
+                    seal.replyToSender(ctx, msg, `【.ai ${helpCmd.name}】${helpCmd.desc}${helpCmd.help ? `\n${helpCmd.help}` : ''}`);
+                    return ret;
+                }
+
                 const uid = ctx.player!.userId;
                 const gid = ctx.group!.groupId;
                 const epId = ctx.endPoint.userId;

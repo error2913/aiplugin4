@@ -11,13 +11,13 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'add_memory',
-            description: '添加个人记忆或群聊记忆，尽量不要重复记忆',
+            description: '添加个人记忆或群聊记忆，尽量不要重复记忆；仅当用户明确要求记忆只在本会话中生效时才传 visibility=private，其余情况不要传（默认 public，相关会话均可读取）',
             parameters: {
                 type: 'object',
                 properties: {
                     memory_type: {
                         type: "string",
-                        description: "记忆类型，个人或群聊。",
+                        description: "记忆归属，个人或群聊（决定存到哪个会话），与可见性无关。",
                         enum: ["private", "group"]
                     },
                     name: {
@@ -48,6 +48,11 @@ export function registerMemory() {
                         items: {
                             type: 'string'
                         }
+                    },
+                    visibility: {
+                        type: 'string',
+                        description: '仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不要传（默认 public，相关会话均可读取）',
+                        enum: ['public', 'private']
                     }
                 },
                 required: ['memory_type', 'name', 'text']
@@ -55,7 +60,9 @@ export function registerMemory() {
         }
     });
     toolAdd.solve = async (ctx, _, session, args) => {
-        const { memory_type, name, text, keywords = [], userList = [], groupList = [] } = args;
+        const { memory_type, name, text, keywords = [], userList = [], groupList = [], visibility = 'public' } = args;
+        // 规范化可见性，避免模型传入非法枚举值
+        const normalizedVisibility: 'public' | 'private' = visibility === 'private' ? 'private' : 'public';
 
         if (memory_type === "private") {
             const ui = await session.context.findUser(ctx, name, true);
@@ -85,7 +92,7 @@ export function registerMemory() {
         }
 
         //记忆相关处理
-        await MemoryManager.addMemory(ctx, session, uiList, giList, Array.isArray(keywords) ? keywords : [], [], text);
+        await MemoryManager.addMemory(ctx, session, uiList, giList, Array.isArray(keywords) ? keywords : [], [], text, normalizedVisibility);
         SessionService.save(session);
 
         return `添加记忆成功`;
@@ -215,6 +222,8 @@ export function registerMemory() {
     });
     toolSearch.solve = async (ctx, _, session, args) => {
         const { memory_type, name = '', query = '', topK = 5, keywords = [], userList = [], groupList = [], method = 'similarity' } = args;
+        // 记录调用方会话：私有记忆只对创建它的会话可见，搜索其他会话时按调用方会话过滤
+        const callerSessionId = session.sessionId;
 
         const si: SessionInfo = {
             isPrivate: false,
@@ -256,7 +265,8 @@ export function registerMemory() {
             users: uiList.map(u => u.id),
             groups: giList.map(g => g.id),
             relatedMemories: [],
-            method: method
+            method: method,
+            sessionId: callerSessionId
         }
 
         const memoryList = await session.memory.search(query, options);

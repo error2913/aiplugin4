@@ -77,7 +77,7 @@ description: 对指定玩家进行 san check（sc）
             "温柔妹妹",
             "书香少女",
             "自定义"
-        ], "该功能在选择预设音色时，需要安装 http 依赖插件，且需要可调用 AI 语音 API 的 napcat/lagrange 等。\n选择自定义音色时，则需要 aitts 依赖插件和 ffmpeg", "工具");
+        ], "该功能在选择预设音色时，需要安装 http 依赖插件，且需要可调用 AI 语音 API 的 napcat/lagrange 等。\n选择自定义音色时，则需要生成音频依赖（tts）和 ffmpeg", "工具");
     }
 
     static get() {

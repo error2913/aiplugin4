@@ -7,7 +7,9 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdRole() {
     const cmd = new SubCmd('role');
     cmd.desc = '切换角色设定';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai role】查看当前角色设定
+【.ai role <名称>】切换角色设定（以 . 开头的名称为隐藏角色，不显示在列表中）`;
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, ret } = scc;

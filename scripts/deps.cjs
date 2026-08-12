@@ -17,14 +17,14 @@ module.exports = {
       filename: "ob11-net-connection.js"
     },
     {
-      name: "AITTS",
-      url: "https://raw.githubusercontent.com/baiyu-yu/plug-in/main/AITTS.js",
-      filename: "AITTS.js"
+      name: "生成音频依赖",
+      url: "https://raw.githubusercontent.com/error2913/aiplugin4-dependencies/main/tts/dist/tts.js",
+      filename: "tts.js"
     },
     {
-      name: "AIDrawing",
-      url: "https://raw.githubusercontent.com/baiyu-yu/plug-in/main/AIDrawing.js",
-      filename: "AIDrawing.js"
+      name: "生成图片依赖",
+      url: "https://raw.githubusercontent.com/error2913/aiplugin4-dependencies/main/tti/dist/tti.js",
+      filename: "tti.js"
     }
   ]
 };

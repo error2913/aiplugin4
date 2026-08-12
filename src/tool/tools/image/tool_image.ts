@@ -1,4 +1,4 @@
-// 图片工具：图片转文字/文生图（AIDrawing）
+// 图片工具：图片转文字/文生图（tti）
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
@@ -70,10 +70,10 @@ export function registerImage() {
     toolTTI.solve = async (ctx, msg, session, args) => {
         const { prompt, negative_prompt, save, name } = args;
 
-        const ext = seal.ext.find('AIDrawing');
+        const ext = seal.ext.find('tti');
         if (!ext) {
-            logger.error(`未找到AIDrawing依赖`);
-            return `未找到AIDrawing依赖，请提示用户安装AIDrawing依赖`;
+            logger.error(`未找到生成图片依赖（tti）`);
+            return `未找到生成图片依赖（tti），请提示用户安装生成图片依赖`;
         }
 
         // 切换到当前会话ai
@@ -82,20 +82,24 @@ export function registerImage() {
         const kws = ["tti", name];
 
         try {
-            // 新版 AIDrawing
-            if (globalThis.aiDrawing && typeof globalThis.aiDrawing.sendImageRequest === 'function') {
-                const result = await globalThis.aiDrawing.sendImageRequest(prompt, negative_prompt);
+            // tti 统一 API
+            if (globalThis.tti && typeof globalThis.tti.generate === 'function') {
+                const result = await globalThis.tti.generate({ text: prompt, negativeText: negative_prompt });
+                if (!result.success) throw new Error(result.error || '图像生成失败');
                 const img = new Image();
                 img.imageId = `${name}_${generateId()}`;
-                if (result.startsWith("http://") || result.startsWith("https://")) {
+                if (result.data.startsWith("http://") || result.data.startsWith("https://")) {
+                    img.url = result.data;
                     try {
                         await img.urlToBase64();
                     } catch (e) {
                         logger.error(`将图片URL转换为base64失败: ${e}`);
-                        img.url = result;
                     }
                 } else {
-                    img.url = result;
+                    // tti 依赖可能返回带 data:image/...;base64 前缀的字符串，统一剥离后再存
+                    img.base64 = /^data:/i.test(result.data) && result.data.includes(',')
+                        ? result.data.slice(result.data.indexOf(',') + 1)
+                        : result.data;
                 }
 
                 img.format = img.format || 'unknown';
@@ -120,8 +124,8 @@ export function registerImage() {
                     return `图像生成失败：${e}`;
                 }
             }
-            logger.error('未找到可用的 AIDrawing 接口，AIDrawing插件可能存在问题');
-            return `未找到可用的 AIDrawing 接口， AIDrawing插件可能存在问题`;
+            logger.error('未找到可用的 tti 接口，生成图片插件可能存在问题');
+            return `未找到可用的 tti 接口，生成图片插件可能存在问题`;
         } catch (e) {
             logger.error(`图像生成失败：${e}`);
             return `图像生成失败：${e}`;

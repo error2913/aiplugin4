@@ -1,5 +1,5 @@
 // SealDice 运行期跨插件共享的全局对象：
-// 由其他插件注入的依赖（ob11 网络连接 / AI 绘图 / AITTS），
+// 由其他插件注入的依赖（ob11 网络连接 / tti 生成图片 / tts 生成音频），
 // 以及本插件暴露给其他插件的智能体 API（aiplugin4，见 src/agent/api.ts）
 /* eslint-disable no-var */
 interface NetApi {
@@ -15,10 +15,23 @@ interface AiDrawingApi {
     generateImage?(prompt: string, ctx: any, msg: any, negativePrompt?: string): Promise<any>;
 }
 
+interface TtiApi {
+    readonly name: string;
+    readonly version: string;
+    generate(request: { text: string; negativeText?: string; model?: string }): Promise<{ success: boolean; type: 'image'; data: string; error?: string }>;
+}
+
+interface TtsApi {
+    readonly name: string;
+    readonly version: string;
+    generate(request: { text: string; model?: string }): Promise<{ success: boolean; type: 'audio'; data: string; error?: string }>;
+}
+
 declare var net: NetApi | undefined;
 declare var http: NetApi | undefined;
 declare var aiDrawing: AiDrawingApi | undefined;
-declare var ttsHandler: { generateSpeech(text: string, ctx: any, msg: any): Promise<any> } | undefined;
+declare var tti: TtiApi | undefined;
+declare var tts: TtsApi | undefined;
 
 // 本插件在启动时通过 registerAgentApi() 注入，其他插件可调用 globalThis.aiplugin4 驱动智能体
 declare var aiplugin4: import("./agent/api").AgentGlobalApi | undefined;

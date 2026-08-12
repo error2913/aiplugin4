@@ -1,7 +1,7 @@
-// prompt 模板：内置 Handlebars 模板（不再注册为可配置项，避免用户误改导致渲染损坏）
+// 内置 prompt 模板：Handlebars 模板常量（不再注册为可配置项，避免用户误改导致渲染损坏）
 import Handlebars from "handlebars";
 
-import Logger from "../../logger";
+import Logger from "../logger";
 
 const TEMPLATES: { [key: string]: string } = {
     "system prompt模板": `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。
@@ -152,14 +152,14 @@ const TEMPLATES: { [key: string]: string } = {
     },
     "memories": {
         type: 'array',
-        description: '记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组',
+        description: '记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组。除非用户明确要求记忆只在本会话中生效，否则不要传 visibility 字段（默认 public）',
         items: {
             type: 'object',
             description: '记忆对象',
             properties: {
                 "memory_type": {
                     type: "string",
-                    description: "记忆类型，个人或群聊。",
+                    description: "记忆归属，个人或群聊，与可见性无关。",
                     enum: ["private", "group"]
                 },
                 "name": {
@@ -190,6 +190,11 @@ const TEMPLATES: { [key: string]: string } = {
                     items: {
                         type: 'string'
                     }
+                },
+                "visibility": {
+                    type: "string",
+                    description: "记忆可见性，仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不传（默认 public）",
+                    enum: ["public", "private"]
                 }
             },
             "required": ['memory_type', 'name', 'text']
@@ -198,23 +203,15 @@ const TEMPLATES: { [key: string]: string } = {
 }`
 };
 
-export default class PromptConfig {
-    static register() {
-        // prompt 模板已转为内置，不再注册配置项
-    }
+// 编译后的模板：模块加载即编译一次，渲染期异常不再兜底（避免掩盖模板 bug），由调用方自行处理
+export const SYSTEM_MESSAGE_TEMPLATE = compileTemplate("system prompt模板");
+export const MEMORY_TEMPLATE = compileTemplate("长期记忆prompt模板");
+export const SUMMARY_TEMPLATE = compileTemplate("总结记忆prompt模板");
+export const TOOLS_PROMPT_TEMPLATE = compileTemplate("工具函数prompt模板");
+export const IMAGE_PROMPT_TEMPLATE = compileTemplate("图片识别prompt模板");
+export const SUMMARY_PROMPT_TEMPLATE = compileTemplate("记忆总结prompt模板");
 
-    static get() {
-        return {
-            SYSTEM_MESSAGE_TEMPLATE: compileTemplate("system prompt模板"),
-            MEMORY_TEMPLATE: compileTemplate("长期记忆prompt模板"),
-            SUMMARY_TEMPLATE: compileTemplate("总结记忆prompt模板"),
-            TOOLS_PROMPT_TEMPLATE: compileTemplate("工具函数prompt模板"),
-            IMAGE_PROMPT_TEMPLATE: compileTemplate("图片识别prompt模板"),
-            SUMMARY_PROMPT_TEMPLATE: compileTemplate("记忆总结prompt模板")
-        }
-    }
-}
-
+/** 编译内置模板：仅编译期（Handlebars.compile）失败时回退空函数，渲染期异常由调用方处理 */
 function compileTemplate(key: string): HandlebarsTemplateDelegate<any> {
     try {
         return Handlebars.compile(TEMPLATES[key] || '');
