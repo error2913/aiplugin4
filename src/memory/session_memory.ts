@@ -58,7 +58,7 @@ export default class SessionMemoryService extends MemoryService {
         if (sumMessages.length === 0) return;
 
         try {
-            const roleSetting = (Config.message.INSTRUCTIONS || [])[0] || '';
+            const roleSetting = (Config.message.ROLE_SETTINGS || [])[0] || '';
             const isPrivate = this.session.sessionType !== 'group';
             const sessionId = this.session.sessionId;
             const userNumber = isPrivate ? sessionId.replace(/^.+:/, '') : '';

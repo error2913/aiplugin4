@@ -8,11 +8,13 @@ import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, SessionInfo, UserInfo } from "../session/types";
 import { stripInternalTags } from "../utils/string";
-import { generateId, revive, TypeDescriptor } from "../utils/utils";
+import { generateId, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 
 import MemoryItem from "./memory_item";
 import { MemorySource, searchOptions } from "./types";
 
+// 向量记忆检索的相似度下限（低于该值的记忆不返回），内置硬编码
+const VECTOR_SIMILARITY = 0.8;
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
@@ -29,6 +31,7 @@ export default class MemoryService {
         this.persona = '无';
         this.useShortMemory = false;
         this.shortMemoryList = [];
+        this.summaries = [];
     }
 
     get memoryIds() {
@@ -74,9 +77,8 @@ export default class MemoryService {
         if (Array.isArray(this.shortMemoryList)) {
             this.shortMemoryList = this.shortMemoryList.map(s => stripInternalTags(s));
         }
-        const summaries = (this as any).summaries;
-        if (Array.isArray(summaries)) {
-            (this as any).summaries = summaries.map((s: string) => stripInternalTags(s));
+        if (Array.isArray(this.summaries)) {
+            this.summaries = this.summaries.map(s => stripInternalTags(s));
         }
         if (typeof this.persona === 'string') this.persona = stripInternalTags(this.persona);
     }
@@ -86,10 +88,13 @@ export default class MemoryService {
 
     useShortMemory: boolean;
     shortMemoryList: string[];
+    summaries: string[];
 
     async updateShortMemory(_ctx: seal.MsgContext, _msg: seal.Message, _ai: any) {
-        if (typeof (this as any).summarize === 'function') {
-            await (this as any).summarize();
+        // 短期记忆总结入口；仅 SessionMemoryService 实现，基类不实现
+        const summarize = (this as MemoryService & { summarize?: () => Promise<void> }).summarize;
+        if (typeof summarize === 'function') {
+            await summarize.call(this);
         }
     }
 
@@ -110,8 +115,9 @@ export default class MemoryService {
     }
 
     deleteMemory(ids: string[] = [], kws: string[] = []) {
-        if (ids.length === 0 && kws.length === 0) return;
-        ids.forEach(id => delete this.memoryMap?.[id]);
+        // 按 id 精确删除（复用 deleteMemories 的严格匹配路径）
+        if (ids.length > 0) this.deleteMemories(ids);
+        // 按关键词宽松删除：命中任一关键词即删除
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
                 if (kws.some(kw => this.memoryMap[id].tags.includes(kw))) {
@@ -145,14 +151,8 @@ export default class MemoryService {
     }
 
     limitMemory() {
-        const { MEMORY_LIMIT } = Config.memory;
-        const limit = MEMORY_LIMIT > 0 ? MEMORY_LIMIT - 1 : 0;
-        if (this.memories.length <= limit) return;
-        this.memories
-            .map(m => ({ id: m.id, score: m.decay * m.importance }))
-            .sort((a, b) => b.score - a.score)
-            .slice(limit)
-            .forEach(item => delete this.memoryMap?.[item.id]);
+        // 单条写入入口：预留 1 个空位给待写入的新记忆
+        this.limitMemories(1);
     }
 
     buildMemory(si: SessionInfo, ml: MemoryItem[]): string {
@@ -207,22 +207,27 @@ export default class MemoryService {
     }
 
     async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, ui: UserInfo | null, gi: GroupInfo | null): Promise<string> {
-        let s = '';
         const users = ui ? [ui.id] : [];
         const groups = gi ? [gi.id] : [];
-        s += this.buildMemory({
-            isPrivate: true,
-            id: ctx.endPoint.userId,
-            name: seal.formatTmpl(ctx, '核心:骰子名字')
-        }, await this.getTopScoreMemoryList(text, users, groups));
-
-        if (!ctx.isPrivate) {
-            s += this.buildMemory({
+        // 私聊/群聊检索的是同一份会话记忆，合并为一次查询（复用向量，避免重复嵌入）
+        const memories = await this.getTopScoreMemoryList(text, users, groups);
+        if (memories.length === 0 && (!this.persona || this.persona === '无')) return '';
+        let s = '';
+        // 个人设定注入私聊、群聊设定注入群聊：放在长期记忆段顶部
+        if (this.persona && this.persona !== '无') {
+            s += `${ctx.isPrivate ? '个人设定' : '群聊设定'}: ${this.persona}\n`;
+        }
+        s += ctx.isPrivate
+            ? this.buildMemory({
+                isPrivate: true,
+                id: ctx.endPoint.userId,
+                name: seal.formatTmpl(ctx, '核心:骰子名字')
+            }, memories)
+            : this.buildMemory({
                 isPrivate: false,
                 id: ctx.group!.groupId,
                 name: ctx.group!.groupName
-            }, await this.getTopScoreMemoryList(text, users, groups));
-        }
+            }, memories);
         return s;
     }
 
@@ -307,7 +312,7 @@ export default class MemoryService {
             .map((m) => {
                 return {
                     id: m.id,
-                    score: m.calculateScore([], [], [], [])
+                    score: m.calculateScore([])
                 }
             })
             .sort((a, b) => b.score - a.score) // 从大到小排序
@@ -319,6 +324,16 @@ export default class MemoryService {
         this.memoryMap = {};
     }
 
+    private static lastEmbeddingWarnAt = 0;
+
+    /** 嵌入检索降级提示：失败不阻断检索，回退关键词/分数；同类警告 60 秒内只提示一次 */
+    private static warnEmbeddingFallback(reason: string) {
+        const now = Date.now();
+        if (now - MemoryService.lastEmbeddingWarnAt < 60_000) return;
+        MemoryService.lastEmbeddingWarnAt = now;
+        Logger.warning(`嵌入检索不可用(${reason})，已降级为关键词/分数检索`);
+    }
+
     async search(query: string, options: searchOptions = {
         topK: 10,
         tags: [],
@@ -328,58 +343,97 @@ export default class MemoryService {
         method: 'score'
     }) {
         if (!this.memories.length) return [];
-        const { topK = 10, tags = [], relatedMemories = [], users = [], groups = [], method = 'score' } = options;
+        const {
+            topK = 10,
+            tags = [],
+            relatedMemories = [],
+            users = [],
+            groups = [],
+            filterUsers = [],
+            filterGroups = [],
+            sessionId = '',
+            method = 'score'
+        } = options;
 
-        const { DIMENSION } = Config.memory;
+        // 向量查询；嵌入未配置/失败时不阻断检索，降级为关键词/分数检索
         let v: number[] = [];
-        if (Config.memory.EMBEDDING_MODEL_ENABLED && DIMENSION > 0 && query) {
-            const model = Model.getEmbeddingModel('text-embedding');
+        if (Config.model.EMBEDDING_MODEL_ENABLED && query) {
+            const dimension = Model.getEmbeddingDimension();
+            const model = dimension > 0 ? Model.getEmbeddingModel('text-embedding') : null;
             if (!model) {
-                Logger.error('未找到可用的嵌入模型');
-                return [];
-            }
-            v = await model.callEmbedding(query);
-            if (!v.length) {
-                Logger.error('查询向量为空');
-                return [];
-            }
-            if (v.length !== DIMENSION) {
-                Logger.error(`查询向量维度不匹配。期望: ${DIMENSION}, 实际: ${v.length}`);
-                return [];
-            }
-            await Promise.all(this.memories.map(async m => {
-                if (m.vector.length !== DIMENSION) {
-                    Logger.info(`记忆向量维度不匹配，重新获取向量: ${m.id}`);
-                    await m.updateVector();
+                MemoryService.warnEmbeddingFallback('未找到可用的嵌入模型');
+            } else {
+                v = await model.callEmbedding(query);
+                if (!v.length) {
+                    MemoryService.warnEmbeddingFallback('查询向量为空');
+                    v = [];
+                } else if (v.length !== dimension) {
+                    MemoryService.warnEmbeddingFallback(`查询向量维度不匹配，期望 ${dimension}，实际 ${v.length}`);
+                    v = [];
                 }
-            }))
+            }
         }
 
-        const { VECTOR_SIMILARITY } = Config.trigger;
-        return this.memories
-            .map(m => {
-                // 未指定关联记忆时返回全部；指定时仅保留命中关联的记忆
-                if (relatedMemories.length > 0 && !relatedMemories.some(r => m.id === r || m.relatedMemories.includes(r))) return null;
-                return m;
-            })
-            .filter(m => m !== null)
-            .filter(m => {
-                // 向量相似度下限：仅对普通检索的 similarity/score 方法生效
-                if (relatedMemories.length > 0) return true;
-                if (v.length === 0 || (method !== 'similarity' && method !== 'score')) return true;
-                return m.calculateSimilarity(v, tags, users, groups) >= VECTOR_SIMILARITY;
-            })
-            .sort((a, b) => {
+        // 候选集过滤：关联记忆/私有可见性/用户群组（宽松+严格）/标签
+        const candidates = this.memories.filter(m => {
+            // 指定关联记忆时仅保留命中项
+            if (relatedMemories.length > 0 && !relatedMemories.some(r => m.id === r || m.relatedMemories.includes(r))) return false;
+            // 私有记忆仅创建会话可见
+            if (m.visibility === 'private') {
+                if (!sessionId || m.sessionId !== sessionId) return false;
+            }
+            // 宽松过滤：条目为空视为全局可见；非空且无交集则排除
+            if (users.length > 0 && m.users.length > 0 && getCommonItem(m.users, users).length === 0) return false;
+            if (groups.length > 0 && m.groups.length > 0 && getCommonItem(m.groups, groups).length === 0) return false;
+            // 严格过滤：非空时须命中至少一个
+            if (filterUsers.length > 0 && getCommonItem(m.users, filterUsers).length === 0) return false;
+            if (filterGroups.length > 0 && getCommonItem(m.groups, filterGroups).length === 0) return false;
+            // 查询标签：非空时须命中至少一个
+            if (tags.length > 0 && getCommonItem(m.tags, tags).length === 0) return false;
+            return true;
+        });
+        if (candidates.length === 0) return [];
+
+        const queryTokens = Array.from(new Set((query || '').split(/[\s,，。.、;；:：!！?？()（）[\]【】]+/).filter(t => t.length > 0)));
+        const simOf = (m: MemoryItem) => (v.length > 0 && m.vector.length > 0) ? m.calculateSimilarity(v) : -1;
+        // 关键词命中分：查询标签命中优先，其次内容包含查询词
+        const keywordScoreOf = (m: MemoryItem) => {
+            let score = 0;
+            if (tags.length > 0) score += getCommonItem(m.tags, tags).length / tags.length;
+            if (queryTokens.length > 0) {
+                score += queryTokens.filter(t => m.content.includes(t)).length / queryTokens.length * 0.5;
+            }
+            return score;
+        };
+
+        let results: MemoryItem[];
+        if (v.length > 0 && (method === 'similarity' || method === 'score')) {
+            // 向量过滤：仅保留纯向量相似度达标的条目，再按相似度/综合分排序
+            const vectorHits = candidates
+                .filter(m => m.vector.length > 0 && simOf(m) >= VECTOR_SIMILARITY)
+                .sort((a, b) => method === 'score' ? b.calculateScore(v) - a.calculateScore(v) : simOf(b) - simOf(a));
+            // 关键词兜底补足 topK：向量未命中时按关键词分填充
+            const fills = candidates
+                .filter(m => !vectorHits.includes(m))
+                .sort((a, b) => keywordScoreOf(b) - keywordScoreOf(a) || b.calculateScore([]) - a.calculateScore([]))
+                .slice(0, Math.max(0, topK - vectorHits.length));
+            results = [...vectorHits.slice(0, topK), ...fills];
+        } else {
+            // 无向量（嵌入未启用/失败）：按方法排序，similarity/score 回退到关键词+综合分
+            results = candidates.sort((a, b) => {
                 switch (method) {
                     case 'importance': return b.importance - a.importance;
-                    case 'similarity': return b.calculateSimilarity(v, tags, users, groups) - a.calculateSimilarity(v, tags, users, groups);
-                    case 'score': return b.calculateScore(v, tags, users, groups) - a.calculateScore(v, tags, users, groups);
                     case 'early': return a.createAt - b.createAt;
                     case 'late': return b.createAt - a.createAt;
                     case 'recent': return b.lastAccessedAt - a.lastAccessedAt;
+                    case 'similarity':
+                    case 'score':
+                    default:
+                        return keywordScoreOf(b) - keywordScoreOf(a) || b.calculateScore([]) - a.calculateScore([]);
                 }
-            })
-            .slice(0, topK);
+            }).slice(0, topK);
+        }
+        return results;
     }
 
     async accessMemories(s: string) {
@@ -403,8 +457,6 @@ export default class MemoryService {
         const task: Promise<void>[] = [];
         // bot记忆权重更新
         task.push(agent.sessionService.memory.accessMemories(s));
-        // 知识库记忆权重更新
-        task.push(agent.sessionService.knowledge.accessMemories(s));
         // 会话自身记忆权重更新
         task.push(session.memory.accessMemories(s));
         // 群内用户的记忆权重更新
@@ -417,8 +469,6 @@ export default class MemoryService {
         const items: string[] = [];
         // bot记忆
         items.push(...agent.sessionService.memory[item]);
-        // 知识库记忆
-        items.push(...agent.sessionService.knowledge[item]);
         // 会话自身记忆
         items.push(...session.memory[item]);
         // 群内用户的记忆

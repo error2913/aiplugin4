@@ -1,21 +1,10 @@
-// prompt 模板配置：system/记忆/总结/知识库/工具/图片识别等 Handlebars 模板
+// prompt 模板：内置 Handlebars 模板（不再注册为可配置项，避免用户误改导致渲染损坏）
 import Handlebars from "handlebars";
 
 import Logger from "../../logger";
-import { ext } from "../config";
 
-// 注册时记录默认模板；存档配置损坏（如 Handlebars 语法错误）时回退到默认模板
-const DEFAULT_TEMPLATES: { [key: string]: string } = {};
-
-function registerTemplate(key: string, templates: string[], desc: string, group: string) {
-    DEFAULT_TEMPLATES[key] = templates[0] || '';
-    seal.ext.registerTemplateConfig(ext, key, templates, desc, group);
-}
-
-export default class PromptConfig {
-    static register() {
-        registerTemplate("system prompt模板", [
-            `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。
+const TEMPLATES: { [key: string]: string } = {
+    "system prompt模板": `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。
 
 ## 扮演设定
 {{{instruction}}}
@@ -84,35 +73,21 @@ export default class PromptConfig {
 
 {{{knowledgePrompt}}}
 
-{{{toolPrompt}}}`
-        ], "Handlebars 模板，生成 system 提示词。\n可用变量：instruction、platform、sessionType、sessionName、sessionId、RECEIVE_IMAGE、LOCAL_IMAGES、LOCAL_AUDIOS、LOCAL_FILES、LOCAL_VIDEOS、memoryPrompt、summaryPrompt、knowledgePrompt、toolPrompt。\n修改后保存并重载 js", "prompt模板");
-        registerTemplate("长期记忆prompt模板", [
-            `{{#if MEMORY}}
+{{{toolPrompt}}}`,
+    "长期记忆prompt模板": `{{#if MEMORY}}
 
 ## 长期记忆
     {{#each sources}}
-来源:{{{source}}}
         {{#each memories}}
-{{index @index}}. ID:{{id}}
-    类型:{{type}}
-    重要性:{{importance}}
-    创建时间:{{{time createAt}}}
-    {{#each tags}}{{#if @first}}标签:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each relatedMemories}}{{#if @first}}相关记忆:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each users}}{{#if @first}}相关用户:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each groups}}{{#if @first}}相关群组:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    内容:{{{content}}}
+{{index @index}}. [{{id}}] {{{content}}}
         {{else}}
 暂无记忆
         {{/each}}
-{{#unless @last}}---{{/unless}} 
     {{else}}
 长期记忆为空
     {{/each}}
-{{/if}}`
-        ], "长期记忆渲染模板，可用变量 MEMORY、sources（含 source/memories）等；一般无需修改", "prompt模板");
-        registerTemplate("总结记忆prompt模板", [
-            `{{#if SUMMARY}}
+{{/if}}`,
+    "总结记忆prompt模板": `{{#if SUMMARY}}
 
 ## 总结记忆
     {{#each summaries}}
@@ -120,28 +95,8 @@ export default class PromptConfig {
     {{else}}
 总结记忆为空
     {{/each}}
-{{/if}}`
-        ], "总结记忆渲染模板，可用变量 SUMMARY、summaries 等；一般无需修改", "prompt模板");
-        registerTemplate("知识库记忆prompt模板", [
-            `{{#if KNOWLEDGE}}
-
-## 知识库
-    {{#each knowledges}}
-{{index @index}}. ID:{{id}}
-    类型:{{type}}
-    重要性:{{importance}}
-    {{#each tags}}{{#if @first}}标签:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each relatedMemories}}{{#if @first}}相关记忆:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each users}}{{#if @first}}相关用户:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    {{#each groups}}{{#if @first}}相关群组:{{/if}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
-    内容:{{{content}}}
-    {{else}}
-知识库为空
-    {{/each}}
-{{/if}}`
-        ], "知识库渲染模板，可用变量 KNOWLEDGE、knowledges（含 id/type/importance/tags/content 等）等；一般无需修改", "prompt模板");
-        registerTemplate("工具函数prompt模板", [
-            `{{#if PROMPT_ENGINEERING}}
+{{/if}}`,
+    "工具函数prompt模板": `{{#if PROMPT_ENGINEERING}}
 
 ## 调用函数
 当需要调用函数功能时，请将函数调用数组放入以 \`\`\`function 开头、\`\`\` 结尾的代码块中，严格使用以下JSON格式，示例：
@@ -167,11 +122,9 @@ export default class PromptConfig {
     {{else}}
 暂无可用函数。
     {{/each}}
-{{/if}}`
-        ], "提示词工程模式下工具调用说明模板；可用变量 PROMPT_ENGINEERING、tools（含 name/description/parameters/required）", "prompt模板");
-        registerTemplate("图片识别prompt模板", ["请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出"], "图片转文字的提示词模板；一般无需修改", "prompt模板");
-        registerTemplate("记忆总结prompt模板", [ // wip
-            `你现在扮演的角色如下:
+{{/if}}`,
+    "图片识别prompt模板": "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出",
+    "记忆总结prompt模板": `你现在扮演的角色如下:
 ## 扮演详情
 {{{角色设定}}}
             
@@ -243,50 +196,30 @@ export default class PromptConfig {
         }
     }
 }`
-        ], "记忆总结任务模板；可用变量 角色设定、平台、私聊、群聊名称、对话内容 等；一般无需修改", "prompt模板");
+};
+
+export default class PromptConfig {
+    static register() {
+        // prompt 模板已转为内置，不再注册配置项
     }
 
     static get() {
         return {
-            SYSTEM_MESSAGE_TEMPLATE: getHandlebarsTemplateConfig("system prompt模板"),
-            MEMORY_TEMPLATE: getHandlebarsTemplateConfig("长期记忆prompt模板"),
-            SUMMARY_TEMPLATE: getHandlebarsTemplateConfig("总结记忆prompt模板"),
-            KNOWLEDGE_TEMPLATE: getHandlebarsTemplateConfig("知识库记忆prompt模板"),
-            TOOLS_PROMPT_TEMPLATE: getHandlebarsTemplateConfig("工具函数prompt模板"),
-            IMAGE_PROMPT_TEMPLATE: getHandlebarsTemplateConfig("图片识别prompt模板"),
-            SUMMARY_PROMPT_TEMPLATE: getHandlebarsTemplateConfig("记忆总结prompt模板")
+            SYSTEM_MESSAGE_TEMPLATE: compileTemplate("system prompt模板"),
+            MEMORY_TEMPLATE: compileTemplate("长期记忆prompt模板"),
+            SUMMARY_TEMPLATE: compileTemplate("总结记忆prompt模板"),
+            TOOLS_PROMPT_TEMPLATE: compileTemplate("工具函数prompt模板"),
+            IMAGE_PROMPT_TEMPLATE: compileTemplate("图片识别prompt模板"),
+            SUMMARY_PROMPT_TEMPLATE: compileTemplate("记忆总结prompt模板")
         }
     }
 }
 
-function getHandlebarsTemplateConfig(key: string): HandlebarsTemplateDelegate<any> {
-    const template = seal.ext.getTemplateConfig(ext, key)[0] || '';
-    let compiled: HandlebarsTemplateDelegate<any> | null;
+function compileTemplate(key: string): HandlebarsTemplateDelegate<any> {
     try {
-        compiled = Handlebars.compile(template);
+        return Handlebars.compile(TEMPLATES[key] || '');
     } catch (e) {
         Logger.error(`模板${key}解析失败: ${e instanceof Error ? e.message : String(e)}`);
-        compiled = null;
-    }
-
-    // 默认模板兜底：存档配置损坏或渲染失败时回退到默认模板
-    let defaultCompiled: HandlebarsTemplateDelegate<any> | null;
-    try {
-        defaultCompiled = Handlebars.compile(DEFAULT_TEMPLATES[key] || '');
-    } catch (e) {
-        Logger.error(`默认模板${key}解析失败: ${e instanceof Error ? e.message : String(e)}`);
-        defaultCompiled = null;
-    }
-    const fallback = defaultCompiled || (() => '');
-
-    if (!compiled) return fallback;
-
-    return (context, options) => {
-        try {
-            return compiled(context, options);
-        } catch (e) {
-            Logger.error(`模板${key}渲染失败，已回退到默认模板: ${e instanceof Error ? e.message : String(e)}`);
-            return fallback(context, options);
-        }
+        return () => '';
     }
 }

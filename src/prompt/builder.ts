@@ -1,5 +1,7 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
 import Config from "../config/config";
+import Message from "../context/message";
+import { UserMessage, UserMessageItem } from "../context/types";
 import { MemoryManager } from "../memory/manager";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
@@ -21,7 +23,7 @@ export interface SystemPromptSection {
 export async function buildSystemPromptContent(
     ctx: seal.MsgContext,
     session: Session,
-    roleIndex: number,
+    _roleIndex: number,
     roleSetting: string
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
@@ -33,26 +35,29 @@ export async function buildSystemPromptContent(
     const localFiles = (Config.resource.LOCAL_FILES || []).map(f => ({ fileId: f.fileId }));
     const localVideos = (Config.resource.LOCAL_VIDEOS || []).map(v => ({ videoId: v.videoId }));
 
-    // 取最后一条用户消息，作为记忆/知识库查询的上下文
+    // 取最近 2~3 条用户消息拼接，作为记忆/知识库查询的上下文（剥离内部标签）
     const userMessages = session.context.messages.filter(m => m.role === 'user');
     let text = '', ui: UserInfo | null = null, gi: GroupInfo | null = null;
-    const lastUser = userMessages[userMessages.length - 1] as any;
-    if (lastUser && Array.isArray(lastUser.contentItems) && lastUser.contentItems.length > 0) {
-        const lastItem = lastUser.contentItems[lastUser.contentItems.length - 1];
-        text = lastItem.text || '';
-        if (lastItem.userId) {
-            const u = User.get(lastItem.userId);
-            ui = { isPrivate: true, id: lastItem.userId, name: u.userName || lastItem.userId };
+    for (const userMsg of userMessages.slice(-3)) {
+        if (!Array.isArray((userMsg as UserMessage).contentItems)) continue;
+        for (const item of (userMsg as UserMessage).contentItems) {
+            if (Message.getUserMessageItemType(item) !== 'user') continue;
+            const umi = item as UserMessageItem;
+            if (umi.text) text += (text ? ' ' : '') + stripInternalTags(umi.text);
+            if (umi.userId) {
+                const u = User.get(umi.userId);
+                ui = { isPrivate: true, id: umi.userId, name: u.userName || umi.userId };
+            }
         }
-        if (!ctx.isPrivate && ctx.group) {
-            gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
-        }
+    }
+    if (!ctx.isPrivate && ctx.group) {
+        gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
     }
 
     // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
     const memoryPrompt = await MemoryManager.buildLongTermPrompt(ctx, session, text, ui || null, gi || null);
     const summaryPrompt = MemoryManager.buildSummaryPrompt(session);
-    const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, roleIndex, text);
+    const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, text);
 
     // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
     const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';

@@ -1,10 +1,8 @@
-// 记忆工具：添加/删除/搜索/清除记忆（含知识库）
-import { knowledgeService } from "../../../memory/knowledge";
+// 记忆工具：添加/删除/搜索/清除记忆
 import { MemoryManager } from "../../../memory/manager";
 import { searchOptions as SearchOptions } from "../../../memory/types";
 import { getSession, SessionService } from "../../../session/session_service";
 import { GroupInfo, SessionInfo, UserInfo } from "../../../session/types";
-import { getRoleSetting } from "../../../utils/message";
 import { getCtxAndMsg } from "../../../utils/seal";
 import Tool from "../../tool";
 
@@ -165,8 +163,8 @@ export function registerMemory() {
                 properties: {
                     memory_type: {
                         type: "string",
-                        description: "记忆类型，个人或群聊或知识库，选择知识库时不用填写name",
-                        enum: ["private", "group", "knowledge"]
+                        description: "记忆类型，个人或群聊",
+                        enum: ["private", "group"]
                     },
                     name: {
                         type: 'string',
@@ -208,7 +206,7 @@ export function registerMemory() {
                     method: {
                         type: 'string',
                         description: '搜索方法，默认similarity',
-                        enum: ['weight', 'similarity', 'score', 'early', 'late', 'recent']
+                        enum: ['similarity', 'score', 'early', 'late', 'recent']
                     }
                 },
                 required: ['memory_type']
@@ -235,33 +233,6 @@ export function registerMemory() {
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);
-        } else if (memory_type === "knowledge") {
-            const giList: GroupInfo[] = [];
-            for (const n of groupList) {
-                const gi = await session.context.findGroup(ctx, n);
-                if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
-            }
-            const uiList: UserInfo[] = [];
-            for (const n of userList) {
-                const ui = await session.context.findUser(ctx, n, true);
-                if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
-            }
-
-            const options: SearchOptions = {
-                topK: topK,
-                tags: keywords,
-                users: uiList.map(u => u.id),
-                groups: giList.map(g => g.id),
-                relatedMemories: [],
-                method: method
-            }
-
-            const { roleIndex } = getRoleSetting(ctx);
-            await knowledgeService.updateKnowledgeMemory(roleIndex);
-            if (knowledgeService.memoryIdList.length === 0) return `暂无记忆`;
-
-            const memoryList = await knowledgeService.search(query, options);
-            return knowledgeService.buildKnowledgeMemory(memoryList) || '暂无记忆';
         } else {
             return `未知的记忆类型<${memory_type}>`;
         }

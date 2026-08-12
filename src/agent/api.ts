@@ -73,7 +73,7 @@ export function registerAgentApi(): void {
         chat: async (prompt: string, agentName?: string) => Agent.get(agentName || '*').chat(prompt),
         chatMessages: async (messages: { role: string, content: string }[], agentName?: string) => Agent.get(agentName || '*').chatMessages(messages),
         imageToText: async (source: string, prompt?: string) => {
-            if (!Config.image.IMAGE_MODEL_ENABLED) return '图片模型开关未开启';
+            if (!Config.model.IMAGE_MODEL_ENABLED) return '图片模型开关未开启';
             if (!Model.getImageModel('image-understanding')) return '未找到支持 image-understanding 的图片模型';
             let img = Image.get(source);
             if (!img && /^https?:\/\//i.test(source)) {

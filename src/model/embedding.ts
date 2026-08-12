@@ -25,7 +25,8 @@ export default class EmbeddingModel extends BaseModel {
             return [];
         }
 
-        if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === this.body.dimensions) {
+        const dimension = { ...DEFAULT_EMBEDDING_MODEL_BODY, ...this.body }.dimensions;
+        if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === dimension) {
             const v = EmbeddingModel.vectorCache.vector;
             return v;
         }

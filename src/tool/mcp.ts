@@ -26,6 +26,8 @@ interface MCPServerState {
 
 const TOOLS_CACHE_TTL = 60 * 1000; // 工具列表缓存 60s
 const serverStates: { [name: string]: MCPServerState } = {};
+const mcpToolKeys = new Map<string, string>(); // MCP 注册过的工具键 → 所属服务器名，仅清理这些键避免误删普通工具
+let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步工具列表
 
 /** 归一化一个 MCP 服务器配置（兼容 Claude Desktop / Cursor .mcp.json 的 mcpServers 条目） */
 function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
@@ -69,36 +71,30 @@ function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
 function getMCPServers(): MCPServer[] {
     const servers: MCPServer[] = [];
     for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置").map(l => (l || '').trim()).filter(Boolean)) {
-        if (line.startsWith('{') || line.startsWith('[')) {
-            try {
-                const j = JSON.parse(line);
-                // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
-                if (j && typeof j === 'object' && j.mcpServers && typeof j.mcpServers === 'object') {
-                    for (const [name, cfg] of Object.entries(j.mcpServers)) {
-                        const s = normalizeMCPServer(name, cfg);
-                        if (s) servers.push(s);
-                    }
-                    continue;
+        try {
+            const j = JSON.parse(line);
+            // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
+            if (j && typeof j === 'object' && j.mcpServers && typeof j.mcpServers === 'object') {
+                for (const [name, cfg] of Object.entries(j.mcpServers)) {
+                    const s = normalizeMCPServer(name, cfg);
+                    if (s) servers.push(s);
                 }
-                // JSON 数组：[{name/url/type/headers...}]
-                if (Array.isArray(j)) {
-                    for (const cfg of j) {
-                        const s = normalizeMCPServer(String((cfg && (cfg.name || cfg.url)) || 'mcp'), cfg);
-                        if (s) servers.push(s);
-                    }
-                    continue;
-                }
-                // 单服务器 JSON：{"name":"qq","url":"http://...","token":"..."} 或 {name: "url"}
-                const s = normalizeMCPServer(String(j.name || j.url || ''), j);
-                if (s) servers.push(s);
-            } catch (e) {
-                Logger.error(`MCP服务器配置 JSON 解析失败: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+                continue;
             }
-            continue;
+            // JSON 数组：[{name/url/type/headers...}]
+            if (Array.isArray(j)) {
+                for (const cfg of j) {
+                    const s = normalizeMCPServer(String((cfg && (cfg.name || cfg.url)) || 'mcp'), cfg);
+                    if (s) servers.push(s);
+                }
+                continue;
+            }
+            // 单服务器 JSON：{"name":"qq","type":"http","url":"http://...","headers":{...}}
+            const s = normalizeMCPServer(String(j.name || j.url || ''), j);
+            if (s) servers.push(s);
+        } catch (e) {
+            Logger.error(`MCP服务器配置解析失败（仅支持 JSON 格式）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
         }
-        // 旧格式：名称|地址|Token
-        const [name, url, token = ''] = line.split('|').map(s => s.trim());
-        servers.push({ name, url, token, headers: {} });
     }
     return servers.filter(s => s.name && s.url);
 }
@@ -242,6 +238,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         if (!t.name) continue;
         const toolName = `${server.name}_${t.name}`;
         if (Object.prototype.hasOwnProperty.call(toolMap, toolName)) continue;
+        mcpToolKeys.set(toolName, server.name);
 
         const schema = t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object', properties: {} };
         const tool = new Tool({
@@ -264,10 +261,30 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
 }
 
 /**
- * 注册所有已配置 MCP 服务器的工具；工具列表按 TTL 缓存，可随时调用刷新。
+ * 注册所有已配置 MCP 服务器的工具；可随时调用刷新（全量刷新按 TTL 节流）。
+ * 已从配置中移除的服务器，其已注册工具会被同步清理，实现配置热加载。
  */
 export async function registerMCPTools() {
-    for (const server of getMCPServers()) {
+    const now = Date.now();
+    if (now - lastRefreshAt < TOOLS_CACHE_TTL) return;
+    lastRefreshAt = now;
+
+    const servers = getMCPServers();
+    const activeNames = new Set(servers.map(s => s.name));
+    // 清理已从配置中移除的服务器的工具（仅限 MCP 注册过的键）
+    for (const [key, serverName] of mcpToolKeys) {
+        if (!activeNames.has(serverName) && Object.prototype.hasOwnProperty.call(toolMap, key)) {
+            Logger.info(`MCP 服务器 ${serverName} 已从配置移除，清理工具 ${key}`);
+            delete toolMap[key];
+            mcpToolKeys.delete(key);
+        }
+    }
+    // 清理 serverStates 中已移除的服务器
+    for (const name of Object.keys(serverStates)) {
+        if (!activeNames.has(name)) delete serverStates[name];
+    }
+
+    for (const server of servers) {
         try {
             await syncTools(server);
         } catch (e) {

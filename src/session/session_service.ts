@@ -1,11 +1,9 @@
-// 会话服务：会话的创建/复活/保存，getSession 入口与知识库访问
+// 会话服务：会话的创建/复活/保存与 getSession 入口
 import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import { Context } from "../context/context";
 import { logger } from "../logger";
-import KnowledgeService from "../memory/knowledge";
 import MemoryService from "../memory/memory";
-import { ImageManager } from "../resource/image";
 import { revive, TypeDescriptor } from "../utils/utils";
 
 import { Session, Setting } from "./session";
@@ -49,12 +47,11 @@ export class SessionService {
             session.sessionId = sessionId;
             if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
             session.agentName = this.agentName;
-            // 复活嵌套对象（Context/MemoryItem/Setting/ImageManager）
+            // 复活嵌套对象（Context/MemoryItem/Setting）
             session.context = revive(Context, session.context || {});
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
             if (session.setting) session.setting = revive(Setting, session.setting);
-            if (session.imageManager) session.imageManager = revive(ImageManager, session.imageManager);
             // 同步归属字段，确保 context/memory 能解析到正确的 agent/session
             session.context.agentName = session.agentName;
             session.context.sessionId = session.sessionId;
@@ -67,8 +64,4 @@ export class SessionService {
         return this.sessionMap[sessionId];
     }
 
-    get knowledge(): KnowledgeService {
-        const m = KnowledgeService.knowledgeServiceMap;
-        return m[this.agentName] || m['*'] || new KnowledgeService();
-    }
 }

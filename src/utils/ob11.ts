@@ -320,7 +320,11 @@ export async function sendGroupAISound(epId: string, characterId: string, group_
     const net = getNet();
     if (!net) return;
     try {
-        await net.callApi(epId, `send_group_ai_record?character=${characterId}&group_id=${group_id}&text=${text}`);
+        await net.callApi(epId, 'send_group_ai_record', {
+            character: characterId,
+            group_id,
+            text
+        });
     } catch (e) {
         logger.error(`发送群 ${group_id} AI 声聊合成语音失败：${e}`);
         return;

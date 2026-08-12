@@ -4,13 +4,11 @@ import { logger } from "../../../logger";
 import Tool from "../../tool"
 
 export function registerDeck() {
-    const { DECKS: decks } = Config.tool;
-
     const toolDraw = new Tool({
         type: "function",
         function: {
             name: "draw_deck",
-            description: `用牌堆名称抽取牌堆，返回抽取结果，牌堆的名字有:${decks.join('、')}`,
+            description: `用牌堆名称抽取牌堆，返回抽取结果；可用牌堆列表以调用时的返回信息为准`,
             parameters: {
                 type: "object",
                 properties: {
@@ -33,7 +31,8 @@ export function registerDeck() {
         const dr = seal.deck.draw(ctx, name, true);
         if (!dr.exists) {
             logger.error(`牌堆${name}不存在:${dr.err}`);
-            return `牌堆${name}不存在:${dr.err}`;
+            const decks = Config.tool.DECKS || [];
+            return `牌堆${name}不存在:${dr.err}${decks.length !== 0 ? `，当前可用的牌堆有:${decks.join('、')}` : ''}`;
         }
 
         const result = dr.result;

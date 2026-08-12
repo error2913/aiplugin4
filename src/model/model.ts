@@ -1,4 +1,6 @@
 // 模型管理器：按 use/名称选择对话/图片/嵌入模型
+import { DEFAULT_EMBEDDING_MODEL_BODY } from "../config/static_config";
+
 import ChatModel from "./chat";
 import EmbeddingModel from "./embedding";
 import ImageModel from "./image";
@@ -106,5 +108,14 @@ export default class Model {
             return EmbeddingModelAnyList[0];
         }
         return null;
+    }
+
+    /** 获取嵌入模型输出维度；未配置或非法时返回 0（调用方降级为非向量检索） */
+    static getEmbeddingDimension(): number {
+        const model = Model.getEmbeddingModel('text-embedding');
+        if (!model) return 0;
+        // 与请求体一致：默认 body（dimensions=1024）与用户 TOML [body] 合并后取维度
+        const dim = { ...DEFAULT_EMBEDDING_MODEL_BODY, ...model.body }.dimensions;
+        return typeof dim === 'number' && dim > 0 ? dim : 0;
     }
 }

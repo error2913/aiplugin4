@@ -1,11 +1,15 @@
 // 图片资源：URL/base64/本地路径图片，图片识别与存储
+import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import Config from "../config/config";
 import { logger } from "../logger";
 import Model from "../model/model";
 import { getSessionId } from "../utils/seal";
-import { MessageSegment, parseSpecialTokens } from "../utils/string";
+import { MessageSegment } from "../utils/string";
 import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
+
+// 图片转文字结果超过该字数时交给压缩智能体压缩，避免撑爆上下文
+const IMAGE_TEXT_COMPRESS_MIN_LENGTH = 5000;
 
 export default class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
@@ -121,11 +125,11 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        if (!Config.image.IMAGE_MODEL_ENABLED) {
+        if (!Config.model.IMAGE_MODEL_ENABLED) {
             logger.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
             return;
         }
-        const { IMAGE_DEFAULT_PROMPT, URL_TO_BASE64, MAX_CHARS } = Config.image;
+        const { IMAGE_DEFAULT_PROMPT, URL_TO_BASE64 } = Config.image;
         const defaultPrompt = Config.prompt.IMAGE_PROMPT_TEMPLATE({}) || IMAGE_DEFAULT_PROMPT;
 
         if (URL_TO_BASE64 == '总是' && this.type === 'url') await this.urlToBase64();
@@ -136,15 +140,27 @@ export default class Image {
             return;
         }
 
-        this.description = (await model.callITT(this.src, prompt ? prompt : defaultPrompt)).slice(0, MAX_CHARS);
+        this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
 
         if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url') {
             logger.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
-            this.description = (await model.callITT(this.src, prompt ? prompt : defaultPrompt)).slice(0, MAX_CHARS);
+            this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
         }
 
         if (!this.description) logger.error(`图片${this.imageId}识别失败`);
+    }
+
+    /** 图片转文字结果过长时交给压缩智能体压缩，失败时保留原文 */
+    private async compressIfLong(text: string): Promise<string> {
+        if (!text || text.length <= IMAGE_TEXT_COMPRESS_MIN_LENGTH) return text;
+        try {
+            const compressed = await Agent.get('compress_agent').chat(text);
+            if (compressed) return compressed;
+        } catch (e) {
+            logger.warning('压缩图片识别结果失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
+        }
+        return text;
     }
 
 
@@ -261,90 +277,4 @@ ${img.CQCode}`;
         return { content, images };
     }
 
-    static async extractExistingImagesToSave(s: string): Promise<Image[]> {
-        const segs = parseSpecialTokens(s);
-        const images: Image[] = [];
-        for (const seg of segs) {
-            switch (seg.type) {
-                case 'img': {
-                    const id = seg.content;
-                    const image = this.get(id);
-
-                    if (image) {
-                        if (image.type === 'url') await image.urlToBase64();
-                        images.push(image);
-                    } else {
-                        logger.warning(`无法找到图片：${id}`);
-                    }
-                    break;
-                }
-            }
-        }
-        return images;
-    }
-}
-
-/**
- * 图片管理器（从旧 src/AI/image.ts 移植）
- * 负责偷取图片、随机发送本地/偷取图片等会话级行为。
- */
-export class ImageManager {
-    static validKeysMap: { [key in keyof ImageManager]?: TypeDescriptor<ImageManager[key]> } = {
-        stolenImages: { array: Image },
-        stealStatus: 'boolean'
-    }
-    stolenImages: Image[];
-    stealStatus: boolean;
-
-    constructor() {
-        this.stolenImages = [];
-        this.stealStatus = false;
-    }
-
-    static getUserAvatar(uid: string): Image {
-        return Image.getUserAvatar(uid);
-    }
-
-    static getGroupAvatar(gid: string): Image {
-        return Image.getGroupAvatar(gid);
-    }
-
-    static getLocalImageListText(p: number = 1): string {
-        return Image.getLocalImageListText(p);
-    }
-
-    stealImages(images: Image[]) {
-        const { MAX_STOLEN_IMAGE_NUM } = Config.image as any;
-        const limit = MAX_STOLEN_IMAGE_NUM > 0 ? MAX_STOLEN_IMAGE_NUM : 50;
-        this.stolenImages = this.stolenImages.concat(images).slice(-limit);
-    }
-
-    async drawStolenImage(): Promise<Image> {
-        const index = Math.floor(Math.random() * this.stolenImages.length);
-        const image = this.stolenImages[index];
-        if (image.type === 'url') await image.urlToBase64();
-        return image;
-    }
-
-    async drawImage(): Promise<Image | null> {
-        const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
-        const localImages = Object.keys(LOCAL_IMAGE_PATH_MAP).map(id => this.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]));
-        if (this.stolenImages.length === 0 && localImages.length === 0) return null;
-        const index = Math.floor(Math.random() * (localImages.length + this.stolenImages.length));
-        return index < localImages.length ? localImages[index] : await this.drawStolenImage();
-    }
-
-    createLocalImage(id: string, path: string): Image {
-        return Image.createLocalImage(id, path);
-    }
-
-    getStolenImageListText(p: number = 1): string {
-        if (this.stolenImages.length === 0) return '';
-        if (p > Math.ceil(this.stolenImages.length / 5)) p = Math.ceil(this.stolenImages.length / 5);
-        return this.stolenImages.slice((p - 1) * 5, p * 5)
-            .map((img, i) => {
-                return `${i + 1 + (p - 1) * 5}. 名称:${img.imageId}
-${img.CQCode}`;
-            }).join('\n') + `\n当前页码:${p}/${Math.ceil(this.stolenImages.length / 5)}`;
-    }
 }

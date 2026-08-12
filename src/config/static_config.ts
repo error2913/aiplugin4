@@ -1,5 +1,5 @@
 // 静态常量：版本/作者/模型映射表/权限等级/别名/表情表等
-export const VERSION = "4.14.4";
+export const VERSION = "4.15.0";
 export const AUTHOR = "baiyu&错误";
 export const NAME = "aiplugin4";
 
@@ -69,7 +69,6 @@ export const ALIAS_MAP: { [key: string]: string } = {
     "y": "year",
     "m": "month",
     "lcl": "local",
-    "stl": "steal",
     "ran": "random",
     "nick": "nickname"
 }
@@ -435,5 +434,6 @@ export const DEFAULT_IMAGE_MODEL_BODY = {
     "stream": false
 }
 export const DEFAULT_EMBEDDING_MODEL_BODY = {
-    "encoding_format": "float"
+    "encoding_format": "float",
+    "dimensions": 1024
 }

@@ -8,15 +8,20 @@ interface MusicServiceConfig {
     cookie: string;
 }
 
-/** 从「音乐服务配置」模板配置中解析指定平台的 域名/Cookie；未配置时返回 null */
+/** 从「音乐服务配置」模板配置中解析指定平台的 域名/Cookie（仅支持 JSON 格式）；未配置时返回 null */
 function getMusicConfig(platform: string): MusicServiceConfig | null {
     const list = Config.tool.MUSIC || [];
     for (const line of list) {
-        const parts = (line || '').split('|');
-        if ((parts[0] || '').trim() !== platform) continue;
-        const api = (parts[1] || '').trim();
-        if (!api) continue;
-        return { api, cookie: parts.slice(2).join('|').trim() };
+        try {
+            const j = JSON.parse(line || '');
+            if (!j || typeof j !== 'object') continue;
+            if (String(j.platform || '').trim() !== platform) continue;
+            const api = String(j.api || '').trim();
+            if (!api) continue;
+            return { api, cookie: String(j.cookie || '').trim() };
+        } catch (e) {
+            logger.error(`音乐服务配置解析失败（仅支持 JSON 格式）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+        }
     }
     return null;
 }
@@ -53,12 +58,12 @@ export function registerMusicPlay() {
         }
         const config = getMusicConfig(platform);
         if (!config) {
-            return `未配置 ${platform} 的音乐服务：请在「工具」配置的「音乐服务配置」中添加 平台|域名|Cookie 条目`;
+            return `未配置 ${platform} 的音乐服务：请在「工具」配置的「音乐服务配置」中添加 {"platform":"${platform}","api":"域名","cookie":""} 格式的 JSON 条目`;
         }
 
         const api = platform === '网易云'
-            ? `${config.api}/search?keywords=${song_name}`
-            : `${config.api}/search?key=${song_name}`;
+            ? `${config.api}/search?keywords=${encodeURIComponent(song_name)}`
+            : `${config.api}/search?key=${encodeURIComponent(song_name)}`;
 
         try {
             logger.info(`搜索音乐: ${api}`);
