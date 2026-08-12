@@ -159,12 +159,16 @@ export class Context {
             role: 'assistant',
             contentItems: [ami]
         });
-        MemoryService.accessRelatedMemories(this.session, text);
+        MemoryService.accessRelatedMemories(this.session, text).catch(e => {
+            Logger.warning('助手消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
+        });
         // 按配置的间隔轮数触发短期记忆总结
         this.summaryCounter++;
         if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
             this.summaryCounter = 0;
-            this.session.memory.summarize();
+            this.session.memory.summarize().catch(e => {
+                Logger.warning('短期记忆总结失败: ' + (e instanceof Error ? e.message : String(e)));
+            });
         }
         this.limitMessages();
     }

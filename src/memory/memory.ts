@@ -99,7 +99,7 @@ export default class MemoryService {
     }
 
     limitShortMemory() {
-        const { SHORT_MEMORY_LIMIT } = Config.memory as any;
+        const { SHORT_MEMORY_LIMIT } = Config.memory;
         const limit = SHORT_MEMORY_LIMIT > 0 ? SHORT_MEMORY_LIMIT : 10;
         if (this.shortMemoryList.length > limit) {
             this.shortMemoryList.splice(0, this.shortMemoryList.length - limit);

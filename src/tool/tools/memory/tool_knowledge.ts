@@ -2,6 +2,9 @@
 import { knowledgeService } from "../../../memory/knowledge";
 import Tool from "../../tool";
 
+// 单次检索返回条数上限，防止模型请求超大 topK 造成上下文/API 浪费
+const KB_SEARCH_TOPK_MAX = 50;
+
 export function registerKnowledgeTools() {
     const toolSearch = new Tool({
         type: 'function',
@@ -26,7 +29,7 @@ export function registerKnowledgeTools() {
     });
     toolSearch.solve = async (_ctx, _msg, _session, args) => {
         const query = typeof args.query === 'string' ? args.query : '';
-        const topK = typeof args.topK === 'number' && args.topK > 0 ? Math.floor(args.topK) : 5;
+        const topK = Math.min(Math.max(typeof args.topK === 'number' && args.topK > 0 ? Math.floor(args.topK) : 5, 1), KB_SEARCH_TOPK_MAX);
         const chunks = await knowledgeService.search(query, topK);
         if (chunks.length === 0) return query ? '未找到相关知识库条目' : '知识库为空';
         return chunks.map((c, i) => `${i + 1}. ${knowledgeService.formatChunk(c)}`).join('\n\n');

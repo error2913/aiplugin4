@@ -153,7 +153,6 @@ export default class Agent {
                             Logger.exception('handlePromptToolCalls error', e);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
-                        session.tool.callCount = 0;
                         toolTurn++;
                         retry = 0;
                         continue;
@@ -184,7 +183,6 @@ export default class Agent {
                             Logger.exception('handleToolCalls error', e);
                             trace.recordToolCall('function-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
-                        session.tool.callCount = 0;
                         toolTurn++;
                         retry = 0;
                         continue;

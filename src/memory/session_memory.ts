@@ -108,9 +108,9 @@ export default class SessionMemoryService extends MemoryService {
             this.summaries.push(summaryContent);
             this.limitSummaries();
 
-            memoryData.memories.forEach(m => {
-                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text);
-            });
+            await Promise.all(memoryData.memories.map(m =>
+                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text)
+            ));
         } catch (e) {
             Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));
         }
