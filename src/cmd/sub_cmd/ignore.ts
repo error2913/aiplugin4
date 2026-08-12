@@ -6,7 +6,12 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdIgnore() {
     const cmd = new SubCmd('ignore');
     cmd.desc = '忽略名单相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+  【.ai ign add @xxx】添加忽略名单
+  【.ai ign rm @xxx】移除忽略名单
+  【.ai ign lst】列出忽略名单
+  
+  忽略名单中的对象仍能正常对话，但无法被选中QQ号`;
     cmd.priv = {
         priv: U, args: {
             add: { priv: U },

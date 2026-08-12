@@ -7,7 +7,12 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdBlock() {
     const cmd = new SubCmd('block');
     cmd.desc = '黑名单相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai block add <统一ID/@xxx> <原因>】添加黑名单
+【.ai block rm <统一ID/@xxx>】移除黑名单
+【.ai block list】查看黑名单列表
+
+被拉黑的对象无法触发AI对话`;
     cmd.priv = {
         priv: M, args: {
             add: { priv: M },

@@ -9,7 +9,16 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdMemory() {
     const cmd = new SubCmd('memory');
     cmd.desc = '记忆相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+     【.ai memo status (@xxx)】查看记忆状态，@为查看个人记忆状态
+     【.ai memo [p/g] st <内容>】设置个人/群聊设定
+     【.ai memo [p/g] st clr】清除个人/群聊设定
+     【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
+     【.ai memo [p/g/short] list】展示个人/群聊/短期记忆
+     【.ai memo [p/g/short] clr】清除个人/群聊/短期记忆
+     【.ai memo short [on/off]】开启/关闭短期记忆
+     【.ai memo sum】立即总结一次短期记忆
+     【.ai memo sum clr】清除总结记忆`;
     cmd.priv = {
         priv: U, args: {
             status: { priv: U },

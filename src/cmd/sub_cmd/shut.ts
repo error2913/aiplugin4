@@ -5,7 +5,8 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdShut() {
     const cmd = new SubCmd('shut');
     cmd.desc = '打断当前对话';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai shut】打断当前正在进行的对话`;
     cmd.priv = { priv: U };
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, session, ret } = scc;

@@ -8,7 +8,10 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdImage() {
     const cmd = new SubCmd('image');
     cmd.desc = '图片相关操作';
-    cmd.help = '';
+    cmd.help = `帮助:
+ 【.ai img list [lcl]】展示本地图片
+ 【.ai img itt [图片] (附加提示词)】图片转文字
+ 【.ai img find <图片ID>】查找图片`;
     cmd.priv = {
         priv: U, args: {
             list: {

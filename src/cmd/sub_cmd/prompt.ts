@@ -7,7 +7,8 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdPrompt() {
     const cmd = new SubCmd('prompt');
     cmd.desc = '查看system prompt';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai prompt】查看当前 system prompt，内容过长时仅记录到日志`;
     cmd.priv = { priv: M };
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, session, ret } = scc;

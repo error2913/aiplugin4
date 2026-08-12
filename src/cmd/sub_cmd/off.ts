@@ -6,7 +6,9 @@ import { SubCmd, SubCmdContext } from "../root_cmd";
 export function registerCmdOff() {
     const cmd = new SubCmd('off');
     cmd.desc = '关闭AI（含非指令正则触发）';
-    cmd.help = '';
+    cmd.help = `帮助:
+【.ai off】关闭 AI 及全部触发模式
+【.ai off --<参数>】按模式关闭（--r 正则 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段）`;
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
