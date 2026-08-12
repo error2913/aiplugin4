@@ -1,7 +1,7 @@
 // 记忆服务：MemoryItem 存取/检索/权重/短期记忆（含旧格式迁移）
 import Agent from "../agent/agent";
 import Config from "../config/config";
-import { MEMORY_TEMPLATE } from "../config/static_config";
+import { MEMORY_TEMPLATE, VECTOR_SIMILARITY } from "../config/static_config";
 import type { Context } from "../context/context";
 import Logger from "../logger";
 import Model from "../model/model";
@@ -13,9 +13,6 @@ import { generateId, getCommonItem, revive, TypeDescriptor } from "../utils/util
 
 import MemoryItem from "./memory_item";
 import { MemorySource, searchOptions } from "./types";
-
-// 向量记忆检索的相似度下限（低于该值的记忆不返回），内置硬编码
-const VECTOR_SIMILARITY = 0.8;
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
