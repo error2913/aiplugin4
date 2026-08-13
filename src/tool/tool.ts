@@ -25,8 +25,7 @@ export const CORE_TOOL_NAMES: string[] = [
     'call_tool',    // 统一执行入口（调用任意已开启工具）
     'use_skill',    // 技能调用
     'run_command',  // 海豹指令调用
-    'get_cmd_help', // 指令帮助
-    'get_time'      // 当前时间
+    'get_cmd_help'  // 指令帮助
 ];
 
 export default class Tool {

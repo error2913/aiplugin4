@@ -1,10 +1,22 @@
 // .ai memo：个人/群聊/短期记忆与设定管理
 import Config from "../../config/config";
+import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
 import { stripInternalTags } from "../../utils/string";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
+
+/** 受保护记忆：其他会话创建的私有记忆仅创建会话可删（与工具层 del_memory / clear_memory 一致） */
+function protectedMemoryIds(target: Session, callerSessionId: string): Set<string> {
+    const ids = new Set<string>();
+    if (target.sessionId !== callerSessionId) {
+        for (const m of target.memory.memories) {
+            if (m.visibility === 'private' && m.sessionId !== callerSessionId) ids.add(m.id);
+        }
+    }
+    return ids;
+}
 
 export function registerCmdMemory() {
     const cmd = new SubCmd('memory');
@@ -117,7 +129,22 @@ export function registerCmdMemory() {
                             seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p del <ID1> <ID2> --关键词1 --关键词2】删除个人记忆');
                             return ret;
                         }
-                        targetSession.memory.deleteMemory(idList, kw);
+                        // 与工具层一致：其他会话创建的私有记忆不可删除
+                        const protectedIds = protectedMemoryIds(targetSession, session.sessionId);
+                        const deleteIds = new Set<string>();
+                        for (const id of idList) {
+                            if (!protectedIds.has(id)) deleteIds.add(id);
+                        }
+                        if (kw.length > 0) {
+                            for (const m of targetSession.memory.memories) {
+                                if (!protectedIds.has(m.id) && kw.some(k => m.tags.includes(k))) deleteIds.add(m.id);
+                            }
+                        }
+                        if (deleteIds.size === 0) {
+                            seal.replyToSender(ctx, msg, '没有可删除的记忆（其他会话创建的私有记忆仅创建会话可删除）');
+                            return ret;
+                        }
+                        targetSession.memory.deleteMemory(Array.from(deleteIds));
                         seal.replyToSender(ctx, msg, targetSession.memory.getLatestMemoryListText({
                             isPrivate: true,
                             id: sessionCtx.player!.userId,
@@ -135,6 +162,19 @@ export function registerCmdMemory() {
                         return ret;
                     }
                     case 'clear': {
+                        // 与工具层一致：保留其他会话创建的私有记忆
+                        const protectedIds = protectedMemoryIds(targetSession, session.sessionId);
+                        if (protectedIds.size > 0) {
+                            const deleteIds = targetSession.memory.memoryIds.filter(id => !protectedIds.has(id));
+                            if (deleteIds.length === 0) {
+                                seal.replyToSender(ctx, msg, '无可清除的记忆（存在其他会话创建的私有记忆）');
+                                return ret;
+                            }
+                            targetSession.memory.deleteMemory(deleteIds);
+                            seal.replyToSender(ctx, msg, `个人记忆已清除（保留 ${protectedIds.size} 条其他会话的私有记忆）`);
+                            targetSession.save();
+                            return ret;
+                        }
                         targetSession.memory.clearMemory();
                         seal.replyToSender(ctx, msg, '个人记忆已清除');
                         targetSession.save();
@@ -191,7 +231,22 @@ export function registerCmdMemory() {
                             seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g del <ID1> <ID2>】删除群聊记忆');
                             return ret;
                         }
-                        session.memory.deleteMemory(idList, kw);
+                        // 与工具层一致：其他会话创建的私有记忆不可删除（群聊指令目标即当前会话，通常无受保护条目）
+                        const protectedIds = protectedMemoryIds(session, session.sessionId);
+                        const deleteIds = new Set<string>();
+                        for (const id of idList) {
+                            if (!protectedIds.has(id)) deleteIds.add(id);
+                        }
+                        if (kw.length > 0) {
+                            for (const m of session.memory.memories) {
+                                if (!protectedIds.has(m.id) && kw.some(k => m.tags.includes(k))) deleteIds.add(m.id);
+                            }
+                        }
+                        if (deleteIds.size === 0) {
+                            seal.replyToSender(ctx, msg, '没有可删除的记忆（其他会话创建的私有记忆仅创建会话可删除）');
+                            return ret;
+                        }
+                        session.memory.deleteMemory(Array.from(deleteIds));
                         seal.replyToSender(ctx, msg, session.memory.getLatestMemoryListText({
                             isPrivate: false,
                             id: ctx.group!.groupId,
@@ -209,6 +264,18 @@ export function registerCmdMemory() {
                         return ret;
                     }
                     case 'clear': {
+                        const protectedIds = protectedMemoryIds(session, session.sessionId);
+                        if (protectedIds.size > 0) {
+                            const deleteIds = session.memory.memoryIds.filter(id => !protectedIds.has(id));
+                            if (deleteIds.length === 0) {
+                                seal.replyToSender(ctx, msg, '无可清除的记忆（存在其他会话创建的私有记忆）');
+                                return ret;
+                            }
+                            session.memory.deleteMemory(deleteIds);
+                            seal.replyToSender(ctx, msg, `群聊记忆已清除（保留 ${protectedIds.size} 条其他会话的私有记忆）`);
+                            session.save();
+                            return ret;
+                        }
                         session.memory.clearMemory();
                         seal.replyToSender(ctx, msg, '群聊记忆已清除');
                         session.save();

@@ -5,6 +5,7 @@ import Logger from "../logger";
 import { SUMMARY_PROMPT_TEMPLATE, SUMMARY_TEMPLATE } from "../prompt/templates";
 import Group from "../session/group";
 import { Session } from "../session/session";
+import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { buildContent } from "../utils/message";
 import { stripInternalTags } from "../utils/string";
@@ -102,17 +103,101 @@ export default class SessionMemoryService extends MemoryService {
                 }[]
             };
 
-            // 防注入：总结内容可能夹带内部上下文标签，入库前统一剥离
-            const summaryContent = stripInternalTags(memoryData.content);
+            // 防注入：总结内容可能夹带内部上下文标签，入库前统一剥离；模型未返回 content 时以空串兜底
+            const summaryContent = stripInternalTags(memoryData.content || '');
             this.shortMemoryList.push(summaryContent);
             this.limitShortMemory();
             // 同时写入总结记忆，供 buildSummaryPrompt 使用
             this.summaries.push(summaryContent);
             this.limitSummaries();
 
-            await Promise.all(memoryData.memories.map(m =>
-                this.addMemory(null, this.session, [], [], m.keywords || [], [], m.text, m.visibility === 'private' ? 'private' : 'public')
-            ));
+            // 与 add_memory 工具一致：按 memory_type/name 决定记忆归属（个人→目标用户会话，群聊→目标群会话）。
+            // 模型不保证遵守模板：memories 缺失/非数组时跳过落库（摘要仍保留），逐条定位失败仅跳过该条，
+            // 缺失/未知 memory_type 时兜底归属当前会话（总结的就是当前对话）
+            const memoryItems = memoryData.memories;
+            if (!Array.isArray(memoryItems)) {
+                Logger.warning('总结记忆：模型返回的 memories 不是数组，本次不落库记忆');
+            } else {
+                const lastCtx = this.session.lastCtx;
+                const sessionIsGroup = this.session.sessionType === 'group';
+                let successCount = 0;
+                let fallbackCount = 0;
+                const skipped: string[] = [];
+                for (const m of memoryItems) {
+                    if (!m || typeof m !== 'object' || typeof m.text !== 'string' || !m.text) {
+                        skipped.push('缺少 text 的记忆条目');
+                        continue;
+                    }
+                    const normalizedVisibility: 'public' | 'private' = m.visibility === 'private' ? 'private' : 'public';
+                    let targetSession: Session | null = null;
+                    if (m.memory_type === 'private') {
+                        // 与 add_memory 一致：name 存在时按名称定位目标用户，缺失时仅当前私聊会话可作归属
+                        if (m.name) {
+                            if (!lastCtx) {
+                                skipped.push('无可用上下文，无法定位个人记忆目标');
+                                continue;
+                            }
+                            const ui = await this.session.context.findUser(lastCtx, m.name, true);
+                            if (ui === null) {
+                                skipped.push(`未找到用户<${m.name}>`);
+                                continue;
+                            }
+                            // 与 add_memory 工具（getSession → Agent.get('*')）一致，避免引入循环依赖
+                            targetSession = Agent.get('*').sessionService.getSession(ui.userId);
+                        } else if (!sessionIsGroup) {
+                            targetSession = this.session;
+                        } else {
+                            skipped.push('缺少 name，无法定位个人记忆');
+                            continue;
+                        }
+                    } else if (m.memory_type === 'group') {
+                        if (m.name) {
+                            if (!lastCtx) {
+                                skipped.push('无可用上下文，无法定位群聊记忆目标');
+                                continue;
+                            }
+                            const gi = await this.session.context.findGroup(lastCtx, m.name);
+                            if (gi === null) {
+                                skipped.push(`未找到群聊<${m.name}>`);
+                                continue;
+                            }
+                            targetSession = Agent.get('*').sessionService.getSession(gi.groupId);
+                        } else if (sessionIsGroup) {
+                            targetSession = this.session;
+                        } else {
+                            skipped.push('缺少 name，无法定位群聊记忆');
+                            continue;
+                        }
+                    } else {
+                        // 缺失/未知 memory_type：兜底归属当前会话
+                        if (m.memory_type) skipped.push(`未知 memory_type<${m.memory_type}>，按当前会话归属`);
+                        else skipped.push('缺少 memory_type，按当前会话归属');
+                        fallbackCount++;
+                        targetSession = this.session;
+                    }
+
+                    // 与 add_memory 工具一致：解析相关用户/群聊名称列表；无可用上下文时跳过解析（不影响落库）
+                    const uiList: UserInfo[] = [];
+                    if (lastCtx) {
+                        for (const n of (Array.isArray(m.userList) ? m.userList : [])) {
+                            const ui = await targetSession.context.findUser(lastCtx, n, true);
+                            if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
+                        }
+                    }
+                    const giList: GroupInfo[] = [];
+                    if (lastCtx) {
+                        for (const n of (Array.isArray(m.groupList) ? m.groupList : [])) {
+                            const gi = await targetSession.context.findGroup(lastCtx, n);
+                            if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
+                        }
+                    }
+                    await targetSession.memory.addMemory(null, targetSession, uiList, giList, Array.isArray(m.keywords) ? m.keywords : [], [], m.text, normalizedVisibility);
+                    successCount++;
+                }
+                if (skipped.length > 0) {
+                    Logger.warning(`总结记忆：成功写入 ${successCount} 条（含 ${fallbackCount} 条归属兜底），跳过 ${skipped.length} 条（${Array.from(new Set(skipped)).join('；')}）`);
+                }
+            }
         } catch (e) {
             Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));
         }

@@ -119,7 +119,7 @@ export function registerMemory() {
                         type: 'array',
                         description: '记忆ID列表，可为空',
                         items: {
-                            type: 'integer'
+                            type: 'string'
                         }
                     },
                     keywords: {
@@ -136,6 +136,8 @@ export function registerMemory() {
     });
     toolDel.solve = async (ctx, _, session, args) => {
         const { memory_type, name, id_list, keywords } = args;
+        // 记录调用方会话：与 search_memory 一致，其他会话创建的私有记忆不可删除
+        const callerSessionId = session.sessionId;
 
         if (memory_type === "private") {
             const ui = await session.context.findUser(ctx, name, true);
@@ -153,8 +155,29 @@ export function registerMemory() {
             return `未知的记忆类型<${memory_type}>`;
         }
 
-        //记忆相关处理
-        session.memory.deleteMemory(id_list, keywords);
+        // 受保护记忆：非调用方会话创建的私有记忆，仅创建会话可删
+        const protectedIds = new Set<string>();
+        if (session.sessionId !== callerSessionId) {
+            for (const m of session.memory.memories) {
+                if (m.visibility === 'private' && m.sessionId !== callerSessionId) protectedIds.add(m.id);
+            }
+        }
+
+        // 由 id_list 与 keywords 共同确定删除范围，剔除受保护记忆（keywords 命中任一即删，与 deleteMemory 语义一致）
+        const deleteIds = new Set<string>();
+        for (const id of (Array.isArray(id_list) ? id_list : [])) {
+            const idStr = String(id);
+            if (!protectedIds.has(idStr)) deleteIds.add(idStr);
+        }
+        if (Array.isArray(keywords) && keywords.length > 0) {
+            for (const m of session.memory.memories) {
+                if (!protectedIds.has(m.id) && keywords.some(kw => m.tags.includes(kw))) deleteIds.add(m.id);
+            }
+        }
+        if (deleteIds.size === 0) return `没有可删除的记忆`;
+
+        // 记忆相关处理
+        session.memory.deleteMemory(Array.from(deleteIds));
         SessionService.save(session);
 
         return `删除记忆成功`;
@@ -225,21 +248,19 @@ export function registerMemory() {
         // 记录调用方会话：私有记忆只对创建它的会话可见，搜索其他会话时按调用方会话过滤
         const callerSessionId = session.sessionId;
 
-        const si: SessionInfo = {
-            isPrivate: false,
-            id: '',
-            name: ''
-        };
+        let si: SessionInfo;
         if (memory_type === "private") {
             const ui = await session.context.findUser(ctx, name, true);
             if (ui === null) return `未找到<${name}>`;
 
+            si = { isPrivate: true, id: ui.userId, name: ui.userName || ui.userId };
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             session = getSession(ui.userId);
         } else if (memory_type === "group") {
             const gi = await session.context.findGroup(ctx, name);
             if (gi === null) return `未找到<${name}>`;
 
+            si = { isPrivate: false, id: gi.groupId, name: gi.groupName || gi.groupId };
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);
         } else {
@@ -297,6 +318,8 @@ export function registerMemory() {
     });
     toolClear.solve = async (ctx, _, session, args) => {
         const { memory_type, name } = args;
+        // 记录调用方会话：与 search_memory 一致，其他会话创建的私有记忆不可清除
+        const callerSessionId = session.sessionId;
 
         if (memory_type === "private") {
             const ui = await session.context.findUser(ctx, name, true);
@@ -312,6 +335,23 @@ export function registerMemory() {
             session = getSession(gi.groupId);
         } else {
             return `未知的记忆类型<${memory_type}>`;
+        }
+
+        // 受保护记忆：非调用方会话创建的私有记忆，仅创建会话可删
+        const protectedIds = new Set<string>();
+        if (session.sessionId !== callerSessionId) {
+            for (const m of session.memory.memories) {
+                if (m.visibility === 'private' && m.sessionId !== callerSessionId) protectedIds.add(m.id);
+            }
+        }
+
+        if (protectedIds.size > 0) {
+            // 只清空调用方可访问的记忆，保留其他会话的私有记忆
+            const deleteIds = session.memory.memoryIds.filter(id => !protectedIds.has(id));
+            if (deleteIds.length === 0) return `无可清除的记忆（存在其他会话的私有记忆）`;
+            session.memory.deleteMemory(deleteIds);
+            SessionService.save(session);
+            return `清除记忆成功（保留 ${protectedIds.size} 条其他会话的私有记忆）`;
         }
 
         session.memory.clearMemory();

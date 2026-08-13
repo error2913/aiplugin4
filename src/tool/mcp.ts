@@ -29,6 +29,18 @@ const serverStates: { [name: string]: MCPServerState } = {};
 const mcpToolKeys = new Map<string, string>(); // MCP 注册过的工具键 → 所属服务器名，仅清理这些键避免误删普通工具
 let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步工具列表
 
+/** 服务器配置是否一致：url/token/headers 任一变化都视为新配置，需要重建会话并重新拉取工具列表 */
+function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
+    if (a.url !== b.url || a.token !== b.token) return false;
+    return JSON.stringify(a.headers || {}) === JSON.stringify(b.headers || {});
+}
+
+/** 按名称取最新配置：始终实时解析当前配置（热加载后立即生效），不保留已移除服务器的旧会话 */
+function getServerByName(name: string): MCPServer | null {
+    // 只返回仍存在于配置中的服务器：服务器被移除后，即使工具列表尚未清理，调用也立即失败而非继续使用旧地址
+    return getMCPServers().find(s => s.name === name) || null;
+}
+
 /** 归一化一个 MCP 服务器配置（兼容 Claude Desktop / Cursor .mcp.json 的 mcpServers 条目） */
 function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
     if (typeof cfg === 'string') {
@@ -197,7 +209,8 @@ async function doCallTool(server: MCPServer, sessionId: string, name: string, ar
 
 async function getSessionId(server: MCPServer, force = false): Promise<string> {
     const state = serverStates[server.name];
-    if (!force && state && state.sessionId) return state.sessionId;
+    // 配置（url/token/headers）变化时即使已有会话也不复用，避免沿用旧地址旧凭据
+    if (!force && state && state.sessionId && sameServerConfig(server, state.server)) return state.sessionId;
     const sessionId = await initialize(server) || '';
     serverStates[server.name] = { server, sessionId, tools: [], toolsFetchedAt: 0 };
     return sessionId;
@@ -226,13 +239,25 @@ export async function callServerTool(server: MCPServer, toolName: string, args: 
 /** 获取工具列表（TTL 缓存），并注册新出现的工具 */
 async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]> {
     const state = serverStates[server.name];
-    if (!force && state && state.tools.length > 0 && Date.now() - state.toolsFetchedAt < TOOLS_CACHE_TTL) {
+    if (!force && state && state.tools.length > 0
+        && sameServerConfig(server, state.server)
+        && Date.now() - state.toolsFetchedAt < TOOLS_CACHE_TTL) {
         return state.tools;
     }
 
     const sessionId = await getSessionId(server);
     const tools = await listTools(server, sessionId);
     serverStates[server.name] = { server, sessionId, tools, toolsFetchedAt: Date.now() };
+
+    // 清理本服务器已注册但 tools/list 不再返回的工具（服务器内工具删除后热加载生效）
+    const liveKeys = new Set(tools.filter(t => t.name).map(t => `${server.name}_${t.name}`));
+    for (const [key, owner] of mcpToolKeys) {
+        if (owner === server.name && !liveKeys.has(key) && Object.prototype.hasOwnProperty.call(toolMap, key)) {
+            Logger.info(`MCP 服务器 ${server.name} 不再提供工具 ${key}，清理`);
+            delete toolMap[key];
+            mcpToolKeys.delete(key);
+        }
+    }
 
     for (const t of tools) {
         if (!t.name) continue;
@@ -252,8 +277,11 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
                 }
             }
         }, true);
+        // 闭包只捕获服务器名：每次调用取最新配置，避免配置热加载后仍用旧 URL/Token
         tool.solve = async (_ctx, _msg, _session, args) => {
-            return await callTool(server, t.name, args || {});
+            const current = getServerByName(server.name);
+            if (!current) return `MCP 服务器 ${server.name} 未配置`;
+            return await callTool(current, t.name, args || {});
         };
         Logger.info(`已注册 MCP 工具 ${toolName}`);
     }
@@ -266,12 +294,11 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
  */
 export async function registerMCPTools() {
     const now = Date.now();
-    if (now - lastRefreshAt < TOOLS_CACHE_TTL) return;
-    lastRefreshAt = now;
 
     const servers = getMCPServers();
     const activeNames = new Set(servers.map(s => s.name));
-    // 清理已从配置中移除的服务器的工具（仅限 MCP 注册过的键）
+    // 清理已从配置中移除的服务器的工具（仅限 MCP 注册过的键）。
+    // 不参与 TTL 节流：删除服务器后下一条消息即清理，避免旧工具在缓存窗口内残留可调用
     for (const [key, serverName] of mcpToolKeys) {
         if (!activeNames.has(serverName) && Object.prototype.hasOwnProperty.call(toolMap, key)) {
             Logger.info(`MCP 服务器 ${serverName} 已从配置移除，清理工具 ${key}`);
@@ -283,6 +310,10 @@ export async function registerMCPTools() {
     for (const name of Object.keys(serverStates)) {
         if (!activeNames.has(name)) delete serverStates[name];
     }
+
+    // 工具列表同步按 TTL 节流
+    if (now - lastRefreshAt < TOOLS_CACHE_TTL) return;
+    lastRefreshAt = now;
 
     for (const server of servers) {
         try {

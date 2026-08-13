@@ -8,6 +8,7 @@ import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall } from "../tool/types";
 
+import { fmtDate } from "./string";
 import { withTimeout } from "./utils";
 
 /** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
@@ -195,24 +196,41 @@ export async function handleMessages(ctx: seal.MsgContext, session: Session, mul
 
 export function buildContent(message: ContextMessage): string {
     if (message.contentItems && message.contentItems.length > 0) {
-        // 用户消息补上发送者前缀（名字 + QQ号），避免最终上下文丢失发送者信息
-        let prefix = '';
+        // 用户消息逐条补上发送者/时间/消息ID：连续多条 user 消息会被合并进同一个
+        // contentItems，若只在消息级补一次前缀，后续条目的发送者会全部丢失。
+        // from 只在发送者切换时渲染（相同发送者连续发言省略，节省 token 且更自然）
         if (message.role === 'user') {
-            const userItem = message.contentItems.find(item => item.userId);
-            if (userItem && userItem.userId) {
-                const uid = userItem.userId;
-                const number = uid.replace(/^.+:/, '');
-                const name = User.get(uid).userName;
-                prefix = name ? `[from:${name}(${number})]` : `[from:${number}]`;
-            }
+            let lastUserId = '';
+            return message.contentItems.map(item => {
+                let from = '';
+                // 系统名义消息（systemName）不参与发送者切换判断，也不渲染 from
+                if (item.userId && item.userId !== lastUserId) {
+                    from = formatFromPrefix(item.userId);
+                }
+                if (item.userId) lastUserId = item.userId;
+                return from
+                    + (item.time ? `[time:${fmtDate(item.time)}]` : '')
+                    + (item.messageId ? `[msg_id:${item.messageId}]` : '')
+                    + (item.text || '');
+            }).join('\f');
         }
-        // 每条消息补消息 ID 标记，供模型在 [quote:xxx] 中引用；无 ID 时跳过避免空标签
-        return prefix + message.contentItems.map(item =>
-            (item.messageId ? `[msg_id:${item.messageId}]` : '') + (item.text || '')
+        // 非用户消息：assistant 补时间与消息 ID；system 是角色设定 prompt 容器，
+        // 不算对话消息，不渲染 time/msg_id
+        return message.contentItems.map(item =>
+            (message.role !== 'system' && item.time ? `[time:${fmtDate(item.time)}]` : '')
+            + (item.messageId ? `[msg_id:${item.messageId}]` : '')
+            + (item.text || '')
         ).join('\f');
     }
     if (message.text) return message.text;
     return '';
+}
+
+/** 把 uid（QQ:xxx）渲染成 [from:名字(QQ号)]，未记录名字时退化为 [from:QQ号] */
+function formatFromPrefix(uid: string): string {
+    const number = uid.replace(/^.+:/, '');
+    const name = User.get(uid).userName;
+    return name ? `[from:${name}(${number})]` : `[from:${number}]`;
 }
 
 /** 解析 [img:...] 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */

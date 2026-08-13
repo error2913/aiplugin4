@@ -4,7 +4,7 @@ import Logger from "../logger";
 import Model from "../model/model";
 import { cosineSimilarity } from "../utils/utils";
 
-import { KnowledgeChunk, splitMarkdownIntoChunks } from "./knowledge_chunk";
+import { hashString, KnowledgeChunk, splitMarkdownIntoChunks } from "./knowledge_chunk";
 
 // 向量重排候选上限：仅对关键词命中的前 N 块做惰性嵌入，控制单次检索的 API 开销
 const VECTOR_RERANK_CANDIDATE_LIMIT = 20;
@@ -27,15 +27,17 @@ export class KnowledgeBaseService {
             if (!raw) return;
             // 条目标题：取文档首个 #，无标题时用条目序号兜底
             const firstTitle = raw.match(/^#\s+(.+)$/m)?.[1]?.trim() || `条目${index + 1}`;
-            const docChunks = splitMarkdownIntoChunks(raw, {}, String(index));
+            const docChunks = splitMarkdownIntoChunks(raw);
             docChunks.forEach(c => {
                 if (!c.title) c.title = firstTitle;
+                // 条目序号参与 ID：跨条目内容完全相同时 ID 仍全局唯一（顺序变化会让未变动条目失效，可接受）
+                c.id = `kb_${index + 1}_${c.id.replace(/^kb_/, '')}`;
                 this.chunks.push(c);
             });
             // 完全没有标题的纯文本：整体作为一条
             if (docChunks.length === 0) {
                 this.chunks.push({
-                    id: `kb_${index}_whole`,
+                    id: `kb_${index + 1}_${hashString(raw)}_whole`,
                     title: firstTitle,
                     heading: '',
                     content: raw

@@ -8,7 +8,7 @@ import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
-import { stripInternalTags } from "../utils/string";
+import { fmtDate, stripInternalTags } from "../utils/string";
 
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
 
@@ -70,6 +70,7 @@ export async function buildSystemPromptContent(
         sessionType: ctx.isPrivate ? 'private' : 'group',
         sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
         sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
+        currentTime: fmtDate(Math.floor(Date.now() / 1000)),
         RECEIVE_IMAGE,
         LOCAL_IMAGES: localImages,
         LOCAL_AUDIOS: localAudios,

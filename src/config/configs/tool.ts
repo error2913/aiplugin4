@@ -15,8 +15,18 @@ export default class ToolConfig {
         seal.ext.registerTemplateConfig(ext, "内置扩展列表", ['fun', 'story', 'coc7', 'deck', 'dnd5e', 'exp', 'log', 'reply'], "每行一个 SealDice 核心内置扩展名，用于「允许所有指令」模式下枚举其指令；可自行增删。修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [
-            `{"mcpServers":{"mcp-files-exec":{"type":"http","url":"http://127.0.0.1:3910","headers":{"Authorization":"Bearer token"}}}}`
-        ], "每条配置项一个 MCP 服务器，仅支持 JSON 格式：\n① 标准 mcpServers 块：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude/Cursor/.mcp.json 可直接粘贴）\n② JSON 数组：[{\"name\":\"服务器名\",\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}]\n③ 单服务器 JSON：{\"name\":\"服务器名\",\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}\nheaders 可带任意自定义请求头（如 Authorization），也可用 token 字段自动生成 Bearer 头。\n说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+            `{
+  "mcpServers": {
+    "mcp-files-exec": {
+      "type": "http",
+      "url": "http://127.0.0.1:3910",
+      "headers": {
+        "Authorization": "Bearer token"
+      }
+    }
+  }
+}`
+        ], "每条配置项一个 MCP 服务器，仅支持 JSON 格式（每行一条，三种写法任选其一）：\n① 标准 mcpServers 块：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude/Cursor/.mcp.json 可直接粘贴）\n② JSON 数组：[{\"name\":\"服务器名\",\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}]\n③ 单服务器 JSON：{\"name\":\"服务器名\",\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}\n字段：name（服务器名）、type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。\n格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。\n说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [
             `---
 name: 今日人品
@@ -48,10 +58,18 @@ name: san检定
 description: 对指定玩家进行 san check（sc）
 ---
 使用 run_command 工具执行：action=call，command="coc7|sc"，args 按顺序：奖励/惩罚骰（可选，如 b、p2）、表达式（成功时掉san/失败时掉san，如 0/1d6、0/1）；coc7|sc 需在「可调用指令白名单」中`
-        ], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 frontmatter 里写 name/description，正文为技能内容，可直接粘贴其他 agent（Claude/Codex/Cursor）的技能文件。默认包含基于 run_command 统一调用的指令技能（今日人品/COC模组/属性展示/检定等），指令需加入「可调用指令白名单」，可自行增删。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
+        ], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选），正文为技能内容；可直接粘贴其他 agent（Claude/Codex/Cursor）的技能文件。\n格式定义见 https://agentskills.io/specification （SKILL.md 开放规范，Claude/Codex 通用，国内可访问）。\n默认包含基于 run_command 统一调用的指令技能（今日人品/COC模组/属性展示/检定等），指令需加入「可调用指令白名单」，可自行增删。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerTemplateConfig(ext, "音乐服务配置", [
-            `{"platform":"网易云","api":"http://net.ease.music.lovesealdice.online","cookie":"_gid=GA1.2.2048499931.1737983161; _ga_MD3K4WETFE=GS1.1.1737983160.8.1.1737983827.0.0.0; _ga=GA1.1.1845263601.1736600307; MUSIC_U=00C10F470166570C36209E7E3E3649FEE210D3DB5B3C39C25214CFE5678DCC5773C63978903CEBA7BF4292B97ADADB566D96A055DCFDC860847761109F8986373FEC32BE2AFBF3DCFF015894EC61602562BF9D16AD12D76CED169C5052A470677A8D59F7B7D16D9FDE2A4ED237DE5C6956C0ED5F7A9EA151C3FA7367B0C6269FF7A74E6626B4D7F920D524718347659394CBB0DAE362991418070195FEFC730BCCE3CF4B03F24274075679FB4BFC884D099BD3CF679E4F1C9D5CBC2959CD29B0741BD52BCA155480116CE96393663B1A51D88AFDB57680F030CF93A305064A797B99874CA826D6760F616CB756B680591167AEE9AF31C4A187E61A19D7C1175961D4FE64CFD878F0BCEBB322A23E396DC5E8175A50D5E07B9788E4EBE8F8257FF139DB4FD03A89676F5C3DF1B70C101F4568C0A3657C24185218F975368ADB2DEF860760C59E9AFCCB214A4B51029E29ED; __csrf=85f3aa8cedc01f6d50b6b924efbf6f95; NMTID=00OG17oToz2Ne1rikTtgKPqOLaYuP0AAAGUqBEN0A"}`,
-            `{"platform":"qq","api":"http://qqmusic.lovesealdice.online","cookie":""}`
+            `{
+  "platform": "网易云",
+  "api": "http://net.ease.music.lovesealdice.online",
+  "cookie": "_gid=GA1.2.2048499931.1737983161; _ga_MD3K4WETFE=GS1.1.1737983160.8.1.1737983827.0.0.0; _ga=GA1.1.1845263601.1736600307; MUSIC_U=00C10F470166570C36209E7E3E3649FEE210D3DB5B3C39C25214CFE5678DCC5773C63978903CEBA7BF4292B97ADADB566D96A055DCFDC860847761109F8986373FEC32BE2AFBF3DCFF015894EC61602562BF9D16AD12D76CED169C5052A470677A8D59F7B7D16D9FDE2A4ED237DE5C6956C0ED5F7A9EA151C3FA7367B0C6269FF7A74E6626B4D7F920D524718347659394CBB0DAE362991418070195FEFC730BCCE3CF4B03F24274075679FB4BFC884D099BD3CF679E4F1C9D5CBC2959CD29B0741BD52BCA155480116CE96393663B1A51D88AFDB57680F030CF93A305064A797B99874CA826D6760F616CB756B680591167AEE9AF31C4A187E61A19D7C1175961D4FE64CFD878F0BCEBB322A23E396DC5E8175A50D5E07B9788E4EBE8F8257FF139DB4FD03A89676F5C3DF1B70C101F4568C0A3657C24185218F975368ADB2DEF860760C59E9AFCCB214A4B51029E29ED; __csrf=85f3aa8cedc01f6d50b6b924efbf6f95; NMTID=00OG17oToz2Ne1rikTtgKPqOLaYuP0AAAGUqBEN0A"
+}`,
+            `{
+  "platform": "qq",
+  "api": "http://qqmusic.lovesealdice.online",
+  "cookie": ""
+}`
         ], "每行一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",

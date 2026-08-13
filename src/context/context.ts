@@ -126,7 +126,8 @@ export class Context {
             const userMsg = lastMessage as UserMessage;
             userMsg.contentItems.push(umi);
             // 连续多条 user 消息合并后总长超阈值 → 合并压缩，替换为该条压缩结果
-            const merged = userMsg.contentItems.map(item => item.text).join('\\f');
+            // 分隔符与 buildContent 渲染保持一致（真实 \f），避免压缩前后表示差异误判重复压缩
+            const merged = userMsg.contentItems.map(item => item.text).join('\f');
             const compressed = await this.compressIfLong(merged);
             if (compressed !== merged) {
                 userMsg.contentItems = [{ text: compressed, time: umi.time, userId: umi.userId, messageId: umi.messageId }];

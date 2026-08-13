@@ -17,7 +17,7 @@ export interface ChunkOptions {
 }
 
 /** 稳定哈希：同一输入总是得到同一 ID */
-function hashString(s: string): string {
+export function hashString(s: string): string {
     let h = 5381;
     for (let i = 0; i < s.length; i++) {
         h = ((h << 5) + h) ^ s.charCodeAt(i);
@@ -70,9 +70,10 @@ function splitParagraphs(text: string, maxSize: number, overlap: number): string
  * 把一段 Markdown 切分为知识库分块。
  * 以 `#` 作为条目标题、`##`/`###` 作为小节标题；无 `#` 的文档由调用方
  * 补充条目标题（如条目序号）。
- * @param seed 用于区分同名条目的额外种子（如条目序号），保证 ID 全局唯一
+ * ID 基于块内容（标题/小节/正文）生成；跨条目内容完全相同时可能碰撞，
+ * 调用方（知识库服务）会在 ID 前附加条目序号保证全局唯一（顺序相关）
  */
-export function splitMarkdownIntoChunks(markdown: string, options: ChunkOptions = {}, seed = ''): KnowledgeChunk[] {
+export function splitMarkdownIntoChunks(markdown: string, options: ChunkOptions = {}): KnowledgeChunk[] {
     const maxSize = options.maxSize ?? 800;
     const overlap = options.overlap ?? 100;
     const lines = (markdown || '').replace(/\r\n/g, '\n').split('\n');
@@ -80,7 +81,6 @@ export function splitMarkdownIntoChunks(markdown: string, options: ChunkOptions 
     let title = '';
     let heading = '';
     let buffer: string[] = [];
-    let groupSeq = 0;
 
     const flushGroup = () => {
         const text = buffer.join('\n').trim();
@@ -109,11 +109,10 @@ export function splitMarkdownIntoChunks(markdown: string, options: ChunkOptions 
 
     const chunks: KnowledgeChunk[] = [];
     for (const g of groups) {
-        groupSeq++;
         const contents = g.text.length <= maxSize ? [g.text] : splitParagraphs(g.text, maxSize, overlap);
-        contents.forEach((content, i) => {
+        contents.forEach((content) => {
             chunks.push({
-                id: `kb_${hashString(`${seed}|${groupSeq}|${i}`)}`,
+                id: `kb_${hashString(`${g.title}|${g.heading}|${content}`)}`,
                 title: g.title,
                 heading: g.heading,
                 content

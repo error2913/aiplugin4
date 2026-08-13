@@ -1,26 +1,9 @@
-// 时间/定时器工具：当前时间与目标/间隔定时器设置
+// 定时器工具：目标/间隔定时器设置与查看、取消
 import { TimerManager } from "../../../timer";
 import { fmtDate } from "../../../utils/string";
 import Tool from "../../tool";
 
 export function registerTime() {
-    const toolGet = new Tool({
-        type: "function",
-        function: {
-            name: "get_time",
-            description: `获取当前时间`,
-            parameters: {
-                type: "object",
-                properties: {
-                },
-                required: []
-            }
-        }
-    });
-    toolGet.solve = async (_, __, ___, ____) => {
-        return fmtDate(Math.floor(Date.now() / 1000));
-    }
-
     const toolSet = new Tool({
         type: 'function',
         function: {

@@ -237,8 +237,8 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
-| MCP服务器配置 | 仅支持 JSON 格式：标准 `mcpServers` 块（Claude/Cursor/.mcp.json 可直接粘贴）、JSON 数组或单服务器 JSON；stdio 服务器会跳过；配置增删自动生效 |
-| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件 |
+| MCP服务器配置 | 仅支持 JSON 格式：标准 `mcpServers` 块（Claude/Cursor/.mcp.json 可直接粘贴）、JSON 数组或单服务器 JSON；stdio 服务器会跳过；配置增删自动生效。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
 ### 记忆
@@ -253,7 +253,7 @@ max_tokens = 2048
 | 短期记忆上限 | 短期记忆条数上限，超出后从最旧的开始淘汰（默认 10） |
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
 | 知识库注入阈值(字符) | 知识库总内容不超过该值时全量注入；超过时只注入条目索引，模型用 kb_read 工具读取详情（默认 5000） |
-| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 kb 工具/指令检索 |
+| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 kb 工具/指令检索。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
 
@@ -359,7 +359,7 @@ max_tokens = 2048
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
 | `.ai tool` | - | 列出所有工具及开关状态 |
-| `.ai tool help <函数名>` | `.ai tool help get_time` | 查看指定工具的详细说明和参数需求 |
+| `.ai tool help <函数名>` | `.ai tool help set_timer` | 查看指定工具的详细说明和参数需求 |
 | `.ai tool [on/off]` | - | 开启/关闭全部工具函数 |
 | `.ai tool [on/off] <函数名>` | `.ai tool on jrrp` | 开启/关闭指定工具函数 |
 | `.ai tool call <函数名> --参数=值` | `.ai tool call jrrp --name=错误` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
@@ -409,7 +409,7 @@ max_tokens = 2048
 | 记忆 | `add_memory`、`del_memory`、`search_memory`、`clear_memory` |
 | 知识库 | `kb_search`、`kb_read`、`kb_list`（只读检索，内容由配置维护） |
 | 消息 | `send_msg`、`get_msg`、`delete_msg`、`send_forward_msg`、`get_context` |
-| 定时 | `get_time`、`set_timer`、`show_timer_list`、`cancel_timer` |
+| 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
 | 指令 | `run_command`（列出/调用海豹指令）、`get_cmd_help`（查看指令帮助） |
 | 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
