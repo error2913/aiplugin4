@@ -10,7 +10,7 @@ import User from "../session/user";
 import { ToolCall } from "../tool/types";
 import { getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo, netExists } from "../utils/ob11";
 import { levenshteinDistance, stripInternalTags } from "../utils/string";
-import { TypeDescriptor } from "../utils/utils";
+import { TypeDescriptor, withTimeout } from "../utils/utils";
 
 import Message from "./message";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
@@ -406,11 +406,19 @@ export class Context {
     async updateName(epId: string, gid: string, uid: string) {
         switch (this.autoNameMod) {
             case 1: {
-                await this.setName(epId, gid, uid, 'nickname');
+                try {
+                    await withTimeout(() => this.setName(epId, gid, uid, 'nickname'), 5000);
+                } catch (e) {
+                    Logger.warning(`自动改名（昵称）失败: ${e instanceof Error ? e.message : String(e)}`);
+                }
                 break;
             }
             case 2: {
-                await this.setName(epId, gid, uid, 'card');
+                try {
+                    await withTimeout(() => this.setName(epId, gid, uid, 'card'), 5000);
+                } catch (e) {
+                    Logger.warning(`自动改名（群名片）失败: ${e instanceof Error ? e.message : String(e)}`);
+                }
                 break;
             }
         }

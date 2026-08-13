@@ -19,7 +19,7 @@ export default class ToolConfig {
   "mcpServers": {
     "mcp-files-exec": {
       "type": "http",
-      "url": "http://127.0.0.1:3910",
+      "url": "http://127.0.0.1:3910/mcp",
       "headers": {
         "Authorization": "Bearer token"
       }
