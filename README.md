@@ -237,7 +237,7 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
-| MCP服务器配置 | 仅支持 JSON 格式：标准 `mcpServers` 块（Claude/Cursor/.mcp.json 可直接粘贴）、JSON 数组或单服务器 JSON；stdio 服务器会跳过；配置增删自动生效。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
@@ -275,9 +275,7 @@ max_tokens = 2048
 | 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/stream-output)，`body.stream = true` 的模型才会走流式 |
 | 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
 | 联网搜索 | [searxng](https://github.com/searxng/searxng)，有能力建议自己搭建，为 AI 提供联网搜索功能 |
-| 网页读取 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/web-read)，为 AI 提供网页详细内容获取功能（MCP，默认 `http://127.0.0.1:46799/mcp`） |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/usage-chart)，token 使用情况图表生成 |
-| md和html图片渲染 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/md-html-render)，将 Markdown/HTML 渲染为图片（MCP，默认 `http://127.0.0.1:37632/mcp`） |
 | 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
 | 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
 | 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |

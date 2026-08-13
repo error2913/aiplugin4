@@ -29,6 +29,10 @@ const serverStates: { [name: string]: MCPServerState } = {};
 const mcpToolKeys = new Map<string, string>(); // MCP 注册过的工具键 → 所属服务器名，仅清理这些键避免误删普通工具
 let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步工具列表
 
+// 内置后端服务（有专用包装工具 web_read / render_markdown / render_html），
+// 仅作为 MCP 服务器供包装工具调用，不把其 tools/list 重复注册为 AI 工具
+const BUILTIN_BACKEND_SERVERS = new Set(['web-read', 'md-html-render']);
+
 /** 服务器配置是否一致：url/token/headers 任一变化都视为新配置，需要重建会话并重新拉取工具列表 */
 function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
     if (a.url !== b.url || a.token !== b.token) return false;
@@ -36,7 +40,7 @@ function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
 }
 
 /** 按名称取最新配置：始终实时解析当前配置（热加载后立即生效），不保留已移除服务器的旧会话 */
-function getServerByName(name: string): MCPServer | null {
+export function getMCPServerByName(name: string): MCPServer | null {
     // 只返回仍存在于配置中的服务器：服务器被移除后，即使工具列表尚未清理，调用也立即失败而非继续使用旧地址
     return getMCPServers().find(s => s.name === name) || null;
 }
@@ -86,26 +90,16 @@ function getMCPServers(): MCPServer[] {
         try {
             const j = JSON.parse(line);
             // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
-            if (j && typeof j === 'object' && j.mcpServers && typeof j.mcpServers === 'object') {
-                for (const [name, cfg] of Object.entries(j.mcpServers)) {
-                    const s = normalizeMCPServer(name, cfg);
-                    if (s) servers.push(s);
-                }
+            if (!j || typeof j !== 'object' || !j.mcpServers || typeof j.mcpServers !== 'object' || Array.isArray(j.mcpServers)) {
+                Logger.error(`MCP服务器配置仅支持标准 mcpServers JSON 格式（{"mcpServers":{...}}），已忽略该行: ${line.slice(0, 120)}`);
                 continue;
             }
-            // JSON 数组：[{name/url/type/headers...}]
-            if (Array.isArray(j)) {
-                for (const cfg of j) {
-                    const s = normalizeMCPServer(String((cfg && (cfg.name || cfg.url)) || 'mcp'), cfg);
-                    if (s) servers.push(s);
-                }
-                continue;
+            for (const [name, cfg] of Object.entries(j.mcpServers)) {
+                const s = normalizeMCPServer(name, cfg);
+                if (s) servers.push(s);
             }
-            // 单服务器 JSON：{"name":"qq","type":"http","url":"http://...","headers":{...}}
-            const s = normalizeMCPServer(String(j.name || j.url || ''), j);
-            if (s) servers.push(s);
         } catch (e) {
-            Logger.error(`MCP服务器配置解析失败（仅支持 JSON 格式）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+            Logger.error(`MCP服务器配置解析失败（仅支持标准 mcpServers JSON 格式）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
         }
     }
     return servers.filter(s => s.name && s.url);
@@ -279,7 +273,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         }, true);
         // 闭包只捕获服务器名：每次调用取最新配置，避免配置热加载后仍用旧 URL/Token
         tool.solve = async (_ctx, _msg, _session, args) => {
-            const current = getServerByName(server.name);
+            const current = getMCPServerByName(server.name);
             if (!current) return `MCP 服务器 ${server.name} 未配置`;
             return await callTool(current, t.name, args || {});
         };
@@ -316,6 +310,8 @@ export async function registerMCPTools() {
     lastRefreshAt = now;
 
     for (const server of servers) {
+        // 内置后端服务由专用包装工具调用，不注册为 AI 可见的 MCP 工具
+        if (BUILTIN_BACKEND_SERVERS.has(server.name)) continue;
         try {
             await syncTools(server);
         } catch (e) {

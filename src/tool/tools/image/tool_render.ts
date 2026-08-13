@@ -1,11 +1,10 @@
-// 渲染工具：Markdown/HTML 转图片
-import Config from "../../../config/config";
+// 渲染工具：Markdown/HTML 转图片（后端 md-html-render，经「工具 → MCP服务器配置」接入）
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { Session } from "../../../session/session";
 import { parseSpecialTokens } from "../../../utils/string";
 import { generateId } from "../../../utils/utils";
-import { callServerTool } from "../../mcp";
+import { callServerTool, getMCPServerByName } from "../../mcp";
 import Tool from "../../tool";
 
 interface RenderResponse {
@@ -84,8 +83,8 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
 
 // Markdown 渲染
 async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradient' = 'light', width = 1200, hasImages = false) {
-    const { RENDER: renderUrl } = Config.backend;
-    const mcpServer = { name: 'md-html-render', url: renderUrl, token: '', headers: {} };
+    const mcpServer = getMCPServerByName('md-html-render');
+    if (!mcpServer) throw new Error(`未配置 MCP 服务器 md-html-render：请在「工具 → MCP服务器配置」中按标准 mcpServers 格式添加`);
     const base64 = await callServerTool(mcpServer, 'render_markdown', { markdown, theme, width, quality: 90, hasImages });
     if (!base64) throw new Error('渲染结果为空');
     return { status: 'success', base64 } as RenderResponse;
@@ -93,8 +92,8 @@ async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradi
 
 // HTML 渲染
 async function renderHtml(html: string, width = 1200, hasImages = false) {
-    const { RENDER: renderUrl } = Config.backend;
-    const mcpServer = { name: 'md-html-render', url: renderUrl, token: '', headers: {} };
+    const mcpServer = getMCPServerByName('md-html-render');
+    if (!mcpServer) throw new Error(`未配置 MCP 服务器 md-html-render：请在「工具 → MCP服务器配置」中按标准 mcpServers 格式添加`);
     const base64 = await callServerTool(mcpServer, 'render_html', { html, theme: 'light', width, quality: 90, hasImages });
     if (!base64) throw new Error('渲染结果为空');
     return { status: 'success', base64 } as RenderResponse;
