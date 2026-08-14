@@ -13,6 +13,7 @@ import { stripInternalTags } from "../utils/string";
 import { generateId, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 
 import MemoryItem from "./memory_item";
+import { bumpMemoryRevision } from "./revision";
 import { MemorySource, searchOptions } from "./types";
 
 export default class MemoryService {
@@ -111,11 +112,18 @@ export default class MemoryService {
 
     clearMemory() {
         this.memoryMap = {};
+        bumpMemoryRevision();
     }
 
     deleteMemory(ids: string[] = [], kws: string[] = []) {
+        const before = this.memories.length;
         // 按 id 精确删除（复用 deleteMemories 的严格匹配路径）
-        if (ids.length > 0) this.deleteMemories(ids);
+        let bumpedByDeleteMemories = false;
+        if (ids.length > 0) {
+            const beforeIds = this.memories.length;
+            this.deleteMemories(ids);
+            bumpedByDeleteMemories = this.memories.length !== beforeIds;
+        }
         // 按关键词宽松删除：命中任一关键词即删除
         if (kws.length > 0) {
             for (const id in this.memoryMap) {
@@ -124,6 +132,7 @@ export default class MemoryService {
                 }
             }
         }
+        if (!bumpedByDeleteMemories && this.memories.length !== before) bumpMemoryRevision();
     }
 
     async addMemory(_ctx: seal.MsgContext | null, session: Session, ul: UserInfo[], gl: GroupInfo[], kws: string[], images: Image[], text: string, visibility: 'public' | 'private' = 'public') {
@@ -149,6 +158,7 @@ export default class MemoryService {
         await m.updateVector();
         this.limitMemory();
         this.memoryMap[id] = m;
+        bumpMemoryRevision();
     }
 
     limitMemory() {
@@ -161,7 +171,10 @@ export default class MemoryService {
         const listText = ml.map((m, i) =>
             (i + 1) + '. [' + m.id + '] ' + m.content
         ).join('\n');
-        return '私聊:' + si.isPrivate + '\n群聊名称:' + si.name + '\n记忆列表:\n' + listText;
+        if (si.isPrivate) {
+            return '记忆类型:个人记忆\n记忆列表:\n' + listText;
+        }
+        return '记忆类型:群聊记忆\n群聊名称:' + si.name + '\n记忆列表:\n' + listText;
     }
 
     getLatestMemoryListText(si: SessionInfo, p: number = 1): string {
@@ -266,6 +279,7 @@ export default class MemoryService {
         await Promise.all(memoriesToAdd.map(async m => await m.updateVector()));
         this.limitMemories(memoriesToAdd.length);
         memoriesToAdd.forEach(m => this.memoryMap[m.id] = m);
+        bumpMemoryRevision();
     }
 
     /**
@@ -279,6 +293,7 @@ export default class MemoryService {
      */
     deleteMemories(ids: string[] = [], tags: string[] = [], relatedMemories: string[] = [], users: string[] = [], groups: string[] = []) {
         if (ids.length === 0 && tags.length === 0 && relatedMemories.length === 0 && users.length === 0 && groups.length === 0) return;
+        const before = this.memories.length;
 
         if (ids.length > 0) {
             ids.forEach(id => {
@@ -303,6 +318,7 @@ export default class MemoryService {
                 ) delete this.memoryMap[id];
             }
         }
+        if (this.memories.length !== before) bumpMemoryRevision();
     }
 
     limitMemories(vacancy: number) {
@@ -323,6 +339,7 @@ export default class MemoryService {
 
     clearMemories() {
         this.memoryMap = {};
+        bumpMemoryRevision();
     }
 
     private static lastEmbeddingWarnAt = 0;

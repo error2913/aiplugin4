@@ -60,10 +60,8 @@ export interface AgentGlobalApi {
     registerTool(info: ToolInfo, options?: RegisterToolOptions): boolean;
 }
 
-/** 把智能体 API 挂载到 globalThis，重复加载/重载时保持幂等 */
+/** 把智能体 API 挂载到 globalThis；JS 重载时直接覆盖为新版本对象，避免外部插件拿到旧 API */
 export function registerAgentApi(): void {
-    if ((globalThis as any)[AGENT_GLOBAL_NAME]) return;
-
     const api: AgentGlobalApi = {
         name: NAME,
         version: VERSION,

@@ -1,4 +1,5 @@
 // 对话配置：角色设定/示例对话/轮数/插入间隔/压缩阈值
+import { logger } from "../../logger";
 import { ext } from "../config";
 export default class MessageConfig {
 
@@ -17,20 +18,35 @@ export default class MessageConfig {
 
     static get() {
         const INSTRUCTIONS = seal.ext.getTemplateConfig(ext, "角色扮演设定");
+        const MAX_ROUNDS = seal.ext.getIntConfig(ext, "对话保存轮数");
+        const INSERT_COUNT = normalizeInsertCount(seal.ext.getIntConfig(ext, "插入system message间隔轮数"), MAX_ROUNDS);
         return {
             INSTRUCTIONS,
             ROLE_NAMES: parseRoleNames(INSTRUCTIONS),
             ROLE_SETTINGS: parseRoleSettings(INSTRUCTIONS),
             SAMPLE_MESSAGES: seal.ext.getTemplateConfig(ext, "示例对话"),
-            MAX_ROUNDS: seal.ext.getIntConfig(ext, "对话保存轮数"),
+            MAX_ROUNDS,
             MAX_CONTEXT_TOKENS: seal.ext.getIntConfig(ext, "上下文最大token"),
-            INSERT_COUNT: seal.ext.getIntConfig(ext, "插入system message间隔轮数"),
+            INSERT_COUNT,
             COMPRESS_THRESHOLD: seal.ext.getIntConfig(ext, "消息压缩阈值")
         }
     }
 }
 
 const ROLE_NAME_MAX_LENGTH = 20;
+
+/**
+ * 插入 system message 间隔轮数校验：必须 > 0 且小于「对话保存轮数」的一半才生效，
+ * 否则按关闭（0）处理并告警，避免插入频率超过历史窗口导致 system 消息占满上下文。
+ */
+function normalizeInsertCount(raw: number, maxRounds: number): number {
+    if (raw <= 0) return 0;
+    if (maxRounds > 0 && raw * 2 >= maxRounds) {
+        logger.warning(`「插入system message间隔轮数」${raw} 未小于「对话保存轮数」${maxRounds} 的二分之一，已按关闭处理`);
+        return 0;
+    }
+    return raw;
+}
 
 /**
  * 解析单个角色设定条目：第一行为角色设定名称（超过 20 字符自动截断），其余为设定内容。

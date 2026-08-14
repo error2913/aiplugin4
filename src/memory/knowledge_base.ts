@@ -71,6 +71,13 @@ export class KnowledgeBaseService {
         return this.chunks.length === 0;
     }
 
+    /** prompt 缓存版本：基于当前配置开关/阈值/全部条目内容生成，配置变化后自然产生新 key */
+    getCacheVersion(): string {
+        const items = Array.isArray(Config.memory.KNOWLEDGE_ITEMS) ? Config.memory.KNOWLEDGE_ITEMS : [];
+        const signature = items.map(item => hashString(item || '')).join(',');
+        return `${Config.memory.KNOWLEDGE ? '1' : '0'}|${Config.memory.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${signature}`;
+    }
+
     /** 全部条目索引（id/标题/小节） */
     list(): KnowledgeChunk[] {
         return this.chunks;

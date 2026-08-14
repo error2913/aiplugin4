@@ -1,4 +1,5 @@
 // .ai ctxn：上下文内名字自动修改相关
+import { logger } from "../../logger";
 import { aliasToCmd } from "../../utils/utils";
 import { I, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -40,6 +41,9 @@ export function registerCmdCtxn() {
                 const promises = session.context.userInfoList.map(ui => session.context.setName(epId, gid, ui.id, mod));
                 Promise.all(promises).then(() => {
                     seal.replyToSender(ctx, msg, `设置完成，上下文里的名字有：\n${session.context.userInfoList.map(uni => `${uni.name}(${uni.id})`).join('\n')}`);
+                }).catch((e: any) => {
+                    logger.error(`批量设置上下文名字出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                    seal.replyToSender(ctx, msg, '批量设置名字失败，请查看日志');
                 });
                 return ret;
             }

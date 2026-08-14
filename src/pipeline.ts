@@ -12,10 +12,15 @@ import { expandMilkySegments, MessageSegment, parseCardToText, parseMusicToText,
 
 /** 海豹核心原生 milky 接收路径会过滤掉的段类型，只能通过 ob11 依赖的事件分发（milky → OB11 转接）收到 */
 const OB11_EXTRA_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
+/** 消息节点/合并转发展开的最大嵌套深度，防止恶意或异常嵌套导致无限递归 */
+const MAX_FORWARD_DEPTH = 5;
 
 export class MessagePipeline {
     /** ob11 数组消息段 → MessageSegment[]：把卡片/视频/音乐/文件/消息节点/合并转发展开为文本段，其余段保留 */
-    private static async expandOb11Segments(ctx: seal.MsgContext, segs: any[]): Promise<MessageSegment[]> {
+    private static async expandOb11Segments(ctx: seal.MsgContext, segs: any[], depth: number = 0): Promise<MessageSegment[]> {
+        if (depth > MAX_FORWARD_DEPTH) {
+            return [{ type: 'text', data: { text: '[消息嵌套过深，已截断]' } }];
+        }
         const result: MessageSegment[] = [];
         const epId = ctx.endPoint.userId;
         for (const seg of segs) {
@@ -45,11 +50,11 @@ export class MessagePipeline {
                     break;
                 }
                 case 'node': {
-                    result.push({ type: 'text', data: { text: await MessagePipeline.parseNodeToText(ctx, data) } });
+                    result.push({ type: 'text', data: { text: await MessagePipeline.parseNodeToText(ctx, data, depth + 1) } });
                     break;
                 }
                 case 'forward': {
-                    const text = await expandForwardMessage(epId, data.id || data.file || '');
+                    const text = await expandForwardMessage(epId, data.id || data.file || '', depth + 1);
                     result.push({
                         type: 'text',
                         data: { text: text ? `【合并转发】\n${text}` : '[合并转发消息，展开失败]' }
@@ -63,13 +68,16 @@ export class MessagePipeline {
     }
 
     /** 消息节点（node）转可读文本：完整节点递归内容，仅 id 时走 ob11 获取 */
-    private static async parseNodeToText(ctx: seal.MsgContext, data: any): Promise<string> {
+    private static async parseNodeToText(ctx: seal.MsgContext, data: any, depth: number = 0): Promise<string> {
         const name = (data && (data.nickname || data.name)) || (data && data.user_id ? `用户${data.user_id}` : '');
+        if (depth > MAX_FORWARD_DEPTH) {
+            return `【消息节点】${name}（嵌套过深，已截断）`;
+        }
         if (data && typeof data.content === 'string') {
             return `${name}: ${data.content}`;
         }
         if (data && Array.isArray(data.content)) {
-            const segs = await this.expandOb11Segments(ctx, data.content);
+            const segs = await this.expandOb11Segments(ctx, data.content, depth + 1);
             let text = '';
             for (const s of segs) {
                 text += s.type === 'text' ? ((s.data && s.data.text) || '') : `[${s.type}]`;
@@ -77,7 +85,7 @@ export class MessagePipeline {
             return `${name}: ${text}`;
         }
         if (data && data.id) {
-            const text = await expandForwardMessage(ctx.endPoint.userId, String(data.id));
+            const text = await expandForwardMessage(ctx.endPoint.userId, String(data.id), depth + 1);
             return text ? `${name}:\n${text}` : `【消息节点】${name}`;
         }
         return `【消息节点】${name}`;
@@ -293,7 +301,9 @@ export class MessagePipeline {
                         if (setting.timer > -1) {
                             session.context.timer = setTimeout(() => {
                                 session.context.timer = null;
-                                session.chat(ctx, msg, '计时器');
+                                session.chat(ctx, msg, '计时器').catch((e: any) => {
+                                    logger.error(`计时器触发对话出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                                });
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
                         }
                     })
@@ -326,7 +336,9 @@ export class MessagePipeline {
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
             if (setting.standby) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
+                session.handleReceipt(ctx, msg, messageArray).then(() => session.save()).catch((e: any) => {
+                    logger.error(`指令消息入库出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                });
             }
         }
     }
@@ -362,7 +374,9 @@ export class MessagePipeline {
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
             if (setting.standby) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
+                session.handleReceipt(ctx, msg, messageArray).then(() => session.save()).catch((e: any) => {
+                    logger.error(`机器人消息入库出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                });
             }
         }
     }

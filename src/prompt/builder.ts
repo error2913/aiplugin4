@@ -1,8 +1,12 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
-import Config from "../config/config";
+import Config, { ext } from "../config/config";
+import { VECTOR_SIMILARITY } from "../config/static_config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
+import { knowledgeService } from "../memory/knowledge";
 import { MemoryManager } from "../memory/manager";
+import { getMemoryRevision, getSummaryRevision } from "../memory/revision";
+import Model from "../model/model";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
@@ -10,11 +14,37 @@ import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 
+import { getCachedString } from "./prompt_cache";
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
 
 export interface SystemPromptSection {
     name: string;
     content: string;
+}
+
+const STATIC_FRAME_TTL = 30_000;
+const LONG_TERM_MEMORY_TTL = 10_000;
+const SUMMARY_TTL = 60_000;
+const KNOWLEDGE_TTL = 60_000;
+
+function signature(parts: Array<string | number | boolean>): string {
+    return parts.map(String).join('|');
+}
+
+function localResourceSignature(): string {
+    return signature([
+        (Config.resource.LOCAL_IMAGES || []).map(img => img.imageId).join(','),
+        (Config.resource.LOCAL_AUDIOS || []).map(a => a.audioId).join(','),
+        (Config.resource.LOCAL_FILES || []).map(f => f.fileId).join(','),
+        (Config.resource.LOCAL_VIDEOS || []).map(v => v.videoId).join(',')
+    ]);
+}
+
+function toolStateSignature(session: Session): string {
+    return Object.keys(session.toolState)
+        .sort()
+        .map(key => `${key}:${session.toolState[key] ? '1' : '0'}`)
+        .join(',');
 }
 
 /**
@@ -30,12 +60,6 @@ export async function buildSystemPromptContent(
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-
-    // 本地可发送资源（图片/语音/文件/视频）来自“资源”配置
-    const localImages = (Config.resource.LOCAL_IMAGES || []).map(img => ({ imageId: img.imageId }));
-    const localAudios = Config.resource.LOCAL_AUDIOS || [];
-    const localFiles = (Config.resource.LOCAL_FILES || []).map(f => ({ fileId: f.fileId }));
-    const localVideos = (Config.resource.LOCAL_VIDEOS || []).map(v => ({ videoId: v.videoId }));
 
     // 取最近 2~3 条用户消息拼接，作为记忆/知识库查询的上下文（剥离内部标签）
     const userMessages = session.context.messages.filter(m => m.role === 'user');
@@ -55,38 +79,98 @@ export async function buildSystemPromptContent(
     if (!ctx.isPrivate && ctx.group) {
         gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
     }
+    // 限制记忆检索 query 长度：优先保留最近内容，避免超长合并消息/合并转发完整送入 embedding
+    if (text.length > 2000) text = text.slice(-2000);
 
-    // 记忆段：长期记忆 + 总结记忆 + 知识库（统一由 MemoryManager 按开关构建）
-    const memoryPrompt = await MemoryManager.buildLongTermPrompt(ctx, session, text, ui || null, gi || null);
-    const summaryPrompt = MemoryManager.buildSummaryPrompt(session);
-    const knowledgePrompt = await MemoryManager.buildKnowledgePrompt(session, text);
-
-    // 能力段：工具函数 + 可用技能（MCP 工具已并入工具列表）
-    const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
-
-    let content = SYSTEM_MESSAGE_TEMPLATE({
-        instruction: roleSetting,
-        platform: ctx.endPoint.platform,
-        sessionType: ctx.isPrivate ? 'private' : 'group',
-        sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
-        sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
-        currentTime: fmtDate(Math.floor(Date.now() / 1000)),
+    // 静态壳：角色/平台/会话/本地资源/工具与技能，连续对话可复用 30 秒。
+    // key 读取原始技能配置避免每次缓存命中都解析/打印错误；真正解析在缓存未命中时执行。
+    const toolState = STATUS && PROMPT_ENGINEERING ? toolStateSignature(session) : '';
+    const skillConfigSignature = STATUS ? seal.ext.getTemplateConfig(ext, "技能配置").join('\n') : '';
+    const staticKey = signature([
+        'prompt:static',
+        roleSetting,
+        ctx.endPoint.platform,
+        ctx.isPrivate ? 'private' : 'group',
+        ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
+        ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
         RECEIVE_IMAGE,
-        LOCAL_IMAGES: localImages,
-        LOCAL_AUDIOS: localAudios,
-        LOCAL_FILES: localFiles,
-        LOCAL_VIDEOS: localVideos,
-        memoryPrompt,
-        summaryPrompt,
-        knowledgePrompt,
-        toolPrompt
+        localResourceSignature(),
+        STATUS,
+        PROMPT_ENGINEERING,
+        Config.tool.BLOCKED.join(','),
+        Config.tool.DEFAULT_CLOSED.join(','),
+        toolState,
+        skillConfigSignature
+    ]);
+    const frame = await getCachedString(staticKey, STATIC_FRAME_TTL, () => {
+        const skillSummaries = getSkillSummaries();
+        const localImages = (Config.resource.LOCAL_IMAGES || []).map(img => ({ imageId: img.imageId }));
+        const localAudios = Config.resource.LOCAL_AUDIOS || [];
+        const localFiles = (Config.resource.LOCAL_FILES || []).map(f => ({ fileId: f.fileId }));
+        const localVideos = (Config.resource.LOCAL_VIDEOS || []).map(v => ({ videoId: v.videoId }));
+        const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
+
+        let content = SYSTEM_MESSAGE_TEMPLATE({
+            instruction: roleSetting,
+            platform: ctx.endPoint.platform,
+            sessionType: ctx.isPrivate ? 'private' : 'group',
+            sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
+            sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
+            RECEIVE_IMAGE,
+            LOCAL_IMAGES: localImages,
+            LOCAL_AUDIOS: localAudios,
+            LOCAL_FILES: localFiles,
+            LOCAL_VIDEOS: localVideos,
+            toolPrompt
+        });
+
+        if (STATUS && skillSummaries.length > 0) {
+            content += `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
+        }
+        return content;
     });
 
-    // 能力段：技能在两种工具模式下都可见（函数调用模式无工具提示词段时也能发现技能）
-    const skillSummaries = getSkillSummaries();
-    if (skillSummaries.length > 0) {
-        content += `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
-    }
+    // 动态段：长期记忆只短缓存并绑定版本号，保证刚写入的记忆立即可见；
+    // 总结记忆与知识库变化频率更低，分别用版本号和知识库配置签名失效。
+    const embeddingModelName = Model.getEmbeddingModel('text-embedding')?.name || '';
+    const memoryKey = signature([
+        'prompt:memory',
+        session.sessionId,
+        getMemoryRevision(),
+        Config.memory.MEMORY,
+        Config.memory.MEMORY_SHOW_NUMBER,
+        Config.model.EMBEDDING_MODEL_ENABLED,
+        Model.getEmbeddingDimension(),
+        embeddingModelName,
+        VECTOR_SIMILARITY,
+        ctx.isPrivate,
+        session.memory.persona,
+        seal.formatTmpl(ctx, '核心:骰子名字'),
+        ui?.id || '',
+        ui?.name || '',
+        gi?.id || '',
+        gi?.name || '',
+        text
+    ]);
+    const summaryKey = signature([
+        'prompt:summary',
+        session.sessionId,
+        getSummaryRevision(),
+        Config.memory.SUMMARY
+    ]);
+    const knowledgeKey = signature(['prompt:knowledge', knowledgeService.getCacheVersion()]);
+
+    const [memoryPrompt, summaryPrompt, knowledgePrompt] = await Promise.all([
+        getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, ui || null, gi || null)),
+        getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildSummaryPrompt(session)),
+        getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
+    ]);
+
+    const dynamicSections = [memoryPrompt, summaryPrompt, knowledgePrompt].filter(Boolean).join('\n\n');
+    const content = frame
+        .replace('**CURRENT_TIME**', fmtDate(Math.floor(Date.now() / 1000)))
+        .replace('**DYNAMIC_SECTIONS**', dynamicSections);
+
     // 防注入：长期记忆/总结记忆/知识库等外部内容可能夹带内部上下文标签，system prompt 出口统一兜底剥离
     return stripInternalTags(content);
 }
