@@ -216,19 +216,28 @@ async function getSessionId(server: MCPServer, force = false): Promise<string> {
     return sessionId;
 }
 
-async function callTool(server: MCPServer, name: string, args: any): Promise<string> {
+/** 判断 MCP 错误是否属于会话失效/服务器未初始化，需要重新 initialize */
+function isSessionInvalidError(e: unknown): boolean {
+    const msg = e instanceof Error ? e.message : String(e);
+    return /会话不存在|已失效|session|未初始化|not initialized|Mcp-Session-Id|Server not initialized/i.test(msg);
+}
+
+/** 获取会话并执行请求；会话失效或服务器重启后未初始化时，重新 initialize 后重试一次 */
+async function withSessionRetry<T>(server: MCPServer, fn: (sessionId: string) => Promise<T>): Promise<{ sessionId: string, value: T }> {
+    let sessionId = await getSessionId(server);
     try {
-        const sessionId = await getSessionId(server);
-        return await doCallTool(server, sessionId, name, args);
+        return { sessionId, value: await fn(sessionId) };
     } catch (e) {
-        // 会话失效时重新 initialize 并重试一次
-        if (e instanceof Error && /会话不存在|已失效|session/i.test(e instanceof Error ? e.message : String(e))) {
-            Logger.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
-            const sessionId = await getSessionId(server, true);
-            return await doCallTool(server, sessionId, name, args);
-        }
-        throw e;
+        if (!isSessionInvalidError(e)) throw e;
+        Logger.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
+        sessionId = await getSessionId(server, true);
+        return { sessionId, value: await fn(sessionId) };
     }
+}
+
+async function callTool(server: MCPServer, name: string, args: any): Promise<string> {
+    const { value } = await withSessionRetry(server, sessionId => doCallTool(server, sessionId, name, args));
+    return value;
 }
 
 /** 供内置工具直接调用某个 MCP 服务器的工具（如 web-read / md-html-render 后端） */
@@ -245,8 +254,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         return state.tools;
     }
 
-    const sessionId = await getSessionId(server);
-    const tools = await listTools(server, sessionId);
+    const { sessionId, value: tools } = await withSessionRetry(server, sessionId => listTools(server, sessionId));
     serverStates[server.name] = { server, sessionId, tools, toolsFetchedAt: Date.now() };
 
     // 清理本服务器已注册但 tools/list 不再返回的工具（服务器内工具删除后热加载生效）

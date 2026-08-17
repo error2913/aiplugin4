@@ -429,7 +429,7 @@ max_tokens = 2048
 
 > 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖与 ffmpeg；`text_to_image` 需要生成图片依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
 
-> 扩展/核心指令工具通过 OB11 核心桥注入假消息，不再要求会话先出现 `.r`；请启动 `ob11-core-bridge`，让 SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「工具 → MCP服务器配置」中启用 `ob11-core-bridge`（`http://127.0.0.1:46880/mcp`）。
+> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「工具 → MCP服务器配置」中启用 `ob11-core-bridge`，`http://127.0.0.1:46880/mcp`）。
 
 ---
 

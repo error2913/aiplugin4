@@ -1,10 +1,10 @@
 # 11 - ob11-core-bridge 使用指南
 
-`ob11-core-bridge` 是 aiplugin4 的配套中转后端（位于独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)）。SealDice 以 OB11 正向 WebSocket 客户端身份主动连到中间件，中间件再**出站主动连接** OB11 协议端，插件通过 MCP 调用中间件：**注入假消息 → 执行核心/扩展指令 → 收集 bot 响应**，并把结果回传给 AI。
+`ob11-core-bridge` 是 aiplugin4 的配套中转后端（位于独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)）。SealDice 以 OB11 正向 WebSocket 客户端身份主动连到中间件，中间件再**出站主动连接** OB11 协议端，插件通过 MCP 调用中间件：**注入假消息 → 执行核心指令 → 收集 bot 响应**，并把结果回传给 AI。扩展指令由插件本地直调扩展 `solve` 执行（`run_ext_command`），不经过中间件。
 
 ## 为什么需要它
 
-SealDice 的 JS 插件无法直接调用核心指令（`.ext`、`.help` 等）与大多数扩展指令。中间件把 SealDice 当成一个普通 OB11 正向 WS 客户端接入，插件端通过 MCP 发起调用，中间件向核心 WS 注入一条“假消息”（`指令前缀 + 指令文本`），再监听核心为响应这条消息而发出的 `send_*_msg` Action 与消息事件，把多消息结果聚合后返回给调用方。
+SealDice 的 JS 插件无法直接调用核心指令（`.ext`、`.help` 等）——核心指令没有公开的 JS 调用入口；扩展指令则可直接调用 `cmdMap[cmd].solve` 在插件内本地执行（`run_ext_command`）。中间件把 SealDice 当成一个普通 OB11 正向 WS 客户端接入，插件端通过 MCP 发起 `run_core_command`，中间件向核心 WS 注入一条“假消息”（`指令前缀 + 指令文本`），再监听核心为响应这条消息而发出的 `send_*_msg` Action 与消息事件，把多消息结果聚合后返回给调用方。
 
 ## 拓扑
 
@@ -18,7 +18,7 @@ aiplugin4 插件（MCP 客户端）      <──>  /mcp
 | --- | --- |
 | `/core`、`/core/ws` | SealDice 核心正向 WS，海豹**主动连接**本端点 |
 | 协议端（出站） | 中间件作为 WS **客户端**，启动时主动连接你在配置里填写的协议端地址（带指数退避重连） |
-| `/mcp` | Streamable HTTP MCP 端点，提供 `run_ext_command` / `run_core_command` |
+| `/mcp` | Streamable HTTP MCP 端点，提供 `run_core_command`（核心指令注入）；扩展指令由插件本地执行 |
 | `/healthz` | 健康检查 |
 
 默认监听 `0.0.0.0:46880`。海豹**主动连入** `/core`；协议端由中间件**出站主动连接**（不支持反向 WS，协议端无需也无法连入中间件）。
@@ -106,11 +106,11 @@ ws://127.0.0.1:46880/core
 }
 ```
 
-3. 按需配置「可调用指令白名单」与「指令前缀」，AI 即可通过 `run_ext_command` / `run_core_command` 调用海豹指令。
+3. 按需配置「可调用指令白名单」与「指令前缀」。`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件；`run_core_command` 经 MCP 调用中间件执行核心指令。
 
 ## 工具与参数
 
-两个工具由中间件通过 MCP 注册，插件直接注册为 AI 工具（敏感工具，执行会显著记录）。
+两个工具都由插件注册为 AI 工具（敏感工具，执行会显著记录）。`run_ext_command` 在插件内本地直调扩展 `solve`，不依赖中间件；`run_core_command` 经中间件 MCP 注入假消息执行核心指令，需启动 `ob11-core-bridge`。
 
 ### run_ext_command — 扩展指令
 
@@ -118,6 +118,8 @@ ws://127.0.0.1:46880/core
 - `action=call`：执行扩展指令
 - `extension` + `command`：`扩展名|指令名`；`command` 也支持直接填 `扩展名|指令名`
 - `args`：指令参数，按顺序
+
+本地执行：直接调用扩展 `cmdMap[cmd].solve`（构造全新 `CmdArgs`，不要求会话先出现 `.r`），并复用多消息收集器收集扩展发出的多条回复。无需 MCP/中间件；核心内置扩展与第三方扩展均可调用，仍受「可调用指令白名单」约束。
 
 扩展分为两类：
 - `builtin`：fun / story / coc7 / deck / dnd5e / exp / log / reply —— 已硬编码在插件里，**无需在配置中维护内置扩展列表**
@@ -128,15 +130,17 @@ ws://127.0.0.1:46880/core
 - `action=list`：列出白名单中的核心指令
 - `action=call`：执行核心指令（如 `ext`、`help`；也支持 `core|ext` 写法）
 
-### 公共参数
+### 参数
 
-| 参数 | 说明 |
-| --- | --- |
-| `forward` | 是否把捕获到的核心发送消息继续转发给协议端，默认 `false`（拦截） |
-| `captureMode` | `reply_only` / `lane`；`forward=true` 且要捕获协议端产生的 bot 回复时建议用 `lane` |
-| `maxMessages` | 最多收集消息数（1–50；ext 默认 20，core 默认 50） |
-| `settleMs` | 收到消息后空闲多少毫秒无新消息即结束（0–10000；ext 默认 400，core 默认 500） |
-| `timeoutMs` | 最长等待毫秒数（100–120000，默认 10000） |
+| 参数 | 适用 | 说明 |
+| --- | --- | --- |
+| `forward` | 仅 `run_core_command` | 是否把捕获到的核心发送消息继续转发给协议端，默认 `false`（拦截） |
+| `captureMode` | 仅 `run_core_command` | `reply_only` / `lane`；`forward=true` 且要捕获协议端产生的 bot 回复时建议用 `lane` |
+| `maxMessages` | 两者 | 最多收集消息数（1–50；ext 默认 20，core 默认 50） |
+| `settleMs` | 两者 | 收到消息后空闲多少毫秒无新消息即结束（0–10000；ext 默认 400，core 默认 500） |
+| `timeoutMs` | 两者 | 最长等待毫秒数（100–120000，默认 10000） |
+
+> `run_ext_command` 本地执行时直接复用会话监听器的 `waitFor(timeoutMs, settleMs, maxMessages)` 收集扩展发出的多条消息；`run_core_command` 则把这些参数传给中间件的 `capture` 策略。
 
 ### 返回结果
 
@@ -148,6 +152,8 @@ ws://127.0.0.1:46880/core
 | `ambiguous` | 是否因无法区分并发消息而标记歧义 |
 | `forwardedCount` / `interceptedCount` | 转发 / 拦截计数 |
 | `error` | 失败原因（如核心未连接、target 缺少群/私聊 id） |
+
+> 上表是 `run_core_command` 经 MCP 返回的结果结构；`run_ext_command` 本地执行直接返回收集到的消息文本，异常时返回错误说明。
 
 ## 指令白名单
 
@@ -177,13 +183,14 @@ ws://127.0.0.1:46880/core
 
 ## 多核心
 
-多个海豹核心可同时连接中间件：核心连接后上报的 `self_id` 用于路由，调用与事件按 `self_id` 区分。插件端从当前消息上下文自动取 `selfId` 填入 `target`，`run_ext_command` / `run_core_command` 会命中对应的核心。
+多个海豹核心可同时连接中间件：核心连接后上报的 `self_id` 用于路由，`run_core_command` 的调用与事件按 `self_id` 区分，插件端从当前消息上下文自动取 `selfId` 填入 `target`。`run_ext_command` 在插件内本地直调当前实例的扩展 `solve`，不涉及多核心路由。
 
 ## 排障
 
 | 现象 | 检查 |
 | --- | --- |
-| 工具报「未配置 MCP 服务器 ob11-core-bridge」 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url |
+| `run_core_command` 报「未配置 MCP 服务器 ob11-core-bridge」 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url |
+| `run_ext_command` 执行失败 / 无响应 | 扩展是否已安装、指令名是否正确（`扩展名|指令名`）、是否在白名单、指令本身是否抛异常；与中间件无关 |
 | 执行无响应 / 超时 | SealDice 是否已连上 `/core`（看中间件日志）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
 | 返回 `ambiguous=true` | 同 lane 并发或缺少 reply 引用；调整 `captureMode` / `settleMs` |
 | 鉴权失败 | 核对 core token / protocol token / MCP headers 与中间件 token 一致 |
