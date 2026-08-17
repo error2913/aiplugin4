@@ -1,8 +1,8 @@
 // 海豹指令工具：扩展指令与核心指令走独立工具，并通过 OB11 核心桥注入假消息。
 import Config from "../../../config/config";
-import Logger from "../../../logger";
 import { CoreBridgeClient, formatCoreBridgeResult } from "../../../integration/core_bridge/client";
-import { collectCommands, extensionNames, isAllowedCore, isAllowedExtension, resolveEntry, splitEntry, ResolvedCommand } from "../../command_catalog";
+import Logger from "../../../logger";
+import { collectCommands, extensionNames, isAllowedCore, isAllowedExtension, ResolvedCommand, resolveEntry, splitEntry } from "../../command_catalog";
 import Tool from "../../tool";
 
 function commandText(item: ResolvedCommand): string {

@@ -32,8 +32,9 @@ declare namespace seal {
     /**
      * 使用当前消息上下文的账号发送一条“通知”给通知列表（骰主）。
      * @param text 通知内容
+     * @param noticeTypes 通知分类（可选），如 group / ban / invite / system 等，用于颗粒化过滤
      */
-    notice(text: string): void;
+    notice(text: string, ...noticeTypes: string[]): void;
   }
 
   /**
@@ -152,7 +153,8 @@ declare namespace seal {
     | 5 // 回复 Reply
     | 6 // 语音 Record
     | 7 // 表情 Face
-    | 8; // 戳一戳 Poke
+    | 8 // 戳一戳 Poke
+    | -1; // 兜底未知类型 Default
 
   /**
    * 消息段（富文本元素）。
@@ -169,7 +171,8 @@ declare namespace seal {
     | ReplyElement
     | RecordElement
     | FaceElement
-    | PokeElement;
+    | PokeElement
+    | DefaultElement;
 
   /** 文本元素（Go message.TextElement） */
   export interface TextElement {
@@ -183,6 +186,8 @@ declare namespace seal {
   export interface AtElement {
     /** 目标用户 ID */
     target: string;
+    /** 目标是否为机器人 */
+    isRobot: boolean;
     /** 元素类型（At = 1） */
     type(): MessageElementType;
   }
@@ -255,12 +260,26 @@ declare namespace seal {
     type(): MessageElementType;
   }
 
+  /**
+   * 默认元素（Go message.DefaultElement），兜底未注册的 CQ 元素类型。
+   * 注意：字段 type（字符串）会遮蔽 type() 方法，因此本类型没有 type() 方法，
+   * 实际类型只能通过该原始类型名判断。
+   */
+  export interface DefaultElement {
+    /** 原始元素类型名（CQ 码 type，如 video / xml 等） */
+    type: string;
+    /** 元素原始数据（JSON 文本） */
+    data: any;
+  }
+
   /** 发送者信息 */
   export interface Sender {
     /** 昵称 */
     nickname: string;
     /** 用户 ID */
     userId: string;
+    /** 是否为机器人 */
+    isRobot: boolean;
   }
 
   /**
@@ -308,6 +327,10 @@ declare namespace seal {
   export interface AtInfo {
     /** 被 @ 的用户 ID */
     userId: string;
+    /** 被 @ 的账号是否为机器人 */
+    isRobot: boolean;
+    /** 被 @ 用户的昵称（v1.6.1 起，平台提供时填充） */
+    name: string;
   }
 
   /** 关键字参数，如 `.ra 50 --key=20 --asm` */
@@ -384,7 +407,7 @@ declare namespace seal {
   /** 指令定义 */
   export interface CmdItemInfo {
     /** 指令执行函数，返回执行结果 */
-    solve: (ctx: MsgContext, msg: Message, cmdArgs: CmdArgs) => CmdExecuteResult | Promise<CmdExecuteResult>;
+    solve: (ctx: MsgContext, msg: Message, cmdArgs: CmdArgs) => CmdExecuteResult;
     /** 指令名称 */
     name: string;
     /** 长帮助，带换行的较详细说明 */
@@ -426,6 +449,8 @@ declare namespace seal {
     version: string;
     /** 是否自动开启 */
     autoActive: boolean;
+    /** 跟随开关：指定扩展开启/关闭时，本扩展同步开启/关闭 */
+    activeWith: string[];
     /** 指令映射：key 为指令名，value 为指令定义 */
     cmdMap: { [key: string]: CmdItemInfo };
     /** 作者 */
@@ -434,6 +459,8 @@ declare namespace seal {
     isLoaded: boolean;
     /** 获取扩展介绍文本 */
     getDescText(): string;
+    /** 获取扩展所属 .sealpack 的包级配置；不属于任何包时返回空对象 */
+    getPackageConfig(): { [key: string]: any };
     /** 监听 加载时 事件 */
     onLoad: () => void;
     /** 指令过滤后剩下的非指令消息 */
@@ -574,6 +601,8 @@ declare namespace seal {
     deprecated: boolean;
     /** 描述 */
     description: string;
+    /** 配置分组（非空时 WebUI 会生成对应的二级配置页签） */
+    group: string;
   }
 
   /**
@@ -796,7 +825,8 @@ declare namespace seal {
       value: string,
       fn: (taskCtx: JsScriptTaskCtx) => void,
       key?: string,
-      desc?: string
+      desc?: string,
+      group?: string
     ): JsScriptTask;
   };
 
