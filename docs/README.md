@@ -21,6 +21,7 @@ AI 骰娘4 是一个运行在 [SealDice](https://docs.sealdice.com/) 上的 JS �
 | [08-相关后端项目](08-相关后端项目.md) | 配套后端服务(独立仓库 aiplugin4-backends)的说明 |
 | [09-注意事项与常见问题](09-注意事项与常见问题.md) | 与 README 的差异、已知问题、排障提示 |
 | [10-TODO 与后续计划](10-TODO.md) | 待办事项、环境适配后需落地的改动清单 |
+| [11-ob11-core-bridge-使用指南](11-ob11-core-bridge-使用指南.md) | OB11 核心桥中间件：部署、SealDice/协议端/MCP 接入、工具参数与排障 |
 | [模型配置参考](MODELS-chat.md) | 对话 / 图片 / 嵌入三种模型的完整 TOML 示例与兼容性说明（[对话](MODELS-chat.md) · [图片](MODELS-image.md) · [嵌入](MODELS-embedding.md)） |
 
 ## 阅读建议

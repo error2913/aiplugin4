@@ -1,0 +1,183 @@
+# 11 - ob11-core-bridge 使用指南
+
+`ob11-core-bridge` 是 aiplugin4 的配套中转后端（位于独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)）。SealDice 以 OB11 正向 WebSocket 客户端身份主动连到中间件，OB11 协议端连到中间件，插件通过 MCP 调用中间件：**注入假消息 → 执行核心/扩展指令 → 收集 bot 响应**，并把结果回传给 AI。
+
+## 为什么需要它
+
+SealDice 的 JS 插件无法直接调用核心指令（`.ext`、`.help` 等）与大多数扩展指令。中间件把 SealDice 当成一个普通 OB11 正向 WS 客户端接入，插件端通过 MCP 发起调用，中间件向核心 WS 注入一条“假消息”（`指令前缀 + 指令文本`），再监听核心为响应这条消息而发出的 `send_*_msg` Action 与消息事件，把多消息结果聚合后返回给调用方。
+
+## 拓扑
+
+```text
+SealDice（OB11 正向 WS 客户端）  <──>  /core（或 /core/ws）
+OB11 协议端 / 模拟器              <──>  /onebot
+aiplugin4 插件（MCP 客户端）      <──>  /mcp
+```
+
+| 端点 | 用途 |
+| --- | --- |
+| `/core`、`/core/ws` | SealDice 核心正向 WS，海豹**主动连接**本端点 |
+| `/onebot` | OB11 协议端（NapCat / LLOneBot / 测试模拟器）的 WS |
+| `/mcp` | Streamable HTTP MCP 端点，提供 `run_ext_command` / `run_core_command` |
+| `/healthz` | 健康检查 |
+
+默认监听 `0.0.0.0:46880`。中间件只做入站监听，没有出站连接（无 `CORE_URL` 之类的配置）；海豹和协议端都要主动连过来。
+
+## 部署
+
+### 方式一：launcher 一键管理（推荐）
+
+```bash
+python launcher.py start ob11-core-bridge
+```
+
+首次启动自动创建依赖并后台运行；也可以在 WebUI（默认 `http://127.0.0.1:8910`）里安装、启动、改端口与 token。
+
+### 方式二：手动运行
+
+```bash
+cd ob11-core-bridge   # 后端独立包目录
+npm install
+npm start
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `AIPLUGIN4_BACKEND_HOST` | `0.0.0.0` | 监听地址 |
+| `AIPLUGIN4_BACKEND_PORT` | `46880` | 监听端口 |
+| `AIPLUGIN4_BRIDGE_CORE_PATH` | `/core` | 核心 WS 路径（默认同时接受 `/core/ws`） |
+| `AIPLUGIN4_BRIDGE_CORE_PATHS` | `/core,/core/ws` | 核心 WS 路径集合（逗号分隔，覆盖默认） |
+| `AIPLUGIN4_BRIDGE_ONEBOT_PATH` | `/onebot` | 协议端 WS 路径 |
+| `AIPLUGIN4_BRIDGE_MCP_PATH` | `/mcp` | MCP Streamable HTTP 路径 |
+| `AIPLUGIN4_BRIDGE_TOKEN` | 空 | 默认鉴权 token，同时作为核心端/协议端/MCP 的默认 token |
+| `AIPLUGIN4_BRIDGE_CORE_TOKEN` | 跟随 `AIPLUGIN4_BRIDGE_TOKEN` | 核心端（SealDice 连接）token |
+| `AIPLUGIN4_BRIDGE_PROTOCOL_TOKEN` | 跟随 `AIPLUGIN4_BRIDGE_TOKEN` | 协议端 token |
+
+> 注意：这里**没有 `CORE_URL`**。旧版“插件连接中间件、中间件反向连海豹”的方案已移除，现在是海豹主动连中间件。
+
+## SealDice 侧配置
+
+在 SealDice 面板「连接」中新增 **OB11 正向 WebSocket**，目标地址填：
+
+```text
+ws://127.0.0.1:46880/core
+```
+
+若中间件设置了 token，把 access_token 填 `AIPLUGIN4_BRIDGE_CORE_TOKEN`（未单独设置时用 `AIPLUGIN4_BRIDGE_TOKEN`）。
+
+## 协议端侧配置
+
+NapCat / LLOneBot 等协议端以 OB11 正向或反向 WS 客户端身份连接中间件 `/onebot`（token 用 `AIPLUGIN4_BRIDGE_PROTOCOL_TOKEN`）。中间件在核心与协议端之间原样转发 OB11 JSON。
+
+> 协议端不是必需的：仅做“注入指令 + 收集响应”时可以不连 `/onebot`。默认 `forward=false` 会拦截核心发出的 Action，即使没有协议端也不会失败。
+
+## 插件侧接入（aiplugin4）
+
+1. 打开「工具 → 是否启用MCP」总开关。
+2. 在「工具 → MCP服务器配置」中确认或添加 `ob11-core-bridge`（默认配置已包含）：
+
+```json
+{
+  "mcpServers": {
+    "ob11-core-bridge": {
+      "type": "http",
+      "url": "http://127.0.0.1:46880/mcp"
+    }
+  }
+}
+```
+
+设置 token 时补充请求头（或使用 `token` 简写字段自动生成 Bearer 头）：
+
+```json
+"ob11-core-bridge": {
+  "type": "http",
+  "url": "http://127.0.0.1:46880/mcp",
+  "headers": { "Authorization": "Bearer <token>" }
+}
+```
+
+3. 按需配置「可调用指令白名单」与「指令前缀」，AI 即可通过 `run_ext_command` / `run_core_command` 调用海豹指令。
+
+## 工具与参数
+
+两个工具由中间件通过 MCP 注册，插件直接注册为 AI 工具（敏感工具，执行会显著记录）。
+
+### run_ext_command — 扩展指令
+
+- `action=list`：按 `kind`（builtin / non_builtin / all）列出可调用扩展指令，并附当前已知扩展名
+- `action=call`：执行扩展指令
+- `extension` + `command`：`扩展名|指令名`；`command` 也支持直接填 `扩展名|指令名`
+- `args`：指令参数，按顺序
+
+扩展分为两类：
+- `builtin`：fun / story / coc7 / deck / dnd5e / exp / log / reply —— 已硬编码在插件里，**无需在配置中维护内置扩展列表**
+- `non_builtin`：第三方扩展及本插件
+
+### run_core_command — 核心指令
+
+- `action=list`：列出白名单中的核心指令
+- `action=call`：执行核心指令（如 `ext`、`help`；也支持 `core|ext` 写法）
+
+### 公共参数
+
+| 参数 | 说明 |
+| --- | --- |
+| `forward` | 是否把捕获到的核心发送消息继续转发给协议端，默认 `false`（拦截） |
+| `captureMode` | `reply_only` / `lane`；`forward=true` 且要捕获协议端产生的 bot 回复时建议用 `lane` |
+| `maxMessages` | 最多收集消息数（1–50；ext 默认 20，core 默认 50） |
+| `settleMs` | 收到消息后空闲多少毫秒无新消息即结束（0–10000；ext 默认 400，core 默认 500） |
+| `timeoutMs` | 最长等待毫秒数（100–120000，默认 10000） |
+
+### 返回结果
+
+| 字段 | 说明 |
+| --- | --- |
+| `ok` | 是否成功 |
+| `messages` | 收集到的消息：`messageId` / `action` / `segments` / `text` / `source`（action/event）/ `forwarded` / `intercepted` |
+| `completedBy` | 结束方式：`idle`（空闲窗口）/ `max_messages`（达到上限）/ `timeout` / `disconnect` |
+| `ambiguous` | 是否因无法区分并发消息而标记歧义 |
+| `forwardedCount` / `interceptedCount` | 转发 / 拦截计数 |
+| `error` | 失败原因（如核心未连接、target 缺少群/私聊 id） |
+
+## 指令白名单
+
+「可调用指令白名单」每行一条，格式 `扩展名|指令名`：
+
+- 内置扩展已硬编码，**无需填写扩展列表**；第三方扩展写实际扩展名
+- 核心指令的扩展名统一写 **`core`**（如 `core|help`）
+- `core|ext` 是扩展发现入口，**无需加入白名单**：`run_core_command` 执行 `command=ext`（即核心 `.ext`）即可查看核心当前全部扩展名称
+- 开启「是否允许调用所有指令」后忽略扩展指令白名单（核心指令仍受 `run_core_command` 白名单约束）
+
+## 指令前缀
+
+「工具 → 指令前缀」配置，默认 `.`。海豹核心通常用 `.` 作为指令前缀；如果核心改成其他前缀（如 `/`），请同步修改该配置，否则注入的假消息不会被核心识别为指令。
+
+## 捕获与转发语义
+
+- `forward=false`（默认）：捕获核心发出的 `send_*_msg` Action / 消息事件后**拦截**，不送到协议端；仍向核心返回 Action 成功响应，避免核心重试或阻塞。适合“AI 内部执行指令、不打扰群聊”的场景。
+- `forward=true`：捕获后**继续转发**到协议端，并把协议端 API 响应按 `echo` 路由回核心；如需收集协议端产生的 bot 消息，`captureMode` 用 `lane`。
+- `reply_only`：只收集带 reply 引用（指向注入消息的虚拟 message_id）的响应，最精准；协议端不生成 reply 引用时可能收集不到，此时标记 `ambiguous=true`。
+- `lane`：按 `self_id + 群/私聊 + 对方 id` 捕获该会话内的 bot 消息，适合没有 reply 引用的场景。
+- 收到第一条消息后进入 `settleMs` 空闲窗口；达到 `maxMessages` 或 `timeoutMs` 结束。
+
+## 并发与消息混淆
+
+- 同一 lane 的调用**串行**执行（队列），不同 lane **并行**，避免同一群同时注入多条指令时响应混在一起。
+- 纯 OB11 没有标准 trace_id，中间件无法从 Action 本身区分“本次命令的响应”与“外部并发发送”，极端并发下可能返回 `ambiguous=true`。业务侧建议：短 `settleMs` + lane 串行 + 唯一目标（`selfId` / `messageType` / `groupId` / `userId`）来降低混淆。
+
+## 多核心
+
+多个海豹核心可同时连接中间件：核心连接后上报的 `self_id` 用于路由，调用与事件按 `self_id` 区分。插件端从当前消息上下文自动取 `selfId` 填入 `target`，`run_ext_command` / `run_core_command` 会命中对应的核心。
+
+## 排障
+
+| 现象 | 检查 |
+| --- | --- |
+| 工具报「未配置 MCP 服务器 ob11-core-bridge」 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url |
+| 执行无响应 / 超时 | SealDice 是否已连上 `/core`（看中间件日志）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
+| 返回 `ambiguous=true` | 同 lane 并发或缺少 reply 引用；调整 `captureMode` / `settleMs` |
+| 鉴权失败 | 核对 core token / protocol token / MCP headers 与中间件 token 一致 |
+| 提示核心 WS 未连接 | 检查 SealDice「连接」里的 OB11 正向 WS 是否指向 `/core` 且未报错 |
