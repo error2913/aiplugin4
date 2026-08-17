@@ -14,6 +14,7 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的指令；默认关闭，建议保持关闭以限制权限", "工具");
         seal.ext.registerTemplateConfig(ext, "内置扩展列表", ['fun', 'story', 'coc7', 'deck', 'dnd5e', 'exp', 'log', 'reply'], "每行一个 SealDice 核心内置扩展名，用于「允许所有指令」模式下枚举其指令；可自行增删。修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
+        seal.ext.registerBoolConfig(ext, "是否启用MCP", false, "MCP 功能总开关；默认关闭，避免未安装 MCP 后端时启动或对话报错。开启后才会解析下方「MCP服务器配置」并连接/注册 MCP 工具", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [
             `{
   "mcpServers": {
@@ -119,6 +120,7 @@ description: 对指定玩家进行 san check（sc）
             ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
             BUILTIN_EXT_NAMES: seal.ext.getTemplateConfig(ext, "内置扩展列表"),
             DECKS: seal.ext.getTemplateConfig(ext, "提供给AI的牌堆名称"),
+            MCP_ENABLED: seal.ext.getBoolConfig(ext, "是否启用MCP"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色"),
             MUSIC: seal.ext.getTemplateConfig(ext, "音乐服务配置")
         }

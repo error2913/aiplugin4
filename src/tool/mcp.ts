@@ -40,6 +40,10 @@ function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
 }
 
 /** 按名称取最新配置：始终实时解析当前配置（热加载后立即生效），不保留已移除服务器的旧会话 */
+export function isMCPEnabled(): boolean {
+    return seal.ext.getBoolConfig(ext, "是否启用MCP");
+}
+
 export function getMCPServerByName(name: string): MCPServer | null {
     // 只返回仍存在于配置中的服务器：服务器被移除后，即使工具列表尚未清理，调用也立即失败而非继续使用旧地址
     return getMCPServers().find(s => s.name === name) || null;
@@ -85,6 +89,8 @@ function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
 }
 
 function getMCPServers(): MCPServer[] {
+    if (!isMCPEnabled()) return [];
+
     const servers: MCPServer[] = [];
     for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置").map(l => (l || '').trim()).filter(Boolean)) {
         try {
