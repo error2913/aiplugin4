@@ -121,8 +121,9 @@ export const updateInfo: { [version: string]: string } = {
 - 新增 docs/10-TODO.md：MCP Streamable HTTP 环境适配后的改动清单
 ## 优化
 - 音乐服务配置化：网易云/qq 的域名与 Cookie 移入「工具-音乐服务配置」（平台|域名|Cookie），不再硬编码
-- cmdArgs 按会话隔离：每个会话独立保存最近一次指令，避免多会话共用同一可变对象相互污染（.ai tool call/run_command 等指令工具随之修正）
-- 内置扩展列表配置化：run_command 枚举指令使用的 SealDice 核心内置扩展名单移入「工具-内置扩展列表」，可自行增删
+- 新增 OB11 核心指令中转：run_ext_command/run_core_command 通过独立控制 WS 向 SealDice 注入假消息，按群/私聊 lane 串行化并收集多条响应，支持捕获后拦截或继续转发
+- 指令监听升级为多消息收集器：使用空闲窗口、最大消息数与超时结束，降低并发调用时的消息混淆
+- 内置扩展名单改为代码常量；核心扩展名统一为 core，core|ext 无需白名单即可查看所有扩展
 - 模型选取确定性：对话/图片/嵌入模型匹配不再随机抽取，固定取第一个符合用途的模型
 - ob11 网络连接依赖订阅等待窗口延长（10 次×3s → 20 次×5s），兼容慢加载环境
 - 用量统计过期归并修正：先收集过期 key 统一归并后再替换，避免遍历同一对象时增删丢数据；0-0-0 长期桶不再参与归并
@@ -142,9 +143,9 @@ export const updateInfo: { [version: string]: string } = {
 ## 修复
 - 修复工具调用后孤立 tool 消息导致的 API 报错（tool 消息缺少对应 tool_calls）`,
     "4.13.3": `## 新功能
-- 新增 run_command 工具：读取海豹扩展指令表列出可用指令（action=list 不含帮助），并可调用白名单内的海豹指令（action=call，开启「是否允许调用所有指令」后可调用任意指令）；配套 get_cmd_help 工具按名查看指令帮助
-- 新增「可调用指令白名单」「是否允许调用所有指令」配置（工具页签）；指令技能（今日人品/COC 模组/属性展示/检定/san检定）统一改为通过 run_command 调用
-- 工具按需加载：search_tools/call_tool/use_skill/run_command/get_cmd_help/get_time 常驻，其余工具按需搜索并统一执行，system prompt 从约 2 万字符降到约 2800 字符
+- 新增 run_ext_command/run_core_command 工具：扩展指令区分 builtin/non_builtin，核心白名单使用 core|指令名；新增「指令前缀」配置，默认为 .
+- 指令技能（今日人品/COC 模组/属性展示/检定/san检定）统一改为通过 run_ext_command 调用
+- 工具按需加载：search_tools/call_tool/use_skill/run_ext_command/run_core_command/get_time 常驻，其余工具按需搜索并统一执行，system prompt 从约 2 万字符降到约 2800 字符
 ## 优化
 - 更新链接改为官方 GitHub Release；商店 README 移除开发章节，只保留用户文档
 ## 修复

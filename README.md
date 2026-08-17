@@ -410,7 +410,7 @@ max_tokens = 2048
 | 消息 | `send_msg`、`get_msg`、`delete_msg`、`send_forward_msg`、`get_context` |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
-| 指令 | `run_command`（列出/调用海豹指令）、`get_cmd_help`（查看指令帮助） |
+| 指令 | `run_ext_command`（调用扩展指令）、`run_core_command`（调用核心指令） |
 | 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
 | 语音 | `record`、`text_to_sound` |
 | 网页 | `web_search`、`web_read` |
@@ -425,11 +425,11 @@ max_tokens = 2048
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | MCP / 技能 | `<服务器名>_<工具名>`（MCP 工具）、`use_skill`（技能） |
 
-> 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
+> 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 
 > 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖与 ffmpeg；`text_to_image` 需要生成图片依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
 
-> 依赖海豹内置指令的工具（如 `draw_deck`、`send_msg` 等）需要会话中先出现过指令消息（如先使用 `.r`），否则工具会提示"请先使用 .r 指令"。
+> 扩展/核心指令工具通过 OB11 核心桥注入假消息，不再要求会话先出现 `.r`；请启动 `ob11-core-bridge`，让 SealDice 的 OB11 网络依赖连接中间件 `/core`，并将插件「后端 → 核心指令中转WS地址」配置为中间件 `/control`。
 
 ---
 

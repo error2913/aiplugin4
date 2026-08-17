@@ -430,7 +430,7 @@ export class MessagePipeline {
 
     /** 指令消息：记录 cmdArgs，并按配置决定是否写入会话上下文 */
     static handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): void {
-        // 每次收到指令都刷新当前会话的 cmdArgs，供 run_command 等指令工具复用最新指令对象
+        // 每次收到指令都刷新当前会话的 cmdArgs，供旧版本地扩展调用兼容逻辑复用最近指令对象
         Tool.setCmdArgs(ctx, cmdArgs);
 
         const { RECEIVE_CMD: allcmd } = Config.received;
@@ -476,7 +476,7 @@ export class MessagePipeline {
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;
 
-        session.tool.listen.resolve?.(messageText); // 将消息传递给监听工具
+        session.tool.listen.push?.(messageText); // 分发给所有监听器，支持多条消息与并发调用
 
         const { RECEIVE_MSG_BY_BOT: allmsg } = Config.received;
         if (!allmsg) return;

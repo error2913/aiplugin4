@@ -144,20 +144,56 @@ export class Session {
         }
         this.memory = new SessionMemoryService();
         this.lastCtx = null;
+        const waiters: { resolve: (messages: string[]) => void, reject: (error: Error) => void, messages: string[], settleTimer: any, timeoutTimer: any, maxMessages: number, settleMs: number }[] = [];
+        const listen: ToolListen = {
+            timeoutId: null,
+            resolve: null,
+            reject: null,
+            cleanup: () => {
+                if (listen.timeoutId) clearTimeout(listen.timeoutId);
+                listen.timeoutId = null;
+                listen.resolve = null;
+                listen.reject = null;
+                while (waiters.length) {
+                    const waiter = waiters.shift()!;
+                    clearTimeout(waiter.settleTimer);
+                    clearTimeout(waiter.timeoutTimer);
+                    waiter.reject(new Error('监听已清理'));
+                }
+            },
+            push: (content: string) => {
+                for (let i = waiters.length - 1; i >= 0; i--) {
+                    const waiter = waiters[i];
+                    if (waiter.messages.length < waiter.maxMessages) waiter.messages.push(content);
+                    if (waiter.settleTimer) clearTimeout(waiter.settleTimer);
+                    if (waiter.messages.length >= waiter.maxMessages) {
+                        waiters.splice(i, 1);
+                        clearTimeout(waiter.timeoutTimer);
+                        waiter.resolve(waiter.messages);
+                    } else {
+                        waiter.settleTimer = setTimeout(() => {
+                            const index = waiters.indexOf(waiter);
+                            if (index >= 0) waiters.splice(index, 1);
+                            clearTimeout(waiter.timeoutTimer);
+                            waiter.resolve(waiter.messages);
+                        }, waiter.settleMs);
+                    }
+                }
+            },
+            waitFor: (timeoutMs = 10000, settleMs = 400, maxMessages = 20) => new Promise((resolve, reject) => {
+                const waiter = { resolve, reject, messages: [] as string[], settleTimer: null as any, timeoutTimer: null as any, maxMessages: Math.max(1, maxMessages), settleMs: Math.max(0, settleMs) };
+                waiter.timeoutTimer = setTimeout(() => {
+                    const index = waiters.indexOf(waiter);
+                    if (index >= 0) waiters.splice(index, 1);
+                    resolve(waiter.messages);
+                }, Math.max(1, timeoutMs));
+                waiters.push(waiter);
+            })
+        };
         this.tool = {
             state: {} as ToolState,
             callCount: 0,
-            listen: {
-                timeoutId: null,
-                resolve: null,
-                reject: null,
-                cleanup: () => {
-                    if (this.tool.listen.timeoutId) clearTimeout(this.tool.listen.timeoutId);
-                    this.tool.listen.timeoutId = null;
-                    this.tool.listen.resolve = null;
-                    this.tool.listen.reject = null;
-                }
-            }
+            listen
         }
     }
 

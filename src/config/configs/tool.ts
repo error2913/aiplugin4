@@ -10,9 +10,9 @@ export default class ToolConfig {
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 5000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg；修改后自动生效", "工具");
-        seal.ext.registerTemplateConfig(ext, "可调用指令白名单", ['fun|jrrp', 'story|modu', 'coc7|st', 'coc7|ra', 'coc7|sc'], "每行一个 AI 可调用的海豹指令；格式：扩展名|指令名（指令与插件同名时可只写指令名）。示例：wifeOfTheDay|今日老婆、fun|jrrp、coc7|st。默认包含内置技能所需指令，可自行增删。修改后自动生效", "工具");
-        seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的指令；默认关闭，建议保持关闭以限制权限", "工具");
-        seal.ext.registerTemplateConfig(ext, "内置扩展列表", ['fun', 'story', 'coc7', 'deck', 'dnd5e', 'exp', 'log', 'reply'], "每行一个 SealDice 核心内置扩展名，用于「允许所有指令」模式下枚举其指令；可自行增删。修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "可调用指令白名单", ['fun|jrrp', 'story|modu', 'coc7|st', 'coc7|ra', 'coc7|sc'], "每行一个 AI 可调用的海豹指令；格式：扩展名|指令名，核心指令的扩展名统一写 core（如 core|ext）。run_core_command 的 core|ext 无需加入白名单。修改后自动生效", "工具");
+        seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 run_core_command 调用", "工具");
+        seal.ext.registerStringConfig(ext, "指令前缀", ".", "注入到 SealDice 核心的指令前缀，通常为 .；如果核心改成其他前缀，请同步修改", "工具");
         seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
         seal.ext.registerBoolConfig(ext, "是否启用MCP", false, "MCP 功能总开关；默认关闭，避免未安装 MCP 后端时启动或对话报错。开启后才会解析下方「MCP服务器配置」并连接/注册 MCP 工具", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [
@@ -41,33 +41,33 @@ export default class ToolConfig {
 name: 今日人品
 description: 查询指定用户的今日人品值
 ---
-使用 run_command 工具执行：action=call，command="fun|jrrp"，args=["用户名或QQ号"]；fun|jrrp 需在「可调用指令白名单」中`,
+使用 run_ext_command 工具执行：action=call，command="fun|jrrp"，args=["用户名或QQ号"]；fun|jrrp 需在「可调用指令白名单」中`,
             `---
 name: COC模组抽取
 description: 随机抽取一个 COC 模组
 ---
-使用 run_command 工具执行：action=call，command="story|modu"，args=["roll"]；story|modu 需在「可调用指令白名单」中`,
+使用 run_ext_command 工具执行：action=call，command="story|modu"，args=["roll"]；story|modu 需在「可调用指令白名单」中`,
             `---
 name: COC模组搜索
 description: 按关键词搜索 COC 模组
 ---
-使用 run_command 工具执行：action=call，command="story|modu"，args=["search","关键词"]；story|modu 需在「可调用指令白名单」中`,
+使用 run_ext_command 工具执行：action=call，command="story|modu"，args=["search","关键词"]；story|modu 需在「可调用指令白名单」中`,
             `---
 name: 属性展示
 description: 展示指定玩家的 COC 全部个人属性
 ---
-使用 run_command 工具执行：action=call，command="coc7|st"，args=["show","玩家名称或QQ号"]；coc7|st 需在「可调用指令白名单」中`,
+使用 run_ext_command 工具执行：action=call，command="coc7|st"，args=["show","玩家名称或QQ号"]；coc7|st 需在「可调用指令白名单」中`,
             `---
 name: 属性检定
 description: 对指定玩家进行一次属性/技能检定（ra）
 ---
-使用 run_command 工具执行：action=call，command="coc7|ra"，args 按顺序：奖励/惩罚骰（可选，如 b、p3）、检定表达式（含难度等级或数值运算时直接用，普通属性名时用该属性，属性为0时补50）、检定原因（可选）；coc7|ra 需在「可调用指令白名单」中`,
+使用 run_ext_command 工具执行：action=call，command="coc7|ra"，args 按顺序：奖励/惩罚骰（可选，如 b、p3）、检定表达式（含难度等级或数值运算时直接用，普通属性名时用该属性，属性为0时补50）、检定原因（可选）；coc7|ra 需在「可调用指令白名单」中`,
             `---
 name: san检定
 description: 对指定玩家进行 san check（sc）
 ---
-使用 run_command 工具执行：action=call，command="coc7|sc"，args 按顺序：奖励/惩罚骰（可选，如 b、p2）、表达式（成功时掉san/失败时掉san，如 0/1d6、0/1）；coc7|sc 需在「可调用指令白名单」中`
-        ], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选），正文为技能内容；可直接粘贴其他 agent（Claude/Codex/Cursor）的技能文件。\n格式定义见 https://agentskills.io/specification （SKILL.md 开放规范，Claude/Codex 通用，国内可访问）。\n默认包含基于 run_command 统一调用的指令技能（今日人品/COC模组/属性展示/检定等），指令需加入「可调用指令白名单」，可自行增删。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
+使用 run_ext_command 工具执行：action=call，command="coc7|sc"，args 按顺序：奖励/惩罚骰（可选，如 b、p2）、表达式（成功时掉san/失败时掉san，如 0/1d6、0/1）；coc7|sc 需在「可调用指令白名单」中`
+        ], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选），正文为技能内容；可直接粘贴其他 agent（Claude/Codex/Cursor）的技能文件。\n格式定义见 https://agentskills.io/specification （SKILL.md 开放规范，Claude/Codex 通用，国内可访问）。\n默认包含基于 run_ext_command 统一调用的扩展技能（今日人品/COC模组/属性展示/检定等），指令需加入「可调用指令白名单」，可自行增删。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerTemplateConfig(ext, "音乐服务配置", [
             `{
   "platform": "网易云",
@@ -118,7 +118,7 @@ description: 对指定玩家进行 san check（sc）
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ext, "默认关闭的函数"),
             CMD_WHITELIST: seal.ext.getTemplateConfig(ext, "可调用指令白名单"),
             ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
-            BUILTIN_EXT_NAMES: seal.ext.getTemplateConfig(ext, "内置扩展列表"),
+            COMMAND_PREFIX: seal.ext.getStringConfig(ext, "指令前缀"),
             DECKS: seal.ext.getTemplateConfig(ext, "提供给AI的牌堆名称"),
             MCP_ENABLED: seal.ext.getBoolConfig(ext, "是否启用MCP"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色"),

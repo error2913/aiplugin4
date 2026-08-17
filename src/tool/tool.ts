@@ -24,8 +24,8 @@ export const CORE_TOOL_NAMES: string[] = [
     'search_tools', // 按需发现工具（返回完整参数说明）
     'call_tool',    // 统一执行入口（调用任意已开启工具）
     'use_skill',    // 技能调用
-    'run_command',  // 海豹指令调用
-    'get_cmd_help'  // 指令帮助
+    'run_ext_command',  // 扩展指令调用
+    'run_core_command' // 核心指令调用
 ];
 
 const ON_DEMAND_PROMPT_LIMIT = 20;
@@ -116,7 +116,7 @@ export default class Tool {
         cmdArgs.amIBeMentionedFirst = at?.[0]?.userId === ctx.endPoint.userId;
         cmdArgs.cleanArgs = cmdArgs.args.join(' ');
         cmdArgs.specialExecuteTimes = 0;
-        cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
+        cmdArgs.rawText = `${Config.tool.COMMAND_PREFIX}${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
 
         const ext = seal.ext.find(eci.extName);
         if (!ext || !Object.prototype.hasOwnProperty.call(ext.cmdMap, eci.cmd)) {
@@ -124,34 +124,22 @@ export default class Tool {
             return ['', false];
         }
 
-        listen.reject?.(new Error('中断当前监听'));
-
-        return new Promise((
-            resolve: (result: [string, boolean]) => void,
-            reject: (err: Error) => void
-        ) => {
-            listen.timeoutId = setTimeout(() => {
-                reject(new Error('监听消息超时'));
-                listen.cleanup();
-            }, 10 * 1000);
-            listen.resolve = (content: string) => {
-                resolve([content, true]);
-                listen.cleanup();
-            };
-            listen.reject = (err: Error) => {
-                reject(err);
-                listen.cleanup();
-            };
-            try {
-                ext.cmdMap[eci.cmd].solve(ctx, msg, cmdArgs);
-            } catch (err) {
-                reject(new Error(`solve中发生错误:${err instanceof Error ? err.message : String(err)}`));
-                listen.cleanup();
-            }
-        }).catch((err) => {
+        // 旧版本地扩展调用兼容：使用消息收集器而不是单一 resolve，支持多条回复、空闲窗口和并发等待。
+        const responsePromise = listen.waitFor
+            ? listen.waitFor(10000, 400, 20)
+            : new Promise<string[]>(resolve => {
+                listen.timeoutId = setTimeout(() => resolve([]), 10000);
+                listen.resolve = content => { resolve([content]); listen.cleanup(); };
+            });
+        try {
+            ext.cmdMap[eci.cmd].solve(ctx, msg, cmdArgs);
+        } catch (err) {
+            listen.cleanup();
             Logger.error(`在extensionSolve中: 调用函数失败:${err instanceof Error ? err.message : String(err)}`);
             return ['', false];
-        });
+        }
+        const messages = await responsePromise;
+        return [messages.join('\n'), messages.length > 0];
     }
 
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
