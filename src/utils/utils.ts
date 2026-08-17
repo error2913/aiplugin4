@@ -51,6 +51,34 @@ export function getRecordMessageId(ctx: seal.MsgContext, msg: seal.Message): str
     return transformMsgId(msg.rawId);
 }
 
+/**
+ * 把 milky 原生消息段的 replySeq（会话内 message_seq）转成 OB11 唯一 message_id。
+ * 依赖未安装、参数不合法或转换失败时回退原始 replySeq，保持与无 ob11 依赖时
+ * 上下文里 transformMsgId(rawId) 记录方式一致。
+ */
+export function getMilkyReplyQuoteId(ctx: seal.MsgContext, replySeq: string | number): string {
+    const seq = String(replySeq ?? '');
+    if (!seq) return '';
+    const net = (globalThis as any).net;
+    if (net && typeof net.messageId === 'function') {
+        try {
+            const peerStr = ctx.isPrivate ? (ctx.player && ctx.player.userId) || '' : (ctx.group && ctx.group.groupId) || '';
+            const peerMatch = /(\d+)$/.exec(peerStr);
+            if (peerMatch && /^\d+$/.test(seq)) {
+                const mid = net.messageId({
+                    scene: ctx.isPrivate ? 'friend' : 'group',
+                    id: Number(peerMatch[1]),
+                    msgid: Number(seq)
+                });
+                if (mid !== null && mid !== undefined) return String(mid);
+            }
+        } catch (e) {
+            logger.warning(`milky 回复消息 ID 转换失败，回退原始 replySeq:${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+    return seq;
+}
+
 export function generateId() {
     const timestamp = Date.now().toString(36); // 将时间戳转换为36进制字符串
     const random = Math.random().toString(36).substring(2, 6); // 随机数部分

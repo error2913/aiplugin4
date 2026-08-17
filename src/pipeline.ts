@@ -8,12 +8,81 @@ import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
-import { expandMilkySegments, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray } from "./utils/string";
+import { expandMilkySegments, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
+import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
-/** 海豹核心原生 milky 接收路径会过滤掉的段类型，只能通过 ob11 依赖的事件分发（milky → OB11 转接）收到 */
-const OB11_EXTRA_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
+/** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
+const OB11_SUPPLEMENT_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
+const CORE_MESSAGE_TTL_MS = 2000;
+const DEPENDENCY_WAIT_MS = 100;
+
+interface CoreMessageState {
+    expiresAt: number;
+    recorded: boolean;
+    types: Set<string>;
+}
+
+const coreMessageStates = new Map<string, CoreMessageState>();
+
+function pruneCoreMessageStates(now: number = Date.now()): void {
+    coreMessageStates.forEach((state, key) => {
+        if (state.expiresAt <= now) coreMessageStates.delete(key);
+    });
+}
+
+function getMessageKey(ctx: seal.MsgContext, msg: seal.Message): string {
+    const sessionId = ctx.isPrivate ? ctx.player?.userId || '' : ctx.group?.groupId || '';
+    const messageId = getRecordMessageId(ctx, msg) || transformMsgId(msg.rawId);
+    return `${ctx.endPoint.userId}|${sessionId}|${messageId}`;
+}
+
+function rememberCoreMessage(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]): string {
+    const key = getMessageKey(ctx, msg);
+    pruneCoreMessageStates();
+    coreMessageStates.set(key, {
+        expiresAt: Date.now() + CORE_MESSAGE_TTL_MS,
+        recorded: false,
+        types: new Set(messageArray
+            .filter(item => item.type !== 'text')
+            .map(item => item.type === 'at' && item.data && item.data.qq === 'all' ? 'at:all' : item.type))
+    });
+    return key;
+}
+
+function markCoreMessageRecorded(key: string): void {
+    const state = coreMessageStates.get(key);
+    if (state) state.recorded = true;
+}
+
+function getCoreMessageState(key: string): CoreMessageState | undefined {
+    pruneCoreMessageStates();
+    return coreMessageStates.get(key);
+}
+
+/** 依赖事件只筛选核心缺失段；face 由核心是否已收到动态决定。 */
+export function filterOb11SupplementSegments(message: any[], coreTypes?: Set<string>): any[] {
+    return message.filter((seg: any) => {
+        if (!seg || typeof seg !== 'object' || !seg.type) return false;
+        if (OB11_SUPPLEMENT_SEGMENT_TYPES.has(seg.type)) return true;
+        if (seg.type === 'at' && seg.data && seg.data.qq === 'all') return !coreTypes?.has('at:all');
+        return seg.type === 'face' && !coreTypes?.has('face');
+    });
+}
+
+function waitForCoreEvent(): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, DEPENDENCY_WAIT_MS));
+}
+
 /** 消息节点/合并转发展开的最大嵌套深度，防止恶意或异常嵌套导致无限递归 */
 const MAX_FORWARD_DEPTH = 5;
+
+/**
+ * 判断某个 OB11 消息段是否属于“核心原生 milky 适配器收不到、只能靠 ob11 依赖补收”的段。
+ * mention_all 会被 ob11 依赖转成 at(qq=all)，而原生 milky 适配器只处理 mention，会丢弃 mention_all。
+ */
+function isOb11ExtraSegment(seg: any): boolean {
+    return filterOb11SupplementSegments([seg]).length > 0;
+}
 
 export class MessagePipeline {
     /** ob11 数组消息段 → MessageSegment[]：把卡片/视频/音乐/文件/消息节点/合并转发展开为文本段，其余段保留 */
@@ -47,6 +116,21 @@ export class MessagePipeline {
                 }
                 case 'music': {
                     result.push({ type: 'text', data: { text: parseMusicToText(data) } });
+                    break;
+                }
+                case 'market_face': {
+                    // 商城表情/超级表情：milky 转接只透传 emoji 元数据，这里转为可读占位，避免段静默丢失
+                    result.push({ type: 'text', data: { text: data.summary ? `【表情】${data.summary}` : '【表情】' } });
+                    break;
+                }
+                case 'xml': {
+                    // XML 卡片/公众号消息：保留关键内容，过长时截断避免污染上下文
+                    result.push({ type: 'text', data: { text: data.data ? `【XML消息】${truncateText(String(data.data), 500)}` : '【XML消息】' } });
+                    break;
+                }
+                case 'markdown': {
+                    // Markdown 消息：milky 转接成 OB11 markdown 段，转成文本进入上下文
+                    result.push({ type: 'text', data: { text: data.content ? `【Markdown】${truncateText(String(data.content), 500)}` : '【Markdown】' } });
                     break;
                 }
                 case 'node': {
@@ -121,7 +205,7 @@ export class MessagePipeline {
         trySubscribe(0);
     }
 
-    /** ob11 事件消息（OneBot 消息段数组）：仅处理核心原生路径收不到的段类型，避免与核心回调重复处理 */
+    /** ob11 事件消息（OneBot 消息段数组）：核心优先，依赖只补充核心未收到的段 */
     private static async handleOb11Event(event: any): Promise<void> {
         if (!event || event.post_type !== 'message') return;
         const message = event.message;
@@ -134,7 +218,7 @@ export class MessagePipeline {
             return;
         }
         const segTypes = message.filter((seg: any) => seg && seg.type).map((seg: any) => seg.type);
-        if (!segTypes.some((t: string) => OB11_EXTRA_SEGMENT_TYPES.has(t))) {
+        if (!message.some((seg: any) => isOb11ExtraSegment(seg))) {
             logger.debug(`ob11 事件消息无额外段（types=[${segTypes.join(',')}]），由核心原生路径处理，跳过`);
             return;
         }
@@ -167,11 +251,30 @@ export class MessagePipeline {
             return;
         }
         logger.debug(`[debug] ob11 事件 ctx 构建完成 isPrivate=${ctx.isPrivate} player=${ctx.player && ctx.player.userId} group=${ctx.group && ctx.group.groupId}`);
-        await MessagePipeline.handleNonCommand(ctx, msg, message);
+
+        await waitForCoreEvent();
+        const state = getCoreMessageState(getMessageKey(ctx, msg));
+        if (state && !state.recorded) {
+            logger.debug(`[debug] ob11 补充消息对应核心消息未入库，跳过依赖补充: id=${msg.rawId}`);
+            return;
+        }
+
+        const supplementSegments = filterOb11SupplementSegments(message, state?.types);
+        if (state) {
+            if (supplementSegments.length === 0) {
+                logger.debug(`[debug] ob11 补充消息无核心缺失段，跳过: id=${msg.rawId}`);
+                return;
+            }
+            await MessagePipeline.handleNonCommand(ctx, msg, supplementSegments, { supplementOnly: true });
+            return;
+        }
+
+        // 核心没有对应回调时，依赖事件作为完整消息兜底，不能只保留额外段。
+        await MessagePipeline.handleNonCommand(ctx, msg, message, { source: 'dependency' });
     }
 
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */
-    static async handleNonCommand(ctx: seal.MsgContext, msg: seal.Message, ob11Segments?: any[]): Promise<void> {
+    static async handleNonCommand(ctx: seal.MsgContext, msg: seal.Message, ob11Segments?: any[], options?: { source?: 'core' | 'dependency'; supplementOnly?: boolean }): Promise<void> {
         const { IGNORE_PRIVATE: disabledInPrivate, IGNORE_REGEX: ignoreRegex, IGNORE_CONDITION } = Config.received;
         const { TRIGGER_REGEX: triggerRegex, TRIGGER_CONDITION: triggerCondition } = Config.trigger;
 
@@ -203,16 +306,13 @@ export class MessagePipeline {
         session.checkActiveTimer(ctx);
 
         const message = msg.message;
-        // 消息段来源优先级：
-        //  1. ob11 事件段数组（卡片/视频/音乐/文件/消息节点/合并转发等核心收不到的段）
-        //  2. milky 原生消息段 msg.segment（非空时直接映射，不转 CQ 码）
-        //  3. 其他平台原生 CQ 码字符串 msg.message
+        // 核心消息优先：Milky 原生段 → 核心 OB11/CQ 字符串；依赖事件仅在显式传入时使用。
         const milkySegments = (msg as any).segment;
         const hasMilkySegments = Array.isArray(milkySegments) && milkySegments.length > 0;
         const messageArray = Array.isArray(ob11Segments)
             ? await this.expandOb11Segments(ctx, ob11Segments)
             : hasMilkySegments
-            ? expandMilkySegments(milkySegments)
+            ? expandMilkySegments(ctx, milkySegments)
             : Array.isArray(message)
             ? await this.expandOb11Segments(ctx, message)
             : transformTextToArray(message);
@@ -224,13 +324,26 @@ export class MessagePipeline {
             logger.debug(`[debug] milky 消息段展开: ${messageText.slice(0, 200)}`);
         }
 
+        const isCoreMessage = options?.source !== 'dependency' && !options?.supplementOnly;
+        const coreMessageKey = isCoreMessage ? rememberCoreMessage(ctx, msg, messageArray) : '';
+
+        // 依赖补充只入库，不重新执行正则、计数器、概率、计时器或 AI 触发。
+        if (options?.supplementOnly) {
+            if (messageArray.length === 0) return;
+            const supplementTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
+            if (supplementTypes.some(type => !CQ_TYPES_ALLOW.includes(type))) return;
+            return session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
+        }
+
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
+            if (coreMessageKey) coreMessageStates.delete(coreMessageKey);
             logger.info('忽略消息条件命中，跳过');
             return;
         }
 
         if (ignoreRegex.test(messageText)) {
+            if (coreMessageKey) coreMessageStates.delete(coreMessageKey);
             logger.info(`非指令消息忽略:${messageText}`);
             return;
         }
@@ -245,6 +358,7 @@ export class MessagePipeline {
             if (session.setting.regexTrigger && triggerRegex.test(messageText)) {
                 const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
                 if (fmtCondition === 1) {
+                    markCoreMessageRecorded(coreMessageKey);
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.chat(ctx, msg, '非指令'));
                 }
@@ -271,6 +385,7 @@ export class MessagePipeline {
                         continue;
                     }
 
+                    markCoreMessageRecorded(coreMessageKey);
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.context.addSystemUserMessage(condition.reason, '触发原因提示'))
                         .then(() => triggerConditionMap[sid].splice(i, 1))
@@ -281,6 +396,7 @@ export class MessagePipeline {
             // 开启任一模式时
             const setting = session.setting;
             if (setting.standby || Config.base.GLOBAL_STANDBY) {
+                markCoreMessageRecorded(coreMessageKey);
                 return session.handleReceipt(ctx, msg, messageArray)
                     .then((): void | Promise<void> => {
                         if (setting.counter > -1) {
@@ -330,7 +446,7 @@ export class MessagePipeline {
         const message = msg.message;
         const milkySegments = (msg as any).segment;
         const hasMilkySegments = Array.isArray(milkySegments) && milkySegments.length > 0;
-        const messageArray = hasMilkySegments ? expandMilkySegments(milkySegments) : transformTextToArray(message);
+        const messageArray = hasMilkySegments ? expandMilkySegments(ctx, milkySegments) : transformTextToArray(message);
 
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
@@ -355,7 +471,7 @@ export class MessagePipeline {
         const message = msg.message;
         const milkySegments = (msg as any).segment;
         const hasMilkySegments = Array.isArray(milkySegments) && milkySegments.length > 0;
-        const messageArray = hasMilkySegments ? expandMilkySegments(milkySegments) : transformTextToArray(message);
+        const messageArray = hasMilkySegments ? expandMilkySegments(ctx, milkySegments) : transformTextToArray(message);
         const messageText = hasMilkySegments
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;

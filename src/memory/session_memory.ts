@@ -8,12 +8,14 @@ import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { buildContent } from "../utils/message";
-import { stripInternalTags } from "../utils/string";
+import { stripInternalTags, truncateText } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
 import { bumpSummaryRevision } from "./revision";
+
+const MEMORY_RENDER_LIMIT = 1000;
 
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
@@ -220,7 +222,7 @@ export default class SessionMemoryService extends MemoryService {
         const { SUMMARY } = Config.memory;
         return SUMMARY_TEMPLATE({
             "SUMMARY": SUMMARY,
-            "summaries": this.summaries
+            "summaries": this.summaries.map(summary => truncateText(summary, MEMORY_RENDER_LIMIT))
         });
     }
 }

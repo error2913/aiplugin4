@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.15.1-green)
+![Version](https://img.shields.io/badge/Version-4.15.2-green)
 
 ## 快速开始
 
@@ -201,7 +201,7 @@ max_tokens = 2048
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 接收图片 | 是否接收并识别图片消息，关闭后不处理任何图片消息 |
+| 接收图片 | 是否接收图片消息并将图片 URL 记录到上下文；是否自动识别由图片识别条件和图片模型配置决定 |
 | 接收指令消息 | 是否将指令消息计入上下文（指令仍会执行） |
 | 接收骰子发送的消息 | 是否处理机器人自己发送的消息 |
 | 忽略私聊消息 | 开启后私聊消息不触发 AI |
@@ -237,6 +237,7 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
+| 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
 | MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |

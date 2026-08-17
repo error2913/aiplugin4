@@ -41,6 +41,8 @@ interface ContextMessage {
     tool_call_id?: string;
 }
 
+const SYSTEM_REMINDER_TEXT = '请继续遵守上方角色设定、上下文标记和工具调用规范。';
+
 /**
  * 无依赖的 token 估算：ASCII 约 4 字符/token，非 ASCII（中文等）约 1 字符/token。
  * 用于「上下文最大token」的整包预算估算，避免依赖外部 tokenizer。
@@ -83,19 +85,19 @@ function buildSamplesMessages(ctx: seal.MsgContext): ContextMessage[] {
         }));
 }
 
-function buildContextMessages(systemMessage: ContextMessage, messages: ContextMessage[]): ContextMessage[] {
+function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
     const { INSERT_COUNT } = Config.message;
 
     const contextMessages = messages.slice();
     if (INSERT_COUNT <= 0) return contextMessages;
 
-    // 顺序遍历：在第 INSERT_COUNT+1 条及之后每隔 INSERT_COUNT 条用户消息前插入 system message，
-    // 让模型在长对话中周期性重新看到角色设定；示例对话不计入插入轮数。
+    // 顺序遍历：在第 INSERT_COUNT+1 条及之后每隔 INSERT_COUNT 条用户消息前插入短提醒，
+    // 避免把完整角色设定、资源说明和工具说明按轮数反复复制进上下文。
     let userCount = 0;
     const result: ContextMessage[] = [];
     for (const m of contextMessages) {
         if (m.role === 'user' && userCount > 0 && userCount % INSERT_COUNT === 0) {
-            result.push(systemMessage);
+            result.push({ role: 'system', text: SYSTEM_REMINDER_TEXT });
         }
         result.push(m);
         if (m.role === 'user') userCount++;
@@ -133,7 +135,7 @@ export async function handleMessages(
 ): Promise<RequestMessage[]> {
     const system = systemMessage ?? await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
-    const contextMessages = buildContextMessages(system, session.context.messages as ContextMessage[]);
+    const contextMessages = buildContextMessages(session.context.messages as ContextMessage[]);
 
     const messages: ContextMessage[] = applyTokenBudget(
         [system, ...samplesMessages, ...contextMessages],
@@ -240,11 +242,9 @@ export function buildContent(message: ContextMessage): string {
                     + (item.text || '');
             }).join('\f');
         }
-        // 非用户消息：assistant 补时间与消息 ID；system 是角色设定 prompt 容器，
-        // 不算对话消息，不渲染 time/msg_id
+        // 非用户消息：只保留消息 ID；时间顺序由消息数组本身表达，去掉重复时间前缀。
         return message.contentItems.map(item =>
-            (message.role !== 'system' && item.time ? `[time:${fmtDate(item.time)}]` : '')
-            + (item.messageId ? `[msg_id:${item.messageId}]` : '')
+            (item.messageId ? `[msg_id:${item.messageId}]` : '')
             + (item.text || '')
         ).join('\f');
     }

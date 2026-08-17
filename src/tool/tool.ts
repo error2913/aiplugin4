@@ -11,7 +11,7 @@ import { withTimeout } from "../utils/utils";
 import { registerMCPTools } from "./mcp";
 import { registerSkills } from "./skills";
 import { registerTools } from "./tools/init";
-import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolListen } from "./types";
+import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolListen } from "./types";
 
 export const toolMap: { [key: string]: Tool } = {};
 
@@ -27,6 +27,26 @@ export const CORE_TOOL_NAMES: string[] = [
     'run_command',  // 海豹指令调用
     'get_cmd_help'  // 指令帮助
 ];
+
+const ON_DEMAND_PROMPT_LIMIT = 20;
+
+function flattenText(text: string, maxLength: number): string {
+    const flattened = String(text || '').replace(/\s+/g, ' ').trim();
+    return flattened.length > maxLength ? flattened.slice(0, maxLength) + '...' : flattened;
+}
+
+function formatParameterText(parameters: ToolInfoObject): string {
+    const properties = parameters && parameters.properties ? parameters.properties : {};
+    const required = Array.isArray(parameters.required) ? parameters.required : [];
+    const lines = Object.keys(properties).map(key => {
+        const prop = properties[key];
+        const type = prop && typeof prop.type === 'string' ? prop.type : 'string';
+        const isRequired = required.indexOf(key) !== -1;
+        const desc = prop && typeof prop.description === 'string' ? flattenText(prop.description, 80) : '';
+        return `${key}:${type}(${isRequired ? '必填' : '可选'})${desc ? ` - ${desc}` : ''}`;
+    });
+    return lines.join('\n');
+}
 
 export default class Tool {
     toolInfo: ToolInfo;
@@ -329,11 +349,11 @@ export default class Tool {
         const tools = this.getToolsInfo(session);
         let s = '';
         if (tools && tools.length > 0) {
-            // 模板按扁平结构读取（name/description/parameters），从 function 字段映射后传入
+            // 模板按扁平结构读取 name/description/parameterText，从 function 字段映射后传入
             const flatTools = tools.map(t => ({
                 name: t.function.name,
-                description: t.function.description,
-                parameters: t.function.parameters
+                description: flattenText(t.function.description, 120),
+                parameterText: formatParameterText(t.function.parameters)
             }));
             s = TOOLS_PROMPT_TEMPLATE({
                 "PROMPT_ENGINEERING": PROMPT_ENGINEERING,
@@ -344,12 +364,15 @@ export default class Tool {
         // 按需工具：只给名称 + 一行描述，详细参数通过 search_tools 获取，控制 token 占用
         const onDemand = this.getOnDemandTools(session);
         if (onDemand.length > 0) {
-            const summaries = onDemand.map((t, i) => {
-                const desc = t.function.description.replace(/\s+/g, ' ').trim();
-                const truncated = desc.length > 120 ? desc.slice(0, 120) + '…' : desc;
-                return `${i + 1}. ${t.function.name}：${truncated}`;
+            const summaries = onDemand.slice(0, ON_DEMAND_PROMPT_LIMIT).map((t, i) => {
+                const desc = flattenText(t.function.description, 120);
+                return `${i + 1}. ${t.function.name}：${desc}`;
             });
             s += `\n\n## 其他可用工具（按需加载）\n${summaries.join('\n')}\n需要使用上述工具时，先调用 search_tools 获取参数说明，再通过 call_tool 执行。`;
+            const hiddenCount = onDemand.length - ON_DEMAND_PROMPT_LIMIT;
+            if (hiddenCount > 0) {
+                s += `\n其余 ${hiddenCount} 个工具请通过 search_tools 查询。`;
+            }
         }
         return s;
     }
