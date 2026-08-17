@@ -1,6 +1,6 @@
 # 11 - ob11-core-bridge 使用指南
 
-`ob11-core-bridge` 是 aiplugin4 的配套中转后端（位于独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)）。SealDice 以 OB11 正向 WebSocket 客户端身份主动连到中间件，OB11 协议端连到中间件，插件通过 MCP 调用中间件：**注入假消息 → 执行核心/扩展指令 → 收集 bot 响应**，并把结果回传给 AI。
+`ob11-core-bridge` 是 aiplugin4 的配套中转后端（位于独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)）。SealDice 以 OB11 正向 WebSocket 客户端身份主动连到中间件，中间件再**出站主动连接** OB11 协议端，插件通过 MCP 调用中间件：**注入假消息 → 执行核心/扩展指令 → 收集 bot 响应**，并把结果回传给 AI。
 
 ## 为什么需要它
 
@@ -10,18 +10,18 @@ SealDice 的 JS 插件无法直接调用核心指令（`.ext`、`.help` 等）�
 
 ```text
 SealDice（OB11 正向 WS 客户端）  <──>  /core（或 /core/ws）
-OB11 协议端 / 模拟器              <──>  /onebot
+OB11 协议端 / 模拟器              <──  中间件启动时出站主动连接
 aiplugin4 插件（MCP 客户端）      <──>  /mcp
 ```
 
 | 端点 | 用途 |
 | --- | --- |
 | `/core`、`/core/ws` | SealDice 核心正向 WS，海豹**主动连接**本端点 |
-| `/onebot` | OB11 协议端（NapCat / LLOneBot / 测试模拟器）的 WS |
+| 协议端（出站） | 中间件作为 WS **客户端**，启动时主动连接你在配置里填写的协议端地址（带指数退避重连） |
 | `/mcp` | Streamable HTTP MCP 端点，提供 `run_ext_command` / `run_core_command` |
 | `/healthz` | 健康检查 |
 
-默认监听 `0.0.0.0:46880`。中间件只做入站监听，没有出站连接（无 `CORE_URL` 之类的配置）；海豹和协议端都要主动连过来。
+默认监听 `0.0.0.0:46880`。海豹**主动连入** `/core`；协议端由中间件**出站主动连接**（不支持反向 WS，协议端无需也无法连入中间件）。
 
 ## 部署
 
@@ -49,11 +49,11 @@ npm start
 | `AIPLUGIN4_BACKEND_PORT` | `46880` | 监听端口 |
 | `AIPLUGIN4_BRIDGE_CORE_PATH` | `/core` | 核心 WS 路径（默认同时接受 `/core/ws`） |
 | `AIPLUGIN4_BRIDGE_CORE_PATHS` | `/core,/core/ws` | 核心 WS 路径集合（逗号分隔，覆盖默认） |
-| `AIPLUGIN4_BRIDGE_ONEBOT_PATH` | `/onebot` | 协议端 WS 路径 |
+| `AIPLUGIN4_BRIDGE_PROTOCOL_URL` | 空 | 协议端 WS 地址（中间件启动时主动连接；WebUI「⚙ 配置」可填，重启生效） |
 | `AIPLUGIN4_BRIDGE_MCP_PATH` | `/mcp` | MCP Streamable HTTP 路径 |
-| `AIPLUGIN4_BRIDGE_TOKEN` | 空 | 默认鉴权 token，同时作为核心端/协议端/MCP 的默认 token |
+| `AIPLUGIN4_BRIDGE_TOKEN` | 空 | MCP 鉴权 token |
 | `AIPLUGIN4_BRIDGE_CORE_TOKEN` | 跟随 `AIPLUGIN4_BRIDGE_TOKEN` | 核心端（SealDice 连接）token |
-| `AIPLUGIN4_BRIDGE_PROTOCOL_TOKEN` | 跟随 `AIPLUGIN4_BRIDGE_TOKEN` | 协议端 token |
+| `AIPLUGIN4_BRIDGE_PROTOCOL_TOKEN` | 空 | 协议端 token（可选；同时以 access_token 查询参数与 Bearer 头发送） |
 
 > 注意：这里**没有 `CORE_URL`**。旧版“插件连接中间件、中间件反向连海豹”的方案已移除，现在是海豹主动连中间件。
 
@@ -69,9 +69,16 @@ ws://127.0.0.1:46880/core
 
 ## 协议端侧配置
 
-NapCat / LLOneBot 等协议端以 OB11 正向或反向 WS 客户端身份连接中间件 `/onebot`（token 用 `AIPLUGIN4_BRIDGE_PROTOCOL_TOKEN`）。中间件在核心与协议端之间原样转发 OB11 JSON。
+中间件在**启动时**作为 WS 客户端主动连接 OB11 协议端（NapCat / LLOneBot / 测试模拟器等）的 WS 地址，并在核心与协议端之间原样转发 OB11 JSON。协议端无需配置任何指向中间件的连接（不支持反向 WS）。
 
-> 协议端不是必需的：仅做“注入指令 + 收集响应”时可以不连 `/onebot`。默认 `forward=false` 会拦截核心发出的 Action，即使没有协议端也不会失败。
+在 aiplugin4「后端」页的 ob11-core-bridge 卡片「⚙ 配置」中填写：
+
+- **协议端 WebSocket 地址**：如 `ws://127.0.0.1:6700`（对应环境变量 `AIPLUGIN4_BRIDGE_PROTOCOL_URL`）
+- **协议端 token**（可选）：会同时以 `access_token` 查询参数和 `Authorization: Bearer` 头发送（对应 `AIPLUGIN4_BRIDGE_PROTOCOL_TOKEN`）
+
+> 配置保存后需**重启该后端**才生效。协议端未配置或不可达时，中间件会按指数退避（1s 起、上限 30s）持续重试，连上后自动恢复转发；期间核心发来的 API 请求立即返回 `status: failed`，不会静默等待超时。
+>
+> 协议端不是必需的：仅做“注入指令 + 收集响应”时可以不配协议端。默认 `forward=false` 会拦截核心发出的 Action，即使没有协议端也不会失败。
 
 ## 插件侧接入（aiplugin4）
 
