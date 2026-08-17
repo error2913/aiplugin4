@@ -121,7 +121,7 @@ export const updateInfo: { [version: string]: string } = {
 - 新增 docs/10-TODO.md：MCP Streamable HTTP 环境适配后的改动清单
 ## 优化
 - 音乐服务配置化：网易云/qq 的域名与 Cookie 移入「工具-音乐服务配置」（平台|域名|Cookie），不再硬编码
-- 新增 OB11 核心指令中转：run_ext_command/run_core_command 通过独立控制 WS 向 SealDice 注入假消息，按群/私聊 lane 串行化并收集多条响应，支持捕获后拦截或继续转发
+- 新增 OB11 核心指令中转：run_ext_command/run_core_command 通过 MCP Streamable HTTP 调用中间件，由中间件向 SealDice 注入假消息；旧版控制 WS 兼容保留，按群/私聊 lane 串行化并收集多条响应，支持捕获后拦截或继续转发
 - 指令监听升级为多消息收集器：使用空闲窗口、最大消息数与超时结束，降低并发调用时的消息混淆
 - 内置扩展名单改为代码常量；核心扩展名统一为 core，core|ext 无需白名单即可查看所有扩展
 - 模型选取确定性：对话/图片/嵌入模型匹配不再随机抽取，固定取第一个符合用途的模型

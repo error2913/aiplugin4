@@ -32,10 +32,14 @@ export default class ToolConfig {
     "md-html-render": {
       "type": "http",
       "url": "http://127.0.0.1:37632/mcp"
+    },
+    "ob11-core-bridge": {
+      "type": "http",
+      "url": "http://127.0.0.1:46880/mcp"
     }
   }
 }`
-        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。默认包含三个：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。默认包含四个：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心/扩展指令中转）。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [
             `---
 name: 今日人品

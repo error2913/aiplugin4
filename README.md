@@ -238,7 +238,7 @@ max_tokens = 2048
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心/扩展指令中转）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
@@ -429,7 +429,7 @@ max_tokens = 2048
 
 > 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖与 ffmpeg；`text_to_image` 需要生成图片依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
 
-> 扩展/核心指令工具通过 OB11 核心桥注入假消息，不再要求会话先出现 `.r`；请启动 `ob11-core-bridge`，让 SealDice 的 OB11 网络依赖连接中间件 `/core`，并将插件「后端 → 核心指令中转WS地址」配置为中间件 `/control`。
+> 扩展/核心指令工具通过 OB11 核心桥注入假消息，不再要求会话先出现 `.r`；请启动 `ob11-core-bridge`，让 SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「工具 → MCP服务器配置」中启用 `ob11-core-bridge`（`http://127.0.0.1:46880/mcp`）。旧版 `/control` 仅作为兼容接口保留。
 
 ---
 

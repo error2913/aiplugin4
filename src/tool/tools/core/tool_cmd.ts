@@ -129,7 +129,7 @@ export function registerCmdTool() {
         const options = captureOptions(args, 50, 500);
         if (command === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
         try {
-            const result = await CoreBridgeClient.call(ctx, command, cmdArgs, options.capture, options.timeoutMs);
+            const result = await CoreBridgeClient.call(ctx, command, cmdArgs, options.capture, options.timeoutMs, 'run_core_command');
             return `核心指令 core|${command} 返回：\n${formatCoreBridgeResult(result)}`;
         } catch (e) {
             Logger.warning(`[run_core_command] 调用 core|${command} 失败:${e instanceof Error ? e.message : String(e)}`);

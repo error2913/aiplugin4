@@ -31,7 +31,7 @@ let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步
 
 // 内置后端服务（有专用包装工具 web_read / render_markdown / render_html），
 // 仅作为 MCP 服务器供包装工具调用，不把其 tools/list 重复注册为 AI 工具
-const BUILTIN_BACKEND_SERVERS = new Set(['web-read', 'md-html-render']);
+const BUILTIN_BACKEND_SERVERS = new Set(['web-read', 'md-html-render', 'ob11-core-bridge']);
 
 /** 服务器配置是否一致：url/token/headers 任一变化都视为新配置，需要重建会话并重新拉取工具列表 */
 function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
