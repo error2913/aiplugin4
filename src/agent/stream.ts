@@ -8,27 +8,70 @@ import Model from "../model/model";
 import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
-import { RequestMessage } from "../utils/message";
+import { estimateTextTokens, RequestMessage } from "../utils/message";
 import { withTimeout } from "../utils/utils";
 
 /**
- * 请求体消息净化（防御层）：剔除空 tool_calls 数组与缺少 tool_call_id 的 tool 消息。
+ * 请求体消息净化（防御层）：一次遍历同时完成——
+ * 1) 删除空 tool_calls 数组；
+ * 2) 删除没有匹配 assistant tool_calls 的 tool 消息（缺 tool_call_id 或引用不存在的调用）；
+ * 3) 删除 assistant tool_calls 中引用不存在 tool 结果的调用项。
  * handleMessages 已保证正常路径不产生这些脏数据，此处兜底外部调用（如其他插件经
  * globalThis.aiplugin4.chatMessages 传入的 messages）与历史持久化数据。
  */
 function sanitizeRequestMessages(messages: any[]): any[] {
-    return (messages || []).filter(m => {
-        if (m && m.role === 'tool' && !m.tool_call_id) {
-            logger.warning('剔除缺少 tool_call_id 的 tool 消息（避免请求报错）');
-            return false;
+    const list = (messages || []).filter(m => m && typeof m === 'object');
+    if (list.length === 0) return [];
+
+    // 先收集两侧引用：tool 结果携带的 tool_call_id 与 assistant 声明的 tool_call id
+    const toolResultIds = new Set<string>();
+    const assistantCallIds = new Set<string>();
+    for (const m of list) {
+        if (m.role === 'tool' && m.tool_call_id) toolResultIds.add(m.tool_call_id);
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            for (const tc of m.tool_calls) if (tc && tc.id) assistantCallIds.add(tc.id);
         }
-        return true;
-    }).map(m => {
-        if (!m || typeof m !== 'object') return m;
+    }
+
+    const result: any[] = [];
+    for (const m of list) {
         const out = { ...m };
         if (Array.isArray(out.tool_calls) && out.tool_calls.length === 0) delete out.tool_calls;
-        return out;
-    });
+
+        if (out.role === 'tool') {
+            const id = out.tool_call_id;
+            if (!id || !assistantCallIds.has(id)) {
+                logger.warning('剔除没有匹配 assistant tool_calls 的 tool 消息');
+                continue;
+            }
+            result.push(out);
+            continue;
+        }
+
+        if (out.role === 'assistant' && Array.isArray(out.tool_calls) && out.tool_calls.length > 0) {
+            const kept = out.tool_calls.filter((tc: any) => tc && tc.id && toolResultIds.has(tc.id));
+            if (kept.length === 0) {
+                logger.warning('剔除引用不存在 tool 结果的 assistant tool_calls');
+                delete out.tool_calls;
+            } else if (kept.length < out.tool_calls.length) {
+                logger.warning('剔除部分引用不存在 tool 结果的 assistant tool_call');
+                out.tool_calls = kept;
+            }
+        }
+        result.push(out);
+    }
+    return result;
+}
+
+/** 发送前校验整包预算：估算 messages + tools 的 token 总量，超出「上下文最大token」时告警 */
+function checkRequestBudget(messages: any[], tools: any[]): void {
+    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
+    if (maxTokens <= 0) return;
+    const toolsEstimate = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
+    const estimate = estimateTextTokens(JSON.stringify(messages || [])) + toolsEstimate;
+    if (estimate > maxTokens) {
+        logger.warning(`请求体估算 token（含 tools JSON）超出「上下文最大token」预算: ${estimate} / ${maxTokens}`);
+    }
 }
 
 export class streamService {
@@ -118,6 +161,7 @@ export class streamService {
                 if (tools && tools.length > 0) body.tools = tools;
                 body.tool_choice = tool_choice;
             }
+            checkRequestBudget(body.messages, tools || []);
             logger.printRequestMessages(body.messages);
 
             const time = Date.now();

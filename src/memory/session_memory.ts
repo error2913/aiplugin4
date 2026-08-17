@@ -13,6 +13,7 @@ import { TypeDescriptor } from "../utils/utils";
 
 import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
+import { bumpSummaryRevision } from "./revision";
 
 export default class SessionMemoryService extends MemoryService {
     static validKeysMap: { [key in keyof SessionMemoryService]?: TypeDescriptor<SessionMemoryService[key]> } = {
@@ -110,6 +111,7 @@ export default class SessionMemoryService extends MemoryService {
             // 同时写入总结记忆，供 buildSummaryPrompt 使用
             this.summaries.push(summaryContent);
             this.limitSummaries();
+            bumpSummaryRevision();
 
             // 与 add_memory 工具一致：按 memory_type/name 决定记忆归属（个人→目标用户会话，群聊→目标群会话）。
             // 模型不保证遵守模板：memories 缺失/非数组时跳过落库（摘要仍保留），逐条定位失败仅跳过该条，
@@ -210,6 +212,7 @@ export default class SessionMemoryService extends MemoryService {
 
     clearSummaries() {
         this.summaries = [];
+        bumpSummaryRevision();
     }
 
     buildSummaryPrompt(): string {

@@ -236,10 +236,18 @@ export class TimerManager {
 当前触发时间：${fmtDate(Math.floor(Date.now() / 1000))}
 提示内容：${content}`;
 
-                            await session.context.addSystemUserMessage(s, "定时器触发提示");
-                            await session.chat(ctx, msg, '定时任务');
-
-                            changed = true;
+                            // 与 interval 一致：执行前先重新入队，执行失败时定时器不会静默丢失，会在下一轮重试
+                            this.timerQueue.push(timer);
+                            try {
+                                await session.context.addSystemUserMessage(s, "定时器触发提示");
+                                await session.chat(ctx, msg, '定时任务');
+                                // 一次性定时器执行成功，从队列移除
+                                const idx = this.timerQueue.indexOf(timer);
+                                if (idx !== -1) this.timerQueue.splice(idx, 1);
+                                changed = true;
+                            } catch (e) {
+                                logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                            }
                             break;
                         }
                         case 'interval': {

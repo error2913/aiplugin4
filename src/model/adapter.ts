@@ -98,7 +98,7 @@ function buildAnthropicMessages(messages: any[]): { system: string, messages: an
     for (const msg of messages || []) {
         const role = msg.role;
         if (role === 'system') {
-            const text = typeof msg.content === 'string' ? msg.content : '';
+            const text = extractSystemText(msg.content);
             if (text) systemParts.push(text);
             continue;
         }
@@ -151,6 +151,18 @@ function buildAnthropicMessages(messages: any[]): { system: string, messages: an
     }
 
     return { system: systemParts.join('\n'), messages: merged };
+}
+
+/** 提取 system 消息文本：支持纯字符串与 OpenAI 多模态内容块数组（仅拼接 text 块） */
+function extractSystemText(content: any): string {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        return content
+            .filter((b: any) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+            .map((b: any) => b.text)
+            .join('\n');
+    }
+    return '';
 }
 
 function mergeAnthropicContent(a: any, b: any): any {

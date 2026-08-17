@@ -7,7 +7,8 @@ import { requestModel } from "./provider";
 import { EmbeddingModelUse, ModelBody, ModelUse } from "./types";
 
 export default class EmbeddingModel extends BaseModel {
-    static vectorCache: { text: string, vector: number[] } = { text: '', vector: [] };
+    /** 按模型名隔离的最近一次嵌入缓存，避免不同嵌入模型（同维度）互相串向量 */
+    static vectorCache: { [model: string]: { text: string, vector: number[] } } = {};
 
     use: EmbeddingModelUse[];
     constructor(use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
@@ -26,8 +27,9 @@ export default class EmbeddingModel extends BaseModel {
         }
 
         const dimension = { ...DEFAULT_EMBEDDING_MODEL_BODY, ...this.body }.dimensions;
-        if (EmbeddingModel.vectorCache.text === text && EmbeddingModel.vectorCache.vector.length === dimension) {
-            const v = EmbeddingModel.vectorCache.vector;
+        const cache = EmbeddingModel.vectorCache[this.name];
+        if (cache && cache.text === text && cache.vector.length === dimension) {
+            const v = cache.vector;
             return v;
         }
 
@@ -43,8 +45,7 @@ export default class EmbeddingModel extends BaseModel {
                 const embedding = data.data[0].embedding;
 
                 logger.info(`文本:`, text.length > 200 ? text.slice(0, 200) + `…(+${text.length - 200})` : text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
-                EmbeddingModel.vectorCache.text = text;
-                EmbeddingModel.vectorCache.vector = embedding;
+                EmbeddingModel.vectorCache[this.name] = { text, vector: embedding };
 
                 return embedding;
             } else {

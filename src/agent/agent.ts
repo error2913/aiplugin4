@@ -14,7 +14,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { handleMessages } from "../utils/message";
+import { buildSystemMessage, handleMessages } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, TypeDescriptor } from "../utils/utils";
 
@@ -107,12 +107,16 @@ export default class Agent {
         const toolInfos = Tool.getToolsInfo(session);
         const trace = new AgentRunContext();
 
+        // system prompt 在同一轮工具循环内复用：避免每轮工具回调后重复做记忆检索/嵌入，
+        // 只在工具回调后更新 context messages（上下文仍随工具结果增长）。
+        const systemMessage = await buildSystemMessage(ctx, session);
+
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             trace.beginTurn();
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
             const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName);
             // 提示词工程模式下模型可能返回 ```function ... ``` 代码块包裹的工具调用：
             // 发送前先剥离该块，避免代码块原文进入回复/上下文；调用内容仍以 match[0] 原样记录

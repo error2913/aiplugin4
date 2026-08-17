@@ -3,6 +3,9 @@ import { logger } from "../logger";
 
 import { MessageSegment, parseCardToText, parseMusicToText } from "./string";
 
+/** 合并转发/消息节点展开的最大嵌套深度，防止恶意或异常嵌套导致无限递归 */
+const MAX_FORWARD_DEPTH = 5;
+
 export function getNet() {
     const net = globalThis.net;
     if (!net) {
@@ -82,7 +85,8 @@ export async function getForwardMessage(epId: string, id: string): Promise<any[]
 }
 
 /** 合并转发单条消息内容转可读文本（支持嵌套 forward） */
-async function forwardSegmentsToText(epId: string, message: any): Promise<string> {
+async function forwardSegmentsToText(epId: string, message: any, depth: number, visited: Set<string>): Promise<string> {
+    if (depth > MAX_FORWARD_DEPTH) return '[消息嵌套过深，已截断]';
     if (typeof message === 'string') return message;
     if (!Array.isArray(message)) return '';
 
@@ -101,12 +105,19 @@ async function forwardSegmentsToText(epId: string, message: any): Promise<string
             case 'music': text += parseMusicToText(seg.data || {}); break;
             case 'node': {
                 // 嵌套消息节点：复用整条消息的渲染逻辑（含发送者名）
-                text += await forwardMessagesToText(epId, [seg]);
+                text += await forwardMessagesToText(epId, [seg], depth + 1, visited);
                 break;
             }
             case 'forward': {
-                const sub = await getForwardMessage(epId, (seg.data && seg.data.id) || '');
-                text += await forwardMessagesToText(epId, sub);
+                const fid = (seg.data && seg.data.id) || '';
+                // 已展开过的转发 id 直接截断，防止循环引用或反复拉取同一转发
+                if (!fid || visited.has(String(fid))) {
+                    text += '[合并转发循环引用，已截断]';
+                    break;
+                }
+                visited.add(String(fid));
+                const sub = await getForwardMessage(epId, String(fid));
+                text += await forwardMessagesToText(epId, sub, depth + 1, visited);
                 break;
             }
             default: text += `[${seg.type}]`;
@@ -116,7 +127,8 @@ async function forwardSegmentsToText(epId: string, message: any): Promise<string
 }
 
 /** 合并转发消息数组转可读文本（发送者 + 内容） */
-async function forwardMessagesToText(epId: string, messages: any[]): Promise<string> {
+async function forwardMessagesToText(epId: string, messages: any[], depth: number = 0, visited: Set<string> = new Set()): Promise<string> {
+    if (depth > MAX_FORWARD_DEPTH) return '[消息嵌套过深，已截断]';
     const lines: string[] = [];
     for (const m of messages) {
         if (!m || typeof m !== 'object') continue;
@@ -124,16 +136,16 @@ async function forwardMessagesToText(epId: string, messages: any[]): Promise<str
         const nodeData = m.type === 'node' ? (m.data || {}) : null;
         const sender = nodeData || m.sender || {};
         const name = sender.card || sender.nickname || `用户${sender.user_id || ''}`;
-        const content = await forwardSegmentsToText(epId, nodeData ? nodeData.content : m.message);
+        const content = await forwardSegmentsToText(epId, nodeData ? nodeData.content : m.message, depth + 1, visited);
         lines.push(`${name}: ${content}`);
     }
     return lines.join('\n');
 }
 
 /** 展开合并转发消息 id，返回可读文本（含嵌套） */
-export async function expandForwardMessage(epId: string, id: string): Promise<string> {
+export async function expandForwardMessage(epId: string, id: string, depth: number = 0): Promise<string> {
     const messages = await getForwardMessage(epId, id);
-    return forwardMessagesToText(epId, messages);
+    return forwardMessagesToText(epId, messages, depth + 1);
 }
 
 export async function getGroupMemberInfo(epId: string, group_id: string, user_id: string): Promise<any> {

@@ -14,7 +14,7 @@ const TEMPLATES: { [key: string]: string } = {
 - 会话类型:{{{sessionType}}}
 - 会话名称:{{{sessionName}}}
 - 会话ID:{{{sessionId}}}
-- 当前时间:{{{currentTime}}}
+- 当前时间:**CURRENT_TIME**
 
 - [at:xxx]表示@某个群成员
 - [poke:xxx]表示戳一戳某个群成员
@@ -69,11 +69,7 @@ const TEMPLATES: { [key: string]: string } = {
     {{/each}}
 {{/if}}
 
-{{{memoryPrompt}}}
-
-{{{summaryPrompt}}}
-
-{{{knowledgePrompt}}}
+**DYNAMIC_SECTIONS**
 
 {{{toolPrompt}}}`,
     "长期记忆prompt模板": `{{#if MEMORY}}

@@ -41,6 +41,18 @@ interface ContextMessage {
     tool_call_id?: string;
 }
 
+/**
+ * 无依赖的 token 估算：ASCII 约 4 字符/token，非 ASCII（中文等）约 1 字符/token。
+ * 用于「上下文最大token」的整包预算估算，避免依赖外部 tokenizer。
+ */
+export function estimateTextTokens(text: string): number {
+    let ascii = 0;
+    for (let i = 0; i < text.length; i++) {
+        if (text.charCodeAt(i) <= 0x7F) ascii++;
+    }
+    return Math.ceil(ascii / 4) + (text.length - ascii);
+}
+
 export async function buildSystemMessage(ctx: seal.MsgContext, session: Session): Promise<ContextMessage> {
     const { roleIndex, roleSetting } = getRoleSetting(ctx);
     const content = await buildSystemPromptContent(ctx, session, roleIndex, roleSetting);
@@ -59,61 +71,75 @@ function buildSamplesMessages(ctx: seal.MsgContext): ContextMessage[] {
     const { SAMPLE_MESSAGES } = Config.message;
 
     return SAMPLE_MESSAGES
-        .map((item, index) => {
-            if (item === '') return null;
-            return {
-                role: index % 2 === 0 ? 'user' : 'assistant',
-                contentItems: [{
-                    text: item,
-                    time: Math.floor(Date.now() / 1000),
-                    userId: index % 2 === 0 ? '' : ctx.endPoint.userId
-                }]
-            };
-        })
-        .filter(item => item !== null);
+        .map((item, index) => ({ item, index }))
+        .filter(x => x.item.trim() !== '')
+        .map((x, i) => ({
+            role: i % 2 === 0 ? 'user' : 'assistant',
+            contentItems: [{
+                text: x.item,
+                time: Math.floor(Date.now() / 1000),
+                userId: i % 2 === 0 ? '' : ctx.endPoint.userId
+            }]
+        }));
 }
 
 function buildContextMessages(systemMessage: ContextMessage, messages: ContextMessage[]): ContextMessage[] {
     const { INSERT_COUNT } = Config.message;
 
     const contextMessages = messages.slice();
-
-    // token 预算裁剪（0 = 不限制）：超出后从最早的消息开始丢弃，保持窗口有界
-    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
-    if (maxTokens > 0) {
-        const estimateTokens = (m: ContextMessage) => Math.ceil(buildContent(m).length / 2);
-        let tokens = contextMessages.reduce((acc, m) => acc + estimateTokens(m), 0);
-        while (tokens > maxTokens && contextMessages.length > 1) {
-            tokens -= estimateTokens(contextMessages[0]);
-            contextMessages.shift();
-        }
-    }
-
     if (INSERT_COUNT <= 0) return contextMessages;
 
-    const userPositions = contextMessages
-        .map((item, index) => (item.role === 'user' ? index : -1))
-        .filter(index => index !== -1);
-
-    if (userPositions.length <= INSERT_COUNT) return contextMessages;
-
-    for (let i = userPositions.length - 1; i >= 0; i--) {
-        if (i + 1 <= INSERT_COUNT) break;
-        const index = userPositions[i];
-        if ((userPositions.length - i) % INSERT_COUNT === 0) {
-            contextMessages.splice(index, 0, systemMessage);
+    // 顺序遍历：在第 INSERT_COUNT+1 条及之后每隔 INSERT_COUNT 条用户消息前插入 system message，
+    // 让模型在长对话中周期性重新看到角色设定；示例对话不计入插入轮数。
+    let userCount = 0;
+    const result: ContextMessage[] = [];
+    for (const m of contextMessages) {
+        if (m.role === 'user' && userCount > 0 && userCount % INSERT_COUNT === 0) {
+            result.push(systemMessage);
         }
+        result.push(m);
+        if (m.role === 'user') userCount++;
     }
-
-    return contextMessages;
+    return result;
 }
 
-export async function handleMessages(ctx: seal.MsgContext, session: Session, multimodal = false): Promise<RequestMessage[]> {
-    const systemMessage = await buildSystemMessage(ctx, session);
-    const samplesMessages = buildSamplesMessages(ctx);
-    const contextMessages = buildContextMessages(systemMessage, session.context.messages as ContextMessage[]);
+/**
+ * token 预算裁剪：在 system + samples + context 完整组装后统一计算，超出预算时从最早的
+ * context 消息开始丢弃；system 与 samples 永不丢弃。tools 的 JSON 长度同样预留进预算，
+ * 使「上下文最大token」更接近真实请求体上限。
+ */
+function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[]): ContextMessage[] {
+    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
+    if (maxTokens <= 0) return messages;
 
-    const messages: ContextMessage[] = [systemMessage, ...samplesMessages, ...contextMessages];
+    const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
+    const budget = Math.max(maxTokens - reserve, 1);
+    const estimate = (m: ContextMessage) => estimateTextTokens(buildContent(m));
+    let tokens = messages.reduce((acc, m) => acc + estimate(m), 0);
+
+    while (tokens > budget && messages.length > protectedCount) {
+        tokens -= estimate(messages[protectedCount]);
+        messages.splice(protectedCount, 1);
+    }
+    return messages;
+}
+
+export async function handleMessages(
+    ctx: seal.MsgContext,
+    session: Session,
+    multimodal = false,
+    tools?: unknown[],
+    systemMessage?: ContextMessage
+): Promise<RequestMessage[]> {
+    const system = systemMessage ?? await buildSystemMessage(ctx, session);
+    const samplesMessages = buildSamplesMessages(ctx);
+    const contextMessages = buildContextMessages(system, session.context.messages as ContextMessage[]);
+
+    const messages: ContextMessage[] = applyTokenBudget(
+        [system, ...samplesMessages, ...contextMessages],
+        samplesMessages.length + 1,
+        tools
+    );
 
     // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
     // 工具结果转成 user 文本（带【工具返回】标记），保证模型能看到结果而不会反复调用工具
