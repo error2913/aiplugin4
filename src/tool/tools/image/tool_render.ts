@@ -4,7 +4,7 @@ import Image from "../../../resource/image";
 import { Session } from "../../../session/session";
 import { parseSpecialTokens } from "../../../utils/string";
 import { generateId } from "../../../utils/utils";
-import { callServerTool, getMCPServerByName } from "../../mcp";
+import { callServerTool, getMCPServerByName, isMCPEnabled } from "../../mcp";
 import Tool from "../../tool";
 
 interface RenderResponse {
@@ -83,6 +83,7 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
 
 // Markdown 渲染
 async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradient' = 'light', width = 1200, hasImages = false) {
+    if (!isMCPEnabled()) throw new Error(`MCP 功能未启用：请在「工具 → 是否启用MCP」中开启，并确认已配置 MCP 服务器 md-html-render`);
     const mcpServer = getMCPServerByName('md-html-render');
     if (!mcpServer) throw new Error(`未配置 MCP 服务器 md-html-render：请在「工具 → MCP服务器配置」中按标准 mcpServers 格式添加`);
     const base64 = await callServerTool(mcpServer, 'render_markdown', { markdown, theme, width, quality: 90, hasImages });
@@ -92,6 +93,7 @@ async function renderMarkdown(markdown: string, theme: 'light' | 'dark' | 'gradi
 
 // HTML 渲染
 async function renderHtml(html: string, width = 1200, hasImages = false) {
+    if (!isMCPEnabled()) throw new Error(`MCP 功能未启用：请在「工具 → 是否启用MCP」中开启，并确认已配置 MCP 服务器 md-html-render`);
     const mcpServer = getMCPServerByName('md-html-render');
     if (!mcpServer) throw new Error(`未配置 MCP 服务器 md-html-render：请在「工具 → MCP服务器配置」中按标准 mcpServers 格式添加`);
     const base64 = await callServerTool(mcpServer, 'render_html', { html, theme: 'light', width, quality: 90, hasImages });

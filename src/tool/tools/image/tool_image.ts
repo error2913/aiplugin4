@@ -4,6 +4,36 @@ import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
+async function resolveTtiImage(ctx: seal.MsgContext, session: any, raw: string): Promise<string | null> {
+    let input = String(raw || '').trim();
+    if (!input) return null;
+
+    const tagMatch = input.match(/^[[［]img[:：]\s?([^\]］]+)[\]］]$/i);
+    if (tagMatch) input = tagMatch[1].trim();
+
+    if (/^data:/i.test(input) || /^https?:\/\//i.test(input)) return input;
+
+    // 直接传入 base64 时原样返回；长度阈值用于避免把普通图片 ID 误判为 base64。
+    const compact = input.replace(/\s+/g, '');
+    if (compact.length >= 64 && /^[A-Za-z0-9+/=]+$/.test(compact)) return input;
+
+    const image = await session.context.findImage(ctx, input)
+        || (input.includes(':') ? await session.context.findImage(ctx, input.split(':')[0]) : null);
+    if (!image) return null;
+    if (image.type === 'local') return null;
+
+    if (image.type === 'url') {
+        try {
+            await image.urlToBase64();
+        } catch (e) {
+            logger.warning(`参考图URL转base64失败: ${e}`);
+        }
+        return image.base64 ? image.base64Url : image.src;
+    }
+
+    return image.base64Url;
+}
+
 export function registerImage() {
     const toolITT = new Tool({
         type: "function",
@@ -61,6 +91,10 @@ export function registerImage() {
                     name: {
                         type: "string",
                         description: "如果保存图片，图片的名称"
+                    },
+                    image: {
+                        type: "string",
+                        description: "可选参考图，用于以图生图。支持图片id、user_avatar:用户名称或纯数字QQ号、group_avatar:群聊名称或纯数字群号、http(s)图片URL、data:image/...;base64或base64数据"
                     }
                 },
                 required: ['prompt', 'save', 'name']
@@ -68,7 +102,7 @@ export function registerImage() {
         }
     });
     toolTTI.solve = async (ctx, msg, session, args) => {
-        const { prompt, negative_prompt, save, name } = args;
+        const { prompt, negative_prompt, save, name, image } = args;
 
         const ext = seal.ext.find('tti');
         if (!ext) {
@@ -84,7 +118,15 @@ export function registerImage() {
         try {
             // tti 统一 API
             if (globalThis.tti && typeof globalThis.tti.generate === 'function') {
-                const result = await globalThis.tti.generate({ text: prompt, negativeText: negative_prompt });
+                const request: { text: string; negativeText?: string; image?: string } = { text: prompt };
+                if (negative_prompt) request.negativeText = negative_prompt;
+                if (image) {
+                    const reference = await resolveTtiImage(ctx, session, image);
+                    if (!reference) return `未找到参考图${image}`;
+                    request.image = reference;
+                }
+
+                const result = await globalThis.tti.generate(request);
                 if (!result.success) throw new Error(result.error || '图像生成失败');
                 const img = new Image();
                 img.imageId = `${name}_${generateId()}`;
@@ -103,7 +145,7 @@ export function registerImage() {
                 }
 
                 img.format = img.format || 'unknown';
-                img.description = `AI绘图[img:${img.imageId}]\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}`;
+                img.description = `AI绘图[img:${img.imageId}]\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}\n${image ? `参考图: 已提供` : ''}`;
 
                 if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
 

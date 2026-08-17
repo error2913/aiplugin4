@@ -18,7 +18,7 @@ interface AiDrawingApi {
 interface TtiApi {
     readonly name: string;
     readonly version: string;
-    generate(request: { text: string; negativeText?: string; model?: string }): Promise<{ success: boolean; type: 'image'; data: string; error?: string }>;
+    generate(request: { text: string; negativeText?: string; model?: string; image?: string }): Promise<{ success: boolean; type: 'image'; data: string; error?: string }>;
 }
 
 interface TtsApi {

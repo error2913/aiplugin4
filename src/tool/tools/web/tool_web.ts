@@ -3,7 +3,7 @@ import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
-import { callServerTool, getMCPServerByName } from "../../mcp";
+import { callServerTool, getMCPServerByName, isMCPEnabled } from "../../mcp";
 import Tool from "../../tool";
 
 export function registerWeb() {
@@ -126,6 +126,7 @@ export function registerWeb() {
     });
     tool.solve = async (_, __, ___, args) => {
         const { url, screenshot = false, width, height, fullPage = false, delay } = args;
+        if (!isMCPEnabled()) return `MCP 功能未启用：请在「工具 → 是否启用MCP」中开启，并确认已配置 MCP 服务器 web-read`;
         const mcpServer = getMCPServerByName('web-read');
         if (!mcpServer) return `未配置 MCP 服务器 web-read：请在「工具 → MCP服务器配置」中按标准 mcpServers 格式添加`;
 
