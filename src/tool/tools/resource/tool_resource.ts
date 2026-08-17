@@ -15,6 +15,23 @@ function buildPathMap(items: { [key: string]: string }[], key: string): { [key: 
     return pathMap;
 }
 
+function buildResourceList(type: string): string {
+    const sections: Array<[string, string[]]> = [];
+    if (type === 'all' || type === 'image') {
+        sections.push(['本地图片', (Config.resource.LOCAL_IMAGES || []).map(img => img.imageId)]);
+    }
+    if (type === 'all' || type === 'audio') {
+        sections.push(['本地音频', (Config.resource.LOCAL_AUDIOS || []).map(a => a.audioId)]);
+    }
+    if (type === 'all' || type === 'file') {
+        sections.push(['本地文件', (Config.resource.LOCAL_FILES || []).map(f => f.fileId)]);
+    }
+    if (type === 'all' || type === 'video') {
+        sections.push(['本地视频', (Config.resource.LOCAL_VIDEOS || []).map(v => v.videoId)]);
+    }
+    return sections.map(([label, names]) => `${label}:${names.length > 0 ? names.join('、') : '暂无'}`).join('\n');
+}
+
 function registerResourceTool(
     name: string,
     desc: string,
@@ -25,7 +42,7 @@ function registerResourceTool(
         type: 'function',
         function: {
             name,
-            description: `${desc}。可传 name（已登记资源，资源名以调用时的报错提示为准）或 path（本地绝对路径，或相对海豹 data 目录的路径）`,
+            description: `${desc}。可传 name（已登记资源，先通过 list_resources 查询可用名称）或 path（本地绝对路径，或相对海豹 data 目录的路径）`,
             parameters: {
                 type: 'object',
                 properties: {
@@ -86,4 +103,30 @@ function registerResourceTool(
 export function registerResourceTools() {
     registerResourceTool('send_file', '发送本地文件', 'fileId', 'file');
     registerResourceTool('send_video', '发送本地视频', 'videoId', 'video');
+
+    const listTool = new Tool({
+        type: 'function',
+        function: {
+            name: 'list_resources',
+            description: '查询当前已配置的本地资源名称。type 可选 image/audio/file/video/all。图片和音频分别使用 [img:名称] 和 [audio:名称]；文件和视频使用 send_file/send_video 的 name 参数。',
+            parameters: {
+                type: 'object',
+                properties: {
+                    type: {
+                        type: 'string',
+                        description: '资源类型',
+                        enum: ['image', 'audio', 'file', 'video', 'all']
+                    }
+                },
+                required: []
+            }
+        }
+    });
+    listTool.solve = async (_, __, ___, args) => {
+        const type = args && typeof args.type === 'string' ? args.type : 'all';
+        if (!['image', 'audio', 'file', 'video', 'all'].includes(type)) {
+            return `未知资源类型:${type}，可选值为 image/audio/file/video/all`;
+        }
+        return buildResourceList(type);
+    };
 }

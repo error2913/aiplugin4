@@ -8,7 +8,12 @@ import { logger } from "../logger";
 import Image from "../resource/image";
 
 import { getCtxAndMsg } from "./seal";
-import { resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
+import { getMilkyReplyQuoteId, resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
+
+export function truncateText(text: string, maxLength: number): string {
+    if (!text || maxLength <= 0 || text.length <= maxLength) return text || '';
+    return text.slice(0, maxLength) + '...';
+}
 
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
@@ -123,7 +128,7 @@ export interface MessageSegment {
  * 项目内部统一段格式。不经过 CQ 码：milky 下 msg.message 只有纯文本拼接，
  * at/图片/回复等富文本信息必须从 segment 取。
  */
-export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSegment[] {
+export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.MessageSegment[]): MessageSegment[] {
     const result: MessageSegment[] = [];
     for (const seg of segments) {
         if (!seg || typeof seg !== 'object' || typeof seg.type !== 'function') continue;
@@ -141,12 +146,12 @@ export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSeg
         switch (typeValue) {
             case 0: { // 文本 Text
                 const content = 'content' in seg ? seg.content : '';
-                result.push({ type: 'text', data: { text: content || '' } });
+                result.push({ type: 'text', data: { text: content === undefined || content === null ? '' : String(content) } });
                 break;
             }
             case 1: { // 艾特 At
                 const target = 'target' in seg ? seg.target : '';
-                result.push({ type: 'at', data: { qq: target || '' } });
+                result.push({ type: 'at', data: { qq: target === undefined || target === null ? '' : String(target) } });
                 break;
             }
             case 2: { // 文件 File
@@ -158,18 +163,24 @@ export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSeg
             }
             case 3: { // 图片 Image
                 const url = 'url' in seg ? seg.url : '';
-                const file = 'file' in seg && seg.file && typeof seg.file === 'object' ? (seg.file.url || seg.file.file) : '';
+                const file = 'file' in seg
+                    ? (typeof seg.file === 'string'
+                        ? seg.file
+                        : seg.file && typeof seg.file === 'object'
+                            ? ((seg.file as any).url || (seg.file as any).file || '')
+                            : '')
+                    : '';
                 result.push({ type: 'image', data: { url: url || file || '' } });
                 break;
             }
             case 4: { // 文字转语音 TTS
                 const content = 'content' in seg ? seg.content : '';
-                result.push({ type: 'text', data: { text: content || '' } });
+                result.push({ type: 'text', data: { text: content === undefined || content === null ? '' : String(content) } });
                 break;
             }
             case 5: { // 回复 Reply
                 const replySeq = 'replySeq' in seg ? seg.replySeq : '';
-                result.push({ type: 'reply', data: { id: replySeq || '' } });
+                result.push({ type: 'reply', data: { id: getMilkyReplyQuoteId(ctx, replySeq) } });
                 break;
             }
             case 6: { // 语音 Record
@@ -178,12 +189,12 @@ export function expandMilkySegments(segments: seal.MessageSegment[]): MessageSeg
             }
             case 7: { // 表情 Face
                 const faceID = 'faceID' in seg ? seg.faceID : '';
-                result.push({ type: 'face', data: { id: faceID || '' } });
+                result.push({ type: 'face', data: { id: faceID === undefined || faceID === null ? '' : String(faceID) } });
                 break;
             }
             case 8: { // 戳一戳 Poke
                 const target = 'target' in seg ? seg.target : '';
-                result.push({ type: 'poke', data: { qq: target || '' } });
+                result.push({ type: 'poke', data: { qq: target === undefined || target === null ? '' : String(target) } });
                 break;
             }
             default: {
@@ -303,8 +314,20 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 const gid = ctx.group ? ctx.group.groupId : '';
                 const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
                 const uid = `${prefix}:${seg.data.qq || ''}`;
-                ({ ctx } = getCtxAndMsg(epId, uid, gid));
-                const name = ctx.player!.name || '未知用户';
+                if (seg.data.qq === 'all') {
+                    content += '[at:全体成员]';
+                    break;
+                }
+                // OB11 段通常直接带 name；优先使用它，避免为每个 at 额外请求群成员信息。
+                let name = seg.data.name || '未知用户';
+                try {
+                    if (!seg.data.name) {
+                        const targetCtx = getCtxAndMsg(epId, uid, gid).ctx;
+                        name = targetCtx.player?.name || name;
+                    }
+                } catch (_e) {
+                    // 目标用户上下文创建失败（如目标不在当前会话）时保留 at 标签，不中断整条消息转换
+                }
                 content += `[at:${name}]`;
                 break;
             }
@@ -313,8 +336,13 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 const gid = ctx.group ? ctx.group.groupId : '';
                 const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
                 const uid = `${prefix}:${seg.data.qq || ''}`;
-                ({ ctx } = getCtxAndMsg(epId, uid, gid));
-                const name = ctx.player!.name || '未知用户';
+                let name = '未知用户';
+                try {
+                    const targetCtx = getCtxAndMsg(epId, uid, gid).ctx;
+                    name = targetCtx.player?.name || name;
+                } catch (_e) {
+                    // 目标用户上下文创建失败时保留 poke 标签，不中断整条消息转换
+                }
                 content += `[poke:${name}]`;
                 break;
             }
@@ -330,8 +358,9 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 break;
             }
             case 'face': {
-                const faceName = FACE_MAP[seg.data.id] || '';
-                content += faceName ? `[face:${faceName}]` : '';
+                const faceName = FACE_MAP[String(seg.data.id)] || '';
+                // 未知 face id 也保留占位，避免用户表情静默丢失；名称作为可见文案的一部分
+                content += `[face:${faceName || `未知表情${String(seg.data.id)}`}]`;
                 break;
             }
         }

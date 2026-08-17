@@ -32,42 +32,14 @@ const TEMPLATES: { [key: string]: string } = {
 {{/if}}
 - 可使用[avatar:xxxxxx]发送用户头像，其中xxxxxx为用户名称或用户ID
 - 可使用[group_avatar:xxxxxx]发送群聊头像，其中xxxxxx为群聊名称或群聊ID
-{{#if LOCAL_IMAGES}}
-- 可使用[img:图片ID]发送本地图片，本地图片列表如下：
-    {{#each LOCAL_IMAGES}}
-{{{imageId}}}{{#unless @last}}、{{/unless}}
-    {{else}}
-暂无本地图片
-    {{/each}}
-{{/if}}
+- 可使用[img:图片ID]发送本地图片，可用名称先通过 list_resources(type=image) 查询
 
 ## 音频相关
-{{#if LOCAL_AUDIOS}}
-- 可使用[audio:音频ID]发送本地音频，本地音频列表如下：
-    {{#each LOCAL_AUDIOS}}
-{{{audioId}}}{{#unless @last}}、{{/unless}}
-    {{else}}
-暂无本地音频
-    {{/each}}
-{{/if}}
+- 可使用[audio:音频ID]发送本地音频，可用名称先通过 list_resources(type=audio) 查询
 
 ## 文件与视频相关
-{{#if LOCAL_FILES}}
-- 可使用send_file工具发送本地文件，本地文件列表如下：
-    {{#each LOCAL_FILES}}
-{{{fileId}}}{{#unless @last}}、{{/unless}}
-    {{else}}
-暂无本地文件
-    {{/each}}
-{{/if}}
-{{#if LOCAL_VIDEOS}}
-- 可使用send_video工具发送本地视频，本地视频列表如下：
-    {{#each LOCAL_VIDEOS}}
-{{{videoId}}}{{#unless @last}}、{{/unless}}
-    {{else}}
-暂无本地视频
-    {{/each}}
-{{/if}}
+- 可使用send_file工具发送本地文件，可用名称先通过 list_resources(type=file) 查询
+- 可使用send_video工具发送本地视频，可用名称先通过 list_resources(type=video) 查询
 
 **DYNAMIC_SECTIONS**
 
@@ -115,8 +87,9 @@ const TEMPLATES: { [key: string]: string } = {
     {{#each tools}}
 {{index @index}}. 名称:{{{name}}}
     - 描述:{{{description}}}
-    - 参数信息:{{{json_stringify parameters.properties}}}
-    - 必需参数:{{#each parameters.required}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}
+    {{#if parameterText}}
+    - 参数:{{{parameterText}}}
+    {{/if}}
     {{else}}
 暂无可用函数。
     {{/each}}

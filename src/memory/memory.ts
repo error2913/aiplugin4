@@ -9,12 +9,14 @@ import { MEMORY_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, SessionInfo, UserInfo } from "../session/types";
-import { stripInternalTags } from "../utils/string";
+import { stripInternalTags, truncateText } from "../utils/string";
 import { generateId, getCommonItem, revive, TypeDescriptor } from "../utils/utils";
 
 import MemoryItem from "./memory_item";
 import { bumpMemoryRevision } from "./revision";
 import { MemorySource, searchOptions } from "./types";
+
+const MEMORY_RENDER_LIMIT = 1000;
 
 export default class MemoryService {
     static validKeysMap: { [key in keyof MemoryService]?: TypeDescriptor<MemoryService[key]> } = {
@@ -166,7 +168,7 @@ export default class MemoryService {
         this.limitMemories(1);
     }
 
-    buildMemory(si: SessionInfo, ml: MemoryItem[]): string {
+    buildMemory(si: SessionInfo, ml: Array<{ id: string, content: string }>): string {
         if (ml.length === 0) return '';
         const listText = ml.map((m, i) =>
             (i + 1) + '. [' + m.id + '] ' + m.content
@@ -231,17 +233,21 @@ export default class MemoryService {
         if (this.persona && this.persona !== '无') {
             s += `${ctx.isPrivate ? '个人设定' : '群聊设定'}: ${this.persona}\n`;
         }
+        const promptMemories = memories.map(memory => ({
+            id: memory.id,
+            content: truncateText(memory.content, MEMORY_RENDER_LIMIT)
+        }));
         s += ctx.isPrivate
             ? this.buildMemory({
                 isPrivate: true,
                 id: ctx.endPoint.userId,
                 name: seal.formatTmpl(ctx, '核心:骰子名字')
-            }, memories)
+            }, promptMemories)
             : this.buildMemory({
                 isPrivate: false,
                 id: ctx.group!.groupId,
                 name: ctx.group!.groupName
-            }, memories);
+            }, promptMemories);
         return s;
     }
 

@@ -36,7 +36,7 @@ export function registerRecord() {
         type: "function",
         function: {
             name: "record",
-            description: `发送本地语音，语音名以调用时的报错提示为准`,
+            description: `发送本地语音，语音名先通过 list_resources(type=audio) 查询`,
             parameters: {
                 type: "object",
                 properties: {

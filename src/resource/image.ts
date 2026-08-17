@@ -187,6 +187,7 @@ export default class Image {
         img.sourceSessionId = sourceSessionId;
         img.url = url;
         this.imageMap[imageId] = img;
+        this.save(img);
         return img;
     }
 
@@ -261,7 +262,12 @@ ${img.CQCode}`;
         let content = '';
         const images: Image[] = [];
         try {
-            const file = seg.data.url || seg.data.file || '';
+            const rawFile = seg.data.url || seg.data.file || '';
+            // Milky 原生 image 的 file 是 FileElement 对象，OB11 通常是字符串；
+            // 统一取 URL/本地文件字段，避免把对象写入 Image.url 后在 type getter 中报错。
+            const file = typeof rawFile === 'object' && rawFile !== null
+                ? ((rawFile as any).url || (rawFile as any).file || '')
+                : String(rawFile);
             if (!file) return { content: '', images: [] };
 
             const image = this.createUrlImage(getSessionId(ctx), file);

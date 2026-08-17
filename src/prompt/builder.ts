@@ -31,15 +31,6 @@ function signature(parts: Array<string | number | boolean>): string {
     return parts.map(String).join('|');
 }
 
-function localResourceSignature(): string {
-    return signature([
-        (Config.resource.LOCAL_IMAGES || []).map(img => img.imageId).join(','),
-        (Config.resource.LOCAL_AUDIOS || []).map(a => a.audioId).join(','),
-        (Config.resource.LOCAL_FILES || []).map(f => f.fileId).join(','),
-        (Config.resource.LOCAL_VIDEOS || []).map(v => v.videoId).join(',')
-    ]);
-}
-
 function toolStateSignature(session: Session): string {
     return Object.keys(session.toolState)
         .sort()
@@ -94,7 +85,6 @@ export async function buildSystemPromptContent(
         ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
         ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
         RECEIVE_IMAGE,
-        localResourceSignature(),
         STATUS,
         PROMPT_ENGINEERING,
         Config.tool.BLOCKED.join(','),
@@ -104,10 +94,6 @@ export async function buildSystemPromptContent(
     ]);
     const frame = await getCachedString(staticKey, STATIC_FRAME_TTL, () => {
         const skillSummaries = getSkillSummaries();
-        const localImages = (Config.resource.LOCAL_IMAGES || []).map(img => ({ imageId: img.imageId }));
-        const localAudios = Config.resource.LOCAL_AUDIOS || [];
-        const localFiles = (Config.resource.LOCAL_FILES || []).map(f => ({ fileId: f.fileId }));
-        const localVideos = (Config.resource.LOCAL_VIDEOS || []).map(v => ({ videoId: v.videoId }));
         const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
 
         let content = SYSTEM_MESSAGE_TEMPLATE({
@@ -117,10 +103,6 @@ export async function buildSystemPromptContent(
             sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
             sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
             RECEIVE_IMAGE,
-            LOCAL_IMAGES: localImages,
-            LOCAL_AUDIOS: localAudios,
-            LOCAL_FILES: localFiles,
-            LOCAL_VIDEOS: localVideos,
             toolPrompt
         });
 
