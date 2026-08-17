@@ -1,8 +1,7 @@
-// 海豹指令工具：扩展指令本地直调 solve；核心指令经 OB11 核心桥中转（run_core_command）。
+// 海豹指令工具：扩展指令本地直调 solve；核心指令由 MCP 适配器注册 run_core_command。
 import Config from "../../../config/config";
-import { CoreBridgeClient, formatCoreBridgeResult } from "../../../integration/core_bridge/client";
 import Logger from "../../../logger";
-import { collectCommands, extensionNames, isAllowedCore, isAllowedExtension, ResolvedCommand, resolveEntry, splitEntry } from "../../command_catalog";
+import { collectCommands, extensionNames, isAllowedExtension, ResolvedCommand, resolveEntry } from "../../command_catalog";
 import { executeExtensionLocally } from "../../extension_executor";
 import Tool from "../../tool";
 
@@ -27,27 +26,7 @@ function optionNumber(value: any): number | undefined {
     return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-function captureOptions(args: { [key: string]: any }, defaultMaxMessages: number, defaultSettleMs: number): {
-    capture: { mode: 'reply_only' | 'lane'; forward: boolean; maxMessages: number; settleMs: number };
-    timeoutMs?: number;
-} {
-    const forward = args && args.forward === true;
-    const requestedMode = args && (args.captureMode === 'lane' || args.captureMode === 'reply_only') ? args.captureMode : undefined;
-    const maxMessages = Number(args && args.maxMessages);
-    const settleMs = Number(args && args.settleMs);
-    const timeoutMs = Number(args && args.timeoutMs);
-    return {
-        capture: {
-            mode: requestedMode || (forward ? 'lane' : 'reply_only'),
-            forward,
-            maxMessages: Number.isFinite(maxMessages) && maxMessages > 0 ? maxMessages : defaultMaxMessages,
-            settleMs: Number.isFinite(settleMs) && settleMs >= 0 ? settleMs : defaultSettleMs
-        },
-        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined
-    };
-}
-
-export function registerCmdTool(): { extTool: Tool; coreTool: Tool } {
+export function registerCmdTool(): Tool {
     const extTool = new Tool({
         type: 'function',
         function: {
@@ -101,50 +80,5 @@ export function registerCmdTool(): { extTool: Tool; coreTool: Tool } {
         }
     };
 
-    const coreTool = new Tool({
-        type: 'function',
-        function: {
-            name: 'run_core_command',
-            description: `通过核心桥向 SealDice 注入一条假消息并执行核心指令。白名单中的核心扩展名统一写作 core|指令名；核心 .ext 是扩展发现入口，不需要加入白名单，调用 command="ext" 即可查看核心当前全部扩展名称。默认指令前缀为 .，可在配置中修改。`,
-            parameters: {
-                type: 'object',
-                properties: {
-                    action: { type: 'string', enum: ['list', 'call'], description: 'list=列出白名单核心指令；call=执行核心指令' },
-                    command: { type: 'string', description: '核心指令名，如 ext、help；也支持 core|ext' },
-                    args: { type: 'array', items: { type: 'string' }, description: '指令参数，按顺序填写' },
-                    forward: { type: 'boolean', description: '是否把捕获到的核心发送消息继续转发给协议端，默认 false（避免重复发送）' },
-                    captureMode: { type: 'string', enum: ['reply_only', 'lane'], description: '消息捕获范围；forward=true 且希望捕获协议端回复时建议使用 lane' },
-                    maxMessages: { type: 'integer', minimum: 1, maximum: 50, description: '最多收集多少条消息' },
-                    settleMs: { type: 'integer', minimum: 0, maximum: 10000, description: '收到消息后等待多久没有新消息才结束' },
-                    timeoutMs: { type: 'integer', minimum: 100, maximum: 120000, description: '最长等待时间，单位毫秒' }
-                },
-                required: ['action']
-            }
-        }
-    });
-    coreTool.sensitive = true;
-    coreTool.solve = async (ctx, _msg, _session, args) => {
-        const action = String(args && args.action || '');
-        if (action === 'list') {
-            const list = Config.tool.CMD_WHITELIST.map(item => splitEntry(String(item))).filter(item => item && item.extName === 'core').map(item => `core|${item!.cmd}`);
-            return `可调用核心指令（共 ${list.length} 个）：\n${list.length ? list.join('\n') : '（除 .ext 外暂无白名单核心指令）'}\n核心扩展发现：使用 action=call、command=ext 查看全部扩展名称`;
-        }
-        if (action !== 'call') return 'action 仅支持 list 或 call';
-        let command = String(args && args.command || '').trim();
-        if (command.indexOf('core|') === 0) command = command.slice(5).trim();
-        if (!command) return '调用核心指令时 command 不能为空';
-        if (!isAllowedCore(command)) return `核心指令 core|${command} 不在可调用指令白名单内，无法调用`;
-        const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
-        const options = captureOptions(args, 50, 500);
-        if (command === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
-        try {
-            const result = await CoreBridgeClient.call(ctx, command, cmdArgs, options.capture, options.timeoutMs, 'run_core_command');
-            return `核心指令 core|${command} 返回：\n${formatCoreBridgeResult(result)}`;
-        } catch (e) {
-            Logger.warning(`[run_core_command] 调用 core|${command} 失败:${e instanceof Error ? e.message : String(e)}`);
-            return `核心指令 core|${command} 调用失败：${e instanceof Error ? e.message : String(e)}`;
-        }
-    };
-
-    return { extTool, coreTool };
+    return extTool;
 }

@@ -90,7 +90,14 @@ ws://127.0.0.1:46880/core
   "mcpServers": {
     "ob11-core-bridge": {
       "type": "http",
-      "url": "http://127.0.0.1:46880/mcp"
+      "url": "http://127.0.0.1:46880/mcp",
+      "tools": {
+        "run_ext_command": { "hidden": true },
+        "run_core_command": {
+          "exposeAs": "run_core_command",
+          "adapter": "core_bridge_core"
+        }
+      }
     }
   }
 }
@@ -106,11 +113,11 @@ ws://127.0.0.1:46880/core
 }
 ```
 
-3. 按需配置「可调用指令白名单」与「指令前缀」。`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件；`run_core_command` 经 MCP 调用中间件执行核心指令。
+3. 按需配置「可调用指令白名单」与「指令前缀」。`tools` 适配块会把远端 `run_core_command` 暴露为同名 AI 工具并套用核心桥适配器；若手写配置时省略该块，`run_core_command` 会按通用规则注册为 `ob11-core-bridge_run_core_command`。`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件；`run_core_command` 经 MCP 调用中间件执行核心指令。
 
 ## 工具与参数
 
-两个工具都由插件注册为 AI 工具（敏感工具，执行会显著记录）。`run_ext_command` 在插件内本地直调扩展 `solve`，不依赖中间件；`run_core_command` 经中间件 MCP 注入假消息执行核心指令，需启动 `ob11-core-bridge`。
+`run_ext_command` 由插件本地注册为 AI 工具（敏感工具，执行会显著记录），在插件内直调扩展 `solve`，不依赖中间件；`run_core_command` 由 MCP 同步注册（默认 `tools` 适配暴露同名工具，同样为敏感工具），经中间件 MCP 注入假消息执行核心指令，需启动 `ob11-core-bridge` 并开启「是否启用MCP」。
 
 ### run_ext_command — 扩展指令
 
@@ -189,7 +196,7 @@ ws://127.0.0.1:46880/core
 
 | 现象 | 检查 |
 | --- | --- |
-| `run_core_command` 报「未配置 MCP 服务器 ob11-core-bridge」 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url |
+| `run_core_command` 不可用 / 报 MCP 服务器未配置 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url、`tools` 适配块是否保留了 `run_core_command` |
 | `run_ext_command` 执行失败 / 无响应 | 扩展是否已安装、指令名是否正确（`扩展名|指令名`）、是否在白名单、指令本身是否抛异常；与中间件无关 |
 | 执行无响应 / 超时 | SealDice 是否已连上 `/core`（看中间件日志）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
 | 返回 `ambiguous=true` | 同 lane 并发或缺少 reply 引用；调整 `captureMode` / `settleMs` |

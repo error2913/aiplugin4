@@ -1,0 +1,345 @@
+// MCP 工具适配器：把 AI 侧参数/返回映射为远端 MCP 工具调用，保留网页截图、Markdown/HTML 渲染、核心桥指令等既有行为
+import Config from "../../config/config";
+import { CoreBridgeInvocation, CoreBridgeResult } from "../../integration/core_bridge/types";
+import Logger from "../../logger";
+import Image from "../../resource/image";
+import { Session } from "../../session/session";
+import { parseSpecialTokens } from "../../utils/string";
+import { generateId } from "../../utils/utils";
+import { isAllowedCore, splitEntry } from "../command_catalog";
+
+import { MCPCallResult, MCPToolConfig } from "./types";
+
+export interface MCPAdapterContext {
+    ctx: seal.MsgContext;
+    msg: seal.Message;
+    session: Session;
+    args: { [key: string]: any };
+    server: { name: string; url: string; token: string; headers: Record<string, string> };
+    remoteTool?: string;
+    remoteTools?: Record<string, string>;
+    descriptor?: MCPToolConfig;
+    callRemote: (toolName: string, args: any) => Promise<MCPCallResult>;
+}
+
+type MCPAdapter = (input: MCPAdapterContext) => Promise<string>;
+
+/** 提取 MCP 结果中的文本内容（兼容 text 块、structuredContent） */
+export function mcpText(result: MCPCallResult | null | undefined): string {
+    if (!result) return '';
+    const texts = Array.isArray(result.content)
+        ? result.content.map(block => (block && typeof block.text === 'string' ? block.text : '')).filter(Boolean)
+        : [];
+    if (texts.length > 0) return texts.join('\n');
+    if (result.structuredContent !== undefined && result.structuredContent !== null) {
+        try {
+            return JSON.stringify(result.structuredContent);
+        } catch (_e) {
+            return String(result.structuredContent);
+        }
+    }
+    return '';
+}
+
+function normalizeBase64(text: string): string {
+    const value = String(text || '').trim();
+    if (/^data:[^,]+;base64,/i.test(value)) return value.slice(value.indexOf(',') + 1);
+    return value;
+}
+
+function looksLikeBase64(text: string): boolean {
+    const compact = normalizeBase64(text).replace(/\s+/g, '');
+    return compact.length >= 64 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact);
+}
+
+function inferFormat(mimeType?: string): string | undefined {
+    const mime = String(mimeType || '').toLowerCase();
+    if (mime.includes('png')) return 'png';
+    if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpeg';
+    if (mime.includes('webp')) return 'webp';
+    if (mime.includes('gif')) return 'gif';
+    return undefined;
+}
+
+/** 提取 MCP 结果中的图片数据；标准 image 块优先，兼容后端以 text 返回 base64 的旧格式 */
+export function extractMCPImage(result: MCPCallResult | null | undefined, treatTextAsBase64 = false): { data: string; mimeType?: string } | null {
+    const blocks = Array.isArray(result && result.content) ? result!.content! : [];
+    for (const block of blocks) {
+        if (block && block.type === 'image' && typeof block.data === 'string' && block.data) {
+            return { data: normalizeBase64(block.data), mimeType: block.mimeType };
+        }
+    }
+    if (treatTextAsBase64) {
+        for (const block of blocks) {
+            if (block && typeof block.text === 'string' && looksLikeBase64(block.text)) {
+                return { data: normalizeBase64(block.text), mimeType: block.mimeType };
+            }
+        }
+    }
+    const structured = result && result.structuredContent;
+    if (structured && typeof structured === 'object') {
+        const base64 = (structured as any).base64 || (structured as any).data;
+        if (typeof base64 === 'string' && looksLikeBase64(base64)) {
+            return { data: normalizeBase64(base64), mimeType: (structured as any).mimeType || (structured as any).mime };
+        }
+    }
+    return null;
+}
+
+async function defaultText(input: MCPAdapterContext): Promise<string> {
+    const result = await input.callRemote(input.remoteTool || 'unknown', input.args || {});
+    return mcpText(result);
+}
+
+async function defaultImage(input: MCPAdapterContext): Promise<string> {
+    const result = await input.callRemote(input.remoteTool || 'unknown', input.args || {});
+    const image = extractMCPImage(result, true);
+    if (!image) throw new Error(`MCP 工具 ${input.remoteTool || 'unknown'} 未返回图片数据`);
+
+    const img = new Image();
+    img.imageId = `mcp_${generateId()}`;
+    img.base64 = image.data;
+    img.format = (input.descriptor && input.descriptor.format) || inferFormat(image.mimeType) || 'png';
+    img.description = `MCP 图片[img:${img.imageId}]`;
+    Image.save(img);
+    return `成功，请使用[img:${img.imageId}]发送`;
+}
+
+async function webReadAdapter(input: MCPAdapterContext): Promise<string> {
+    const { url, screenshot = false, width, height, fullPage = false, delay } = input.args || {};
+    if (!url) return 'url 不能为空';
+
+    if (screenshot) {
+        const remoteTool = (input.remoteTools && input.remoteTools.screenshot) || input.remoteTool || 'screenshot_url';
+        Logger.info(`网页截图: ${url}`);
+        const result = await input.callRemote(remoteTool, { url, width, height, fullPage, delay });
+        const image = extractMCPImage(result, true);
+        if (!image) throw new Error('截图结果为空');
+
+        const img = new Image();
+        img.imageId = `web_${generateId()}`;
+        img.base64 = image.data;
+        img.format = inferFormat(image.mimeType) || 'png';
+        img.description = `网页截图[img:${img.imageId}]`;
+        Image.save(img);
+        return `成功，请使用[img:${img.imageId}]发送`;
+    }
+
+    const remoteTool = (input.remoteTools && input.remoteTools.scrape) || input.remoteTool || 'scrape_url';
+    Logger.info(`读取网页内容: ${url}`);
+    const result = await input.callRemote(remoteTool, { url });
+    return mcpText(result) || '网页内容为空';
+}
+
+async function transformContentToUrlText(ctx: seal.MsgContext, session: Session, content: string): Promise<{ text: string; images: Image[] }> {
+    const segs = parseSpecialTokens(content);
+    let text = '';
+    const images: Image[] = [];
+    for (const seg of segs) {
+        switch (seg.type) {
+            case 'text': {
+                text += seg.content;
+                break;
+            }
+            case 'at': {
+                const name = seg.content;
+                const ui = await session.context.findUser(ctx, name);
+                if (ui !== null) {
+                    text += ` @${ui.userName} `;
+                } else {
+                    Logger.warning(`无法找到用户：${name}`);
+                    text += ` @${name} `;
+                }
+                break;
+            }
+            case 'img': {
+                const id = seg.content;
+                // 兼容 [img:imageId:描述]：整体找不到时取首个冒号前作为图片 id
+                const image = await session.context.findImage(ctx, id) || (id.includes(':') ? await session.context.findImage(ctx, id.split(':')[0]) : null);
+                if (image) {
+                    if (image.type === 'local') throw new Error(`图片[img:${id}]为本地图片，暂不支持`);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    Logger.warning(`无法找到图片：${id}`);
+                }
+                break;
+            }
+            case 'avatar': {
+                const name = seg.content;
+                const ui = await session.context.findUser(ctx, name);
+                if (ui !== null) {
+                    const image = Image.getUserAvatar(ui.userId);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    Logger.warning(`无法找到用户：${name}`);
+                }
+                break;
+            }
+            case 'group_avatar': {
+                const name = seg.content;
+                const gi = await session.context.findGroup(ctx, name);
+                if (gi) {
+                    const image = Image.getGroupAvatar(gi.groupId);
+                    images.push(image);
+                    text += image.url;
+                } else {
+                    Logger.warning(`无法找到群聊：${name}`);
+                }
+                break;
+            }
+        }
+    }
+    return { text, images };
+}
+
+async function renderAdapter(input: MCPAdapterContext, kind: 'markdown' | 'html'): Promise<string> {
+    const { content, name, save } = input.args || {};
+    const theme = input.args && input.args.theme || 'light';
+    if (!content || !content.trim()) return '内容不能为空';
+    if (!name || !name.trim()) return '图片名称不能为空';
+    if (kind === 'markdown' && !['light', 'dark', 'gradient'].includes(theme)) return `无效的主题: ${theme}。支持: light, dark, gradient`;
+
+    const kws = kind === 'markdown' ? ['render', 'markdown', name, theme] : ['render', 'html', name];
+    try {
+        const { text, images } = await transformContentToUrlText(input.ctx, input.session, content);
+        const hasImages = images.length > 0;
+        const remoteArgs = kind === 'markdown'
+            ? { markdown: text, theme, width: 1200, quality: 90, hasImages }
+            : { html: text, theme: 'light', width: 1200, quality: 90, hasImages };
+        const result = await input.callRemote(input.remoteTool || (kind === 'markdown' ? 'render_markdown' : 'render_html'), remoteArgs);
+        const image = extractMCPImage(result, true);
+        if (!image) throw new Error('渲染结果为空');
+
+        const img = new Image();
+        img.imageId = `${name}_${generateId()}`;
+        img.base64 = image.data;
+        img.format = (input.descriptor && input.descriptor.format) || 'unknown';
+        img.description = kind === 'markdown'
+            ? `Markdown 渲染图片[img:${img.imageId}]\n主题：${theme}`
+            : `HTML 渲染图片[img:${img.imageId}]`;
+
+        if (save) input.session.memory.addMemory(input.ctx, input.session, [], [], kws, [img], img.description);
+        return `成功，请使用[img:${img.imageId}]发送`;
+    } catch (err) {
+        Logger.error(`${kind === 'markdown' ? 'Markdown' : 'HTML'} 渲染失败: ${err instanceof Error ? err.message : String(err)}`);
+        return `渲染图片失败: ${err instanceof Error ? err.message : String(err)}`;
+    }
+}
+
+async function renderMarkdownAdapter(input: MCPAdapterContext): Promise<string> {
+    return renderAdapter(input, 'markdown');
+}
+
+async function renderHtmlAdapter(input: MCPAdapterContext): Promise<string> {
+    return renderAdapter(input, 'html');
+}
+
+let sequence = 0;
+
+function nextId(): string {
+    sequence = (sequence + 1) % 100000;
+    return `invoke_${Date.now().toString(36)}_${sequence.toString(36)}`;
+}
+
+function decodeCoreBridgeResult(text: string): CoreBridgeResult {
+    try {
+        const result = JSON.parse(text);
+        if (result && typeof result === 'object' && typeof result.ok === 'boolean') return result as CoreBridgeResult;
+    } catch (_e) {
+        // MCP 服务端应返回 JSON 文本；保留原文，便于定位不兼容的中间件。
+    }
+    throw new Error(`核心指令中转返回了无效结果：${text.slice(0, 500)}`);
+}
+
+function formatCoreBridgeResult(result: CoreBridgeResult): string {
+    if (!result.ok) return `中转执行失败：${result.error || '未知错误'}`;
+    const texts = (result.messages || []).map(item => item.text || '').filter(Boolean);
+    const body = texts.length ? texts.join('\n') : '核心未返回文本消息';
+    const flags = [result.ambiguous ? '消息关联存在歧义' : '', result.completedBy ? `结束方式:${result.completedBy}` : ''].filter(Boolean);
+    return `${body}${flags.length ? `\n（${flags.join('，')}）` : ''}`;
+}
+
+function captureOptions(args: { [key: string]: any }, defaultMaxMessages: number, defaultSettleMs: number): {
+    capture: { mode: 'reply_only' | 'lane'; forward: boolean; maxMessages: number; settleMs: number };
+    timeoutMs?: number;
+} {
+    const forward = args && args.forward === true;
+    const requestedMode = args && (args.captureMode === 'lane' || args.captureMode === 'reply_only') ? args.captureMode : undefined;
+    const maxMessages = Number(args && args.maxMessages);
+    const settleMs = Number(args && args.settleMs);
+    const timeoutMs = Number(args && args.timeoutMs);
+    return {
+        capture: {
+            mode: requestedMode || (forward ? 'lane' : 'reply_only'),
+            forward,
+            maxMessages: Number.isFinite(maxMessages) && maxMessages > 0 ? maxMessages : defaultMaxMessages,
+            settleMs: Number.isFinite(settleMs) && settleMs >= 0 ? settleMs : defaultSettleMs
+        },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined
+    };
+}
+
+async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
+    const { ctx, args = {} } = input;
+    const action = String(args && args.action || '');
+    if (action === 'list') {
+        const list = Config.tool.CMD_WHITELIST.map(item => splitEntry(String(item))).filter(item => item && item.extName === 'core').map(item => `core|${item!.cmd}`);
+        return `可调用核心指令（共 ${list.length} 个）：\n${list.length ? list.join('\n') : '（除 .ext 外暂无白名单核心指令）'}\n核心扩展发现：使用 action=call、command=ext 查看全部扩展名称`;
+    }
+    if (action !== 'call') return 'action 仅支持 list 或 call';
+
+    let command = String(args && args.command || '').trim();
+    if (command.indexOf('core|') === 0) command = command.slice(5).trim();
+    if (!command) return '调用核心指令时 command 不能为空';
+    if (!isAllowedCore(command)) return `核心指令 core|${command} 不在可调用指令白名单内，无法调用`;
+
+    const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
+    const options = captureOptions(args, 50, 500);
+    if (command === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
+
+    const prefix = Config.tool.COMMAND_PREFIX;
+    const raw = `${prefix}${command}${cmdArgs.length ? ` ${cmdArgs.join(' ')}` : ''}`.trim();
+    const target: CoreBridgeInvocation['target'] = {
+        selfId: String(ctx.endPoint.userId || '').replace(/^.+:/, ''),
+        messageType: ctx.isPrivate ? 'private' : 'group',
+        userId: String(ctx.player && ctx.player.userId || '').replace(/^.+:/, '')
+    };
+    if (!ctx.isPrivate) target.groupId = String(ctx.group && ctx.group.groupId || '').replace(/^.+:/, '');
+
+    try {
+        const result = await input.callRemote(input.remoteTool || 'run_core_command', {
+            target,
+            actor: {
+                userId: target.userId || target.selfId,
+                nickname: String(ctx.player && ctx.player.name || 'AI'),
+                role: 'member'
+            },
+            command: { raw, name: command, args: cmdArgs },
+            capture: options.capture,
+            timeoutMs: options.timeoutMs,
+            id: nextId()
+        });
+        return `核心指令 core|${command} 返回：\n${formatCoreBridgeResult(decodeCoreBridgeResult(mcpText(result)))}`;
+    } catch (e) {
+        Logger.warning(`[run_core_command] 调用 core|${command} 失败:${e instanceof Error ? e.message : String(e)}`);
+        return `核心指令 core|${command} 调用失败：${e instanceof Error ? e.message : String(e)}`;
+    }
+}
+
+const ADAPTERS: { [name: string]: MCPAdapter } = {
+    text: defaultText,
+    image: defaultImage,
+    web_read: webReadAdapter,
+    render_markdown: renderMarkdownAdapter,
+    render_html: renderHtmlAdapter,
+    core_bridge_core: coreBridgeAdapter
+};
+
+/** 按配置的适配器名执行；未指定时按 output 选择 text/image 通用适配器 */
+export async function runMCPAdapter(name: string | undefined, input: MCPAdapterContext): Promise<string> {
+    const adapterName = name || (input.descriptor && input.descriptor.output === 'image' ? 'image' : 'text');
+    const adapter = ADAPTERS[adapterName] || defaultText;
+    return adapter(input);
+}

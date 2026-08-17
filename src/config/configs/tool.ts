@@ -27,19 +27,178 @@ export default class ToolConfig {
     },
     "web-read": {
       "type": "http",
-      "url": "http://127.0.0.1:46799/mcp"
+      "url": "http://127.0.0.1:46799/mcp",
+      "tools": {
+        "screenshot_url": {
+          "hidden": true
+        },
+        "scrape_url": {
+          "exposeAs": "web_read",
+          "adapter": "web_read",
+          "remoteTools": {
+            "screenshot": "screenshot_url",
+            "scrape": "scrape_url"
+          },
+          "description": "读取网页内容或对网页截图。默认抓取网页标题/正文/链接；screenshot=true 时对网页截图并返回可发送的图片",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "需要读取内容或截图的网页链接"
+              },
+              "screenshot": {
+                "type": "boolean",
+                "description": "true 时对网页截图并返回图片，false（默认）时抓取网页文本内容"
+              },
+              "width": {
+                "type": "integer",
+                "description": "截图视口宽度，默认 1680"
+              },
+              "height": {
+                "type": "integer",
+                "description": "截图视口高度，默认 1000"
+              },
+              "fullPage": {
+                "type": "boolean",
+                "description": "是否截取整页（长图），默认 false"
+              },
+              "delay": {
+                "type": "integer",
+                "description": "页面加载完成后等待的毫秒数，默认 3000"
+              }
+            },
+            "required": ["url"]
+          }
+        }
+      }
     },
     "md-html-render": {
       "type": "http",
-      "url": "http://127.0.0.1:37632/mcp"
+      "url": "http://127.0.0.1:37632/mcp",
+      "tools": {
+        "render_markdown": {
+          "exposeAs": "render_markdown",
+          "adapter": "render_markdown",
+          "output": "image",
+          "format": "unknown",
+          "description": "渲染 Markdown 内容为图片",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "要渲染的 Markdown 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用[img:xxxxxx]替代图片url（注意使用markdown语法显示图片），xxxxxx为图片id，或avatar:用户名称/ID，或group_avatar:群聊名称/ID"
+              },
+              "name": {
+                "type": "string",
+                "description": "名称，对内容大致描述"
+              },
+              "theme": {
+                "type": "string",
+                "enum": ["light", "dark", "gradient"],
+                "description": "主题样式，其中 gradient 为紫色渐变背景"
+              },
+              "save": {
+                "type": "boolean",
+                "description": "是否保存图片"
+              }
+            },
+            "required": ["content", "name", "save"]
+          }
+        },
+        "render_html": {
+          "exposeAs": "render_html",
+          "adapter": "render_html",
+          "output": "image",
+          "format": "unknown",
+          "description": "渲染 HTML 内容为图片",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "要渲染的 HTML 内容。支持 LaTeX 数学公式，使用前后 $ 包裹行内公式，前后 $$ 包裹块级公式。可以使用[img:xxxxxx]替代图片url（注意使用html元素显示图片），xxxxxx为图片id，或avatar:用户名称/ID，或group_avatar:群聊名称/ID"
+              },
+              "name": {
+                "type": "string",
+                "description": "名称，对内容大致描述"
+              },
+              "save": {
+                "type": "boolean",
+                "description": "是否保存图片"
+              }
+            },
+            "required": ["content", "name", "save"]
+          }
+        }
+      }
     },
     "ob11-core-bridge": {
       "type": "http",
-      "url": "http://127.0.0.1:46880/mcp"
+      "url": "http://127.0.0.1:46880/mcp",
+      "tools": {
+        "run_ext_command": {
+          "hidden": true
+        },
+        "run_core_command": {
+          "exposeAs": "run_core_command",
+          "adapter": "core_bridge_core",
+          "sensitive": true,
+          "description": "通过核心桥向 SealDice 注入一条假消息并执行核心指令。白名单中的核心扩展名统一写作 core|指令名；核心 .ext 是扩展发现入口，不需要加入白名单，调用 command=\"ext\" 即可查看核心当前全部扩展名称。默认指令前缀为 .，可在配置中修改。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["list", "call"],
+                "description": "list=列出白名单核心指令；call=执行核心指令"
+              },
+              "command": {
+                "type": "string",
+                "description": "核心指令名，如 ext、help；也支持 core|ext"
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "指令参数，按顺序填写"
+              },
+              "forward": {
+                "type": "boolean",
+                "description": "是否把捕获到的核心发送消息继续转发给协议端，默认 false（避免重复发送）"
+              },
+              "captureMode": {
+                "type": "string",
+                "enum": ["reply_only", "lane"],
+                "description": "消息捕获范围；forward=true 且希望捕获协议端回复时建议使用 lane"
+              },
+              "maxMessages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "description": "最多收集多少条消息"
+              },
+              "settleMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000,
+                "description": "收到消息后等待多久没有新消息才结束"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 120000,
+                "description": "最长等待时间，单位毫秒"
+              }
+            },
+            "required": ["action"]
+          }
+        }
+      }
     }
   }
 }`
-        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。默认包含四个：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心/扩展指令中转）。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。默认包含四个：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心/扩展指令中转）。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）、tools（可选工具适配块：键为远端工具名，值为对象，支持 hidden=仅作底层工具不暴露给 AI、exposeAs=暴露给 AI 的工具名、adapter=适配器（text/image/web_read/render_markdown/render_html/core_bridge_core）、description/parameters=覆盖 AI 可见的描述与参数、output/format=图片输出与保存格式、remoteTool/remoteTools=实际调用的远端工具名映射、sensitive=敏感工具标记；未配置 tools 的服务器按 <服务器名>_<工具名> 通用注册）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [
             `---
 name: 今日人品
