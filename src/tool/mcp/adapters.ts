@@ -232,7 +232,7 @@ function captureOptions(args: { [key: string]: any }, defaultMaxMessages: number
     capture: { mode: 'reply_only' | 'lane'; forward: boolean; maxMessages: number; settleMs: number };
     timeoutMs?: number;
 } {
-    const forward = args && args.forward === true;
+    const forward = !(args && args.forward === false);
     const requestedMode = args && (args.captureMode === 'lane' || args.captureMode === 'reply_only') ? args.captureMode : undefined;
     const maxMessages = Number(args && args.maxMessages);
     const settleMs = Number(args && args.settleMs);

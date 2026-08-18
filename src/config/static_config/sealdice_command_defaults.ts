@@ -6,7 +6,7 @@ export const SEALDICE_COMMAND_WHITELIST = [
     'core|bot', 'core|dismiss', 'core|botlist', 'core|master',
     'core|roll/r/rd/rh/rhd/rdh/rx/rxh/rhx',
     'core|ext', 'core|nn', 'core|userid', 'core|randalgo', 'core|set',
-    'core|角色/ch/char/character/pc', 'core|reply', 'core|team',
+    'core|角色/ch/char/character/pc', 'core|st/cst', 'core|reply', 'core|team',
 
     // fun
     'fun|alias', 'fun|&/a', 'fun|ping', 'fun|send', 'fun|welcome', 'fun|gugu/咕咕',
@@ -45,40 +45,28 @@ const COMMAND_CALL_RULES = `
 
 export const SEALDICE_COMMAND_SKILLS = [
     `---
-name: 今日人品
-description: 查询指定用户的今日人品值
+name: 录卡
+description: 从角色卡 Excel 表格提取可直接执行的 .st 命令，并通过 SealDice 核心录入角色卡
 ---
-使用 run_ext_command 工具执行：{"action":"call","extension":"fun","command":"jrrp","args":["用户名或QQ号"]}；fun|jrrp 已加入默认白名单。`,
+目标：把用户提供的角色卡表格录入当前群/私聊上下文对应的 SealDice 角色卡。优先使用表格已经生成的完整 .st 导入命令，不要凭空重排或猜测属性。
 
-    `---
-name: COC模组抽取
-description: 随机抽取一个 COC 模组
----
-使用 run_ext_command 工具执行：{"action":"call","extension":"story","command":"modu","args":["roll"]}；story|modu 已加入默认白名单。`,
+一、读取文件
+1. 先从当前消息的文件字段中取得真实路径或 URL（优先 path/file/url，其次 file_id）；只有文件名而没有可访问路径时，明确提示用户重新发送文件或提供路径，不要猜测本地位置。
+2. 对 .xlsx/.xlsm 文件，使用 mcp-files-exec 的 read_file 或 run_shell 配合 Python/openpyxl/LibreOffice 读取；先列出工作表，优先选择名称为“简化卡 骰娘导入”、包含“简化卡”或“骰娘导入”的工作表，其次选择 Sheet2/第二个工作表。D:\COC\空白卡 下的模板仅用于识别布局，不能替代用户实际上传的角色卡。
+3. 读取公式结果时优先取已计算的缓存值；缓存为空时用 LibreOffice headless 重算后再读。不要把公式文本本身当作 .st 参数。
 
-    `---
-name: COC模组搜索
-description: 按关键词搜索 COC 模组
----
-使用 run_ext_command 工具执行：{"action":"call","extension":"story","command":"modu","args":["search","关键词"]}；story|modu 已加入默认白名单。`,
+二、提取 .st
+1. 扫描优先工作表的所有单元格（包括公式计算结果、富文本/换行文本），寻找以 .st 开头的完整命令；允许前后空白和全角空格，但必须保留命令原文中的字段顺序、等号、加减号、括号和分隔符。
+2. 优先选择完整的角色卡导入命令（包含角色名及多个属性），排除“.st show/.st clr/.st rm”等查询、清理或局部修改命令。若表格生成多个 .st 行，按表格顺序执行；执行前先向用户展示将执行的命令摘要并确认角色名，避免覆盖错误角色。
+3. 录入使用核心工具 run_core_command，不要使用 run_ext_command：
+   {"action":"call","raw_message":".st …","forward":true}
+   raw_message 与 command/args 不能同时传。forward 未提供时默认也是 true；如用户要求静默再显式传 false。
+4. 命令返回后用 run_core_command 再执行核心 st 查询确认（通常为 {"action":"call","command":"st","args":["show"]}），检查角色名和关键属性是否已写入；失败时不要盲目重复执行，先报告核心返回。
 
-    `---
-name: 属性展示
-description: 展示指定玩家的 COC 全部个人属性
----
-使用 run_ext_command 工具执行：{"action":"call","extension":"coc7","command":"st","args":["show","玩家名称或QQ号"]}；coc7|st 已加入默认白名单。`,
-
-    `---
-name: 属性检定
-description: 对指定玩家进行一次属性或技能检定（ra）
----
-使用 run_ext_command 工具执行：{"action":"call","extension":"coc7","command":"ra","args":["奖励/惩罚骰（可选，如 b、p3）","检定表达式或属性名","检定原因（可选）"]}；coc7|ra 已加入默认白名单。args 按 SealDice 原始指令顺序传入；普通属性名若属性值为 0，按原扩展规则补 50。`,
-
-    `---
-name: san检定
-description: 对指定玩家进行 San check（sc）
----
-使用 run_ext_command 工具执行：{"action":"call","extension":"coc7","command":"sc","args":["奖励/惩罚骰（可选，如 b、p2）","成功损失/失败损失表达式（如 0/1d6、0/1）"]}；coc7|sc 已加入默认白名单。`,
+三、没有可用 .st 时的回退
+1. 先确认角色名，再调用核心角色管理：{"action":"call","command":"pc","args":["new","角色名"],"forward":true}。若角色已存在，不要覆盖，先用 pc list/st show 查询并请求确认。
+2. 新建成功后，把表格中的可识别属性按核心 st 语法分批设置，仍使用 run_core_command(command="st", args=[…])；未知字段、公式未解析或无法映射的字段列为待人工处理，不要猜值。
+3. 最后再次执行 st show 验证。回复用户时报告：文件、工作表、是否找到直接 .st、角色名、执行结果和未录入字段。`,
 
     `---
 name: SealDice核心指令调用帮助
@@ -99,7 +87,8 @@ ${COMMAND_CALL_RULES}
 - userid：查看当前帐号、用户和群组 ID。
 - randalgo：查看随机算法，或 args=["get","100"]；set 仅限 Master。
 - set：设置骰子面数或规则，例如 args=["coc"]、args=["100"]。
-- 角色 / ch / char / character / pc：查看或设置角色卡。
+- 角色 / ch / char / character / pc：查看或设置角色卡；录卡时用 pc new 新建角色。
+- st / cst：核心角色属性导入、查看和修改；录卡时优先使用 run_core_command。
 - reply：开启或关闭自定义回复，例如 args=["on"] 或 args=["off"]。
 - team：团队管理，例如 args=["list"] 或 args=["团队名","add"]；需要群聊环境。
 
@@ -152,7 +141,7 @@ ${COMMAND_CALL_RULES}
 - rav / rcv：对抗/竞争检定；args 按原命令帮助传入。
 - sc：San 检定；args 按顺序传奖励/惩罚骰、成功/失败损失表达式，例如 ["0/1d6"]。
 - coc：生成 COC 角色卡；args 可传数量，例如 ["3"]。
-- st / cst：查看或管理 COC 角色属性；常用 args=["show","玩家名称或QQ号"]。`,
+- st / cst：COC 扩展的角色属性查看/修改别名；常用 args=["show","玩家名称或QQ号"]。角色卡导入流程优先使用核心 run_core_command 的 st。`,
 
     `---
 name: SealDice deck扩展调用帮助

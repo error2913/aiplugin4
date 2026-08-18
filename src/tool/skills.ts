@@ -1,5 +1,6 @@
 // Skills：配置驱动的技能，AI 通过 use_skill 工具按需获取技能内容
 import { ext } from "../config/config";
+import { SEALDICE_COMMAND_SKILLS } from "../config/static_config/sealdice_command_defaults";
 import Logger from "../logger";
 
 import Tool from "./tool";
@@ -49,11 +50,19 @@ function parseSkillEntry(line: string): { name: string, description: string, con
 }
 
 function getSkills(): Skill[] {
-    return seal.ext.getTemplateConfig(ext, "技能配置")
+    const configured = seal.ext.getTemplateConfig(ext, "技能配置")
         .map(line => (line || '').replace(/\r\n/g, '\n').trim())
         .filter(Boolean)
         .map(parseSkillEntry)
         .filter(s => s.name);
+
+    // registerTemplateConfig 不会覆盖已有安装的配置。为避免升级后新默认技能（如“录卡”）
+    // 因旧配置持久化而不可用，补入缺失的默认技能；同名自定义技能优先保留。
+    const configuredNames = new Set(configured.map(skill => skill.name));
+    const defaults = SEALDICE_COMMAND_SKILLS
+        .map(line => parseSkillEntry(line.trim()))
+        .filter(skill => skill.name && !configuredNames.has(skill.name));
+    return configured.concat(defaults);
 }
 
 /** 返回已配置的技能名称列表 */

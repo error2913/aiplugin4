@@ -78,7 +78,7 @@ ws://127.0.0.1:46880/core
 
 > 配置保存后需**重启该后端**才生效。协议端未配置或不可达时，中间件会按指数退避（1s 起、上限 30s）持续重试，连上后自动恢复转发；期间核心发来的 API 请求立即返回 `status: failed`，不会静默等待超时。
 >
-> 协议端不是必需的：仅做“注入指令 + 收集响应”时可以不配协议端。默认 `forward=false` 会拦截核心发出的 Action，即使没有协议端也不会失败。
+> 协议端不是必需的：仅做“注入指令 + 收集响应”时请显式传 `forward=false`；默认 `forward=true` 需要协议端可连接，否则核心发出的 Action 无法继续转发。
 
 ## 插件侧接入（aiplugin4）
 
@@ -136,7 +136,7 @@ ws://127.0.0.1:46880/core
 
 | 参数 | 适用 | 说明 |
 | --- | --- | --- |
-| `forward` | 仅 `run_core_command` | 是否把捕获到的核心发送消息继续转发给协议端，默认 `false`（拦截） |
+| `forward` | 仅 `run_core_command` | 是否把捕获到的核心发送消息继续转发给协议端，默认 `true`（转发） |
 | `captureMode` | 仅 `run_core_command` | `reply_only` / `lane`；`forward=true` 且要捕获协议端产生的 bot 回复时建议用 `lane` |
 | `maxMessages` | 两者 | 最多收集消息数（1–50；ext 默认 20，core 默认 50） |
 | `settleMs` | 两者 | 收到消息后空闲多少毫秒无新消息即结束（0–10000；ext 默认 400，core 默认 500） |
@@ -173,7 +173,7 @@ ws://127.0.0.1:46880/core
 
 ## 捕获与转发语义
 
-- `forward=false`（默认）：捕获核心发出的 `send_*_msg` Action / 消息事件后**拦截**，不送到协议端；仍向核心返回 Action 成功响应，避免核心重试或阻塞。适合“AI 内部执行指令、不打扰群聊”的场景。
+- `forward=false`：捕获核心发出的 `send_*_msg` Action / 消息事件后**拦截**，不送到协议端；仍向核心返回 Action 成功响应，避免核心重试或阻塞。适合“AI 内部执行指令、不打扰群聊”的场景。
 - `forward=true`：捕获后**继续转发**到协议端，并把协议端 API 响应按 `echo` 路由回核心；如需收集协议端产生的 bot 消息，`captureMode` 用 `lane`。
 - `reply_only`：只收集带 reply 引用（指向注入消息的虚拟 message_id）的响应，最精准；协议端不生成 reply 引用时可能收集不到，此时标记 `ambiguous=true`。
 - `lane`：按 `self_id + 群/私聊 + 对方 id` 捕获该会话内的 bot 消息，适合没有 reply 引用的场景。
