@@ -272,7 +272,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         if (!t.name) continue;
         const descriptor = server.tools && server.tools[t.name];
         if (descriptor && descriptor.hidden) continue;
-        liveKeys.add(descriptor && descriptor.exposeAs ? descriptor.exposeAs : `${server.name}_${t.name}`);
+        liveKeys.add(descriptor && descriptor.exposeAs ? descriptor.exposeAs : t.name);
     }
     for (const [key, owner] of mcpToolKeys) {
         if (owner === server.name && !liveKeys.has(key) && Object.prototype.hasOwnProperty.call(toolMap, key)) {
@@ -286,9 +286,11 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         if (!t.name) continue;
         const descriptor = server.tools && server.tools[t.name];
         if (descriptor && descriptor.hidden) continue;
-        const toolName = descriptor && descriptor.exposeAs ? descriptor.exposeAs : `${server.name}_${t.name}`;
-        if (Object.prototype.hasOwnProperty.call(toolMap, toolName)) continue;
-        mcpToolKeys.set(toolName, server.name);
+        const toolName = descriptor && descriptor.exposeAs ? descriptor.exposeAs : t.name;
+        if (Object.prototype.hasOwnProperty.call(toolMap, toolName)) {
+            Logger.info(`MCP 工具 ${toolName} 与已有工具同名，跳过（${server.name}.${t.name}）`);
+            continue;
+        }
 
         const schema = descriptor && descriptor.parameters && typeof descriptor.parameters === 'object'
             ? descriptor.parameters
@@ -335,6 +337,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
                 callRemote: async (toolName: string, callArgs: any) => callTool(current, toolName, callArgs || {})
             });
         };
+        mcpToolKeys.set(toolName, server.name);
         Logger.info(`已注册 MCP 工具 ${toolName}`);
     }
     return tools;

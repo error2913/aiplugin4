@@ -14,9 +14,9 @@ export interface MCPCallResult {
     isError?: boolean;
 }
 
-/** 单个 MCP 工具的本地适配配置。未配置时按通用规则注册 `<服务器名>_<工具名>`。 */
+/** 单个 MCP 工具的本地适配配置。未配置时默认直接用远端工具名注册，同名冲突会跳过。 */
 export interface MCPToolConfig {
-    /** 暴露给 AI 的工具名；默认 `<服务器名>_<工具名>` */
+    /** 暴露给 AI 的工具名；默认使用远端工具名，可用此字段改名避免同名冲突 */
     exposeAs?: string;
     /** 是否只作为后端远程工具，不注册为 AI 工具（如低层 screenshot_url/scrape_url） */
     hidden?: boolean;

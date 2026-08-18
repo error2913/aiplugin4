@@ -92,7 +92,6 @@ ws://127.0.0.1:46880/core
       "type": "http",
       "url": "http://127.0.0.1:46880/mcp",
       "tools": {
-        "run_ext_command": { "hidden": true },
         "run_core_command": {
           "exposeAs": "run_core_command",
           "adapter": "core_bridge_core"
@@ -113,7 +112,7 @@ ws://127.0.0.1:46880/core
 }
 ```
 
-3. 按需配置「可调用指令白名单」与「指令前缀」。`tools` 适配块会把远端 `run_core_command` 暴露为同名 AI 工具并套用核心桥适配器；若手写配置时省略该块，`run_core_command` 会按通用规则注册为 `ob11-core-bridge_run_core_command`。`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件；`run_core_command` 经 MCP 调用中间件执行核心指令。
+3. 按需配置「可调用指令白名单」与「指令前缀」。`tools` 适配块会把远端 `run_core_command` 暴露为同名 AI 工具并套用核心桥适配器；若手写配置时省略该块，`run_core_command` 也会直接用远端工具名注册，但不会套用核心桥适配器。`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件；`run_core_command` 经 MCP 调用中间件执行核心指令。
 
 ## 工具与参数
 

@@ -138,9 +138,6 @@ export default class ToolConfig {
       "type": "http",
       "url": "http://127.0.0.1:46880/mcp",
       "tools": {
-        "run_ext_command": {
-          "hidden": true
-        },
         "run_core_command": {
           "exposeAs": "run_core_command",
           "adapter": "core_bridge_core",
@@ -198,7 +195,7 @@ export default class ToolConfig {
     }
   }
 }`
-        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。默认包含四个：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心/扩展指令中转）。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）、tools（可选工具适配块：键为远端工具名，值为对象，支持 hidden=仅作底层工具不暴露给 AI、exposeAs=暴露给 AI 的工具名、adapter=适配器（text/image/web_read/render_markdown/render_html/core_bridge_core）、description/parameters=覆盖 AI 可见的描述与参数、output/format=图片输出与保存格式、remoteTool/remoteTools=实际调用的远端工具名映射、sensitive=敏感工具标记；未配置 tools 的服务器按 <服务器名>_<工具名> 通用注册）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。默认包含四个：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心/扩展指令中转）。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）、tools（可选工具适配块：键为远端工具名，值为对象，支持 hidden=仅作底层工具不暴露给 AI、exposeAs=暴露给 AI 的工具名、adapter=适配器（text/image/web_read/render_markdown/render_html/core_bridge_core）、description/parameters=覆盖 AI 可见的描述与参数、output/format=图片输出与保存格式、remoteTool/remoteTools=实际调用的远端工具名映射、sensitive=敏感工具标记；未配置 tools 的服务器默认直接用远端工具名注册，与本地/已有工具同名时跳过，可用 exposeAs 改名或 hidden 隐藏）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [
             `---
 name: 今日人品
