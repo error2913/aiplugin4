@@ -7,6 +7,7 @@ import MemoryService from "../memory/memory";
 import { revive, TypeDescriptor } from "../utils/utils";
 
 import { Session, Setting } from "./session";
+import { createToolListen } from "./tool_listen";
 
 
 /**
@@ -47,6 +48,8 @@ export class SessionService {
             session.sessionId = sessionId;
             if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
             session.agentName = this.agentName;
+            // listen 是运行时对象，函数不会被 JSON 持久化；每次恢复会话都重新创建。
+            session.tool.listen = createToolListen();
             // 复活嵌套对象（Context/MemoryItem/Setting）
             session.context = revive(Context, session.context || {});
             session.context.reviveMessages();

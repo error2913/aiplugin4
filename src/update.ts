@@ -17,6 +17,7 @@ export const updateInfo: { [version: string]: string } = {
 ## 工具与图片
 - 增加 MCP 总开关与图生图能力：text_to_image 支持图片 ID、头像、URL、data URL 和 base64，适配 aiplugin4-dependencies 新接口
 - 按需工具摘要限制数量并提供参数概览，减少 system prompt 中函数列表占用的 token
+- 更新 SealDice 核心与内置扩展命令白名单：默认包含全部命令及别名，并补充对应的 Skills 调用帮助
 
 ## 配置项更改
 - 无新增或删除配置项；本版本主要为消息接收、提示词缓存、工具调用和图片处理的实现修复。升级后无需恢复默认配置。`,

@@ -123,6 +123,37 @@ export interface MessageSegment {
     };
 }
 
+/**
+ * 文件消息的完整可读表示。不要只显示 name：OB11/不同适配器可能把真实路径、URL、
+ * file_id、file_unique 等字段放在同一段里，AI 需要这些字段才能继续调用文件工具。
+ */
+export function formatFileSegmentText(rawData: any): string {
+    const data = rawData && typeof rawData === 'object' ? rawData : {};
+    const nestedFile = data.file && typeof data.file === 'object' ? data.file : {};
+    const pick = (...values: any[]): string => {
+        for (const value of values) {
+            if (value === undefined || value === null) continue;
+            const text = String(value).replace(/[\r\n]+/g, ' ').trim();
+            if (text) return text;
+        }
+        return '';
+    };
+    const name = pick(data.name, data.file_name, data.filename, nestedFile.name, nestedFile.file_name);
+    const path = pick(data.path, data.local_path, nestedFile.path, nestedFile.local_path);
+    const file = pick(typeof data.file === 'string' ? data.file : '', nestedFile.file);
+    const url = pick(data.url, data.file_url, data.download_url, nestedFile.url, nestedFile.file_url);
+    const fileId = pick(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
+    const fileUnique = pick(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
+    const size = pick(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
+    const mime = pick(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
+    const label = name || path || file || url || fileId || '未知文件';
+    const fields = [
+        ['name', name], ['path', path], ['file', file], ['url', url],
+        ['file_id', fileId], ['file_unique', fileUnique], ['size', size], ['mime', mime]
+    ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`);
+    return `【文件】${label}${fields.length ? `\n${fields.join('\n')}` : ''}`;
+}
+
 /** 为忽略/触发正则生成兼容 CQ 码的匹配文本，不改变消息段本身。 */
 export function formatMessageSegmentsForMatching(messageArray: MessageSegment[], fallback: string = ''): string {
     const text = messageArray.map(item => {
@@ -168,10 +199,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                 break;
             }
             case 2: { // 文件 File
-                const url = 'url' in seg ? seg.url : '';
-                const file = 'file' in seg && typeof seg.file === 'string' ? seg.file : '';
-                const fileText = url || file;
-                result.push({ type: 'text', data: { text: fileText ? `【文件】${fileText}` : '【文件】' } });
+                result.push({ type: 'text', data: { text: formatFileSegmentText(seg) } });
                 break;
             }
             case 3: { // 图片 Image

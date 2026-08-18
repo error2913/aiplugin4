@@ -97,12 +97,6 @@ export interface ToolCallResult {
     callBack?: boolean     // 是否把结果回调给智能体（写回上下文继续对话），false 时工具静默执行
 }
 
-export interface ExtCmdInfo {
-    extName: string, // 使用的扩展名称
-    cmd: string, // 指令名称
-    staticArgs: string[] // 参数
-}
-
 export interface ToolListen {
     timeoutId: number | null,
     resolve: ((content: string) => void) | null,

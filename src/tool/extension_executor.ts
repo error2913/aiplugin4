@@ -19,7 +19,12 @@ function splitKwargs(plainArgs: string[]): { args: string[]; kwargs: seal.Kwarg[
         const m = RE_KEYWORD.exec(text);
         if (m) {
             const value = m[2] || '';
-            kwargs.push({ name: m[1], value, valueExists: m[2] !== undefined, asBool: value !== 'false' });
+            kwargs.push({
+                name: m[1],
+                value,
+                valueExists: m[2] !== undefined,
+                asBool: value !== '' && value !== '0' && value.toLowerCase() !== 'false',
+            });
         } else {
             args.push(text);
         }
@@ -118,15 +123,24 @@ export async function executeExtensionLocally(
     const cmdArgs = buildCmdArgs(ctx, rc.cmd, plainArgs, options.at || [], prefix);
 
     const listen = session.tool.listen;
+    // waitFor 是当前监听器的消息收集入口；resolve 仅作为旧会话对象的防御性兜底。
     const responsePromise = listen.waitFor
         ? listen.waitFor(timeoutMs, settleMs, maxMessages)
-        : Promise.resolve([] as string[]);
+        : new Promise<string[]>(resolve => {
+            listen.timeoutId = setTimeout(() => resolve([]), timeoutMs);
+            listen.resolve = content => {
+                resolve([content]);
+                listen.cleanup();
+            };
+        });
 
     let solved = false;
     try {
-        const result = ext.cmdMap[rc.cmd].solve(ctx, msg, cmdArgs) as { solved?: boolean } | undefined;
+        const result = await Promise.resolve(ext.cmdMap[rc.cmd].solve(ctx, msg, cmdArgs)) as { solved?: boolean } | undefined;
         solved = !!(result && result.solved);
     } catch (e) {
+        listen.cleanup();
+        await responsePromise.catch(() => []);
         Logger.warning(`[run_ext_command] 本地执行 ${rc.extName}|${rc.cmd} 抛异常:${e instanceof Error ? e.message : String(e)}`);
         throw new Error(`指令执行抛异常：${e instanceof Error ? e.message : String(e)}`);
     }

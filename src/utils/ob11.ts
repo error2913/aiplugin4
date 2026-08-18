@@ -35,6 +35,39 @@ export async function sendPrivateMsg(epId: string, user_id: string, message: Mes
     }
 }
 
+/**
+ * 统一发送文件。新版 ob11 网络依赖提供 sendFile，可针对 Milky 正确调用
+ * upload_group_file/upload_private_file；旧版依赖回退到 OB11 file 消息段。
+ */
+export async function sendPrivateFile(epId: string, user_id: string, file: string, name: string): Promise<any> {
+    const net = getNet();
+    if (!net) return null;
+    try {
+        if (typeof net.sendFile === 'function') return await net.sendFile(epId, 'private', user_id, file, name);
+        return await net.callApi(epId, 'send_private_msg', {
+            user_id,
+            message: [{ type: 'file', data: { file, ...(name ? { name } : {}) } }]
+        });
+    } catch (_e) {
+        logger.error(`发送私聊文件失败`);
+        return null;
+    }
+}
+
+export async function sendGroupFile(epId: string, group_id: string, file: string, name: string): Promise<any> {
+    const net = getNet();
+    if (!net) return null;
+    try {
+        if (typeof net.sendFile === 'function') return await net.sendFile(epId, 'group', group_id, file, name);
+        return await net.callApi(epId, 'send_group_msg', {
+            group_id,
+            message: [{ type: 'file', data: { file, ...(name ? { name } : {}) } }]
+        });
+    } catch (_e) {
+        logger.error(`发送群文件失败`);
+        return null;
+    }
+}
 export async function sendGroupMsg(epId: string, group_id: string, message: MessageSegment[]): Promise<any> {
     const net = getNet();
     if (!net) return null;

@@ -2,7 +2,6 @@
 import Config from "../../config/config";
 import { logger } from "../../logger";
 import { toolMap } from "../../tool/tool";
-import Tool from "../../tool/tool";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -105,11 +104,6 @@ export function registerCmdTool() {
                     return ret;
                 }
                 const tool = toolMap[val3];
-                if (tool.ExtCmdInfo.extName !== '' && !Tool.getCmdArgs(ctx)) {
-                    seal.replyToSender(ctx, msg, `暂时无法调用函数，请先使用 .r 指令`);
-                    return ret;
-                }
-
                 try {
                     const args = cmdArgs.kwargs.reduce((acc: { [key: string]: any }, kwarg) => {
                         const valueString = kwarg.value;

@@ -18,5 +18,5 @@
 说明：
 
 - `tool call` 有调用副作用（如 `ban`/`whole_ban`/`record`/`text_to_sound`），只测无副作用的 `show_timer_list` 与未注册函数错误路径。
-- `tool call` 依赖 `Tool.cmdArgs`（`ExtCmdInfo.extName !== ''` 且 `Tool.cmdArgs == null` 时会要求先使用 `.r` 指令），遇此提示记 SKIP(env)。
+- `run_ext_command` 不依赖会话历史中的 `Tool.cmdArgs`，也不要求先使用 `.r`；每次调用都会按工具参数现场构造 `CmdArgs`。核心指令使用 `run_core_command`，需要 OB11 核心桥。
 - TOOL-04~07 结束后按 TOOL-01 快照逐工具还原（`on`/`off <工具名>`）。

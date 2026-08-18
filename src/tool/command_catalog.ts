@@ -56,8 +56,21 @@ export function resolveEntry(entry: string): ResolvedCommand | null {
     return null;
 }
 
+/** 将同一白名单元素中的 command/alias1/alias2 展开为可解析的独立条目。 */
+function expandWhitelistEntry(entry: string): string[] {
+    const text = String(entry || '').trim();
+    if (!text) return [];
+    const index = text.indexOf('|');
+    if (index < 0) return [text];
+    const extName = text.slice(0, index).trim();
+    const commands = text.slice(index + 1).split('/').map(item => item.trim()).filter(Boolean);
+    return extName && commands.length ? commands.map(command => `${extName}|${command}`) : [];
+}
+
 export function whitelistEntries(): string[] {
-    return Config.tool.CMD_WHITELIST.map(item => String(item || '').trim()).filter(Boolean);
+    const result: string[] = [];
+    Config.tool.CMD_WHITELIST.forEach(item => result.push(...expandWhitelistEntry(String(item || ''))));
+    return result;
 }
 
 export function isAllowedExtension(rc: ResolvedCommand): boolean {

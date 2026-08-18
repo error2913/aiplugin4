@@ -6,7 +6,7 @@ import Image from "../../resource/image";
 import { Session } from "../../session/session";
 import { parseSpecialTokens } from "../../utils/string";
 import { generateId } from "../../utils/utils";
-import { isAllowedCore, splitEntry } from "../command_catalog";
+import { isAllowedCore, splitEntry, whitelistEntries } from "../command_catalog";
 
 import { MCPCallResult } from "./types";
 
@@ -252,7 +252,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     const { ctx, args = {} } = input;
     const action = String(args && args.action || '');
     if (action === 'list') {
-        const list = Config.tool.CMD_WHITELIST.map(item => splitEntry(String(item))).filter(item => item && item.extName === 'core').map(item => `core|${item!.cmd}`);
+        const list = whitelistEntries().map(item => splitEntry(item)).filter(item => item && item.extName === 'core').map(item => `core|${item!.cmd}`);
         return `可调用核心指令（共 ${list.length} 个）：\n${list.length ? list.join('\n') : '（除 .ext 外暂无白名单核心指令）'}\n核心扩展发现：使用 action=call、command=ext 查看全部扩展名称`;
     }
     if (action !== 'call') return 'action 仅支持 list 或 call';

@@ -31,7 +31,7 @@ export function registerCmdTool(): Tool {
         type: 'function',
         function: {
             name: 'run_ext_command',
-            description: `在 SealDice 本地直接调用扩展指令的 solve，不依赖核心桥/中间件，无需 MCP 与协议端。扩展分为 builtin（fun/story/coc7/deck/dnd5e/exp/log/reply）与 non_builtin（第三方扩展及本插件），无需配置内置扩展列表。action=list 可按 kind 列出指令；action=call 执行指令，并收集扩展发出的多条消息作为返回。可调用指令仍受「可调用指令白名单」约束，白名单格式为扩展名|指令名。核心指令请使用 run_core_command。`,
+            description: `在 SealDice 本地直接调用扩展指令的 solve，不依赖核心桥/中间件，无需 MCP 与协议端。扩展分为 builtin（fun/story/coc7/deck/dnd5e/exp/log/reply）与 non_builtin（第三方扩展及本插件），无需配置内置扩展列表。action=list 可按 kind 列出指令；action=call 执行指令，并收集扩展发出的多条消息作为返回。可调用指令仍受「可调用指令白名单」约束，白名单格式为扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔。核心指令请使用 run_core_command。`,
             parameters: {
                 type: 'object',
                 properties: {

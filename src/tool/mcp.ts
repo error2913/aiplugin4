@@ -256,6 +256,12 @@ async function withSessionRetry<T>(server: MCPServer, fn: (sessionId: string) =>
     }
 }
 
+/** 供资源工具等内部桥接调用 MCP 工具，不依赖 MCP 工具是否已注册到 AI 工具列表。 */
+export async function callMCPTool(serverName: string, name: string, args: any = {}): Promise<MCPCallResult> {
+    const server = getMCPServerByName(serverName);
+    if (!server) throw new Error(`MCP 服务器 ${serverName} 未配置`);
+    return callTool(server, name, args);
+}
 async function callTool(server: MCPServer, name: string, args: any): Promise<MCPCallResult> {
     const { value } = await withSessionRetry(server, sessionId => doCallTool(server, sessionId, name, args));
     return value;

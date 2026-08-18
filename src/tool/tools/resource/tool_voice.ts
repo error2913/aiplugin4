@@ -2,7 +2,7 @@
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import { netExists, sendGroupAISound } from "../../../utils/ob11";
-import { resolveLocalPath } from "../../../utils/utils";
+import { resolveResourceReference } from "../../../utils/resource";
 import Tool from "../../tool";
 
 const characterMap: { [key: string]: string } = {
@@ -36,22 +36,38 @@ export function registerRecord() {
         type: "function",
         function: {
             name: "record",
-            description: `发送本地语音，语音名先通过 list_resources(type=audio) 查询`,
+            description: `发送本地语音。可传 name（先通过 list_resources(type=audio) 查询）或 path（本地绝对路径、相对 SealDice 目录的路径、file:// URI、mcp://服务器名/沙箱相对路径）`,
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: "string",
                         description: "语音名称"
+                    },
+                    path: {
+                        type: "string",
+                        description: "本地语音路径、file:// URI，或 mcp://服务器名/沙箱相对路径"
+                    },
+                    source: {
+                        type: "string",
+                        enum: ["local", "mcp"],
+                        description: "资源来源；使用 MCP 文件服务器时填 mcp"
+                    },
+                    server: {
+                        type: "string",
+                        description: "MCP 服务器名称，source=mcp 时使用，默认 mcp-files-exec"
                     }
                 },
-                required: ["name"]
+                required: []
             }
         }
     });
     toolRecord.sensitive = true; // 发送语音属敏感操作
     toolRecord.solve = async (ctx, msg, _, args) => {
-        const { name } = args;
+        const { name, path, source, server } = args;
+
+        if (name && path) return 'name 与 path 不能同时提供，请二选一：name 或 path';
+        if (!name && !path) return '必须提供 name（已登记资源）或 path（直接传路径）中的一项';
 
         // 每次调用实时读取配置，保证修改配置后无需重载即可生效
         const recordPathMap: { [key: string]: string } = {};
@@ -59,13 +75,24 @@ export function registerRecord() {
             recordPathMap[audio.audioId] = audio.path;
         }
 
-        if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
-            seal.replyToSender(ctx, msg, `[语音:${resolveLocalPath(recordPathMap[name])}]`);
-            return '发送成功';
-        } else {
-            const nameList = Object.keys(recordPathMap);
-            logger.error(`本地语音${name}不存在`);
-            return `本地语音${name}不存在${nameList.length !== 0 ? `，可发送的语音名有:${nameList.join('、')}` : ''}`;
+        try {
+            if (path) {
+                const resource = await resolveResourceReference(path, source, server);
+                seal.replyToSender(ctx, msg, `[语音:${resource.path}]`);
+                return '发送成功';
+            }
+            if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
+                const resource = await resolveResourceReference(recordPathMap[name]);
+                seal.replyToSender(ctx, msg, `[语音:${resource.path}]`);
+                return '发送成功';
+            } else {
+                const nameList = Object.keys(recordPathMap);
+                logger.error(`本地语音${name}不存在`);
+                return `本地语音${name}不存在${nameList.length !== 0 ? `，可发送的语音名有:${nameList.join('、')}` : ''}`;
+            }
+        } catch (e) {
+            logger.error(`发送语音失败：${e instanceof Error ? e.message : String(e)}`);
+            return `发送语音失败：${e instanceof Error ? e.message : String(e)}`;
         }
     }
 

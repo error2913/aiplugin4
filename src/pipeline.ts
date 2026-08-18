@@ -4,11 +4,10 @@ import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
-import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
-import { expandMilkySegments, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
+import { expandMilkySegments, formatFileSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
 import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
 /** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
@@ -106,8 +105,8 @@ export class MessagePipeline {
                     break;
                 }
                 case 'file': {
-                    // milky 转接与 NapCat 的 file 段字段略有差异（file/name/file_id），统一取可用值
-                    result.push({ type: 'text', data: { text: `【文件】${data.name || data.file || data.file_id || ''}` } });
+                    // 保留文件名之外的 path/url/file_id 等字段，供 AI 继续调用文件工具读取或导入。
+                    result.push({ type: 'text', data: { text: formatFileSegmentText(data) } });
                     break;
                 }
                 case 'video': {
@@ -428,10 +427,8 @@ export class MessagePipeline {
         }
     }
 
-    /** 指令消息：记录 cmdArgs，并按配置决定是否写入会话上下文 */
-    static handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): void {
-        // 每次收到指令都刷新当前会话的 cmdArgs，供旧版本地扩展调用兼容逻辑复用最近指令对象
-        Tool.setCmdArgs(ctx, cmdArgs);
+    /** 指令消息：按配置决定是否写入会话上下文 */
+    static handleCommand(ctx: seal.MsgContext, msg: seal.Message): void {
 
         const { RECEIVE_CMD: allcmd } = Config.received;
         if (!allcmd) return;
@@ -476,7 +473,8 @@ export class MessagePipeline {
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;
 
-        session.tool.listen.push?.(messageText); // 分发给所有监听器，支持多条消息与并发调用
+        const deliver = session.tool.listen.push || session.tool.listen.resolve;
+        deliver?.(messageText);
 
         const { RECEIVE_MSG_BY_BOT: allmsg } = Config.received;
         if (!allmsg) return;

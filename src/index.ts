@@ -84,9 +84,9 @@ function main() {
   }
 
   //接受的指令
-  ext.onCommandReceived = (ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs) => {
+  ext.onCommandReceived = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      MessagePipeline.handleCommand(ctx, msg, cmdArgs);
+      MessagePipeline.handleCommand(ctx, msg);
     } catch (e) {
       logger.error(`指令消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
     }
@@ -95,6 +95,7 @@ function main() {
   //骰子发送的消息
   ext.onMessageSend = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
+      logger.debug(`[onMessageSend] 收到机器人出站消息 session=${ctx.isPrivate ? ctx.player?.userId : ctx.group?.groupId} text=${String(msg.message || "").slice(0, 120)}`);
       MessagePipeline.handleBotMessage(ctx, msg);
     } catch (e) {
       logger.error(`获取发送消息处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);

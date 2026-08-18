@@ -38,8 +38,9 @@ const TEMPLATES: { [key: string]: string } = {
 - 可使用[audio:音频ID]发送本地音频，可用名称先通过 list_resources(type=audio) 查询
 
 ## 文件与视频相关
-- 可使用send_file工具发送本地文件，可用名称先通过 list_resources(type=file) 查询
-- 可使用send_video工具发送本地视频，可用名称先通过 list_resources(type=video) 查询
+- 可使用send_file工具发送本地文件，可用名称先通过 list_resources(type=file) 查询；也可直接传 path
+- 可使用send_video工具发送本地视频，可用名称先通过 list_resources(type=video) 查询；也可直接传 path
+- send_image、send_file、send_video、record 的 path 支持本地绝对路径、file:// URI；MCP 沙箱文件使用 mcp://服务器名/沙箱相对路径，或 source=mcp + server + path
 
 **DYNAMIC_SECTIONS**
 

@@ -1,12 +1,14 @@
 // 资源工具：本地文件/视频发送（走 ob11 网络连接依赖）
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
-import { netExists, sendGroupMsg, sendPrivateMsg } from "../../../utils/ob11";
-import { resolveLocalPath } from "../../../utils/utils";
+import { netExists, sendGroupFile, sendGroupMsg, sendPrivateFile, sendPrivateMsg } from "../../../utils/ob11";
+import { resolveResourceReference } from "../../../utils/resource";
 import Tool from "../../tool";
 
-/** 按“资源名=路径”映射构建 名称->路径 表，key 为 id 字段名（fileId/videoId） */
-function buildPathMap(items: { [key: string]: string }[], key: string): { [key: string]: string } {
+type ResourceEntry = { [key: string]: string | undefined };
+
+/** 按“资源名=路径”映射构建 名称->路径 表，key 为 id 字段名（imageId/fileId/videoId） */
+function buildPathMap(items: ResourceEntry[], key: string): { [key: string]: string } {
     const pathMap: { [key: string]: string } = {};
     for (const item of items || []) {
         const id = item[key];
@@ -32,17 +34,27 @@ function buildResourceList(type: string): string {
     return sections.map(([label, names]) => `${label}:${names.length > 0 ? names.join('、') : '暂无'}`).join('\n');
 }
 
+function getConfiguredResources(key: 'imageId' | 'fileId' | 'videoId'): ResourceEntry[] {
+    if (key === 'imageId') {
+        return (Config.resource.LOCAL_IMAGES || []).map(item => ({ [key]: item.imageId, path: item.path }));
+    }
+    if (key === 'fileId') {
+        return (Config.resource.LOCAL_FILES || []).map(item => ({ [key]: item.fileId, path: item.path }));
+    }
+    return (Config.resource.LOCAL_VIDEOS || []).map(item => ({ [key]: item.videoId, path: item.path }));
+}
+
 function registerResourceTool(
     name: string,
     desc: string,
-    key: 'fileId' | 'videoId',
-    segmentType: 'file' | 'video'
+    key: 'imageId' | 'fileId' | 'videoId',
+    segmentType: 'image' | 'file' | 'video'
 ) {
     const tool = new Tool({
         type: 'function',
         function: {
             name,
-            description: `${desc}。可传 name（已登记资源，先通过 list_resources 查询可用名称）或 path（本地绝对路径，或相对海豹 data 目录的路径）`,
+            description: `${desc}。可传 name（已登记资源，先通过 list_resources 查询可用名称）或 path（本地绝对路径、相对 SealDice 目录的路径、file:// URI，或 mcp://服务器名/沙箱路径）；也可用 source=mcp、server、path 调用 MCP 文件服务器`,
             parameters: {
                 type: 'object',
                 properties: {
@@ -52,7 +64,16 @@ function registerResourceTool(
                     },
                     path: {
                         type: 'string',
-                        description: '文件路径：本地绝对路径，或相对海豹 data 目录的路径'
+                        description: '文件路径：本地绝对路径、相对 SealDice 目录的路径、file:// URI，或 mcp://服务器名/沙箱相对路径'
+                    },
+                    source: {
+                        type: 'string',
+                        enum: ['local', 'mcp'],
+                        description: '资源来源；使用 MCP 文件服务器时填 mcp'
+                    },
+                    server: {
+                        type: 'string',
+                        description: 'MCP 服务器名称，source=mcp 时使用，默认 mcp-files-exec'
                     }
                 },
                 required: []
@@ -61,14 +82,14 @@ function registerResourceTool(
     });
     tool.sensitive = true; // 发送文件/视频属敏感操作
     tool.solve = async (ctx, _, __, args) => {
-        const { name, path } = args;
+        const { name, path, source, server } = args;
 
         // 每次调用实时读取配置，保证修改配置后无需重载即可生效
-        const items = key === 'fileId' ? (Config.resource.LOCAL_FILES || []) : (Config.resource.LOCAL_VIDEOS || []);
+        const items = getConfiguredResources(key);
         const pathMap = buildPathMap(items, key);
         const nameList = Object.keys(pathMap);
 
-        let filePath = '';
+        let rawPath = '';
         if (name && path) {
             return `name 与 path 不能同时提供，请二选一：name（已登记资源）或 path（直接传路径）`;
         }
@@ -77,34 +98,48 @@ function registerResourceTool(
                 logger.error(`${desc}${name}不存在`);
                 return `${desc}${name}不存在${nameList.length !== 0 ? `，可发送的资源名有:${nameList.join('、')}` : ''}`;
             }
-            filePath = resolveLocalPath(pathMap[name]);
+            rawPath = pathMap[name];
         } else if (path) {
-            filePath = resolveLocalPath(path);
+            rawPath = path;
         } else {
             return `必须提供 name（已登记资源）或 path（直接传路径）中的一项`;
         }
 
         if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
 
-        const epId = ctx.endPoint.userId;
-        const segment = { type: segmentType, data: { file: filePath } };
-        let result = null;
-        if (ctx.isPrivate) {
-            result = await sendPrivateMsg(epId, ctx.player!.userId.replace(/^.+:/, ''), [segment]);
-        } else {
-            result = await sendGroupMsg(epId, ctx.group!.groupId.replace(/^.+:/, ''), [segment]);
-        }
+        try {
+            const resource = await resolveResourceReference(rawPath, source, server);
+            const epId = ctx.endPoint.userId;
+            let result = null;
+            const peerId = ctx.isPrivate
+                ? ctx.player!.userId.replace(/^.+:/, '')
+                : ctx.group!.groupId.replace(/^.+:/, '');
+            if (segmentType === 'file') {
+                result = ctx.isPrivate
+                    ? await sendPrivateFile(epId, peerId, resource.path, resource.name)
+                    : await sendGroupFile(epId, peerId, resource.path, resource.name);
+            } else {
+                const segment = { type: segmentType, data: { file: resource.path } };
+                result = ctx.isPrivate
+                    ? await sendPrivateMsg(epId, peerId, [segment])
+                    : await sendGroupMsg(epId, peerId, [segment]);
+            }
 
-        if (result === null || result === undefined) return `${desc}发送失败，请查看ob11网络连接依赖日志`;
-        return `${desc}发送成功`;
-    }
+            if (result === null || result === undefined) return `${desc}发送失败，请查看ob11网络连接依赖日志`;
+            return `${desc}发送成功`;
+        } catch (e) {
+            logger.error(`${desc}失败：${e instanceof Error ? e.message : String(e)}`);
+            return `${desc}失败：${e instanceof Error ? e.message : String(e)}`;
+        }
+    };
 }
 
 export function registerResourceTools() {
+    registerResourceTool('send_image', '发送本地图片', 'imageId', 'image');
     registerResourceTool('send_file', '发送本地文件', 'fileId', 'file');
     registerResourceTool('send_video', '发送本地视频', 'videoId', 'video');
 
-    const listTool = new Tool({
+    const tool = new Tool({
         type: 'function',
         function: {
             name: 'list_resources',
@@ -114,15 +149,15 @@ export function registerResourceTools() {
                 properties: {
                     type: {
                         type: 'string',
-                        description: '资源类型',
-                        enum: ['image', 'audio', 'file', 'video', 'all']
+                        enum: ['all', 'image', 'audio', 'file', 'video'],
+                        description: '资源类型，默认 all'
                     }
                 },
                 required: []
             }
         }
     });
-    listTool.solve = async (_, __, ___, args) => {
+    tool.solve = async (_, __, ___, args) => {
         const type = args && typeof args.type === 'string' ? args.type : 'all';
         if (!['image', 'audio', 'file', 'video', 'all'].includes(type)) {
             return `未知资源类型:${type}，可选值为 image/audio/file/video/all`;
