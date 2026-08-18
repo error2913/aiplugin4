@@ -42,8 +42,10 @@ export function buildCommandContext(
     ctx: seal.MsgContext,
     target: { trigger: string; at: string[] }
 ): { ctx: seal.MsgContext; msg: seal.Message } {
+    // Message.groupId 必须保留 SealDice 的平台前缀（如 QQ-Group:123），
+    // 否则 OB11 核心在 SendToGroup 时无法命中群会话，也不会触发 onMessageSend。
     const normalizedGroupId = ctx.group && normalizeGroupId(ctx.group.groupId);
-    const groupId = normalizedGroupId ? getRawId(normalizedGroupId) : '';
+    const groupId = normalizedGroupId || '';
     const msg = createMsg(ctx.isPrivate ? 'private' : 'group', target.trigger, groupId);
     if (target.at.length) {
         const atText = target.at.map(userId => `[CQ:at,qq=${userId}]`).join(' ');
