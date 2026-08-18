@@ -90,12 +90,7 @@ ws://127.0.0.1:46880/core
   "mcpServers": {
     "ob11-core-bridge": {
       "type": "http",
-      "url": "http://127.0.0.1:46880/mcp",
-      "tools": {
-        "run_core_command": {
-          "adapter": "core_bridge_core"
-        }
-      }
+      "url": "http://127.0.0.1:46880/mcp"
     }
   }
 }
@@ -111,7 +106,7 @@ ws://127.0.0.1:46880/core
 }
 ```
 
-3. 按需配置「可调用指令白名单」与「指令前缀」。后端只通过 MCP 提供 `run_core_command`，插件直接套用核心桥适配器；`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件，也不会出现在 MCP 工具列表中。
+3. 按需配置「可调用指令白名单」与「指令前缀」。后端只通过标准 MCP `tools/list` 提供 `run_core_command`，插件自动读取工具名称、描述和参数 schema；`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件，也不会出现在 MCP 工具列表中。
 
 ## 工具与参数
 
@@ -134,6 +129,8 @@ ws://127.0.0.1:46880/core
 
 - `action=list`：列出白名单中的核心指令
 - `action=call`：执行核心指令（如 `ext`、`help`；也支持 `core|ext` 写法）
+- 结构化模式：传 `command` 和可选 `args`，插件会按当前「指令前缀」组装核心原始消息
+- 原始消息模式：传 `raw_message`，原样注入核心；`raw_message` 不能与 `command` 或 `args` 同时使用
 
 ### 参数
 
@@ -194,7 +191,7 @@ ws://127.0.0.1:46880/core
 
 | 现象 | 检查 |
 | --- | --- |
-| `run_core_command` 不可用 / 报 MCP 服务器未配置 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url、`tools` 适配块是否保留了 `run_core_command` |
+| `run_core_command` 不可用 / 报 MCP 服务器未配置 | 「是否启用MCP」总开关、MCP服务器配置中的服务器名与 url；确认后端 `/mcp` 可访问且 `tools/list` 返回了 `run_core_command` |
 | `run_ext_command` 执行失败 / 无响应 | 扩展是否已安装、指令名是否正确（`扩展名|指令名`）、是否在白名单、指令本身是否抛异常；与中间件无关 |
 | 执行无响应 / 超时 | SealDice 是否已连上 `/core`（看中间件日志）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
 | 返回 `ambiguous=true` | 同 lane 并发或缺少 reply 引用；调整 `captureMode` / `settleMs` |

@@ -238,7 +238,7 @@ max_tokens = 2048
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。每台服务器可配 `tools` 适配块（`hidden`/`exposeAs`/`adapter`/`remoteTools`/`description`/`parameters` 等）；未配置时默认直接使用远端工具名注册，同名冲突自动跳过。默认后端工具名为 `run_shell`、`web_read`、`render_markdown`、`render_html`、`run_core_command`；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
@@ -423,7 +423,7 @@ max_tokens = 2048
 | 音乐 | `music_play` |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
-| MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过；可用 `tools.exposeAs` 改名）、`use_skill`（技能） |
+| MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`（技能） |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 

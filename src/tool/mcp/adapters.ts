@@ -1,6 +1,6 @@
 // MCP 工具适配器：把 AI 侧参数/返回映射为远端 MCP 工具调用，保留网页截图、Markdown/HTML 渲染、核心桥指令等既有行为
 import Config from "../../config/config";
-import { CoreBridgeInvocation, CoreBridgeResult } from "../../integration/core_bridge/types";
+import { CoreBridgeResult } from "../../integration/core_bridge/types";
 import Logger from "../../logger";
 import Image from "../../resource/image";
 import { Session } from "../../session/session";
@@ -8,7 +8,7 @@ import { parseSpecialTokens } from "../../utils/string";
 import { generateId } from "../../utils/utils";
 import { isAllowedCore, splitEntry } from "../command_catalog";
 
-import { MCPCallResult, MCPToolConfig } from "./types";
+import { MCPCallResult } from "./types";
 
 export interface MCPAdapterContext {
     ctx: seal.MsgContext;
@@ -16,9 +16,7 @@ export interface MCPAdapterContext {
     session: Session;
     args: { [key: string]: any };
     server: { name: string; url: string; token: string; headers: Record<string, string> };
-    remoteTool?: string;
-    remoteTools?: Record<string, string>;
-    descriptor?: MCPToolConfig;
+    toolName: string;
     callRemote: (toolName: string, args: any) => Promise<MCPCallResult>;
 }
 
@@ -61,6 +59,16 @@ function inferFormat(mimeType?: string): string | undefined {
     return undefined;
 }
 
+function saveMCPImage(image: { data: string; mimeType?: string }, prefix = 'mcp'): string {
+    const img = new Image();
+    img.imageId = `${prefix}_${generateId()}`;
+    img.base64 = image.data;
+    img.format = inferFormat(image.mimeType) || 'png';
+    img.description = `MCP 图片[img:${img.imageId}]`;
+    Image.save(img);
+    return `成功，请使用[img:${img.imageId}]发送`;
+}
+
 /** 提取 MCP 结果中的图片数据；标准 image 块优先，兼容后端以 text 返回 base64 的旧格式 */
 export function extractMCPImage(result: MCPCallResult | null | undefined, treatTextAsBase64 = false): { data: string; mimeType?: string } | null {
     const blocks = Array.isArray(result && result.content) ? result!.content! : [];
@@ -87,48 +95,17 @@ export function extractMCPImage(result: MCPCallResult | null | undefined, treatT
 }
 
 async function defaultText(input: MCPAdapterContext): Promise<string> {
-    const result = await input.callRemote(input.remoteTool || 'unknown', input.args || {});
+    const result = await input.callRemote(input.toolName, input.args || {});
+    const image = extractMCPImage(result, false);
+    if (image) return saveMCPImage(image);
     return mcpText(result);
 }
 
 async function defaultImage(input: MCPAdapterContext): Promise<string> {
-    const result = await input.callRemote(input.remoteTool || 'unknown', input.args || {});
+    const result = await input.callRemote(input.toolName, input.args || {});
     const image = extractMCPImage(result, true);
-    if (!image) throw new Error(`MCP 工具 ${input.remoteTool || 'unknown'} 未返回图片数据`);
-
-    const img = new Image();
-    img.imageId = `mcp_${generateId()}`;
-    img.base64 = image.data;
-    img.format = (input.descriptor && input.descriptor.format) || inferFormat(image.mimeType) || 'png';
-    img.description = `MCP 图片[img:${img.imageId}]`;
-    Image.save(img);
-    return `成功，请使用[img:${img.imageId}]发送`;
-}
-
-async function webReadAdapter(input: MCPAdapterContext): Promise<string> {
-    const { url, screenshot = false, width, height, fullPage = false, delay } = input.args || {};
-    if (!url) return 'url 不能为空';
-
-    if (screenshot) {
-        const remoteTool = (input.remoteTools && input.remoteTools.screenshot) || input.remoteTool || 'screenshot_url';
-        Logger.info(`网页截图: ${url}`);
-        const result = await input.callRemote(remoteTool, { url, width, height, fullPage, delay });
-        const image = extractMCPImage(result, true);
-        if (!image) throw new Error('截图结果为空');
-
-        const img = new Image();
-        img.imageId = `web_${generateId()}`;
-        img.base64 = image.data;
-        img.format = inferFormat(image.mimeType) || 'png';
-        img.description = `网页截图[img:${img.imageId}]`;
-        Image.save(img);
-        return `成功，请使用[img:${img.imageId}]发送`;
-    }
-
-    const remoteTool = (input.remoteTools && input.remoteTools.scrape) || input.remoteTool || 'scrape_url';
-    Logger.info(`读取网页内容: ${url}`);
-    const result = await input.callRemote(remoteTool, { url });
-    return mcpText(result) || '网页内容为空';
+    if (!image) throw new Error(`MCP 工具 ${input.toolName} 未返回图片数据`);
+    return saveMCPImage(image);
 }
 
 async function transformContentToUrlText(ctx: seal.MsgContext, session: Session, content: string): Promise<{ text: string; images: Image[] }> {
@@ -195,32 +172,29 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
 }
 
 async function renderAdapter(input: MCPAdapterContext, kind: 'markdown' | 'html'): Promise<string> {
-    const { content, name, save } = input.args || {};
+    const args = input.args || {};
+    const source = kind === 'markdown' ? args.markdown : args.html;
     const theme = input.args && input.args.theme || 'light';
-    if (!content || !content.trim()) return '内容不能为空';
-    if (!name || !name.trim()) return '图片名称不能为空';
+    if (!source || !String(source).trim()) return '内容不能为空';
     if (kind === 'markdown' && !['light', 'dark', 'gradient'].includes(theme)) return `无效的主题: ${theme}。支持: light, dark, gradient`;
 
-    const kws = kind === 'markdown' ? ['render', 'markdown', name, theme] : ['render', 'html', name];
     try {
-        const { text, images } = await transformContentToUrlText(input.ctx, input.session, content);
+        const { text, images } = await transformContentToUrlText(input.ctx, input.session, String(source));
         const hasImages = images.length > 0;
-        const remoteArgs = kind === 'markdown'
-            ? { markdown: text, theme, width: 1200, quality: 90, hasImages }
-            : { html: text, theme: 'light', width: 1200, quality: 90, hasImages };
-        const result = await input.callRemote(input.remoteTool || (kind === 'markdown' ? 'render_markdown' : 'render_html'), remoteArgs);
+        const remoteArgs = { ...args, [kind]: text, hasImages };
+        const result = await input.callRemote(input.toolName, remoteArgs);
         const image = extractMCPImage(result, true);
         if (!image) throw new Error('渲染结果为空');
 
         const img = new Image();
-        img.imageId = `${name}_${generateId()}`;
+        img.imageId = `mcp_${kind}_${generateId()}`;
         img.base64 = image.data;
-        img.format = (input.descriptor && input.descriptor.format) || 'unknown';
+        img.format = inferFormat(image.mimeType) || 'png';
         img.description = kind === 'markdown'
             ? `Markdown 渲染图片[img:${img.imageId}]\n主题：${theme}`
             : `HTML 渲染图片[img:${img.imageId}]`;
 
-        if (save) input.session.memory.addMemory(input.ctx, input.session, [], [], kws, [img], img.description);
+        Image.save(img);
         return `成功，请使用[img:${img.imageId}]发送`;
     } catch (err) {
         Logger.error(`${kind === 'markdown' ? 'Markdown' : 'HTML'} 渲染失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -234,13 +208,6 @@ async function renderMarkdownAdapter(input: MCPAdapterContext): Promise<string> 
 
 async function renderHtmlAdapter(input: MCPAdapterContext): Promise<string> {
     return renderAdapter(input, 'html');
-}
-
-let sequence = 0;
-
-function nextId(): string {
-    sequence = (sequence + 1) % 100000;
-    return `invoke_${Date.now().toString(36)}_${sequence.toString(36)}`;
 }
 
 function decodeCoreBridgeResult(text: string): CoreBridgeResult {
@@ -290,18 +257,35 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     }
     if (action !== 'call') return 'action 仅支持 list 或 call';
 
+    const rawMessage = typeof args.raw_message === 'string' ? args.raw_message : undefined;
+    const hasRawMessage = rawMessage !== undefined;
+    const hasStructuredArgs = args.command !== undefined || args.args !== undefined;
+    if (hasRawMessage && hasStructuredArgs) return 'raw_message 不能与 command/args 同时使用';
+
     let command = String(args && args.command || '').trim();
     if (command.indexOf('core|') === 0) command = command.slice(5).trim();
-    if (!command) return '调用核心指令时 command 不能为空';
-    if (!isAllowedCore(command)) return `核心指令 core|${command} 不在可调用指令白名单内，无法调用`;
+    if (!hasRawMessage && !command) return '调用核心指令时 command 不能为空';
+
+    let authorizedCommand = command;
+    if (hasRawMessage) {
+        const withoutPrefix = rawMessage!.trim().startsWith(Config.tool.COMMAND_PREFIX)
+            ? rawMessage!.trim().slice(Config.tool.COMMAND_PREFIX.length).trim()
+            : rawMessage!.trim();
+        authorizedCommand = withoutPrefix.split(/\s+/, 1)[0].replace(/^core\|/, '').trim();
+        if (!authorizedCommand) return '调用核心指令时 raw_message 不能为空';
+    }
+    if (!isAllowedCore(authorizedCommand)) return `核心指令 core|${authorizedCommand} 不在可调用指令白名单内，无法调用`;
 
     const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
     const options = captureOptions(args, 50, 500);
-    if (command === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
+    if (authorizedCommand === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
 
-    const prefix = Config.tool.COMMAND_PREFIX;
-    const raw = `${prefix}${command}${cmdArgs.length ? ` ${cmdArgs.join(' ')}` : ''}`.trim();
-    const target: CoreBridgeInvocation['target'] = {
+    const target: {
+        selfId: string;
+        messageType: 'private' | 'group';
+        userId: string;
+        groupId?: string;
+    } = {
         selfId: String(ctx.endPoint.userId || '').replace(/^.+:/, ''),
         messageType: ctx.isPrivate ? 'private' : 'group',
         userId: String(ctx.player && ctx.player.userId || '').replace(/^.+:/, '')
@@ -309,37 +293,43 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     if (!ctx.isPrivate) target.groupId = String(ctx.group && ctx.group.groupId || '').replace(/^.+:/, '');
 
     try {
-        const result = await input.callRemote(input.remoteTool || 'run_core_command', {
+        const remoteArgs: { [key: string]: any } = {
+            action: 'call',
             target,
             actor: {
                 userId: target.userId || target.selfId,
                 nickname: String(ctx.player && ctx.player.name || 'AI'),
                 role: 'member'
             },
-            command: { raw, name: command, args: cmdArgs },
-            capture: options.capture,
+            maxMessages: options.capture.maxMessages,
+            settleMs: options.capture.settleMs,
+            captureMode: options.capture.mode,
+            forward: options.capture.forward,
             timeoutMs: options.timeoutMs,
-            id: nextId()
-        });
-        return `核心指令 core|${command} 返回：\n${formatCoreBridgeResult(decodeCoreBridgeResult(mcpText(result)))}`;
+            __commandPrefix: Config.tool.COMMAND_PREFIX
+        };
+        if (hasRawMessage) remoteArgs.raw_message = rawMessage;
+        else {
+            remoteArgs.command = command;
+            remoteArgs.args = cmdArgs;
+        }
+        const result = await input.callRemote(input.toolName, remoteArgs);
+        return `核心指令 core|${authorizedCommand} 返回：\n${formatCoreBridgeResult(decodeCoreBridgeResult(mcpText(result)))}`;
     } catch (e) {
-        Logger.warning(`[run_core_command] 调用 core|${command} 失败:${e instanceof Error ? e.message : String(e)}`);
-        return `核心指令 core|${command} 调用失败：${e instanceof Error ? e.message : String(e)}`;
+        Logger.warning(`[run_core_command] 调用 core|${authorizedCommand} 失败:${e instanceof Error ? e.message : String(e)}`);
+        return `核心指令 core|${authorizedCommand} 调用失败：${e instanceof Error ? e.message : String(e)}`;
     }
 }
 
 const ADAPTERS: { [name: string]: MCPAdapter } = {
-    text: defaultText,
-    image: defaultImage,
-    web_read: webReadAdapter,
+    screenshot_url: defaultImage,
     render_markdown: renderMarkdownAdapter,
     render_html: renderHtmlAdapter,
-    core_bridge_core: coreBridgeAdapter
+    run_core_command: coreBridgeAdapter
 };
 
-/** 按配置的适配器名执行；未指定时按 output 选择 text/image 通用适配器 */
+/** 适配器只负责处理特殊输入/输出；工具定义始终来自 MCP tools/list。 */
 export async function runMCPAdapter(name: string | undefined, input: MCPAdapterContext): Promise<string> {
-    const adapterName = name || (input.descriptor && input.descriptor.output === 'image' ? 'image' : 'text');
-    const adapter = ADAPTERS[adapterName] || defaultText;
+    const adapter = (name && ADAPTERS[name]) || defaultText;
     return adapter(input);
 }
