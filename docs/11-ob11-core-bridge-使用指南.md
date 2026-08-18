@@ -118,6 +118,8 @@ ws://127.0.0.1:46880/core
 - `action=call`：执行扩展指令
 - `extension` + `command`：`扩展名|指令名`；`command` 也支持直接填 `扩展名|指令名`
 - `args`：指令参数，按顺序
+- `triggerUserId`：可选，指定注入消息的发送者/触发对象用户 ID；不填则使用当前对话用户
+- `atUserId`：可选，指定注入消息中 @ 的用户 ID；仅群聊支持
 
 本地执行：直接调用扩展 `cmdMap[cmd].solve`（构造全新 `CmdArgs`，不要求会话先出现 `.r`），并复用多消息收集器收集扩展发出的多条回复。无需 MCP/中间件；核心内置扩展与第三方扩展均可调用，仍受「可调用指令白名单」约束。
 
@@ -132,10 +134,14 @@ ws://127.0.0.1:46880/core
 - 结构化模式：传 `command` 和可选 `args`，插件会按当前「指令前缀」组装核心原始消息
 - 原始消息模式：传 `raw_message`，原样注入核心；`raw_message` 不能与 `command` 或 `args` 同时使用
 
+触发对象与 @ 对象：两种工具都支持 `triggerUserId` / `atUserId`。前者写入 OB11 `user_id` / `sender.user_id`，后者写入消息的 at 段和 `[CQ:at,qq=...]` 原文；省略前者时沿用当前对话用户。私聊传 `atUserId` 会返回提示，不会伪造私聊 @。
+
 ### 参数
 
 | 参数 | 适用 | 说明 |
 | --- | --- | --- |
+| `triggerUserId` | 两者 | 指定指令消息发送者/触发对象用户 ID；默认当前对话用户 |
+| `atUserId` | 两者 | 指定消息中 @ 的用户 ID；仅群聊 |
 | `forward` | 仅 `run_core_command` | 是否把捕获到的核心发送消息继续转发给协议端，默认 `true`（转发） |
 | `captureMode` | 仅 `run_core_command` | `reply_only` / `lane`；`forward=true` 且要捕获协议端产生的 bot 回复时建议用 `lane` |
 | `maxMessages` | 两者 | 最多收集消息数（1–50；ext 默认 20，core 默认 50） |
@@ -186,7 +192,7 @@ ws://127.0.0.1:46880/core
 
 ## 多核心
 
-多个海豹核心可同时连接中间件：核心连接后上报的 `self_id` 用于路由，`run_core_command` 的调用与事件按 `self_id` 区分，插件端从当前消息上下文自动取 `selfId` 填入 `target`。`run_ext_command` 在插件内本地直调当前实例的扩展 `solve`，不涉及多核心路由。
+核心桥收到 `triggerUserId` 后会同时写入假消息的 `user_id` 与 `sender.user_id`；`atUserId` 会写入 OB11 at 消息段及 raw_message。多个海豹核心可同时连接中间件：核心连接后上报的 `self_id` 用于路由，`run_core_command` 的调用与事件按 `self_id` 区分，插件端从当前消息上下文自动取 `selfId` 填入 `target`。`run_ext_command` 在插件内本地直调当前实例的扩展 `solve`，不涉及多核心路由。
 
 ## 排障
 

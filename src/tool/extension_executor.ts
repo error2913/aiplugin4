@@ -3,6 +3,7 @@
 import Logger from "../logger";
 
 import { ResolvedCommand } from "./command_catalog";
+import { buildCommandContext } from "./command_target";
 import { ToolListen } from "./types";
 
 const RE_KEYWORD = /^--([^\s=]+)(?:=(\S+))?$/;
@@ -101,6 +102,8 @@ export interface LocalExecutionOptions {
     settleMs?: number;
     maxMessages?: number;
     at?: seal.AtInfo[];
+    triggerUserId?: string;
+    atUserId?: string;
 }
 
 /** 本地执行一条已解析的扩展指令，并用会话监听器收集多条 bot 回复。 */
@@ -120,7 +123,14 @@ export async function executeExtensionLocally(
     const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 10000;
     const settleMs = options.settleMs != null && options.settleMs >= 0 ? options.settleMs : 400;
     const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : 20;
-    const cmdArgs = buildCmdArgs(ctx, rc.cmd, plainArgs, options.at || [], prefix);
+    const targetContext = options.triggerUserId
+        ? buildCommandContext(ctx, { triggerUserId: options.triggerUserId, atUserId: options.atUserId })
+        : { ctx, msg };
+    const executionCtx = targetContext.ctx;
+    const executionMsg = targetContext.msg;
+    const atText = (options.at || []).map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ');
+    executionMsg.message = [atText, `${prefix}${rc.cmd}`, plainArgs.join(' ')].filter(Boolean).join(' ');
+    const cmdArgs = buildCmdArgs(executionCtx, rc.cmd, plainArgs, options.at || [], prefix);
 
     const listen = session.tool.listen;
     // waitFor 是当前监听器的消息收集入口；resolve 仅作为旧会话对象的防御性兜底。
@@ -136,7 +146,7 @@ export async function executeExtensionLocally(
 
     let solved = false;
     try {
-        const result = await Promise.resolve(ext.cmdMap[rc.cmd].solve(ctx, msg, cmdArgs)) as { solved?: boolean } | undefined;
+        const result = await Promise.resolve(ext.cmdMap[rc.cmd].solve(executionCtx, executionMsg, cmdArgs)) as { solved?: boolean } | undefined;
         solved = !!(result && result.solved);
     } catch (e) {
         listen.cleanup();

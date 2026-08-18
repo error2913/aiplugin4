@@ -39,6 +39,7 @@ const COMMAND_CALL_RULES = `
 - 扩展指令使用 run_ext_command，参数格式：{"action":"call","extension":"扩展名","command":"指令名","args":["参数1","参数2"]}；不要在 command 中带前缀点号。
 - 核心指令（包括 core|team）使用 run_core_command，参数格式：{"command":"指令名","args":["参数1","参数2"]}。
 - args 按 SealDice 原始指令的空格分隔顺序逐项传入；需要 @、表达式或带空格的文本时按工具 schema 传入单独字符串。
+- 如需让指令替其他用户触发，传 triggerUserId；如需模拟消息中的 @，传 atUserId。两者均为用户 ID，不填 triggerUserId 时使用当前对话用户；私聊不支持 atUserId。
 - 下方同一行中的名称是同一条指令的别名，均已加入白名单；优先使用第一个主名称。
 - 参数不确定时，先调用对应的 help：核心用 run_core_command(command="help", args=["指令名"]，扩展可调用扩展的 help 参数或先查看 SealDice 指令帮助。
 `;
@@ -138,7 +139,7 @@ ${COMMAND_CALL_RULES}
 - ti：抽取临时性疯狂症状；args=[]。
 - li：抽取总结性疯狂症状；args=[]。
 - ra / rc / rch / rah / cra / crc / crch / crah：属性或技能检定，同一实现的不同别名；args 按顺序传奖励/惩罚骰、检定表达式、原因。
-- rav / rcv：对抗/竞争检定；args 按原命令帮助传入。
+- rav / rcv：对抗/竞争检定；args 按原命令帮助传入；需要替其他用户触发或 @ 对象时，额外传 triggerUserId / atUserId。
 - sc：San 检定；args 按顺序传奖励/惩罚骰、成功/失败损失表达式，例如 ["0/1d6"]。
 - coc：生成 COC 角色卡；args 可传数量，例如 ["3"]。
 - st / cst：COC 扩展的角色属性查看/修改别名；常用 args=["show","玩家名称或QQ号"]。角色卡导入流程优先使用核心 run_core_command 的 st。`,
@@ -165,9 +166,9 @@ ${COMMAND_CALL_RULES}
 - rc / ra / rah / rch / drc：DND 检定；args 按顺序传检定表达式、难度或原因，别名可按习惯选择。
 - buff / dbuff：增益/减益效果；参数按原命令帮助传入。
 - spellslots / ss / dss / 法术位：查看或管理法术位。
-- cast / dcast：施法；args 按原命令帮助传入。
+- cast / dcast：施法；args 按原命令帮助传入；需要替其他用户触发或 @ 对象时，额外传 triggerUserId / atUserId。
 - 长休 / longrest / dlongrest：执行长休。
-- ds / 死亡豁免：死亡豁免检定；args 按原命令帮助传入。`,
+- ds / 死亡豁免：死亡豁免检定；args 按原命令帮助传入；需要替其他用户触发或 @ 对象时，额外传 triggerUserId / atUserId。`,
 
     `---
 name: SealDice log扩展调用帮助
@@ -182,5 +183,3 @@ ${COMMAND_CALL_RULES}
 
 日志命令可能读取或导出群聊历史，调用前确认范围，避免无必要地暴露隐私。`
 ];
-
-

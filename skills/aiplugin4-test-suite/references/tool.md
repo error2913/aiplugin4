@@ -14,9 +14,10 @@
 | TOOL-08 | `.ai tool call show_timer_list` | M | `返回内容`、`定时器` | 需骰主；无副作用（无定时器时返回「当前对话没有定时器」） |
 | TOOL-09 | `.ai tool call 不存在的函数` | M | `调用函数失败:未注册的函数` | 错误路径 |
 | TOOL-10 | `.ai tool on <禁止调用的函数>` | I | `不被允许开启` | 仅当知道"禁止调用的函数"配置项内容时测，否则 SKIP(env) |
+| TOOL-11 | `.ai tool help draw_deck` | U | `没有这个工具函数` | 回归：旧牌堆独立工具已移除，牌堆抽取改用 `run_ext_command` 的 `deck|draw` |
 
 说明：
 
 - `tool call` 有调用副作用（如 `ban`/`whole_ban`/`record`/`text_to_sound`），只测无副作用的 `show_timer_list` 与未注册函数错误路径。
-- `run_ext_command` 不依赖会话历史中的 `Tool.cmdArgs`，也不要求先使用 `.r`；每次调用都会按工具参数现场构造 `CmdArgs`。核心指令使用 `run_core_command`，需要 OB11 核心桥。
+- `run_ext_command` 不依赖会话历史中的 `Tool.cmdArgs`，也不要求先使用 `.r`；每次调用都会按工具参数现场构造 `CmdArgs`。核心指令使用 `run_core_command`，需要 OB11 核心桥。牌堆、模组、今日人品等能力不再提供独立工具名，统一通过扩展白名单调用 `deck|draw`、`story|modu`、`fun|jrrp` 等指令。
 - TOOL-04~07 结束后按 TOOL-01 快照逐工具还原（`on`/`off <工具名>`）。

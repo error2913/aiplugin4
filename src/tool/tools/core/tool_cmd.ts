@@ -2,6 +2,7 @@
 import Config from "../../../config/config";
 import Logger from "../../../logger";
 import { collectCommands, extensionNames, isAllowedExtension, ResolvedCommand, resolveEntry } from "../../command_catalog";
+import { qualifyCommandUserId, resolveCommandTarget } from "../../command_target";
 import { executeExtensionLocally } from "../../extension_executor";
 import Tool from "../../tool";
 
@@ -31,7 +32,7 @@ export function registerCmdTool(): Tool {
         type: 'function',
         function: {
             name: 'run_ext_command',
-            description: `在 SealDice 本地直接调用扩展指令的 solve，不依赖核心桥/中间件，无需 MCP 与协议端。扩展分为 builtin（fun/story/coc7/deck/dnd5e/exp/log/reply）与 non_builtin（第三方扩展及本插件），无需配置内置扩展列表。action=list 可按 kind 列出指令；action=call 执行指令，并收集扩展发出的多条消息作为返回。可调用指令仍受「可调用指令白名单」约束，白名单格式为扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔。核心指令请使用 run_core_command。`,
+            description: `在 SealDice 本地直接调用扩展指令的 solve，不依赖核心桥/中间件，无需 MCP 与协议端；可用 triggerUserId 指定触发对象、atUserId 模拟 @ 对象。扩展分为 builtin（fun/story/coc7/deck/dnd5e/exp/log/reply）与 non_builtin（第三方扩展及本插件），无需配置内置扩展列表。action=list 可按 kind 列出指令；action=call 执行指令，并收集扩展发出的多条消息作为返回。可调用指令仍受「可调用指令白名单」约束，白名单格式为扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔。核心指令请使用 run_core_command。`,
             parameters: {
                 type: 'object',
                 properties: {
@@ -40,6 +41,8 @@ export function registerCmdTool(): Tool {
                     extension: { type: 'string', description: '扩展名；call 时可填写，核心扩展名不是这里的 core' },
                     command: { type: 'string', description: '指令名；也支持直接填写 扩展名|指令名' },
                     args: { type: 'array', items: { type: 'string' }, description: '指令参数，按顺序填写' },
+                    triggerUserId: { type: 'string', description: '可选；指定这条指令消息的发送者/触发对象（用户 ID），不填则使用当前对话用户' },
+                    atUserId: { type: 'string', description: '可选；让注入的指令消息 @ 此用户（用户 ID）；群聊可用，私聊不支持' },
                     maxMessages: { type: 'integer', minimum: 1, maximum: 50, description: '最多收集多少条回复消息' },
                     settleMs: { type: 'integer', minimum: 0, maximum: 10000, description: '收到消息后等待多久没有新消息才结束' },
                     timeoutMs: { type: 'integer', minimum: 100, maximum: 120000, description: '最长等待时间，单位毫秒' }
@@ -66,12 +69,22 @@ export function registerCmdTool(): Tool {
         const requested = `${rc.extName}|${rc.cmd}`;
         if (!isAllowedExtension(rc)) return `扩展指令 ${requested} 不在可调用指令白名单内，无法调用`;
         const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
+        const target = resolveCommandTarget(ctx, args);
+        if (target.atUserId && ctx.isPrivate) return '私聊消息不支持 atUserId';
+        const at = target.atUserId ? [{
+            userId: qualifyCommandUserId(ctx, target.atUserId),
+            isRobot: target.atUserId === String(ctx.endPoint.userId || '').replace(/^.+:/, ''),
+            name: ''
+        }] : [];
         try {
             const content = await executeExtensionLocally(ctx, msg, session, rc, cmdArgs, {
                 prefix: Config.tool.COMMAND_PREFIX,
                 timeoutMs: optionNumber(args && args.timeoutMs),
                 settleMs: optionNumber(args && args.settleMs),
-                maxMessages: optionNumber(args && args.maxMessages)
+                maxMessages: optionNumber(args && args.maxMessages),
+                at,
+                triggerUserId: target.triggerUserId,
+                atUserId: target.atUserId
             });
             return `扩展指令 ${requested} 返回：\n${content}`;
         } catch (e) {

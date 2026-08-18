@@ -7,6 +7,7 @@ import { Session } from "../../session/session";
 import { parseSpecialTokens } from "../../utils/string";
 import { generateId } from "../../utils/utils";
 import { isAllowedCore, splitEntry, whitelistEntries } from "../command_catalog";
+import { resolveCommandTarget } from "../command_target";
 
 import { MCPCallResult } from "./types";
 
@@ -277,6 +278,8 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     if (!isAllowedCore(authorizedCommand)) return `核心指令 core|${authorizedCommand} 不在可调用指令白名单内，无法调用`;
 
     const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
+    const commandTarget = resolveCommandTarget(ctx, args);
+    if (commandTarget.atUserId && ctx.isPrivate) return '私聊消息不支持 atUserId';
     const options = captureOptions(args, 50, 500);
     if (authorizedCommand === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
 
@@ -288,7 +291,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     } = {
         selfId: String(ctx.endPoint.userId || '').replace(/^.+:/, ''),
         messageType: ctx.isPrivate ? 'private' : 'group',
-        userId: String(ctx.player && ctx.player.userId || '').replace(/^.+:/, '')
+        userId: commandTarget.triggerUserId
     };
     if (!ctx.isPrivate) target.groupId = String(ctx.group && ctx.group.groupId || '').replace(/^.+:/, '');
 
@@ -297,7 +300,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
             action: 'call',
             target,
             actor: {
-                userId: target.userId || target.selfId,
+                userId: commandTarget.triggerUserId || target.selfId,
                 nickname: String(ctx.player && ctx.player.name || 'AI'),
                 role: 'member'
             },
@@ -306,7 +309,9 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
             captureMode: options.capture.mode,
             forward: options.capture.forward,
             timeoutMs: options.timeoutMs,
-            __commandPrefix: Config.tool.COMMAND_PREFIX
+            __commandPrefix: Config.tool.COMMAND_PREFIX,
+            triggerUserId: commandTarget.triggerUserId,
+            ...(commandTarget.atUserId ? { atUserId: commandTarget.atUserId } : {})
         };
         if (hasRawMessage) remoteArgs.raw_message = rawMessage;
         else {

@@ -236,7 +236,6 @@ max_tokens = 2048
 | 工具响应压缩触发字数 | 工具返回结果超过该字数时压缩后再存入上下文，设为 0 不压缩（默认 5000）；web_search 压缩时附带搜索目标 |
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
-| 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
 | MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 可调用指令白名单 | 每行一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
@@ -361,8 +360,8 @@ max_tokens = 2048
 | `.ai tool` | - | 列出所有工具及开关状态 |
 | `.ai tool help <函数名>` | `.ai tool help set_timer` | 查看指定工具的详细说明和参数需求 |
 | `.ai tool [on/off]` | - | 开启/关闭全部工具函数 |
-| `.ai tool [on/off] <函数名>` | `.ai tool on jrrp` | 开启/关闭指定工具函数 |
-| `.ai tool call <函数名> --参数=值` | `.ai tool call jrrp --name=错误` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
+| `.ai tool [on/off] <函数名>` | `.ai tool on run_ext_command` | 开启/关闭指定工具函数 |
+| `.ai tool call <函数名> --参数=值` | `.ai tool call run_ext_command --action=call --extension=fun --command=jrrp` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
 
 ### 忽略名单相关命令
 
@@ -415,7 +414,6 @@ max_tokens = 2048
 | 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
 | 语音 | `record`、`text_to_sound` |
 | 网页 | `web_search`、`web_read` |
-| TRPG | `draw_deck` |
 | 属性 | `attr_get`、`attr_set` |
 | 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
 | QQ 管理 | `ban`、`whole_ban`、`get_ban_list`、`rename`、`group_sign` |
@@ -457,7 +455,7 @@ max_tokens = 2048
 - 查看日志中的调用失败原因（未注册/未经许可/参数缺失/类型不符/会话类型不符/超时等）；
 - 用 `.ai tool` 查看开关状态，`.ai tool help <函数名>` 查看参数，`.ai tool call <函数名> --参数=值` 手动试用；
 - 工具在「禁止调用的函数」列表中时无法开启；新会话中「默认关闭的函数」需要 `.ai tool on <函数名>` 手动开启；
-- 扩展指令工具不需要先使用 `.r`；`run_ext_command` 每次调用现场构造 `CmdArgs`。核心指令工具通过 `run_core_command` 走 OB11 核心桥。
+- 扩展指令工具不需要先使用 `.r`；`run_ext_command` 每次调用现场构造 `CmdArgs`。`run_ext_command` / `run_core_command` 均支持 `triggerUserId` 指定触发对象、`atUserId` 指定群聊中的 @ 对象。核心指令工具通过 `run_core_command` 走 OB11 核心桥。
 
 **记忆/知识库检索不到**
 

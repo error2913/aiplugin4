@@ -9,12 +9,11 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "拉黑前需要骰主确认", true, "AI 建议拉黑时需骰主确认后才生效；关闭后 AI 可直接拉黑", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 10, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 5000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
-        seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：draw_deck；修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用，示例：get_msg；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "可调用指令白名单", SEALDICE_COMMAND_WHITELIST, "每行一个 AI 可调用的海豹指令；格式：扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔；核心指令的扩展名统一写 core（如 core|roll/r/rd）。默认已包含当前 SealDice 源码中的全部核心命令、内置扩展命令及其别名；修改后自动生效", "工具");
         seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 run_core_command 调用", "工具");
         seal.ext.registerStringConfig(ext, "指令前缀", ".", "注入到 SealDice 核心的指令前缀，通常为 .；如果核心改成其他前缀，请同步修改", "工具");
-        seal.ext.registerTemplateConfig(ext, "提供给AI的牌堆名称", [''], "每行一个牌堆名，示例：克苏鲁的呼唤；没有的话建议把 draw_deck 加入不允许调用", "工具");
         seal.ext.registerBoolConfig(ext, "是否启用MCP", false, "MCP 功能总开关；默认关闭，避免未安装 MCP 后端时启动或对话报错。开启后才会解析下方「MCP服务器配置」并连接/注册 MCP 工具", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [
             `{
@@ -93,7 +92,6 @@ export default class ToolConfig {
             CMD_WHITELIST: seal.ext.getTemplateConfig(ext, "可调用指令白名单"),
             ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
             COMMAND_PREFIX: seal.ext.getStringConfig(ext, "指令前缀"),
-            DECKS: seal.ext.getTemplateConfig(ext, "提供给AI的牌堆名称"),
             MCP_ENABLED: seal.ext.getBoolConfig(ext, "是否启用MCP"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色"),
             MUSIC: seal.ext.getTemplateConfig(ext, "音乐服务配置")
