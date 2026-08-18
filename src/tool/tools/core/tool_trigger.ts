@@ -16,9 +16,9 @@ export function registerSetTrigger() {
                         type: 'string',
                         description: '触发关键词，可使用正则表达式，为空时任意消息都可触发'
                     },
-                    name: {
+                    user_id: {
                         type: 'string',
-                        description: '指定触发必须满足的用户名称或纯数字QQ号，为空时任意用户均可触发'
+                        description: '指定触发必须满足的用户ID，为空时任意用户均可触发'
                     },
                     reason: {
                         type: 'string',
@@ -30,7 +30,7 @@ export function registerSetTrigger() {
         }
     });
     tool.solve = async (ctx, _, session, args) => {
-        const { keyword = '', name = '', reason } = args;
+        const { keyword = '', user_id = '', reason } = args;
 
         const condition = {
             keyword: '',
@@ -47,9 +47,9 @@ export function registerSetTrigger() {
             }
         }
 
-        if (name) {
-            const ui = await session.context.findUser(ctx, name, true);
-            if (ui === null) return `未找到<${name}>`;
+        if (user_id) {
+            const ui = await session.context.getUserById(user_id);
+            if (ui === null) return `未找到用户ID<${user_id}>`;
             if (ui.userId === ctx.endPoint.userId) return `禁止将自己设置为触发条件`;
             condition.uid = ui.userId;
         }

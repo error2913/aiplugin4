@@ -23,6 +23,7 @@ export const CORE_TOOL_NAMES: string[] = [
     'search_tools', // 按需发现工具（返回完整参数说明）
     'call_tool',    // 统一执行入口（调用任意已开启工具）
     'use_skill',    // 技能调用
+    'call_ob11_api', // 唯一 OB11 API 调用入口
     'run_ext_command',  // 扩展指令调用
     'run_core_command' // 核心指令调用
 ];

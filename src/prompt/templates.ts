@@ -16,8 +16,8 @@ const TEMPLATES: { [key: string]: string } = {
 - 会话ID:{{{sessionId}}}
 - 当前时间:**CURRENT_TIME**
 
-- [at:xxx]表示@某个群成员
-- [poke:xxx]表示戳一戳某个群成员
+- [at:用户ID]表示@某个群成员，用户ID使用QQ号或规范化用户ID
+- [poke:用户ID]表示戳一戳某个群成员，用户ID使用QQ号或规范化用户ID
 - [from:xxx]表示消息来源，xxx为发送者名称，用户消息带此前缀（含QQ号）；同一发送者连续发言时仅首条带
 - [msg_id:xxx]表示消息ID，xxx为对应消息的ID，引用某条消息时使用[quote:xxx]
 - [time:xxxx-xx-xx xx:xx:xx]表示消息发送时间
@@ -30,17 +30,15 @@ const TEMPLATES: { [key: string]: string } = {
 {{#if RECEIVE_IMAGE}}
 - [img:xxxxxx:yyy]表示图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用[img:xxxxxx]的格式
 {{/if}}
-- 可使用[avatar:xxxxxx]发送用户头像，其中xxxxxx为用户名称或用户ID
-- 可使用[group_avatar:xxxxxx]发送群聊头像，其中xxxxxx为群聊名称或群聊ID
+- 可使用[avatar:用户ID]发送用户头像
+- 可使用[group_avatar:群ID]发送群聊头像
 - 可使用[img:图片ID]发送本地图片，可用名称先通过 list_resources(type=image) 查询
 
-## 音频相关
-- 可使用[audio:音频ID]发送本地音频，可用名称先通过 list_resources(type=audio) 查询
-
-## 文件与视频相关
-- 可使用send_file工具发送本地文件，可用名称先通过 list_resources(type=file) 查询；也可直接传 path
-- 可使用send_video工具发送本地视频，可用名称先通过 list_resources(type=video) 查询；也可直接传 path
-- send_image、send_file、send_video、record 的 path 支持本地绝对路径、file:// URI；MCP 沙箱文件使用 mcp://服务器名/沙箱相对路径，或 source=mcp + server + path
+## OB11 消息与资源
+- 所有协议消息只能使用 call_ob11_api：选择 send_private_msg/send_group_msg，并在 message 中传文本或消息段数组。
+- 图片、语音、视频、文件使用 image/record/video/file 消息段；本地资源先用 list_resources 查询，再将 file 写成 resource:资源ID。
+- 文件区上传使用 upload_group_file/upload_private_file，不要把上传动作伪装成普通 file 消息段。
+- 资源路径支持本地绝对路径、file:// URI、HTTP(S) URL、base64://；MCP 沙箱文件使用 mcp://服务器名/沙箱相对路径。
 
 **DYNAMIC_SECTIONS**
 
@@ -106,8 +104,8 @@ const TEMPLATES: { [key: string]: string } = {
     - 当前私聊:<{{{用户名称}}}>({{{用户号码}}})
 {{else}}
     - 当前群聊:<{{{群聊名称}}}>({{{群聊号码}}})
-    - [at:xxx]表示@某个群成员
-    - [poke:xxx]表示戳一戳某个群成员
+    - [at:用户ID]表示@某个群成员，用户ID使用QQ号或规范化用户ID
+    - [poke:用户ID]表示戳一戳某个群成员，用户ID使用QQ号或规范化用户ID
     - [quote:xxx]表示引用消息，xxx为对应的消息ID
     - [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
 {{/if}}
@@ -134,9 +132,9 @@ const TEMPLATES: { [key: string]: string } = {
                     description: "记忆归属，个人或群聊，与可见性无关。",
                     enum: ["private", "group"]
                 },
-                "name": {
+                "target_id": {
                     type: 'string',
-                    description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
+                    description: '目标用户ID或群ID，实际使用时与记忆类型对应'
                 },
                 "text": {
                     type: 'string',
@@ -144,21 +142,21 @@ const TEMPLATES: { [key: string]: string } = {
                 },
                 "keywords": {
                     type: 'array',
-                    description: '相关用户名称列表',
+                    description: '相关关键词列表',
                     items: {
                         type: 'string'
                     }
                 },
-                "userList": {
+                "related_user_ids": {
                     type: 'array',
-                    description: '相关用户名称列表',
+                    description: '相关用户ID列表',
                     items: {
                         type: 'string'
                     }
                 },
-                "groupList": {
+                "related_group_ids": {
                     type: 'array',
-                    description: '相关群聊名称列表',
+                    description: '相关群ID列表',
                     items: {
                         type: 'string'
                     }
@@ -169,7 +167,7 @@ const TEMPLATES: { [key: string]: string } = {
                     enum: ["public", "private"]
                 }
             },
-            "required": ['memory_type', 'name', 'text']
+            "required": ['memory_type', 'target_id', 'text']
         }
     }
 }`

@@ -11,6 +11,7 @@
     "build": "cross-env NODE_ENV=production node tools/build.js",
     "build-dev": "cross-env NODE_ENV=dev node tools/build.js",
     "smoke": "node scripts/smoke.js",
+    "test:ob11": "node scripts/test-ob11-runtime.cjs",
     "lint": "eslint \"src/**/*.ts\"",
     "package:check": "npm run build && node scripts/prepare-sealpack.js && sealpack validate sealpack && sealpack size sealpack",
     "pack:sealpack": "node scripts/prepare-sealpack.js && sealpack pack sealpack --out dist/aiplugin4.sealpack",

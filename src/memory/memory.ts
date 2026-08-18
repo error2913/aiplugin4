@@ -1,4 +1,4 @@
-// 记忆服务：MemoryItem 存取/检索/权重/短期记忆（含旧格式迁移）
+// 记忆服务：MemoryItem 存取/检索/权重/短期记忆
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import { VECTOR_SIMILARITY } from "../config/static_config";
@@ -543,9 +543,7 @@ export default class MemoryService {
 // 目前数量级应该没什么优化的需求
 
 /**
- * 兼容旧存储格式（src/AI/memory.ts 中的 MemoryManager）的过渡类。
- * 负责把历史 AI_* 存档里的旧 Memory 字段迁移成新 MemoryItem，
- * 迁移完成后可删除。
+ * 旧存档读取器：仅按当前 MemoryItem 字段复活数据，不再解析旧的名称/列表字段。
  */
 export class MemoryManager extends MemoryService {
     static validKeysMap: { [key in keyof MemoryManager]?: TypeDescriptor<MemoryManager[key]> } = {
@@ -585,8 +583,8 @@ export class MemoryManager extends MemoryService {
                 vector: m.vector || [],
                 tags: m.tags || m.keywords || [],
                 relatedMemories: m.relatedMemories || [],
-                users: m.users || (m.userList || []).map((u: any) => u.id),
-                groups: m.groups || (m.groupList || []).map((g: any) => g.id)
+                users: Array.isArray(m.users) ? m.users : [],
+                groups: Array.isArray(m.groups) ? m.groups : []
             });
             this.memoryMap[id] = item;
         }

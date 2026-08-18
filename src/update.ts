@@ -15,7 +15,7 @@ export const updateInfo: { [version: string]: string } = {
 - 修复负数消息 ID、未知表情、全体 at、私聊消息和嵌套消息节点进入上下文时的标签与发送者信息
 
 ## 工具与指令
-- run_ext_command 与 run_core_command 支持 triggerUserId 指定触发对象、atUserId 指定群聊 @ 对象；扩展本地临时构造消息上下文，核心桥注入 OB11 的 user_id/sender.user_id 与 at 段。
+- run_ext_command 与 run_core_command 支持 trigger 指定触发对象、at 指定群聊 @ 对象；扩展本地临时构造消息上下文，核心桥注入 OB11 的 user_id/sender.user_id 与 at 段。
 - 移除已由 run_ext_command 覆盖的 draw_deck 独立工具入口，牌堆、模组、今日人品等扩展能力统一通过扩展指令调用。
 ## 工具与图片
 - 增加 MCP 总开关与图生图能力：text_to_image 支持图片 ID、头像、URL、data URL 和 base64，适配 aiplugin4-dependencies 新接口
@@ -72,7 +72,7 @@ export const updateInfo: { [version: string]: string } = {
 - 修复「允许连续调用函数次数」在重构后未真正累计生效的问题：同一触发流程内的多轮工具调用现在按配置累计（设为 0 时不再限制连续调用次数），每次触发开始时自动清零
 - 修复 kb_search 检索条数无上限的问题：单次返回条数限制在 1~50 之间，防止模型请求超大 topK 造成上下文与 API 浪费
 - 修复私有记忆权限遗漏：del_memory / clear_memory 现在与 search_memory 一致，其他会话创建的私有记忆不可删除或清空（跨会话删除时自动保留并提示）
-- 修复摘要智能体总结出的记忆归属：按模型返回的 memory_type / name 定位目标用户或群聊会话后写入（与 add_memory 工具一致），不再全部落进当前会话；找不到目标时跳过该条并记录日志
+- 修复摘要智能体总结出的记忆归属：按模型返回的 memory_type / target_id 定位目标用户或群聊会话后写入（与 add_memory 工具一致），不再全部落进当前会话；找不到目标时跳过该条并记录日志
 - 修复 search_memory 私有记忆展示标头：个人记忆不再误标为群聊（显示私聊会话与用户名）
 - 修复摘要记忆对模型输出的容错：memories 非数组/条目缺 text 时跳过落库，缺失或未知 memory_type 兜底归属当前会话并计数，不再抛错导致「摘要已存、记忆未落库」的半成功状态
 - 修复知识库分块 ID 跨条目碰撞：相同内容的不同条目通过条目序号区分，ID 保持稳定且全局唯一

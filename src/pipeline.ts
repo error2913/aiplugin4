@@ -4,6 +4,7 @@ import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
+import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
@@ -473,8 +474,11 @@ export class MessagePipeline {
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;
 
-        const deliver = session.tool.listen.push || session.tool.listen.resolve;
-        deliver?.(messageText);
+        const captured = dispatchLocalCommandOutput(sid, messageText);
+        if (!captured) {
+            const deliver = session.tool.listen.push || session.tool.listen.resolve;
+            deliver?.(messageText);
+        }
 
         const { RECEIVE_MSG_BY_BOT: allmsg } = Config.received;
         if (!allmsg) return;

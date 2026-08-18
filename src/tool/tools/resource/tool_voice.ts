@@ -1,158 +1,48 @@
-// 语音工具：本地语音/文字转语音（tts）
+// 音频资源工具：生成音频资源，不直接发送消息。
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
-import { netExists, sendGroupAISound } from "../../../utils/ob11";
 import { resolveResourceReference } from "../../../utils/resource";
 import Tool from "../../tool";
 
-const characterMap: { [key: string]: string } = {
-    "小新": "lucy-voice-laibixiaoxin",
-    "猴哥": "lucy-voice-houge",
-    "四郎": "lucy-voice-silang",
-    "东北老妹儿": "lucy-voice-guangdong-f1",
-    "广西大表哥": "lucy-voice-guangxi-m1",
-    "妲己": "lucy-voice-daji",
-    "霸道总裁": "lucy-voice-lizeyan",
-    "酥心御姐": "lucy-voice-suxinjiejie",
-    "说书先生": "lucy-voice-m8",
-    "憨憨小弟": "lucy-voice-male1",
-    "憨厚老哥": "lucy-voice-male3",
-    "吕布": "lucy-voice-lvbu",
-    "元气少女": "lucy-voice-xueling",
-    "文艺少女": "lucy-voice-f37",
-    "磁性大叔": "lucy-voice-male2",
-    "邻家小妹": "lucy-voice-female1",
-    "低沉男声": "lucy-voice-m14",
-    "傲娇少女": "lucy-voice-f38",
-    "爹系男友": "lucy-voice-m101",
-    "暖心姐姐": "lucy-voice-female2",
-    "温柔妹妹": "lucy-voice-f36",
-    "书香少女": "lucy-voice-f34"
-};
-
-export function registerRecord() {
-    // 本地语音统一走“资源”配置（支持 语音名=路径 或纯路径）
-    const toolRecord = new Tool({
+export function registerAudioTools() {
+    const tool = new Tool({
         type: "function",
         function: {
-            name: "record",
-            description: `发送本地语音。可传 name（先通过 list_resources(type=audio) 查询）或 path（本地绝对路径、相对 SealDice 目录的路径、file:// URI、mcp://服务器名/沙箱相对路径）`,
+            name: "generate_audio",
+            description: "生成或解析语音资源，返回可交给 call_ob11_api 的 record 消息段；不会自动发送。自定义音色需要 tts 生成音频依赖。",
             parameters: {
                 type: "object",
                 properties: {
-                    name: {
-                        type: "string",
-                        description: "语音名称"
-                    },
-                    path: {
-                        type: "string",
-                        description: "本地语音路径、file:// URI，或 mcp://服务器名/沙箱相对路径"
-                    },
-                    source: {
-                        type: "string",
-                        enum: ["local", "mcp"],
-                        description: "资源来源；使用 MCP 文件服务器时填 mcp"
-                    },
-                    server: {
-                        type: "string",
-                        description: "MCP 服务器名称，source=mcp 时使用，默认 mcp-files-exec"
-                    }
+                    text: { type: "string", description: "要合成的文本" },
+                    path: { type: "string", description: "已有本地语音路径、file:// URI 或 mcp:// 资源" },
+                    source: { type: "string", enum: ["local", "mcp"], description: "资源来源" },
+                    server: { type: "string", description: "MCP 文件服务器名称" }
                 },
                 required: []
             }
         }
     });
-    toolRecord.sensitive = true; // 发送语音属敏感操作
-    toolRecord.solve = async (ctx, msg, _, args) => {
-        const { name, path, source, server } = args;
-
-        if (name && path) return 'name 与 path 不能同时提供，请二选一：name 或 path';
-        if (!name && !path) return '必须提供 name（已登记资源）或 path（直接传路径）中的一项';
-
-        // 每次调用实时读取配置，保证修改配置后无需重载即可生效
-        const recordPathMap: { [key: string]: string } = {};
-        for (const audio of Config.resource.LOCAL_AUDIOS || []) {
-            recordPathMap[audio.audioId] = audio.path;
-        }
+    tool.solve = async (_ctx, _msg, _session, args) => {
+        const text = args && typeof args.text === "string" ? args.text : "";
+        const path = args && typeof args.path === "string" ? args.path : "";
+        if (!text && !path) return "必须提供 text 或 path";
+        if (text && path) return "text 与 path 不能同时提供";
 
         try {
             if (path) {
-                const resource = await resolveResourceReference(path, source, server);
-                seal.replyToSender(ctx, msg, `[语音:${resource.path}]`);
-                return '发送成功';
+                const resource = await resolveResourceReference(path, args.source, args.server);
+                return JSON.stringify({ kind: "resource", type: "record", name: resource.name, segment: { type: "record", data: { file: resource.path } } });
             }
-            if (Object.prototype.hasOwnProperty.call(recordPathMap, name)) {
-                const resource = await resolveResourceReference(recordPathMap[name]);
-                seal.replyToSender(ctx, msg, `[语音:${resource.path}]`);
-                return '发送成功';
-            } else {
-                const nameList = Object.keys(recordPathMap);
-                logger.error(`本地语音${name}不存在`);
-                return `本地语音${name}不存在${nameList.length !== 0 ? `，可发送的语音名有:${nameList.join('、')}` : ''}`;
+            if (!globalThis.tts) {
+                return JSON.stringify({ ok: false, code: "TTS_DEPENDENCY_REQUIRED", message: "文字转语音需要安装 tts 生成音频依赖" });
             }
-        } catch (e) {
-            logger.error(`发送语音失败：${e instanceof Error ? e.message : String(e)}`);
-            return `发送语音失败：${e instanceof Error ? e.message : String(e)}`;
+            const result = await globalThis.tts.generate({ text, model: String(Config.tool.TTS_CHARACTER || "") });
+            if (!result.success) return JSON.stringify({ ok: false, code: "TTS_ERROR", message: result.error || "生成音频失败" });
+            const file = /^https?:\/\//i.test(result.data) ? result.data : seal.base64ToImage(result.data);
+            return JSON.stringify({ kind: "resource", type: "record", segment: { type: "record", data: { file } } });
+        } catch (error) {
+            logger.error(`生成音频失败：${error instanceof Error ? error.message : String(error)}`);
+            return JSON.stringify({ ok: false, code: "AUDIO_GENERATION_ERROR", message: error instanceof Error ? error.message : String(error) });
         }
-    }
-
-    const toolTTS = new Tool({
-        type: 'function',
-        function: {
-            name: 'text_to_sound',
-            description: '发送AI声聊合成语音',
-            parameters: {
-                type: 'object',
-                properties: {
-                    text: {
-                        type: 'string',
-                        description: '要合成的文本'
-                    }
-                },
-                required: ['text']
-            }
-        }
-    });
-    toolTTS.sensitive = true; // AI 声聊合成语音属敏感操作
-    toolTTS.solve = async (ctx, msg, _, args) => {
-        const { text } = args;
-
-        const { TTS_CHARACTER: character } = Config.tool;
-        if (character === '自定义') {
-            const ttsExt = seal.ext.find('tts');
-            if (!ttsExt) {
-                logger.error(`未找到生成音频依赖（tts）`);
-                return `未找到生成音频依赖（tts），请提示用户安装生成音频依赖`;
-            }
-            try {
-                if (!globalThis.tts) return `未找到生成音频依赖（tts），请提示用户安装生成音频依赖`;
-                const result = await globalThis.tts.generate({ text });
-                if (!result.success) throw new Error(result.error || '生成音频失败');
-                let file = result.data;
-                if (!/^https?:\/\//i.test(file)) {
-                    try {
-                        file = seal.base64ToImage(file);
-                    } catch (e) {
-                        throw new Error(`已获取音频数据，但保存为本地文件失败:${e}`);
-                    }
-                }
-                seal.replyToSender(ctx, msg, `[CQ:record,file=${file}]`);
-            } catch (e) {
-                logger.error(e);
-                return `发送语音失败`;
-            }
-
-            return `发送语音成功`;
-        }
-
-        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
-
-        const epId = ctx.endPoint.userId;
-        const gid = ctx.group!.groupId;
-
-        const characterId = characterMap[character];
-        await sendGroupAISound(epId, characterId, gid.replace(/^.+:/, ''), text);
-
-        return `发送语音成功`;
-    }
+    };
 }

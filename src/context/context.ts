@@ -1,4 +1,4 @@
-// 会话上下文：消息增删/忽略名单/压缩与总结触发/用户群查找/图片查找
+// 会话上下文：消息增删/忽略名单/压缩与总结触发/按 ID 获取目标/图片查找
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
@@ -8,8 +8,9 @@ import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall } from "../tool/types";
-import { getFriendList, getGroupList, getGroupMemberInfo, getGroupMemberList, getStrangerInfo, netExists } from "../utils/ob11";
-import { levenshteinDistance, stripInternalTags } from "../utils/string";
+import { callOb11Api } from "../utils/ob11";
+import { stripInternalTags } from "../utils/string";
+import { normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor, withTimeout } from "../utils/utils";
 
 import Message from "./message";
@@ -242,55 +243,10 @@ export class Context {
         }
     }
 
-    async findUserId(ctx: seal.MsgContext, name: string | number, findInFriendList: boolean = false): Promise<string> {
-        const session = this.session;
-        const returnUserId = (userId: string) => session.checkIgnoredUserId(userId) ? '' : userId;
-
-        name = String(name);
-        if (!name) return '';
-
-        if (name.length > 4 && !isNaN(parseInt(name))) return returnUserId(`QQ:${name}`);
-
-        const match = name.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
-        if (match) name = match[1] || match[2];
-
-        if (name === ctx.player!.name) return returnUserId(ctx.player!.userId);
-        if (name === seal.formatTmpl(ctx, "核心:骰子名字")) return returnUserId(ctx.endPoint.userId);
-
-        // 在上下文和记忆中查找用户
-        const users = Array.from(new Set([...this.users, ...MemoryService.getItemsFromRelatedMemories(this.session, 'users')]));
-        for (const userId of users) {
-            const u = User.get(userId);
-            if (name === u.userName) return returnUserId(u.userId);
-            if (name.length > 4 && levenshteinDistance(name, u.userName) <= 2) return returnUserId(u.userId);
-        }
-
-        // 在群成员列表、好友列表中查找用户
-        if (netExists()) {
-            const epId = ctx.endPoint.userId;
-
-            if (!ctx.isPrivate) {
-                const gid = ctx.group!.groupId;
-                const groupMemberList = await getGroupMemberList(epId, gid.replace(/^.+:/, ''));
-                if (groupMemberList && Array.isArray(groupMemberList)) {
-                    const user_id = groupMemberList.find(item => item.card === name || item.nickname === name)?.user_id;
-                    if (user_id) return returnUserId(`QQ:${user_id}`);
-                }
-            }
-
-            if (findInFriendList) {
-                const friendList = await getFriendList(epId);
-                if (friendList && Array.isArray(friendList)) {
-                    const user_id = friendList.find(item => item.nickname === name || item.remark === name)?.user_id;
-                    if (user_id) return returnUserId(`QQ:${user_id}`);
-                }
-            }
-        }
-
-        if (name.length > 4 && levenshteinDistance(name, ctx.player!.name) <= 2) return returnUserId(ctx.player!.userId);
-
-        Logger.warning(`未找到用户<${name}>`);
-        return '';
+    getUserById(userId: string | number): User | null {
+        const normalizedId = normalizeUserId(userId);
+        if (!normalizedId || this.session.checkIgnoredUserId(normalizedId)) return null;
+        return User.get(normalizedId);
     }
     get userInfoList(): { isPrivate: true, id: string, name: string }[] {
         const userMap: { [key: string]: { isPrivate: true, id: string, name: string } } = {};
@@ -315,7 +271,7 @@ export class Context {
         let name = '';
         switch (mod) {
             case 'nickname': {
-                const strangerInfo = await getStrangerInfo(epId, uid.replace(/^.+:/, ''));
+                const strangerInfo = await callOb11Api(epId, "get_stranger_info", { user_id: uid.replace(/^.+:/, ""), no_cache: true });
                 if (!strangerInfo || !strangerInfo.nickname) {
                     Logger.warning(`未找到用户<${uid}>的昵称`);
                     break;
@@ -325,7 +281,7 @@ export class Context {
             }
             case 'card': {
                 if (!gid) break;
-                const memberInfo = await getGroupMemberInfo(epId, gid.replace(/^.+:/, ''), uid.replace(/^.+:/, ''));
+                const memberInfo = await callOb11Api(epId, "get_group_member_info", { group_id: gid.replace(/^.+:/, ""), user_id: uid.replace(/^.+:/, ""), no_cache: true });
                 if (!memberInfo) {
                     Logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
                     await this.setName(epId, gid, uid, 'nickname');
@@ -347,52 +303,21 @@ export class Context {
         u.userName = name;
         User.save(u);
     }
-    async findGroupId(ctx: seal.MsgContext, groupName: string | number): Promise<string> {
-        groupName = String(groupName);
-        if (!groupName) return '';
-
-        if (groupName.length > 5 && !isNaN(parseInt(groupName))) return `QQ-Group:${groupName}`;
-
-        const match = groupName.match(/^<([^>]+?)>(?:[\(（]\d+[\)）])?$|(.+?)[\(（]\d+[\)）]$/);
-        if (match) groupName = match[1] || match[2];
-
-        if (!ctx.isPrivate && ctx.group && groupName === ctx.group.groupName) return ctx.group.groupId;
-
-        // 在记忆中查找群聊
-        for (const groupId of MemoryService.getItemsFromRelatedMemories(this.session, 'groups')) {
-            const g = Group.get(groupId);
-            if (g.groupName === groupName) return groupId;
-            if (g.groupName.length > 4 && levenshteinDistance(groupName, g.groupName) <= 2) return groupId;
-        }
-
-        // 在群聊列表中查找用户
-        if (netExists()) {
-            const epId = ctx.endPoint.userId;
-            const groupList = await getGroupList(epId);
-            if (groupList && Array.isArray(groupList)) {
-                const group_id = groupList.find(item => item.group_name === groupName)?.group_id;
-                if (group_id) return `QQ-Group:${group_id}`;
-            }
-        }
-
-        if (!ctx.isPrivate && ctx.group && groupName.length > 4 && levenshteinDistance(groupName, ctx.group.groupName) <= 2) return ctx.group.groupId;
-
-        Logger.warning(`未找到群聊<${groupName}>`);
-        return '';
+    getGroupById(groupId: string | number): Group | null {
+        const normalizedId = normalizeGroupId(groupId);
+        if (!normalizedId) return null;
+        return Group.get(normalizedId);
     }
-    async findUser(ctx: seal.MsgContext, name: string | number, findInFriendList: boolean = false): Promise<User | null> {
-        const userId = await this.findUserId(ctx, name, findInFriendList);
-        if (!userId) return null;
-        return User.get(userId);
-    }
-    async findImage(ctx: seal.MsgContext, id: string): Promise<Image | null> {
-        if (/^user_avatar[:?]/.test(id)) {
-            const ui = await this.findUser(ctx, id.replace(/^user_avatar[:?]/, ''));
-            if (ui) return Image.getUserAvatar(ui.userId);
+    async findImage(_ctx: seal.MsgContext, id: string): Promise<Image | null> {
+        if (/^user_avatar[:：?]/.test(id)) {
+            const userId = normalizeUserId(id.replace(/^user_avatar[:：?]/, ''));
+            if (userId) return Image.getUserAvatar(userId);
+            return null;
         }
-        if (/^group_avatar[:?]/.test(id)) {
-            const gi = await this.findGroup(ctx, id.replace(/^group_avatar[:?]/, ''));
-            if (gi) return Image.getGroupAvatar(gi.groupId);
+        if (/^group_avatar[:：?]/.test(id)) {
+            const groupId = normalizeGroupId(id.replace(/^group_avatar[:：?]/, ''));
+            if (groupId) return Image.getGroupAvatar(groupId);
+            return null;
         }
         const img = Image.get(id);
         if (img) return img;
@@ -424,9 +349,4 @@ export class Context {
         }
     }
 
-    async findGroup(ctx: seal.MsgContext, groupName: string | number): Promise<Group | null> {
-        const groupId = await this.findGroupId(ctx, groupName);
-        if (!groupId) return null;
-        return Group.get(groupId);
-    }
 }

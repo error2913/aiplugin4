@@ -7,7 +7,7 @@ import { Context } from "../context/context";
 import { logger } from "../logger";
 import Image from "../resource/image";
 
-import { getCtxAndMsg } from "./seal";
+import { getRawId, normalizeGroupId, normalizeUserId } from "./target_id";
 import { getMilkyReplyQuoteId, resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
 
 export function truncateText(text: string, maxLength: number): string {
@@ -351,40 +351,17 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 break;
             }
             case 'at': {
-                const epId = ctx.endPoint.userId;
-                const gid = ctx.group ? ctx.group.groupId : '';
-                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
-                const uid = `${prefix}:${seg.data.qq || ''}`;
                 if (seg.data.qq === 'all') {
-                    content += '[at:全体成员]';
+                    content += '[at:all]';
                     break;
                 }
-                // OB11 段通常直接带 name；优先使用它，避免为每个 at 额外请求群成员信息。
-                let name = seg.data.name || '未知用户';
-                try {
-                    if (!seg.data.name) {
-                        const targetCtx = getCtxAndMsg(epId, uid, gid).ctx;
-                        name = targetCtx.player?.name || name;
-                    }
-                } catch (_e) {
-                    // 目标用户上下文创建失败（如目标不在当前会话）时保留 at 标签，不中断整条消息转换
-                }
-                content += `[at:${name}]`;
+                const userId = normalizeUserId(seg.data.qq || '');
+                content += `[at:${userId ? getRawId(userId) : String(seg.data.qq || '')}]`;
                 break;
             }
             case 'poke': {
-                const epId = ctx.endPoint.userId;
-                const gid = ctx.group ? ctx.group.groupId : '';
-                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
-                const uid = `${prefix}:${seg.data.qq || ''}`;
-                let name = '未知用户';
-                try {
-                    const targetCtx = getCtxAndMsg(epId, uid, gid).ctx;
-                    name = targetCtx.player?.name || name;
-                } catch (_e) {
-                    // 目标用户上下文创建失败时保留 poke 标签，不中断整条消息转换
-                }
-                content += `[poke:${name}]`;
+                const userId = normalizeUserId(seg.data.qq || '');
+                content += `[poke:${userId ? getRawId(userId) : String(seg.data.qq || '')}]`;
                 break;
             }
             case 'reply': {
@@ -427,24 +404,19 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 break;
             }
             case 'at': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    text += `[CQ:at,qq=${ui.userId.replace(/^.+:/, "")}]`;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                    text += ` @${name} `;
+                if (seg.content.trim().toLowerCase() === 'all') {
+                    text += '[CQ:at,qq=all]';
+                    break;
                 }
+                const userId = normalizeUserId(seg.content);
+                if (userId) text += `[CQ:at,qq=${getRawId(userId)}]`;
+                else logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'poke': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    text += `[CQ:poke,qq=${ui.userId.replace(/^.+:/, "")}]`;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                }
+                const userId = normalizeUserId(seg.content);
+                if (userId) text += `[CQ:poke,qq=${getRawId(userId)}]`;
+                else logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'quote': {
@@ -470,27 +442,21 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 break;
             }
             case 'avatar': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    const image = Image.getUserAvatar(ui.userId);
+                const userId = normalizeUserId(seg.content);
+                if (userId) {
+                    const image = Image.getUserAvatar(userId);
                     images.push(image);
                     text += image.CQCode;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                }
+                } else logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'group_avatar': {
-                const name = seg.content;
-                const gi = await session.context.findGroup(ctx, name);
-                if (gi) {
-                    const image = Image.getGroupAvatar(gi.groupId);
+                const groupId = normalizeGroupId(seg.content);
+                if (groupId) {
+                    const image = Image.getGroupAvatar(groupId);
                     images.push(image);
                     text += image.CQCode;
-                } else {
-                    logger.warning(`无法找到群聊：${name}`);
-                }
+                } else logger.warning(`群ID格式无效：${seg.content}`);
                 break;
             }
             case 'audio': {
@@ -534,9 +500,11 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
         const segment = segments[i];
         const match = segment.match(/^[[［]from[:：]?\s?(.+?)[\]］]$/);
         if (match) {
-            // 如果臆想对象是自己，那么将下一条消息添加到s中
-            const ui = await session.context.findUser(ctx, match[1]);
-            if (ui && ui.userId === ctx.endPoint.userId && i < segments.length - 1) s += segments[i + 1];
+            // 如果臆想对象是自己，那么将下一条消息添加到s中；只读取 [from] 中的显式 QQ 号。
+            const numberMatch = match[1].match(/(?:^|\()([0-9]+)(?:\))?$/);
+            const fromUserId = numberMatch ? normalizeUserId(numberMatch[1]) : null;
+            const currentUserId = normalizeUserId(ctx.endPoint.userId);
+            if (fromUserId && currentUserId && fromUserId === currentUserId && i < segments.length - 1) s += segments[i + 1];
         } else if (i === 0) {
             s = segment;
         }

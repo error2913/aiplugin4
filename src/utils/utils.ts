@@ -2,8 +2,9 @@
 import Config from "../config/config";
 import { ALIAS_MAP } from "../config/static_config";
 import { logger } from "../logger";
+import { callOb11ApiForContext } from "../transport/ob11/dispatcher";
 
-import { netExists, sendGroupMsg, sendPrivateMsg } from "./ob11";
+import { netExists } from "./ob11";
 import { transformTextToArray } from "./string";
 
 export function transformMsgId(msgId: string | number | null): string {
@@ -107,18 +108,17 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
 
         if (messageArray.length === 0) return '';
 
-        const epId = ctx.endPoint.userId;
         const uid = ctx.player!.userId;
         if (msg.messageType === 'private') {
-            const result = await sendPrivateMsg(epId, uid.replace(/^.+:/, ''), messageArray);
-            if (result?.message_id) {
+            const result = await callOb11ApiForContext(ctx, msg, "send_private_msg", { user_id: uid.replace(/^.+:/, ""), message: messageArray });
+            if (result.ok && result.message_id) {
                 logger.info(`(${result.message_id})发送给${uid}:${s}`);
                 return transformMsgId(result.message_id);
             }
         } else if (msg.messageType === 'group') {
             const gid = ctx.group ? ctx.group.groupId : '';
-            const result = await sendGroupMsg(epId, gid.replace(/^.+:/, ''), messageArray);
-            if (result?.message_id) {
+            const result = await callOb11ApiForContext(ctx, msg, "send_group_msg", { group_id: gid.replace(/^.+:/, ""), message: messageArray });
+            if (result.ok && result.message_id) {
                 logger.info(`(${result.message_id})发送给${gid}:${s}`);
                 return transformMsgId(result.message_id);
             }

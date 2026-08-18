@@ -5,6 +5,7 @@ import Logger from "../../logger";
 import Image from "../../resource/image";
 import { Session } from "../../session/session";
 import { parseSpecialTokens } from "../../utils/string";
+import { getRawId, normalizeGroupId, normalizeUserId } from "../../utils/target_id";
 import { generateId } from "../../utils/utils";
 import { isAllowedCore, splitEntry, whitelistEntries } from "../command_catalog";
 import { resolveCommandTarget } from "../command_target";
@@ -120,13 +121,11 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
                 break;
             }
             case 'at': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    text += ` @${ui.userName} `;
-                } else {
-                    Logger.warning(`无法找到用户：${name}`);
-                    text += ` @${name} `;
+                const userId = normalizeUserId(seg.content);
+                if (userId) text += ` @${getRawId(userId)} `;
+                else {
+                    Logger.warning(`用户ID格式无效：${seg.content}`);
+                    text += ` @${seg.content} `;
                 }
                 break;
             }
@@ -144,27 +143,21 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
                 break;
             }
             case 'avatar': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    const image = Image.getUserAvatar(ui.userId);
+                const userId = normalizeUserId(seg.content);
+                if (userId) {
+                    const image = Image.getUserAvatar(userId);
                     images.push(image);
                     text += image.url;
-                } else {
-                    Logger.warning(`无法找到用户：${name}`);
-                }
+                } else Logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'group_avatar': {
-                const name = seg.content;
-                const gi = await session.context.findGroup(ctx, name);
-                if (gi) {
-                    const image = Image.getGroupAvatar(gi.groupId);
+                const groupId = normalizeGroupId(seg.content);
+                if (groupId) {
+                    const image = Image.getGroupAvatar(groupId);
                     images.push(image);
                     text += image.url;
-                } else {
-                    Logger.warning(`无法找到群聊：${name}`);
-                }
+                } else Logger.warning(`群ID格式无效：${seg.content}`);
                 break;
             }
         }
@@ -279,7 +272,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
 
     const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
     const commandTarget = resolveCommandTarget(ctx, args);
-    if (commandTarget.atUserId && ctx.isPrivate) return '私聊消息不支持 atUserId';
+    if (commandTarget.at.length && ctx.isPrivate) return '私聊消息不支持 at';
     const options = captureOptions(args, 50, 500);
     if (authorizedCommand === 'ext' && !(args && args.captureMode)) options.capture.mode = 'lane';
 
@@ -291,7 +284,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     } = {
         selfId: String(ctx.endPoint.userId || '').replace(/^.+:/, ''),
         messageType: ctx.isPrivate ? 'private' : 'group',
-        userId: commandTarget.triggerUserId
+        userId: commandTarget.effectiveTrigger
     };
     if (!ctx.isPrivate) target.groupId = String(ctx.group && ctx.group.groupId || '').replace(/^.+:/, '');
 
@@ -300,7 +293,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
             action: 'call',
             target,
             actor: {
-                userId: commandTarget.triggerUserId || target.selfId,
+                userId: commandTarget.effectiveTrigger || target.selfId,
                 nickname: String(ctx.player && ctx.player.name || 'AI'),
                 role: 'member'
             },
@@ -310,8 +303,8 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
             forward: options.capture.forward,
             timeoutMs: options.timeoutMs,
             __commandPrefix: Config.tool.COMMAND_PREFIX,
-            triggerUserId: commandTarget.triggerUserId,
-            ...(commandTarget.atUserId ? { atUserId: commandTarget.atUserId } : {})
+            trigger: commandTarget.effectiveTrigger,
+            at: commandTarget.at
         };
         if (hasRawMessage) remoteArgs.raw_message = rawMessage;
         else {

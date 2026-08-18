@@ -1,14 +1,23 @@
 import { createCtx, createMsg } from "../utils/seal";
+import { getRawId, normalizeGroupId, normalizeUserId } from "../utils/target_id";
 
 export interface CommandTargetOptions {
-    triggerUserId?: string;
-    atUserId?: string;
+    /** 显式指定指令消息的触发用户；未填写时由调用方使用当前会话用户。 */
+    trigger?: string;
+    /** 指令消息中的 @ 用户列表。 */
+    at: string[];
 }
 
-/** 将 QQ:123 / 123 等用户标识统一为可注入 OB11/海豹消息的纯用户 ID。 */
+/** 将用户标识严格规范化为可注入 OB11/海豹消息的原始用户 ID。 */
 export function normalizeCommandUserId(value: any): string | undefined {
-    const text = String(value == null ? '' : value).trim().replace(/^.+:/, '');
-    return text || undefined;
+    const normalized = normalizeUserId(String(value == null ? '' : value));
+    return normalized ? getRawId(normalized) : undefined;
+}
+
+export function currentCommandUserId(ctx: seal.MsgContext): string {
+    return normalizeCommandUserId(ctx.player && ctx.player.userId)
+        || normalizeCommandUserId(ctx.endPoint.userId)
+        || '';
 }
 
 export function qualifyCommandUserId(ctx: seal.MsgContext, userId: string): string {
@@ -16,27 +25,34 @@ export function qualifyCommandUserId(ctx: seal.MsgContext, userId: string): stri
     return platform ? `${platform}:${userId}` : userId;
 }
 
-export function resolveCommandTarget(ctx: seal.MsgContext, args: { [key: string]: any } | undefined): CommandTargetOptions & { triggerUserId: string } {
-    const currentUserId = normalizeCommandUserId(ctx.player && ctx.player.userId) || normalizeCommandUserId(ctx.endPoint.userId) || '';
-    const triggerUserId = normalizeCommandUserId(args && args.triggerUserId) || currentUserId;
-    const atUserId = normalizeCommandUserId(args && args.atUserId);
-    return { triggerUserId, ...(atUserId ? { atUserId } : {}) };
+/** 解析工具参数；不对旧字段做兼容，at 必须是数组。 */
+export function resolveCommandTarget(ctx: seal.MsgContext, args: { [key: string]: any } | undefined): CommandTargetOptions & { effectiveTrigger: string } {
+    const trigger = normalizeCommandUserId(args && args.trigger);
+    const at = Array.isArray(args && args.at)
+        ? args.at.map(normalizeCommandUserId).filter((item): item is string => !!item)
+        : [];
+    return {
+        ...(trigger ? { trigger } : {}),
+        at,
+        effectiveTrigger: trigger || currentCommandUserId(ctx)
+    };
 }
 
 export function buildCommandContext(
     ctx: seal.MsgContext,
-    target: CommandTargetOptions & { triggerUserId: string }
+    target: { trigger: string; at: string[] }
 ): { ctx: seal.MsgContext; msg: seal.Message } {
-    const groupId = ctx.group && normalizeCommandUserId(ctx.group.groupId) || '';
-    const msg = createMsg(ctx.isPrivate ? 'private' : 'group', target.triggerUserId, groupId);
-    if (target.atUserId) {
-        const atText = `[CQ:at,qq=${target.atUserId}]`;
+    const normalizedGroupId = ctx.group && normalizeGroupId(ctx.group.groupId);
+    const groupId = normalizedGroupId ? getRawId(normalizedGroupId) : '';
+    const msg = createMsg(ctx.isPrivate ? 'private' : 'group', target.trigger, groupId);
+    if (target.at.length) {
+        const atText = target.at.map(userId => `[CQ:at,qq=${userId}]`).join(' ');
         msg.message = `${atText} `;
-        (msg as any).segment = [{
-            target: target.atUserId,
-            isRobot: target.atUserId === normalizeCommandUserId(ctx.endPoint.userId),
+        (msg as any).segment = target.at.map(userId => ({
+            target: userId,
+            isRobot: userId === normalizeCommandUserId(ctx.endPoint.userId),
             type: () => 1
-        }];
+        }));
     }
     if (msg.sender) msg.sender.nickname = ctx.player && ctx.player.name || '';
     const targetCtx = createCtx(ctx.endPoint.userId, msg);

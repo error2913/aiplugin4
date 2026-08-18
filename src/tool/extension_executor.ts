@@ -1,9 +1,8 @@
-// 本地扩展指令执行器：直接调用 SealDice 扩展 cmdMap 的 solve，无需依赖 OB11 核心桥。
-// 仅用于扩展指令；核心指令请走 run_core_command（经 ob11-core-bridge 中间件中转）。
 import Logger from "../logger";
 
 import { ResolvedCommand } from "./command_catalog";
-import { buildCommandContext } from "./command_target";
+import { buildCommandContext, currentCommandUserId } from "./command_target";
+import { registerLocalCommandCapture } from "./local_command_capture";
 import { ToolListen } from "./types";
 
 const RE_KEYWORD = /^--([^\s=]+)(?:=(\S+))?$/;
@@ -34,10 +33,8 @@ function splitKwargs(plainArgs: string[]): { args: string[]; kwargs: seal.Kwarg[
 }
 
 /**
- * 依据海豹核心 CmdArgs 语义构造一个全新的指令参数对象。
- * 不污染会话最近一次真实指令的 cmdArgs，也不要求会话里先收到过指令。
- * 调用扩展 solve 时 goja 会把该对象按 jsbind 标签转换回 Go *CmdArgs，
- * 因此 solve 内部拿到的是带真实方法的对象，这里的方法实现仅作为类型兜底。
+ * 依据海豹 CmdArgs 语义构造一个全新的指令参数对象。
+ * 不污染会话最近一次真实指令的参数，也不要求会话里先收到过指令。
  */
 export function buildCmdArgs(ctx: seal.MsgContext, command: string, plainArgs: string[], at: seal.AtInfo[], prefix: string): seal.CmdArgs {
     const { args, kwargs } = splitKwargs(plainArgs);
@@ -102,8 +99,12 @@ export interface LocalExecutionOptions {
     settleMs?: number;
     maxMessages?: number;
     at?: seal.AtInfo[];
-    triggerUserId?: string;
-    atUserId?: string;
+    /** 显式触发用户；不填写时保留原始会话 ctx/msg。 */
+    trigger?: string;
+}
+
+function sessionLane(ctx: seal.MsgContext): string {
+    return ctx.isPrivate ? String(ctx.player && ctx.player.userId || '') : String(ctx.group && ctx.group.groupId || '');
 }
 
 /** 本地执行一条已解析的扩展指令，并用会话监听器收集多条 bot 回复。 */
@@ -123,17 +124,18 @@ export async function executeExtensionLocally(
     const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 10000;
     const settleMs = options.settleMs != null && options.settleMs >= 0 ? options.settleMs : 400;
     const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : 20;
-    const targetContext = options.triggerUserId
-        ? buildCommandContext(ctx, { triggerUserId: options.triggerUserId, atUserId: options.atUserId })
+    const at = options.at || [];
+    const useSyntheticContext = options.trigger !== undefined || at.length > 0;
+    const targetContext = useSyntheticContext
+        ? buildCommandContext(ctx, { trigger: options.trigger || currentCommandUserId(ctx), at: at.map(item => item.userId.replace(/^.+:/, '')) })
         : { ctx, msg };
     const executionCtx = targetContext.ctx;
     const executionMsg = targetContext.msg;
-    const atText = (options.at || []).map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ');
+    const atText = at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ');
     executionMsg.message = [atText, `${prefix}${rc.cmd}`, plainArgs.join(' ')].filter(Boolean).join(' ');
-    const cmdArgs = buildCmdArgs(executionCtx, rc.cmd, plainArgs, options.at || [], prefix);
+    const cmdArgs = buildCmdArgs(executionCtx, rc.cmd, plainArgs, at, prefix);
 
     const listen = session.tool.listen;
-    // waitFor 是当前监听器的消息收集入口；resolve 仅作为旧会话对象的防御性兜底。
     const responsePromise = listen.waitFor
         ? listen.waitFor(timeoutMs, settleMs, maxMessages)
         : new Promise<string[]>(resolve => {
@@ -143,12 +145,17 @@ export async function executeExtensionLocally(
                 listen.cleanup();
             };
         });
+    const unregisterCapture = registerLocalCommandCapture(
+        Array.from(new Set([sessionLane(ctx), sessionLane(executionCtx)])),
+        content => (listen.push || listen.resolve)?.(content)
+    );
 
     let solved = false;
     try {
         const result = await Promise.resolve(ext.cmdMap[rc.cmd].solve(executionCtx, executionMsg, cmdArgs)) as { solved?: boolean } | undefined;
         solved = !!(result && result.solved);
     } catch (e) {
+        unregisterCapture();
         listen.cleanup();
         await responsePromise.catch(() => []);
         Logger.warning(`[run_ext_command] 本地执行 ${rc.extName}|${rc.cmd} 抛异常:${e instanceof Error ? e.message : String(e)}`);
@@ -156,6 +163,7 @@ export async function executeExtensionLocally(
     }
 
     const messages = await responsePromise;
+    unregisterCapture();
     if (messages.length) return messages.join('\n');
     return solved ? '海豹未返回文本消息' : '指令未响应（扩展返回 solved=false），海豹未返回文本消息';
 }

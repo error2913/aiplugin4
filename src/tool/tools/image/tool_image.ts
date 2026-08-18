@@ -45,7 +45,7 @@ export function registerImage() {
                 properties: {
                     id: {
                         type: "string",
-                        description: '图片id，或user_avatar:用户名称或纯数字QQ号，或group_avatar:群聊名称或纯数字群号'
+                        description: '图片ID，或user_avatar:用户ID，或group_avatar:群ID'
                     },
                     content: {
                         type: "string",
@@ -94,7 +94,7 @@ export function registerImage() {
                     },
                     image: {
                         type: "string",
-                        description: "可选参考图，用于以图生图。支持图片id、user_avatar:用户名称或纯数字QQ号、group_avatar:群聊名称或纯数字群号、http(s)图片URL、data:image/...;base64或base64数据"
+                        description: "可选参考图，用于以图生图。支持图片ID、user_avatar:用户ID、group_avatar:群ID、http(s)图片URL、data:image/...;base64或base64数据"
                     }
                 },
                 required: ['prompt', 'save', 'name']
