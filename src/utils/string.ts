@@ -123,6 +123,19 @@ export interface MessageSegment {
     };
 }
 
+/** 为忽略/触发正则生成兼容 CQ 码的匹配文本，不改变消息段本身。 */
+export function formatMessageSegmentsForMatching(messageArray: MessageSegment[], fallback: string = ''): string {
+    const text = messageArray.map(item => {
+        if (item.type === 'text') return (item.data && item.data.text) || '';
+        if (item.type === 'at') {
+            const qq = item.data && (item.data.qq || item.data.user_id);
+            return qq ? `[CQ:at,qq=${qq}]` : '[at]';
+        }
+        return `[${item.type}]`;
+    }).join('');
+    return text || fallback;
+}
+
 /**
  * 把海豹 milky 消息段（seal.MessageSegment，独立 Go 结构体 + type() 编号）直接映射为
  * 项目内部统一段格式。不经过 CQ 码：milky 下 msg.message 只有纯文本拼接，

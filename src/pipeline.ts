@@ -8,7 +8,7 @@ import Tool from "./tool/tool";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
-import { expandMilkySegments, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
+import { expandMilkySegments, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
 import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
 /** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
@@ -318,7 +318,7 @@ export class MessagePipeline {
             : transformTextToArray(message);
         // 正则匹配统一使用可读文本：原生路径保持原字符串，数组路径用展开后的文本
         const messageText = Array.isArray(ob11Segments) || hasMilkySegments || Array.isArray(message)
-            ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
+            ? formatMessageSegmentsForMatching(messageArray, typeof message === 'string' ? message : '')
             : message;
         if (hasMilkySegments) {
             logger.debug(`[debug] milky 消息段展开: ${messageText.slice(0, 200)}`);

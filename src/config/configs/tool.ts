@@ -27,7 +27,7 @@ export default class ToolConfig {
     },
     "web-read": {
       "type": "http",
-      "url": "http://127.0.0.1:46799/mcp",
+      "url": "http://127.0.0.1:46799/mcp"
     },
     "md-html-render": {
       "type": "http",

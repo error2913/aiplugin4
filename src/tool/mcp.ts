@@ -1,6 +1,7 @@
 // MCP 客户端：把外部 MCP 服务器（Streamable HTTP / JSON-RPC）的工具注册为 AI 工具
 import { ext } from "../config/config";
 import Logger from "../logger";
+import { parseJSONWithTrailingCommas } from "../utils/json";
 
 import { runMCPAdapter } from "./mcp/adapters";
 import { MCPCallResult } from "./mcp/types";
@@ -92,7 +93,7 @@ function getMCPServers(): MCPServer[] {
     const servers: MCPServer[] = [];
     for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置").map(l => (l || '').trim()).filter(Boolean)) {
         try {
-            const j = JSON.parse(line);
+            const j = parseJSONWithTrailingCommas(line);
             // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
             if (!j || typeof j !== 'object' || !j.mcpServers || typeof j.mcpServers !== 'object' || Array.isArray(j.mcpServers)) {
                 Logger.error(`MCP服务器配置仅支持标准 mcpServers JSON 格式（{"mcpServers":{...}}），已忽略该行: ${line.slice(0, 120)}`);
@@ -103,7 +104,7 @@ function getMCPServers(): MCPServer[] {
                 if (s) servers.push(s);
             }
         } catch (e) {
-            Logger.error(`MCP服务器配置解析失败（仅支持标准 mcpServers JSON 格式）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+            Logger.error(`MCP服务器配置解析失败（需要标准 mcpServers JSON 格式，兼容对象/数组尾逗号）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
         }
     }
     return servers.filter(s => s.name && s.url);
