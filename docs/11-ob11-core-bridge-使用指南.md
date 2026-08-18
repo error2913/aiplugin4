@@ -93,7 +93,6 @@ ws://127.0.0.1:46880/core
       "url": "http://127.0.0.1:46880/mcp",
       "tools": {
         "run_core_command": {
-          "exposeAs": "run_core_command",
           "adapter": "core_bridge_core"
         }
       }
@@ -112,11 +111,11 @@ ws://127.0.0.1:46880/core
 }
 ```
 
-3. 按需配置「可调用指令白名单」与「指令前缀」。`tools` 适配块会把远端 `run_core_command` 暴露为同名 AI 工具并套用核心桥适配器；若手写配置时省略该块，`run_core_command` 也会直接用远端工具名注册，但不会套用核心桥适配器。`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件；`run_core_command` 经 MCP 调用中间件执行核心指令。
+3. 按需配置「可调用指令白名单」与「指令前缀」。后端只通过 MCP 提供 `run_core_command`，插件直接套用核心桥适配器；`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件，也不会出现在 MCP 工具列表中。
 
 ## 工具与参数
 
-`run_ext_command` 由插件本地注册为 AI 工具（敏感工具，执行会显著记录），在插件内直调扩展 `solve`，不依赖中间件；`run_core_command` 由 MCP 同步注册（默认 `tools` 适配暴露同名工具，同样为敏感工具），经中间件 MCP 注入假消息执行核心指令，需启动 `ob11-core-bridge` 并开启「是否启用MCP」。
+`run_ext_command` 由插件本地注册为 AI 工具（敏感工具，执行会显著记录），在插件内直调扩展 `solve`，不依赖中间件；`run_core_command` 由 MCP 同步注册，经中间件 MCP 注入假消息执行核心指令，需启动 `ob11-core-bridge` 并开启「是否启用MCP」。MCP 工具列表只包含 `run_core_command`。
 
 ### run_ext_command — 扩展指令
 
@@ -159,7 +158,7 @@ ws://127.0.0.1:46880/core
 | `forwardedCount` / `interceptedCount` | 转发 / 拦截计数 |
 | `error` | 失败原因（如核心未连接、target 缺少群/私聊 id） |
 
-> 上表是 `run_core_command` 经 MCP 返回的结果结构；`run_ext_command` 本地执行直接返回收集到的消息文本，异常时返回错误说明。
+> 上表是 `run_core_command` 经 MCP 返回的结果结构；`run_ext_command` 不经过 MCP，本地执行直接返回收集到的消息文本，异常时返回错误说明。
 
 ## 指令白名单
 

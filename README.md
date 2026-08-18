@@ -238,7 +238,7 @@ max_tokens = 2048
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。每台服务器可配 `tools` 适配块（`hidden`/`exposeAs`/`adapter`/`remoteTools`/`description`/`parameters` 等）；未配置时默认直接用远端工具名注册，同名冲突自动跳过。默认配置把 `web_read`、`render_markdown`、`render_html`、`run_core_command` 映射为原工具名，把 `mcp-files-exec` 的远端 `run_command` 暴露为 `runshell`，并隐藏 `ob11-core-bridge` 的远端 `run_ext_command`。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。每台服务器可配 `tools` 适配块（`hidden`/`exposeAs`/`adapter`/`remoteTools`/`description`/`parameters` 等）；未配置时默认直接使用远端工具名注册，同名冲突自动跳过。默认后端工具名为 `run_shell`、`web_read`、`render_markdown`、`render_html`、`run_core_command`；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
