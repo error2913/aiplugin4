@@ -332,7 +332,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
             });
         };
         mcpToolKeys.set(t.name, server.name);
-        Logger.info(`已注册 MCP 工具 ${t.name}`);
+        Logger.debug(`已注册 MCP 工具 ${t.name}`);
     }
     return tools;
 }
