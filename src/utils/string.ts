@@ -519,6 +519,10 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
     // 剥离残留的内部上下文标签（msg_id/system/time 及未参与多轮分段的 from），不进入发送内容与上下文
     s = stripInternalTags(s);
 
+    // 模型有时会输出字面量 \n / \r\n；在分段前还原为真实换行。
+    // \f 不在这里处理，仍作为多消息分隔符交给 filterString。
+    s = decodeEscapedNewlines(s);
+
     // 分离回复消息和戳一戳消息
     s = s.replace(/[[［]quote[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}`)
         .replace(/[[［]poke[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}\\f`);
@@ -702,6 +706,15 @@ interface TokenSegment {
 /** 旧版 <|xxx|> 渲染标签归一化为新版 [xxx]（含全角/缺竖杠变体）；仅用于 4.14.0 首次对话的历史数据迁移，解析层不再兼容旧标签 */
 const RENDER_TAG_CONTENT = '[^|｜>＞]+?';
 const RENDER_TAG_CLOSE = '(?:[\\|│｜][>＞]|[\\|│｜>＞])';
+
+/** 将模型常见的字面量换行转义（\n / \r\n）还原为真实换行。
+ * 注意：不处理 \f；\f 仍由回复过滤器作为多消息分隔符处理。 */
+export function decodeEscapedNewlines(s: string): string {
+    return s
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\n');
+}
 
 export function normalizeRenderTags(s: string): string {
     if (!s.includes('<')) return s;

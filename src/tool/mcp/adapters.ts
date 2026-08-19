@@ -4,9 +4,10 @@ import { CoreBridgeResult } from "../../integration/core_bridge/types";
 import Logger from "../../logger";
 import Image from "../../resource/image";
 import { Session } from "../../session/session";
+import { callOb11ApiDirect } from "../../transport/ob11/dispatcher";
 import { parseSpecialTokens } from "../../utils/string";
 import { getRawId, normalizeGroupId, normalizeUserId } from "../../utils/target_id";
-import { generateId } from "../../utils/utils";
+import { generateId, withTimeout } from "../../utils/utils";
 import { isAllowedCore, splitEntry, whitelistEntries } from "../command_catalog";
 import { resolveCommandTarget } from "../command_target";
 
@@ -23,6 +24,30 @@ export interface MCPAdapterContext {
 }
 
 type MCPAdapter = (input: MCPAdapterContext) => Promise<string>;
+
+/** 获取核心假消息发送者的真实平台昵称/群名片，避免把当前 AI 会话用户昵称错传给 trigger。 */
+async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string): Promise<string> {
+    const rawUserId = normalizeUserId(userId) || userId;
+    const rawGroupId = ctx.group ? normalizeGroupId(ctx.group.groupId) : '';
+    if (!rawUserId) return '';
+    try {
+        const action = rawGroupId ? 'get_group_member_info' : 'get_stranger_info';
+        const params = rawGroupId
+            ? { group_id: rawGroupId.replace(/^.+:/, ''), user_id: rawUserId.replace(/^.+:/, ''), no_cache: true }
+            : { user_id: rawUserId.replace(/^.+:/, ''), no_cache: true };
+        const info = await withTimeout(
+            () => callOb11ApiDirect(ctx.endPoint.userId, action, params),
+            3000
+        );
+        const name = rawGroupId ? info && (info.card || info.nickname) : info && info.nickname;
+        if (typeof name === 'string' && name.trim()) return name.trim();
+    } catch (e) {
+        Logger.debug(`[run_core_command] 获取 trigger=${rawUserId} 昵称失败，使用回退值: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return rawUserId === normalizeUserId(ctx.player && ctx.player.userId || '')
+        ? String(ctx.player && ctx.player.name || '')
+        : `用户${rawUserId}`;
+}
 
 /** 提取 MCP 结果中的文本内容（兼容 text 块、structuredContent） */
 export function mcpText(result: MCPCallResult | null | undefined): string {
@@ -294,7 +319,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
             target,
             actor: {
                 userId: commandTarget.effectiveTrigger || target.selfId,
-                nickname: String(ctx.player && ctx.player.name || 'AI'),
+                nickname: await resolveCommandActorNickname(ctx, commandTarget.effectiveTrigger || target.selfId),
                 role: 'member'
             },
             maxMessages: options.capture.maxMessages,

@@ -28,8 +28,9 @@ export function qualifyCommandUserId(ctx: seal.MsgContext, userId: string): stri
 /** 解析工具参数；不对旧字段做兼容，at 必须是数组。 */
 export function resolveCommandTarget(ctx: seal.MsgContext, args: { [key: string]: any } | undefined): CommandTargetOptions & { effectiveTrigger: string } {
     const trigger = normalizeCommandUserId(args && args.trigger);
-    const at = Array.isArray(args && args.at)
-        ? args.at.map(normalizeCommandUserId).filter((item): item is string => !!item)
+    const atValue = args && args.at;
+    const at = Array.isArray(atValue)
+        ? atValue.map((value: any) => normalizeCommandUserId(value)).filter((item: string | undefined): item is string => !!item)
         : [];
     return {
         ...(trigger ? { trigger } : {}),
@@ -46,7 +47,8 @@ export function buildCommandContext(
     // 否则 OB11 核心在 SendToGroup 时无法命中群会话，也不会触发 onMessageSend。
     const normalizedGroupId = ctx.group && normalizeGroupId(ctx.group.groupId);
     const groupId = normalizedGroupId || '';
-    const msg = createMsg(ctx.isPrivate ? 'private' : 'group', target.trigger, groupId);
+    const triggerUserId = qualifyCommandUserId(ctx, target.trigger);
+    const msg = createMsg(ctx.isPrivate ? 'private' : 'group', triggerUserId, groupId);
     if (target.at.length) {
         const atText = target.at.map(userId => `[CQ:at,qq=${userId}]`).join(' ');
         msg.message = `${atText} `;
@@ -56,7 +58,11 @@ export function buildCommandContext(
             type: () => 1
         }));
     }
-    if (msg.sender) msg.sender.nickname = ctx.player && ctx.player.name || '';
+    // 显式切换触发用户时不能沿用当前会话发送者的昵称；否则本地扩展指令（如 rav）
+    // 会以当前 AI 对话用户的名字执行，而不是以 target.trigger 对应的玩家执行。
+    // 未切换触发者时仍保留原消息昵称，避免普通 @ 模拟丢失当前玩家显示名。
+    const currentUserId = currentCommandUserId(ctx);
+    if (msg.sender && target.trigger === currentUserId) msg.sender.nickname = ctx.player && ctx.player.name || '';
     const targetCtx = createCtx(ctx.endPoint.userId, msg);
     if (!targetCtx) throw new Error(`未找到通信端点: ${ctx.endPoint.userId}`);
     return { ctx: targetCtx, msg };

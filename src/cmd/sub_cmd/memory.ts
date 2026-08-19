@@ -75,7 +75,7 @@ export function registerCmdMemory() {
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, session, page, ret  } = scc;
 
-        const currentUserId = normalizeUserId(ctx.player && ctx.player.userId);
+        const currentUserId = normalizeUserId(ctx.player && ctx.player.userId || '');
         if (!currentUserId) {
             seal.replyToSender(ctx, msg, '当前消息缺少有效用户ID');
             return ret;

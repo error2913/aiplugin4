@@ -60,6 +60,11 @@ globalThis.seal = {
     assert.equal(runtime.getActionCapability('send_group_msg'), 'either');
     assert.equal(runtime.getActionCapability('get_group_member_list'), 'network');
 
+    // Model literal \n escapes are rendered as real line breaks; \f remains untouched for message splitting.
+    assert.equal(runtime.decodeEscapedNewlines('第一行\\n第二行'), '第一行\n第二行');
+    assert.equal(runtime.decodeEscapedNewlines('第一行\\r\\n第二行'), '第一行\n第二行');
+    assert.equal(runtime.decodeEscapedNewlines('第一条\\f第二条'), '第一条\\f第二条');
+
     const context = {
         endpointId: '10000',
         ctx: {
