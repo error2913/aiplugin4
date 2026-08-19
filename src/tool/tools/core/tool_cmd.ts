@@ -1,186 +1,96 @@
-// 指令调用工具：读取海豹扩展 cmdMap 列出可用指令、查看指令帮助，并调用指令获取返回
+// 海豹指令工具：扩展指令本地直调 solve；核心指令由 MCP 适配器注册 run_core_command。
 import Config from "../../../config/config";
-import { NAME } from "../../../config/static_config";
 import Logger from "../../../logger";
+import { collectCommands, extensionNames, isAllowedExtension, ResolvedCommand, resolveEntry } from "../../command_catalog";
+import { qualifyCommandUserId, resolveCommandTarget } from "../../command_target";
+import { executeExtensionLocally } from "../../extension_executor";
 import Tool from "../../tool";
 
-interface ResolvedCmd {
-    extName: string;
-    cmd: string;
-    help: string;
+function commandText(item: ResolvedCommand): string {
+    return `${item.extName}|${item.cmd}`;
 }
 
-function getCmdHelp(ext: seal.ExtInfo, cmd: string): string {
-    const item = ext.cmdMap?.[cmd];
-    return item && item.help ? item.help : '';
+function formatList(items: ResolvedCommand[]): string {
+    return items.length
+        ? `可调用扩展指令（共 ${items.length} 个）：\n${items.map((item, index) => `${index + 1}. ${commandText(item)}`).join('\n')}`
+        : '当前没有可列举的扩展指令';
 }
 
-/** 解析条目：支持 扩展名|指令名 或裸 指令名（优先按同名扩展解析，其次扫描内置扩展） */
-function resolveEntry(entry: string): ResolvedCmd | null {
-    const s = (entry || '').trim();
-    if (!s) return null;
-    const pipe = s.indexOf('|');
-    if (pipe !== -1) {
-        const extName = s.slice(0, pipe).trim();
-        const cmd = s.slice(pipe + 1).trim();
-        if (!extName || !cmd) return null;
-        const ext = seal.ext.find(extName);
-        if (ext && ext.cmdMap && Object.prototype.hasOwnProperty.call(ext.cmdMap, cmd)) {
-            return { extName: ext.name || extName, cmd, help: getCmdHelp(ext, cmd) };
-        }
-        return null;
-    }
-    const byName = seal.ext.find(s);
-    if (byName && byName.cmdMap && Object.prototype.hasOwnProperty.call(byName.cmdMap, s)) {
-        return { extName: byName.name || s, cmd: s, help: getCmdHelp(byName, s) };
-    }
-    for (const extName of Config.tool.BUILTIN_EXT_NAMES) {
-        const ext = seal.ext.find(extName);
-        if (ext && ext.cmdMap && Object.prototype.hasOwnProperty.call(ext.cmdMap, s)) {
-            return { extName, cmd: s, help: getCmdHelp(ext, s) };
-        }
-    }
-    return null;
+function parseExtCommand(extension: string, command: string): { requested: string; resolved: ResolvedCommand | null } {
+    const requested = extension ? `${extension}|${command}` : command;
+    return { requested, resolved: resolveEntry(requested) };
 }
 
-/** 指令是否允许调用：开启「允许所有指令」时放行，否则必须在白名单内 */
-function isAllowed(command: string): boolean {
-    if (Config.tool.ALLOW_ALL_CMDS) return true;
-    return Config.tool.CMD_WHITELIST.some(entry => {
-        const rc = resolveEntry(entry);
-        return rc !== null && (rc.cmd === command || `${rc.extName}|${rc.cmd}` === command);
-    });
+/** 解析可选数字参数；非法或负数视为未提供，由执行器回退到默认值。 */
+function optionNumber(value: any): number | undefined {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-/** 收集可列举指令列表 */
-function collectCommands(all: boolean): ResolvedCmd[] {
-    const seen: { [key: string]: boolean } = {};
-    const result: ResolvedCmd[] = [];
-    const push = (rc: ResolvedCmd | null) => {
-        if (!rc) return;
-        const key = `${rc.extName}/${rc.cmd}`;
-        if (seen[key]) return;
-        seen[key] = true;
-        result.push(rc);
-    };
-    const { CMD_WHITELIST } = Config.tool;
-    for (const entry of CMD_WHITELIST) push(resolveEntry(entry));
-    if (all) {
-        // 查看全部：核心内置扩展 + 插件自身扩展（第三方插件指令无法枚举，需加入白名单）
-        for (const extName of Config.tool.BUILTIN_EXT_NAMES) {
-            const ext = seal.ext.find(extName);
-            if (ext && ext.cmdMap) {
-                for (const cmd of Object.keys(ext.cmdMap)) {
-                    push({ extName: ext.name || extName, cmd, help: getCmdHelp(ext, cmd) });
-                }
-            }
-        }
-        const self = seal.ext.find(NAME);
-        if (self && self.cmdMap) {
-            for (const cmd of Object.keys(self.cmdMap)) {
-                push({ extName: self.name || NAME, cmd, help: getCmdHelp(self, cmd) });
-            }
-        }
-    }
-    return result;
-}
-
-export function registerCmdTool() {
-    const tool = new Tool({
+export function registerCmdTool(): Tool {
+    const extTool = new Tool({
         type: 'function',
         function: {
-            name: 'run_command',
-            description: `读取海豹扩展指令表（cmdMap）并调用海豹指令。action=list：列出可用指令名（不含帮助），默认只列白名单内指令，all=true 时额外列出核心内置扩展与插件自身的指令（第三方插件指令无法枚举，需加入白名单才能列出）；action=call：调用 command 指定的指令并返回执行结果，默认仅能调用白名单内的指令（开启「是否允许调用所有指令」后可调用任意指令）。查看指令帮助请用 get_cmd_help 工具。注意：调用指令需要在最近收到过一条指令消息（如 .r）后才能获取返回。`,
+            name: 'run_ext_command',
+            description: `在 SealDice 本地直接调用扩展指令的 solve，不依赖核心桥/中间件，无需 MCP 与协议端；可用 trigger 指定触发对象、at 模拟 @ 对象。扩展分为 builtin（fun/story/coc7/deck/dnd5e/exp/log/reply）与 non_builtin（第三方扩展及本插件），无需配置内置扩展列表。action=list 可按 kind 列出指令；action=call 执行指令，并收集扩展发出的多条消息作为返回。可调用指令仍受「可调用指令白名单」约束，白名单格式为扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔。核心指令请使用 run_core_command。`,
             parameters: {
                 type: 'object',
                 properties: {
-                    action: {
-                        type: 'string',
-                        enum: ['list', 'call'],
-                        description: 'list=列出指令名（帮助请用 get_cmd_help）；call=调用指令'
-                    },
-                    command: {
-                        type: 'string',
-                        description: '指令名（如 今日老婆、jrrp），也支持 扩展名|指令名 格式；list 时留空表示列出全部'
-                    },
-                    all: {
-                        type: 'boolean',
-                        description: '仅 list 使用：true 时额外列出全部可解析指令（核心内置 + 插件自身），默认 false 只列白名单'
-                    },
-                    args: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        description: '调用指令时传入的参数列表（按顺序）'
-                    }
+                    action: { type: 'string', enum: ['list', 'call'], description: 'list=列出扩展指令；call=执行扩展指令' },
+                    kind: { type: 'string', enum: ['builtin', 'non_builtin', 'all'], description: 'list 时筛选扩展类型，默认 all' },
+                    extension: { type: 'string', description: '扩展名；call 时可填写，核心扩展名不是这里的 core' },
+                    command: { type: 'string', description: '指令名；也支持直接填写 扩展名|指令名' },
+                    args: { type: 'array', items: { type: 'string' }, description: '指令参数，按顺序填写' },
+                    trigger: { type: 'string', description: '可选；指定这条指令消息的发送者/触发对象（用户 ID），不填则使用当前对话用户' },
+                    at: { type: 'array', items: { type: 'string' }, description: '可选；让注入的指令消息 @ 这些用户（用户 ID）；群聊可用，私聊不支持' },
+                    maxMessages: { type: 'integer', minimum: 1, maximum: 50, description: '最多收集多少条回复消息' },
+                    settleMs: { type: 'integer', minimum: 0, maximum: 10000, description: '收到消息后等待多久没有新消息才结束' },
+                    timeoutMs: { type: 'integer', minimum: 100, maximum: 120000, description: '最长等待时间，单位毫秒' }
                 },
                 required: ['action']
             }
         }
     });
-    tool.sensitive = true; // 调用指令可能发送消息/执行操作，调用会显著记录
-    tool.solve = async (ctx, msg, session, args) => {
-        const { action, command = '', args: cmdArgs = [], all = false } = args || {};
+    extTool.sensitive = true;
+    extTool.solve = async (ctx, msg, session, args) => {
+        const action = String(args && args.action || '');
         if (action === 'list') {
-            const list = collectCommands(all === true);
-            if (list.length === 0) {
-                return all === true
-                    ? '当前没有可列举的指令'
-                    : '可调用指令白名单为空：请先在「工具」配置的「可调用指令白名单」中添加指令';
-            }
-            return `可调用指令（共 ${list.length} 个）：\n${list.map((rc, i) => `${i + 1}. ${rc.extName}|${rc.cmd}`).join('\n')}\n查看帮助：调用 get_cmd_help（command=指令名，如 fun|jrrp）`;
+            const kind = args && args.kind === 'builtin' || args && args.kind === 'non_builtin' ? args.kind : 'all';
+            return `${formatList(collectCommands(kind))}\n扩展名称（核心 .ext 可查看完整列表）：${extensionNames().join('、')}`;
         }
-        if (action === 'call') {
-            const cmdStr = (command || '').trim();
-            if (!cmdStr) return '调用指令时 command 不能为空';
-            if (!isAllowed(cmdStr)) {
-                return `指令 ${cmdStr} 不在可调用白名单内，无法调用`;
-            }
-            const rc = resolveEntry(cmdStr);
-            if (!rc) {
-                return `无法解析指令 ${cmdStr}：请确认插件已安装，或使用 扩展名|指令名 格式（如 fun|jrrp）`;
-            }
-            const [content, success] = await Tool.extensionSolve(
-                ctx, msg, session.tool.listen,
-                { extName: rc.extName, cmd: rc.cmd, staticArgs: [] },
-                (cmdArgs || []).map(String), [], []
-            );
-            if (!success) {
-                Logger.warning(`[run_command] 调用指令 ${rc.cmd} 失败`);
-                return `指令 ${rc.cmd} 调用失败：请先让用户发送一条指令消息（如 .r）后再试`;
-            }
-            return `指令 ${rc.cmd} 返回：\n${content}`;
+        if (action !== 'call') return 'action 仅支持 list 或 call';
+        const extension = String(args && args.extension || '').trim();
+        const command = String(args && args.command || '').trim();
+        if (!command) return '调用扩展指令时 command 不能为空';
+        const parsed = parseExtCommand(extension, command);
+        const rc = parsed.resolved;
+        if (!rc) return `无法解析扩展指令 ${parsed.requested}：请确认扩展已安装，并使用 扩展名|指令名 格式`;
+        if (rc.kind === 'core') return '核心指令请使用 run_core_command，不要使用 run_ext_command';
+        const requested = `${rc.extName}|${rc.cmd}`;
+        if (!isAllowedExtension(rc)) return `扩展指令 ${requested} 不在可调用指令白名单内，无法调用`;
+        const cmdArgs = Array.isArray(args && args.args) ? args.args.map(String) : [];
+        const target = resolveCommandTarget(ctx, args);
+        if (target.at.length && ctx.isPrivate) return '私聊消息不支持 at';
+        const at = target.at.map(userId => ({
+            userId: qualifyCommandUserId(ctx, userId),
+            isRobot: userId === String(ctx.endPoint.userId || '').replace(/^.+:/, ''),
+            name: ''
+        }));
+        try {
+            const content = await executeExtensionLocally(ctx, msg, session, rc, cmdArgs, {
+                prefix: Config.tool.COMMAND_PREFIX,
+                timeoutMs: optionNumber(args && args.timeoutMs),
+                settleMs: optionNumber(args && args.settleMs),
+                maxMessages: optionNumber(args && args.maxMessages),
+                at,
+                trigger: target.trigger
+            });
+            return `扩展指令 ${requested} 返回：\n${content}`;
+        } catch (e) {
+            Logger.warning(`[run_ext_command] 调用 ${requested} 失败:${e instanceof Error ? e.message : String(e)}`);
+            return `扩展指令 ${requested} 调用失败：${e instanceof Error ? e.message : String(e)}`;
         }
-        return 'action 仅支持 list 或 call';
     };
 
-    // 指令帮助查看工具：只读取 cmdMap 中的帮助文本，不执行任何指令
-    const toolHelp = new Tool({
-        type: 'function',
-        function: {
-            name: 'get_cmd_help',
-            description: '查看海豹指令的帮助文本（只读，不执行指令）；先用 run_command 的 action=list 查看可用指令名，再用本工具获取某个指令的详细帮助',
-            parameters: {
-                type: 'object',
-                properties: {
-                    command: {
-                        type: 'string',
-                        description: '指令名（如 今日老婆、jrrp），也支持 扩展名|指令名 格式'
-                    }
-                },
-                required: ['command']
-            }
-        }
-    });
-    toolHelp.solve = async (_, __, ___, args) => {
-        const { command = '' } = args || {};
-        const rc = resolveEntry(command);
-        if (!rc) {
-            return `无法解析指令 ${command}：请确认插件已安装，或使用 扩展名|指令名 格式（如 fun|jrrp）`;
-        }
-        return rc.help
-            ? `指令 ${rc.cmd}（扩展：${rc.extName}）帮助：\n${rc.help}`
-            : `指令 ${rc.cmd}（扩展：${rc.extName}）暂无帮助文本`;
-    };
-
-    return tool;
+    return extTool;
 }

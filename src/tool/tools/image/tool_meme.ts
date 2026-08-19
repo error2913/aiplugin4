@@ -2,6 +2,7 @@
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { GroupInfo, UserInfo } from "../../../session/types";
+import { normalizeGroupId, normalizeUserId } from "../../../utils/target_id";
 import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
@@ -101,7 +102,7 @@ export function registerMeme() {
                     image_ids: {
                         type: "array",
                         items: { type: "string" },
-                        description: '图片id，或user_avatar:用户名称或纯数字QQ号，或group_avatar:群聊名称或纯数字群号'
+                        description: '图片ID，或user_avatar:用户ID，或group_avatar:群ID'
                     },
                     save: {
                         type: "boolean",
@@ -146,23 +147,21 @@ export function registerMeme() {
         const giList: GroupInfo[] = [];
         for (const id of image_ids) {
             if (/^user_avatar[:：]/.test(id)) {
-                const ui = await session.context.findUser(ctx, id.replace(/^user_avatar[:：]/, ''));
-                if (ui) {
-                    uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
-                    images.push(Image.getUserAvatar(ui.userId));
-                } else {
-                    return `用户 ${id} 不存在`;
-                }
+                const userId = normalizeUserId(id.replace(/^user_avatar[:：]/, ''));
+                if (!userId) return `用户ID格式无效：${id}`;
+                const ui = session.context.getUserById(userId);
+                if (!ui) return `用户ID无效：${id}`;
+                uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
+                images.push(Image.getUserAvatar(ui.userId));
                 continue;
             }
             if (/^group_avatar[:：]/.test(id)) {
-                const gi = await session.context.findGroup(ctx, id.replace(/^group_avatar[:：]/, ''));
-                if (gi) {
-                    giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
-                    images.push(Image.getGroupAvatar(gi.groupId));
-                } else {
-                    return `群聊 ${id} 不存在`;
-                }
+                const groupId = normalizeGroupId(id.replace(/^group_avatar[:：]/, ''));
+                if (!groupId) return `群ID格式无效：${id}`;
+                const gi = session.context.getGroupById(groupId);
+                if (!gi) return `群ID无效：${id}`;
+                giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
+                images.push(Image.getGroupAvatar(gi.groupId));
                 continue;
             }
             const img = await session.context.findImage(ctx, id);

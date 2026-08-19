@@ -7,7 +7,7 @@ import { Context } from "../context/context";
 import { logger } from "../logger";
 import Image from "../resource/image";
 
-import { getCtxAndMsg } from "./seal";
+import { getRawId, normalizeGroupId, normalizeUserId } from "./target_id";
 import { getMilkyReplyQuoteId, resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
 
 export function truncateText(text: string, maxLength: number): string {
@@ -124,6 +124,50 @@ export interface MessageSegment {
 }
 
 /**
+ * 文件消息的完整可读表示。不要只显示 name：OB11/不同适配器可能把真实路径、URL、
+ * file_id、file_unique 等字段放在同一段里，AI 需要这些字段才能继续调用文件工具。
+ */
+export function formatFileSegmentText(rawData: any): string {
+    const data = rawData && typeof rawData === 'object' ? rawData : {};
+    const nestedFile = data.file && typeof data.file === 'object' ? data.file : {};
+    const pick = (...values: any[]): string => {
+        for (const value of values) {
+            if (value === undefined || value === null) continue;
+            const text = String(value).replace(/[\r\n]+/g, ' ').trim();
+            if (text) return text;
+        }
+        return '';
+    };
+    const name = pick(data.name, data.file_name, data.filename, nestedFile.name, nestedFile.file_name);
+    const path = pick(data.path, data.local_path, nestedFile.path, nestedFile.local_path);
+    const file = pick(typeof data.file === 'string' ? data.file : '', nestedFile.file);
+    const url = pick(data.url, data.file_url, data.download_url, nestedFile.url, nestedFile.file_url);
+    const fileId = pick(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
+    const fileUnique = pick(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
+    const size = pick(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
+    const mime = pick(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
+    const label = name || path || file || url || fileId || '未知文件';
+    const fields = [
+        ['name', name], ['path', path], ['file', file], ['url', url],
+        ['file_id', fileId], ['file_unique', fileUnique], ['size', size], ['mime', mime]
+    ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`);
+    return `【文件】${label}${fields.length ? `\n${fields.join('\n')}` : ''}`;
+}
+
+/** 为忽略/触发正则生成兼容 CQ 码的匹配文本，不改变消息段本身。 */
+export function formatMessageSegmentsForMatching(messageArray: MessageSegment[], fallback: string = ''): string {
+    const text = messageArray.map(item => {
+        if (item.type === 'text') return (item.data && item.data.text) || '';
+        if (item.type === 'at') {
+            const qq = item.data && (item.data.qq || item.data.user_id);
+            return qq ? `[CQ:at,qq=${qq}]` : '[at]';
+        }
+        return `[${item.type}]`;
+    }).join('');
+    return text || fallback;
+}
+
+/**
  * 把海豹 milky 消息段（seal.MessageSegment，独立 Go 结构体 + type() 编号）直接映射为
  * 项目内部统一段格式。不经过 CQ 码：milky 下 msg.message 只有纯文本拼接，
  * at/图片/回复等富文本信息必须从 segment 取。
@@ -155,10 +199,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                 break;
             }
             case 2: { // 文件 File
-                const url = 'url' in seg ? seg.url : '';
-                const file = 'file' in seg && typeof seg.file === 'string' ? seg.file : '';
-                const fileText = url || file;
-                result.push({ type: 'text', data: { text: fileText ? `【文件】${fileText}` : '【文件】' } });
+                result.push({ type: 'text', data: { text: formatFileSegmentText(seg) } });
                 break;
             }
             case 3: { // 图片 Image
@@ -310,40 +351,17 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 break;
             }
             case 'at': {
-                const epId = ctx.endPoint.userId;
-                const gid = ctx.group ? ctx.group.groupId : '';
-                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
-                const uid = `${prefix}:${seg.data.qq || ''}`;
                 if (seg.data.qq === 'all') {
-                    content += '[at:全体成员]';
+                    content += '[at:all]';
                     break;
                 }
-                // OB11 段通常直接带 name；优先使用它，避免为每个 at 额外请求群成员信息。
-                let name = seg.data.name || '未知用户';
-                try {
-                    if (!seg.data.name) {
-                        const targetCtx = getCtxAndMsg(epId, uid, gid).ctx;
-                        name = targetCtx.player?.name || name;
-                    }
-                } catch (_e) {
-                    // 目标用户上下文创建失败（如目标不在当前会话）时保留 at 标签，不中断整条消息转换
-                }
-                content += `[at:${name}]`;
+                const userId = normalizeUserId(seg.data.qq || '');
+                content += `[at:${userId ? getRawId(userId) : String(seg.data.qq || '')}]`;
                 break;
             }
             case 'poke': {
-                const epId = ctx.endPoint.userId;
-                const gid = ctx.group ? ctx.group.groupId : '';
-                const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
-                const uid = `${prefix}:${seg.data.qq || ''}`;
-                let name = '未知用户';
-                try {
-                    const targetCtx = getCtxAndMsg(epId, uid, gid).ctx;
-                    name = targetCtx.player?.name || name;
-                } catch (_e) {
-                    // 目标用户上下文创建失败时保留 poke 标签，不中断整条消息转换
-                }
-                content += `[poke:${name}]`;
+                const userId = normalizeUserId(seg.data.qq || '');
+                content += `[poke:${userId ? getRawId(userId) : String(seg.data.qq || '')}]`;
                 break;
             }
             case 'reply': {
@@ -386,24 +404,19 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 break;
             }
             case 'at': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    text += `[CQ:at,qq=${ui.userId.replace(/^.+:/, "")}]`;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                    text += ` @${name} `;
+                if (seg.content.trim().toLowerCase() === 'all') {
+                    text += '[CQ:at,qq=all]';
+                    break;
                 }
+                const userId = normalizeUserId(seg.content);
+                if (userId) text += `[CQ:at,qq=${getRawId(userId)}]`;
+                else logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'poke': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    text += `[CQ:poke,qq=${ui.userId.replace(/^.+:/, "")}]`;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                }
+                const userId = normalizeUserId(seg.content);
+                if (userId) text += `[CQ:poke,qq=${getRawId(userId)}]`;
+                else logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'quote': {
@@ -429,27 +442,21 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 break;
             }
             case 'avatar': {
-                const name = seg.content;
-                const ui = await session.context.findUser(ctx, name);
-                if (ui !== null) {
-                    const image = Image.getUserAvatar(ui.userId);
+                const userId = normalizeUserId(seg.content);
+                if (userId) {
+                    const image = Image.getUserAvatar(userId);
                     images.push(image);
                     text += image.CQCode;
-                } else {
-                    logger.warning(`无法找到用户：${name}`);
-                }
+                } else logger.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'group_avatar': {
-                const name = seg.content;
-                const gi = await session.context.findGroup(ctx, name);
-                if (gi) {
-                    const image = Image.getGroupAvatar(gi.groupId);
+                const groupId = normalizeGroupId(seg.content);
+                if (groupId) {
+                    const image = Image.getGroupAvatar(groupId);
                     images.push(image);
                     text += image.CQCode;
-                } else {
-                    logger.warning(`无法找到群聊：${name}`);
-                }
+                } else logger.warning(`群ID格式无效：${seg.content}`);
                 break;
             }
             case 'audio': {
@@ -493,9 +500,11 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
         const segment = segments[i];
         const match = segment.match(/^[[［]from[:：]?\s?(.+?)[\]］]$/);
         if (match) {
-            // 如果臆想对象是自己，那么将下一条消息添加到s中
-            const ui = await session.context.findUser(ctx, match[1]);
-            if (ui && ui.userId === ctx.endPoint.userId && i < segments.length - 1) s += segments[i + 1];
+            // 如果臆想对象是自己，那么将下一条消息添加到s中；只读取 [from] 中的显式 QQ 号。
+            const numberMatch = match[1].match(/(?:^|\()([0-9]+)(?:\))?$/);
+            const fromUserId = numberMatch ? normalizeUserId(numberMatch[1]) : null;
+            const currentUserId = normalizeUserId(ctx.endPoint.userId);
+            if (fromUserId && currentUserId && fromUserId === currentUserId && i < segments.length - 1) s += segments[i + 1];
         } else if (i === 0) {
             s = segment;
         }
@@ -509,6 +518,10 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
 
     // 剥离残留的内部上下文标签（msg_id/system/time 及未参与多轮分段的 from），不进入发送内容与上下文
     s = stripInternalTags(s);
+
+    // 模型有时会输出字面量 \n / \r\n；在分段前还原为真实换行。
+    // \f 不在这里处理，仍作为多消息分隔符交给 filterString。
+    s = decodeEscapedNewlines(s);
 
     // 分离回复消息和戳一戳消息
     s = s.replace(/[[［]quote[:：]?\s?(.+?)[\]］]/g, (match) => `\\f${match}`)
@@ -693,6 +706,15 @@ interface TokenSegment {
 /** 旧版 <|xxx|> 渲染标签归一化为新版 [xxx]（含全角/缺竖杠变体）；仅用于 4.14.0 首次对话的历史数据迁移，解析层不再兼容旧标签 */
 const RENDER_TAG_CONTENT = '[^|｜>＞]+?';
 const RENDER_TAG_CLOSE = '(?:[\\|│｜][>＞]|[\\|│｜>＞])';
+
+/** 将模型常见的字面量换行转义（\n / \r\n）还原为真实换行。
+ * 注意：不处理 \f；\f 仍由回复过滤器作为多消息分隔符处理。 */
+export function decodeEscapedNewlines(s: string): string {
+    return s
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\n');
+}
 
 export function normalizeRenderTags(s: string): string {
     if (!s.includes('<')) return s;

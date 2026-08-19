@@ -97,15 +97,13 @@ export interface ToolCallResult {
     callBack?: boolean     // 是否把结果回调给智能体（写回上下文继续对话），false 时工具静默执行
 }
 
-export interface ExtCmdInfo {
-    extName: string, // 使用的扩展名称
-    cmd: string, // 指令名称
-    staticArgs: string[] // 参数
-}
-
 export interface ToolListen {
     timeoutId: number | null,
     resolve: ((content: string) => void) | null,
     reject: ((err: Error) => void) | null,
-    cleanup: () => void
+    cleanup: () => void,
+    /** 将机器人消息分发给所有正在等待的调用，避免单一 resolve 丢消息。 */
+    push?: (content: string) => void,
+    /** 收集一段空闲窗口内的多条机器人消息。 */
+    waitFor?: (timeoutMs?: number, settleMs?: number, maxMessages?: number) => Promise<string[]>
 }

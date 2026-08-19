@@ -4,6 +4,8 @@
 /* eslint-disable no-var */
 interface NetApi {
     callApi(epId: string, action: string, params?: any): Promise<any>;
+    /** 统一发送文件；Milky 端点会改用 upload_*_file，OB11 端点发送 file 消息段 */
+    sendFile?(epId: string, scene: 'group' | 'private', peerId: string | number, file: string, name: string, parentFolderId?: string): Promise<any>;
     /** 订阅依赖的事件分发（ob11 网络连接依赖：milky → OB11 转接的额外消息段） */
     getEventDispatcher?(ext: any, key?: string): Promise<any>;
     /** milky 消息引用 <-> OB11 唯一 message_id 双向转换（本地计算） */

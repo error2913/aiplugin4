@@ -4,11 +4,11 @@ import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
-import Tool from "./tool/tool";
+import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
-import { expandMilkySegments, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
+import { expandMilkySegments, formatFileSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
 import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
 /** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
@@ -106,8 +106,8 @@ export class MessagePipeline {
                     break;
                 }
                 case 'file': {
-                    // milky 转接与 NapCat 的 file 段字段略有差异（file/name/file_id），统一取可用值
-                    result.push({ type: 'text', data: { text: `【文件】${data.name || data.file || data.file_id || ''}` } });
+                    // 保留文件名之外的 path/url/file_id 等字段，供 AI 继续调用文件工具读取或导入。
+                    result.push({ type: 'text', data: { text: formatFileSegmentText(data) } });
                     break;
                 }
                 case 'video': {
@@ -318,7 +318,7 @@ export class MessagePipeline {
             : transformTextToArray(message);
         // 正则匹配统一使用可读文本：原生路径保持原字符串，数组路径用展开后的文本
         const messageText = Array.isArray(ob11Segments) || hasMilkySegments || Array.isArray(message)
-            ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
+            ? formatMessageSegmentsForMatching(messageArray, typeof message === 'string' ? message : '')
             : message;
         if (hasMilkySegments) {
             logger.debug(`[debug] milky 消息段展开: ${messageText.slice(0, 200)}`);
@@ -428,10 +428,8 @@ export class MessagePipeline {
         }
     }
 
-    /** 指令消息：记录 cmdArgs，并按配置决定是否写入会话上下文 */
-    static handleCommand(ctx: seal.MsgContext, msg: seal.Message, cmdArgs: seal.CmdArgs): void {
-        // 每次收到指令都刷新当前会话的 cmdArgs，供 run_command 等指令工具复用最新指令对象
-        Tool.setCmdArgs(ctx, cmdArgs);
+    /** 指令消息：按配置决定是否写入会话上下文 */
+    static handleCommand(ctx: seal.MsgContext, msg: seal.Message): void {
 
         const { RECEIVE_CMD: allcmd } = Config.received;
         if (!allcmd) return;
@@ -476,7 +474,11 @@ export class MessagePipeline {
             ? messageArray.map(item => item.type === 'text' ? ((item.data && item.data.text) || '') : `[${item.type}]`).join('')
             : message;
 
-        session.tool.listen.resolve?.(messageText); // 将消息传递给监听工具
+        const captured = dispatchLocalCommandOutput(sid, messageText);
+        if (!captured) {
+            const deliver = session.tool.listen.push || session.tool.listen.resolve;
+            deliver?.(messageText);
+        }
 
         const { RECEIVE_MSG_BY_BOT: allmsg } = Config.received;
         if (!allmsg) return;

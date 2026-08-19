@@ -1,123 +1,54 @@
-// ob11 API 封装：消息/群/好友/禁言等
-import { logger } from "../logger";
+// OB11 运行时工具：只保留统一调用与转发文本解析，不保留按 action 的旧包装函数。
+import Logger from "../logger";
+import { callOb11ApiDirect, hasOb11Network } from "../transport/ob11/dispatcher";
 
-import { MessageSegment, parseCardToText, parseMusicToText } from "./string";
+import { parseCardToText, parseMusicToText } from "./string";
 
-/** 合并转发/消息节点展开的最大嵌套深度，防止恶意或异常嵌套导致无限递归 */
 const MAX_FORWARD_DEPTH = 5;
 
-export function getNet() {
-    const net = globalThis.net;
-    if (!net) {
-        logger.warning(`未找到ob11网络连接依赖`);
-        return null;
-    }
-    return net;
-}
-
 export function netExists(): boolean {
-    const net = globalThis.net;
-    return net !== null && net !== undefined;
+    return hasOb11Network();
 }
 
-export async function sendPrivateMsg(epId: string, user_id: string, message: MessageSegment[]): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'send_private_msg', {
-            user_id,
-            message
-        })
-        return data;
-    } catch (_e) {
-        logger.error(`发送私聊消息失败`);
-        return null;
-    }
+export async function callOb11Api(epId: string, action: string, params: Record<string, any> = {}): Promise<any | null> {
+    return callOb11ApiDirect(epId, action, params);
 }
 
-export async function sendGroupMsg(epId: string, group_id: string, message: MessageSegment[]): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'send_group_msg', {
-            group_id,
-            message
-        })
-        return data;
-    } catch (_e) {
-        logger.error(`发送群聊消息失败`);
-        return null;
-    }
+async function getForwardMessage(epId: string, id: string): Promise<any[]> {
+    const data = await callOb11Api(epId, "get_forward_msg", { id });
+    if (!data) return [];
+    if (Array.isArray(data.message)) return data.message;
+    if (Array.isArray(data.messages)) return data.messages;
+    return [];
 }
 
-export async function getStrangerInfo(epId: string, user_id: string): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_stranger_info', {
-            user_id,
-            no_cache: true
-        })
-        return data;
-    } catch (e) {
-        logger.error(`获取用户 ${user_id} 信息失败：${e}`);
-        return null;
-    }
-}
-
-/** 获取合并转发消息（OneBot get_forward_msg），返回消息数组。
- * 兼容 ob11 网络连接依赖 milky 转接的两种返回形态（均为 message 数组）：
- *  - 平铺: [{ user_id, nickname, time, message: [...] }]
- *  - node: [{ type: 'node', data: { user_id, nickname, time, content: [...] } }] */
-export async function getForwardMessage(epId: string, id: string): Promise<any[]> {
-    const net = getNet();
-    if (!net) return [];
-    try {
-        const data = await net.callApi(epId, 'get_forward_msg', { id });
-        if (!data) return [];
-        if (Array.isArray(data.message)) return data.message;
-        if (Array.isArray(data.messages)) return data.messages;
-        return [];
-    } catch (e) {
-        logger.error(`获取合并转发消息 ${id} 失败：${e}`);
-        return [];
-    }
-}
-
-/** 合并转发单条消息内容转可读文本（支持嵌套 forward） */
 async function forwardSegmentsToText(epId: string, message: any, depth: number, visited: Set<string>): Promise<string> {
-    if (depth > MAX_FORWARD_DEPTH) return '[消息嵌套过深，已截断]';
-    if (typeof message === 'string') return message;
-    if (!Array.isArray(message)) return '';
+    if (depth > MAX_FORWARD_DEPTH) return "[消息嵌套过深，已截断]";
+    if (typeof message === "string") return message;
+    if (!Array.isArray(message)) return "";
 
-    let text = '';
+    let text = "";
     for (const seg of message) {
-        if (!seg || typeof seg !== 'object') continue;
+        if (!seg || typeof seg !== "object") continue;
         switch (seg.type) {
-            case 'text': text += (seg.data && seg.data.text) || ''; break;
-            case 'at': text += `@${(seg.data && seg.data.qq) || ''} `; break;
-            case 'face': text += `[表情${(seg.data && seg.data.id) || ''}]`; break;
-            case 'image': text += '[图片]'; break;
-            case 'record': text += '【语音】'; break;
-            case 'video': text += `【视频】${(seg.data && (seg.data.file || seg.data.url)) || ''}`; break;
-            case 'file': text += `【文件】${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || ''}`; break;
-            case 'json': text += parseCardToText(seg.data && seg.data.data); break;
-            case 'music': text += parseMusicToText(seg.data || {}); break;
-            case 'node': {
-                // 嵌套消息节点：复用整条消息的渲染逻辑（含发送者名）
-                text += await forwardMessagesToText(epId, [seg], depth + 1, visited);
-                break;
-            }
-            case 'forward': {
-                const fid = (seg.data && seg.data.id) || '';
-                // 已展开过的转发 id 直接截断，防止循环引用或反复拉取同一转发
+            case "text": text += (seg.data && seg.data.text) || ""; break;
+            case "at": text += `@${(seg.data && (seg.data.qq || seg.data.user_id)) || ""} `; break;
+            case "face": text += `[表情${(seg.data && seg.data.id) || ""}]`; break;
+            case "image": text += "[图片]"; break;
+            case "record": text += "【语音】"; break;
+            case "video": text += `【视频】${(seg.data && (seg.data.file || seg.data.url)) || ""}`; break;
+            case "file": text += `【文件】${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || ""}`; break;
+            case "json": text += parseCardToText(seg.data && (seg.data.data || seg.data.content)); break;
+            case "music": text += parseMusicToText(seg.data || {}); break;
+            case "node": text += await forwardMessagesToText(epId, [seg], depth + 1, visited); break;
+            case "forward": {
+                const fid = (seg.data && seg.data.id) || "";
                 if (!fid || visited.has(String(fid))) {
-                    text += '[合并转发循环引用，已截断]';
+                    text += "[合并转发循环引用，已截断]";
                     break;
                 }
                 visited.add(String(fid));
-                const sub = await getForwardMessage(epId, String(fid));
-                text += await forwardMessagesToText(epId, sub, depth + 1, visited);
+                text += await forwardMessagesToText(epId, await getForwardMessage(epId, String(fid)), depth + 1, visited);
                 break;
             }
             default: text += `[${seg.type}]`;
@@ -126,267 +57,26 @@ async function forwardSegmentsToText(epId: string, message: any, depth: number, 
     return text;
 }
 
-/** 合并转发消息数组转可读文本（发送者 + 内容） */
-async function forwardMessagesToText(epId: string, messages: any[], depth: number = 0, visited: Set<string> = new Set()): Promise<string> {
-    if (depth > MAX_FORWARD_DEPTH) return '[消息嵌套过深，已截断]';
+async function forwardMessagesToText(epId: string, messages: any[], depth = 0, visited: Set<string> = new Set()): Promise<string> {
+    if (depth > MAX_FORWARD_DEPTH) return "[消息嵌套过深，已截断]";
     const lines: string[] = [];
-    for (const m of messages) {
-        if (!m || typeof m !== 'object') continue;
-        // milky 转接的 node 形态：内容在 data.content；平铺形态：内容在 message
-        const nodeData = m.type === 'node' ? (m.data || {}) : null;
-        const sender = nodeData || m.sender || {};
-        const name = sender.card || sender.nickname || `用户${sender.user_id || ''}`;
-        const content = await forwardSegmentsToText(epId, nodeData ? nodeData.content : m.message, depth + 1, visited);
+    for (const message of messages) {
+        if (!message || typeof message !== "object") continue;
+        const nodeData = message.type === "node" ? message.data || {} : null;
+        const sender = nodeData || message.sender || {};
+        const name = sender.card || sender.nickname || `用户${sender.user_id || ""}`;
+        const content = await forwardSegmentsToText(epId, nodeData ? nodeData.content : message.message, depth + 1, visited);
         lines.push(`${name}: ${content}`);
     }
-    return lines.join('\n');
+    return lines.join("\n");
 }
 
-/** 展开合并转发消息 id，返回可读文本（含嵌套） */
-export async function expandForwardMessage(epId: string, id: string, depth: number = 0): Promise<string> {
-    const messages = await getForwardMessage(epId, id);
-    return forwardMessagesToText(epId, messages, depth + 1);
-}
-
-export async function getGroupMemberInfo(epId: string, group_id: string, user_id: string): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
+export async function expandForwardMessage(epId: string, id: string, depth = 0): Promise<string> {
+    if (!netExists()) return "[未安装 ob11 网络连接依赖，无法展开合并转发]";
     try {
-        const data = await net.callApi(epId, 'get_group_member_info', {
-            group_id,
-            user_id,
-            no_cache: true
-        })
-        return data;
-    } catch (e) {
-        logger.error(`获取群 ${group_id} 用户 ${user_id} 信息失败：${e}`);
-        return null;
-    }
-}
-
-export async function getGroupMemberList(epId: string, group_id: string): Promise<any[] | null> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_group_member_list', {
-            group_id,
-            no_cache: true
-        })
-        return data;
-    } catch (e) {
-        logger.error(`获取群 ${group_id} 成员列表失败：${e}`);
-        return null;
-    }
-}
-
-export async function getFriendList(epId: string): Promise<any[] | null> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_friend_list');
-        return data;
-    } catch (e) {
-        logger.error(`获取好友列表失败：${e}`);
-        return null;
-    }
-}
-
-export async function getGroupList(epId: string): Promise<any[] | null> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_group_list');
-        return data;
-    } catch (e) {
-        logger.error(`获取群列表失败：${e}`);
-        return null;
-    }
-}
-
-export async function setGroupBan(epId: string, group_id: string, user_id: string, duration: number = 0): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'set_group_ban', {
-            group_id,
-            user_id,
-            duration
-        })
-    } catch (e) {
-        logger.error(`设置群 ${group_id} 用户 ${user_id} 禁言失败：${e}`);
-        return;
-    }
-}
-
-export async function setGroupWholeBan(epId: string, group_id: string, enable: boolean): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'set_group_whole_ban', {
-            group_id,
-            enable
-        })
-    } catch (e) {
-        logger.error(`设置群 ${group_id} 全员禁言失败：${e}`);
-        return;
-    }
-}
-
-export async function getGroupShutList(epId: string, group_id: string): Promise<any[] | null> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_group_shut_list', {
-            group_id,
-            no_cache: true
-        })
-        return data;
-    } catch (e) {
-        logger.error(`获取群 ${group_id} 关闭列表失败：${e}`);
-        return null;
-    }
-}
-
-export async function setEssenceMsg(epId: string, message_id: number): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'set_essence_msg', {
-            message_id
-        })
-    } catch (e) {
-        logger.error(`设置消息 ${message_id} 精华消息失败：${e}`);
-        return;
-    }
-}
-
-export async function getEssenceMsgList(epId: string, group_id: string): Promise<any[] | null> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_essence_msg_list', {
-            group_id,
-            no_cache: true
-        })
-        return data;
-    } catch (e) {
-        logger.error(`获取群 ${group_id} 精华消息列表失败：${e}`);
-        return null;
-    }
-}
-
-export async function deleteEssenceMsg(epId: string, message_id: number): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'delete_essence_msg', {
-            message_id
-        })
-    } catch (e) {
-        logger.error(`删除消息 ${message_id} 精华消息失败：${e}`);
-        return;
-    }
-}
-
-export async function sendGroupSign(epId: string, group_id: string): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'send_group_sign', {
-            group_id
-        });
-    } catch (e) {
-        logger.error(`发送群 ${group_id} 签名失败：${e}`);
-        return;
-    }
-}
-
-export async function getMsg(epId: string, message_id: number): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'get_msg', {
-            message_id
-        })
-        return data;
-    } catch (e) {
-        logger.error(`获取消息 ${message_id} 失败：${e}`);
-        return null;
-    }
-}
-
-export async function deleteMsg(epId: string, message_id: number): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'delete_msg', {
-            message_id
-        })
-    } catch (e) {
-        logger.error(`删除消息 ${message_id} 失败：${e}`);
-        return;
-    }
-}
-
-export async function sendGroupAISound(epId: string, characterId: string, group_id: string, text: string): Promise<void> {
-    const net = getNet();
-    if (!net) return;
-    try {
-        await net.callApi(epId, 'send_group_ai_record', {
-            character: characterId,
-            group_id,
-            text
-        });
-    } catch (e) {
-        logger.error(`发送群 ${group_id} AI 声聊合成语音失败：${e}`);
-        return;
-    }
-}
-
-export async function sendPrivateForwardMsg(epId: string, user_id: string,
-    messages: any[],
-    news: string[],
-    prompt: string,
-    summary: string,
-    source: string): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'send_private_forward_msg', {
-            user_id,
-            messages,
-            news,
-            prompt,
-            summary,
-            source
-        })
-        return data;
-    } catch (e) {
-        logger.error(`发送用户 ${user_id} 转发消息失败：${e}`);
-        return null;
-    }
-}
-
-export async function sendGroupForwardMsg(epId: string, group_id: string,
-    messages: any[],
-    news: string[],
-    prompt: string,
-    summary: string,
-    source: string): Promise<any> {
-    const net = getNet();
-    if (!net) return null;
-    try {
-        const data = await net.callApi(epId, 'send_group_forward_msg', {
-            group_id,
-            messages,
-            news,
-            prompt,
-            summary,
-            source
-        })
-        return data;
-    } catch (e) {
-        logger.error(`发送群 ${group_id} 转发消息失败：${e}`);
-        return null;
+        return await forwardMessagesToText(epId, await getForwardMessage(epId, id), depth + 1);
+    } catch (error) {
+        Logger.error(`展开合并转发 ${id} 失败：${error instanceof Error ? error.message : String(error)}`);
+        return "[合并转发展开失败]";
     }
 }

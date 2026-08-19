@@ -9,6 +9,7 @@ import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { buildContent } from "../utils/message";
 import { stripInternalTags, truncateText } from "../utils/string";
+import { normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor } from "../utils/utils";
 
 import MemoryService from "./memory";
@@ -97,11 +98,11 @@ export default class SessionMemoryService extends MemoryService {
                 content: string,
                 memories: {
                     memory_type: 'private' | 'group',
-                    name: string,
+                    target_id: string,
                     text: string,
                     keywords?: string[],
-                    userList?: string[],
-                    groupList?: string[],
+                    related_user_ids?: string[],
+                    related_group_ids?: string[],
                     visibility?: 'public' | 'private',
                 }[]
             };
@@ -115,14 +116,12 @@ export default class SessionMemoryService extends MemoryService {
             this.limitSummaries();
             bumpSummaryRevision();
 
-            // 与 add_memory 工具一致：按 memory_type/name 决定记忆归属（个人→目标用户会话，群聊→目标群会话）。
-            // 模型不保证遵守模板：memories 缺失/非数组时跳过落库（摘要仍保留），逐条定位失败仅跳过该条，
-            // 缺失/未知 memory_type 时兜底归属当前会话（总结的就是当前对话）
+            // 与 add_memory 工具一致：按 memory_type/target_id 决定记忆归属。
+            // 目标字段只接受 ID；缺少 target_id 时，仅允许当前会话作为摘要归属，不读取任何旧字段。
             const memoryItems = memoryData.memories;
             if (!Array.isArray(memoryItems)) {
                 Logger.warning('总结记忆：模型返回的 memories 不是数组，本次不落库记忆');
             } else {
-                const lastCtx = this.session.lastCtx;
                 const sessionIsGroup = this.session.sessionType === 'group';
                 let successCount = 0;
                 let fallbackCount = 0;
@@ -135,71 +134,66 @@ export default class SessionMemoryService extends MemoryService {
                     const normalizedVisibility: 'public' | 'private' = m.visibility === 'private' ? 'private' : 'public';
                     let targetSession: Session | null = null;
                     if (m.memory_type === 'private') {
-                        // 与 add_memory 一致：name 存在时按名称定位目标用户，缺失时仅当前私聊会话可作归属
-                        if (m.name) {
-                            if (!lastCtx) {
-                                skipped.push('无可用上下文，无法定位个人记忆目标');
+                        if (m.target_id) {
+                            const targetId = normalizeUserId(m.target_id);
+                            if (!targetId) {
+                                skipped.push(`用户目标ID格式无效<${m.target_id}>`);
                                 continue;
                             }
-                            const ui = await this.session.context.findUser(lastCtx, m.name, true);
-                            if (ui === null) {
-                                skipped.push(`未找到用户<${m.name}>`);
-                                continue;
-                            }
-                            // 与 add_memory 工具（getSession → Agent.get('*')）一致，避免引入循环依赖
-                            targetSession = Agent.get('*').sessionService.getSession(ui.userId);
+                            targetSession = Agent.get('*').sessionService.getSession(targetId);
                         } else if (!sessionIsGroup) {
                             targetSession = this.session;
+                            fallbackCount++;
                         } else {
-                            skipped.push('缺少 name，无法定位个人记忆');
+                            skipped.push('缺少 target_id，无法定位个人记忆');
                             continue;
                         }
                     } else if (m.memory_type === 'group') {
-                        if (m.name) {
-                            if (!lastCtx) {
-                                skipped.push('无可用上下文，无法定位群聊记忆目标');
+                        if (m.target_id) {
+                            const targetId = normalizeGroupId(m.target_id);
+                            if (!targetId) {
+                                skipped.push(`群目标ID格式无效<${m.target_id}>`);
                                 continue;
                             }
-                            const gi = await this.session.context.findGroup(lastCtx, m.name);
-                            if (gi === null) {
-                                skipped.push(`未找到群聊<${m.name}>`);
-                                continue;
-                            }
-                            targetSession = Agent.get('*').sessionService.getSession(gi.groupId);
+                            targetSession = Agent.get('*').sessionService.getSession(targetId);
                         } else if (sessionIsGroup) {
                             targetSession = this.session;
+                            fallbackCount++;
                         } else {
-                            skipped.push('缺少 name，无法定位群聊记忆');
+                            skipped.push('缺少 target_id，无法定位群聊记忆');
                             continue;
                         }
                     } else {
-                        // 缺失/未知 memory_type：兜底归属当前会话
-                        if (m.memory_type) skipped.push(`未知 memory_type<${m.memory_type}>，按当前会话归属`);
-                        else skipped.push('缺少 memory_type，按当前会话归属');
+                        skipped.push(`未知 memory_type<${m.memory_type}>，按当前会话归属`);
                         fallbackCount++;
                         targetSession = this.session;
                     }
 
-                    // 与 add_memory 工具一致：解析相关用户/群聊名称列表；无可用上下文时跳过解析（不影响落库）
                     const uiList: UserInfo[] = [];
-                    if (lastCtx) {
-                        for (const n of (Array.isArray(m.userList) ? m.userList : [])) {
-                            const ui = await targetSession.context.findUser(lastCtx, n, true);
-                            if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
+                    for (const userId of (Array.isArray(m.related_user_ids) ? m.related_user_ids : [])) {
+                        const normalizedUserId = normalizeUserId(userId);
+                        if (!normalizedUserId) {
+                            skipped.push(`相关用户ID格式无效<${userId}>`);
+                            continue;
                         }
+                        const ui = targetSession.context.getUserById(normalizedUserId);
+                        if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
                     }
                     const giList: GroupInfo[] = [];
-                    if (lastCtx) {
-                        for (const n of (Array.isArray(m.groupList) ? m.groupList : [])) {
-                            const gi = await targetSession.context.findGroup(lastCtx, n);
-                            if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
+                    for (const groupId of (Array.isArray(m.related_group_ids) ? m.related_group_ids : [])) {
+                        const normalizedGroupId = normalizeGroupId(groupId);
+                        if (!normalizedGroupId) {
+                            skipped.push(`相关群ID格式无效<${groupId}>`);
+                            continue;
                         }
+                        const gi = targetSession.context.getGroupById(normalizedGroupId);
+                        if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
                     }
                     await targetSession.memory.addMemory(null, targetSession, uiList, giList, Array.isArray(m.keywords) ? m.keywords : [], [], m.text, normalizedVisibility);
                     successCount++;
                 }
                 if (skipped.length > 0) {
-                    Logger.warning(`总结记忆：成功写入 ${successCount} 条（含 ${fallbackCount} 条归属兜底），跳过 ${skipped.length} 条（${Array.from(new Set(skipped)).join('；')}）`);
+                    Logger.warning(`总结记忆：成功写入 ${successCount} 条（含 ${fallbackCount} 条当前会话归属），跳过 ${skipped.length} 条（${Array.from(new Set(skipped)).join('；')}）`);
                 }
             }
         } catch (e) {

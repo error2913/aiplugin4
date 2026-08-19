@@ -4,14 +4,13 @@ import Logger from "../logger"
 import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
-import { getSessionId } from "../utils/seal";
 import { fixJsonString } from "../utils/string";
 import { withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
 import { registerSkills } from "./skills";
 import { registerTools } from "./tools/init";
-import { ExtCmdInfo, ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolListen } from "./types";
+import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject } from "./types";
 
 export const toolMap: { [key: string]: Tool } = {};
 
@@ -24,8 +23,9 @@ export const CORE_TOOL_NAMES: string[] = [
     'search_tools', // 按需发现工具（返回完整参数说明）
     'call_tool',    // 统一执行入口（调用任意已开启工具）
     'use_skill',    // 技能调用
-    'run_command',  // 海豹指令调用
-    'get_cmd_help'  // 指令帮助
+    'call_ob11_api', // 唯一 OB11 API 调用入口
+    'run_ext_command',  // 扩展指令调用
+    'run_core_command' // 核心指令调用
 ];
 
 const ON_DEMAND_PROMPT_LIMIT = 20;
@@ -50,7 +50,6 @@ function formatParameterText(parameters: ToolInfoObject): string {
 
 export default class Tool {
     toolInfo: ToolInfo;
-    ExtCmdInfo: ExtCmdInfo; // 海豹指令信息
     sessionType: 'any' | SessionType; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
     sensitive: boolean; // 敏感工具（发送消息/封禁/改名等），调用会显著记录
@@ -59,11 +58,6 @@ export default class Tool {
     constructor(info: ToolInfo, sensitive = false) {
         this.toolInfo = info;
         this.sensitive = sensitive;
-        this.ExtCmdInfo = {
-            extName: '',
-            cmd: '',
-            staticArgs: []
-        }
         this.sessionType = "any";
         this.callBack = true;
         this.solve = async (_, __, ___, ____) => "函数未实现";
@@ -71,23 +65,9 @@ export default class Tool {
         toolMap[info.function.name] = this;
     }
 
-    // 按会话保存最近一次收到的指令 cmdArgs，避免多个会话共用同一可变对象相互污染
-    static cmdArgsMap: { [sid: string]: seal.CmdArgs } = {};
-
-    /** 刷新某会话的 cmdArgs（每次收到指令都会更新） */
-    static setCmdArgs(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs) {
-        Tool.cmdArgsMap[getSessionId(ctx)] = cmdArgs;
-    }
-
-    /** 获取某会话最近一次指令的 cmdArgs；未收到过指令时返回 undefined */
-    static getCmdArgs(ctx: seal.MsgContext): seal.CmdArgs | undefined {
-        return Tool.cmdArgsMap[getSessionId(ctx)];
-    }
-
     /** 清空工具注册表（用于测试/热重载） */
     static reset() {
         for (const key of Object.keys(toolMap)) delete toolMap[key];
-        Tool.cmdArgsMap = {};
     }
 
     static registerTool() {
@@ -97,62 +77,6 @@ export default class Tool {
     }
 
 
-
-    /**
-     * 利用预存的指令信息和额外输入的参数构建一个cmdArgs并调用solve函数，监听消息并返回结果
-     */
-    static async extensionSolve(ctx: seal.MsgContext, msg: seal.Message, listen: ToolListen, eci: ExtCmdInfo, args: string[], kwargs: seal.Kwarg[], at: seal.AtInfo[]): Promise<[string, boolean]> {
-        const cmdArgs = this.getCmdArgs(ctx);
-        if (!cmdArgs) {
-            Logger.warning('扩展指令调用失败：尚未收到过指令（cmdArgs 为空）');
-            return ['', false];
-        }
-        cmdArgs.command = eci.cmd;
-        cmdArgs.args = eci.staticArgs.concat(args);
-        cmdArgs.kwargs = kwargs;
-        cmdArgs.at = at;
-        cmdArgs.rawArgs = `${cmdArgs.args.join(' ')} ${kwargs.map(item => `--${item.name}${item.valueExists ? `=${item.value}` : ``}`).join(' ')}`;
-        cmdArgs.amIBeMentioned = at.findIndex(item => item.userId === ctx.endPoint.userId) !== -1;
-        cmdArgs.amIBeMentionedFirst = at?.[0]?.userId === ctx.endPoint.userId;
-        cmdArgs.cleanArgs = cmdArgs.args.join(' ');
-        cmdArgs.specialExecuteTimes = 0;
-        cmdArgs.rawText = `.${cmdArgs.command} ${cmdArgs.rawArgs} ${at.map(item => `[CQ:at,qq=${item.userId.replace(/^.+:/, '')}]`).join(' ')}`;
-
-        const ext = seal.ext.find(eci.extName);
-        if (!ext || !Object.prototype.hasOwnProperty.call(ext.cmdMap, eci.cmd)) {
-            Logger.warning(`扩展${eci.extName}未找到或缺少指令:${eci.cmd}`);
-            return ['', false];
-        }
-
-        listen.reject?.(new Error('中断当前监听'));
-
-        return new Promise((
-            resolve: (result: [string, boolean]) => void,
-            reject: (err: Error) => void
-        ) => {
-            listen.timeoutId = setTimeout(() => {
-                reject(new Error('监听消息超时'));
-                listen.cleanup();
-            }, 10 * 1000);
-            listen.resolve = (content: string) => {
-                resolve([content, true]);
-                listen.cleanup();
-            };
-            listen.reject = (err: Error) => {
-                reject(err);
-                listen.cleanup();
-            };
-            try {
-                ext.cmdMap[eci.cmd].solve(ctx, msg, cmdArgs);
-            } catch (err) {
-                reject(new Error(`solve中发生错误:${err instanceof Error ? err.message : String(err)}`));
-                listen.cleanup();
-            }
-        }).catch((err) => {
-            Logger.error(`在extensionSolve中: 调用函数失败:${err instanceof Error ? err.message : String(err)}`);
-            return ['', false];
-        });
-    }
 
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
@@ -166,11 +90,6 @@ export default class Tool {
         }
 
         const tool = toolMap[name];
-        if (tool.ExtCmdInfo.extName !== '' && !this.getCmdArgs(ctx)) {
-            Logger.warning(`暂时无法调用函数，请先使用 .r 指令`);
-            return { result: { tool_call_id: tool_call.id, content: `暂时无法调用函数，请先提示用户使用 .r 指令` }, callBack: true };
-        }
-
         const msgType = msg.messageType === 'private' ? 'user' : 'group';
         if (tool.sessionType !== "any" && tool.sessionType !== msgType) {
             Logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);

@@ -11,24 +11,24 @@ export function registerAttrSeal() {
             parameters: {
                 type: 'object',
                 properties: {
-                    name: {
+                    user_id: {
                         type: 'string',
-                        description: '用户名称或纯数字QQ号'
+                        description: '用户ID'
                     },
                     attr: {
                         type: 'string',
                         description: '属性名称'
                     }
                 },
-                required: ['name', 'attr']
+                required: ['user_id', 'attr']
             }
         }
     });
     toolGet.solve = async (ctx, _, session, args) => {
-        const { name, attr } = args;
+        const { user_id, attr } = args;
 
-        const ui = await session.context.findUser(ctx, name);
-        if (ui === null) return `未找到<${name}>`;
+        const ui = await session.context.getUserById(user_id);
+        if (ui === null) return `未找到用户ID<${user_id}>`;
 
         ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group!.groupId));
 
@@ -44,24 +44,24 @@ export function registerAttrSeal() {
             parameters: {
                 type: 'object',
                 properties: {
-                    name: {
+                    user_id: {
                         type: 'string',
-                        description: '用户名称或纯数字QQ号'
+                        description: '用户ID'
                     },
                     expression: {
                         type: 'string',
                         description: '修改表达式，例如`hp=hp+1d6`就是将hp的值修改为hp+1d6'
                     }
                 },
-                required: ['name', 'expression']
+                required: ['user_id', 'expression']
             }
         }
     });
     toolSet.solve = async (ctx, msg, session, args) => {
-        const { name, expression } = args;
+        const { user_id, expression } = args;
 
-        const ui = await session.context.findUser(ctx, name);
-        if (ui === null) return `未找到<${name}>`;
+        const ui = await session.context.getUserById(user_id);
+        if (ui === null) return `未找到用户ID<${user_id}>`;
 
         ({ ctx, msg } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ctx.group!.groupId));
 

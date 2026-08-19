@@ -18,29 +18,29 @@ export function registerContext() {
                         description: "上下文类型，私聊或群聊",
                         enum: ["private", "group"]
                     },
-                    name: {
+                    target_id: {
                         type: 'string',
-                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与上下文类型对应'
+                        description: '目标用户ID或群ID，与上下文类型对应，不支持使用名称'
                     }
                 },
-                required: ["ctx_type", "name"]
+                required: ["ctx_type", "target_id"]
             }
         }
     });
     toolGet.solve = async (ctx, _, session, args) => {
-        const { ctx_type, name } = args;
+        const { ctx_type, target_id } = args;
 
         if (ctx_type === "private") {
-            const ui = await session.context.findUser(ctx, name, true);
-            if (ui === null) return `未找到<${name}>`;
+            const ui = await session.context.getUserById(target_id);
+            if (ui === null) return `未找到目标ID<${target_id}>`;
             if (ui.userId === ctx.player!.userId && ctx.isPrivate) return `向当前私聊发送消息无需调用函数`;
             if (ui.userId === ctx.endPoint.userId) return `禁止向自己发送消息`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             session = getSession(ui.userId);
         } else if (ctx_type === "group") {
-            const gi = await session.context.findGroup(ctx, name);
-            if (gi === null) return `未找到<${name}>`;
+            const gi = await session.context.getGroupById(target_id);
+            if (gi === null) return `未找到目标ID<${target_id}>`;
             if (gi.groupId === ctx.group!.groupId) return `向当前群聊发送消息无需调用函数`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));

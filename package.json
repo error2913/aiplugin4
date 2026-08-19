@@ -1,6 +1,6 @@
 {
   "name": "aiplugin4",
-  "version": "4.15.2",
+  "version": "4.16.0",
   "description": "ai plugin for sealdice",
   "main": "build/index.js",
   "typings": "build/index.d.ts",
@@ -11,6 +11,7 @@
     "build": "cross-env NODE_ENV=production node tools/build.js",
     "build-dev": "cross-env NODE_ENV=dev node tools/build.js",
     "smoke": "node scripts/smoke.js",
+    "test:ob11": "node scripts/test-ob11-runtime.cjs",
     "lint": "eslint \"src/**/*.ts\"",
     "package:check": "npm run build && node scripts/prepare-sealpack.js && sealpack validate sealpack && sealpack size sealpack",
     "pack:sealpack": "node scripts/prepare-sealpack.js && sealpack pack sealpack --out dist/aiplugin4.sealpack",

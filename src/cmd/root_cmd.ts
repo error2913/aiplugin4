@@ -134,11 +134,12 @@ export function registerCmd() {
                 }
 
                 // 兜住子命令异步异常，避免“无响应”（SealDice 不会消费未捕获的 Promise 拒绝）
-                return Promise.resolve(SubCmd.map[subCmd].solve({ ctx, msg, cmdArgs, epId, uid, gid, sid, session, page, ret })).catch((e) => {
+                // 同步返回 ret：新版 seal.d.ts 中 solve 仅接受同步 CmdExecuteResult
+                void Promise.resolve(SubCmd.map[subCmd].solve({ ctx, msg, cmdArgs, epId, uid, gid, sid, session, page, ret })).catch((e) => {
                     logger.error(`指令.ai执行失败:${e.message}`);
                     seal.replyToSender(ctx, msg, `指令.ai执行失败:${e.message}`);
-                    return ret;
                 });
+                return ret;
             } else if (subCmd === 'help') {
                 // .ai help <一级子指令>：查看对应子命令帮助；不带参数时展示根命令帮助
                 const target = aliasToCmd(cmdArgs.getArgN(2));

@@ -16,42 +16,42 @@ export function registerBlockTool() {
             parameters: {
                 type: 'object',
                 properties: {
-                    name: {
+                    user_id: {
                         type: 'string',
-                        description: '用户名称或纯数字QQ号'
+                        description: '用户ID'
                     },
                     reason: {
                         type: 'string',
                         description: '建议拉黑原因'
                     }
                 },
-                required: ['name', 'reason']
+                required: ['user_id', 'reason']
             }
         }
     });
     toolSuggestBlock.solve = async (ctx, _msg, session, args) => {
-        const { name, reason } = args;
+        const { user_id, reason } = args;
 
-        const ui = await session.context.findUser(ctx, name);
-        if (!ui) return `未找到<${name}>`;
+        const ui = await session.context.getUserById(user_id);
+        if (!ui) return `未找到用户ID<${user_id}>`;
 
         if (BlockManager.checkBlock(ui.userId)) {
-            return `用户<${name}>已经在黑名单中`;
+            return `用户ID<${user_id}>已经在黑名单中`;
         }
 
         const last = suggestCooldown[ui.userId];
         if (last && Date.now() - last < SUGGEST_COOLDOWN_MS) {
             const remain = Math.ceil((SUGGEST_COOLDOWN_MS - (Date.now() - last)) / 1000);
-            return `已建议过拉黑<${name}>，冷却中（剩余约 ${remain} 秒），等待骰主处理`;
+            return `已建议过拉黑用户ID<${user_id}>，冷却中（剩余约 ${remain} 秒），等待骰主处理`;
         }
 
         suggestCooldown[ui.userId] = Date.now();
         if (Config.tool.BLOCK_REQUIRE_OWNER_CONFIRM) {
-            ctx.notice(`AI 建议拉黑用户<${name}>(${ui.userId})，原因: ${reason}。骰主可执行 .ai block add ${ui.userId} <原因> 确认拉黑`);
-            return `已向骰主建议拉黑<${name}>，原因: ${reason}，等待骰主确认`;
+            ctx.notice(`AI 建议拉黑用户ID<${ui.userId}>，原因: ${reason}。骰主可执行 .ai block add ${ui.userId} <原因> 确认拉黑`);
+            return `已向骰主建议拉黑用户ID<${ui.userId}>，原因: ${reason}，等待骰主确认`;
         }
         BlockManager.addBlock(ui.userId, `${reason}（AI 自动拉黑，已关闭骰主确认）`);
-        return `已直接拉黑<${name}>（原因: ${reason}），其消息将不再触发 AI`;
+        return `已直接拉黑用户ID<${ui.userId}>（原因: ${reason}），其消息将不再触发 AI`;
     }
 
     // 移除黑名单（骰主指令之外的补充入口）
@@ -63,25 +63,25 @@ export function registerBlockTool() {
             parameters: {
                 type: 'object',
                 properties: {
-                    name: {
+                    user_id: {
                         type: 'string',
-                        description: '用户名称或纯数字QQ号'
+                        description: '用户ID'
                     }
                 },
-                required: ['name']
+                required: ['user_id']
             }
         }
     });
-    toolUnblock.solve = async (ctx, _msg, session, args) => {
-        const { name } = args;
+    toolUnblock.solve = async (_ctx, _msg, session, args) => {
+        const { user_id } = args;
 
-        const ui = await session.context.findUser(ctx, name);
-        if (!ui) return `未找到<${name}>`;
+        const ui = await session.context.getUserById(user_id);
+        if (!ui) return `未找到用户ID<${user_id}>`;
 
         if (BlockManager.removeBlock(ui.userId)) {
-            return `已将<${name}>移出黑名单`;
+            return `已将用户ID<${user_id}>移出黑名单`;
         }
-        return `用户<${name}>不在黑名单中`;
+        return `用户ID<${user_id}>不在黑名单中`;
     }
 
     // 查看黑名单列表

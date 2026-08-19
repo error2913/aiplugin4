@@ -20,7 +20,7 @@ export default class BackendConfig {
             USAGE_CHART: seal.ext.getStringConfig(ext, "用量图表"),
             FORUM_URL: seal.ext.getStringConfig(ext, "论坛地址"),
             FORUM_API_TOKEN: seal.ext.getStringConfig(ext, "论坛API Token"),
-            FORUM_SECRET_KEY: seal.ext.getStringConfig(ext, "论坛签名密钥")
+            FORUM_SECRET_KEY: seal.ext.getStringConfig(ext, "论坛签名密钥"),
         }
     }
 }

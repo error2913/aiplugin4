@@ -4,6 +4,7 @@ import { searchOptions as SearchOptions } from "../../../memory/types";
 import { getSession, SessionService } from "../../../session/session_service";
 import { GroupInfo, SessionInfo, UserInfo } from "../../../session/types";
 import { getCtxAndMsg } from "../../../utils/seal";
+import { normalizeGroupId, normalizeUserId } from "../../../utils/target_id";
 import Tool from "../../tool";
 
 export function registerMemory() {
@@ -20,9 +21,9 @@ export function registerMemory() {
                         description: "记忆归属，个人或群聊（决定存到哪个会话），与可见性无关。",
                         enum: ["private", "group"]
                     },
-                    name: {
+                    target_id: {
                         type: 'string',
-                        description: '目标用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
+                        description: '目标用户ID或群ID，实际使用时与记忆类型对应'
                     },
                     text: {
                         type: 'string',
@@ -30,21 +31,21 @@ export function registerMemory() {
                     },
                     keywords: {
                         type: 'array',
-                        description: '相关用户名称列表',
+                        description: '相关用户ID列表',
                         items: {
                             type: 'string'
                         }
                     },
-                    userList: {
+                    related_user_ids: {
                         type: 'array',
-                        description: '相关用户名称列表',
+                        description: '相关用户ID列表',
                         items: {
                             type: 'string'
                         }
                     },
-                    groupList: {
+                    related_group_ids: {
                         type: 'array',
-                        description: '相关群聊名称列表',
+                        description: '相关群ID列表',
                         items: {
                             type: 'string'
                         }
@@ -55,24 +56,28 @@ export function registerMemory() {
                         enum: ['public', 'private']
                     }
                 },
-                required: ['memory_type', 'name', 'text']
+                required: ['memory_type', 'target_id', 'text']
             }
         }
     });
     toolAdd.solve = async (ctx, _, session, args) => {
-        const { memory_type, name, text, keywords = [], userList = [], groupList = [], visibility = 'public' } = args;
+        const { memory_type, target_id, text, keywords = [], related_user_ids = [], related_group_ids = [], visibility = 'public' } = args;
         // 规范化可见性，避免模型传入非法枚举值
         const normalizedVisibility: 'public' | 'private' = visibility === 'private' ? 'private' : 'public';
 
         if (memory_type === "private") {
-            const ui = await session.context.findUser(ctx, name, true);
-            if (ui === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeUserId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const ui = session.context.getUserById(normalizedTargetId);
+            if (ui === null) return `未找到目标ID<${target_id}>`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             session = getSession(ui.userId);
         } else if (memory_type === "group") {
-            const gi = await session.context.findGroup(ctx, name);
-            if (gi === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeGroupId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const gi = session.context.getGroupById(normalizedTargetId);
+            if (gi === null) return `未找到目标ID<${target_id}>`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);
@@ -81,13 +86,17 @@ export function registerMemory() {
         }
 
         const uiList: UserInfo[] = [];
-        for (const n of userList) {
-            const ui = await session.context.findUser(ctx, n, true);
+        for (const n of related_user_ids) {
+            const normalizedUserId = normalizeUserId(n);
+            if (normalizedUserId === null) return `相关用户ID格式无效<${n}>`;
+            const ui = session.context.getUserById(normalizedUserId);
             if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
         }
         const giList: GroupInfo[] = [];
-        for (const n of groupList) {
-            const gi = await session.context.findGroup(ctx, n);
+        for (const n of related_group_ids) {
+            const normalizedGroupId = normalizeGroupId(n);
+            if (normalizedGroupId === null) return `相关群ID格式无效<${n}>`;
+            const gi = session.context.getGroupById(normalizedGroupId);
             if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
         }
 
@@ -111,9 +120,9 @@ export function registerMemory() {
                         description: "记忆类型，个人或群聊。",
                         enum: ["private", "group"]
                     },
-                    name: {
+                    target_id: {
                         type: 'string',
-                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
+                        description: '目标用户ID或群ID，实际使用时与记忆类型对应'
                     },
                     id_list: {
                         type: 'array',
@@ -130,24 +139,28 @@ export function registerMemory() {
                         }
                     }
                 },
-                required: ['memory_type', 'name', 'id_list', 'keywords']
+                required: ['memory_type', 'target_id', 'id_list', 'keywords']
             }
         }
     });
     toolDel.solve = async (ctx, _, session, args) => {
-        const { memory_type, name, id_list, keywords } = args;
+        const { memory_type, target_id, id_list, keywords } = args;
         // 记录调用方会话：与 search_memory 一致，其他会话创建的私有记忆不可删除
         const callerSessionId = session.sessionId;
 
         if (memory_type === "private") {
-            const ui = await session.context.findUser(ctx, name, true);
-            if (ui === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeUserId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const ui = session.context.getUserById(normalizedTargetId);
+            if (ui === null) return `未找到目标ID<${target_id}>`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             session = getSession(ui.userId);
         } else if (memory_type === "group") {
-            const gi = await session.context.findGroup(ctx, name);
-            if (gi === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeGroupId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const gi = session.context.getGroupById(normalizedTargetId);
+            if (gi === null) return `未找到目标ID<${target_id}>`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);
@@ -196,9 +209,9 @@ export function registerMemory() {
                         description: "记忆类型，个人或群聊",
                         enum: ["private", "group"]
                     },
-                    name: {
+                    target_id: {
                         type: 'string',
-                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
+                        description: '目标用户ID或群ID，实际使用时与记忆类型对应'
                     },
                     query: {
                         type: 'string',
@@ -210,21 +223,21 @@ export function registerMemory() {
                     },
                     keywords: {
                         type: 'array',
-                        description: '相关用户名称列表',
+                        description: '相关用户ID列表',
                         items: {
                             type: 'string'
                         }
                     },
-                    userList: {
+                    related_user_ids: {
                         type: 'array',
-                        description: '相关用户名称列表',
+                        description: '相关用户ID列表',
                         items: {
                             type: 'string'
                         }
                     },
-                    groupList: {
+                    related_group_ids: {
                         type: 'array',
-                        description: '相关群聊名称列表',
+                        description: '相关群ID列表',
                         items: {
                             type: 'string'
                         }
@@ -239,26 +252,30 @@ export function registerMemory() {
                         enum: ['similarity', 'score', 'early', 'late', 'recent']
                     }
                 },
-                required: ['memory_type']
+                required: ['memory_type', 'target_id']
             }
         }
     });
     toolSearch.solve = async (ctx, _, session, args) => {
-        const { memory_type, name = '', query = '', topK = 5, keywords = [], userList = [], groupList = [], method = 'similarity' } = args;
+        const { memory_type, target_id, query = '', topK = 5, keywords = [], related_user_ids = [], related_group_ids = [], method = 'similarity' } = args;
         // 记录调用方会话：私有记忆只对创建它的会话可见，搜索其他会话时按调用方会话过滤
         const callerSessionId = session.sessionId;
 
         let si: SessionInfo;
         if (memory_type === "private") {
-            const ui = await session.context.findUser(ctx, name, true);
-            if (ui === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeUserId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const ui = session.context.getUserById(normalizedTargetId);
+            if (ui === null) return `未找到目标ID<${target_id}>`;
 
             si = { isPrivate: true, id: ui.userId, name: ui.userName || ui.userId };
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             session = getSession(ui.userId);
         } else if (memory_type === "group") {
-            const gi = await session.context.findGroup(ctx, name);
-            if (gi === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeGroupId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const gi = session.context.getGroupById(normalizedTargetId);
+            if (gi === null) return `未找到目标ID<${target_id}>`;
 
             si = { isPrivate: false, id: gi.groupId, name: gi.groupName || gi.groupId };
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
@@ -270,13 +287,17 @@ export function registerMemory() {
         if (session.memory.memoryIds.length === 0) return `暂无记忆`;
 
         const uiList: UserInfo[] = [];
-        for (const n of userList) {
-            const ui = await session.context.findUser(ctx, n, true);
+        for (const n of related_user_ids) {
+            const normalizedUserId = normalizeUserId(n);
+            if (normalizedUserId === null) return `相关用户ID格式无效<${n}>`;
+            const ui = session.context.getUserById(normalizedUserId);
             if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
         }
         const giList: GroupInfo[] = [];
-        for (const n of groupList) {
-            const gi = await session.context.findGroup(ctx, n);
+        for (const n of related_group_ids) {
+            const normalizedGroupId = normalizeGroupId(n);
+            if (normalizedGroupId === null) return `相关群ID格式无效<${n}>`;
+            const gi = session.context.getGroupById(normalizedGroupId);
             if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
         }
 
@@ -307,29 +328,33 @@ export function registerMemory() {
                         description: "记忆类型，个人或群聊",
                         enum: ["private", "group"]
                     },
-                    name: {
+                    target_id: {
                         type: 'string',
-                        description: '用户名称或群聊名称或纯数字QQ号、群号，实际使用时与记忆类型对应'
+                        description: '目标用户ID或群ID，实际使用时与记忆类型对应'
                     }
                 },
-                required: ['memory_type', 'name']
+                required: ['memory_type', 'target_id']
             }
         }
     });
     toolClear.solve = async (ctx, _, session, args) => {
-        const { memory_type, name } = args;
+        const { memory_type, target_id } = args;
         // 记录调用方会话：与 search_memory 一致，其他会话创建的私有记忆不可清除
         const callerSessionId = session.sessionId;
 
         if (memory_type === "private") {
-            const ui = await session.context.findUser(ctx, name, true);
-            if (ui === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeUserId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const ui = session.context.getUserById(normalizedTargetId);
+            if (ui === null) return `未找到目标ID<${target_id}>`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             session = getSession(ui.userId);
         } else if (memory_type === "group") {
-            const gi = await session.context.findGroup(ctx, name);
-            if (gi === null) return `未找到<${name}>`;
+            const normalizedTargetId = normalizeGroupId(target_id);
+            if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
+            const gi = session.context.getGroupById(normalizedTargetId);
+            if (gi === null) return `未找到目标ID<${target_id}>`;
 
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, '', gi.groupId));
             session = getSession(gi.groupId);

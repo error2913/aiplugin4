@@ -236,10 +236,10 @@ max_tokens = 2048
 | 工具响应压缩触发字数 | 工具返回结果超过该字数时压缩后再存入上下文，设为 0 不压缩（默认 5000）；web_search 压缩时附带搜索目标 |
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
-| 提供给AI的牌堆名称 | 每行一个牌堆名，用于 `draw_deck` 工具；没有的话建议把 `draw_deck` 加入禁止调用 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
-| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| 可调用指令白名单 | 每行一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
+| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认包含核心命令、内置扩展命令及别名的 `run_ext_command` / `run_core_command` 调用帮助。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
 ### 记忆
@@ -263,6 +263,7 @@ max_tokens = 2048
 | 回复引用 | AI 回复时是否引用触发的消息；回复含戳戳（poke）时不引用，避免消息无法显示 |
 | 回复最大字数 | 防止最大 tokens 限制不起效导致回复过长 |
 | 回复文本去除首尾空白字符 | 发送前去除回复首尾空白 |
+| 回复中的换行转义 | AI 回复里写出的字面量 `\n` / `\r\n` 会在发送时转换为真实换行；多条消息仍使用 `\f` 分隔 |
 | 分段发送延时 | 流式/非流式输出共用，消息间隔是否开启延时防止乱序 |
 | 分段发送基础延时/ms | 流式/非流式输出共用，从第二条消息开始每条发送前等待的毫秒数（默认 350） |
 | 分段发送含图额外延时/ms | 流式/非流式输出共用，当消息包含图片时额外增加的等待毫秒数（默认 250） |
@@ -312,8 +313,8 @@ max_tokens = 2048
 | `.ai priv show <指令>` | - | 检查指定指令的权限限制 |
 | `.ai priv reset` | - | 重置所有指令权限为默认 |
 | `.ai prompt` | - | 查看当前 system prompt（骰主） |
-| `.ai block add <统一ID/@xxx> <原因>` | `.ai block add QQ:1234567890 乱发广告` | 拉黑用户/群（骰主），被拉黑对象无法触发 AI 对话 |
-| `.ai block rm <统一ID/@xxx>` | - | 移除黑名单 |
+| `.ai block add <用户ID/群ID> <原因>` | `.ai block add QQ:1234567890 乱发广告` | 拉黑用户/群（骰主），被拉黑对象无法触发 AI 对话 |
+| `.ai block rm <用户ID/群ID>` | - | 移除黑名单 |
 | `.ai block list` | - | 查看黑名单列表 |
 
 > 权限数值：-30 黑名单 / 0 普通用户 / 40 邀请者 / 50 群管理员 / 60 群主 / 70 白名单 / 100 骰主。
@@ -340,7 +341,7 @@ max_tokens = 2048
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai memo status (@xxx)` | - | 查看当前（或 @ 指定用户的）长期/短期记忆状态 |
+| `.ai memo status [用户ID]` | - | 查看当前（或指定用户ID的）长期/短期记忆状态 |
 | `.ai memo [p/g] st <内容>` | `.ai memo p st 西瓜` | 设置个人/群聊设定（个人≤20字，群聊≤30字） |
 | `.ai memo [p/g] st clr` | - | 清除设定 |
 | `.ai memo [p/g] del <ID1> <ID2> --关键词` | - | 按 ID 删除记忆，可附带关键词 |
@@ -360,15 +361,15 @@ max_tokens = 2048
 | `.ai tool` | - | 列出所有工具及开关状态 |
 | `.ai tool help <函数名>` | `.ai tool help set_timer` | 查看指定工具的详细说明和参数需求 |
 | `.ai tool [on/off]` | - | 开启/关闭全部工具函数 |
-| `.ai tool [on/off] <函数名>` | `.ai tool on jrrp` | 开启/关闭指定工具函数 |
-| `.ai tool call <函数名> --参数=值` | `.ai tool call jrrp --name=错误` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
+| `.ai tool [on/off] <函数名>` | `.ai tool on run_ext_command` | 开启/关闭指定工具函数 |
+| `.ai tool call <函数名> --参数=值` | `.ai tool call run_ext_command --action=call --extension=fun --command=jrrp` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
 
 ### 忽略名单相关命令
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai ign add @xxx` | - | 添加名单（仅群聊）。名单内的用户能正常对话，但无法被选中作为作用目标 |
-| `.ai ign rm @xxx` | - | 删除名单 |
+| `.ai ign add <用户ID>` | - | 添加名单（仅群聊）。名单内的用户能正常对话，但不会被选为目标用户 |
+| `.ai ign rm <用户ID>` | - | 删除名单 |
 | `.ai ign lst` | - | 查看名单 |
 
 ### token 计数命令
@@ -407,29 +408,28 @@ max_tokens = 2048
 |:---:|:---|
 | 记忆 | `add_memory`、`del_memory`、`search_memory`、`clear_memory` |
 | 知识库 | `kb_search`、`kb_read`、`kb_list`（只读检索，内容由配置维护） |
-| 消息 | `send_msg`、`get_msg`、`delete_msg`、`send_forward_msg`、`get_context` |
+| OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
-| 指令 | `run_command`（列出/调用海豹指令）、`get_cmd_help`（查看指令帮助） |
+| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经 MCP 调用核心指令） |
 | 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
-| 语音 | `record`、`text_to_sound` |
+| 音频资源 | `generate_audio`（生成 record 消息段，不直接发送） |
 | 网页 | `web_search`、`web_read` |
-| TRPG | `draw_deck` |
 | 属性 | `attr_get`、`attr_set` |
 | 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
-| QQ 管理 | `ban`、`whole_ban`、`get_ban_list`、`rename`、`group_sign` |
-| 群资料 | `get_list`、`get_group_member_list`、`search_chat`、`search_common_group`、`get_person_info` |
-| 精华消息 | `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
-| 音乐 | `music_play` |
+| OB11 管理/查询 | 统一通过 `call_ob11_api` 传入 `set_group_ban`、`set_group_name`、`get_group_list` 等 action |
+| 资源/群资料 | `list_resources`；群资料统一通过 `call_ob11_api` 传入对应 action |
+| 精华消息 | 统一通过 `call_ob11_api` 传入 `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
+| 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
-| MCP / 技能 | `<服务器名>_<工具名>`（MCP 工具）、`use_skill`（技能） |
+| MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`（技能） |
 
-> 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
+> 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 
-> 依赖说明：ob11 相关工具需要安装 [ob11 网络连接依赖](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js) 或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)；`text_to_sound` 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖与 ffmpeg；`text_to_image` 需要生成图片依赖；`music_play` 需要协议端配置音卡签名；`render_markdown` / `render_html` 需要配置 md 和 html 图片渲染后端。
+> OB11 说明：AI 只调用 `call_ob11_api`。安装 ob11 网络连接依赖时，action 原样交给 `net.callApi`；未安装时仍由 SealDice 原生后端完成当前上下文可完成的发送和查询，远端 action 返回 `OB11_DEPENDENCY_REQUIRED`，不会假装成功。图片、语音、视频、文件、JSON、Markdown、音乐和合并转发均通过 message segment 保留格式；`generate_audio`、`search_music` 只生成可发送的 segment。
 
-> 依赖海豹内置指令的工具（如 `draw_deck`、`send_msg` 等）需要会话中先出现过指令消息（如先使用 `.r`），否则工具会提示"请先使用 .r 指令"。
+> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「工具 → MCP服务器配置」中启用 `ob11-core-bridge`，`http://127.0.0.1:46880/mcp`）。
 
 ---
 
@@ -456,7 +456,7 @@ max_tokens = 2048
 - 查看日志中的调用失败原因（未注册/未经许可/参数缺失/类型不符/会话类型不符/超时等）；
 - 用 `.ai tool` 查看开关状态，`.ai tool help <函数名>` 查看参数，`.ai tool call <函数名> --参数=值` 手动试用；
 - 工具在「禁止调用的函数」列表中时无法开启；新会话中「默认关闭的函数」需要 `.ai tool on <函数名>` 手动开启；
-- 依赖海豹指令的工具需要先使用 `.r` 等指令。
+- 扩展指令工具不需要先使用 `.r`；`run_ext_command` 每次调用现场构造 `CmdArgs`。`run_ext_command` / `run_core_command` 均支持 `trigger` 指定触发对象、`at` 指定群聊中的 @ 对象列表。核心指令工具通过 `run_core_command` 走 OB11 核心桥。
 
 **记忆/知识库检索不到**
 

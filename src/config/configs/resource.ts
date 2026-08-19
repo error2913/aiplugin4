@@ -34,7 +34,7 @@ function getPathMapConfig(key: string): { [id: string]: string } {
                 id = trimmed.slice(0, eq).trim();
                 path = trimmed.slice(eq + 1).trim();
             } else {
-                id = (trimmed.split('/').pop() || '').replace(/\.[^/.]+$/, '');
+                id = (trimmed.split(/[\\/]/).pop() || '').replace(/\.[^/.]+$/, '');
             }
             if (!id || !path) throw new Error(`本地路径格式错误:${line}`);
             acc[id] = path;

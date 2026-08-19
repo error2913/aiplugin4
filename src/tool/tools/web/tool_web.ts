@@ -1,9 +1,6 @@
 // 联网工具：搜索与网页阅读
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
-import Image from "../../../resource/image";
-import { generateId } from "../../../utils/utils";
-import { callServerTool, getMCPServerByName, isMCPEnabled } from "../../mcp";
 import Tool from "../../tool";
 
 export function registerWeb() {
@@ -87,75 +84,4 @@ export function registerWeb() {
         }
     }
 
-    const tool = new Tool({
-        type: "function",
-        function: {
-            name: "web_read",
-            description: `读取网页内容或对网页截图。默认抓取网页标题/正文/链接；screenshot=true 时对网页截图并返回可发送的图片`,
-            parameters: {
-                type: "object",
-                properties: {
-                    url: {
-                        type: "string",
-                        description: "需要读取内容或截图的网页链接"
-                    },
-                    screenshot: {
-                        type: "boolean",
-                        description: "true 时对网页截图并返回图片，false（默认）时抓取网页文本内容"
-                    },
-                    width: {
-                        type: "integer",
-                        description: "截图视口宽度，默认 1680"
-                    },
-                    height: {
-                        type: "integer",
-                        description: "截图视口高度，默认 1000"
-                    },
-                    fullPage: {
-                        type: "boolean",
-                        description: "是否截取整页（长图），默认 false"
-                    },
-                    delay: {
-                        type: "integer",
-                        description: "页面加载完成后等待的毫秒数，默认 3000"
-                    }
-                },
-                required: ["url"]
-            }
-        }
-    });
-    tool.solve = async (_, __, ___, args) => {
-        const { url, screenshot = false, width, height, fullPage = false, delay } = args;
-        if (!isMCPEnabled()) return `MCP 功能未启用：请在「工具 → 是否启用MCP」中开启，并确认已配置 MCP 服务器 web-read`;
-        const mcpServer = getMCPServerByName('web-read');
-        if (!mcpServer) return `未配置 MCP 服务器 web-read：请在「工具 → MCP服务器配置」中按标准 mcpServers 格式添加`;
-
-        if (screenshot) {
-            try {
-                logger.info(`网页截图: ${url}`);
-                const base64 = await callServerTool(mcpServer, 'screenshot_url', { url, width, height, fullPage, delay });
-                if (!base64) throw new Error('截图失败');
-
-                const img = new Image();
-                img.imageId = `web_${generateId()}`;
-                img.base64 = base64;
-                img.format = 'png';
-                img.description = `网页截图[img:${img.imageId}]`;
-                Image.save(img);
-
-                return `截图成功，请使用[img:${img.imageId}]发送`;
-            } catch (error) {
-                logger.error("在web_read截图请求中出错：", error);
-                return `网页截图失败: ${error instanceof Error ? error.message : String(error)}`;
-            }
-        }
-
-        try {
-            logger.info(`读取网页内容: ${url}`);
-            return await callServerTool(mcpServer, 'scrape_url', { url });
-        } catch (error) {
-            logger.error("在web_read中请求出错：", error);
-            return `读取网页内容失败: ${error}`;
-        }
-    }
 }

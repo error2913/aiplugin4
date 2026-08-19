@@ -18,6 +18,7 @@ import { TypeDescriptor } from "../utils/utils";
 import { getRecordMessageId, replyToSender } from "../utils/utils";
 
 import Group from "./group";
+import { createToolListen } from "./tool_listen";
 import { SessionType, State } from "./types";
 import User from "./user";
 
@@ -144,20 +145,11 @@ export class Session {
         }
         this.memory = new SessionMemoryService();
         this.lastCtx = null;
+        const listen = createToolListen();
         this.tool = {
             state: {} as ToolState,
             callCount: 0,
-            listen: {
-                timeoutId: null,
-                resolve: null,
-                reject: null,
-                cleanup: () => {
-                    if (this.tool.listen.timeoutId) clearTimeout(this.tool.listen.timeoutId);
-                    this.tool.listen.timeoutId = null;
-                    this.tool.listen.resolve = null;
-                    this.tool.listen.reject = null;
-                }
-            }
+            listen
         }
     }
 

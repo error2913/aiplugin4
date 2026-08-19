@@ -1,130 +1,38 @@
-// 资源工具：本地文件/视频发送（走 ob11 网络连接依赖）
+// 资源查询工具：只负责列出可用资源，不直接发送消息。
 import Config from "../../../config/config";
-import { logger } from "../../../logger";
-import { netExists, sendGroupMsg, sendPrivateMsg } from "../../../utils/ob11";
-import { resolveLocalPath } from "../../../utils/utils";
 import Tool from "../../tool";
-
-/** 按“资源名=路径”映射构建 名称->路径 表，key 为 id 字段名（fileId/videoId） */
-function buildPathMap(items: { [key: string]: string }[], key: string): { [key: string]: string } {
-    const pathMap: { [key: string]: string } = {};
-    for (const item of items || []) {
-        const id = item[key];
-        if (id && item.path) pathMap[id] = item.path;
-    }
-    return pathMap;
-}
 
 function buildResourceList(type: string): string {
     const sections: Array<[string, string[]]> = [];
-    if (type === 'all' || type === 'image') {
-        sections.push(['本地图片', (Config.resource.LOCAL_IMAGES || []).map(img => img.imageId)]);
-    }
-    if (type === 'all' || type === 'audio') {
-        sections.push(['本地音频', (Config.resource.LOCAL_AUDIOS || []).map(a => a.audioId)]);
-    }
-    if (type === 'all' || type === 'file') {
-        sections.push(['本地文件', (Config.resource.LOCAL_FILES || []).map(f => f.fileId)]);
-    }
-    if (type === 'all' || type === 'video') {
-        sections.push(['本地视频', (Config.resource.LOCAL_VIDEOS || []).map(v => v.videoId)]);
-    }
-    return sections.map(([label, names]) => `${label}:${names.length > 0 ? names.join('、') : '暂无'}`).join('\n');
-}
-
-function registerResourceTool(
-    name: string,
-    desc: string,
-    key: 'fileId' | 'videoId',
-    segmentType: 'file' | 'video'
-) {
-    const tool = new Tool({
-        type: 'function',
-        function: {
-            name,
-            description: `${desc}。可传 name（已登记资源，先通过 list_resources 查询可用名称）或 path（本地绝对路径，或相对海豹 data 目录的路径）`,
-            parameters: {
-                type: 'object',
-                properties: {
-                    name: {
-                        type: 'string',
-                        description: '资源名称（已登记资源）'
-                    },
-                    path: {
-                        type: 'string',
-                        description: '文件路径：本地绝对路径，或相对海豹 data 目录的路径'
-                    }
-                },
-                required: []
-            }
-        }
-    });
-    tool.sensitive = true; // 发送文件/视频属敏感操作
-    tool.solve = async (ctx, _, __, args) => {
-        const { name, path } = args;
-
-        // 每次调用实时读取配置，保证修改配置后无需重载即可生效
-        const items = key === 'fileId' ? (Config.resource.LOCAL_FILES || []) : (Config.resource.LOCAL_VIDEOS || []);
-        const pathMap = buildPathMap(items, key);
-        const nameList = Object.keys(pathMap);
-
-        let filePath = '';
-        if (name && path) {
-            return `name 与 path 不能同时提供，请二选一：name（已登记资源）或 path（直接传路径）`;
-        }
-        if (name) {
-            if (!Object.prototype.hasOwnProperty.call(pathMap, name)) {
-                logger.error(`${desc}${name}不存在`);
-                return `${desc}${name}不存在${nameList.length !== 0 ? `，可发送的资源名有:${nameList.join('、')}` : ''}`;
-            }
-            filePath = resolveLocalPath(pathMap[name]);
-        } else if (path) {
-            filePath = resolveLocalPath(path);
-        } else {
-            return `必须提供 name（已登记资源）或 path（直接传路径）中的一项`;
-        }
-
-        if (!netExists()) return `未找到ob11网络连接依赖，请提示用户安装`;
-
-        const epId = ctx.endPoint.userId;
-        const segment = { type: segmentType, data: { file: filePath } };
-        let result = null;
-        if (ctx.isPrivate) {
-            result = await sendPrivateMsg(epId, ctx.player!.userId.replace(/^.+:/, ''), [segment]);
-        } else {
-            result = await sendGroupMsg(epId, ctx.group!.groupId.replace(/^.+:/, ''), [segment]);
-        }
-
-        if (result === null || result === undefined) return `${desc}发送失败，请查看ob11网络连接依赖日志`;
-        return `${desc}发送成功`;
-    }
+    if (type === "all" || type === "image") sections.push(["本地图片", (Config.resource.LOCAL_IMAGES || []).map(item => item.imageId)]);
+    if (type === "all" || type === "audio") sections.push(["本地音频", (Config.resource.LOCAL_AUDIOS || []).map(item => item.audioId)]);
+    if (type === "all" || type === "file") sections.push(["本地文件", (Config.resource.LOCAL_FILES || []).map(item => item.fileId)]);
+    if (type === "all" || type === "video") sections.push(["本地视频", (Config.resource.LOCAL_VIDEOS || []).map(item => item.videoId)]);
+    return sections.map(([label, names]) => `${label}:${names.length > 0 ? names.join("、") : "暂无"}`).join("\n");
 }
 
 export function registerResourceTools() {
-    registerResourceTool('send_file', '发送本地文件', 'fileId', 'file');
-    registerResourceTool('send_video', '发送本地视频', 'videoId', 'video');
-
-    const listTool = new Tool({
-        type: 'function',
+    const tool = new Tool({
+        type: "function",
         function: {
-            name: 'list_resources',
-            description: '查询当前已配置的本地资源名称。type 可选 image/audio/file/video/all。图片和音频分别使用 [img:名称] 和 [audio:名称]；文件和视频使用 send_file/send_video 的 name 参数。',
+            name: "list_resources",
+            description: "查询当前已配置的本地资源名称。发送资源请使用 call_ob11_api 的 image/record/video/file 消息段，并将 file 写成 resource:资源名。",
             parameters: {
-                type: 'object',
+                type: "object",
                 properties: {
                     type: {
-                        type: 'string',
-                        description: '资源类型',
-                        enum: ['image', 'audio', 'file', 'video', 'all']
+                        type: "string",
+                        enum: ["all", "image", "audio", "file", "video"],
+                        description: "资源类型，默认 all"
                     }
                 },
                 required: []
             }
         }
     });
-    listTool.solve = async (_, __, ___, args) => {
-        const type = args && typeof args.type === 'string' ? args.type : 'all';
-        if (!['image', 'audio', 'file', 'video', 'all'].includes(type)) {
+    tool.solve = async (_, __, ___, args) => {
+        const type = args && typeof args.type === "string" ? args.type : "all";
+        if (!["image", "audio", "file", "video", "all"].includes(type)) {
             return `未知资源类型:${type}，可选值为 image/audio/file/video/all`;
         }
         return buildResourceList(type);
