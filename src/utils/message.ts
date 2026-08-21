@@ -21,6 +21,7 @@ export interface RequestMessage {
     content: RequestMessageContent;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
+    reasoning_content?: string;
 }
 
 interface MessageItem {
@@ -29,16 +30,19 @@ interface MessageItem {
     userId?: string;
     messageId?: string;
     systemName?: string;
+    reasoningContent?: string;
 }
 
 interface ContextMessage {
     role: string;
     contentItems?: MessageItem[];
     text?: string;
+    toolName?: string; // 工具名：prompt 工程模式下把工具结果转回 user 消息时保留来源
     toolCalls?: ToolCall[];
     tool_calls?: ToolCall[];
     toolCallId?: string;
     tool_call_id?: string;
+    reasoningContent?: string;
 }
 
 const SYSTEM_REMINDER_TEXT = '请继续遵守上方角色设定、上下文标记和工具调用规范。';
@@ -53,6 +57,44 @@ export function estimateTextTokens(text: string): number {
         if (text.charCodeAt(i) <= 0x7F) ascii++;
     }
     return Math.ceil(ascii / 4) + (text.length - ascii);
+}
+
+/**
+ * 单条消息 token 估算：与 estimateTextTokens 同一口径（ASCII 4 字符/token，非 ASCII 1 字符/token）。
+ * 兼容 RequestMessage（content 为字符串或多模态内容块）与 ContextMessage（contentItems/text），
+ * 并把 assistant 的 tool_calls JSON 一并计入，使「上下文最大token」与请求体真实负载一致；
+ * applyTokenBudget 与 stream.checkRequestBudget 统一使用该口径，避免两套估算不一致。
+ * 多模态图片 URL/base64 只按固定 [image] 开销估算，避免把 base64 当纯文本猛算。
+ */
+export function estimateMessageTokens(m: ContextMessage | RequestMessage): number {
+    let text = '';
+    const content = (m as RequestMessage).content;
+    if (typeof content === 'string') {
+        text = content;
+    } else if (Array.isArray(content)) {
+        text = content.map(part => part.type === 'text' ? part.text : '[image]').join('');
+    } else {
+        text = buildContent(m as ContextMessage);
+    }
+    const toolCalls = (m as ContextMessage).toolCalls || (m as RequestMessage).tool_calls;
+    const toolCallsEst = Array.isArray(toolCalls) && toolCalls.length > 0
+        ? estimateTextTokens(JSON.stringify(toolCalls))
+        : 0;
+    return estimateTextTokens(text) + toolCallsEst;
+}
+
+
+/**
+ * 取消息携带的思维链：消息级字段（tool_calls 消息）或内容条目级字段（assistant 文本消息）。
+ * 空字符串也原样返回（DeepSeek thinking mode 要求字段本身必须回传，不能忽略）。
+ */
+function resolveReasoningContent(message: ContextMessage): string | undefined {
+    if (message.reasoningContent !== undefined) return message.reasoningContent;
+    if (Array.isArray(message.contentItems)) {
+        const item = message.contentItems.find(i => i && i.reasoningContent !== undefined);
+        if (item) return item.reasoningContent;
+    }
+    return undefined;
 }
 
 export async function buildSystemMessage(ctx: seal.MsgContext, session: Session): Promise<ContextMessage> {
@@ -106,9 +148,25 @@ function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
 }
 
 /**
+ * 紧急兜底截断：把单条消息的渲染文本裁剪到 maxChars（保留尾部最近内容），返回实际移除的字符数。
+ * 仅用于预算兜底（如单条超大消息/合并转发/工具长结果），结构上简化为单段文本，不动 tool_calls。
+ */
+function truncateMessageText(message: ContextMessage, maxChars: number): number {
+    const before = buildContent(message);
+    if (before.length <= maxChars) return 0;
+    message.contentItems = undefined;
+    message.text = before.slice(-maxChars);
+    return before.length - message.text.length;
+}
+
+/**
  * token 预算裁剪：在 system + samples + context 完整组装后统一计算，超出预算时从最早的
  * context 消息开始丢弃；system 与 samples 永不丢弃。tools 的 JSON 长度同样预留进预算，
  * 使「上下文最大token」更接近真实请求体上限。
+ *
+ * 单条超大消息兜底：当某条未保护消息本身超过当前缺口（典型为合并转发/工具长结果等
+ * 单条消息过大，整条丢弃会清空全部上下文）时，改为按超出量截断其渲染文本（保留尾部），
+ * 而不是让请求体带着超限预算直接发送，也不会把整个会话上下文一次性清空。
  */
 function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[]): ContextMessage[] {
     const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
@@ -116,11 +174,37 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
 
     const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
     const budget = Math.max(maxTokens - reserve, 1);
-    const estimate = (m: ContextMessage) => estimateTextTokens(buildContent(m));
-    let tokens = messages.reduce((acc, m) => acc + estimate(m), 0);
+    const totalTokens = () => messages.reduce((acc, m) => acc + estimateMessageTokens(m), 0);
+    let tokens = totalTokens();
 
     while (tokens > budget && messages.length > protectedCount) {
-        tokens -= estimate(messages[protectedCount]);
+        const over = tokens - budget;
+
+        // 找未保护段中渲染文本最长的一条
+        let longestIdx = -1, longestLen = 0, longestEst = 0;
+        for (let i = protectedCount; i < messages.length; i++) {
+            const len = buildContent(messages[i]).length;
+            if (len > longestLen) {
+                longestLen = len;
+                longestIdx = i;
+                longestEst = estimateMessageTokens(messages[i]);
+            }
+        }
+
+        // 单条消息本身超过缺口：截断比整条丢弃更能保留上下文
+        if (longestIdx >= 0 && longestLen > 0 && longestEst > over) {
+            const prev = tokens;
+            // 按超出量折算需移除的字符数（每 token 约等于该消息的字符/token 比值）
+            const charsToRemove = Math.max(1, Math.ceil(longestLen * (over / longestEst)));
+            truncateMessageText(messages[longestIdx], Math.max(1, longestLen - charsToRemove));
+            tokens = totalTokens();
+            // 截断未降低估算（如超出量主要来自 tool_calls）时停止，避免死循环
+            if (tokens >= prev) break;
+            continue;
+        }
+
+        // 常规情况：整条丢弃最早的未保护消息
+        tokens -= estimateMessageTokens(messages[protectedCount]);
         messages.splice(protectedCount, 1);
     }
     return messages;
@@ -148,12 +232,20 @@ export async function handleMessages(
     if (Config.tool.PROMPT_ENGINEERING) {
         return await Promise.all(messages.map(async message => {
             if (message.role === 'tool') {
-                return { role: 'user', content: `【工具返回】${buildContent(message)}` };
+                // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记
+                const toolName = (message as ContextMessage).toolName;
+                return {
+                    role: 'user',
+                    content: toolName ? `【工具返回:${toolName}】${buildContent(message)}` : `【工具返回】${buildContent(message)}`
+                };
             }
-            return {
+            const out: RequestMessage = {
                 role: message.role,
                 content: multimodal ? await buildMultimodalContent(message) : buildContent(message)
             };
+            const reasoning = resolveReasoningContent(message);
+            if (reasoning !== undefined) out.reasoning_content = reasoning;
+            return out;
         }));
     }
 
@@ -217,6 +309,12 @@ export async function handleMessages(
         // tool 消息必须携带非空 tool_call_id；缺失的已在上方孤立清理流程中丢弃
         if (message.role === 'tool' && (message.toolCallId || message.tool_call_id)) {
             out.tool_call_id = message.toolCallId || message.tool_call_id;
+        }
+        // thinking mode（DeepSeek V4 等）：带工具调用轮次的 assistant 消息必须原样回传
+        // reasoning_content（含空字符串，字段本身不能丢），否则后续请求会 400
+        if (message.role === 'assistant') {
+            const reasoning = resolveReasoningContent(message);
+            if (reasoning !== undefined) out.reasoning_content = reasoning;
         }
         return out;
     }));

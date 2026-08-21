@@ -114,60 +114,60 @@ const TEMPLATES: { [key: string]: string } = {
 请根据你的设定，对以下对话内容进行总结:
 {{{对话内容}}}
 
-返回格式为JSON，格式类型如下:
+返回格式为JSON，格式类型如下（请严格返回合法的 JSON：所有键和字符串必须使用双引号，不要输出 Markdown 代码块或其他解释文字）:
 {
     "content": {
-        type: 'string',
-        description: '总结后的对话摘要，请根据人物、行为、场景，以所扮演角色的口吻进行简短描述，只保留核心内容'
+        "type": "string",
+        "description": "总结后的对话摘要，请根据人物、行为、场景，以所扮演角色的口吻进行简短描述，只保留核心内容"
     },
     "memories": {
-        type: 'array',
-        description: '记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组。除非用户明确要求记忆只在本会话中生效，否则不要传 visibility 字段（默认 public）',
-        items: {
-            type: 'object',
-            description: '记忆对象',
-            properties: {
+        "type": "array",
+        "description": "记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组。除非用户明确要求记忆只在本会话中生效，否则不要传 visibility 字段（默认 public）",
+        "items": {
+            "type": "object",
+            "description": "记忆对象",
+            "properties": {
                 "memory_type": {
-                    type: "string",
-                    description: "记忆归属，个人或群聊，与可见性无关。",
-                    enum: ["private", "group"]
+                    "type": "string",
+                    "description": "记忆归属，个人或群聊，与可见性无关。",
+                    "enum": ["private", "group"]
                 },
                 "target_id": {
-                    type: 'string',
-                    description: '目标用户ID或群ID，实际使用时与记忆类型对应'
+                    "type": "string",
+                    "description": "目标用户ID或群ID，实际使用时与记忆类型对应"
                 },
                 "text": {
-                    type: 'string',
-                    description: '记忆内容，尽量简短，无需附带时间与来源'
+                    "type": "string",
+                    "description": "记忆内容，尽量简短，无需附带时间与来源"
                 },
                 "keywords": {
-                    type: 'array',
-                    description: '相关关键词列表',
-                    items: {
-                        type: 'string'
+                    "type": "array",
+                    "description": "相关关键词列表",
+                    "items": {
+                        "type": "string"
                     }
                 },
                 "related_user_ids": {
-                    type: 'array',
-                    description: '相关用户ID列表',
-                    items: {
-                        type: 'string'
+                    "type": "array",
+                    "description": "相关用户ID列表",
+                    "items": {
+                        "type": "string"
                     }
                 },
                 "related_group_ids": {
-                    type: 'array',
-                    description: '相关群ID列表',
-                    items: {
-                        type: 'string'
+                    "type": "array",
+                    "description": "相关群ID列表",
+                    "items": {
+                        "type": "string"
                     }
                 },
                 "visibility": {
-                    type: "string",
-                    description: "记忆可见性，仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不传（默认 public）",
-                    enum: ["public", "private"]
+                    "type": "string",
+                    "description": "记忆可见性，仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不传（默认 public）",
+                    "enum": ["public", "private"]
                 }
             },
-            "required": ['memory_type', 'target_id', 'text']
+            "required": ["memory_type", "target_id", "text"]
         }
     }
 }`

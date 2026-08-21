@@ -1,7 +1,7 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
 import Config from "../config/config";
 import { ext } from "../config/config";
-import Logger, { logger } from "../logger";
+import Logger from "../logger";
 import ChatModel from "../model/chat";
 import ImageModel from "../model/image";
 import Model from "../model/model";
@@ -20,6 +20,8 @@ import { revive, TypeDescriptor } from "../utils/utils";
 
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
+
+const log = Logger.withTag('agent');
 
 export default class Agent {
     static validKeysMap: { [key in keyof Agent]?: TypeDescriptor<Agent[key]> } = {
@@ -113,11 +115,14 @@ export default class Agent {
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
+        // 最后一轮模型响应的思维链：无工具轮次时随最终回复一并入库（见下方最终 session.reply）
+        let lastReasoning: string | undefined;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             trace.beginTurn();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
-            const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName);
+            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId);
+            lastReasoning = reasoning_content;
             // 提示词工程模式下模型可能返回 ```function ... ``` 代码块包裹的工具调用：
             // 发送前先剥离该块，避免代码块原文进入回复/上下文；调用内容仍以 match[0] 原样记录
             const promptCallMatch: RegExpMatchArray | null = (STATUS && PROMPT_ENGINEERING)
@@ -129,10 +134,10 @@ export default class Agent {
                 if (PROMPT_ENGINEERING) {
                     const match = promptCallMatch;
                     if (match) {
-                        logger.info('prompt tool call triggered');
+                        log.info('prompt tool call triggered');
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
-                        await session.context.addAssistantMessage(match[0], '');
+                        await session.context.addAssistantMessage(match[0], '', reasoning_content);
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
@@ -140,13 +145,13 @@ export default class Agent {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
-                                logger.info('工具执行完成且不回调（callBack=false），结束本轮编排');
+                                log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
                                 result = { contextArray: [], replyArray: [], images: [] };
                                 break;
                             }
                             trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
-                            Logger.exception('handlePromptToolCalls error', e);
+                            log.exception('handlePromptToolCalls error', e);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
                         retry = 0;
@@ -154,10 +159,10 @@ export default class Agent {
                     }
                 } else {
                     if (tool_calls.length > 0) {
-                        logger.info('tool call triggered');
+                        log.info('tool call triggered');
                         const { contextArray, replyArray, images } = result;
-                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
-                        session.context.addToolCallsMessage(tool_calls);
+                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true }, reasoning_content);
+                        session.context.addToolCallsMessage(tool_calls, reasoning_content);
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
@@ -165,13 +170,13 @@ export default class Agent {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
-                                logger.info('工具执行完成且不回调（callBack=false），结束本轮编排');
+                                log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
                                 result = { contextArray: [], replyArray: [], images: [] };
                                 break;
                             }
                             trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
-                            Logger.exception('handleToolCalls error', e);
+                            log.exception('handleToolCalls error', e);
                             trace.recordToolCall('function-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
                         retry = 0;
@@ -182,11 +187,11 @@ export default class Agent {
 
             if (checkRepeat(session.context, result.contextArray.join('')) && result.replyArray.join('').trim()) {
                 if (retry >= MaxRetry) {
-                    logger.warning('repeat detected, clear assistant/tool messages');
+                    log.warning('repeat detected, clear assistant/tool messages');
                     session.context.clearMessages('assistant', 'tool');
                     break;
                 }
-                logger.warning(`repeat detected, retry [${retry}/${MaxRetry}]`);
+                log.warning(`repeat detected, retry [${retry}/${MaxRetry}]`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
             }
@@ -194,8 +199,8 @@ export default class Agent {
         }
 
         const { contextArray, replyArray, images } = result;
-        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
-        logger.info(`[run] ${trace.summary()}`);
+        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true }, lastReasoning);
+        log.info(`[run] ${trace.summary()}`);
     }
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
@@ -215,7 +220,7 @@ export default class Agent {
         await session.stopCurrentChatStream();
 
         const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
-        const id = await streamService.startStream(messages, session.setting.modelName);
+        const id = await streamService.startStream(messages, session.setting.modelName, trace.runId);
         if (!id) return;
 
         session.stream.id = id;
@@ -239,11 +244,11 @@ export default class Agent {
                 await new Promise(resolve => setTimeout(resolve, interval));
                 continue;
             }
-            logger.info('stream reply:', raw_reply.length > 200 ? raw_reply.slice(0, 200) + `…(+${raw_reply.length - 200})` : raw_reply);
+            log.debug('stream reply:', raw_reply.length > 200 ? raw_reply.slice(0, 200) + `…(+${raw_reply.length - 200})` : raw_reply);
 
             if (STATUS && PROMPT_ENGINEERING) {
                 if (!session.stream.toolCallStatus && /```function/.test(session.stream.reply + raw_reply)) {
-                    logger.info('tool call start tag found');
+                    log.info('tool call start tag found');
                     const match = raw_reply.match(/([\s\S]*)```function/);
                     if (match && match[1].trim()) {
                         const { contextArray, replyArray, images } = await handleReply(ctx, msg, session, match[1]);
@@ -262,7 +267,7 @@ export default class Agent {
                     // 结束围栏 ``` 与起始围栏 ```function 区分：从起始围栏后取到首个 ``` 即视为调用块结束
                     const match = session.stream.reply.match(/```function([\s\S]*?)```/);
                     if (match) {
-                        logger.info('tool call end tag found');
+                        log.info('tool call end tag found');
                         session.stream.reply = '';
                         session.stream.toolCallStatus = false;
                         await session.stopCurrentChatStream();
@@ -276,12 +281,12 @@ export default class Agent {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
-                                logger.info('工具执行完成且不回调（callBack=false），结束本轮编排');
-                                logger.info(`[run] ${trace.summary()}`);
+                                log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
+                                log.info(`[run] ${trace.summary()}`);
                                 return;
                             }
                         } catch (e) {
-                            logger.error('handlePromptToolCalls error:', e instanceof Error ? e.message : String(e));
+                            log.exception('handlePromptToolCalls error', e);
                             return;
                         }
 
@@ -305,7 +310,7 @@ export default class Agent {
 
         if (session.stream.id !== id) return;
         await session.stopCurrentChatStream();
-        logger.info(`[run] ${trace.summary()}`);
+        log.info(`[run] ${trace.summary()}`);
     }
 
     static agentMap: { [key: string]: Agent } = {};
@@ -317,7 +322,7 @@ export default class Agent {
                 const data = JSON.parse(ext.storageGet(`agent_${name}`) || '{}');
                 agent = revive(Agent, data);
             } catch (error) {
-                logger.error(`加载智能体${name}失败: ${error}`);
+                log.exception('加载智能体' + name, error);
             }
             agent.name = name;
             agent.sessionService.agentName = name;

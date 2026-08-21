@@ -6,6 +6,8 @@ import { failure, serializeResult } from "./result";
 import { SealNativeBackend } from "./seal_native_backend";
 import { Ob11CallContext, Ob11Result } from "./types";
 
+const log = Logger.withTag('ob11');
+
 const ob11NetBackend = new Ob11NetBackend();
 const sealNativeBackend = new SealNativeBackend();
 
@@ -53,7 +55,7 @@ export async function callOb11ApiDirect(endpointId: string, action: string, para
     if (!ob11NetBackend.canHandle(action)) return null;
     const result = await ob11NetBackend.call({ endpointId }, action, params);
     if (result.ok === false) {
-        Logger.warning(`OB11 API ${action} 调用失败：${result.error.message}`);
+        log.warning(`OB11 API ${action} 调用失败：${result.error.message}`);
         return null;
     }
     return result.data;

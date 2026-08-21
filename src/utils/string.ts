@@ -10,6 +10,8 @@ import Image from "../resource/image";
 import { getRawId, normalizeGroupId, normalizeUserId } from "./target_id";
 import { getMilkyReplyQuoteId, resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
 
+const log = logger.withTag('string');
+
 export function truncateText(text: string, maxLength: number): string {
     if (!text || maxLength <= 0 || text.length <= maxLength) return text || '';
     return text.slice(0, maxLength) + '...';
@@ -183,7 +185,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
         try {
             typeValue = Number(seg.type());
         } catch (_e) {
-            logger.warning('milky 消息段 type() 解析异常，按未知段处理');
+            log.warning('milky 消息段 type() 解析异常，按未知段处理');
             result.push({ type: 'text', data: { text: '[未知消息段]' } });
             continue;
         }
@@ -239,7 +241,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                 break;
             }
             default: {
-                logger.debug(`milky 未知消息段类型: ${typeValue}，按文本占位处理`);
+                log.debug(`milky 未知消息段类型: ${typeValue}，按文本占位处理`);
                 result.push({ type: 'text', data: { text: '[未知消息段]' } });
             }
         }
@@ -304,7 +306,7 @@ export function transformTextToArray(text: string): MessageSegment[] {
                 messageArray.push({ type, data: params });
             } else {
                 // 无法解析的 [CQ:... 字样保留为纯文本，避免用户内容被静默吞掉
-                logger.error(`无法解析CQ码，保留为文本：${segment}`);
+                log.error(`无法解析CQ码，保留为文本：${segment}`);
                 messageArray.push({ type: 'text', data: { text: segment } });
             }
         } else {
@@ -410,13 +412,13 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 }
                 const userId = normalizeUserId(seg.content);
                 if (userId) text += `[CQ:at,qq=${getRawId(userId)}]`;
-                else logger.warning(`用户ID格式无效：${seg.content}`);
+                else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'poke': {
                 const userId = normalizeUserId(seg.content);
                 if (userId) text += `[CQ:poke,qq=${getRawId(userId)}]`;
-                else logger.warning(`用户ID格式无效：${seg.content}`);
+                else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'quote': {
@@ -437,7 +439,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                     images.push(image);
                     text += image.CQCode;
                 } else {
-                    logger.warning(`无法找到图片：${id}`);
+                    log.warning(`无法找到图片：${id}`);
                 }
                 break;
             }
@@ -447,7 +449,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                     const image = Image.getUserAvatar(userId);
                     images.push(image);
                     text += image.CQCode;
-                } else logger.warning(`用户ID格式无效：${seg.content}`);
+                } else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'group_avatar': {
@@ -456,7 +458,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                     const image = Image.getGroupAvatar(groupId);
                     images.push(image);
                     text += image.CQCode;
-                } else logger.warning(`群ID格式无效：${seg.content}`);
+                } else log.warning(`群ID格式无效：${seg.content}`);
                 break;
             }
             case 'audio': {
@@ -467,7 +469,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 if (audio) {
                     text += `[语音:${resolveLocalPath(audio.path)}]`;
                 } else {
-                    logger.warning(`无法找到本地语音：${id}`);
+                    log.warning(`无法找到本地语音：${id}`);
                 }
                 break;
             }
@@ -560,7 +562,7 @@ export function checkRepeat(context: Context, s: string) {
             const last = items[items.length - 1];
             const content = last ? (last.text || '') : '';
             const similarity = calculateSimilarity(content.trim(), s.trim());
-            logger.info(`复读相似度：${similarity}`);
+            log.info(`复读相似度：${similarity}`);
 
             if (similarity > similarityLimit) {
                 // 找到最近的一块assistant消息全部删除，防止触发tool相关的bug
@@ -870,8 +872,8 @@ export function fmtDate(timestamp: number) {
 
 /**
  * 修复json字符串，将其中缺少前半双引号的字符串添加前半双引号，修复失败返回空字符串
- * @param s 
- * @returns 
+ * @param s
+ * @returns
  */
 export function fixJsonString(s: string): string {
     try {
@@ -881,7 +883,7 @@ export function fixJsonString(s: string): string {
         const patterns = [
             // 匹配键缺少前半引号: {key": 或 ,key":
             /([{,][\s\n]*)([a-zA-Z_$][a-zA-Z0-9_$]*)("[\s\n]*:)/g,
-            // 匹配值缺少前半引号: :value", 或 :value"} 或 
+            // 匹配值缺少前半引号: :value", 或 :value"} 或
             /(:[\s\n]*)([^"]+)("[\s\n]*[,}])/g,
             // 匹配数组中的字符串缺少前半引号: [value", 或 [value"] 或 ,value", 或 ,value"]
             /([\[,][\s\n]*)([^"]+)("[\s\n]*[,\]])/g
@@ -894,7 +896,7 @@ export function fixJsonString(s: string): string {
             fixed = fixed.replace(pattern, (fullMatch, prefix, content, suffix) => {
                 matched = true;
                 const fixedContent = `${prefix}"${content}${suffix}`;
-                logger.info(`修复json字符串: ${fullMatch} -> ${fixedContent}`);
+                log.info(`修复json字符串: ${fullMatch} -> ${fixedContent}`);
                 return fixedContent;
             });
 

@@ -4,6 +4,8 @@ import Logger from "../logger";
 import Model from "../model/model";
 import { cosineSimilarity, revive, TypeDescriptor } from "../utils/utils";
 
+const log = Logger.withTag('memory');
+
 export default class MemoryItem {
     static validKeysMap: { [key in keyof MemoryItem]?: TypeDescriptor<MemoryItem[key]> } = {
         'id': 'string',
@@ -123,15 +125,15 @@ export default class MemoryItem {
         if (!Config.model.EMBEDDING_MODEL_ENABLED) return;
         const DIMENSION = Model.getEmbeddingDimension();
         if (DIMENSION <= 0) {
-            Logger.info(`未配置嵌入向量维度，跳过向量更新: ${this.id}`);
+            log.info(`未配置嵌入向量维度，跳过向量更新: ${this.id}`);
             return;
         }
-        Logger.info(`更新记忆向量: ${this.id}`);
+        log.info(`更新记忆向量: ${this.id}`);
         const model = Model.getEmbeddingModel('text-embedding');
-        if (!model) return Logger.error('未找到可用的嵌入模型');
+        if (!model) return log.error('未找到可用的嵌入模型');
         const vector = await model.callEmbedding(this.content);
-        if (!vector.length) return Logger.error('返回向量为空');
-        if (vector.length !== DIMENSION) return Logger.error(`向量维度不匹配。期望: ${DIMENSION}, 实际: ${vector.length}`);
+        if (!vector.length) return log.error('返回向量为空');
+        if (vector.length !== DIMENSION) return log.error(`向量维度不匹配。期望: ${DIMENSION}, 实际: ${vector.length}`);
         this.vector = vector;
     }
 }

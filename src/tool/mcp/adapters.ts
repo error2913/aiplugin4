@@ -13,6 +13,8 @@ import { resolveCommandTarget } from "../command_target";
 
 import { MCPCallResult } from "./types";
 
+const log = Logger.withTag('mcp');
+
 export interface MCPAdapterContext {
     ctx: seal.MsgContext;
     msg: seal.Message;
@@ -42,7 +44,7 @@ async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string)
         const name = rawGroupId ? info && (info.card || info.nickname) : info && info.nickname;
         if (typeof name === 'string' && name.trim()) return name.trim();
     } catch (e) {
-        Logger.debug(`[run_core_command] 获取 trigger=${rawUserId} 昵称失败，使用回退值: ${e instanceof Error ? e.message : String(e)}`);
+        log.debug(`[run_core_command] 获取 trigger=${rawUserId} 昵称失败，使用回退值: ${e instanceof Error ? e.message : String(e)}`);
     }
     return rawUserId === normalizeUserId(ctx.player && ctx.player.userId || '')
         ? String(ctx.player && ctx.player.name || '')
@@ -149,7 +151,7 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
                 const userId = normalizeUserId(seg.content);
                 if (userId) text += ` @${getRawId(userId)} `;
                 else {
-                    Logger.warning(`用户ID格式无效：${seg.content}`);
+                    log.warning(`用户ID格式无效：${seg.content}`);
                     text += ` @${seg.content} `;
                 }
                 break;
@@ -163,7 +165,7 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
                     images.push(image);
                     text += image.url;
                 } else {
-                    Logger.warning(`无法找到图片：${id}`);
+                    log.warning(`无法找到图片：${id}`);
                 }
                 break;
             }
@@ -173,7 +175,7 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
                     const image = Image.getUserAvatar(userId);
                     images.push(image);
                     text += image.url;
-                } else Logger.warning(`用户ID格式无效：${seg.content}`);
+                } else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'group_avatar': {
@@ -182,7 +184,7 @@ async function transformContentToUrlText(ctx: seal.MsgContext, session: Session,
                     const image = Image.getGroupAvatar(groupId);
                     images.push(image);
                     text += image.url;
-                } else Logger.warning(`群ID格式无效：${seg.content}`);
+                } else log.warning(`群ID格式无效：${seg.content}`);
                 break;
             }
         }
@@ -216,7 +218,7 @@ async function renderAdapter(input: MCPAdapterContext, kind: 'markdown' | 'html'
         Image.save(img);
         return `成功，请使用[img:${img.imageId}]发送`;
     } catch (err) {
-        Logger.error(`${kind === 'markdown' ? 'Markdown' : 'HTML'} 渲染失败: ${err instanceof Error ? err.message : String(err)}`);
+        log.exception(`${kind === 'markdown' ? 'Markdown' : 'HTML'} 渲染失败`, err);
         return `渲染图片失败: ${err instanceof Error ? err.message : String(err)}`;
     }
 }
@@ -339,7 +341,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
         const result = await input.callRemote(input.toolName, remoteArgs);
         return `核心指令 core|${authorizedCommand} 返回：\n${formatCoreBridgeResult(decodeCoreBridgeResult(mcpText(result)))}`;
     } catch (e) {
-        Logger.warning(`[run_core_command] 调用 core|${authorizedCommand} 失败:${e instanceof Error ? e.message : String(e)}`);
+        log.warning(`[run_core_command] 调用 core|${authorizedCommand} 失败:${e instanceof Error ? e.message : String(e)}`);
         return `核心指令 core|${authorizedCommand} 调用失败：${e instanceof Error ? e.message : String(e)}`;
     }
 }

@@ -7,6 +7,8 @@ import { getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
 import { revive, TypeDescriptor } from "./utils/utils";
 
+const log = logger.withTag('timer');
+
 export class TimerInfo {
     static validKeys: (keyof TimerInfo)[] = ['sid', 'isPrivate', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content'];
     static validKeysMap: { [key in keyof TimerInfo]?: TypeDescriptor<TimerInfo[key]> } = {
@@ -58,7 +60,7 @@ export class TimerManager {
                 this.timerQueue.push(revive(TimerInfo, item));
             });
         } catch (e) {
-            logger.error('在获取timerQueue时出错', e);
+            log.exception('在获取timerQueue时出错', e);
         }
     }
 
@@ -81,11 +83,11 @@ export class TimerManager {
         this.saveTimerQueue();
 
         if (!this.intervalId) {
-            logger.info('定时器任务启动');
+            log.info('定时器任务启动');
             this.executeTask();
         }
 
-        logger.info(`添加${timer.type}定时器${session.id}:
+        log.info(`添加${timer.type}定时器${session.id}:
 触发时间:${fmtDate(target)}
 内容:${content}`);
     }
@@ -107,11 +109,11 @@ export class TimerManager {
         this.saveTimerQueue();
 
         if (!this.intervalId) {
-            logger.info('定时器任务启动');
+            log.info('定时器任务启动');
             this.executeTask();
         }
 
-        logger.info(`添加${timer.type}定时器${session.id}:
+        log.info(`添加${timer.type}定时器${session.id}:
 间隔:${interval}秒
 次数:${count}次
 内容:${content}`);
@@ -132,11 +134,11 @@ export class TimerManager {
         this.saveTimerQueue();
 
         if (!this.intervalId) {
-            logger.info('定时器任务启动');
+            log.info('定时器任务启动');
             this.executeTask();
         }
 
-        logger.info(`添加${timer.type}定时器${session.id}:
+        log.info(`添加${timer.type}定时器${session.id}:
 触发时间:${fmtDate(target)}`);
     }
 
@@ -146,13 +148,13 @@ export class TimerManager {
 
             for (const index of index_list) {
                 if (index < 1 || index > timers.length) {
-                    logger.warning(`序号${index}超出范围`);
+                    log.warning(`序号${index}超出范围`);
                     continue;
                 }
 
                 const i = this.timerQueue.indexOf(timers[index - 1]);
                 if (i === -1) {
-                    logger.warning(`出错了:找不到序号${index}的定时器`);
+                    log.warning(`出错了:找不到序号${index}的定时器`);
                     continue;
                 }
 
@@ -204,7 +206,7 @@ export class TimerManager {
     static async task() {
         try {
             if (this.isTaskRunning) {
-                logger.info('定时器任务正在运行，跳过');
+                log.info('定时器任务正在运行，跳过');
                 return;
             }
 
@@ -222,7 +224,7 @@ export class TimerManager {
                                 this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
-                                logger.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
                                 continue;
                             }
 
@@ -246,7 +248,7 @@ export class TimerManager {
                                 if (idx !== -1) this.timerQueue.splice(idx, 1);
                                 changed = true;
                             } catch (e) {
-                                logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                                log.exception(`${timer.sid} 执行 ${timer.type} 定时器出错`, e);
                             }
                             break;
                         }
@@ -256,7 +258,7 @@ export class TimerManager {
                                 this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
-                                logger.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
                                 continue;
                             }
 
@@ -291,7 +293,7 @@ export class TimerManager {
                                 this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
-                                logger.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
                                 continue;
                             }
 
@@ -302,7 +304,7 @@ export class TimerManager {
                             const curSegIndex = session.curActiveTimeSegIndex;
                             const nextTimePoint = session.getNextTimePoint(curSegIndex);
                             if (curSegIndex === -1) {
-                                logger.error(`${sid} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
+                                log.error(`${sid} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
                                 continue;
                             }
                             if (nextTimePoint !== -1) {
@@ -328,7 +330,7 @@ ${lastTimePrompt}
 
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (e) {
-                    logger.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                    log.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
                 }
             }
 
@@ -338,7 +340,7 @@ ${lastTimePrompt}
 
             this.isTaskRunning = false;
         } catch (e) {
-            logger.error(`定时任务处理出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+            log.exception('定时任务处理出错', e);
         }
     }
 
@@ -356,7 +358,7 @@ ${lastTimePrompt}
         if (this.intervalId) {
             clearTimeout(this.intervalId);
             this.intervalId = null;
-            logger.info('定时器任务已停止');
+            log.info('定时器任务已停止');
         }
     }
 

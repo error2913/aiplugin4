@@ -12,6 +12,8 @@ import { registerSkills } from "./skills";
 import { registerTools } from "./tools/init";
 import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject } from "./types";
 
+const log = Logger.withTag('tool');
+
 export const toolMap: { [key: string]: Tool } = {};
 
 export type ToolName = string;
@@ -73,7 +75,7 @@ export default class Tool {
     static registerTool() {
         registerTools();
         registerSkills();
-        registerMCPTools().catch(e => Logger.error(`注册MCP工具失败:${e.message}`));
+        registerMCPTools().catch(e => log.exception('注册MCP工具失败', e));
     }
 
 
@@ -81,18 +83,18 @@ export default class Tool {
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
         if (!Object.prototype.hasOwnProperty.call(toolMap, name)) {
-            Logger.warning(`调用函数失败:未注册的函数:${name}`);
+            log.warning(`调用函数失败:未注册的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
         }
         if (!session.toolState?.[name]) {
-            Logger.warning(`调用函数失败:未经许可的函数:${name}`);
+            log.warning(`调用函数失败:未经许可的函数:${name}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未经许可的函数:${name}` }, callBack: true };
         }
 
         const tool = toolMap[name];
         const msgType = msg.messageType === 'private' ? 'user' : 'group';
         if (tool.sessionType !== "any" && tool.sessionType !== msgType) {
-            Logger.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);
+            log.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);
             return { result: { tool_call_id: tool_call.id, content: `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}` }, callBack: true };
         }
 
@@ -102,13 +104,13 @@ export default class Tool {
         } catch (e) {
             const fixedStr = fixJsonString(tool_call.function.arguments);
             if (fixedStr === '') {
-                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
+                log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
             }
             try {
                 args = JSON.parse(fixedStr);
             } catch (e) {
-                Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
+                log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
             }
 
@@ -116,33 +118,33 @@ export default class Tool {
 
         try {
             if (args !== null && typeof args !== 'object') {
-                Logger.warning(`调用函数失败:arguement不是一个object`);
+                log.warning(`调用函数失败:arguement不是一个object`);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数失败:arguement不是一个object` }, callBack: true };
             }
             for (const key of (tool.toolInfo.function.parameters.required || [])) {
                 if (!Object.prototype.hasOwnProperty.call(args, key)) {
-                    Logger.warning(`调用函数失败:缺少必需参数 ${key}`);
+                    log.warning(`调用函数失败:缺少必需参数 ${key}`);
                     return { result: { tool_call_id: tool_call.id, content: `调用函数失败:缺少必需参数 ${key}` }, callBack: true };
                 }
             }
 
             const validateError = Tool.validateArgs(tool, args);
             if (validateError) {
-                Logger.warning(`调用函数失败:${validateError}`);
+                log.warning(`调用函数失败:${validateError}`);
                 return { result: { tool_call_id: tool_call.id, content: `调用函数失败:${validateError}` }, callBack: true };
             }
 
             const { TIMEOUT } = Config.base;
             const time = Date.now();
             const content = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT);
-            Logger.info(`[tool] ${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
+            log.info(`${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
             const result: ToolCallResult = { tool_call_id: tool_call.id, content };
             if (name === 'web_search' && args && typeof args.q === 'string' && args.q.trim()) {
                 result.searchTarget = args.q.trim();
             }
             return { result, callBack: tool.callBack };
         } catch (e) {
-            Logger.error(`调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}`);
+            log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
         }
     }
@@ -169,7 +171,7 @@ export default class Tool {
         for (let i = 0; i < tool_calls.length; i++) {
             const tool_call = tool_calls[i];
             if (MAX_CALL_COUNT > 0 && session.tool.callCount >= MAX_CALL_COUNT) {
-                Logger.warning('工具调用超过上限');
+                log.warning('工具调用超过上限');
                 ret.result.push({
                     tool_call_id: tool_call.id,
                     content: '工具调用超过上限',
@@ -192,7 +194,7 @@ export default class Tool {
         try {
             const data = JSON.parse(toolCallStr);
             if (!Array.isArray(data)) {
-                Logger.warning(`解析函数调用失败:tool_calls不是一个数组`);
+                log.warning(`解析函数调用失败:tool_calls不是一个数组`);
                 return { result: [{ tool_call_id: '', content: `解析函数调用失败:tool_calls不是一个数组` }], callBack: true };
             }
             const tool_calls = data.map((item, index) => {
@@ -210,7 +212,7 @@ export default class Tool {
             });
             return await this.handleToolCalls(ctx, msg, session, tool_calls);
         } catch (e) {
-            Logger.error(`解析函数调用失败:${e instanceof Error ? e.message : String(e)}`);
+            log.exception('解析函数调用失败', e);
             return { result: [{ tool_call_id: '', content: `解析函数调用失败:${e instanceof Error ? e.message : String(e)}` }], callBack: true };
         }
     }
@@ -223,7 +225,7 @@ export default class Tool {
                 if (!CORE_TOOL_NAMES.includes(key)) return null; // 非核心工具按需加载，不注入 schema
                 if (toolState[key]) {
                     if (!Object.prototype.hasOwnProperty.call(toolMap, key)) {
-                        Logger.warning(`在getToolsInfo中找不到工具:${key}`);
+                        log.warning(`在getToolsInfo中找不到工具:${key}`);
                         return null;
                     }
                     const tool: Tool = toolMap[key];
@@ -246,7 +248,7 @@ export default class Tool {
         for (const key of Object.keys(toolState)) {
             if (CORE_TOOL_NAMES.includes(key) || !toolState[key]) continue;
             if (!Object.prototype.hasOwnProperty.call(toolMap, key)) {
-                Logger.warning(`在getOnDemandTools中找不到工具:${key}`);
+                log.warning(`在getOnDemandTools中找不到工具:${key}`);
                 continue;
             }
             const tool: Tool = toolMap[key];

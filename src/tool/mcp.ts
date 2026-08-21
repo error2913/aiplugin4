@@ -7,6 +7,8 @@ import { runMCPAdapter } from "./mcp/adapters";
 import { MCPCallResult } from "./mcp/types";
 import Tool, { toolMap } from "./tool";
 
+const log = Logger.withTag('mcp');
+
 export interface MCPServer {
     name: string;
     url: string;
@@ -58,12 +60,12 @@ function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
 
     // stdio 需要拉起子进程，海豹 goja 环境不支持，明确提示后跳过
     if (cfg.command) {
-        Logger.warning(`MCP 服务器 ${name} 使用 stdio 传输，海豹运行环境无法拉起进程，已跳过；请改用 Streamable HTTP（type=http + url）`);
+        log.warning(`MCP 服务器 ${name} 使用 stdio 传输，海豹运行环境无法拉起进程，已跳过；请改用 Streamable HTTP（type=http + url）`);
         return null;
     }
     const type = String(cfg.type || 'http').toLowerCase();
     if (type !== 'http' && type !== 'streamable-http') {
-        Logger.warning(`MCP 服务器 ${name} 传输类型 ${type} 不受支持（当前仅支持 Streamable HTTP），已跳过`);
+        log.warning(`MCP 服务器 ${name} 传输类型 ${type} 不受支持（当前仅支持 Streamable HTTP），已跳过`);
         return null;
     }
 
@@ -96,7 +98,7 @@ function getMCPServers(): MCPServer[] {
             const j = parseJSONWithTrailingCommas(line);
             // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
             if (!j || typeof j !== 'object' || !j.mcpServers || typeof j.mcpServers !== 'object' || Array.isArray(j.mcpServers)) {
-                Logger.error(`MCP服务器配置仅支持标准 mcpServers JSON 格式（{"mcpServers":{...}}），已忽略该行: ${line.slice(0, 120)}`);
+                log.error(`MCP服务器配置仅支持标准 mcpServers JSON 格式（{"mcpServers":{...}}），已忽略该行: ${line.slice(0, 120)}`);
                 continue;
             }
             for (const [name, cfg] of Object.entries(j.mcpServers)) {
@@ -104,7 +106,7 @@ function getMCPServers(): MCPServer[] {
                 if (s) servers.push(s);
             }
         } catch (e) {
-            Logger.error(`MCP服务器配置解析失败（需要标准 mcpServers JSON 格式，兼容对象/数组尾逗号）: ${e instanceof Error ? e.message : String(e)}，内容: ${line}`);
+            log.exception(`MCP服务器配置解析失败（需要标准 mcpServers JSON 格式，兼容对象/数组尾逗号），内容: ${line}`, e);
         }
     }
     return servers.filter(s => s.name && s.url);
@@ -250,7 +252,7 @@ async function withSessionRetry<T>(server: MCPServer, fn: (sessionId: string) =>
         return { sessionId, value: await fn(sessionId) };
     } catch (e) {
         if (!isSessionInvalidError(e)) throw e;
-        Logger.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
+        log.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
         sessionId = await getSessionId(server, true);
         return { sessionId, value: await fn(sessionId) };
     }
@@ -283,7 +285,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
     const liveKeys = new Set(tools.filter(t => !!t.name).map(t => t.name));
     for (const [key, owner] of mcpToolKeys) {
         if (owner === server.name && !liveKeys.has(key) && Object.prototype.hasOwnProperty.call(toolMap, key)) {
-            Logger.info(`MCP 服务器 ${server.name} 不再提供工具 ${key}，清理`);
+            log.info(`MCP 服务器 ${server.name} 不再提供工具 ${key}，清理`);
             delete toolMap[key];
             mcpToolKeys.delete(key);
         }
@@ -293,7 +295,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         if (!t.name) continue;
         const owner = mcpToolKeys.get(t.name);
         if ((owner && owner !== server.name) || (!owner && Object.prototype.hasOwnProperty.call(toolMap, t.name))) {
-            Logger.info(`MCP 工具 ${t.name} 与已有工具同名，跳过（${server.name}.${t.name}）`);
+            log.info(`MCP 工具 ${t.name} 与已有工具同名，跳过（${server.name}.${t.name}）`);
             continue;
         }
         if (owner === server.name) delete toolMap[t.name];
@@ -332,7 +334,7 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
             });
         };
         mcpToolKeys.set(t.name, server.name);
-        Logger.debug(`已注册 MCP 工具 ${t.name}`);
+        log.debug(`已注册 MCP 工具 ${t.name}`);
     }
     return tools;
 }
@@ -350,7 +352,7 @@ export async function registerMCPTools() {
     // 不参与 TTL 节流：删除服务器后下一条消息即清理，避免旧工具在缓存窗口内残留可调用
     for (const [key, serverName] of mcpToolKeys) {
         if (!activeNames.has(serverName) && Object.prototype.hasOwnProperty.call(toolMap, key)) {
-            Logger.info(`MCP 服务器 ${serverName} 已从配置移除，清理工具 ${key}`);
+            log.info(`MCP 服务器 ${serverName} 已从配置移除，清理工具 ${key}`);
             delete toolMap[key];
             mcpToolKeys.delete(key);
         }
@@ -368,7 +370,7 @@ export async function registerMCPTools() {
         try {
             await syncTools(server);
         } catch (e) {
-            Logger.error(`MCP 服务器 ${server.name} 注册失败: ${e instanceof Error ? e.message : String(e)}`);
+            log.exception(`MCP 服务器 ${server.name} 注册失败`, e);
         }
     }
 }

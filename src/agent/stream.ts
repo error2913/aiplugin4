@@ -8,8 +8,10 @@ import Model from "../model/model";
 import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
-import { estimateTextTokens, RequestMessage } from "../utils/message";
+import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
 import { withTimeout } from "../utils/utils";
+
+const log = logger.withTag('model');
 
 /**
  * 请求体消息净化（防御层）：一次遍历同时完成——
@@ -41,7 +43,7 @@ function sanitizeRequestMessages(messages: any[]): any[] {
         if (out.role === 'tool') {
             const id = out.tool_call_id;
             if (!id || !assistantCallIds.has(id)) {
-                logger.warning('剔除没有匹配 assistant tool_calls 的 tool 消息');
+                log.warning('剔除没有匹配 assistant tool_calls 的 tool 消息');
                 continue;
             }
             result.push(out);
@@ -51,10 +53,10 @@ function sanitizeRequestMessages(messages: any[]): any[] {
         if (out.role === 'assistant' && Array.isArray(out.tool_calls) && out.tool_calls.length > 0) {
             const kept = out.tool_calls.filter((tc: any) => tc && tc.id && toolResultIds.has(tc.id));
             if (kept.length === 0) {
-                logger.warning('剔除引用不存在 tool 结果的 assistant tool_calls');
+                log.warning('剔除引用不存在 tool 结果的 assistant tool_calls');
                 delete out.tool_calls;
             } else if (kept.length < out.tool_calls.length) {
-                logger.warning('剔除部分引用不存在 tool 结果的 assistant tool_call');
+                log.warning('剔除部分引用不存在 tool 结果的 assistant tool_call');
                 out.tool_calls = kept;
             }
         }
@@ -68,19 +70,21 @@ function checkRequestBudget(messages: any[], tools: any[]): void {
     const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
     if (maxTokens <= 0) return;
     const toolsEstimate = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
-    const estimate = estimateTextTokens(JSON.stringify(messages || [])) + toolsEstimate;
+    // 与 handleMessages 的 applyTokenBudget 统一估算口径（文本 + tool_calls + tools 预留），
+    // 避免两套口径不一致导致裁剪后请求体仍超限；多模态图片按固定开销而非 base64 原文估算
+    const estimate = (messages || []).reduce((acc, m) => acc + estimateMessageTokens(m), 0) + toolsEstimate;
     if (estimate > maxTokens) {
-        logger.warning(`请求体估算 token（含 tools JSON）超出「上下文最大token」预算: ${estimate} / ${maxTokens}`);
+        log.warning(`请求体估算 token（含 tools JSON）超出「上下文最大token」预算: ${estimate} / ${maxTokens}`);
     }
 }
 
 export class streamService {
-    static async startStream(messages: any[], modelName: string = ''): Promise<string> {
+    static async startStream(messages: any[], modelName: string = '', runId: string = ''): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl } = Config.backend;
         const model = Model.getChatModel('chat', modelName);
         if (!model) {
-            logger.error('未找到可用的对话模型');
+            log.error('未找到可用的对话模型');
             return '';
         }
         try {
@@ -91,13 +95,7 @@ export class streamService {
             body.messages = sanitizeRequestMessages(body.messages);
 
             // 打印请求发送前的上下文
-            const s = JSON.stringify(body.messages, (key, value) => {
-                if (key === "" && Array.isArray(value)) {
-                    return value.filter(item => item.role !== "system");
-                }
-                return value;
-            });
-            logger.info(`请求发送前的上下文:\n`, s);
+            log.printRequestMessages(body.messages, runId);
 
             const response = await withTimeout(() => fetch(`${streamUrl}/start`, {
                 method: 'POST',
@@ -112,7 +110,7 @@ export class streamService {
                 })
             }), timeout);
 
-            // logger.info("响应体", JSON.stringify(response, null, 2));
+            // log.info("响应体", JSON.stringify(response, null, 2));
 
             const text = await response.text();
             if (!response.ok) {
@@ -135,7 +133,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
-            logger.error("在startStream中出错:", e instanceof Error ? e.message : String(e));
+            log.exception('startStream', e);
             return '';
         }
     }
@@ -144,10 +142,10 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = ''): Promise<{ content: string, tool_calls: ToolCall[] }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = ''): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = Model.getChatModel('chat', modelName) as ChatModel;
         if (!model) {
-            logger.error('未找到可用的对话模型');
+            log.error('未找到可用的对话模型');
             return { content: '', tool_calls: [] };
         }
         try {
@@ -162,7 +160,7 @@ export class streamService {
                 body.tool_choice = tool_choice;
             }
             checkRequestBudget(body.messages, tools || []);
-            logger.printRequestMessages(body.messages);
+            log.printRequestMessages(body.messages, runId);
 
             const time = Date.now();
             const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider });
@@ -171,20 +169,25 @@ export class streamService {
                 const message = response.choices[0].message;
                 const finish_reason = response.choices[0].finish_reason;
 
-                if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
-                    logger.info('思维链内容:', message.reasoning_content);
+                // thinking mode（DeepSeek V4 等）：reasoning_content 必须原样回传（含空字符串），
+                // 直接丢弃会在后续带工具轮次的请求中触发 400；这里随返回值带出，由调用方存入上下文
+                const hasReasoning = Object.prototype.hasOwnProperty.call(message, 'reasoning_content');
+                const reasoning = hasReasoning ? (message.reasoning_content || '') : undefined;
+                if (hasReasoning) {
+                    const shownR = reasoning.length > 500 ? reasoning.slice(0, 500) + `…(+${reasoning.length - 500})` : reasoning;
+                    log.info(`思维链内容(${reasoning.length}字符): ${shownR}`);
                 }
 
                 const content = message.content || '';
+                const shown = content.length > 300 ? content.slice(0, 300) + `…(+${content.length - 300})` : content;
+                log.info(`响应内容(${Date.now() - time}ms, finish=${finish_reason}): ${shown}`);
 
-                logger.info('响应内容:', content, '\nlatency:', Date.now() - time, 'ms', '\nfinish_reason:', finish_reason);
-
-                return { content, tool_calls: message.tool_calls || [] };
+                return { content, tool_calls: message.tool_calls || [], ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) };
             } else {
                 throw new Error('服务器响应中没有choices或choices为空\n响应体:' + JSON.stringify(data, null, 2));
             }
         } catch (e) {
-            logger.error('在sendChatRequest中出错:', e instanceof Error ? e.message : String(e));
+            log.exception('sendChatRequest', e);
             return { content: '', tool_calls: [] };
         }
     }
@@ -200,7 +203,7 @@ export class streamService {
                 }
             });
 
-            // logger.info("响应体", JSON.stringify(response, null, 2));
+            // log.info("响应体", JSON.stringify(response, null, 2));
 
             const text = await response.text();
             if (!response.ok) {
@@ -227,7 +230,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
-            logger.error("在pollStream中出错:", e instanceof Error ? e.message : String(e));
+            log.exception('pollStream', e);
             return { status: 'failed', reply: '', nextAfter: 0 };
         }
     }
@@ -243,7 +246,7 @@ export class streamService {
                 }
             });
 
-            // logger.info("响应体", JSON.stringify(response, null, 2));
+            // log.info("响应体", JSON.stringify(response, null, 2));
 
             const text = await response.text();
             if (!response.ok) {
@@ -261,7 +264,7 @@ export class streamService {
                 if (!data.status) {
                     throw new Error("服务器响应中没有status字段");
                 }
-                logger.info('对话结束', data.status === 'success' ? '成功' : '失败');
+                log.info('对话结束', data.status === 'success' ? '成功' : '失败');
                 if (data.status === 'success') {
                     UsageManager.updateUsage(data.model, data.usage);
                 }
@@ -270,7 +273,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
-            logger.error("在endStream中出错:", e instanceof Error ? e.message : String(e));
+            log.exception('endStream', e);
             return '';
         }
     }

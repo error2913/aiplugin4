@@ -136,6 +136,12 @@ function buildAnthropicMessages(messages: any[]): { system: string, messages: an
             }
             content = blocks;
         }
+        // DeepSeek 思维链 → Anthropic thinking 块：thinking 必须位于消息块最前，且每条消息最多一个
+        if (role === 'assistant' && typeof msg.reasoning_content === 'string' && msg.reasoning_content.trim() !== '') {
+            const blocks = Array.isArray(content) ? content.slice() : (typeof content === 'string' && content ? [{ type: 'text', text: content }] : []);
+            blocks.unshift({ type: 'thinking', thinking: msg.reasoning_content });
+            content = blocks;
+        }
         out.push({ role, content });
     }
 
@@ -167,7 +173,17 @@ function extractSystemText(content: any): string {
 
 function mergeAnthropicContent(a: any, b: any): any {
     const toBlocks = (c: any): any[] => typeof c === 'string' ? [{ type: 'text', text: c }] : (Array.isArray(c) ? c : []);
-    return toBlocks(a).concat(toBlocks(b));
+    const aBlocks = toBlocks(a);
+    const bBlocks = toBlocks(b);
+    // Anthropic 每条消息最多一个 thinking 块：thinking 恒在消息块最前，
+    // 合并相邻 assistant 消息时取两条消息的首块判断并合并，而不是末尾块
+    const firstA = aBlocks[0];
+    const firstB = bBlocks[0];
+    if (firstA && firstB && firstA.type === 'thinking' && firstB.type === 'thinking') {
+        firstA.thinking = (firstA.thinking || '') + '\n' + (firstB.thinking || '');
+        bBlocks.shift();
+    }
+    return aBlocks.concat(bBlocks);
 }
 
 /** Anthropic Messages 响应 → OpenAI 兼容结构（choices/message/content/tool_calls） */
@@ -207,3 +223,4 @@ function parseAnthropicResponse(data: any): NormalizedChatResponse {
         usage: extractUsage(data)
     };
 }
+

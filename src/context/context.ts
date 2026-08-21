@@ -16,6 +16,7 @@ import { TypeDescriptor, withTimeout } from "../utils/utils";
 import Message from "./message";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
+const log = Logger.withTag('context');
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
@@ -98,7 +99,7 @@ export class Context {
             const compressed = await Agent.get('compress_agent').chat(text);
             return compressed || text;
         } catch (e) {
-            Logger.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
+            log.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
             return text;
         }
     }
@@ -110,7 +111,7 @@ export class Context {
             try {
                 await this.updateName(ctx.endPoint.userId, ctx.group ? ctx.group.groupId : '', userId);
             } catch (e) {
-                Logger.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
+                log.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
         text = await this.compressIfLong(text);
@@ -143,17 +144,18 @@ export class Context {
         try {
             await MemoryService.accessRelatedMemories(this.session, text);
         } catch (e) {
-            Logger.warning('记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
+            log.warning('记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
         }
     }
 
-    addAssistantMessage(text: string, messageId: string) {
+    addAssistantMessage(text: string, messageId: string, reasoningContent?: string) {
         // 防泄露：兜底剥离内部上下文标签（正常回复在 handleReply 已剥离）
         text = stripInternalTags(text);
         const ami: AssistantMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
-            messageId
+            messageId,
+            ...(reasoningContent !== undefined ? { reasoningContent } : {})
         };
         const lastMessage = this.messages[this.messages.length - 1];
         if (lastMessage && Message.getMessageType(lastMessage) === 'assistant' && Array.isArray((lastMessage as AssistantMessage).contentItems)) (lastMessage as AssistantMessage).contentItems.push(ami);
@@ -162,14 +164,14 @@ export class Context {
             contentItems: [ami]
         });
         MemoryService.accessRelatedMemories(this.session, text).catch(e => {
-            Logger.warning('助手消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
+            log.warning('助手消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
         });
         // 按配置的间隔轮数触发短期记忆总结
         this.summaryCounter++;
         if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
             this.summaryCounter = 0;
             this.session.memory.summarize().catch(e => {
-                Logger.warning('短期记忆总结失败: ' + (e instanceof Error ? e.message : String(e)));
+                log.warning('短期记忆总结失败: ' + (e instanceof Error ? e.message : String(e)));
             });
         }
         this.limitMessages();
@@ -191,15 +193,16 @@ export class Context {
         this.session.memory.accessMemories(text);
     }
 
-    addToolCallsMessage(toolCalls: ToolCall[]) {
+    addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {
         // 防御：空数组不应入库，避免后续请求体携带 "tool_calls":[] 被后端拒绝
         if (!toolCalls || toolCalls.length === 0) {
-            Logger.warning('addToolCallsMessage 收到空数组，已忽略');
+            log.warning('addToolCallsMessage 收到空数组，已忽略');
             return;
         }
         const tcm: ToolCallsMessage = {
             role: 'assistant',
-            toolCalls
+            toolCalls,
+            ...(reasoningContent !== undefined ? { reasoningContent } : {})
         }
         this.messages.push(tcm);
     }
@@ -217,7 +220,7 @@ export class Context {
                 const compressed = await Agent.get('compress_agent').chat(prompt);
                 if (compressed) text = compressed;
             } catch (e) {
-                Logger.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
+                log.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
         // 防注入：工具返回内容（如历史消息、网页文本）中的内部上下文标签直接剥离，不进入上下文
@@ -225,7 +228,8 @@ export class Context {
         const tcbm: ToolCallbackMessage = {
             role: 'tool',
             text,
-            toolCallId
+            toolCallId,
+            toolName
         }
         this.messages.push(tcbm);
     }
@@ -273,7 +277,7 @@ export class Context {
             case 'nickname': {
                 const strangerInfo = await callOb11Api(epId, "get_stranger_info", { user_id: uid.replace(/^.+:/, ""), no_cache: true });
                 if (!strangerInfo || !strangerInfo.nickname) {
-                    Logger.warning(`未找到用户<${uid}>的昵称`);
+                    log.warning(`未找到用户<${uid}>的昵称`);
                     break;
                 }
                 name = strangerInfo.nickname;
@@ -283,7 +287,7 @@ export class Context {
                 if (!gid) break;
                 const memberInfo = await callOb11Api(epId, "get_group_member_info", { group_id: gid.replace(/^.+:/, ""), user_id: uid.replace(/^.+:/, ""), no_cache: true });
                 if (!memberInfo) {
-                    Logger.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
+                    log.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
                     await this.setName(epId, gid, uid, 'nickname');
                     return;
                 }
@@ -296,7 +300,7 @@ export class Context {
             }
         }
         if (!name) {
-            Logger.warning(`用户<${uid}>未设置昵称或群名片`);
+            log.warning(`用户<${uid}>未设置昵称或群名片`);
             return;
         }
         const u = User.get(uid);
@@ -334,7 +338,7 @@ export class Context {
                 try {
                     await withTimeout(() => this.setName(epId, gid, uid, 'nickname'), 5000);
                 } catch (e) {
-                    Logger.warning(`自动改名（昵称）失败: ${e instanceof Error ? e.message : String(e)}`);
+                    log.warning(`自动改名（昵称）失败: ${e instanceof Error ? e.message : String(e)}`);
                 }
                 break;
             }
@@ -342,7 +346,7 @@ export class Context {
                 try {
                     await withTimeout(() => this.setName(epId, gid, uid, 'card'), 5000);
                 } catch (e) {
-                    Logger.warning(`自动改名（群名片）失败: ${e instanceof Error ? e.message : String(e)}`);
+                    log.warning(`自动改名（群名片）失败: ${e instanceof Error ? e.message : String(e)}`);
                 }
                 break;
             }

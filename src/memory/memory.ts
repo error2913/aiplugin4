@@ -222,8 +222,9 @@ export default class MemoryService {
         return null;
     }
 
-    async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, ui: UserInfo | null, gi: GroupInfo | null): Promise<string> {
-        const users = ui ? [ui.id] : [];
+    async buildMemoryPrompt(ctx: seal.MsgContext, _context: Context, text: string, uis: UserInfo[], gi: GroupInfo | null): Promise<string> {
+        // 群聊多人在线时按全部发言者检索，而不是只按最后一位用户过滤
+        const users = Array.from(new Set(uis.map(u => u.id)));
         const groups = gi ? [gi.id] : [];
         // 私聊/群聊检索的是同一份会话记忆，合并为一次查询（复用向量，避免重复嵌入）
         const memories = await this.getTopScoreMemoryList(text, users, groups);

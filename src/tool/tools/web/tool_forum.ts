@@ -5,6 +5,8 @@ import Image from "../../../resource/image";
 import { parseSpecialTokens } from "../../../utils/string";
 import Tool from "../../tool";
 
+const log = logger.withTag('tool');
+
 /**
  * FNV-1a 签名算法
  */
@@ -113,7 +115,7 @@ async function imageToForumFormat(image: Image): Promise<{ name: string, mime_ty
 
         const base64Data = image.base64;
         if (!base64Data) {
-            logger.warning(`图片 ${image.imageId} 无法获取 base64 数据`);
+            log.warning(`图片 ${image.imageId} 无法获取 base64 数据`);
             return null;
         }
         const pureBase64 = base64Data.replace(/^data:image\/[^;]+;base64,/, '');
@@ -128,7 +130,7 @@ async function imageToForumFormat(image: Image): Promise<{ name: string, mime_ty
             data: pureBase64
         };
     } catch (error) {
-        logger.error(`转换图片 ${image.imageId} 为论坛格式失败:`, error);
+        log.exception(`转换图片 ${image.imageId} 为论坛格式失败`, error);
         return null;
     }
 }
@@ -147,7 +149,7 @@ function extractImagesFromContent(content: string): Image[] {
             if (image) {
                 images.push(image);
             } else {
-                logger.warning(`论坛发帖：无法找到图片 ${id}`);
+                log.warning(`论坛发帖：无法找到图片 ${id}`);
             }
         }
     }
@@ -195,7 +197,7 @@ export function registerForum() {
 
         try {
             const url = `${FORUM_URL}/api/public/posts?sort=${sort}&page=${page}&limit=${limit}`;
-            logger.info(`获取论坛帖子列表: ${url}`);
+            log.info(`获取论坛帖子列表: ${url}`);
 
             const response = await fetch(url, {
                 method: "GET",
@@ -220,7 +222,7 @@ export function registerForum() {
                         `   预览: ${post.content_preview || ''}`;
                 }).join('\n');
         } catch (error) {
-            logger.error("在forum_get_posts中请求出错：", error);
+            log.exception('在forum_get_posts中请求出错', error);
             return `获取论坛帖子列表失败: ${error}`;
         }
     };
@@ -248,7 +250,7 @@ export function registerForum() {
         const { FORUM_URL } = Config.backend;
 
         try {
-            logger.info(`获取论坛帖子详情: post_id=${post_id}`);
+            log.info(`获取论坛帖子详情: post_id=${post_id}`);
 
             const postResponse = await fetch(`${FORUM_URL}/api/public/posts/${post_id}`, {
                 method: "GET",
@@ -301,7 +303,7 @@ export function registerForum() {
 
             return result;
         } catch (error) {
-            logger.error("在forum_get_post_detail中请求出错：", error);
+            log.exception('在forum_get_post_detail中请求出错', error);
             return `获取论坛帖子详情失败: ${error}`;
         }
     };
@@ -354,7 +356,7 @@ export function registerForum() {
             if (page) params.push(`page=${encodeURIComponent(page.toString())}`);
 
             const url = `${FORUM_URL}/api/public/search?${params.join('&')}`;
-            logger.info(`搜索论坛: ${url}`);
+            log.info(`搜索论坛: ${url}`);
 
             const response = await fetch(url, {
                 method: "GET",
@@ -379,7 +381,7 @@ export function registerForum() {
                         `   预览: ${post.content_preview || ''}`;
                 }).join('\n');
         } catch (error) {
-            logger.error("在forum_search中请求出错：", error);
+            log.exception('在forum_search中请求出错', error);
             return `搜索论坛失败: ${error}`;
         }
     };
@@ -426,7 +428,7 @@ export function registerForum() {
         const { FORUM_URL } = Config.backend;
 
         try {
-            logger.info(`创建论坛帖子: ${title}`);
+            log.info(`创建论坛帖子: ${title}`);
 
             const allImages: Image[] = [];
 
@@ -436,9 +438,9 @@ export function registerForum() {
                     const image = Image.get(imgId);
                     if (image) {
                         allImages.push(image);
-                        logger.info(`论坛发帖：通过 image_ids 找到图片 ${imgId}`);
+                        log.info(`论坛发帖：通过 image_ids 找到图片 ${imgId}`);
                     } else {
-                        logger.warning(`论坛发帖：无法通过 image_ids 找到图片 ${imgId}`);
+                        log.warning(`论坛发帖：无法通过 image_ids 找到图片 ${imgId}`);
                     }
                 }
             }
@@ -448,7 +450,7 @@ export function registerForum() {
             for (const img of contentImages) {
                 if (!allImages.find(existing => existing.imageId === img.imageId)) {
                     allImages.push(img);
-                    logger.info(`论坛发帖：从内容中提取到图片 ${img.imageId}`);
+                    log.info(`论坛发帖：从内容中提取到图片 ${img.imageId}`);
                 }
             }
 
@@ -465,7 +467,7 @@ export function registerForum() {
                     const forumImage = await imageToForumFormat(image);
                     if (forumImage) {
                         forumImages.push(forumImage);
-                        logger.info(`论坛发帖：成功转换图片 ${image.imageId}，大小: ${forumImage.data.length} 字符`);
+                        log.info(`论坛发帖：成功转换图片 ${image.imageId}，大小: ${forumImage.data.length} 字符`);
                     }
                 }
                 if (forumImages.length > 0) {
@@ -483,7 +485,7 @@ export function registerForum() {
 
             return resultMsg;
         } catch (error) {
-            logger.error("在forum_create_post中请求出错：", error);
+            log.exception('在forum_create_post中请求出错', error);
             return `创建论坛帖子失败: ${error}`;
         }
     };
@@ -530,26 +532,26 @@ export function registerForum() {
         try {
             if (action === "create") {
                 if (!post_id || !content) return "创建评论需要提供 post_id 和 content";
-                logger.info(`创建论坛评论: post_id=${post_id}`);
+                log.info(`创建论坛评论: post_id=${post_id}`);
                 const body: any = { content };
                 if (parent_id) body.parent_id = parent_id;
                 const data = await forumAuthFetch(`${FORUM_URL}/api/posts/${post_id}/comments`, 'POST', body);
                 return `评论成功！\n评论ID: ${data.comment?.id}\n内容: ${data.comment?.content}`;
             } else if (action === "update") {
                 if (!comment_id || !content) return "更新评论需要提供 comment_id 和 content";
-                logger.info(`更新论坛评论: comment_id=${comment_id}`);
+                log.info(`更新论坛评论: comment_id=${comment_id}`);
                 await forumAuthFetch(`${FORUM_URL}/api/comments/${comment_id}`, 'PUT', { content });
                 return `评论 [ID:${comment_id}] 更新成功！`;
             } else if (action === "delete") {
                 if (!comment_id) return "删除评论需要提供 comment_id";
-                logger.info(`删除论坛评论: comment_id=${comment_id}`);
+                log.info(`删除论坛评论: comment_id=${comment_id}`);
                 await forumAuthFetch(`${FORUM_URL}/api/comments/${comment_id}`, 'DELETE');
                 return `评论 [ID:${comment_id}] 已成功删除！`;
             } else {
                 return `未知的操作类型: ${action}`;
             }
         } catch (error) {
-            logger.error(`论坛评论操作（${action}）中出错：`, error);
+            log.exception(`论坛评论操作（${action}）失败`, error);
             return `论坛评论操作失败: ${error}`;
         }
     };
@@ -571,7 +573,7 @@ export function registerForum() {
         const { FORUM_URL } = Config.backend;
 
         try {
-            logger.info('获取论坛动态');
+            log.info('获取论坛动态');
 
             const data = await forumAuthFetch(`${FORUM_URL}/api/activity`, 'GET');
 
@@ -600,7 +602,7 @@ export function registerForum() {
 
             return result;
         } catch (error) {
-            logger.error("在forum_get_activity中请求出错：", error);
+            log.exception('在forum_get_activity中请求出错', error);
             return `获取论坛动态失败: ${error}`;
         }
     };
@@ -649,7 +651,7 @@ export function registerForum() {
 
         try {
             if (action === "update") {
-                logger.info(`更新论坛帖子: post_id=${post_id}`);
+                log.info(`更新论坛帖子: post_id=${post_id}`);
                 const body: any = {};
                 if (title !== undefined) body.title = title;
                 if (content !== undefined) body.content = content;
@@ -662,14 +664,14 @@ export function registerForum() {
                 const data = await forumAuthFetch(`${FORUM_URL}/api/posts/${post_id}`, 'PUT', body);
                 return `帖子 [ID:${post_id}] 更新成功！\n标题: ${data.post?.title || title}\n状态: ${data.moderation || '待审核'}`;
             } else if (action === "delete") {
-                logger.info(`删除论坛帖子: post_id=${post_id}`);
+                log.info(`删除论坛帖子: post_id=${post_id}`);
                 await forumAuthFetch(`${FORUM_URL}/api/posts/${post_id}`, 'DELETE');
                 return `帖子 [ID:${post_id}] 已成功删除！`;
             } else {
                 return `未知的操作类型: ${action}`;
             }
         } catch (error) {
-            logger.error(`论坛帖子操作（${action}）中出错：`, error);
+            log.exception(`论坛帖子操作（${action}）失败`, error);
             return `修改论坛帖子失败: ${error}`;
         }
     };
