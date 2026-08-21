@@ -7,6 +7,8 @@ import { callOb11ApiForContext } from "../transport/ob11/dispatcher";
 import { netExists } from "./ob11";
 import { transformTextToArray } from "./string";
 
+const sendLog = logger.withTag('send');
+
 export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null || msgId === '') {
         return '';
@@ -112,18 +114,18 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
         if (msg.messageType === 'private') {
             const result = await callOb11ApiForContext(ctx, msg, "send_private_msg", { user_id: uid.replace(/^.+:/, ""), message: messageArray });
             if (result.ok && result.message_id) {
-                logger.info(`(${result.message_id})发送给${uid}:${s}`);
+                sendLog.debug(`(${result.message_id})发送给${uid}:${s}`);
                 return transformMsgId(result.message_id);
             }
         } else if (msg.messageType === 'group') {
             const gid = ctx.group ? ctx.group.groupId : '';
             const result = await callOb11ApiForContext(ctx, msg, "send_group_msg", { group_id: gid.replace(/^.+:/, ""), message: messageArray });
             if (result.ok && result.message_id) {
-                logger.info(`(${result.message_id})发送给${gid}:${s}`);
+                sendLog.debug(`(${result.message_id})发送给${gid}:${s}`);
                 return transformMsgId(result.message_id);
             }
         }
-        logger.warning(`无法获取message_id`);
+        sendLog.warning('无法获取 message_id');
     }
     session.context.lastReply = s;
     seal.replyToSender(ctx, msg, s);

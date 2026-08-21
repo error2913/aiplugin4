@@ -55,7 +55,15 @@ export const updateInfo: { [version: string]: string } = {
 - 按需工具摘要限制数量并提供参数概览，减少 system prompt 中函数列表占用的 token
 
 ## 配置项更改
-- 无新增或删除配置项；本版本主要为消息接收、提示词缓存、工具调用和图片处理的实现修复。升级后无需恢复默认配置。`,
+- 无新增或删除配置项；本版本主要为消息接收、提示词缓存、工具调用和图片处理的实现修复。升级后无需恢复默认配置。
+
+## 日志
+- 日志格式升级：每条日志带级别短标签（[ERROR]/[WARN]/[INFO]/[DEBUG]）与模块标签（[agent]/[model]/[pipeline]/[timer]/[send]/[ob11]/[context]/[image]），按模块过滤、按级别着色更直观
+- 请求上下文改为摘要 + 明细两级：默认只打 run 号与消息条数摘要，逐条 role/长度/toolCalls 与正文进 DEBUG 级别，「日志记录消息内容」 开关仍控制正文是否输出
+- 异常统一走 exception()：错误进 ERROR、堆栈进 DEBUG，不再把堆栈拼进单行错误
+- 脱敏加强：URL query 中的 token/signature 等参数、sk- 前缀密钥、access/refresh token 一并打码
+- 长文本分段打印带 [第x段/总段数] 标注；响应内容/思维链默认只打印截断摘要
+`,
     "4.15.1": `## 修复
 - 修复 MCP 服务器配置默认值 mcp-files-exec 的 url 缺少 /mcp 路径的问题：默认值修正为 http://127.0.0.1:3910/mcp，与后端 Streamable HTTP 实际路径一致（旧默认值初始化会 404，面板实测 list_dir / read_file 调用正常）
 - 自动改名（昵称/群名片）增加 5 秒超时保护：ob11 网络连接依赖请求异常或未响应时不再让整条消息处理链路挂起，超时记 warning 后继续处理

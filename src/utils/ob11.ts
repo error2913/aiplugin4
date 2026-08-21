@@ -4,6 +4,8 @@ import { callOb11ApiDirect, hasOb11Network } from "../transport/ob11/dispatcher"
 
 import { parseCardToText, parseMusicToText } from "./string";
 
+const log = Logger.withTag('ob11');
+
 const MAX_FORWARD_DEPTH = 5;
 
 export function netExists(): boolean {
@@ -76,7 +78,7 @@ export async function expandForwardMessage(epId: string, id: string, depth = 0):
     try {
         return await forwardMessagesToText(epId, await getForwardMessage(epId, id), depth + 1);
     } catch (error) {
-        Logger.error(`展开合并转发 ${id} 失败：${error instanceof Error ? error.message : String(error)}`);
+        log.exception('展开合并转发 ' + id + ' 失败', error);
         return "[合并转发展开失败]";
     }
 }

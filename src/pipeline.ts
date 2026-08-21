@@ -11,6 +11,8 @@ import { createCtx, createMsg } from "./utils/seal";
 import { expandMilkySegments, formatFileSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
 import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
+const log = logger.withTag('pipeline');
+
 /** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
 const OB11_SUPPLEMENT_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
 const CORE_MESSAGE_TTL_MS = 2000;
@@ -185,7 +187,7 @@ export class MessagePipeline {
                     // ob11 依赖可能在 aiplugin4 之后加载，轮询等待就绪
                     setTimeout(() => trySubscribe(attempt + 1), 5000);
                 } else {
-                    logger.info('[debug] 等待 ob11 网络连接依赖就绪超时（20 次×5s），跳过 ob11 额外消息接收订阅');
+                    log.debug('等待 ob11 网络连接依赖就绪超时（20 次×5s），跳过 ob11 额外消息接收订阅');
                 }
                 return;
             }
@@ -194,12 +196,12 @@ export class MessagePipeline {
                     try {
                         await MessagePipeline.handleOb11Event(event);
                     } catch (e) {
-                        logger.error(`ob11 事件消息处理出错:${e instanceof Error ? e.message : String(e)}`);
+                        log.exception('ob11 事件消息处理出错', e);
                     }
                 };
-                logger.info('[debug] 已订阅 ob11 事件分发，额外接收卡片/视频/音乐/文件/语音/合并转发等消息段');
+                log.debug('已订阅 ob11 事件分发，额外接收卡片/视频/音乐/文件/语音/合并转发等消息段');
             }).catch((e: any) => {
-                logger.error(`订阅 ob11 事件分发失败:${e instanceof Error ? e.message : String(e)}`);
+                log.exception('订阅 ob11 事件分发失败', e);
             });
         };
         trySubscribe(0);
@@ -210,19 +212,19 @@ export class MessagePipeline {
         if (!event || event.post_type !== 'message') return;
         const message = event.message;
         if (!Array.isArray(message)) {
-            logger.debug(`ob11 事件消息为字符串（${String(message).slice(0, 50)}），由核心原生路径处理，跳过`);
+            log.debug(`ob11 事件消息为字符串（${String(message).slice(0, 50)}），由核心原生路径处理，跳过`);
             return;
         }
         if (event.user_id === event.self_id) {
-            logger.debug(`ob11 事件消息来自机器人自身（${event.user_id}），跳过`);
+            log.debug(`ob11 事件消息来自机器人自身（${event.user_id}），跳过`);
             return;
         }
         const segTypes = message.filter((seg: any) => seg && seg.type).map((seg: any) => seg.type);
         if (!message.some((seg: any) => isOb11ExtraSegment(seg))) {
-            logger.debug(`ob11 事件消息无额外段（types=[${segTypes.join(',')}]），由核心原生路径处理，跳过`);
+            log.debug(`ob11 事件消息无额外段（types=[${segTypes.join(',')}]），由核心原生路径处理，跳过`);
             return;
         }
-        logger.info(`[debug] ob11 额外消息接收: ${event.message_type === 'group' ? '群' : '私聊'} uid=${event.user_id} segTypes=[${segTypes.join(',')}]`);
+        log.debug(`ob11 额外消息接收: ${event.message_type === 'group' ? '群' : '私聊'} uid=${event.user_id} segTypes=[${segTypes.join(',')}]`);
 
         // 按端点解析平台前缀（默认 QQ），并构造与核心回调一致的 ctx/msg
         const eps = seal.getEndPoints();
@@ -231,7 +233,7 @@ export class MessagePipeline {
             if (ep.userId === epId) break;
             if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
         }
-        logger.debug(`[debug] ob11 事件 端点解析完成 ep=${epId}`);
+        log.debug(`ob11 事件 端点解析完成 ep=${epId}`);
         const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
         const uid = `${prefix}:${event.user_id}`;
         const isPrivate = event.message_type !== 'group';
@@ -247,22 +249,22 @@ export class MessagePipeline {
 
         const ctx = createCtx(epId, msg);
         if (!ctx) {
-            logger.warning(`ob11 事件消息未找到通信端点: ${epId}，跳过`);
+            log.warning(`ob11 事件消息未找到通信端点: ${epId}，跳过`);
             return;
         }
-        logger.debug(`[debug] ob11 事件 ctx 构建完成 isPrivate=${ctx.isPrivate} player=${ctx.player && ctx.player.userId} group=${ctx.group && ctx.group.groupId}`);
+        log.debug(`ob11 事件 ctx 构建完成 isPrivate=${ctx.isPrivate} player=${ctx.player && ctx.player.userId} group=${ctx.group && ctx.group.groupId}`);
 
         await waitForCoreEvent();
         const state = getCoreMessageState(getMessageKey(ctx, msg));
         if (state && !state.recorded) {
-            logger.debug(`[debug] ob11 补充消息对应核心消息未入库，跳过依赖补充: id=${msg.rawId}`);
+            log.debug(`ob11 补充消息对应核心消息未入库，跳过依赖补充: id=${msg.rawId}`);
             return;
         }
 
         const supplementSegments = filterOb11SupplementSegments(message, state?.types);
         if (state) {
             if (supplementSegments.length === 0) {
-                logger.debug(`[debug] ob11 补充消息无核心缺失段，跳过: id=${msg.rawId}`);
+                log.debug(`ob11 补充消息无核心缺失段，跳过: id=${msg.rawId}`);
                 return;
             }
             await MessagePipeline.handleNonCommand(ctx, msg, supplementSegments, { supplementOnly: true });
@@ -282,14 +284,14 @@ export class MessagePipeline {
         const uid = ctx.player!.userId;
         const blockReason = BlockManager.checkBlock(uid);
         if (blockReason) {
-            logger.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略消息`);
+            log.info(`用户<${uid}>在黑名单中，原因: ${blockReason}，忽略消息`);
             return;
         }
         if (!ctx.isPrivate) {
             const gid = ctx.group!.groupId;
             const groupBlockReason = BlockManager.checkBlock(gid);
             if (groupBlockReason) {
-                logger.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略消息`);
+                log.info(`群组<${gid}>在黑名单中，原因: ${groupBlockReason}，忽略消息`);
                 return;
             }
         }
@@ -321,7 +323,7 @@ export class MessagePipeline {
             ? formatMessageSegmentsForMatching(messageArray, typeof message === 'string' ? message : '')
             : message;
         if (hasMilkySegments) {
-            logger.debug(`[debug] milky 消息段展开: ${messageText.slice(0, 200)}`);
+            log.debug(`milky 消息段展开: ${messageText.slice(0, 200)}`);
         }
 
         const isCoreMessage = options?.source !== 'dependency' && !options?.supplementOnly;
@@ -338,13 +340,13 @@ export class MessagePipeline {
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
             if (coreMessageKey) coreMessageStates.delete(coreMessageKey);
-            logger.info('忽略消息条件命中，跳过');
+            log.info('忽略消息条件命中，跳过');
             return;
         }
 
         if (ignoreRegex.test(messageText)) {
             if (coreMessageKey) coreMessageStates.delete(coreMessageKey);
-            logger.info(`非指令消息忽略:${messageText}`);
+            log.info(`非指令消息忽略:${messageText}`);
             return;
         }
 
@@ -374,7 +376,7 @@ export class MessagePipeline {
                         try {
                             keywordMatched = new RegExp(condition.keyword).test(messageText);
                         } catch (e) {
-                            logger.error(`触发关键词正则错误，已忽略该条件:${condition.keyword}，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                            log.exception('触发关键词正则错误，已忽略该条件: ' + condition.keyword, e);
                             keywordMatched = false;
                         }
                     }
@@ -418,7 +420,7 @@ export class MessagePipeline {
                             session.context.timer = setTimeout(() => {
                                 session.context.timer = null;
                                 session.chat(ctx, msg, '计时器').catch((e: any) => {
-                                    logger.error(`计时器触发对话出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                                    log.exception('计时器触发对话出错', e);
                                 });
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
                         }
@@ -451,7 +453,7 @@ export class MessagePipeline {
             const setting = session.setting;
             if (setting.standby) {
                 session.handleReceipt(ctx, msg, messageArray).then(() => session.save()).catch((e: any) => {
-                    logger.error(`指令消息入库出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                    log.exception('指令消息入库出错', e);
                 });
             }
         }
@@ -493,7 +495,7 @@ export class MessagePipeline {
             const setting = session.setting;
             if (setting.standby) {
                 session.handleReceipt(ctx, msg, messageArray).then(() => session.save()).catch((e: any) => {
-                    logger.error(`机器人消息入库出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
+                    log.exception('机器人消息入库出错', e);
                 });
             }
         }

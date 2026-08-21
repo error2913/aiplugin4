@@ -5,6 +5,8 @@ import { BaseModel } from "./model";
 import { requestModel } from "./provider";
 import { ImageModelUse, ModelBody, ModelUse } from "./types";
 
+const log = Logger.withTag('image');
+
 export default class ImageModel extends BaseModel {
     use: ImageModelUse[];
     constructor(use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
@@ -31,7 +33,7 @@ export default class ImageModel extends BaseModel {
                     }]
                 }]
             });
-            Logger.printRequestMessages(body.messages);
+            log.printRequestMessages(body.messages);
 
             const time = Date.now();
             const data = await requestModel(this.url, this.apiKey, body);
@@ -39,14 +41,14 @@ export default class ImageModel extends BaseModel {
                 const message = data.choices[0].message;
                 const content = message.content || '';
 
-                Logger.info(`响应内容:`, content.length > 500 ? content.slice(0, 500) + `…(+${content.length - 500})` : content, '\nlatency', Date.now() - time, 'ms');
+                log.info(`响应内容(${Date.now() - time}ms): ${content.length > 500 ? content.slice(0, 500) + `…(+${content.length - 500})` : content}`);
 
                 return content;
             } else {
                 throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
             }
         } catch (e) {
-            Logger.error(`在调用模型${this.name}中出错:`, e instanceof Error ? e.message : String(e));
+            log.exception('在调用模型' + this.name + '中出错', e);
             return '';
         }
     }

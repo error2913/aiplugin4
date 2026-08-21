@@ -4,6 +4,8 @@ import { normalizeFileReference, normalizeMessageSegments } from "./message_segm
 import { failure, success } from "./result";
 import { Ob11Backend, Ob11CallContext, Ob11Result } from "./types";
 
+const log = Logger.withTag('ob11');
+
 function getNet(): NetApi | null {
     const net = globalThis.net;
     return net && typeof net.callApi === "function" ? net : null;
@@ -59,7 +61,7 @@ export class Ob11NetBackend implements Ob11Backend {
             return success(this.name, action, data, getMessageId(data));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            Logger.error(`OB11 API ${action} 调用失败：${message}`);
+            log.exception(`OB11 API ${action} 调用失败`, error);
             return failure(this.name, action, "OB11_API_ERROR", message, { retryable: true });
         }
     }
