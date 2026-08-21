@@ -4,6 +4,8 @@ import Image from "../../../resource/image";
 import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
+const log = logger.withTag('tool');
+
 async function resolveTtiImage(ctx: seal.MsgContext, session: any, raw: string): Promise<string | null> {
     let input = String(raw || '').trim();
     if (!input) return null;
@@ -26,7 +28,7 @@ async function resolveTtiImage(ctx: seal.MsgContext, session: any, raw: string):
         try {
             await image.urlToBase64();
         } catch (e) {
-            logger.warning(`参考图URL转base64失败: ${e}`);
+            log.warning(`参考图URL转base64失败: ${e}`);
         }
         return image.base64 ? image.base64Url : image.src;
     }
@@ -106,7 +108,7 @@ export function registerImage() {
 
         const ext = seal.ext.find('tti');
         if (!ext) {
-            logger.error(`未找到生成图片依赖（tti）`);
+            log.error(`未找到生成图片依赖（tti）`);
             return `未找到生成图片依赖（tti），请提示用户安装生成图片依赖`;
         }
 
@@ -135,7 +137,7 @@ export function registerImage() {
                     try {
                         await img.urlToBase64();
                     } catch (e) {
-                        logger.error(`将图片URL转换为base64失败: ${e}`);
+                        log.exception(`将图片URL转换为base64失败`, e);
                     }
                 } else {
                     // tti 依赖可能返回带 data:image/...;base64 前缀的字符串，统一剥离后再存
@@ -157,19 +159,19 @@ export function registerImage() {
                 try {
                     await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
                     if (save) {
-                        logger.warning('旧版 AIDrawing，无法直接保存图片');
+                        log.warning('旧版 AIDrawing，无法直接保存图片');
                         return `图像生成请求已发送`;
                     }
                     return `图像生成请求已发送`;
                 } catch (e) {
-                    logger.error(`图像生成失败：：${e}`);
+                    log.exception('图像生成失败', e);
                     return `图像生成失败：${e}`;
                 }
             }
-            logger.error('未找到可用的 tti 接口，生成图片插件可能存在问题');
+            log.error('未找到可用的 tti 接口，生成图片插件可能存在问题');
             return `未找到可用的 tti 接口，生成图片插件可能存在问题`;
         } catch (e) {
-            logger.error(`图像生成失败：${e}`);
+            log.exception('图像生成失败', e);
             return `图像生成失败：${e}`;
         }
     }

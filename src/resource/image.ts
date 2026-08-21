@@ -9,6 +9,8 @@ import { getSessionId } from "../utils/seal";
 import { MessageSegment } from "../utils/string";
 import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 
+const log = logger.withTag('image');
+
 // 图片转文字结果超过该字数时交给压缩智能体压缩，避免撑爆上下文
 const IMAGE_TEXT_COMPRESS_MIN_LENGTH = 5000;
 
@@ -73,21 +75,21 @@ export default class Image {
             if (response.ok) {
                 const contentType = response.headers.get('Content-Type');
                 if (contentType && contentType.startsWith('image')) {
-                    logger.info('URL有效且未过期');
+                    log.info('URL有效且未过期');
                     isValid = true;
                 } else {
-                    logger.warning(`URL有效但未返回图片 Content-Type: ${contentType}`);
+                    log.warning(`URL有效但未返回图片 Content-Type: ${contentType}`);
                 }
             } else {
                 if (response.status === 500) {
-                    logger.warning(`URL不知道有没有效 状态码: ${response.status}`);
+                    log.warning(`URL不知道有没有效 状态码: ${response.status}`);
                     isValid = true;
                 } else {
-                    logger.warning(`URL无效或过期 状态码: ${response.status}`);
+                    log.warning(`URL无效或过期 状态码: ${response.status}`);
                 }
             }
         } catch (error) {
-            logger.error('在checkImageUrl中请求出错:', error);
+            log.exception('在checkImageUrl中请求出错', error);
         }
         return isValid;
     }
@@ -119,7 +121,7 @@ export default class Image {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (error) {
-            logger.error("在imageUrlToBase64中请求出错：", error);
+            log.exception('在imageUrlToBase64中请求出错', error);
         }
 
         Image.save(this);
@@ -127,7 +129,7 @@ export default class Image {
 
     async imageToText(prompt = '') {
         if (!Config.model.IMAGE_MODEL_ENABLED) {
-            logger.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
+            log.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
             return;
         }
         const { URL_TO_BASE64 } = Config.image;
@@ -137,19 +139,19 @@ export default class Image {
 
         const model = Model.getImageModel('image-understanding');
         if (!model) {
-            logger.error(`未找到支持image-understanding的模型`);
+            log.error(`未找到支持image-understanding的模型`);
             return;
         }
 
         this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
 
         if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url') {
-            logger.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
+            log.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
             this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
         }
 
-        if (!this.description) logger.error(`图片${this.imageId}识别失败`);
+        if (!this.description) log.error(`图片${this.imageId}识别失败`);
     }
 
     /** 图片转文字结果过长时交给压缩智能体压缩，失败时保留原文 */
@@ -159,7 +161,7 @@ export default class Image {
             const compressed = await Agent.get('compress_agent').chat(text);
             if (compressed) return compressed;
         } catch (e) {
-            logger.warning('压缩图片识别结果失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
+            log.warning('压缩图片识别结果失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
         }
         return text;
     }
@@ -173,7 +175,7 @@ export default class Image {
             id = generateId();
             a++;
             if (a > 1000) {
-                logger.error(`生成图片id失败，已尝试1000次，放弃`);
+                log.error(`生成图片id失败，已尝试1000次，放弃`);
                 throw new Error(`生成图片id失败，已尝试1000次，放弃`);
             }
         }
@@ -208,7 +210,7 @@ export default class Image {
                 const data = JSON.parse(text || '{}');
                 img = revive(Image, data);
             } catch (error) {
-                logger.error(`加载图片${imageId}失败: ${error}`);
+                log.exception(`加载图片${imageId}失败`, error);
                 return null;
             }
             this.imageMap[imageId] = img;
@@ -278,7 +280,7 @@ ${img.CQCode}`;
             content += image.description ? `[img:${image.imageId}:${image.description}]` : `[img:${image.imageId}]`;
             images.push(image);
         } catch (error) {
-            logger.error('在handleImageMessage中处理图片时出错:', error);
+            log.exception('在handleImageMessage中处理图片时出错', error);
         }
 
         return { content, images };

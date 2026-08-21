@@ -22,6 +22,7 @@ import { createToolListen } from "./tool_listen";
 import { SessionType, State } from "./types";
 import User from "./user";
 
+const log = logger.withTag('session');
 
 export class Setting {
     static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger'];
@@ -238,7 +239,7 @@ export class Session {
                 const curSegIndex = this.curActiveTimeSegIndex;
                 const nextTimePoint = this.getNextTimePoint(curSegIndex);
                 if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
-                else logger.error('active time timer add failed');
+                else log.error('active time timer add failed');
             }
         }
     }
@@ -276,10 +277,10 @@ export class Session {
 
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string): Promise<void> {
         this.lastCtx = ctx;
-        logger.info('trigger reply:', reason || 'unknown');
+        log.info('trigger reply:', reason || 'unknown');
 
         // MCP 工具按配置热加载：同步已新增/移除的服务器工具（内部按 TTL 节流，不阻塞对话）
-        registerMCPTools().catch(e => logger.warning('刷新 MCP 工具失败: ' + (e instanceof Error ? e.message : String(e))));
+        registerMCPTools().catch(e => log.warning('刷新 MCP 工具失败: ' + (e instanceof Error ? e.message : String(e))));
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
         this.migrateStoredTags();
@@ -292,7 +293,7 @@ export class Session {
                 this.bucket.lastTime = Date.now();
             }
             if (this.bucket.count <= 0) {
-                logger.warning('bucket empty, skip reply');
+                log.warning('bucket empty, skip reply');
                 return;
             }
         }
@@ -306,7 +307,7 @@ export class Session {
 
         const model = Model.getChatModel('chat', this.setting.modelName);
         if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
-            logger.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
+            log.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
         }
         if (model && (model.body as any).stream === true && model.provider !== 'anthropic') {
             await this.chatStream(ctx, msg);
@@ -361,8 +362,8 @@ export class Session {
             toolCallStatus: false
         }
         if (id) {
-            logger.info('end stream:', id);
-            if (reply && toolCallStatus) logger.warning('unfinished tool call:', reply);
+            log.info('end stream:', id);
+            if (reply && toolCallStatus) log.warning('unfinished tool call:', reply);
             await streamService.endStream(id);
         }
     }

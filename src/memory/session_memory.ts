@@ -16,6 +16,8 @@ import MemoryService from "./memory";
 import MemoryItem from "./memory_item";
 import { bumpSummaryRevision } from "./revision";
 
+const log = Logger.withTag('memory');
+
 const MEMORY_RENDER_LIMIT = 1000;
 
 export default class SessionMemoryService extends MemoryService {
@@ -88,7 +90,7 @@ export default class SessionMemoryService extends MemoryService {
                 }).join('\n')
             });
 
-            Logger.info('记忆总结prompt:\n', prompt);
+            log.info('记忆总结prompt:\n', prompt);
 
             // 使用摘要智能体进行总结（按其 use 选择模型）
             const reply = await Agent.get('summarize_agent').chat(prompt);
@@ -120,7 +122,7 @@ export default class SessionMemoryService extends MemoryService {
             // 目标字段只接受 ID；缺少 target_id 时，仅允许当前会话作为摘要归属，不读取任何旧字段。
             const memoryItems = memoryData.memories;
             if (!Array.isArray(memoryItems)) {
-                Logger.warning('总结记忆：模型返回的 memories 不是数组，本次不落库记忆');
+                log.warning('总结记忆：模型返回的 memories 不是数组，本次不落库记忆');
             } else {
                 const sessionIsGroup = this.session.sessionType === 'group';
                 let successCount = 0;
@@ -193,11 +195,11 @@ export default class SessionMemoryService extends MemoryService {
                     successCount++;
                 }
                 if (skipped.length > 0) {
-                    Logger.warning(`总结记忆：成功写入 ${successCount} 条（含 ${fallbackCount} 条当前会话归属），跳过 ${skipped.length} 条（${Array.from(new Set(skipped)).join('；')}）`);
+                    log.warning(`总结记忆：成功写入 ${successCount} 条（含 ${fallbackCount} 条当前会话归属），跳过 ${skipped.length} 条（${Array.from(new Set(skipped)).join('；')}）`);
                 }
             }
         } catch (e) {
-            Logger.error('更新短期记忆失败: ' + (e instanceof Error ? e.message : String(e)));
+            log.exception('更新短期记忆失败', e);
         }
     }
 

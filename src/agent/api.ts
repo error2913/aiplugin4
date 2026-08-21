@@ -11,6 +11,8 @@ import { ToolInfo } from "../tool/types";
 
 import Agent from "./agent";
 
+const log = logger.withTag('api');
+
 /** globalThis 上暴露的全局名称，其他插件通过 globalThis.aiplugin4 访问 */
 export const AGENT_GLOBAL_NAME = "aiplugin4";
 
@@ -84,7 +86,7 @@ export function registerAgentApi(): void {
         embed: async (text: string) => {
             const model = Model.getEmbeddingModel('text-embedding');
             if (!model) {
-                logger.warning('外部调用 embed 失败：未找到嵌入模型');
+                log.warning('外部调用 embed 失败：未找到嵌入模型');
                 return [];
             }
             return await model.callEmbedding(text);
@@ -98,12 +100,12 @@ export function registerAgentApi(): void {
         registerTool: (info: ToolInfo, options: RegisterToolOptions = {}) => {
             const name = info?.function?.name;
             if (!name) {
-                logger.warning('注册工具失败：缺少函数名');
+                log.warning('注册工具失败：缺少函数名');
                 return false;
             }
             const existing = toolMap[name];
             if (existing && !(existing as any).apiRegistered) {
-                logger.warning(`注册工具失败：工具 ${name} 已存在（内置或其他插件注册）`);
+                log.warning(`注册工具失败：工具 ${name} 已存在（内置或其他插件注册）`);
                 return false;
             }
             try {
@@ -112,15 +114,15 @@ export function registerAgentApi(): void {
                 tool.sessionType = options.sessionType || 'any';
                 if (options.callBack !== undefined) tool.callBack = options.callBack;
                 tool.solve = async (ctx, msg, session, args) => options.solve ? await options.solve(ctx, msg, session, args) : '函数未实现';
-                logger.info(`外部插件注册工具: ${name}`);
+                log.info(`外部插件注册工具: ${name}`);
                 return true;
             } catch (e) {
-                logger.error(`注册工具 ${name} 失败: ${e instanceof Error ? e.message : String(e)}`);
+                log.exception(`注册工具 ${name} 失败`, e);
                 return false;
             }
         }
     };
 
     (globalThis as any)[AGENT_GLOBAL_NAME] = api;
-    logger.info(`已暴露智能体 API: globalThis.${AGENT_GLOBAL_NAME} (v${VERSION})`);
+    log.info(`已暴露智能体 API: globalThis.${AGENT_GLOBAL_NAME} (v${VERSION})`);
 }
