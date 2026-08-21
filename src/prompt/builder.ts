@@ -52,9 +52,12 @@ export async function buildSystemPromptContent(
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING } = Config.tool;
 
-    // 取最近 2~3 条用户消息拼接，作为记忆/知识库查询的上下文（剥离内部标签）
+    // 取最近 2~3 条用户消息拼接，作为记忆/知识库查询的上下文（剥离内部标签）；
+    // 同时收集全部发言者：群聊多人在线时，记忆检索不再只按最后一位发言者过滤
     const userMessages = session.context.messages.filter(m => m.role === 'user');
-    let text = '', ui: UserInfo | null = null, gi: GroupInfo | null = null;
+    let text = '';
+    const uis: UserInfo[] = [];
+    let gi: GroupInfo | null = null;
     for (const userMsg of userMessages.slice(-3)) {
         if (!Array.isArray((userMsg as UserMessage).contentItems)) continue;
         for (const item of (userMsg as UserMessage).contentItems) {
@@ -63,7 +66,8 @@ export async function buildSystemPromptContent(
             if (umi.text) text += (text ? ' ' : '') + stripInternalTags(umi.text);
             if (umi.userId) {
                 const u = User.get(umi.userId);
-                ui = { isPrivate: true, id: umi.userId, name: u.userName || umi.userId };
+                const info: UserInfo = { isPrivate: true, id: umi.userId, name: u.userName || umi.userId };
+                if (!uis.some(x => x.id === info.id)) uis.push(info);
             }
         }
     }
@@ -128,8 +132,8 @@ export async function buildSystemPromptContent(
         ctx.isPrivate,
         session.memory.persona,
         seal.formatTmpl(ctx, '核心:骰子名字'),
-        ui?.id || '',
-        ui?.name || '',
+        uis.map(u => u.id).join(','),
+        uis.map(u => u.name).join(','),
         gi?.id || '',
         gi?.name || '',
         text
@@ -143,15 +147,15 @@ export async function buildSystemPromptContent(
     const knowledgeKey = signature(['prompt:knowledge', knowledgeService.getCacheVersion()]);
 
     const [memoryPrompt, summaryPrompt, knowledgePrompt] = await Promise.all([
-        getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, ui || null, gi || null)),
+        getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null)),
         getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildSummaryPrompt(session)),
         getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
     ]);
 
     const dynamicSections = [memoryPrompt, summaryPrompt, knowledgePrompt].filter(Boolean).join('\n\n');
     const content = frame
-        .replace('**CURRENT_TIME**', fmtDate(Math.floor(Date.now() / 1000)))
-        .replace('**DYNAMIC_SECTIONS**', dynamicSections);
+        .split('**CURRENT_TIME**').join(fmtDate(Math.floor(Date.now() / 1000)))
+        .split('**DYNAMIC_SECTIONS**').join(dynamicSections);
 
     // 防注入：长期记忆/总结记忆/知识库等外部内容可能夹带内部上下文标签，system prompt 出口统一兜底剥离
     return stripInternalTags(content);

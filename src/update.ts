@@ -1,6 +1,14 @@
 // 版本更新日志（updateInfo），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const updateInfo: { [version: string]: string } = {
+    "4.17.0": `## 修复
+- 修复 DeepSeek thinking mode 下带工具调用的轮次请求报 400：assistant 消息的思维链 reasoning_content 全链路原样透传（含空字符串），工具轮 / 提示词工程轮 / 最终回复均入库并在后续请求中带回
+- 修复 anthropic（Claude）适配：assistant 消息的思维链自动转换为 thinking 块并置于消息最前，相邻 assistant 消息的 thinking 块自动合并，避免工具循环时请求体结构非法
+
+## 功能调整
+- 长期记忆检索改为按最近 2~3 条用户消息的全部发言者进行，群聊多人在线时不再只按最后一位发言者过滤
+- 总结记忆提示词返回格式示例改为严格合法 JSON（键与字符串使用双引号），并明确要求不输出 Markdown 代码块，降低模型返回非法 JSON 的概率
+`,
     "4.16.0": `## 新功能
 - MCP 工具改为标准 Streamable HTTP 即插即用模式：按 mcpServers 配置连接服务器并通过 tools/list 自动发现工具，支持自定义请求头/token；常用文本、图片、网页读取、Markdown/HTML 渲染和核心指令桥接由适配器统一处理。
 - 新增 run_core_command 核心指令桥：通过 OB11 核心桥中间件注入假消息，支持核心命令多消息收集、空闲窗口结束、超时和并发 lane 串行化；MCP 会话失效或未初始化时自动重连。

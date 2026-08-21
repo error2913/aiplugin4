@@ -115,11 +115,14 @@ export default class Agent {
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
+        // 最后一轮模型响应的思维链：无工具轮次时随最终回复一并入库（见下方最终 session.reply）
+        let lastReasoning: string | undefined;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             trace.beginTurn();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
-            const { content: raw_reply, tool_calls } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId);
+            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId);
+            lastReasoning = reasoning_content;
             // 提示词工程模式下模型可能返回 ```function ... ``` 代码块包裹的工具调用：
             // 发送前先剥离该块，避免代码块原文进入回复/上下文；调用内容仍以 match[0] 原样记录
             const promptCallMatch: RegExpMatchArray | null = (STATUS && PROMPT_ENGINEERING)
@@ -134,7 +137,7 @@ export default class Agent {
                         log.info('prompt tool call triggered');
                         const { contextArray, replyArray, images } = result;
                         await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
-                        await session.context.addAssistantMessage(match[0], '');
+                        await session.context.addAssistantMessage(match[0], '', reasoning_content);
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
@@ -158,8 +161,8 @@ export default class Agent {
                     if (tool_calls.length > 0) {
                         log.info('tool call triggered');
                         const { contextArray, replyArray, images } = result;
-                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
-                        session.context.addToolCallsMessage(tool_calls);
+                        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true }, reasoning_content);
+                        session.context.addToolCallsMessage(tool_calls, reasoning_content);
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
@@ -196,7 +199,7 @@ export default class Agent {
         }
 
         const { contextArray, replyArray, images } = result;
-        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true });
+        await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true }, lastReasoning);
         log.info(`[run] ${trace.summary()}`);
     }
 

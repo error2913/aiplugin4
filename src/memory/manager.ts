@@ -10,9 +10,9 @@ import { searchOptions } from "./types";
 
 export class MemoryManager {
     /** 长期记忆段：按开关与检索构建（记忆条目 + 权重更新） */
-    static async buildLongTermPrompt(ctx: seal.MsgContext, session: Session, text: string, ui: UserInfo | null, gi: GroupInfo | null): Promise<string> {
+    static async buildLongTermPrompt(ctx: seal.MsgContext, session: Session, text: string, uis: UserInfo[], gi: GroupInfo | null): Promise<string> {
         const { MEMORY } = Config.memory;
-        return MEMORY ? session.memory.buildMemoryPrompt(ctx, session.context, text, ui, gi) : '';
+        return MEMORY ? session.memory.buildMemoryPrompt(ctx, session.context, text, uis, gi) : '';
     }
 
     /** 总结记忆段：按开关构建 */

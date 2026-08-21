@@ -250,7 +250,7 @@ export class Session {
         await this.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
     }
 
-    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}) {
+    async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}, reasoningContent?: string) {
         const { withSegmentDelay = false } = options;
         const { SEGMENT_DELAY_ENABLED, SEGMENT_DELAY_MS, SEGMENT_IMAGE_EXTRA_DELAY_MS } = Config.reply;
 
@@ -270,7 +270,7 @@ export class Session {
             }
 
             const msgId = await replyToSender(ctx, msg, this, reply);
-            await this.context.addAssistantMessage(content, msgId);
+            await this.context.addAssistantMessage(content, msgId, reasoningContent);
         }
 
     }

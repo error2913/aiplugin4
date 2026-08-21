@@ -148,13 +148,14 @@ export class Context {
         }
     }
 
-    addAssistantMessage(text: string, messageId: string) {
+    addAssistantMessage(text: string, messageId: string, reasoningContent?: string) {
         // 防泄露：兜底剥离内部上下文标签（正常回复在 handleReply 已剥离）
         text = stripInternalTags(text);
         const ami: AssistantMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
-            messageId
+            messageId,
+            ...(reasoningContent !== undefined ? { reasoningContent } : {})
         };
         const lastMessage = this.messages[this.messages.length - 1];
         if (lastMessage && Message.getMessageType(lastMessage) === 'assistant' && Array.isArray((lastMessage as AssistantMessage).contentItems)) (lastMessage as AssistantMessage).contentItems.push(ami);
@@ -192,7 +193,7 @@ export class Context {
         this.session.memory.accessMemories(text);
     }
 
-    addToolCallsMessage(toolCalls: ToolCall[]) {
+    addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {
         // 防御：空数组不应入库，避免后续请求体携带 "tool_calls":[] 被后端拒绝
         if (!toolCalls || toolCalls.length === 0) {
             log.warning('addToolCallsMessage 收到空数组，已忽略');
@@ -200,7 +201,8 @@ export class Context {
         }
         const tcm: ToolCallsMessage = {
             role: 'assistant',
-            toolCalls
+            toolCalls,
+            ...(reasoningContent !== undefined ? { reasoningContent } : {})
         }
         this.messages.push(tcm);
     }
@@ -226,7 +228,8 @@ export class Context {
         const tcbm: ToolCallbackMessage = {
             role: 'tool',
             text,
-            toolCallId
+            toolCallId,
+            toolName
         }
         this.messages.push(tcbm);
     }

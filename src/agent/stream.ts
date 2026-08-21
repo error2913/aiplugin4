@@ -8,7 +8,7 @@ import Model from "../model/model";
 import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
-import { estimateTextTokens, RequestMessage } from "../utils/message";
+import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
 import { withTimeout } from "../utils/utils";
 
 const log = logger.withTag('model');
@@ -70,7 +70,9 @@ function checkRequestBudget(messages: any[], tools: any[]): void {
     const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
     if (maxTokens <= 0) return;
     const toolsEstimate = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
-    const estimate = estimateTextTokens(JSON.stringify(messages || [])) + toolsEstimate;
+    // 与 handleMessages 的 applyTokenBudget 统一估算口径（文本 + tool_calls + tools 预留），
+    // 避免两套口径不一致导致裁剪后请求体仍超限；多模态图片按固定开销而非 base64 原文估算
+    const estimate = (messages || []).reduce((acc, m) => acc + estimateMessageTokens(m), 0) + toolsEstimate;
     if (estimate > maxTokens) {
         log.warning(`请求体估算 token（含 tools JSON）超出「上下文最大token」预算: ${estimate} / ${maxTokens}`);
     }
@@ -140,7 +142,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = ''): Promise<{ content: string, tool_calls: ToolCall[] }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = ''): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = Model.getChatModel('chat', modelName) as ChatModel;
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -167,8 +169,11 @@ export class streamService {
                 const message = response.choices[0].message;
                 const finish_reason = response.choices[0].finish_reason;
 
-                if (Object.prototype.hasOwnProperty.call(message, 'reasoning_content')) {
-                    const reasoning = message.reasoning_content || '';
+                // thinking mode（DeepSeek V4 等）：reasoning_content 必须原样回传（含空字符串），
+                // 直接丢弃会在后续带工具轮次的请求中触发 400；这里随返回值带出，由调用方存入上下文
+                const hasReasoning = Object.prototype.hasOwnProperty.call(message, 'reasoning_content');
+                const reasoning = hasReasoning ? (message.reasoning_content || '') : undefined;
+                if (hasReasoning) {
                     const shownR = reasoning.length > 500 ? reasoning.slice(0, 500) + `…(+${reasoning.length - 500})` : reasoning;
                     log.info(`思维链内容(${reasoning.length}字符): ${shownR}`);
                 }
@@ -177,7 +182,7 @@ export class streamService {
                 const shown = content.length > 300 ? content.slice(0, 300) + `…(+${content.length - 300})` : content;
                 log.info(`响应内容(${Date.now() - time}ms, finish=${finish_reason}): ${shown}`);
 
-                return { content, tool_calls: message.tool_calls || [] };
+                return { content, tool_calls: message.tool_calls || [], ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) };
             } else {
                 throw new Error('服务器响应中没有choices或choices为空\n响应体:' + JSON.stringify(data, null, 2));
             }

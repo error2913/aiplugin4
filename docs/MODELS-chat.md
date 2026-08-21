@@ -31,6 +31,8 @@ max_tokens = 8192
 
 > `deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 退役，旧名请求会直接报错，必须改用 `deepseek-v4-flash`（1M 上下文、支持工具调用）或 `deepseek-v4-pro`。
 
+> DeepSeek 思考模式（thinking mode）返回的 `reasoning_content` 思维链会原样透传（含空字符串）：带工具调用的后续轮次不会再因缺失该字段而报 400。
+
 ## OpenAI
 
 ```toml
@@ -108,7 +110,7 @@ base_url = "https://api.anthropic.com/v1"
 max_tokens = 8192
 ```
 
-> `provider = "anthropic"` 走专有适配：请求 `/messages`、使用 `x-api-key` 请求头，system / tools / 多模态 / stop_sequences 自动转换，响应归一化为 OpenAI 格式；`stream = true` 暂不支持，会自动回退为非流式。模型名可用 `claude-opus-4-5` / `claude-sonnet-4-5` / `claude-haiku-4-5`，也可用 `opus` / `sonnet` / `haiku` 最新别名。
+> `provider = "anthropic"` 走专有适配：请求 `/messages`、使用 `x-api-key` 请求头，system / tools / 多模态 / stop_sequences 自动转换，响应归一化为 OpenAI 格式；`stream = true` 暂不支持，会自动回退为非流式。模型名可用 `claude-opus-4-5` / `claude-sonnet-4-5` / `claude-haiku-4-5`，也可用 `opus` / `sonnet` / `haiku` 最新别名。接入 DeepSeek 等带思维链的模型时，assistant 消息的 `reasoning_content` 会自动转换为 thinking 块并置于消息最前，相邻消息的 thinking 块自动合并。
 
 ## Moonshot Kimi
 
