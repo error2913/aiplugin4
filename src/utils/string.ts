@@ -872,8 +872,8 @@ export function fmtDate(timestamp: number) {
 
 /**
  * 修复json字符串，将其中缺少前半双引号的字符串添加前半双引号，修复失败返回空字符串
- * @param s 
- * @returns 
+ * @param s
+ * @returns
  */
 export function fixJsonString(s: string): string {
     try {
@@ -883,7 +883,7 @@ export function fixJsonString(s: string): string {
         const patterns = [
             // 匹配键缺少前半引号: {key": 或 ,key":
             /([{,][\s\n]*)([a-zA-Z_$][a-zA-Z0-9_$]*)("[\s\n]*:)/g,
-            // 匹配值缺少前半引号: :value", 或 :value"} 或 
+            // 匹配值缺少前半引号: :value", 或 :value"} 或
             /(:[\s\n]*)([^"]+)("[\s\n]*[,}])/g,
             // 匹配数组中的字符串缺少前半引号: [value", 或 [value"] 或 ,value", 或 ,value"]
             /([\[,][\s\n]*)([^"]+)("[\s\n]*[,\]])/g
