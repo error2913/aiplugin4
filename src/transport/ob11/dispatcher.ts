@@ -1,6 +1,7 @@
 import Logger from "../../logger";
 
 import { getActionCapability } from "./capability_catalog";
+import { resolveSendMessage, SendSessionLike } from "./message_segments";
 import { Ob11NetBackend } from "./ob11_net_backend";
 import { failure, serializeResult } from "./result";
 import { SealNativeBackend } from "./seal_native_backend";
@@ -10,6 +11,9 @@ const log = Logger.withTag('ob11');
 
 const ob11NetBackend = new Ob11NetBackend();
 const sealNativeBackend = new SealNativeBackend();
+
+/** 需要处理消息正文渲染标签的发送类 action */
+const SEND_MESSAGE_ACTIONS = new Set(["send_group_msg", "send_private_msg", "send_msg"]);
 
 export function hasOb11Network(): boolean {
     return ob11NetBackend.canHandle("");
@@ -39,6 +43,12 @@ export async function dispatchOb11Api(
         return failure("seal-native", "", "INVALID_PARAMS", "action 不能为空");
     }
 
+    // 发送消息前把文本里的渲染标签解析为真实消息段（内部标签剥离、[img:] 等解析成图片/语音段），
+    // 避免模型把 [msg_id]/[img:虚拟ID] 等原样发到群里；仅工具调用路径带 session 时可解析。
+    if (SEND_MESSAGE_ACTIONS.has(normalizedAction) && params && params.message !== undefined && context.ctx && context.session) {
+        params = { ...params, message: await resolveSendMessage(context.ctx, context.session, params.message) };
+    }
+
     if (ob11NetBackend.canHandle(normalizedAction)) {
         return ob11NetBackend.call(context, normalizedAction, params || {});
     }
@@ -65,9 +75,10 @@ export async function callOb11ApiForContext(
     ctx: seal.MsgContext,
     msg: seal.Message,
     action: string,
-    params: Record<string, any> = {}
+    params: Record<string, any> = {},
+    session?: SendSessionLike
 ): Promise<Ob11Result> {
-    return dispatchOb11Api({ ctx, msg, endpointId: ctx.endPoint.userId }, action, params);
+    return dispatchOb11Api({ ctx, msg, endpointId: ctx.endPoint.userId, session }, action, params);
 }
 
 export function formatOb11Result(result: Ob11Result): string {

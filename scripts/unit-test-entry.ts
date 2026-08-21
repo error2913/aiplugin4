@@ -7,8 +7,10 @@ Config.registerConfig();
 
 import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
+import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import MemoryService from "../src/memory/memory";
 import MemoryItem from "../src/memory/memory_item";
+import Image from "../src/resource/image";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
 
@@ -184,5 +186,52 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // 无匹配用户 → 无记忆可展示
         const p0 = await svc.buildMemoryPrompt(ctx, {} as any, '北京', [{ isPrivate: true, id: 'QQ:99999', name: '路人' }], null);
         assert.equal(p0, '');
+    },
+
+    /** OB11 发送路径：渲染标签解析为真实消息段，内部标签不外发（回归：#126 重构丢失发送标签解析） */
+    async testSendMessageResolveRenderTags(): Promise<void> {
+        const ctx = makeCtx();
+        const img = new Image();
+        img.url = 'http://example.com/gen.png';
+        const session = {
+            context: {
+                findImage: async (_c: any, id: string) => (id === '噩梦之石照片_abc' || id === 'img1' ? img : null)
+            }
+        };
+
+        // 字符串消息：剥内部标签、[img:] 解析成图片段、[at]/[poke]/[quote]/[face] 转段
+        const segs = await resolveSendMessage(
+            ctx as any,
+            session as any,
+            '图来了[img:噩梦之石照片_abc][msg_id:9pzh8k][system:x][time:2026]好[at:123][poke:456][quote:abc][face:撇嘴]'
+        ) as any[];
+        assert.deepEqual(
+            segs.map(s => s.type),
+            ['text', 'image', 'text', 'at', 'poke', 'reply', 'face'],
+            '渲染标签应全部转换为对应消息段'
+        );
+        assert.equal(segs[0].data.text, '图来了');
+        assert.equal(segs[1].data.file, 'http://example.com/gen.png', '[img:] 应解析为真实图片段');
+        assert.equal(segs[2].data.text, '好');
+        assert.equal(segs[3].data.qq, '123');
+        assert.equal(segs[4].data.qq, '456');
+        assert.ok(segs[5].data.id !== undefined && !String(segs[5].data.id).includes('NaN'), 'quote 应转 reply 段');
+        assert.ok(segs[6].data.id !== undefined, 'face 应转 face 段');
+        const joined = JSON.stringify(segs);
+        assert.ok(!joined.includes('msg_id') && !joined.includes('[system') && !joined.includes('[time'),
+            '内部标签不得原样外发');
+
+        // 数组消息：只处理 text 段，结构化段原样保留
+        const arr = await resolveSendMessage(ctx as any, session as any, [
+            { type: 'text', data: { text: '配图[img:img1]' } },
+            { type: 'at', data: { qq: '789' } }
+        ]) as any[];
+        assert.deepEqual(arr.map(s => s.type), ['text', 'image', 'at']);
+        assert.equal(arr[1].data.file, 'http://example.com/gen.png');
+
+        // 找不到的图片：丢弃，不泄露原文
+        const miss = await resolveSendMessage(ctx as any, session as any, '无图[img:不存在]') as any[];
+        assert.deepEqual(miss.map(s => s.type), ['text']);
+        assert.equal(miss[0].data.text, '无图');
     }
 };

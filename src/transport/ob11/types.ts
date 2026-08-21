@@ -1,4 +1,5 @@
 import { MessageSegment } from "../../utils/string";
+import { SendSessionLike } from "./message_segments";
 
 export type Ob11BackendName = "ob11-net" | "seal-native";
 
@@ -6,6 +7,7 @@ export interface Ob11CallContext {
     ctx?: seal.MsgContext;
     msg?: seal.Message;
     endpointId: string;
+    session?: SendSessionLike;
 }
 
 export interface Ob11Success {

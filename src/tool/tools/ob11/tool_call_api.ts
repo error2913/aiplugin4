@@ -30,7 +30,7 @@ export function registerCallOb11Api() {
         }
     });
     tool.sensitive = true;
-    tool.solve = async (ctx, msg, _session, args) => {
+    tool.solve = async (ctx, msg, session, args) => {
         const action = args && typeof args.action === "string" ? args.action.trim() : "";
         const params = args && args.params && typeof args.params === "object" && !Array.isArray(args.params) ? args.params : null;
         if (!action) return JSON.stringify({ ok: false, backend: "seal-native", action: "", error: { code: "INVALID_PARAMS", message: "action 不能为空" } });
@@ -45,7 +45,7 @@ export function registerCallOb11Api() {
             return JSON.stringify({ ok: false, backend: "seal-native", action, error: { code: "ACTION_DISABLED", message: `OB11 action 默认关闭：${action}` } });
         }
 
-        const result = await callOb11ApiForContext(ctx, msg, action, params);
+        const result = await callOb11ApiForContext(ctx, msg, action, params, session);
         return formatOb11Result(result);
     };
 }
