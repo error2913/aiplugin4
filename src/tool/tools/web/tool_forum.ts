@@ -2,7 +2,7 @@
 import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
-import { parseSpecialTokens } from "../../../utils/string";
+import { parseSpecialTokens, stripRenderTags } from "../../../utils/string";
 import Tool from "../../tool";
 
 const log = logger.withTag('tool');
@@ -154,13 +154,6 @@ function extractImagesFromContent(content: string): Image[] {
         }
     }
     return images;
-}
-
-/**
- * 从内容中移除 [img:xxx] 标记，保留纯文本/Markdown
- */
-function stripImageTokens(content: string): string {
-    return content.replace(/\[img:[^\]]*\]/g, '').trim();
 }
 
 export function registerForum() {
@@ -454,7 +447,8 @@ export function registerForum() {
                 }
             }
 
-            const cleanContent = stripImageTokens(content);
+            // 纯文本出口：剥离内部/渲染标签（[msg_id]/[from]/[at] 等），只保留正文与 Markdown
+            const cleanContent = stripRenderTags(content);
 
             const body: any = { title, content: cleanContent };
             if (tags && tags.length > 0) {
@@ -533,14 +527,14 @@ export function registerForum() {
             if (action === "create") {
                 if (!post_id || !content) return "创建评论需要提供 post_id 和 content";
                 log.info(`创建论坛评论: post_id=${post_id}`);
-                const body: any = { content };
+                const body: any = { content: stripRenderTags(content) };
                 if (parent_id) body.parent_id = parent_id;
                 const data = await forumAuthFetch(`${FORUM_URL}/api/posts/${post_id}/comments`, 'POST', body);
                 return `评论成功！\n评论ID: ${data.comment?.id}\n内容: ${data.comment?.content}`;
             } else if (action === "update") {
                 if (!comment_id || !content) return "更新评论需要提供 comment_id 和 content";
                 log.info(`更新论坛评论: comment_id=${comment_id}`);
-                await forumAuthFetch(`${FORUM_URL}/api/comments/${comment_id}`, 'PUT', { content });
+                await forumAuthFetch(`${FORUM_URL}/api/comments/${comment_id}`, 'PUT', { content: stripRenderTags(content) });
                 return `评论 [ID:${comment_id}] 更新成功！`;
             } else if (action === "delete") {
                 if (!comment_id) return "删除评论需要提供 comment_id";
@@ -654,7 +648,7 @@ export function registerForum() {
                 log.info(`更新论坛帖子: post_id=${post_id}`);
                 const body: any = {};
                 if (title !== undefined) body.title = title;
-                if (content !== undefined) body.content = content;
+                if (content !== undefined) body.content = stripRenderTags(content);
                 if (tags !== undefined) body.tags = tags;
 
                 if (Object.keys(body).length === 0) {

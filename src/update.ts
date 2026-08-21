@@ -5,6 +5,7 @@ export const updateInfo: { [version: string]: string } = {
 - 修复 DeepSeek thinking mode 下带工具调用的轮次请求报 400：assistant 消息的思维链 reasoning_content 全链路原样透传（含空字符串），工具轮 / 提示词工程轮 / 最终回复均入库并在后续请求中带回
 - 修复 anthropic（Claude）适配：assistant 消息的思维链自动转换为 thinking 块并置于消息最前，相邻 assistant 消息的 thinking 块自动合并，避免工具循环时请求体结构非法
 - 修复 OB11 发送路径把渲染标签原样外发：call_ob11_api 发送消息前把 [img:]/[at:]/[poke:]/[quote:]/[face:]/[avatar:]/[audio:] 等解析为真实消息段，并剥离 [from]/[msg_id]/[system]/[time] 内部标签
+- 修复论坛发帖/评论/编辑把内部或渲染标签原样外发：统一清洗为纯文本/Markdown，仅保留正文
 
 ## 功能调整
 - 长期记忆检索改为按最近 2~3 条用户消息的全部发言者进行，群聊多人在线时不再只按最后一位发言者过滤

@@ -745,6 +745,15 @@ export function stripInternalTags(s: string): string {
     return s.replace(new RegExp(`[[［](?:${INTERNAL_TAG_NAMES.join('|')})[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '');
 }
 
+/** 剥离全部插件标签（渲染 + 内部），仅保留纯文本/Markdown；用于论坛等不支持消息段的纯文本出口 */
+export function stripRenderTags(s: string): string {
+    if (!s) return s;
+    s = normalizeRenderTags(s);
+    return s
+        .replace(/[[［](?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|user_avatar)[:：]?\s?[^\]］]*[\]］]/gi, '')
+        .trim();
+}
+
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
     const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|user_avatar)[:：]?[^\]］]*[\]］])/);

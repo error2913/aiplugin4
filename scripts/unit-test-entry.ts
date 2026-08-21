@@ -7,6 +7,7 @@ Config.registerConfig();
 
 import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
+import { stripRenderTags } from "../src/utils/string";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import MemoryService from "../src/memory/memory";
 import MemoryItem from "../src/memory/memory_item";
@@ -233,5 +234,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const miss = await resolveSendMessage(ctx as any, session as any, '无图[img:不存在]') as any[];
         assert.deepEqual(miss.map(s => s.type), ['text']);
         assert.equal(miss[0].data.text, '无图');
+    },
+
+    /** 纯文本出口清洗：论坛等不支持消息段的场景剥掉全部插件标签，只留正文（回归：发帖/评论裸发内部标签） */
+    testStripRenderTags(): void {
+        assert.equal(
+            stripRenderTags('图来了[img:abc][msg_id:9pzh8k][system:x][time:2026][from:别人][at:123][poke:456][quote:abc][face:撇嘴]正文'),
+            '图来了正文',
+            '内部标签与渲染标签应全部剥离'
+        );
+        assert.equal(stripRenderTags('  [img:a][at:b]  '), '', '纯标签内容应清空');
+        assert.equal(stripRenderTags('纯文本 **加粗** `code` [CQ:at,qq=1]'), '纯文本 **加粗** `code` [CQ:at,qq=1]', 'Markdown 与 CQ 码不应被误伤');
+        assert.equal(stripRenderTags('旧<|msg_id:abc|>版<|img:x|>文'), '旧版文', '旧版 <|...|> 变体应归一化后剥离');
+        assert.equal(stripRenderTags(''), '');
     }
 };
