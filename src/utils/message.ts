@@ -83,7 +83,6 @@ export function estimateMessageTokens(m: ContextMessage | RequestMessage): numbe
     return estimateTextTokens(text) + toolCallsEst;
 }
 
-
 /**
  * 取消息携带的思维链：消息级字段（tool_calls 消息）或内容条目级字段（assistant 文本消息）。
  * 空字符串也原样返回（DeepSeek thinking mode 要求字段本身必须回传，不能忽略）。
@@ -146,6 +145,34 @@ function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
     }
     return result;
 }
+
+/**
+ * 请求组装前克隆上下文消息，避免 token 裁剪/tool_calls 过滤污染持久化会话数据。
+ */
+function cloneContextMessage(message: ContextMessage): ContextMessage {
+    const clone: ContextMessage = { ...message };
+
+    if (Array.isArray(message.contentItems)) {
+        clone.contentItems = message.contentItems.map(item => ({ ...item }));
+    }
+
+    if (Array.isArray(message.toolCalls)) {
+        clone.toolCalls = message.toolCalls.map(tc => ({
+            ...tc,
+            function: tc.function ? { ...tc.function } : tc.function
+        }));
+    }
+
+    if (Array.isArray(message.tool_calls)) {
+        clone.tool_calls = message.tool_calls.map(tc => ({
+            ...tc,
+            function: tc.function ? { ...tc.function } : tc.function
+        }));
+    }
+
+    return clone;
+}
+
 
 /**
  * 紧急兜底截断：把单条消息的渲染文本裁剪到 maxChars（保留尾部最近内容），返回实际移除的字符数。
@@ -219,7 +246,9 @@ export async function handleMessages(
 ): Promise<RequestMessage[]> {
     const system = systemMessage ?? await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
-    const contextMessages = buildContextMessages(session.context.messages as ContextMessage[]);
+    const contextMessages = buildContextMessages(
+        (session.context.messages as ContextMessage[]).map(cloneContextMessage)
+    );
 
     const messages: ContextMessage[] = applyTokenBudget(
         [system, ...samplesMessages, ...contextMessages],

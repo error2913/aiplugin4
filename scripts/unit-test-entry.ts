@@ -11,6 +11,8 @@ import { stripRenderTags } from "../src/utils/string";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import MemoryService from "../src/memory/memory";
 import MemoryItem from "../src/memory/memory_item";
+import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
+import { Context } from "../src/context/context";
 import Image from "../src/resource/image";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
@@ -21,6 +23,34 @@ function resetConfigCache() {
 
 function makeCtx(): any {
     return { endPoint: { userId: 'QQ:10000' }, player: { userId: 'QQ:10000', name: '测试员' } };
+}
+
+/** 构造一个带默认值的 MemoryItem（embedding 关闭，vector 恒空） */
+function mkMemory(id: string, content: string, opts: Partial<MemoryItem> = {}): MemoryItem {
+    const m = new MemoryItem();
+    m.id = id;
+    m.content = content;
+    m.users = opts.users || [];
+    m.groups = opts.groups || [];
+    m.tags = opts.tags || [];
+    m.relatedMemories = opts.relatedMemories || [];
+    m.vector = [];
+    m.importance = opts.importance != null ? opts.importance : 0.5;
+    m.createAt = opts.createAt || Math.floor(Date.now() / 1000);
+    m.lastAccessedAt = opts.lastAccessedAt || Math.floor(Date.now() / 1000);
+    m.type = opts.type || 'text';
+    m.stale = !!opts.stale;
+    m.accessCount = opts.accessCount || 0;
+    return m;
+}
+
+/** 关闭嵌入并重置配置缓存（记忆相关测试的共同前置） */
+function resetMemoryTestConfig() {
+    TC.boolConfigs['是否开启嵌入模型'] = false;
+    TC.intConfigs['长期记忆上限'] = 50;
+    TC.intConfigs['长期记忆展示数量'] = 5;
+    TC.intConfigs['核心事实注入条数'] = 3;
+    resetConfigCache();
 }
 
 export const tests: Record<string, () => void | Promise<void>> = {
@@ -128,7 +158,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!(toolMsg2.content as string).startsWith('【工具返回:'));
     },
 
-    /** 总结记忆模板：示例 JSON 必须可被 JSON.parse 解析，且不含单引号键 */
+    /** 总结记忆模板：示例 JSON 必须可被 JSON.parse 解析，且不含单引号键；协议为 summary + facts(op) */
     testSummaryTemplateValidJson(): void {
         const rendered = SUMMARY_PROMPT_TEMPLATE({
             '角色设定': '测试角色',
@@ -143,8 +173,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const brace = rendered.indexOf('{', start);
         const block = rendered.slice(brace, rendered.lastIndexOf('}') + 1);
         const parsed = JSON.parse(block); // 必须不抛异常
-        assert.ok(parsed.content && parsed.content.type === 'string');
-        assert.ok(parsed.memories && parsed.memories.items.properties.related_user_ids.type === 'array');
+        assert.ok(parsed.summary && parsed.summary.type === 'string');
+        assert.ok(parsed.facts && parsed.facts.type === 'array');
+        assert.ok(parsed.facts.items.properties.op, 'facts 条目应包含 op 操作类型');
+        assert.ok(parsed.facts.items.properties.related_user_ids.type === 'array');
+        assert.ok(parsed.facts.items.properties.importance.type === 'number');
         assert.ok(!block.includes("'"), '示例 JSON 不应再包含单引号');
     },
 
@@ -247,5 +280,189 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(stripRenderTags('纯文本 **加粗** `code` [CQ:at,qq=1]'), '纯文本 **加粗** `code` [CQ:at,qq=1]', 'Markdown 与 CQ 码不应被误伤');
         assert.equal(stripRenderTags('旧<|msg_id:abc|>版<|img:x|>文'), '旧版文', '旧版 <|...|> 变体应归一化后剥离');
         assert.equal(stripRenderTags(''), '');
+    },
+
+    /** 宽容 JSON 解析：代码块围栏/前后缀文本都应能提取；垃圾输入返回 null */
+    testParseLooseJson(): void {
+        assert.deepEqual(parseLooseJson('```json\n{"a":1}\n```'), { a: 1 }, '应剥离 markdown 围栏');
+        assert.deepEqual(parseLooseJson('```\n{"a":1}\n```'), { a: 1 }, '无 json 标识的围栏也应剥离');
+        assert.deepEqual(parseLooseJson('好的，结果是 {"a":1,"b":"x"} 这就是了'), { a: 1, b: 'x' }, '应容忍前后缀文本');
+        assert.equal(parseLooseJson('完全不是 JSON'), null, '垃圾输入返回 null');
+        assert.equal(parseLooseJson(''), null, '空串返回 null');
+    },
+
+    /** addMemory 查重：同会话规范化内容一致时合并而非新增（B1 修复：模型重复记忆不再累积） */
+    async testAddMemoryDedup(): Promise<void> {
+        resetMemoryTestConfig();
+        const svc = new MemoryService();
+        const session = { sessionId: 'QQ:10001' } as any;
+        const r1 = await svc.addMemory(null, session, [], [], [], [], '小明喜欢喝咖啡', 'public', 'fact', 0.8);
+        const r2 = await svc.addMemory(null, session, [], [], [], [], '  小明 喜欢喝咖啡 ', 'public', 'fact', 0.9);
+        assert.equal(r1.action, 'added');
+        assert.equal(r2.action, 'merged', '规范化后内容一致应合并');
+        assert.equal(r2.id, r1.id, '合并应命中同一条记忆');
+        assert.equal(svc.memoryIds.length, 1, '不应产生重复记忆');
+        assert.equal(svc.memoryMap[r1.id].importance, 0.9, '合并取较高重要性');
+    },
+
+    /** applyFact 管线：add → merge → update → delete → noop 全分支 */
+    async testApplyFactPipeline(): Promise<void> {
+        resetMemoryTestConfig();
+        const svc = new MemoryService();
+        const a = await svc.applyFact({ op: 'add', text: '小明喜欢喝咖啡', type: 'fact', importance: 0.9, keywords: ['咖啡'] });
+        assert.equal(a.action, 'added');
+        assert.ok(a.id);
+        assert.equal(svc.memoryMap[a.id!].type, 'fact');
+        assert.equal(svc.memoryMap[a.id!].importance, 0.9);
+
+        const b = await svc.applyFact({ op: 'add', text: '小明喜欢喝咖啡', type: 'fact' });
+        assert.equal(b.action, 'merged', '重复 add 应合并');
+        assert.equal(b.id, a.id);
+
+        const c = await svc.applyFact({ op: 'update', existing_id: a.id, text: '小明喜欢喝热咖啡', importance: 0.95 });
+        assert.equal(c.action, 'updated');
+        assert.equal(svc.memoryMap[a.id!].content, '小明喜欢喝热咖啡', 'update 应覆盖内容');
+        assert.equal(svc.memoryMap[a.id!].importance, 0.95, 'update 应提升重要性');
+
+        const d = await svc.applyFact({ op: 'delete', existing_id: a.id });
+        assert.equal(d.action, 'deleted');
+        assert.equal(svc.memoryIds.length, 0);
+
+        const e = await svc.applyFact({ op: 'noop', text: '任意内容' });
+        assert.equal(e.action, 'noop', 'noop 不写入');
+        assert.equal(svc.memoryIds.length, 0);
+    },
+
+    /** 中文 n-gram 检索：无向量时关键词兜底能命中中文子串（B12 修复） */
+    async testChineseNgramSearch(): Promise<void> {
+        resetMemoryTestConfig();
+        const svc = new MemoryService();
+        svc.memoryMap['m1'] = mkMemory('m1', '小明喜欢喝咖啡，每天两杯');
+        svc.memoryMap['m2'] = mkMemory('m2', '小明喜欢打篮球，周末去球场');
+        const opts = { topK: 5, tags: [], relatedMemories: [], users: [], groups: [], method: 'score' as const };
+        const r1 = await svc.search('咖啡', opts);
+        assert.ok(r1.some(m => m.id === 'm1'), '查询「咖啡」应命中咖啡记忆');
+        assert.equal(r1[0].id, 'm1', 'n-gram 命中者应排在最前');
+        const r2 = await svc.search('篮球', opts);
+        assert.ok(r2.some(m => m.id === 'm2'), '查询「篮球」应命中篮球记忆');
+        assert.equal(r2[0].id, 'm2', 'n-gram 命中者应排在最前');
+    },
+
+    /** 三因子打分：importance 权重生效、向量相关性提升分数（Phase 2） */
+    testThreeFactorScore(): void {
+        const now = Math.floor(Date.now() / 1000);
+        const mk = (importance: number): MemoryItem => {
+            const m = new MemoryItem();
+            m.createAt = now - 86400;
+            m.lastAccessedAt = now;
+            m.importance = importance;
+            m.accessCount = 0;
+            return m;
+        };
+        const hi = mk(1);
+        const lo = mk(0.1);
+        const sHi = hi.calculateScore([]);
+        const sLo = lo.calculateScore([]);
+        assert.ok(sHi > sLo, `重要性高者分数应更高 (${sHi} > ${sLo})`);
+        assert.ok(Number.isFinite(sHi) && sHi >= 0 && sHi <= 1, '分数应在 0-1 区间');
+
+        const m = new MemoryItem();
+        m.vector = [1, 0];
+        m.importance = 0.5;
+        m.createAt = now;
+        m.lastAccessedAt = now;
+        assert.ok(m.calculateScore([1, 0]) > m.calculateScore([]), '查询向量相关时分数应更高');
+    },
+
+    /** stale 记忆治理：低重要性超期标记 stale；stale 再超期删除（Phase 3） */
+    testMarkAndPruneStale(): void {
+        const now = Math.floor(Date.now() / 1000);
+        const day = 86400;
+        const svc = new MemoryService();
+        svc.memoryMap['old'] = mkMemory('old', '旧日常琐事', { importance: 0.1, createAt: now - 40 * day, lastAccessedAt: now - 40 * day });
+        svc.memoryMap['imp'] = mkMemory('imp', '重要长期关系', { importance: 0.9, createAt: now - 100 * day, lastAccessedAt: now - 100 * day });
+        svc.memoryMap['dead'] = mkMemory('dead', '已过期', { importance: 0.1, createAt: now - 100 * day, lastAccessedAt: now - 70 * day, stale: true });
+
+        const r = svc.markAndPruneStale();
+        assert.equal(r.marked, 1, '低重要性且超 30 天未访问应标记 stale');
+        assert.deepEqual(r.deleted, ['dead'], 'stale 且超 60 天应删除');
+        assert.equal(svc.memoryMap['old'].stale, true);
+        assert.ok(svc.memoryMap['imp'], '高重要性记忆不应被标记');
+        assert.ok(!svc.memoryMap['dead'], '过期记忆应被移除');
+    },
+
+    /** 总结条目合并：n-gram 相似度高者去重，保序（Phase 3） */
+    testMergeSimilarSummaries(): void {
+        const merged = MemoryService.mergeSimilarSummaries([
+            '小明喜欢喝咖啡',
+            '小明喜欢喝咖啡，也喜欢喝茶',
+            '今天天气晴朗适合散步'
+        ]);
+        assert.ok(merged.length < 3, '相似总结应被合并');
+        assert.ok(merged.includes('小明喜欢喝咖啡'), '保留先出现的条目');
+        assert.ok(merged.includes('今天天气晴朗适合散步'), '不相似条目应保留');
+    },
+
+    /** stale 记忆不参与检索 */
+    async testSearchStaleExcluded(): Promise<void> {
+        resetMemoryTestConfig();
+        const svc = new MemoryService();
+        svc.memoryMap['m1'] = mkMemory('m1', '咖啡相关记忆', { stale: true });
+        const r = await svc.search('咖啡', { topK: 5, tags: [], relatedMemories: [], users: [], groups: [], method: 'score' });
+        assert.equal(r.length, 0, 'stale 记忆不应出现在检索结果');
+    },
+
+    /** 关联记忆一跳扩展：命中记忆的 relatedMemories 并入结果（Phase 3） */
+    async testSearchRelatedExpansion(): Promise<void> {
+        resetMemoryTestConfig();
+        const svc = new MemoryService();
+        svc.memoryMap['m1'] = mkMemory('m1', '北京旅游攻略', { relatedMemories: ['m2'] });
+        svc.memoryMap['m2'] = mkMemory('m2', '故宫历史与门票');
+        const r = await svc.search('北京', { topK: 5, tags: [], relatedMemories: [], users: [], groups: [], method: 'score' });
+        const ids = r.map(m => m.id);
+        assert.ok(ids.includes('m1'), '关键词命中记忆应返回');
+        assert.ok(ids.includes('m2'), '关联记忆应一跳扩展进结果');
+    },
+
+    /** 核心事实常驻注入：重要性达阈值的事实进入 prompt，且不与检索段重复（Phase 2） */
+    async testBuildMemoryPromptCoreFacts(): Promise<void> {
+        resetMemoryTestConfig();
+        const svc = new MemoryService();
+        svc.memoryMap['f1'] = mkMemory('f1', '小明喜欢喝咖啡', { type: 'fact' as any, importance: 0.9 });
+        svc.memoryMap['r1'] = mkMemory('r1', '小明提到想去日本旅游', { importance: 0.4 });
+        const ctx = { isPrivate: true, endPoint: { userId: 'QQ:10000' }, group: null } as any;
+        const p = await svc.buildMemoryPrompt(ctx, {} as any, '咖啡', [{ isPrivate: true, id: 'QQ:10000', name: '用户1' }], null);
+        assert.ok(p.includes('核心事实'), 'prompt 应包含核心事实段');
+        assert.ok(p.includes('小明喜欢喝咖啡'), '核心事实应注入');
+        const first = p.indexOf('小明喜欢喝咖啡');
+        assert.equal(p.indexOf('小明喜欢喝咖啡', first + 1), -1, '核心事实不应与检索段重复');
+    },
+
+    /** 上下文裁剪时总结游标同步回退，避免越界（B4 修复） */
+    testContextSummaryCursorAdjustsOnTrim(): void {
+        TC.intConfigs['对话保存轮数'] = 2;
+        resetConfigCache();
+        const ctx = new Context();
+        ctx.messages = [
+            { role: 'user' }, { role: 'user' }, { role: 'user' }, { role: 'user' }
+        ] as any;
+        ctx.lastSummarizedIndex = 3;
+        ctx.limitMessages();
+        assert.equal(ctx.messages.length, 3, '应裁剪头部保留最近窗口');
+        assert.equal(ctx.lastSummarizedIndex, 2, '游标应随头部裁剪回退');
+    },
+
+    /** 旧存档「短期记忆」→「总结记忆」迁移：列表合并去重、开关合并（命名统一） */
+    testMigrateShortToSummaryMemory(): void {
+        const svc = new SessionMemoryService();
+        svc.summaries = ['已有总结'];
+        svc.shortMemoryList = ['旧短期记忆A', '旧短期记忆B', '旧短期记忆A'];
+        svc.useShortMemory = true;
+        svc.summaryStatus = false;
+        svc.reviveMemoryMap();
+        assert.deepEqual(svc.summaries, ['已有总结', '旧短期记忆A', '旧短期记忆B'], '旧短期记忆应并入总结记忆并去重');
+        assert.equal(svc.shortMemoryList!.length, 0, '迁移后旧列表应清空');
+        assert.equal(svc.summaryStatus, true, '旧开关应合并到 summaryStatus');
+        assert.equal(svc.useShortMemory, false, '旧字段应复位');
     }
 };

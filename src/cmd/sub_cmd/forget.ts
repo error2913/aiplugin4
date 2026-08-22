@@ -19,7 +19,6 @@ export function registerCmdForget() {
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, session, ret  } = scc;
 
-        session.resetState();
 
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
@@ -36,6 +35,7 @@ export function registerCmdForget() {
                 return ret;
             }
             default: {
+                session.resetState();
                 session.context.clearMessages();
                 seal.replyToSender(ctx, msg, '上下文已清除');
                 session.save();

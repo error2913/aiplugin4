@@ -189,7 +189,6 @@ export class Session {
         if (this.context.timer) clearTimeout(this.context.timer);
         this.context.timer = null;
         this.context.counter = 0;
-        this.bucket.count--;
         this.tool.callCount = 0;
     }
 
@@ -304,6 +303,7 @@ export class Session {
         });
 
         this.resetState();
+        this.bucket.count--;
 
         const model = Model.getChatModel('chat', this.setting.modelName);
         if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {

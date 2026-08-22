@@ -269,6 +269,19 @@ function captureOptions(args: { [key: string]: any }, defaultMaxMessages: number
     };
 }
 
+/** 从 raw_message 中提取用于白名单校验的核心命令名，尽量兼容前缀/CQ/执行次数/core| 等写法。 */
+function extractAuthorizedCommand(raw: string): string {
+    let s = String(raw || '').trim();
+    if (s.startsWith(Config.tool.COMMAND_PREFIX)) {
+        s = s.slice(Config.tool.COMMAND_PREFIX.length).trim();
+    }
+    s = s.replace(/^\[CQ:[^\]]+\]\s*/, '');
+    s = s.replace(/^\d+#/, '');
+    s = s.replace(/^core\|/i, '');
+    return s.split(/\s+/, 1)[0] || '';
+}
+
+
 async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
     const { ctx, args = {} } = input;
     const action = String(args && args.action || '');
@@ -289,10 +302,7 @@ async function coreBridgeAdapter(input: MCPAdapterContext): Promise<string> {
 
     let authorizedCommand = command;
     if (hasRawMessage) {
-        const withoutPrefix = rawMessage!.trim().startsWith(Config.tool.COMMAND_PREFIX)
-            ? rawMessage!.trim().slice(Config.tool.COMMAND_PREFIX.length).trim()
-            : rawMessage!.trim();
-        authorizedCommand = withoutPrefix.split(/\s+/, 1)[0].replace(/^core\|/, '').trim();
+        authorizedCommand = extractAuthorizedCommand(rawMessage!);
         if (!authorizedCommand) return '调用核心指令时 raw_message 不能为空';
     }
     if (!isAllowedCore(authorizedCommand)) return `核心指令 core|${authorizedCommand} 不在可调用指令白名单内，无法调用`;

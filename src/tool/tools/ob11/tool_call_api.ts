@@ -7,7 +7,15 @@ export function registerCallOb11Api() {
         type: "function",
         function: {
             name: "call_ob11_api",
-            description: "调用 OneBot 11 API 或已支持的 NapCat/Milky API。运行时会自动选择 ob11-net 后端或 SealDice 原生后端；不要调用旧的按功能拆分工具。",
+            description: "调用 OneBot 11 API 或已支持的 NapCat/Milky API。运行时会自动选择 ob11-net 后端或 SealDice 原生后端；不要调用旧的按功能拆分工具。\n" +
+                "发送消息必须使用本工具，禁止在回复中伪造发送动作。\n" +
+                "\n" +
+                "消息发送格式：\n" +
+                "- 发私聊/群聊消息使用 send_private_msg / send_group_msg，params.message 传文本或消息段数组。\n" +
+                "- 图片/语音/视频/文件分别使用 image/record/video/file 消息段。\n" +
+                "- 本地资源将 file 写成 resource:资源ID。\n" +
+                "- 上传文件使用 upload_group_file / upload_private_file，不要把上传动作伪装成普通 file 消息段。\n" +
+                "- 资源路径支持本地绝对路径、file:// URI、HTTP(S) URL、base64://、mcp://服务器名/沙箱相对路径。",
             parameters: {
                 type: "object",
                 properties: {

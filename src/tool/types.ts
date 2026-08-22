@@ -97,6 +97,11 @@ export interface ToolCallResult {
     callBack?: boolean     // 是否把结果回调给智能体（写回上下文继续对话），false 时工具静默执行
 }
 
+export interface ToolWaitHandle {
+    promise: Promise<string[]>;
+    cancel: () => void;
+}
+
 export interface ToolListen {
     timeoutId: number | null,
     resolve: ((content: string) => void) | null,
@@ -104,6 +109,6 @@ export interface ToolListen {
     cleanup: () => void,
     /** 将机器人消息分发给所有正在等待的调用，避免单一 resolve 丢消息。 */
     push?: (content: string) => void,
-    /** 收集一段空闲窗口内的多条机器人消息。 */
-    waitFor?: (timeoutMs?: number, settleMs?: number, maxMessages?: number) => Promise<string[]>
+    /** 收集一段空闲窗口内的多条机器人消息；返回可单独取消的句柄。 */
+    waitFor?: (timeoutMs?: number, settleMs?: number, maxMessages?: number) => ToolWaitHandle
 }

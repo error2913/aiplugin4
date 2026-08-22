@@ -1,4 +1,4 @@
-// 摘要智能体：用于短期记忆总结（use=summarization）
+// 摘要智能体：用于总结记忆生成（use=summarization）
 import Agent from "../agent";
 
 // 摘要智能体：懒初始化（需在 Config.registerConfig 之后调用）

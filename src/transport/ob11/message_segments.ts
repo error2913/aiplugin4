@@ -3,8 +3,8 @@ import { FACE_MAP } from "../../config/static_config";
 import { logger } from "../../logger";
 import Image from "../../resource/image";
 import { resolveResourceReference } from "../../utils/resource";
-import { getRawId, normalizeUserId } from "../../utils/target_id";
 import { MessageSegment, parseSpecialTokens, stripInternalTags } from "../../utils/string";
+import { getRawId, normalizeUserId } from "../../utils/target_id";
 import { resolveLocalPath, transformMsgIdBack } from "../../utils/utils";
 
 const log = logger.withTag('ob11-send');

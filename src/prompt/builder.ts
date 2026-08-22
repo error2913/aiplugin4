@@ -110,9 +110,10 @@ export async function buildSystemPromptContent(
             toolPrompt
         });
 
-        if (STATUS && skillSummaries.length > 0) {
-            content += `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`;
-        }
+        const skillBlock = STATUS && skillSummaries.length > 0
+            ? `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`
+            : '';
+        content = content.replace('**DYNAMIC_SECTIONS**', `${skillBlock}\n\n**DYNAMIC_SECTIONS**`);
         return content;
     });
 
@@ -125,6 +126,7 @@ export async function buildSystemPromptContent(
         getMemoryRevision(),
         Config.memory.MEMORY,
         Config.memory.MEMORY_SHOW_NUMBER,
+        Config.memory.CORE_FACT_NUMBER,
         Config.model.EMBEDDING_MODEL_ENABLED,
         Model.getEmbeddingDimension(),
         embeddingModelName,
@@ -146,11 +148,17 @@ export async function buildSystemPromptContent(
     ]);
     const knowledgeKey = signature(['prompt:knowledge', knowledgeService.getCacheVersion()]);
 
-    const [memoryPrompt, summaryPrompt, knowledgePrompt] = await Promise.all([
-        getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null)),
-        getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildSummaryPrompt(session)),
-        getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
-    ]);
+    const memoryTask = Config.memory.MEMORY
+        ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
+        : Promise.resolve('');
+    const summaryTask = Config.memory.SUMMARY
+        ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildSummaryPrompt(session))
+        : Promise.resolve('');
+    const knowledgeTask = Config.memory.KNOWLEDGE
+        ? getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
+        : Promise.resolve('');
+
+    const [memoryPrompt, summaryPrompt, knowledgePrompt] = await Promise.all([memoryTask, summaryTask, knowledgeTask]);
 
     const dynamicSections = [memoryPrompt, summaryPrompt, knowledgePrompt].filter(Boolean).join('\n\n');
     const content = frame

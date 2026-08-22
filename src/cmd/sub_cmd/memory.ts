@@ -1,4 +1,4 @@
-// .ai memo：个人/群聊/短期记忆与设定管理
+// .ai memo：个人/群聊/总结记忆与设定管理
 import Config from "../../config/config";
 import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
@@ -27,11 +27,13 @@ export function registerCmdMemory() {
      【.ai memo [p/g] st <内容>】设置个人/群聊设定
      【.ai memo [p/g] st clr】清除个人/群聊设定
      【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
-     【.ai memo [p/g/short] list】展示个人/群聊/短期记忆
-     【.ai memo [p/g/short] clr】清除个人/群聊/短期记忆
-     【.ai memo short [on/off]】开启/关闭短期记忆
-     【.ai memo sum】立即总结一次短期记忆
-     【.ai memo sum clr】清除总结记忆`;
+     【.ai memo [p/g] list】展示个人/群聊记忆
+     【.ai memo [p/g] clr】清除个人/群聊记忆
+     【.ai memo sum [on/off]】开启/关闭总结记忆
+     【.ai memo sum list】展示总结记忆
+     【.ai memo sum】立即生成一次总结记忆
+     【.ai memo sum clr】清除总结记忆
+     【.ai memo cons】立即巩固一次记忆（合并重复总结、清理过期记忆）`;
     cmd.priv = {
         priv: U, args: {
             status: { priv: U },
@@ -61,15 +63,15 @@ export function registerCmdMemory() {
                     clear: { priv: U }
                 }
             },
-            short: {
-                priv: S, args: {
+            sum: {
+                priv: U, args: {
                     list: { priv: U },
                     clear: { priv: U },
-                    on: { priv: U },
-                    off: { priv: U }
+                    on: { priv: S },
+                    off: { priv: S }
                 }
             },
-            sum: { priv: U }
+            cons: { priv: U }
         }
     };
     cmd.solve = async (scc: SubCmdContext) => {
@@ -95,13 +97,13 @@ export function registerCmdMemory() {
                     }
                     statusSession = getSession(normalizedUserId);
                 }
-                const { MEMORY: isMemory, SUMMARY: isShortMemory } = Config.memory;
+                const { MEMORY: isMemory, SUMMARY: isSummary } = Config.memory;
                 seal.replyToSender(ctx, msg, `${statusSession.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
      长期记忆条数: ${statusSession.memory.memoryIds.length}
      关键词库: ${statusSession.memory.keywords.join('、') || '无'}
-     短期记忆开启状态: ${(isShortMemory && statusSession.memory.useShortMemory) ? '是' : '否'}
-     短期记忆条数: ${statusSession.memory.shortMemoryList.length}`);
+     总结记忆开启状态: ${isSummary ? '是' : '否'}
+     总结记忆条数: ${statusSession.memory.summaries.length}`);
                 return ret;
             }
             case 'private': {
@@ -302,61 +304,53 @@ export function registerCmdMemory() {
                     }
                 }
             }
-            case 'short': {
-                const val3 = cmdArgs.getArgN(3);
-                switch (aliasToCmd(val3)) {
+            case 'sum': {
+                const val3 = aliasToCmd(cmdArgs.getArgN(3));
+                switch (val3) {
                     case 'on': {
-                        session.memory.useShortMemory = true;
-                        seal.replyToSender(ctx, msg, '短期记忆已开启');
+                        session.memory.summaryStatus = true;
+                        seal.replyToSender(ctx, msg, '总结记忆已开启');
                         session.save();
                         return ret;
                     }
                     case 'off': {
-                        session.memory.useShortMemory = false;
-                        seal.replyToSender(ctx, msg, '短期记忆已关闭');
+                        session.memory.summaryStatus = false;
+                        seal.replyToSender(ctx, msg, '总结记忆已关闭');
                         session.save();
                         return ret;
                     }
                     case 'list': {
-                        if (session.memory.shortMemoryList.length === 0) {
-                            seal.replyToSender(ctx, msg, '短期记忆为空');
+                        if (session.memory.summaries.length === 0) {
+                            seal.replyToSender(ctx, msg, '总结记忆为空');
                             return ret;
                         }
-                        seal.replyToSender(ctx, msg, session.memory.shortMemoryList
+                        seal.replyToSender(ctx, msg, session.memory.summaries
                             .map((item, index) => `${index + 1}. ${item}`)
                             .slice((page - 1) * 10, page * 10)
-                            .join('\n') + `\n当前页码: ${page}/${Math.ceil(session.memory.shortMemoryList.length / 10)}`);
+                            .join('\n') + `\n当前页码: ${page}/${Math.ceil(session.memory.summaries.length / 10)}`);
                         return ret;
                     }
                     case 'clear': {
-                        session.memory.clearShortMemory();
-                        seal.replyToSender(ctx, msg, '短期记忆已清除');
+                        session.memory.clearSummaries();
                         session.save();
+                        seal.replyToSender(ctx, msg, '总结记忆已清除');
                         return ret;
                     }
                     default: {
-                        seal.replyToSender(ctx, msg, `参数缺失
-     【.ai memo short list】展示短期记忆
-     【.ai memo short clr】清除短期记忆
-     【.ai memo short [on/off]】开启/关闭短期记忆`);
+                        session.context.summaryCounter = 0;
+                        await session.memory.summarize();
+                        session.save();
+                        seal.replyToSender(ctx, msg, session.memory.summaries
+                            .map((item, index) => `${index + 1}. ${item}`)
+                            .slice((page - 1) * 10, page * 10)
+                            .join('\n') + `\n当前页码: ${page}/${Math.ceil(session.memory.summaries.length / 10)}`);
                         return ret;
                     }
                 }
             }
-            case 'sum': {
-                const val3 = cmdArgs.getArgN(3);
-                if (aliasToCmd(val3) === 'clear') {
-                    session.memory.clearSummaries();
-                    session.save();
-                    seal.replyToSender(ctx, msg, '总结记忆已清除');
-                    return ret;
-                }
-                session.context.summaryCounter = 0;
-                await session.memory.updateShortMemory(ctx, msg, session)
-                seal.replyToSender(ctx, msg, session.memory.shortMemoryList
-                    .map((item, index) => `${index + 1}. ${item}`)
-                    .slice((page - 1) * 10, page * 10)
-                    .join('\n') + `\n当前页码: ${page}/${Math.ceil(session.memory.shortMemoryList.length / 10)}`);
+            case 'cons': {
+                await session.memory.consolidate();
+                seal.replyToSender(ctx, msg, `记忆巩固完成：总结记忆 ${session.memory.summaries.length} 条，长期记忆 ${session.memory.memoryIds.length} 条`);
                 return ret;
             }
             default: {
@@ -365,11 +359,13 @@ export function registerCmdMemory() {
      【.ai memo [p/g] st <内容>】设置个人/群聊设定
      【.ai memo [p/g] st clr】清除个人/群聊设定
      【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
-     【.ai memo [p/g/short] list】展示个人/群聊/短期记忆
-     【.ai memo [p/g/short] clr】清除个人/群聊/短期记忆
-     【.ai memo short [on/off]】开启/关闭短期记忆
-     【.ai memo sum】立即总结一次短期记忆
-     【.ai memo sum clr】清除总结记忆`);
+     【.ai memo [p/g] list】展示个人/群聊记忆
+     【.ai memo [p/g] clr】清除个人/群聊记忆
+     【.ai memo sum [on/off]】开启/关闭总结记忆
+     【.ai memo sum list】展示总结记忆
+     【.ai memo sum】立即生成一次总结记忆
+     【.ai memo sum clr】清除总结记忆
+     【.ai memo cons】立即巩固一次记忆（合并重复总结、清理过期记忆）`);
                 return ret;
             }
         }

@@ -4,45 +4,30 @@ import Handlebars from "handlebars";
 import Logger from "../logger";
 
 const TEMPLATES: { [key: string]: string } = {
-    "system prompt模板": `你是一名QQ中的掷骰机器人，也称骰娘，用于线上TRPG中。你需要扮演以下角色在群聊和私聊中与人聊天。
+    "system prompt模板": `你是骰娘机器人，按角色设定在私聊/群聊中扮演。
 
-## 扮演设定
+## 角色
 {{{instruction}}}
-            
-## 聊天相关
-- 平台:{{{platform}}}
-- 会话类型:{{{sessionType}}}
-- 会话名称:{{{sessionName}}}
-- 会话ID:{{{sessionId}}}
+
+## 会话信息
+- 平台:{{{platform}}} | 类型:{{{sessionType}}} | 名称:{{{sessionName}}} | ID:{{{sessionId}}}
 - 当前时间:**CURRENT_TIME**
 
-- [at:用户ID]表示@某个群成员，用户ID使用QQ号或规范化用户ID
-- [poke:用户ID]表示戳一戳某个群成员，用户ID使用QQ号或规范化用户ID
-- [from:xxx]表示消息来源，xxx为发送者名称，用户消息带此前缀（含QQ号）；同一发送者连续发言时仅首条带
-- [msg_id:xxx]表示消息ID，xxx为对应消息的ID，引用某条消息时使用[quote:xxx]
-- [time:xxxx-xx-xx xx:xx:xx]表示消息发送时间
-- [from]/[msg_id]/[system]/[time] 是系统自动注入的上下文标记，聊天中禁止模仿或生成这些标签
-- [quote:xxx]表示引用消息，xxx为对应的消息ID
-- [face:xxx]表示使用某个表情，xxx为表情名称，注意与img表情包区分
-- \\f用于分割多条消息
-
-## 图片相关
+## 消息标记
+- [at:ID] @某人；[poke:ID] 戳一戳；[quote:ID] 引用；[face:名称] 表情
+- [from:名字(QQ)] 发送者；[msg_id:ID] 消息ID；[time:时间] 发送时间
+- [from]/[msg_id]/[system]/[time] 是系统自动注入标记，禁止模仿或生成
+- \\f 表示多条消息分隔
 {{#if RECEIVE_IMAGE}}
-- [img:xxxxxx:yyy]表示图片，其中xxxxxx为6位的图片id，yyy为图片描述（可能没有），如果要发送出现过的图片请使用[img:xxxxxx]的格式
+- [img:图片ID:描述] 图片；[avatar:用户ID] 头像；[group_avatar:群ID] 群头像
+- 本地图片先用 list_resources(type=image) 查询
+{{else}}
+- [avatar:用户ID] 头像；[group_avatar:群ID] 群头像
 {{/if}}
-- 可使用[avatar:用户ID]发送用户头像
-- 可使用[group_avatar:群ID]发送群聊头像
-- 可使用[img:图片ID]发送本地图片，可用名称先通过 list_resources(type=image) 查询
 
-## OB11 消息与资源
-- 所有协议消息只能使用 call_ob11_api：选择 send_private_msg/send_group_msg，并在 message 中传文本或消息段数组。
-- 图片、语音、视频、文件使用 image/record/video/file 消息段；本地资源先用 list_resources 查询，再将 file 写成 resource:资源ID。
-- 文件区上传使用 upload_group_file/upload_private_file，不要把上传动作伪装成普通 file 消息段。
-- 资源路径支持本地绝对路径、file:// URI、HTTP(S) URL、base64://；MCP 沙箱文件使用 mcp://服务器名/沙箱相对路径。
+{{{toolPrompt}}}
 
-**DYNAMIC_SECTIONS**
-
-{{{toolPrompt}}}`,
+**DYNAMIC_SECTIONS**`,
     "长期记忆prompt模板": `{{#if MEMORY}}
 
 ## 长期记忆
@@ -116,17 +101,26 @@ const TEMPLATES: { [key: string]: string } = {
 
 返回格式为JSON，格式类型如下（请严格返回合法的 JSON：所有键和字符串必须使用双引号，不要输出 Markdown 代码块或其他解释文字）:
 {
-    "content": {
+    "summary": {
         "type": "string",
-        "description": "总结后的对话摘要，请根据人物、行为、场景，以所扮演角色的口吻进行简短描述，只保留核心内容"
+        "description": "一句话对话摘要，以所扮演角色的口吻简述本次对话的核心事件，只保留核心内容"
     },
-    "memories": {
+    "facts": {
         "type": "array",
-        "description": "记忆数组。单条记忆应只有一个话题或事件。若对话内容对记忆有重要影响时返回，否则返回空数组。除非用户明确要求记忆只在本会话中生效，否则不要传 visibility 字段（默认 public）",
+        "description": "记忆数组。每条一个原子事实或更新操作，一个话题/事件一条。若对话内容对记忆有重要影响时返回，否则返回空数组。除非用户明确要求记忆只在本会话中生效，否则不要传 visibility 字段（默认 public）",
         "items": {
             "type": "object",
-            "description": "记忆对象",
+            "description": "记忆操作对象",
             "properties": {
+                "op": {
+                    "type": "string",
+                    "enum": ["add", "update", "delete", "noop"],
+                    "description": "操作类型：新事实用 add；修正已存在的记忆（内容变化/错误）用 update 并附 existing_id；已过时/错误的记忆用 delete 并附 existing_id；其余情况用 noop（不写入）"
+                },
+                "existing_id": {
+                    "type": "string",
+                    "description": "op 为 update/delete 时必填：已存在记忆的 ID（来自长期记忆/总结记忆列表）"
+                },
                 "memory_type": {
                     "type": "string",
                     "description": "记忆归属，个人或群聊，与可见性无关。",
@@ -136,13 +130,18 @@ const TEMPLATES: { [key: string]: string } = {
                     "type": "string",
                     "description": "目标用户ID或群ID，实际使用时与记忆类型对应"
                 },
+                "type": {
+                    "type": "string",
+                    "description": "记忆类型：fact（事实/偏好/属性）、rule（规则/群规/指令）、relation（人物关系）、event（发生过的事件）",
+                    "enum": ["fact", "rule", "relation", "event"]
+                },
                 "text": {
                     "type": "string",
-                    "description": "记忆内容，尽量简短，无需附带时间与来源"
+                    "description": "原子事实内容，一句话，尽量简短，无需附带时间与来源"
                 },
                 "keywords": {
                     "type": "array",
-                    "description": "相关关键词列表",
+                    "description": "相关关键词/标签列表",
                     "items": {
                         "type": "string"
                     }
@@ -161,13 +160,24 @@ const TEMPLATES: { [key: string]: string } = {
                         "type": "string"
                     }
                 },
+                "related_memory_ids": {
+                    "type": "array",
+                    "description": "相关联的已有记忆ID列表（来自长期记忆/总结记忆列表），用于建立记忆之间的关联",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "importance": {
+                    "type": "number",
+                    "description": "重要性 0-1：对角色塑造/长期关系/群规则重要给高分（≥0.8 会常驻注入），日常琐事给低分"
+                },
                 "visibility": {
                     "type": "string",
                     "description": "记忆可见性，仅当用户明确要求记忆只在本会话中生效时才传 private；其余情况不传（默认 public）",
                     "enum": ["public", "private"]
                 }
             },
-            "required": ["memory_type", "target_id", "text"]
+            "required": ["op", "text"]
         }
     }
 }`

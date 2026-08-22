@@ -213,13 +213,19 @@ export default class Agent {
         }
     }
 
-    private async runStreamInner(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    private async runStreamInner(
+        session: Session,
+        ctx: seal.MsgContext,
+        msg: seal.Message,
+        systemMessage?: Awaited<ReturnType<typeof buildSystemMessage>>
+    ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const trace = new AgentRunContext();
 
         await session.stopCurrentChatStream();
 
-        const messages = await handleMessages(ctx, session, this.isMultimodalChat(session));
+        const sys = systemMessage ?? await buildSystemMessage(ctx, session);
+        const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), undefined, sys);
         const id = await streamService.startStream(messages, session.setting.modelName, trace.runId);
         if (!id) return;
 
@@ -290,7 +296,7 @@ export default class Agent {
                             return;
                         }
 
-                        await this.runStreamInner(session, ctx, msg);
+                        await this.runStreamInner(session, ctx, msg, sys);
                         return;
                     } else {
                         after = result.nextAfter;

@@ -31,6 +31,10 @@ export function registerCmdTool() {
             case 'on': {
                 const val3 = cmdArgs.getArgN(3);
                 if (val3) {
+                    if (!Object.prototype.hasOwnProperty.call(toolMap, val3)) {
+                        seal.replyToSender(ctx, msg, `工具函数 ${val3} 不存在`);
+                        return ret;
+                    }
                     const blockedTools = Config.tool.BLOCKED;
                     if (blockedTools.includes(val3)) {
                         seal.replyToSender(ctx, msg, `工具函数 ${val3} 不被允许开启`);
@@ -53,6 +57,10 @@ export function registerCmdTool() {
             case 'off': {
                 const val3 = cmdArgs.getArgN(3);
                 if (val3) {
+                    if (!Object.prototype.hasOwnProperty.call(toolMap, val3)) {
+                        seal.replyToSender(ctx, msg, `工具函数 ${val3} 不存在`);
+                        return ret;
+                    }
                     session.tool.state[val3] = false;
                     seal.replyToSender(ctx, msg, `已关闭工具函数 ${val3}`);
                     session.save();

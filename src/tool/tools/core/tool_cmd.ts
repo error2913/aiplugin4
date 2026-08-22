@@ -1,7 +1,7 @@
 // 海豹指令工具：扩展指令本地直调 solve；核心指令由 MCP 适配器注册 run_core_command。
 import Config from "../../../config/config";
 import Logger from "../../../logger";
-import { collectCommands, extensionNames, isAllowedExtension, ResolvedCommand, resolveEntry } from "../../command_catalog";
+import { collectCommands, extensionNames, findBuiltinCommands, isAllowedExtension, ResolvedCommand, resolveEntry } from "../../command_catalog";
 import { qualifyCommandUserId, resolveCommandTarget } from "../../command_target";
 import { executeExtensionLocally } from "../../extension_executor";
 import Tool from "../../tool";
@@ -56,12 +56,18 @@ export function registerCmdTool(): Tool {
         const action = String(args && args.action || '');
         if (action === 'list') {
             const kind = args && args.kind === 'builtin' || args && args.kind === 'non_builtin' ? args.kind : 'all';
-            return `${formatList(collectCommands(kind))}\n扩展名称（核心 .ext 可查看完整列表）：${extensionNames().join('、')}`;
+            return `${formatList(collectCommands(kind).filter(isAllowedExtension))}\n扩展名称（核心 .ext 可查看完整列表）：${extensionNames().join('、')}`;
         }
         if (action !== 'call') return 'action 仅支持 list 或 call';
         const extension = String(args && args.extension || '').trim();
         const command = String(args && args.command || '').trim();
         if (!command) return '调用扩展指令时 command 不能为空';
+        if (!extension && !command.includes('|')) {
+            const matches = findBuiltinCommands(command);
+            if (matches.length > 1) {
+                return `指令 ${command} 在多个扩展中存在：${matches.map(m => `${m.extName}|${m.cmd}`).join('、')}，请明确指定 extension`;
+            }
+        }
         const parsed = parseExtCommand(extension, command);
         const rc = parsed.resolved;
         if (!rc) return `无法解析扩展指令 ${parsed.requested}：请确认扩展已安装，并使用 扩展名|指令名 格式`;

@@ -17,6 +17,17 @@ export function truncateText(text: string, maxLength: number): string {
     return text.slice(0, maxLength) + '...';
 }
 
+/** 字符 n-gram 集合（默认 2~4 元）：用于中文关键词匹配/相似度近似。
+ *  只取尾部最多 300 字符，控制超长查询下的 gram 数量与匹配开销。 */
+export function buildCharNGrams(s: string, min = 2, max = 4): Set<string> {
+    const clean = String(s || '').replace(/\s+/g, '').slice(-300);
+    const set = new Set<string>();
+    for (let n = min; n <= max; n++) {
+        for (let i = 0; i + n <= clean.length; i++) set.add(clean.slice(i, i + n));
+    }
+    return set;
+}
+
 
 /* 先丢这一坨东西在这。之所以不用是因为被类型检查整烦了
 
@@ -939,7 +950,7 @@ export function parseActivityTime(s: string): [number, number, number] {
 
     if (start === end) throw new Error('活跃时间段开始时间和结束时间不能相同');
 
-    if (!Number.isInteger(segs)) throw new Error('活跃次数必须为整数');
+    if (!Number.isInteger(segs) || segs <= 0) throw new Error('活跃次数必须为正整数');
 
     const endReal = end >= start ? end : end + 24 * 60;
     if (segs > endReal - start) throw new Error('活跃次数不能大于活跃时间段分钟数');

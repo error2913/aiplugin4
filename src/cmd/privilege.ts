@@ -87,6 +87,29 @@ export class PrivilegeManager {
         return cpi;
     }
 
+    /** 与 getCmdPrivInfo 类似，但支持 * 通配回退；用于查看“实际生效权限”。 */
+    static getEffectiveCmdPrivInfo(cmdChain: string[], cp: CmdPriv = this.cmdPriv): { cpi: CmdPrivInfo; viaWildcard: boolean } | null {
+        if (cmdChain.length === 0) {
+            return null;
+        }
+
+        const cmd = aliasToCmd(cmdChain[0]);
+        const exact = Object.prototype.hasOwnProperty.call(cp, cmd);
+        const wildcard = Object.prototype.hasOwnProperty.call(cp, "*");
+        if (!exact && !wildcard) {
+            return null;
+        }
+
+        const cpi = exact ? cp[cmd] : cp["*"];
+        const viaWildcard = !exact && wildcard;
+        if (cpi.args && cmdChain.length > 1) {
+            const child = this.getEffectiveCmdPrivInfo(cmdChain.slice(1), cpi.args);
+            if (child) return child;
+        }
+
+        return { cpi, viaWildcard };
+    }
+
     static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, session: Session): { success: boolean, exist: boolean } {
         const sessionPriv = session.setting.priv;
         const userPriv = ctx.privilegeLevel;

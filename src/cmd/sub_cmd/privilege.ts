@@ -105,6 +105,11 @@ ${HELP_MAP["权限限制"]}`);
                 }
                 const cpi = PrivilegeManager.getCmdPrivInfo(cmdChain);
                 if (!cpi) {
+                    const effective = PrivilegeManager.getEffectiveCmdPrivInfo(cmdChain);
+                    if (effective) {
+                        seal.replyToSender(ctx, msg, `指令${val3}由通配权限管理，请使用 .ai priv set ${cmdChain.join('-')}-* 或直接修改对应通配项`);
+                        return ret;
+                    }
                     seal.replyToSender(ctx, msg, `指令${val3}不存在`);
                     return ret;
                 }
@@ -134,12 +139,13 @@ ${HELP_MAP["指令"]}`);
                     return ret;
                 }
                 const cmdChain = val3.split('-');
-                const cpi = PrivilegeManager.getCmdPrivInfo(cmdChain);
-                if (!cpi) {
+                const effective = PrivilegeManager.getEffectiveCmdPrivInfo(cmdChain);
+                if (!effective) {
                     seal.replyToSender(ctx, msg, `指令${val3}不存在`);
                     return ret;
                 }
-                seal.replyToSender(ctx, msg, `指令${val3}权限限制:${cpi.priv.join('-')}`);
+                const suffix = effective.viaWildcard ? '（由通配权限生效）' : '';
+                seal.replyToSender(ctx, msg, `指令${val3}权限限制:${effective.cpi.priv.join('-')}${suffix}`);
                 return ret;
             }
             case 'reset': {

@@ -8,10 +8,11 @@ export default class MemoryConfig {
         seal.ext.registerIntConfig(ext, "长期记忆上限", 50, "长期记忆条数上限，超出后按分数淘汰", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆展示数量", 5, "构造记忆 prompt 时展示的长期记忆条数", "记忆");
         seal.ext.registerBoolConfig(ext, "启用总结记忆", true, "开启后定期对对话进行总结记忆", "记忆");
-        seal.ext.registerIntConfig(ext, "总结记忆上限", 10, "总结记忆条数上限", "记忆");
+        seal.ext.registerIntConfig(ext, "总结记忆上限", 10, "总结记忆条数上限，超出后从最旧的开始淘汰", "记忆");
         seal.ext.registerIntConfig(ext, "总结记忆间隔轮数", 10, "每多少轮对话自动触发一次总结", "记忆");
         seal.ext.registerIntConfig(ext, "总结记忆参与轮数", 10, "每次总结纳入的对话轮数", "记忆");
-        seal.ext.registerIntConfig(ext, "短期记忆上限", 10, "短期记忆条数上限，超出后从最旧的开始淘汰", "记忆");
+        seal.ext.registerIntConfig(ext, "核心事实注入条数", 3, "重要性达阈值（80%）的语义记忆常驻注入 prompt 的条数，0为不注入", "记忆");
+        seal.ext.registerIntConfig(ext, "记忆巩固间隔(次总结)", 30, "每多少次总结后自动整合重复总结并清理过期记忆，0为关闭", "记忆");
         seal.ext.registerBoolConfig(ext, "启用知识库记忆", false, "开启后把知识库内容注入 system prompt，供对话参考", "记忆");
         seal.ext.registerIntConfig(ext, "知识库注入阈值(字符)", 5000, "知识库总内容不超过该值时全量注入 system prompt；超过时只注入条目索引，需要详情时模型用 kb_read 工具读取。设为 0 时始终只注入索引", "记忆");
         seal.ext.registerTemplateConfig(ext, "知识库", [
@@ -56,7 +57,8 @@ export default class MemoryConfig {
             SUMMARY_LIMIT: seal.ext.getIntConfig(ext, "总结记忆上限"),
             SUMMARY_INTERVAL: seal.ext.getIntConfig(ext, "总结记忆间隔轮数"),
             SUMMARY_SIZE: seal.ext.getIntConfig(ext, "总结记忆参与轮数"),
-            SHORT_MEMORY_LIMIT: seal.ext.getIntConfig(ext, "短期记忆上限"),
+            CORE_FACT_NUMBER: seal.ext.getIntConfig(ext, "核心事实注入条数"),
+            CONSOLIDATE_INTERVAL: seal.ext.getIntConfig(ext, "记忆巩固间隔(次总结)"),
             KNOWLEDGE: seal.ext.getBoolConfig(ext, "启用知识库记忆"),
             KNOWLEDGE_INJECT_THRESHOLD: seal.ext.getIntConfig(ext, "知识库注入阈值(字符)"),
             KNOWLEDGE_ITEMS: seal.ext.getTemplateConfig(ext, "知识库")

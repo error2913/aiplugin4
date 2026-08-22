@@ -1,5 +1,6 @@
 // 记忆条目：向量/标签/用户群组/相似度与新鲜度计算
 import Config from "../config/config";
+import { MEMORY_SCORE_IMPORTANCE_WEIGHT, MEMORY_SCORE_RECENCY_WEIGHT, MEMORY_SCORE_RELEVANCE_WEIGHT } from "../config/static_config";
 import Logger from "../logger";
 import Model from "../model/model";
 import { cosineSimilarity, revive, TypeDescriptor } from "../utils/utils";
@@ -21,20 +22,22 @@ export default class MemoryItem {
         'tags': { array: 'string' },
         'relatedMemories': { array: 'string' },
         'users': { array: 'string' },
-        'groups': { array: 'string' }
+        'groups': { array: 'string' },
+        'stale': 'boolean'
     };
 
     // 核心字段
     id: string; // 记忆ID
     sessionId: string; // 记忆来源会话ID
-    type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'other'; // 记忆类型
+    type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'other' | 'fact' | 'rule' | 'relation' | 'event'; // 记忆类型
     visibility: 'public' | 'private'; // 记忆可见性
 
     // 淘汰策略相关
     createAt: number; // 创建时间 TTL
     lastAccessedAt: number; // 最后访问时间 LRU
     accessCount: number; // 访问次数 LFU
-    importance: number; // 重要性0-1
+    importance: number; // 重要性0-1（写入时由模型/调用方打分）
+    stale: boolean; // 是否已标记为过期（移出检索，待清理）
 
     // 内容
     content: string; // 记忆内容
@@ -53,6 +56,7 @@ export default class MemoryItem {
         this.lastAccessedAt = 0;
         this.accessCount = 0;
         this.importance = 0;
+        this.stale = false;
         this.content = '';
         this.vector = [];
         this.tags = [];
@@ -89,6 +93,13 @@ export default class MemoryItem {
         return accessNorm * this.decay;
     }
 
+    /** 重要性随时间衰减（90 天半衰期）：重要性高的记忆同样需要被反复访问/强化 */
+    get importanceDecay() {
+        const now = Math.floor(Date.now() / 1000);
+        const age = (now - this.createAt) / (24 * 60 * 60);
+        return this.createAt === 0 ? 1 : Math.exp(-age / 90 * Math.LN2);
+    }
+
     /**
      * 计算记忆与查询的纯向量相似度（归一化到 0-1）
      * @param v 查询向量
@@ -100,13 +111,17 @@ export default class MemoryItem {
     }
 
     /**
-     * 计算记忆的最终分数
+     * 计算记忆的最终分数（三因子：新鲜度 recency / 重要性 importance / 相关性 relevance）
      * @param v 查询向量
      * @returns 综合分数（0-1）
      */
     calculateScore(v: number[]): number {
-        const similarity = this.calculateSimilarity(v);
-        return this.importance * 0.2 + this.accessScore * 0.2 + similarity * 0.6;
+        const relevance = this.calculateSimilarity(v);
+        const recency = this.decay;
+        const importance = this.importance * this.importanceDecay;
+        return MEMORY_SCORE_RECENCY_WEIGHT * recency
+            + MEMORY_SCORE_IMPORTANCE_WEIGHT * importance
+            + MEMORY_SCORE_RELEVANCE_WEIGHT * relevance;
     }
 
     compareWith(m: MemoryItem): boolean {
@@ -114,7 +129,7 @@ export default class MemoryItem {
     }
 
     merge(m: MemoryItem) {
-        this.importance = m.importance;
+        this.importance = Math.max(this.importance, m.importance);
         this.tags = Array.from(new Set([...this.tags, ...m.tags]));
         this.relatedMemories = Array.from(new Set([...this.relatedMemories, ...m.relatedMemories]));
         this.users = Array.from(new Set([...this.users, ...m.users]));

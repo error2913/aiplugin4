@@ -11,7 +11,7 @@ export function getMemoryRevision(): number {
 
 export function bumpMemoryRevision(): void {
     memoryRevision++;
-    invalidateCachedPrefix('prompt:memory:');
+    invalidateCachedPrefix('prompt:memory|');
 }
 
 export function getSummaryRevision(): number {
@@ -20,5 +20,5 @@ export function getSummaryRevision(): number {
 
 export function bumpSummaryRevision(): void {
     summaryRevision++;
-    invalidateCachedPrefix('prompt:summary:');
+    invalidateCachedPrefix('prompt:summary|');
 }

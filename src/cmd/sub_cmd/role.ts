@@ -18,7 +18,7 @@ export function registerCmdRole() {
         const { roleName } = getRoleSetting(ctx);
         // 以 . 开头的角色设定为隐藏角色：不出现在列表中，但可通过 .ai role 直接切换
         const visibleNames = roleSettingNames.filter(name => !name.startsWith('.'));
-        const val2 = cmdArgs.getArgN(2);
+        const val2 = cmdArgs.getRestArgsFrom(2).trim();
         if (!val2) {
             seal.replyToSender(ctx, msg, `当前角色设定名称为[${roleName}]，名称有:\n${visibleNames.join('、')}`);
             return ret;

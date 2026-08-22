@@ -1,4 +1,4 @@
-// 记忆管理器：统一长期/短期/总结/知识库的读取入口，供 prompt 组装与检索使用
+// 记忆管理器：统一长期/总结/知识库的读取入口，供 prompt 组装与检索使用
 import Config from "../config/config";
 import Image from "../resource/image";
 import { Session } from "../session/session";
@@ -6,7 +6,7 @@ import { GroupInfo, UserInfo } from "../session/types";
 
 import { knowledgeService } from "./knowledge";
 import MemoryItem from "./memory_item";
-import { searchOptions } from "./types";
+import { MemoryFactResult, searchOptions } from "./types";
 
 export class MemoryManager {
     /** 长期记忆段：按开关与检索构建（记忆条目 + 权重更新） */
@@ -29,9 +29,20 @@ export class MemoryManager {
         return knowledgeService.buildKnowledgePrompt();
     }
 
-    /** 写入记忆：统一入口（内部含去重合并与向量生成） */
-    static async addMemory(ctx: seal.MsgContext | null, session: Session, uiList: UserInfo[], giList: GroupInfo[], keywords: string[], images: Image[], text: string, visibility: 'public' | 'private' = 'public') {
-        return session.memory.addMemory(ctx, session, uiList, giList, keywords, images, text, visibility);
+    /** 写入记忆：统一入口（内部含去重合并与向量生成），返回动作与记忆 ID */
+    static async addMemory(
+        ctx: seal.MsgContext | null,
+        session: Session,
+        uiList: UserInfo[],
+        giList: GroupInfo[],
+        keywords: string[],
+        images: Image[],
+        text: string,
+        visibility: 'public' | 'private' = 'public',
+        type?: MemoryItem['type'],
+        importance?: number
+    ): Promise<MemoryFactResult> {
+        return session.memory.addMemory(ctx, session, uiList, giList, keywords, images, text, visibility, type, importance);
     }
 
     /** 检索记忆：统一入口 */
@@ -39,7 +50,7 @@ export class MemoryManager {
         return session.memory.search(text, options);
     }
 
-    /** 触发短期记忆总结 */
+    /** 触发总结记忆生成 */
     static async summarize(session: Session) {
         return session.memory.summarize();
     }

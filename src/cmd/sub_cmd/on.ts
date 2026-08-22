@@ -38,6 +38,45 @@ export function registerCmdOn() {
         }
 
         let text = `AI已开启：`;
+        // 先校验所有参数，避免部分生效
+        for (const kwarg of kwargs) {
+            const name = kwarg.name;
+            const exist = kwarg.valueExists;
+            const valStr = kwarg.value.trim();
+            if (name === 'c' || name === 'counter') {
+                if (exist) {
+                    const parsed = Number(valStr);
+                    if (!Number.isInteger(parsed) || parsed <= 0) {
+                        seal.replyToSender(ctx, msg, '计数器模式参数必须为正整数');
+                        return ret;
+                    }
+                }
+            } else if (name === 't' || name === 'timer') {
+                if (exist) {
+                    const parsed = Number(valStr);
+                    if (!Number.isFinite(parsed) || parsed <= 0) {
+                        seal.replyToSender(ctx, msg, '计时器模式参数必须大于0');
+                        return ret;
+                    }
+                }
+            } else if (name === 'p' || name === 'prob') {
+                if (exist) {
+                    const parsed = Number(valStr);
+                    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+                        seal.replyToSender(ctx, msg, '概率模式参数必须在0-100之间');
+                        return ret;
+                    }
+                }
+            } else if (name === 'a' || name === 'active') {
+                try {
+                    parseActivityTime(exist ? valStr : Config.trigger.ACTIVE_TIME);
+                } catch (e) {
+                    seal.replyToSender(ctx, msg, e instanceof Error ? e.message : String(e));
+                    return ret;
+                }
+            }
+        }
+
         for (const kwarg of kwargs) {
             const name = kwarg.name;
             const exist = kwarg.valueExists;

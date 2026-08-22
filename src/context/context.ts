@@ -18,6 +18,25 @@ import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageI
 
 const log = Logger.withTag('context');
 
+// 群内用户会话的记忆权重（accessCount/lastAccessedAt）节流持久化：每会话 5 分钟内最多写一次，
+// 避免每条消息都对所有历史发言者全量序列化。当前会话由对话收尾统一保存。
+const lastUserMemorySaveAt: { [sessionId: string]: number } = {};
+const USER_MEMORY_SAVE_INTERVAL_MS = 5 * 60 * 1000;
+
+function flushGroupUserMemories(session: Session): void {
+    if (session.sessionType !== 'group') return;
+    const now = Date.now();
+    const agent = session.agent;
+    for (const uid of session.context.users) {
+        const us = agent.sessionService.getSession(uid);
+        const last = lastUserMemorySaveAt[uid] || 0;
+        if (now - last > USER_MEMORY_SAVE_INTERVAL_MS) {
+            lastUserMemorySaveAt[uid] = now;
+            us.save();
+        }
+    }
+}
+
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
         agentName: 'string',
@@ -25,7 +44,8 @@ export class Context {
         messages: { array: 'any' },
         ignoreList: { array: 'string' },
         autoNameMod: 'number',
-        summaryCounter: 'number'
+        summaryCounter: 'number',
+        lastSummarizedIndex: 'number'
     }
     agentName: string;
     sessionId: string;
@@ -36,6 +56,8 @@ export class Context {
     timer: number | null;
     autoNameMod: number;
     summaryCounter: number;
+    /** 总结记忆增量游标：只总结该索引之后的消息（limitMessages 裁剪时同步回退） */
+    lastSummarizedIndex: number;
 
     constructor() {
         this.agentName = '';
@@ -47,6 +69,7 @@ export class Context {
         this.timer = null;
         this.autoNameMod = 0;
         this.summaryCounter = 0;
+        this.lastSummarizedIndex = 0;
     }
 
     get agent(): Agent { return Agent.get(this.agentName); }
@@ -67,6 +90,7 @@ export class Context {
     clearMessages(...roles: Array<'user' | 'assistant' | 'tool'>) {
         if (roles.length === 0) {
             this.summaryCounter = 0;
+            this.lastSummarizedIndex = 0;
             this.messages = [];
             return;
         }
@@ -143,6 +167,8 @@ export class Context {
         // 关联记忆权重更新：bot 记忆 + 知识库 + 会话记忆 + 群内用户记忆
         try {
             await MemoryService.accessRelatedMemories(this.session, text);
+            // 群内用户会话的权重更新节流持久化（避免每条消息全量写盘）
+            flushGroupUserMemories(this.session);
         } catch (e) {
             log.warning('记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
         }
@@ -163,15 +189,17 @@ export class Context {
             role: 'assistant',
             contentItems: [ami]
         });
-        MemoryService.accessRelatedMemories(this.session, text).catch(e => {
+        MemoryService.accessRelatedMemories(this.session, text).then(() => {
+            flushGroupUserMemories(this.session);
+        }).catch(e => {
             log.warning('助手消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
         });
-        // 按配置的间隔轮数触发短期记忆总结
+        // 按配置的间隔轮数触发总结记忆
         this.summaryCounter++;
         if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
             this.summaryCounter = 0;
             this.session.memory.summarize().catch(e => {
-                log.warning('短期记忆总结失败: ' + (e instanceof Error ? e.message : String(e)));
+                log.warning('总结记忆生成失败: ' + (e instanceof Error ? e.message : String(e)));
             });
         }
         this.limitMessages();
@@ -190,7 +218,9 @@ export class Context {
             role: 'user',
             contentItems: [sumi]
         });
-        this.session.memory.accessMemories(text);
+        this.session.memory.accessMemories(text).catch(e => {
+            log.warning('系统消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
+        });
     }
 
     addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {
@@ -236,13 +266,24 @@ export class Context {
 
     limitMessages() {
         const { MAX_ROUNDS } = Config.message;
+        if (MAX_ROUNDS <= 0) return;
+
         const messages = this.messages;
         let round = 0;
+
         for (let i = messages.length - 1; i >= 0; i--) {
             if (messages[i].role === 'user') round++;
+
             if (round > MAX_ROUNDS) {
-                messages.splice(0, i);
-                break;
+                // 删除超限的这条 user 及其后紧跟的 assistant/tool，直到下一条 user 前
+                let removeEnd = i + 1;
+                while (removeEnd < messages.length && messages[removeEnd].role !== 'user') {
+                    removeEnd++;
+                }
+
+                messages.splice(0, removeEnd);
+                this.lastSummarizedIndex = Math.max(0, this.lastSummarizedIndex - removeEnd);
+                return;
             }
         }
     }

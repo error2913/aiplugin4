@@ -38,6 +38,9 @@ export function getCachedString(key: string, ttlMs: number, build: () => string 
     const existing = cache.get(key);
 
     if (existing) {
+        // LRU：命中时移到 Map 尾部，淘汰时优先淘汰最久未使用的条目
+        cache.delete(key);
+        cache.set(key, existing);
         if (existing.value !== undefined && now < existing.expiresAt) {
             return Promise.resolve(existing.value);
         }

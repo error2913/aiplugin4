@@ -107,8 +107,8 @@ export function registerCmd() {
                     return ret;
                 }
 
-                const uid = ctx.player!.userId;
-                const gid = ctx.group!.groupId;
+                const uid = ctx.player?.userId || '';
+                const gid = ctx.group?.groupId || '';
                 const epId = ctx.endPoint.userId;
                 const sid = ctx.isPrivate ? uid : gid;
 

@@ -5,7 +5,7 @@ import { buildCommandContext, currentCommandUserId } from "./command_target";
 import { registerLocalCommandCapture } from "./local_command_capture";
 import { ToolListen } from "./types";
 
-const RE_KEYWORD = /^--([^\s=]+)(?:=(\S+))?$/;
+const RE_KEYWORD = /^--([^\s=]+)=(.*)$|^--([^\s=]+)$/;
 
 interface ListenerHost {
     tool: { listen: ToolListen };
@@ -18,9 +18,10 @@ function splitKwargs(plainArgs: string[]): { args: string[]; kwargs: seal.Kwarg[
     for (const text of plainArgs) {
         const m = RE_KEYWORD.exec(text);
         if (m) {
-            const value = m[2] || '';
+            const name = m[1] || m[3] || '';
+            const value = m[2] !== undefined ? m[2] : '';
             kwargs.push({
-                name: m[1],
+                name,
                 value,
                 valueExists: m[2] !== undefined,
                 asBool: value !== '' && value !== '0' && value.toLowerCase() !== 'false',
@@ -136,8 +137,9 @@ export async function executeExtensionLocally(
     const cmdArgs = buildCmdArgs(executionCtx, rc.cmd, plainArgs, at, prefix);
 
     const listen = session.tool.listen;
-    const responsePromise = listen.waitFor
-        ? listen.waitFor(timeoutMs, settleMs, maxMessages)
+    const waitHandle = listen.waitFor ? listen.waitFor(timeoutMs, settleMs, maxMessages) : null;
+    const responsePromise = waitHandle
+        ? waitHandle.promise
         : new Promise<string[]>(resolve => {
             listen.timeoutId = setTimeout(() => resolve([]), timeoutMs);
             listen.resolve = content => {
@@ -156,7 +158,7 @@ export async function executeExtensionLocally(
         solved = !!(result && result.solved);
     } catch (e) {
         unregisterCapture();
-        listen.cleanup();
+        if (waitHandle) waitHandle.cancel(); else listen.cleanup();
         await responsePromise.catch(() => []);
         Logger.warning(`[run_ext_command] 本地执行 ${rc.extName}|${rc.cmd} 抛异常:${e instanceof Error ? e.message : String(e)}`);
         throw new Error(`指令执行抛异常：${e instanceof Error ? e.message : String(e)}`);

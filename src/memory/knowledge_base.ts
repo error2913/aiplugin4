@@ -2,6 +2,7 @@
 import Config from "../config/config";
 import Logger from "../logger";
 import Model from "../model/model";
+import { buildCharNGrams } from "../utils/string";
 import { cosineSimilarity } from "../utils/utils";
 
 import { hashString, KnowledgeChunk, splitMarkdownIntoChunks } from "./knowledge_chunk";
@@ -13,15 +14,22 @@ export class KnowledgeBaseService {
     private chunks: KnowledgeChunk[] = [];
     /** 惰性向量缓存：检索时才按块嵌入，加载知识库本身不请求嵌入模型 */
     private chunkVectors: Map<string, number[]> = new Map();
-    /** 上次加载的配置引用：配置缓存 TTL 内引用不变，过期后重新解析 */
-    private loadedItems: string[] | null = null;
+    /** 上次加载的配置内容签名：签名不变则跳过重新切分，避免依赖数组引用稳定性 */
+    private loadedSignature: string | null = null;
     private loadPromise: Promise<void> | null = null;
 
-    /** 解析配置中的全部 Markdown 文档为分块（不含向量） */
+    /** 配置内容签名：全部条目内容 hash 拼接，配置变化后签名必然变化 */
+    private getItemsSignature(items: string[]): string {
+        const list = Array.isArray(items) ? items : [];
+        return list.map(item => hashString(item || '')).join(',');
+    }
+
+    /** 解析配置中的全部 Markdown 文档为分块（不含向量）；未变分块保留已有向量缓存 */
     private async reload(items: string[]): Promise<void> {
         const list = Array.isArray(items) ? items : [];
+        const oldVectors = this.chunkVectors;
+        this.chunkVectors = new Map();
         this.chunks = [];
-        this.chunkVectors.clear();
         list.forEach((md, index) => {
             const raw = (md || '').replace(/\r\n/g, '\n').trim();
             if (!raw) return;
@@ -44,15 +52,22 @@ export class KnowledgeBaseService {
                 });
             }
         });
-        this.loadedItems = items;
+        // 保留未变分块的向量缓存：ID 稳定（内容 hash）时旧向量仍然有效
+        for (const c of this.chunks) {
+            const v = oldVectors.get(c.id);
+            if (v) this.chunkVectors.set(c.id, v);
+        }
+        this.loadedSignature = this.getItemsSignature(list);
         Logger.info(`知识库加载完成: ${this.chunks.length} 个分块`);
     }
 
     private ensureLoaded(): Promise<void> {
         const items = Config.memory.KNOWLEDGE_ITEMS;
-        if (this.loadedItems === items && this.loadedItems !== null) return Promise.resolve();
+        const list = Array.isArray(items) ? items : [];
+        const signature = this.getItemsSignature(list);
+        if (this.loadedSignature === signature && this.loadedSignature !== null) return Promise.resolve();
         if (!this.loadPromise) {
-            this.loadPromise = this.reload(items);
+            this.loadPromise = this.reload(list);
             this.loadPromise.then(() => {
                 this.loadPromise = null;
             }, () => {
@@ -74,8 +89,7 @@ export class KnowledgeBaseService {
     /** prompt 缓存版本：基于当前配置开关/阈值/全部条目内容生成，配置变化后自然产生新 key */
     getCacheVersion(): string {
         const items = Array.isArray(Config.memory.KNOWLEDGE_ITEMS) ? Config.memory.KNOWLEDGE_ITEMS : [];
-        const signature = items.map(item => hashString(item || '')).join(',');
-        return `${Config.memory.KNOWLEDGE ? '1' : '0'}|${Config.memory.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${signature}`;
+        return `${Config.memory.KNOWLEDGE ? '1' : '0'}|${Config.memory.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignature(items)}`;
     }
 
     /** 全部条目索引（id/标题/小节） */
@@ -94,10 +108,23 @@ export class KnowledgeBaseService {
         ));
     }
 
-    private keywordScore(chunk: KnowledgeChunk, tokens: string[]): number {
-        if (tokens.length === 0) return 0;
+    private keywordScore(chunk: KnowledgeChunk, tokens: string[], query?: string): number {
         const text = `${chunk.title}\n${chunk.heading}\n${chunk.content}`;
-        return tokens.filter(t => text.includes(t)).length / tokens.length;
+        let score = 0;
+        if (tokens.length > 0) {
+            score += tokens.filter(t => text.includes(t)).length / tokens.length;
+        }
+        // 中文 n-gram 重合率：弥补按空白/标点切分对中文整句的失效
+        const grams = query ? buildCharNGrams(query) : new Set<string>();
+        if (grams.size > 0) {
+            const contentGrams = buildCharNGrams(text);
+            if (contentGrams.size > 0) {
+                let hit = 0;
+                for (const g of grams) if (contentGrams.has(g)) hit++;
+                score += hit / grams.size * 0.5;
+            }
+        }
+        return score;
     }
 
     /** 惰性嵌入单个分块；失败返回空数组（调用方降级为纯关键词） */
@@ -139,7 +166,7 @@ export class KnowledgeBaseService {
             return this.chunks.slice(0, topK);
         }
         const hits = this.chunks
-            .map(chunk => ({ chunk, score: this.keywordScore(chunk, tokens) }))
+            .map(chunk => ({ chunk, score: this.keywordScore(chunk, tokens, query) }))
             .filter(x => x.score > 0)
             .sort((a, b) => b.score - a.score || b.chunk.content.length - a.chunk.content.length);
         if (hits.length === 0) return [];

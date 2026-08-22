@@ -42,7 +42,12 @@ export function resolveEntry(entry: string): ResolvedCommand | null {
     if (parsed.extName === 'core') return { extName: 'core', cmd: parsed.cmd, help: '', kind: 'core' };
     if (parsed.extName) {
         const ext = seal.ext.find(parsed.extName);
-        return isCommand(ext, parsed.cmd) ? { extName: ext!.name || parsed.extName, cmd: parsed.cmd, help: helpOf(ext!, parsed.cmd), kind: kindOf(ext!.name || parsed.extName) } : null;
+        if (isCommand(ext, parsed.cmd)) {
+            return { extName: ext!.name || parsed.extName, cmd: parsed.cmd, help: helpOf(ext!, parsed.cmd), kind: kindOf(ext!.name || parsed.extName) };
+        }
+        const aliasTarget = getWhitelistAliasMap().get(`${parsed.extName}|${parsed.cmd}`);
+        if (aliasTarget) return resolveEntry(aliasTarget);
+        return null;
     }
     const sameName = seal.ext.find(parsed.cmd);
     if (isCommand(sameName, parsed.cmd)) {
@@ -55,6 +60,17 @@ export function resolveEntry(entry: string): ResolvedCommand | null {
     }
     return null;
 }
+
+/** 查找某个指令在内置扩展中的所有匹配，用于处理不指定扩展名时的歧义。 */
+export function findBuiltinCommands(cmd: string): ResolvedCommand[] {
+    const result: ResolvedCommand[] = [];
+    for (const extName of BUILTIN_EXT_NAMES) {
+        const resolved = resolveEntry(`${extName}|${cmd}`);
+        if (resolved) result.push(resolved);
+    }
+    return result;
+}
+
 
 /** 将同一白名单元素中的 command/alias1/alias2 展开为可解析的独立条目。 */
 function expandWhitelistEntry(entry: string): string[] {
@@ -73,21 +89,42 @@ export function whitelistEntries(): string[] {
     return result;
 }
 
+/** 从白名单构建“扩展名|别名 -> 扩展名|主命令名”的映射，避免依赖 cmdMap 是否暴露别名。 */
+function getWhitelistAliasMap(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const entry of Config.tool.CMD_WHITELIST) {
+        const text = String(entry || '').trim();
+        const index = text.indexOf('|');
+        if (index < 0) continue;
+        const extName = text.slice(0, index).trim();
+        const names = text.slice(index + 1).split('/').map(item => item.trim()).filter(Boolean);
+        if (!extName || names.length < 2) continue;
+        const canonical = names[0];
+        for (const alias of names.slice(1)) {
+            map.set(`${extName}|${alias}`, `${extName}|${canonical}`);
+        }
+    }
+    return map;
+}
+
+
 export function isAllowedExtension(rc: ResolvedCommand): boolean {
     if (Config.tool.ALLOW_ALL_CMDS) return true;
+    const target = `${rc.extName}|${rc.cmd}`.toLowerCase();
     return whitelistEntries().some(entry => {
         const item = resolveEntry(entry);
-        return !!item && item.kind !== 'core' && `${item.extName}|${item.cmd}` === `${rc.extName}|${rc.cmd}`;
+        return !!item && item.kind !== 'core' && `${item.extName}|${item.cmd}`.toLowerCase() === target;
     });
 }
 
 export function isAllowedCore(command: string): boolean {
     const cmd = String(command || '').trim();
     // .ext 是核心提供的扩展发现入口，不应被白名单挡住。
-    if (cmd === 'ext' || Config.tool.ALLOW_ALL_CMDS) return true;
+    if (cmd.toLowerCase() === 'ext' || Config.tool.ALLOW_ALL_CMDS) return true;
+    const normalized = cmd.toLowerCase();
     return whitelistEntries().some(entry => {
         const item = splitEntry(entry);
-        return !!item && item.extName === 'core' && item.cmd === cmd;
+        return !!item && item.extName === 'core' && item.cmd.toLowerCase() === normalized;
     });
 }
 

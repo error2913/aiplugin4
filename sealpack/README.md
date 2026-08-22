@@ -1,6 +1,6 @@
 # aiplugin4
 
-适用于大部分 OpenAI API 兼容格式 AI 的 Sealdice 模型插件，支持多轮对话、长期/短期记忆、知识库、图片生成与识别、工具调用（Function Calling / MCP / Skills）、子智能体、定时任务等。
+适用于大部分 OpenAI API 兼容格式 AI 的 Sealdice 模型插件，支持多轮对话、长期/总结记忆、知识库、图片生成与识别、工具调用（Function Calling / MCP / Skills）、子智能体、定时任务等。
 
 ## 安装
 

@@ -1,4 +1,4 @@
-import { ToolListen } from "../tool/types";
+import { ToolListen, ToolWaitHandle } from "../tool/types";
 
 interface ToolWaiter {
     resolve: (messages: string[]) => void;
@@ -53,23 +53,38 @@ export function createToolListen(): ToolListen {
             listen.reject = rejectAll;
         },
         push: dispatch,
-        waitFor: (timeoutMs = 10000, settleMs = 400, maxMessages = 20) => new Promise((resolve, reject) => {
-            const waiter: ToolWaiter = {
-                resolve,
-                reject,
-                messages: [],
-                settleTimer: null,
-                timeoutTimer: null,
-                maxMessages: Math.max(1, maxMessages),
-                settleMs: Math.max(0, settleMs),
+        waitFor: (timeoutMs = 10000, settleMs = 400, maxMessages = 20): ToolWaitHandle => {
+            let waiter: ToolWaiter | undefined;
+            const promise = new Promise<string[]>((resolve, reject) => {
+                waiter = {
+                    resolve,
+                    reject,
+                    messages: [],
+                    settleTimer: null,
+                    timeoutTimer: null,
+                    maxMessages: Math.max(1, maxMessages),
+                    settleMs: Math.max(0, settleMs),
+                };
+                waiter.timeoutTimer = setTimeout(() => {
+                    const index = waiters.indexOf(waiter!);
+                    if (index >= 0) waiters.splice(index, 1);
+                    resolve(waiter!.messages);
+                }, Math.max(1, timeoutMs));
+                waiters.push(waiter);
+            });
+            return {
+                promise,
+                cancel: () => {
+                    if (!waiter) return;
+                    const index = waiters.indexOf(waiter);
+                    if (index >= 0) waiters.splice(index, 1);
+                    clearTimeout(waiter.settleTimer);
+                    clearTimeout(waiter.timeoutTimer);
+                    waiter.reject(new Error('监听已取消'));
+                    waiter = undefined;
+                },
             };
-            waiter.timeoutTimer = setTimeout(() => {
-                const index = waiters.indexOf(waiter);
-                if (index >= 0) waiters.splice(index, 1);
-                resolve(waiter.messages);
-            }, Math.max(1, timeoutMs));
-            waiters.push(waiter);
-        }),
+        },
     };
     return listen;
 }
