@@ -1,7 +1,7 @@
 // 记忆服务：MemoryItem 存取/检索/权重/总结记忆
 import Agent from "../agent/agent";
 import Config from "../config/config";
-import { CORE_FACT_IMPORTANCE, STALE_DELETE_DAYS, STALE_IMPORTANCE_THRESHOLD, STALE_MARK_DAYS, VECTOR_SIMILARITY } from "../config/static_config";
+import { CORE_FACT_IMPORTANCE, STALE_DELETE_DAYS, STALE_IMPORTANCE_THRESHOLD, STALE_MARK_DAYS, SUMMARY_MERGE_THRESHOLD, VECTOR_SIMILARITY } from "../config/static_config";
 import type { Context } from "../context/context";
 import Logger from "../logger";
 import Model from "../model/model";
@@ -168,8 +168,10 @@ export default class MemoryService {
                 existing.users = Array.from(new Set([...existing.users, ...users]));
                 existing.groups = Array.from(new Set([...existing.groups, ...groups]));
                 existing.importance = Math.max(existing.importance, importance);
+                existing.stale = false;
                 existing.accessCount++;
                 existing.lastAccessedAt = now;
+                this.invalidateContentIndex();
                 bumpMemoryRevision();
                 return { action: 'merged', id: existing.id };
             }
@@ -181,9 +183,11 @@ export default class MemoryService {
             existing.users = Array.from(new Set([...existing.users, ...users]));
             existing.groups = Array.from(new Set([...existing.groups, ...groups]));
             existing.importance = Math.max(existing.importance, importance);
+            existing.stale = false;
             existing.lastAccessedAt = now;
             existing.accessCount++;
             await existing.updateVector();
+            this.invalidateContentIndex();
             bumpMemoryRevision();
             return { action: 'updated', id: existing.id };
         }
@@ -246,7 +250,7 @@ export default class MemoryService {
     }
 
     /** 合并高度相似的总结条目（n-gram 最小集归一化 ≥ 阈值视为重复），保序去重 */
-    static mergeSimilarSummaries(summaries: string[], threshold = 0.8): string[] {
+    static mergeSimilarSummaries(summaries: string[], threshold = SUMMARY_MERGE_THRESHOLD): string[] {
         const merged: string[] = [];
         for (const s of summaries) {
             let dup = false;
@@ -334,6 +338,7 @@ export default class MemoryService {
             existing.groups = Array.from(new Set([...existing.groups, ...gl.map(g => g.id)]));
             existing.accessCount++;
             existing.lastAccessedAt = now;
+            existing.stale = false;
             if (existing.importance < importance) existing.importance = importance;
             bumpMemoryRevision();
             return { action: 'merged', id: existing.id };
@@ -488,6 +493,7 @@ export default class MemoryService {
                 if (om.compareWith(m)) {
                     Logger.info(`记忆已存在，id:${om.id}，进行合并`);
                     om.merge(m);
+                    om.stale = false;
                     om.accessCount++;
                     om.lastAccessedAt = now;
                     merged = true;
@@ -840,7 +846,8 @@ export class MemoryManager extends MemoryService {
                 tags: m.tags || m.keywords || [],
                 relatedMemories: m.relatedMemories || [],
                 users: Array.isArray(m.users) ? m.users : [],
-                groups: Array.isArray(m.groups) ? m.groups : []
+                groups: Array.isArray(m.groups) ? m.groups : [],
+                stale: !!m.stale,
             });
             this.memoryMap[id] = item;
         }

@@ -98,11 +98,13 @@ export function registerCmdMemory() {
                     statusSession = getSession(normalizedUserId);
                 }
                 const { MEMORY: isMemory, SUMMARY: isSummary } = Config.memory;
+                const summaryEffective = statusSession.memory.summaryOverride === false ? false : statusSession.memory.summaryOverride === true ? true : isSummary;
+                const summarySuffix = statusSession.memory.summaryOverride === undefined ? '' : '（会话级）';
                 seal.replyToSender(ctx, msg, `${statusSession.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
      长期记忆条数: ${statusSession.memory.memoryIds.length}
      关键词库: ${statusSession.memory.keywords.join('、') || '无'}
-     总结记忆开启状态: ${isSummary ? '是' : '否'}
+     总结记忆开启状态: ${summaryEffective ? '是' : '否'}${summarySuffix}
      总结记忆条数: ${statusSession.memory.summaries.length}`);
                 return ret;
             }
@@ -308,12 +310,14 @@ export function registerCmdMemory() {
                 const val3 = aliasToCmd(cmdArgs.getArgN(3));
                 switch (val3) {
                     case 'on': {
+                        session.memory.summaryOverride = true;
                         session.memory.summaryStatus = true;
                         seal.replyToSender(ctx, msg, '总结记忆已开启');
                         session.save();
                         return ret;
                     }
                     case 'off': {
+                        session.memory.summaryOverride = false;
                         session.memory.summaryStatus = false;
                         seal.replyToSender(ctx, msg, '总结记忆已关闭');
                         session.save();

@@ -173,7 +173,7 @@ export class streamService {
                 // 直接丢弃会在后续带工具轮次的请求中触发 400；这里随返回值带出，由调用方存入上下文
                 const hasReasoning = Object.prototype.hasOwnProperty.call(message, 'reasoning_content');
                 const reasoning = hasReasoning ? (message.reasoning_content || '') : undefined;
-                if (hasReasoning) {
+                if (reasoning !== undefined) {
                     const shownR = reasoning.length > 500 ? reasoning.slice(0, 500) + `…(+${reasoning.length - 500})` : reasoning;
                     log.info(`思维链内容(${reasoning.length}字符): ${shownR}`);
                 }

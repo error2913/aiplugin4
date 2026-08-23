@@ -31,8 +31,9 @@ function flushGroupUserMemories(session: Session): void {
         const us = agent.sessionService.getSession(uid);
         const last = lastUserMemorySaveAt[uid] || 0;
         if (now - last > USER_MEMORY_SAVE_INTERVAL_MS) {
-            lastUserMemorySaveAt[uid] = now;
             us.save();
+            // 保存成功后再记录时间，避免保存失败仍被节流跳过
+            lastUserMemorySaveAt[uid] = now;
         }
     }
 }
@@ -94,7 +95,21 @@ export class Context {
             this.messages = [];
             return;
         }
+
+        // 同步修正总结游标：删除游标前的消息会使游标前移；游标本身被删则回到 0 重新总结
+        const removedBefore = this.messages
+            .slice(0, this.lastSummarizedIndex)
+            .filter(m => roles.includes(m.role as any)).length;
+        const cursorRemoved = this.lastSummarizedIndex < this.messages.length
+            && roles.includes(this.messages[this.lastSummarizedIndex].role as any);
+
         this.messages = this.messages.filter(m => !roles.includes(m.role as any));
+
+        if (cursorRemoved) {
+            this.lastSummarizedIndex = 0;
+        } else {
+            this.lastSummarizedIndex = Math.max(0, this.lastSummarizedIndex - removedBefore);
+        }
     }
 
     reviveMessages() {

@@ -453,6 +453,7 @@ export function registerMemory() {
         if (typeof text === 'string' && text.trim()) {
             m.content = stripInternalTags(text.trim());
             await m.updateVector();
+            (target.memory as any).invalidateContentIndex();
         }
         if (Array.isArray(keywords)) {
             m.tags = Array.from(new Set([...m.tags, ...keywords.map(String)]));

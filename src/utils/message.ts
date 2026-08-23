@@ -181,8 +181,11 @@ function cloneContextMessage(message: ContextMessage): ContextMessage {
 function truncateMessageText(message: ContextMessage, maxChars: number): number {
     const before = buildContent(message);
     if (before.length <= maxChars) return 0;
+    // 截断会清空 contentItems，先把思维链提升到消息级，避免后续请求丢失 reasoning_content
+    const reasoning = resolveReasoningContent(message);
     message.contentItems = undefined;
     message.text = before.slice(-maxChars);
+    if (reasoning !== undefined) message.reasoningContent = reasoning;
     return before.length - message.text.length;
 }
 

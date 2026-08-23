@@ -46,6 +46,7 @@ export default class SessionMemoryService extends MemoryService {
         agentName: 'string',
         sessionId: 'string',
         summaryStatus: 'boolean',
+        summaryOverride: 'boolean',
         summaries: { array: 'string' },
         // 旧版本「短期记忆」字段：仅用于存档加载与迁移，新代码不再读写
         useShortMemory: 'boolean',
@@ -55,6 +56,7 @@ export default class SessionMemoryService extends MemoryService {
     agentName: string;
     sessionId: string;
     summaryStatus: boolean;
+    summaryOverride?: boolean;
     summaries: string[];
     /** 旧版本「短期记忆」字段：仅用于存档加载与迁移（见 reviveMemoryMap） */
     useShortMemory?: boolean;
@@ -69,6 +71,7 @@ export default class SessionMemoryService extends MemoryService {
         this.agentName = '';
         this.sessionId = '';
         this.summaryStatus = false;
+        this.summaryOverride = undefined;
         this.summaries = [];
         this.summarizing = false;
         this.consolidating = false;
@@ -90,12 +93,16 @@ export default class SessionMemoryService extends MemoryService {
             this.summaryStatus = true;
             this.useShortMemory = false;
         }
+        // 旧版 summaryStatus=true 表示用户显式开启过总结；迁移为会话级 override=true
+        if (this.summaryStatus === true && this.summaryOverride === undefined) {
+            this.summaryOverride = true;
+        }
     }
-
     // 总结记忆（每轮对话后由 context.addAssistantMessage 触发；增量：只总结上次游标之后的消息）
     async summarize() {
-        // 开关：全局「启用总结记忆」或会话级 summaryStatus（含旧存档迁移）任一开启即生效
-        if (!this.summaryStatus && !Config.memory.SUMMARY) return;
+        // 会话级显式开关优先；未显式设置时跟随全局「启用总结记忆」
+        if (this.summaryOverride === false) return;
+        if (this.summaryOverride !== true && !Config.memory.SUMMARY) return;
         if (this.summarizing) return; // 重入保护
         this.summarizing = true;
         try {
@@ -154,7 +161,7 @@ export default class SessionMemoryService extends MemoryService {
             }
 
             // 防注入：总结内容可能夹带内部上下文标签，入库前统一剥离；缺失时以空串兜底
-            const summaryContent = stripInternalTags(typeof memoryData.content === 'string' ? memoryData.content : '');
+            const summaryContent = stripInternalTags(typeof memoryData.summary === 'string' ? memoryData.summary : (typeof memoryData.content === 'string' ? memoryData.content : ''));
             if (summaryContent) {
                 // 写入总结记忆，供 buildSummaryPrompt 使用
                 this.summaries.push(summaryContent);
@@ -236,12 +243,12 @@ export default class SessionMemoryService extends MemoryService {
                 }
             }
 
-            // 推进增量游标：只总结成功推进，失败下次重试
-            this.session.context.lastSummarizedIndex = end;
-
-            // 持久化：总结写入的每个会话（含目标会话）显式保存，防止重启丢失
+            // 先持久化本轮写入的总结/事实，避免内容落盘前推进游标导致重启后跳过
             touched.forEach(s => s.save());
 
+            // 内容已持久化后再推进增量游标；若游标保存失败，最坏情况是重复总结，不会丢失
+            this.session.context.lastSummarizedIndex = end;
+            this.session.save();
             // 巩固触发：每 CONSOLIDATE_INTERVAL 次总结后整合重复总结/清理过期记忆
             const { CONSOLIDATE_INTERVAL } = Config.memory;
             if (CONSOLIDATE_INTERVAL > 0) {

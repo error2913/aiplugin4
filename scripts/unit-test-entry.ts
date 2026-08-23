@@ -448,8 +448,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         ] as any;
         ctx.lastSummarizedIndex = 3;
         ctx.limitMessages();
-        assert.equal(ctx.messages.length, 3, '应裁剪头部保留最近窗口');
-        assert.equal(ctx.lastSummarizedIndex, 2, '游标应随头部裁剪回退');
+        assert.equal(ctx.messages.length, 2, '应裁剪头部保留最近窗口');
+        assert.equal(ctx.lastSummarizedIndex, 1, '游标应随头部裁剪回退');
     },
 
     /** 旧存档「短期记忆」→「总结记忆」迁移：列表合并去重、开关合并（命名统一） */
