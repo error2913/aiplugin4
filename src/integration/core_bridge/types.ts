@@ -20,6 +20,18 @@ export interface CoreBridgeInvocation {
     timeoutMs?: number;
 }
 
+export interface CoreBridgeWsCommand {
+    target: CoreBridgeTarget;
+    actor: { userId: string; nickname: string; role: string };
+    raw_message?: string;
+    command?: { raw: string; name?: string; args?: string[] };
+    capture?: CoreBridgeCapture;
+    timeoutMs?: number;
+    trigger?: string;
+    at?: string[];
+}
+
+
 export interface CoreBridgeMessage {
     messageId?: string;
     action?: string;

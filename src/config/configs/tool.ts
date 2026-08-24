@@ -20,40 +20,36 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "是否启用MCP", false, "MCP 功能总开关；默认关闭，避免未安装 MCP 后端时启动或对话报错。开启后才会解析下方「MCP服务器配置」并连接/注册 MCP 工具", "工具");
         seal.ext.registerTemplateConfig(ext, "MCP服务器配置", [
             `{
-  "mcpServers": {
-    "mcp-files-exec": {
-      "type": "http",
-      "url": "http://127.0.0.1:3910/mcp",
-      "headers": {
-        "Authorization": "Bearer token"
+    "mcpServers": {
+      "mcp-files-exec": {
+        "type": "http",
+        "url": "http://127.0.0.1:3910/mcp",
+        "headers": {
+          "Authorization": "Bearer token"
+        }
+      },
+      "web-read": {
+        "type": "http",
+        "url": "http://127.0.0.1:46799/mcp"
+      },
+      "md-html-render": {
+        "type": "http",
+        "url": "http://127.0.0.1:37632/mcp"
       }
-    },
-    "web-read": {
-      "type": "http",
-      "url": "http://127.0.0.1:46799/mcp"
-    },
-    "md-html-render": {
-      "type": "http",
-      "url": "http://127.0.0.1:37632/mcp"
-    },
-    "ob11-core-bridge": {
-      "type": "http",
-      "url": "http://127.0.0.1:46880/mcp"
     }
-  }
-}`
-        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。工具名称、描述和参数 schema 会在连接后通过 MCP tools/list 自动发现，不需要也不支持额外的 tools 配置块。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。默认包含四个：mcp-files-exec（提供 read_file、list_dir、write_file、delete_file、download_file、run_shell、export_file；默认可直接传后端绝对路径）、web-read（提供 scrape_url、screenshot_url）、md-html-render（提供 render_markdown、render_html）、ob11-core-bridge（仅提供 run_core_command）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请改用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+  }`
+        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。工具名称、描述和参数 schema 会在连接后通过 MCP tools/list 自动发现，不需要也不支持额外的 tools 配置块。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。默认包含三个：mcp-files-exec（提供 read_file、list_dir、write_file、delete_file、download_file、run_shell、export_file；默认可直接传后端绝对路径）、web-read（提供 scrape_url、screenshot_url）、md-html-render（提供 render_markdown、render_html）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请改用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [...SEALDICE_COMMAND_SKILLS, ...OB11_API_SKILLS], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选），正文为技能内容；默认包含当前 SealDice 核心命令、内置扩展命令及别名的调用帮助，统一说明 run_ext_command / run_core_command 的参数传递方式。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerTemplateConfig(ext, "音乐服务配置", [
             `{
-  "platform": "网易云",
-  "api": "http://net.ease.music.lovesealdice.online",
-  "cookie": "_gid=GA1.2.2048499931.1737983161; _ga_MD3K4WETFE=GS1.1.1737983160.8.1.1737983827.0.0.0; _ga=GA1.1.1845263601.1736600307; MUSIC_U=00C10F470166570C36209E7E3E3649FEE210D3DB5B3C39C25214CFE5678DCC5773C63978903CEBA7BF4292B97ADADB566D96A055DCFDC860847761109F8986373FEC32BE2AFBF3DCFF015894EC61602562BF9D16AD12D76CED169C5052A470677A8D59F7B7D16D9FDE2A4ED237DE5C6956C0ED5F7A9EA151C3FA7367B0C6269FF7A74E6626B4D7F920D524718347659394CBB0DAE362991418070195FEFC730BCCE3CF4B03F24274075679FB4BFC884D099BD3CF679E4F1C9D5CBC2959CD29B0741BD52BCA155480116CE96393663B1A51D88AFDB57680F030CF93A305064A797B99874CA826D6760F616CB756B680591167AEE9AF31C4A187E61A19D7C1175961D4FE64CFD878F0BCEBB322A23E396DC5E8175A50D5E07B9788E4EBE8F8257FF139DB4FD03A89676F5C3DF1B70C101F4568C0A3657C24185218F975368ADB2DEF860760C59E9AFCCB214A4B51029E29ED; __csrf=85f3aa8cedc01f6d50b6b924efbf6f95; NMTID=00OG17oToz2Ne1rikTtgKPqOLaYuP0AAAGUqBEN0A"
+    "platform": "网易云",
+    "api": "http://net.ease.music.lovesealdice.online",
+    "cookie": "_gid=GA1.2.2048499931.1737983161; _ga_MD3K4WETFE=GS1.1.1737983160.8.1.1737983827.0.0.0; _ga=GA1.1.1845263601.1736600307; MUSIC_U=00C10F470166570C36209E7E3E3649FEE210D3DB5B3C39C25214CFE5678DCC5773C63978903CEBA7BF4292B97ADADB566D96A055DCFDC860847761109F8986373FEC32BE2AFBF3DCFF015894EC61602562BF9D16AD12D76CED169C5052A470677A8D59F7B7D16D9FDE2A4ED237DE5C6956C0ED5F7A9EA151C3FA7367B0C6269FF7A74E6626B4D7F920D524718347659394CBB0DAE362991418070195FEFC730BCCE3CF4B03F24274075679FB4BFC884D099BD3CF679E4F1C9D5CBC2959CD29B0741BD52BCA155480116CE96393663B1A51D88AFDB57680F030CF93A305064A797B99874CA826D6760F616CB756B680591167AEE9AF31C4A187E61A19D7C1175961D4FE64CFD878F0BCEBB322A23E396DC5E8175A50D5E07B9788E4EBE8F8257FF139DB4FD03A89676F5C3DF1B70C101F4568C0A3657C24185218F975368ADB2DEF860760C59E9AFCCB214A4B51029E29ED; __csrf=85f3aa8cedc01f6d50b6b924efbf6f95; NMTID=00OG17oToz2Ne1rikTtgKPqOLaYuP0AAAGUqBEN0A"
 }`,
             `{
-  "platform": "qq",
-  "api": "http://qqmusic.lovesealdice.online",
-  "cookie": ""
+    "platform": "qq",
+    "api": "http://qqmusic.lovesealdice.online",
+    "cookie": ""
 }`
         ], "每行一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
