@@ -17,6 +17,8 @@ const WS_OPEN = 1;
 
 
 let ws: WebSocket | null = null;
+let connected = false;
+
 let connecting: Promise<void> | null = null;
 let requestSeq = 0;
 const pending = new Map<string, PendingRequest>();
@@ -66,6 +68,7 @@ function attachHandlers(socket: WebSocket): void {
     socket.onmessage = event => handleMessage((event as any).data);
     socket.onclose = () => {
         if (ws === socket) ws = null;
+        connected = false;
         const error = new Error('核心桥 WebSocket 连接已断开');
         rejectAll(error);
     };
@@ -75,7 +78,7 @@ function attachHandlers(socket: WebSocket): void {
 }
 
 function connect(): Promise<void> {
-    if (ws && ws.readyState === WS_OPEN) return Promise.resolve();
+    if (ws && connected && ws.readyState === WS_OPEN) return Promise.resolve();
     if (connecting) return connecting;
     if (typeof WebSocket === 'undefined') {
         return Promise.reject(new Error('当前环境不支持 WebSocket'));
@@ -93,6 +96,7 @@ function connect(): Promise<void> {
 
         socket.onopen = () => {
             ws = socket;
+            connected = true;
             attachHandlers(socket);
             connecting = null;
             resolve();
@@ -117,7 +121,7 @@ export async function callCoreBridgeCommand(
     timeoutMs = 10000
 ): Promise<CoreBridgeResult> {
     await connect();
-    if (!ws || ws.readyState !== WS_OPEN) {
+    if (!ws || !connected || ws.readyState !== WS_OPEN) {
         throw new Error('核心桥 WebSocket 未连接');
     }
 
@@ -143,6 +147,7 @@ export function closeCoreBridgeWS(): void {
     if (ws) {
         const socket = ws;
         ws = null;
+        connected = false;
         try {
             socket.close();
         } catch (_e) {
