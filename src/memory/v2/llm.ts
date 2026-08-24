@@ -99,7 +99,7 @@ export const defaultReranker: Reranker = async (query, candidates) => {
             `${RERANK_PROMPT}\n\n查询：${query}\n候选记忆：\n${list}`
         );
         const data = parseLooseJson(reply);
-        const rankedIds = Array.isArray(data?.ranked_ids) ? data.ranked_ids.map(String) : [];
+        const rankedIds: string[] = Array.isArray(data?.ranked_ids) ? data.ranked_ids.map(String) : [];
         const valid = rankedIds.filter(id => candidates.some(c => c.id === id));
         if (valid.length > 0) return valid;
         return candidates.map(c => c.id);

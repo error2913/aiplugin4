@@ -216,7 +216,7 @@ export class MemoryEngine {
             preferObservations: !!options.preferObservations,
         };
 
-        let units = bank.units.filter(u => u.state === 'valid' && opts.types.includes(u.factType));
+        let units = bank.units.filter(u => u.state === 'valid' && (opts.types ?? ['world', 'experience', 'observation']).includes(u.factType));
         units = this.filterByTags(units, opts.tags || [], opts.tagsMatch || 'any');
 
         if (units.length === 0) return [];

@@ -28,7 +28,7 @@ export class MemoryRepository {
     getBank(id: string): PersistedBank | null {
         let bank = this.banks.get(id);
         if (!bank) {
-            bank = this.storage.getBank(id);
+            bank = this.storage.getBank(id) ?? undefined;
             if (bank) this.banks.set(id, bank);
         }
         return bank || null;
