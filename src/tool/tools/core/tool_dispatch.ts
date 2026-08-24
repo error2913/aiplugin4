@@ -132,8 +132,12 @@ export function registerDispatchTools() {
 
         const time = Date.now();
         try {
-            const content = await withTimeout(() => tool.solve(ctx, msg, session, toolArgs), Config.base.TIMEOUT);
+            const solved = await withTimeout(() => tool.solve(ctx, msg, session, toolArgs), Config.base.TIMEOUT);
             Logger.info(`[call_tool] ${toolName} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
+            const content = typeof solved === 'string' ? solved : solved.text;
+            if (typeof solved !== 'string' && solved.contentParts && solved.contentParts.length > 0) {
+                return { text: `工具 ${toolName} 返回：\n${content}`, contentParts: solved.contentParts };
+            }
             return `工具 ${toolName} 返回：\n${content}`;
         } catch (e) {
             Logger.error(`[call_tool] ${toolName} 执行失败: ${e instanceof Error ? e.message : String(e)}`);

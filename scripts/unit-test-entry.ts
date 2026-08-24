@@ -19,6 +19,8 @@ import { buildMemoryPrompt } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
 import { Context } from "../src/context/context";
 import Image from "../src/resource/image";
+import Tool, { toolMap } from "../src/tool/tool";
+import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
 
@@ -142,6 +144,41 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const toolText = outText.find(m => m.role === 'tool');
         assert.equal(toolText.content, '图[img:mcp_1]', '非多模态应退化为文本');
     },
+
+    /** call_tool 必须透传 ToolSolveContent，不能把对象 toString 成 [object Object] */
+    async testCallToolPropagatesContentParts(): Promise<void> {
+        registerDispatchTools();
+        const inner = new Tool({
+            type: 'function',
+            function: {
+                name: 'mcp_fake_image',
+                description: 'fake mcp image tool',
+                parameters: { type: 'object', properties: {} }
+            }
+        });
+        inner.solve = async () => ({
+            text: '图片[img:mcp_fake_1]',
+            contentParts: [
+                { type: 'text', text: '图片[img:mcp_fake_1]' },
+                { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }
+            ]
+        });
+        const callTool = toolMap['call_tool'];
+        assert.ok(callTool, 'call_tool 应已注册');
+        const session = {
+            sessionType: 'group',
+            toolState: { mcp_fake_image: true }
+        };
+        const result = await callTool.solve(makeCtx(), {} as any, session as any, {
+            name: 'mcp_fake_image',
+            arguments: {}
+        });
+        assert.equal(typeof result, 'object');
+        assert.ok((result as any).text.includes('图片[img:mcp_fake_1]'), '应包含文本结果而非 [object Object]');
+        assert.ok(Array.isArray((result as any).contentParts), '应透传多模态 contentParts');
+        assert.equal((result as any).contentParts[1].type, 'image_url');
+    },
+
 
 
     /** 预算裁剪：整条丢弃最早的未保护消息，system 永不丢弃 */
