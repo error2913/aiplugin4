@@ -26,17 +26,19 @@
     "js-toml": "^1.0.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/handlebars": "^4.0.40",
     "@typescript-eslint/eslint-plugin": "^8.66.0",
     "@typescript-eslint/parser": "^8.66.0",
     "cross-env": "^7.0.3",
     "esbuild": "^0.21.4",
-    "eslint": "^8.57.1",
-    "eslint-config-prettier": "^8.10.2",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-eslint-comments": "^3.2.0",
     "eslint-plugin-import": "^2.32.0",
+    "globals": "^17.11.0",
     "sealpack": "^0.1.2",
-    "typescript": "^5.5.4",
-    "@types/handlebars": "^4.0.40"
+    "typescript": "^5.5.4"
   },
   "files": [
     "build/main",
