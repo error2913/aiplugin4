@@ -98,7 +98,7 @@ max_tokens = 2048
 AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能对话插件，基于 OpenAI 兼容 API 开发，深度整合海豹骰子生态的 TRPG 功能：
 
 - **智能对话**：支持上下文感知的 AI 对话、角色设定与示例对话；
-- **记忆体系**：长期记忆（向量检索 + 标签/用户/群组过滤）、总结记忆、配置驱动的知识库（Markdown 模板 + 自动分块）；
+- **记忆体系**：长期记忆（向量检索 + 标签/用户/群组过滤）、观察记忆、配置驱动的知识库（Markdown 模板 + 自动分块）；
 - **工具系统**：内置 40+ 工具函数（TRPG 检定、牌堆抽取、消息、图片、禁言、定时器等），支持函数调用与提示词工程两种模式，可接入外部 MCP 服务器与可配置技能；
 - **图片处理**：图片识别、表情包管理、Markdown/HTML 渲染为图片与本地图片资源；
 - **权限体系**：命令权限（会话/用户/强触三维）与工具权限（禁止/默认关闭/按会话开关）；
@@ -237,7 +237,7 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含四个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）、ob11-core-bridge（SealDice 核心指令中转）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）；`run_core_command` 由插件本地注册，通过「后端 → 核心桥WS地址」直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | 可调用指令白名单 | 每行一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认包含核心命令、内置扩展命令及别名的 `run_ext_command` / `run_core_command` 调用帮助。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
@@ -249,10 +249,10 @@ max_tokens = 2048
 | 启用长期记忆 | 开启后对话内容会沉淀为长期记忆 |
 | 长期记忆上限 | 长期记忆条数上限，超出后按分数淘汰 |
 | 长期记忆展示数量 | 构造记忆 prompt 时展示的长期记忆条数 |
-| 启用总结记忆 | 开启后定期对对话进行总结记忆（增量总结：只总结上次之后的新消息） |
-| 总结记忆上限 / 总结记忆间隔轮数 / 总结记忆参与轮数 | 总结记忆条数上限、自动总结间隔、每次总结纳入的对话轮数 |
+| 启用观察记忆 | 开启后定期对对话进行观察记忆（增量观察：只观察上次之后的新消息） |
+| 观察记忆上限 / 观察记忆间隔轮数 / 观察记忆参与轮数 | 观察记忆条数上限、自动观察间隔、每次观察纳入的对话轮数 |
 | 核心事实注入条数 | 重要性达阈值（80%）的语义记忆（事实/规则/关系）常驻注入 prompt 的条数（默认 3，0 为不注入） |
-| 记忆巩固间隔(次总结) | 每多少次总结后自动整合重复总结、标记/清理过期记忆（默认 30，0 为关闭） |
+| 记忆巩固间隔(次观察) | 每多少次观察后自动整合重复观察、清理过期记忆（默认 30，0 为关闭） |
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
 | 知识库注入阈值(字符) | 知识库总内容不超过该值时全量注入；超过时只注入条目索引，模型用 kb_read 工具读取详情（默认 5000） |
 | 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 kb 工具/指令检索。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
@@ -296,7 +296,7 @@ max_tokens = 2048
 
 ### prompt 模板
 
-6 个 Handlebars 模板（system prompt / 长期记忆 / 总结记忆 / 工具函数 / 图片识别 / 记忆总结）已内置在插件中，不再作为配置项展示，避免误改导致渲染损坏。
+6 个 Handlebars 模板（system prompt / 长期记忆 / 观察记忆 / 工具函数 / 图片识别 / 记忆观察）已内置在插件中，不再作为配置项展示，避免误改导致渲染损坏。
 
 ---
 
@@ -342,20 +342,20 @@ max_tokens = 2048
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai memo status [用户ID]` | - | 查看当前（或指定用户ID的）长期/总结记忆状态 |
+| `.ai memo status [用户ID]` | - | 查看当前（或指定用户ID的）长期/观察记忆状态 |
 | `.ai memo [p/g] st <内容>` | `.ai memo p st 西瓜` | 设置个人/群聊设定（个人≤20字，群聊≤30字） |
 | `.ai memo [p/g] st clr` | - | 清除设定 |
 | `.ai memo [p/g] del <ID1> <ID2> --关键词` | - | 按 ID 删除记忆，可附带关键词 |
 | `.ai memo [p/g] list` | - | 展示长期记忆列表，支持 `--page` 翻页 |
 | `.ai memo [p/g] clr` | - | 清除长期记忆 |
-| `.ai memo sum [on/off]` | - | 开启/关闭总结记忆 |
-| `.ai memo sum list` | - | 展示总结记忆列表，支持 `--page` 翻页 |
-| `.ai memo sum` | - | 立即生成一次总结记忆 |
-| `.ai memo sum clr` | - | 清除总结记忆 |
-| `.ai memo cons` | - | 立即巩固一次记忆（合并重复总结、标记/清理过期记忆） |
+| `.ai memo obs [on/off]` | - | 开启/关闭观察记忆 |
+| `.ai memo obs list` | - | 展示观察记忆列表，支持 `--page` 翻页 |
+| `.ai memo obs` | - | 立即生成一次观察记忆 |
+| `.ai memo obs clr` | - | 清除观察记忆 |
+| `.ai memo cons` | - | 立即巩固一次记忆（合并重复观察、清理过期记忆） |
 | `.ai kb [list/search <关键词>/read <ID>]` | `.ai kb search 触发方式` | 知识库只读查询：列出条目索引 / 按关键词搜索 / 按 ID 读取详情 |
 
-> 个人记忆跨群、群聊记忆仅限本群；group 分支需邀请者以上，`.ai memo sum on/off` 需会话权限 1。
+> 个人记忆跨群、群聊记忆仅限本群；group 分支需邀请者以上，`.ai memo obs on/off` 需会话权限 1。
 
 ### 工具管理命令
 
@@ -409,12 +409,12 @@ max_tokens = 2048
 
 | 分类 | 工具函数 |
 |:---:|:---|
-| 记忆 | `add_memory`、`update_memory`、`del_memory`、`search_memory`、`clear_memory` |
+| 记忆 | `add_memory`、`update_memory`、`del_memory`、`search_memory`、`clear_memory`、`reflect_memory`、`consolidate_memory` |
 | 知识库 | `kb_search`、`kb_read`、`kb_list`（只读检索，内容由配置维护） |
 | OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
-| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经 MCP 调用核心指令） |
+| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
 | 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
 | 音频资源 | `generate_audio`（生成 record 消息段，不直接发送） |
 | 网页 | `web_search`、`web_read` |
@@ -432,7 +432,7 @@ max_tokens = 2048
 
 > OB11 说明：AI 只调用 `call_ob11_api`。安装 ob11 网络连接依赖时，action 原样交给 `net.callApi`；未安装时仍由 SealDice 原生后端完成当前上下文可完成的发送和查询，远端 action 返回 `OB11_DEPENDENCY_REQUIRED`，不会假装成功。图片、语音、视频、文件、JSON、Markdown、音乐和合并转发均通过 message segment 保留格式；`generate_audio`、`search_music` 只生成可发送的 segment。
 
-> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「工具 → MCP服务器配置」中启用 `ob11-core-bridge`，`http://127.0.0.1:46880/mcp`）。
+> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「后端」配置「核心桥WS地址」，默认 `ws://127.0.0.1:46880/plugin`）。
 
 ---
 
