@@ -7,7 +7,7 @@ import Image from "../resource/image";
 import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
-import { ToolCall } from "../tool/types";
+import { ToolCall, ToolContentPart } from "../tool/types";
 import { callOb11Api } from "../utils/ob11";
 import { stripInternalTags } from "../utils/string";
 import { normalizeGroupId, normalizeUserId } from "../utils/target_id";
@@ -254,7 +254,7 @@ export class Context {
 
     // 工具回调消息：过长的结果同样交给压缩智能体压缩后再存入上下文
     // 独立于用户消息压缩阈值；web_search 压缩时附带搜索目标，帮助保留与问题相关的信息
-    async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, searchTarget?: string) {
+    async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, searchTarget?: string, contentParts?: ToolContentPart[]) {
         const { TOOL_RESPONSE_COMPRESS_MIN_LENGTH } = Config.tool;
         if (TOOL_RESPONSE_COMPRESS_MIN_LENGTH > 0 && text.length > TOOL_RESPONSE_COMPRESS_MIN_LENGTH) {
             try {
@@ -274,6 +274,7 @@ export class Context {
             role: 'tool',
             text,
             toolCallId,
+            contentParts,
             toolName
         }
         this.messages.push(tcbm);

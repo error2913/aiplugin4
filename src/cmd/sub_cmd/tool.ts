@@ -131,7 +131,8 @@ export function registerCmdTool() {
                         }
                     }
 
-                    const content = await tool.solve(ctx, msg, session, args);
+                    const solved = await tool.solve(ctx, msg, session, args);
+                    const content = typeof solved === 'string' ? solved : solved.text;
                     logger.info(`[tool] 指令调用 session=${session.sessionId} tool=${val3}`);
                     const MAX_TOOL_CALL_OUTPUT_LENGTH = 500;
                     if (content.length > MAX_TOOL_CALL_OUTPUT_LENGTH) {

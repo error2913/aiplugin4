@@ -89,9 +89,20 @@ export interface ToolCall {
         arguments: string
     }
 }
+
+export type ToolContentPart =
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } };
+
+export interface ToolSolveContent {
+    text: string;
+    contentParts?: ToolContentPart[];
+}
+
 export interface ToolCallResult {
     tool_call_id: string,
     content: string,
+    contentParts?: ToolContentPart[], // 多模态内容块，供多模态模型直接消费
     toolName?: string,     // 工具名（回调压缩/审计用）
     searchTarget?: string, // web_search 的搜索目标（压缩时附带，保留与问题相关的信息）
     callBack?: boolean     // 是否把结果回调给智能体（写回上下文继续对话），false 时工具静默执行

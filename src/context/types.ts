@@ -1,5 +1,5 @@
 // 上下文消息类型定义
-import { ToolCall } from "../tool/types";
+import { ToolCall, ToolContentPart } from "../tool/types";
 
 export interface BaseMessageItem {
     time: number; // 秒
@@ -33,6 +33,7 @@ export interface ToolCallsMessage {
 export interface ToolCallbackMessage {
     role: 'tool';
     text: string;
+    contentParts?: ToolContentPart[];
     toolCallId: string;
     toolName?: string; // 工具名：prompt 工程模式下把工具结果转回 user 消息时保留来源
 }

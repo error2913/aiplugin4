@@ -103,8 +103,21 @@ function buildAnthropicMessages(messages: any[]): { system: string, messages: an
             continue;
         }
         if (role === 'tool') {
-            const text = typeof msg.content === 'string' ? msg.content : String(msg.content || '');
-            out.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: msg.tool_call_id, content: text }] });
+            const content = Array.isArray(msg.content)
+                ? msg.content.map((block: any) => {
+                    if (block.type === 'image_url') {
+                        const url = (block.image_url && block.image_url.url) || '';
+                        const m = url.match(/^data:image\/([^;]+);base64,(.+)$/);
+                        if (m) {
+                            return { type: 'image', source: { type: 'base64', media_type: `image/${m[1]}`, data: m[2] } };
+                        }
+                        return { type: 'image', source: { type: 'url', url } };
+                    }
+                    if (block.type === 'text') return { type: 'text', text: block.text };
+                    return block;
+                })
+                : (typeof msg.content === 'string' ? msg.content : String(msg.content || ''));
+            out.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: msg.tool_call_id, content }] });
             continue;
         }
         let content: any = msg.content;

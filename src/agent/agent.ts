@@ -142,7 +142,7 @@ export default class Agent {
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
                             for (const r of callResults) {
-                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
                                 log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
@@ -167,7 +167,7 @@ export default class Agent {
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
                             for (const r of callResults) {
-                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
                                 log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
@@ -284,7 +284,7 @@ export default class Agent {
                             trace.recordToolCall('stream-tool-call', 0, true);
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
                             for (const r of callResults) {
-                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget);
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
                                 log.info('工具执行完成且不回调（callBack=false），结束本轮编排');

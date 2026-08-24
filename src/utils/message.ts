@@ -6,7 +6,7 @@ import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import User from "../session/user";
-import { ToolCall } from "../tool/types";
+import { ToolCall, ToolContentPart } from "../tool/types";
 
 import { fmtDate } from "./string";
 import { withTimeout } from "./utils";
@@ -37,6 +37,7 @@ interface ContextMessage {
     role: string;
     contentItems?: MessageItem[];
     text?: string;
+    contentParts?: ToolContentPart[];
     toolName?: string; // 工具名：prompt 工程模式下把工具结果转回 user 消息时保留来源
     toolCalls?: ToolCall[];
     tool_calls?: ToolCall[];
@@ -74,7 +75,14 @@ export function estimateMessageTokens(m: ContextMessage | RequestMessage): numbe
     } else if (Array.isArray(content)) {
         text = content.map(part => part.type === 'text' ? part.text : '[image]').join('');
     } else {
-        text = buildContent(m as ContextMessage);
+        const contextMessage = m as ContextMessage;
+        if (Array.isArray(contextMessage.contentParts) && contextMessage.contentParts.length > 0) {
+            text = contextMessage.contentParts
+                .map(part => part.type === 'text' ? part.text : '[image]')
+                .join('');
+        } else {
+            text = buildContent(contextMessage);
+        }
     }
     const toolCalls = (m as ContextMessage).toolCalls || (m as RequestMessage).tool_calls;
     const toolCallsEst = Array.isArray(toolCalls) && toolCalls.length > 0
@@ -330,7 +338,11 @@ export async function handleMessages(
     return await Promise.all(messages.map(async message => {
         const out: RequestMessage = {
             role: message.role,
-            content: multimodal ? await buildMultimodalContent(message) : buildContent(message)
+            content: message.role === 'tool'
+                ? (multimodal && Array.isArray(message.contentParts) && message.contentParts.length > 0
+                    ? message.contentParts
+                    : buildContent(message))
+                : (multimodal ? await buildMultimodalContent(message) : buildContent(message))
         };
         // 只在 assistant 且 tool_calls 非空时附带该字段：空数组在 JSON 里是合法值，
         // 会被原样序列化为 "tool_calls":[]，部分后端直接报错拒绝请求

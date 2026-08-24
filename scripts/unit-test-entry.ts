@@ -6,6 +6,7 @@ import Config from "../src/config/config";
 Config.registerConfig();
 
 import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
+import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { stripRenderTags } from "../src/utils/string";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
@@ -88,6 +89,56 @@ export const tests: Record<string, () => void | Promise<void>> = {
         };
         assert.ok(estimateMessageTokens(withTools as any) > estimateTextTokens('调用'));
     },
+
+    /** MCP 结果归一化：text/image/resource 转成文本引用 + 多模态 contentParts */
+    testNormalizeMCPResult(): void {
+        const normalized = normalizeMCPResult({
+            content: [
+                { type: 'text', text: '标题' },
+                { type: 'image', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', mimeType: 'image/png' },
+                { type: 'resource', resource: { uri: 'mcp://mcp-files-exec/output/a.txt', mimeType: 'text/plain', text: '文件内容' } }
+            ],
+            structuredContent: { url: 'https://example.com' }
+        });
+        assert.ok(normalized.text.includes('标题'), '应保留文本');
+        assert.ok(normalized.text.includes('图片[img:'), '图片应转成 [img:] 引用');
+        assert.ok(normalized.text.includes('文件内容'), 'resource 文本应并入');
+        assert.equal(normalized.images.length, 1);
+        assert.ok(normalized.images[0].src.startsWith('data:image/png;base64,'));
+        assert.equal(normalized.resources.length, 1);
+        assert.equal(normalized.resources[0].uri, 'mcp://mcp-files-exec/output/a.txt');
+
+        const parts = buildContentParts(normalized);
+        assert.ok(parts.some(p => p.type === 'text'));
+        assert.ok(parts.some(p => p.type === 'image_url' && (p as any).image_url.url.startsWith('data:image/png;base64,')));
+    },
+
+    /** 多模态工具结果：contentParts 直接进入请求体，非多模态退化为文本 */
+    async testToolMultimodalContentParts(): Promise<void> {
+        TC.intConfigs['上下文最大token'] = 0;
+        TC.boolConfigs['切换为提示词工程'] = false;
+        resetConfigCache();
+        const system = { role: 'system', text: '系统' };
+        const session = {
+            context: {
+                messages: [
+                    { role: 'assistant', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'screenshot_url', arguments: '{}' } }] },
+                    { role: 'tool', text: '图[img:mcp_1]', contentParts: [
+                        { type: 'text', text: '图' },
+                        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }
+                    ], toolCallId: 'call_1', toolName: 'screenshot_url' }
+                ]
+            }
+        };
+        const out = await handleMessages(makeCtx(), session as any, true, undefined, system as any);
+        const tool = out.find(m => m.role === 'tool');
+        assert.ok(Array.isArray(tool.content), '多模态下工具结果应为 content 数组');
+        assert.ok((tool.content as any[]).some((p: any) => p.type === 'image_url'));
+        const outText = await handleMessages(makeCtx(), session as any, false, undefined, system as any);
+        const toolText = outText.find(m => m.role === 'tool');
+        assert.equal(toolText.content, '图[img:mcp_1]', '非多模态应退化为文本');
+    },
+
 
     /** 预算裁剪：整条丢弃最早的未保护消息，system 永不丢弃 */
     async testTokenBudgetDropsEarliest(): Promise<void> {

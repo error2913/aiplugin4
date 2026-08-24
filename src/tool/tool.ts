@@ -10,7 +10,7 @@ import { withTimeout } from "../utils/utils";
 import { registerMCPTools } from "./mcp";
 import { registerSkills } from "./skills";
 import { registerTools } from "./tools/init";
-import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject } from "./types";
+import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolSolveContent } from "./types";
 
 const log = Logger.withTag('tool');
 
@@ -55,7 +55,7 @@ export default class Tool {
     sessionType: 'any' | SessionType; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
     sensitive: boolean; // 敏感工具（发送消息/封禁/改名等），调用会显著记录
-    solve: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => Promise<string>;
+    solve: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => Promise<string | ToolSolveContent>;
 
     constructor(info: ToolInfo, sensitive = false) {
         this.toolInfo = info;
@@ -136,9 +136,13 @@ export default class Tool {
 
             const { TIMEOUT } = Config.base;
             const time = Date.now();
-            const content = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT);
+            const solved = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT);
+            const content = typeof solved === 'string' ? solved : solved.text;
             log.info(`${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
             const result: ToolCallResult = { tool_call_id: tool_call.id, content };
+            if (typeof solved !== 'string' && solved.contentParts && solved.contentParts.length > 0) {
+                result.contentParts = solved.contentParts;
+            }
             if (name === 'web_search' && args && typeof args.q === 'string' && args.q.trim()) {
                 result.searchTarget = args.q.trim();
             }

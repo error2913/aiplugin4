@@ -3,7 +3,7 @@ import { ext } from "../config/config";
 import Logger from "../logger";
 import { parseJSONWithTrailingCommas } from "../utils/json";
 
-import { runMCPAdapter } from "./mcp/adapters";
+import { buildContentParts, normalizeMCPResult } from "./mcp/result";
 import { MCPCallResult } from "./mcp/types";
 import Tool, { toolMap } from "./tool";
 
@@ -315,23 +315,13 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
             }
         }, true);
         // 每次调用都重新读取当前服务器配置，支持配置热加载且不缓存旧凭据。
-        tool.solve = async (ctx, msg, session, args) => {
+        tool.solve = async (_ctx, _msg, _session, args) => {
             const current = getMCPServerByName(server.name);
             if (!current) return `MCP 服务器 ${server.name} 未配置`;
-            return runMCPAdapter(t.name, {
-                ctx,
-                msg,
-                session,
-                args: args || {},
-                server: {
-                    name: current.name,
-                    url: current.url,
-                    token: current.token,
-                    headers: current.headers
-                },
-                toolName: t.name,
-                callRemote: async (toolName: string, callArgs: any) => callTool(current, toolName, callArgs || {})
-            });
+            const result = await callTool(current, t.name, args || {});
+            const normalized = normalizeMCPResult(result);
+            return { text: normalized.text, contentParts: buildContentParts(normalized) };
+
         };
         mcpToolKeys.set(t.name, server.name);
         log.debug(`已注册 MCP 工具 ${t.name}`);

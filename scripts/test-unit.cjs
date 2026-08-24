@@ -40,7 +40,7 @@ const TEMPLATE_DEFAULTS = {
 globalThis.seal = {
     ext: {
         find: () => undefined,
-        new: () => ({}),
+        new: () => ({ storageGet: () => '', storageSet: () => undefined }),
         register: () => undefined,
         registerBoolConfig: () => undefined,
         registerIntConfig: () => undefined,
