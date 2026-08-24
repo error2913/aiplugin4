@@ -3,6 +3,8 @@ import { MemoryManager } from "../../../memory/manager";
 import { bumpMemoryRevision } from "../../../memory/revision";
 import { resolveTargetSession } from "../../../memory/session_target";
 import { searchOptions as SearchOptions } from "../../../memory/types";
+import { resolveBankId } from "../../../memory/v2/bank_resolver";
+import { getMemoryEngine } from "../../../memory/v2/index";
 import { SessionService } from "../../../session/session_service";
 import { GroupInfo, SessionInfo, UserInfo } from "../../../session/types";
 import { getCtxAndMsg } from "../../../utils/seal";
@@ -442,28 +444,97 @@ export function registerMemory() {
 
         const target = resolveTargetSession(session, memory_type, target_id);
         if (!target) return `目标ID格式无效<${target_id}>`;
-        const m = target.memory.memoryMap[String(id)];
-        if (!m) return `未找到记忆<${id}>`;
+        const bankId = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName).bankId;
+        const unit = getMemoryEngine().repository.getUnit(bankId, String(id));
+        if (!unit) return `未找到记忆<${id}>`;
 
         // 保护：其他会话的私有记忆不可更新
-        if (target.sessionId !== callerSessionId && m.visibility === 'private' && m.sessionId !== callerSessionId) {
+        if (target.sessionId !== callerSessionId && unit.tags.includes(`vis:private:${callerSessionId}`)) {
             return `无权更新其他会话的私有记忆<${id}>`;
         }
 
         if (typeof text === 'string' && text.trim()) {
-            m.content = stripInternalTags(text.trim());
-            await m.updateVector();
-            (target.memory as any).invalidateContentIndex();
+            unit.text = stripInternalTags(text.trim());
         }
         if (Array.isArray(keywords)) {
-            m.tags = Array.from(new Set([...m.tags, ...keywords.map(String)]));
+            unit.tags = Array.from(new Set([...unit.tags, ...keywords.map(String)]));
         }
         if (typeof importance === 'number') {
-            m.importance = Math.min(1, Math.max(0, importance));
+            unit.importance = Math.min(1, Math.max(0, importance));
         }
-        m.lastAccessedAt = Math.floor(Date.now() / 1000);
+        unit.lastAccessedAt = Math.floor(Date.now() / 1000);
+        unit.updatedAt = unit.lastAccessedAt;
+        getMemoryEngine().repository.updateUnit(bankId, unit);
         bumpMemoryRevision();
         SessionService.save(target);
-        return `记忆已更新<${m.id}>`;
+        return `记忆已更新<${unit.id}>`;
     }
+
+    const toolConsolidate = new Tool({
+        type: 'function',
+        function: {
+            name: 'consolidate_memory',
+            description: '触发指定个人或群聊记忆的观察巩固，把已有事实合并生成观察记忆',
+            parameters: {
+                type: 'object',
+                properties: {
+                    memory_type: {
+                        type: 'string',
+                        description: '记忆归属，个人或群聊',
+                        enum: ['private', 'group']
+                    },
+                    target_id: {
+                        type: 'string',
+                        description: '目标用户ID或群ID'
+                    }
+                },
+                required: ['memory_type', 'target_id']
+            }
+        }
+    });
+    toolConsolidate.solve = async (_ctx, _, session, args) => {
+        const { memory_type, target_id } = args;
+        const target = resolveTargetSession(session, memory_type, target_id);
+        if (!target) return `目标ID格式无效<${target_id}>`;
+        const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
+        const result = await getMemoryEngine().consolidate(bank.bankId);
+        SessionService.save(target);
+        return `观察巩固完成：新建 ${result.created.length} 条，更新 ${result.updated.length} 条，合并 ${result.merged.length} 条`;
+    };
+
+    const toolReflect = new Tool({
+        type: 'function',
+        function: {
+            name: 'reflect_memory',
+            description: '基于指定个人或群聊记忆进行推理，返回心智模型、观察记忆和事实证据的汇总回答',
+            parameters: {
+                type: 'object',
+                properties: {
+                    memory_type: {
+                        type: 'string',
+                        description: '记忆归属，个人或群聊',
+                        enum: ['private', 'group']
+                    },
+                    target_id: {
+                        type: 'string',
+                        description: '目标用户ID或群ID'
+                    },
+                    query: {
+                        type: 'string',
+                        description: '要推理的问题'
+                    }
+                },
+                required: ['memory_type', 'target_id', 'query']
+            }
+        }
+    });
+    toolReflect.solve = async (_ctx, _, session, args) => {
+        const { memory_type, target_id, query } = args;
+        const target = resolveTargetSession(session, memory_type, target_id);
+        if (!target) return `目标ID格式无效<${target_id}>`;
+        const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
+        const result = await getMemoryEngine().reflect(bank.bankId, String(query || ''));
+        return result.text;
+    };
+
 }

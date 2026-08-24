@@ -13,6 +13,10 @@ import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import MemoryService from "../src/memory/memory";
 import MemoryItem from "../src/memory/memory_item";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
+import { MemoryEngine } from "../src/memory/v2/engine";
+import { migrateLegacyMemory } from "../src/memory/v2/migrate";
+import { buildMemoryPrompt } from "../src/memory/v2/prompt";
+import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
 import { Context } from "../src/context/context";
 import Image from "../src/resource/image";
 
@@ -515,5 +519,101 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(svc.shortMemoryList!.length, 0, '迁移后旧列表应清空');
         assert.equal(svc.summaryStatus, true, '旧开关应合并到 summaryStatus');
         assert.equal(svc.useShortMemory, false, '旧字段应复位');
+    },
+
+    /** Hindsight-like 新引擎：Retain 精确查重与关键词召回 */
+    async testV2RetainDedupAndRecall(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        const r1 = await engine.addMemory('user_test', { content: '小明喜欢喝咖啡', tags: ['user:QQ1'] });
+        const r2 = await engine.addMemory('user_test', { content: '小明喜欢喝咖啡', tags: ['user:QQ1'] });
+        assert.equal(r1.action, 'added');
+        assert.equal(r2.action, 'merged', '同 bank 同文本应合并');
+        assert.equal(r1.unitIds[0], r2.unitIds[0]);
+        const results = await engine.recall('user_test', '咖啡', { tags: ['user:QQ1'], maxTokens: 200 });
+        assert.ok(results.some(r => r.unit.text.includes('咖啡')), '关键词应召回咖啡记忆');
+    },
+
+    /** Hindsight-like 新引擎：时间检索窗口 */
+    async testV2TemporalRecall(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        const now = Date.now();
+        await engine.addMemory('user_t', {
+            content: '去年去了日本旅游',
+            occurredStart: new Date(now - 400 * 86400000).getTime(),
+            occurredEnd: new Date(now - 370 * 86400000).getTime(),
+        });
+        await engine.addMemory('user_t', { content: '今天买了咖啡' });
+        const results = await engine.recall('user_t', '去年发生了什么', { maxTokens: 200 });
+        assert.ok(results.some(r => r.unit.text.includes('日本旅游')), '时间检索应命中去年事件');
+    },
+
+    /** Hindsight-like 新引擎：Consolidation 生成 Observation */
+    async testV2ConsolidationCreatesObservation(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        await engine.addMemory('user_c', { content: '小明喜欢 Python', entities: ['小明', 'Python'] });
+        await engine.addMemory('user_c', { content: '小明喜欢写类型注解', entities: ['小明', 'Python'] });
+        const result = await engine.consolidate('user_c');
+        assert.ok(result.created.length > 0, '应生成至少一条 Observation');
+        const observations = engine.repository.listObservations('user_c');
+        assert.ok(observations.length > 0);
+        assert.ok(observations[0].evidence.length >= 2, 'Observation 应携带多条证据');
+    },
+
+    /** Hindsight-like 新引擎：MentalModel 与 Observation 的 Prompt 渲染 */
+    async testV2PromptRendersMentalModel(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        await engine.createMentalModel('user_p', '这个用户的偏好是什么？', '用户喜欢简洁的回复');
+        const prompt = buildMemoryPrompt({
+            isPrivate: true,
+            sessionName: '测试员',
+            mentalModels: engine.listMentalModels('user_p'),
+            observations: [],
+            recalls: [],
+        });
+        assert.ok(prompt.includes('心智模型'), 'Prompt 应包含心智模型段');
+        assert.ok(prompt.includes('用户喜欢简洁的回复'), 'Prompt 应包含心智模型答案');
+    },
+
+    /** Hindsight-like 新引擎：旧记忆迁移到新 Bank */
+    async testV2MigrateLegacyMemory(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        const old = new MemoryItem();
+        old.id = 'legacy1';
+        old.content = '小明喜欢喝咖啡';
+        old.importance = 0.9;
+        old.tags = ['咖啡'];
+        old.users = ['QQ:1'];
+        const count = await migrateLegacyMemory('user_m', { memoryMap: { legacy1: old }, summaries: ['旧总结'], persona: '喜欢简洁' }, engine);
+        assert.ok(count >= 2, '应迁移旧记忆/总结，实际 ' + count);
+        const results = await engine.recall('user_m', '咖啡', { maxTokens: 200 });
+        assert.ok(results.some(r => r.unit.text.includes('咖啡')), '迁移后应能检索到旧记忆');
+        const models = engine.listMentalModels('user_m');
+        assert.ok(models.some(m => m.answer === '喜欢简洁'), 'persona 应迁移为心智模型');
+    },
+
+    /** Hindsight-like 新引擎：LLM 抽取 / Rerank / Observation 合成 / MentalModel 刷新 */
+    async testV2ExtractorRerankSynthesisAndRefresh(): Promise<void> {
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            extract: async () => [
+                { text: '小明喜欢喝咖啡', entities: ['小明'] },
+                { text: '小红喜欢喝茶', entities: ['小红'] },
+            ],
+            rerank: async (_query, candidates) => candidates.map(c => c.id).reverse(),
+            synthesizeObservation: async (quotes) => '综合观察：' + quotes.join(' | '),
+        });
+        await engine.retain('user_r', { content: '对话原文', verbatim: false });
+        assert.equal(engine.repository.listUnits('user_r').length, 2, 'LLM 抽取应生成两条事实');
+        await engine.addMemory('user_r', { content: '小明喜欢喝茶', entities: ['小明'] });
+        const recalls = await engine.recall('user_r', '咖啡', { maxTokens: 200 });
+        assert.ok(recalls.length > 0, 'Rerank 后仍应返回结果');
+        await engine.consolidate('user_r');
+        const observations = engine.repository.listObservations('user_r');
+        assert.ok(observations.some(o => o.text.startsWith('综合观察：')), 'Observation 应使用合成器生成');
+        await engine.createMentalModel('user_m2', '偏好是什么？', '旧答案');
+        await engine.refreshMentalModels('user_m2');
+        const model = engine.listMentalModels('user_m2')[0];
+        assert.ok(model.version > 1, 'MentalModel 应被刷新版本号');
     }
+
 };

@@ -41,13 +41,13 @@ const TEMPLATES: { [key: string]: string } = {
 长期记忆为空
     {{/each}}
 {{/if}}`,
-    "总结记忆prompt模板": `{{#if SUMMARY}}
+    "观察记忆prompt模板": `{{#if SUMMARY}}
 
-## 总结记忆
+## 观察记忆
     {{#each summaries}}
 {{index @index}}. {{{this}}}
     {{else}}
-总结记忆为空
+观察记忆为空
     {{/each}}
 {{/if}}`,
     "工具函数prompt模板": `{{#if PROMPT_ENGINEERING}}
@@ -79,7 +79,7 @@ const TEMPLATES: { [key: string]: string } = {
     {{/each}}
 {{/if}}`,
     "图片识别prompt模板": "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出",
-    "记忆总结prompt模板": `你现在扮演的角色如下:
+    "记忆观察prompt模板": `你现在扮演的角色如下:
 ## 扮演详情
 {{{角色设定}}}
             
@@ -96,7 +96,7 @@ const TEMPLATES: { [key: string]: string } = {
 {{/if}}
     - \\f用于分割多条消息
 
-请根据你的设定，对以下对话内容进行总结:
+请根据你的设定，对以下对话内容进行观察:
 {{{对话内容}}}
 
 返回格式为JSON，格式类型如下（请严格返回合法的 JSON：所有键和字符串必须使用双引号，不要输出 Markdown 代码块或其他解释文字）:
@@ -119,7 +119,7 @@ const TEMPLATES: { [key: string]: string } = {
                 },
                 "existing_id": {
                     "type": "string",
-                    "description": "op 为 update/delete 时必填：已存在记忆的 ID（来自长期记忆/总结记忆列表）"
+                    "description": "op 为 update/delete 时必填：已存在记忆的 ID（来自长期记忆/观察记忆列表）"
                 },
                 "memory_type": {
                     "type": "string",
@@ -162,7 +162,7 @@ const TEMPLATES: { [key: string]: string } = {
                 },
                 "related_memory_ids": {
                     "type": "array",
-                    "description": "相关联的已有记忆ID列表（来自长期记忆/总结记忆列表），用于建立记忆之间的关联",
+                    "description": "相关联的已有记忆ID列表（来自长期记忆/观察记忆列表），用于建立记忆之间的关联",
                     "items": {
                         "type": "string"
                     }
@@ -186,10 +186,10 @@ const TEMPLATES: { [key: string]: string } = {
 // 编译后的模板：模块加载即编译一次，渲染期异常不再兜底（避免掩盖模板 bug），由调用方自行处理
 export const SYSTEM_MESSAGE_TEMPLATE = compileTemplate("system prompt模板");
 export const MEMORY_TEMPLATE = compileTemplate("长期记忆prompt模板");
-export const SUMMARY_TEMPLATE = compileTemplate("总结记忆prompt模板");
+export const SUMMARY_TEMPLATE = compileTemplate("观察记忆prompt模板");
 export const TOOLS_PROMPT_TEMPLATE = compileTemplate("工具函数prompt模板");
 export const IMAGE_PROMPT_TEMPLATE = compileTemplate("图片识别prompt模板");
-export const SUMMARY_PROMPT_TEMPLATE = compileTemplate("记忆总结prompt模板");
+export const SUMMARY_PROMPT_TEMPLATE = compileTemplate("记忆观察prompt模板");
 
 /** 编译内置模板：仅编译期（Handlebars.compile）失败时回退空函数，渲染期异常由调用方处理 */
 function compileTemplate(key: string): HandlebarsTemplateDelegate<any> {
@@ -200,3 +200,4 @@ function compileTemplate(key: string): HandlebarsTemplateDelegate<any> {
         return () => '';
     }
 }
+

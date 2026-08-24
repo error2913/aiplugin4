@@ -2,6 +2,7 @@
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
+import { MemoryManager } from "../memory/manager";
 import MemoryService from "../memory/memory";
 import Image from "../resource/image";
 import Group from "../session/group";
@@ -209,12 +210,12 @@ export class Context {
         }).catch(e => {
             log.warning('助手消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
         });
-        // 按配置的间隔轮数触发总结记忆
+        // 按配置的间隔轮数触发对话记忆抽取与巩固（Hindsight-like Retain + Consolidation）
         this.summaryCounter++;
         if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
             this.summaryCounter = 0;
-            this.session.memory.summarize().catch(e => {
-                log.warning('总结记忆生成失败: ' + (e instanceof Error ? e.message : String(e)));
+            MemoryManager.retainConversation(this.session).catch(e => {
+                log.warning('记忆抽取/巩固失败: ' + (e instanceof Error ? e.message : String(e)));
             });
         }
         this.limitMessages();
@@ -411,3 +412,4 @@ export class Context {
     }
 
 }
+

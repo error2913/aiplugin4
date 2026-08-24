@@ -1,4 +1,4 @@
-// 记忆配置：长期记忆/总结记忆/知识库（Markdown 模板）
+// 记忆配置：长期记忆/观察记忆/知识库（Markdown 模板）
 import { ext } from "../config";
 
 
@@ -7,14 +7,17 @@ export default class MemoryConfig {
         seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "开启后对话内容会沉淀为长期记忆", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆上限", 50, "长期记忆条数上限，超出后按分数淘汰", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆展示数量", 5, "构造记忆 prompt 时展示的长期记忆条数", "记忆");
-        seal.ext.registerBoolConfig(ext, "启用总结记忆", true, "开启后定期对对话进行总结记忆", "记忆");
-        seal.ext.registerIntConfig(ext, "总结记忆上限", 10, "总结记忆条数上限，超出后从最旧的开始淘汰", "记忆");
-        seal.ext.registerIntConfig(ext, "总结记忆间隔轮数", 10, "每多少轮对话自动触发一次总结", "记忆");
-        seal.ext.registerIntConfig(ext, "总结记忆参与轮数", 10, "每次总结纳入的对话轮数", "记忆");
+        seal.ext.registerBoolConfig(ext, "启用观察记忆", true, "开启后定期对对话进行观察记忆", "记忆");
+        seal.ext.registerIntConfig(ext, "观察记忆上限", 10, "观察记忆条数上限，超出后从最旧的开始淘汰", "记忆");
+        seal.ext.registerIntConfig(ext, "观察记忆间隔轮数", 10, "每多少轮对话自动触发一次观察", "记忆");
+        seal.ext.registerIntConfig(ext, "观察记忆参与轮数", 10, "每次观察纳入的对话轮数", "记忆");
         seal.ext.registerIntConfig(ext, "核心事实注入条数", 3, "重要性达阈值（80%）的语义记忆常驻注入 prompt 的条数，0为不注入", "记忆");
-        seal.ext.registerIntConfig(ext, "记忆巩固间隔(次总结)", 30, "每多少次总结后自动整合重复总结并清理过期记忆，0为关闭", "记忆");
+        seal.ext.registerIntConfig(ext, "记忆巩固间隔(次观察)", 30, "每多少次观察后自动整合重复观察并清理过期记忆，0为关闭", "记忆");
         seal.ext.registerBoolConfig(ext, "启用知识库记忆", false, "开启后把知识库内容注入 system prompt，供对话参考", "记忆");
         seal.ext.registerIntConfig(ext, "知识库注入阈值(字符)", 5000, "知识库总内容不超过该值时全量注入 system prompt；超过时只注入条目索引，需要详情时模型用 kb_read 工具读取。设为 0 时始终只注入索引", "记忆");
+        seal.ext.registerBoolConfig(ext, "记忆LLM抽取", false, "Retain 时使用 LLM 抽取原子事实（默认关闭，避免与观察抽取重复）", "记忆");
+        seal.ext.registerBoolConfig(ext, "记忆LLM重排", false, "Recall 时使用 LLM 对 RRF 结果重排（较慢，默认关闭）", "记忆");
+        seal.ext.registerBoolConfig(ext, "记忆观察合成", true, "Consolidation 时使用 LLM 合成观察记忆（默认开启）", "记忆");
         seal.ext.registerTemplateConfig(ext, "知识库", [
             `# AI 骰娘4 使用指南
 
@@ -53,15 +56,22 @@ export default class MemoryConfig {
             MEMORY: seal.ext.getBoolConfig(ext, "启用长期记忆"),
             MEMORY_LIMIT: seal.ext.getIntConfig(ext, "长期记忆上限"),
             MEMORY_SHOW_NUMBER: seal.ext.getIntConfig(ext, "长期记忆展示数量"),
-            SUMMARY: seal.ext.getBoolConfig(ext, "启用总结记忆"),
-            SUMMARY_LIMIT: seal.ext.getIntConfig(ext, "总结记忆上限"),
-            SUMMARY_INTERVAL: seal.ext.getIntConfig(ext, "总结记忆间隔轮数"),
-            SUMMARY_SIZE: seal.ext.getIntConfig(ext, "总结记忆参与轮数"),
+            SUMMARY: seal.ext.getBoolConfig(ext, "启用观察记忆"),
+            SUMMARY_LIMIT: seal.ext.getIntConfig(ext, "观察记忆上限"),
+            SUMMARY_INTERVAL: seal.ext.getIntConfig(ext, "观察记忆间隔轮数"),
+            SUMMARY_SIZE: seal.ext.getIntConfig(ext, "观察记忆参与轮数"),
             CORE_FACT_NUMBER: seal.ext.getIntConfig(ext, "核心事实注入条数"),
-            CONSOLIDATE_INTERVAL: seal.ext.getIntConfig(ext, "记忆巩固间隔(次总结)"),
+            CONSOLIDATE_INTERVAL: seal.ext.getIntConfig(ext, "记忆巩固间隔(次观察)"),
             KNOWLEDGE: seal.ext.getBoolConfig(ext, "启用知识库记忆"),
             KNOWLEDGE_INJECT_THRESHOLD: seal.ext.getIntConfig(ext, "知识库注入阈值(字符)"),
-            KNOWLEDGE_ITEMS: seal.ext.getTemplateConfig(ext, "知识库")
+            KNOWLEDGE_ITEMS: seal.ext.getTemplateConfig(ext, "知识库"),
+            MEMORY_LLM_EXTRACT: seal.ext.getBoolConfig(ext, "记忆LLM抽取"),
+            MEMORY_LLM_RERANK: seal.ext.getBoolConfig(ext, "记忆LLM重排"),
+            MEMORY_OBSERVATION_SYNTH: seal.ext.getBoolConfig(ext, "记忆观察合成")
         }
     }
 }
+
+
+
+
