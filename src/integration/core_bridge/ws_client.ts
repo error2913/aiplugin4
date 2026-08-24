@@ -13,6 +13,9 @@ interface PendingRequest {
     timer: any;
 }
 
+const WS_OPEN = 1;
+
+
 let ws: WebSocket | null = null;
 let connecting: Promise<void> | null = null;
 let requestSeq = 0;
@@ -72,7 +75,7 @@ function attachHandlers(socket: WebSocket): void {
 }
 
 function connect(): Promise<void> {
-    if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (ws && ws.readyState === WS_OPEN) return Promise.resolve();
     if (connecting) return connecting;
     if (typeof WebSocket === 'undefined') {
         return Promise.reject(new Error('当前环境不支持 WebSocket'));
@@ -114,7 +117,7 @@ export async function callCoreBridgeCommand(
     timeoutMs = 10000
 ): Promise<CoreBridgeResult> {
     await connect();
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!ws || ws.readyState !== WS_OPEN) {
         throw new Error('核心桥 WebSocket 未连接');
     }
 
