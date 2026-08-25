@@ -2,9 +2,9 @@
 import { MemoryManager } from "../../../memory/manager";
 import { bumpMemoryRevision } from "../../../memory/revision";
 import { resolveTargetSession } from "../../../memory/session_target";
-import type { RecallOptions } from "../../../memory/v2/types";
 import { resolveBankId } from "../../../memory/v2/bank_resolver";
 import { getMemoryEngine } from "../../../memory/v2/index";
+import type { RecallOptions } from "../../../memory/v2/types";
 import { SessionService } from "../../../session/session_service";
 import { GroupInfo, SessionInfo, UserInfo } from "../../../session/types";
 import { getCtxAndMsg } from "../../../utils/seal";

@@ -1,5 +1,6 @@
 // 旧记忆迁移：把旧存档中的记忆数据写入 Hindsight-like 新引擎。
 import type { MemoryEngine } from "./engine";
+
 import { getMemoryEngine } from "./index";
 
 export interface LegacyMemoryItem {

@@ -20,6 +20,10 @@ import { Context } from "../src/context/context";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
+import { transformMsgId, transformMsgIdBack } from "../src/utils/utils";
+import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
+import { normalizeSpecialIdParams } from "../src/transport/ob11/special_id_params";
+import { registerSpecialResource } from "../src/utils/special_id";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
 
@@ -545,6 +549,113 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(isDuplicateEvent('k2', now + 1000), false, '不同 key 不重复');
         assert.equal(isDuplicateEvent('k1', now + 4000), false, '窗口过期后不再重复');
         resetEventGuards();
+    },
+
+    /** 消息 ID base36 转换：超出 2^53 的大整数不再丢精度，负数无损往返，非法输入返回空 */
+    testTransformMsgIdPrecision(): void {
+        // 大正整数（int64 范围）：9007199254740993 > 2^53，旧实现会丢成 ...992
+        const bigId = '9007199254740993';
+        const big36 = transformMsgId(bigId);
+        assert.notEqual(big36, '');
+        assert.equal(transformMsgIdBack(big36), bigId, '大整数应无损往返');
+        // 普通安全整数：返回 number 兼容旧行为
+        assert.equal(transformMsgId(123), '3f');
+        assert.equal(transformMsgIdBack('3f'), 123);
+        assert.equal(transformMsgId('0'), '0');
+        assert.equal(transformMsgIdBack('0'), 0);
+        // 负数（NapCat 负 int64 ID）：保留符号
+        const negId = '-1234567890123456789';
+        const neg36 = transformMsgId(negId);
+        assert.ok(neg36.startsWith('-'));
+        assert.equal(transformMsgIdBack(neg36), negId, '负大整数应无损往返');
+        assert.equal(transformMsgId(-123), '-3f');
+        assert.equal(transformMsgIdBack('-3f'), -123);
+        // 非法输入
+        assert.equal(transformMsgId(''), '');
+        assert.equal(transformMsgId(null), '');
+        assert.equal(transformMsgId('abc'), '');
+        assert.equal(transformMsgIdBack(''), '');
+        assert.equal(transformMsgIdBack('zzz!'), '');
+        // 非安全整数 Number 输入拒绝（已丢精度）
+        assert.equal(transformMsgId(9007199254740993), '');
+        // 往返一致性：覆盖边界与超长样例
+        const samples = ['1', '35', '36', '1295', '1296', '99999999999999999999', '9223372036854775807'];
+        for (const v of samples) {
+            assert.equal(String(transformMsgIdBack(transformMsgId(v))), v, `往返一致性失败: ${v}`);
+        }
+    },
+
+    /** 特殊 ID 参数归一化：上下文短消息 ID/图片 ID/语音句柄在调用协议 API 前还原为原始值 */
+    testSpecialIdParamNormalization(): void {
+        // 消息 ID：base36（含字母）→ 十进制字符串
+        assert.deepEqual(normalizeSpecialIdParams('get_msg', { message_id: '3f' }), { message_id: '123' });
+        // 带标签包裹
+        assert.deepEqual(normalizeSpecialIdParams('delete_msg', { message_id: '[quote:3f]' }), { message_id: '123' });
+        assert.deepEqual(normalizeSpecialIdParams('get_msg', { message_id: '[msg_id:-3f]' }), { message_id: '-123' });
+        // 大整数（>2^53）base36 → 精确十进制字符串
+        const bigId = '9007199254740993';
+        const big36 = transformMsgId(bigId);
+        assert.deepEqual(normalizeSpecialIdParams('get_msg', { message_id: big36 }), { message_id: bigId });
+        // 纯十进制 / 数字不误转
+        assert.deepEqual(normalizeSpecialIdParams('get_msg', { message_id: '12345' }), { message_id: '12345' });
+        assert.deepEqual(normalizeSpecialIdParams('get_msg', { message_id: 12345 }), { message_id: 12345 });
+        // 非法 base36 保持原样
+        assert.deepEqual(normalizeSpecialIdParams('get_msg', { message_id: 'zzz!' }), { message_id: 'zzz!' });
+
+        // 图片：登记到 imageMap 后，6 位 ID / [img:ID:描述] 还原为原始 file
+        const img = new Image();
+        img.imageId = 'abc123';
+        img.url = 'https://example.com/a.png';
+        img.raw = JSON.stringify({ file: 'a.image', file_unique: 'u1', md5: 'm1', url: 'https://example.com/a.png' });
+        (Image as any).imageMap['abc123'] = img;
+        assert.deepEqual(normalizeSpecialIdParams('get_image', { file: 'abc123' }), { file: 'a.image' });
+        assert.deepEqual(normalizeSpecialIdParams('get_image', { file: '[img:abc123:截图]' }), { file: 'a.image' });
+        // 非图片 ID（URL）不转换
+        assert.deepEqual(normalizeSpecialIdParams('get_image', { file: 'https://example.com/x.png' }), { file: 'https://example.com/x.png' });
+
+        // 语音：登记句柄后，句柄 / [voice:句柄] 还原为原始 file
+        const handle = registerSpecialResource('voice', { file: 'voice.amr', url: 'https://example.com/v.amr' });
+        assert.deepEqual(normalizeSpecialIdParams('get_record', { file: handle }), { file: 'voice.amr' });
+        assert.deepEqual(normalizeSpecialIdParams('get_record', { file: '[voice:' + handle + ']' }), { file: 'voice.amr' });
+
+        // 原 params 不可变：命中转换时入参对象不被修改
+        const orig = { message_id: '3f' };
+        const next = normalizeSpecialIdParams('get_msg', orig);
+        assert.equal(orig.message_id, '3f', '入参对象不应被修改');
+        assert.notEqual(next, orig, '命中转换时应返回新对象');
+    },
+
+    /** resolve_special_id 工具：还原消息 ID/图片 ID/媒体句柄为原始字段 */
+    async testResolveSpecialIdTool(): Promise<void> {
+        registerResolveSpecialId();
+        const tool = toolMap['resolve_special_id'];
+        assert.ok(tool, 'resolve_special_id 应已注册');
+
+        let r = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: 'message', id: '[quote:3f]' }));
+        assert.equal(r.ok, true);
+        assert.equal(r.message_id, '123');
+
+        const img = new Image();
+        img.imageId = 'img456';
+        img.url = 'https://example.com/b.png';
+        img.raw = JSON.stringify({ file: 'b.image', file_unique: 'u2', md5: 'm2', url: 'https://example.com/b.png' });
+        (Image as any).imageMap['img456'] = img;
+        r = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: 'image', id: '[img:img456:截图]' }));
+        assert.equal(r.ok, true);
+        assert.equal(r.image_id, 'img456');
+        assert.equal(r.file, 'b.image');
+        assert.equal(r.file_unique, 'u2');
+        assert.equal(r.url, 'https://example.com/b.png');
+
+        const handle = registerSpecialResource('voice', { file: 'voice.amr', url: 'https://example.com/v.amr' });
+        r = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: 'voice', id: handle }));
+        assert.equal(r.ok, true);
+        assert.equal(r.file, 'voice.amr');
+
+        r = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: 'bogus', id: 'x' }));
+        assert.equal(r.ok, false);
+        r = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: 'image', id: 'not_exist_xx' }));
+        assert.equal(r.ok, false);
     }
 
 };

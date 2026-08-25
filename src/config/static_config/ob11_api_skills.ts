@@ -34,6 +34,11 @@ data：
 - \`send_msg\` 不是本工具入口。需要发送时根据场景明确选择 \`send_private_msg\` 或 \`send_group_msg\`。
 - 管理、删除、加好友等有副作用的 action 只有在用户意图明确时调用；\`reason\` 只用于记录意图，不会替代 API 参数，也不会绕过权限。
 
+## 2.5 特殊 ID 与句柄
+- 上下文消息里的消息 ID 是 base36 短 ID（\`[msg_id:xxx]\`/\`[quote:xxx]\`），图片是 \`[img:图片ID]\`，语音/视频/文件消息带 \`handle=句柄\`。
+- 需要把短 ID 还原成协议端能用的原始值（\`message_id\`/\`file\`/\`url\`/\`path\`/\`file_id\` 等）时，先调用 \`resolve_special_id(type=message/image/voice/video/file, id=短ID或句柄)\`。
+- \`get_msg\`/\`delete_msg\`/\`set_essence_msg\` 等 action 的 \`message_id\`、\`get_image\`/\`get_record\` 的 \`file\` 也支持直接传上下文短 ID/句柄，\`call_ob11_api\` 会自动还原；复杂场景建议先用 \`resolve_special_id\` 查询确认。
+
 ## 3. message 格式
 \`message\` 可以是纯文本字符串，也可以是 OneBot 11 消息段数组。消息段统一格式为 \`{"type":"类型","data":{...}}\`。可混排，数组顺序就是发送顺序。
 

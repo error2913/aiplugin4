@@ -26,6 +26,7 @@ const TEMPLATES: { [key: string]: string } = {
 {{else}}
 - [avatar:用户ID] 头像；[group_avatar:群ID] 群头像
 {{/if}}
+- [msg_id:ID]/[quote:ID]/[img:图片ID] 与语音/视频/文件的 handle=句柄 都是短 ID：需要对接协议 API 或读取原始 url/path/file/file_id 时，先用 resolve_special_id 还原
 
 {{{toolPrompt}}}
 

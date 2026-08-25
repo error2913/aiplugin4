@@ -23,6 +23,7 @@ export default class Image {
         base64: 'string',
         format: 'string',
         description: 'string',
+        raw: 'string',
     }
     imageId: string;
     sourceSessionId: string;
@@ -31,6 +32,8 @@ export default class Image {
     base64: string;
     format: string;
     description: string;
+    /** 接收时的原始消息段 data（JSON），含 file/file_unique/md5/subType/url 等，供 resolve_special_id 查询 */
+    raw: string;
 
     constructor() {
         this.imageId = '';
@@ -40,6 +43,7 @@ export default class Image {
         this.base64 = '';
         this.format = '';
         this.description = '';
+        this.raw = '';
     }
 
     get type(): 'url' | 'local' | 'base64' {
@@ -273,9 +277,16 @@ ${img.CQCode}`;
             if (!file) return { content: '', images: [] };
 
             const image = this.createUrlImage(getSessionId(ctx), file);
+            // 保留接收到的原始段字段（file/file_unique/md5/subType/url 等），供 resolve_special_id 查询
+            try {
+                image.raw = JSON.stringify(seg.data || {});
+            } catch (_e) {
+                image.raw = '';
+            }
             const { IMAGE_CONDITION } = Config.image;
             const fmtCondition = parseInt(seal.format(ctx, `{${IMAGE_CONDITION}}`));
             if (fmtCondition === 1) await image.imageToText();
+            Image.save(image); // 持久化原始字段
 
             content += image.description ? `[img:${image.imageId}:${image.description}]` : `[img:${image.imageId}]`;
             images.push(image);

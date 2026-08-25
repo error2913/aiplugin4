@@ -13,16 +13,96 @@ export function transformMsgId(msgId: string | number | null): string {
     if (msgId === null || msgId === '') {
         return '';
     }
-    if (typeof msgId === 'string') {
-        msgId = parseInt(msgId, 10); // 原始十进制 ID；负数保留符号
+    let s: string;
+    if (typeof msgId === 'number') {
+        // 浮点数或超出安全整数范围的数字本身已丢失精度，无法还原，直接拒绝
+        if (!Number.isFinite(msgId) || !Number.isSafeInteger(msgId)) return '';
+        s = String(msgId);
+    } else {
+        s = String(msgId).trim();
+        if (!/^[+-]?\d+$/.test(s)) return '';
     }
-    // 消息 ID 可能为负数（NapCat 等实现会产生负的 int64 ID），
-    // base36 转换会保留符号（如 -123 -> -3f），反向转换可无损还原
-    return isNaN(msgId) ? '' : msgId.toString(36);
+    if (/^[+-]?0+$/.test(s)) return '0';
+    const negative = s.startsWith('-');
+    const digits = s.replace(/^[+-]?/, '').replace(/^0+/, '') || '0';
+    const base36 = decimalToBase36(digits);
+    return negative ? `-${base36}` : base36;
 }
 
-export function transformMsgIdBack(msgId: string): number {
-    return parseInt(msgId, 36); // 将36进制字符串转换为数字（负数保留符号）
+/**
+ * base36 短 ID → 原始十进制消息 ID。
+ * 安全整数（|n| ≤ 2^53-1）返回 number（兼容旧行为），超出安全范围返回精确十进制字符串，避免精度丢失。
+ * 非法输入返回 ''。
+ */
+export function transformMsgIdBack(msgId: string): number | string {
+    const s = String(msgId ?? '').trim();
+    if (!s) return '';
+    const negative = s.startsWith('-');
+    const digits = s.replace(/^[+-]?/, '');
+    if (!digits || !/^[0-9a-z]+$/i.test(digits)) return '';
+    const decimal = base36ToDecimal(digits);
+    if (decimal === '') return '';
+    const signed = (negative ? '-' : '') + decimal;
+    const num = Number(signed);
+    if (Number.isSafeInteger(num)) return num;
+    return signed;
+}
+
+// ---- 大整数 base36 转换辅助（消息 ID 可能超出 2^53，不能用 Number 直接转换） ----
+
+const BASE36_DIGITS = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+/** 十进制字符串乘加：decimal = decimal * multiplier + addend（multiplier/addend 为 0~35 的小整数） */
+function decimalMulAdd(decimal: string, multiplier: number, addend: number): string {
+    let carry = addend;
+    let result = '';
+    for (let i = decimal.length - 1; i >= 0; i--) {
+        const sum = (decimal.charCodeAt(i) - 48) * multiplier + carry;
+        result = String(sum % 10) + result;
+        carry = Math.floor(sum / 10);
+    }
+    while (carry > 0) {
+        result = String(carry % 10) + result;
+        carry = Math.floor(carry / 10);
+    }
+    return result || '0';
+}
+
+/** 十进制字符串除以 36：返回商与余数（长除法，避免 Number 精度丢失） */
+function decimalDivMod36(decimal: string): { quotient: string; remainder: number } {
+    let quotient = '';
+    let remainder = 0;
+    for (let i = 0; i < decimal.length; i++) {
+        const current = remainder * 10 + (decimal.charCodeAt(i) - 48);
+        const q = Math.floor(current / 36);
+        remainder = current % 36;
+        if (quotient !== '' || q > 0) quotient += String(q);
+    }
+    return { quotient: quotient || '0', remainder };
+}
+
+/** 非负十进制字符串 → base36（大整数安全） */
+function decimalToBase36(decimal: string): string {
+    let n = decimal.replace(/^0+/, '') || '0';
+    if (n === '0') return '0';
+    let result = '';
+    while (n !== '0') {
+        const { quotient, remainder } = decimalDivMod36(n);
+        result = BASE36_DIGITS[remainder] + result;
+        n = quotient;
+    }
+    return result;
+}
+
+/** 非负 base36 字符串 → 十进制字符串（大整数安全）；含非法字符返回 '' */
+function base36ToDecimal(base36: string): string {
+    let decimal = '0';
+    for (const ch of base36.toLowerCase()) {
+        const digit = BASE36_DIGITS.indexOf(ch);
+        if (digit < 0) return '';
+        decimal = decimalMulAdd(decimal, 36, digit);
+    }
+    return decimal;
 }
 
 /**

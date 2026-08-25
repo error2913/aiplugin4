@@ -205,7 +205,7 @@ async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, te
             }
             case "quote": {
                 const backId = transformMsgIdBack(token.content);
-                if (Number.isFinite(backId)) {
+                if (backId !== "") {
                     flush();
                     out.push({ type: "reply", data: { id: String(backId) } });
                 }

@@ -10,7 +10,8 @@ import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
-import { expandMilkySegments, formatFileSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
+import { registerSpecialResource } from "./utils/special_id";
+import { expandMilkySegments, formatMediaSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
 import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
 const log = logger.withTag('pipeline');
@@ -105,17 +106,22 @@ export class MessagePipeline {
                     break;
                 }
                 case 'record': {
-                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收并转成可读文本
-                    result.push({ type: 'text', data: { text: '【语音】' } });
+                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收：保留原始字段并登记句柄，
+                    // AI 可通过 resolve_special_id(type=voice, id=句柄) 获取原始文件字段。
+                    const recordHandle = registerSpecialResource('voice', data);
+                    result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', data, recordHandle) } });
                     break;
                 }
                 case 'file': {
-                    // 保留文件名之外的 path/url/file_id 等字段，供 AI 继续调用文件工具读取或导入。
-                    result.push({ type: 'text', data: { text: formatFileSegmentText(data) } });
+                    // 保留原始字段并登记句柄，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
+                    const fileHandle = registerSpecialResource('file', data);
+                    result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', data, fileHandle) } });
                     break;
                 }
                 case 'video': {
-                    result.push({ type: 'text', data: { text: `【视频】${data.file || ''}` } });
+                    // 保留原始字段并登记句柄，AI 可通过 resolve_special_id(type=video, id=句柄) 查询
+                    const videoHandle = registerSpecialResource('video', data);
+                    result.push({ type: 'text', data: { text: formatMediaSegmentText('视频', data, videoHandle) } });
                     break;
                 }
                 case 'music': {

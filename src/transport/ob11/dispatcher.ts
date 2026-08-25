@@ -5,6 +5,7 @@ import { resolveSendMessage, SendSessionLike } from "./message_segments";
 import { Ob11NetBackend } from "./ob11_net_backend";
 import { failure, serializeResult } from "./result";
 import { SealNativeBackend } from "./seal_native_backend";
+import { normalizeSpecialIdParams } from "./special_id_params";
 import { Ob11CallContext, Ob11Result } from "./types";
 
 const log = Logger.withTag('ob11');
@@ -49,6 +50,9 @@ export async function dispatchOb11Api(
         params = { ...params, message: await resolveSendMessage(context.ctx, context.session, params.message) };
     }
 
+    // 特殊 ID 归一化：模型可能直接使用上下文里的短 ID（[msg_id:base36]/[quote:base36]/[img:图片ID]/[voice:句柄]），
+    // 调用前还原为协议端需要的原始 message_id/file/url，避免把渲染标签或 base36 短 ID 原样外发。
+    params = normalizeSpecialIdParams(normalizedAction, params || {});
     if (ob11NetBackend.canHandle(normalizedAction)) {
         return ob11NetBackend.call(context, normalizedAction, params || {});
     }

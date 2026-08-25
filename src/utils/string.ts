@@ -7,6 +7,7 @@ import { Context } from "../context/context";
 import { logger } from "../logger";
 import Image from "../resource/image";
 
+import { registerSpecialResource } from "./special_id";
 import { getRawId, normalizeGroupId, normalizeUserId } from "./target_id";
 import { getMilkyReplyQuoteId, resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
 
@@ -140,31 +141,55 @@ export interface MessageSegment {
  * 文件消息的完整可读表示。不要只显示 name：OB11/不同适配器可能把真实路径、URL、
  * file_id、file_unique 等字段放在同一段里，AI 需要这些字段才能继续调用文件工具。
  */
+function pickFirstText(...values: any[]): string {
+    for (const value of values) {
+        if (value === undefined || value === null) continue;
+        const text = String(value).replace(/[\r\n]+/g, ' ').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
 export function formatFileSegmentText(rawData: any): string {
     const data = rawData && typeof rawData === 'object' ? rawData : {};
     const nestedFile = data.file && typeof data.file === 'object' ? data.file : {};
-    const pick = (...values: any[]): string => {
-        for (const value of values) {
-            if (value === undefined || value === null) continue;
-            const text = String(value).replace(/[\r\n]+/g, ' ').trim();
-            if (text) return text;
-        }
-        return '';
-    };
-    const name = pick(data.name, data.file_name, data.filename, nestedFile.name, nestedFile.file_name);
-    const path = pick(data.path, data.local_path, nestedFile.path, nestedFile.local_path);
-    const file = pick(typeof data.file === 'string' ? data.file : '', nestedFile.file);
-    const url = pick(data.url, data.file_url, data.download_url, nestedFile.url, nestedFile.file_url);
-    const fileId = pick(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
-    const fileUnique = pick(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
-    const size = pick(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
-    const mime = pick(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
+    const name = pickFirstText(data.name, data.file_name, data.filename, nestedFile.name, nestedFile.file_name);
+    const path = pickFirstText(data.path, data.local_path, nestedFile.path, nestedFile.local_path);
+    const file = pickFirstText(typeof data.file === 'string' ? data.file : '', nestedFile.file);
+    const url = pickFirstText(data.url, data.file_url, data.download_url, nestedFile.url, nestedFile.file_url);
+    const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
+    const fileUnique = pickFirstText(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
+    const size = pickFirstText(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
+    const mime = pickFirstText(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
     const label = name || path || file || url || fileId || '未知文件';
     const fields = [
         ['name', name], ['path', path], ['file', file], ['url', url],
         ['file_id', fileId], ['file_unique', fileUnique], ['size', size], ['mime', mime]
     ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`);
     return `【文件】${label}${fields.length ? `\n${fields.join('\n')}` : ''}`;
+}
+
+/**
+ * 语音/视频等媒体消息的完整可读表示：除可读字段外还带句柄（handle=xxx），
+ * AI 可用 resolve_special_id(type=voice/video/file, id=句柄) 查询原始字段。
+ */
+export function formatMediaSegmentText(label: string, rawData: any, handle: string): string {
+    const data = rawData && typeof rawData === 'object' ? rawData : {};
+    const nestedFile = data.file && typeof data.file === 'object' ? data.file : {};
+    const name = pickFirstText(data.name, data.file_name, data.filename, nestedFile.name, nestedFile.file_name);
+    const path = pickFirstText(data.path, data.local_path, nestedFile.path, nestedFile.local_path);
+    const file = pickFirstText(typeof data.file === 'string' ? data.file : '', nestedFile.file);
+    const url = pickFirstText(data.url, data.file_url, nestedFile.url, nestedFile.file_url);
+    const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
+    const fileUnique = pickFirstText(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
+    const size = pickFirstText(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
+    const mime = pickFirstText(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
+    const labelName = name || path || file || url || fileId || '未知';
+    const fields = [
+        ['handle', handle], ['name', name], ['path', path], ['file', file], ['url', url],
+        ['file_id', fileId], ['file_unique', fileUnique], ['size', size], ['mime', mime]
+    ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`);
+    return `【${label}】${labelName}${fields.length ? `\n${fields.join('\n')}` : ''}`;
 }
 
 /** 为忽略/触发正则生成兼容 CQ 码的匹配文本，不改变消息段本身。 */
@@ -212,7 +237,9 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                 break;
             }
             case 2: { // 文件 File
-                result.push({ type: 'text', data: { text: formatFileSegmentText(seg) } });
+                // 保留原始文件字段并登记句柄，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
+                const fileHandle = registerSpecialResource('file', seg);
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', seg, fileHandle) } });
                 break;
             }
             case 3: { // 图片 Image
@@ -224,7 +251,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                             ? ((seg.file as any).url || (seg.file as any).file || '')
                             : '')
                     : '';
-                result.push({ type: 'image', data: { url: url || file || '' } });
+                result.push({ type: 'image', data: { url: url || file || '', file } });
                 break;
             }
             case 4: { // 文字转语音 TTS
@@ -238,7 +265,18 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                 break;
             }
             case 6: { // 语音 Record
-                result.push({ type: 'text', data: { text: '【语音】' } });
+                // RecordElement.file 是 FileElement（含 url/file/contentType），保留原始字段并登记句柄，
+                // AI 可通过 resolve_special_id(type=voice, id=句柄) 获取原始文件字段。
+                const hasFile = 'file' in seg;
+                const fileValue = hasFile ? seg.file : undefined;
+                const fileEl = fileValue && typeof fileValue === 'object' ? (fileValue as any) : null;
+                const rawData = {
+                    file: fileEl ? (fileEl.file || fileEl.url || '') : (typeof fileValue === 'string' ? fileValue : ''),
+                    url: fileEl ? fileEl.url : '',
+                    content_type: fileEl ? fileEl.contentType : ''
+                };
+                const handle = registerSpecialResource('voice', rawData);
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', rawData, handle) } });
                 break;
             }
             case 7: { // 表情 Face
@@ -436,8 +474,8 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 const msgId = seg.content;
                 if (msgId) {
                     const backId = transformMsgIdBack(msgId);
-                    // msgid 可能为负数（base36 保留符号），仅当可解析时才生成引用，避免 id=NaN
-                    if (Number.isFinite(backId)) text += `[CQ:reply,id=${backId}]`;
+                    // msgid 可能为负数（base36 保留符号）或超出 2^53 的精确十进制字符串，仅当可解析时才生成引用
+                    if (backId !== '') text += `[CQ:reply,id=${backId}]`;
                 }
                 break;
             }
