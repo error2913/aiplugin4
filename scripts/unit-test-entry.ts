@@ -9,6 +9,7 @@ import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../sr
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripRenderTags } from "../src/utils/string";
+import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isRateLimited, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -450,6 +451,75 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await engine.refreshMentalModels('user_m2');
         const model = engine.listMentalModels('user_m2')[0];
         assert.ok(model.version > 1, 'MentalModel 应被刷新版本号');
+    },
+
+    /** 通知事件白名单解析：逗号/换行/空行/大小写容错 */
+    testParseNoticeWhitelist(): void {
+        const set = parseNoticeWhitelist(['group_ban, group_admin', 'lucky_king', '', ' group_upload,', 'Group_Whole_Mute']);
+        assert.equal(set.has('group_ban'), true);
+        assert.equal(set.has('group_admin'), true);
+        assert.equal(set.has('lucky_king'), true);
+        assert.equal(set.has('group_upload'), true);
+        assert.equal(set.has('group_whole_mute'), true, '应统一转小写');
+        assert.equal(set.has(''), false, '空项不应入白名单');
+        assert.equal(set.has('nope'), false);
+    },
+
+    /** ob11 通知事件文本：禁言/管理员/文件上传/运气王/荣誉/poke/群名变更/未知类型 */
+    testBuildNoticeText(): void {
+        assert.equal(buildNoticeText({ notice_type: 'group_ban', sub_type: 'ban', user_id: 1001, operator_id: 1002, duration: 60 }, 'QQ'), '【群事件】QQ:1002 将 QQ:1001 禁言 60 秒');
+        assert.equal(buildNoticeText({ notice_type: 'group_ban', sub_type: 'lift_ban', user_id: 1001, operator_id: 1002 }, 'QQ'), '【群事件】QQ:1002 解除了 QQ:1001 的禁言');
+        assert.equal(buildNoticeText({ notice_type: 'group_admin', sub_type: 'set', user_id: 1001 }, 'QQ'), '【群事件】QQ:1001 被设为管理员');
+        assert.equal(buildNoticeText({ notice_type: 'group_admin', sub_type: 'unset', user_id: 1001 }, 'QQ'), '【群事件】QQ:1001 被取消管理员');
+        assert.equal(buildNoticeText({ notice_type: 'group_upload', user_id: 1001, file: { name: '规则.pdf', size: 2048 } }, 'QQ'), '【群事件】QQ:1001 上传了文件「规则.pdf」（2.0KB）');
+        assert.equal(buildNoticeText({ notice_type: 'group_upload', user_id: 1001, file: { name: '小文件.txt', size: 512 } }, 'QQ'), '【群事件】QQ:1001 上传了文件「小文件.txt」（512B）');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'lucky_king', user_id: 1001 }, 'QQ'), '【群事件】QQ:1001 抢到了运气王红包');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'honor', user_id: 1001, honor_type: 'talkative' }, 'QQ'), '【群事件】QQ:1001 获得群荣誉「talkative」');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'poke', user_id: 1001 }, 'QQ'), '', 'poke 由原生 onPoke 处理，不应生成事件文本');
+        assert.equal(buildNoticeText({ notice_type: 'group_name_change', group_name: '新群名' }, 'QQ'), '【群事件】群名称变更为「新群名」');
+        assert.equal(buildNoticeText({ notice_type: 'group_whole_mute', sub_type: 'off' }, 'QQ'), '【群事件】全员禁言已关闭');
+        assert.equal(buildNoticeText({ notice_type: 'unknown_type', user_id: 1001 }, 'QQ'), '', '未知类型返回空');
+    },
+
+    /** ob11 请求事件文本：好友/入群申请（含备注截断） */
+    testBuildRequestText(): void {
+        assert.equal(buildRequestText({ request_type: 'friend', user_id: 1001, comment: '我是小明' }, 'QQ'), '【好友请求】QQ:1001 请求添加好友：我是小明');
+        assert.equal(buildRequestText({ request_type: 'group', sub_type: 'add', user_id: 1001, group_id: 2001, comment: '想进群' }, 'QQ'), '【入群请求】QQ:1001 申请加入群 QQ-Group:2001：想进群');
+        assert.equal(buildRequestText({ request_type: 'group', sub_type: 'invite', user_id: 1001, group_id: 2001 }, 'QQ'), '【入群请求】QQ:1001 邀请加入群 QQ-Group:2001');
+        assert.equal(buildRequestText({ request_type: 'unknown', user_id: 1001 }, 'QQ'), '');
+    },
+
+    /** 原生海豹回调事件文本（Phase 3 统一入口） */
+    testBuildNativeNoticeText(): void {
+        assert.equal(buildNativeNoticeText({ noticeType: 'group_joined' }), '【群事件】本机器人加入本群');
+        assert.equal(buildNativeNoticeText({ noticeType: 'group_increase', userId: 'QQ:1001' }), '【群事件】QQ:1001 加入本群');
+        assert.equal(buildNativeNoticeText({ noticeType: 'group_decrease', subType: 'kick', userId: 'QQ:1001', operatorId: 'QQ:1002' }), '【群事件】QQ:1002 将 QQ:1001 移出本群');
+        assert.equal(buildNativeNoticeText({ noticeType: 'group_decrease', subType: 'kick_me' }), '【群事件】本机器人被移出群聊');
+        assert.equal(buildNativeNoticeText({ noticeType: 'group_decrease', userId: 'QQ:1001' }), '【群事件】QQ:1001 退出本群');
+        assert.equal(buildNativeNoticeText({ noticeType: 'group_recall', userId: 'QQ:1001' }), '【群事件】QQ:1001 撤回了一条消息');
+        assert.equal(buildNativeNoticeText({ noticeType: 'friend_recall', userId: 'QQ:1001' }), '【好友事件】QQ:1001 撤回了一条消息');
+        assert.equal(buildNativeNoticeText({ noticeType: 'friend_add', userId: 'QQ:1001' }), '【好友事件】已与 QQ:1001 成为好友');
+        assert.equal(buildNativeNoticeText({ noticeType: 'nope' }), '');
+    },
+
+    /** 事件去重：同 key 窗口内只录一次；限流：60s 内超过上限丢弃 */
+    testEventDedupAndRateLimit(): void {
+        resetEventGuards();
+        const now = 1000000;
+        assert.equal(isDuplicateEvent('k1', now), false, '首次记录不重复');
+        assert.equal(isDuplicateEvent('k1', now + 1000), true, '窗口内同 key 重复');
+        assert.equal(isDuplicateEvent('k2', now + 1000), false, '不同 key 不重复');
+        assert.equal(isDuplicateEvent('k1', now + 4000), false, '窗口过期后不再重复');
+
+        resetEventGuards();
+        assert.equal(isRateLimited('s1', 2, now), false);
+        assert.equal(isRateLimited('s1', 2, now + 1000), false);
+        assert.equal(isRateLimited('s1', 2, now + 2000), true, '60s 内超过上限');
+        assert.equal(isRateLimited('s2', 2, now + 2000), false, '不同会话独立计数');
+        assert.equal(isRateLimited('s1', 2, now + 70000), false, '窗口滚动后恢复');
+        resetEventGuards();
+        assert.equal(isRateLimited('s3', 0, now), false, 'limit<=0 不限制');
+        resetEventGuards();
     }
 
 };

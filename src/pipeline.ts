@@ -2,6 +2,7 @@
 import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
+import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isRateLimited, parseNoticeWhitelist } from "./event/notice";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
@@ -199,7 +200,21 @@ export class MessagePipeline {
                         log.exception('ob11 事件消息处理出错', e);
                     }
                 };
-                log.debug('已订阅 ob11 事件分发，额外接收卡片/视频/音乐/文件/语音/合并转发等消息段');
+                ed.onNoticeEvent = async (_epId: string, event: any) => {
+                    try {
+                        await MessagePipeline.handleOb11NoticeEvent(event);
+                    } catch (e) {
+                        log.exception('ob11 通知事件处理出错', e);
+                    }
+                };
+                ed.onRequestEvent = async (_epId: string, event: any) => {
+                    try {
+                        await MessagePipeline.handleOb11RequestEvent(event);
+                    } catch (e) {
+                        log.exception('ob11 请求事件处理出错', e);
+                    }
+                };
+                log.debug('已订阅 ob11 事件分发：额外接收卡片/视频/音乐/文件/语音/合并转发等消息段，以及白名单通知/请求事件');
             }).catch((e: any) => {
                 log.exception('订阅 ob11 事件分发失败', e);
             });
@@ -273,6 +288,155 @@ export class MessagePipeline {
 
         // 核心没有对应回调时，依赖事件作为完整消息兜底，不能只保留额外段。
         await MessagePipeline.handleNonCommand(ctx, msg, message, { source: 'dependency' });
+    }
+
+    /** ob11 依赖通知事件（OneBot notice）→ 文本提示词录入上下文：仅白名单内类型，仅作背景不触发 AI */
+    static async handleOb11NoticeEvent(event: any): Promise<void> {
+        if (!event || event.post_type !== 'notice' || !event.notice_type) return;
+        const { RECEIVE_NOTICE, NOTICE_TYPES } = Config.event;
+        if (!RECEIVE_NOTICE) return;
+
+        const noticeType = String(event.notice_type);
+        const subType = String(event.sub_type || '');
+        const whitelist = parseNoticeWhitelist(NOTICE_TYPES);
+        if (!whitelist.has(noticeType) && !whitelist.has(subType)) {
+            log.debug(`ob11 通知事件不在白名单，跳过: type=${noticeType} sub=${subType}`);
+            return;
+        }
+
+        const eps = seal.getEndPoints();
+        let epId = `QQ:${event.self_id}`;
+        for (const ep of eps) {
+            if (ep.userId === epId) break;
+            if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
+        }
+        const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+
+        const isGroup = !!(event.group_id || noticeType.startsWith('group_'));
+        let sid = '';
+        if (isGroup && event.group_id) sid = `${prefix}-Group:${event.group_id}`;
+        else if (event.user_id) sid = `${prefix}:${event.user_id}`;
+        if (!sid) {
+            log.debug(`ob11 通知事件无法定位会话，跳过: type=${noticeType}`);
+            return;
+        }
+
+        const text = buildNoticeText(event, prefix);
+        if (!text) {
+            log.debug(`ob11 通知事件无可读文本，跳过: type=${noticeType} sub=${subType}`);
+            return;
+        }
+
+        const userId = event.user_id ? `${prefix}:${event.user_id}` : '';
+        const messageId = event.message_id !== undefined && event.message_id !== null ? String(event.message_id) : '';
+        MessagePipeline.recordEventPrompt({
+            sid,
+            text,
+            systemName: '群事件提示',
+            epId,
+            eventType: noticeType,
+            userId,
+            messageId,
+        });
+    }
+
+    /** ob11 依赖请求事件（OneBot request）→ 文本提示词：默认仅日志，开启接收后录入上下文 */
+    static async handleOb11RequestEvent(event: any): Promise<void> {
+        if (!event || event.post_type !== 'request' || !event.request_type) return;
+
+        const eps = seal.getEndPoints();
+        let epId = `QQ:${event.self_id}`;
+        for (const ep of eps) {
+            if (ep.userId === epId) break;
+            if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
+        }
+        const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+
+        let sid = '';
+        if (event.request_type === 'group' && event.group_id) sid = `${prefix}-Group:${event.group_id}`;
+        else if (event.user_id) sid = `${prefix}:${event.user_id}`;
+        if (!sid) return;
+
+        const text = buildRequestText(event, prefix);
+        if (!text) return;
+
+        if (!Config.event.RECEIVE_REQUEST) {
+            log.debug(`ob11 请求事件（未开启接收，仅记录日志）: ${text}`);
+            return;
+        }
+
+        const userId = event.user_id ? `${prefix}:${event.user_id}` : '';
+        MessagePipeline.recordEventPrompt({
+            sid,
+            text,
+            systemName: '请求事件提示',
+            epId,
+            eventType: `request:${event.request_type}`,
+            userId,
+            messageId: '',
+        });
+    }
+
+    /** 原生海豹回调事件（成员加入/退出/撤回/加好友/入驻）：白名单含对应类型时录入，与 ob11 依赖双路径共用去重 */
+    static handleNativeNoticeEvent(epId: string, sid: string, info: { noticeType: string; subType?: string; userId?: string; operatorId?: string; messageId?: string }): void {
+        const { RECEIVE_NOTICE, NOTICE_TYPES } = Config.event;
+        if (!RECEIVE_NOTICE) return;
+        const whitelist = parseNoticeWhitelist(NOTICE_TYPES);
+        if (!whitelist.has(info.noticeType)) return;
+        const text = buildNativeNoticeText(info);
+        if (!text) return;
+        MessagePipeline.recordEventPrompt({
+            sid,
+            text,
+            systemName: '群事件提示',
+            epId,
+            eventType: info.noticeType,
+            userId: info.userId || '',
+            messageId: info.messageId || '',
+        });
+    }
+
+    /** 事件提示词统一入库：黑名单 → 去重 → 限流 → 会话创建策略 → 录入上下文（仅背景，不触发 AI） */
+    private static recordEventPrompt(opts: {
+        sid: string;
+        text: string;
+        systemName: string;
+        epId: string;
+        eventType: string;
+        userId: string;
+        messageId?: string;
+    }): boolean {
+        const { EVENT_RATE_LIMIT, EVENT_MAX_LENGTH, EVENT_CREATE_SESSION } = Config.event;
+        const blockReason = BlockManager.checkBlock(opts.sid);
+        if (blockReason) {
+            log.debug(`事件忽略：会话<${opts.sid}>在黑名单（${blockReason}）`);
+            return false;
+        }
+        if (opts.userId) {
+            const userBlockReason = BlockManager.checkBlock(opts.userId);
+            if (userBlockReason) {
+                log.debug(`事件忽略：用户<${opts.userId}>在黑名单（${userBlockReason}）`);
+                return false;
+            }
+        }
+        if (isDuplicateEvent(buildEventDedupKey(opts.epId, opts.sid, opts.eventType, opts.userId, opts.messageId || ''))) {
+            log.debug(`事件去重丢弃：${opts.eventType} @ ${opts.sid}`);
+            return false;
+        }
+        if (isRateLimited(opts.sid, EVENT_RATE_LIMIT)) {
+            log.debug(`事件限流丢弃：${opts.eventType} @ ${opts.sid}`);
+            return false;
+        }
+        const session = getSession(opts.sid);
+        if (!EVENT_CREATE_SESSION && session.context.messages.length === 0) {
+            log.debug(`事件忽略：会话<${opts.sid}>不存在且未开启自动建会话`);
+            return false;
+        }
+        const text = truncateText(opts.text, EVENT_MAX_LENGTH);
+        session.context.addSystemUserMessage(text, opts.systemName);
+        session.save();
+        log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
+        return true;
     }
 
     /** 非指令消息：过滤后进入会话，由智能体决定是否触发回复 */

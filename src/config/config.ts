@@ -2,6 +2,7 @@ import Logger from "../logger";
 
 import BackendConfig from "./configs/backend";
 import BaseConfig from "./configs/base";
+import EventConfig from "./configs/event";
 import ImageConfig from "./configs/image";
 import MemoryConfig from "./configs/memory";
 import MessageConfig from "./configs/message";
@@ -32,6 +33,7 @@ const configMap = {
     memory: MemoryConfig,
     image: ImageConfig,
     backend: BackendConfig,
+    event: EventConfig,
     resource: ResourceConfig,
 } as const;
 

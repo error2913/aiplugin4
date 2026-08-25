@@ -379,6 +379,7 @@ export function buildContent(message: ContextMessage): string {
                 }
                 if (item.userId) lastUserId = item.userId;
                 return from
+                    + (item.systemName ? `[system:${item.systemName}]` : '')
                     + (item.time ? `[time:${fmtDate(item.time)}]` : '')
                     + (item.messageId ? `[msg_id:${item.messageId}]` : '')
                     + (item.text || '');

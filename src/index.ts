@@ -69,6 +69,79 @@ function main() {
     else ext.onNotCommandReceived(ctx, msg);
   }
 
+  // 原生已覆盖的群/好友事件（成员加入/退出/撤回/加好友/入驻）：
+  // 默认白名单不含这些类型（避免与原生回调重复），仅当用户显式加入白名单时才录入上下文；
+  // 与 ob11 依赖的通知事件双路径共用 3s 事件级去重，防止同一条事件被记录两次。
+  ext.onGroupMemberJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
+    try {
+      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
+        noticeType: 'group_increase',
+        userId: msg.sender.userId,
+      });
+    } catch (e) {
+      log.exception('群成员加入事件处理出错', e);
+    }
+  };
+
+  ext.onGroupLeave = (ctx: seal.MsgContext, event: seal.GroupLeaveEvent) => {
+    try {
+      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${event.groupId}`, {
+        noticeType: 'group_decrease',
+        subType: event.operatorId ? 'kick' : 'leave',
+        userId: `${prefix}:${event.userId}`,
+        operatorId: event.operatorId ? `${prefix}:${event.operatorId}` : '',
+      });
+    } catch (e) {
+      log.exception('群成员退出事件处理出错', e);
+    }
+  };
+
+  ext.onMessageDeleted = (ctx: seal.MsgContext, msg: seal.Message) => {
+    try {
+      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      const messageId = msg.rawId !== undefined && msg.rawId !== null ? String(msg.rawId) : '';
+      if (msg.messageType === 'group') {
+        MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
+          noticeType: 'group_recall',
+          userId: msg.sender.userId,
+          messageId,
+        });
+      } else {
+        MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, msg.sender.userId, {
+          noticeType: 'friend_recall',
+          userId: msg.sender.userId,
+          messageId,
+        });
+      }
+    } catch (e) {
+      log.exception('消息撤回事件处理出错', e);
+    }
+  };
+
+  ext.onBecomeFriend = (ctx: seal.MsgContext, msg: seal.Message) => {
+    try {
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, msg.sender.userId, {
+        noticeType: 'friend_add',
+        userId: msg.sender.userId,
+      });
+    } catch (e) {
+      log.exception('成为好友事件处理出错', e);
+    }
+  };
+
+  ext.onGroupJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
+    try {
+      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
+        noticeType: 'group_joined',
+      });
+    } catch (e) {
+      log.exception('加入群聊事件处理出错', e);
+    }
+  };
+
   //接受非指令消息
   ext.onNotCommandReceived = (ctx: seal.MsgContext, msg: seal.Message): void | Promise<void> => {
     try {
