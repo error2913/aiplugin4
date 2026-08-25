@@ -8,12 +8,23 @@ export default class EventConfig {
             "group_ban",
             "group_admin",
             "group_upload",
+            "group_increase",
+            "group_decrease",
+            "group_recall",
+            "group_joined",
             "group_name_change",
             "group_disband",
             "group_whole_mute",
+            "group_message_reaction",
+            "group_essence_message_change",
+            "friend_recall",
+            "friend_add",
+            "friend_file_upload",
+            "peer_pin_change",
+            "notify",
             "lucky_king",
             "honor"
-        ], "每行一个 notice 类型，仅白名单内的事件会录入上下文。poke/group_increase/group_recall/friend_add/group_decrease 等海豹原生已覆盖的类型默认不在此列（避免与原生回调重复），如确需收录可自行加入，事件级去重会防止双录", "事件接收");
+        ], "每行一个 notice 类型，仅白名单内的事件会录入上下文。默认包含全部可转换事件类型（元事件除外）：元事件（心跳/生命周期）不属于通知/请求事件，始终不录入；poke 虽属 notify 子类型但由原生 onPoke 处理、不生成事件文本，实际不会录入；原生与 ob11 依赖双路径由事件级去重防双录，如需排除可自行删除", "事件接收");
         seal.ext.registerIntConfig(ext, "每会话每分钟事件上限", 10, "同一会话 60 秒内最多录入的事件条数，超出丢弃（防刷屏）；0 表示不限制", "事件接收");
         seal.ext.registerIntConfig(ext, "单条事件文本最大长度", 300, "事件提示词超长时截断（字符数）", "事件接收");
         seal.ext.registerBoolConfig(ext, "接收请求事件", false, "开启后把好友/入群申请事件录入上下文（默认仅日志，避免隐私与打扰）", "事件接收");
