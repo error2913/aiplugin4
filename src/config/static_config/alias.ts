@@ -11,6 +11,7 @@ export const ALIAS_MAP: { [key: string]: string } = {
     "ass": "assistant",
     "img": "image",
     "memo": "memory",
+    "cons": "consolidate",
     "p": "private",
     "g": "group",
     "del": "delete",

@@ -152,7 +152,7 @@ export async function buildSystemPromptContent(
         ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');
     const summaryTask = Config.memory.SUMMARY
-        ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildSummaryPrompt(session))
+        ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
         : Promise.resolve('');
     const knowledgeTask = Config.memory.KNOWLEDGE
         ? getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
@@ -168,3 +168,4 @@ export async function buildSystemPromptContent(
     // 防注入：长期记忆/总结记忆/知识库等外部内容可能夹带内部上下文标签，system prompt 出口统一兜底剥离
     return stripInternalTags(content);
 }
+

@@ -1,4 +1,4 @@
-// 记忆管理器：统一长期/观察/知识库的读取入口，底层使用 Hindsight-like 新引擎。
+// 记忆管理器：统一长期/观察/知识库的读取入口，底层只使用 Hindsight-like 新引擎。
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import { SUMMARY_PROMPT_TEMPLATE } from "../prompt/templates";
@@ -10,14 +10,12 @@ import User from "../session/user";
 import { buildContent } from "../utils/message";
 
 import { knowledgeService } from "./knowledge";
-import MemoryItem from "./memory_item";
 import { bumpMemoryRevision } from "./revision";
 import { parseLooseJson } from "./session_memory";
-import { MemoryFactResult, searchOptions } from "./types";
 import { resolveBankId } from "./v2/bank_resolver";
 import { getMemoryEngine } from "./v2/index";
 import { buildMemoryPrompt } from "./v2/prompt";
-import type { MemoryUnit } from "./v2/types";
+import type { MemoryUnit, RecallOptions, RetainResult } from "./v2/types";
 
 function bankForSession(session: Session) {
     const kind = session.sessionType === 'group' ? 'group' : 'user';
@@ -58,8 +56,8 @@ export class MemoryManager {
         });
     }
 
-    /** 观察记忆段：由 Observation 与 MentalModel 替代旧 summaries */
-    static buildSummaryPrompt(session: Session): string {
+    /** 观察记忆段：由 Observation 替代旧 summaries */
+    static buildObservationPrompt(session: Session): string {
         const { SUMMARY } = Config.memory;
         if (!SUMMARY) return '';
         const engine = getMemoryEngine();
@@ -77,8 +75,8 @@ export class MemoryManager {
         return knowledgeService.buildKnowledgePrompt();
     }
 
-    /** 写入记忆：统一入口（内部含去重合并与向量生成），返回动作与记忆 ID */
-    static async addMemory(
+    /** 写入记忆：统一入口，返回新引擎结果 */
+    static async retainMemory(
         _ctx: seal.MsgContext | null,
         session: Session,
         uiList: UserInfo[],
@@ -87,9 +85,9 @@ export class MemoryManager {
         _images: Image[],
         text: string,
         visibility: 'public' | 'private' = 'public',
-        type?: MemoryItem['type'],
+        type?: string,
         importance?: number
-    ): Promise<MemoryFactResult> {
+    ): Promise<RetainResult> {
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
         engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
@@ -109,39 +107,19 @@ export class MemoryManager {
             factType: type === 'event' ? 'experience' : 'world',
             verbatim: true,
         });
-        const id = result.unitIds[0];
         bumpMemoryRevision();
-        return {
-            action: result.action === 'merged' ? 'merged' : result.action === 'updated' ? 'updated' : result.action === 'noop' ? 'noop' : 'added',
-            id,
-        };
-    }
-
-    /** 检索记忆：统一入口（转换为旧 MemoryItem 视图，工具层可逐步迁移到 searchV2） */
-    static async search(session: Session, text: string, options: searchOptions): Promise<MemoryItem[]> {
-        const engine = getMemoryEngine();
-        const bank = bankForSession(session);
-        const callerSessionId = options.sessionId || session.sessionId;
-        const results = await engine.recall(bank.bankId, text, {
-            tags: options.tags,
-            maxTokens: options.topK * 200,
-            budget: 'mid',
-            types: ['world', 'experience', 'observation'],
-        });
-        return results
-            .filter(r => canSeeMemoryUnit(r.unit, callerSessionId))
-            .map(r => toLegacyMemoryItem(r.unit));
+        return result;
     }
 
     /** 检索记忆：直接返回新引擎单元 */
-    static async searchV2(session: Session, text: string, options: searchOptions): Promise<MemoryUnit[]> {
+    static async recallMemory(session: Session, text: string, options: Partial<RecallOptions> = {}): Promise<MemoryUnit[]> {
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
-        const callerSessionId = options.sessionId || session.sessionId;
+        const callerSessionId = session.sessionId;
         const results = await engine.recall(bank.bankId, text, {
             tags: options.tags,
-            maxTokens: options.topK * 200,
-            budget: 'mid',
+            maxTokens: options.maxTokens || 2048,
+            budget: options.budget || 'mid',
             types: ['world', 'experience', 'observation'],
         });
         return results
@@ -149,11 +127,18 @@ export class MemoryManager {
             .map(r => r.unit);
     }
 
-    /** 触发巩固（原观察生成/巩固由新引擎 Consolidation 替代） */
-    static async summarize(session: Session) {
+    /** 触发巩固 */
+    static async consolidateMemory(session: Session) {
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
         return engine.consolidate(bank.bankId);
+    }
+
+    /** 基于记忆推理 */
+    static async reflectMemory(session: Session, query: string) {
+        const engine = getMemoryEngine();
+        const bank = bankForSession(session);
+        return engine.reflect(bank.bankId, query);
     }
 
     /**
@@ -231,31 +216,11 @@ export class MemoryManager {
                 verbatim: true,
             });
         }
-        bumpMemoryRevision();
 
+        bumpMemoryRevision();
         session.context.lastSummarizedIndex = end;
         await engine.consolidate(bank.bankId);
     }
-}
-
-function toLegacyMemoryItem(unit: MemoryUnit): MemoryItem {
-    const m = new MemoryItem();
-    m.id = unit.id;
-    m.sessionId = unit.bankId;
-    m.type = unit.factType === 'observation' ? 'text' : unit.factType === 'experience' ? 'event' : 'fact';
-    m.visibility = unit.tags.includes('vis:private') ? 'private' : 'public';
-    m.createAt = unit.createdAt;
-    m.lastAccessedAt = unit.lastAccessedAt;
-    m.accessCount = unit.accessCount;
-    m.importance = unit.importance;
-    m.stale = unit.state !== 'valid';
-    m.content = unit.text;
-    m.vector = unit.embedding;
-    m.tags = unit.tags;
-    m.relatedMemories = [];
-    m.users = unit.tags.filter(t => t.startsWith('user:')).map(t => t.slice(5));
-    m.groups = unit.tags.filter(t => t.startsWith('group:')).map(t => t.slice(6));
-    return m;
 }
 
 function canSeeMemoryUnit(unit: MemoryUnit, callerSessionId: string): boolean {
@@ -263,6 +228,4 @@ function canSeeMemoryUnit(unit: MemoryUnit, callerSessionId: string): boolean {
     if (privateTags.length === 0) return true;
     return privateTags.some(t => t === `vis:private:${callerSessionId}`);
 }
-
-
 

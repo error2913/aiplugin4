@@ -1,6 +1,7 @@
 // .ai memo：个人/群聊/观察记忆与设定管理
 import Config from "../../config/config";
 import { MemoryManager } from "../../memory/manager";
+import { bumpMemoryRevision } from "../../memory/revision";
 import { resolveBankId } from "../../memory/v2/bank_resolver";
 import { getMemoryEngine } from "../../memory/v2/index";
 import { Session } from "../../session/session";
@@ -26,17 +27,20 @@ export function registerCmdMemory() {
     const cmd = new SubCmd('memory');
     cmd.desc = '记忆相关操作';
     cmd.help = `帮助:
-     【.ai memo status [用户ID]】查看记忆状态，传用户ID时查看对应个人记忆
-     【.ai memo [p/g] st <内容>】设置个人/群聊设定
-     【.ai memo [p/g] st clr】清除个人/群聊设定
-     【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
-     【.ai memo [p/g] list】展示个人/群聊记忆
-     【.ai memo [p/g] clr】清除个人/群聊记忆
-     【.ai memo obs [on/off]】开启/关闭观察记忆
-     【.ai memo obs list】展示观察记忆
-     【.ai memo obs】立即生成一次观察记忆
-     【.ai memo obs clr】清除观察记忆
-     【.ai memo cons】立即巩固一次记忆（合并重复观察、清理过期记忆）`;
+       【.ai memo status [用户ID]】查看记忆状态，传用户ID时查看对应个人记忆
+       【.ai memo p|g add <内容>】添加个人/群聊记忆
+       【.ai memo p|g list [页码]】展示个人/群聊记忆
+       【.ai memo p|g update <ID> <新内容>】更新个人/群聊记忆
+       【.ai memo p|g delete <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
+       【.ai memo p|g clear】清除个人/群聊记忆
+       【.ai memo p|g st <内容>】设置个人/群聊设定
+       【.ai memo p|g st clr】清除个人/群聊设定
+       【.ai memo obs [on/off]】开启/关闭观察记忆
+       【.ai memo obs list】展示观察记忆
+       【.ai memo obs】立即生成一次观察记忆
+       【.ai memo obs clr】清除观察记忆
+       【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
+       【.ai memo reflect <问题>】基于记忆进行推理`;
     cmd.priv = {
         priv: U, args: {
             status: { priv: U },
@@ -49,6 +53,8 @@ export function registerCmdMemory() {
                         }
                     },
                     delete: { priv: U },
+                    add: { priv: U },
+                    update: { priv: U },
                     list: { priv: U },
                     clear: { priv: U }
                 }
@@ -62,6 +68,8 @@ export function registerCmdMemory() {
                         }
                     },
                     delete: { priv: U },
+                    add: { priv: U },
+                    update: { priv: U },
                     list: { priv: U },
                     clear: { priv: U }
                 }
@@ -74,7 +82,7 @@ export function registerCmdMemory() {
                     off: { priv: S }
                 }
             },
-            cons: { priv: U },
+            consolidate: { priv: U },
             reflect: { priv: U }
         }
     };
@@ -142,6 +150,38 @@ export function registerCmdMemory() {
                                 return ret;
                             }
                         }
+                    }
+                    case 'add': {
+                        const content = cmdArgs.getRestArgsFrom(4);
+                        if (!content) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p add <内容>】添加个人记忆');
+                            return ret;
+                        }
+                        const result = await targetSession.memory.retainMemory(null, targetSession, [], [], [], [], stripInternalTags(content), 'public', undefined, 0.5);
+                        targetSession.save();
+                        seal.replyToSender(ctx, msg, result.id ? `个人记忆已添加<${result.id}>` : '个人记忆已添加');
+                        return ret;
+                    }
+                    case 'update': {
+                        const id = cmdArgs.getArgN(4);
+                        const content = cmdArgs.getRestArgsFrom(5);
+                        if (!id || !content) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo p update <ID> <新内容>】更新个人记忆');
+                            return ret;
+                        }
+                        const bankId = resolveBankId(targetSession.sessionId, 'user', targetSession.agentName).bankId;
+                        const unit = getMemoryEngine().repository.getUnit(bankId, id);
+                        if (!unit) {
+                            seal.replyToSender(ctx, msg, `未找到记忆<${id}>`);
+                            return ret;
+                        }
+                        unit.text = stripInternalTags(content);
+                        unit.updatedAt = Math.floor(Date.now() / 1000);
+                        getMemoryEngine().repository.updateUnit(bankId, unit);
+                        bumpMemoryRevision();
+                        targetSession.save();
+                        seal.replyToSender(ctx, msg, `记忆已更新<${unit.id}>`);
+                        return ret;
                     }
                     case 'delete': {
                         const idList = cmdArgs.args.slice(3);
@@ -245,6 +285,38 @@ export function registerCmdMemory() {
                             }
                         }
                     }
+                    case 'add': {
+                        const content = cmdArgs.getRestArgsFrom(4);
+                        if (!content) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g add <内容>】添加群聊记忆');
+                            return ret;
+                        }
+                        const result = await session.memory.retainMemory(null, session, [], [], [], [], stripInternalTags(content), 'public', undefined, 0.5);
+                        session.save();
+                        seal.replyToSender(ctx, msg, result.id ? `群聊记忆已添加<${result.id}>` : '群聊记忆已添加');
+                        return ret;
+                    }
+                    case 'update': {
+                        const id = cmdArgs.getArgN(4);
+                        const content = cmdArgs.getRestArgsFrom(5);
+                        if (!id || !content) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo g update <ID> <新内容>】更新群聊记忆');
+                            return ret;
+                        }
+                        const bankId = resolveBankId(session.sessionId, 'group', session.agentName).bankId;
+                        const unit = getMemoryEngine().repository.getUnit(bankId, id);
+                        if (!unit) {
+                            seal.replyToSender(ctx, msg, `未找到记忆<${id}>`);
+                            return ret;
+                        }
+                        unit.text = stripInternalTags(content);
+                        unit.updatedAt = Math.floor(Date.now() / 1000);
+                        getMemoryEngine().repository.updateUnit(bankId, unit);
+                        bumpMemoryRevision();
+                        session.save();
+                        seal.replyToSender(ctx, msg, `记忆已更新<${unit.id}>`);
+                        return ret;
+                    }
                     case 'delete': {
                         const idList = cmdArgs.args.slice(3);
                         const kw = cmdArgs.kwargs.map(item => item.name);
@@ -331,7 +403,7 @@ export function registerCmdMemory() {
                         return ret;
                     }
                     case 'list': {
-                        const summaryPrompt = MemoryManager.buildSummaryPrompt(session);
+                        const summaryPrompt = MemoryManager.buildObservationPrompt(session);
                         if (!summaryPrompt) {
                             seal.replyToSender(ctx, msg, '观察记忆为空');
                             return ret;
@@ -363,8 +435,8 @@ export function registerCmdMemory() {
                     }
                 }
             }
-            case 'cons': {
-                await MemoryManager.summarize(session);
+            case 'consolidate': {
+                await MemoryManager.consolidateMemory(session);
                 const bank = resolveBankId(session.sessionId, session.sessionType === 'group' ? 'group' : 'user', session.agentName);
                 const obsCount = getMemoryEngine().repository.listObservations(bank.bankId).length;
                 seal.replyToSender(ctx, msg, `记忆巩固完成：观察记忆 ${obsCount} 条，长期记忆 ${session.memory.memoryIds.length} 条`);
@@ -386,22 +458,27 @@ export function registerCmdMemory() {
             default: {
                 seal.replyToSender(ctx, msg, `帮助:
        【.ai memo status [用户ID]】查看记忆状态，传用户ID时查看对应个人记忆
-       【.ai memo [p/g] st <内容>】设置个人/群聊设定
-       【.ai memo [p/g] st clr】清除个人/群聊设定
-       【.ai memo [p/g] del <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
-       【.ai memo [p/g] list】展示个人/群聊记忆
-       【.ai memo [p/g] clr】清除个人/群聊记忆
+       【.ai memo p|g add <内容>】添加个人/群聊记忆
+       【.ai memo p|g list [页码]】展示个人/群聊记忆
+       【.ai memo p|g update <ID> <新内容>】更新个人/群聊记忆
+       【.ai memo p|g delete <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
+       【.ai memo p|g clear】清除个人/群聊记忆
+       【.ai memo p|g st <内容>】设置个人/群聊设定
+       【.ai memo p|g st clr】清除个人/群聊设定
        【.ai memo obs [on/off]】开启/关闭观察记忆
        【.ai memo obs list】展示观察记忆
        【.ai memo obs】立即生成一次观察记忆
        【.ai memo obs clr】清除观察记忆
-       【.ai memo cons】立即巩固一次记忆（合并重复观察、清理过期记忆）
+       【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
        【.ai memo reflect <问题>】基于记忆进行推理`);
                 return ret;
             }
         }
     }
 }
+
+
+
 
 
 

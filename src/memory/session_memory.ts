@@ -120,7 +120,7 @@ export default class SessionMemoryService extends MemoryService {
         return this.tags;
     }
 
-    override async addMemory(
+    async retainMemory(
         _ctx: seal.MsgContext | null,
         _session: Session,
         ul: UserInfo[],
@@ -154,7 +154,7 @@ export default class SessionMemoryService extends MemoryService {
         };
     }
 
-    override async search(query: string, options: searchOptions): Promise<MemoryItem[]> {
+    async recallMemory(query: string, options: searchOptions): Promise<MemoryItem[]> {
         const engine = getMemoryEngine();
         const callerSessionId = options.sessionId || this.sessionId;
         const results = await engine.recall(this.bankId, query, {
@@ -316,7 +316,7 @@ export default class SessionMemoryService extends MemoryService {
             // 防注入：观察内容可能夹带内部上下文标签，入库前统一剥离；缺失时以空串兜底
             const summaryContent = stripInternalTags(typeof memoryData.summary === 'string' ? memoryData.summary : (typeof memoryData.content === 'string' ? memoryData.content : ''));
             if (summaryContent) {
-                // 写入观察记忆，供 buildSummaryPrompt 使用
+                // 写入观察记忆，供 buildObservationPrompt 使用
                 this.summaries.push(summaryContent);
                 this.limitSummaries();
                 bumpSummaryRevision();
@@ -458,7 +458,7 @@ export default class SessionMemoryService extends MemoryService {
         bumpSummaryRevision();
     }
 
-    buildSummaryPrompt(): string {
+    buildObservationPrompt(): string {
         const { SUMMARY } = Config.memory;
         if (!SUMMARY) return '';
         const observations = getMemoryEngine().repository.listObservations(this.bankId);
@@ -495,6 +495,8 @@ function canSeeUnit(unit: MemoryUnit, callerSessionId: string): boolean {
     if (privateTags.length === 0) return true;
     return privateTags.some(t => t === `vis:private:${callerSessionId}`);
 }
+
+
 
 
 

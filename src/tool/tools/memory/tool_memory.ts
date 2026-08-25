@@ -16,7 +16,7 @@ export function registerMemory() {
     const toolAdd = new Tool({
         type: 'function',
         function: {
-            name: 'add_memory',
+            name: 'memory_add',
             description: '添加个人记忆或群聊记忆，尽量不要重复记忆；仅当用户明确要求记忆只在本会话中生效时才传 visibility=private，其余情况不要传（默认 public，相关会话均可读取）',
             parameters: {
                 type: 'object',
@@ -116,17 +116,18 @@ export function registerMemory() {
         }
 
         //记忆相关处理
-        const result = await MemoryManager.addMemory(ctx, session, uiList, giList, Array.isArray(keywords) ? keywords : [], [], text, normalizedVisibility, type, importance);
+        const result = await MemoryManager.retainMemory(ctx, session, uiList, giList, Array.isArray(keywords) ? keywords : [], [], text, normalizedVisibility, type, importance);
         SessionService.save(session);
 
-        if (result && result.action === 'merged') return `记忆已存在，已合并到<${result.id}>`;
-        return result && result.id ? `添加记忆成功<${result.id}>` : `添加记忆成功`;
+        const id = result.unitIds[0];
+        if (result && result.action === 'merged') return `记忆已存在，已合并到<${id}>`;
+        return id ? `添加记忆成功<${id}>` : `添加记忆成功`;
     }
 
     const toolDel = new Tool({
         type: 'function',
         function: {
-            name: 'del_memory',
+            name: 'memory_delete',
             description: '删除个人记忆或群聊记忆',
             parameters: {
                 type: 'object',
@@ -214,7 +215,7 @@ export function registerMemory() {
     const toolSearch = new Tool({
         type: 'function',
         function: {
-            name: 'search_memory',
+            name: 'memory_recall',
             description: '搜索个人记忆或群聊记忆',
             parameters: {
                 type: 'object',
@@ -325,14 +326,14 @@ export function registerMemory() {
             sessionId: callerSessionId
         }
 
-        const memoryList = await session.memory.search(query, options);
+        const memoryList = await session.memory.recallMemory(query, options);
         return session.memory.buildMemory(si, memoryList) || '暂无记忆';
     }
 
     const toolClear = new Tool({
         type: 'function',
         function: {
-            name: 'clear_memory',
+            name: 'memory_clear',
             description: '清除个人记忆或群聊记忆',
             parameters: {
                 type: 'object',
@@ -400,7 +401,7 @@ export function registerMemory() {
     const toolUpdate = new Tool({
         type: 'function',
         function: {
-            name: 'update_memory',
+            name: 'memory_update',
             description: '更新一条已有记忆的内容/标签/重要性（按 ID 定位）。仅可更新本会话相关记忆，其他会话的私有记忆不可更新；发现记错了请用它修正而不是删除重加',
             parameters: {
                 type: 'object',
@@ -473,7 +474,7 @@ export function registerMemory() {
     const toolConsolidate = new Tool({
         type: 'function',
         function: {
-            name: 'consolidate_memory',
+            name: 'memory_consolidate',
             description: '触发指定个人或群聊记忆的观察巩固，把已有事实合并生成观察记忆',
             parameters: {
                 type: 'object',
@@ -505,7 +506,7 @@ export function registerMemory() {
     const toolReflect = new Tool({
         type: 'function',
         function: {
-            name: 'reflect_memory',
+            name: 'memory_reflect',
             description: '基于指定个人或群聊记忆进行推理，返回心智模型、观察记忆和事实证据的汇总回答',
             parameters: {
                 type: 'object',
@@ -538,3 +539,5 @@ export function registerMemory() {
     };
 
 }
+
+

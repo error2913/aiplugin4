@@ -9,7 +9,7 @@ export function registerKnowledgeTools() {
     const toolSearch = new Tool({
         type: 'function',
         function: {
-            name: 'kb_search',
+            name: 'knowledge_search',
             description: '在知识库中按关键词搜索相关条目，返回匹配的标题与内容；知识库内容由管理员配置，只读',
             parameters: {
                 type: 'object',
@@ -38,7 +38,7 @@ export function registerKnowledgeTools() {
     const toolRead = new Tool({
         type: 'function',
         function: {
-            name: 'kb_read',
+            name: 'knowledge_read',
             description: '按 ID 读取知识库中某个条目的完整内容，ID 来自 kb_list 或 kb_search 的结果',
             parameters: {
                 type: 'object',
@@ -62,7 +62,7 @@ export function registerKnowledgeTools() {
     const toolList = new Tool({
         type: 'function',
         function: {
-            name: 'kb_list',
+            name: 'knowledge_list',
             description: '列出知识库全部条目的 ID 与标题索引',
             parameters: {
                 type: 'object',
@@ -76,3 +76,4 @@ export function registerKnowledgeTools() {
         return index ? index : '知识库为空';
     };
 }
+
