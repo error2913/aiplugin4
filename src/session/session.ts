@@ -350,8 +350,6 @@ export class Session {
             }
         }
         this.memory?.migrateLegacyTags();
-        const globalMemory = Agent.get('*').sessionService.memory;
-        if (globalMemory && globalMemory !== this.memory) globalMemory.migrateLegacyTags();
     }
 
     async stopCurrentChatStream(): Promise<void> {

@@ -3,7 +3,6 @@ import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
 import { MemoryManager } from "../memory/manager";
-import MemoryService from "../memory/memory";
 import Image from "../resource/image";
 import Group from "../session/group";
 import { Session } from "../session/session";
@@ -180,14 +179,8 @@ export class Context {
                 contentItems: [umi]
             });
         }
-        // 关联记忆权重更新：bot 记忆 + 知识库 + 会话记忆 + 群内用户记忆
-        try {
-            await MemoryService.accessRelatedMemories(this.session, text);
-            // 群内用户会话的权重更新节流持久化（避免每条消息全量写盘）
-            flushGroupUserMemories(this.session);
-        } catch (e) {
-            log.warning('记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
-        }
+        // 群内用户会话的权重更新节流持久化（避免每条消息全量写盘）
+        flushGroupUserMemories(this.session);
     }
 
     addAssistantMessage(text: string, messageId: string, reasoningContent?: string) {
@@ -205,11 +198,7 @@ export class Context {
             role: 'assistant',
             contentItems: [ami]
         });
-        MemoryService.accessRelatedMemories(this.session, text).then(() => {
-            flushGroupUserMemories(this.session);
-        }).catch(e => {
-            log.warning('助手消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
-        });
+        flushGroupUserMemories(this.session);
         // 按配置的间隔轮数触发对话记忆抽取与巩固（Hindsight-like Retain + Consolidation）
         this.summaryCounter++;
         if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
@@ -234,9 +223,7 @@ export class Context {
             role: 'user',
             contentItems: [sumi]
         });
-        this.session.memory.accessMemories(text).catch(e => {
-            log.warning('系统消息记忆更新失败: ' + (e instanceof Error ? e.message : String(e)));
-        });
+
     }
 
     addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {
@@ -412,4 +399,5 @@ export class Context {
     }
 
 }
+
 

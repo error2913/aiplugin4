@@ -2,7 +2,7 @@
 import { MemoryManager } from "../../../memory/manager";
 import { bumpMemoryRevision } from "../../../memory/revision";
 import { resolveTargetSession } from "../../../memory/session_target";
-import { searchOptions as SearchOptions } from "../../../memory/types";
+import type { RecallOptions } from "../../../memory/v2/types";
 import { resolveBankId } from "../../../memory/v2/bank_resolver";
 import { getMemoryEngine } from "../../../memory/v2/index";
 import { SessionService } from "../../../session/session_service";
@@ -273,7 +273,7 @@ export function registerMemory() {
         }
     });
     toolSearch.solve = async (ctx, _, session, args) => {
-        const { memory_type, target_id, query = '', topK = 5, keywords = [], related_user_ids = [], related_group_ids = [], method = 'similarity' } = args;
+        const { memory_type, target_id, query = '', topK = 5, keywords = [], related_user_ids = [], related_group_ids = [], method: _method = 'similarity' } = args;
         // 记录调用方会话：私有记忆只对创建它的会话可见，搜索其他会话时按调用方会话过滤
         const callerSessionId = session.sessionId;
 
@@ -316,13 +316,9 @@ export function registerMemory() {
             if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
         }
 
-        const options: SearchOptions = {
-            topK: topK,
+        const options: Partial<RecallOptions> & { sessionId?: string } = {
             tags: keywords,
-            users: uiList.map(u => u.id),
-            groups: giList.map(g => g.id),
-            relatedMemories: [],
-            method: method,
+            maxTokens: topK * 200,
             sessionId: callerSessionId
         }
 

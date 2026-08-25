@@ -17,7 +17,8 @@ function protectedMemoryIds(target: Session, callerSessionId: string): Set<strin
     const ids = new Set<string>();
     if (target.sessionId !== callerSessionId) {
         for (const m of target.memory.memories) {
-            if (m.visibility === 'private' && m.sessionId !== callerSessionId) ids.add(m.id);
+            const privateTags = m.tags.filter(t => t.startsWith('vis:private:'));
+            if (privateTags.length > 0 && !privateTags.some(t => t === `vis:private:${callerSessionId}`)) ids.add(m.id);
         }
     }
     return ids;
@@ -117,7 +118,6 @@ export function registerCmdMemory() {
                 seal.replyToSender(ctx, msg, `${statusSession.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
      长期记忆条数: ${statusSession.memory.memoryIds.length}
-     关键词库: ${statusSession.memory.keywords.join('、') || '无'}
      观察记忆开启状态: ${summaryEffective ? '是' : '否'}${summarySuffix}
      观察记忆条数: ${getMemoryEngine().repository.listObservations(resolveBankId(statusSession.sessionId, statusSession.sessionType === 'group' ? 'group' : 'user', statusSession.agentName).bankId).length}
      心智模型条数: ${getMemoryEngine().listMentalModels(resolveBankId(statusSession.sessionId, statusSession.sessionType === 'group' ? 'group' : 'user', statusSession.agentName).bankId).length}`);
@@ -159,7 +159,7 @@ export function registerCmdMemory() {
                         }
                         const result = await targetSession.memory.retainMemory(null, targetSession, [], [], [], [], stripInternalTags(content), 'public', undefined, 0.5);
                         targetSession.save();
-                        seal.replyToSender(ctx, msg, result.id ? `个人记忆已添加<${result.id}>` : '个人记忆已添加');
+                        seal.replyToSender(ctx, msg, result.unitIds[0] ? `个人记忆已添加<${result.unitIds[0]}>` : '个人记忆已添加');
                         return ret;
                     }
                     case 'update': {
@@ -293,7 +293,7 @@ export function registerCmdMemory() {
                         }
                         const result = await session.memory.retainMemory(null, session, [], [], [], [], stripInternalTags(content), 'public', undefined, 0.5);
                         session.save();
-                        seal.replyToSender(ctx, msg, result.id ? `群聊记忆已添加<${result.id}>` : '群聊记忆已添加');
+                        seal.replyToSender(ctx, msg, result.unitIds[0] ? `群聊记忆已添加<${result.unitIds[0]}>` : '群聊记忆已添加');
                         return ret;
                     }
                     case 'update': {
@@ -476,6 +476,7 @@ export function registerCmdMemory() {
         }
     }
 }
+
 
 
 

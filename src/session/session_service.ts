@@ -3,7 +3,6 @@ import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import { Context } from "../context/context";
 import { logger } from "../logger";
-import MemoryService from "../memory/memory";
 import { revive, TypeDescriptor } from "../utils/utils";
 
 import { Session, Setting } from "./session";
@@ -23,17 +22,17 @@ export class SessionService {
     }
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
         agentName: 'string',
-        memory: MemoryService,
+        memory: { objectValue: 'any' },
         sessionMap: { objectValue: Session }
     }
     agentName: string;
-    memory: MemoryService; // 全局记忆服务
+    memory: any; // 全局记忆服务（新引擎下不再使用旧 MemoryService）
     sessionMap: { [key: string]: Session };
 
     constructor() {
         this.agentName = '';
         this.sessionMap = {};
-        this.memory = new MemoryService();
+        this.memory = {};
     }
 
     getSession(sessionId: string): Session {
@@ -68,3 +67,5 @@ export class SessionService {
     }
 
 }
+
+
