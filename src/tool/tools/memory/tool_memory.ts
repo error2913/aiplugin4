@@ -461,6 +461,25 @@ export function registerMemory() {
         }
         unit.lastAccessedAt = Math.floor(Date.now() / 1000);
         unit.updatedAt = unit.lastAccessedAt;
+
+        // 更新后如果与另一条有效记忆内容完全相同，则合并到已有记忆，避免“同内容两条”
+        if (typeof text === 'string' && text.trim()) {
+            const normalized = text.replace(/\s+/g, '').toLowerCase();
+            const duplicate = getMemoryEngine().repository.listUnits(bankId).find(u =>
+                u.id !== unit.id && u.state === 'valid' && u.text.replace(/\s+/g, '').toLowerCase() === normalized
+            );
+            if (duplicate) {
+                duplicate.tags = Array.from(new Set([...duplicate.tags, ...unit.tags]));
+                duplicate.importance = Math.max(duplicate.importance, unit.importance);
+                getMemoryEngine().repository.updateUnit(bankId, duplicate);
+                unit.state = 'invalidated';
+                getMemoryEngine().repository.updateUnit(bankId, unit);
+                bumpMemoryRevision();
+                SessionService.save(target);
+                return `记忆已更新并合并到<${duplicate.id}>`;
+            }
+        }
+
         getMemoryEngine().repository.updateUnit(bankId, unit);
         bumpMemoryRevision();
         SessionService.save(target);
@@ -535,5 +554,6 @@ export function registerMemory() {
     };
 
 }
+
 
 
