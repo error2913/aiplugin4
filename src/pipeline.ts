@@ -107,9 +107,9 @@ export class MessagePipeline {
                     break;
                 }
                 case 'record': {
-                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收：登记句柄并渲染 [voice:句柄]摘要[/voice]，
-                    // AI 可通过 resolve_special_id(type=voice, id=句柄) 获取原始文件字段。
-                    const recordHandle = registerSpecialResource('voice', data);
+                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收：登记句柄并渲染 [record:句柄]摘要[/record]，
+                    // AI 可通过 resolve_special_id(type=record, id=句柄) 获取原始文件字段。
+                    const recordHandle = registerSpecialResource('record', data);
                     result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', data, recordHandle), __system: '1' } });
                     break;
                 }

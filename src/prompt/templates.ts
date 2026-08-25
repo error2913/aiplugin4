@@ -26,7 +26,7 @@ const TEMPLATES: { [key: string]: string } = {
 {{else}}
 - [avatar:用户ID] 头像；[group_avatar:群ID] 群头像
 {{/if}}
-- [msg_id:ID]/[quote:ID]/[img:图片ID] 是短 ID；语音/视频/文件是闭合标签 [voice:句柄]摘要[/voice]、[video:句柄]摘要[/video]、[file:句柄]摘要[/file]，句柄在开标签参数里：需要对接协议 API 或读取原始 url/path/file/file_id 时，先用 resolve_special_id 还原；已有完整 url 时直接用，不要调 get_image/get_record
+- [msg_id:ID]/[quote:ID]/[img:图片ID] 是短 ID；语音/视频/文件是闭合标签 [record:句柄]摘要[/record]、[video:句柄]摘要[/video]、[file:句柄]摘要[/file]，句柄在开标签参数里：需要对接协议 API 或读取原始 url/path/file/file_id 时，先用 resolve_special_id 还原；已有完整 url 时直接用，不要调 get_image/get_record
 
 {{{toolPrompt}}}
 

@@ -57,7 +57,7 @@ export async function dispatchOb11Api(
         return failure("seal-native", normalizedAction, validated.code, validated.message, { retryable: false });
     }
 
-    // 特殊 ID 归一化：模型可能直接使用上下文里的短 ID（[msg_id:base36]/[quote:base36]/[img:图片ID]/[voice:句柄]），
+    // 特殊 ID 归一化：模型可能直接使用上下文里的短 ID（[msg_id:base36]/[quote:base36]/[img:图片ID]/[record:句柄]），
     // 调用前还原为协议端需要的原始 message_id/file/url，避免把渲染标签或 base36 短 ID 原样外发。
     params = normalizeSpecialIdParams(normalizedAction, params || {});
     if (ob11NetBackend.canHandle(normalizedAction)) {

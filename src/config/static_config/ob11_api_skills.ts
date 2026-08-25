@@ -38,8 +38,8 @@ data：
 - 上下文里的 ID 都是插件渲染的短形式，不要把短 ID/句柄或标签原样外发：
   - 消息 ID：base36 短 ID（\`[msg_id:xxx]\`/\`[quote:xxx]\`）
   - 图片：6 位图片 ID（\`[img:图片ID]\`，或带描述的 \`[img:图片ID:描述]\`）
-  - 语音/视频/文件：闭合标签 \`[voice:句柄]摘要[/voice]\`、\`[video:句柄]摘要[/video]\`、\`[file:句柄]摘要[/file]\`，句柄在开标签参数里
-- 需要还原成协议端能用的原始值（\`message_id\`/\`file\`/\`url\`/\`path\`/\`file_id\`/\`file_unique\` 等）时，先调用 \`resolve_special_id(type=message/image/voice/video/file, id=短ID或句柄)\`；\`id\` 可以传整个标签（含闭合形式），也可以只传句柄。
+  - 语音/视频/文件：闭合标签 \`[record:句柄]摘要[/record]\`、\`[video:句柄]摘要[/video]\`、\`[file:句柄]摘要[/file]\`，句柄在开标签参数里
+- 需要还原成协议端能用的原始值（\`message_id\`/\`file\`/\`url\`/\`path\`/\`file_id\`/\`file_unique\` 等）时，先调用 \`resolve_special_id(type=message/image/record/video/file, id=短ID或句柄)\`；\`id\` 可以传整个标签（含闭合形式），也可以只传句柄。
 - \`get_msg\`/\`delete_msg\`/\`set_essence_msg\` 等 action 的 \`message_id\`、\`get_image\`/\`get_record\` 的 \`file\` 也支持直接传上下文短 ID/句柄，\`call_ob11_api\` 会自动还原；复杂场景建议先用 \`resolve_special_id\` 查询确认。
 - **已有完整 url/path/base64 时直接用，不要调 \`get_image\`/\`get_record\` 转换**：这两个接口只接受协议端缓存文件名（如 \`xxx.image\`/\`voice.amr\`）或上下文短 ID/句柄；把下载 URL 传给它们会返回 \`file not found\`。已拿到 url 的图片/语音直接使用 url 即可。
 

@@ -1,7 +1,7 @@
 // 特殊 ID 参数归一化：把上下文里出现的短 ID 还原为协议端需要的原始值。
 // - 消息 ID：上下文 [msg_id:base36]/[quote:base36] 或疑似 base36 短 ID → 十进制字符串（含 >2^53 精确值）
 // - 图片：get_image 的 file 传 [img:图片ID:描述] 或 6 位图片 ID → 还原为接收时的原始 file/url/path
-// - 语音：get_record 的 file 传 [voice:句柄] 或 6 位句柄 → 还原为登记时的原始 file/url/path
+// - 语音：get_record 的 file 传 [record:句柄] 或 6 位句柄 → 还原为登记时的原始 file/url/path
 import Image from "../../resource/image";
 import { resolveSpecialResourceByType } from "../../utils/special_id";
 import { transformMsgIdBack } from "../../utils/utils";
@@ -63,16 +63,16 @@ function resolveImageFile(value: any): any {
     return file || value;
 }
 
-/** 尝试把语音句柄（含 [voice:句柄] 包裹）解析为协议端可用的 file/url；失败原样返回 */
+/** 尝试把语音句柄（含 [record:句柄] 包裹）解析为协议端可用的 file/url；失败原样返回 */
 function resolveRecordFile(value: any): any {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
     let handle = "";
-    const tagMatch = /^\[voice:([^\]]+)\]/i.exec(trimmed);
+    const tagMatch = /^\[record:([^\]]+)\]/i.exec(trimmed);
     if (tagMatch) handle = tagMatch[1];
     else if (HANDLE_PATTERN.test(trimmed)) handle = trimmed;
     else return value;
-    const res = resolveSpecialResourceByType("voice", handle);
+    const res = resolveSpecialResourceByType("record", handle);
     if (!res) return value;
     const data = res.data || {};
     const file = data.file || data.url || data.path || "";
@@ -105,7 +105,7 @@ export function validateSpecialIdParams(action: string, params: Record<string, a
 
     // 上下文标签/短 ID/句柄 → 提取候选 ID；get_image 只认图片，get_record 只认语音
     let candidate = "";
-    const mediaMatch = /^\[(?:voice|video|file):([^\]]+)\]/i.exec(trimmed);
+    const mediaMatch = /^\[(?:record|video|file):([^\]]+)\]/i.exec(trimmed);
     const imgMatch = /^\[img:([^\]]+)\]$/i.exec(trimmed);
     if (mediaMatch) {
         if (action === "get_image") {
@@ -121,7 +121,7 @@ export function validateSpecialIdParams(action: string, params: Record<string, a
             return {
                 ok: false,
                 code: "INVALID_FILE",
-                message: "get_record 的 file 不接受图片 ID，请改用 [voice:句柄] 或先调用 resolve_special_id(type=voice) 获取原始 file/url"
+                message: "get_record 的 file 不接受图片 ID，请改用 [record:句柄] 或先调用 resolve_special_id(type=record) 获取原始 file/url"
             };
         }
         const content = imgMatch[1];
@@ -140,11 +140,11 @@ export function validateSpecialIdParams(action: string, params: Record<string, a
             };
         }
     } else {
-        if (!resolveSpecialResourceByType("voice", candidate)) {
+        if (!resolveSpecialResourceByType("record", candidate)) {
             return {
                 ok: false,
                 code: "INVALID_FILE",
-                message: `未找到对应语音缓存：${trimmed}，先调用 resolve_special_id(type=voice, id=句柄) 获取 raw file/url/path，或直接用 url`
+                message: `未找到对应语音缓存：${trimmed}，先调用 resolve_special_id(type=record, id=句柄) 获取 raw file/url/path，或直接用 url`
             };
         }
     }

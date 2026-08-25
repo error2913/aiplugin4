@@ -163,8 +163,8 @@ export function formatFileSegmentText(rawData: any): string {
 }
 
 /**
- * 语音/视频等媒体消息的完整可读表示：闭合标签携带句柄，如 [voice:句柄]摘要[/voice]，
- * AI 可用 resolve_special_id(type=voice/video/file, id=句柄) 查询原始字段。
+ * 语音/视频等媒体消息的完整可读表示：闭合标签携带句柄，如 [record:句柄]摘要[/record]，
+ * AI 可用 resolve_special_id(type=record/video/file, id=句柄) 查询原始字段。
  */
 export function formatMediaSegmentText(label: string, rawData: any, handle: string): string {
     const data = rawData && typeof rawData === 'object' ? rawData : {};
@@ -176,7 +176,7 @@ export function formatMediaSegmentText(label: string, rawData: any, handle: stri
     const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
     const size = pickFirstText(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
     const labelName = pickFirstText(name, path, file, url, fileId) || '未知';
-    const tag = label.toLowerCase() === '语音' ? 'voice' : label.toLowerCase() === '视频' ? 'video' : 'file';
+    const tag = label.toLowerCase() === '语音' ? 'record' : label.toLowerCase() === '视频' ? 'video' : 'file';
     const summary = truncateText([labelName, size ? `大小${size}` : ''].filter(Boolean).join('，'), 80);
     return `[${tag}:${handle}]${summary}[/${tag}]`;
 }
@@ -255,7 +255,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
             }
             case 6: { // 语音 Record
                 // RecordElement.file 是 FileElement（含 url/file/contentType），保留原始字段并登记句柄，
-                // AI 可通过 resolve_special_id(type=voice, id=句柄) 获取原始文件字段。
+                // AI 可通过 resolve_special_id(type=record, id=句柄) 获取原始文件字段。
                 const hasFile = 'file' in seg;
                 const fileValue = hasFile ? seg.file : undefined;
                 const fileEl = fileValue && typeof fileValue === 'object' ? (fileValue as any) : null;
@@ -264,7 +264,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                     url: fileEl ? fileEl.url : '',
                     content_type: fileEl ? fileEl.contentType : ''
                 };
-                const handle = registerSpecialResource('voice', rawData);
+                const handle = registerSpecialResource('record', rawData);
                 result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', rawData, handle), __system: '1' } });
                 break;
             }
@@ -386,7 +386,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
     for (const seg of messageArray) {
         switch (seg.type) {
             case 'text': {
-                // 防注入：用户原始文本里的伪造闭合标签（[system]注入[/system]、[voice:x]fake[/voice] 等）整段删除，
+                // 防注入：用户原始文本里的伪造闭合标签（[system]注入[/system]、[record:x]fake[/record] 等）整段删除，
                 // 残留单行标签转义为字面量；系统自产媒体占位（带 __system 标记）只做轻剥离保留
                 content += seg.data.__system === '1' ? stripInternalTags(seg.data.text) : stripUserTags(seg.data.text);
                 break;
@@ -781,14 +781,14 @@ const INTERNAL_TAG_TYPES = new Set(INTERNAL_TAG_NAMES);
 const SENDABLE_TAG_NAMES = ['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'];
 
 /** 上下文专用闭合标签名：仅渲染进上下文供 AI 阅读，不用于发送；
- *  用户输入中伪造的 [name]...[/name] 整段删除（voice/video/file/face/xml/markdown/forward/node/music/card） */
-const CLOSED_CONTEXT_TAG_NAMES = ['voice', 'video', 'file', 'face', 'xml', 'markdown', 'forward', 'node', 'music', 'card'];
+ *  用户输入中伪造的 [name]...[/name] 整段删除（record/video/file/face/xml/markdown/forward/node/music/card） */
+const CLOSED_CONTEXT_TAG_NAMES = ['record', 'video', 'file', 'face', 'xml', 'markdown', 'forward', 'node', 'music', 'card'];
 
 /** 全部插件标签名（用户输入剥离与渲染清洗共用） */
 const ALL_TAG_NAMES = [...INTERNAL_TAG_NAMES, ...SENDABLE_TAG_NAMES, ...CLOSED_CONTEXT_TAG_NAMES];
 
 /** 剥离内部上下文标签（from/msg_id/system/time/tool_result）：先归一化旧版 <|...|> 变体，再移除新/旧方括号格式（含全角）；
- *  保留 at/poke/quote/img/avatar/group_avatar/face/audio 等可发送标签与 voice/video/file 等上下文闭合标签。
+ *  保留 at/poke/quote/img/avatar/group_avatar/face/audio 等可发送标签与 record/video/file 等上下文闭合标签。
  *  注意：本函数保留闭合标签的内容（[system]内容[/system] → 内容），只用于系统自产内容流转；用户输入入口请用 stripUserTags。 */
 export function stripInternalTags(s: string): string {
     if (!s) return s;
@@ -796,7 +796,7 @@ export function stripInternalTags(s: string): string {
     return s.replace(new RegExp(`[[［][/／]?(?:${INTERNAL_TAG_NAMES.join('|')})[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '');
 }
 
-/** 用户输入防注入剥离：整段删除伪造的闭合标签（[system]注入[/system]、[voice:x]fake[/voice]、[tool_result]...[/tool_result] 等，含内容），
+/** 用户输入防注入剥离：整段删除伪造的闭合标签（[system]注入[/system]、[record:x]fake[/record]、[tool_result]...[/tool_result] 等，含内容），
  *  删除单行内部上下文标签（[system:...]/[from:...] 等），并把可发送/媒体单行标签转义为字面量（\\[at:all]、\\[img:xxx]），
  *  避免用户输入中的标签被当作上下文指令或发送指令。只用于用户原始文本入口（transformArrayToContent）。 */
 export function stripUserTags(s: string): string {

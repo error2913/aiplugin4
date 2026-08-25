@@ -37,7 +37,7 @@ async function forwardSegmentsToText(epId: string, message: any, depth: number, 
             case "at": text += `@${(seg.data && (seg.data.qq || seg.data.user_id)) || ""} `; break;
             case "face": text += `[face:${(seg.data && seg.data.id) || ""}]`; break;
             case "image": text += "[图片]"; break;
-            case "record": text += "[voice]语音[/voice]"; break;
+            case "record": text += "[record]语音[/record]"; break;
             case "video": text += "[video]视频[/video]"; break;
             case "file": text += `[file]${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || "文件"}[/file]`; break;
             case "json": text += parseCardToText(seg.data && (seg.data.data || seg.data.content)); break;
