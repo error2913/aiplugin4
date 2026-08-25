@@ -378,11 +378,13 @@ export function buildContent(message: ContextMessage): string {
                     from = formatFromPrefix(item.userId);
                 }
                 if (item.userId) lastUserId = item.userId;
-                return from
+                const prefix = from
                     + (item.systemName ? `[system:${item.systemName}]` : '')
                     + (item.time ? `[time:${fmtDate(item.time)}]` : '')
-                    + (item.messageId ? `[msg_id:${item.messageId}]` : '')
-                    + (item.text || '');
+                    + (item.messageId ? `[msg_id:${item.messageId}]` : '');
+                const text = item.text || '';
+                // 防注入：系统名义消息（群事件/触发原因/定时器等）成对加边界，明确「背景通知」范围
+                return item.systemName ? `${prefix}${text ? ' ' + text : ''} [/system]` : prefix + text;
             }).join('\f');
         }
         // 非用户消息：只保留消息 ID；时间顺序由消息数组本身表达，去掉重复时间前缀。
@@ -391,7 +393,14 @@ export function buildContent(message: ContextMessage): string {
             + (item.text || '')
         ).join('\f');
     }
-    if (message.text) return message.text;
+    if (message.text) {
+        // 防注入：工具返回的外部数据（网页/文件/命令等）成对加边界，明确「只读参考」范围
+        if (message.role === 'tool') {
+            const toolCallId = message.toolCallId || message.tool_call_id || '';
+            return `[tool_result${toolCallId ? `:${toolCallId}` : ''}]\n${message.text}\n[/tool_result]`;
+        }
+        return message.text;
+    }
     return '';
 }
 

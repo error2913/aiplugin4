@@ -746,7 +746,7 @@ export function normalizeRenderTags(s: string): string {
 }
 
 /** 内部上下文标签名：由代码注入上下文，其余任何来源（用户输入/AI 回复/工具回调/记忆等）出现时一律剥离 */
-const INTERNAL_TAG_NAMES = ['from', 'msg_id', 'system', 'time'];
+const INTERNAL_TAG_NAMES = ['from', 'msg_id', 'system', 'time', 'tool_result'];
 const INTERNAL_TAG_TYPES = new Set(INTERNAL_TAG_NAMES);
 
 /** 剥离内部上下文标签（from/msg_id/system/time）：先归一化旧版 <|...|> 变体，再移除新/旧方括号格式（含全角）；
@@ -754,7 +754,7 @@ const INTERNAL_TAG_TYPES = new Set(INTERNAL_TAG_NAMES);
 export function stripInternalTags(s: string): string {
     if (!s) return s;
     s = normalizeRenderTags(s);
-    return s.replace(new RegExp(`[[［](?:${INTERNAL_TAG_NAMES.join('|')})[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '');
+    return s.replace(new RegExp(`[[［][/／]?(?:${INTERNAL_TAG_NAMES.join('|')})[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '');
 }
 
 /** 剥离全部插件标签（渲染 + 内部），仅保留纯文本/Markdown；用于论坛等不支持消息段的纯文本出口 */
@@ -762,16 +762,16 @@ export function stripRenderTags(s: string): string {
     if (!s) return s;
     s = normalizeRenderTags(s);
     return s
-        .replace(/[[［](?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|user_avatar)[:：]?\s?[^\]］]*[\]］]/gi, '')
+        .replace(/[[［][/／]?(?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|tool_result|user_avatar)[:：]?\s?[^\]］]*[\]］]/gi, '')
         .trim();
 }
 
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
-    const segs = s.split(/([[［](?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|user_avatar)[:：]?[^\]］]*[\]］])/);
+    const segs = s.split(/([[［][/／]?(?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|tool_result|user_avatar)[:：]?[^\]］]*[\]］])/);
     segs.forEach(seg => {
         if (!seg) return;
-        const match = seg.match(/^[[［]([a-z_]+)[:：]?\s?([^\]］]*)[\]］]$/i);
+        const match = seg.match(/^[[［][/／]?([a-z_]+)[:：]?\s?([^\]］]*)[\]］]$/i);
         if (!match) {
             result.push({
                 type: 'text',

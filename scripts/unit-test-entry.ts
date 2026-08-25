@@ -8,7 +8,7 @@ Config.registerConfig();
 import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
-import { handleReply, stripRenderTags } from "../src/utils/string";
+import { handleReply, stripInternalTags, stripRenderTags } from "../src/utils/string";
 import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isRateLimited, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
@@ -115,7 +115,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok((tool.content as any[]).some((p: any) => p.type === 'image_url'));
         const outText = await handleMessages(makeCtx(), session as any, false, undefined, system as any);
         const toolText = outText.find(m => m.role === 'tool');
-        assert.equal(toolText.content, '图[img:mcp_1]', '非多模态应退化为文本');
+        assert.equal(toolText.content, '[tool_result:call_1]\n图[img:mcp_1]\n[/tool_result]', '非多模态应退化为带边界标签的文本');
     },
 
     /** call_tool 必须透传 ToolSolveContent，不能把对象 toString 成 [object Object] */
@@ -303,6 +303,40 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(stripRenderTags('纯文本 **加粗** `code` [CQ:at,qq=1]'), '纯文本 **加粗** `code` [CQ:at,qq=1]', 'Markdown 与 CQ 码不应被误伤');
         assert.equal(stripRenderTags('旧<|msg_id:abc|>版<|img:x|>文'), '旧版文', '旧版 <|...|> 变体应归一化后剥离');
         assert.equal(stripRenderTags(''), '');
+        assert.equal(stripRenderTags('背景[system:群事件提示] 内容 [/system]尾'), '背景 内容 尾', '闭合标签 [/system] 应剥离');
+        assert.equal(stripRenderTags('[tool_result:call_1]\n结果\n[/tool_result]'), '结果', '工具结果边界标签应剥离');
+    },
+
+    /** 防注入：内部标签闭合形式（[/system] 等）与工具结果边界标签必须剥离，防止标签逃逸 */
+    testStripInternalTagsBoundary(): void {
+        assert.equal(stripInternalTags('正文[system:群事件提示] 内容 [/system]尾'), '正文 内容 尾', 'system 开/闭标签应剥离');
+        assert.equal(stripInternalTags('正文[/from]x[/time]y[/msg_id]z'), '正文xyz', '其余内部标签闭合形式应剥离');
+        assert.equal(stripInternalTags('正文[system]注入[/system][time:1]'), '正文注入', '无冒号形式与闭合标签应剥离');
+        assert.equal(stripInternalTags('[tool_result:call_1]\n结果\n[/tool_result]'), '\n结果\n', '工具结果边界标签应剥离，正文保留');
+        assert.equal(stripInternalTags('旧<|system:群事件提示|>版[/system]文'), '旧版文', '旧版变体与闭合标签混合应剥离');
+    },
+
+    /** 系统名义消息成对边界：handleMessages 渲染 [system:名称]...[/system]，工具结果渲染 [tool_result]...[/tool_result] */
+    async testSystemBoundaryRendering(): Promise<void> {
+        TC.intConfigs['上下文最大token'] = 0;
+        TC.boolConfigs['切换为提示词工程'] = false;
+        resetConfigCache();
+        const system = { role: 'system', text: '系统' };
+        const session = {
+            context: {
+                messages: [
+                    { role: 'user', contentItems: [{ text: '事件内容', systemName: '群事件提示', time: 1700000000 }] },
+                    { role: 'assistant', toolCalls: [{ id: 'call_9', type: 'function', function: { name: 'web_read', arguments: '{}' } }] },
+                    { role: 'tool', text: '外部数据', toolCallId: 'call_9', toolName: 'web_read' }
+                ]
+            }
+        };
+        const out = await handleMessages(makeCtx(), session as any, false, undefined, system as any);
+        const user = out.find(m => m.role === 'user');
+        assert.ok(String(user.content).startsWith('[system:群事件提示]'), '应以 [system:名称] 开头');
+        assert.ok(String(user.content).endsWith('事件内容 [/system]'), '应以正文+[/system] 结尾');
+        const tool = out.find(m => m.role === 'tool');
+        assert.equal(tool.content, '[tool_result:call_9]\n外部数据\n[/tool_result]', '工具结果应带 [tool_result] 边界');
     },
 
     /** \f 多消息分隔：真实 \f 与字面 \\f 都应拆分；首尾/连续分隔符不产生空消息；过滤匹配之间的 \f 也不产生空消息 */
