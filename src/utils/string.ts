@@ -633,6 +633,7 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
     const contextArray: string[] = [];
     const replyArray: string[] = [];
     let replyLength = 0; //只计算未被匹配的部分
+    let newMessagePending = false; // 遇到裸 \f / 尾部 \f 时置位，下一段非空内容开新消息，避免产生空消息
 
     const filters = getReplyFilters();
 
@@ -653,9 +654,10 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
                 const contextString = filter.contextTemplate(data);
                 const replyString = filter.replyTemplate(data);
 
-                if (contextArray.length === 0) {
+                if (newMessagePending || contextArray.length === 0) {
                     contextArray.push(contextString);
                     replyArray.push(replyString);
+                    newMessagePending = false;
                 } else {
                     contextArray[contextArray.length - 1] += contextString;
                     replyArray[replyArray.length - 1] += replyString;
@@ -667,11 +669,8 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
 
         if (!isMatched) {
             const segs = segment.split(/\\f|\f/g).filter(item => item);
-
-            if (segment.startsWith('\\f') || segment.startsWith('\f')) {
-                contextArray.push('');
-                replyArray.push('');
-            }
+            const startsWithF = segment.startsWith('\\f') || segment.startsWith('\f');
+            const endsWithF = segment.endsWith('\\f') || segment.endsWith('\f');
 
             for (let j = 0; j < segs.length; j++) {
                 let seg = segs[j];
@@ -681,13 +680,15 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
                     seg = seg.slice(0, maxChar - replyLength);
                 }
 
-                if (contextArray.length === 0 || j !== 0) {
+                // 前面有分隔符、本段内已出现过 \f、或段首就是 \f 时，当前 seg 应开启新消息
+                if (newMessagePending || contextArray.length === 0 || j !== 0 || (startsWithF && j === 0)) {
                     contextArray.push(seg);
                     replyArray.push(seg);
                 } else {
                     contextArray[contextArray.length - 1] += seg;
                     replyArray[replyArray.length - 1] += seg;
                 }
+                newMessagePending = false;
 
                 // 长度超过最大限制，直接退出
                 replyLength += seg.length;
@@ -696,9 +697,9 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
                 }
             }
 
-            if (segment.endsWith('\\f') || segment.endsWith('\f')) {
-                contextArray.push('');
-                replyArray.push('');
+            // 段尾是分隔符，或整个段就是分隔符时，让下一段内容另起一条消息
+            if (endsWithF || (segs.length === 0 && (startsWithF || endsWithF))) {
+                newMessagePending = true;
             }
         }
 

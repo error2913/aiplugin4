@@ -8,7 +8,7 @@ Config.registerConfig();
 import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
-import { stripRenderTags } from "../src/utils/string";
+import { handleReply, stripRenderTags } from "../src/utils/string";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -302,6 +302,35 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(stripRenderTags('纯文本 **加粗** `code` [CQ:at,qq=1]'), '纯文本 **加粗** `code` [CQ:at,qq=1]', 'Markdown 与 CQ 码不应被误伤');
         assert.equal(stripRenderTags('旧<|msg_id:abc|>版<|img:x|>文'), '旧版文', '旧版 <|...|> 变体应归一化后剥离');
         assert.equal(stripRenderTags(''), '');
+    },
+
+    /** \f 多消息分隔：真实 \f 与字面 \\f 都应拆分；首尾/连续分隔符不产生空消息；过滤匹配之间的 \f 也不产生空消息 */
+    async testFormFeedMessageSplitting(): Promise<void> {
+        const ctx = { endPoint: { userId: 'QQ:10000' }, group: { groupId: 'g' }, player: { userId: 'QQ:20000', name: 'u' } } as any;
+        const msg = { rawId: '123', messageType: 'group' } as any;
+        const session = { context: { findImage: async () => null } } as any;
+
+        const real = await handleReply(ctx, msg, session, '第一条\f第二条');
+        assert.deepEqual(real.contextArray, ['第一条', '第二条'], '真实 \\f 应按多条消息拆分');
+
+        const literal = await handleReply(ctx, msg, session, '第一条\\f第二条');
+        assert.deepEqual(literal.contextArray, ['第一条', '第二条'], '字面 \\f 应按多条消息拆分');
+
+        const edge = await handleReply(ctx, msg, session, '\\f第一条\f第二条\f');
+        assert.deepEqual(edge.contextArray, ['第一条', '第二条'], '首尾分隔符不应产生空消息');
+
+        const consecutive = await handleReply(ctx, msg, session, '第一条\f\f第二条');
+        assert.deepEqual(consecutive.contextArray, ['第一条', '第二条'], '连续分隔符不应产生空消息');
+
+        const formattedBetween = await handleReply(ctx, msg, session, '**第一条**\f**第二条**');
+        assert.deepEqual(formattedBetween.contextArray, ['**第一条**', '**第二条**'], '过滤匹配之间的分隔符不应产生空消息');
+
+        const formattedInside = await handleReply(ctx, msg, session, '**第一条\f第二条**');
+        assert.deepEqual(formattedInside.contextArray, ['**第一条\f第二条**'], '过滤匹配内部的 \\f 仍按原有规则由该匹配整体处理');
+
+        const multiple = await handleReply(ctx, msg, session, '第一条\f第二条\f第三条\f第四条\f第五条');
+        assert.deepEqual(multiple.contextArray, ['第一条', '第二条', '第三条', '第四条', '第五条'], '多个 \\f 分隔的多条消息应全部拆分');
+
     },
 
     /** 宽容 JSON 解析：代码块围栏/前后缀文本都应能提取；垃圾输入返回 null */
