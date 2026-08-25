@@ -131,7 +131,7 @@ export class Context {
     }
 
     /** 文本超过压缩阈值时交给压缩智能体，返回压缩结果；未超阈值或失败时返回原文 */
-    private async compressIfLong(text: string): Promise<string> {
+    static async compressIfLong(text: string): Promise<string> {
         const { COMPRESS_THRESHOLD } = Config.message;
         if (text.length <= COMPRESS_THRESHOLD) return text;
         try {
@@ -153,7 +153,7 @@ export class Context {
                 log.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
-        text = await this.compressIfLong(text);
+        text = await Context.compressIfLong(text);
         // 防注入：压缩智能体可能回带标签，入库前再兜底剥离一次（主入口在 transformArrayToContent）
         text = stripInternalTags(text);
         const umi: UserMessageItem = {
@@ -169,7 +169,7 @@ export class Context {
             // 连续多条 user 消息合并后总长超阈值 → 合并压缩，替换为该条压缩结果
             // 分隔符与 buildContent 渲染保持一致（真实 \f），避免压缩前后表示差异误判重复压缩
             const merged = userMsg.contentItems.map(item => item.text).join('\f');
-            const compressed = await this.compressIfLong(merged);
+            const compressed = await Context.compressIfLong(merged);
             if (compressed !== merged) {
                 userMsg.contentItems = [{ text: compressed, time: umi.time, userId: umi.userId, messageId: umi.messageId }];
             }

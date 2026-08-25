@@ -2,7 +2,8 @@
 import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
-import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isRateLimited, parseNoticeWhitelist } from "./event/notice";
+import { Context } from "./context/context";
+import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, parseNoticeWhitelist } from "./event/notice";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
@@ -314,11 +315,18 @@ export class MessagePipeline {
 
         const isGroup = !!(event.group_id || noticeType.startsWith('group_'));
         let sid = '';
-        if (isGroup && event.group_id) sid = `${prefix}-Group:${event.group_id}`;
-        else if (event.user_id) sid = `${prefix}:${event.user_id}`;
-        if (!sid) {
-            log.debug(`ob11 通知事件无法定位会话，跳过: type=${noticeType}`);
-            return;
+        if (isGroup) {
+            if (!event.group_id) {
+                log.debug(`ob11 通知事件（群事件）缺少 group_id，跳过: type=${noticeType}`);
+                return;
+            }
+            sid = `${prefix}-Group:${event.group_id}`;
+        } else {
+            if (!event.user_id) {
+                log.debug(`ob11 通知事件（好友事件）缺少 user_id，跳过: type=${noticeType}`);
+                return;
+            }
+            sid = `${prefix}:${event.user_id}`;
         }
 
         const text = buildNoticeText(event, prefix);
@@ -329,7 +337,7 @@ export class MessagePipeline {
 
         const userId = event.user_id ? `${prefix}:${event.user_id}` : '';
         const messageId = event.message_id !== undefined && event.message_id !== null ? String(event.message_id) : '';
-        MessagePipeline.recordEventPrompt({
+        await MessagePipeline.recordEventPrompt({
             sid,
             text,
             systemName: '群事件提示',
@@ -340,9 +348,18 @@ export class MessagePipeline {
         });
     }
 
-    /** ob11 依赖请求事件（OneBot request）→ 文本提示词：默认仅日志，开启接收后录入上下文 */
+    /** ob11 依赖请求事件（OneBot request）→ 文本提示词：白名单含对应类型时录入，仅作背景不触发 AI */
     static async handleOb11RequestEvent(event: any): Promise<void> {
         if (!event || event.post_type !== 'request' || !event.request_type) return;
+        const { RECEIVE_NOTICE, NOTICE_TYPES } = Config.event;
+        if (!RECEIVE_NOTICE) return;
+
+        const requestType = String(event.request_type);
+        const whitelist = parseNoticeWhitelist(NOTICE_TYPES);
+        if (!whitelist.has(requestType + '_request')) {
+            log.debug(`ob11 请求事件不在白名单，跳过: type=${requestType}_request`);
+            return;
+        }
 
         const eps = seal.getEndPoints();
         let epId = `QQ:${event.self_id}`;
@@ -352,40 +369,48 @@ export class MessagePipeline {
         }
         const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
 
+        // 严格会话归属：入群申请 → 群会话；好友申请 → 私聊会话；映射不到即丢弃
         let sid = '';
-        if (event.request_type === 'group' && event.group_id) sid = `${prefix}-Group:${event.group_id}`;
-        else if (event.user_id) sid = `${prefix}:${event.user_id}`;
-        if (!sid) return;
+        if (requestType === 'group') {
+            if (!event.group_id) {
+                log.debug(`ob11 请求事件（入群申请）缺少 group_id，跳过`);
+                return;
+            }
+            sid = `${prefix}-Group:${event.group_id}`;
+        } else if (requestType === 'friend') {
+            if (!event.user_id) {
+                log.debug(`ob11 请求事件（好友申请）缺少 user_id，跳过`);
+                return;
+            }
+            sid = `${prefix}:${event.user_id}`;
+        } else {
+            return;
+        }
 
         const text = buildRequestText(event, prefix);
         if (!text) return;
 
-        if (!Config.event.RECEIVE_REQUEST) {
-            log.debug(`ob11 请求事件（未开启接收，仅记录日志）: ${text}`);
-            return;
-        }
-
         const userId = event.user_id ? `${prefix}:${event.user_id}` : '';
-        MessagePipeline.recordEventPrompt({
+        await MessagePipeline.recordEventPrompt({
             sid,
             text,
             systemName: '请求事件提示',
             epId,
-            eventType: `request:${event.request_type}`,
+            eventType: `request:${requestType}`,
             userId,
             messageId: '',
         });
     }
 
     /** 原生海豹回调事件（成员加入/退出/撤回/加好友/入驻）：白名单含对应类型时录入，与 ob11 依赖双路径共用去重 */
-    static handleNativeNoticeEvent(epId: string, sid: string, info: { noticeType: string; subType?: string; userId?: string; operatorId?: string; messageId?: string }): void {
+    static async handleNativeNoticeEvent(epId: string, sid: string, info: { noticeType: string; subType?: string; userId?: string; operatorId?: string; messageId?: string }): Promise<void> {
         const { RECEIVE_NOTICE, NOTICE_TYPES } = Config.event;
         if (!RECEIVE_NOTICE) return;
         const whitelist = parseNoticeWhitelist(NOTICE_TYPES);
         if (!whitelist.has(info.noticeType)) return;
         const text = buildNativeNoticeText(info);
         if (!text) return;
-        MessagePipeline.recordEventPrompt({
+        await MessagePipeline.recordEventPrompt({
             sid,
             text,
             systemName: '群事件提示',
@@ -396,8 +421,8 @@ export class MessagePipeline {
         });
     }
 
-    /** 事件提示词统一入库：黑名单 → 待机 → 去重 → 限流 → 会话创建策略 → 录入上下文（仅背景，不触发 AI） */
-    private static recordEventPrompt(opts: {
+    /** 事件提示词统一入库：黑名单 → 待机 → 去重 → 压缩 → 录入上下文（仅背景，不触发 AI） */
+    private static async recordEventPrompt(opts: {
         sid: string;
         text: string;
         systemName: string;
@@ -405,8 +430,7 @@ export class MessagePipeline {
         eventType: string;
         userId: string;
         messageId?: string;
-    }): boolean {
-        const { EVENT_RATE_LIMIT, EVENT_MAX_LENGTH, EVENT_CREATE_SESSION } = Config.event;
+    }): Promise<boolean> {
         const blockReason = BlockManager.checkBlock(opts.sid);
         if (blockReason) {
             log.debug(`事件忽略：会话<${opts.sid}>在黑名单（${blockReason}）`);
@@ -429,15 +453,8 @@ export class MessagePipeline {
             log.debug(`事件去重丢弃：${opts.eventType} @ ${opts.sid}`);
             return false;
         }
-        if (isRateLimited(opts.sid, EVENT_RATE_LIMIT)) {
-            log.debug(`事件限流丢弃：${opts.eventType} @ ${opts.sid}`);
-            return false;
-        }
-        if (!EVENT_CREATE_SESSION && session.context.messages.length === 0) {
-            log.debug(`事件忽略：会话<${opts.sid}>不存在且未开启自动建会话`);
-            return false;
-        }
-        const text = truncateText(opts.text, EVENT_MAX_LENGTH);
+        // 事件文本过长时交给压缩智能体（复用全局「消息压缩阈值」，默认 2000），失败保留原文
+        const text = await Context.compressIfLong(opts.text);
         session.context.addSystemUserMessage(text, opts.systemName);
         session.save();
         log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);

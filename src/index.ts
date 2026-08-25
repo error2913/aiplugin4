@@ -70,7 +70,7 @@ function main() {
   }
 
   // 原生已覆盖的群/好友事件（成员加入/退出/撤回/加好友/入驻）：
-  // 默认白名单不含这些类型（避免与原生回调重复），仅当用户显式加入白名单时才录入上下文；
+  // 这些类型默认就在通知事件白名单中，事件仅作背景不触发 AI；
   // 与 ob11 依赖的通知事件双路径共用 3s 事件级去重，防止同一条事件被记录两次。
   ext.onGroupMemberJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
@@ -78,7 +78,7 @@ function main() {
       MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
         noticeType: 'group_increase',
         userId: msg.sender.userId,
-      });
+      }).catch((e: any) => log.exception('群成员加入事件处理出错', e));
     } catch (e) {
       log.exception('群成员加入事件处理出错', e);
     }
@@ -92,7 +92,7 @@ function main() {
         subType: event.operatorId ? 'kick' : 'leave',
         userId: `${prefix}:${event.userId}`,
         operatorId: event.operatorId ? `${prefix}:${event.operatorId}` : '',
-      });
+      }).catch((e: any) => log.exception('群成员退出事件处理出错', e));
     } catch (e) {
       log.exception('群成员退出事件处理出错', e);
     }
@@ -107,13 +107,13 @@ function main() {
           noticeType: 'group_recall',
           userId: msg.sender.userId,
           messageId,
-        });
+        }).catch((e: any) => log.exception('消息撤回事件处理出错', e));
       } else {
         MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, msg.sender.userId, {
           noticeType: 'friend_recall',
           userId: msg.sender.userId,
           messageId,
-        });
+        }).catch((e: any) => log.exception('消息撤回事件处理出错', e));
       }
     } catch (e) {
       log.exception('消息撤回事件处理出错', e);
@@ -125,7 +125,7 @@ function main() {
       MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, msg.sender.userId, {
         noticeType: 'friend_add',
         userId: msg.sender.userId,
-      });
+      }).catch((e: any) => log.exception('成为好友事件处理出错', e));
     } catch (e) {
       log.exception('成为好友事件处理出错', e);
     }
@@ -136,7 +136,7 @@ function main() {
       const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
       MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
         noticeType: 'group_joined',
-      });
+      }).catch((e: any) => log.exception('加入群聊事件处理出错', e));
     } catch (e) {
       log.exception('加入群聊事件处理出错', e);
     }

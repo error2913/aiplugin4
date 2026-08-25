@@ -9,7 +9,7 @@ import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../sr
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags } from "../src/utils/string";
-import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isRateLimited, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
+import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -536,23 +536,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(buildNativeNoticeText({ noticeType: 'nope' }), '');
     },
 
-    /** 事件去重：同 key 窗口内只录一次；限流：60s 内超过上限丢弃 */
-    testEventDedupAndRateLimit(): void {
+    /** 事件去重：同 key 窗口内只录一次（会话级限流已移除，仅保留 3s 事件级去重防双录） */
+    testEventDedup(): void {
         resetEventGuards();
         const now = 1000000;
         assert.equal(isDuplicateEvent('k1', now), false, '首次记录不重复');
         assert.equal(isDuplicateEvent('k1', now + 1000), true, '窗口内同 key 重复');
         assert.equal(isDuplicateEvent('k2', now + 1000), false, '不同 key 不重复');
         assert.equal(isDuplicateEvent('k1', now + 4000), false, '窗口过期后不再重复');
-
-        resetEventGuards();
-        assert.equal(isRateLimited('s1', 2, now), false);
-        assert.equal(isRateLimited('s1', 2, now + 1000), false);
-        assert.equal(isRateLimited('s1', 2, now + 2000), true, '60s 内超过上限');
-        assert.equal(isRateLimited('s2', 2, now + 2000), false, '不同会话独立计数');
-        assert.equal(isRateLimited('s1', 2, now + 70000), false, '窗口滚动后恢复');
-        resetEventGuards();
-        assert.equal(isRateLimited('s3', 0, now), false, 'limit<=0 不限制');
         resetEventGuards();
     }
 

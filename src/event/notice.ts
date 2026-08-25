@@ -1,18 +1,13 @@
-// 依赖事件 → 文本提示词：纯函数转换 + 去重/限流守卫（ob11 依赖 notice/request 事件）
+// 依赖事件 → 文本提示词：纯函数转换 + 去重守卫（ob11 依赖 notice/request 事件）
 import { truncateText } from "../utils/string";
 
 /** 事件级去重窗口：同 key 事件在此窗口内只记录一次（原生回调与 ob11 依赖双路径防双录） */
 const EVENT_DEDUP_WINDOW_MS = 3000;
-/** 会话级事件限流窗口 */
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-
 const eventDedupMap = new Map<string, number>();
-const rateLimitMap = new Map<string, number[]>();
 
-/** 重置去重/限流状态（单元测试用） */
+/** 重置去重状态（单元测试用） */
 export function resetEventGuards(): void {
     eventDedupMap.clear();
-    rateLimitMap.clear();
 }
 
 /** 事件级去重：窗口内已存在同 key 返回 true（重复，应丢弃）；否则记录并返回 false */
@@ -22,19 +17,6 @@ export function isDuplicateEvent(key: string, now: number = Date.now()): boolean
     });
     if (eventDedupMap.has(key)) return true;
     eventDedupMap.set(key, now + EVENT_DEDUP_WINDOW_MS);
-    return false;
-}
-
-/** 会话级限流：60 秒窗口内超过 limit 条返回 true（应丢弃）；limit<=0 不限制 */
-export function isRateLimited(sessionId: string, limit: number, now: number = Date.now()): boolean {
-    if (limit <= 0) return false;
-    const list = (rateLimitMap.get(sessionId) || []).filter(t => now - t < RATE_LIMIT_WINDOW_MS);
-    if (list.length >= limit) {
-        rateLimitMap.set(sessionId, list);
-        return true;
-    }
-    list.push(now);
-    rateLimitMap.set(sessionId, list);
     return false;
 }
 
