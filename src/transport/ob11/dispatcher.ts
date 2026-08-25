@@ -5,7 +5,7 @@ import { resolveSendMessage, SendSessionLike } from "./message_segments";
 import { Ob11NetBackend } from "./ob11_net_backend";
 import { failure, serializeResult } from "./result";
 import { SealNativeBackend } from "./seal_native_backend";
-import { normalizeSpecialIdParams } from "./special_id_params";
+import { normalizeSpecialIdParams, validateSpecialIdParams } from "./special_id_params";
 import { Ob11CallContext, Ob11Result } from "./types";
 
 const log = Logger.withTag('ob11');
@@ -48,6 +48,13 @@ export async function dispatchOb11Api(
     // 避免模型把 [msg_id]/[img:虚拟ID] 等原样发到群里；仅工具调用路径带 session 时可解析。
     if (SEND_MESSAGE_ACTIONS.has(normalizedAction) && params && params.message !== undefined && context.ctx && context.session) {
         params = { ...params, message: await resolveSendMessage(context.ctx, context.session, params.message) };
+    }
+
+    // get_image/get_record 等特殊 ID 参数 fail-fast 校验：完整 URL/未登记句柄直接短路，
+    // 避免 AI 把下载 URL 或渲染标签原样发给协议端导致 file not found。
+    const validated = validateSpecialIdParams(normalizedAction, params || {});
+    if (validated.ok === false) {
+        return failure("seal-native", normalizedAction, validated.code, validated.message, { retryable: false });
     }
 
     // 特殊 ID 归一化：模型可能直接使用上下文里的短 ID（[msg_id:base36]/[quote:base36]/[img:图片ID]/[voice:句柄]），

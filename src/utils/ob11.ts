@@ -35,11 +35,11 @@ async function forwardSegmentsToText(epId: string, message: any, depth: number, 
         switch (seg.type) {
             case "text": text += (seg.data && seg.data.text) || ""; break;
             case "at": text += `@${(seg.data && (seg.data.qq || seg.data.user_id)) || ""} `; break;
-            case "face": text += `[表情${(seg.data && seg.data.id) || ""}]`; break;
+            case "face": text += `[face:${(seg.data && seg.data.id) || ""}]`; break;
             case "image": text += "[图片]"; break;
-            case "record": text += "【语音】"; break;
-            case "video": text += `【视频】${(seg.data && (seg.data.file || seg.data.url)) || ""}`; break;
-            case "file": text += `【文件】${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || ""}`; break;
+            case "record": text += "[voice]语音[/voice]"; break;
+            case "video": text += "[video]视频[/video]"; break;
+            case "file": text += `[file]${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || "文件"}[/file]`; break;
             case "json": text += parseCardToText(seg.data && (seg.data.data || seg.data.content)); break;
             case "music": text += parseMusicToText(seg.data || {}); break;
             case "node": text += await forwardMessagesToText(epId, [seg], depth + 1, visited); break;

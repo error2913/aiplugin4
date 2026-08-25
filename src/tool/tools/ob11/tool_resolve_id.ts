@@ -15,10 +15,14 @@ function fail(code: string, message: string): string {
     return JSON.stringify({ ok: false, error: { code, message } });
 }
 
-/** 剥掉标签包裹：[msg_id:xxx]/[quote:xxx]/[img:xxx]/[voice:xxx]/[video:xxx]/[file:xxx] → xxx */
+/** 剥掉标签包裹：[msg_id:xxx]/[quote:xxx]/[img:xxx] 单行形式，及
+ *  [voice:xxx]摘要[/voice]/[video:xxx]...[/video]/[file:xxx]...[/file] 闭合形式 → 取开标签参数 xxx；兼容 handle=xxx 旧形式 */
 function stripTag(raw: string): string {
-    const m = /^\[(?:msg_id|quote|img|voice|video|file):([^\]]+)\]$/i.exec(raw);
-    return m ? m[1].trim() : raw;
+    const trimmed = String(raw || '').trim();
+    const m = /^\[(?:msg_id|quote|img|voice|video|file):([^\]]+)\]/i.exec(trimmed);
+    if (m) return m[1].trim();
+    if (/^handle=/i.test(trimmed)) return trimmed.replace(/^handle=/i, '').trim();
+    return trimmed;
 }
 
 export function registerResolveSpecialId() {
@@ -28,8 +32,9 @@ export function registerResolveSpecialId() {
             name: "resolve_special_id",
             description: "解析上下文里出现的特殊短 ID/句柄，返回其原始字段，用于对接协议 API。\n" +
                 "上下文中的消息 ID 是 base36 短 ID（[msg_id:xxx]/[quote:xxx]），图片是 6 位图片 ID（[img:xxx]），" +
-                "语音/视频/文件消息带 handle=句柄。需要把短 ID 交给 get_msg/delete_msg/get_image/get_record/文件下载等" +
-                "协议能力，或读取原始 url/path/file/file_id/file_unique 等字段时，先调用本工具还原。",
+                "语音/视频/文件消息是闭合标签（[voice:句柄]摘要[/voice]、[video:句柄]...[/video]、[file:句柄]...[/file]）。" +
+                "需要把短 ID 交给 get_msg/delete_msg/get_image/get_record/文件下载等协议能力，或读取原始 " +
+                "url/path/file/file_id/file_unique 等字段时，先调用本工具还原。",
             parameters: {
                 type: "object",
                 properties: {
@@ -40,7 +45,7 @@ export function registerResolveSpecialId() {
                     },
                     id: {
                         type: "string",
-                        description: "上下文里的短 ID 或句柄（如 [msg_id:3f]、[img:abc123]、handle=abc123 中的 abc123）"
+                        description: "上下文里的短 ID 或句柄（如 [msg_id:3f]、[img:abc123]、[voice:abc123]摘要[/voice] 中的 abc123）"
                     }
                 },
                 required: ["type", "id"]

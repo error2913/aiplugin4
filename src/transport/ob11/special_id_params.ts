@@ -68,7 +68,7 @@ function resolveRecordFile(value: any): any {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
     let handle = "";
-    const tagMatch = /^\[voice:([^\]]+)\]$/i.exec(trimmed);
+    const tagMatch = /^\[voice:([^\]]+)\]/i.exec(trimmed);
     if (tagMatch) handle = tagMatch[1];
     else if (HANDLE_PATTERN.test(trimmed)) handle = trimmed;
     else return value;
@@ -77,6 +77,78 @@ function resolveRecordFile(value: any): any {
     const data = res.data || {};
     const file = data.file || data.url || data.path || "";
     return file || value;
+}
+
+/**
+ * get_image/get_record 的 file 参数 fail-fast 校验：拦截 AI 常见误用，避免把
+ * 渲染标签/完整 URL/未登记句柄原样发给协议端（如 get_image file=完整下载 URL 导致 file not found）。
+ * - 完整 URL → 直接使用 url，不应调 get_image/get_record
+ * - 上下文标签/短 ID/句柄 → 提取候选并校验是否已登记；未登记提示先 resolve_special_id
+ * - 其余（缓存文件名 xxx.image/voice.amr、本地路径、base64:// 等）放行
+ */
+export function validateSpecialIdParams(action: string, params: Record<string, any>): { ok: true } | { ok: false; code: string; message: string } {
+    if (!IMAGE_ID_ACTIONS.has(action) && !RECORD_ID_ACTIONS.has(action)) return { ok: true };
+    if (!params || typeof params !== "object" || Array.isArray(params)) return { ok: true };
+    const file = params.file;
+    if (typeof file !== "string") return { ok: true };
+    const trimmed = file.trim();
+    if (!trimmed) return { ok: true };
+
+    // 完整 URL：已有 url/path/base64 时直接用，不应再调 get_image/get_record 转存
+    if (/^https?:\/\//i.test(trimmed)) {
+        return {
+            ok: false,
+            code: "INVALID_FILE",
+            message: `${action} 的 file 不接受 URL：已有 url 直接用，不要调 ${action}；只有缓存文件名（如 xxx.image/voice.amr）或上下文短 ID/句柄才需要调用本接口`
+        };
+    }
+
+    // 上下文标签/短 ID/句柄 → 提取候选 ID；get_image 只认图片，get_record 只认语音
+    let candidate = "";
+    const mediaMatch = /^\[(?:voice|video|file):([^\]]+)\]/i.exec(trimmed);
+    const imgMatch = /^\[img:([^\]]+)\]$/i.exec(trimmed);
+    if (mediaMatch) {
+        if (action === "get_image") {
+            return {
+                ok: false,
+                code: "INVALID_FILE",
+                message: "get_image 的 file 不接受语音/视频/文件句柄，请改用 [img:图片ID] 或先调用 resolve_special_id(type=image) 获取原始 file/url"
+            };
+        }
+        candidate = mediaMatch[1].trim();
+    } else if (imgMatch) {
+        if (action === "get_record") {
+            return {
+                ok: false,
+                code: "INVALID_FILE",
+                message: "get_record 的 file 不接受图片 ID，请改用 [voice:句柄] 或先调用 resolve_special_id(type=voice) 获取原始 file/url"
+            };
+        }
+        const content = imgMatch[1];
+        candidate = content.includes(":") ? content.split(":")[0] : content;
+    } else if (HANDLE_PATTERN.test(trimmed)) {
+        candidate = trimmed;
+    }
+    if (!candidate) return { ok: true };
+
+    if (action === "get_image") {
+        if (!Image.get(candidate)) {
+            return {
+                ok: false,
+                code: "INVALID_FILE",
+                message: `未找到对应图片缓存：${trimmed}，先调用 resolve_special_id(type=image, id=图片ID) 获取 raw file/url/path，或直接用 url`
+            };
+        }
+    } else {
+        if (!resolveSpecialResourceByType("voice", candidate)) {
+            return {
+                ok: false,
+                code: "INVALID_FILE",
+                message: `未找到对应语音缓存：${trimmed}，先调用 resolve_special_id(type=voice, id=句柄) 获取 raw file/url/path，或直接用 url`
+            };
+        }
+    }
+    return { ok: true };
 }
 
 /**

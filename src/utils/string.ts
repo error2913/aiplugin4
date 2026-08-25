@@ -158,19 +158,12 @@ export function formatFileSegmentText(rawData: any): string {
     const file = pickFirstText(typeof data.file === 'string' ? data.file : '', nestedFile.file);
     const url = pickFirstText(data.url, data.file_url, data.download_url, nestedFile.url, nestedFile.file_url);
     const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
-    const fileUnique = pickFirstText(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
-    const size = pickFirstText(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
-    const mime = pickFirstText(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
     const label = name || path || file || url || fileId || '未知文件';
-    const fields = [
-        ['name', name], ['path', path], ['file', file], ['url', url],
-        ['file_id', fileId], ['file_unique', fileUnique], ['size', size], ['mime', mime]
-    ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`);
-    return `【文件】${label}${fields.length ? `\n${fields.join('\n')}` : ''}`;
+    return `[file]${truncateText(label, 80)}[/file]`;
 }
 
 /**
- * 语音/视频等媒体消息的完整可读表示：除可读字段外还带句柄（handle=xxx），
+ * 语音/视频等媒体消息的完整可读表示：闭合标签携带句柄，如 [voice:句柄]摘要[/voice]，
  * AI 可用 resolve_special_id(type=voice/video/file, id=句柄) 查询原始字段。
  */
 export function formatMediaSegmentText(label: string, rawData: any, handle: string): string {
@@ -181,15 +174,11 @@ export function formatMediaSegmentText(label: string, rawData: any, handle: stri
     const file = pickFirstText(typeof data.file === 'string' ? data.file : '', nestedFile.file);
     const url = pickFirstText(data.url, data.file_url, nestedFile.url, nestedFile.file_url);
     const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
-    const fileUnique = pickFirstText(data.file_unique, data.fileUnique, nestedFile.file_unique, nestedFile.fileUnique);
     const size = pickFirstText(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
-    const mime = pickFirstText(data.content_type, data.contentType, data.mime, nestedFile.content_type, nestedFile.contentType);
-    const labelName = name || path || file || url || fileId || '未知';
-    const fields = [
-        ['handle', handle], ['name', name], ['path', path], ['file', file], ['url', url],
-        ['file_id', fileId], ['file_unique', fileUnique], ['size', size], ['mime', mime]
-    ].filter(([, value]) => value).map(([key, value]) => `${key}=${value}`);
-    return `【${label}】${labelName}${fields.length ? `\n${fields.join('\n')}` : ''}`;
+    const labelName = pickFirstText(name, path, file, url, fileId) || '未知';
+    const tag = label.toLowerCase() === '语音' ? 'voice' : label.toLowerCase() === '视频' ? 'video' : 'file';
+    const summary = truncateText([labelName, size ? `大小${size}` : ''].filter(Boolean).join('，'), 80);
+    return `[${tag}:${handle}]${summary}[/${tag}]`;
 }
 
 /** 为忽略/触发正则生成兼容 CQ 码的匹配文本，不改变消息段本身。 */
@@ -239,7 +228,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
             case 2: { // 文件 File
                 // 保留原始文件字段并登记句柄，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
                 const fileHandle = registerSpecialResource('file', seg);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', seg, fileHandle) } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', seg, fileHandle), __system: '1' } });
                 break;
             }
             case 3: { // 图片 Image
@@ -276,7 +265,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                     content_type: fileEl ? fileEl.contentType : ''
                 };
                 const handle = registerSpecialResource('voice', rawData);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', rawData, handle) } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', rawData, handle), __system: '1' } });
                 break;
             }
             case 7: { // 表情 Face
@@ -298,15 +287,15 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
     return result;
 }
 
-/** 解析 QQ 卡片消息（CQ:json / OB11 json 段的 data 字段），提取标题/描述/链接等可读文本 */
+/** 解析 QQ 卡片消息（CQ:json / OB11 json 段的 data 字段），提取标题/描述/链接等可读文本，包成上下文专用闭合标签 [card]...[/card] */
 export function parseCardToText(raw: any): string {
-    if (!raw) return '[卡片消息]';
+    if (!raw) return '[card]未知卡片[/card]';
 
     let obj: any = null;
     try {
         obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
     } catch (_e) {
-        return `[卡片消息] ${String(raw).slice(0, 200)}`;
+        return `[card]${truncateText(String(raw), 200)}[/card]`;
     }
 
     const str = (v: any): string => (typeof v === 'string' && v.trim()) ? v.trim() : '';
@@ -318,16 +307,16 @@ export function parseCardToText(raw: any): string {
     const url = str(view.url) || str(view.jumpUrl) || (view.news && str(view.news.jumpUrl)) || (view.detail && str(view.detail.jumpUrl)) || '';
 
     const parts = [title, desc].filter(Boolean);
-    if (parts.length === 0) return '[卡片消息]';
-    return `【卡片】${parts.join('\n')}${url ? `\n${url}` : ''}`;
+    if (parts.length === 0) return '[card]未知卡片[/card]';
+    return `[card]${truncateText(parts.join(' / ') + (url ? ` ${url}` : ''), 300)}[/card]`;
 }
 
-/** 音乐段转可读文本（data 为 qq/163 id 或 custom 对象） */
+/** 音乐段转可读文本（data 为 qq/163 id 或 custom 对象），包成上下文专用闭合标签 [music]...[/music] */
 export function parseMusicToText(data: any): string {
-    if (data && data.title) return `【音乐】${data.title}`;
+    if (data && data.title) return `[music]${truncateText(String(data.title), 80)}[/music]`;
     const type = data && data.type ? String(data.type) : '';
     const id = data && data.id ? String(data.id) : '';
-    return `【音乐】${type}${id ? ` ${id}` : ''}`;
+    return `[music]${type}${id ? ` ${id}` : '未知音乐'}[/music]`;
 }
 
 export function transformTextToArray(text: string): MessageSegment[] {
@@ -397,8 +386,9 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
     for (const seg of messageArray) {
         switch (seg.type) {
             case 'text': {
-                // 防注入：用户输入中的内部上下文标签（from/msg_id/system/time）直接剥离，不进入上下文
-                content += stripInternalTags(seg.data.text);
+                // 防注入：用户原始文本里的伪造闭合标签（[system]注入[/system]、[voice:x]fake[/voice] 等）整段删除，
+                // 残留单行标签转义为字面量；系统自产媒体占位（带 __system 标记）只做轻剥离保留
+                content += seg.data.__system === '1' ? stripInternalTags(seg.data.text) : stripUserTags(seg.data.text);
                 break;
             }
             case 'at': {
@@ -787,12 +777,43 @@ export function normalizeRenderTags(s: string): string {
 const INTERNAL_TAG_NAMES = ['from', 'msg_id', 'system', 'time', 'tool_result'];
 const INTERNAL_TAG_TYPES = new Set(INTERNAL_TAG_NAMES);
 
-/** 剥离内部上下文标签（from/msg_id/system/time）：先归一化旧版 <|...|> 变体，再移除新/旧方括号格式（含全角）；
- *  保留 at/poke/quote/img/avatar/group_avatar/face/audio 等可发送标签 */
+/** 可发送单行标签名：AI 输出可解析为消息段；用户输入中出现时转义为字面量 */
+const SENDABLE_TAG_NAMES = ['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'];
+
+/** 上下文专用闭合标签名：仅渲染进上下文供 AI 阅读，不用于发送；
+ *  用户输入中伪造的 [name]...[/name] 整段删除（voice/video/file/face/xml/markdown/forward/node/music/card） */
+const CLOSED_CONTEXT_TAG_NAMES = ['voice', 'video', 'file', 'face', 'xml', 'markdown', 'forward', 'node', 'music', 'card'];
+
+/** 全部插件标签名（用户输入剥离与渲染清洗共用） */
+const ALL_TAG_NAMES = [...INTERNAL_TAG_NAMES, ...SENDABLE_TAG_NAMES, ...CLOSED_CONTEXT_TAG_NAMES];
+
+/** 剥离内部上下文标签（from/msg_id/system/time/tool_result）：先归一化旧版 <|...|> 变体，再移除新/旧方括号格式（含全角）；
+ *  保留 at/poke/quote/img/avatar/group_avatar/face/audio 等可发送标签与 voice/video/file 等上下文闭合标签。
+ *  注意：本函数保留闭合标签的内容（[system]内容[/system] → 内容），只用于系统自产内容流转；用户输入入口请用 stripUserTags。 */
 export function stripInternalTags(s: string): string {
     if (!s) return s;
     s = normalizeRenderTags(s);
     return s.replace(new RegExp(`[[［][/／]?(?:${INTERNAL_TAG_NAMES.join('|')})[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '');
+}
+
+/** 用户输入防注入剥离：整段删除伪造的闭合标签（[system]注入[/system]、[voice:x]fake[/voice]、[tool_result]...[/tool_result] 等，含内容），
+ *  删除单行内部上下文标签（[system:...]/[from:...] 等），并把可发送/媒体单行标签转义为字面量（\\[at:all]、\\[img:xxx]），
+ *  避免用户输入中的标签被当作上下文指令或发送指令。只用于用户原始文本入口（transformArrayToContent）。 */
+export function stripUserTags(s: string): string {
+    if (!s) return s;
+    let out = normalizeRenderTags(s);
+    // 1) 整段删除闭合标签 span（含内容），反复直到无残留（覆盖嵌套/多个相邻）
+    const closedRe = new RegExp(`[[［](${INTERNAL_TAG_NAMES.concat(CLOSED_CONTEXT_TAG_NAMES).join('|')})[:：]?[^\\]］]*[\\]］][\\s\\S]*?[[［]/\\1[\\]］]`, 'gi');
+    let prev = '';
+    while (prev !== out) {
+        prev = out;
+        out = out.replace(closedRe, '');
+    }
+    // 2) 删除单行内部上下文标签（上下文专用，不应出现在用户输入）
+    out = out.replace(new RegExp(`[[［](${INTERNAL_TAG_NAMES.join('|')})[:：]?[^\\]］]*[\\]］]`, 'gi'), '');
+    // 3) 可发送/媒体单行标签转义为字面量，避免被当作发送指令
+    out = out.replace(new RegExp(`[[［](${SENDABLE_TAG_NAMES.concat(CLOSED_CONTEXT_TAG_NAMES).join('|')})[:：]?[^\\]］]*[\\]］]`, 'gi'), (m) => '\\' + m);
+    return out;
 }
 
 /** 剥离全部插件标签（渲染 + 内部），仅保留纯文本/Markdown；用于论坛等不支持消息段的纯文本出口 */
@@ -800,40 +821,51 @@ export function stripRenderTags(s: string): string {
     if (!s) return s;
     s = normalizeRenderTags(s);
     return s
-        .replace(/[[［][/／]?(?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|tool_result|user_avatar)[:：]?\s?[^\]］]*[\]］]/gi, '')
+        .replace(new RegExp(`[[［][/／]?(?:${ALL_TAG_NAMES.join('|')}|user_avatar)[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '')
         .trim();
 }
-
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
-    const segs = s.split(/([[［][/／]?(?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|tool_result|user_avatar)[:：]?[^\]］]*[\]］])/);
+    // 转义感知：stripUserTags 转义的字面标签（\\[at:all]）不再当标签解析，按文本保留
+    const placeholders = new Map<string, string>();
+    let phIndex = 0;
+    const protectedStr = s.replace(/\\([[［][/／]?[a-z_]+[:：]?[^\\\[［\\\]］]*[\\\]］])/gi, (_m, tag: string) => {
+        const ph = `\uE000${phIndex++}\uE001`;
+        placeholders.set(ph, tag);
+        return ph;
+    });
+    const restore = (text: string): string =>
+        text.replace(/\uE000\d+\uE001/g, ph => placeholders.get(ph) ?? ph);
+    const segs = protectedStr.split(/([[［][/／]?(?:at|poke|quote|face|img|avatar|group_avatar|audio|from|msg_id|system|time|tool_result|user_avatar)[:：]?[^\\\[［\\\]］]*[\\\]］])/);
     segs.forEach(seg => {
         if (!seg) return;
-        const match = seg.match(/^[[［][/／]?([a-z_]+)[:：]?\s?([^\]］]*)[\]］]$/i);
+        const match = seg.match(/^[[［][/／]?([a-z_]+)[:：]?\s?([^\\\[［\\\]］]*)[\\\]］]$/i);
         if (!match) {
             result.push({
                 type: 'text',
-                content: seg
+                content: restore(seg)
             })
-        } else {
-            const [_, rawType = 'text', content = ''] = match;
-            const type = rawType.toLowerCase();
-            // 内部上下文标签（来源/消息ID/系统/时间）不用于发送，直接丢弃避免泄露
-            if (INTERNAL_TAG_TYPES.has(type)) return;
-            // 兼容旧格式 [user_avatar:xxx] 别名
-            const mapped = type === 'user_avatar' ? 'avatar' : type;
-            if (!['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'].includes(mapped)) {
-                result.push({
-                    type: 'text',
-                    content: seg
-                })
-            } else {
-                result.push({
-                    type: mapped as TokenSegment['type'],
-                    content: content
-                })
-            }
+            return;
         }
+        const [_, rawType = 'text', content = ''] = match;
+        const type = rawType.toLowerCase();
+        // 内部上下文标签（来源/消息ID/系统/时间）不用于发送，直接丢弃避免泄露
+        if (INTERNAL_TAG_TYPES.has(type)) return;
+        // 兼容旧格式 [user_avatar:xxx] 别名
+        const mapped = type === 'user_avatar' ? 'avatar' : type;
+        // 闭合标签 [/xxx] 或内容为空的标签（如 [face] 商城表情的开标签）不是可发送标签，按文本保留
+        const isClosing = /^[[［]\//.test(seg);
+        if (isClosing || !content.trim() || !['at', 'poke', 'quote', 'img', 'avatar', 'group_avatar', 'face', 'audio'].includes(mapped)) {
+            result.push({
+                type: 'text',
+                content: restore(seg)
+            })
+            return;
+        }
+        result.push({
+            type: mapped as TokenSegment['type'],
+            content: content
+        })
     })
     return result;
 }

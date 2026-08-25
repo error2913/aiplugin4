@@ -34,17 +34,21 @@ data：
 - \`send_msg\` 不是本工具入口。需要发送时根据场景明确选择 \`send_private_msg\` 或 \`send_group_msg\`。
 - 管理、删除、加好友等有副作用的 action 只有在用户意图明确时调用；\`reason\` 只用于记录意图，不会替代 API 参数，也不会绕过权限。
 
-## 2.5 特殊 ID 与句柄
-- 上下文消息里的消息 ID 是 base36 短 ID（\`[msg_id:xxx]\`/\`[quote:xxx]\`），图片是 \`[img:图片ID]\`，语音/视频/文件消息带 \`handle=句柄\`。
-- 需要把短 ID 还原成协议端能用的原始值（\`message_id\`/\`file\`/\`url\`/\`path\`/\`file_id\` 等）时，先调用 \`resolve_special_id(type=message/image/voice/video/file, id=短ID或句柄)\`。
+## 2.5 特殊 ID、句柄与媒体引用
+- 上下文里的 ID 都是插件渲染的短形式，不要把短 ID/句柄或标签原样外发：
+  - 消息 ID：base36 短 ID（\`[msg_id:xxx]\`/\`[quote:xxx]\`）
+  - 图片：6 位图片 ID（\`[img:图片ID]\`，或带描述的 \`[img:图片ID:描述]\`）
+  - 语音/视频/文件：闭合标签 \`[voice:句柄]摘要[/voice]\`、\`[video:句柄]摘要[/video]\`、\`[file:句柄]摘要[/file]\`，句柄在开标签参数里
+- 需要还原成协议端能用的原始值（\`message_id\`/\`file\`/\`url\`/\`path\`/\`file_id\`/\`file_unique\` 等）时，先调用 \`resolve_special_id(type=message/image/voice/video/file, id=短ID或句柄)\`；\`id\` 可以传整个标签（含闭合形式），也可以只传句柄。
 - \`get_msg\`/\`delete_msg\`/\`set_essence_msg\` 等 action 的 \`message_id\`、\`get_image\`/\`get_record\` 的 \`file\` 也支持直接传上下文短 ID/句柄，\`call_ob11_api\` 会自动还原；复杂场景建议先用 \`resolve_special_id\` 查询确认。
+- **已有完整 url/path/base64 时直接用，不要调 \`get_image\`/\`get_record\` 转换**：这两个接口只接受协议端缓存文件名（如 \`xxx.image\`/\`voice.amr\`）或上下文短 ID/句柄；把下载 URL 传给它们会返回 \`file not found\`。已拿到 url 的图片/语音直接使用 url 即可。
 
 ## 3. message 格式
 \`message\` 可以是纯文本字符串，也可以是 OneBot 11 消息段数组。消息段统一格式为 \`{"type":"类型","data":{...}}\`。可混排，数组顺序就是发送顺序。
 
 常用消息段：
 - 文本：\`{"type":"text","data":{"text":"文字"}}\`
-- QQ 表情：\`{"type":"face","data":{"id":"123"}}\`
+- QQ 表情：\`{"type":"face","data":{"id":"123"}}\`。上下文中普通 QQ 表情显示为 \`[face:表情名]\`（可发送）；商城表情/超级表情显示为 \`[face]表情名[/face]\`（仅供阅读，不能直接发送，需要时按对应协议段构造）。
 - 图片：\`{"type":"image","data":{"file":"绝对路径、URL、base64://... 或 resource:资源名"}}\`
 - 语音：\`{"type":"record","data":{"file":"绝对路径、URL、base64://... 或 resource:资源名","magic":0}}\`
 - 视频：\`{"type":"video","data":{"file":"绝对路径、URL、base64://... 或 resource:资源名"}}\`
@@ -72,7 +76,7 @@ data：
   \`{"action":"upload_group_file","params":{"group_id":"123","file":"/data/a.zip","name":"a.zip"}}\`。
 - 上传 action 的 \`file\` 也支持 \`resource:资源ID\`；工具会先解析到已配置资源的实际路径，再交给文件上传 API。
 - \`file\` 消息段是消息中的文件卡片，不等同于 \`upload_group_file\`；不要用普通 \`file\` segment 冒充群文件区上传。
-- 语音生成先使用 \`generate_audio\` 得到 record segment，再把该 segment 原样交给 \`call_ob11_api\`；直接把 record segment 交给 \`call_ob11_api\`。
+- 语音生成先使用 \`generate_audio\` 得到 record segment，再把该 segment 原样交给 \`call_ob11_api\`。
 - 音乐搜索先使用 \`search_music\` 得到 music segment，再把该 segment 放入发送 action；不要直接发送，继续使用 \`call_ob11_api\`。
 
 ## 6. JSON、Markdown、音乐
@@ -88,15 +92,30 @@ data：
 - 需要构造新的合并转发：使用 \`send_group_forward_msg\` 或 \`send_private_forward_msg\`，并按当前协议端的 \`messages\` / \`messages\` 节点格式提供 node；这类远端动作需要 ob11 网络连接依赖。
 - node 示例：\`{"type":"node","data":{"user_id":"10001","nickname":"昵称","content":[{"type":"text","data":{"text":"内容"}}]}}\`。不同协议端对 node 字段可能有差异，优先遵循当前端点文档。
 
-## 8. 常用 action 分类
-以下是常用原始 action，不是额外工具名：
-- 消息：\`send_private_msg\`、\`send_group_msg\`、\`get_msg\`、\`delete_msg\`、\`get_forward_msg\`、\`send_group_forward_msg\`、\`send_private_forward_msg\`。
-- 查询：\`get_login_info\`、\`get_status\`、\`get_version_info\`、\`get_group_info\`、\`get_group_list\`、\`get_group_member_info\`、\`get_group_member_list\`、\`get_friend_list\`、\`get_stranger_info\`、\`get_group_msg_history\`、\`get_friend_msg_history\`。
-- 群管理：\`set_group_kick\`、\`set_group_ban\`、\`set_group_whole_ban\`、\`set_group_admin\`、\`set_group_card\`、\`set_group_name\`、\`set_group_leave\`、\`set_group_special_title\`、\`send_group_sign\`。
-- 请求与好友：\`send_like\`、\`set_friend_add_request\`、\`set_group_add_request\`。
-- 群文件：\`upload_group_file\`、\`upload_private_file\`、\`get_group_file_url\`、\`get_group_root_files\`、\`get_group_files_by_folder\`、\`create_group_file_folder\`、\`delete_group_file\`、\`delete_group_folder\`、\`move_group_file\`、\`rename_group_file\`、\`get_private_file_url\`。
-- 账号/缓存：\`get_cookies\`、\`get_csrf_token\`、\`get_credentials\`、\`get_record\`、\`get_image\`、\`can_send_image\`、\`can_send_record\`、\`set_qq_avatar\`、\`set_qq_profile\`、\`set_group_portrait\`、\`set_restart\`、\`clean_cache\`。
-- 未列出的 action：如果已安装 ob11 网络连接依赖，统一入口会原样透传给协议端；没有依赖时不能执行未知 action，也不能猜测结果。
+## 8. action 方法合集（三层）
+\`call_ob11_api\` 以 OneBot 11（OB11）action 名为入口，不新增包装名。当前端点能力分三层，均按原名透传：
+
+### 8.1 OB11 标准 action（38 个，兼容端点通用）
+- 消息：\`send_private_msg\`、\`send_group_msg\`、\`send_msg\`、\`delete_msg\`、\`get_msg\`、\`get_forward_msg\`、\`send_like\`
+- 群管理：\`set_group_kick\`、\`set_group_ban\`、\`set_group_anonymous_ban\`、\`set_group_whole_ban\`、\`set_group_admin\`、\`set_group_anonymous\`、\`set_group_card\`、\`set_group_name\`、\`set_group_leave\`、\`set_group_special_title\`
+- 请求：\`set_friend_add_request\`、\`set_group_add_request\`
+- 查询：\`get_login_info\`、\`get_stranger_info\`、\`get_friend_list\`、\`get_group_info\`、\`get_group_list\`、\`get_group_member_info\`、\`get_group_member_list\`、\`get_group_honor_info\`
+- 账号/工具：\`get_cookies\`、\`get_csrf_token\`、\`get_credentials\`、\`get_record\`、\`get_image\`、\`can_send_image\`、\`can_send_record\`、\`get_status\`、\`get_version_info\`、\`set_restart\`、\`clean_cache\`
+
+### 8.2 NapCat/兼容端点扩展（128 个，原样透传）
+已安装 ob11 网络连接依赖时，NapCat 等端点的扩展 action 也按原名透传，常见代表：
+- 消息扩展：\`send_group_forward_msg\`、\`send_private_forward_msg\`、\`send_forward_msg\`、\`set_essence_msg\`、\`delete_essence_msg\`、\`get_essence_msg_list\`、\`set_msg_emoji_like\`、\`get_group_msg_history\`、\`get_friend_msg_history\`、\`get_ai_record\`、\`send_group_ai_record\`、\`send_private_ai_record\`
+- 群文件：\`upload_group_file\`、\`upload_private_file\`、\`get_group_file_url\`、\`get_group_root_files\`、\`get_group_files_by_folder\`、\`create_group_file_folder\`、\`delete_group_file\`、\`delete_group_folder\`、\`move_group_file\`、\`rename_group_file\`、\`get_private_file_url\`、\`get_group_file_system_info\`、\`trans_group_file\`
+- 群管理扩展：\`set_group_portrait\`、\`set_group_remark\`、\`set_group_member_invite_policy\`、\`set_group_member_permissions\`、\`set_group_new_member_history_visibility\`、\`set_group_kick_members\`、\`get_group_system_msg\`、\`get_group_shut_list\`、\`send_group_sign\`、\`set_group_sign\`、\`get_group_at_all_remain\`、\`_send_group_notice\`、\`_get_group_notice\`、\`_del_group_notice\`
+- 头像/资料/状态：\`set_qq_avatar\`、\`set_qq_profile\`、\`set_self_longnick\`、\`set_online_status\`、\`set_diy_online_status\`、\`get_online_clients\`、\`get_robot_uin_range\`、\`get_clientkey\`、\`get_rkey\`、\`get_rkey_server\`、\`nc_get_rkey\`、\`nc_get_packet_status\`、\`nc_get_user_status\`
+- 戳一戳/表情/收藏：\`group_poke\`、\`friend_poke\`、\`send_poke\`、\`fetch_custom_face\`、\`fetch_custom_face_detail\`、\`add_custom_face\`、\`delete_custom_face\`、\`set_custom_face_desc\`、\`fetch_emoji_like\`、\`get_emoji_likes\`、\`create_collection\`、\`get_collection_list\`
+- 转发/翻译/OCR/键盘：\`forward_friend_single_msg\`、\`forward_group_single_msg\`、\`translate_en2zh\`、\`fetch_ptt_text\`、\`ocr_image\`、\`click_inline_keyboard_button\`
+- 闪照/在线文件/空间：\`send_flash_msg\`、\`create_flash_task\`、\`get_flash_file_list\`、\`get_flash_file_url\`、\`get_fileset_id\`、\`get_fileset_info\`、\`download_fileset\`、\`send_online_file\`、\`send_online_folder\`、\`get_online_file_msg\`、\`receive_online_file\`、\`refuse_online_file\`、\`cancel_online_file\`、\`send_qzone_msg\`、\`delete_qzone_msg\`
+- 其他：\`delete_friend\`、\`mark_msg_as_read\`、\`mark_group_msg_as_read\`、\`mark_private_msg_as_read\`、\`_mark_all_as_read\`、\`get_recent_contact\`、\`get_unidirectional_friend_list\`、\`set_input_status\`、\`get_profile_like\`、\`get_group_ignore_add_request\`、\`get_group_ignored_notifies\`、\`send_packet\`、\`get_mini_app_ark\`、\`get_guild_list\`、\`get_guild_service_profile\`、\`get_share_link\`、\`download_file\`、\`check_url_safely\`、\`get_file\`、\`set_friend_remark\`、\`get_doubt_friends_add_request\`、\`set_doubt_friends_add_request\`、\`set_group_todo\`、\`complete_group_todo\`、\`cancel_group_todo\`、\`get_group_album_media_list\`、\`del_group_album_media\`、\`set_group_album_media_like\`、\`cancel_group_album_media_like\`、\`do_group_album_comment\`、\`upload_image_to_qun_album\`、\`get_qun_album_list\`、\`get_friends_with_category\`、\`get_group_info_ex\`、\`get_group_detail_info\`、\`get_group_signed_list\`
+- **未列出的 action 也原样透传**：只要端点支持即可调用；参数按端点文档提供，本工具不做转换。
+
+### 8.3 旧 Milky 方法名（兼容层）
+当前端点若使用海豹 Milky 兼容层（sealdice-plugin-ob11-net-connection），还接受一批 Milky 风格方法名（\`get_impl_info\`、\`get_friend_info\`、\`get_user_profile\`、\`send_friend_nudge\`、\`send_group_nudge\`、\`set_group_member_mute\`、\`set_group_member_admin\`、\`set_group_member_card\`、\`set_group_avatar\`、\`set_avatar\` 等约 39 个），依赖层会自动转写为对应 OB11/NapCat action。无对应等价 action 的 Milky 方法（约 12 个，如 \`get_peer_pins\`、\`get_friend_requests\`、\`accept_friend_request\` 等）会明确返回 unsupported。优先使用 OB11 标准/NapCat 扩展原名，兼容层方法仅在需要时使用。
 
 ## 9. ob11 依赖是否安装
 运行时每次调用都会检测 \`globalThis.net\`，不需要用户手动选择后端：

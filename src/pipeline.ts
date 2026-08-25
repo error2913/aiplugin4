@@ -102,56 +102,58 @@ export class MessagePipeline {
             const data = seg.data || {};
             switch (seg.type) {
                 case 'json': {
-                    result.push({ type: 'text', data: { text: parseCardToText(data.data) } });
+                    // QQ 卡片消息：转为上下文专用闭合标签 [card]...[/card]，AI 可读标题/描述/链接
+                    result.push({ type: 'text', data: { text: parseCardToText(data.data), __system: '1' } });
                     break;
                 }
                 case 'record': {
-                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收：保留原始字段并登记句柄，
+                    // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收：登记句柄并渲染 [voice:句柄]摘要[/voice]，
                     // AI 可通过 resolve_special_id(type=voice, id=句柄) 获取原始文件字段。
                     const recordHandle = registerSpecialResource('voice', data);
-                    result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', data, recordHandle) } });
+                    result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', data, recordHandle), __system: '1' } });
                     break;
                 }
                 case 'file': {
-                    // 保留原始字段并登记句柄，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
+                    // 登记句柄并渲染 [file:句柄]文件名[/file]，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
                     const fileHandle = registerSpecialResource('file', data);
-                    result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', data, fileHandle) } });
+                    result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', data, fileHandle), __system: '1' } });
                     break;
                 }
                 case 'video': {
-                    // 保留原始字段并登记句柄，AI 可通过 resolve_special_id(type=video, id=句柄) 查询
+                    // 登记句柄并渲染 [video:句柄]摘要[/video]，AI 可通过 resolve_special_id(type=video, id=句柄) 查询
                     const videoHandle = registerSpecialResource('video', data);
-                    result.push({ type: 'text', data: { text: formatMediaSegmentText('视频', data, videoHandle) } });
+                    result.push({ type: 'text', data: { text: formatMediaSegmentText('视频', data, videoHandle), __system: '1' } });
                     break;
                 }
                 case 'music': {
-                    result.push({ type: 'text', data: { text: parseMusicToText(data) } });
+                    result.push({ type: 'text', data: { text: parseMusicToText(data), __system: '1' } });
                     break;
                 }
                 case 'market_face': {
-                    // 商城表情/超级表情：milky 转接只透传 emoji 元数据，这里转为可读占位，避免段静默丢失
-                    result.push({ type: 'text', data: { text: data.summary ? `【表情】${data.summary}` : '【表情】' } });
+                    // 商城表情/超级表情：milky 转接只透传元数据，转为 [face]表情名[/face] 占位避免段静默丢失
+                    result.push({ type: 'text', data: { text: `[face]${data.summary ? String(data.summary) : '未知商城表情'}[/face]`, __system: '1' } });
                     break;
                 }
                 case 'xml': {
-                    // XML 卡片/公众号消息：保留关键内容，过长时截断避免污染上下文
-                    result.push({ type: 'text', data: { text: data.data ? `【XML消息】${truncateText(String(data.data), 500)}` : '【XML消息】' } });
+                    // XML 卡片/公众号消息：转为 [xml]...[/xml]，过长时截断避免污染上下文
+                    result.push({ type: 'text', data: { text: `[xml]${data.data ? truncateText(String(data.data), 500) : '未知XML消息'}[/xml]`, __system: '1' } });
                     break;
                 }
                 case 'markdown': {
-                    // Markdown 消息：milky 转接成 OB11 markdown 段，转成文本进入上下文
-                    result.push({ type: 'text', data: { text: data.content ? `【Markdown】${truncateText(String(data.content), 500)}` : '【Markdown】' } });
+                    // Markdown 消息：milky 转接成 OB11 markdown 段，转为 [markdown]...[/markdown] 进入上下文
+                    result.push({ type: 'text', data: { text: `[markdown]${data.content ? truncateText(String(data.content), 500) : '未知Markdown'}[/markdown]`, __system: '1' } });
                     break;
                 }
                 case 'node': {
-                    result.push({ type: 'text', data: { text: await MessagePipeline.parseNodeToText(ctx, data, depth + 1) } });
+                    const nodeText = await MessagePipeline.parseNodeToText(ctx, data, depth + 1);
+                    result.push({ type: 'text', data: { text: `[node]${nodeText}[/node]`, __system: '1' } });
                     break;
                 }
                 case 'forward': {
                     const text = await expandForwardMessage(epId, data.id || data.file || '', depth + 1);
                     result.push({
                         type: 'text',
-                        data: { text: text ? `【合并转发】\n${text}` : '[合并转发消息，展开失败]' }
+                        data: { text: text ? `[forward]\n${text}\n[/forward]` : '[forward]合并转发展开失败[/forward]', __system: '1' }
                     });
                     break;
                 }
@@ -165,7 +167,7 @@ export class MessagePipeline {
     private static async parseNodeToText(ctx: seal.MsgContext, data: any, depth: number = 0): Promise<string> {
         const name = (data && (data.nickname || data.name)) || (data && data.user_id ? `用户${data.user_id}` : '');
         if (depth > MAX_FORWARD_DEPTH) {
-            return `【消息节点】${name}（嵌套过深，已截断）`;
+            return `${name}（嵌套过深，已截断）`;
         }
         if (data && typeof data.content === 'string') {
             return `${name}: ${data.content}`;
@@ -180,9 +182,9 @@ export class MessagePipeline {
         }
         if (data && data.id) {
             const text = await expandForwardMessage(ctx.endPoint.userId, String(data.id), depth + 1);
-            return text ? `${name}:\n${text}` : `【消息节点】${name}`;
+            return text ? `${name}:\n${text}` : `${name}`;
         }
-        return `【消息节点】${name}`;
+        return name || '未知消息节点';
     }
 
     /** 订阅 ob11 网络连接依赖的事件分发：核心原生 milky 路径会丢弃视频/文件/卡片/合并转发等段，

@@ -81,8 +81,9 @@ const NETWORK_ACTIONS = new Set([
 export function getActionCapability(action: string): Ob11ActionCapability {
     if (NATIVE_ACTIONS.has(action)) return "either";
     if (CONTEXT_ACTIONS.has(action)) return "either";
-    // 未知动作仍允许 ob11-net 原样透传，未安装依赖时不能伪造。
-    return NETWORK_ACTIONS.has(action) ? "network" : "network";
+    // 全部动作最终都走 network 透传：未列出的 action 也允许 ob11-net 原样转发给协议端，
+    // 已安装依赖即可按端点能力执行；未安装依赖时由调用方返回 OB11_DEPENDENCY_REQUIRED，不能伪造结果。
+    return "network";
 }
 
 export function isNativeAction(action: string): boolean {
