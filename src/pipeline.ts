@@ -396,7 +396,7 @@ export class MessagePipeline {
         });
     }
 
-    /** 事件提示词统一入库：黑名单 → 去重 → 限流 → 会话创建策略 → 录入上下文（仅背景，不触发 AI） */
+    /** 事件提示词统一入库：黑名单 → 待机 → 去重 → 限流 → 会话创建策略 → 录入上下文（仅背景，不触发 AI） */
     private static recordEventPrompt(opts: {
         sid: string;
         text: string;
@@ -419,6 +419,12 @@ export class MessagePipeline {
                 return false;
             }
         }
+        // 待机关口：事件仅在待机（会话待机或全局待机）时录入上下文，与普通消息入库口径一致
+        const session = getSession(opts.sid);
+        if (!(session.setting.standby || Config.base.GLOBAL_STANDBY)) {
+            log.debug(`事件忽略：会话<${opts.sid}>未开启待机，不录入事件`);
+            return false;
+        }
         if (isDuplicateEvent(buildEventDedupKey(opts.epId, opts.sid, opts.eventType, opts.userId, opts.messageId || ''))) {
             log.debug(`事件去重丢弃：${opts.eventType} @ ${opts.sid}`);
             return false;
@@ -427,7 +433,6 @@ export class MessagePipeline {
             log.debug(`事件限流丢弃：${opts.eventType} @ ${opts.sid}`);
             return false;
         }
-        const session = getSession(opts.sid);
         if (!EVENT_CREATE_SESSION && session.context.messages.length === 0) {
             log.debug(`事件忽略：会话<${opts.sid}>不存在且未开启自动建会话`);
             return false;

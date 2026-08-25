@@ -3,7 +3,7 @@ import { ext } from "../config";
 
 export default class EventConfig {
     static register() {
-        seal.ext.registerBoolConfig(ext, "接收依赖通知事件", false, "开启后把 ob11 依赖订阅到的群通知事件（禁言/管理变动/文件上传/运气王等）转成文本提示词录入上下文，仅作背景不触发 AI", "事件接收");
+        seal.ext.registerBoolConfig(ext, "接收依赖通知事件", false, "开启后把 ob11 依赖订阅到的群通知事件（禁言/管理变动/文件上传/运气王等）转成文本提示词录入上下文，仅作背景不触发 AI；仅当会话待机或全局待机开启时才录入（与普通消息入库口径一致）", "事件接收");
         seal.ext.registerTemplateConfig(ext, "通知事件白名单", [
             "group_ban",
             "group_admin",
