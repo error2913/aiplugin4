@@ -223,7 +223,10 @@ export default class Agent {
             if (lastTurnHadTools && nudgeCount < MaxNudge) {
                 nudgeCount++;
                 lastTurnHadTools = false;
-                session.steer('你上一轮只给了文字，没有给出工具调用块。若任务未完成，请直接给出工具调用块继续干活；若已完成，请明确回复“任务完成”。');
+                session.context.addSystemUserMessage(
+                    '你上一轮只给了文字，没有给出工具调用块。若任务未完成，请直接给出工具调用块继续干活；若已完成，请明确回复“任务完成”。',
+                    '任务续跑提示'
+                );
                 retry = 0;
                 continue;
             }
