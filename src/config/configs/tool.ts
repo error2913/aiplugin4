@@ -8,6 +8,7 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "开启调用函数功能", true, "总开关；关闭后 AI 无法调用任何工具，仅保留普通对话", "工具");
         seal.ext.registerBoolConfig(ext, "切换为提示词工程", false, "API在不支持function calling功能的时候开启", "工具");
         seal.ext.registerBoolConfig(ext, "拉黑前需要骰主确认", true, "AI 建议拉黑时需骰主确认后才生效；关闭后 AI 可直接拉黑", "工具");
+        seal.ext.registerBoolConfig(ext, "无工具调用时续跑提示", false, "上一轮调用过工具、本轮只回文字时，向上下文注入续跑提示再转一轮，避免只说方向不调用工具就停；默认关闭", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
         seal.ext.registerIntConfig(ext, "MCP会话空闲回收分钟", 15, "MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 表示不回收", "工具");
@@ -87,6 +88,7 @@ export default class ToolConfig {
             PROMPT_ENGINEERING: seal.ext.getBoolConfig(ext, "切换为提示词工程"),
             BLOCK_REQUIRE_OWNER_CONFIRM: seal.ext.getBoolConfig(ext, "拉黑前需要骰主确认"),
             MAX_CALL_COUNT: seal.ext.getIntConfig(ext, "允许连续调用函数次数"),
+            NUDGE_ENABLED: seal.ext.getBoolConfig(ext, "无工具调用时续跑提示"),
             TOOL_RESPONSE_COMPRESS_MIN_LENGTH: seal.ext.getIntConfig(ext, "工具响应压缩触发字数"),
             BLOCKED: seal.ext.getTemplateConfig(ext, "禁止调用的函数"),
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ext, "默认关闭的函数"),

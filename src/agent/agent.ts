@@ -220,7 +220,7 @@ export default class Agent {
 
             // dsh 式 turn-stopping 检查点：上一轮执行过工具 && 本轮无工具调用（只说方向/罢工）
             // → 注入续跑提示再转一轮，最多 MaxNudge 次；正常“工具→最终回答”也会被推一次（dsh 方案本身的设计代价）
-            if (lastTurnHadTools && nudgeCount < MaxNudge) {
+            if (Config.tool.NUDGE_ENABLED && lastTurnHadTools && nudgeCount < MaxNudge) {
                 nudgeCount++;
                 lastTurnHadTools = false;
                 session.context.addSystemUserMessage(
