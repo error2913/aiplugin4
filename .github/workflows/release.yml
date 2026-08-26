@@ -136,7 +136,7 @@ jobs:
         with:
           name: release-assets-${{ github.run_id }}
 
-      - name: Generate release notes from update.ts
+      - name: Generate release notes from changelog.ts
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"

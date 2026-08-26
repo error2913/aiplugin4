@@ -1,6 +1,6 @@
-// 版本更新日志（updateInfo），供启动时展示更新说明
+// 版本更新日志（changelog），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
-export const updateInfo: { [version: string]: string } = {
+export const changelog: { [version: string]: string } = {
     "4.19.0": `## 功能调整与删除
 - web-read 后端已下架：网页读取能力统一由 mcp-browser 提供（browser_navigate / browser_snapshot / browser_take_screenshot，截图时机由 AI 自主选择），默认 MCP 服务器配置移除 web-read
 - MCP 会话按 AI 会话分桶：同一 AI 会话的连续浏览器操作复用同一服务端会话（保持登录/页面状态），不同 AI 会话互不干扰；空闲或超上限按 LRU 回收，回收前对 mcp-browser 自动调用 browser_close 释放服务端浏览器

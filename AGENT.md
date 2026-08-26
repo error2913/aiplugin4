@@ -52,14 +52,14 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 
 每个功能/改动开发完成并验证后，发布前必须同步三处，否则发版说明与用户文档会脱节：
 
-1. `src/update.ts`：在 `updateInfo` 的最新版本条目补充本次改动（`- 描述`），发布工作流读取它生成 GitHub Release 正文。
+1. `src/changelog.ts`：在 `changelog` 的最新版本条目补充本次改动（`- 描述`），发布工作流读取它生成 GitHub Release 正文。
 2. `README.md`：同步配置手册/命令手册/可用工具函数等章节（商店 README 只放用户内容，不要放开发章节）。
 3. 知识库 `docs/`：涉及命令/配置/工具/架构的改动同步对应文档（常用 04/05/03/09）。
 
 ## 发布流程
 
-1. 版本推进：`src/config/static_config/meta.ts` 的 `VERSION`、`header.txt` 的 `@version`、`sealpack/info.toml` 的 `version`（由 `scripts/prepare-sealpack.js` 自动同步）、`src/update.ts` 新增对应版本条目，走 PR 合并到 main。
-2. 推送 `v<版本>` 标签 → GitHub Actions `release.yml` 自动：verify（校验标签与 VERSION/update.ts 一致）→ `node scripts/build-release.js` 打包（本体 JS + 本体豹包 + 完整豹包）→ 用 `SEALPACK_TOKEN` 发布两个豹包到 SealRepo → 从 `update.ts` 提取版本日志创建 GitHub Release。
+1. 版本推进：`src/config/static_config/meta.ts` 的 `VERSION`、`header.txt` 的 `@version`、`sealpack/info.toml` 的 `version`（由 `scripts/prepare-sealpack.js` 自动同步）、`src/changelog.ts` 新增对应版本条目，走 PR 合并到 main。
+2. 推送 `v<版本>` 标签 → GitHub Actions `release.yml` 自动：verify（校验标签与 VERSION/changelog.ts 一致）→ `node scripts/build-release.js` 打包（本体 JS + 本体豹包 + 完整豹包）→ 用 `SEALPACK_TOKEN` 发布两个豹包到 SealRepo → 从 `changelog.ts` 提取版本日志创建 GitHub Release。
 3. 完整包依赖插件在 `scripts/deps.cjs` 的 `dependencies` 配置（`url` 为 raw 地址）；包图标 `sealpack/assets/icon.png`；SealRepo Token 放仓库 secrets（`SEALPACK_TOKEN`）。
 
 ## CI 工作流

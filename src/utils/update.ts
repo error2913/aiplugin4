@@ -1,8 +1,8 @@
 // 版本校验与更新日志展示
+import { changelog } from "../changelog";
 import { ext } from "../config/config";
 import { VERSION } from "../config/static_config";
 import { logger } from "../logger";
-import { updateInfo } from "../update";
 
 /**
  * 比较两个版本号的大小。
@@ -38,11 +38,11 @@ export function checkUpdate() {
         if (compareVersions(oldVersion, VERSION) < 0) {
             ext.storageSet("version", VERSION);
             const info = [];
-            for (const v in updateInfo) {
+            for (const v in changelog) {
                 if (compareVersions(oldVersion, v) >= 0) {
                     break;
                 }
-                info.unshift(`${v}：\n${updateInfo[v]}`);
+                info.unshift(`${v}：\n${changelog[v]}`);
             }
             logger.warning(`更新到${VERSION}版本，更新内容：\n\n${info.join("\n\n")}`);
         }
