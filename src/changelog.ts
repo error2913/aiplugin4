@@ -1,10 +1,6 @@
 // 版本更新日志（changelog），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const changelog: { [version: string]: string } = {
-    "4.19.0": `## 功能调整与删除
-- web-read 后端已下架：网页读取能力统一由 mcp-browser 提供（browser_navigate / browser_snapshot / browser_take_screenshot，截图时机由 AI 自主选择），默认 MCP 服务器配置移除 web-read
-- MCP 会话按 AI 会话分桶：同一 AI 会话的连续浏览器操作复用同一服务端会话（保持登录/页面状态），不同 AI 会话互不干扰；空闲或超上限按 LRU 回收，回收前对 mcp-browser 自动调用 browser_close 释放服务端浏览器
-`,
     "4.18.0": `## 新功能
 - .ai shut 移除，新增 .ai stop：完全暂停当前对话——打断流式输出、中断工具链（含并发队列中等待的请求）、清除待触发计时器；计数器/概率/正则/待机等触发条件保留，需主动触发
 - 新增 .ai steer <内容>：在不打断当前对话的前提下，把内容作为方向提示插入工具链，下一轮模型请求生效
@@ -16,6 +12,10 @@ export const changelog: { [version: string]: string } = {
 - 记忆配置重组：新增独立「知识库」页签；删除「长期记忆上限/展示数量、观察记忆上限、核心事实注入条数」等无效配置；「观察记忆间隔轮数→每隔多少轮对话生成一次观察」「观察记忆参与轮数→每次观察纳入最近的对话轮数」「记忆巩固间隔(次观察)→每隔多少次观察整合一次记忆」并真正生效；记忆LLM开关更名并调整说明（改名项的自定义值会重置为默认）
 - 修复长期记忆语义检索未接线：配置嵌入模型后长期记忆启用向量检索，存量记忆在首次语义检索时自动补算向量；未配置嵌入模型时自动降级为关键词/图/时间检索
 - 「每隔多少次观察整合一次记忆」默认 30（0 为关闭）：观察记忆由原先每次生成即整合改为按累计次数整合，手动 consolidate_memory 工具 / .ai memo 不受影响
+
+## 功能调整与删除
+- web-read 后端已下架：网页读取能力统一由 mcp-browser 提供（browser_navigate / browser_snapshot / browser_take_screenshot，截图时机由 AI 自主选择），默认 MCP 服务器配置移除 web-read
+- MCP 会话按 AI 会话分桶：同一 AI 会话的连续浏览器操作复用同一服务端会话（保持登录/页面状态），不同 AI 会话互不干扰；空闲或超上限按 LRU 回收，回收前对 mcp-browser 自动调用 browser_close 释放服务端浏览器
 `,
     "4.17.0": `## 新功能
 - 记忆引擎重构为 Hindsight-like 纯 TS 引擎：新增 reflect_memory（基于记忆推理，返回心智模型/观察记忆/事实证据汇总）与 consolidate_memory（观察巩固，合并重复观察、清理过期记忆）工具；.ai memo 子命令改为 obs（观察记忆），支持 on/off、list、立即生成、clr
