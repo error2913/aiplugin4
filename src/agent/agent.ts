@@ -123,6 +123,10 @@ export default class Agent {
         const MaxRetry = 3;
         // 最后一轮模型响应的思维链：无工具轮次时随最终回复一并入库（见下方最终 session.reply）
         let lastReasoning: string | undefined;
+        // dsh 式 turn-stopping 检查点：上一轮是否执行过工具（行为信号），以及续跑提示次数上限
+        let lastTurnHadTools = false;
+        let nudgeCount = 0;
+        const MaxNudge = 2;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // stop 中止检查点：上一轮工具执行/回调期间被 stop 则不再发下一轮请求
@@ -168,6 +172,7 @@ export default class Agent {
                             log.exception('handlePromptToolCalls error', e);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
+                        lastTurnHadTools = true;
                         retry = 0;
                         continue;
                     }
@@ -195,6 +200,7 @@ export default class Agent {
                             log.exception('handleToolCalls error', e);
                             trace.recordToolCall('function-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
+                        lastTurnHadTools = true;
                         retry = 0;
                         continue;
                     }
@@ -209,6 +215,16 @@ export default class Agent {
                 }
                 log.warning(`repeat detected, retry [${retry}/${MaxRetry}]`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
+                continue;
+            }
+
+            // dsh 式 turn-stopping 检查点：上一轮执行过工具 && 本轮无工具调用（只说方向/罢工）
+            // → 注入续跑提示再转一轮，最多 MaxNudge 次；正常“工具→最终回答”也会被推一次（dsh 方案本身的设计代价）
+            if (lastTurnHadTools && nudgeCount < MaxNudge) {
+                nudgeCount++;
+                lastTurnHadTools = false;
+                session.steer('你上一轮只给了文字，没有给出工具调用块。若任务未完成，请直接给出工具调用块继续干活；若已完成，请明确回复“任务完成”。');
+                retry = 0;
                 continue;
             }
             break;
