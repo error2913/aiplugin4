@@ -62,7 +62,7 @@ export class KnowledgeBaseService {
     }
 
     private ensureLoaded(): Promise<void> {
-        const items = Config.memory.KNOWLEDGE_ITEMS;
+        const items = Config.knowledgeBase.KNOWLEDGE_ITEMS;
         const list = Array.isArray(items) ? items : [];
         const signature = this.getItemsSignature(list);
         if (this.loadedSignature === signature && this.loadedSignature !== null) return Promise.resolve();
@@ -88,8 +88,8 @@ export class KnowledgeBaseService {
 
     /** prompt 缓存版本：基于当前配置开关/阈值/全部条目内容生成，配置变化后自然产生新 key */
     getCacheVersion(): string {
-        const items = Array.isArray(Config.memory.KNOWLEDGE_ITEMS) ? Config.memory.KNOWLEDGE_ITEMS : [];
-        return `${Config.memory.KNOWLEDGE ? '1' : '0'}|${Config.memory.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignature(items)}`;
+        const items = Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : [];
+        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${Config.knowledgeBase.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignature(items)}`;
     }
 
     /** 全部条目索引（id/标题/小节） */
@@ -209,7 +209,7 @@ export class KnowledgeBaseService {
      */
     buildKnowledgePrompt(): string {
         if (this.chunks.length === 0) return '';
-        const { KNOWLEDGE_INJECT_THRESHOLD } = Config.memory;
+        const { KNOWLEDGE_INJECT_THRESHOLD } = Config.knowledgeBase;
         const total = this.chunks.reduce((sum, c) => sum + c.content.length, 0);
         if (total <= KNOWLEDGE_INJECT_THRESHOLD) {
             const body = this.chunks.map((c, i) => `${i + 1}. ${this.formatChunk(c)}`).join('\n\n');

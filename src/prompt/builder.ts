@@ -1,6 +1,5 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
 import Config, { ext } from "../config/config";
-import { VECTOR_SIMILARITY } from "../config/static_config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
 import { knowledgeService } from "../memory/knowledge";
@@ -125,12 +124,9 @@ export async function buildSystemPromptContent(
         session.sessionId,
         getMemoryRevision(),
         Config.memory.MEMORY,
-        Config.memory.MEMORY_SHOW_NUMBER,
-        Config.memory.CORE_FACT_NUMBER,
         Config.model.EMBEDDING_MODEL_ENABLED,
         Model.getEmbeddingDimension(),
         embeddingModelName,
-        VECTOR_SIMILARITY,
         ctx.isPrivate,
         session.memory.persona,
         seal.formatTmpl(ctx, '核心:骰子名字'),
@@ -154,7 +150,7 @@ export async function buildSystemPromptContent(
     const summaryTask = Config.memory.SUMMARY
         ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
         : Promise.resolve('');
-    const knowledgeTask = Config.memory.KNOWLEDGE
+    const knowledgeTask = Config.knowledgeBase.KNOWLEDGE
         ? getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
         : Promise.resolve('');
 
@@ -168,4 +164,3 @@ export async function buildSystemPromptContent(
     // 防注入：长期记忆/总结记忆/知识库等外部内容可能夹带内部上下文标签，system prompt 出口统一兜底剥离
     return stripInternalTags(content);
 }
-

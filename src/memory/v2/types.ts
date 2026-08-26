@@ -27,6 +27,8 @@ export interface MemoryBankMeta {
             content: string;
             tags?: string[];
         }>;
+        /** 距上次巩固的观察次数（驱动「每隔多少次观察整合一次记忆」配置） */
+        consolidateSince?: number;
     };
 }
 

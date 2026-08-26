@@ -17,6 +17,7 @@ import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
 import { buildMemoryPrompt } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
+import { createMemoryEngine } from "../src/memory/v2";
 import { Context } from "../src/context/context";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
@@ -773,6 +774,53 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(r.ok, false);
         r = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: 'image', id: 'not_exist_xx' }));
         assert.equal(r.ok, false);
-    }
+    },
 
+    /** Hindsight-like 新引擎：embedding 接线后语义检索生效（含 verbatim 记忆生成向量） */
+    async testV2EmbeddingSemanticRecall(): Promise<void> {
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            embedding: async (text) => [text.length, text.length * 2],
+        });
+        await engine.addMemory('user_emb', { content: '小明喜欢喝咖啡', verbatim: true });
+        const unit = engine.repository.listUnits('user_emb')[0];
+        assert.ok(unit.embedding.length > 0, 'verbatim 记忆也应生成 embedding');
+        const results = await engine.recall('user_emb', '咖啡', { maxTokens: 200 });
+        assert.ok(results.length > 0, '语义检索应返回结果');
+        assert.ok(results.some(r => r.matchedStrategies.includes('semantic')), '应命中 semantic 策略');
+    },
+
+    /** Hindsight-like 新引擎：存量无向量记忆首次语义检索自动回填并落库 */
+    async testV2EmbeddingBackfill(): Promise<void> {
+        const storage = new InMemoryMemoryStorage();
+        const engineNoEmb = new MemoryEngine({ storage });
+        await engineNoEmb.addMemory('user_bf', { content: '小明喜欢喝茶' });
+        assert.equal(engineNoEmb.repository.listUnits('user_bf')[0].embedding.length, 0, '无 embedding 时条目不带向量');
+        const engineEmb = new MemoryEngine({
+            storage,
+            embedding: async (text) => [text.length, text.length * 2],
+        });
+        await engineEmb.recall('user_bf', '茶', { maxTokens: 200 });
+        const unit = engineEmb.repository.listUnits('user_bf')[0];
+        assert.ok(unit.embedding.length > 0, '首次语义检索应回填向量并落库');
+        const results = await engineEmb.recall('user_bf', '茶', { maxTokens: 200 });
+        assert.ok(results.some(r => r.matchedStrategies.includes('semantic')), '回填后语义检索应命中');
+    },
+
+    /** 巩固计数：get/setConsolidateSince 持久化到 bank meta.settings */
+    async testV2ConsolidateCounter(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        assert.equal(engine.getConsolidateSince('user_ci'), 0, '默认计数应为 0');
+        engine.setConsolidateSince('user_ci', 29);
+        assert.equal(engine.getConsolidateSince('user_ci'), 29, '计数应持久化');
+        engine.setConsolidateSince('user_ci', 0);
+        assert.equal(engine.getConsolidateSince('user_ci'), 0, '巩固后应清零');
+    },
+
+    /** createMemoryEngine：未配置嵌入模型时自动降级（不抛错、可正常写入） */
+    async testCreateMemoryEngineDegrade(): Promise<void> {
+        const engine = createMemoryEngine();
+        await engine.addMemory('user_deg', { content: '降级可用' });
+        assert.equal(engine.repository.listUnits('user_deg').length, 1, '未配置嵌入模型时应正常写入');
+    },
 };

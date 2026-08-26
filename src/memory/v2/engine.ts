@@ -23,6 +23,8 @@ import type {
 
 const RRF_K = 60;
 const DEFAULT_MAX_TOKENS = 2048;
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
+const BACKFILL_BATCH_LIMIT = 20;
 
 export interface MemoryEngineOptions {
     storage?: MemoryStorage;
@@ -130,7 +132,7 @@ export class MemoryEngine {
             mentionedAt: timestamp,
             createdAt: now,
             updatedAt: now,
-            embedding: input.verbatim === false ? await this.embedText(text) : [],
+            embedding: await this.embedText(text),
             entityIds,
             tags: input.tags || [],
             metadata: input.metadata || {},
@@ -162,7 +164,7 @@ export class MemoryEngine {
             for (const other of bank.units) {
                 if (other.id === unitId || other.state !== 'valid' || other.embedding.length === 0) continue;
                 const sim = cosineSimilarity(unit.embedding, other.embedding);
-                if (sim >= 0.8) {
+                if (sim >= SEMANTIC_SIMILARITY_THRESHOLD) {
                     this.repository.addLink(bankId, {
                         fromUnitId: unitId,
                         toUnitId: other.id,
@@ -222,6 +224,11 @@ export class MemoryEngine {
         if (units.length === 0) return [];
 
         const queryEmbedding = q ? await this.embedText(q) : [];
+
+        // 存量回填：语义检索可用时，对尚无向量的记忆惰性补算并落库（每轮限量，避免阻塞）
+        if (queryEmbedding.length > 0) {
+            await this.backfillEmbeddings(bankId, units);
+        }
         const strategyResults: Array<{ strategy: string; ids: string[] }> = [];
 
         // 1. Semantic
@@ -378,10 +385,24 @@ export class MemoryEngine {
             this.repository.markUnitConsolidated(bankId, cluster.map(u => u.id));
         }
 
-        const dedup = this.repository.mergeSimilarObservations(bankId, 0.8);
+        const dedup = this.repository.mergeSimilarObservations(bankId, SEMANTIC_SIMILARITY_THRESHOLD);
         merged.push(...dedup.merged);
 
         return { created, updated, merged, skipped };
+    }
+
+
+    // ===== Consolidation 计数（驱动「每隔多少次观察整合一次记忆」配置） =====
+
+    getConsolidateSince(bankId: string): number {
+        const bank = this.repository.getBank(bankId);
+        return bank?.meta.settings.consolidateSince ?? 0;
+    }
+
+    setConsolidateSince(bankId: string, count: number): void {
+        const bank = this.repository.getOrCreateBank(bankId, 'global');
+        bank.meta.settings.consolidateSince = count;
+        this.repository.save(bankId);
     }
 
     private async synthesizeObservationText(quotes: string[]): Promise<string> {
@@ -488,6 +509,29 @@ export class MemoryEngine {
     }
 
     // ===== Utility =====
+
+
+    /** 存量回填：为尚无向量的有效记忆惰性补算 embedding（每轮限量，失败自动降级） */
+    private async backfillEmbeddings(bankId: string, units: MemoryUnit[]): Promise<void> {
+        const missing = units.filter(u => u.state === 'valid' && u.embedding.length === 0);
+        if (missing.length === 0) return;
+        const batch = missing.slice(0, BACKFILL_BATCH_LIMIT);
+        const vectors = await Promise.all(batch.map(u => this.embedText(u.text)));
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return;
+        let changed = false;
+        for (let i = 0; i < batch.length; i++) {
+            const vector = vectors[i];
+            if (vector.length > 0) {
+                const idx = bank.units.findIndex(u => u.id === batch[i].id);
+                if (idx >= 0) {
+                    bank.units[idx] = { ...bank.units[idx], embedding: vector };
+                    changed = true;
+                }
+            }
+        }
+        if (changed) this.repository.save(bankId);
+    }
 
     private async embedText(text: string): Promise<number[]> {
         if (!this.embedding || !text) return [];

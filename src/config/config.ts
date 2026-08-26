@@ -4,6 +4,7 @@ import BackendConfig from "./configs/backend";
 import BaseConfig from "./configs/base";
 import EventConfig from "./configs/event";
 import ImageConfig from "./configs/image";
+import KnowledgeBaseConfig from "./configs/knowledge_base";
 import MemoryConfig from "./configs/memory";
 import MessageConfig from "./configs/message";
 import ModelConfig from "./configs/model";
@@ -31,6 +32,7 @@ const configMap = {
     reply: ReplyConfig,
     tool: ToolConfig,
     memory: MemoryConfig,
+    knowledgeBase: KnowledgeBaseConfig,
     image: ImageConfig,
     backend: BackendConfig,
     event: EventConfig,

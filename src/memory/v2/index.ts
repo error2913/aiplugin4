@@ -1,5 +1,6 @@
 // 记忆引擎统一出口：默认使用 SealDice 持久化，测试可注入内存存储。
 import Config from "../../config/config";
+import Model from "../../model/model";
 
 import { MemoryEngine } from "./engine";
 import { defaultFactExtractor, defaultObservationSynthesizer, defaultReranker } from "./llm";
@@ -15,7 +16,16 @@ export * from "./prompt";
 export { defaultFactExtractor, defaultReranker, defaultObservationSynthesizer } from "./llm";
 
 export function createMemoryEngine(): MemoryEngine {
-    const engine = new MemoryEngine({ storage: getDefaultMemoryStorage() });
+    // 与知识库检索一致：配置了 text-embedding 模型时接入语义向量，未配置时自动降级为关键词/图/时间检索
+    const embeddingModel = (() => {
+        if (!Config.model.EMBEDDING_MODEL_ENABLED) return null;
+        const dimension = Model.getEmbeddingDimension();
+        return dimension > 0 ? Model.getEmbeddingModel("text-embedding") : null;
+    })();
+    const engine = new MemoryEngine({
+        storage: getDefaultMemoryStorage(),
+        embedding: embeddingModel ? (text: string) => embeddingModel.callEmbedding(text) : undefined,
+    });
     const memoryConfig = Config.memory;
     if (memoryConfig.MEMORY_LLM_EXTRACT) engine.setExtractor(defaultFactExtractor);
     if (memoryConfig.MEMORY_LLM_RERANK) engine.setReranker(defaultReranker);
@@ -33,4 +43,3 @@ export function getMemoryEngine(): MemoryEngine {
 export function resetMemoryEngineForTest(storage?: MemoryStorage): void {
     globalEngine = new MemoryEngine({ storage: storage || new InMemoryMemoryStorage() });
 }
-

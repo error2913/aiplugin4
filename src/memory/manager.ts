@@ -69,7 +69,7 @@ export class MemoryManager {
 
     /** 知识库段：按开关构建（配置驱动，全局单例加载） */
     static async buildKnowledgePrompt(_session: Session, _text: string): Promise<string> {
-        const { KNOWLEDGE } = Config.memory;
+        const { KNOWLEDGE } = Config.knowledgeBase;
         if (!KNOWLEDGE) return '';
         await knowledgeService.init();
         return knowledgeService.buildKnowledgePrompt();
@@ -219,7 +219,17 @@ export class MemoryManager {
 
         bumpMemoryRevision();
         session.context.lastSummarizedIndex = end;
-        await engine.consolidate(bank.bankId);
+        // 巩固间隔：每累计 CONSOLIDATE_INTERVAL 次观察整合一次重复观察；0 为关闭（consolidate_memory 工具 / .ai memo 手动巩固不受影响）
+        const consolidateInterval = Config.memory.CONSOLIDATE_INTERVAL;
+        if (consolidateInterval > 0) {
+            const since = engine.getConsolidateSince(bank.bankId) + 1;
+            if (since >= consolidateInterval) {
+                await engine.consolidate(bank.bankId);
+                engine.setConsolidateSince(bank.bankId, 0);
+            } else {
+                engine.setConsolidateSince(bank.bankId, since);
+            }
+        }
     }
 }
 
@@ -228,4 +238,3 @@ function canSeeMemoryUnit(unit: MemoryUnit, callerSessionId: string): boolean {
     if (privateTags.length === 0) return true;
     return privateTags.some(t => t === `vis:private:${callerSessionId}`);
 }
-
