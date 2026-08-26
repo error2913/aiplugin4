@@ -3,7 +3,7 @@ import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { Context } from "./context/context";
-import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, parseNoticeWhitelist } from "./event/notice";
+import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_RAW_LIMIT, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist } from "./event/notice";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
@@ -353,6 +353,7 @@ export class MessagePipeline {
             eventType: noticeType,
             userId,
             messageId,
+            raw: event,
         });
     }
 
@@ -404,9 +405,10 @@ export class MessagePipeline {
             text,
             systemName: '请求事件提示',
             epId,
-            eventType: `request:${requestType}`,
+            eventType: `${requestType}_request`,
             userId,
             messageId: '',
+            raw: event,
         });
     }
 
@@ -426,6 +428,7 @@ export class MessagePipeline {
             eventType: info.noticeType,
             userId: info.userId || '',
             messageId: info.messageId || '',
+            raw: info,
         });
     }
 
@@ -438,6 +441,7 @@ export class MessagePipeline {
         eventType: string;
         userId: string;
         messageId?: string;
+        raw?: unknown;
     }): Promise<boolean> {
         const blockReason = BlockManager.checkBlock(opts.sid);
         if (blockReason) {
@@ -463,7 +467,12 @@ export class MessagePipeline {
         }
         // 事件文本过长时交给压缩智能体（复用全局「消息压缩阈值」，默认 2000），失败保留原文
         const text = await Context.compressIfLong(opts.text);
-        session.context.addSystemUserMessage(text, opts.systemName);
+        session.context.addSystemUserMessage(text, opts.systemName, {
+            eventType: opts.eventType,
+            raw: isEventRawRetainable(opts.raw) ? opts.raw : undefined,
+        });
+        // 事件原始数据条目上限：超出从最旧删除 raw（文本提示词保留），避免会话存储无限膨胀
+        session.context.pruneSystemUserRaws(EVENT_RAW_LIMIT);
         session.save();
         log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
         return true;

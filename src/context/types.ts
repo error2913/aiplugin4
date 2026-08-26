@@ -15,6 +15,10 @@ export interface AssistantMessageItem extends BaseMessageItem {
 }
 export interface SystemUserMessageItem extends BaseMessageItem {
     systemName: string; // 系统用户消息的名义
+    /** 事件类型（仅事件提示词条目）：供 get_event_detail 过滤，不参与上下文渲染 */
+    eventType?: string;
+    /** 事件原始数据（仅事件提示词条目）：不渲染给模型，仅由工具读取；随消息清理/裁剪/遗忘一起失效 */
+    raw?: unknown;
 }
 
 export interface UserMessage {

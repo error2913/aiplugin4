@@ -5,11 +5,12 @@ import assert from "node:assert/strict";
 import Config from "../src/config/config";
 Config.registerConfig();
 
-import { estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
+import { buildContent, estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
-import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
+import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
+import { registerEventTools } from "../src/tool/tools/event/tool_event";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -533,9 +534,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** ob11 请求事件文本：好友/入群申请（含备注截断） */
     testBuildRequestText(): void {
-        assert.equal(buildRequestText({ request_type: 'friend', user_id: 1001, comment: '我是小明' }, 'QQ'), '【好友请求】QQ:1001 请求添加好友：我是小明');
-        assert.equal(buildRequestText({ request_type: 'group', sub_type: 'add', user_id: 1001, group_id: 2001, comment: '想进群' }, 'QQ'), '【入群请求】QQ:1001 申请加入群 QQ-Group:2001：想进群');
-        assert.equal(buildRequestText({ request_type: 'group', sub_type: 'invite', user_id: 1001, group_id: 2001 }, 'QQ'), '【入群请求】QQ:1001 邀请加入群 QQ-Group:2001');
+        assert.equal(buildRequestText({ request_type: 'friend', user_id: 1001, comment: '我是小明' }, 'QQ'), '【好友请求】QQ:1001 请求添加好友：我是小明（完整事件数据可调用 get_event_detail 查看，处理申请需要）');
+        assert.equal(buildRequestText({ request_type: 'group', sub_type: 'add', user_id: 1001, group_id: 2001, comment: '想进群' }, 'QQ'), '【入群请求】QQ:1001 申请加入群 QQ-Group:2001：想进群（完整事件数据可调用 get_event_detail 查看，处理申请需要）');
+        assert.equal(buildRequestText({ request_type: 'group', sub_type: 'invite', user_id: 1001, group_id: 2001 }, 'QQ'), '【入群请求】QQ:1001 邀请加入群 QQ-Group:2001（完整事件数据可调用 get_event_detail 查看，处理申请需要）');
         assert.equal(buildRequestText({ request_type: 'unknown', user_id: 1001 }, 'QQ'), '');
     },
 
@@ -550,6 +551,93 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(buildNativeNoticeText({ noticeType: 'friend_recall', userId: 'QQ:1001' }), '【好友事件】QQ:1001 撤回了一条消息');
         assert.equal(buildNativeNoticeText({ noticeType: 'friend_add', userId: 'QQ:1001' }), '【好友事件】已与 QQ:1001 成为好友');
         assert.equal(buildNativeNoticeText({ noticeType: 'nope' }), '');
+    },
+
+    /** 事件原始数据保留判定：可 JSON 序列化且不超过长度上限才保留（超长/循环引用/null 均丢弃） */
+    testIsEventRawRetainable(): void {
+        assert.equal(isEventRawRetainable(undefined), false, 'undefined 不保留');
+        assert.equal(isEventRawRetainable(null), false, 'null 不保留');
+        assert.equal(isEventRawRetainable({ notice_type: 'group_ban', user_id: 1001 }), true);
+        assert.equal(isEventRawRetainable({ big: 'x'.repeat(5000) }), false, '超过 4000 字符上限应丢弃');
+        const circular: any = {}; circular.self = circular;
+        assert.equal(isEventRawRetainable(circular), false, '循环引用不可序列化应丢弃');
+    },
+
+    /** 事件提示词条目：eventType/raw 挂载在条目上，buildContent 渲染不泄露原始数据 */
+    testEventRawNotRendered(): void {
+        const ctx = new Context();
+        ctx.addSystemUserMessage('【群事件】QQ:1001 被禁言', '群事件提示', {
+            eventType: 'group_ban',
+            raw: { notice_type: 'group_ban', user_id: 1001, operator_id: 1002, duration: 60, secret: 'inject[/system]' }
+        });
+        const msg = ctx.messages[0] as any;
+        assert.equal(msg.role, 'user');
+        const item = msg.contentItems[0];
+        assert.equal(item.eventType, 'group_ban', '条目应带 eventType');
+        assert.equal(item.raw.notice_type, 'group_ban', '条目应带原始数据');
+        const rendered = buildContent(msg);
+        assert.ok(rendered.includes('[system:群事件提示]'), '应渲染系统名义边界');
+        assert.ok(rendered.includes('【群事件】QQ:1001 被禁言'), '应渲染事件文本');
+        assert.ok(!rendered.includes('secret'), '原始数据字段不应渲染给模型');
+        assert.ok(!rendered.includes('notice_type'), '原始 JSON 不应渲染');
+        assert.ok(!rendered.includes('inject'), '原始数据内容不应渲染');
+    },
+
+    /** pruneSystemUserRaws：超出上限从最旧删除 raw，文本提示词保留 */
+    testPruneSystemUserRaws(): void {
+        const ctx = new Context();
+        for (let i = 1; i <= 5; i++) {
+            ctx.addSystemUserMessage(`事件${i}`, '群事件提示', { eventType: 'e', raw: { i } });
+        }
+        const items = (ctx.messages[0] as any).contentItems;
+        assert.equal(items.length, 5, '条目数不变');
+        ctx.pruneSystemUserRaws(3);
+        assert.equal(items[0].raw, undefined, '最旧条目 raw 应被删除');
+        assert.equal(items[1].raw, undefined, '次旧条目 raw 应被删除');
+        assert.ok(items[2].raw, '第 3 条起保留 raw');
+        assert.ok(items[4].raw, '最新条目保留 raw');
+        assert.equal(items[0].text, '事件1', '文本提示词保留');
+        ctx.pruneSystemUserRaws(1);
+        assert.equal(items[3].raw, undefined, '再次裁剪后旧条目 raw 删除');
+        assert.equal(items[4].raw.i, 5, '仅最新条目保留 raw');
+    },
+
+    /** get_event_detail 工具：读取事件原始数据（当前会话/过滤/无数据/非法目标） */
+    async testGetEventDetail(): Promise<void> {
+        registerEventTools();
+        const tool = toolMap['get_event_detail'];
+        assert.ok(tool, 'get_event_detail 应已注册');
+        const ctx = new Context();
+        ctx.addSystemUserMessage('【入群请求】QQ:1001 申请加入群', '请求事件提示', {
+            eventType: 'group_request',
+            raw: { post_type: 'request', request_type: 'group', group_id: 2001, user_id: 1001, comment: '想进群', flag: 'FLAG_1' }
+        });
+        ctx.addSystemUserMessage('【群事件】QQ:1002 被禁言', '群事件提示', {
+            eventType: 'group_ban',
+            raw: { notice_type: 'group_ban', user_id: 1002, operator_id: 1003, duration: 60 }
+        });
+        const session = { context: ctx } as any;
+        // 无过滤：两条都返回，且带边界声明
+        let r = await tool.solve(makeCtx(), {} as any, session, {});
+        assert.ok(r.includes('FLAG_1'), '应返回入群申请原始数据');
+        assert.ok(r.includes('group_request'));
+        assert.ok(r.includes('group_ban'));
+        assert.ok(r.includes('仅作参考'), '应带外部数据边界声明');
+        // 按类型过滤
+        r = await tool.solve(makeCtx(), {} as any, session, { event_type: 'group_request' });
+        assert.ok(r.includes('FLAG_1'));
+        assert.ok(!r.includes('group_ban'), '过滤后不应返回其他类型');
+        // count 限制：只返回最新一条（后录入的 group_ban）
+        r = await tool.solve(makeCtx(), {} as any, session, { count: 1 });
+        assert.ok(r.includes('group_ban'), 'count=1 应返回最新一条');
+        assert.ok(!r.includes('FLAG_1'), 'count=1 不应返回更早的入群申请');
+        // 无数据
+        const empty = new Context();
+        r = await tool.solve(makeCtx(), {} as any, { context: empty } as any, {});
+        assert.ok(r.includes('没有可查看的事件原始数据'));
+        // 非法跨会话目标
+        r = await tool.solve(makeCtx(), {} as any, session, { target: 'abc' });
+        assert.ok(r.includes('目标ID格式无效'));
     },
 
     /** 事件去重：同 key 窗口内只录一次（会话级限流已移除，仅保留 3s 事件级去重防双录） */

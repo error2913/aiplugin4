@@ -1,6 +1,7 @@
 // 工具注册统一入口：OB11 消息发送由 call_ob11_api 统一处理。
 import { registerContextTools } from "./context/init";
 import { registerCoreTools } from "./core/init";
+import { registerEventToolSet } from "./event/init";
 import { registerImageTools } from "./image/init";
 import { registerManageTools } from "./manage/init";
 import { registerMemoryTools } from "./memory/init";
@@ -14,6 +15,7 @@ export function registerTools() {
     registerOb11Tools();
     registerSealTools();
     registerContextTools();
+    registerEventToolSet();
     registerMemoryTools();
     registerResourceTools();
     registerCoreTools();

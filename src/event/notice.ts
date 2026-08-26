@@ -1,5 +1,21 @@
-// 依赖事件 → 文本提示词：纯函数转换 + 去重守卫（ob11 依赖 notice/request 事件）
 import { truncateText } from "../utils/string";
+// 上下文内保留事件原始数据的条目上限（超出从最旧删除 raw，文本提示词保留）
+export const EVENT_RAW_LIMIT = 20;
+/** 单条事件原始数据序列化后的最大长度，超过则丢弃 raw（防御性上限，正常事件远小于此） */
+export const EVENT_RAW_MAX_CHARS = 4000;
+
+/** 事件原始数据是否可安全保留：可 JSON 序列化且不超过长度上限 */
+export function isEventRawRetainable(raw: unknown): boolean {
+    if (raw === undefined || raw === null) return false;
+    try {
+        const s = JSON.stringify(raw);
+        return !!s && s.length <= EVENT_RAW_MAX_CHARS;
+    } catch {
+        return false;
+    }
+}
+
+// 依赖事件 → 文本提示词：纯函数转换 + 去重守卫（ob11 依赖 notice/request 事件）
 
 /** 事件级去重窗口：同 key 事件在此窗口内只记录一次（原生回调与 ob11 依赖双路径防双录） */
 const EVENT_DEDUP_WINDOW_MS = 3000;
@@ -123,12 +139,13 @@ export function buildRequestText(event: any, prefix: string = 'QQ'): string {
     const user = uniUserId(event.user_id, prefix);
     const group = uniGroupId(event.group_id, prefix);
     const comment = event.comment ? `：${truncateText(String(event.comment), 80)}` : '';
+    const hint = '（完整事件数据可调用 get_event_detail 查看，处理申请需要）';
     if (requestType === 'friend') {
-        return `【好友请求】${user || '未知用户'} 请求添加好友${comment}`;
+        return `【好友请求】${user || '未知用户'} 请求添加好友${comment}${hint}`;
     }
     if (requestType === 'group') {
         const action = event.sub_type === 'invite' ? '邀请加入' : '申请加入';
-        return `【入群请求】${user || '未知用户'} ${action}${group ? '群 ' + group : ''}${comment}`;
+        return `【入群请求】${user || '未知用户'} ${action}${group ? '群 ' + group : ''}${comment}${hint}`;
     }
     return '';
 }

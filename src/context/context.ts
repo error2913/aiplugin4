@@ -210,12 +210,14 @@ export class Context {
         this.limitMessages();
     }
 
-    addSystemUserMessage(text: string, systemName: string) {
+    addSystemUserMessage(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }) {
         text = stripInternalTags(text);
         const sumi: SystemUserMessageItem = {
             text,
             time: Math.floor(Date.now() / 1000),
-            systemName
+            systemName,
+            ...(extra?.eventType ? { eventType: extra.eventType } : {}),
+            ...(extra?.raw !== undefined ? { raw: extra.raw } : {})
         };
         const lastMessage = this.messages[this.messages.length - 1];
         if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) (lastMessage as UserMessage).contentItems.push(sumi);
@@ -226,6 +228,19 @@ export class Context {
 
     }
 
+    /** 限制上下文内携带事件原始数据（raw）的条目数：超出从最旧开始删除 raw 字段，文本提示词保留 */
+    pruneSystemUserRaws(limit: number) {
+        if (limit <= 0) return;
+        const raws: SystemUserMessageItem[] = [];
+        for (const m of this.messages) {
+            if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
+            for (const item of (m as UserMessage).contentItems) {
+                if (Message.getUserMessageItemType(item) === 'system' && (item as SystemUserMessageItem).raw !== undefined) raws.push(item as SystemUserMessageItem);
+            }
+        }
+        const overflow = raws.length - limit;
+        for (let i = 0; i < overflow; i++) delete raws[i].raw;
+    }
     addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {
         // 防御：空数组不应入库，避免后续请求体携带 "tool_calls":[] 被后端拒绝
         if (!toolCalls || toolCalls.length === 0) {
