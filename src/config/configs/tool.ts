@@ -30,10 +30,6 @@ export default class ToolConfig {
           "Authorization": "Bearer token"
         }
       },
-      "web-read": {
-        "type": "http",
-        "url": "http://127.0.0.1:46799/mcp"
-      },
       "md-html-render": {
         "type": "http",
         "url": "http://127.0.0.1:37632/mcp"
@@ -44,7 +40,7 @@ export default class ToolConfig {
       }
     }
   }`
-        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。工具名称、描述和参数 schema 会在连接后通过 MCP tools/list 自动发现，不需要也不支持额外的 tools 配置块。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。默认包含四个：mcp-files-exec（提供 read_file、list_dir、write_file、delete_file、download_file、run_shell、export_file；默认可直接传后端绝对路径）、web-read（提供 scrape_url、screenshot_url）、md-html-render（提供 render_markdown、render_html）、mcp-browser（提供 browser_navigate、browser_click、browser_type、browser_snapshot、browser_take_screenshot、browser_wait_for、browser_close 等浏览器操作，按 AI 会话隔离，截图时机由 AI 自主选择）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请改用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。工具名称、描述和参数 schema 会在连接后通过 MCP tools/list 自动发现，不需要也不支持额外的 tools 配置块。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。默认包含三个：mcp-files-exec（提供 read_file、list_dir、write_file、delete_file、download_file、run_shell、export_file；默认可直接传后端绝对路径）、md-html-render（提供 render_markdown、render_html）、mcp-browser（提供 browser_navigate、browser_click、browser_type、browser_snapshot、browser_take_screenshot、browser_wait_for、browser_close 等浏览器操作，按 AI 会话隔离，截图时机由 AI 自主选择）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请改用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [...SEALDICE_COMMAND_SKILLS, ...OB11_API_SKILLS], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选），正文为技能内容；默认包含当前 SealDice 核心命令、内置扩展命令及别名的调用帮助，统一说明 run_ext_command / run_core_command 的参数传递方式。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerTemplateConfig(ext, "音乐服务配置", [
             `{
