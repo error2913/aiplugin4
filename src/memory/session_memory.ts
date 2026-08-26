@@ -2,6 +2,7 @@
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import { SUMMARY_TEMPLATE } from "../prompt/templates";
+import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import { truncateText } from "../utils/string";
@@ -211,11 +212,11 @@ export default class SessionMemoryService {
         return this.retainMemory(ctx, session, ul, gl, kws, images, text, visibility, type, importance);
     }
 
-    findImage(_id: string): any {
+    findImage(_id: string): Image | null {
         return null;
     }
 
-    findMemoryAndImageByImageIdPrefix(_id: string): any {
+    findMemoryAndImageByImageIdPrefix(_id: string): { memory: MemoryUnit; image: Image } | null {
         return null;
     }
 
