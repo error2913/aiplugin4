@@ -152,7 +152,44 @@ globalThis.seal = {
     assert.equal(calls[1].peerId, '123456');
     assert.equal(calls[1].file, '/virtual/book.pdf');
 
-    console.log('OB11 runtime simulation passed: native fallback, dependency errors, special segments, resource references, net calls, and file uploads.');
+    // replyToSender：OB11 成功拿到 message_id 时返回 base36 短 ID，不落海豹 API。
+    calls.length = 0;
+    sent.length = 0;
+    globalThis.net.callApi = async (epId, action, params) => {
+        calls.push({ kind: 'callApi', epId, action, params });
+        return { message_id: 501, action };
+    };
+    const sendSession = { context: { lastReply: '' } };
+    const msgId = await runtime.replyToSender(context.ctx, context.msg, sendSession, '你好');
+    assert.equal(msgId, 'dx'); // transformMsgId(501)
+    assert.equal(sent.length, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.group_id, '123456');
+
+    // replyToSender：OB11 网络后端抛错（内部转 failure）时落回海豹 API。
+    sent.length = 0;
+    sendSession.context.lastReply = '';
+    globalThis.net.callApi = async () => { throw new Error('net down'); };
+    const fallbackMsgId = await runtime.replyToSender(context.ctx, context.msg, sendSession, '你好');
+    assert.equal(fallbackMsgId, '');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].content, '你好');
+    assert.equal(sendSession.context.lastReply, '你好');
+
+    // replyToSender：OB11 分支内部参数构造抛错（ctx.player 缺失）也必须落回海豹 API，而不是吞掉回复。
+    sent.length = 0;
+    sendSession.context.lastReply = '';
+    const brokenCtx = {
+        endPoint: { userId: '10000' },
+        group: { groupId: 'QQ-Group:123456' },
+        player: undefined
+    };
+    const brokenMsgId = await runtime.replyToSender(brokenCtx, { messageType: 'group' }, sendSession, 'hello');
+    assert.equal(brokenMsgId, '');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].content, 'hello');
+
+    console.log('OB11 runtime simulation passed: native fallback, dependency errors, special segments, resource references, net calls, file uploads, and replyToSender fallbacks.');
 })().finally(() => fs.rmSync(outDir, { recursive: true, force: true })).catch(error => {
     console.error(error);
     process.exitCode = 1;

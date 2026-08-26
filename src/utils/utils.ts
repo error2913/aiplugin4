@@ -175,37 +175,42 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
 
     const { showMsgId = true } = Config.message as any;
     if (showMsgId && netExists()) {
-        const rawMessageArray = transformTextToArray(s);
-        const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
+        try {
+            const rawMessageArray = transformTextToArray(s);
+            const messageArray = rawMessageArray.filter(item => item.type !== 'poke');
 
-        // 处理戳戳戳
-        const pokeMsgArr = rawMessageArray.filter(item => item.type === 'poke');
-        if (pokeMsgArr.length > 0) {
-            pokeMsgArr.forEach(item => {
-                const s = `[CQ:poke,qq=${item.data.qq}]`;
-                session.context.lastReply = s;
-                seal.replyToSender(ctx, msg, s);
-            });
-        }
-
-        if (messageArray.length === 0) return '';
-
-        const uid = ctx.player!.userId;
-        if (msg.messageType === 'private') {
-            const result = await callOb11ApiForContext(ctx, msg, "send_private_msg", { user_id: uid.replace(/^.+:/, ""), message: messageArray });
-            if (result.ok && result.message_id) {
-                sendLog.debug(`(${result.message_id})发送给${uid}:${s}`);
-                return transformMsgId(result.message_id);
+            // 处理戳戳戳
+            const pokeMsgArr = rawMessageArray.filter(item => item.type === 'poke');
+            if (pokeMsgArr.length > 0) {
+                pokeMsgArr.forEach(item => {
+                    const s = `[CQ:poke,qq=${item.data.qq}]`;
+                    session.context.lastReply = s;
+                    seal.replyToSender(ctx, msg, s);
+                });
             }
-        } else if (msg.messageType === 'group') {
-            const gid = ctx.group ? ctx.group.groupId : '';
-            const result = await callOb11ApiForContext(ctx, msg, "send_group_msg", { group_id: gid.replace(/^.+:/, ""), message: messageArray });
-            if (result.ok && result.message_id) {
-                sendLog.debug(`(${result.message_id})发送给${gid}:${s}`);
-                return transformMsgId(result.message_id);
+
+            if (messageArray.length === 0) return '';
+
+            const uid = ctx.player!.userId;
+            if (msg.messageType === 'private') {
+                const result = await callOb11ApiForContext(ctx, msg, "send_private_msg", { user_id: uid.replace(/^.+:/, ""), message: messageArray });
+                if (result.ok && result.message_id) {
+                    sendLog.debug(`(${result.message_id})发送给${uid}:${s}`);
+                    return transformMsgId(result.message_id);
+                }
+            } else if (msg.messageType === 'group') {
+                const gid = ctx.group ? ctx.group.groupId : '';
+                const result = await callOb11ApiForContext(ctx, msg, "send_group_msg", { group_id: gid.replace(/^.+:/, ""), message: messageArray });
+                if (result.ok && result.message_id) {
+                    sendLog.debug(`(${result.message_id})发送给${gid}:${s}`);
+                    return transformMsgId(result.message_id);
+                }
             }
+            sendLog.warning('无法获取 message_id');
+        } catch (error) {
+            // OB11 发送链路（含参数构造/上下文取值）任何异常都不允许吞掉回复：落回海豹 API 发送
+            sendLog.exception('OB11 发送异常，落回海豹 API 发送', error);
         }
-        sendLog.warning('无法获取 message_id');
     }
     session.context.lastReply = s;
     seal.replyToSender(ctx, msg, s);
