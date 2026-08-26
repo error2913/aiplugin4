@@ -2,7 +2,7 @@
 
 权限：U=任意成员；I=邀请者/管理/群主/白名单/骰主；S=骰主（会话权限≥1 时为邀请者）。
 
-## 基础控制（status/ctxn/on/standby/off/forget/role/model/shut）
+## 基础控制（status/ctxn/on/standby/off/forget/role/model/stop/steer）
 
 | ID | 指令 | 权限 | 预期关键字 | 备注 |
 |---|---|---|---|---|
@@ -31,7 +31,9 @@
 | CTRL-23 | `.ai model <当前模型名>` | U | `已设置当前会话模型为` | 用 CTRL-22 返回的模型名；为空则 SKIP(env) |
 | CTRL-24 | `.ai model clr` | U | `已清除当前会话的模型设置` | 结束后恢复快照模型 |
 | CTRL-25 | `.ai model 不存在的模型` | U | `不存在` | 错误路径 |
-| CTRL-26 | `.ai shut` | U | `当前没有正在进行的对话` | 无流式对话时 |
+| CTRL-26 | `.ai stop` | U | `当前没有正在进行的对话` | 无进行中对话时（原 shut 用例） |
+| CTRL-27 | `.ai steer` | U | `缺少内容` | 无内容错误路径 |
+| CTRL-28 | `.ai steer 测试方向` | U | `当前没有正在进行的对话` | 无进行中对话时 |
 
 ## 忽略名单（ignore）
 

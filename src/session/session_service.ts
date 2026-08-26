@@ -18,7 +18,7 @@ export function getSession(sessionId: string): Session {
 
 export class SessionService {
     static save(session: Session) {
-        ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => key === 'lastCtx' ? undefined : value));
+        ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => key === 'lastCtx' || key === 'running' || key === 'stopVersion' || key === 'steerQueue' ? undefined : value));
     }
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
         agentName: 'string',

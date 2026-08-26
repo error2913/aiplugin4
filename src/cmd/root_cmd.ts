@@ -19,9 +19,10 @@ import { registerCmdOn } from "./sub_cmd/on";
 import { registerCmdPrivilege } from "./sub_cmd/privilege";
 import { registerCmdPrompt } from "./sub_cmd/prompt";
 import { registerCmdRole } from "./sub_cmd/role";
-import { registerCmdShut } from "./sub_cmd/shut";
 import { registerCmdStandby } from "./sub_cmd/standby";
 import { registerCmdStatus } from "./sub_cmd/status";
+import { registerCmdSteer } from "./sub_cmd/steer";
+import { registerCmdStop } from "./sub_cmd/stop";
 import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
@@ -74,7 +75,8 @@ export class SubCmd {
         registerCmdTool();
         registerCmdIgnore();
         registerCmdToken();
-        registerCmdShut();
+        registerCmdStop();
+        registerCmdSteer();
         registerCmdModel();
         registerCmdBlock();
 

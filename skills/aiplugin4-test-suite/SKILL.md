@@ -30,7 +30,7 @@ description: aiplugin4 插件综合测试与调试技能：通过 qqmcp 对测�
 
 | 用户提到的指令 | 用例文件 |
 |---|---|
-| `status` `ctxn` `on` `off` `sb/standby` `fgt/forget` `role` `model` `shut` `ign/ignore` | [control.md](references/control.md) |
+| `status` `ctxn` `on` `off` `sb/standby` `fgt/forget` `role` `model` `stop` `steer` `ign/ignore` | [control.md](references/control.md) |
 | `memo/memory` | [memory.md](references/memory.md) |
 | `tool` | [tool.md](references/tool.md) |
 | `priv/privilege` `prompt` `tk/token` `timer` | [admin.md](references/admin.md) |

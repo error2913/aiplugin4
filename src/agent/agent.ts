@@ -14,7 +14,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { buildSystemMessage, handleMessages } from "../utils/message";
+import { buildSystemMessage, handleMessages, RequestMessage } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, TypeDescriptor } from "../utils/utils";
 
@@ -96,10 +96,15 @@ export default class Agent {
      * 循环直到模型给出最终回复（工具轮数由「允许连续调用函数次数」配置控制，0 为不限制），最后统一拆分并发送回复。
      */
     async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
-        if (!(await requestLimiter.acquire())) return;
+        // 启动前捕获 stopVersion：.ai stop 发生在排队期间或拿到许可瞬间都会因版本变化而中止
+        const version = session.stopVersion;
+        if (!(await requestLimiter.acquire(session.sessionId))) return;
         try {
+            if (session.stopVersion !== version) return;
+            session.running = true;
             await this.runInternal(session, ctx, msg, tool_choice);
         } finally {
+            session.running = false;
             requestLimiter.release();
         }
     }
@@ -108,6 +113,7 @@ export default class Agent {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const toolInfos = Tool.getToolsInfo(session);
         const trace = new AgentRunContext();
+        const version = session.stopVersion;
 
         // system prompt 在同一轮工具循环内复用：避免每轮工具回调后重复做记忆检索/嵌入，
         // 只在工具回调后更新 context messages（上下文仍随工具结果增长）。
@@ -119,9 +125,14 @@ export default class Agent {
         let lastReasoning: string | undefined;
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
+            // stop 中止检查点：上一轮工具执行/回调期间被 stop 则不再发下一轮请求
+            if (session.stopVersion !== version) return;
             trace.beginTurn();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
+            this.injectSteers(session, messages);
             const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId);
+            // stop 中止检查点：模型请求期间被 stop，丢弃本轮输出直接中止
+            if (session.stopVersion !== version) return;
             lastReasoning = reasoning_content;
             // 提示词工程模式下模型可能返回 ```function ... ``` 代码块包裹的工具调用：
             // 发送前先剥离该块，避免代码块原文进入回复/上下文；调用内容仍以 match[0] 原样记录
@@ -129,6 +140,7 @@ export default class Agent {
                 ? raw_reply.match(/```function([\s\S]*?)```/)
                 : null;
             result = await handleReply(ctx, msg, session, promptCallMatch ? raw_reply.slice(0, promptCallMatch.index ?? 0) : raw_reply);
+            if (session.stopVersion !== version) return;
 
             if (STATUS) {
                 if (PROMPT_ENGINEERING) {
@@ -141,6 +153,8 @@ export default class Agent {
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
+                            // stop 中止检查点：工具执行期间被 stop，不再回调/续轮
+                            if (session.stopVersion !== version) return;
                             for (const r of callResults) {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
                             }
@@ -166,6 +180,8 @@ export default class Agent {
                         const callTime = Date.now();
                         try {
                             const callResults = await ToolRunner.executeFunctionCalls(ctx, msg, session, tool_calls);
+                            // stop 中止检查点：工具执行期间被 stop，不再回调/续轮
+                            if (session.stopVersion !== version) return;
                             for (const r of callResults) {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
                             }
@@ -198,17 +214,30 @@ export default class Agent {
             break;
         }
 
+        if (session.stopVersion !== version) return;
         const { contextArray, replyArray, images } = result;
         await session.reply(ctx, msg, contextArray, replyArray, images, { withSegmentDelay: true }, lastReasoning);
         log.info(`[run] ${trace.summary()}`);
     }
 
+    /** 把 .ai steer 注入的方向提示追加到请求消息末尾（最新指令），并清空队列；不写入持久化上下文 */
+    private injectSteers(session: Session, messages: RequestMessage[]): void {
+        const steers = session.drainSteers();
+        for (const steer of steers) {
+            messages.push({ role: 'system', content: `【方向提示】${steer}` });
+        }
+    }
+
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
-        if (!(await requestLimiter.acquire())) return;
+        const version = session.stopVersion;
+        if (!(await requestLimiter.acquire(session.sessionId))) return;
         try {
+            if (session.stopVersion !== version) return;
+            session.running = true;
             await this.runStreamInner(session, ctx, msg);
         } finally {
+            session.running = false;
             requestLimiter.release();
         }
     }
@@ -221,13 +250,21 @@ export default class Agent {
     ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const trace = new AgentRunContext();
+        const version = session.stopVersion;
 
         await session.stopCurrentChatStream();
 
         const sys = systemMessage ?? await buildSystemMessage(ctx, session);
         const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), undefined, sys);
+        this.injectSteers(session, messages);
         const id = await streamService.startStream(messages, session.setting.modelName, trace.runId);
         if (!id) return;
+        // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
+        if (session.stopVersion !== version) {
+            session.stream.id = id;
+            await session.stopCurrentChatStream();
+            return;
+        }
 
         session.stream.id = id;
         let status = 'processing';
@@ -283,6 +320,8 @@ export default class Agent {
                         try {
                             trace.recordToolCall('stream-tool-call', 0, true);
                             const callResults = await ToolRunner.executePromptCalls(ctx, msg, session, match[1]);
+                            // stop 中止检查点：工具执行期间被 stop，不递归续流，直接中止工具链
+                            if (session.stopVersion !== version) return;
                             for (const r of callResults) {
                                 if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
                             }
@@ -296,6 +335,7 @@ export default class Agent {
                             return;
                         }
 
+                        if (session.stopVersion !== version) return;
                         await this.runStreamInner(session, ctx, msg, sys);
                         return;
                     } else {

@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.17.0-green)
+![Version](https://img.shields.io/badge/Version-4.18.0-green)
 
 ## 快速开始
 
@@ -336,7 +336,8 @@ max_tokens = 2048
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
 | `.ai model [<模型名>]` | `.ai model deepseek-chat` | 查看 / 设置当前会话模型，`clr` 清除设置恢复默认 |
-| `.ai shut` | - | 中断当前流式输出 |
+| `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器；触发条件保留，需主动触发） |
+| `.ai steer <内容>` | - | 不打断对话，向工具链插入方向提示，下一轮生效 |
 
 ### 记忆管理命令
 

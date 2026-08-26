@@ -13,7 +13,8 @@ import { registerMCPTools } from "../tool/mcp";
 import { ToolState } from "../tool/tool";
 import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
-import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
+import { requestLimiter } from "../utils/concurrency";
+import { MessageSegment, normalizeRenderTags, stripInternalTags, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 import { getRecordMessageId, replyToSender } from "../utils/utils";
 
@@ -23,6 +24,9 @@ import { SessionType, State } from "./types";
 import User from "./user";
 
 const log = logger.withTag('session');
+
+/** 持久化时排除的运行时字段（监听器/运行状态/方向提示等），不写入存储、不参与 revive 恢复 */
+const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'stopVersion', 'steerQueue']);
 
 export class Setting {
     static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger'];
@@ -119,6 +123,12 @@ export class Session {
         lastTime: number
     }
     lastCtx: seal.MsgContext | null = null;
+    /** 运行时字段：当前是否有 run/runStream 在跑（含工具执行阶段；不持久化） */
+    running = false;
+    /** 运行时字段：stop 时自增，运行循环启动时捕获、检测到变化即中止（不持久化） */
+    stopVersion = 0;
+    /** 运行时字段：.ai steer 注入的方向提示队列，下一轮模型请求时清空注入（不持久化） */
+    steerQueue: string[] = [];
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -146,6 +156,9 @@ export class Session {
         }
         this.memory = new SessionMemoryService();
         this.lastCtx = null;
+        this.running = false;
+        this.stopVersion = 0;
+        this.steerQueue = [];
         const listen = createToolListen();
         this.tool = {
             state: {} as ToolState,
@@ -193,7 +206,7 @@ export class Session {
     }
 
     save() {
-        ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => key === 'lastCtx' ? undefined : value));
+        ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
     }
 
     get curActiveTimeSegIndex(): number {
@@ -364,5 +377,34 @@ export class Session {
             if (reply && toolCallStatus) log.warning('unfinished tool call:', reply);
             await streamService.endStream(id);
         }
+    }
+
+    /** 完全停止本会话对话：结束流式输出、升级 stopVersion 中止运行中循环、清理该会话排队请求、清待触发计时器；
+     *  AI 设定触发条件保留（需主动触发）。返回各项是否发生，供命令反馈。 */
+    async stopConversation(): Promise<{ hadStream: boolean; hadRun: boolean; hadTimer: boolean; queueCleared: number }> {
+        const hadStream = this.stream.id !== '';
+        const hadRun = this.running;
+        const hadTimer = this.context.timer !== null;
+        await this.stopCurrentChatStream();
+        this.stopVersion++;
+        // 完全暂停：清掉待触发的计时器（计数器/概率/触发条件保留，需主动触发）
+        if (this.context.timer) clearTimeout(this.context.timer);
+        this.context.timer = null;
+        const queueCleared = requestLimiter.cancelBySession(this.sessionId);
+        this.save();
+        log.info(`stop conversation: stream=${hadStream} running=${hadRun} timer=${hadTimer} queueCleared=${queueCleared}`);
+        return { hadStream, hadRun, hadTimer, queueCleared };
+    }
+
+    /** 插入方向提示：进入 steerQueue，由下一轮模型请求注入（不打断当前对话） */
+    steer(text: string): void {
+        this.steerQueue.push(stripInternalTags(text));
+    }
+
+    /** 取出并清空方向提示队列 */
+    drainSteers(): string[] {
+        const steers = this.steerQueue;
+        this.steerQueue = [];
+        return steers;
     }
 }

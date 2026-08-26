@@ -1,6 +1,13 @@
 // 版本更新日志（updateInfo），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const updateInfo: { [version: string]: string } = {
+    "4.18.0": `## 新功能
+- .ai shut 移除，新增 .ai stop：完全暂停当前对话——打断流式输出、中断工具链（含并发队列中等待的请求）、清除待触发计时器；计数器/概率/正则/待机等触发条件保留，需主动触发
+- 新增 .ai steer <内容>：在不打断当前对话的前提下，把内容作为方向提示插入工具链，下一轮模型请求生效
+
+## 功能调整
+- .ai stop 与 .ai steer 均为普通用户可用（权限 U）
+`,
     "4.17.0": `## 新功能
 - 记忆引擎重构为 Hindsight-like 纯 TS 引擎：新增 reflect_memory（基于记忆推理，返回心智模型/观察记忆/事实证据汇总）与 consolidate_memory（观察巩固，合并重复观察、清理过期记忆）工具；.ai memo 子命令改为 obs（观察记忆），支持 on/off、list、立即生成、clr
 - run_core_command 改为直连 ob11-core-bridge 的 /plugin WebSocket：新增「核心桥WS地址/核心桥Token」后端配置，支持自动重连/超时/令牌校验；默认 MCP 服务器列表移除 ob11-core-bridge
