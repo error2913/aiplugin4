@@ -107,11 +107,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const session = {
             context: {
                 messages: [
-                    { role: 'assistant', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'screenshot_url', arguments: '{}' } }] },
+                    { role: 'assistant', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'browser_take_screenshot', arguments: '{}' } }] },
                     { role: 'tool', text: '图[img:mcp_1]', contentParts: [
                         { type: 'text', text: '图' },
                         { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }
-                    ], toolCallId: 'call_1', toolName: 'screenshot_url' }
+                    ], toolCallId: 'call_1', toolName: 'browser_take_screenshot' }
                 ]
             }
         };
@@ -344,8 +344,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             context: {
                 messages: [
                     { role: 'user', contentItems: [{ text: '事件内容', systemName: '群事件提示', time: 1700000000 }] },
-                    { role: 'assistant', toolCalls: [{ id: 'call_9', type: 'function', function: { name: 'web_read', arguments: '{}' } }] },
-                    { role: 'tool', text: '外部数据', toolCallId: 'call_9', toolName: 'web_read' }
+                    { role: 'assistant', toolCalls: [{ id: 'call_9', type: 'function', function: { name: 'render_markdown', arguments: '{}' } }] },
+                    { role: 'tool', text: '外部数据', toolCallId: 'call_9', toolName: 'render_markdown' }
                 ]
             }
         };

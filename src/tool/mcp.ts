@@ -1,4 +1,6 @@
 // MCP 客户端：把外部 MCP 服务器（Streamable HTTP / JSON-RPC）的工具注册为 AI 工具
+// 多会话：按 AI 会话（session.sessionId）分桶维护 MCP 会话，同一 AI 会话的连续调用
+// 复用同一 MCP 会话，保持服务端浏览器/登录状态；空闲或超限的会话按 LRU 回收。
 import { ext } from "../config/config";
 import Logger from "../logger";
 import { parseJSONWithTrailingCommas } from "../utils/json";
@@ -22,14 +24,24 @@ interface MCPToolDef {
     inputSchema?: any;
 }
 
+interface MCPServerSession {
+    sessionId: string;
+    lastUsedAt: number;
+}
+
 interface MCPServerState {
     server: MCPServer;
-    sessionId: string;
+    /** 系统级会话：拉取工具列表与无会话上下文的内部桥接调用（callMCPTool）使用，空闲后回收、需要时重建 */
+    defaultSessionId: string;
+    defaultSessionUsedAt: number;
     tools: MCPToolDef[];
     toolsFetchedAt: number;
+    /** 按 AI 会话分桶的 MCP 会话 */
+    sessions: Map<string, MCPServerSession>;
 }
 
 const TOOLS_CACHE_TTL = 60 * 1000; // 工具列表缓存 60s
+const DEFAULT_MAX_SESSIONS = 8; // 每服务器最大会话数默认 8（可配置「MCP每服务器最大会话数」）
 const serverStates: { [name: string]: MCPServerState } = {};
 const mcpToolKeys = new Map<string, string>(); // MCP 注册过的工具键 → 所属服务器名，仅清理这些键避免误删普通工具
 let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步工具列表
@@ -38,6 +50,16 @@ let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步
 function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
     if (a.url !== b.url || a.token !== b.token) return false;
     return JSON.stringify(a.headers || {}) === JSON.stringify(b.headers || {});
+}
+
+function sessionTTLMs(): number {
+    const v = seal.ext.getIntConfig(ext, "MCP会话空闲回收分钟");
+    return (Number.isFinite(v) && v > 0 ? v : 15) * 60 * 1000;
+}
+
+function maxSessionsPerServer(): number {
+    const v = seal.ext.getIntConfig(ext, "MCP每服务器最大会话数");
+    return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_SESSIONS;
 }
 
 /** 按名称取最新配置：始终实时解析当前配置（热加载后立即生效），不保留已移除服务器的旧会话 */
@@ -230,12 +252,90 @@ async function doCallTool(server: MCPServer, sessionId: string, name: string, ar
     };
 }
 
-async function getSessionId(server: MCPServer, force = false): Promise<string> {
-    const state = serverStates[server.name];
-    // 配置（url/token/headers）变化时即使已有会话也不复用，避免沿用旧地址旧凭据
-    if (!force && state && state.sessionId && sameServerConfig(server, state.server)) return state.sessionId;
+function getOrCreateState(server: MCPServer): MCPServerState {
+    let state = serverStates[server.name];
+    // 配置（url/token/headers）变化时重建：旧会话地址/凭据已失效，直接丢弃
+    if (!state || !sameServerConfig(server, state.server)) {
+        state = {
+            server,
+            defaultSessionId: '',
+            defaultSessionUsedAt: 0,
+            tools: [],
+            toolsFetchedAt: 0,
+            sessions: new Map()
+        };
+        serverStates[server.name] = state;
+    }
+    return state;
+}
+
+/** 若服务器提供 browser_close 工具，则调用它释放该会话的服务端浏览器 context（尽力而为，失败忽略） */
+async function closeSessionIfBrowser(server: MCPServer, state: MCPServerState, sessionId: string): Promise<void> {
+    if (!sessionId) return;
+    if (!state.tools.some(t => t.name === 'browser_close')) return;
+    try {
+        await doCallTool(server, sessionId, 'browser_close', {});
+    } catch (e) {
+        log.warning(`关闭 MCP 会话浏览器失败（可忽略）: ${server.name} ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+
+/** 空闲超时/超上限的会话按 LRU 回收；有 browser_close 的服务器先释放浏览器再删会话 */
+async function evictSessions(server: MCPServer, state: MCPServerState): Promise<void> {
+    const now = Date.now();
+    const ttl = sessionTTLMs();
+    const max = maxSessionsPerServer();
+
+    for (const [key, s] of [...state.sessions]) {
+        if (now - s.lastUsedAt <= ttl) continue;
+        await closeSessionIfBrowser(server, state, s.sessionId);
+        state.sessions.delete(key);
+        log.info(`MCP 会话空闲回收: ${server.name} ${key}（空闲超过 ${Math.round(ttl / 60000)} 分钟）`);
+    }
+
+    if (state.sessions.size > max) {
+        const sorted = [...state.sessions.entries()].sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
+        const drop = sorted.slice(0, state.sessions.size - max);
+        for (const [key, s] of drop) {
+            await closeSessionIfBrowser(server, state, s.sessionId);
+            state.sessions.delete(key);
+            log.info(`MCP 会话超限回收: ${server.name} ${key}（每服务器上限 ${max}）`);
+        }
+    }
+
+    if (state.defaultSessionId && now - state.defaultSessionUsedAt > ttl) {
+        await closeSessionIfBrowser(server, state, state.defaultSessionId);
+        state.defaultSessionId = '';
+        log.info(`MCP 默认会话空闲回收: ${server.name}`);
+    }
+}
+
+/**
+ * 获取 MCP 会话：key 非空时按 AI 会话分桶（同会话复用，保持服务端状态），
+ * key 为空时使用系统级默认会话（工具列表/内部桥接调用）。
+ */
+async function getSessionId(server: MCPServer, key: string, force = false): Promise<string> {
+    const state = getOrCreateState(server);
+
+    if (key) {
+        const existing = state.sessions.get(key);
+        if (!force && existing && existing.sessionId) {
+            existing.lastUsedAt = Date.now();
+            return existing.sessionId;
+        }
+        const sessionId = await initialize(server) || '';
+        state.sessions.set(key, { sessionId, lastUsedAt: Date.now() });
+        await evictSessions(server, state);
+        return sessionId;
+    }
+
+    if (!force && state.defaultSessionId) {
+        state.defaultSessionUsedAt = Date.now();
+        return state.defaultSessionId;
+    }
     const sessionId = await initialize(server) || '';
-    serverStates[server.name] = { server, sessionId, tools: [], toolsFetchedAt: 0 };
+    state.defaultSessionId = sessionId;
+    state.defaultSessionUsedAt = Date.now();
     return sessionId;
 }
 
@@ -246,14 +346,14 @@ function isSessionInvalidError(e: unknown): boolean {
 }
 
 /** 获取会话并执行请求；会话失效或服务器重启后未初始化时，重新 initialize 后重试一次 */
-async function withSessionRetry<T>(server: MCPServer, fn: (sessionId: string) => Promise<T>): Promise<{ sessionId: string, value: T }> {
-    let sessionId = await getSessionId(server);
+async function withSessionRetry<T>(server: MCPServer, key: string, fn: (sessionId: string) => Promise<T>): Promise<{ sessionId: string, value: T }> {
+    let sessionId = await getSessionId(server, key);
     try {
         return { sessionId, value: await fn(sessionId) };
     } catch (e) {
         if (!isSessionInvalidError(e)) throw e;
         log.warning(`MCP 会话失效，重新初始化后重试: ${server.name}`);
-        sessionId = await getSessionId(server, true);
+        sessionId = await getSessionId(server, key, true);
         return { sessionId, value: await fn(sessionId) };
     }
 }
@@ -262,10 +362,10 @@ async function withSessionRetry<T>(server: MCPServer, fn: (sessionId: string) =>
 export async function callMCPTool(serverName: string, name: string, args: any = {}): Promise<MCPCallResult> {
     const server = getMCPServerByName(serverName);
     if (!server) throw new Error(`MCP 服务器 ${serverName} 未配置`);
-    return callTool(server, name, args);
+    return callTool(server, '', name, args);
 }
-async function callTool(server: MCPServer, name: string, args: any): Promise<MCPCallResult> {
-    const { value } = await withSessionRetry(server, sessionId => doCallTool(server, sessionId, name, args));
+async function callTool(server: MCPServer, key: string, name: string, args: any): Promise<MCPCallResult> {
+    const { value } = await withSessionRetry(server, key, sessionId => doCallTool(server, sessionId, name, args));
     return value;
 }
 
@@ -278,8 +378,13 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
         return state.tools;
     }
 
-    const { sessionId, value: tools } = await withSessionRetry(server, sessionId => listTools(server, sessionId));
-    serverStates[server.name] = { server, sessionId, tools, toolsFetchedAt: Date.now() };
+    const { sessionId, value: tools } = await withSessionRetry(server, '', sessionId => listTools(server, sessionId));
+    const s = getOrCreateState(server);
+    s.server = server;
+    s.defaultSessionId = sessionId;
+    s.defaultSessionUsedAt = Date.now();
+    s.tools = tools;
+    s.toolsFetchedAt = Date.now();
 
     // 工具名称、描述和参数 schema 全部以 MCP tools/list 为准；服务器内工具删除后热加载清理。
     const liveKeys = new Set(tools.filter(t => !!t.name).map(t => t.name));
@@ -315,10 +420,12 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
             }
         }, true);
         // 每次调用都重新读取当前服务器配置，支持配置热加载且不缓存旧凭据。
-        tool.solve = async (_ctx, _msg, _session, args) => {
+        // 按 AI 会话（session.sessionId）分桶：同一会话的连续浏览器操作复用同一 MCP 会话。
+        tool.solve = async (_ctx, _msg, session, args) => {
             const current = getMCPServerByName(server.name);
             if (!current) return `MCP 服务器 ${server.name} 未配置`;
-            const result = await callTool(current, t.name, args || {});
+            const key = session && session.sessionId ? session.sessionId : '';
+            const result = await callTool(current, key, t.name, args || {});
             const normalized = normalizeMCPResult(result);
             return { text: normalized.text, contentParts: buildContentParts(normalized) };
 
@@ -347,9 +454,16 @@ export async function registerMCPTools() {
             mcpToolKeys.delete(key);
         }
     }
-    // 清理 serverStates 中已移除的服务器
+    // 清理 serverStates 中已移除的服务器；有 browser_close 的服务器先释放浏览器会话再删
     for (const name of Object.keys(serverStates)) {
-        if (!activeNames.has(name)) delete serverStates[name];
+        if (activeNames.has(name)) continue;
+        const state = serverStates[name];
+        for (const s of state.sessions.values()) {
+            await closeSessionIfBrowser(state.server, state, s.sessionId);
+        }
+        await closeSessionIfBrowser(state.server, state, state.defaultSessionId);
+        delete serverStates[name];
+        log.info(`MCP 服务器 ${name} 已从配置移除，清理其会话`);
     }
 
     // 工具列表同步按 TTL 节流

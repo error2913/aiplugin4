@@ -237,7 +237,9 @@ max_tokens = 2048
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、web-read（网页读取）、md-html-render（Markdown/HTML 渲染）；`run_core_command` 由插件本地注册，通过「后端 → 核心桥WS地址」直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删自动生效。默认包含三个服务器：mcp-files-exec（文件执行）、md-html-render（Markdown/HTML 渲染）、mcp-browser（AI 浏览器操作：导航/点击/输入/快照/截图，按 AI 会话隔离）；`run_core_command` 由插件本地注册，通过「后端 → 核心桥WS地址」直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| MCP会话空闲回收分钟 | MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 不回收（默认 15） |
+| MCP每服务器最大会话数 | 每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话；浏览器操作按 AI 会话隔离（默认 8） |
 | 可调用指令白名单 | 每行一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认包含核心命令、内置扩展命令及别名的 `run_ext_command` / `run_core_command` 调用帮助。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
@@ -342,7 +344,7 @@ max_tokens = 2048
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
 | `.ai model [<模型名>]` | `.ai model deepseek-chat` | 查看 / 设置当前会话模型，`clr` 清除设置恢复默认 |
-| `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器；触发条件保留，需主动触发） |
+| `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 | `.ai steer <内容>` | - | 不打断对话，向工具链插入方向提示，下一轮生效 |
 
 ### 记忆管理命令
@@ -425,7 +427,7 @@ max_tokens = 2048
 | 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
 | 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
 | 音频资源 | `generate_audio`（生成 record 消息段，不直接发送） |
-| 网页 | `web_search`、`web_read` |
+| 网页 | `web_search` |
 | 属性 | `attr_get`、`attr_set` |
 | 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
 | OB11 管理/查询 | 统一通过 `call_ob11_api` 传入 `set_group_ban`、`set_group_name`、`get_group_list` 等 action |

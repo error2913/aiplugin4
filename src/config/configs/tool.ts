@@ -10,6 +10,8 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "拉黑前需要骰主确认", true, "AI 建议拉黑时需骰主确认后才生效；关闭后 AI 可直接拉黑", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
+        seal.ext.registerIntConfig(ext, "MCP会话空闲回收分钟", 15, "MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 表示不回收", "工具");
+        seal.ext.registerIntConfig(ext, "MCP每服务器最大会话数", 8, "每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话（浏览器操作按 AI 会话隔离）", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的 OB11 action", [''], "每行一个禁止 call_ob11_api 调用的原始 OB11 action，例如 set_group_ban；修改后自动生效", "工具");
@@ -28,17 +30,17 @@ export default class ToolConfig {
           "Authorization": "Bearer token"
         }
       },
-      "web-read": {
-        "type": "http",
-        "url": "http://127.0.0.1:46799/mcp"
-      },
       "md-html-render": {
         "type": "http",
         "url": "http://127.0.0.1:37632/mcp"
+      },
+      "mcp-browser": {
+        "type": "http",
+        "url": "http://127.0.0.1:8921/mcp"
       }
     }
   }`
-        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。工具名称、描述和参数 schema 会在连接后通过 MCP tools/list 自动发现，不需要也不支持额外的 tools 配置块。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。默认包含三个：mcp-files-exec（提供 read_file、list_dir、write_file、delete_file、download_file、run_shell、export_file；默认可直接传后端绝对路径）、web-read（提供 scrape_url、screenshot_url）、md-html-render（提供 render_markdown、render_html）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请改用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
+        ], "仅支持标准 mcpServers JSON 格式：{\"mcpServers\":{\"服务器名\":{\"type\":\"http\",\"url\":\"...\",\"headers\":{...}}}}（Claude Desktop/Cursor/.mcp.json 可直接粘贴），一个块可包含多个服务器。工具名称、描述和参数 schema 会在连接后通过 MCP tools/list 自动发现，不需要也不支持额外的 tools 配置块。字段：type（仅支持 http，即 Streamable HTTP）、url（服务器地址）、headers（任意自定义请求头，如 Authorization）、token（自动生成 Bearer 头，与 headers 二选一）。默认包含三个：mcp-files-exec（提供 read_file、list_dir、write_file、delete_file、download_file、run_shell、export_file；默认可直接传后端绝对路径）、md-html-render（提供 render_markdown、render_html）、mcp-browser（提供 browser_navigate、browser_click、browser_type、browser_snapshot、browser_take_screenshot、browser_wait_for、browser_close 等浏览器操作，按 AI 会话隔离，截图时机由 AI 自主选择）。格式定义见 https://modelcontextprotocol.io/specification/latest （MCP 官方规范，国内可访问）。说明：stdio（command）服务器需拉起子进程，海豹环境不支持会自动跳过，请改用 Streamable HTTP（type=http + url）。修改后自动生效（缓存最多 1 分钟）", "工具");
         seal.ext.registerTemplateConfig(ext, "技能配置", [...SEALDICE_COMMAND_SKILLS, ...OB11_API_SKILLS], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选），正文为技能内容；默认包含当前 SealDice 核心命令、内置扩展命令及别名的调用帮助，统一说明 run_ext_command / run_core_command 的参数传递方式。修改后自动生效（缓存最多 1 分钟）。AI 可通过 use_skill 工具按需调用", "工具");
         seal.ext.registerTemplateConfig(ext, "音乐服务配置", [
             `{
@@ -94,6 +96,8 @@ export default class ToolConfig {
             ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
             COMMAND_PREFIX: seal.ext.getStringConfig(ext, "指令前缀"),
             MCP_ENABLED: seal.ext.getBoolConfig(ext, "是否启用MCP"),
+            MCP_SESSION_IDLE_MINUTES: seal.ext.getIntConfig(ext, "MCP会话空闲回收分钟"),
+            MCP_MAX_SESSIONS_PER_SERVER: seal.ext.getIntConfig(ext, "MCP每服务器最大会话数"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色"),
             MUSIC: seal.ext.getTemplateConfig(ext, "音乐服务配置")
         }
