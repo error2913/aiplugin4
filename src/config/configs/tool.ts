@@ -12,8 +12,8 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "工具方向提示", true, "开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块；关闭后直接调用工具，不播报方向", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
         seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
-        seal.ext.registerIntConfig(ext, "MCP会话空闲回收分钟", 15, "MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 表示不回收", "工具");
-        seal.ext.registerIntConfig(ext, "MCP每服务器最大会话数", 8, "每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话（浏览器操作按 AI 会话隔离）", "工具");
+        seal.ext.registerIntConfig(ext, "MCP会话空闲回收分钟", 10, "MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 表示不回收", "工具");
+        seal.ext.registerIntConfig(ext, "MCP每服务器最大会话数", 3, "每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话（浏览器操作按 AI 会话隔离）", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的 OB11 action", [''], "每行一个禁止 call_ob11_api 调用的原始 OB11 action，例如 set_group_ban；修改后自动生效", "工具");
@@ -107,3 +107,4 @@ export default class ToolConfig {
         }
     }
 }
+
