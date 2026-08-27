@@ -1,5 +1,5 @@
 // 后端服务配置：流式/图片转base64/搜索/用量图/论坛等 URL
-// md/html 渲染（md-html-render）为 MCP 服务，已移入「工具 → MCP服务器配置」
+// md/html 渲染（md-html-render）为 MCP 服务，已移入「MCP → MCP服务器配置」
 import { ext } from "../config";
 export default class BackendConfig {
     static register() {

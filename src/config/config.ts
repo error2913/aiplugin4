@@ -5,12 +5,14 @@ import BaseConfig from "./configs/base";
 import EventConfig from "./configs/event";
 import ImageConfig from "./configs/image";
 import KnowledgeBaseConfig from "./configs/knowledge_base";
+import McpConfig from "./configs/mcp";
 import MemoryConfig from "./configs/memory";
 import MessageConfig from "./configs/message";
 import ModelConfig from "./configs/model";
 import ReceivedConfig from "./configs/received";
 import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
+import SkillsConfig from "./configs/skills";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
@@ -31,6 +33,8 @@ const configMap = {
     trigger: TriggerConfig,
     reply: ReplyConfig,
     tool: ToolConfig,
+    mcp: McpConfig,
+    skills: SkillsConfig,
     memory: MemoryConfig,
     knowledgeBase: KnowledgeBaseConfig,
     image: ImageConfig,

@@ -41,7 +41,7 @@ interface MCPServerState {
 }
 
 const TOOLS_CACHE_TTL = 60 * 1000; // 工具列表缓存 60s
-const DEFAULT_MAX_SESSIONS = 8; // 每服务器最大会话数默认 8（可配置「MCP每服务器最大会话数」）
+const DEFAULT_MAX_SESSIONS = 3; // 每服务器最大会话数默认 3（可配置「MCP每服务器最大会话数」）
 const serverStates: { [name: string]: MCPServerState } = {};
 const mcpToolKeys = new Map<string, string>(); // MCP 注册过的工具键 → 所属服务器名，仅清理这些键避免误删普通工具
 let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步工具列表
@@ -54,7 +54,7 @@ function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
 
 function sessionTTLMs(): number {
     const v = seal.ext.getIntConfig(ext, "MCP会话空闲回收分钟");
-    return (Number.isFinite(v) && v > 0 ? v : 15) * 60 * 1000;
+    return (Number.isFinite(v) && v > 0 ? v : 10) * 60 * 1000;
 }
 
 function maxSessionsPerServer(): number {
