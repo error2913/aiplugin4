@@ -5,7 +5,7 @@ import { Context } from "../context/context";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/utils";
 
-import { Session, Setting } from "./session";
+import { Session, SESSION_RUNTIME_KEYS, Setting } from "./session";
 import { createToolListen } from "./tool_listen";
 
 
@@ -18,7 +18,7 @@ export function getSession(sessionId: string): Session {
 
 export class SessionService {
     static save(session: Session) {
-        ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => key === 'lastCtx' || key === 'running' || key === 'stopVersion' || key === 'steerQueue' ? undefined : value));
+        ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
     }
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
         agentName: 'string',
@@ -64,6 +64,11 @@ export class SessionService {
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];
+    }
+
+    /** 枚举当前已加载（惰性加载进内存）的全部会话；不含从未触达过的会话 */
+    listSessions(): Session[] {
+        return Object.values(this.sessionMap);
     }
 
 }

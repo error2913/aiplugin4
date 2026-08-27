@@ -26,7 +26,7 @@ import User from "./user";
 const log = logger.withTag('session');
 
 /** 持久化时排除的运行时字段（监听器/运行状态/方向提示等），不写入存储、不参与 revive 恢复 */
-const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'stopVersion', 'steerQueue']);
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'stopVersion', 'steerQueue', 'activeRuns']);
 
 export class Setting {
     static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger'];
@@ -129,6 +129,8 @@ export class Session {
     stopVersion = 0;
     /** 运行时字段：.ai steer 注入的方向提示队列，下一轮模型请求时清空注入（不持久化） */
     steerQueue: string[] = [];
+    /** 运行时字段：本会话当前在跑的 run/runStream 请求数（同会话并发重叠时 >1；不持久化） */
+    activeRuns = 0;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -159,6 +161,7 @@ export class Session {
         this.running = false;
         this.stopVersion = 0;
         this.steerQueue = [];
+        this.activeRuns = 0;
         const listen = createToolListen();
         this.tool = {
             state: {} as ToolState,

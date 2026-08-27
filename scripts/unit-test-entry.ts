@@ -18,6 +18,7 @@ import { migrateLegacyMemory } from "../src/memory/v2/migrate";
 import { buildMemoryPrompt } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
 import { createMemoryEngine } from "../src/memory/v2";
+import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
@@ -822,5 +823,88 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const engine = createMemoryEngine();
         await engine.addMemory('user_deg', { content: '降级可用' });
         assert.equal(engine.repository.listUnits('user_deg').length, 1, '未配置嵌入模型时应正常写入');
+    },
+    /** 请求并发限制：活跃/排队按会话归属统计，release(sessionId) 精确归还并在队列交接时转让槽位 */
+    async testRequestLimiterSessionStats(): Promise<void> {
+        TC.intConfigs['请求并发上限'] = 2;
+        TC.intConfigs['请求队列上限'] = 3;
+        resetConfigCache();
+
+        // 两个活跃 + 一个排队
+        assert.equal(await requestLimiter.acquire('sessA'), true);
+        assert.equal(await requestLimiter.acquire('sessB'), true);
+        const c = requestLimiter.acquire('sessC');
+        let qi = requestLimiter.getQueueInfo();
+        assert.equal(qi.active, 2);
+        assert.equal(qi.queued, 1);
+        assert.equal(qi.maxConcurrent, 2);
+        assert.equal(qi.maxQueue, 3);
+        qi = requestLimiter.getQueueInfo('sessC');
+        assert.equal(qi.queuedBySession, 1);
+
+        // sessA 释放：活跃槽不归还，直接转让给排队中的 sessC
+        requestLimiter.release('sessA');
+        assert.equal(await c, true);
+        qi = requestLimiter.getQueueInfo();
+        assert.equal(qi.active, 2, '队列交接时活跃数不变');
+        assert.equal(qi.queued, 0);
+        qi = requestLimiter.getQueueInfo('sessC');
+        assert.equal(qi.activeBySession, 1, '转让后 sessC 占据活跃槽');
+
+        // sessC 释放：无排队者，精确归还 sessC 自己的槽
+        requestLimiter.release('sessC');
+        qi = requestLimiter.getQueueInfo();
+        assert.equal(qi.active, 1);
+        qi = requestLimiter.getQueueInfo('sessB');
+        assert.equal(qi.activeBySession, 1, 'sessB 槽不受影响');
+
+        // 同会话并发重叠：sessB 再拿一个活跃槽，按会话统计为 2
+        assert.equal(await requestLimiter.acquire('sessB'), true);
+        qi = requestLimiter.getQueueInfo('sessB');
+        assert.equal(qi.activeBySession, 2);
+        requestLimiter.release('sessB');
+        requestLimiter.release('sessB');
+        assert.equal(requestLimiter.getQueueInfo().active, 0, '全部归还后活跃数为 0');
+
+        // 队列满：超出直接丢弃返回 false
+        assert.equal(await requestLimiter.acquire('sessD'), true);
+        assert.equal(await requestLimiter.acquire('sessD'), true);
+        const d3 = requestLimiter.acquire('sessD');
+        const d4 = requestLimiter.acquire('sessD');
+        const d5 = requestLimiter.acquire('sessD');
+        assert.equal(await requestLimiter.acquire('sessD'), false, '队列满应丢弃');
+        // 逐个释放：活跃槽依次转让给排队者
+        requestLimiter.release('sessD');
+        assert.equal(await d3, true);
+        requestLimiter.release('sessD');
+        assert.equal(await d4, true);
+        requestLimiter.release('sessD');
+        assert.equal(await d5, true);
+        qi = requestLimiter.getQueueInfo();
+        assert.equal(qi.active, 2, '三次交接后活跃槽仍为并发上限 2');
+        assert.equal(qi.queued, 0);
+        // 全部归还
+        requestLimiter.release('sessD');
+        requestLimiter.release('sessD');
+        requestLimiter.release('sessD');
+        assert.equal(requestLimiter.getQueueInfo().active, 0);
+
+        // 取消排队：cancelBySession 只清队列，不动活跃槽
+        assert.equal(await requestLimiter.acquire('sessE'), true);
+        assert.equal(await requestLimiter.acquire('sessE'), true);
+        const e3 = requestLimiter.acquire('sessE');
+        const e4 = requestLimiter.acquire('sessE');
+        assert.equal(requestLimiter.cancelBySession('sessE'), 2, '取消 2 个排队请求');
+        assert.equal(await e3, false);
+        assert.equal(await e4, false);
+        assert.equal(requestLimiter.getQueueInfo().queued, 0);
+        requestLimiter.release('sessE');
+        requestLimiter.release('sessE');
+        assert.equal(requestLimiter.getQueueInfo().active, 0);
+
+        // 恢复默认（0=不限制），避免影响后续测试
+        TC.intConfigs['请求并发上限'] = 0;
+        TC.intConfigs['请求队列上限'] = 0;
+        resetConfigCache();
     },
 };

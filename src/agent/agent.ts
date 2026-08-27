@@ -102,10 +102,12 @@ export default class Agent {
         try {
             if (session.stopVersion !== version) return;
             session.running = true;
+            session.activeRuns++;
             await this.runInternal(session, ctx, msg, tool_choice);
         } finally {
-            session.running = false;
-            requestLimiter.release();
+            session.activeRuns = Math.max(0, session.activeRuns - 1);
+            session.running = session.activeRuns > 0;
+            requestLimiter.release(session.sessionId);
         }
     }
 
@@ -254,10 +256,12 @@ export default class Agent {
         try {
             if (session.stopVersion !== version) return;
             session.running = true;
+            session.activeRuns++;
             await this.runStreamInner(session, ctx, msg);
         } finally {
-            session.running = false;
-            requestLimiter.release();
+            session.activeRuns = Math.max(0, session.activeRuns - 1);
+            session.running = session.activeRuns > 0;
+            requestLimiter.release(session.sessionId);
         }
     }
 
@@ -398,6 +402,11 @@ export default class Agent {
 
     static save(agent: Agent) {
         ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
+    }
+
+    /** 枚举全部已加载的智能体实例（供 .ai live all 汇总全局活跃会话） */
+    static listAgents(): Agent[] {
+        return Object.values(this.agentMap);
     }
 
 }

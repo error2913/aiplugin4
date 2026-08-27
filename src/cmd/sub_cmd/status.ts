@@ -14,6 +14,8 @@ export function registerCmdStatus() {
         const { start, end, segs } = setting.activeTimeInfo;
 
         seal.replyToSender(ctx, msg, `${sid}
+        会话类型: ${session.sessionType === 'user' ? '私聊' : '群聊'}
+        模型: ${session.setting.modelName || '全局默认'}
         权限: ${setting.priv}
         上下文轮数: ${session.context.messages.filter(m => m.role === 'user').length}
         非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}

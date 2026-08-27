@@ -12,6 +12,7 @@ import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
 import { registerCmdImage } from "./sub_cmd/image";
 import { registerCmdKB } from "./sub_cmd/kb";
+import { registerCmdLive } from "./sub_cmd/live";
 import { registerCmdMemory } from "./sub_cmd/memory";
 import { registerCmdModel } from "./sub_cmd/model";
 import { registerCmdOff } from "./sub_cmd/off";
@@ -62,6 +63,7 @@ export class SubCmd {
         registerCmdPrivilege();
         registerCmdPrompt();
         registerCmdStatus();
+        registerCmdLive();
         registerCmdCtxn();
         registerCmdTimer();
         registerCmdOn();
