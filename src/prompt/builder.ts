@@ -49,7 +49,7 @@ export async function buildSystemPromptContent(
     roleSetting: string
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
-    const { STATUS, PROMPT_ENGINEERING } = Config.tool;
+    const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
 
     // 取最近 2~3 条用户消息拼接，作为记忆/知识库查询的上下文（剥离内部标签）；
     // 同时收集全部发言者：群聊多人在线时，记忆检索不再只按最后一位发言者过滤
@@ -90,6 +90,7 @@ export async function buildSystemPromptContent(
         RECEIVE_IMAGE,
         STATUS,
         PROMPT_ENGINEERING,
+        DIRECTION_PROMPT,
         Config.tool.BLOCKED.join(','),
         Config.tool.DEFAULT_CLOSED.join(','),
         toolState,
@@ -106,6 +107,7 @@ export async function buildSystemPromptContent(
             sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
             sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
             RECEIVE_IMAGE,
+            DIRECTION_PROMPT,
             toolPrompt
         });
 

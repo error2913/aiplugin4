@@ -27,6 +27,7 @@ const TEMPLATES: { [key: string]: string } = {
 - [avatar:用户ID] 头像；[group_avatar:群ID] 群头像
 {{/if}}
 - [msg_id:ID]/[quote:ID]/[img:图片ID] 是短 ID；语音/视频/文件是闭合标签 [record:句柄]摘要[/record]、[video:句柄]摘要[/video]、[file:句柄]摘要[/file]，句柄在开标签参数里：需要对接协议 API 或读取原始 url/path/file/file_id 时，先用 resolve_special_id 还原；已有完整 url 时直接用，不要调 get_image/get_record
+{{#if DIRECTION_PROMPT}}
 
 ## 工作方向
 需要调用工具时，先向用户说一句简短的"要做什么"，再在同一回复中直接给出工具调用块。
@@ -36,6 +37,7 @@ const TEMPLATES: { [key: string]: string } = {
 - 只在任务开始或工作方向转变时说一次方向，不要逐条播报每个工具调用；方向未变时保持安静
 - 确认确实要调用工具才说方向，说了就一定要做，不要说了方向却什么都不做
 - 方向说明不是最终回答；说完方向照常调用工具完成任务，最终回答里不要复述这句话
+{{/if}}
 {{{toolPrompt}}}
 
 **DYNAMIC_SECTIONS**`,
