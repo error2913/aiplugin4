@@ -506,6 +506,8 @@ export class MessagePipeline {
         const gid = ctx.isPrivate ? '' : ctx.group!.groupId;
         const sid = ctx.isPrivate ? uid : gid;
         const session = getSession(sid);
+        // 会话忙（正在运行或正在启动）时，新消息不直接入库/触发，改为挂起由 run 循环统一处理
+        const sessionBusy = session.running || session.starting;
 
         // 检查活跃时间定时器
         session.checkActiveTimer(ctx);
@@ -537,6 +539,9 @@ export class MessagePipeline {
             if (messageArray.length === 0) return;
             const supplementTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
             if (supplementTypes.some(type => !CQ_TYPES_ALLOW.includes(type))) return;
+            if (sessionBusy) {
+                return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.save());
+            }
             return session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
         }
 
@@ -556,14 +561,18 @@ export class MessagePipeline {
         // 检查CQ码
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
-            if (session.context.timer) clearTimeout(session.context.timer);
-            session.context.timer = null;
+            // 运行中不重置待触发计时器（待机计数/概率/计时器一律跳过，只入库不推进）
+            if (!sessionBusy && session.context.timer) clearTimeout(session.context.timer);
+            if (!sessionBusy) session.context.timer = null;
 
             // 非指令消息触发（受会话开关控制）
             if (session.setting.regexTrigger && triggerRegex.test(messageText)) {
                 const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
                 if (fmtCondition === 1) {
                     markCoreMessageRecorded(coreMessageKey);
+                    if (sessionBusy) {
+                        return session.deferReceipt(ctx, msg, messageArray, 'trigger').then(() => session.save());
+                    }
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.chat(ctx, msg, '非指令'));
                 }
@@ -591,6 +600,11 @@ export class MessagePipeline {
                     }
 
                     markCoreMessageRecorded(coreMessageKey);
+                    if (sessionBusy) {
+                        // 先消费一次性触发条件再挂起，避免条件残留导致下次重复触发
+                        triggerConditionMap[sid].splice(i, 1);
+                        return session.deferReceipt(ctx, msg, messageArray, 'trigger', condition.reason).then(() => session.save());
+                    }
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.context.addSystemUserMessage(condition.reason, '触发原因提示'))
                         .then(() => triggerConditionMap[sid].splice(i, 1))
@@ -602,6 +616,10 @@ export class MessagePipeline {
             const setting = session.setting;
             if (setting.standby || Config.base.GLOBAL_STANDBY) {
                 markCoreMessageRecorded(coreMessageKey);
+                if (sessionBusy) {
+                    // 运行中待机消息只挂起入库：计数/概率/计时器一律跳过，不推进、不触发
+                    return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.save());
+                }
                 return session.handleReceipt(ctx, msg, messageArray)
                     .then((): void | Promise<void> => {
                         if (setting.counter > -1) {

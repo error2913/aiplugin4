@@ -14,7 +14,9 @@ function stateText(session: Session, qi: QueueInfo): string {
     if (session.stream.id && session.stream.toolCallStatus) return '流式-工具调用中';
     if (session.stream.id) return '流式输出中';
     if (session.activeRuns > 0) return `运行中(${session.activeRuns}个请求)`;
+    if (session.starting) return '启动中';
     if (qi.queuedBySession > 0) return '排队中';
+    if (session.pendingQueue.length > 0) return `挂起${session.pendingQueue.length}`;
     return '空闲';
 }
 
@@ -23,6 +25,7 @@ function collectRuntime(session: Session): {
     state: string;
     activeRuns: number;
     queued: number;
+    pending: number;
     timers: { target: number; interval: number; activeTime: number };
 } {
     const qi = requestLimiter.getQueueInfo(session.sessionId);
@@ -34,6 +37,7 @@ function collectRuntime(session: Session): {
         state: stateText(session, qi),
         activeRuns: session.activeRuns,
         queued: qi.queuedBySession,
+        pending: session.pendingQueue.length,
         timers
     };
 }
@@ -56,6 +60,7 @@ function formatRuntime(session: Session): string {
         `状态: ${r.state}`,
         `流式: ${session.stream.id ? (session.stream.toolCallStatus ? '工具调用中' : '输出中') : '无'}`,
         `并发: 全局活跃 ${qi.active}/${qi.maxConcurrent} | 本会话活跃 ${r.activeRuns} | 本会话排队 ${r.queued}/${qi.maxQueue}`,
+        `挂起消息: ${r.pending}`,
         `定时器: ${timerText(r.timers)}`
     ].join('\n');
 }
@@ -64,6 +69,8 @@ function formatRuntime(session: Session): string {
 function isBusy(session: Session): boolean {
     if (session.stream.id) return true;
     if (session.activeRuns > 0) return true;
+    if (session.starting) return true;
+    if (session.pendingQueue.length > 0) return true;
     if (requestLimiter.getQueueInfo(session.sessionId).queuedBySession > 0) return true;
     return TimerManager.getTimers(session.sessionId).length > 0;
 }
@@ -97,6 +104,7 @@ function formatAll(): string {
         const sessionType = session.sessionType === 'user' ? '私聊' : '群聊';
         const timerCount = r.timers.target + r.timers.interval + r.timers.activeTime;
         const suffix = [
+            r.pending > 0 ? `挂起${r.pending}` : '',
             r.queued > 0 ? `排队${r.queued}` : '',
             timerCount > 0 ? `定时器:${timerText(r.timers)}` : ''
         ].filter(Boolean).join(' ');

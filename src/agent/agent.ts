@@ -14,7 +14,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { buildSystemMessage, handleMessages, RequestMessage } from "../utils/message";
+import { buildSystemMessage, handleMessages } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, TypeDescriptor } from "../utils/utils";
 
@@ -98,16 +98,38 @@ export default class Agent {
     async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         // 启动前捕获 stopVersion：.ai stop 发生在排队期间或拿到许可瞬间都会因版本变化而中止
         const version = session.stopVersion;
-        if (!(await requestLimiter.acquire(session.sessionId))) return;
+        // 同会话闸门：已有 run 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
+        if (session.running || session.starting) return;
+        session.starting = true;
+        let acquired = false;
         try {
+            acquired = await requestLimiter.acquire(session.sessionId);
+            if (!acquired) return;
             if (session.stopVersion !== version) return;
             session.running = true;
+            session.starting = false;
             session.activeRuns++;
             await this.runInternal(session, ctx, msg, tool_choice);
         } finally {
-            session.activeRuns = Math.max(0, session.activeRuns - 1);
-            session.running = session.activeRuns > 0;
-            requestLimiter.release(session.sessionId);
+            // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
+            if (acquired) {
+                session.activeRuns = Math.max(0, session.activeRuns - 1);
+                session.running = session.activeRuns > 0;
+                // 先释放并发槽再续跑，避免续跑 acquire 与自己持有的槽死锁
+                requestLimiter.release(session.sessionId);
+                await this.resumePending(session, version);
+            }
+            session.starting = false;
+        }
+    }
+
+    /** 链结束后处理挂起队列：先全部入库（记录类不续跑），若含触发类且未被 stop 则用第一条串行再起一轮 */
+    private async resumePending(session: Session, version: number): Promise<void> {
+        if (session.pendingQueue.length === 0) return;
+        const firstTrigger = session.pendingQueue.find(p => p.kind === 'trigger');
+        const hasTrigger = await session.flushPending();
+        if (hasTrigger && firstTrigger && session.stopVersion === version) {
+            await session.chat(firstTrigger.ctx, firstTrigger.msg, '挂起触发');
         }
     }
 
@@ -134,8 +156,9 @@ export default class Agent {
             // stop 中止检查点：上一轮工具执行/回调期间被 stop 则不再发下一轮请求
             if (session.stopVersion !== version) return;
             trace.beginTurn();
+            // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
+            await session.flushPending();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
-            this.injectSteers(session, messages);
             const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId);
             // stop 中止检查点：模型请求期间被 stop，丢弃本轮输出直接中止
             if (session.stopVersion !== version) return;
@@ -241,27 +264,32 @@ export default class Agent {
         log.info(`[run] ${trace.summary()}`);
     }
 
-    /** 把 .ai steer 注入的方向提示追加到请求消息末尾（最新指令），并清空队列；不写入持久化上下文 */
-    private injectSteers(session: Session, messages: RequestMessage[]): void {
-        const steers = session.drainSteers();
-        for (const steer of steers) {
-            messages.push({ role: 'system', content: `【方向提示】${steer}` });
-        }
-    }
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const version = session.stopVersion;
-        if (!(await requestLimiter.acquire(session.sessionId))) return;
+        // 同会话闸门：已有 run/runStream 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
+        if (session.running || session.starting) return;
+        session.starting = true;
+        let acquired = false;
         try {
+            acquired = await requestLimiter.acquire(session.sessionId);
+            if (!acquired) return;
             if (session.stopVersion !== version) return;
             session.running = true;
+            session.starting = false;
             session.activeRuns++;
             await this.runStreamInner(session, ctx, msg);
         } finally {
-            session.activeRuns = Math.max(0, session.activeRuns - 1);
-            session.running = session.activeRuns > 0;
-            requestLimiter.release(session.sessionId);
+            // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
+            if (acquired) {
+                session.activeRuns = Math.max(0, session.activeRuns - 1);
+                session.running = session.activeRuns > 0;
+                // 先释放并发槽再续跑，避免续跑 acquire 与自己持有的槽死锁
+                requestLimiter.release(session.sessionId);
+                await this.resumePending(session, version);
+            }
+            session.starting = false;
         }
     }
 
@@ -276,10 +304,11 @@ export default class Agent {
         const version = session.stopVersion;
 
         await session.stopCurrentChatStream();
+        // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
+        await session.flushPending();
 
         const sys = systemMessage ?? await buildSystemMessage(ctx, session);
         const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), undefined, sys);
-        this.injectSteers(session, messages);
         const id = await streamService.startStream(messages, session.setting.modelName, trace.runId);
         if (!id) return;
         // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流

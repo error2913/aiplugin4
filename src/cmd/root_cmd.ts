@@ -22,7 +22,6 @@ import { registerCmdPrompt } from "./sub_cmd/prompt";
 import { registerCmdRole } from "./sub_cmd/role";
 import { registerCmdStandby } from "./sub_cmd/standby";
 import { registerCmdStatus } from "./sub_cmd/status";
-import { registerCmdSteer } from "./sub_cmd/steer";
 import { registerCmdStop } from "./sub_cmd/stop";
 import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
@@ -78,7 +77,6 @@ export class SubCmd {
         registerCmdIgnore();
         registerCmdToken();
         registerCmdStop();
-        registerCmdSteer();
         registerCmdModel();
         registerCmdBlock();
 

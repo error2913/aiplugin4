@@ -14,7 +14,7 @@ import { ToolState } from "../tool/tool";
 import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { MessageSegment, normalizeRenderTags, stripInternalTags, transformArrayToContent } from "../utils/string";
+import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
 import { TypeDescriptor } from "../utils/utils";
 import { getRecordMessageId, replyToSender } from "../utils/utils";
 
@@ -25,8 +25,19 @@ import User from "./user";
 
 const log = logger.withTag('session');
 
-/** 持久化时排除的运行时字段（监听器/运行状态/方向提示等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'stopVersion', 'steerQueue', 'activeRuns']);
+/** 持久化时排除的运行时字段（监听器/运行状态/挂起队列等），不写入存储、不参与 revive 恢复 */
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns']);
+
+/** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
+export interface PendingMessage {
+    ctx: seal.MsgContext;
+    msg: seal.Message;
+    content: string;
+    userId: string;
+    messageId: string;
+    kind: 'trigger' | 'record';
+    systemReason?: string;
+}
 
 export class Setting {
     static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger'];
@@ -127,8 +138,10 @@ export class Session {
     running = false;
     /** 运行时字段：stop 时自增，运行循环启动时捕获、检测到变化即中止（不持久化） */
     stopVersion = 0;
-    /** 运行时字段：.ai steer 注入的方向提示队列，下一轮模型请求时清空注入（不持久化） */
-    steerQueue: string[] = [];
+    /** 运行时字段：本会话正在启动 run/runStream（含在请求并发队列中等待时）；置位后同会话新消息一律挂起（不持久化） */
+    starting = false;
+    /** 运行时字段：会话忙（starting/running）时挂起的待入库消息队列，下一轮模型请求前统一入库（不持久化） */
+    pendingQueue: PendingMessage[] = [];
     /** 运行时字段：本会话当前在跑的 run/runStream 请求数（同会话并发重叠时 >1；不持久化） */
     activeRuns = 0;
     tool: {
@@ -160,7 +173,8 @@ export class Session {
         this.lastCtx = null;
         this.running = false;
         this.stopVersion = 0;
-        this.steerQueue = [];
+        this.starting = false;
+        this.pendingQueue = [];
         this.activeRuns = 0;
         const listen = createToolListen();
         this.tool = {
@@ -263,6 +277,42 @@ export class Session {
         this.lastCtx = ctx;
         const { content } = await transformArrayToContent(ctx, messageArray);
         await this.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
+    }
+
+    /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
+    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string) {
+        this.lastCtx = ctx;
+        const { content } = await transformArrayToContent(ctx, messageArray);
+        this.pendingQueue.push({
+            ctx,
+            msg,
+            content,
+            userId: ctx.player!.userId,
+            messageId: getRecordMessageId(ctx, msg),
+            kind,
+            systemReason
+        });
+    }
+
+    /** 取出并清空挂起队列 */
+    drainPending(): PendingMessage[] {
+        const pending = this.pendingQueue;
+        this.pendingQueue = [];
+        return pending;
+    }
+
+    /** 把挂起队列全部写入上下文（此时上一轮工具回调已入库，位置合法）并保存；返回是否存在触发类消息 */
+    async flushPending(): Promise<boolean> {
+        const pending = this.drainPending();
+        if (pending.length === 0) return false;
+        let hasTrigger = false;
+        for (const p of pending) {
+            if (p.kind === 'trigger') hasTrigger = true;
+            await this.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
+            if (p.systemReason) await this.context.addSystemUserMessage(p.systemReason, '触发原因提示');
+        }
+        this.save();
+        return hasTrigger;
     }
 
     async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}, reasoningContent?: string) {
@@ -390,7 +440,9 @@ export class Session {
         const hadTimer = this.context.timer !== null;
         await this.stopCurrentChatStream();
         this.stopVersion++;
-        // 完全暂停：清掉待触发的计时器（计数器/概率/触发条件保留，需主动触发）
+        this.starting = false;
+        // 完全暂停：清掉挂起消息（停止后不复活）与待触发的计时器（计数器/概率/触发条件保留，需主动触发）
+        this.pendingQueue = [];
         if (this.context.timer) clearTimeout(this.context.timer);
         this.context.timer = null;
         const queueCleared = requestLimiter.cancelBySession(this.sessionId);
@@ -399,15 +451,4 @@ export class Session {
         return { hadStream, hadRun, hadTimer, queueCleared };
     }
 
-    /** 插入方向提示：进入 steerQueue，由下一轮模型请求注入（不打断当前对话） */
-    steer(text: string): void {
-        this.steerQueue.push(stripInternalTags(text));
-    }
-
-    /** 取出并清空方向提示队列 */
-    drainSteers(): string[] {
-        const steers = this.steerQueue;
-        this.steerQueue = [];
-        return steers;
-    }
 }
