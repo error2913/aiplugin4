@@ -53,13 +53,12 @@ function timerText(timers: { target: number; interval: number; activeTime: numbe
 /** 单会话视图：.ai live */
 function formatRuntime(session: Session): string {
     const r = collectRuntime(session);
-    const qi = requestLimiter.getQueueInfo(session.sessionId);
     const sessionType = session.sessionType === 'user' ? '私聊' : '群聊';
     return [
         `【运行状态】${sessionType}会话 ${session.sessionId}`,
         `状态: ${r.state}`,
         `流式: ${session.stream.id ? (session.stream.toolCallStatus ? '工具调用中' : '输出中') : '无'}`,
-        `并发: 全局活跃 ${qi.active}/${qi.maxConcurrent} | 本会话活跃 ${r.activeRuns} | 本会话排队 ${r.queued}/${qi.maxQueue}`,
+        `并发: 本会话活跃 ${r.activeRuns} | 本会话排队 ${r.queued}`,
         `挂起消息: ${r.pending}`,
         `定时器: ${timerText(r.timers)}`
     ].join('\n');
