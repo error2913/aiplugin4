@@ -20,6 +20,8 @@ import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
 import { createMemoryEngine } from "../src/memory/v2";
 import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
+import Agent from "../src/agent/agent";
+import { Session } from "../src/session/session";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
@@ -906,5 +908,140 @@ export const tests: Record<string, () => void | Promise<void>> = {
         TC.intConfigs['请求并发上限'] = 0;
         TC.intConfigs['请求队列上限'] = 0;
         resetConfigCache();
+    },
+
+    /** 会话忙时挂起：deferReceipt 不直接入库，进入 pendingQueue（空闲时 handleReceipt 仍直接入库） */
+    async testDeferReceiptWhileBusy(): Promise<void> {
+        const session = new Session();
+        session.sessionId = 'sess_defer';
+        session.sessionType = 'user';
+        session.running = true;
+        const ctx = makeCtx();
+        const msg = { message: '测试消息' } as any;
+        const messageArray = [{ type: 'text', data: { text: '测试消息' } }] as any;
+        await session.deferReceipt(ctx, msg, messageArray, 'trigger');
+        assert.equal(session.pendingQueue.length, 1, '忙时应进入挂起队列');
+        assert.equal(session.context.messages.length, 0, '忙时不应直接写入上下文');
+        const p = session.pendingQueue[0];
+        assert.equal(p.kind, 'trigger');
+        assert.equal(p.content, '测试消息');
+        assert.equal(p.userId, 'QQ:10000');
+
+        // 空闲对照：handleReceipt 直接入库
+        session.running = false;
+        await session.handleReceipt(ctx, msg, messageArray);
+        assert.equal(session.context.messages.length, 1, '空闲时 handleReceipt 应直接入库');
+        assert.equal(session.pendingQueue.length, 1, '已挂起队列不受空闲路径影响');
+    },
+
+    /** flushPending：统一入库并返回是否存在触发类消息；连续 user 消息自动合并 */
+    async testFlushPendingAddsMessagesAndReturnsFlag(): Promise<void> {
+        const session = new Session();
+        session.sessionId = 'sess_flush';
+        session.sessionType = 'user';
+        const ctx = makeCtx();
+        const msgA = { message: '第一条' } as any;
+        const msgB = { message: '第二条' } as any;
+        const arrA = [{ type: 'text', data: { text: '第一条' } }] as any;
+        const arrB = [{ type: 'text', data: { text: '第二条' } }] as any;
+
+        // 仅记录类：flushPending 返回 false（链结束不续跑）
+        await session.deferReceipt(ctx, msgA, arrA, 'record');
+        assert.equal(await session.flushPending(), false, '纯记录类不应续跑');
+        assert.equal(session.pendingQueue.length, 0, 'flush 后队列应清空');
+
+        // 触发类 + 记录类混排：返回 true，且全部入库（连续 user 消息合并为同一条）
+        const session2 = new Session();
+        session2.sessionId = 'sess_flush2';
+        session2.sessionType = 'user';
+        await session2.deferReceipt(ctx, msgA, arrA, 'record');
+        await session2.deferReceipt(ctx, msgB, arrB, 'trigger');
+        assert.equal(await session2.flushPending(), true, '含触发类应返回 true');
+        assert.equal(session2.context.messages.length, 1, '连续 user 消息应合并为同一条');
+        const userMsg = session2.context.messages[0] as any;
+        assert.equal(userMsg.role, 'user');
+        const texts = userMsg.contentItems.map((i: any) => i.text);
+        assert.deepEqual(texts, ['第一条', '第二条'], '连续 user 消息应合并为同一条');
+    },
+
+    /** flushPending 空队列：返回 false 且不改动上下文 */
+    async testFlushPendingEmpty(): Promise<void> {
+        const session = new Session();
+        session.sessionId = 'sess_empty';
+        session.sessionType = 'user';
+        assert.equal(await session.flushPending(), false);
+        assert.equal(session.context.messages.length, 0);
+    },
+
+    /** AI 设定触发挂起：systemReason 在 flush 时以「触发原因提示」写入用户消息 */
+    async testFlushPendingAddsSystemReason(): Promise<void> {
+        const session = new Session();
+        session.sessionId = 'sess_reason';
+        session.sessionType = 'user';
+        const ctx = makeCtx();
+        const msg = { message: '关键词消息' } as any;
+        const messageArray = [{ type: 'text', data: { text: '关键词消息' } }] as any;
+        await session.deferReceipt(ctx, msg, messageArray, 'trigger', '因为你提到了关键词');
+        assert.equal(await session.flushPending(), true);
+        const userMsg = session.context.messages[0] as any;
+        const items = userMsg.contentItems;
+        const reasonItem = items.find((i: any) => i.systemName === '触发原因提示');
+        assert.ok(reasonItem, '应写入触发原因提示条目');
+        assert.equal(reasonItem.text, '因为你提到了关键词');
+        assert.ok(items.some((i: any) => i.text === '关键词消息'), '用户消息本身也应入库');
+    },
+
+    /** .ai stop：清空挂起队列（停止后不复活） */
+    async testStopClearsPendingQueue(): Promise<void> {
+        const session = new Session();
+        session.sessionId = 'sess_stop';
+        session.sessionType = 'user';
+        const ctx = makeCtx();
+        const msg = { message: '挂起消息' } as any;
+        const messageArray = [{ type: 'text', data: { text: '挂起消息' } }] as any;
+        await session.deferReceipt(ctx, msg, messageArray, 'trigger');
+        assert.equal(session.pendingQueue.length, 1);
+        await session.stopConversation();
+        assert.equal(session.pendingQueue.length, 0, 'stop 后挂起队列应清空');
+        assert.equal(session.context.messages.length, 0, 'stop 后挂起消息不应复活入库');
+    },
+
+    /** 同会话闸门：第一条 run 挂起在 runInternal 时，第二条 run 被 starting 闸门直接拦截，activeRuns 恒 ≤1 */
+    async testStartingGatePreventsConcurrentRun(): Promise<void> {
+        TC.intConfigs['请求并发上限'] = 1;
+        TC.intConfigs['请求队列上限'] = 3;
+        resetConfigCache();
+
+        const agent = new Agent();
+        const session = new Session();
+        session.sessionId = 'sess_gate';
+        const origInternal = (agent as any).runInternal;
+        let releaseRun = () => { };
+        const gate = new Promise<void>(resolve => { releaseRun = resolve; });
+        (agent as any).runInternal = async () => {
+            assert.ok(session.activeRuns <= 1, '同一会话不应并发多个 run');
+            await gate;
+        };
+        try {
+            const p1 = agent.run(session, makeCtx(), { message: '1' } as any);
+            // 等第一条真正进入 runInternal（acquire 完成、running=true、activeRuns=1、挂起在 gate 上）
+            await new Promise(r => setTimeout(r, 0));
+            // 第二条同刻到达：run() 同步闸门（running/starting）应直接拦截，不进入 acquire/runInternal
+            await agent.run(session, makeCtx(), { message: '2' } as any);
+            assert.equal(session.activeRuns, 1, '并发保护下 activeRuns 恒为 1');
+            assert.equal(session.running, true, '第一条仍在运行');
+            assert.equal(session.starting, false, '运行中不再处于启动中');
+            releaseRun();
+            await p1;
+            assert.equal(session.activeRuns, 0, '运行结束后 activeRuns 归零');
+            assert.equal(session.running, false);
+            assert.equal(session.starting, false, '结束后 starting 复位');
+        } finally {
+            releaseRun();
+            (agent as any).runInternal = origInternal;
+            TC.intConfigs['请求并发上限'] = 0;
+            TC.intConfigs['请求队列上限'] = 0;
+            resetConfigCache();
+        }
     },
 };
