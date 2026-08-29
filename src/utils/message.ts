@@ -448,8 +448,9 @@ export async function buildMultimodalContent(message: ContextMessage): Promise<R
         } else {
             image = resolveImageById(value);
         }
-        // URL 图片优先转成 base64（模型常无法直接访问 QQ 临时链接）；转换失败保留原 URL
-        if (image && image.type === 'url' && !image.base64) {
+        // URL 图片优先转成 base64（模型常无法直接访问 QQ 临时链接）；转换失败保留原 URL，
+        // 失败后进入 1 小时冷却期（isBase64RetryBlocked），期间不再重复请求转换
+        if (image && image.type === 'url' && !image.base64 && !image.isBase64RetryBlocked()) {
             try {
                 await withTimeout(() => image.urlToBase64(), 10000);
             } catch (e) {

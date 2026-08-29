@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import Config from "../src/config/config";
 Config.registerConfig();
 
-import { buildContent, estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
+import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
@@ -25,7 +25,7 @@ import { Session } from "../src/session/session";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
-import { transformMsgId, transformMsgIdBack } from "../src/utils/utils";
+import { revive, transformMsgId, transformMsgIdBack } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
 import { normalizeSpecialIdParams, validateSpecialIdParams } from "../src/transport/ob11/special_id_params";
 import { registerSpecialResource } from "../src/utils/special_id";
@@ -38,6 +38,18 @@ function resetConfigCache() {
 
 function makeCtx(): any {
     return { endPoint: { userId: 'QQ:10000' }, player: { userId: 'QQ:10000', name: '测试员' } };
+}
+
+/** Image 转 base64 测试：静默 error 日志并指向测试后端，结束后还原 */
+function setupImageTestConfig() {
+    TC.optionConfigs['日志级别'] = '从不';
+    TC.stringConfigs['图片转base64'] = 'http://test-backend';
+    resetConfigCache();
+}
+function restoreImageTestConfig() {
+    delete TC.optionConfigs['日志级别'];
+    delete TC.stringConfigs['图片转base64'];
+    resetConfigCache();
 }
 
 
@@ -1044,4 +1056,187 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
         }
     },
+    /** Image.urlToBase64 成功：写入 base64/format 并复位失败标记 */
+    async testImageUrlToBase64Success(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        let fetchCount = 0;
+        (globalThis as any).fetch = async () => {
+            fetchCount++;
+            return { ok: true, status: 200, text: async () => JSON.stringify({ base64: 'QUJD', format: 'png' }) };
+        };
+        try {
+            const img = new Image();
+            img.imageId = 'img_success';
+            img.url = 'https://example.com/a.png';
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1, '成功应请求一次后端');
+            assert.equal(img.base64, 'QUJD');
+            assert.equal(img.format, 'png');
+            assert.equal(img.base64Failed, false, '成功后失败标记应为 false');
+            assert.equal(img.base64FailedAt, 0, '成功后失败时间戳应清空');
+            assert.equal(img.type, 'base64');
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** Image.urlToBase64 失败：落失败标记，1 小时冷却期内不再重复请求后端 */
+    async testImageUrlToBase64FailureMarksAndSkips(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        let fetchCount = 0;
+        (globalThis as any).fetch = async () => {
+            fetchCount++;
+            return {
+                ok: false,
+                status: 500,
+                text: async () => JSON.stringify({ error: 'An error occurred while processing the image: 400 Client Error: Bad Request for url: https://multimedia.nt.qq.com.cn/download?appid=1407' })
+            };
+        };
+        try {
+            const img = new Image();
+            img.imageId = 'img_fail';
+            img.url = 'https://expired.qq.com/x.png';
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1, '首次失败应请求一次后端');
+            assert.equal(img.base64Failed, true, '失败后应落标记');
+            assert.ok(img.base64FailedAt > 0, '失败后应记录时间戳');
+            assert.equal(img.base64, '');
+            assert.equal(img.type, 'url');
+            // 冷却期内再次请求：不再发后端请求，也不再报错
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1, '冷却期内不应再次请求后端');
+            assert.equal(img.base64Failed, true);
+            assert.equal(img.isBase64RetryBlocked(), true, '冷却期内应判定为 blocked');
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** Image.urlToBase64 TTL：1 小时后允许重试，重试成功清空标记 */
+    async testImageUrlToBase64RetryAfterTTL(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        const origNow = Date.now;
+        let fakeNow = 1000000;
+        Date.now = () => fakeNow;
+        let fetchCount = 0;
+        (globalThis as any).fetch = async () => {
+            fetchCount++;
+            if (fetchCount === 1) {
+                return { ok: false, status: 500, text: async () => '{"error":"expired"}' };
+            }
+            return { ok: true, status: 200, text: async () => JSON.stringify({ base64: 'QUJD', format: 'png' }) };
+        };
+        try {
+            const img = new Image();
+            img.imageId = 'img_ttl';
+            img.url = 'https://expired.qq.com/y.png';
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1);
+            assert.equal(img.base64Failed, true);
+            assert.equal(img.base64FailedAt, fakeNow);
+            // 59 分钟后：仍在冷却期内，不重试
+            fakeNow += 59 * 60 * 1000;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1, '1 小时冷却期内不应重试');
+            // 满 1 小时后：允许重试，且成功清空标记
+            fakeNow += 2 * 60 * 1000;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 2, '冷却期结束后应重试一次');
+            assert.equal(img.base64, 'QUJD');
+            assert.equal(img.base64Failed, false);
+            assert.equal(img.base64FailedAt, 0);
+            assert.equal(img.isBase64RetryBlocked(), false);
+        } finally {
+            Date.now = origNow;
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** Image.urlToBase64 并发去重：同一实例并发调用只发一次后端请求，请求结束释放槽位 */
+    async testImageUrlToBase64ConcurrentDedupe(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        let fetchCount = 0;
+        let release = () => { };
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        (globalThis as any).fetch = async () => {
+            fetchCount++;
+            await gate;
+            return { ok: false, status: 500, text: async () => '{"error":"expired"}' };
+        };
+        try {
+            const img = new Image();
+            img.imageId = 'img_dedupe';
+            img.url = 'https://example.com/b.png';
+            const p1 = img.urlToBase64();
+            const p2 = img.urlToBase64();
+            assert.equal(fetchCount, 1, '并发调用应共享同一次后端请求');
+            release();
+            await Promise.all([p1, p2]);
+            assert.equal(fetchCount, 1, '去重后后端只请求一次');
+            assert.equal(img.base64Failed, true);
+            // 请求结束后去重槽位应释放：手动清除失败标记（模拟冷却期结束）后应重新请求
+            img.base64Failed = false;
+            img.base64FailedAt = 0;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 2, '请求结束后去重槽位应释放并重新请求');
+        } finally {
+            release();
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** 多模态构建：过期图片转换失败后保留原 URL（方案 A），冷却期内不再重复请求 */
+    async testBuildMultimodalContentKeepsFailedUrl(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        let fetchCount = 0;
+        (globalThis as any).fetch = async () => {
+            fetchCount++;
+            return { ok: false, status: 500, text: async () => '{"error":"400 Client Error: Bad Request"}' };
+        };
+        const img = new Image();
+        img.imageId = 'img_mm1';
+        img.url = 'https://expired.qq.com/mm.png';
+        (Image as any).imageMap['img_mm1'] = img;
+        try {
+            const message = { role: 'user', text: '看看这张图[img:img_mm1]' } as any;
+            const parts: any[] = await buildMultimodalContent(message);
+            assert.equal(fetchCount, 1, '首次构建应请求一次转换');
+            assert.equal(img.base64Failed, true);
+            const imagePart = parts.find((p: any) => p.type === 'image_url');
+            assert.ok(imagePart, '失败后应保留 image_url 内容块（方案 A）');
+            assert.equal(imagePart.image_url.url, 'https://expired.qq.com/mm.png', '失败后应保留原 URL');
+            // 冷却期内再次构建：不再请求转换，仍保留原 URL
+            const parts2: any[] = await buildMultimodalContent(message);
+            assert.equal(fetchCount, 1, '冷却期内再次构建不应请求转换');
+            const imagePart2 = parts2.find((p: any) => p.type === 'image_url');
+            assert.equal(imagePart2.image_url.url, 'https://expired.qq.com/mm.png');
+        } finally {
+            delete (Image as any).imageMap['img_mm1'];
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** Image 新字段持久化：revive 恢复 base64Failed/base64FailedAt，缺字段回退默认值 */
+    testImageReviveKeepsFailMarker(): void {
+        const failedAt = Date.now() - 1000;
+        const img = revive(Image, { imageId: 'x1', url: 'https://example.com/c.png', base64Failed: true, base64FailedAt: failedAt });
+        assert.equal(img.base64Failed, true);
+        assert.equal(img.base64FailedAt, failedAt);
+        assert.equal(img.isBase64RetryBlocked(), true, '持久化的失败标记应让冷却期生效');
+        const img2 = revive(Image, { imageId: 'x2', url: 'https://example.com/d.png' });
+        assert.equal(img2.base64Failed, false, '缺字段应回退默认 false');
+        assert.equal(img2.base64FailedAt, 0, '缺字段应回退默认 0');
+        assert.equal(img2.isBase64RetryBlocked(), false);
+    },
+
 };
