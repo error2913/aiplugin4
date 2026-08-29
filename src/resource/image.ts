@@ -14,6 +14,12 @@ const log = logger.withTag('image');
 // 图片转文字结果超过该字数时交给压缩智能体压缩，避免撑爆上下文
 const IMAGE_TEXT_COMPRESS_MIN_LENGTH = 5000;
 
+// URL 转 base64 失败后的冷却期：1 小时内不再重复请求，超时后允许重试一次
+const IMAGE_BASE64_RETRY_TTL = 60 * 60 * 1000;
+
+// 进行中的 URL→base64 请求，按 Image 实例去重（同一实例并发调用共享同一次请求）
+const pendingUrlToBase64 = new WeakMap<Image, Promise<void>>();
+
 export default class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
         imageId: 'string',
@@ -24,6 +30,8 @@ export default class Image {
         format: 'string',
         description: 'string',
         raw: 'string',
+        base64Failed: 'boolean',
+        base64FailedAt: 'number',
     }
     imageId: string;
     sourceSessionId: string;
@@ -34,6 +42,10 @@ export default class Image {
     description: string;
     /** 接收时的原始消息段 data（JSON），含 file/file_unique/md5/subType/url 等，供 resolve_special_id 查询 */
     raw: string;
+    /** URL 转 base64 是否失败过（冷却期内不再重复请求） */
+    base64Failed: boolean;
+    /** 最近一次 URL 转 base64 失败的毫秒时间戳，用于冷却期判断 */
+    base64FailedAt: number;
 
     constructor() {
         this.imageId = '';
@@ -44,6 +56,8 @@ export default class Image {
         this.format = '';
         this.description = '';
         this.raw = '';
+        this.base64Failed = false;
+        this.base64FailedAt = 0;
     }
 
     get type(): 'url' | 'local' | 'base64' {
@@ -98,8 +112,34 @@ export default class Image {
         return isValid;
     }
 
+    /** URL 转 base64 失败是否处于冷却期（1 小时内不再重复请求） */
+    isBase64RetryBlocked(): boolean {
+        return this.base64Failed && Date.now() - this.base64FailedAt < IMAGE_BASE64_RETRY_TTL;
+    }
+
+    /**
+     * 获取图片的 base64：URL 图片转 base64 供模型读取。
+     * 失败后进入 1 小时冷却期不再重复请求；同一实例并发调用共享同一次请求。
+     */
     async urlToBase64() {
         if (this.type !== 'url') return;
+        if (this.isBase64RetryBlocked()) return;
+
+        const pending = pendingUrlToBase64.get(this);
+        if (pending) return pending;
+
+        const task = (async () => {
+            try {
+                await this.doUrlToBase64();
+            } finally {
+                pendingUrlToBase64.delete(this);
+            }
+        })();
+        pendingUrlToBase64.set(this, task);
+        return task;
+    }
+
+    private async doUrlToBase64() {
         const { IMAGE_TO_BASE64: imageTobase64Url } = Config.backend;
         try {
             const response = await fetch(`${imageTobase64Url}/image-to-base64`, {
@@ -121,10 +161,14 @@ export default class Image {
                 if (!data.base64 || !data.format) throw new Error(`响应体中缺少base64或format字段`);
                 this.base64 = data.base64;
                 this.format = data.format;
+                this.base64Failed = false;
+                this.base64FailedAt = 0;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (error) {
+            this.base64Failed = true;
+            this.base64FailedAt = Date.now();
             log.exception('在imageUrlToBase64中请求出错', error);
         }
 
@@ -139,7 +183,7 @@ export default class Image {
         const { URL_TO_BASE64 } = Config.image;
         const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
 
-        if (URL_TO_BASE64 == '总是' && this.type === 'url') await this.urlToBase64();
+        if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
 
         const model = Model.getImageModel('image-understanding');
         if (!model) {
@@ -149,7 +193,7 @@ export default class Image {
 
         this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
 
-        if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url') {
+        if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url' && !this.isBase64RetryBlocked()) {
             log.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
             this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
