@@ -4,6 +4,7 @@ import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { Context } from "./context/context";
 import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_RAW_LIMIT, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist } from "./event/notice";
+import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
@@ -630,19 +631,21 @@ export class MessagePipeline {
                     return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.save());
                 }
                 return session.handleReceipt(ctx, msg, messageArray)
-                    .then((): void | Promise<void> => {
+                    .then(async (): Promise<void> => {
                         if (setting.counter > -1) {
                             session.context.counter += 1;
                             if (session.context.counter >= setting.counter) {
                                 session.context.counter = 0;
-                                return session.chat(ctx, msg, '计数器');
+                                await session.chat(ctx, msg, '计数器');
+                                return;
                             }
                         }
 
                         if (setting.prob > -1) {
                             const ran = Math.random() * 100;
                             if (ran <= setting.prob) {
-                                return session.chat(ctx, msg, '概率');
+                                await session.chat(ctx, msg, '概率');
+                                return;
                             }
                         }
 
@@ -653,6 +656,10 @@ export class MessagePipeline {
                                     log.exception('计时器触发对话出错', e);
                                 });
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
+                        }
+
+                        if (setting.judge) {
+                            await JudgeManager.evaluate(ctx, msg, session, messageText);
                         }
                     })
                     .then(() => session.save());

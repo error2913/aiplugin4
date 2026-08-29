@@ -27,6 +27,7 @@ import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
 import Agent from "../src/agent/agent";
 import { Session } from "../src/session/session";
+import { JudgeManager } from "../src/judge/judge_manager";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
@@ -58,6 +59,24 @@ function restoreImageTestConfig() {
 }
 
 
+
+/** Judge 测试辅助：干净的 judge 状态（当前小时） */
+function freshJudgeState(now: number): any {
+    return {
+        lastSpeakAt: 0,
+        lastEnergyAt: now,
+        energy: 1.0,
+        waitTimer: null,
+        waitAttempts: 0,
+        hourly: { hour: Math.floor(now / 3600000), count: 0 },
+        msgTimes: []
+    };
+}
+
+/** Judge 测试辅助：最小 Session 桩（context.timer 可独立覆盖） */
+function makeJudgeSession(sid: string): any {
+    return { sessionId: sid, context: { timer: null, messages: [] }, running: false, starting: false };
+}
 
 export const tests: Record<string, () => void | Promise<void>> = {
     /** token 估算口径：ASCII 4 字符/token，非 ASCII 1 字符/token */
@@ -1400,4 +1419,335 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(img2.isBase64RetryBlocked(), false);
     },
 
+    /** 打分 gate 门禁：各 DROP 条件命中直接丢弃且不触发小模型（零 LLM），正常条件放行并累计每小时计数 */
+    testJudgeGateDropConditions(): void {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        let llmCalls = 0;
+        (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => { llmCalls++; return ''; } };
+        const cfg = (Config as any).trigger.JUDGE;
+        Date.now = () => fakeNow;
+        try {
+            const session = makeJudgeSession('gate');
+            // 会话已挂起待触发计时器（计数器/概率/计时器已安排回复）→ DROP
+            session.context.timer = 1;
+            let g = (JudgeManager as any).gate(session, freshJudgeState(fakeNow));
+            assert.equal(g.drop, true);
+            assert.match(g.reason, /计时器已挂起/);
+            session.context.timer = null;
+
+            // 已有 WAIT 回访定时器 → 不并发打分
+            const waitState = freshJudgeState(fakeNow);
+            waitState.waitTimer = 12345;
+            g = (JudgeManager as any).gate(session, waitState);
+            assert.equal(g.drop, true);
+            assert.match(g.reason, /已有WAIT回访/);
+
+            // 最小回复间隔冷却中 → DROP
+            const coolState = freshJudgeState(fakeNow);
+            coolState.lastSpeakAt = fakeNow - 1000;
+            g = (JudgeManager as any).gate(session, coolState);
+            assert.equal(g.drop, true);
+            assert.match(g.reason, /冷却剩余/);
+
+            // 精力不足 → DROP
+            const lowState = freshJudgeState(fakeNow);
+            lowState.energy = 0.05;
+            g = (JudgeManager as any).gate(session, lowState);
+            assert.equal(g.drop, true);
+            assert.match(g.reason, /精力不足/);
+
+            // 消息过密（15 秒窗口内达到 5 条）→ DROP
+            const denseState = freshJudgeState(fakeNow);
+            denseState.msgTimes = [fakeNow - 14000, fakeNow - 10000, fakeNow - 5000, fakeNow - 2000, fakeNow - 1000];
+            g = (JudgeManager as any).gate(session, denseState);
+            assert.equal(g.drop, true);
+            assert.match(g.reason, /消息过密/);
+
+            // 每会话每小时打分上限用尽 → DROP
+            const hourlyState = freshJudgeState(fakeNow);
+            hourlyState.hourly.count = cfg.MAX_JUDGE_PER_HOUR;
+            g = (JudgeManager as any).gate(session, hourlyState);
+            assert.equal(g.drop, true);
+            assert.match(g.reason, /本轮judge已用尽/);
+
+            // 全部条件通过 → 放行并累计每小时打分计数
+            const okState = freshJudgeState(fakeNow);
+            g = (JudgeManager as any).gate(session, okState);
+            assert.equal(g.drop, false);
+            assert.equal(okState.hourly.count, 1, 'gate 放行后应累计每小时打分计数');
+
+            // 全程未调用打分小模型
+            assert.equal(llmCalls, 0, 'gate 判断本身不应触发小模型');
+        } finally {
+            Date.now = origNow;
+            delete (Agent as any).agentMap['judge_agent'];
+            resetConfigCache();
+        }
+    },
+
+    /** 其他方式触发会话：刷新回复间隔、扣精力、清 WAIT 定时器并重置退避；未开启 --j 的会话不建状态 */
+    testJudgeNoteSessionTrigger(): void {
+        const cfg = (Config as any).trigger.JUDGE;
+        const sid = 'note-trigger';
+        // 无状态（未开启过 --j）的会话不应被记账
+        (JudgeManager as any).noteSessionTrigger('note-absent', '正则');
+        assert.equal((JudgeManager as any).states.has('note-absent'), false, '无状态会话不应被记账');
+        // 已开启过 --j：注入状态后触发应记账
+        const state = {
+            lastSpeakAt: 0,
+            lastEnergyAt: 0,
+            energy: 1.0,
+            waitTimer: setTimeout(() => { /* 不应触发 */ }, 60000),
+            waitAttempts: 2,
+            hourly: { hour: 0, count: 0 },
+            msgTimes: []
+        };
+        (JudgeManager as any).states.set(sid, state);
+        const before = Date.now();
+        try {
+            (JudgeManager as any).noteSessionTrigger(sid, '正则');
+            const after = Date.now();
+            assert.ok(state.lastSpeakAt >= before && state.lastSpeakAt <= after, '应刷新最近触发时间');
+            assert.equal(state.energy, Math.max(1.0 - cfg.ENERGY_REPLY_COST, cfg.ENERGY_MIN), '应扣减精力');
+            assert.equal(state.waitTimer, null, '应清除 WAIT 回访定时器');
+            assert.equal(state.waitAttempts, 0, '应重置 WAIT 退避次数');
+        } finally {
+            (JudgeManager as any).clearSession(sid);
+        }
+    },
+
+    /** 打分 JSON 解析：容忍 Markdown 围栏/前后多余文字，五维必须为 0-10 数字，reason 截断 100 字 */
+    testJudgeParseScore(): void {
+        const parse = (JudgeManager as any).parseScore;
+        // 纯 JSON
+        let r = parse('{"relevance":8,"willingness":7,"social":6,"timing":5,"continuity":4,"reason":"不错"}');
+        assert.ok(r);
+        assert.equal(r.dims.relevance, 8);
+        assert.equal(r.reason, '不错');
+        // Markdown json 代码块 + 前后多余文字
+        r = parse('前面的话\n```json\n{"relevance":1,"willingness":2,"social":3,"timing":4,"continuity":5,"reason":"ok"}\n```\n后面的话');
+        assert.ok(r);
+        assert.equal(r.dims.continuity, 5);
+        // 无围栏但有前后文字（截取首个 { 到最后一个 }）
+        r = parse('好的{"relevance":9,"willingness":9,"social":9,"timing":9,"continuity":9,"reason":"x"}结束');
+        assert.ok(r);
+        assert.equal(r.dims.relevance, 9);
+        // 缺维度 → null
+        assert.equal(parse('{"relevance":1,"willingness":2,"social":3,"timing":4,"reason":"x"}'), null);
+        // 越界值（>10）→ null
+        assert.equal(parse('{"relevance":11,"willingness":0,"social":0,"timing":0,"continuity":0,"reason":"x"}'), null);
+        // 非数字 → null
+        assert.equal(parse('{"relevance":"高","willingness":0,"social":0,"timing":0,"continuity":0,"reason":"x"}'), null);
+        // 非法 JSON / 无花括号 → null
+        assert.equal(parse('不是json'), null);
+        assert.equal(parse(''), null);
+        // reason 截断到 100 字
+        r = parse(`{"relevance":1,"willingness":2,"social":3,"timing":4,"continuity":5,"reason":"${'长'.repeat(150)}"}`);
+        assert.ok(r);
+        assert.equal(r.reason.length, 100);
+    },
+
+    /** 打分注入上下文：只收集 user/assistant，跳过 system/tool/空内容；当前消息兜底补入并去重，受条数限制 */
+    testJudgeBuildHistory(): void {
+        const bh = (JudgeManager as any).buildHistory;
+        const session = {
+            context: {
+                messages: [
+                    { role: 'system', text: '系统设定' },
+                    { role: 'user', text: '第一条' },
+                    { role: 'assistant', text: '回复一' },
+                    { role: 'tool', text: '工具结果' },
+                    { role: 'user', text: '' },
+                    { role: 'user', text: '第二条' }
+                ]
+            }
+        };
+        // 当前消息不在末尾：兜底补入
+        let h = bh(session, 10, '第三条');
+        assert.ok(h.text.includes('[用户] 第一条'), '应包含最早的用户消息');
+        assert.ok(h.text.includes('[bot] 回复一'), '应包含 assistant 消息并标记 [bot]');
+        assert.ok(h.text.includes('[用户] 第二条'));
+        assert.ok(h.text.includes('[用户] 第三条'), '当前消息不在末尾时应兜底补入');
+        assert.ok(!h.text.includes('系统设定'), 'system 消息不应进入注入上下文');
+        assert.ok(!h.text.includes('工具结果'), 'tool 消息不应进入注入上下文');
+        assert.equal(h.count, 4);
+        // 当前消息已在末尾：不重复补入
+        h = bh(session, 10, '第二条');
+        assert.equal(h.count, 3);
+        assert.ok(!h.text.includes('第三条'), '当前消息已在末尾时不应重复补入');
+        // 条数限制：最近 count 条 + 当前消息兜底
+        h = bh(session, 2, '第三条');
+        assert.equal(h.count, 3);
+        assert.ok(!h.text.includes('第一条'), '超出条数限制的历史不应注入');
+    },
+
+    /** 打分智能体触发配置：默认值、部分覆盖（weights 并入默认）与非法 TOML 回退默认 */
+    testJudgeConfigDefaults(): void {
+        const key = '打分智能体触发配置';
+        delete TC.templateConfigs[key];
+        resetConfigCache();
+        // 默认值
+        let cfg = (Config as any).trigger.JUDGE;
+        assert.equal(cfg.SPEAK_THRESHOLD, 0.70);
+        assert.equal(cfg.WAIT_THRESHOLD, 0.45);
+        assert.deepEqual(cfg.WEIGHTS, { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 });
+        assert.equal(cfg.ENERGY_INITIAL, 1.0);
+        assert.equal(cfg.ENERGY_REPLY_COST, 0.1);
+        assert.equal(cfg.ENERGY_MIN, 0.1);
+        assert.equal(cfg.MIN_REPLY_INTERVAL, 120);
+        assert.equal(cfg.CONTEXT_COUNT, 10);
+        assert.equal(cfg.TIMEOUT_SEC, 30);
+        assert.equal(cfg.RETRIES, 3);
+        assert.deepEqual(cfg.WAIT_BACKOFF, [30, 60, 120]);
+        assert.equal(cfg.MAX_JUDGE_PER_HOUR, 20);
+        // 部分覆盖：只改 speak_threshold 与 weights.relevance，其余并入默认值
+        TC.templateConfigs[key] = ['speak_threshold = 0.8\nweights = { relevance = 50 }'];
+        resetConfigCache();
+        cfg = (Config as any).trigger.JUDGE;
+        assert.equal(cfg.SPEAK_THRESHOLD, 0.8);
+        assert.equal(cfg.WEIGHTS.relevance, 50);
+        assert.equal(cfg.WEIGHTS.willingness, 20, '未配置维度应并入默认权重');
+        assert.equal(cfg.WAIT_THRESHOLD, 0.45, '缺省字段应使用默认值');
+        // 非法 TOML：回退默认值
+        TC.templateConfigs[key] = ['not = = toml'];
+        resetConfigCache();
+        cfg = (Config as any).trigger.JUDGE;
+        assert.equal(cfg.SPEAK_THRESHOLD, 0.70, '非法 TOML 应回退默认值');
+        delete TC.templateConfigs[key];
+        resetConfigCache();
+    },
+
+    /** 清理会话 judge 状态：清 WAIT 定时器并移除内存状态，重复清理不抛错 */
+    testJudgeClearSession(): void {
+        const sid = 'clear-me';
+        const state = {
+            lastSpeakAt: 0,
+            lastEnergyAt: 0,
+            energy: 1.0,
+            waitTimer: setTimeout(() => { /* 不应触发 */ }, 60000),
+            waitAttempts: 0,
+            hourly: { hour: 0, count: 0 },
+            msgTimes: []
+        };
+        (JudgeManager as any).states.set(sid, state);
+        (JudgeManager as any).clearSession(sid);
+        assert.equal((JudgeManager as any).states.has(sid), false, '应移除 judge 状态');
+        (JudgeManager as any).clearSession(sid);
+    },
+
+    /** evaluate 端到端：gate 命中（计时器挂起/冷却）时直接丢弃，不调用打分小模型 */
+    async testJudgeEvaluateDropNoLlm(): Promise<void> {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        let llmCalls = 0;
+        (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => { llmCalls++; return ''; } };
+        const sid = 'eval-drop';
+        const session = { sessionId: sid, context: { timer: 1, messages: [] }, running: false, starting: false };
+        try {
+            // 计时器已挂起 → gate DROP，不触发小模型
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息');
+            assert.equal(llmCalls, 0, 'gate 命中计时器挂起时应直接丢弃，不触发打分小模型');
+            // 冷却期内 → gate DROP，不触发小模型
+            session.context.timer = null;
+            (JudgeManager as any).states.set(sid, {
+                lastSpeakAt: fakeNow, lastEnergyAt: fakeNow, energy: 1.0,
+                waitTimer: null, waitAttempts: 0,
+                hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
+            });
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息2');
+            assert.equal(llmCalls, 0, '冷却期内也应直接丢弃，不触发打分小模型');
+        } finally {
+            Date.now = origNow;
+            (JudgeManager as any).clearSession(sid);
+            delete (Agent as any).agentMap['judge_agent'];
+            resetConfigCache();
+        }
+    },
+
+    /** evaluate 端到端：高分 SPEAK 直接插话 / 中分 WAIT 挂退避定时器 / 低分 IGNORE 丢弃 */
+    async testJudgeEvaluateBranches(): Promise<void> {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        // 缩短打分超时，避免 withTimeout 的兜底定时器拖慢测试
+        TC.templateConfigs['打分智能体触发配置'] = ['timeout_sec = 0.001'];
+        resetConfigCache();
+        const chatReasons: string[] = [];
+        const mkSession = (sid: string) => ({
+            sessionId: sid,
+            context: { timer: null, messages: [] },
+            running: false,
+            starting: false,
+            chat: async (_ctx: any, _msg: any, reason: string) => { chatReasons.push(reason); }
+        });
+        try {
+            // SPEAK：高分直接插话
+            (Agent as any).agentMap['judge_agent'] = {
+                chatMessages: async () => JSON.stringify({ relevance: 10, willingness: 10, social: 10, timing: 10, continuity: 10, reason: '高相关' })
+            };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-speak'), '点名');
+            assert.deepEqual(chatReasons, ['打分触发'], 'SPEAK 分支应以打分触发发起会话');
+
+            // WAIT：中分进入退避等待（挂定时器、累计尝试），不直接插话
+            (Agent as any).agentMap['judge_agent'] = {
+                chatMessages: async () => JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' })
+            };
+            const waitSession = mkSession('eval-wait');
+            await (JudgeManager as any).evaluate(makeCtx(), {}, waitSession, '普通消息');
+            const waitState = (JudgeManager as any).states.get('eval-wait');
+            assert.ok(waitState, 'WAIT 分支应保留状态');
+            assert.equal(waitState.waitAttempts, 1);
+            assert.ok(waitState.waitTimer !== null, 'WAIT 分支应挂退避定时器');
+            assert.deepEqual(chatReasons, ['打分触发'], 'WAIT 分支不应直接插话');
+
+            // IGNORE：低分直接丢弃，不插话
+            (Agent as any).agentMap['judge_agent'] = {
+                chatMessages: async () => JSON.stringify({ relevance: 0, willingness: 0, social: 0, timing: 0, continuity: 0, reason: '无关' })
+            };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-ignore'), '广告');
+            assert.deepEqual(chatReasons, ['打分触发'], 'IGNORE 分支不应插话');
+        } finally {
+            Date.now = origNow;
+            (JudgeManager as any).clearSession('eval-speak');
+            (JudgeManager as any).clearSession('eval-wait');
+            (JudgeManager as any).clearSession('eval-ignore');
+            delete (Agent as any).agentMap['judge_agent'];
+            delete TC.templateConfigs['打分智能体触发配置'];
+            resetConfigCache();
+        }
+    },
+
+    /** WAIT 回访：会话忙或 gate 命中时放弃，不触发小模型 */
+    async testJudgeWaitRevisitAborts(): Promise<void> {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        let llmCalls = 0;
+        (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => { llmCalls++; return ''; } };
+        const sid = 'revisit';
+        const built = { messages: [], ctxCount: 0, botName: '骰娘', role: '（无）', lastBot: '' };
+        const cfg = (Config as any).trigger.JUDGE;
+        try {
+            // 会话忙（running/starting）→ 放弃
+            const busy = { sessionId: sid, context: { timer: null, messages: [] }, running: true, starting: false };
+            await (JudgeManager as any).waitRevisit(makeCtx(), {}, busy, '消息', cfg, built);
+            assert.equal(llmCalls, 0, '会话忙时 WAIT 回访应放弃');
+            // gate 命中（冷却中）→ 放弃
+            const cooling = { sessionId: sid, context: { timer: null, messages: [] }, running: false, starting: false };
+            (JudgeManager as any).states.set(sid, {
+                lastSpeakAt: fakeNow, lastEnergyAt: fakeNow, energy: 1.0,
+                waitTimer: null, waitAttempts: 0,
+                hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
+            });
+            await (JudgeManager as any).waitRevisit(makeCtx(), {}, cooling, '消息', cfg, built);
+            assert.equal(llmCalls, 0, 'gate 命中时 WAIT 回访应放弃');
+        } finally {
+            Date.now = origNow;
+            (JudgeManager as any).clearSession(sid);
+            delete (Agent as any).agentMap['judge_agent'];
+            resetConfigCache();
+        }
+    },
 };

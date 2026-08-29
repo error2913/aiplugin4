@@ -4,6 +4,7 @@ import { streamService } from "../agent/stream";
 import { ext } from "../config/config";
 import Config from "../config/config";
 import { Context } from "../context/context";
+import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
 import SessionMemoryService from "../memory/session_memory";
 import Model from "../model/model";
@@ -40,7 +41,7 @@ export interface PendingMessage {
 }
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger'];
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger', 'judge'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
         standby: 'boolean',
@@ -48,6 +49,7 @@ export class Setting {
         timer: 'number',
         prob: 'number',
         regexTrigger: 'boolean',
+        judge: 'boolean',
         modelName: 'string',
         activeTimeInfo: { objectValue: 'any' }
     }
@@ -57,6 +59,7 @@ export class Setting {
     timer: number;
     prob: number;
     regexTrigger: boolean;
+    judge: boolean;
     modelName: string;
     activeTimeInfo: {
         start: number;
@@ -71,6 +74,7 @@ export class Setting {
         this.timer = -1;
         this.prob = -1;
         this.regexTrigger = true;
+        this.judge = false;
         this.modelName = '';
         this.activeTimeInfo = {
             start: 0,
@@ -371,6 +375,9 @@ export class Session {
         this.resetState();
         this.bucket.count--;
 
+        // 打分智能体触发：无论以何种方式触发会话，都刷新回复间隔并扣精力（gate 冷却依赖）
+        JudgeManager.noteSessionTrigger(this.sessionId, reason || 'unknown');
+
         const model = Model.getChatModel('chat', this.setting.modelName);
         if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
             log.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
@@ -445,6 +452,8 @@ export class Session {
         this.pendingQueue = [];
         if (this.context.timer) clearTimeout(this.context.timer);
         this.context.timer = null;
+        // 打分智能体触发：停止会话时清掉 WAIT 回访定时器与内存状态
+        JudgeManager.clearSession(this.sessionId);
         const queueCleared = requestLimiter.cancelBySession(this.sessionId);
         this.save();
         log.info(`stop conversation: stream=${hadStream} running=${hadRun} timer=${hadTimer} queueCleared=${queueCleared}`);

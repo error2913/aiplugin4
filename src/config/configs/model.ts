@@ -20,7 +20,7 @@ export default class ModelConfig {
             `# 使用toml格式
 name = "deepseek-v4-flash"          # 必填，模型名
 api_key = "sk-xxxx"                 # 必填，API 密钥
-use = ["chat", "compression"]       # 必填，用途，可多个：chat/compression/summarization
+use = ["chat", "compression"]       # 必填，用途，可多个：chat/compression/summarization/judge
 provider = "deepseek"               # 可选，服务商，省略时自动识别
 base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取服务商默认
 
@@ -28,7 +28,7 @@ base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取�
 temperature = 1                     # 可选
 top_p = 1                           # 可选
 max_tokens = 8192                   # 可选`
-        ], '每行一个模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途，可多个）。可选：provider（服务商，省略时按模型名自动识别：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）。默认对话模型取列表第一项；body 未配置时使用 max_tokens=8192、stop=null、stream=false。下方默认值即完整示例，可直接修改。完整格式指导与各平台模型示例见 https://github.com/error2913/aiplugin4/blob/main/docs/MODELS-chat.md （仓库文档）。', "模型");
+        ], '每行一个模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途，可多个）。可选：provider（服务商，省略时按模型名自动识别：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）/judge（群聊插话打分，未单独配置时回退到 chat 模型）。默认对话模型取列表第一项；body 未配置时使用 max_tokens=8192、stop=null、stream=false。下方默认值即完整示例，可直接修改。完整格式指导与各平台模型示例见 https://github.com/error2913/aiplugin4/blob/main/docs/MODELS-chat.md （仓库文档）。', "模型");
         seal.ext.registerBoolConfig(ext, "是否开启图片模型", false, "总开关，默认关闭。\n配置好图片模型后再开启；关闭时图片识别/图片转文字不生效", "模型");
         seal.ext.registerTemplateConfig(ext, "图片模型", [
             `# 使用toml格式
