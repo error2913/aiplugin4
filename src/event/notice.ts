@@ -70,10 +70,10 @@ function formatFileSize(bytes: any): string {
 }
 
 /**
- * OB11 通知事件 → 自描述文本提示词（ID 统一转 UNI-ID：QQ:xxx / QQ-Group:xxx）。
+ * OB11 通知事件 → 自描述文本提示词（ID 统一转 UNI-ID：<平台>:xxx / <平台>-Group:xxx）。
  * 白名单外/无法识别的类型返回空字符串（由调用方跳过）。
  */
-export function buildNoticeText(event: any, prefix: string = 'QQ'): string {
+export function buildNoticeText(event: any, prefix: string): string {
     const noticeType = event.notice_type || '';
     const subType = event.sub_type || '';
     const user = uniUserId(event.user_id, prefix);
@@ -134,7 +134,7 @@ export function buildNoticeText(event: any, prefix: string = 'QQ'): string {
 }
 
 /** OB11 请求事件 → 文本提示词（好友/入群申请）；无法识别返回空字符串 */
-export function buildRequestText(event: any, prefix: string = 'QQ'): string {
+export function buildRequestText(event: any, prefix: string): string {
     const requestType = event.request_type || '';
     const user = uniUserId(event.user_id, prefix);
     const group = uniGroupId(event.group_id, prefix);

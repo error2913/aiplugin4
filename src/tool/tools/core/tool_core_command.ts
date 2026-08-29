@@ -5,7 +5,7 @@ import { CoreBridgeResult } from "../../../integration/core_bridge/types";
 import { callCoreBridgeCommand } from "../../../integration/core_bridge/ws_client";
 import Logger from "../../../logger";
 import { callOb11ApiDirect } from "../../../transport/ob11/dispatcher";
-import { normalizeGroupId, normalizeUserId } from "../../../utils/target_id";
+import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
 import { withTimeout } from "../../../utils/utils";
 import { isAllowedCore, splitEntry, whitelistEntries } from "../../command_catalog";
 import { resolveCommandTarget } from "../../command_target";
@@ -15,8 +15,8 @@ const log = Logger.withTag('run_core_command');
 
 /** 获取核心假消息发送者的真实平台昵称/群名片，避免把当前 AI 会话用户昵称错传给 trigger。 */
 async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string): Promise<string> {
-    const rawUserId = normalizeUserId(userId) || userId;
-    const rawGroupId = ctx.group ? normalizeGroupId(ctx.group.groupId) : '';
+    const rawUserId = normalizeUserId(userId, platformOf(ctx)) || userId;
+    const rawGroupId = ctx.group ? normalizeGroupId(ctx.group.groupId, platformOf(ctx)) : '';
     if (!rawUserId) return '';
     try {
         const action = rawGroupId ? 'get_group_member_info' : 'get_stranger_info';
@@ -32,7 +32,7 @@ async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string)
     } catch (e) {
         log.debug(`[run_core_command] 获取 trigger=${rawUserId} 昵称失败，使用回退值: ${e instanceof Error ? e.message : String(e)}`);
     }
-    return rawUserId === normalizeUserId(ctx.player && ctx.player.userId || '')
+    return rawUserId === normalizeUserId(ctx.player && ctx.player.userId || '', platformOf(ctx))
         ? String(ctx.player && ctx.player.name || '')
         : `用户${rawUserId}`;
 }

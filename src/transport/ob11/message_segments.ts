@@ -4,7 +4,7 @@ import { logger } from "../../logger";
 import Image from "../../resource/image";
 import { resolveResourceReference } from "../../utils/resource";
 import { MessageSegment, parseSpecialTokens, stripInternalTags } from "../../utils/string";
-import { getRawId, normalizeUserId } from "../../utils/target_id";
+import { getRawId, normalizeUserId, platformOf } from "../../utils/target_id";
 import { resolveLocalPath, transformMsgIdBack } from "../../utils/utils";
 
 const log = logger.withTag('ob11-send');
@@ -188,7 +188,7 @@ async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, te
                 break;
             }
             case "at": {
-                const userId = normalizeUserId(token.content);
+                const userId = normalizeUserId(token.content, platformOf(ctx));
                 if (userId) {
                     flush();
                     out.push({ type: "at", data: { qq: getRawId(userId) } });
@@ -196,7 +196,7 @@ async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, te
                 break;
             }
             case "poke": {
-                const userId = normalizeUserId(token.content);
+                const userId = normalizeUserId(token.content, platformOf(ctx));
                 if (userId) {
                     flush();
                     out.push({ type: "poke", data: { qq: getRawId(userId) } });

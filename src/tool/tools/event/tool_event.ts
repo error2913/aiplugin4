@@ -5,7 +5,7 @@ import { SystemUserMessageItem, UserMessage } from "../../../context/types";
 import type { Session } from "../../../session/session";
 import { getSession } from "../../../session/session_service";
 import { fmtDate } from "../../../utils/string";
-import { normalizeTargetId } from "../../../utils/target_id";
+import { getPlatform, normalizeTargetId } from "../../../utils/target_id";
 import Tool from "../../tool";
 
 /** 单次返回总长度上限：超出截断并提示，避免一次注入过多原始数据 */
@@ -53,7 +53,7 @@ export function registerEventTools() {
                     },
                     target: {
                         type: 'string',
-                        description: '可选：跨会话查看事件，格式 QQ:<用户ID> 或 QQ-Group:<群ID>；不传查看当前会话'
+                        description: '可选：跨会话查看事件，格式 <平台>:<用户ID> 或 <平台>-Group:<群ID>；不传查看当前会话'
                     }
                 },
                 required: []
@@ -64,8 +64,8 @@ export function registerEventTools() {
         const { event_type, count = 5, target } = (args || {}) as { event_type?: string; count?: number; target?: string };
         let targetSession: Session = session;
         if (target) {
-            const id = normalizeTargetId(target);
-            if (!id) return `目标ID格式无效<${target}>，应为 QQ:<用户ID> 或 QQ-Group:<群ID>`;
+            const id = normalizeTargetId(target, getPlatform(session.sessionId));
+            if (!id) return `目标ID格式无效<${target}>，应为 <平台>:<用户ID> 或 <平台>-Group:<群ID>`;
             targetSession = getSession(id);
         }
         const limit = Math.min(Math.max(parseInt(String(count), 10) || 5, 1), 20);

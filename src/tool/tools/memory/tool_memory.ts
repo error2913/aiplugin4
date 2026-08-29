@@ -9,7 +9,7 @@ import { SessionService } from "../../../session/session_service";
 import { GroupInfo, SessionInfo, UserInfo } from "../../../session/types";
 import { getCtxAndMsg } from "../../../utils/seal";
 import { stripInternalTags } from "../../../utils/string";
-import { normalizeGroupId, normalizeUserId } from "../../../utils/target_id";
+import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
 import Tool from "../../tool";
 
 export function registerMemory() {
@@ -83,13 +83,13 @@ export function registerMemory() {
             const target = resolveTargetSession(session, memory_type, target_id);
             if (!target) return `目标ID格式无效<${target_id}>`;
             if (memory_type === "private") {
-                const normalizedTargetId = normalizeUserId(target_id);
+                const normalizedTargetId = normalizeUserId(target_id, platformOf(ctx));
                 if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
                 const ui = session.context.getUserById(normalizedTargetId);
                 if (ui === null) return `未找到目标ID<${target_id}>`;
                 ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
             } else {
-                const normalizedTargetId = normalizeGroupId(target_id);
+                const normalizedTargetId = normalizeGroupId(target_id, platformOf(ctx));
                 if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
                 const gi = session.context.getGroupById(normalizedTargetId);
                 if (gi === null) return `未找到目标ID<${target_id}>`;
@@ -102,14 +102,14 @@ export function registerMemory() {
 
         const uiList: UserInfo[] = [];
         for (const n of related_user_ids) {
-            const normalizedUserId = normalizeUserId(n);
+            const normalizedUserId = normalizeUserId(n, platformOf(ctx));
             if (normalizedUserId === null) return `相关用户ID格式无效<${n}>`;
             const ui = session.context.getUserById(normalizedUserId);
             if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
         }
         const giList: GroupInfo[] = [];
         for (const n of related_group_ids) {
-            const normalizedGroupId = normalizeGroupId(n);
+            const normalizedGroupId = normalizeGroupId(n, platformOf(ctx));
             if (normalizedGroupId === null) return `相关群ID格式无效<${n}>`;
             const gi = session.context.getGroupById(normalizedGroupId);
             if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
@@ -168,13 +168,13 @@ export function registerMemory() {
         const target = resolveTargetSession(session, memory_type, target_id);
         if (!target) return `目标ID格式无效<${target_id}>`;
         if (memory_type === "private") {
-            const normalizedTargetId = normalizeUserId(target_id);
+            const normalizedTargetId = normalizeUserId(target_id, platformOf(ctx));
             if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
             const ui = session.context.getUserById(normalizedTargetId);
             if (ui === null) return `未找到目标ID<${target_id}>`;
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
         } else if (memory_type === "group") {
-            const normalizedTargetId = normalizeGroupId(target_id);
+            const normalizedTargetId = normalizeGroupId(target_id, platformOf(ctx));
             if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
             const gi = session.context.getGroupById(normalizedTargetId);
             if (gi === null) return `未找到目标ID<${target_id}>`;
@@ -281,14 +281,14 @@ export function registerMemory() {
         if (!target) return `目标ID格式无效<${target_id}>`;
         let si: SessionInfo | null = null;
         if (memory_type === "private") {
-            const normalizedTargetId = normalizeUserId(target_id);
+            const normalizedTargetId = normalizeUserId(target_id, platformOf(ctx));
             if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
             const ui = session.context.getUserById(normalizedTargetId);
             if (ui === null) return `未找到目标ID<${target_id}>`;
             si = { isPrivate: true, id: ui.userId, name: ui.userName || ui.userId };
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
         } else if (memory_type === "group") {
-            const normalizedTargetId = normalizeGroupId(target_id);
+            const normalizedTargetId = normalizeGroupId(target_id, platformOf(ctx));
             if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
             const gi = session.context.getGroupById(normalizedTargetId);
             if (gi === null) return `未找到目标ID<${target_id}>`;
@@ -303,14 +303,14 @@ export function registerMemory() {
 
         const uiList: UserInfo[] = [];
         for (const n of related_user_ids) {
-            const normalizedUserId = normalizeUserId(n);
+            const normalizedUserId = normalizeUserId(n, platformOf(ctx));
             if (normalizedUserId === null) return `相关用户ID格式无效<${n}>`;
             const ui = session.context.getUserById(normalizedUserId);
             if (ui !== null) uiList.push({ isPrivate: true, id: ui.userId, name: ui.userName });
         }
         const giList: GroupInfo[] = [];
         for (const n of related_group_ids) {
-            const normalizedGroupId = normalizeGroupId(n);
+            const normalizedGroupId = normalizeGroupId(n, platformOf(ctx));
             if (normalizedGroupId === null) return `相关群ID格式无效<${n}>`;
             const gi = session.context.getGroupById(normalizedGroupId);
             if (gi !== null) giList.push({ isPrivate: false, id: gi.groupId, name: gi.groupName });
@@ -356,13 +356,13 @@ export function registerMemory() {
         const target = resolveTargetSession(session, memory_type, target_id);
         if (!target) return `目标ID格式无效<${target_id}>`;
         if (memory_type === "private") {
-            const normalizedTargetId = normalizeUserId(target_id);
+            const normalizedTargetId = normalizeUserId(target_id, platformOf(ctx));
             if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
             const ui = session.context.getUserById(normalizedTargetId);
             if (ui === null) return `未找到目标ID<${target_id}>`;
             ({ ctx } = getCtxAndMsg(ctx.endPoint.userId, ui.userId, ''));
         } else if (memory_type === "group") {
-            const normalizedTargetId = normalizeGroupId(target_id);
+            const normalizedTargetId = normalizeGroupId(target_id, platformOf(ctx));
             if (normalizedTargetId === null) return `目标ID格式无效<${target_id}>`;
             const gi = session.context.getGroupById(normalizedTargetId);
             if (gi === null) return `未找到目标ID<${target_id}>`;

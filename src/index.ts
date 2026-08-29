@@ -16,6 +16,7 @@ import { TimerManager } from "./timer";
 import Tool from "./tool/tool";
 import { createMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
+import { getPlatform } from "./utils/target_id";
 import { checkUpdate } from "./utils/update";
 
 const log = logger.withTag('main');
@@ -74,7 +75,7 @@ function main() {
   // 与 ob11 依赖的通知事件双路径共用 3s 事件级去重，防止同一条事件被记录两次。
   ext.onGroupMemberJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      const prefix = getPlatform(ctx.endPoint.userId);
       MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
         noticeType: 'group_increase',
         userId: msg.sender.userId,
@@ -86,7 +87,7 @@ function main() {
 
   ext.onGroupLeave = (ctx: seal.MsgContext, event: seal.GroupLeaveEvent) => {
     try {
-      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      const prefix = getPlatform(ctx.endPoint.userId);
       MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${event.groupId}`, {
         noticeType: 'group_decrease',
         subType: event.operatorId ? 'kick' : 'leave',
@@ -100,7 +101,7 @@ function main() {
 
   ext.onMessageDeleted = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      const prefix = getPlatform(ctx.endPoint.userId);
       const messageId = msg.rawId !== undefined && msg.rawId !== null ? String(msg.rawId) : '';
       if (msg.messageType === 'group') {
         MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
@@ -133,7 +134,7 @@ function main() {
 
   ext.onGroupJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const prefix = ctx.endPoint.userId.includes(':') ? ctx.endPoint.userId.slice(0, ctx.endPoint.userId.indexOf(':')) : 'QQ';
+      const prefix = getPlatform(ctx.endPoint.userId);
       MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
         noticeType: 'group_joined',
       }).catch((e: any) => log.exception('加入群聊事件处理出错', e));

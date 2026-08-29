@@ -12,6 +12,9 @@ import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "
 import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerEventTools } from "../src/tool/tools/event/tool_event";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
+import { resolveEndpointId } from "../src/pipeline";
+import { SessionService } from "../src/session/session_service";
+import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
@@ -569,6 +572,115 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(buildNativeNoticeText({ noticeType: 'nope' }), '');
     },
 
+    /** target_id 平台无关：QQ 行为不变，其它平台按 adaptor 格式保留；裸 ID 必须带 platformHint，绝不默认 QQ */
+    testTargetIdPlatformAgnostic(): void {
+        // QQ：带前缀行为与旧版一致，裸数字 ID + QQ hint 补全为 QQ:xxx
+        assert.equal(normalizeUserId('QQ:123'), 'QQ:123');
+        assert.equal(normalizeUserId('QQ:abc'), null, 'QQ 用户 ID 必须为纯数字');
+        assert.equal(normalizeUserId('123', 'QQ'), 'QQ:123');
+        assert.equal(normalizeUserId('abc', 'QQ'), null, 'QQ 裸 ID 仍要求纯数字');
+        assert.equal(normalizeUserId(123, 'QQ'), 'QQ:123');
+        assert.equal(normalizeGroupId('QQ-Group:123'), 'QQ-Group:123');
+        assert.equal(normalizeGroupId('QQ-Group:abc'), null, 'QQ 群 ID 必须为纯数字');
+        assert.equal(normalizeGroupId('123', 'QQ'), 'QQ-Group:123');
+        assert.equal(normalizeGroupId('QQ:123'), null, '用户前缀不能当群 ID');
+        assert.equal(normalizeUserId('QQ-Group:123'), null, '群 ID 不能当用户 ID');
+        // 非 QQ 平台：带前缀原样保留（如 Discord 字母 ID）
+        assert.equal(normalizeUserId('DISCORD:user_abc'), 'DISCORD:user_abc');
+        assert.equal(normalizeGroupId('DISCORD-Group:chan_1'), 'DISCORD-Group:chan_1');
+        assert.equal(normalizeUserId('DISCORD-Group:chan_1'), null);
+        assert.equal(normalizeGroupId('DISCORD:user_abc'), null);
+        // 裸 ID + 非 QQ hint：按平台补全
+        assert.equal(normalizeUserId('user_abc', 'DISCORD'), 'DISCORD:user_abc');
+        assert.equal(normalizeGroupId('chan_1', 'DISCORD'), 'DISCORD-Group:chan_1');
+        // OpenQQ 群同样走 -Group: 标记
+        assert.equal(normalizeGroupId('OpenQQ-Group:123456'), 'OpenQQ-Group:123456');
+        // 无 hint 的裸 ID：绝不默认 QQ，返回 null
+        assert.equal(normalizeUserId('123'), null, '裸 ID 无 hint 不得默认 QQ');
+        assert.equal(normalizeGroupId('123'), null, '裸群 ID 无 hint 不得默认 QQ');
+        assert.equal(normalizeTargetId('123'), null, '裸目标 ID 无法判断类型，无 hint 返回 null');
+        // normalizeTargetId：按 -Group: 标记区分用户/群
+        assert.equal(normalizeTargetId('QQ:123'), 'QQ:123');
+        assert.equal(normalizeTargetId('QQ-Group:123'), 'QQ-Group:123');
+        assert.equal(normalizeTargetId('DISCORD:user_abc'), 'DISCORD:user_abc');
+        assert.equal(normalizeTargetId('DISCORD-Group:chan_1'), 'DISCORD-Group:chan_1');
+        // getPlatform / isGroupId / makeUserId / makeGroupId
+        assert.equal(getPlatform('QQ:123'), 'QQ');
+        assert.equal(getPlatform('QQ-Group:123'), 'QQ');
+        assert.equal(getPlatform('DISCORD:user_abc'), 'DISCORD');
+        assert.equal(getPlatform('DISCORD-Group:chan_1'), 'DISCORD');
+        assert.equal(isGroupId('QQ-Group:123'), true);
+        assert.equal(isGroupId('DISCORD-Group:chan_1'), true);
+        assert.equal(isGroupId('QQ:123'), false);
+        assert.equal(makeUserId('QQ', '123'), 'QQ:123');
+        assert.equal(makeGroupId('DISCORD', 'chan_1'), 'DISCORD-Group:chan_1');
+        // platformOf：优先 endPoint.platform，其次从 endPoint.userId 前缀解析
+        assert.equal(platformOf({ endPoint: { platform: 'QQ', userId: 'QQ:10000' } }), 'QQ');
+        assert.equal(platformOf({ endPoint: { userId: 'QQ:10000' } }), 'QQ');
+        assert.equal(platformOf({ endPoint: { userId: 'DISCORD:user_abc' } }), 'DISCORD');
+        assert.equal(platformOf({ endPoint: { platform: 'OpenQQ', userId: 'OpenQQ-Group:123' } }), 'OpenQQ');
+        assert.equal(platformOf({ endPoint: { platform: '  QQ  ' } }), 'QQ', 'platform 应 trim');
+        assert.equal(platformOf(null), '', '空 ctx 返回空平台');
+        assert.equal(platformOf({ endPoint: {} }), '', '无平台信息返回空');
+    },
+
+    /** buildNoticeText/buildRequestText：prefix 由调用方传入，非 QQ 平台输出对应 UNI-ID；QQ 输出不变 */
+    testBuildNoticeTextNonQQPrefix(): void {
+        assert.equal(
+            buildNoticeText({ notice_type: 'group_ban', sub_type: 'ban', user_id: 1001, operator_id: 1002, duration: 60 }, 'DISCORD'),
+            '【群事件】DISCORD:1002 将 DISCORD:1001 禁言 60 秒'
+        );
+        assert.equal(
+            buildNoticeText({ notice_type: 'group_upload', user_id: 1001, file: { name: '规则.pdf', size: 2048 } }, 'DISCORD'),
+            '【群事件】DISCORD:1001 上传了文件「规则.pdf」（2.0KB）'
+        );
+        assert.equal(
+            buildRequestText({ request_type: 'group', sub_type: 'add', user_id: 1001, group_id: 2001, comment: '想进群' }, 'DISCORD'),
+            '【入群请求】DISCORD:1001 申请加入群 DISCORD-Group:2001：想进群（完整事件数据可调用 get_event_detail 查看，处理申请需要）'
+        );
+        // QQ 回归：与既有 QQ 前缀输出完全一致
+        assert.equal(
+            buildNoticeText({ notice_type: 'group_ban', sub_type: 'ban', user_id: 1001, operator_id: 1002, duration: 60 }, 'QQ'),
+            '【群事件】QQ:1002 将 QQ:1001 禁言 60 秒'
+        );
+        assert.equal(
+            buildRequestText({ request_type: 'friend', user_id: 1001 }, 'QQ'),
+            '【好友请求】QQ:1001 请求添加好友（完整事件数据可调用 get_event_detail 查看，处理申请需要）'
+        );
+    },
+
+    /** resolveEndpointId：按 self_id 反查平台端点（QQ 与非 QQ 均可），匹配不到返回空串 */
+    testResolveEndpointId(): void {
+        const origGetEndPoints = (globalThis as any).seal.getEndPoints;
+        (globalThis as any).seal.getEndPoints = () => [
+            { userId: 'QQ:10000' },
+            { userId: 'DISCORD:10001' },
+            { userId: 'OpenQQ-Group:20002' }
+        ];
+        try {
+            assert.equal(resolveEndpointId('10000'), 'QQ:10000');
+            assert.equal(resolveEndpointId('10001'), 'DISCORD:10001');
+            assert.equal(resolveEndpointId('20002'), 'OpenQQ-Group:20002');
+            assert.equal(resolveEndpointId('99999'), '', '未匹配端点应返回空串');
+            assert.equal(resolveEndpointId(10000), 'QQ:10000', '数字 self_id 应兼容');
+        } finally {
+            (globalThis as any).seal.getEndPoints = origGetEndPoints;
+        }
+    },
+
+    /** SessionService 会话类型判定：-Group: 标记判群，其余为私聊用户（QQ 行为不变，且支持非 QQ 平台） */
+    testSessionServicePlatformAgnosticType(): void {
+        const svc = new SessionService();
+        try {
+            assert.equal(svc.getSession('QQ:abc').sessionType, 'user', 'QQ 私聊仍为 user');
+            assert.equal(svc.getSession('QQ-Group:123').sessionType, 'group', 'QQ 群仍为 group');
+            assert.equal(svc.getSession('DISCORD:user_abc').sessionType, 'user', '非 QQ 私聊为 user');
+            assert.equal(svc.getSession('DISCORD-Group:chan_1').sessionType, 'group', '非 QQ 群为 group');
+            assert.equal(svc.getSession('OpenQQ-Group:123456').sessionType, 'group', 'OpenQQ 群为 group');
+        } finally {
+            for (const key of Object.keys(svc.sessionMap)) delete svc.sessionMap[key];
+        }
+    },
     /** 事件原始数据保留判定：可 JSON 序列化且不超过长度上限才保留（超长/循环引用/null 均丢弃） */
     testIsEventRawRetainable(): void {
         assert.equal(isEventRawRetainable(undefined), false, 'undefined 不保留');

@@ -2,7 +2,7 @@
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { GroupInfo, UserInfo } from "../../../session/types";
-import { normalizeGroupId, normalizeUserId } from "../../../utils/target_id";
+import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
 import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
@@ -147,7 +147,7 @@ export function registerMeme() {
         const giList: GroupInfo[] = [];
         for (const id of image_ids) {
             if (/^user_avatar[:：]/.test(id)) {
-                const userId = normalizeUserId(id.replace(/^user_avatar[:：]/, ''));
+                const userId = normalizeUserId(id.replace(/^user_avatar[:：]/, ''), platformOf(ctx));
                 if (!userId) return `用户ID格式无效：${id}`;
                 const ui = session.context.getUserById(userId);
                 if (!ui) return `用户ID无效：${id}`;
@@ -156,7 +156,7 @@ export function registerMeme() {
                 continue;
             }
             if (/^group_avatar[:：]/.test(id)) {
-                const groupId = normalizeGroupId(id.replace(/^group_avatar[:：]/, ''));
+                const groupId = normalizeGroupId(id.replace(/^group_avatar[:：]/, ''), platformOf(ctx));
                 if (!groupId) return `群ID格式无效：${id}`;
                 const gi = session.context.getGroupById(groupId);
                 if (!gi) return `群ID无效：${id}`;

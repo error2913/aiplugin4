@@ -7,6 +7,7 @@ import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { getSessionId } from "../utils/seal";
 import { MessageSegment } from "../utils/string";
+import { getPlatform } from "../utils/target_id";
 import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 
 const log = logger.withTag('image');
@@ -68,6 +69,7 @@ export default class Image {
 
     get CQCode(): string {
         const file = this.type === 'base64' ? seal.base64ToImage(this.base64) : (this.url || this.path);
+        if (!file) return '';
         return `[CQ:image,file=${file}]`;
     }
 
@@ -272,14 +274,17 @@ export default class Image {
     static getUserAvatar(uid: string): Image {
         const img = new Image();
         img.imageId = `user_avatar:${uid}`;
-        img.url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
+        const rawId = uid.replace(/^.+:/, '');
+        // qlogo 仅 QQ 平台可用；其它平台返回空 URL，由发送路径跳过头像
+        img.url = getPlatform(uid) === 'QQ' ? `https://q1.qlogo.cn/g?b=qq&nk=${rawId}&s=640` : '';
         return img;
     }
 
     static getGroupAvatar(gid: string): Image {
         const img = new Image();
         img.imageId = `group_avatar:${gid}`;
-        img.url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
+        const rawId = gid.replace(/^.+:/, '');
+        img.url = getPlatform(gid) === 'QQ' ? `https://p.qlogo.cn/gh/${rawId}/${rawId}/640` : '';
         return img;
     }
 

@@ -10,7 +10,7 @@ import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
 import { callOb11Api } from "../utils/ob11";
 import { stripInternalTags } from "../utils/string";
-import { normalizeGroupId, normalizeUserId } from "../utils/target_id";
+import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor, withTimeout } from "../utils/utils";
 
 import Message from "./message";
@@ -308,7 +308,7 @@ export class Context {
     }
 
     getUserById(userId: string | number): User | null {
-        const normalizedId = normalizeUserId(userId);
+        const normalizedId = normalizeUserId(userId, getPlatform(this.sessionId));
         if (!normalizedId || this.session.checkIgnoredUserId(normalizedId)) return null;
         return User.get(normalizedId);
     }
@@ -368,18 +368,18 @@ export class Context {
         User.save(u);
     }
     getGroupById(groupId: string | number): Group | null {
-        const normalizedId = normalizeGroupId(groupId);
+        const normalizedId = normalizeGroupId(groupId, getPlatform(this.sessionId));
         if (!normalizedId) return null;
         return Group.get(normalizedId);
     }
     async findImage(_ctx: seal.MsgContext, id: string): Promise<Image | null> {
         if (/^user_avatar[:：?]/.test(id)) {
-            const userId = normalizeUserId(id.replace(/^user_avatar[:：?]/, ''));
+            const userId = normalizeUserId(id.replace(/^user_avatar[:：?]/, ''), getPlatform(this.sessionId));
             if (userId) return Image.getUserAvatar(userId);
             return null;
         }
         if (/^group_avatar[:：?]/.test(id)) {
-            const groupId = normalizeGroupId(id.replace(/^group_avatar[:：?]/, ''));
+            const groupId = normalizeGroupId(id.replace(/^group_avatar[:：?]/, ''), getPlatform(this.sessionId));
             if (groupId) return Image.getGroupAvatar(groupId);
             return null;
         }
