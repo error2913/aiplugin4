@@ -14,6 +14,8 @@ import { registerEventTools } from "../src/tool/tools/event/tool_event";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { SessionService } from "../src/session/session_service";
+import { SubCmd } from "../src/cmd/root_cmd";
+import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -681,6 +683,53 @@ export const tests: Record<string, () => void | Promise<void>> = {
             for (const key of Object.keys(svc.sessionMap)) delete svc.sessionMap[key];
         }
     },
+    /** .ai status：输出平台（QQ 与非 QQ 均按 adaptor 平台展示） */
+    testCmdStatusShowsPlatform(): void {
+        const origReply = (globalThis as any).seal.replyToSender;
+        const origStatus = SubCmd.map['status'];
+        let replied = '';
+        (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
+        try {
+            registerCmdStatus(); // 注册到 SubCmd.map（幂等覆盖）
+            const qqSession = new Session();
+            qqSession.sessionId = 'QQ:10000';
+            qqSession.sessionType = 'user';
+            SubCmd.map['status'].solve({
+                ctx: { endPoint: { userId: 'QQ:10000' }, player: { userId: 'QQ:10000', name: '测试员' } } as any,
+                msg: {} as any,
+                cmdArgs: {} as any,
+                epId: 'QQ:10000',
+                uid: 'QQ:10000',
+                gid: '',
+                sid: 'QQ:10000',
+                session: qqSession,
+                page: 1,
+                ret: {} as any
+            });
+            assert.ok(replied.includes('平台: QQ'), `QQ 会话应显示平台 QQ，实际: ${replied}`);
+
+            const discordSession = new Session();
+            discordSession.sessionId = 'DISCORD:user_abc';
+            discordSession.sessionType = 'user';
+            SubCmd.map['status'].solve({
+                ctx: { endPoint: { userId: 'DISCORD:user_abc' }, player: { userId: 'DISCORD:user_abc', name: '测试员' } } as any,
+                msg: {} as any,
+                cmdArgs: {} as any,
+                epId: 'DISCORD:user_abc',
+                uid: 'DISCORD:user_abc',
+                gid: '',
+                sid: 'DISCORD:user_abc',
+                session: discordSession,
+                page: 1,
+                ret: {} as any
+            });
+            assert.ok(replied.includes('平台: DISCORD'), `非 QQ 会话应按 adaptor 显示平台，实际: ${replied}`);
+        } finally {
+            (globalThis as any).seal.replyToSender = origReply;
+            if (origStatus) SubCmd.map['status'] = origStatus; else delete SubCmd.map['status'];
+        }
+    },
+
     /** 事件原始数据保留判定：可 JSON 序列化且不超过长度上限才保留（超长/循环引用/null 均丢弃） */
     testIsEventRawRetainable(): void {
         assert.equal(isEventRawRetainable(undefined), false, 'undefined 不保留');

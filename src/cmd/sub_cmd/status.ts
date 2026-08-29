@@ -1,4 +1,5 @@
 // .ai status：查看当前会话 AI 状态
+import { platformOf } from "../../utils/target_id";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
@@ -6,7 +7,7 @@ export function registerCmdStatus() {
     const cmd = new SubCmd('status');
     cmd.desc = '查看当前AI状态';
     cmd.help = `帮助:
-【.ai status】查看当前会话 AI 状态（权限/上下文轮数/各触发模式）`;
+【.ai status】查看当前会话 AI 状态（平台/权限/上下文轮数/各触发模式）`;
     cmd.priv = { priv: U };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, sid, session, ret } = scc;
@@ -14,6 +15,7 @@ export function registerCmdStatus() {
         const { start, end, segs } = setting.activeTimeInfo;
 
         seal.replyToSender(ctx, msg, `${sid}
+        平台: ${platformOf(ctx) || '未知'}
         会话类型: ${session.sessionType === 'user' ? '私聊' : '群聊'}
         模型: ${session.setting.modelName || '全局默认'}
         权限: ${setting.priv}
