@@ -28,6 +28,10 @@ const DEFAULT_MAX_TOKENS = 2048;
 const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
 const BACKFILL_BATCH_LIMIT = 20;
 const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
+/** 遗忘保护：importance 达到该值（或 pinned）的记忆最后淘汰（上限仍是硬约束，超限仍会删） */
+const PROTECT_IMPORTANCE = 0.9;
+/** 衰减分半衰期（天）：decayScore = importance × 2^(−未访问天数/半衰期)，用于超限时排序 */
+const DECAY_HALF_LIFE_DAYS = 60;
 
 /** 「设定」心智模型的固定问题：.ai memo p|g st 与 persona 迁移共用，同问题名即同一条 */
 export const MENTAL_MODEL_PERSONA_QUESTION = '这个用户/群的设定是什么？';
@@ -43,6 +47,8 @@ export interface MemoryEngineOptions {
     recencyWeight?: number;
     /** 新近度加分半衰期（天），默认 60 */
     recencyHalfLifeDays?: number;
+    /** 长期记忆条数上限（0 = 不限制，默认 100 由配置注入） */
+    memoryCap?: number;
 }
 
 export class MemoryEngine {
@@ -64,6 +70,8 @@ export class MemoryEngine {
     private recencyWeight = 0.4;
     /** 新近度加分半衰期（天），默认 60 */
     private recencyHalfLifeDays = 60;
+    /** 长期记忆条数上限（0 = 不限制） */
+    private memoryCap = 0;
 
     constructor(options: MemoryEngineOptions = {}) {
         this.repository = new MemoryRepository(options.storage || new InMemoryMemoryStorage());
@@ -74,6 +82,7 @@ export class MemoryEngine {
         this.reflectSynthesizer = options.reflectSynthesizer;
         this.recencyWeight = options.recencyWeight ?? 0.4;
         this.recencyHalfLifeDays = options.recencyHalfLifeDays ?? 60;
+        this.memoryCap = options.memoryCap ?? 0;
     }
 
     setExtractor(extract: FactExtractor): void {
@@ -101,6 +110,11 @@ export class MemoryEngine {
     setRecency(weight: number, halfLifeDays: number): void {
         this.recencyWeight = weight > 0 ? weight : 0;
         this.recencyHalfLifeDays = halfLifeDays > 0 ? halfLifeDays : 60;
+    }
+
+    /** 配置长期记忆条数上限：cap<=0 为不限制（默认 100 由 createMemoryEngine 注入） */
+    setMemoryCap(cap: number): void {
+        this.memoryCap = cap > 0 ? cap : 0;
     }
 
     // ===== Bank =====
@@ -235,6 +249,9 @@ export class MemoryEngine {
                 embedding: unit.embedding.length ? unit.embedding : undefined,
             });
         }
+
+        // 遗忘机制：超限时按覆盖/衰减优先级物理删除多余记忆（上限为硬约束）
+        await this.pruneBank(bankId);
 
         return { unitIds: [unitId], documentId: input.documentId, action: 'added' };
     }
@@ -404,7 +421,10 @@ export class MemoryEngine {
         if (this.consolidatingBanks.has(bankId)) return { created: [], updated: [], merged: [], skipped: 0 };
         this.consolidatingBanks.add(bankId);
         try {
-            return await this.doConsolidate(bankId);
+            const result = await this.doConsolidate(bankId);
+            // 遗忘机制：consolidate 后大量细节已被 observation 覆盖，覆盖优先物理删（上限硬约束）
+            await this.pruneBank(bankId);
+            return result;
         } finally {
             this.consolidatingBanks.delete(bankId);
         }
@@ -847,6 +867,48 @@ export class MemoryEngine {
         current.accessCount = (current.accessCount || 0) + 1;
         current.lastAccessedAt = now;
         this.repository.updateUnit(bankId, current, false);
+    }
+
+    /** 召回/巩固后触发：超过条数上限时物理删除多余记忆（上限为硬约束）。返回被淘汰的 unit id */
+    private async pruneBank(bankId: string): Promise<string[]> {
+        if (this.memoryCap <= 0) return [];
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return [];
+        const valid = bank.units.filter(u => u.state === 'valid');
+        if (valid.length <= this.memoryCap) return [];
+
+        const now = Math.floor(Date.now() / 1000);
+        const coveredIds = new Set<string>();
+        for (const o of bank.observations) {
+            for (const e of o.evidence) coveredIds.add(e.memoryId);
+        }
+        const sorted = valid.slice().sort((a, b) => {
+            const ga = this.evictionGroup(a, coveredIds);
+            const gb = this.evictionGroup(b, coveredIds);
+            if (ga !== gb) return ga - gb;
+            const da = this.decayScore(a, now);
+            const db = this.decayScore(b, now);
+            if (da !== db) return da - db;
+            return (a.lastAccessedAt || 0) - (b.lastAccessedAt || 0);
+        });
+        const toEvict = sorted.slice(0, valid.length - this.memoryCap).map(u => u.id);
+        if (toEvict.length > 0) this.repository.deleteUnits(bankId, toEvict);
+        return toEvict;
+    }
+
+    /** 淘汰分组（越小越先删）：0=已被观察覆盖 1=普通单元 2=observation 沉淀 3=保护项（最后删，但上限硬约束下仍删） */
+    private evictionGroup(u: MemoryUnit, coveredIds: Set<string>): number {
+        if (u.importance >= PROTECT_IMPORTANCE || u.metadata?.pinned === '1' || u.tags.includes('pinned')) return 3;
+        if (u.factType === 'observation') return 2;
+        if (u.consolidationState === 'done' && coveredIds.has(u.id)) return 0;
+        return 1;
+    }
+
+    /** 衰减分：importance × 2^(−未访问天数/半衰期)，越低越先淘汰 */
+    private decayScore(u: MemoryUnit, nowSec: number): number {
+        const last = u.lastAccessedAt || u.updatedAt || u.createdAt || nowSec;
+        const ageDays = Math.max(0, (nowSec - last) / 86400);
+        return u.importance * Math.exp((-Math.LN2 * ageDays) / DECAY_HALF_LIFE_DAYS);
     }
 
     private sameCluster(a: MemoryUnit, b: MemoryUnit): boolean {

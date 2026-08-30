@@ -32,6 +32,8 @@ export function createMemoryEngine(): MemoryEngine {
     if (memoryConfig.MEMORY_OBSERVATION_SYNTH) engine.setObservationSynthesizer(defaultObservationSynthesizer);
     if (memoryConfig.MEMORY_REFLECT_SYNTH) engine.setReflectSynthesizer(defaultReflectSynthesizer);
     if (memoryConfig.MEMORY_REFRESH_MIN_INTERVAL > 0) engine.setRefreshMinInterval(memoryConfig.MEMORY_REFRESH_MIN_INTERVAL * 60);
+    // 遗忘机制：长期记忆条数上限（0 为不限制，默认 100）
+    engine.setMemoryCap(memoryConfig.MEMORY_CAP);
     // Hindsight 式新近度加权：接入召回排序（权重 0 时关闭）
     engine.setRecency(memoryConfig.MEMORY_RECENCY_WEIGHT, memoryConfig.MEMORY_RECENCY_HALF_LIFE_DAYS);
     return engine;

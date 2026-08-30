@@ -473,8 +473,7 @@ export function registerMemory() {
                 duplicate.tags = Array.from(new Set([...duplicate.tags, ...unit.tags]));
                 duplicate.importance = Math.max(duplicate.importance, unit.importance);
                 getMemoryEngine().repository.updateUnit(bankId, duplicate);
-                unit.state = 'invalidated';
-                getMemoryEngine().repository.updateUnit(bankId, unit);
+                getMemoryEngine().repository.deleteUnits(bankId, [unit.id]);
                 bumpMemoryRevision();
                 SessionService.save(target);
                 return `记忆已更新并合并到<${duplicate.id}>`;
