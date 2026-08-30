@@ -1,6 +1,6 @@
 {
   "name": "aiplugin4",
-  "version": "4.19.0",
+  "version": "4.19.1",
   "description": "ai plugin for sealdice",
   "main": "build/index.js",
   "typings": "build/index.d.ts",
