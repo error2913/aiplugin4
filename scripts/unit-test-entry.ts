@@ -9,7 +9,7 @@ import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessa
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
-import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
+import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isEventRawRetainable, isNoticeInWhitelist, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerEventTools } from "../src/tool/tools/event/tool_event";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
@@ -561,7 +561,34 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(set.has('nope'), false);
     },
 
-    /** ob11 通知事件文本：禁言/管理员/文件上传/运气王/荣誉/poke/群名变更/未知类型 */
+    /** isNoticeInWhitelist：notify 子类型精确匹配；其余按 notice_type/sub_type 匹配 */
+    testNoticeWhitelistGate(): void {
+        // notify 大类：只加 notify 不收录任何子类型（避免 gray_tip/input_status 等噪音）
+        let set = parseNoticeWhitelist(['notify']);
+        assert.equal(isNoticeInWhitelist('notify', 'lucky_king', set), false, '仅加 notify 不收录其子类型');
+        assert.equal(isNoticeInWhitelist('notify', 'input_status', set), false);
+        assert.equal(isNoticeInWhitelist('notify', '', set), false, 'notify 无子类型不收录');
+
+        // notify 子类型单独加白名单后才收录
+        set = parseNoticeWhitelist(['notify', 'lucky_king', 'honor']);
+        assert.equal(isNoticeInWhitelist('notify', 'lucky_king', set), true);
+        assert.equal(isNoticeInWhitelist('notify', 'honor', set), true);
+        assert.equal(isNoticeInWhitelist('notify', 'group_name', set), false, '未单独加的子类型不收录');
+
+        // 非 notify 类：按 notice_type 收录，也兼容按 sub_type 收录
+        set = parseNoticeWhitelist(['group_ban', 'group_card', 'group_decrease']);
+        assert.equal(isNoticeInWhitelist('group_ban', 'ban', set), true, '按 notice_type 收录');
+        assert.equal(isNoticeInWhitelist('group_card', '', set), true, '按 notice_type 收录（无子类型）');
+        assert.equal(isNoticeInWhitelist('group_decrease', 'leave', set), true, 'notice_type 命中即收录');
+
+        // 仅加 sub_type（如 kick）也能收录对应事件
+        set = parseNoticeWhitelist(['kick']);
+        assert.equal(isNoticeInWhitelist('group_decrease', 'kick', set), true, '按 sub_type 收录');
+        assert.equal(isNoticeInWhitelist('group_decrease', 'leave', set), false, '未加 group_decrease 时 leave 不收录');
+        assert.equal(isNoticeInWhitelist('', 'ban', set), false, '空 notice_type 不收录');
+    },
+
+    /** ob11 通知事件文本：禁言/管理员/文件上传/运气王/荣誉/poke/群名与头衔/资料点赞/名片/精华/表情回应/解散群/未知类型 */
     testBuildNoticeText(): void {
         assert.equal(buildNoticeText({ notice_type: 'group_ban', sub_type: 'ban', user_id: 1001, operator_id: 1002, duration: 60 }, 'QQ'), '【群事件】QQ:1002 将 QQ:1001 禁言 60 秒');
         assert.equal(buildNoticeText({ notice_type: 'group_ban', sub_type: 'lift_ban', user_id: 1001, operator_id: 1002 }, 'QQ'), '【群事件】QQ:1002 解除了 QQ:1001 的禁言');
@@ -572,8 +599,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'lucky_king', user_id: 1001 }, 'QQ'), '【群事件】QQ:1001 抢到了运气王红包');
         assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'honor', user_id: 1001, honor_type: 'talkative' }, 'QQ'), '【群事件】QQ:1001 获得群荣誉「talkative」');
         assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'poke', user_id: 1001 }, 'QQ'), '', 'poke 由原生 onPoke 处理，不应生成事件文本');
-        assert.equal(buildNoticeText({ notice_type: 'group_name_change', group_name: '新群名' }, 'QQ'), '【群事件】群名称变更为「新群名」');
-        assert.equal(buildNoticeText({ notice_type: 'group_whole_mute', sub_type: 'off' }, 'QQ'), '【群事件】全员禁言已关闭');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'group_name', name_new: '新群名' }, 'QQ'), '【群事件】群名称变更为「新群名」');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'title', user_id: 1001, title: '群主' }, 'QQ'), '【群事件】QQ:1001 的头衔变更为「群主」');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'profile_like', operator_id: 1002, operator_nick: '小明', times: 2 }, 'QQ'), '【资料事件】QQ:1002 点赞了你的资料（×2）');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'profile_like', operator_nick: '小明', times: 1 }, 'QQ'), '【资料事件】小明 点赞了你的资料', '无 operator_id 时回退昵称');
+        assert.equal(buildNoticeText({ notice_type: 'notify', sub_type: 'input_status', user_id: 1001 }, 'QQ'), '', 'input_status 纯噪音不收录');
+        assert.equal(buildNoticeText({ notice_type: 'group_card', user_id: 1001, card_old: '旧名片', card_new: '新名片' }, 'QQ'), '【群事件】QQ:1001 的群名片由「旧名片」变更为「新名片」');
+        assert.equal(buildNoticeText({ notice_type: 'essence', sub_type: 'add', sender_id: 1001, operator_id: 1002 }, 'QQ'), '【群事件】QQ:1002 将 QQ:1001 的消息设为精华');
+        assert.equal(buildNoticeText({ notice_type: 'essence', sub_type: 'delete', sender_id: 1001, operator_id: 1002 }, 'QQ'), '【群事件】QQ:1002 将 QQ:1001 的消息取消精华');
+        assert.equal(buildNoticeText({ notice_type: 'group_msg_emoji_like', user_id: 1001, likes: [{ emoji_id: '14', count: 3 }], is_add: true }, 'QQ'), '【群事件】QQ:1001 对消息添加了表情「微笑」(×3)');
+        assert.equal(buildNoticeText({ notice_type: 'group_msg_emoji_like', user_id: 1001, likes: [{ emoji_id: '14', count: 1 }, { emoji_id: '21', count: 1 }], is_add: false }, 'QQ'), '【群事件】QQ:1001 对消息取消了表情「微笑」、「可爱」');
+        assert.equal(buildNoticeText({ notice_type: 'group_decrease', sub_type: 'disband' }, 'QQ'), '【群事件】本群已解散');
         assert.equal(buildNoticeText({ notice_type: 'unknown_type', user_id: 1001 }, 'QQ'), '', '未知类型返回空');
     },
 
