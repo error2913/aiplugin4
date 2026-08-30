@@ -1,3 +1,4 @@
+import { FACE_MAP } from "../config/static_config";
 import { truncateText } from "../utils/string";
 // 上下文内保留事件原始数据的条目上限（超出从最旧删除 raw，文本提示词保留）
 export const EVENT_RAW_LIMIT = 20;
@@ -48,6 +49,18 @@ export function parseNoticeWhitelist(list: string[]): Set<string> {
     return set;
 }
 
+/**
+ * 通知事件是否命中白名单：
+ * - notify 大类按子类型精确匹配（避免只加了 notify 就把 gray_tip/input_status 等噪音全收进来；
+ *   各 notify 子类型需单独在白名单内才会收录）；
+ * - 其余类型按 notice_type 匹配，也兼容按子类型匹配（如 group_decrease 的 kick）。
+ */
+export function isNoticeInWhitelist(noticeType: string, subType: string, whitelist: Set<string>): boolean {
+    if (!noticeType) return false;
+    if (noticeType === 'notify') return !!subType && whitelist.has(subType);
+    return whitelist.has(noticeType) || (!!subType && whitelist.has(subType));
+}
+
 /** 事件去重 key：epId + 会话 + 事件类型 + 用户 + 消息ID（撤回用）。窗口内同 key 视为同一事件双路径到达 */
 export function buildEventDedupKey(epId: string, sessionId: string, eventType: string, userId: string, messageId: string = ''): string {
     return `${epId}|${sessionId}|${eventType}|${userId}|${messageId}`;
@@ -67,6 +80,12 @@ function formatFileSize(bytes: any): string {
     if (n < 1024) return `${n}B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+/** 表情回应 emoji_id → 中文名（QQ 表情表），未知保留原始 id 便于排查 */
+function formatEmojiId(id: any): string {
+    const key = String(id);
+    return FACE_MAP[key] || `表情${key}`;
 }
 
 /**
@@ -93,15 +112,27 @@ export function buildNoticeText(event: any, prefix: string): string {
             const size = formatFileSize(file.size);
             return `【群事件】${user || '群成员'} 上传了文件「${file.name || file.file || '未知文件'}」${size ? `（${size}）` : ''}`;
         }
+        case 'group_card':
+            return `【群事件】${user || '成员'} 的群名片由「${event.card_old || '未知'}」变更为「${event.card_new || '未知'}」`;
         case 'notify': {
             if (subType === 'lucky_king') return `【群事件】${user || '群成员'} 抢到了运气王红包`;
             if (subType === 'honor') return `【群事件】${user || '群成员'} 获得群荣誉「${event.honor_type || '未知荣誉'}」`;
             if (subType === 'poke') return ''; // poke 由原生 onPoke 处理，不在这里录
+            if (subType === 'group_name') return `【群事件】群名称变更为「${event.name_new || event.group_name || '未知'}」`;
+            if (subType === 'title') return `【群事件】${user || '群成员'} 的头衔变更为「${event.title || '未知'}」`;
+            if (subType === 'profile_like') {
+                const liker = uniUserId(event.operator_id, prefix);
+                const times = event.times && Number(event.times) > 1 ? `（×${event.times}）` : '';
+                return `【资料事件】${liker || event.operator_nick || '有人'} 点赞了你的资料${times}`;
+            }
+            if (subType === 'gray_tip') return `【群事件】${user || '成员'} 触发灰条消息（busi_id: ${event.busi_id || '未知'}）`;
+            if (subType === 'input_status') return ''; // 输入状态纯噪音，不收录
             return `【群事件】${user || '群成员'} 触发通知（${subType}）`;
         }
         case 'group_increase':
             return `【群事件】${user || '成员'} 加入本群${operator ? `（由 ${operator} ${subType === 'invite' ? '邀请' : '通过'}）` : ''}`;
         case 'group_decrease': {
+            if (subType === 'disband') return `【群事件】本群已解散`;
             if (subType === 'kick_me') return `【群事件】本机器人被移出群聊`;
             if (subType === 'kick') return `【群事件】${operator || '管理员'} 将 ${user || '成员'} 移出本群`;
             return `【群事件】${user || '成员'} 退出本群`;
@@ -112,22 +143,21 @@ export function buildNoticeText(event: any, prefix: string): string {
             return `【好友事件】${user || '好友'} 撤回了一条消息`;
         case 'friend_add':
             return `【好友事件】已与 ${user || '新好友'} 成为好友`;
-        case 'group_name_change':
-            return `【群事件】群名称变更为「${event.group_name || event.name || '未知'}」`;
-        case 'group_disband':
-            return `【群事件】本群已解散`;
-        case 'group_whole_mute': {
-            const off = subType === 'off' || event.enable === false || event.enable === 0 || Number(event.duration) === 0;
-            return off ? `【群事件】全员禁言已关闭` : `【群事件】全员禁言已开启`;
+        case 'essence': {
+            const sender = uniUserId(event.sender_id, prefix);
+            return `【群事件】${operator || '管理员'} 将 ${sender || '成员'} 的消息${event.sub_type === 'delete' ? '取消' : '设为'}精华`;
         }
-        case 'friend_file_upload':
-            return `【好友事件】${user || '好友'} 发送了文件「${event.file?.name || event.file_name || '未知文件'}」`;
-        case 'peer_pin_change':
-            return `【会话事件】${user || '成员'} ${event.pinned === false ? '取消置顶' : '置顶'}了一条消息`;
-        case 'group_message_reaction':
-            return `【群事件】${user || '成员'} 对消息${event.reaction ? `添加表情「${event.reaction}」` : '做出反应'}`;
-        case 'group_essence_message_change':
-            return `【群事件】${user || '成员'} 的消息被${event.is_set === false ? '取消' : '设为'}精华`;
+        case 'group_msg_emoji_like': {
+            const likes = Array.isArray(event.likes) ? event.likes : [];
+            const emojiText = likes
+                .map((l: any) => {
+                    const cnt = l && l.count && Number(l.count) > 1 ? `(×${l.count})` : '';
+                    return `「${l ? formatEmojiId(l.emoji_id) : '未知表情'}」${cnt}`;
+                })
+                .join('、');
+            const action = event.is_add === false ? '取消' : '添加';
+            return `【群事件】${user || '有成员'} 对消息${action}了表情${emojiText || '（未知）'}`;
+        }
         default:
             return '';
     }

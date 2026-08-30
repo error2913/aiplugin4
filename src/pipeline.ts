@@ -3,7 +3,7 @@ import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { Context } from "./context/context";
-import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_RAW_LIMIT, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist } from "./event/notice";
+import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_RAW_LIMIT, isDuplicateEvent, isEventRawRetainable, isNoticeInWhitelist, parseNoticeWhitelist } from "./event/notice";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
@@ -320,7 +320,7 @@ export class MessagePipeline {
         const noticeType = String(event.notice_type);
         const subType = String(event.sub_type || '');
         const whitelist = parseNoticeWhitelist(NOTICE_TYPES);
-        if (!whitelist.has(noticeType) && !whitelist.has(subType)) {
+        if (!isNoticeInWhitelist(noticeType, subType, whitelist)) {
             log.debug(`ob11 通知事件不在白名单，跳过: type=${noticeType} sub=${subType}`);
             return;
         }
@@ -341,11 +341,12 @@ export class MessagePipeline {
             }
             sid = `${prefix}-Group:${event.group_id}`;
         } else {
-            if (!event.user_id) {
-                log.debug(`ob11 通知事件（好友事件）缺少 user_id，跳过: type=${noticeType}`);
+            const uid = event.user_id ?? event.operator_id;
+            if (!uid) {
+                log.debug(`ob11 通知事件（好友事件）缺少 user_id/operator_id，跳过: type=${noticeType}`);
                 return;
             }
-            sid = `${prefix}:${event.user_id}`;
+            sid = `${prefix}:${uid}`;
         }
 
         const text = buildNoticeText(event, prefix);
@@ -354,7 +355,8 @@ export class MessagePipeline {
             return;
         }
 
-        const userId = event.user_id ? `${prefix}:${event.user_id}` : '';
+        const eventUserId = event.user_id ?? event.operator_id;
+        const userId = eventUserId ? `${prefix}:${eventUserId}` : '';
         const messageId = event.message_id !== undefined && event.message_id !== null ? String(event.message_id) : '';
         await MessagePipeline.recordEventPrompt({
             sid,
