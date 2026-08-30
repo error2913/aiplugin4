@@ -11,6 +11,9 @@ export const changelog: { [version: string]: string } = {
 - 「消息触发」页签新增「评分触发配置」（TOML 单条、分段 TOML，缺省段/字段使用默认值）：[scoring] speak_threshold / wait_cooldown、[weights] 五维权重、[energy] initial / reply_cost / recover_min、[gate] min_reply_interval / max_judge_per_hour、[model] context_count / timeout_sec / retries
 - 对话模型 use 新增 judge 用途：可为评分智能体单独配置模型，未单独配置时自动回退 chat 模型（仅模型配置描述与示例变化，解析结构不变）
 - .ai off --j 单独关闭评分触发并清理其 WAIT 冷却与内存状态；.ai stop 同样清理
+
+## 修复
+- 图片转 base64 连续失败达到 3 次后永久放弃重试：不再按 1 小时冷却期周期反复请求，避免过期链接一直重试
 `,
     "4.18.1": `## 新功能
 - 新增 .ai live：查看会话实时运行状态——流式输出/工具调用、运行中请求数、排队数、定时器；.ai live all 查看全局活跃会话总览（仅骰主）

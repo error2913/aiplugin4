@@ -1254,6 +1254,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(img.format, 'png');
             assert.equal(img.base64Failed, false, '成功后失败标记应为 false');
             assert.equal(img.base64FailedAt, 0, '成功后失败时间戳应清空');
+            assert.equal(img.base64FailedCount, 0, '成功后失败次数应清零');
             assert.equal(img.type, 'base64');
         } finally {
             (globalThis as any).fetch = origFetch;
@@ -1282,6 +1283,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(fetchCount, 1, '首次失败应请求一次后端');
             assert.equal(img.base64Failed, true, '失败后应落标记');
             assert.ok(img.base64FailedAt > 0, '失败后应记录时间戳');
+            assert.equal(img.base64FailedCount, 1, '失败后连续失败次数应为 1');
             assert.equal(img.base64, '');
             assert.equal(img.type, 'url');
             // 冷却期内再次请求：不再发后端请求，也不再报错
@@ -1329,6 +1331,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(img.base64, 'QUJD');
             assert.equal(img.base64Failed, false);
             assert.equal(img.base64FailedAt, 0);
+            assert.equal(img.base64FailedCount, 0, '重试成功后失败次数应清零');
             assert.equal(img.isBase64RetryBlocked(), false);
         } finally {
             Date.now = origNow;
@@ -1360,6 +1363,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             await Promise.all([p1, p2]);
             assert.equal(fetchCount, 1, '去重后后端只请求一次');
             assert.equal(img.base64Failed, true);
+            assert.equal(img.base64FailedCount, 1, '失败后连续失败次数应为 1');
             // 请求结束后去重槽位应释放：手动清除失败标记（模拟冷却期结束）后应重新请求
             img.base64Failed = false;
             img.base64FailedAt = 0;
@@ -1408,14 +1412,72 @@ export const tests: Record<string, () => void | Promise<void>> = {
     /** Image 新字段持久化：revive 恢复 base64Failed/base64FailedAt，缺字段回退默认值 */
     testImageReviveKeepsFailMarker(): void {
         const failedAt = Date.now() - 1000;
-        const img = revive(Image, { imageId: 'x1', url: 'https://example.com/c.png', base64Failed: true, base64FailedAt: failedAt });
+        const img = revive(Image, { imageId: 'x1', url: 'https://example.com/c.png', base64Failed: true, base64FailedAt: failedAt, base64FailedCount: 2 });
         assert.equal(img.base64Failed, true);
         assert.equal(img.base64FailedAt, failedAt);
         assert.equal(img.isBase64RetryBlocked(), true, '持久化的失败标记应让冷却期生效');
+        assert.equal(img.base64FailedCount, 2, '持久化的失败次数应恢复');
         const img2 = revive(Image, { imageId: 'x2', url: 'https://example.com/d.png' });
         assert.equal(img2.base64Failed, false, '缺字段应回退默认 false');
         assert.equal(img2.base64FailedAt, 0, '缺字段应回退默认 0');
+        assert.equal(img2.base64FailedCount, 0, '缺字段应回退默认 0');
         assert.equal(img2.isBase64RetryBlocked(), false);
+        const img3 = revive(Image, { imageId: 'x3', url: 'https://example.com/e.png', base64Failed: true, base64FailedAt: 1, base64FailedCount: 3 });
+        assert.equal(img3.base64FailedCount, 3, '持久化的永久阻断次数应恢复');
+        assert.equal(img3.isBase64RetryBlocked(), true, '持久化的永久阻断应生效（即使时间戳早已超过冷却期）');
+    },
+
+    /** Image.urlToBase64 永久阻断：连续失败达上限后，即使冷却期已过也不再重试 */
+    async testImageUrlToBase64PermanentBlockAfterMax(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        const origNow = Date.now;
+        let fakeNow = 1000000;
+        Date.now = () => fakeNow;
+        let fetchCount = 0;
+        (globalThis as any).fetch = async () => {
+            fetchCount++;
+            return { ok: false, status: 500, text: async () => '{"error":"expired"}' };
+        };
+        try {
+            const img = new Image();
+            img.imageId = 'img_perm';
+            img.url = 'https://expired.qq.com/perm.png';
+            // 第 1 次失败：计数 1，进入 1 小时冷却
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1);
+            assert.equal(img.base64FailedCount, 1);
+            // 冷却期内不重试
+            fakeNow += 59 * 60 * 1000;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 1, '冷却期内不应重试');
+            // 1 小时后重试：第 2 次失败
+            fakeNow += 2 * 60 * 1000;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 2);
+            assert.equal(img.base64FailedCount, 2);
+            // 再过 1 小时重试：第 3 次失败 → 达到上限，永久阻断
+            fakeNow += 2 * 60 * 60 * 1000;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 3);
+            assert.equal(img.base64FailedCount, 3);
+            assert.equal(img.isBase64RetryBlocked(), true, '达到上限后应永久阻断');
+            // 即使时间远超冷却期（100 天后），也不再请求
+            fakeNow += 100 * 24 * 60 * 60 * 1000;
+            await img.urlToBase64();
+            assert.equal(fetchCount, 3, '永久阻断后不应再请求后端');
+            assert.equal(img.isBase64RetryBlocked(), true);
+            // 手动清掉冷却标记也不能恢复（计数仍达上限）
+            img.base64Failed = false;
+            img.base64FailedAt = 0;
+            assert.equal(img.isBase64RetryBlocked(), true, '永久阻断与冷却时间无关');
+            await img.urlToBase64();
+            assert.equal(fetchCount, 3, '永久阻断后手动清标记也不应请求');
+        } finally {
+            Date.now = origNow;
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
     },
 
     /** 评分 gate 门禁：各 DROP 条件命中直接丢弃且不触发小模型（零 LLM），正常条件放行并累计每小时计数 */
