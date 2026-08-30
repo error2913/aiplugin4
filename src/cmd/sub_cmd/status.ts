@@ -26,6 +26,7 @@ export function registerCmdStatus() {
         概率模式(p): ${setting.prob > -1 ? `${setting.prob}%` : '关闭'}
         活跃时间段: ${(start !== 0 || end !== 0) ? `${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}` : '未设置'}
         活跃次数: ${segs > 0 ? segs : '未设置'}
+        评分触发(j): ${setting.judge ? '开启' : '关闭'}
         待机模式: ${setting.standby ? '开启' : '关闭'}`);
         return ret;
     }

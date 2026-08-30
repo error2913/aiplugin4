@@ -33,6 +33,7 @@ import Model from "../src/model/model";
 import MultimodalModel from "../src/model/multimodal";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
+import { TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
@@ -68,7 +69,7 @@ function restoreImageTestConfig() {
 /** Judge 测试辅助：干净的 judge 状态（当前小时） */
 function freshJudgeState(now: number): any {
     return {
-        lastSpeakAt: 0,
+        pending: null,
         lastEnergyAt: now,
         energy: 100,
         waitUntil: 0,
@@ -1502,26 +1503,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.match(g.reason, /计时器已挂起/);
             session.context.timer = null;
 
-            // WAIT 冷却中 → 不并发评分
-            const waitState = freshJudgeState(fakeNow);
-            waitState.waitUntil = fakeNow + 60 * 1000;
-            g = (JudgeManager as any).gate(session, waitState);
-            assert.equal(g.drop, true);
-            assert.match(g.reason, /WAIT冷却中/);
-
-            // WAIT 冷却已过 → 放行（冷却只按时间戳判定，不重判）
-            const expiredWaitState = freshJudgeState(fakeNow);
-            expiredWaitState.waitUntil = fakeNow - 1;
-            g = (JudgeManager as any).gate(session, expiredWaitState);
-            assert.equal(g.drop, false, 'WAIT 冷却过期后应放行');
-
-            // 最小回复间隔冷却中 → DROP
-            const coolState = freshJudgeState(fakeNow);
-            coolState.lastSpeakAt = fakeNow - 1000;
-            g = (JudgeManager as any).gate(session, coolState);
-            assert.equal(g.drop, true);
-            assert.match(g.reason, /冷却剩余/);
-
             // 精力为 0（下限）→ DROP
             const lowState = freshJudgeState(fakeNow);
             lowState.energy = 0;
@@ -1566,32 +1547,31 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 其他方式触发会话：刷新回复间隔、解除 WAIT 冷却、不扣精力；未开启 --j 的会话不建状态 */
+    /** 其他方式触发会话：起一轮 WAIT 作为冷却（bot 刚被触发即冷却），不扣精力，并注册轮末定时器 */
     testJudgeNoteSessionTrigger(): void {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
         const cfg = (Config as any).trigger.JUDGE;
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        let judgeWaitTimers = 0;
+        (TimerManager as any).addJudgeWaitTimer = (_ctx: any, _session: any, _target: number) => { judgeWaitTimers++; };
         const sid = 'note-trigger';
-        // 无状态（未开启过 --j）的会话不应被记账
-        (JudgeManager as any).noteSessionTrigger('note-absent', '正则');
-        assert.equal((JudgeManager as any).states.has('note-absent'), false, '无状态会话不应被记账');
-        // 已开启过 --j：注入状态后触发应记账
-        const state = {
-            lastSpeakAt: 0,
-            lastEnergyAt: 0,
-            energy: 100,
-            waitUntil: Date.now() + 60000,
-            hourly: { hour: 0, count: 0 },
-            msgTimes: []
-        };
-        (JudgeManager as any).states.set(sid, state);
-        const before = Date.now();
         try {
-            (JudgeManager as any).noteSessionTrigger(sid, '正则');
-            const after = Date.now();
-            assert.ok(state.lastSpeakAt >= before && state.lastSpeakAt <= after, '应刷新最近触发时间');
+            // 无状态会话触发：也应建状态并进入 WAIT 轮（触发即冷却，不需要预先开启过 --j 的状态）
+            (JudgeManager as any).noteSessionTrigger(makeCtx(), makeJudgeSession(sid), '正则');
+            const state = (JudgeManager as any).states.get(sid);
+            assert.ok(state, '触发应创建 judge 状态');
+            assert.ok(state.waitUntil > fakeNow, '应进入 WAIT 轮作为冷却');
+            assert.ok(state.waitUntil <= fakeNow + cfg.SCORING.wait_cooldown * 1000, 'WAIT 轮截止应为 now + wait_cooldown');
+            assert.equal(state.pending, null, '触发消息由 chat 本身处理，不应挂 pending');
             assert.equal(state.energy, 100, 'A1：其他方式触发不扣精力');
-            assert.equal(state.waitUntil, 0, '应解除 WAIT 冷却');
+            assert.equal(judgeWaitTimers, 1, '应注册 WAIT 轮末定时器');
         } finally {
+            Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession(sid);
+            resetConfigCache();
         }
     },
 
@@ -1673,7 +1653,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.ENERGY.initial, 100);
         assert.equal(cfg.ENERGY.reply_cost, 5);
         assert.equal(cfg.ENERGY.recover_min, 4);
-        assert.equal(cfg.GATE.min_reply_interval, 120);
         assert.equal(cfg.GATE.max_judge_per_hour, 20);
         assert.equal(cfg.MODEL.context_count, 10);
         assert.equal(cfg.MODEL.timeout_sec, 30);
@@ -1686,7 +1665,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.SCORING.wait_cooldown, 30, 'TOML 覆盖 wait_cooldown 应生效');
         assert.equal(cfg.WEIGHTS.relevance, 25, '未配置段应并入默认权重');
         assert.equal(cfg.ENERGY.initial, 100, '未配置段应并入默认精力');
-        assert.equal(cfg.GATE.min_reply_interval, 120, '未配置段应并入默认门禁');
         assert.equal(cfg.MODEL.timeout_sec, 30, '未配置段应并入默认模型');
         // 单键部分覆盖：只改 energy.reply_cost，其余键并入默认值
         TC.templateConfigs[key] = ['[energy]\nreply_cost = 8'];
@@ -1708,7 +1686,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     testJudgeClearSession(): void {
         const sid = 'clear-me';
         const state = {
-            lastSpeakAt: 0,
+            pending: null,
             lastEnergyAt: 0,
             energy: 100,
             waitUntil: Date.now() + 60000,
@@ -1721,46 +1699,46 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (JudgeManager as any).clearSession(sid);
     },
 
-    /** evaluate 端到端：gate 命中（计时器挂起/冷却）时直接丢弃，不调用评分小模型 */
+    /** evaluate 端到端：gate 命中（计时器挂起）直接丢弃 / WAIT 轮中消息挂起 pending、轮末重新过 gate，均不触发评分小模型 */
     async testJudgeEvaluateDropNoLlm(): Promise<void> {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
         let llmCalls = 0;
         (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => { llmCalls++; return ''; } };
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        (TimerManager as any).addJudgeWaitTimer = () => { };
         const sid = 'eval-drop';
-        const session = { sessionId: sid, context: { timer: 1, messages: [] }, running: false, starting: false };
+        const session = makeJudgeSession(sid);
         try {
             // 计时器已挂起 → gate DROP，不触发小模型
+            session.context.timer = 1;
             await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息');
             assert.equal(llmCalls, 0, 'gate 命中计时器挂起时应直接丢弃，不触发评分小模型');
-            // 冷却期内 → gate DROP，不触发小模型
+
+            // WAIT 轮进行中 → 不评分，消息挂起 pending（轮末重新过 gate）
             session.context.timer = null;
-            (JudgeManager as any).states.set(sid, {
-                lastSpeakAt: fakeNow, lastEnergyAt: fakeNow, energy: 100,
-                waitUntil: 0,
-                hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
-            });
-            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息2');
-            assert.equal(llmCalls, 0, '冷却期内也应直接丢弃，不触发评分小模型');
-            // WAIT 冷却期内 → gate DROP，不触发小模型
-            session.context.timer = null;
-            (JudgeManager as any).states.set(sid, {
-                lastSpeakAt: 0, lastEnergyAt: fakeNow, energy: 100,
-                waitUntil: fakeNow + 60 * 1000,
-                hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
-            });
-            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息3');
-            assert.equal(llmCalls, 0, 'WAIT 冷却期内也应直接丢弃，不触发评分小模型');
+            const waitState = freshJudgeState(fakeNow);
+            waitState.waitUntil = fakeNow + 60 * 1000;
+            (JudgeManager as any).states.set(sid, waitState);
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, 'WAIT中消息1');
+            assert.equal(llmCalls, 0, 'WAIT 轮中不应触发评分小模型');
+            assert.equal(waitState.pending.text, 'WAIT中消息1', 'WAIT 轮中消息应挂起 pending');
+
+            // WAIT 轮中连续消息 → 最新一条覆盖 pending，仍不评分
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, 'WAIT中消息2');
+            assert.equal(waitState.pending.text, 'WAIT中消息2', 'WAIT 轮中最新消息应覆盖 pending');
+            assert.equal(llmCalls, 0, 'WAIT 轮中始终不触发评分小模型');
         } finally {
             Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession(sid);
             delete (Agent as any).agentMap['judge_agent'];
             resetConfigCache();
         }
     },
 
-    /** evaluate 端到端：高分 SPEAK 直接插话 / 低分 WAIT 只记冷却时间戳（不插话） */
+    /** evaluate 端到端：高分 SPEAK 直接插话（扣精力）/ 低分进入 WAIT 轮（不插话、注册轮末定时器） */
     async testJudgeEvaluateBranches(): Promise<void> {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
@@ -1777,6 +1755,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
             starting: false,
             chat: async (_ctx: any, _msg: any, reason: string) => { chatReasons.push(reason); }
         });
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        let judgeWaitTimers = 0;
+        (TimerManager as any).addJudgeWaitTimer = () => { judgeWaitTimers++; };
         try {
             // SPEAK：高分直接插话
             (Agent as any).agentMap['judge_agent'] = {
@@ -1787,7 +1768,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const speakState = (JudgeManager as any).states.get('eval-speak');
             assert.equal(speakState.energy, 100 - cfg.ENERGY.reply_cost, 'SPEAK 插话成功应扣减精力');
 
-            // WAIT：低于 speak_threshold 只记冷却时间戳，不直接插话
+            // WAIT：低于 speak_threshold 进入 WAIT 轮，不直接插话，注册轮末定时器
             (Agent as any).agentMap['judge_agent'] = {
                 chatMessages: async () => JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' })
             };
@@ -1795,21 +1776,25 @@ export const tests: Record<string, () => void | Promise<void>> = {
             await (JudgeManager as any).evaluate(makeCtx(), {}, waitSession, '普通消息');
             const waitState = (JudgeManager as any).states.get('eval-wait');
             assert.ok(waitState, 'WAIT 分支应保留状态');
-            assert.ok(waitState.waitUntil > fakeNow, 'WAIT 分支应记录冷却截止时间戳');
-            assert.ok(waitState.waitUntil <= fakeNow + cfg.SCORING.wait_cooldown * 1000, 'WAIT 冷却截止应为 now + wait_cooldown');
+            assert.ok(waitState.waitUntil > fakeNow, 'WAIT 分支应进入 WAIT 轮');
+            assert.ok(waitState.waitUntil <= fakeNow + cfg.SCORING.wait_cooldown * 1000, 'WAIT 轮截止应为 now + wait_cooldown');
+            assert.equal(waitState.pending, null, 'WAIT 轮开始时无挂起消息');
             assert.deepEqual(chatReasons, ['评分触发'], 'WAIT 分支不应直接插话');
             assert.equal(waitState.energy, 100, 'WAIT 未插话不扣精力');
+            assert.equal(judgeWaitTimers, 1, 'WAIT 分支应注册轮末定时器');
 
-            // 低分同样进入 WAIT（无 IGNORE 级别）：只记冷却不插话
+            // 低分同样进入 WAIT（无 IGNORE 级别）：不插话、不扣精力
             (Agent as any).agentMap['judge_agent'] = {
                 chatMessages: async () => JSON.stringify({ relevance: 0, willingness: 0, social: 0, timing: 0, continuity: 0, reason: '无关' })
             };
             await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-wait-low'), '广告');
             const lowState = (JudgeManager as any).states.get('eval-wait-low');
-            assert.ok(lowState && lowState.waitUntil > fakeNow, '低分也应记 WAIT 冷却');
+            assert.ok(lowState && lowState.waitUntil > fakeNow, '低分也应进入 WAIT 轮');
             assert.deepEqual(chatReasons, ['评分触发'], '低分不应插话');
+            assert.equal(judgeWaitTimers, 2, '低分也应注册轮末定时器');
         } finally {
             Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession('eval-speak');
             (JudgeManager as any).clearSession('eval-wait');
             (JudgeManager as any).clearSession('eval-wait-low');
@@ -1818,6 +1803,160 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
         }
     },
+
+    /** WAIT 轮末：到点且有挂起消息 → 重新过 gate 评分；未到点 / 无挂起消息 → 不评分 */
+    async testJudgeWaitRound(): Promise<void> {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        let llmCalls = 0;
+        (Agent as any).agentMap['judge_agent'] = {
+            chatMessages: async () => { llmCalls++; return JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' }); }
+        };
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        (TimerManager as any).addJudgeWaitTimer = () => { };
+        const sid = 'wait-round';
+        const session = makeJudgeSession(sid);
+        try {
+            // 未到点：旧定时器触发忽略，不清 pending、不评分
+            const early = freshJudgeState(fakeNow);
+            early.waitUntil = fakeNow + 60 * 1000;
+            early.pending = { ctx: makeCtx(), msg: {}, text: '未到点消息', session };
+            (JudgeManager as any).states.set(sid, early);
+            const earlyResult = await (JudgeManager as any).endWaitRound(sid);
+            assert.equal(earlyResult, false, '未到点应返回 false（定时器重新入队）');
+            assert.equal(llmCalls, 0, '未到点不应触发评分');
+            assert.equal(early.pending.text, '未到点消息', '未到点不应清空 pending');
+
+            // 到点且有挂起消息 → 重新过 gate 评分；低分再次进入 WAIT 轮
+            Date.now = () => fakeNow + 61 * 1000;
+            const expired = freshJudgeState(fakeNow + 61 * 1000);
+            expired.waitUntil = fakeNow + 60 * 1000;
+            expired.pending = { ctx: makeCtx(), msg: {}, text: '轮末消息', session };
+            (JudgeManager as any).states.set(sid, expired);
+            const expiredResult = await (JudgeManager as any).endWaitRound(sid);
+            assert.equal(expiredResult, true, '到点应返回 true（本轮已结束）');
+            const after = (JudgeManager as any).states.get(sid);
+            assert.equal(llmCalls, 1, '轮末挂起消息应重新过 gate 评分');
+            assert.equal(after.pending, null, '评分后 pending 应清空');
+            assert.ok(after.waitUntil > fakeNow + 61 * 1000, '低分重新评分后应再进入 WAIT 轮');
+
+            // 到点但无挂起消息 → 无事发生，不评分
+            const before = llmCalls;
+            const empty = freshJudgeState(fakeNow + 61 * 1000);
+            empty.waitUntil = fakeNow + 60 * 1000;
+            (JudgeManager as any).states.set(sid, empty);
+            const emptyResult = await (JudgeManager as any).endWaitRound(sid);
+            assert.equal(emptyResult, true, '到点但无挂起消息也应返回 true');
+            assert.equal((JudgeManager as any).states.get(sid).pending, null, '无挂起消息时 pending 保持 null');
+            assert.equal(llmCalls, before, '无挂起消息不应触发评分');
+        } finally {
+            Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
+            (JudgeManager as any).clearSession(sid);
+            delete (Agent as any).agentMap['judge_agent'];
+            resetConfigCache();
+        }
+    },
+
+    /** 会话结束（.ai stop / .ai off）：清掉 judge 状态（含 pending）并移除 WAIT 轮末定时器，轮内挂起消息不再重新评分 */
+    async testJudgeSessionEndClearsPending(): Promise<void> {
+        const sid = 'session-end';
+        const state = freshJudgeState(Date.now());
+        state.waitUntil = Date.now() + 60 * 1000;
+        state.pending = { ctx: makeCtx(), msg: {}, text: '轮内消息', session: makeJudgeSession(sid) };
+        (JudgeManager as any).states.set(sid, state);
+        const fakeTimer = { sid, type: 'judgeWait', target: Math.floor(Date.now() / 1000) + 60 } as any;
+        TimerManager.timerQueue.push(fakeTimer);
+        let llmCalls = 0;
+        (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => { llmCalls++; return ''; } };
+        try {
+            // 模拟 stopConversation / .ai off 的清理：clearSession 应同时清掉 judge 状态（含 pending）并移除轮末定时器
+            (JudgeManager as any).clearSession(sid);
+            assert.equal((JudgeManager as any).states.get(sid), undefined, '会话结束应清掉 judge 状态（含 pending）');
+            assert.equal(TimerManager.timerQueue.includes(fakeTimer), false, 'clearSession 应一并移除 WAIT 轮末定时器');
+            // 即便有残留轮末定时器触发（endWaitRound 被调用），状态已清也不会重判轮内挂起消息
+            const ended = await (JudgeManager as any).endWaitRound(sid);
+            assert.equal(ended, true, '会话结束后 endWaitRound 应直接结束（无状态）');
+            assert.equal(llmCalls, 0, '会话结束后不应再重判轮内挂起消息');
+        } finally {
+            delete (Agent as any).agentMap['judge_agent'];
+            (JudgeManager as any).clearSession(sid);
+            resetConfigCache();
+        }
+    },
+
+    /** evaluate 补跑：轮已到点但定时器兜底未触发时，先重判轮内挂起消息；重判低分再进新 WAIT 轮，当前消息挂起等下一轮 */
+    async testJudgeEvaluatePendingCatchup(): Promise<void> {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        let llmCalls = 0;
+        (Agent as any).agentMap['judge_agent'] = {
+            chatMessages: async () => { llmCalls++; return JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' }); }
+        };
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        (TimerManager as any).addJudgeWaitTimer = () => { };
+        const sid = 'pending-catchup';
+        const session = makeJudgeSession(sid);
+        try {
+            // 轮已到点（waitUntil 已过）、轮内挂起一条消息、定时器兜底尚未触发
+            const state = freshJudgeState(fakeNow + 61 * 1000);
+            state.waitUntil = fakeNow + 60 * 1000;
+            state.pending = { ctx: makeCtx(), msg: {}, text: '轮末消息', session };
+            (JudgeManager as any).states.set(sid, state);
+            Date.now = () => fakeNow + 61 * 1000;
+            // 此时又来一条新消息 → 先补跑重判轮末消息（低分再进新 WAIT 轮），当前消息挂起等下一轮
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '轮后新消息');
+            const after = (JudgeManager as any).states.get(sid);
+            assert.equal(llmCalls, 1, '补跑应只重判轮末挂起消息一次，不重复评分');
+            assert.equal(after.pending.text, '轮后新消息', '重判后进入新 WAIT 轮，当前消息应挂起');
+            assert.ok(after.waitUntil > fakeNow + 61 * 1000, '低分重判后应再进入新 WAIT 轮');
+            assert.equal(after.energy, 100, '低分重判不扣精力');
+        } finally {
+            Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
+            (JudgeManager as any).clearSession(sid);
+            delete (Agent as any).agentMap['judge_agent'];
+            resetConfigCache();
+        }
+    },
+
+    /** wait_cooldown=0：触发/评分低分都不进入 WAIT 轮、不注册轮末定时器，也不残留挂起消息 */
+    testJudgeWaitCooldownZero(): void {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        TC.templateConfigs['评分触发配置'] = ['[scoring]\nwait_cooldown = 0'];
+        resetConfigCache();
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        let judgeWaitTimers = 0;
+        (TimerManager as any).addJudgeWaitTimer = () => { judgeWaitTimers++; };
+        const sid = 'wait-zero';
+        const session = makeJudgeSession(sid);
+        try {
+            // 其他方式触发：wait_cooldown=0 不进入 WAIT 轮，不注册定时器
+            (JudgeManager as any).noteSessionTrigger(makeCtx(), session, '正则');
+            let state = (JudgeManager as any).states.get(sid);
+            assert.ok(state, '触发仍应创建状态');
+            assert.equal(state.waitUntil, 0, 'wait_cooldown=0 不应进入 WAIT 轮');
+            assert.equal(state.pending, null, '不应残留挂起消息');
+            assert.equal(judgeWaitTimers, 0, 'wait_cooldown=0 不应注册轮末定时器');
+            // 评分低分分支：同样不进入 WAIT 轮
+            (JudgeManager as any).startWaitRound(makeCtx(), session, '评分低分');
+            state = (JudgeManager as any).states.get(sid);
+            assert.equal(state.waitUntil, 0, '低分在 wait_cooldown=0 时也不应进入 WAIT 轮');
+            assert.equal(state.pending, null, '低分在 wait_cooldown=0 时也不应残留挂起消息');
+            assert.equal(judgeWaitTimers, 0, '低分在 wait_cooldown=0 时也不应注册定时器');
+        } finally {
+            Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
+            (JudgeManager as any).clearSession(sid);
+            delete TC.templateConfigs['评分触发配置'];
+            resetConfigCache();
+        }
+    },
+
 
     /** 多模态文本转换：纯文本原样返回；图片标签转内容块数组；无法解析保留原标签 */
     async testTextToMultimodalContent(): Promise<void> {

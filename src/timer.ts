@@ -1,5 +1,6 @@
-// 定时器模块：目标/间隔/活跃时间段三类定时任务的调度与持久化
+// 定时器模块：目标/间隔/活跃时间段/WAIT轮末 四类定时任务的调度与持久化
 import { ext } from "./config/config";
+import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { Session } from "./session/session";
 import { getSession } from "./session/session_service";
@@ -29,7 +30,7 @@ export class TimerInfo {
     target: number; // 定时器具体触发时间，单位秒
     interval: number; // 定时器触发间隔，单位秒
     count: number; // 定时器触发次数，若为-1则无限循环，若为0则不触发，若为其他正整数则触发该次数后停止
-    type: 'target' | 'interval' | 'activeTime'; // 定时器类型，目标时间定时器、间隔定时器、活动时间定时器
+    type: 'target' | 'interval' | 'activeTime' | 'judgeWait'; // 定时器类型，目标时间定时器、间隔定时器、活动时间定时器、评分WAIT轮末定时器
     content: string;
 
     constructor() {
@@ -142,7 +143,31 @@ export class TimerManager {
 触发时间:${fmtDate(target)}`);
     }
 
-    static removeTimers(sid: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime')[] = [], index_list: number[] = []) {
+    /** 评分 WAIT 轮末兜底定时器：到点后由 task 调 JudgeManager.endWaitRound 把轮内挂起消息重新过 gate（一次性） */
+    static addJudgeWaitTimer(ctx: seal.MsgContext, session: Session, target: number) {
+        const uid = ctx.player!.userId;
+        const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
+        const timer = new TimerInfo();
+        timer.sid = sessionId;
+        timer.isPrivate = ctx.isPrivate;
+        timer.epId = ctx.endPoint.userId;
+        timer.set = Math.floor(Date.now() / 1000);
+        timer.target = target;
+        timer.type = 'judgeWait';
+
+        this.timerQueue.push(timer);
+        this.saveTimerQueue();
+
+        if (!this.intervalId) {
+            log.info('定时器任务启动');
+            this.executeTask();
+        }
+
+        log.info(`添加${timer.type}定时器${session.id}:
+触发时间:${fmtDate(target)}`);
+    }
+
+    static removeTimers(sid: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime' | 'judgeWait')[] = [], index_list: number[] = []) {
         if (index_list.length > 0) {
             const timers = this.getTimers(sid, content, types);
 
@@ -173,7 +198,7 @@ export class TimerManager {
         this.saveTimerQueue();
     }
 
-    static getTimers(sid: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime')[] = []): TimerInfo[] {
+    static getTimers(sid: string = '', content: string = '', types: ('target' | 'interval' | 'activeTime' | 'judgeWait')[] = []): TimerInfo[] {
         return this.timerQueue.filter(timer =>
             (!sid || timer.sid === sid) &&
             (!content || timer.content === content) &&
@@ -199,6 +224,9 @@ export class TimerManager {
                 case 'activeTime': return `${i + 1 + (p - 1) * 10}. 定时器设定时间：${fmtDate(t.set)}
 类型:${t.type}
 目标时间：${fmtDate(t.target)}`;
+                case 'judgeWait': return `${i + 1 + (p - 1) * 10}. 定时器设定时间：${fmtDate(t.set)}
+类型:${t.type}
+WAIT轮末时间：${fmtDate(t.target)}`;
             }
         }).join('\n') + `\n当前页码:${p}/${Math.ceil(timers.length / 10)}`;
     }
@@ -323,6 +351,25 @@ ${lastTimePrompt}
                             await session.context.addSystemUserMessage(s, "活跃时间触发提示");
                             await session.chat(ctx, msg, '活跃时间');
 
+                            changed = true;
+                            break;
+                        }
+                        case 'judgeWait': {
+                            const target = timer.target;
+                            if (target > Math.floor(Date.now() / 1000)) {
+                                this.timerQueue.push(timer);
+                                continue;
+                            } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
+                                log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                continue;
+                            }
+
+                            // WAIT 轮末兜底：轮内若有挂起消息则重新过 gate 评分；一次性定时器，轮未到点（秒级定时目标与毫秒截止的舍入差）时重新入队
+                            const ended = await JudgeManager.endWaitRound(timer.sid);
+                            if (!ended) {
+                                this.timerQueue.push(timer);
+                                continue;
+                            }
                             changed = true;
                             break;
                         }

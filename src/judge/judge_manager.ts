@@ -1,10 +1,11 @@
 // 评分触发管理：gate 门禁（零 LLM）→ 评分小模型 → SPEAK/WAIT 两级；
-// 记录其他方式触发会话（刷新回复间隔/解除 WAIT 冷却，不扣精力），WAIT 只记冷却时间戳由 gate 直接 DROP。
+// 其他方式触发会话 = 起一轮 WAIT（bot 刚发言/刚被触发即冷却）；WAIT 轮内新消息不评分、挂起轮末最新一条重新过 gate，由内置定时器兜底触发。
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import { JudgeConfig } from "../config/configs/trigger";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
+import { TimerManager } from "../timer";
 import { buildContent, getRoleSetting } from "../utils/message";
 import { fmtDate } from "../utils/string";
 import { withTimeout } from "../utils/utils";
@@ -35,13 +36,13 @@ interface JudgeBuilt {
 }
 
 interface JudgeState {
-    /** 最近一次发言/被触发时间（毫秒），用于最小回复间隔冷却 */
-    lastSpeakAt: number;
     /** 精力最后记账时间（毫秒），用于懒恢复 */
     lastEnergyAt: number;
     energy: number;
-    /** WAIT 冷却截止时间戳（毫秒）：gate 在此前直接 DROP；0 表示无冷却 */
+    /** WAIT 轮截止时间戳（毫秒）：轮进行中（now < waitUntil）时新消息挂起 pending，不评分；0 表示无轮进行中 */
     waitUntil: number;
+    /** WAIT 轮内到达的最新一条消息（轮末重新过 gate 评分）；null 表示轮内无消息 */
+    pending: { ctx: seal.MsgContext; msg: seal.Message; text: string; session: Session } | null;
     /** 每会话每小时评分次数 */
     hourly: { hour: number; count: number };
     /** 15 秒窗口内的消息时间戳，用于密度判断 */
@@ -67,10 +68,10 @@ export class JudgeManager {
             return state;
         }
         state = {
-            lastSpeakAt: 0,
             lastEnergyAt: Date.now(),
             energy: Config.trigger.JUDGE.ENERGY.initial,
             waitUntil: 0,
+            pending: null,
             hourly: { hour: -1, count: 0 },
             msgTimes: []
         };
@@ -84,25 +85,31 @@ export class JudgeManager {
     }
 
     /**
-     * 会话被触发（含正则/计数/概率/计时器/评分等其他方式触发会话）时刷新回复间隔并解除 WAIT 冷却。
-     * 精力只在评分判定 SPEAK 插话成功时扣减，其他方式触发不扣费（A1）。
-     * 只在 judge 状态已存在（该会话开启过 --j）时记账，避免为从未用过的会话保留状态。
+     * 会话被其他方式触发（正则/计数/概率/计时器/活跃时间/评分 SPEAK 等，session.chat 每次被调用）时起一轮 WAIT：
+     * bot 刚发言/刚被触发即以 WAIT 轮作为冷却，期间新消息挂起、轮末重新过 gate，不扣精力（A1）。
      */
-    static noteSessionTrigger(sid: string, reason: string): void {
-        const state = this.states.get(sid);
-        if (!state) return;
+    static noteSessionTrigger(ctx: seal.MsgContext, session: Session, reason: string): void {
+        const state = this.ensureState(session.sessionId);
+        const cfg = Config.trigger.JUDGE;
         const now = Date.now();
-        state.lastSpeakAt = now;
-        state.waitUntil = 0;
-        log.info(`会话<${sid}>被触发(${reason})，刷新回复间隔，解除WAIT冷却，精力=${state.energy}`);
+        state.pending = null;
+        if (cfg.SCORING.wait_cooldown <= 0) {
+            state.waitUntil = 0;
+            log.info(`会话<${session.sessionId}>被触发(${reason})，wait_cooldown=0 不进入WAIT轮`);
+            return;
+        }
+        state.waitUntil = now + cfg.SCORING.wait_cooldown * 1000;
+        this.startWaitTimer(ctx, session);
+        log.info(`会话<${session.sessionId}>被触发(${reason})，进入WAIT轮${cfg.SCORING.wait_cooldown}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))} 精力=${state.energy}`);
     }
 
-    /** 清理会话 judge 状态：移除内存状态（.ai off / .ai stop 时调用） */
+    /** 清理会话 judge 状态：移除内存状态与 WAIT 轮末定时器（.ai off / .ai stop / LRU 淘汰时调用，保证会话结束后轮内挂起消息不再重新评分） */
     static clearSession(sid: string): void {
         this.states.delete(sid);
+        TimerManager.removeTimers(sid, "", ["judgeWait"], []);
     }
 
-    /** 主入口：消息已入库后由 pipeline 待机块调用；gate 通过才调用评分小模型 */
+    /** 主入口：消息已入库后由 pipeline 待机块调用；WAIT 轮内挂起，轮外 gate 通过才调用评分小模型 */
     static async evaluate(ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string): Promise<void> {
         const sid = session.sessionId;
         const cfg = Config.trigger.JUDGE;
@@ -111,6 +118,78 @@ export class JudgeManager {
         // 先记录消息时间戳再进 gate，密度统计覆盖 gate 丢弃的消息（反映真实群消息流速）
         state.msgTimes.push(Date.now());
 
+        const now = Date.now();
+        // WAIT 轮进行中：不评分，挂起最新一条消息，轮末重新过 gate
+        if (now < state.waitUntil) {
+            state.pending = { ctx, msg, text: messageText, session };
+            log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} WAIT轮中 挂起消息 轮末重新过gate 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
+            return;
+        }
+        // 轮已到点但定时器兜底尚未触发：先补跑轮末挂起消息，再继续处理当前消息
+        if (state.pending) {
+            await this.endWaitRound(sid);
+            const after = this.ensureState(sid);
+            if (Date.now() < after.waitUntil) {
+                after.pending = { ctx, msg, text: messageText, session };
+                log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} 补跑后进入新WAIT轮 挂起消息 截止${fmtDate(Math.floor(after.waitUntil / 1000))}`);
+                return;
+            }
+        }
+        await this.processMessage(ctx, msg, session, messageText, cfg);
+    }
+
+    /** WAIT 轮结束（内置定时器兜底触发，或 evaluate 发现已到点先补跑）：把轮内挂起的最新一条消息重新过 gate 评分。
+     *  返回是否已结束本轮；false = 轮未到点（定时器应重新入队等下一轮，避免秒级定时目标与毫秒截止的舍入差导致兜底静默丢失） */
+    static async endWaitRound(sid: string): Promise<boolean> {
+        const state = this.states.get(sid);
+        if (!state) return true;
+        if (Date.now() < state.waitUntil) {
+            log.info(`会话<${sid}> WAIT轮未到点，定时器重新入队等下一轮`);
+            return false;
+        }
+        state.waitUntil = 0;
+        const pending = state.pending;
+        state.pending = null;
+        if (!pending) {
+            log.info(`会话<${sid}> WAIT轮结束，无挂起消息`);
+            return true;
+        }
+        log.info(`会话<${sid}> WAIT轮结束，重新过 gate 评分`);
+        await this.evaluate(pending.ctx, pending.msg, pending.session, pending.text);
+        return true;
+    }
+
+    /** 启动一轮 WAIT：bot 刚发言/刚被触发/评分低分均进入，期间新消息挂起轮末重新过 gate */
+    private static startWaitRound(ctx: seal.MsgContext, session: Session, tag: string): void {
+        const cfg = Config.trigger.JUDGE;
+        const state = this.ensureState(session.sessionId);
+        const now = Date.now();
+        if (cfg.SCORING.wait_cooldown <= 0) {
+            state.waitUntil = 0;
+            state.pending = null;
+            log.info(`会话<${session.sessionId}> ${tag} wait_cooldown=0 不进入WAIT轮`);
+            return;
+        }
+        state.waitUntil = now + cfg.SCORING.wait_cooldown * 1000;
+        state.pending = null;
+        this.startWaitTimer(ctx, session);
+        log.info(`会话<${session.sessionId}> ${tag} 进入WAIT轮 ${cfg.SCORING.wait_cooldown}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))} 精力=${state.energy}`);
+    }
+
+    /** 用内置定时器为当前会话注册 WAIT 轮末兜底触发（一次性，到点后由 task 调 endWaitRound） */
+    private static startWaitTimer(ctx: seal.MsgContext, session: Session): void {
+        if (Config.trigger.JUDGE.SCORING.wait_cooldown <= 0) return;
+        const target = Math.floor(Date.now() / 1000) + Config.trigger.JUDGE.SCORING.wait_cooldown;
+        TimerManager.addJudgeWaitTimer(ctx, session, target);
+    }
+
+    /** 轮外消息进 gate：任一条件命中 DROP（不触发小模型），通过则评分 */
+    private static async processMessage(
+        ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string, cfg: JudgeConfig
+    ): Promise<void> {
+        const sid = session.sessionId;
+        const state = this.ensureState(sid);
+        const from = ctx.player?.userId || '';
         const g = this.gate(session, state);
         if (g.drop) {
             log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} gate=DROP(${g.reason}) 不触发小模型`);
@@ -123,19 +202,13 @@ export class JudgeManager {
         await this.judgeAndBranch(ctx, msg, session, cfg, built);
     }
 
-    /** gate 门禁（零 LLM）：任一条件命中直接 DROP，不触发小模型 */
+    /** gate 门禁（零 LLM）：任一条件命中直接 DROP，不触发小模型；WAIT 轮判定在 evaluate 入口，gate 不再管冷却 */
     private static gate(session: Session, state: JudgeState): { drop: boolean; reason: string } {
         const cfg = Config.trigger.JUDGE;
         const now = Date.now();
 
         // 会话已挂起待触发计时器（计数器/概率/计时器已安排回复）→ 防双触发
         if (session.context.timer !== null) return { drop: true, reason: '计时器已挂起' };
-        // WAIT 冷却中 → 不并发评分
-        if (now < state.waitUntil) return { drop: true, reason: 'WAIT冷却中' };
-
-        // 最小回复间隔：bot 刚发言/刚被其他方式触发过
-        const cooldownLeft = state.lastSpeakAt + cfg.GATE.min_reply_interval * 1000 - now;
-        if (cooldownLeft > 0) return { drop: true, reason: `冷却剩余${Math.ceil(cooldownLeft / 1000)}s` };
 
         // 精力懒恢复：按距上次记账的时间补齐（每5分钟），上限初始精力
         const elapsedMs = now - state.lastEnergyAt;
@@ -161,7 +234,7 @@ export class JudgeManager {
         return { drop: false, reason: '' };
     }
 
-    /** 评分 + 两级分支：SPEAK 直接插话 / WAIT 记冷却时间戳（冷却期内 gate 直接 DROP） */
+    /** 评分 + 两级分支：SPEAK 直接插话（session.chat 内部会起一轮 WAIT 作为冷却）/ WAIT 起一轮 WAIT 挂起后续消息 */
     private static async judgeAndBranch(
         ctx: seal.MsgContext, msg: seal.Message, session: Session,
         cfg: JudgeConfig, built: JudgeBuilt
@@ -196,9 +269,8 @@ export class JudgeManager {
             log.info(`SPEAK 扣减精力 ${cfg.ENERGY.reply_cost} → ${speakState.energy}`);
             return;
         }
-        const state = this.ensureState(session.sessionId);
-        state.waitUntil = Date.now() + cfg.SCORING.wait_cooldown * 1000;
-        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SCORING.speak_threshold}) 冷却${cfg.SCORING.wait_cooldown}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
+        this.startWaitRound(ctx, session, '评分低分');
+        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SCORING.speak_threshold}) 冷却${cfg.SCORING.wait_cooldown}s`);
     }
 
     /** 调用评分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */

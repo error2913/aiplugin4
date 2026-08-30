@@ -15,7 +15,7 @@ export interface JudgeConfig {
     /** 精力（0-100）：仅 SPEAK 插话成功扣减；每 5 分钟懒恢复 */
     ENERGY: { initial: number; reply_cost: number; recover_min: number };
     /** 门禁限额 */
-    GATE: { min_reply_interval: number; max_judge_per_hour: number };
+    GATE: { max_judge_per_hour: number };
     /** 评分小模型调用 */
     MODEL: { context_count: number; timeout_sec: number; retries: number };
 }
@@ -23,7 +23,7 @@ export interface JudgeConfig {
 const JUDGE_TOML_DEFAULT = `# 评分触发参数（.ai on --j 开启后生效；缺省段/字段使用默认值）
 [scoring]                       # 判定
 speak_threshold = 0.70          # 得分(0-1)≥该值直接插话
-wait_cooldown = 60              # 得分<speak_threshold 时的 WAIT 冷却秒数，期间 gate 直接丢弃；0=不冷却
+wait_cooldown = 60              # 得分<speak_threshold 或 bot 发言/被触发后的 WAIT 轮秒数；轮内消息挂起、轮末重新过 gate；0=不冷却
 
 [weights]                       # 五维权重
 relevance = 25
@@ -38,7 +38,6 @@ reply_cost = 5                  # 每次 SPEAK 插话成功扣减精力（0.05×
 recover_min = 4                 # 每 5 分钟懒恢复精力
 
 [gate]                          # 门禁限额
-min_reply_interval = 120        # 最小回复间隔(秒)，间隔内 gate 直接丢弃
 max_judge_per_hour = 20         # 每会话每小时最多评分次数
 
 [model]                         # 评分小模型调用
@@ -51,19 +50,19 @@ class JudgeConfigItem {
         scoring: { object: { speak_threshold: 'number', wait_cooldown: 'number' } },
         weights: { object: { relevance: 'number', willingness: 'number', social: 'number', timing: 'number', continuity: 'number' } },
         energy: { object: { initial: 'number', reply_cost: 'number', recover_min: 'number' } },
-        gate: { object: { min_reply_interval: 'number', max_judge_per_hour: 'number' } },
+        gate: { object: { max_judge_per_hour: 'number' } },
         model: { object: { context_count: 'number', timeout_sec: 'number', retries: 'number' } }
     }
     scoring: { speak_threshold: number; wait_cooldown: number };
     weights: { relevance: number, willingness: number, social: number, timing: number, continuity: number };
     energy: { initial: number; reply_cost: number; recover_min: number };
-    gate: { min_reply_interval: number; max_judge_per_hour: number };
+    gate: { max_judge_per_hour: number };
     model: { context_count: number; timeout_sec: number; retries: number };
     constructor() {
         this.scoring = { speak_threshold: 0.70, wait_cooldown: 60 };
         this.weights = { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 };
         this.energy = { initial: 100, reply_cost: 5, recover_min: 4 };
-        this.gate = { min_reply_interval: 120, max_judge_per_hour: 20 };
+        this.gate = { max_judge_per_hour: 20 };
         this.model = { context_count: 10, timeout_sec: 30, retries: 3 };
     }
 }
@@ -89,7 +88,7 @@ function getJudgeConfig(): JudgeConfig {
             SCORING: { speak_threshold: 0.70, wait_cooldown: 60 },
             WEIGHTS: { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 },
             ENERGY: { initial: 100, reply_cost: 5, recover_min: 4 },
-            GATE: { min_reply_interval: 120, max_judge_per_hour: 20 },
+            GATE: { max_judge_per_hour: 20 },
             MODEL: { context_count: 10, timeout_sec: 30, retries: 3 }
         };
     }
@@ -97,6 +96,8 @@ function getJudgeConfig(): JudgeConfig {
 
 export default class TriggerConfig {
     static register() {
+        seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "消息触发");
+        seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "消息触发");
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [
             "\\[CQ:at,qq=3893625976\\]",
             "^正确.*[。？！?!]$"
@@ -106,8 +107,6 @@ export default class TriggerConfig {
         seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "消息触发");
         seal.ext.registerStringConfig(ext, "默认触发活跃时间", "10:00-20:00-5", "格式：HH:mm-HH:mm-次数，示例 10:00-20:00-5 表示 10:00-20:00 之间最多触发 5 次", "消息触发");
         seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "消息触发");
-        seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "消息触发");
-        seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "消息触发");
         seal.ext.registerTemplateConfig(ext, "评分触发配置", [
             JUDGE_TOML_DEFAULT
         ], "评分触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后自动生效（缓存最多 1 分钟）", "消息触发");

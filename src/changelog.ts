@@ -13,15 +13,15 @@ export const changelog: { [version: string]: string } = {
 - 修复多模态模型（use=chat）作为会话模型时请求仍发给全局默认对话模型的问题：Agent.chat/chatMessages 现将解析到的模型实例显式传给请求层，会话级 .ai model 指定专属模型真正生效
 `,
     "4.19.0": `## 新功能
-- 新增评分触发（.ai on --j）：由评分智能体判断群聊消息是否值得机器人插话，避免待机时对无关消息强行回复。消息先入库，gate 门禁（零 LLM）先丢弃明显不该触发的情况（冷却中/精力不足/消息过密/每小时次数用尽/WAIT 冷却中/已有待触发计时器），通过后再由评分智能体按五维（相关度/意愿度/社交价值/时机/延续性）加权评分
-- 评分结果两级：得分≥speak_threshold 直接插话（SPEAK）；低于 speak_threshold 进入 WAIT，只记录冷却时间戳，wait_cooldown 秒内该会话的评分请求由 gate 直接丢弃（不重新评分）
-- 其他方式触发会话（正则/计数器/概率/计时器/AI设定触发条件等）同样刷新评分回复间隔并解除 WAIT 冷却，避免各触发方式互相刷屏；精力仅在评分判定 SPEAK 插话成功时扣减
-- 评分详情（输入、注入、维度分、加权总分、判定、gate DROP 原因、重试/超时）以 [judge] 标签打印到日志
+- 新增评分触发（.ai on --j）：由评分智能体判断群聊消息是否值得机器人插话，避免待机时对无关消息强行回复。消息先入库，gate 门禁（零 LLM）先丢弃明显不该触发的情况（精力不足/消息过密/每小时次数用尽/已有待触发计时器），通过后再由评分智能体按五维（相关度/意愿度/社交价值/时机/延续性）加权评分
+- 评分结果两级：得分≥speak_threshold 直接插话（SPEAK）；低于 speak_threshold 进入 WAIT 轮，wait_cooldown 秒内新消息不评分、挂起轮末最新一条重新过 gate；WAIT 轮按时间戳判定，由内置定时器在轮末兜底触发重判
+- 其他方式触发会话（正则/计数器/概率/计时器/AI设定触发条件等）同样以一轮 WAIT 作为冷却（bot 刚发言/刚被触发即冷却），轮内新消息挂起、轮末重新过 gate，避免各触发方式互相刷屏；会话结束（.ai off/.ai stop）时清理轮内挂起消息，不再重判；精力仅在评分判定 SPEAK 插话成功时扣减
+- 评分详情（输入、注入、维度分、加权总分、判定、gate DROP 原因、重试/超时、WAIT 轮挂起/轮末重判）以 [judge] 标签打印到日志
 
 ## 配置变更
-- 「消息触发」页签新增「评分触发配置」（TOML 单条、分段 TOML，缺省段/字段使用默认值）：[scoring] speak_threshold / wait_cooldown、[weights] 五维权重、[energy] initial / reply_cost / recover_min、[gate] min_reply_interval / max_judge_per_hour、[model] context_count / timeout_sec / retries
+- 「消息触发」页签新增「评分触发配置」（分段 TOML，缺省段/字段使用默认值）：[scoring] speak_threshold / wait_cooldown、[weights] 五维权重、[energy] initial / reply_cost / recover_min、[gate] max_judge_per_hour、[model] context_count / timeout_sec / retries
 - 对话模型 use 新增 judge 用途：可为评分智能体单独配置模型，未单独配置时自动回退 chat 模型（仅模型配置描述与示例变化，解析结构不变）
-- .ai off --j 单独关闭评分触发并清理其 WAIT 冷却与内存状态；.ai stop 同样清理
+- .ai off --j 单独关闭评分触发并清理其 WAIT 轮与内存状态；.ai stop 同样清理
 
 ## 修复
 - 图片转 base64 连续失败达到 3 次后永久放弃重试：不再按 1 小时冷却期周期反复请求，避免过期链接一直重试
