@@ -109,48 +109,54 @@ function scopePrefix(target: MemoTarget): string {
     return target.explicit ? `【${target.scopeLabel}:${target.session.sessionId}】` : `【${target.scopeLabel}】`;
 }
 
-const MEMO_HELP = `帮助:
-  【.ai memo status [--u|--g[=ID]]】查看记忆状态
-  【.ai memo add <内容> [--u|--g[=ID]]】添加长期记忆
-  【.ai memo list [页码] [--u|--g[=ID]]】展示长期记忆
-  【.ai memo update <ID> <新内容> [--u|--g[=ID]]】更新长期记忆
-  【.ai memo delete <ID1> <ID2> --关键词 [--u|--g[=ID]]】删除长期记忆
-  【.ai memo clear [--u|--g[=ID]]】清除长期记忆
-  【.ai memo obs [on/off|list|view <ID>|clr] [--u|--g[=ID]]】观察记忆
-  【.ai memo consolidate [--u|--g[=ID]]】巩固记忆
-  【.ai memo reflect <问题> [--u|--g[=ID]]】基于记忆推理
-  【.ai memo mm list|view|add|refresh|del [--u|--g[=ID]]】心智模型
-  【.ai memo <子命令> help】查看子命令详细帮助
-  范围说明: 默认当前会话；--u 查看本人个人记忆，--g 查看当前群；--u=<ID>/--g=<ID> 仅骰主可用`;
+const MEMO_SCOPE_NOTE = `范围: 默认当前会话（私聊=个人，群聊=当前群）；--u 本人个人记忆、--g 当前群；--u=<ID>/--g=<ID> 仅骰主`;
 
-const MEMO_STATUS_HELP = `【.ai memo status [--u|--g[=ID]]】查看记忆状态
-  范围: 默认当前会话；--u 本人个人记忆；--g 当前群；--u=<ID>/--g=<ID> 仅骰主`;
+const MEMO_HELP = `帮助:
+  【.ai memo status】查看记忆状态
+  【.ai memo add <内容>】添加长期记忆
+  【.ai memo list [页码]】展示长期记忆
+  【.ai memo update <ID> <新内容>】更新长期记忆
+  【.ai memo delete <ID1> <ID2> --关键词】删除长期记忆
+  【.ai memo clear】清除长期记忆
+  【.ai memo obs [on/off|list|view <ID>|clr]】观察记忆
+  【.ai memo consolidate】巩固记忆
+  【.ai memo reflect <问题>】基于记忆推理
+  【.ai memo mm list|view|add|refresh|del】心智模型
+  【.ai memo <子命令> help】查看子命令详细帮助
+  ${MEMO_SCOPE_NOTE}`;
+
+const MEMO_STATUS_HELP = `【.ai memo status】查看记忆状态
+  ${MEMO_SCOPE_NOTE}`;
 
 const MEMO_MEMORY_HELP = `长期记忆操作:
-  【.ai memo add <内容> [--u|--g[=ID]]】添加
-  【.ai memo list [页码] [--u|--g[=ID]]】展示（页码也可用 --page=N）
-  【.ai memo update <ID> <新内容> [--u|--g[=ID]]】更新
-  【.ai memo delete <ID1> <ID2> --关键词 [--u|--g[=ID]]】删除（支持关键词过滤）
-  【.ai memo clear [--u|--g[=ID]]】清除
-  范围: 默认当前会话；--u 本人；--g 当前群；--u=<ID>/--g=<ID> 仅骰主`;
+  【.ai memo add <内容>】添加
+  【.ai memo list [页码]】展示（页码也可用 --page=N）
+  【.ai memo update <ID> <新内容>】更新
+  【.ai memo delete <ID1> <ID2> --关键词】删除（支持关键词过滤）
+  【.ai memo clear】清除
+  ${MEMO_SCOPE_NOTE}`;
 
 const MEMO_OBS_HELP = `观察记忆操作:
-  【.ai memo obs on/off [--u|--g[=ID]]】开启/关闭（会话级设置）
-  【.ai memo obs list [--u|--g[=ID]]】展示
-  【.ai memo obs view <ID> [--u|--g[=ID]]】详情
-  【.ai memo obs clr [--u|--g[=ID]]】清除
-  【.ai memo obs】立即生成一次观察（仅当前会话，不带 --u/--g）`;
+  【.ai memo obs on/off】开启/关闭（会话级设置）
+  【.ai memo obs list】展示
+  【.ai memo obs view <ID>】详情
+  【.ai memo obs clr】清除
+  【.ai memo obs】立即生成一次观察（仅当前会话，不带 --u/--g）
+  ${MEMO_SCOPE_NOTE}`;
 
-const MEMO_CONSOLIDATE_HELP = `【.ai memo consolidate [--u|--g[=ID]]】立即巩固一次记忆（合并重复观察、清理过期记忆）`;
+const MEMO_CONSOLIDATE_HELP = `【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
+  ${MEMO_SCOPE_NOTE}`;
 
-const MEMO_REFLECT_HELP = `【.ai memo reflect <问题> [--u|--g[=ID]]】基于记忆进行推理`;
+const MEMO_REFLECT_HELP = `【.ai memo reflect <问题>】基于记忆进行推理
+  ${MEMO_SCOPE_NOTE}`;
 
 const MEMO_MM_HELP = `心智模型操作:
-  【.ai memo mm list [页码] [--u|--g[=ID]]】查看心智模型列表
-  【.ai memo mm view <ID> [--u|--g[=ID]]】查看心智模型详情
-  【.ai memo mm add <问题> [答案] [--u|--g[=ID]]】添加心智模型（不填答案时自动推理；--tag=xx 自定义范围标签）
-  【.ai memo mm refresh [ID] [--u|--g[=ID]]】刷新心智模型（基于当前记忆重新推理）
-  【.ai memo mm del <ID> [--u|--g[=ID]]】删除心智模型`;
+  【.ai memo mm list [页码]】查看心智模型列表
+  【.ai memo mm view <ID>】查看心智模型详情
+  【.ai memo mm add <问题> [答案]】添加心智模型（不填答案时自动推理；--tag=xx 自定义范围标签）
+  【.ai memo mm refresh [ID]】刷新心智模型（基于当前记忆重新推理）
+  【.ai memo mm del <ID>】删除心智模型
+  ${MEMO_SCOPE_NOTE}`;
 export function registerCmdMemory() {
     const cmd = new SubCmd('memory');
     cmd.desc = '记忆相关操作';
