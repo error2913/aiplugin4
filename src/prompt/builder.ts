@@ -144,7 +144,6 @@ export async function buildSystemPromptContent(
         Config.memory.SUMMARY
     ]);
     const knowledgeKey = signature(['prompt:knowledge', knowledgeService.getCacheVersion()]);
-
     const memoryTask = Config.memory.MEMORY
         ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');

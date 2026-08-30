@@ -367,6 +367,11 @@ ${lastTimePrompt}
                             // WAIT 轮末兜底：轮内若有挂起消息则重新过 gate 评分；一次性定时器，轮未到点（秒级定时目标与毫秒截止的舍入差）时重新入队
                             const ended = await JudgeManager.endWaitRound(timer.sid);
                             if (!ended) {
+                                // 未到点通常意味着 waitUntil 被新一轮 WAIT 延长；若该会话已有更新的 judgeWait 定时器，
+                                // 说明旧定时器已被覆盖（含 task 快照与新建之间的竞态），直接丢弃避免堆积
+                                if (this.getTimers(timer.sid, '', ['judgeWait']).length > 0) {
+                                    continue;
+                                }
                                 this.timerQueue.push(timer);
                                 continue;
                             }
