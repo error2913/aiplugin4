@@ -134,6 +134,7 @@ const MEMO_MEMORY_HELP = `长期记忆操作:
   【.ai memo update <ID> <新内容>】更新
   【.ai memo delete <ID1> <ID2> --关键词】删除（支持关键词过滤）
   【.ai memo clear】清除
+  注: delete/clear 为物理删除（从存储中彻底移除，释放空间，不可恢复）
   ${MEMO_SCOPE_NOTE}`;
 
 const MEMO_OBS_HELP = `观察记忆操作:
@@ -214,13 +215,15 @@ export function registerCmdMemory() {
                     return ret;
                 }
                 const { MEMORY: isMemory, SUMMARY: isSummary } = Config.memory;
+                const cap = Config.memory.MEMORY_CAP;
+                const capText = cap > 0 ? ` / ${cap}（上限）` : `（未设上限）`;
                 const summaryEffective = targetSession.memory.summaryOverride === false ? false : targetSession.memory.summaryOverride === true ? true : isSummary;
                 const summarySuffix = targetSession.memory.summaryOverride === undefined ? '' : '（会话级）';
                 const statusModels = getMemoryEngine().listMentalModels(bank.bankId);
                 const modelOverview = statusModels.length === 0 ? '（空）' : statusModels.map(m => `${m.question}${m.version > 1 ? `(v${m.version})` : ''}`).join('；');
                 seal.replyToSender(ctx, msg, `${target.explicit ? prefix : `${prefix} ${targetSession.id}`}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
-     长期记忆条数: ${targetSession.memory.memoryIds.length}
+     长期记忆条数: ${targetSession.memory.memoryIds.length}${capText}
      观察记忆开启状态: ${summaryEffective ? '是' : '否'}${summarySuffix}
      观察记忆条数: ${getMemoryEngine().repository.listObservations(bank.bankId).length}
      心智模型条数: ${statusModels.length}

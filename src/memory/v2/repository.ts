@@ -120,6 +120,26 @@ export class MemoryRepository {
     }
 
     /**
+     * 批量物理删除单元（遗忘淘汰/手动清除用）：一次落盘，避免逐条整库序列化。
+     * 同步清理相关 links 与 observation evidence 引用，返回实际删除条数。
+     */
+    deleteUnits(bankId: string, unitIds: string[]): number {
+        const bank = this.getBank(bankId);
+        if (!bank || unitIds.length === 0) return 0;
+        const ids = new Set(unitIds);
+        const before = bank.units.length;
+        bank.units = bank.units.filter(u => !ids.has(u.id));
+        bank.links = bank.links.filter(l => !ids.has(l.fromUnitId) && !ids.has(l.toUnitId));
+        bank.observations = bank.observations.map(o => ({
+            ...o,
+            evidence: o.evidence.filter(e => !ids.has(e.memoryId)),
+            proofCount: o.evidence.filter(e => !ids.has(e.memoryId)).length,
+        }));
+        this.save(bankId);
+        return before - bank.units.length;
+    }
+
+    /**
      * 删除观察记忆：移除 observation 条目与同步的 observation unit，
      * 清理其他 observation 中对该观察证据的引用，并移除相关 links。
      */

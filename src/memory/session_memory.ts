@@ -125,29 +125,28 @@ export default class SessionMemoryService {
             .map(r => r.unit);
     }
 
+    /** 删除指定记忆（按 ID 或关键词）：物理删除，彻底移除并释放存储空间 */
     deleteMemory(ids: string[] = [], kws: string[] = []) {
         const engine = getMemoryEngine();
         const units = engine.repository.listUnits(this.bankId);
-        const targets = units.filter(u => u.state === 'valid' && (
-            ids.includes(u.id) || (kws.length > 0 && kws.some(kw => u.tags.includes(kw)))
-        ));
-        for (const u of targets) {
-            const unit = engine.repository.getUnit(this.bankId, u.id);
-            if (unit) {
-                unit.state = 'invalidated';
-                engine.repository.updateUnit(this.bankId, unit);
-            }
-        }
-        if (targets.length > 0) bumpMemoryRevision();
+        const targetIds = units
+            .filter(u => u.state === 'valid' && (
+                ids.includes(u.id) || (kws.length > 0 && kws.some(kw => u.tags.includes(kw)))
+            ))
+            .map(u => u.id);
+        if (targetIds.length === 0) return;
+        engine.repository.deleteUnits(this.bankId, targetIds);
+        bumpMemoryRevision();
     }
 
+    /** 清除全部长期记忆：物理删除，彻底移除并释放存储空间（观察记忆请用 .ai memo obs clr） */
     clearMemory() {
         const engine = getMemoryEngine();
-        for (const u of engine.repository.listUnits(this.bankId)) {
-            if (u.state !== 'valid') continue;
-            u.state = 'invalidated';
-            engine.repository.updateUnit(this.bankId, u);
-        }
+        const targetIds = engine.repository.listUnits(this.bankId)
+            .filter(u => u.state === 'valid')
+            .map(u => u.id);
+        if (targetIds.length === 0) return;
+        engine.repository.deleteUnits(this.bankId, targetIds);
         bumpMemoryRevision();
     }
 

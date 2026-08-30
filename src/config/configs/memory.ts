@@ -14,6 +14,8 @@ export default class MemoryConfig {
         // Hindsight 式检索新近度加权：只影响召回排序，不删除旧记忆
         seal.ext.registerFloatConfig(ext, "记忆召回新近度权重", 0.4, "检索时给新近记忆的加分权重（0 为关闭）", "记忆");
         seal.ext.registerIntConfig(ext, "记忆召回新近度半衰期", 60, "新近度加分半衰期（天），越大旧记忆衰减越慢", "记忆");
+        // 遗忘机制：长期记忆条数上限（0 = 不限制，超限按覆盖/衰减优先级物理删除）
+        seal.ext.registerIntConfig(ext, "长期记忆条数上限", 100, "长期记忆超过该条数自动遗忘最不重要的记忆，0 为不限制", "记忆");
         // 高级 LLM 选项
         seal.ext.registerBoolConfig(ext, "用LLM抽取记忆", false, "使用 LLM 从对话中抽取原子事实（实验性，默认关闭）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM重排召回结果", false, "使用 LLM 对召回结果重新排序（较慢，默认关闭）", "记忆");
@@ -37,7 +39,8 @@ export default class MemoryConfig {
             MEMORY_REFRESH_AFTER_CONSOLIDATE: seal.ext.getBoolConfig(ext, "巩固后自动刷新心智模型"),
             MEMORY_REFRESH_MIN_INTERVAL: seal.ext.getIntConfig(ext, "心智模型刷新最小间隔"),
             MEMORY_RECENCY_WEIGHT: seal.ext.getFloatConfig(ext, "记忆召回新近度权重"),
-            MEMORY_RECENCY_HALF_LIFE_DAYS: seal.ext.getIntConfig(ext, "记忆召回新近度半衰期")
+            MEMORY_RECENCY_HALF_LIFE_DAYS: seal.ext.getIntConfig(ext, "记忆召回新近度半衰期"),
+            MEMORY_CAP: seal.ext.getIntConfig(ext, "长期记忆条数上限")
         }
     }
 }
