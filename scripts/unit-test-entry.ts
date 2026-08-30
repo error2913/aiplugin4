@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import Config from "../src/config/config";
 Config.registerConfig();
 
-import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages } from "../src/utils/message";
+import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages, textToMultimodalContent } from "../src/utils/message";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
@@ -16,6 +16,7 @@ import { resolveEndpointId } from "../src/pipeline";
 import { SessionService } from "../src/session/session_service";
 import { SubCmd } from "../src/cmd/root_cmd";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
+import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -26,6 +27,10 @@ import { createMemoryEngine } from "../src/memory/v2";
 import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
 import Agent from "../src/agent/agent";
+import { streamService } from "../src/agent/stream";
+import ChatModel from "../src/model/chat";
+import Model from "../src/model/model";
+import MultimodalModel from "../src/model/multimodal";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
 import Image from "../src/resource/image";
@@ -1814,4 +1819,310 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** 多模态文本转换：纯文本原样返回；图片标签转内容块数组；无法解析保留原标签 */
+    async testTextToMultimodalContent(): Promise<void> {
+        // 纯文本：原样返回字符串
+        assert.equal(await textToMultimodalContent('你好，世界'), '你好，世界');
+        assert.equal(typeof await textToMultimodalContent('没有图片标签的文本'), 'string');
+
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        (globalThis as any).fetch = async () => ({ ok: false, status: 500, text: async () => '{"error":"x"}' });
+        const img = new Image();
+        img.imageId = 'img_mm_text';
+        img.url = 'https://example.com/a.png';
+        (Image as any).imageMap['img_mm_text'] = img;
+        try {
+            // [img:...] → image_url 内容块数组
+            const parts: any = await textToMultimodalContent('看看[img:img_mm_text]');
+            assert.ok(Array.isArray(parts), '[img] 应转成内容块数组');
+            assert.equal(parts[0].type, 'text');
+            assert.equal(parts[0].text, '看看');
+            const imagePart = parts.find((p: any) => p.type === 'image_url');
+            assert.ok(imagePart, '应包含 image_url 内容块');
+            assert.equal(imagePart.image_url.url, 'https://example.com/a.png', '转换失败应保留原 URL');
+            // [avatar:...] 同样转内容块数组
+            const partsAv: any = await textToMultimodalContent('头像[avatar:QQ:12345]');
+            assert.ok(Array.isArray(partsAv), '[avatar] 应转成内容块数组');
+            assert.ok(partsAv.find((p: any) => p.type === 'image_url'), 'avatar 应转 image_url');
+            // 无法解析的图片：保留原标签文本
+            const parts2: any = await textToMultimodalContent('没有这张图[img:not_exist_xxx]');
+            assert.ok(Array.isArray(parts2));
+            const textOnly = parts2.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+            assert.ok(textOnly.includes('[img:not_exist_xxx]'), '无法解析的图片应保留原标签');
+        } finally {
+            delete (Image as any).imageMap['img_mm_text'];
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** 模型解析：多模态模型按用途/名称命中；同名时对话列表优先（纯文本）；无专属用途回退 chat 文本模型 */
+    testGetChatModelResolution(): void {
+        Model.reset();
+        Model.chatModels = [
+            new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {}),
+        ];
+        Model.multimodalModels = [
+            new MultimodalModel(['image-understanding'], 'vision-x', 'zhipu', 'https://x', 'k', {}),
+            new MultimodalModel(['chat'], 'vision-chat', 'zhipu', 'https://x', 'k', {}),
+            new MultimodalModel(['judge'], 'vision-judge', 'zhipu', 'https://x', 'k', {}),
+        ];
+        try {
+            // 多模态模型按用途命中（judge 无文本专属时）
+            const judge = Model.getChatModel('judge');
+            assert.equal(judge?.name, 'vision-judge', '多模态模型应可按 judge 用途命中');
+            assert.equal(judge?.isMultimodal, true);
+            // 按名命中多模态列表（use 含 chat）
+            const named = Model.getChatModel('chat', 'vision-chat');
+            assert.equal(named?.name, 'vision-chat');
+            assert.equal(named?.isMultimodal, true, '按名命中多模态模型应标记为多模态');
+            // 按名命中多模态列表（use 为空 = 任意用途）
+            Model.multimodalModels.push(new MultimodalModel([], 'vision-any', 'zhipu', 'https://x', 'k', {}));
+            const namedAny = Model.getChatModel('chat', 'vision-any');
+            assert.equal(namedAny?.name, 'vision-any');
+            // 同名时对话列表优先（纯文本）
+            Model.chatModels.push(new ChatModel(['chat'], 'vision-chat', 'deepseek', 'https://t', 'k', {}));
+            const same = Model.getChatModel('chat', 'vision-chat');
+            assert.equal(same?.name, 'vision-chat');
+            assert.equal(same?.isMultimodal, false, '同名时对话列表优先，按纯文本处理');
+            // 用途无专属时回退到第一个 chat 用途文本模型
+            Model.multimodalModels = [new MultimodalModel(['image-understanding'], 'vision-x', 'zhipu', 'https://x', 'k', {})];
+            const fallback = Model.getChatModel('compression');
+            assert.equal(fallback?.name, 'text-a', '无专属用途应回退 chat 用途文本模型');
+            assert.equal(fallback?.isMultimodal, false);
+            // 识图专用：getMultimodalModel 按 image-understanding 命中
+            const itt = Model.getMultimodalModel('image-understanding');
+            assert.equal(itt?.name, 'vision-x');
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** Agent.chat：多模态 user content 为内容块数组、纯文本为字符串；请求层收到解析出的模型实例 */
+    async testAgentChatPassesResolvedModel(): Promise<void> {
+        const origSend = (streamService as any).sendChatRequest;
+        let captured: any = null;
+        (streamService as any).sendChatRequest = async (messages: any, _tools: any, _tc: any, _mn: any, _rid: any, model: any) => {
+            captured = { messages, model };
+            return { content: '回复', tool_calls: [] };
+        };
+        try {
+            // 多模态：content 为内容块数组，模型为多模态实例
+            Model.reset();
+            Model.chatModels = [];
+            Model.multimodalModels = [new MultimodalModel(['chat'], 'glm-4v', 'zhipu', 'https://x', 'k', {})];
+            const agent = new Agent();
+            const ret = await agent.chat('看看[img:not_exist_zz]');
+            assert.equal(ret, '回复');
+            assert.ok(Array.isArray(captured.messages[0].content), '多模态 user content 应为内容块数组');
+            assert.equal(captured.model.name, 'glm-4v', '请求层应收到解析出的多模态模型');
+            assert.equal(captured.model.isMultimodal, true);
+
+            // 纯文本：content 为字符串，模型为对话实例
+            Model.reset();
+            Model.chatModels = [new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {})];
+            Model.multimodalModels = [];
+            const agent2 = new Agent();
+            await agent2.chat('你好');
+            assert.equal(typeof captured.messages[0].content, 'string', '纯文本 user content 应为字符串');
+            assert.equal(captured.model.name, 'text-a');
+            assert.equal(captured.model.isMultimodal, false);
+        } finally {
+            (streamService as any).sendChatRequest = origSend;
+            Model.reset();
+        }
+    },
+
+    /** isMultimodalChat：同名时对话列表优先（纯文本）；仅多模态列表时为多模态 */
+    testIsMultimodalChat(): void {
+        const agent = new Agent();
+        const stubSession = { setting: { modelName: '' } } as any;
+        Model.reset();
+        Model.chatModels = [new ChatModel(['chat'], 'same', 'deepseek', 'https://a', 'k', {})];
+        Model.multimodalModels = [new MultimodalModel(['chat'], 'same', 'zhipu', 'https://x', 'k', {})];
+        try {
+            assert.equal((agent as any).isMultimodalChat(stubSession), false, '同名时对话列表优先，按纯文本处理');
+            Model.chatModels = [];
+            assert.equal((agent as any).isMultimodalChat(stubSession), true, '仅多模态列表时按多模态处理');
+            // 按会话指定名称命中多模态模型
+            const stub2 = { setting: { modelName: 'same' } } as any;
+            assert.equal((agent as any).isMultimodalChat(stub2), true);
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** .ai model：查看当前会话模型（多模态标注）、设置/清除会话模型、同名去重、非对话用途拒绝 */
+    testCmdModelSetAndQuery(): void {
+        const origReply = (globalThis as any).seal.replyToSender;
+        const origModel = SubCmd.map['model'];
+        let replied = '';
+        (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
+        const makeArgs = (name: string) => ({ getArgN: (n: number) => ['', 'model', name][n] ?? '' });
+        const base = {
+            ctx: { endPoint: { userId: 'QQ:10000' }, player: { userId: 'QQ:10000', name: '测试员' } } as any,
+            msg: {} as any,
+            epId: 'QQ:10000',
+            uid: 'QQ:10000',
+            gid: '',
+            sid: 'QQ:10000',
+            page: 1,
+            ret: {} as any
+        };
+        try {
+            registerCmdModel(); // 注册到 SubCmd.map（幂等覆盖）
+            const session = new Session();
+
+            // 查看：会话指定多模态模型时显示模型名 + （多模态）
+            Model.reset();
+            Model.chatModels = [new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {})];
+            Model.multimodalModels = [new MultimodalModel(['chat'], 'vision-chat', 'zhipu', 'https://x', 'k', {})];
+            session.setting.modelName = 'vision-chat';
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('') } as any);
+            assert.equal(replied, '当前模型: vision-chat（多模态）', '查看应显示会话模型名与多模态标注');
+
+            // 设置：use 含 chat 的多模态模型可被选中并写入会话
+            session.setting.modelName = '';
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('vision-chat') } as any);
+            assert.equal(replied, '已设置当前会话模型为 vision-chat（多模态）', replied);
+            assert.equal(session.setting.modelName, 'vision-chat', '设置后应写入会话 modelName');
+
+            // 设置不存在的模型：提示不存在并列可用列表（多模态带标注）
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('no-such') } as any);
+            assert.ok(replied.includes('模型 no-such 不存在'), replied);
+            assert.ok(replied.includes('vision-chat（多模态）'), '可用列表应含多模态标注: ' + replied);
+            assert.ok(replied.includes('text-a'), '可用列表应含对话模型: ' + replied);
+
+            // clr：清除会话模型
+            session.setting.modelName = 'text-a';
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('clr') } as any);
+            assert.equal(replied, '已清除当前会话的模型设置', replied);
+            assert.equal(session.setting.modelName, '', 'clr 应清空 modelName');
+
+            // 同名去重：同名模型列表只出现一次且不带多模态标注；设置该名仍按对话模型（纯文本）
+            Model.reset();
+            Model.chatModels = [new ChatModel(['chat'], 'same', 'deepseek', 'https://a', 'k', {})];
+            Model.multimodalModels = [new MultimodalModel(['chat'], 'same', 'zhipu', 'https://x', 'k', {})];
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('no-such') } as any);
+            assert.equal((replied.match(/same/g) || []).length, 1, '同名模型在可用列表应只出现一次');
+            assert.ok(!replied.includes('same（多模态）'), '同名时对话列表优先，不应带多模态标注');
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('same') } as any);
+            assert.equal(replied, '已设置当前会话模型为 same', '同名时设置不带多模态标注');
+            assert.equal(session.setting.modelName, 'same');
+
+            // 校验拒绝：use 只有 image-understanding 的多模态模型不可作为对话模型
+            Model.reset();
+            Model.chatModels = [];
+            Model.multimodalModels = [new MultimodalModel(['image-understanding'], 'vision-itt', 'zhipu', 'https://x', 'k', {})];
+            SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('vision-itt') } as any);
+            assert.ok(replied.includes('模型 vision-itt 不存在'), '仅识图用途的多模态模型不应出现在可用对话列表中');
+        } finally {
+            (globalThis as any).seal.replyToSender = origReply;
+            if (origModel) SubCmd.map['model'] = origModel; else delete SubCmd.map['model'];
+            Model.reset();
+        }
+    },
+
+    /** Agent.chatMessages：多模态 user content 转内容块数组、assistant content 保持字符串；纯文本保持字符串 */
+    async testAgentChatMessagesMultimodal(): Promise<void> {
+        const origSend = (streamService as any).sendChatRequest;
+        let captured: any = null;
+        (streamService as any).sendChatRequest = async (messages: any, _tools: any, _tc: any, _mn: any, _rid: any, model: any) => {
+            captured = { messages, model };
+            return { content: '回复', tool_calls: [] };
+        };
+        try {
+            // 多模态：user content 为内容块数组，assistant content 保持字符串，模型为多模态实例
+            Model.reset();
+            Model.chatModels = [];
+            Model.multimodalModels = [new MultimodalModel(['chat'], 'glm-4v', 'zhipu', 'https://x', 'k', {})];
+            const agent = new Agent();
+            const ret = await agent.chatMessages([
+                { role: 'user', content: '看看[img:not_exist_zz]' },
+                { role: 'assistant', content: '好的' }
+            ]);
+            assert.equal(ret, '回复');
+            assert.ok(Array.isArray(captured.messages[0].content), '多模态 user content 应为内容块数组');
+            assert.ok(captured.messages[0].content.some((p: any) => p.type === 'text'), '内容块应含 text 块');
+            assert.equal(captured.messages[1].content, '好的', 'assistant content 应保持字符串');
+            assert.equal(captured.model.name, 'glm-4v', '请求层应收到解析出的多模态模型');
+            assert.equal(captured.model.isMultimodal, true);
+
+            // 纯文本：user content 保持字符串，模型为对话实例
+            Model.reset();
+            Model.chatModels = [new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {})];
+            Model.multimodalModels = [];
+            const agent2 = new Agent();
+            await agent2.chatMessages([{ role: 'user', content: '看看[img:not_exist_zz]' }]);
+            assert.equal(typeof captured.messages[0].content, 'string', '纯文本 user content 应为字符串');
+            assert.equal(captured.model.name, 'text-a');
+            assert.equal(captured.model.isMultimodal, false);
+        } finally {
+            (streamService as any).sendChatRequest = origSend;
+            Model.reset();
+        }
+    },
+
+    /** 识图开关：关闭时跳过识别（不查询模型、不写描述）；开启时命中 image-understanding 模型并写入描述 */
+    async testImageUnderstandingSwitch(): Promise<void> {
+        setupImageTestConfig();
+        const origGet = Model.getMultimodalModel;
+        try {
+            // 开关关闭：直接返回，不查询多模态模型
+            TC.boolConfigs['是否开启识图模型'] = false;
+            resetConfigCache();
+            const imgOff = new Image();
+            imgOff.imageId = 'img_itt_off';
+            imgOff.url = 'https://example.com/off.png';
+            let getCalled = 0;
+            Model.getMultimodalModel = (_use: any) => { getCalled++; return null; };
+            await imgOff.imageToText();
+            assert.equal(getCalled, 0, '开关关闭时不应查询多模态模型');
+            assert.equal(imgOff.description, '', '开关关闭时不应设置描述');
+
+            // 开关开启：调用识图模型的 callITT 并把结果写入 description
+            TC.boolConfigs['是否开启识图模型'] = true;
+            resetConfigCache();
+            const imgOn = new Image();
+            imgOn.imageId = 'img_itt_on';
+            imgOn.url = 'https://example.com/on.png';
+            const vision = new MultimodalModel(['image-understanding'], 'vision-itt', 'zhipu', 'https://x', 'k', {});
+            let capturedSrc = '';
+            let capturedPrompt = '';
+            (vision as any).callITT = async (src: string, prompt: string) => {
+                capturedSrc = src;
+                capturedPrompt = prompt;
+                return '图片中有一只猫';
+            };
+            Model.multimodalModels = [vision];
+            Model.getMultimodalModel = (_use: any) => vision;
+            await imgOn.imageToText('描述这张图');
+            assert.equal(imgOn.description, '图片中有一只猫', '开启时识别结果应写入 description');
+            assert.equal(capturedSrc, 'https://example.com/on.png', 'callITT 应收到图片 src');
+            assert.equal(capturedPrompt, '描述这张图', 'callITT 应收到自定义提示词');
+        } finally {
+            Model.getMultimodalModel = origGet;
+            Model.reset();
+            delete TC.boolConfigs['是否开启识图模型'];
+            restoreImageTestConfig();
+        }
+    },
+
+    /** 模型配置键：新键 MULTIMODAL_MODELS / IMAGE_UNDERSTANDING_ENABLED，旧键 IMAGE_MODELS / IMAGE_MODEL_ENABLED 已移除 */
+    testModelConfigKeys(): void {
+        try {
+            resetConfigCache();
+            const cfg = (Config as any).model;
+            assert.ok('MULTIMODAL_MODELS' in cfg, '应包含 MULTIMODAL_MODELS 键');
+            assert.ok('IMAGE_UNDERSTANDING_ENABLED' in cfg, '应包含 IMAGE_UNDERSTANDING_ENABLED 键');
+            assert.ok('CHAT_MODELS' in cfg, '应包含 CHAT_MODELS 键');
+            assert.ok(!('IMAGE_MODELS' in cfg), '旧键 IMAGE_MODELS 应已移除');
+            assert.ok(!('IMAGE_MODEL_ENABLED' in cfg), '旧键 IMAGE_MODEL_ENABLED 应已移除');
+            assert.ok(Array.isArray(cfg.MULTIMODAL_MODELS));
+            assert.ok(Array.isArray(cfg.CHAT_MODELS));
+        } finally {
+            Model.reset();
+        }
+    }
 };

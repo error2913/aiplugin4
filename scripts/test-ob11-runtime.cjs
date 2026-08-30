@@ -29,7 +29,7 @@ globalThis.seal = {
         registerOptionConfig: () => undefined,
         registerTemplateConfig: () => undefined,
         getTemplateConfig: (_ext, key) => {
-            if (['对话模型', '图片模型', '嵌入模型'].includes(key)) return [];
+            if (['对话模型', '多模态模型', '嵌入模型'].includes(key)) return [];
             return templateConfig[key] || [''];
         },
         getBoolConfig: () => true,

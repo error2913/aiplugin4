@@ -1,10 +1,10 @@
-// 模型管理器：按 use/名称选择对话/图片/嵌入模型
+// 模型管理器：按 use/名称选择对话/多模态/嵌入模型
 import { DEFAULT_EMBEDDING_MODEL_BODY } from "../config/static_config";
 
 import ChatModel from "./chat";
 import EmbeddingModel from "./embedding";
-import ImageModel from "./image";
-import { ChatModelUse, EmbeddingModelUse, ImageModelUse, ModelBody } from "./types";
+import MultimodalModel from "./multimodal";
+import { ChatModelUse, EmbeddingModelUse, ModelBody, MultimodalModelUse } from "./types";
 
 export class BaseModel {
     name: string;
@@ -21,6 +21,11 @@ export class BaseModel {
         this.body = body;
     }
 
+    /** 是否为多模态模型：默认 false（对话模型纯文本），多模态模型覆写为 true */
+    get isMultimodal(): boolean {
+        return false;
+    }
+
     buildBody(args: { [key: string]: any }, defaults: { [key: string]: any } = {}) {
         // 优先级：默认值 < 用户 TOML [body] 配置 < 调用方显式参数
         return { ...defaults, ...this.body, ...args };
@@ -29,17 +34,17 @@ export class BaseModel {
 
 export default class Model {
     static chatModels: ChatModel[] = [];
-    static imageModels: ImageModel[] = [];
+    static multimodalModels: MultimodalModel[] = [];
     static embeddingModels: EmbeddingModel[] = [];
 
     /** 重置注册表（用于测试/热重载） */
     static reset() {
         Model.chatModels = [];
-        Model.imageModels = [];
+        Model.multimodalModels = [];
         Model.embeddingModels = [];
     }
 
-    static getChatModel(use: ChatModelUse, name: string = ''): ChatModel | ImageModel | null {
+    static getChatModel(use: ChatModelUse, name: string = ''): ChatModel | MultimodalModel | null {
         if (name) {
             const namedList = Model.chatModels.filter(model => model.name === name && model.use.includes(use));
             if (namedList.length > 0) {
@@ -49,14 +54,14 @@ export default class Model {
             if (namedAnyList.length > 0) {
                 return namedAnyList[0];
             }
-            // 图片模型里配置的多模态模型也可按名称用于 chat（use 含 chat 或未指定用途）
-            const namedImageList = Model.imageModels.filter(model => model.name === name && model.use.includes(use));
-            if (namedImageList.length > 0) {
-                return namedImageList[0];
+            // 多模态模型里配置的模型也可按名称用于 chat（use 含 chat 或未指定用途）
+            const namedMultimodalList = Model.multimodalModels.filter(model => model.name === name && model.use.includes(use));
+            if (namedMultimodalList.length > 0) {
+                return namedMultimodalList[0];
             }
-            const namedImageAnyList = Model.imageModels.filter(model => model.name === name && model.use.length === 0);
-            if (namedImageAnyList.length > 0) {
-                return namedImageAnyList[0];
+            const namedMultimodalAnyList = Model.multimodalModels.filter(model => model.name === name && model.use.length === 0);
+            if (namedMultimodalAnyList.length > 0) {
+                return namedMultimodalAnyList[0];
             }
             // 指定名称不存在时回退到全局选择
             return Model.getChatModel(use);
@@ -66,17 +71,17 @@ export default class Model {
             // 确定性选择：同一用途下取第一个匹配模型（避免随机导致行为不稳定）
             return chatModelList[0];
         }
-        const ImageModelList = Model.imageModels.filter(model => model.use.includes(use));
-        if (ImageModelList.length > 0) {
-            return ImageModelList[0];
+        const multimodalModelList = Model.multimodalModels.filter(model => model.use.includes(use));
+        if (multimodalModelList.length > 0) {
+            return multimodalModelList[0];
         }
         const chatModelAnyList = Model.chatModels.filter(model => model.use.length === 0);
         if (chatModelAnyList.length > 0) {
             return chatModelAnyList[0];
         }
-        const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
-        if (ImageModelAnyList.length > 0) {
-            return ImageModelAnyList[0];
+        const multimodalModelAnyList = Model.multimodalModels.filter(model => model.use.length === 0);
+        if (multimodalModelAnyList.length > 0) {
+            return multimodalModelAnyList[0];
         }
         // 用途匹配失败时回退到 chat 用途的模型（与文档约定一致），避免压缩/总结等静默失败
         const chatFallbackList = Model.chatModels.filter(model => model.use.includes('chat'));
@@ -86,14 +91,14 @@ export default class Model {
         return null;
     }
 
-    static getImageModel(use: ImageModelUse): ImageModel | null {
-        const ImageModelList = Model.imageModels.filter(model => model.use.includes(use));
-        if (ImageModelList.length > 0) {
-            return ImageModelList[0];
+    static getMultimodalModel(use: MultimodalModelUse): MultimodalModel | null {
+        const multimodalModelList = Model.multimodalModels.filter(model => model.use.includes(use));
+        if (multimodalModelList.length > 0) {
+            return multimodalModelList[0];
         }
-        const ImageModelAnyList = Model.imageModels.filter(model => model.use.length === 0);
-        if (ImageModelAnyList.length > 0) {
-            return ImageModelAnyList[0];
+        const multimodalModelAnyList = Model.multimodalModels.filter(model => model.use.length === 0);
+        if (multimodalModelAnyList.length > 0) {
+            return multimodalModelAnyList[0];
         }
         return null;
     }

@@ -192,8 +192,8 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        if (!Config.model.IMAGE_MODEL_ENABLED) {
-            log.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
+        if (!Config.model.IMAGE_UNDERSTANDING_ENABLED) {
+            log.info(`识图模型开关未开启，跳过识别: ${this.imageId}`);
             return;
         }
         const { URL_TO_BASE64 } = Config.image;
@@ -201,7 +201,7 @@ export default class Image {
 
         if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
 
-        const model = Model.getImageModel('image-understanding');
+        const model = Model.getMultimodalModel('image-understanding');
         if (!model) {
             log.error(`未找到支持image-understanding的模型`);
             return;

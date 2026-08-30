@@ -35,7 +35,7 @@ max_tokens = 2048
 
 - `provider` / `base_url` 可以省略（deepseek / openai / google / zhipu / alibaba / anthropic / moonshot / xai / mistral / siliconflow 会自动识别），也可以显式填写 `base_url`；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式；
-- 图片识别需要配置「图片模型」（`use = ["image-understanding"]`）；如果模型支持视觉，可在「图片模型」的 `use` 里加 `chat` 把它当多模态对话模型用（上下文中的图片直接传给模型）；向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度从嵌入模型的 `[body] dimensions` 读取，默认 1024）；
+- 图片识别需要配置「多模态模型」（`use = ["image-understanding"]`）；如果模型支持视觉，可在「多模态模型」的 `use` 里加 `chat` 把它当多模态对话模型用（上下文中的图片直接传给模型）；向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度从嵌入模型的 `[body] dimensions` 读取，默认 1024）；
 - 默认对话模型取列表第一项，可在群里用 `.ai model <模型名>` 切换，`.ai model clr` 恢复默认。
 
 ### 4. 设置触发与角色
@@ -158,7 +158,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 对话模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）；`provider` / `base_url` 可省略自动识别；默认对话模型取列表第一项；可选 `[body]` 覆盖请求参数 |
-| 图片模型 | TOML 格式，`use` 可选 `["image-understanding"]`（图片理解/图片转文字）或 `["chat"]`（多模态对话：作为对话模型使用，上下文中的图片直接传给模型），也可两者并存 |
+| 多模态模型 | TOML 格式，`use` 可选 `["image-understanding"]`（识图/图片转文字）或 `["chat"]`（多模态对话：作为对话模型使用，上下文中的图片直接传给模型），也可两者并存；列表内模型一律按多模态处理 |
 | 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`（文本嵌入），输出维度在 `[body] dimensions` 配置（默认 1024），未配置时自动降级为关键词/分数检索 |
 
 ```toml
@@ -203,7 +203,7 @@ max_tokens = 2048
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 接收图片 | 是否接收图片消息并将图片 URL 记录到上下文；是否自动识别由图片识别条件和图片模型配置决定 |
+| 接收图片 | 是否接收图片消息并将图片 URL 记录到上下文；是否自动识别由图片识别条件和识图模型配置决定 |
 | 接收指令消息 | 是否将指令消息计入上下文（指令仍会执行） |
 | 接收骰子发送的消息 | 是否处理机器人自己发送的消息 |
 | 忽略私聊消息 | 开启后私聊消息不触发 AI |
@@ -493,7 +493,7 @@ max_tokens = 2048
 
 - 确认图片 URL 可以在浏览器访问（过期或 QQ 图床 bug 时更换协议端版本）；
 - 模型不支持 QQ 图床时，把「识别图片时将url转换为base64」设为「总是」或「自动」；
-- 图片转文字依赖视觉模型配置（「图片模型」TOML，`use = ["image-understanding"]`）。
+- 图片转文字依赖视觉模型配置（「多模态模型」TOML，`use = ["image-understanding"]`）。
 
 **HTTP 请求出错**
 

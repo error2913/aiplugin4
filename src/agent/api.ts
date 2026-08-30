@@ -52,7 +52,7 @@ export interface AgentGlobalApi {
     chat(prompt: string, agentName?: string): Promise<string>;
     /** 对话：直接发送 OpenAI 风格 messages 数组到对话模型，返回回复文本（无可用模型时返回空串） */
     chatMessages(messages: { role: string, content: string }[], agentName?: string): Promise<string>;
-    /** 识图：对图片 id 或 http(s) 图片地址调用图片识别模型，返回描述文本；未开启图片模型/未配置模型/找不到图片时返回错误说明 */
+    /** 识图：对图片 id 或 http(s) 图片地址调用图片识别模型，返回描述文本；识图模型开关未开启/未配置模型/找不到图片时返回错误说明 */
     imageToText(source: string, prompt?: string): Promise<string>;
     /** 嵌入：调用嵌入模型返回文本向量；未配置嵌入模型时返回空数组 */
     embed(text: string): Promise<number[]>;
@@ -73,8 +73,8 @@ export function registerAgentApi(): void {
         chat: async (prompt: string, agentName?: string) => Agent.get(agentName || '*').chat(prompt),
         chatMessages: async (messages: { role: string, content: string }[], agentName?: string) => Agent.get(agentName || '*').chatMessages(messages),
         imageToText: async (source: string, prompt?: string) => {
-            if (!Config.model.IMAGE_MODEL_ENABLED) return '图片模型开关未开启';
-            if (!Model.getImageModel('image-understanding')) return '未找到支持 image-understanding 的图片模型';
+            if (!Config.model.IMAGE_UNDERSTANDING_ENABLED) return '识图模型开关未开启';
+            if (!Model.getMultimodalModel('image-understanding')) return '未找到支持 image-understanding 的多模态模型';
             let img = Image.get(source);
             if (!img && /^https?:\/\//i.test(source)) {
                 img = Image.createUrlImage('', source);
