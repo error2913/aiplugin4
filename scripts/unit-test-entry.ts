@@ -1487,6 +1487,32 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(aAfter.lastAccessedAt >= now - 5 && bAfter.lastAccessedAt >= now - 5, '命中应更新最近访问时间');
     },
 
+    /** recall 批量落盘：一次召回命中多条时，访问计数只改内存、整库仅落盘一次（避免每条命中都整库序列化） */
+    async testV2RecallBatchedSave(): Promise<void> {
+        const saveCalls = { n: 0 };
+        const inner = new InMemoryMemoryStorage();
+        const countingStorage = {
+            getBank: (id: string) => inner.getBank(id),
+            saveBank: (bank: any) => { saveCalls.n++; inner.saveBank(bank); },
+            deleteBank: (id: string) => inner.deleteBank(id),
+        };
+        const engine = new MemoryEngine({
+            storage: countingStorage as any,
+            embedding: async (t: string) => [t.length, t.length * 2],
+        });
+        await engine.addMemory('user_batch', { content: '记忆一：小明喜欢喝咖啡' });
+        await engine.addMemory('user_batch', { content: '记忆二：小红喜欢喝茶' });
+        await engine.addMemory('user_batch', { content: '记忆三：小刚喜欢喝奶茶' });
+        saveCalls.n = 0;
+        const results = await engine.recall('user_batch', '喜欢喝', { maxTokens: 500 });
+        assert.ok(results.length >= 3, '应召回全部三条');
+        assert.equal(saveCalls.n, 1, '一次 recall 命中多条时整库只应落盘一次，实际: ' + saveCalls.n);
+        for (const r of results) {
+            const u = engine.repository.getUnit('user_batch', r.unit.id)!;
+            assert.ok(u.accessCount >= 1, '命中单元访问计数应递增（内存可见）');
+        }
+    },
+
     /** Hindsight 式惰性清理：consolidate 时清理超过 OBSERVATION_STALE_DAYS 未验证的观察记忆 */
     async testV2ConsolidationCleansStaleObservations(): Promise<void> {
         const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });

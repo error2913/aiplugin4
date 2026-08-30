@@ -65,6 +65,13 @@ export default class Logger {
         return s;
     }
 
+    /** 紧凑时间戳：HH:MM:SS.mmm，供耗时类日志直观展示触发点（海豹前缀本身也带时间，这里再打一份便于复制分析） */
+    static ts(): string {
+        const d = new Date();
+        const p = (n: number, w = 2) => String(n).padStart(w, '0');
+        return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+    }
+
     private static emit(level: string, ...data: any[]) {
         const { LOG_LEVEL } = Config.base;
         const current = LEVEL_ORDER[LOG_LEVEL] ?? 3;

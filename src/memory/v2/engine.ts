@@ -1,5 +1,6 @@
 // Hindsight-like 记忆引擎：Retain / Recall / Consolidation / Reflect 的纯 TS 实现。
 // 设计参考 Hindsight：MemoryUnit + Entity + MemoryLink + Observation + MentalModel。
+import { logger } from "../../logger";
 import { buildCharNGrams } from "../../utils/string";
 import { cosineSimilarity, generateId } from "../../utils/utils";
 
@@ -28,6 +29,8 @@ const DEFAULT_MAX_TOKENS = 2048;
 const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
 const BACKFILL_BATCH_LIMIT = 20;
 const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
+
+const log = logger.withTag('memory');
 
 /** 「设定」心智模型的固定问题：.ai memo p|g st 与 persona 迁移共用，同问题名即同一条 */
 export const MENTAL_MODEL_PERSONA_QUESTION = '这个用户/群的设定是什么？';
@@ -265,11 +268,20 @@ export class MemoryEngine {
 
         if (units.length === 0) return [];
 
+        const t0 = Date.now();
+        let embedMs = 0;
+        let backfillMs = 0;
+        let rerankMs = 0;
+        const queryEmbedStart = Date.now();
         const queryEmbedding = q ? await this.embedText(q) : [];
+        embedMs = Date.now() - queryEmbedStart;
 
         // 存量回填：语义检索可用时，对尚无向量的记忆惰性补算并落库（每轮限量，避免阻塞）
+        let backfilled = 0;
         if (queryEmbedding.length > 0) {
-            await this.backfillEmbeddings(bankId, units);
+            const backfillStart = Date.now();
+            backfilled = await this.backfillEmbeddings(bankId, units);
+            backfillMs = Date.now() - backfillStart;
         }
         const strategyResults: Array<{ strategy: string; ids: string[] }> = [];
 
@@ -303,12 +315,15 @@ export class MemoryEngine {
         const results: RecallResult[] = [];
         const usedTokens = new Map<string, number>();
         const unitById = new Map(units.map(u => [u.id, u]));
+        // 本轮是否有命中被 touch：有则末尾统一落盘一次（touchUnit 只改内存，避免每条命中整库序列化）
+        let touched = false;
 
         if (this.rerank && q && rrfEntries.length > 0) {
             const candidates = rrfEntries
                 .slice(0, 20)
                 .map(([id]) => unitById.get(id))
                 .filter((u): u is MemoryUnit => !!u);
+            const rerankStart = Date.now();
             try {
                 const rankedIds = await this.rerank(q, candidates);
                 const rank = new Map(rankedIds.map((id, index) => [id, index]));
@@ -320,6 +335,7 @@ export class MemoryEngine {
             } catch {
                 // rerank 失败时保留 RRF 原始排序
             }
+            rerankMs = Date.now() - rerankStart;
         }
 
         // Hindsight 式新近度加分：按 lastAccessedAt 做指数衰减加权（半衰期 halfLife），
@@ -348,7 +364,10 @@ export class MemoryEngine {
                     if (obsUnit && !results.some(r => r.unit.id === obs.id)) {
                         const before = results.length;
                         this.pushResult(results, usedTokens, { unit: obsUnit, score: rrfScoreValue, matchedStrategies: this.matchedStrategies(strategyResults, id) }, opts.maxTokens || DEFAULT_MAX_TOKENS);
-                        if (results.length > before) this.touchUnit(bankId, obsUnit);
+                        if (results.length > before) {
+                            this.touchUnit(bankId, obsUnit);
+                            touched = true;
+                        }
                         continue;
                     }
                 }
@@ -363,7 +382,10 @@ export class MemoryEngine {
             }
             const before = results.length;
             this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
-            if (results.length > before) this.touchUnit(bankId, unit);
+            if (results.length > before) {
+                this.touchUnit(bankId, unit);
+                touched = true;
+            }
         }
 
         // 如果 token 预算宽松，用关键词/重要性补足（Hindsight recall 同样有 backfill 行为）
@@ -377,8 +399,17 @@ export class MemoryEngine {
             };
             const before = results.length;
             this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
-            if (results.length > before) this.touchUnit(bankId, u);
+            if (results.length > before) {
+                this.touchUnit(bankId, u);
+                touched = true;
+            }
         }
+
+        // 统一落盘一次（原实现每条命中都整库 JSON.stringify + storageSet，记忆库越大越慢）
+        const saveStart = Date.now();
+        if (touched) this.repository.save(bankId);
+        const saveMs = Date.now() - saveStart;
+        log.info(`[memory] ${logger.ts()} recall bank=${bankId} 库${bank.units.length}条 命中${results.length}条 耗时${Date.now() - t0}ms 向量${embedMs}ms 回填${backfillMs}ms(${backfilled}条) 重排${rerankMs}ms 落盘${saveMs}ms`);
 
         return results;
     }
@@ -660,34 +691,41 @@ export class MemoryEngine {
     // ===== Utility =====
 
 
-    /** 存量回填：为尚无向量的有效记忆惰性补算 embedding（每轮限量，失败自动降级） */
-    private async backfillEmbeddings(bankId: string, units: MemoryUnit[]): Promise<void> {
+    /** 存量回填：为尚无向量的有效记忆惰性补算 embedding（每轮限量，失败自动降级）；返回成功回填条数 */
+    private async backfillEmbeddings(bankId: string, units: MemoryUnit[]): Promise<number> {
         const missing = units.filter(u => u.state === 'valid' && u.embedding.length === 0);
-        if (missing.length === 0) return;
+        if (missing.length === 0) return 0;
         const batch = missing.slice(0, BACKFILL_BATCH_LIMIT);
+        const t0 = Date.now();
         const vectors = await Promise.all(batch.map(u => this.embedText(u.text)));
         const bank = this.repository.getBank(bankId);
-        if (!bank) return;
-        let changed = false;
+        if (!bank) return 0;
+        let changed = 0;
         for (let i = 0; i < batch.length; i++) {
             const vector = vectors[i];
             if (vector.length > 0) {
                 const idx = bank.units.findIndex(u => u.id === batch[i].id);
                 if (idx >= 0) {
                     bank.units[idx] = { ...bank.units[idx], embedding: vector };
-                    changed = true;
+                    changed++;
                 }
             }
         }
-        if (changed) this.repository.save(bankId);
+        if (changed > 0) this.repository.save(bankId);
+        log.info(`[memory] ${logger.ts()} 回填 bank=${bankId} 缺向量${missing.length}条 本轮${batch.length}条 成功${changed}条 耗时${Date.now() - t0}ms`);
+        return changed;
     }
 
     private async embedText(text: string): Promise<number[]> {
         if (!this.embedding || !text) return [];
+        const t0 = Date.now();
         try {
             const v = await this.embedding(text);
+            const ms = Date.now() - t0;
+            log.debug(`[memory] ${logger.ts()} embed 耗时${ms}ms 维度${Array.isArray(v) ? v.length : 0} 文本${text.slice(0, 50)}${text.length > 50 ? '…' : ''}`);
             return Array.isArray(v) ? v : [];
-        } catch {
+        } catch (e) {
+            log.warning(`[memory] ${logger.ts()} embed 失败 耗时${Date.now() - t0}ms: ${e instanceof Error ? e.message : String(e)}`);
             return [];
         }
     }
@@ -825,14 +863,14 @@ export class MemoryEngine {
         usedTokens.set(item.unit.id, cost);
     }
 
-    /** 召回命中：更新访问计数与最近访问时间并落库（新近度加分的依据） */
+    /** 召回命中：更新访问计数与最近访问时间（新近度加分的依据）；只改内存不落盘，由 recall 末尾统一 save */
     private touchUnit(bankId: string, unit: MemoryUnit): void {
         const now = Math.floor(Date.now() / 1000);
         // 以库中最新对象为准（backfill 可能已替换为带向量的新对象），避免回写覆盖
         const current = this.repository.getUnit(bankId, unit.id) || unit;
         current.accessCount = (current.accessCount || 0) + 1;
         current.lastAccessedAt = now;
-        this.repository.updateUnit(bankId, current);
+        this.repository.updateUnit(bankId, current, false);
     }
 
     private sameCluster(a: MemoryUnit, b: MemoryUnit): boolean {

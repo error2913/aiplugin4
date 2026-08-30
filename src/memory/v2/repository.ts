@@ -1,4 +1,6 @@
 // 记忆仓库：内存态 Bank 管理 + 持久化。
+import { logger } from "../../logger";
+
 import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
 import type {
     ConsolidationResult,
@@ -12,6 +14,8 @@ import type {
     Observation,
     PersistedBank,
 } from "./types";
+
+const log = logger.withTag('memory');
 
 function nowSec(): number {
     return Math.floor(Date.now() / 1000);
@@ -75,7 +79,9 @@ export class MemoryRepository {
         const bank = this.banks.get(id);
         if (!bank) return;
         bank.meta.updatedAt = nowSec();
+        const t0 = Date.now();
         this.storage.saveBank(bank);
+        log.debug(`[memory] ${logger.ts()} save bank=${id} 耗时${Date.now() - t0}ms units=${bank.units.length} observations=${bank.observations.length} mentalModels=${bank.mentalModels.length}`);
     }
 
     // ===== Units =====
@@ -96,13 +102,14 @@ export class MemoryRepository {
         this.save(bankId);
     }
 
-    updateUnit(bankId: string, unit: MemoryUnit): void {
+    updateUnit(bankId: string, unit: MemoryUnit, persist = true): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.units.findIndex(u => u.id === unit.id);
         if (idx >= 0) {
             bank.units[idx] = unit;
-            this.save(bankId);
+            // persist=false 用于高频元数据更新（如 recall 的访问计数），由调用方批量落盘，避免每条命中都整库序列化
+            if (persist) this.save(bankId);
         }
     }
 
