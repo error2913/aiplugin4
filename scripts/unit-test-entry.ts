@@ -17,6 +17,7 @@ import { SessionService } from "../src/session/session_service";
 import { SubCmd } from "../src/cmd/root_cmd";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { registerCmdModel } from "../src/cmd/sub_cmd/model";
+import { registerCmdMemory } from "../src/cmd/sub_cmd/memory";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
@@ -138,6 +139,66 @@ function makeLegacyBank(id: string, models: any[]): any {
         documents: [],
         chunks: [],
     };
+}
+
+
+/** .ai memo 测试桩：构造 CmdArgs（含 --u/--g kwargs 支持，args 不含 kwargs） */
+function makeMemoArgs(args: string[], kwargs: { name: string; value?: string; valueExists?: boolean }[] = []): any {
+    return {
+        args,
+        kwargs: kwargs.map(k => ({ name: k.name, value: k.value ?? '', valueExists: k.valueExists ?? false, asBool: false })),
+        getArgN: (n: number) => args[n - 1] ?? '',
+        getRestArgsFrom: (n: number) => args.slice(n - 1).join(' '),
+        getKwarg: (name: string) => (kwargs.find(k => k.name === name) as any) || null,
+    };
+}
+
+/** .ai memo 测试桩：构造 SubCmdContext（默认私聊、玩家 QQ:10000、非骰主 privilegeLevel=0） */
+function makeMemoScc(over: any = {}): any {
+    const { ctx: overCtx, ...rest } = over;
+    const sessionId = rest.session?.sessionId || 'QQ:10000';
+    return {
+        ctx: {
+            endPoint: { userId: 'QQ:10000' },
+            player: { userId: 'QQ:10000', name: '测试员' },
+            isPrivate: true,
+            privilegeLevel: 0,
+            ...(overCtx || {}),
+        },
+        msg: {},
+        epId: 'QQ:10000',
+        uid: 'QQ:10000',
+        gid: '',
+        sid: sessionId,
+        page: 1,
+        ret: {},
+        session: new Session(),
+        ...rest,
+    };
+}
+
+/** .ai memo 测试桩：构造已同步 memory 归属字段的会话（模拟 SessionService.getSession） */
+function makeMemoSession(sessionId: string): Session {
+    const s = new Session();
+    s.sessionId = sessionId;
+    s.sessionType = sessionId.includes('-Group:') ? 'group' : 'user';
+    s.agentName = '';
+    s.memory.sessionId = sessionId;
+    s.memory.agentName = s.agentName;
+    return s;
+}
+
+/** .ai memo 测试桩：执行一次 memory 子命令，返回最后一次回复文本 */
+async function runMemo(scc: any): Promise<string> {
+    const origReply = (globalThis as any).seal.replyToSender;
+    let replied = '';
+    (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
+    try {
+        await SubCmd.map['memory'].solve(scc);
+    } finally {
+        (globalThis as any).seal.replyToSender = origReply;
+    }
+    return replied;
 }
 
 export const tests: Record<string, () => void | Promise<void>> = {
@@ -2535,6 +2596,191 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (globalThis as any).seal.replyToSender = origReply;
             if (origModel) SubCmd.map['model'] = origModel; else delete SubCmd.map['model'];
             Model.reset();
+        }
+    },
+
+
+    /** .ai memo：--u/--g 范围参数解析与骰主跨范围权限（默认当前会话、--u 本人、--u=<ID>/--g=<ID> 仅骰主） */
+    async testCmdMemoResolveTarget(): Promise<void> {
+        const origMemory = SubCmd.map['memory'];
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            registerCmdMemory(); // 注册到 SubCmd.map（幂等覆盖）
+            const engine = getMemoryEngine();
+            const userTexts = (id: string) => engine.repository.listUnits(`user_${id}`).filter(u => u.state === 'valid').map(u => u.text);
+            const groupTexts = (id: string) => engine.repository.listUnits(`group_${id}`).filter(u => u.state === 'valid').map(u => u.text);
+            const groupSession = makeMemoSession('QQ-Group:1064487252');
+            const mkGroupScc = (cmdArgs: any) => makeMemoScc({
+                session: groupSession,
+                ctx: { isPrivate: false, group: { groupId: 'QQ-Group:1064487252', groupName: '测试群' } },
+                gid: 'QQ-Group:1064487252',
+                sid: 'QQ-Group:1064487252',
+                cmdArgs,
+            });
+
+            // 群聊默认（无 --u/--g）=> 当前群 bank
+            let replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'add', '群默认记忆'])));
+            assert.ok(replied.includes('群聊记忆已添加'), `群聊默认应写入群记忆: ${replied}`);
+            assert.deepEqual(groupTexts('QQ-Group:1064487252'), ['群默认记忆'], '默认范围应为当前群 bank');
+
+            // 群聊 --u（无值）=> 调用者本人个人 bank
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'add', '我的个人记忆'], [{ name: 'u' }])));
+            assert.ok(replied.includes('个人记忆已添加'), `--u 无值应写入个人记忆: ${replied}`);
+            assert.deepEqual(userTexts('QQ:10000'), ['我的个人记忆'], '--u 无值应落到调用者本人');
+
+            // 非骰主 --u=<ID> => 权限拒绝，不写入他人 bank
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'add', '越权内容'], [{ name: 'u', value: 'QQ:123', valueExists: true }])));
+            assert.ok(replied.includes('权限不足'), `非骰主 --u=<ID> 应拒绝: ${replied}`);
+            assert.equal(userTexts('QQ:123').length, 0, '越权不应写入他人 bank');
+
+            // 骰主 --u=123 => 裸数字归一化为 QQ:123 个人 bank
+            replied = await runMemo(makeMemoScc({
+                session: groupSession,
+                ctx: { isPrivate: false, group: { groupId: 'QQ-Group:1064487252', groupName: '测试群' }, privilegeLevel: 100 },
+                gid: 'QQ-Group:1064487252',
+                sid: 'QQ-Group:1064487252',
+                cmdArgs: makeMemoArgs(['memo', 'add', '跨用户记忆'], [{ name: 'u', value: '123', valueExists: true }]),
+            }));
+            assert.ok(replied.includes('个人记忆已添加'), `骰主 --u=123 应写入: ${replied}`);
+            assert.deepEqual(userTexts('QQ:123'), ['跨用户记忆'], '裸数字 --u 应按平台归一化为 QQ:123');
+
+            // 私聊 --g（无值）=> 报错，需指定群 ID
+            replied = await runMemo(makeMemoScc({
+                session: makeMemoSession('QQ:10000'),
+                cmdArgs: makeMemoArgs(['memo', 'list'], [{ name: 'g' }]),
+            }));
+            assert.ok(replied.includes('当前为私聊会话'), `私聊 --g 应报错: ${replied}`);
+
+            // 骰主 --g=456 => 裸数字归一化为 QQ-Group:456 群 bank（私聊也可指定）
+            replied = await runMemo(makeMemoScc({
+                ctx: { privilegeLevel: 100 },
+                cmdArgs: makeMemoArgs(['memo', 'add', '跨群记忆'], [{ name: 'g', value: '456', valueExists: true }]),
+            }));
+            assert.ok(replied.includes('群聊记忆已添加'), `骰主 --g=456 应写入: ${replied}`);
+            assert.deepEqual(groupTexts('QQ-Group:456'), ['跨群记忆'], '裸数字 --g 应按平台归一化为 QQ-Group:456');
+
+            // --u + --g 同给 => 报错
+            replied = await runMemo(makeMemoScc({ cmdArgs: makeMemoArgs(['memo', 'list'], [{ name: 'u' }, { name: 'g' }]) }));
+            assert.ok(replied.includes('不能同时使用 --u 和 --g'), `同时 --u/--g 应报错: ${replied}`);
+
+            // --u=abc => 参数无效
+            replied = await runMemo(makeMemoScc({
+                ctx: { privilegeLevel: 100 },
+                cmdArgs: makeMemoArgs(['memo', 'list'], [{ name: 'u', value: 'abc', valueExists: true }]),
+            }));
+            assert.ok(replied.includes('参数无效：--u=<用户ID>'), `非法 --u 应报参数无效: ${replied}`);
+        } finally {
+            if (origMemory) SubCmd.map['memory'] = origMemory; else delete SubCmd.map['memory'];
+        }
+    },
+
+    /** .ai memo：空列表范围文案（群聊不误导为“心智模型为空”，引导 --u；个人范围不重复引导） */
+    async testCmdMemoEmptyListText(): Promise<void> {
+        const origMemory = SubCmd.map['memory'];
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            registerCmdMemory();
+            const groupSession = makeMemoSession('QQ-Group:1064487252');
+            const mkGroupScc = (cmdArgs: any) => makeMemoScc({
+                session: groupSession,
+                ctx: { isPrivate: false, group: { groupId: 'QQ-Group:1064487252', groupName: '测试群' } },
+                gid: 'QQ-Group:1064487252',
+                sid: 'QQ-Group:1064487252',
+                cmdArgs,
+            });
+
+            let replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'list'])));
+            assert.ok(replied.includes('【群聊】暂无群聊记忆'), `list 空文案应带群聊范围: ${replied}`);
+
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'obs', 'list'])));
+            assert.ok(replied.includes('【群聊】观察记忆为空'), `obs list 空文案应带群聊范围: ${replied}`);
+
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'list'])));
+            assert.ok(replied.includes('【群聊】心智模型为空'), `mm list 空文案应带群聊范围: ${replied}`);
+            assert.ok(replied.includes('--u 查看自己的心智模型'), `群聊 mm 空应引导 --u: ${replied}`);
+
+            // 群聊 --u（无值）查看本人：前缀带个人 ID，且不再重复引导 --u
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'list'], [{ name: 'u' }])));
+            assert.ok(replied.includes('【个人:QQ:10000】心智模型为空'), `--u 查看本人应显示个人范围: ${replied}`);
+            assert.ok(!replied.includes('--u 查看自己的心智模型'), `个人范围不应重复引导 --u: ${replied}`);
+        } finally {
+            if (origMemory) SubCmd.map['memory'] = origMemory; else delete SubCmd.map['memory'];
+        }
+    },
+
+    /** .ai memo：旧 p|g|st 子命令废弃提示 + 新语法 add --u 正常写入且不落心智模型 */
+    async testCmdMemoNoStAndOldSyntax(): Promise<void> {
+        const origMemory = SubCmd.map['memory'];
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            registerCmdMemory();
+            const groupSession = makeMemoSession('QQ-Group:1064487252');
+            const mkGroupScc = (cmdArgs: any) => makeMemoScc({
+                session: groupSession,
+                ctx: { isPrivate: false, group: { groupId: 'QQ-Group:1064487252', groupName: '测试群' } },
+                gid: 'QQ-Group:1064487252',
+                sid: 'QQ-Group:1064487252',
+                cmdArgs,
+            });
+
+            let replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'p', 'add', '旧语法'])));
+            assert.ok(replied.includes('旧语法已废弃'), `旧 p 子命令应提示废弃: ${replied}`);
+            assert.ok(replied.includes('--u/--g'), `废弃提示应引导 --u/--g: ${replied}`);
+
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'g', 'list'])));
+            assert.ok(replied.includes('旧语法已废弃'), `旧 g 子命令应提示废弃: ${replied}`);
+
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'st', '我是设定'])));
+            assert.ok(replied.includes('旧语法已废弃'), `旧 st 子命令应提示废弃: ${replied}`);
+
+            // 新语法 add --u：写入调用者本人个人 bank
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'add', '新语法内容'], [{ name: 'u' }])));
+            assert.ok(replied.includes('个人记忆已添加'), `新语法 add --u 应写入: ${replied}`);
+            const texts = getMemoryEngine().repository.listUnits('user_QQ:10000').filter(u => u.state === 'valid').map(u => u.text);
+            assert.deepEqual(texts, ['新语法内容'], '新语法应写入调用者本人个人 bank');
+
+            // 旧 st 不应写入群心智模型
+            assert.equal(getMemoryEngine().listMentalModels('group_QQ-Group:1064487252').length, 0, '旧 st 不应写入心智模型');
+        } finally {
+            if (origMemory) SubCmd.map['memory'] = origMemory; else delete SubCmd.map['memory'];
+        }
+    },
+
+    /** .ai memo：delete 按 ID 删除（args 切片定位：bare delete 提示参数缺失，带 ID 删除目标记忆） */
+    async testCmdMemoDeleteBehavior(): Promise<void> {
+        const origMemory = SubCmd.map['memory'];
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            registerCmdMemory();
+            const groupSession = makeMemoSession('QQ-Group:1064487252');
+            const mkGroupScc = (cmdArgs: any) => makeMemoScc({
+                session: groupSession,
+                ctx: { isPrivate: false, group: { groupId: 'QQ-Group:1064487252', groupName: '测试群' } },
+                gid: 'QQ-Group:1064487252',
+                sid: 'QQ-Group:1064487252',
+                cmdArgs,
+            });
+            const groupBank = 'group_QQ-Group:1064487252';
+            const validUnits = () => getMemoryEngine().repository.listUnits(groupBank).filter(u => u.state === 'valid');
+
+            // 添加一条群记忆，取回单元 ID
+            let replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'add', '待删除记忆'])));
+            assert.ok(replied.includes('群聊记忆已添加<'), `添加应返回记忆 ID: ${replied}`);
+            const id = (replied.match(/<([^>]+)>/) || [])[1];
+            assert.ok(id, `应能从回复解析出记忆 ID: ${replied}`);
+            assert.equal(validUnits().length, 1, '添加后群 bank 应有 1 条记忆');
+
+            // bare delete（无 ID/关键词）=> 参数缺失，不删除任何记忆
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'delete'])));
+            assert.ok(replied.includes('参数缺失'), `bare delete 应提示参数缺失: ${replied}`);
+            assert.equal(validUnits().length, 1, 'bare delete 不应删除任何记忆');
+
+            // delete <ID> => 删除目标记忆并提示清除
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'delete', id])));
+            assert.ok(replied.includes('群聊记忆已全部清除'), `按 ID 删除后应提示清除: ${replied}`);
+            assert.equal(validUnits().length, 0, '按 ID 删除后群 bank 应为空');
+        } finally {
+            if (origMemory) SubCmd.map['memory'] = origMemory; else delete SubCmd.map['memory'];
         }
     },
 
