@@ -3,10 +3,10 @@ import Config from "../../config/config";
 import { MemoryManager } from "../../memory/manager";
 import { bumpMemoryRevision } from "../../memory/revision";
 import { resolveBankId } from "../../memory/v2/bank_resolver";
-import { getMemoryEngine } from "../../memory/v2/index";
+import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "../../memory/v2/index";
 import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
-import { stripInternalTags } from "../../utils/string";
+import { fmtDate, stripInternalTags } from "../../utils/string";
 import { normalizeUserId, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
@@ -34,14 +34,19 @@ export function registerCmdMemory() {
        【.ai memo p|g update <ID> <新内容>】更新个人/群聊记忆
        【.ai memo p|g delete <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
        【.ai memo p|g clear】清除个人/群聊记忆
-       【.ai memo p|g st <内容>】设置个人/群聊设定
-       【.ai memo p|g st clr】清除个人/群聊设定
+       【.ai memo p|g st <内容>】设置个人/群聊设定（写入心智模型）
+       【.ai memo p|g st clr】清除个人/群聊设定（删除心智模型）
        【.ai memo obs [on/off]】开启/关闭观察记忆
        【.ai memo obs list】展示观察记忆
        【.ai memo obs】立即生成一次观察记忆
        【.ai memo obs clr】清除观察记忆
        【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
-       【.ai memo reflect <问题>】基于记忆进行推理`;
+       【.ai memo reflect <问题>】基于记忆进行推理
+       【.ai memo mm list [页码]】查看心智模型列表
+       【.ai memo mm view <ID>】查看心智模型详情
+       【.ai memo mm add <问题> [答案]】添加心智模型（不填答案时自动推理）
+       【.ai memo mm refresh [ID]】刷新心智模型（基于当前记忆重新推理）
+       【.ai memo mm del <ID>】删除心智模型`;
     cmd.priv = {
         priv: U, args: {
             status: { priv: U },
@@ -84,7 +89,17 @@ export function registerCmdMemory() {
                 }
             },
             consolidate: { priv: U },
-            reflect: { priv: U }
+            reflect: { priv: U },
+            mm: {
+                priv: U, args: {
+                    list: { priv: U },
+                    view: { priv: U },
+                    add: { priv: U },
+                    refresh: { priv: U },
+                    del: { priv: U },
+                    "*": { priv: U }
+                }
+            }
         }
     };
     cmd.solve = async (scc: SubCmdContext) => {
@@ -115,12 +130,16 @@ export function registerCmdMemory() {
                 const { MEMORY: isMemory, SUMMARY: isSummary } = Config.memory;
                 const summaryEffective = statusSession.memory.summaryOverride === false ? false : statusSession.memory.summaryOverride === true ? true : isSummary;
                 const summarySuffix = statusSession.memory.summaryOverride === undefined ? '' : '（会话级）';
+                const statusBank = resolveBankId(statusSession.sessionId, statusSession.sessionType === 'group' ? 'group' : 'user', statusSession.agentName);
+                const statusModels = getMemoryEngine().listMentalModels(statusBank.bankId);
+                const modelOverview = statusModels.length === 0 ? '（空）' : statusModels.map(m => `${m.question}${m.version > 1 ? `(v${m.version})` : ''}`).join('；');
                 seal.replyToSender(ctx, msg, `${statusSession.id}
      长期记忆开启状态: ${isMemory ? '是' : '否'}
      长期记忆条数: ${statusSession.memory.memoryIds.length}
      观察记忆开启状态: ${summaryEffective ? '是' : '否'}${summarySuffix}
-     观察记忆条数: ${getMemoryEngine().repository.listObservations(resolveBankId(statusSession.sessionId, statusSession.sessionType === 'group' ? 'group' : 'user', statusSession.agentName).bankId).length}
-     心智模型条数: ${getMemoryEngine().listMentalModels(resolveBankId(statusSession.sessionId, statusSession.sessionType === 'group' ? 'group' : 'user', statusSession.agentName).bankId).length}`);
+     观察记忆条数: ${getMemoryEngine().repository.listObservations(statusBank.bankId).length}
+     心智模型条数: ${statusModels.length}
+     心智模型概览: ${modelOverview}`);
                 return ret;
             }
             case 'private': {
@@ -134,18 +153,26 @@ export function registerCmdMemory() {
                                 return ret;
                             }
                             case 'clear': {
+                                const bank = resolveBankId(targetSession.sessionId, 'user', targetSession.agentName);
+                                const mm = getMemoryEngine().listMentalModels(bank.bankId).find(m => m.question === MENTAL_MODEL_PERSONA_QUESTION);
+                                if (mm) getMemoryEngine().deleteMentalModel(bank.bankId, mm.id);
                                 targetSession.memory.persona = '无';
-                                seal.replyToSender(ctx, msg, '设定已清除');
+                                bumpMemoryRevision();
+                                seal.replyToSender(ctx, msg, '设定已清除（心智模型已删除）');
                                 targetSession.save();
                                 return ret;
                             }
                             default: {
-                                if (s.length > 20) {
-                                    seal.replyToSender(ctx, msg, '设定过长，请控制在20字以内');
+                                if (s.length > 500) {
+                                    seal.replyToSender(ctx, msg, '设定过长，请控制在500字以内');
                                     return ret;
                                 }
-                                targetSession.memory.persona = stripInternalTags(s);
-                                seal.replyToSender(ctx, msg, '设定已修改');
+                                const bank = resolveBankId(targetSession.sessionId, 'user', targetSession.agentName);
+                                getMemoryEngine().ensureBank(bank.bankId, bank.kind, bank.agentName);
+                                await getMemoryEngine().createMentalModel(bank.bankId, MENTAL_MODEL_PERSONA_QUESTION, stripInternalTags(s), [`user:${targetSession.sessionId}`]);
+                                targetSession.memory.persona = '无';
+                                bumpMemoryRevision();
+                                seal.replyToSender(ctx, msg, '设定已修改（已写入心智模型）');
                                 targetSession.save();
                                 return ret;
                             }
@@ -268,18 +295,26 @@ export function registerCmdMemory() {
                                 return ret;
                             }
                             case 'clear': {
+                                const bank = resolveBankId(session.sessionId, 'group', session.agentName);
+                                const mm = getMemoryEngine().listMentalModels(bank.bankId).find(m => m.question === MENTAL_MODEL_PERSONA_QUESTION);
+                                if (mm) getMemoryEngine().deleteMentalModel(bank.bankId, mm.id);
                                 session.memory.persona = '无';
-                                seal.replyToSender(ctx, msg, '设定已清除');
+                                bumpMemoryRevision();
+                                seal.replyToSender(ctx, msg, '设定已清除（心智模型已删除）');
                                 session.save();
                                 return ret;
                             }
                             default: {
-                                if (s.length > 30) {
-                                    seal.replyToSender(ctx, msg, '设定过长，请控制在30字以内');
+                                if (s.length > 500) {
+                                    seal.replyToSender(ctx, msg, '设定过长，请控制在500字以内');
                                     return ret;
                                 }
-                                session.memory.persona = stripInternalTags(s);
-                                seal.replyToSender(ctx, msg, '设定已修改');
+                                const bank = resolveBankId(session.sessionId, 'group', session.agentName);
+                                getMemoryEngine().ensureBank(bank.bankId, bank.kind, bank.agentName);
+                                await getMemoryEngine().createMentalModel(bank.bankId, MENTAL_MODEL_PERSONA_QUESTION, stripInternalTags(s), [`group:${session.sessionId}`]);
+                                session.memory.persona = '无';
+                                bumpMemoryRevision();
+                                seal.replyToSender(ctx, msg, '设定已修改（已写入心智模型）');
                                 session.save();
                                 return ret;
                             }
@@ -455,6 +490,109 @@ export function registerCmdMemory() {
                 return ret;
             }
 
+            case 'mm': {
+                const mmBank = resolveBankId(session.sessionId, session.sessionType === 'group' ? 'group' : 'user', session.agentName);
+                const mmEngine = getMemoryEngine();
+                const mmVal3 = aliasToCmd(cmdArgs.getArgN(3));
+                switch (mmVal3) {
+                    case 'list': {
+                        const models = mmEngine.listMentalModels(mmBank.bankId);
+                        if (models.length === 0) {
+                            seal.replyToSender(ctx, msg, '心智模型为空，【.ai memo mm add <问题> [答案]】添加');
+                            return ret;
+                        }
+                        const perPage = 5;
+                        const totalPages = Math.max(1, Math.ceil(models.length / perPage));
+                        const pageArg = parseInt(cmdArgs.getArgN(4) || '', 10);
+                        const pageNum = pageArg > 0 ? pageArg : page;
+                        const cur = Math.min(Math.max(pageNum, 1), totalPages);
+                        const items = models.slice((cur - 1) * perPage, cur * perPage);
+                        const lines = items.map(m => `${m.id} ${m.question} (v${m.version} · 更新于${fmtDate(m.updatedAt)})`);
+                        seal.replyToSender(ctx, msg, `心智模型 ${models.length} 条\n${lines.join('\n')}\n当前页码: ${cur}/${totalPages}`);
+                        return ret;
+                    }
+                    case 'view': {
+                        const id = cmdArgs.getArgN(4);
+                        if (!id) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo mm view <ID>】查看心智模型详情');
+                            return ret;
+                        }
+                        const m = mmEngine.listMentalModels(mmBank.bankId).find(x => x.id === id);
+                        if (!m) {
+                            seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
+                            return ret;
+                        }
+                        const answer = m.answer.length > 600 ? m.answer.slice(0, 600) + '…' : m.answer;
+                        seal.replyToSender(ctx, msg, `【心智模型】${m.question}\n${answer}\nID: ${m.id} · v${m.version}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(m.createdAt)}\n更新: ${fmtDate(m.updatedAt)}`);
+                        return ret;
+                    }
+                    case 'add': {
+                        const question = cmdArgs.getArgN(4);
+                        if (!question) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo mm add <问题> [答案]】添加心智模型');
+                            return ret;
+                        }
+                        const answer = cmdArgs.getRestArgsFrom(5);
+                        const tagKw = cmdArgs.getKwarg('tag');
+                        const scopeTags = tagKw && tagKw.value ? [tagKw.value] : [session.sessionType === 'group' ? `group:${session.sessionId}` : `user:${session.sessionId}`];
+                        if (!answer) {
+                            const result = await mmEngine.reflect(mmBank.bankId, question);
+                            const m = await mmEngine.createMentalModel(mmBank.bankId, question, result.text, scopeTags);
+                            bumpMemoryRevision();
+                            session.save();
+                            seal.replyToSender(ctx, msg, `心智模型已添加<${m.id}>\n问题: ${question}\n答案: ${result.text}`);
+                            return ret;
+                        }
+                        const m = await mmEngine.createMentalModel(mmBank.bankId, question, stripInternalTags(answer), scopeTags);
+                        bumpMemoryRevision();
+                        session.save();
+                        seal.replyToSender(ctx, msg, `心智模型已添加<${m.id}>`);
+                        return ret;
+                    }
+                    case 'refresh': {
+                        const id = cmdArgs.getArgN(4);
+                        if (id) {
+                            const exists = mmEngine.listMentalModels(mmBank.bankId).some(x => x.id === id);
+                            if (!exists) {
+                                seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
+                                return ret;
+                            }
+                        }
+                        const total = id ? 1 : mmEngine.listMentalModels(mmBank.bankId).length;
+                        const updated = await mmEngine.refreshMentalModels(mmBank.bankId, id || undefined);
+                        if (updated > 0) bumpMemoryRevision();
+                        session.save();
+                        seal.replyToSender(ctx, msg, `已刷新 ${updated} 条，跳过 ${total - updated} 条`);
+                        return ret;
+                    }
+                    case 'del': {
+                        const id = cmdArgs.getArgN(4);
+                        if (!id) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo mm del <ID>】删除心智模型');
+                            return ret;
+                        }
+                        const ok = mmEngine.deleteMentalModel(mmBank.bankId, id);
+                        if (!ok) {
+                            seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
+                            return ret;
+                        }
+                        bumpMemoryRevision();
+                        session.save();
+                        seal.replyToSender(ctx, msg, `心智模型已删除<${id}>`);
+                        return ret;
+                    }
+                    default: {
+                        seal.replyToSender(ctx, msg, `参数缺失:
+     【.ai memo mm list [页码]】查看心智模型列表
+     【.ai memo mm view <ID>】查看心智模型详情
+     【.ai memo mm add <问题> [答案]】添加心智模型（不填答案时自动推理）
+     【.ai memo mm refresh [ID]】刷新心智模型
+     【.ai memo mm del <ID>】删除心智模型`);
+                        return ret;
+                    }
+                }
+            }
+
             default: {
                 seal.replyToSender(ctx, msg, `帮助:
        【.ai memo status [用户ID]】查看记忆状态，传用户ID时查看对应个人记忆
@@ -463,14 +601,19 @@ export function registerCmdMemory() {
        【.ai memo p|g update <ID> <新内容>】更新个人/群聊记忆
        【.ai memo p|g delete <ID1> <ID2> --关键词1 --关键词2】删除个人/群聊记忆
        【.ai memo p|g clear】清除个人/群聊记忆
-       【.ai memo p|g st <内容>】设置个人/群聊设定
-       【.ai memo p|g st clr】清除个人/群聊设定
+       【.ai memo p|g st <内容>】设置个人/群聊设定（写入心智模型）
+       【.ai memo p|g st clr】清除个人/群聊设定（删除心智模型）
        【.ai memo obs [on/off]】开启/关闭观察记忆
        【.ai memo obs list】展示观察记忆
        【.ai memo obs】立即生成一次观察记忆
        【.ai memo obs clr】清除观察记忆
        【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
-       【.ai memo reflect <问题>】基于记忆进行推理`);
+       【.ai memo reflect <问题>】基于记忆进行推理
+       【.ai memo mm list [页码]】查看心智模型列表
+       【.ai memo mm view <ID>】查看心智模型详情
+       【.ai memo mm add <问题> [答案]】添加心智模型（不填答案时自动推理）
+       【.ai memo mm refresh [ID]】刷新心智模型（基于当前记忆重新推理）
+       【.ai memo mm del <ID>】删除心智模型`);
                 return ret;
             }
         }

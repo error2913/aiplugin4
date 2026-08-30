@@ -18,12 +18,14 @@ import { SubCmd } from "../src/cmd/root_cmd";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
+import { MemoryManager } from "../src/memory/manager";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
+import { resolveBankId } from "../src/memory/v2/bank_resolver";
 import { buildMemoryPrompt } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
-import { createMemoryEngine } from "../src/memory/v2";
+import { createMemoryEngine, getMemoryEngine, resetMemoryEngineForTest, MENTAL_MODEL_PERSONA_QUESTION } from "../src/memory/v2";
 import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
 import Agent from "../src/agent/agent";
@@ -543,10 +545,102 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await engine.consolidate('user_r');
         const observations = engine.repository.listObservations('user_r');
         assert.ok(observations.some(o => o.text.startsWith('综合观察：')), 'Observation 应使用合成器生成');
-        await engine.createMentalModel('user_m2', '偏好是什么？', '旧答案');
-        await engine.refreshMentalModels('user_m2');
-        const model = engine.listMentalModels('user_m2')[0];
-        assert.ok(model.version > 1, 'MentalModel 应被刷新版本号');
+        // 心智模型刷新：注入确定性合成器，验证空库保护（无依据不刷）与正常刷新
+        const refreshEngine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async (query) => `推理结果：${query}`,
+        });
+        await refreshEngine.createMentalModel('user_m2', '偏好是什么？', '旧答案');
+        assert.equal(await refreshEngine.refreshMentalModels('user_m2'), 0, '空库无依据时应跳过');
+        assert.equal(refreshEngine.listMentalModels('user_m2')[0].version, 1, '空库不应刷版本');
+        await refreshEngine.addMemory('user_m2', { content: '偏好 小明喜欢简洁' });
+        assert.equal(await refreshEngine.refreshMentalModels('user_m2'), 1, '有依据时应刷新');
+        const model = refreshEngine.listMentalModels('user_m2')[0];
+        assert.equal(model.version, 2, 'MentalModel 应被刷新版本号');
+        assert.equal(model.answer, '推理结果：偏好是什么？', '刷新后应使用合成器结果');
+    },
+
+    /** 心智模型增删改：同问题名覆盖更新；删除返回是否命中 */
+    async testV2MentalModelLifecycle(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        const m1 = await engine.createMentalModel('user_l1', '问题X', '答案1', ['user:QQ:1']);
+        assert.equal(m1.version, 1);
+        // 同问题名：覆盖答案、整体替换 scopeTags、版本 +1
+        const m2 = await engine.createMentalModel('user_l1', '问题X', '答案2', ['user:QQ:2']);
+        assert.equal(m2.id, m1.id, '同问题应更新同一条');
+        assert.equal(m2.answer, '答案2');
+        assert.equal(m2.version, 2);
+        assert.deepEqual(m2.scopeTags, ['user:QQ:2'], 'scopeTags 应整体替换');
+        assert.equal(engine.listMentalModels('user_l1').length, 1);
+        // 不同问题：新增一条
+        await engine.createMentalModel('user_l1', '问题Y', '答案Y');
+        assert.equal(engine.listMentalModels('user_l1').length, 2);
+        // 删除
+        assert.equal(engine.deleteMentalModel('user_l1', m1.id), true);
+        assert.equal(engine.listMentalModels('user_l1').length, 1);
+        assert.equal(engine.deleteMentalModel('user_l1', m1.id), false, '删除不存在应返回 false');
+    },
+
+    /** 心智模型刷新保护：空库不刷、结果不变不刷、合成器返回占位文本不覆盖、单条刷新只刷目标 */
+    async testV2ReflectAndRefreshGuards(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        // 空库 reflect 降级为占位文本
+        const r = await engine.reflect('user_g1', '没有任何记忆');
+        assert.equal(r.text, '暂无足够记忆进行推理', '空库 reflect 应返回占位文本');
+        // 无观察/事实可依据：refresh 跳过，版本不变
+        await engine.createMentalModel('user_g1', '问题A', '旧答案');
+        assert.equal(await engine.refreshMentalModels('user_g1'), 0, '无依据时应跳过');
+        assert.equal(engine.listMentalModels('user_g1')[0].version, 1, '无依据时版本不变');
+        // 结果未变化：不 bump version
+        const engine2 = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => '固定答案',
+        });
+        await engine2.createMentalModel('user_g2', '问题B', '固定答案');
+        await engine2.addMemory('user_g2', { content: '偏好 小明喜欢简洁' });
+        assert.equal(await engine2.refreshMentalModels('user_g2'), 0, '结果未变化时不更新');
+        assert.equal(engine2.listMentalModels('user_g2')[0].version, 1);
+        // 合成器返回占位文本：不覆盖旧答案
+        const engine3 = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => '暂无足够记忆进行推理',
+        });
+        await engine3.createMentalModel('user_g3', '问题C', '旧答案');
+        await engine3.addMemory('user_g3', { content: '偏好 小明喜欢简洁' });
+        assert.equal(await engine3.refreshMentalModels('user_g3'), 0, '占位文本不应覆盖旧答案');
+        assert.equal(engine3.listMentalModels('user_g3')[0].answer, '旧答案');
+        // 单条刷新：id 过滤，只刷目标模型
+        const mD = await engine2.createMentalModel('user_g2', '问题D', '旧答案D');
+        assert.equal(await engine2.refreshMentalModels('user_g2', mD.id), 1, '单条刷新应只更新目标模型');
+        assert.equal(engine2.listMentalModels('user_g2').find(m => m.id === mD.id)!.version, 2);
+        assert.equal(engine2.listMentalModels('user_g2').find(m => m.question === '问题B')!.version, 1, '非目标模型版本不变');
+    },
+
+    /** 旧 persona 懒迁移：写入心智模型后清空；已有模型时只清不覆盖；幂等 */
+    async testMigrateLegacyPersona(): Promise<void> {
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        const engine = getMemoryEngine();
+        const session = new Session();
+        session.sessionId = 'QQ:77777';
+        session.sessionType = 'user';
+        session.memory.persona = '我是小明，喜欢简洁';
+        await MemoryManager.migrateLegacyPersona(session);
+        const bankId = resolveBankId('QQ:77777', 'user', '').bankId;
+        const models = engine.listMentalModels(bankId);
+        assert.equal(models.length, 1);
+        assert.equal(models[0].question, MENTAL_MODEL_PERSONA_QUESTION);
+        assert.equal(models[0].answer, '我是小明，喜欢简洁');
+        assert.deepEqual(models[0].scopeTags, ['user:QQ:77777']);
+        assert.equal(session.memory.persona, '无', '迁移后应清空 persona');
+        // 幂等：已有该问题模型时只清空 persona，不重复写入、不覆盖已有答案
+        session.memory.persona = '旧设定残留';
+        await MemoryManager.migrateLegacyPersona(session);
+        assert.equal(engine.listMentalModels(bankId).length, 1, '不应重复迁移');
+        assert.equal(engine.listMentalModels(bankId)[0].answer, '我是小明，喜欢简洁', '已有模型不应被残留 persona 覆盖');
+        assert.equal(session.memory.persona, '无');
+        // persona 为空/无：直接返回不创建
+        await MemoryManager.migrateLegacyPersona(session);
+        assert.equal(engine.listMentalModels(bankId).length, 1, '空 persona 不应创建模型');
     },
 
     /** 通知事件白名单解析：逗号/换行/空行/大小写容错 */

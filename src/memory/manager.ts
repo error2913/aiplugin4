@@ -8,12 +8,13 @@ import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { buildContent } from "../utils/message";
+import { stripInternalTags } from "../utils/string";
 
 import { knowledgeService } from "./knowledge";
 import { bumpMemoryRevision } from "./revision";
 import { parseLooseJson } from "./session_memory";
 import { resolveBankId } from "./v2/bank_resolver";
-import { getMemoryEngine } from "./v2/index";
+import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "./v2/index";
 import { buildMemoryPrompt } from "./v2/prompt";
 import type { MemoryUnit, RecallOptions, RetainResult } from "./v2/types";
 
@@ -29,10 +30,33 @@ function tagsForSession(uis: UserInfo[], gi: GroupInfo | null): string[] {
 }
 
 export class MemoryManager {
+    /**
+     * 旧 persona 懒迁移：把仍存于 session.memory.persona 的旧设定写入心智模型
+     * （固定问题 MENTAL_MODEL_PERSONA_QUESTION），随后清空 persona。
+     * 幂等：bank 已有该问题的模型时只清空 persona，不重复写入。
+     */
+    static async migrateLegacyPersona(session: Session): Promise<void> {
+        const persona = session.memory.persona;
+        if (!persona || persona === '无') return;
+        const engine = getMemoryEngine();
+        const bank = bankForSession(session);
+        engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
+        const scopeTag = session.sessionType === 'group' ? `group:${session.sessionId}` : `user:${session.sessionId}`;
+        const existing = engine.listMentalModels(bank.bankId).find(m => m.question === MENTAL_MODEL_PERSONA_QUESTION);
+        if (!existing) {
+            await engine.createMentalModel(bank.bankId, MENTAL_MODEL_PERSONA_QUESTION, stripInternalTags(persona), [scopeTag]);
+            bumpMemoryRevision();
+        }
+        session.memory.persona = '无';
+        session.save();
+    }
+
     /** 长期记忆段：MentalModel + Observation + Recall 混合渲染 */
     static async buildLongTermPrompt(ctx: seal.MsgContext, session: Session, text: string, uis: UserInfo[], gi: GroupInfo | null): Promise<string> {
         const { MEMORY } = Config.memory;
         if (!MEMORY) return '';
+        // 旧 persona 懒迁移：首次构建长期提示时把存量 persona 写入心智模型后清空
+        await MemoryManager.migrateLegacyPersona(session);
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
         engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
