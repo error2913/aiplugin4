@@ -109,7 +109,8 @@ function getModelsConfig<T extends ChatModel | MultimodalModel | EmbeddingModel>
         try {
             const mc = revive(ModelConfigItem, load(tomlString));
             // ignore=1：忽略该条模型配置（不出现在列表、不可选中、不作为默认）
-            if (mc.ignore === 1 || mc.ignore === true || mc.ignore === '1') return null;
+            const ignore = mc.ignore as unknown as number | boolean | string;
+            if (ignore === 1 || ignore === true || ignore === '1') return null;
             if (mc.name === "") throw new Error('缺失模型名称');
             if (mc.api_key === "") throw new Error('缺失模型API密钥');
             if (mc.provider === "") mc.provider = m2p?.[mc.name] || "";
