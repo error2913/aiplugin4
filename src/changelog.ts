@@ -2,15 +2,15 @@
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const changelog: { [version: string]: string } = {
     "4.19.0": `## 新功能
-- 新增打分智能体触发（.ai on --j）：由打分智能体判断群聊消息是否值得机器人插话，避免待机时对无关消息强行回复。消息先入库，gate 门禁（零 LLM）先丢弃明显不该触发的情况（冷却中/精力不足/消息过密/每小时次数用尽/已有待触发计时器），通过后再由打分智能体按五维（相关度/意愿度/社交价值/时机/延续性）加权打分
-- 打分结果三分支：得分≥speak_threshold 直接插话（SPEAK）；得分在 [wait_threshold, speak_threshold) 时进入退避等待（WAIT），到点后先过 gate 再重新打分；低于 wait_threshold 直接忽略（IGNORE）
+- 新增打分智能体触发（.ai on --j）：由打分智能体判断群聊消息是否值得机器人插话，避免待机时对无关消息强行回复。消息先入库，gate 门禁（零 LLM）先丢弃明显不该触发的情况（冷却中/精力不足/消息过密/每小时次数用尽/WAIT 冷却中/已有待触发计时器），通过后再由打分智能体按五维（相关度/意愿度/社交价值/时机/延续性）加权打分
+- 打分结果两级：得分≥speak_threshold 直接插话（SPEAK）；低于 speak_threshold 进入 WAIT，只记录冷却时间戳，wait_cooldown 秒内该会话的打分请求由 gate 直接丢弃（不重新打分）
 - 其他方式触发会话（正则/计数器/概率/计时器/AI设定触发条件等）同样刷新打分回复间隔并扣除精力，避免各触发方式互相刷屏
-- 打分详情（输入、注入、维度分、加权总分、判定、退避、gate DROP 原因、重试/超时）以 [judge] 标签打印到日志
+- 打分详情（输入、注入、维度分、加权总分、判定、gate DROP 原因、重试/超时）以 [judge] 标签打印到日志
 
 ## 配置变更
-- 「消息触发」页签新增「打分智能体触发配置」（TOML 单条，缺省字段使用默认值）：speak_threshold / wait_threshold / weights / energy_initial / energy_reply_cost / energy_min / energy_recover_min / energy_recover_day / min_reply_interval / context_count / timeout_sec / retries / wait_backoff / max_judge_per_hour
+- 「消息触发」页签新增「打分智能体触发配置」（TOML 单条，缺省字段使用默认值）：speak_threshold / wait_cooldown / weights / energy_initial / energy_reply_cost / energy_min / energy_recover_min / energy_recover_day / min_reply_interval / context_count / timeout_sec / retries / max_judge_per_hour
 - 对话模型 use 新增 judge 用途：可为打分智能体单独配置模型，未单独配置时自动回退 chat 模型（仅模型配置描述与示例变化，解析结构不变）
-- .ai off --j 单独关闭打分智能体触发并清理其 WAIT 回访与内存状态；.ai stop 同样清理
+- .ai off --j 单独关闭打分智能体触发并清理其 WAIT 冷却与内存状态；.ai stop 同样清理
 `,
     "4.18.1": `## 新功能
 - 新增 .ai live：查看会话实时运行状态——流式输出/工具调用、运行中请求数、排队数、定时器；.ai live all 查看全局活跃会话总览（仅骰主）

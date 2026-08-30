@@ -1,5 +1,5 @@
-// 打分智能体触发管理：gate 门禁（零 LLM）→ 打分小模型 → SPEAK/WAIT/IGNORE 三分支；
-// 记录其他方式触发会话（刷新回复间隔/扣精力），WAIT 退避回访复用 gate。
+// 打分智能体触发管理：gate 门禁（零 LLM）→ 打分小模型 → SPEAK/WAIT 两级；
+// 记录其他方式触发会话（刷新回复间隔/扣精力），WAIT 只记冷却时间戳由 gate 直接 DROP。
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import { JudgeConfig } from "../config/configs/trigger";
@@ -40,10 +40,8 @@ interface JudgeState {
     /** 精力最后记账时间（毫秒），用于懒恢复 */
     lastEnergyAt: number;
     energy: number;
-    /** WAIT 回访定时器（与 session.context.timer 独立） */
-    waitTimer: number | null;
-    /** 已进行过的 WAIT 次数，达到退避档位数后按 IGNORE 处理 */
-    waitAttempts: number;
+    /** WAIT 冷却截止时间戳（毫秒）：gate 在此前直接 DROP；0 表示无冷却 */
+    waitUntil: number;
     /** 每会话每小时打分次数 */
     hourly: { hour: number; count: number };
     /** 15 秒窗口内的消息时间戳，用于密度判断 */
@@ -72,13 +70,12 @@ export class JudgeManager {
             lastSpeakAt: 0,
             lastEnergyAt: Date.now(),
             energy: Config.trigger.JUDGE.ENERGY_INITIAL,
-            waitTimer: null,
-            waitAttempts: 0,
+            waitUntil: 0,
             hourly: { hour: -1, count: 0 },
             msgTimes: []
         };
         this.states.set(sid, state);
-        // 超上限淘汰最久未使用的会话（Map 第一个键），并清理其 WAIT 定时器
+        // 超上限淘汰最久未使用的会话（Map 第一个键）
         if (this.states.size > MAX_STATES) {
             const oldest = this.states.keys().next().value as string | undefined;
             if (oldest) this.clearSession(oldest);
@@ -87,7 +84,7 @@ export class JudgeManager {
     }
 
     /**
-     * 会话被触发（含正则/计数/概率/计时器/打分等其他方式触发会话）时刷新回复间隔、扣精力并取消 WAIT。
+     * 会话被触发（含正则/计数/概率/计时器/打分等其他方式触发会话）时刷新回复间隔、扣精力并解除 WAIT 冷却。
      * 只在 judge 状态已存在（该会话开启过 --j）时记账，避免为从未用过的会话保留状态。
      */
     static noteSessionTrigger(sid: string, reason: string): void {
@@ -98,19 +95,12 @@ export class JudgeManager {
         state.lastSpeakAt = now;
         state.lastEnergyAt = now;
         state.energy = Math.max(state.energy - ENERGY_REPLY_COST, ENERGY_MIN);
-        if (state.waitTimer !== null) {
-            clearTimeout(state.waitTimer);
-            state.waitTimer = null;
-        }
-        state.waitAttempts = 0;
+        state.waitUntil = 0;
         log.info(`会话<${sid}>被触发(${reason})，刷新回复间隔，精力=${state.energy.toFixed(2)}`);
     }
 
-    /** 清理会话 judge 状态：清 WAIT 定时器并移除内存状态（.ai off / .ai stop 时调用） */
+    /** 清理会话 judge 状态：移除内存状态（.ai off / .ai stop 时调用） */
     static clearSession(sid: string): void {
-        const state = this.states.get(sid);
-        if (!state) return;
-        if (state.waitTimer !== null) clearTimeout(state.waitTimer);
         this.states.delete(sid);
     }
 
@@ -132,7 +122,7 @@ export class JudgeManager {
 
         const built = this.buildJudgeMessages(ctx, session, messageText, cfg);
         log.info(`注入: bot=${built.botName} role=${truncate(built.role, 80)} lastBot=${truncate(built.lastBot, 80)} ctx=${built.ctxCount}/${cfg.CONTEXT_COUNT}`);
-        await this.judgeAndBranch(ctx, msg, session, messageText, cfg, built);
+        await this.judgeAndBranch(ctx, msg, session, cfg, built);
     }
 
     /** gate 门禁（零 LLM）：任一条件命中直接 DROP，不触发小模型 */
@@ -142,8 +132,8 @@ export class JudgeManager {
 
         // 会话已挂起待触发计时器（计数器/概率/计时器已安排回复）→ 防双触发
         if (session.context.timer !== null) return { drop: true, reason: '计时器已挂起' };
-        // 已有 WAIT 回访定时器 → 不并发打分
-        if (state.waitTimer !== null) return { drop: true, reason: '已有WAIT回访' };
+        // WAIT 冷却中 → 不并发打分
+        if (now < state.waitUntil) return { drop: true, reason: 'WAIT冷却中' };
 
         // 最小回复间隔：bot 刚发言/刚被其他方式触发过
         const cooldownLeft = state.lastSpeakAt + cfg.MIN_REPLY_INTERVAL * 1000 - now;
@@ -174,14 +164,14 @@ export class JudgeManager {
         return { drop: false, reason: '' };
     }
 
-    /** 打分 + 三分支：SPEAK 直接插话 / WAIT 退避回访 / IGNORE 丢弃 */
+    /** 打分 + 两级分支：SPEAK 直接插话 / WAIT 记冷却时间戳（冷却期内 gate 直接 DROP） */
     private static async judgeAndBranch(
-        ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string,
+        ctx: seal.MsgContext, msg: seal.Message, session: Session,
         cfg: JudgeConfig, built: JudgeBuilt
     ): Promise<void> {
         const result = await this.requestScore(built.messages, cfg);
         if ('error' in result) {
-            log.info(`打分失败(${result.error})，按IGNORE处理`);
+            log.info(`打分失败(${result.error})，本次不插话`);
             return;
         }
         const { dims, reason } = result;
@@ -204,54 +194,9 @@ export class JudgeManager {
             await session.chat(ctx, msg, '打分触发');
             return;
         }
-        if (s >= cfg.WAIT_THRESHOLD) {
-            log.info(`score=${score10.toFixed(2)}/10 → WAIT (${cfg.WAIT_THRESHOLD}≤s<${cfg.SPEAK_THRESHOLD})`);
-            this.scheduleWait(ctx, msg, session, messageText, cfg, built);
-            return;
-        }
-        log.info(`score=${score10.toFixed(2)}/10 → IGNORE`);
-    }
-
-    /** WAIT 分支：按退避档位挂定时器，到点由 waitRevisit 先过 gate 再重判 */
-    private static scheduleWait(
-        ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string,
-        cfg: JudgeConfig, built: JudgeBuilt
-    ): void {
-        const sid = session.sessionId;
-        const state = this.ensureState(sid);
-        if (state.waitAttempts >= cfg.WAIT_BACKOFF.length) {
-            log.info(`WAIT退避已达上限(${cfg.WAIT_BACKOFF.length}次)，按IGNORE处理`);
-            return;
-        }
-        const idx = Math.min(state.waitAttempts, cfg.WAIT_BACKOFF.length - 1);
-        const backoff = cfg.WAIT_BACKOFF[idx] ?? 30;
-        state.waitAttempts++;
-        const fireAt = Date.now() + backoff * 1000;
-        state.waitTimer = setTimeout(() => {
-            state.waitTimer = null;
-            void this.waitRevisit(ctx, msg, session, messageText, cfg, built);
-        }, backoff * 1000);
-        log.info(`WAIT backoff=${backoff}s next=${fmtDate(Math.floor(fireAt / 1000))} 尝试${state.waitAttempts}/${cfg.WAIT_BACKOFF.length}`);
-    }
-
-    /** WAIT 回访：先复用 gate（冷却/精力/密度/上限任一命中即放弃），通过才重新打分 */
-    private static async waitRevisit(
-        ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string,
-        cfg: JudgeConfig, built: JudgeBuilt
-    ): Promise<void> {
-        const sid = session.sessionId;
-        const state = this.ensureState(sid);
-        if (session.running || session.starting) {
-            log.info('WAIT回访 会话忙，放弃');
-            return;
-        }
-        const g = this.gate(session, state);
-        if (g.drop) {
-            log.info(`WAIT回访 gate=DROP(${g.reason})，放弃`);
-            return;
-        }
-        log.info('WAIT回访 gate=通过，重新打分');
-        await this.judgeAndBranch(ctx, msg, session, messageText, cfg, built);
+        const state = this.ensureState(session.sessionId);
+        state.waitUntil = Date.now() + cfg.WAIT_COOLDOWN * 1000;
+        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SPEAK_THRESHOLD}) 冷却${cfg.WAIT_COOLDOWN}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
     }
 
     /** 调用打分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */

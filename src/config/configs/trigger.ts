@@ -10,8 +10,6 @@ import { getRegexConfig } from "../config";
 export interface JudgeConfig {
     /** 得分(归一化 0-1)≥该值直接插话 */
     SPEAK_THRESHOLD: number;
-    /** 得分≥该值且<SPEAK_THRESHOLD 时进入退避等待 */
-    WAIT_THRESHOLD: number;
     /** 五维权重（加权平均，归一化到 0-10） */
     WEIGHTS: { relevance: number, willingness: number, social: number, timing: number, continuity: number };
     /** 初始精力 */
@@ -32,15 +30,15 @@ export interface JudgeConfig {
     TIMEOUT_SEC: number;
     /** JSON 解析失败重试次数 */
     RETRIES: number;
-    /** WAIT 退避间隔（秒），依次取用，用尽后按 IGNORE 处理 */
-    WAIT_BACKOFF: number[];
+    /** WAIT 冷却时长（秒）：得分<SPEAK_THRESHOLD 时记冷却，期间 gate 直接 DROP；0 表示不冷却 */
+    WAIT_COOLDOWN: number;
     /** 每会话每小时最多打分次数，超出后 gate 直接 DROP */
     MAX_JUDGE_PER_HOUR: number;
 }
 
 const JUDGE_TOML_DEFAULT = `# 打分智能体触发参数（.ai on --j 开启后生效；缺省字段使用默认值）
 speak_threshold = 0.70          # 得分(归一化)≥该值直接插话
-wait_threshold = 0.45           # 得分在 [该值, speak_threshold) 时进入退避等待再判
+wait_cooldown = 60              # 得分<speak_threshold 时的 WAIT 冷却秒数，期间 gate 直接丢弃；0=不冷却
 weights = { relevance = 25, willingness = 20, social = 20, timing = 15, continuity = 20 }  # 五维权重
 energy_initial = 1.0            # 初始精力
 energy_reply_cost = 0.1         # 每次触发会话(含其他方式触发)扣减精力
@@ -51,13 +49,12 @@ min_reply_interval = 120        # 最小回复间隔(秒)，间隔内 gate 直�
 context_count = 10              # 注入给打分智能体的最近上下文条数
 timeout_sec = 30                # 单次打分请求超时(秒)
 retries = 3                     # 打分返回非 JSON 时的重试次数
-wait_backoff = [30, 60, 120]    # WAIT 退避间隔(秒)，依次取用
 max_judge_per_hour = 20         # 每会话每小时最多打分次数`;
 
 class JudgeConfigItem {
     static validKeysMap: { [key in keyof JudgeConfigItem]?: TypeDescriptor<JudgeConfigItem[key]> } = {
         speak_threshold: 'number',
-        wait_threshold: 'number',
+        wait_cooldown: 'number',
         weights: { objectValue: 'number' },
         energy_initial: 'number',
         energy_reply_cost: 'number',
@@ -68,11 +65,10 @@ class JudgeConfigItem {
         context_count: 'number',
         timeout_sec: 'number',
         retries: 'number',
-        wait_backoff: { array: 'number' },
         max_judge_per_hour: 'number'
     }
     speak_threshold: number;
-    wait_threshold: number;
+    wait_cooldown: number;
     weights: { relevance: number, willingness: number, social: number, timing: number, continuity: number };
     energy_initial: number;
     energy_reply_cost: number;
@@ -83,11 +79,10 @@ class JudgeConfigItem {
     context_count: number;
     timeout_sec: number;
     retries: number;
-    wait_backoff: number[];
     max_judge_per_hour: number;
     constructor() {
         this.speak_threshold = 0.70;
-        this.wait_threshold = 0.45;
+        this.wait_cooldown = 60;
         this.weights = { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 };
         this.energy_initial = 1.0;
         this.energy_reply_cost = 0.1;
@@ -98,7 +93,6 @@ class JudgeConfigItem {
         this.context_count = 10;
         this.timeout_sec = 30;
         this.retries = 3;
-        this.wait_backoff = [30, 60, 120];
         this.max_judge_per_hour = 20;
     }
 }
@@ -111,12 +105,9 @@ function getJudgeConfig(): JudgeConfig {
         const mc = revive(JudgeConfigItem, load(tomlString));
         // weights 是部分覆盖：TOML 里只写了部分维度时，其余并入默认值
         const weights = { ...new JudgeConfigItem().weights, ...(mc.weights || {}) };
-        const waitBackoff = Array.isArray(mc.wait_backoff) && mc.wait_backoff.length > 0
-            ? mc.wait_backoff.filter(v => typeof v === 'number' && v > 0)
-            : [30, 60, 120];
         return {
             SPEAK_THRESHOLD: mc.speak_threshold,
-            WAIT_THRESHOLD: mc.wait_threshold,
+            WAIT_COOLDOWN: mc.wait_cooldown,
             WEIGHTS: weights,
             ENERGY_INITIAL: mc.energy_initial,
             ENERGY_REPLY_COST: mc.energy_reply_cost,
@@ -127,14 +118,13 @@ function getJudgeConfig(): JudgeConfig {
             CONTEXT_COUNT: mc.context_count,
             TIMEOUT_SEC: mc.timeout_sec,
             RETRIES: mc.retries,
-            WAIT_BACKOFF: waitBackoff,
             MAX_JUDGE_PER_HOUR: mc.max_judge_per_hour
         };
     } catch (e) {
         Logger.error(`打分智能体触发配置解析错误，已使用默认值:${e instanceof Error ? e.message : String(e)}`);
         return {
             SPEAK_THRESHOLD: 0.70,
-            WAIT_THRESHOLD: 0.45,
+            WAIT_COOLDOWN: 60,
             WEIGHTS: { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 },
             ENERGY_INITIAL: 1.0,
             ENERGY_REPLY_COST: 0.1,
@@ -145,7 +135,6 @@ function getJudgeConfig(): JudgeConfig {
             CONTEXT_COUNT: 10,
             TIMEOUT_SEC: 30,
             RETRIES: 3,
-            WAIT_BACKOFF: [30, 60, 120],
             MAX_JUDGE_PER_HOUR: 20
         };
     }
