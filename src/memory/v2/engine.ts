@@ -1,6 +1,5 @@
 // Hindsight-like 记忆引擎：Retain / Recall / Consolidation / Reflect 的纯 TS 实现。
 // 设计参考 Hindsight：MemoryUnit + Entity + MemoryLink + Observation + MentalModel。
-import { logger } from "../../logger";
 import { buildCharNGrams } from "../../utils/string";
 import { cosineSimilarity, generateId } from "../../utils/utils";
 
@@ -29,8 +28,6 @@ const DEFAULT_MAX_TOKENS = 2048;
 const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
 const BACKFILL_BATCH_LIMIT = 20;
 const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
-
-const log = logger.withTag('memory');
 
 /** 「设定」心智模型的固定问题：.ai memo p|g st 与 persona 迁移共用，同问题名即同一条 */
 export const MENTAL_MODEL_PERSONA_QUESTION = '这个用户/群的设定是什么？';
@@ -268,20 +265,11 @@ export class MemoryEngine {
 
         if (units.length === 0) return [];
 
-        const t0 = Date.now();
-        let embedMs = 0;
-        let backfillMs = 0;
-        let rerankMs = 0;
-        const queryEmbedStart = Date.now();
         const queryEmbedding = q ? await this.embedText(q) : [];
-        embedMs = Date.now() - queryEmbedStart;
 
         // 存量回填：语义检索可用时，对尚无向量的记忆惰性补算并落库（每轮限量，避免阻塞）
-        let backfilled = 0;
         if (queryEmbedding.length > 0) {
-            const backfillStart = Date.now();
-            backfilled = await this.backfillEmbeddings(bankId, units);
-            backfillMs = Date.now() - backfillStart;
+            await this.backfillEmbeddings(bankId, units);
         }
         const strategyResults: Array<{ strategy: string; ids: string[] }> = [];
 
@@ -323,7 +311,6 @@ export class MemoryEngine {
                 .slice(0, 20)
                 .map(([id]) => unitById.get(id))
                 .filter((u): u is MemoryUnit => !!u);
-            const rerankStart = Date.now();
             try {
                 const rankedIds = await this.rerank(q, candidates);
                 const rank = new Map(rankedIds.map((id, index) => [id, index]));
@@ -335,7 +322,6 @@ export class MemoryEngine {
             } catch {
                 // rerank 失败时保留 RRF 原始排序
             }
-            rerankMs = Date.now() - rerankStart;
         }
 
         // Hindsight 式新近度加分：按 lastAccessedAt 做指数衰减加权（半衰期 halfLife），
@@ -406,10 +392,7 @@ export class MemoryEngine {
         }
 
         // 统一落盘一次（原实现每条命中都整库 JSON.stringify + storageSet，记忆库越大越慢）
-        const saveStart = Date.now();
         if (touched) this.repository.save(bankId);
-        const saveMs = Date.now() - saveStart;
-        log.info(`[memory] ${logger.ts()} recall bank=${bankId} 库${bank.units.length}条 命中${results.length}条 耗时${Date.now() - t0}ms 向量${embedMs}ms 回填${backfillMs}ms(${backfilled}条) 重排${rerankMs}ms 落盘${saveMs}ms`);
 
         return results;
     }
@@ -691,41 +674,34 @@ export class MemoryEngine {
     // ===== Utility =====
 
 
-    /** 存量回填：为尚无向量的有效记忆惰性补算 embedding（每轮限量，失败自动降级）；返回成功回填条数 */
-    private async backfillEmbeddings(bankId: string, units: MemoryUnit[]): Promise<number> {
+    /** 存量回填：为尚无向量的有效记忆惰性补算 embedding（每轮限量，失败自动降级） */
+    private async backfillEmbeddings(bankId: string, units: MemoryUnit[]): Promise<void> {
         const missing = units.filter(u => u.state === 'valid' && u.embedding.length === 0);
-        if (missing.length === 0) return 0;
+        if (missing.length === 0) return;
         const batch = missing.slice(0, BACKFILL_BATCH_LIMIT);
-        const t0 = Date.now();
         const vectors = await Promise.all(batch.map(u => this.embedText(u.text)));
         const bank = this.repository.getBank(bankId);
-        if (!bank) return 0;
-        let changed = 0;
+        if (!bank) return;
+        let changed = false;
         for (let i = 0; i < batch.length; i++) {
             const vector = vectors[i];
             if (vector.length > 0) {
                 const idx = bank.units.findIndex(u => u.id === batch[i].id);
                 if (idx >= 0) {
                     bank.units[idx] = { ...bank.units[idx], embedding: vector };
-                    changed++;
+                    changed = true;
                 }
             }
         }
-        if (changed > 0) this.repository.save(bankId);
-        log.info(`[memory] ${logger.ts()} 回填 bank=${bankId} 缺向量${missing.length}条 本轮${batch.length}条 成功${changed}条 耗时${Date.now() - t0}ms`);
-        return changed;
+        if (changed) this.repository.save(bankId);
     }
 
     private async embedText(text: string): Promise<number[]> {
         if (!this.embedding || !text) return [];
-        const t0 = Date.now();
         try {
             const v = await this.embedding(text);
-            const ms = Date.now() - t0;
-            log.debug(`[memory] ${logger.ts()} embed 耗时${ms}ms 维度${Array.isArray(v) ? v.length : 0} 文本${text.slice(0, 50)}${text.length > 50 ? '…' : ''}`);
             return Array.isArray(v) ? v : [];
-        } catch (e) {
-            log.warning(`[memory] ${logger.ts()} embed 失败 耗时${Date.now() - t0}ms: ${e instanceof Error ? e.message : String(e)}`);
+        } catch {
             return [];
         }
     }

@@ -144,8 +144,6 @@ export default class Agent {
     }
 
     private async runInternal(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
-        const runStart = Date.now();
-        log.info(`[agent] ${Logger.ts()} 开始 run（会话 ${session.sessionId}）`);
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const toolInfos = Tool.getToolsInfo(session);
         const trace = new AgentRunContext();
@@ -154,7 +152,6 @@ export default class Agent {
         // system prompt 在同一轮工具循环内复用：避免每轮工具回调后重复做记忆检索/嵌入，
         // 只在工具回调后更新 context messages（上下文仍随工具结果增长）。
         const systemMessage = await buildSystemMessage(ctx, session);
-        log.info(`[agent] ${Logger.ts()} system prompt 构建完成 耗时${Date.now() - runStart}ms（会话 ${session.sessionId}）`);
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;

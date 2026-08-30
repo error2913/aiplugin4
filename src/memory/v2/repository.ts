@@ -1,6 +1,4 @@
 // 记忆仓库：内存态 Bank 管理 + 持久化。
-import { logger } from "../../logger";
-
 import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
 import type {
     ConsolidationResult,
@@ -14,8 +12,6 @@ import type {
     Observation,
     PersistedBank,
 } from "./types";
-
-const log = logger.withTag('memory');
 
 function nowSec(): number {
     return Math.floor(Date.now() / 1000);
@@ -79,9 +75,7 @@ export class MemoryRepository {
         const bank = this.banks.get(id);
         if (!bank) return;
         bank.meta.updatedAt = nowSec();
-        const t0 = Date.now();
         this.storage.saveBank(bank);
-        log.debug(`[memory] ${logger.ts()} save bank=${id} 耗时${Date.now() - t0}ms units=${bank.units.length} observations=${bank.observations.length} mentalModels=${bank.mentalModels.length}`);
     }
 
     // ===== Units =====

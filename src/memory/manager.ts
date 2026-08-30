@@ -1,7 +1,6 @@
 // 记忆管理器：统一长期/观察/知识库的读取入口，底层只使用 Hindsight-like 新引擎。
 import Agent from "../agent/agent";
 import Config from "../config/config";
-import { logger } from "../logger";
 import { SUMMARY_PROMPT_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import Group from "../session/group";
@@ -30,8 +29,6 @@ function tagsForSession(uis: UserInfo[], gi: GroupInfo | null): string[] {
     return tags;
 }
 
-const log = logger.withTag('memory');
-
 export class MemoryManager {
     /**
      * 旧 persona 懒迁移：把仍存于 session.memory.persona 的旧设定写入心智模型
@@ -58,7 +55,6 @@ export class MemoryManager {
     static async buildLongTermPrompt(ctx: seal.MsgContext, session: Session, text: string, uis: UserInfo[], gi: GroupInfo | null): Promise<string> {
         const { MEMORY } = Config.memory;
         if (!MEMORY) return '';
-        const t0 = Date.now();
         // 旧 persona 懒迁移：首次构建长期提示时把存量 persona 写入心智模型后清空
         await MemoryManager.migrateLegacyPersona(session);
         const engine = getMemoryEngine();
@@ -66,28 +62,24 @@ export class MemoryManager {
         engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
         const tags = tagsForSession(uis, gi || null);
         const callerSessionId = ctx.player?.userId || session.sessionId;
-        const recallStart = Date.now();
         const recalls = (await engine.recall(bank.bankId, text, {
             tags,
             maxTokens: 2048,
             preferObservations: true,
             budget: 'mid',
         })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
-        const recallMs = Date.now() - recallStart;
         const allObservations = engine.repository.listObservations(bank.bankId);
         const allMentalModels = engine.listMentalModels(bank.bankId);
         // E1/E2：scopeTags 过滤 + stale 剔除 + 条数上限（注入裁剪，控制 token）
         const { mentalModels, observations } = selectInjectionCandidates(allMentalModels, allObservations, tags);
         const sessionName = ctx.isPrivate ? (ctx.player?.name || '') : (ctx.group?.groupName || '');
-        const prompt = buildMemoryPrompt({
+        return buildMemoryPrompt({
             isPrivate: ctx.isPrivate,
             sessionName,
             mentalModels,
             observations,
             recalls,
         });
-        log.info(`[memory] ${logger.ts()} 长期记忆构建 会话=${session.sessionId} 总耗时${Date.now() - t0}ms recall=${recallMs}ms(召回${recalls.length}条) 观察${observations.length}/${allObservations.length}条 心智模型${mentalModels.length}/${allMentalModels.length}个 文本${prompt.length}字符`);
-        return prompt;
     }
 
     /** 观察记忆段：由 Observation 替代旧 summaries */
