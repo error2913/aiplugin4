@@ -179,6 +179,9 @@ export class JudgeManager {
     /** 用内置定时器为当前会话注册 WAIT 轮末兜底触发（一次性，到点后由 task 调 endWaitRound） */
     private static startWaitTimer(ctx: seal.MsgContext, session: Session): void {
         if (Config.trigger.JUDGE.SCORING.wait_cooldown <= 0) return;
+        // 同一会话只保留一个 WAIT 轮末兜底定时器：新轮覆盖旧轮，避免轮次频繁时旧定时器堆积
+        // （旧定时器会因 waitUntil 被新轮延长而反复“未到点”重试，刷日志并多余执行）
+        TimerManager.removeTimers(session.sessionId, "", ["judgeWait"], []);
         const target = Math.floor(Date.now() / 1000) + Config.trigger.JUDGE.SCORING.wait_cooldown;
         TimerManager.addJudgeWaitTimer(ctx, session, target);
     }

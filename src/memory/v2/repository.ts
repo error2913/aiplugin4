@@ -96,13 +96,14 @@ export class MemoryRepository {
         this.save(bankId);
     }
 
-    updateUnit(bankId: string, unit: MemoryUnit): void {
+    updateUnit(bankId: string, unit: MemoryUnit, persist = true): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.units.findIndex(u => u.id === unit.id);
         if (idx >= 0) {
             bank.units[idx] = unit;
-            this.save(bankId);
+            // persist=false 用于高频元数据更新（如 recall 的访问计数），由调用方批量落盘，避免每条命中都整库序列化
+            if (persist) this.save(bankId);
         }
     }
 

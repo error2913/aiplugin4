@@ -320,6 +320,8 @@ export class MemoryEngine {
         const results: RecallResult[] = [];
         const usedTokens = new Map<string, number>();
         const unitById = new Map(units.map(u => [u.id, u]));
+        // 本轮是否有命中被 touch：有则末尾统一落盘一次（touchUnit 只改内存，避免每条命中整库序列化）
+        let touched = false;
 
         if (this.rerank && q && rrfEntries.length > 0) {
             const candidates = rrfEntries
@@ -365,7 +367,10 @@ export class MemoryEngine {
                     if (obsUnit && !results.some(r => r.unit.id === obs.id)) {
                         const before = results.length;
                         this.pushResult(results, usedTokens, { unit: obsUnit, score: rrfScoreValue, matchedStrategies: this.matchedStrategies(strategyResults, id) }, opts.maxTokens || DEFAULT_MAX_TOKENS);
-                        if (results.length > before) this.touchUnit(bankId, obsUnit);
+                        if (results.length > before) {
+                            this.touchUnit(bankId, obsUnit);
+                            touched = true;
+                        }
                         continue;
                     }
                 }
@@ -380,7 +385,10 @@ export class MemoryEngine {
             }
             const before = results.length;
             this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
-            if (results.length > before) this.touchUnit(bankId, unit);
+            if (results.length > before) {
+                this.touchUnit(bankId, unit);
+                touched = true;
+            }
         }
 
         // 如果 token 预算宽松，用关键词/重要性补足（Hindsight recall 同样有 backfill 行为）
@@ -394,8 +402,14 @@ export class MemoryEngine {
             };
             const before = results.length;
             this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
-            if (results.length > before) this.touchUnit(bankId, u);
+            if (results.length > before) {
+                this.touchUnit(bankId, u);
+                touched = true;
+            }
         }
+
+        // 统一落盘一次（原实现每条命中都整库 JSON.stringify + storageSet，记忆库越大越慢）
+        if (touched) this.repository.save(bankId);
 
         return results;
     }
@@ -845,14 +859,14 @@ export class MemoryEngine {
         usedTokens.set(item.unit.id, cost);
     }
 
-    /** 召回命中：更新访问计数与最近访问时间并落库（新近度加分的依据） */
+    /** 召回命中：更新访问计数与最近访问时间（新近度加分的依据）；只改内存不落盘，由 recall 末尾统一 save */
     private touchUnit(bankId: string, unit: MemoryUnit): void {
         const now = Math.floor(Date.now() / 1000);
         // 以库中最新对象为准（backfill 可能已替换为带向量的新对象），避免回写覆盖
         const current = this.repository.getUnit(bankId, unit.id) || unit;
         current.accessCount = (current.accessCount || 0) + 1;
         current.lastAccessedAt = now;
-        this.repository.updateUnit(bankId, current);
+        this.repository.updateUnit(bankId, current, false);
     }
 
     /** 召回/巩固后触发：超过条数上限时物理删除多余记忆（上限为硬约束）。返回被淘汰的 unit id */
