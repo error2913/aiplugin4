@@ -2628,7 +2628,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
             Model.multimodalModels = [new MultimodalModel(['chat'], 'vision-chat', 'zhipu', 'https://x', 'k', {})];
             session.setting.modelName = 'vision-chat';
             SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('') } as any);
-            assert.equal(replied, '当前模型: vision-chat（多模态）', '查看应显示会话模型名与多模态标注');
+            assert.ok(replied.startsWith('当前模型: vision-chat（多模态）'), '查看应显示会话模型名与多模态标注: ' + replied);
+            assert.ok(replied.includes('可用纯文本模型:'), '应显示可用纯文本模型列表: ' + replied);
+            assert.ok(replied.includes('1. text-a'), '列表应含序号与模型名: ' + replied);
+            assert.ok(replied.includes('2. vision-chat（多模态）（当前）'), '当前多模态模型应带（当前）标注: ' + replied);
 
             // 设置：use 含 chat 的多模态模型可被选中并写入会话
             session.setting.modelName = '';
@@ -2640,7 +2643,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             SubCmd.map['model'].solve({ ...base, session, cmdArgs: makeArgs('no-such') } as any);
             assert.ok(replied.includes('模型 no-such 不存在'), replied);
             assert.ok(replied.includes('vision-chat（多模态）'), '可用列表应含多模态标注: ' + replied);
-            assert.ok(replied.includes('text-a'), '可用列表应含对话模型: ' + replied);
+            assert.ok(replied.includes('text-a'), '可用列表应含纯文本模型: ' + replied);
 
             // clr：清除会话模型
             session.setting.modelName = 'text-a';
@@ -2648,7 +2651,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(replied, '已清除当前会话的模型设置', replied);
             assert.equal(session.setting.modelName, '', 'clr 应清空 modelName');
 
-            // 同名去重：同名模型列表只出现一次且不带多模态标注；设置该名仍按对话模型（纯文本）
+            // 同名去重：同名模型列表只出现一次且不带多模态标注；设置该名仍按纯文本模型
             Model.reset();
             Model.chatModels = [new ChatModel(['chat'], 'same', 'deepseek', 'https://a', 'k', {})];
             Model.multimodalModels = [new MultimodalModel(['chat'], 'same', 'zhipu', 'https://x', 'k', {})];
@@ -2897,26 +2900,22 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 识图开关：关闭时跳过识别（不查询模型、不写描述）；开启时命中 image-understanding 模型并写入描述 */
+    /** 识图模型配置：未配置 image-understanding 模型时查询一次、不写描述、不抛错；配置后调用 callITT 并写入描述 */
     async testImageUnderstandingSwitch(): Promise<void> {
         setupImageTestConfig();
         const origGet = Model.getMultimodalModel;
         try {
-            // 开关关闭：直接返回，不查询多模态模型
-            TC.boolConfigs['是否开启识图模型'] = false;
-            resetConfigCache();
+            // 未配置识图模型：查询一次后直接返回，不写描述、不抛错
             const imgOff = new Image();
             imgOff.imageId = 'img_itt_off';
             imgOff.url = 'https://example.com/off.png';
             let getCalled = 0;
             Model.getMultimodalModel = (_use: any) => { getCalled++; return null; };
             await imgOff.imageToText();
-            assert.equal(getCalled, 0, '开关关闭时不应查询多模态模型');
-            assert.equal(imgOff.description, '', '开关关闭时不应设置描述');
+            assert.equal(getCalled, 1, '未配置识图模型时应查询一次多模态模型');
+            assert.equal(imgOff.description, '', '未配置识图模型时不应设置描述');
 
-            // 开关开启：调用识图模型的 callITT 并把结果写入 description
-            TC.boolConfigs['是否开启识图模型'] = true;
-            resetConfigCache();
+            // 配置识图模型：调用识图模型的 callITT 并把结果写入 description
             const imgOn = new Image();
             imgOn.imageId = 'img_itt_on';
             imgOn.url = 'https://example.com/on.png';
@@ -2931,30 +2930,53 @@ export const tests: Record<string, () => void | Promise<void>> = {
             Model.multimodalModels = [vision];
             Model.getMultimodalModel = (_use: any) => vision;
             await imgOn.imageToText('描述这张图');
-            assert.equal(imgOn.description, '图片中有一只猫', '开启时识别结果应写入 description');
+            assert.equal(imgOn.description, '图片中有一只猫', '配置识图模型后识别结果应写入 description');
             assert.equal(capturedSrc, 'https://example.com/on.png', 'callITT 应收到图片 src');
             assert.equal(capturedPrompt, '描述这张图', 'callITT 应收到自定义提示词');
         } finally {
             Model.getMultimodalModel = origGet;
             Model.reset();
-            delete TC.boolConfigs['是否开启识图模型'];
             restoreImageTestConfig();
         }
     },
 
-    /** 模型配置键：新键 MULTIMODAL_MODELS / IMAGE_UNDERSTANDING_ENABLED，旧键 IMAGE_MODELS / IMAGE_MODEL_ENABLED 已移除 */
+    /** 模型配置键：CHAT/MULTIMODAL/EMBEDDING 列表键存在，两个旧开关键与旧图片键已移除 */
     testModelConfigKeys(): void {
         try {
             resetConfigCache();
             const cfg = (Config as any).model;
             assert.ok('MULTIMODAL_MODELS' in cfg, '应包含 MULTIMODAL_MODELS 键');
-            assert.ok('IMAGE_UNDERSTANDING_ENABLED' in cfg, '应包含 IMAGE_UNDERSTANDING_ENABLED 键');
             assert.ok('CHAT_MODELS' in cfg, '应包含 CHAT_MODELS 键');
+            assert.ok('EMBEDDING_MODELS' in cfg, '应包含 EMBEDDING_MODELS 键');
+            assert.ok(!('IMAGE_UNDERSTANDING_ENABLED' in cfg), '开关键 IMAGE_UNDERSTANDING_ENABLED 应已移除');
+            assert.ok(!('EMBEDDING_MODEL_ENABLED' in cfg), '开关键 EMBEDDING_MODEL_ENABLED 应已移除');
             assert.ok(!('IMAGE_MODELS' in cfg), '旧键 IMAGE_MODELS 应已移除');
             assert.ok(!('IMAGE_MODEL_ENABLED' in cfg), '旧键 IMAGE_MODEL_ENABLED 应已移除');
             assert.ok(Array.isArray(cfg.MULTIMODAL_MODELS));
             assert.ok(Array.isArray(cfg.CHAT_MODELS));
         } finally {
+            Model.reset();
+        }
+    },
+
+    /** 模型 ignore 字段：ignore=1 的条目被忽略，0/缺失正常 */
+    testModelIgnoreField(): void {
+        const orig = TC.templateConfigs['纯文本模型'];
+        try {
+            TC.templateConfigs['纯文本模型'] = [
+                'name = "keep-a"\napi_key = "k"\nuse = ["chat"]\nprovider = "deepseek"\nbase_url = "https://api.deepseek.com/v1"',
+                'name = "skip-b"\napi_key = "k"\nuse = ["chat"]\nprovider = "deepseek"\nbase_url = "https://api.deepseek.com/v1"\nignore = 1',
+                'name = "keep-c"\napi_key = "k"\nuse = ["chat"]\nprovider = "deepseek"\nbase_url = "https://api.deepseek.com/v1"\nignore = 0',
+            ];
+            resetConfigCache();
+            const cfg = (Config as any).model;
+            assert.ok(Array.isArray(cfg.CHAT_MODELS), 'CHAT_MODELS 应为数组');
+            const names = cfg.CHAT_MODELS.map((m: any) => m.name);
+            assert.deepEqual(names, ['keep-a', 'keep-c'], 'ignore=1 的条目应被忽略，0/缺失正常: ' + JSON.stringify(names));
+        } finally {
+            if (orig === undefined) delete TC.templateConfigs['纯文本模型'];
+            else TC.templateConfigs['纯文本模型'] = orig;
+            resetConfigCache();
             Model.reset();
         }
     },

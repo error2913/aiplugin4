@@ -19,7 +19,6 @@ export { defaultFactExtractor, defaultReranker, defaultObservationSynthesizer, d
 export function createMemoryEngine(): MemoryEngine {
     // 与知识库检索一致：配置了 text-embedding 模型时接入语义向量，未配置时自动降级为关键词/图/时间检索
     const embeddingModel = (() => {
-        if (!Config.model.EMBEDDING_MODEL_ENABLED) return null;
         const dimension = Model.getEmbeddingDimension();
         return dimension > 0 ? Model.getEmbeddingModel("text-embedding") : null;
     })();

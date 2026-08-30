@@ -21,7 +21,7 @@ export class BaseModel {
         this.body = body;
     }
 
-    /** 是否为多模态模型：默认 false（对话模型纯文本），多模态模型覆写为 true */
+    /** 是否为多模态模型：默认 false（纯文本模型），多模态模型覆写为 true */
     get isMultimodal(): boolean {
         return false;
     }

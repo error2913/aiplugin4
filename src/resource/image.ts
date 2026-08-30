@@ -192,10 +192,6 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        if (!Config.model.IMAGE_UNDERSTANDING_ENABLED) {
-            log.info(`识图模型开关未开启，跳过识别: ${this.imageId}`);
-            return;
-        }
         const { URL_TO_BASE64 } = Config.image;
         const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
 

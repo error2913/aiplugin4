@@ -15,7 +15,7 @@ const bundle = path.join(outDir, 'unit.cjs');
 // 测试可覆盖的配置值（unit-test-entry.ts 通过 globalThis.__TEST_CONFIG__ 读写）
 const TC = {
     intConfigs: {},      // 整数配置覆盖，如 上下文最大token
-    boolConfigs: {},     // 布尔配置覆盖，如 切换为提示词工程 / 是否开启嵌入模型
+    boolConfigs: {},     // 布尔配置覆盖，如 切换为提示词工程
     stringConfigs: {},
     optionConfigs: {},
     floatConfigs: {},
@@ -24,7 +24,7 @@ const TC = {
 
 // 模板配置默认值：模型类返回空数组避免 TOML 解析；其余返回空条目
 const TEMPLATE_DEFAULTS = {
-    '对话模型': [],
+    '纯文本模型': [],
     '多模态模型': [],
     '嵌入模型': [],
     '角色扮演设定': ['测试机器人\n你是测试角色'],

@@ -1,4 +1,4 @@
-// 对话模型：模型元数据与请求地址
+// 纯文本模型：模型元数据与请求地址
 import { BaseModel } from "./model";
 import { ChatModelUse, ModelBody, ModelUse } from "./types";
 

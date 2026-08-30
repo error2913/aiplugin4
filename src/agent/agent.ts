@@ -57,7 +57,7 @@ export default class Agent {
     /**
      * 当前会话使用的对话模型是否为多模态：
      * 只有最终解析到的模型实例来自「多模态模型」列表（MultimodalModel）才算多模态；
-     * 来自「对话模型」列表的模型即使同名也按纯文本处理。
+     * 来自「纯文本模型」列表的模型即使同名也按纯文本处理。
      * 多模态时上下文中的图片以 image_url 内容块直接传给模型，而不是文本标签。
      */
     private isMultimodalChat(session: Session): boolean {

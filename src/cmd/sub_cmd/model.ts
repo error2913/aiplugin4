@@ -5,8 +5,8 @@ import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
 /**
- * 可选用作对话的模型列表：对话模型全部 + 多模态模型中 use 含 chat（或未指定用途）的条目；
- * 同名去重（对话模型优先，命中时按纯文本处理），多模态条目标注（多模态）。
+ * 可选用作对话的模型列表：纯文本模型全部 + 多模态模型中 use 含 chat（或未指定用途）的条目；
+ * 同名去重（纯文本模型优先，命中时按纯文本处理），多模态条目标注（多模态）。
  */
 function listChatModels(): { name: string, multimodal: boolean }[] {
     const list: { name: string, multimodal: boolean }[] = [];
@@ -29,7 +29,7 @@ export function registerCmdModel() {
     const cmd = new SubCmd('model');
     cmd.desc = '查看/设置当前会话使用的模型';
     cmd.help = `帮助:
-【.ai model】查看当前会话模型
+【.ai model】查看当前会话模型与可用模型列表
 【.ai model <模型名称>】设置当前会话模型
 【.ai model clr】清除当前会话模型设置，使用全局默认`;
     cmd.priv = { priv: U };
@@ -38,9 +38,15 @@ export function registerCmdModel() {
         const val2 = cmdArgs.getArgN(2);
 
         if (!val2) {
+            const candidates = listChatModels();
             const model = Model.getChatModel('chat', session.setting.modelName);
-            const suffix = model && model.isMultimodal ? '（多模态）' : '';
-            seal.replyToSender(ctx, msg, `当前模型: ${session.setting.modelName || (model ? model.name : '未配置')}${suffix}`);
+            const currentName = session.setting.modelName || (model ? model.name : '');
+            const currentSuffix = model && model.isMultimodal ? '（多模态）' : '';
+            const currentText = currentName ? `${currentName}${currentSuffix}` : '未配置';
+            const listText = candidates.length === 0
+                ? '（未配置任何纯文本模型）'
+                : candidates.map((c, i) => `${i + 1}. ${c.name}${c.multimodal ? '（多模态）' : ''}${c.name === currentName ? '（当前）' : ''}`).join('\n');
+            seal.replyToSender(ctx, msg, `当前模型: ${currentText}\n可用纯文本模型:\n${listText}`);
             return ret;
         }
 
@@ -55,7 +61,7 @@ export function registerCmdModel() {
         const target = candidates.find(c => c.name === val2);
         if (!target) {
             const listText = candidates.map(c => c.multimodal ? `${c.name}（多模态）` : c.name).join('、');
-            seal.replyToSender(ctx, msg, `模型 ${val2} 不存在，可用的对话模型: ${listText}`);
+            seal.replyToSender(ctx, msg, `模型 ${val2} 不存在，可用的纯文本模型: ${listText}`);
             return ret;
         }
 

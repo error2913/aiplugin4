@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.18.0-green)
+![Version](https://img.shields.io/badge/Version-4.19.0-green)
 
 ## 快速开始
 
@@ -21,12 +21,12 @@
 ### 3. 配置大模型
 
 - 在 WebUI →「JS插件」→「插件设置」中找到 `aiplugin4`，点击展开；
-- 进入「模型」分组，在「对话模型」中用 **TOML 格式**填写你的模型，例如：
+- 进入「模型」分组，在「纯文本模型」中用 **TOML 格式**填写你的模型，例如：
 
 ```toml
 name = "deepseek-chat" # 模型名，查看你所用大模型平台的文档
 api_key = "sk-xxxx"    # 你的 API Key
-use = ["chat"]         # 用途，对话模型填 chat
+use = ["chat"]         # 用途，纯文本模型填 chat
 
 [body]                 # 可选：覆盖请求参数
 temperature = 1
@@ -36,7 +36,7 @@ max_tokens = 2048
 - `provider` / `base_url` 可以省略（deepseek / openai / google / zhipu / alibaba / anthropic / moonshot / xai / mistral / siliconflow 会自动识别），也可以显式填写 `base_url`；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式；
 - 图片识别需要配置「多模态模型」（`use = ["image-understanding"]`）；如果模型支持视觉，可在「多模态模型」的 `use` 里加 `chat` 把它当多模态对话模型用（上下文中的图片直接传给模型）；向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度从嵌入模型的 `[body] dimensions` 读取，默认 1024）；
-- 默认对话模型取列表第一项，可在群里用 `.ai model <模型名>` 切换，`.ai model clr` 恢复默认。
+- 默认纯文本模型取列表第一项，可用 `.ai model` 查看当前模型与可用列表，`.ai model <模型名>` 切换，`.ai model clr` 恢复默认。
 
 ### 4. 设置触发与角色
 
@@ -157,12 +157,12 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 对话模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）；`provider` / `base_url` 可省略自动识别；默认对话模型取列表第一项；可选 `[body]` 覆盖请求参数 |
+| 纯文本模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）；`provider` / `base_url` 可省略自动识别；默认纯文本模型取列表第一项；可选 `[body]` 覆盖请求参数；`ignore` 可选：1=忽略该条配置（不出现在列表/不可选中/不作为默认），0/不写=正常 |
 | 多模态模型 | TOML 格式，`use` 可选 `["image-understanding"]`（识图/图片转文字）或 `["chat"]`（多模态对话：作为对话模型使用，上下文中的图片直接传给模型），也可两者并存；列表内模型一律按多模态处理 |
 | 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`（文本嵌入），输出维度在 `[body] dimensions` 配置（默认 1024），未配置时自动降级为关键词/分数检索 |
 
 ```toml
-# 对话模型示例
+# 纯文本模型示例
 name = "deepseek-chat"
 api_key = "sk-xxxx"
 use = ["chat"]
@@ -173,7 +173,7 @@ temperature = 0.8
 max_tokens = 2048
 ```
 
-> 会话内可用 `.ai model` 查看、`.ai model <模型名>` 切换、`.ai model clr` 恢复默认。
+> 会话内可用 `.ai model` 查看当前模型与可用列表、`.ai model <模型名>` 切换、`.ai model clr` 恢复默认。
 
 ### 基础
 
@@ -485,7 +485,7 @@ max_tokens = 2048
 
 **记忆/知识库检索不到**
 
-- 记忆检索确认「嵌入模型」已配置且「是否开启嵌入模型」开关打开，「启用长期记忆」开关打开；
+- 记忆检索确认「嵌入模型」已配置，「启用长期记忆」开关打开；
 - 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置即可，自动生效（缓存最多 1 分钟），用 `.ai kb search <关键词>` / `.ai kb list` 验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 
@@ -544,3 +544,5 @@ Permission is hereby granted...
 - QQ交流群: 143412516
 
 > "才、才不是专门给你写的文档呢！只是...只是顺便而已！(///ω///)" —— 正确·改
+
+

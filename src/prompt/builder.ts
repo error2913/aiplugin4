@@ -126,7 +126,6 @@ export async function buildSystemPromptContent(
         session.sessionId,
         getMemoryRevision(),
         Config.memory.MEMORY,
-        Config.model.EMBEDDING_MODEL_ENABLED,
         Model.getEmbeddingDimension(),
         embeddingModelName,
         ctx.isPrivate,

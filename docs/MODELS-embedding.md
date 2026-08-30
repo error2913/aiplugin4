@@ -14,6 +14,7 @@
 | `provider` | 否 | 服务商标识；省略时按 `name` 在自动识别表中查找（alibaba / openai / zhipu / siliconflow），查不到则必须显式填写 |
 | `base_url` | 否 | API 地址；省略时取该 provider 的默认地址 |
 | `[body]` | 否 | 请求参数覆盖；默认 `encoding_format=float`、`dimensions=1024` |
+| `ignore` | 否 | 1=忽略该条配置（不出现在列表/不可选中/不作为默认），0/不写=正常 |
 
 > **维度必须与后端真实输出一致**：插件从第一个嵌入模型的 `[body] dimensions` 读取检索维度（默认 1024），不一致时向量检索会自动降级为关键词 / 分数检索。模型响应日志会打印实际 embedding 长度，可用于核对。
 
@@ -97,5 +98,5 @@ dimensions = 1024
 - 接口必须为 OpenAI 兼容 `/embeddings`（请求体 `model` + `input`，`[body]` 合并进请求体）。
 - Google Gemini 的原生嵌入接口与 OpenAI 格式不同，不能直接填原生地址；需自建 OpenAI 兼容代理 / 网关，或改用百炼、智谱等兼容服务。
 - 插件默认携带 `encoding_format=float` 与 `dimensions=1024`（可被 `[body]` 覆盖，但不能移除）；不支持 `dimensions` 参数的旧模型（如 `text-embedding-ada-002`）不兼容。
-- 维度一致性是向量检索正确的前提；「是否开启嵌入模型」开关默认关闭，配置好模型后需要手动打开。
+- 维度一致性是向量检索正确的前提；配置好「嵌入模型」后即自动启用语义检索，无需额外开关；`ignore` 可选：1=忽略该条配置，0/不写=正常。
 - 向量缓存只缓存最近一条文本，不影响日常使用。

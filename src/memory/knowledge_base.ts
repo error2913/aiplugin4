@@ -131,7 +131,6 @@ export class KnowledgeBaseService {
     private async getChunkVector(chunk: KnowledgeChunk): Promise<number[]> {
         const cached = this.chunkVectors.get(chunk.id);
         if (cached) return cached;
-        if (!Config.model.EMBEDDING_MODEL_ENABLED) return [];
         const dimension = Model.getEmbeddingDimension();
         const model = dimension > 0 ? Model.getEmbeddingModel('text-embedding') : null;
         if (!model) return [];
@@ -143,7 +142,6 @@ export class KnowledgeBaseService {
 
     /** 嵌入查询词；未启用/未配置/失败时返回空数组 */
     private async embedQuery(query: string): Promise<number[]> {
-        if (!Config.model.EMBEDDING_MODEL_ENABLED || !query) return [];
         const dimension = Model.getEmbeddingDimension();
         const model = dimension > 0 ? Model.getEmbeddingModel('text-embedding') : null;
         if (!model) return [];

@@ -1,5 +1,4 @@
 // 对外 API：把智能体暴露到 globalThis，供其他海豹插件调用
-import Config from "../config/config";
 import { NAME, VERSION } from "../config/static_config";
 import { logger } from "../logger";
 import Model from "../model/model";
@@ -73,7 +72,6 @@ export function registerAgentApi(): void {
         chat: async (prompt: string, agentName?: string) => Agent.get(agentName || '*').chat(prompt),
         chatMessages: async (messages: { role: string, content: string }[], agentName?: string) => Agent.get(agentName || '*').chatMessages(messages),
         imageToText: async (source: string, prompt?: string) => {
-            if (!Config.model.IMAGE_UNDERSTANDING_ENABLED) return '识图模型开关未开启';
             if (!Model.getMultimodalModel('image-understanding')) return '未找到支持 image-understanding 的多模态模型';
             let img = Image.get(source);
             if (!img && /^https?:\/\//i.test(source)) {

@@ -14,6 +14,7 @@
 | `provider` | 否 | 服务商标识；省略时按 `name` 在自动识别表中查找（zhipu / alibaba / openai / google / siliconflow），查不到则必须显式填写 |
 | `base_url` | 否 | API 地址；省略时取该 provider 的默认地址 |
 | `[body]` | 否 | 请求参数覆盖；默认 `max_tokens=2048`、`stop=null`、`stream=false` |
+| `ignore` | 否 | 1=忽略该条配置（不出现在列表/不可选中/不作为默认），0/不写=正常 |
 
 > 请求固定为 OpenAI 兼容 `POST {base_url}/chat/completions`，图片以 `image_url` 内容块传入。`[body]` 中的字段会作为请求体顶层字段发送（例如 `temperature`、`max_tokens`），模型名只认 `name`。
 
@@ -110,13 +111,13 @@ max_tokens = 2048
 ## 多模态对话的接法
 
 - 把视觉模型放「多模态模型」列表，`use = ["chat"]`，然后 `.ai model <模型名>` 选中它；列表内模型一律按多模态处理，上下文中的图片以 `image_url` 内容直接传给模型，不再转成文本标签；
-- 或直接把支持视觉的模型放「对话模型」列表（`use = ["chat"]`）按纯文本对话使用（图片仍只以文本标签形式出现）。
+- 或直接把支持视觉的模型放「纯文本模型」列表（`use = ["chat"]`）按纯文本对话使用（图片仍只以文本标签形式出现）。
 
-> 只有「多模态模型」列表里的模型才按多模态处理；同名模型若同时出现在「对话模型」列表，按对话模型（纯文本）优先。多模态对话的前提是「消息接收」里的接收图片开关开启，且模型本身支持视觉输入。
+> 只有「多模态模型」列表里的模型才按多模态处理；同名模型若同时出现在「纯文本模型」列表，按纯文本模型优先。多模态对话的前提是「消息接收」里的接收图片开关开启，且模型本身支持视觉输入。
 
 ## 兼容性说明
 
 - 接口标准为 OpenAI 兼容 Chat Completions + `image_url` 内容块；不提供该格式的服务商需要自建或使用 OpenAI 兼容网关。
-- **不要在多模态模型列表填 `provider = "anthropic"`**：图片识别请求没有 anthropic 适配，会请求到不存在的 `/chat/completions`。想用 Claude 看图，把它配在「对话模型」（`use = ["chat"]`），由对话适配层自动把图片转成 anthropic image 块。
+- **不要在多模态模型列表填 `provider = "anthropic"`**：图片识别请求没有 anthropic 适配，会请求到不存在的 `/chat/completions`。想用 Claude 看图，把它配在「纯文本模型」（`use = ["chat"]`），由对话适配层自动把图片转成 anthropic image 块。
 - 部分大模型无法访问 QQ 图床图片：可开启「识别图片时将url转换为base64」或「图片转base64」后端解决。
-- 「是否开启识图模型」开关默认关闭，只影响图片识别 / 图片转文字（image-understanding），多模态对话不受该开关控制；配置好模型后需要手动打开。
+- 图片识别（image-understanding）在配置好「多模态模型」（use 含 image-understanding）后即生效，无需额外开关；`ignore` 可选：1=忽略该条配置，0/不写=正常。
