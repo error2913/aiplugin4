@@ -1,4 +1,4 @@
-// 触发配置：默认计数器/计时器/概率/活跃时间/触发正则与令牌桶；打分智能体触发参数（TOML 一条配置）
+// 触发配置：默认计数器/计时器/概率/活跃时间/触发正则与令牌桶；评分触发参数（TOML 一条配置）
 import { load } from 'js-toml'
 
 import Logger from "../../logger";
@@ -6,7 +6,7 @@ import { revive, TypeDescriptor } from "../../utils/utils";
 import { ext } from "../config";
 import { getRegexConfig } from "../config";
 
-/** 打分智能体触发配置（TOML 分段解析，缺省段/字段并入默认值） */
+/** 评分触发配置（TOML 分段解析，缺省段/字段并入默认值） */
 export interface JudgeConfig {
     /** 判定：得分(0-1)≥该值直接插话；WAIT 冷却秒数（0=不冷却） */
     SCORING: { speak_threshold: number; wait_cooldown: number };
@@ -16,11 +16,11 @@ export interface JudgeConfig {
     ENERGY: { initial: number; reply_cost: number; recover_min: number };
     /** 门禁限额 */
     GATE: { min_reply_interval: number; max_judge_per_hour: number };
-    /** 打分小模型调用 */
+    /** 评分小模型调用 */
     MODEL: { context_count: number; timeout_sec: number; retries: number };
 }
 
-const JUDGE_TOML_DEFAULT = `# 打分智能体触发参数（.ai on --j 开启后生效；缺省段/字段使用默认值）
+const JUDGE_TOML_DEFAULT = `# 评分触发参数（.ai on --j 开启后生效；缺省段/字段使用默认值）
 [scoring]                       # 判定
 speak_threshold = 0.70          # 得分(0-1)≥该值直接插话
 wait_cooldown = 60              # 得分<speak_threshold 时的 WAIT 冷却秒数，期间 gate 直接丢弃；0=不冷却
@@ -39,12 +39,12 @@ recover_min = 2                 # 每 5 分钟懒恢复精力
 
 [gate]                          # 门禁限额
 min_reply_interval = 120        # 最小回复间隔(秒)，间隔内 gate 直接丢弃
-max_judge_per_hour = 20         # 每会话每小时最多打分次数
+max_judge_per_hour = 20         # 每会话每小时最多评分次数
 
-[model]                         # 打分小模型调用
-context_count = 10              # 注入给打分智能体的最近上下文条数
-timeout_sec = 30                # 单次打分请求超时(秒)
-retries = 3                     # 打分返回非 JSON 时的重试次数`;
+[model]                         # 评分小模型调用
+context_count = 10              # 注入给评分智能体的最近上下文条数
+timeout_sec = 30                # 单次评分请求超时(秒)
+retries = 3                     # 评分返回非 JSON 时的重试次数`;
 
 class JudgeConfigItem {
     static validKeysMap: { [key in keyof JudgeConfigItem]?: TypeDescriptor<JudgeConfigItem[key]> } = {
@@ -68,9 +68,9 @@ class JudgeConfigItem {
     }
 }
 
-/** 解析打分智能体 TOML 配置；解析失败或缺省段/字段时并入默认值，不因缺字段报错 */
+/** 解析评分智能体 TOML 配置；解析失败或缺省段/字段时并入默认值，不因缺字段报错 */
 function getJudgeConfig(): JudgeConfig {
-    const tomlList = seal.ext.getTemplateConfig(ext, "打分智能体触发配置");
+    const tomlList = seal.ext.getTemplateConfig(ext, "评分触发配置");
     const tomlString = (tomlList || []).find(s => s && s.trim() !== '') || JUDGE_TOML_DEFAULT;
     const d = new JudgeConfigItem();
     try {
@@ -84,7 +84,7 @@ function getJudgeConfig(): JudgeConfig {
             MODEL: { ...d.model, ...(mc.model || {}) }
         };
     } catch (e) {
-        Logger.error(`打分智能体触发配置解析错误，已使用默认值:${e instanceof Error ? e.message : String(e)}`);
+        Logger.error(`评分触发配置解析错误，已使用默认值:${e instanceof Error ? e.message : String(e)}`);
         return {
             SCORING: { speak_threshold: 0.70, wait_cooldown: 60 },
             WEIGHTS: { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 },
@@ -108,9 +108,9 @@ export default class TriggerConfig {
         seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "消息触发");
         seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "消息触发");
         seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "消息触发");
-        seal.ext.registerTemplateConfig(ext, "打分智能体触发配置", [
+        seal.ext.registerTemplateConfig(ext, "评分触发配置", [
             JUDGE_TOML_DEFAULT
-        ], "打分智能体触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后自动生效（缓存最多 1 分钟）", "消息触发");
+        ], "评分触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后自动生效（缓存最多 1 分钟）", "消息触发");
     }
 
     static get() {

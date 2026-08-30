@@ -9,7 +9,7 @@ export function registerCmdOff() {
     cmd.desc = '关闭AI（含非指令正则触发）';
     cmd.help = `帮助:
 【.ai off】关闭 AI 及全部触发模式
-【.ai off --<参数>】按模式关闭（--r 正则 / --j 打分智能体 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段）`;
+【.ai off --<参数>】按模式关闭（--r 正则 / --j 评分智能体 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段）`;
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
@@ -54,7 +54,7 @@ export function registerCmdOff() {
                 case 'judge': {
                     setting.judge = false;
                     JudgeManager.clearSession(sid);
-                    text += `\n打分智能体触发`;
+                    text += `\n评分触发`;
                     break;
                 }
                 case 'c':

@@ -375,7 +375,7 @@ export class Session {
         this.resetState();
         this.bucket.count--;
 
-        // 打分智能体触发：无论以何种方式触发会话，都刷新回复间隔并扣精力（gate 冷却依赖）
+        // 评分触发：无论以何种方式触发会话，都刷新回复间隔并解除 WAIT 冷却（不扣精力，gate 冷却依赖）
         JudgeManager.noteSessionTrigger(this.sessionId, reason || 'unknown');
 
         const model = Model.getChatModel('chat', this.setting.modelName);
@@ -452,7 +452,7 @@ export class Session {
         this.pendingQueue = [];
         if (this.context.timer) clearTimeout(this.context.timer);
         this.context.timer = null;
-        // 打分智能体触发：停止会话时清掉 WAIT 回访定时器与内存状态
+        // 评分触发：停止会话时清掉 WAIT 回访定时器与内存状态
         JudgeManager.clearSession(this.sessionId);
         const queueCleared = requestLimiter.cancelBySession(this.sessionId);
         this.save();

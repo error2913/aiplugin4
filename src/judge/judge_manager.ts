@@ -1,4 +1,4 @@
-// 打分智能体触发管理：gate 门禁（零 LLM）→ 打分小模型 → SPEAK/WAIT 两级；
+// 评分触发管理：gate 门禁（零 LLM）→ 评分小模型 → SPEAK/WAIT 两级；
 // 记录其他方式触发会话（刷新回复间隔/解除 WAIT 冷却，不扣精力），WAIT 只记冷却时间戳由 gate 直接 DROP。
 import Agent from "../agent/agent";
 import Config from "../config/config";
@@ -25,7 +25,7 @@ interface JudgeDims {
     continuity: number;
 }
 
-/** 打分智能体注入内容 */
+/** 评分智能体注入内容 */
 interface JudgeBuilt {
     messages: { role: string; content: string }[];
     ctxCount: number;
@@ -42,7 +42,7 @@ interface JudgeState {
     energy: number;
     /** WAIT 冷却截止时间戳（毫秒）：gate 在此前直接 DROP；0 表示无冷却 */
     waitUntil: number;
-    /** 每会话每小时打分次数 */
+    /** 每会话每小时评分次数 */
     hourly: { hour: number; count: number };
     /** 15 秒窗口内的消息时间戳，用于密度判断 */
     msgTimes: number[];
@@ -84,8 +84,8 @@ export class JudgeManager {
     }
 
     /**
-     * 会话被触发（含正则/计数/概率/计时器/打分等其他方式触发会话）时刷新回复间隔并解除 WAIT 冷却。
-     * 精力只在打分判定 SPEAK 插话成功时扣减，其他方式触发不扣费（A1）。
+     * 会话被触发（含正则/计数/概率/计时器/评分等其他方式触发会话）时刷新回复间隔并解除 WAIT 冷却。
+     * 精力只在评分判定 SPEAK 插话成功时扣减，其他方式触发不扣费（A1）。
      * 只在 judge 状态已存在（该会话开启过 --j）时记账，避免为从未用过的会话保留状态。
      */
     static noteSessionTrigger(sid: string, reason: string): void {
@@ -102,7 +102,7 @@ export class JudgeManager {
         this.states.delete(sid);
     }
 
-    /** 主入口：消息已入库后由 pipeline 待机块调用；gate 通过才调用打分小模型 */
+    /** 主入口：消息已入库后由 pipeline 待机块调用；gate 通过才调用评分小模型 */
     static async evaluate(ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string): Promise<void> {
         const sid = session.sessionId;
         const cfg = Config.trigger.JUDGE;
@@ -130,7 +130,7 @@ export class JudgeManager {
 
         // 会话已挂起待触发计时器（计数器/概率/计时器已安排回复）→ 防双触发
         if (session.context.timer !== null) return { drop: true, reason: '计时器已挂起' };
-        // WAIT 冷却中 → 不并发打分
+        // WAIT 冷却中 → 不并发评分
         if (now < state.waitUntil) return { drop: true, reason: 'WAIT冷却中' };
 
         // 最小回复间隔：bot 刚发言/刚被其他方式触发过
@@ -152,7 +152,7 @@ export class JudgeManager {
         state.msgTimes = state.msgTimes.filter(t => t > windowStart);
         if (state.msgTimes.length >= DENSITY_LIMIT) return { drop: true, reason: `消息过密(${state.msgTimes.length}条/15s)` };
 
-        // 每会话每小时打分上限
+        // 每会话每小时评分上限
         const hour = Math.floor(now / 3600000);
         if (state.hourly.hour !== hour) state.hourly = { hour, count: 0 };
         if (state.hourly.count >= cfg.GATE.max_judge_per_hour) return { drop: true, reason: `本轮judge已用尽(${state.hourly.count}/${cfg.GATE.max_judge_per_hour})` };
@@ -161,14 +161,14 @@ export class JudgeManager {
         return { drop: false, reason: '' };
     }
 
-    /** 打分 + 两级分支：SPEAK 直接插话 / WAIT 记冷却时间戳（冷却期内 gate 直接 DROP） */
+    /** 评分 + 两级分支：SPEAK 直接插话 / WAIT 记冷却时间戳（冷却期内 gate 直接 DROP） */
     private static async judgeAndBranch(
         ctx: seal.MsgContext, msg: seal.Message, session: Session,
         cfg: JudgeConfig, built: JudgeBuilt
     ): Promise<void> {
         const result = await this.requestScore(built.messages, cfg);
         if ('error' in result) {
-            log.info(`打分失败(${result.error})，本次不插话`);
+            log.info(`评分失败(${result.error})，本次不插话`);
             return;
         }
         const { dims, reason } = result;
@@ -188,7 +188,7 @@ export class JudgeManager {
 
         if (s >= cfg.SCORING.speak_threshold) {
             log.info(`score=${score10.toFixed(2)}/10 → SPEAK`);
-            await session.chat(ctx, msg, '打分触发');
+            await session.chat(ctx, msg, '评分触发');
             // A1：精力只在 SPEAK 插话成功时扣减
             const speakState = this.ensureState(session.sessionId);
             speakState.energy = Math.max(speakState.energy - cfg.ENERGY.reply_cost, 0);
@@ -201,7 +201,7 @@ export class JudgeManager {
         log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SCORING.speak_threshold}) 冷却${cfg.SCORING.wait_cooldown}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
     }
 
-    /** 调用打分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */
+    /** 调用评分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */
     private static async requestScore(messages: { role: string; content: string }[], cfg: JudgeConfig): Promise<JudgeResult> {
         const agent = Agent.get('judge_agent');
         let lastError = '';
@@ -213,16 +213,16 @@ export class JudgeManager {
                     if (i > 0) log.info(`JSON解析失败×${i}，重试成功`);
                     return parsed;
                 }
-                lastError = '打分响应非合法JSON';
+                lastError = '评分响应非合法JSON';
             } catch (_e) {
                 lastError = _e instanceof Error ? _e.message : String(_e);
             }
-            if (i < cfg.MODEL.retries) log.info(`打分失败(${lastError})，第${i + 1}/${cfg.MODEL.retries}次重试`);
+            if (i < cfg.MODEL.retries) log.info(`评分失败(${lastError})，第${i + 1}/${cfg.MODEL.retries}次重试`);
         }
         return { error: lastError };
     }
 
-    /** 解析打分 JSON：容忍 Markdown 代码块与多余文字，五维必须为 0-10 数字 */
+    /** 解析评分 JSON：容忍 Markdown 代码块与多余文字，五维必须为 0-10 数字 */
     private static parseScore(raw: string): { dims: JudgeDims; reason: string } | null {
         let text = (raw || '').trim();
         const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -246,7 +246,7 @@ export class JudgeManager {
         }
     }
 
-    /** 组装打分输入：bot 名/角色设定/上次发言/最近上下文注入，并声明外部数据仅供参考防注入 */
+    /** 组装评分输入：bot 名/角色设定/上次发言/最近上下文注入，并声明外部数据仅供参考防注入 */
     private static buildJudgeMessages(
         ctx: seal.MsgContext, session: Session, messageText: string, cfg: JudgeConfig
     ): JudgeBuilt {
@@ -282,7 +282,7 @@ ${external.join('\n')}
 最近的群聊记录（最后一条为当前待评判消息）：
 ${history.text}
 
-请对最后一条消息按五个维度打分。`;
+请对最后一条消息按五个维度评分。`;
 
         return {
             messages: [

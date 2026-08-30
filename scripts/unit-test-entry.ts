@@ -1418,7 +1418,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(img2.isBase64RetryBlocked(), false);
     },
 
-    /** 打分 gate 门禁：各 DROP 条件命中直接丢弃且不触发小模型（零 LLM），正常条件放行并累计每小时计数 */
+    /** 评分 gate 门禁：各 DROP 条件命中直接丢弃且不触发小模型（零 LLM），正常条件放行并累计每小时计数 */
     testJudgeGateDropConditions(): void {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
@@ -1435,7 +1435,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.match(g.reason, /计时器已挂起/);
             session.context.timer = null;
 
-            // WAIT 冷却中 → 不并发打分
+            // WAIT 冷却中 → 不并发评分
             const waitState = freshJudgeState(fakeNow);
             waitState.waitUntil = fakeNow + 60 * 1000;
             g = (JudgeManager as any).gate(session, waitState);
@@ -1477,20 +1477,20 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(g.drop, true);
             assert.match(g.reason, /消息过密/);
 
-            // 每会话每小时打分上限用尽 → DROP
+            // 每会话每小时评分上限用尽 → DROP
             const hourlyState = freshJudgeState(fakeNow);
             hourlyState.hourly.count = cfg.GATE.max_judge_per_hour;
             g = (JudgeManager as any).gate(session, hourlyState);
             assert.equal(g.drop, true);
             assert.match(g.reason, /本轮judge已用尽/);
 
-            // 全部条件通过 → 放行并累计每小时打分计数
+            // 全部条件通过 → 放行并累计每小时评分计数
             const okState = freshJudgeState(fakeNow);
             g = (JudgeManager as any).gate(session, okState);
             assert.equal(g.drop, false);
-            assert.equal(okState.hourly.count, 1, 'gate 放行后应累计每小时打分计数');
+            assert.equal(okState.hourly.count, 1, 'gate 放行后应累计每小时评分计数');
 
-            // 全程未调用打分小模型
+            // 全程未调用评分小模型
             assert.equal(llmCalls, 0, 'gate 判断本身不应触发小模型');
         } finally {
             Date.now = origNow;
@@ -1528,7 +1528,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 打分 JSON 解析：容忍 Markdown 围栏/前后多余文字，五维必须为 0-10 数字，reason 截断 100 字 */
+    /** 评分 JSON 解析：容忍 Markdown 围栏/前后多余文字，五维必须为 0-10 数字，reason 截断 100 字 */
     testJudgeParseScore(): void {
         const parse = (JudgeManager as any).parseScore;
         // 纯 JSON
@@ -1559,7 +1559,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(r.reason.length, 100);
     },
 
-    /** 打分注入上下文：只收集 user/assistant，跳过 system/tool/空内容；当前消息兜底补入并去重，受条数限制 */
+    /** 评分注入上下文：只收集 user/assistant，跳过 system/tool/空内容；当前消息兜底补入并去重，受条数限制 */
     testJudgeBuildHistory(): void {
         const bh = (JudgeManager as any).buildHistory;
         const session = {
@@ -1593,9 +1593,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!h.text.includes('第一条'), '超出条数限制的历史不应注入');
     },
 
-    /** 打分智能体触发配置（TOML 分段）：默认值、单段/单键部分覆盖并入默认与非法 TOML 回退默认 */
+    /** 评分触发配置（TOML 分段）：默认值、单段/单键部分覆盖并入默认与非法 TOML 回退默认 */
     testJudgeConfigDefaults(): void {
-        const key = '打分智能体触发配置';
+        const key = '评分触发配置';
         delete TC.templateConfigs[key];
         resetConfigCache();
         // 默认值
@@ -1654,7 +1654,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (JudgeManager as any).clearSession(sid);
     },
 
-    /** evaluate 端到端：gate 命中（计时器挂起/冷却）时直接丢弃，不调用打分小模型 */
+    /** evaluate 端到端：gate 命中（计时器挂起/冷却）时直接丢弃，不调用评分小模型 */
     async testJudgeEvaluateDropNoLlm(): Promise<void> {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
@@ -1666,7 +1666,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             // 计时器已挂起 → gate DROP，不触发小模型
             await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息');
-            assert.equal(llmCalls, 0, 'gate 命中计时器挂起时应直接丢弃，不触发打分小模型');
+            assert.equal(llmCalls, 0, 'gate 命中计时器挂起时应直接丢弃，不触发评分小模型');
             // 冷却期内 → gate DROP，不触发小模型
             session.context.timer = null;
             (JudgeManager as any).states.set(sid, {
@@ -1675,7 +1675,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
             });
             await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息2');
-            assert.equal(llmCalls, 0, '冷却期内也应直接丢弃，不触发打分小模型');
+            assert.equal(llmCalls, 0, '冷却期内也应直接丢弃，不触发评分小模型');
             // WAIT 冷却期内 → gate DROP，不触发小模型
             session.context.timer = null;
             (JudgeManager as any).states.set(sid, {
@@ -1684,7 +1684,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
             });
             await (JudgeManager as any).evaluate(makeCtx(), {}, session, '触发消息3');
-            assert.equal(llmCalls, 0, 'WAIT 冷却期内也应直接丢弃，不触发打分小模型');
+            assert.equal(llmCalls, 0, 'WAIT 冷却期内也应直接丢弃，不触发评分小模型');
         } finally {
             Date.now = origNow;
             (JudgeManager as any).clearSession(sid);
@@ -1698,8 +1698,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
-        // 缩短打分超时，避免 withTimeout 的兜底定时器拖慢测试
-        TC.templateConfigs['打分智能体触发配置'] = ['[model]\ntimeout_sec = 0.001'];
+        // 缩短评分超时，避免 withTimeout 的兜底定时器拖慢测试
+        TC.templateConfigs['评分触发配置'] = ['[model]\ntimeout_sec = 0.001'];
         resetConfigCache();
         const cfg = (Config as any).trigger.JUDGE;
         const chatReasons: string[] = [];
@@ -1716,7 +1716,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 chatMessages: async () => JSON.stringify({ relevance: 10, willingness: 10, social: 10, timing: 10, continuity: 10, reason: '高相关' })
             };
             await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-speak'), '点名');
-            assert.deepEqual(chatReasons, ['打分触发'], 'SPEAK 分支应以打分触发发起会话');
+            assert.deepEqual(chatReasons, ['评分触发'], 'SPEAK 分支应以评分触发发起会话');
             const speakState = (JudgeManager as any).states.get('eval-speak');
             assert.equal(speakState.energy, 100 - cfg.ENERGY.reply_cost, 'SPEAK 插话成功应扣减精力');
 
@@ -1730,7 +1730,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(waitState, 'WAIT 分支应保留状态');
             assert.ok(waitState.waitUntil > fakeNow, 'WAIT 分支应记录冷却截止时间戳');
             assert.ok(waitState.waitUntil <= fakeNow + cfg.SCORING.wait_cooldown * 1000, 'WAIT 冷却截止应为 now + wait_cooldown');
-            assert.deepEqual(chatReasons, ['打分触发'], 'WAIT 分支不应直接插话');
+            assert.deepEqual(chatReasons, ['评分触发'], 'WAIT 分支不应直接插话');
             assert.equal(waitState.energy, 100, 'WAIT 未插话不扣精力');
 
             // 低分同样进入 WAIT（无 IGNORE 级别）：只记冷却不插话
@@ -1740,14 +1740,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-wait-low'), '广告');
             const lowState = (JudgeManager as any).states.get('eval-wait-low');
             assert.ok(lowState && lowState.waitUntil > fakeNow, '低分也应记 WAIT 冷却');
-            assert.deepEqual(chatReasons, ['打分触发'], '低分不应插话');
+            assert.deepEqual(chatReasons, ['评分触发'], '低分不应插话');
         } finally {
             Date.now = origNow;
             (JudgeManager as any).clearSession('eval-speak');
             (JudgeManager as any).clearSession('eval-wait');
             (JudgeManager as any).clearSession('eval-wait-low');
             delete (Agent as any).agentMap['judge_agent'];
-            delete TC.templateConfigs['打分智能体触发配置'];
+            delete TC.templateConfigs['评分触发配置'];
             resetConfigCache();
         }
     },

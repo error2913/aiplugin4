@@ -13,7 +13,7 @@ export function registerCmdOn() {
 
 <参数>:
 【r】非指令正则触发开关
-【j】打分智能体触发开关，开启后由打分智能体判断是否插话（无参数）
+【j】评分触发开关，开启后由评分智能体判断是否插话（无参数）
 【c】计数器模式，接收消息数达到后触发
 单位/条，默认10条
 【t】计时器模式，最后一条消息后达到时限触发
@@ -89,7 +89,7 @@ export function registerCmdOn() {
                 case 'j':
                 case 'judge': {
                     setting.judge = true;
-                    text += "\n打分智能体触发: 开启";
+                    text += "\n评分触发: 开启";
                     break;
                 }
                 case 'r':
