@@ -16,6 +16,7 @@ import type {
     RecallOptions,
     RecallResult,
     ReflectResult,
+    ReflectSynthesizer,
     Reranker,
     RetainInput,
     RetainResult,
@@ -25,6 +26,10 @@ const RRF_K = 60;
 const DEFAULT_MAX_TOKENS = 2048;
 const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
 const BACKFILL_BATCH_LIMIT = 20;
+const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
+
+/** 「设定」心智模型的固定问题：.ai memo p|g st 与 persona 迁移共用，同问题名即同一条 */
+export const MENTAL_MODEL_PERSONA_QUESTION = '这个用户/群的设定是什么？';
 
 export interface MemoryEngineOptions {
     storage?: MemoryStorage;
@@ -32,6 +37,7 @@ export interface MemoryEngineOptions {
     extract?: FactExtractor;
     rerank?: Reranker;
     synthesizeObservation?: ObservationSynthesizer;
+    reflectSynthesizer?: ReflectSynthesizer;
 }
 
 export class MemoryEngine {
@@ -40,6 +46,7 @@ export class MemoryEngine {
     private extract?: FactExtractor;
     private rerank?: Reranker;
     private synthesizeObservation?: ObservationSynthesizer;
+    private reflectSynthesizer?: ReflectSynthesizer;
 
     constructor(options: MemoryEngineOptions = {}) {
         this.repository = new MemoryRepository(options.storage || new InMemoryMemoryStorage());
@@ -47,6 +54,7 @@ export class MemoryEngine {
         this.extract = options.extract;
         this.rerank = options.rerank;
         this.synthesizeObservation = options.synthesizeObservation;
+        this.reflectSynthesizer = options.reflectSynthesizer;
     }
 
     setExtractor(extract: FactExtractor): void {
@@ -59,6 +67,10 @@ export class MemoryEngine {
 
     setObservationSynthesizer(synthesizeObservation: ObservationSynthesizer): void {
         this.synthesizeObservation = synthesizeObservation;
+    }
+
+    setReflectSynthesizer(reflectSynthesizer: ReflectSynthesizer): void {
+        this.reflectSynthesizer = reflectSynthesizer;
     }
 
     // ===== Bank =====
@@ -477,17 +489,36 @@ export class MemoryEngine {
         return model;
     }
 
-    async refreshMentalModels(bankId: string): Promise<number> {
-        const models = this.repository.listMentalModels(bankId);
+    deleteMentalModel(bankId: string, id: string): boolean {
+        return this.repository.deleteMentalModel(bankId, id);
+    }
+
+    /**
+     * 刷新心智模型：基于现有记忆重新推理每个问题；传 id 时只刷新该条。
+     * - 空内容保护：合成失败 / 无足够记忆时不覆盖旧答案
+     * - 未变化跳过：结果与旧答案相同不 bump version
+     * 返回实际更新的条数。
+     */
+    async refreshMentalModels(bankId: string, id?: string): Promise<number> {
+        const models = this.repository.listMentalModels(bankId).filter(m => !id || m.id === id);
+        // 空内容保护：无观察/事实可依据时跳过，避免把模型自身内容当“新推理结果”反复刷版本
+        const hasSource = this.repository.listObservations(bankId).length > 0
+            || this.repository.listUnits(bankId).some(u => u.state === 'valid' && (u.factType === 'world' || u.factType === 'experience'));
+        if (!hasSource) return 0;
         const now = Math.floor(Date.now() / 1000);
+        let updated = 0;
         for (const model of models) {
             const result = await this.reflect(bankId, model.question);
-            model.answer = result.text;
+            const text = (result.text || '').trim();
+            if (!text || text === NO_MEMORY_TEXT) continue;
+            if (text === model.answer) continue;
+            model.answer = text;
             model.updatedAt = now;
             model.version++;
             this.repository.updateMentalModel(bankId, model);
+            updated++;
         }
-        return models.length;
+        return updated;
     }
 
     // ===== Reflect =====
@@ -497,13 +528,23 @@ export class MemoryEngine {
         const observations = this.repository.listObservations(bankId);
         const memories = (await this.recall(bankId, query, { types: ['world', 'experience'], maxTokens: 4096 }))
             .map(r => r.unit);
-        const text = [
-            ...mentalModels.map(m => `【心智模型】${m.question}\n${m.answer}`),
-            ...observations.map(o => `【观察】${o.text}`),
-            ...memories.map(m => `【事实】${m.text}`),
-        ].join('\n');
+        let text = '';
+        if (this.reflectSynthesizer) {
+            try {
+                text = (await this.reflectSynthesizer(query, { mentalModels, observations, memories })) || '';
+            } catch {
+                text = '';
+            }
+        }
+        if (!text.trim()) {
+            text = [
+                ...mentalModels.map(m => `【心智模型】${m.question}\n${m.answer}`),
+                ...observations.map(o => `【观察】${o.text}`),
+                ...memories.map(m => `【事实】${m.text}`),
+            ].join('\n') || NO_MEMORY_TEXT;
+        }
         return {
-            text: text || '暂无足够记忆进行推理',
+            text,
             basedOn: { mentalModels, observations, memories },
         };
     }

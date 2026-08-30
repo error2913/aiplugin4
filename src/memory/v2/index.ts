@@ -3,7 +3,7 @@ import Config from "../../config/config";
 import Model from "../../model/model";
 
 import { MemoryEngine } from "./engine";
-import { defaultFactExtractor, defaultObservationSynthesizer, defaultReranker } from "./llm";
+import { defaultFactExtractor, defaultObservationSynthesizer, defaultReflectSynthesizer, defaultReranker } from "./llm";
 import { getDefaultMemoryStorage, InMemoryMemoryStorage } from "./storage";
 import type { MemoryStorage } from "./storage";
 
@@ -11,9 +11,10 @@ export { MemoryEngine } from "./engine";
 export { MemoryRepository } from "./repository";
 export { InMemoryMemoryStorage, SealMemoryStorage, setDefaultMemoryStorage, getDefaultMemoryStorage } from "./storage";
 export * from "./types";
+export { MENTAL_MODEL_PERSONA_QUESTION } from "./engine";
 export * from "./bank_resolver";
 export * from "./prompt";
-export { defaultFactExtractor, defaultReranker, defaultObservationSynthesizer } from "./llm";
+export { defaultFactExtractor, defaultReranker, defaultObservationSynthesizer, defaultReflectSynthesizer } from "./llm";
 
 export function createMemoryEngine(): MemoryEngine {
     // 与知识库检索一致：配置了 text-embedding 模型时接入语义向量，未配置时自动降级为关键词/图/时间检索
@@ -30,6 +31,7 @@ export function createMemoryEngine(): MemoryEngine {
     if (memoryConfig.MEMORY_LLM_EXTRACT) engine.setExtractor(defaultFactExtractor);
     if (memoryConfig.MEMORY_LLM_RERANK) engine.setReranker(defaultReranker);
     if (memoryConfig.MEMORY_OBSERVATION_SYNTH) engine.setObservationSynthesizer(defaultObservationSynthesizer);
+    if (memoryConfig.MEMORY_REFLECT_SYNTH) engine.setReflectSynthesizer(defaultReflectSynthesizer);
     return engine;
 }
 

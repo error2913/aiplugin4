@@ -217,6 +217,16 @@ export class MemoryRepository {
         }
     }
 
+    deleteMentalModel(bankId: string, id: string): boolean {
+        const bank = this.getBank(bankId);
+        if (!bank) return false;
+        const idx = bank.mentalModels.findIndex(m => m.id === id);
+        if (idx < 0) return false;
+        bank.mentalModels.splice(idx, 1);
+        this.save(bankId);
+        return true;
+    }
+
     // ===== Documents / Chunks =====
 
     getDocument(bankId: string, documentId: string): MemoryDocument | null {

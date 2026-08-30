@@ -5,6 +5,7 @@ import type {
     ExtractedFact,
     FactExtractor,
     ObservationSynthesizer,
+    ReflectSynthesizer,
     Reranker,
     RetainInput,
 } from "./types";
@@ -46,6 +47,14 @@ const OBSERVATION_PROMPT = `你是一个记忆观察合成器。根据以下支�
 {
   "observation": "合成后的观察文本"
 }`;
+
+const REFLECT_PROMPT = `你是一个基于记忆的推理助手。根据用户的问题和相关记忆，给出简洁、准确的回答。
+
+要求：
+- 只依据提供的记忆内容作答；
+- 记忆不足时如实说明缺少哪些信息；
+- 不要编造记忆中没有的信息；
+- 回答控制在 200 字以内，直接输出答案，不要输出解释。`;
 
 function parseLooseJson(text: string): any {
     if (!text || typeof text !== 'string') return null;
@@ -123,13 +132,39 @@ export const defaultObservationSynthesizer: ObservationSynthesizer = async (quot
     }
 };
 
+export const defaultReflectSynthesizer: ReflectSynthesizer = async (query, context) => {
+    try {
+        const parts: string[] = [];
+        if (context.mentalModels.length) {
+            parts.push('【心智模型】');
+            parts.push(context.mentalModels.map(m => `- ${m.question}\n  ${m.answer}`).join('\n'));
+        }
+        if (context.observations.length) {
+            parts.push('【观察】');
+            parts.push(context.observations.map(o => `- ${o.text}`).join('\n'));
+        }
+        if (context.memories.length) {
+            parts.push('【事实】');
+            parts.push(context.memories.map(m => `- ${m.text}`).join('\n'));
+        }
+        const reply = await Agent.get('summarize_agent').chat(
+            `${REFLECT_PROMPT}\n\n问题：${query}\n相关记忆：\n${parts.join('\n\n') || '（无）'}`
+        );
+        return (reply || '').trim();
+    } catch {
+        return '';
+    }
+};
+
 export function configureDefaultCallbacks(engine: {
     setExtractor(extract: FactExtractor): void;
     setReranker(rerank: Reranker): void;
     setObservationSynthesizer(synthesizeObservation: ObservationSynthesizer): void;
+    setReflectSynthesizer(reflectSynthesizer: ReflectSynthesizer): void;
 }): void {
     engine.setExtractor(defaultFactExtractor);
     engine.setReranker(defaultReranker);
     engine.setObservationSynthesizer(defaultObservationSynthesizer);
+    engine.setReflectSynthesizer(defaultReflectSynthesizer);
 }
 

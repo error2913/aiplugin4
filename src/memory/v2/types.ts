@@ -181,6 +181,13 @@ export type Reranker = (query: string, candidates: MemoryUnit[]) => Promise<stri
 
 export type ObservationSynthesizer = (quotes: string[]) => Promise<string>;
 
+/** 心智模型推理合成器：基于问题与相关记忆（心智模型/观察/事实）生成结论文本。 */
+export type ReflectSynthesizer = (query: string, context: {
+    mentalModels: MentalModel[];
+    observations: Observation[];
+    memories: MemoryUnit[];
+}) => Promise<string>;
+
 export interface RetainResult {
     unitIds: string[];
     documentId?: string;

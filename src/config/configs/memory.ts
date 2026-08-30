@@ -15,6 +15,7 @@ export default class MemoryConfig {
         seal.ext.registerBoolConfig(ext, "用LLM抽取记忆", false, "使用 LLM 从对话中抽取原子事实（实验性，默认关闭）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM重排召回结果", false, "使用 LLM 对召回结果重新排序（较慢，默认关闭）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM合成观察记忆", true, "使用 LLM 合成观察记忆（默认开启）", "记忆");
+        seal.ext.registerBoolConfig(ext, "用LLM推理记忆", true, "使用 LLM 合成心智模型推理答案（.ai memo mm / reflect 使用，默认开启）", "记忆");
     }
 
     static get() {
@@ -26,7 +27,8 @@ export default class MemoryConfig {
             CONSOLIDATE_INTERVAL: seal.ext.getIntConfig(ext, "每隔多少次观察整合一次记忆"),
             MEMORY_LLM_EXTRACT: seal.ext.getBoolConfig(ext, "用LLM抽取记忆"),
             MEMORY_LLM_RERANK: seal.ext.getBoolConfig(ext, "用LLM重排召回结果"),
-            MEMORY_OBSERVATION_SYNTH: seal.ext.getBoolConfig(ext, "用LLM合成观察记忆")
+            MEMORY_OBSERVATION_SYNTH: seal.ext.getBoolConfig(ext, "用LLM合成观察记忆"),
+            MEMORY_REFLECT_SYNTH: seal.ext.getBoolConfig(ext, "用LLM推理记忆")
         }
     }
 }
