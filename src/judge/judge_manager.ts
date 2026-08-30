@@ -1,5 +1,5 @@
 // 打分智能体触发管理：gate 门禁（零 LLM）→ 打分小模型 → SPEAK/WAIT 两级；
-// 记录其他方式触发会话（刷新回复间隔/扣精力），WAIT 只记冷却时间戳由 gate 直接 DROP。
+// 记录其他方式触发会话（刷新回复间隔/解除 WAIT 冷却，不扣精力），WAIT 只记冷却时间戳由 gate 直接 DROP。
 import Agent from "../agent/agent";
 import Config from "../config/config";
 import { JudgeConfig } from "../config/configs/trigger";
@@ -69,7 +69,7 @@ export class JudgeManager {
         state = {
             lastSpeakAt: 0,
             lastEnergyAt: Date.now(),
-            energy: Config.trigger.JUDGE.ENERGY_INITIAL,
+            energy: Config.trigger.JUDGE.ENERGY.initial,
             waitUntil: 0,
             hourly: { hour: -1, count: 0 },
             msgTimes: []
@@ -84,19 +84,17 @@ export class JudgeManager {
     }
 
     /**
-     * 会话被触发（含正则/计数/概率/计时器/打分等其他方式触发会话）时刷新回复间隔、扣精力并解除 WAIT 冷却。
+     * 会话被触发（含正则/计数/概率/计时器/打分等其他方式触发会话）时刷新回复间隔并解除 WAIT 冷却。
+     * 精力只在打分判定 SPEAK 插话成功时扣减，其他方式触发不扣费（A1）。
      * 只在 judge 状态已存在（该会话开启过 --j）时记账，避免为从未用过的会话保留状态。
      */
     static noteSessionTrigger(sid: string, reason: string): void {
         const state = this.states.get(sid);
         if (!state) return;
-        const { ENERGY_REPLY_COST, ENERGY_MIN } = Config.trigger.JUDGE;
         const now = Date.now();
         state.lastSpeakAt = now;
-        state.lastEnergyAt = now;
-        state.energy = Math.max(state.energy - ENERGY_REPLY_COST, ENERGY_MIN);
         state.waitUntil = 0;
-        log.info(`会话<${sid}>被触发(${reason})，刷新回复间隔，精力=${state.energy.toFixed(2)}`);
+        log.info(`会话<${sid}>被触发(${reason})，刷新回复间隔，解除WAIT冷却，精力=${state.energy}`);
     }
 
     /** 清理会话 judge 状态：移除内存状态（.ai off / .ai stop 时调用） */
@@ -118,10 +116,10 @@ export class JudgeManager {
             log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} gate=DROP(${g.reason}) 不触发小模型`);
             return;
         }
-        log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} gate=通过 | 精力${state.energy.toFixed(2)} 密度${state.msgTimes.length}/${DENSITY_LIMIT}/15s 本轮judge ${state.hourly.count}/${cfg.MAX_JUDGE_PER_HOUR}`);
+        log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} gate=通过 | 精力${state.energy} 密度${state.msgTimes.length}/${DENSITY_LIMIT}/15s 本轮judge ${state.hourly.count}/${cfg.GATE.max_judge_per_hour}`);
 
         const built = this.buildJudgeMessages(ctx, session, messageText, cfg);
-        log.info(`注入: bot=${built.botName} role=${truncate(built.role, 80)} lastBot=${truncate(built.lastBot, 80)} ctx=${built.ctxCount}/${cfg.CONTEXT_COUNT}`);
+        log.info(`注入: bot=${built.botName} role=${truncate(built.role, 80)} lastBot=${truncate(built.lastBot, 80)} ctx=${built.ctxCount}/${cfg.MODEL.context_count}`);
         await this.judgeAndBranch(ctx, msg, session, cfg, built);
     }
 
@@ -136,19 +134,18 @@ export class JudgeManager {
         if (now < state.waitUntil) return { drop: true, reason: 'WAIT冷却中' };
 
         // 最小回复间隔：bot 刚发言/刚被其他方式触发过
-        const cooldownLeft = state.lastSpeakAt + cfg.MIN_REPLY_INTERVAL * 1000 - now;
+        const cooldownLeft = state.lastSpeakAt + cfg.GATE.min_reply_interval * 1000 - now;
         if (cooldownLeft > 0) return { drop: true, reason: `冷却剩余${Math.ceil(cooldownLeft / 1000)}s` };
 
-        // 精力懒恢复：按距上次记账的时间补齐（每5分钟 / 每天），上限初始精力
+        // 精力懒恢复：按距上次记账的时间补齐（每5分钟），上限初始精力
         const elapsedMs = now - state.lastEnergyAt;
         const minutes = elapsedMs / 60000;
-        const dayRecover = Math.floor(minutes / (24 * 60)) * cfg.ENERGY_RECOVER_DAY;
-        const minRecover = Math.floor(minutes / 5) * cfg.ENERGY_RECOVER_MIN;
-        if (dayRecover > 0 || minRecover > 0) {
-            state.energy = Math.min(cfg.ENERGY_INITIAL, state.energy + dayRecover + minRecover);
+        const minRecover = Math.floor(minutes / 5) * cfg.ENERGY.recover_min;
+        if (minRecover > 0) {
+            state.energy = Math.min(cfg.ENERGY.initial, state.energy + minRecover);
             state.lastEnergyAt = now;
         }
-        if (state.energy < cfg.ENERGY_MIN) return { drop: true, reason: `精力不足(${state.energy.toFixed(2)})` };
+        if (state.energy <= 0) return { drop: true, reason: '精力不足(0)' };
 
         // 消息密度：15 秒窗口内达到上限视为刷屏
         const windowStart = now - DENSITY_WINDOW_MS;
@@ -158,7 +155,7 @@ export class JudgeManager {
         // 每会话每小时打分上限
         const hour = Math.floor(now / 3600000);
         if (state.hourly.hour !== hour) state.hourly = { hour, count: 0 };
-        if (state.hourly.count >= cfg.MAX_JUDGE_PER_HOUR) return { drop: true, reason: `本轮judge已用尽(${state.hourly.count}/${cfg.MAX_JUDGE_PER_HOUR})` };
+        if (state.hourly.count >= cfg.GATE.max_judge_per_hour) return { drop: true, reason: `本轮judge已用尽(${state.hourly.count}/${cfg.GATE.max_judge_per_hour})` };
 
         state.hourly.count++;
         return { drop: false, reason: '' };
@@ -189,23 +186,28 @@ export class JudgeManager {
         log.info(`dims: relevance=${dims.relevance}(w${w.relevance}) willingness=${dims.willingness}(w${w.willingness}) social=${dims.social}(w${w.social}) timing=${dims.timing}(w${w.timing}) continuity=${dims.continuity}(w${w.continuity})`);
         log.info(`reason: ${reason}`);
 
-        if (s >= cfg.SPEAK_THRESHOLD) {
+        if (s >= cfg.SCORING.speak_threshold) {
             log.info(`score=${score10.toFixed(2)}/10 → SPEAK`);
             await session.chat(ctx, msg, '打分触发');
+            // A1：精力只在 SPEAK 插话成功时扣减
+            const speakState = this.ensureState(session.sessionId);
+            speakState.energy = Math.max(speakState.energy - cfg.ENERGY.reply_cost, 0);
+            speakState.lastEnergyAt = Date.now();
+            log.info(`SPEAK 扣减精力 ${cfg.ENERGY.reply_cost} → ${speakState.energy}`);
             return;
         }
         const state = this.ensureState(session.sessionId);
-        state.waitUntil = Date.now() + cfg.WAIT_COOLDOWN * 1000;
-        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SPEAK_THRESHOLD}) 冷却${cfg.WAIT_COOLDOWN}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
+        state.waitUntil = Date.now() + cfg.SCORING.wait_cooldown * 1000;
+        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SCORING.speak_threshold}) 冷却${cfg.SCORING.wait_cooldown}s 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
     }
 
     /** 调用打分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */
     private static async requestScore(messages: { role: string; content: string }[], cfg: JudgeConfig): Promise<JudgeResult> {
         const agent = Agent.get('judge_agent');
         let lastError = '';
-        for (let i = 0; i <= cfg.RETRIES; i++) {
+        for (let i = 0; i <= cfg.MODEL.retries; i++) {
             try {
-                const raw = await withTimeout(() => agent.chatMessages(messages), cfg.TIMEOUT_SEC * 1000);
+                const raw = await withTimeout(() => agent.chatMessages(messages), cfg.MODEL.timeout_sec * 1000);
                 const parsed = this.parseScore(raw);
                 if (parsed) {
                     if (i > 0) log.info(`JSON解析失败×${i}，重试成功`);
@@ -215,7 +217,7 @@ export class JudgeManager {
             } catch (_e) {
                 lastError = _e instanceof Error ? _e.message : String(_e);
             }
-            if (i < cfg.RETRIES) log.info(`打分失败(${lastError})，第${i + 1}/${cfg.RETRIES}次重试`);
+            if (i < cfg.MODEL.retries) log.info(`打分失败(${lastError})，第${i + 1}/${cfg.MODEL.retries}次重试`);
         }
         return { error: lastError };
     }
@@ -252,7 +254,7 @@ export class JudgeManager {
         const { roleSetting } = getRoleSetting(ctx);
         const role = roleSetting || '（无）';
         const lastBot = this.getLastBotSpeak(session);
-        const history = this.buildHistory(session, cfg.CONTEXT_COUNT, messageText);
+        const history = this.buildHistory(session, cfg.MODEL.context_count, messageText);
 
         const system = `你是一个群聊插话质量评判员。你要判断机器人「${botName}」是否应该插话回复群里最新的一条消息。
 

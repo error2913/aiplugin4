@@ -65,7 +65,7 @@ function freshJudgeState(now: number): any {
     return {
         lastSpeakAt: 0,
         lastEnergyAt: now,
-        energy: 1.0,
+        energy: 100,
         waitUntil: 0,
         hourly: { hour: Math.floor(now / 3600000), count: 0 },
         msgTimes: []
@@ -1455,12 +1455,20 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(g.drop, true);
             assert.match(g.reason, /冷却剩余/);
 
-            // 精力不足 → DROP
+            // 精力为 0（下限）→ DROP
             const lowState = freshJudgeState(fakeNow);
-            lowState.energy = 0.05;
+            lowState.energy = 0;
             g = (JudgeManager as any).gate(session, lowState);
             assert.equal(g.drop, true);
             assert.match(g.reason, /精力不足/);
+
+            // 精力懒恢复：距上次记账超过 5 分钟按每 5 分钟补齐，恢复后放行
+            const recState = freshJudgeState(fakeNow);
+            recState.energy = 90;
+            recState.lastEnergyAt = fakeNow - 6 * 60 * 1000;
+            g = (JudgeManager as any).gate(session, recState);
+            assert.equal(recState.energy, 90 + cfg.ENERGY.recover_min, '每 5 分钟应恢复一次');
+            assert.equal(g.drop, false, '恢复后精力>0 应放行');
 
             // 消息过密（15 秒窗口内达到 5 条）→ DROP
             const denseState = freshJudgeState(fakeNow);
@@ -1471,7 +1479,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             // 每会话每小时打分上限用尽 → DROP
             const hourlyState = freshJudgeState(fakeNow);
-            hourlyState.hourly.count = cfg.MAX_JUDGE_PER_HOUR;
+            hourlyState.hourly.count = cfg.GATE.max_judge_per_hour;
             g = (JudgeManager as any).gate(session, hourlyState);
             assert.equal(g.drop, true);
             assert.match(g.reason, /本轮judge已用尽/);
@@ -1491,7 +1499,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 其他方式触发会话：刷新回复间隔、扣精力、解除 WAIT 冷却；未开启 --j 的会话不建状态 */
+    /** 其他方式触发会话：刷新回复间隔、解除 WAIT 冷却、不扣精力；未开启 --j 的会话不建状态 */
     testJudgeNoteSessionTrigger(): void {
         const cfg = (Config as any).trigger.JUDGE;
         const sid = 'note-trigger';
@@ -1502,7 +1510,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const state = {
             lastSpeakAt: 0,
             lastEnergyAt: 0,
-            energy: 1.0,
+            energy: 100,
             waitUntil: Date.now() + 60000,
             hourly: { hour: 0, count: 0 },
             msgTimes: []
@@ -1513,7 +1521,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (JudgeManager as any).noteSessionTrigger(sid, '正则');
             const after = Date.now();
             assert.ok(state.lastSpeakAt >= before && state.lastSpeakAt <= after, '应刷新最近触发时间');
-            assert.equal(state.energy, Math.max(1.0 - cfg.ENERGY_REPLY_COST, cfg.ENERGY_MIN), '应扣减精力');
+            assert.equal(state.energy, 100, 'A1：其他方式触发不扣精力');
             assert.equal(state.waitUntil, 0, '应解除 WAIT 冷却');
         } finally {
             (JudgeManager as any).clearSession(sid);
@@ -1585,42 +1593,46 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!h.text.includes('第一条'), '超出条数限制的历史不应注入');
     },
 
-    /** 打分智能体触发配置：默认值、部分覆盖（weights 并入默认）与非法 TOML 回退默认 */
+    /** 打分智能体触发配置（TOML 分段）：默认值、单段/单键部分覆盖并入默认与非法 TOML 回退默认 */
     testJudgeConfigDefaults(): void {
         const key = '打分智能体触发配置';
         delete TC.templateConfigs[key];
         resetConfigCache();
         // 默认值
         let cfg = (Config as any).trigger.JUDGE;
-        assert.equal(cfg.SPEAK_THRESHOLD, 0.70);
+        assert.equal(cfg.SCORING.speak_threshold, 0.70);
+        assert.equal(cfg.SCORING.wait_cooldown, 60);
         assert.deepEqual(cfg.WEIGHTS, { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 });
-        assert.equal(cfg.ENERGY_INITIAL, 1.0);
-        assert.equal(cfg.ENERGY_REPLY_COST, 0.1);
-        assert.equal(cfg.ENERGY_MIN, 0.1);
-        assert.equal(cfg.MIN_REPLY_INTERVAL, 120);
-        assert.equal(cfg.CONTEXT_COUNT, 10);
-        assert.equal(cfg.TIMEOUT_SEC, 30);
-        assert.equal(cfg.RETRIES, 3);
-        assert.equal(cfg.WAIT_COOLDOWN, 60);
-        assert.equal(cfg.MAX_JUDGE_PER_HOUR, 20);
-        // 部分覆盖：只改 speak_threshold 与 weights.relevance，其余并入默认值
-        TC.templateConfigs[key] = ['speak_threshold = 0.8\nweights = { relevance = 50 }\nwait_cooldown = 30'];
+        assert.equal(cfg.ENERGY.initial, 100);
+        assert.equal(cfg.ENERGY.reply_cost, 5);
+        assert.equal(cfg.ENERGY.recover_min, 2);
+        assert.equal(cfg.GATE.min_reply_interval, 120);
+        assert.equal(cfg.GATE.max_judge_per_hour, 20);
+        assert.equal(cfg.MODEL.context_count, 10);
+        assert.equal(cfg.MODEL.timeout_sec, 30);
+        assert.equal(cfg.MODEL.retries, 3);
+        // 单段部分覆盖：只改 scoring 段，其余段并入默认值
+        TC.templateConfigs[key] = ['[scoring]\nspeak_threshold = 0.8\nwait_cooldown = 30'];
         resetConfigCache();
         cfg = (Config as any).trigger.JUDGE;
-        assert.equal(cfg.SPEAK_THRESHOLD, 0.8);
-        assert.equal(cfg.WEIGHTS.relevance, 50);
-        assert.equal(cfg.WEIGHTS.willingness, 20, '未配置维度应并入默认权重');
-        assert.equal(cfg.WAIT_COOLDOWN, 30, 'TOML 覆盖 wait_cooldown 应生效');
-        // 缺省字段并入默认值：未配置 wait_cooldown 时使用默认 60
-        TC.templateConfigs[key] = ['speak_threshold = 0.75'];
+        assert.equal(cfg.SCORING.speak_threshold, 0.8);
+        assert.equal(cfg.SCORING.wait_cooldown, 30, 'TOML 覆盖 wait_cooldown 应生效');
+        assert.equal(cfg.WEIGHTS.relevance, 25, '未配置段应并入默认权重');
+        assert.equal(cfg.ENERGY.initial, 100, '未配置段应并入默认精力');
+        assert.equal(cfg.GATE.min_reply_interval, 120, '未配置段应并入默认门禁');
+        assert.equal(cfg.MODEL.timeout_sec, 30, '未配置段应并入默认模型');
+        // 单键部分覆盖：只改 energy.reply_cost，其余键并入默认值
+        TC.templateConfigs[key] = ['[energy]\nreply_cost = 8'];
         resetConfigCache();
         cfg = (Config as any).trigger.JUDGE;
-        assert.equal(cfg.WAIT_COOLDOWN, 60, '缺省字段应使用默认值');
+        assert.equal(cfg.ENERGY.reply_cost, 8, 'TOML 覆盖 reply_cost 应生效');
+        assert.equal(cfg.ENERGY.initial, 100, '缺省键应使用默认值');
+        assert.equal(cfg.SCORING.speak_threshold, 0.70, '缺省段应使用默认值');
         // 非法 TOML：回退默认值
         TC.templateConfigs[key] = ['not = = toml'];
         resetConfigCache();
         cfg = (Config as any).trigger.JUDGE;
-        assert.equal(cfg.SPEAK_THRESHOLD, 0.70, '非法 TOML 应回退默认值');
+        assert.equal(cfg.SCORING.speak_threshold, 0.70, '非法 TOML 应回退默认值');
         delete TC.templateConfigs[key];
         resetConfigCache();
     },
@@ -1631,7 +1643,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const state = {
             lastSpeakAt: 0,
             lastEnergyAt: 0,
-            energy: 1.0,
+            energy: 100,
             waitUntil: Date.now() + 60000,
             hourly: { hour: 0, count: 0 },
             msgTimes: []
@@ -1658,7 +1670,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             // 冷却期内 → gate DROP，不触发小模型
             session.context.timer = null;
             (JudgeManager as any).states.set(sid, {
-                lastSpeakAt: fakeNow, lastEnergyAt: fakeNow, energy: 1.0,
+                lastSpeakAt: fakeNow, lastEnergyAt: fakeNow, energy: 100,
                 waitUntil: 0,
                 hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
             });
@@ -1667,7 +1679,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             // WAIT 冷却期内 → gate DROP，不触发小模型
             session.context.timer = null;
             (JudgeManager as any).states.set(sid, {
-                lastSpeakAt: 0, lastEnergyAt: fakeNow, energy: 1.0,
+                lastSpeakAt: 0, lastEnergyAt: fakeNow, energy: 100,
                 waitUntil: fakeNow + 60 * 1000,
                 hourly: { hour: Math.floor(fakeNow / 3600000), count: 0 }, msgTimes: []
             });
@@ -1687,7 +1699,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
         // 缩短打分超时，避免 withTimeout 的兜底定时器拖慢测试
-        TC.templateConfigs['打分智能体触发配置'] = ['timeout_sec = 0.001'];
+        TC.templateConfigs['打分智能体触发配置'] = ['[model]\ntimeout_sec = 0.001'];
         resetConfigCache();
         const cfg = (Config as any).trigger.JUDGE;
         const chatReasons: string[] = [];
@@ -1705,6 +1717,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             };
             await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-speak'), '点名');
             assert.deepEqual(chatReasons, ['打分触发'], 'SPEAK 分支应以打分触发发起会话');
+            const speakState = (JudgeManager as any).states.get('eval-speak');
+            assert.equal(speakState.energy, 100 - cfg.ENERGY.reply_cost, 'SPEAK 插话成功应扣减精力');
 
             // WAIT：低于 speak_threshold 只记冷却时间戳，不直接插话
             (Agent as any).agentMap['judge_agent'] = {
@@ -1715,8 +1729,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const waitState = (JudgeManager as any).states.get('eval-wait');
             assert.ok(waitState, 'WAIT 分支应保留状态');
             assert.ok(waitState.waitUntil > fakeNow, 'WAIT 分支应记录冷却截止时间戳');
-            assert.ok(waitState.waitUntil <= fakeNow + cfg.WAIT_COOLDOWN * 1000, 'WAIT 冷却截止应为 now + wait_cooldown');
+            assert.ok(waitState.waitUntil <= fakeNow + cfg.SCORING.wait_cooldown * 1000, 'WAIT 冷却截止应为 now + wait_cooldown');
             assert.deepEqual(chatReasons, ['打分触发'], 'WAIT 分支不应直接插话');
+            assert.equal(waitState.energy, 100, 'WAIT 未插话不扣精力');
 
             // 低分同样进入 WAIT（无 IGNORE 级别）：只记冷却不插话
             (Agent as any).agentMap['judge_agent'] = {
