@@ -1605,7 +1605,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.deepEqual(cfg.WEIGHTS, { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 });
         assert.equal(cfg.ENERGY.initial, 100);
         assert.equal(cfg.ENERGY.reply_cost, 5);
-        assert.equal(cfg.ENERGY.recover_min, 2);
+        assert.equal(cfg.ENERGY.recover_min, 4);
         assert.equal(cfg.GATE.min_reply_interval, 120);
         assert.equal(cfg.GATE.max_judge_per_hour, 20);
         assert.equal(cfg.MODEL.context_count, 10);

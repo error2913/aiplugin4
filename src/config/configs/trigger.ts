@@ -35,7 +35,7 @@ continuity = 20
 [energy]                        # 精力(0-100)
 initial = 100                   # 初始精力
 reply_cost = 5                  # 每次 SPEAK 插话成功扣减精力（0.05×100，精力为 0-100 整数）
-recover_min = 2                 # 每 5 分钟懒恢复精力
+recover_min = 4                 # 每 5 分钟懒恢复精力
 
 [gate]                          # 门禁限额
 min_reply_interval = 120        # 最小回复间隔(秒)，间隔内 gate 直接丢弃
@@ -62,7 +62,7 @@ class JudgeConfigItem {
     constructor() {
         this.scoring = { speak_threshold: 0.70, wait_cooldown: 60 };
         this.weights = { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 };
-        this.energy = { initial: 100, reply_cost: 5, recover_min: 2 };
+        this.energy = { initial: 100, reply_cost: 5, recover_min: 4 };
         this.gate = { min_reply_interval: 120, max_judge_per_hour: 20 };
         this.model = { context_count: 10, timeout_sec: 30, retries: 3 };
     }
@@ -88,7 +88,7 @@ function getJudgeConfig(): JudgeConfig {
         return {
             SCORING: { speak_threshold: 0.70, wait_cooldown: 60 },
             WEIGHTS: { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 },
-            ENERGY: { initial: 100, reply_cost: 5, recover_min: 2 },
+            ENERGY: { initial: 100, reply_cost: 5, recover_min: 4 },
             GATE: { min_reply_interval: 120, max_judge_per_hour: 20 },
             MODEL: { context_count: 10, timeout_sec: 30, retries: 3 }
         };
