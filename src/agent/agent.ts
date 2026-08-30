@@ -14,7 +14,8 @@ import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
 import { buildSystemMessage, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { revive, StopError, TypeDescriptor } from "../utils/utils";
+import { resetStopEvent } from "../utils/utils";
 
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -109,10 +110,16 @@ export default class Agent {
             acquired = await requestLimiter.acquire(session.sessionId);
             if (!acquired) return;
             if (session.stopVersion !== version) return;
+            // 新一轮 run 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
+            resetStopEvent(session.stopEvent);
             session.running = true;
             session.starting = false;
             session.activeRuns++;
             await this.runInternal(session, ctx, msg, tool_choice);
+        } catch (e) {
+            // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
+            if (e instanceof StopError) return;
+            throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
             if (acquired) {
@@ -131,7 +138,7 @@ export default class Agent {
         if (session.pendingQueue.length === 0) return;
         const firstTrigger = session.pendingQueue.find(p => p.kind === 'trigger');
         const hasTrigger = await session.flushPending();
-        if (hasTrigger && firstTrigger && session.stopVersion === version) {
+        if (hasTrigger && firstTrigger && session.stopVersion === version && !session.stopEvent.fired) {
             await session.chat(firstTrigger.ctx, firstTrigger.msg, '挂起触发');
         }
     }
@@ -162,7 +169,7 @@ export default class Agent {
             // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
             await session.flushPending();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
-            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId);
+            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId, undefined, session.stopEvent);
             // stop 中止检查点：模型请求期间被 stop，丢弃本轮输出直接中止
             if (session.stopVersion !== version) return;
             lastReasoning = reasoning_content;
@@ -197,6 +204,8 @@ export default class Agent {
                             }
                             trace.recordToolCall('prompt-call', Date.now() - callTime, true);
                         } catch (e) {
+                            // stop 中断工具链：静默返回，不再回填/续轮
+                            if (e instanceof StopError) return;
                             log.exception('handlePromptToolCalls error', e);
                             trace.recordToolCall('prompt-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
@@ -225,6 +234,8 @@ export default class Agent {
                             }
                             trace.recordToolCall('function-call', Date.now() - callTime, true);
                         } catch (e) {
+                            // stop 中断工具链：静默返回，不再回填/续轮
+                            if (e instanceof StopError) return;
                             log.exception('handleToolCalls error', e);
                             trace.recordToolCall('function-call', Date.now() - callTime, false, e instanceof Error ? e.message : String(e));
                         }
@@ -279,10 +290,16 @@ export default class Agent {
             acquired = await requestLimiter.acquire(session.sessionId);
             if (!acquired) return;
             if (session.stopVersion !== version) return;
+            // 新一轮 runStream 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
+            resetStopEvent(session.stopEvent);
             session.running = true;
             session.starting = false;
             session.activeRuns++;
             await this.runStreamInner(session, ctx, msg);
+        } catch (e) {
+            // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
+            if (e instanceof StopError) return;
+            throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
             if (acquired) {
@@ -312,7 +329,7 @@ export default class Agent {
 
         const sys = systemMessage ?? await buildSystemMessage(ctx, session);
         const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), undefined, sys);
-        const id = await streamService.startStream(messages, session.setting.modelName, trace.runId);
+        const id = await streamService.startStream(messages, session.setting.modelName, trace.runId, session.stopEvent);
         if (!id) return;
         // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
         if (session.stopVersion !== version) {
@@ -327,8 +344,10 @@ export default class Agent {
         let interval = 1000;
 
         while (status === 'processing' && session.stream.id === id) {
+            // stop 中止检查点：stop 后立即退出轮询循环（poll 内部也通过 stopEvent 快速失败）
+            if (session.stopVersion !== version) return;
             trace.beginTurn();
-            const result = await streamService.pollStream(session.stream.id, after);
+            const result = await streamService.pollStream(session.stream.id, after, session.stopEvent);
             status = result.status;
             const raw_reply = result.reply;
 
@@ -386,6 +405,8 @@ export default class Agent {
                                 return;
                             }
                         } catch (e) {
+                            // stop 中断工具链：静默返回，不再递归续流
+                            if (e instanceof StopError) return;
                             log.exception('handlePromptToolCalls error', e);
                             return;
                         }

@@ -5,7 +5,7 @@ import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { fixJsonString } from "../utils/string";
-import { withTimeout } from "../utils/utils";
+import { StopError, withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
 import { registerSkills } from "./skills";
@@ -136,7 +136,7 @@ export default class Tool {
 
             const { TIMEOUT } = Config.base;
             const time = Date.now();
-            const solved = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT);
+            const solved = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT, { stopEvent: session.stopEvent });
             const content = typeof solved === 'string' ? solved : solved.text;
             log.info(`${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
             const result: ToolCallResult = { tool_call_id: tool_call.id, content };
@@ -148,6 +148,8 @@ export default class Tool {
             }
             return { result, callBack: tool.callBack };
         } catch (e) {
+            // stop 中断工具执行：向上抛出让工具链立即中止（不把 StopError 当工具失败回填给模型）
+            if (e instanceof StopError) throw e;
             log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
             return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
         }
@@ -216,6 +218,8 @@ export default class Tool {
             });
             return await this.handleToolCalls(ctx, msg, session, tool_calls);
         } catch (e) {
+            // stop 中断工具链：向上抛出让工具链立即中止
+            if (e instanceof StopError) throw e;
             log.exception('解析函数调用失败', e);
             return { result: [{ tool_call_id: '', content: `解析函数调用失败:${e instanceof Error ? e.message : String(e)}` }], callBack: true };
         }

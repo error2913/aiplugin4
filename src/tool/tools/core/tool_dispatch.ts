@@ -4,7 +4,7 @@
 import Config from "../../../config/config";
 import Logger from "../../../logger";
 import { Session } from "../../../session/session";
-import { withTimeout } from "../../../utils/utils";
+import { StopError, withTimeout } from "../../../utils/utils";
 import Tool, { toolMap } from "../../tool";
 import { ToolInfo } from "../../types";
 
@@ -132,7 +132,7 @@ export function registerDispatchTools() {
 
         const time = Date.now();
         try {
-            const solved = await withTimeout(() => tool.solve(ctx, msg, session, toolArgs), Config.base.TIMEOUT);
+            const solved = await withTimeout(() => tool.solve(ctx, msg, session, toolArgs), Config.base.TIMEOUT, { stopEvent: session.stopEvent });
             Logger.info(`[call_tool] ${toolName} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
             const content = typeof solved === 'string' ? solved : solved.text;
             if (typeof solved !== 'string' && solved.contentParts && solved.contentParts.length > 0) {
@@ -140,6 +140,8 @@ export function registerDispatchTools() {
             }
             return `工具 ${toolName} 返回：\n${content}`;
         } catch (e) {
+            // stop 中断工具执行：向上抛出让工具链立即中止
+            if (e instanceof StopError) throw e;
             Logger.error(`[call_tool] ${toolName} 执行失败: ${e instanceof Error ? e.message : String(e)}`);
             return `工具 ${toolName} 执行失败: ${e instanceof Error ? e.message : String(e)}`;
         }

@@ -40,7 +40,7 @@ import { TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
-import { revive, transformMsgId, transformMsgIdBack } from "../src/utils/utils";
+import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
 import { normalizeSpecialIdParams, validateSpecialIdParams } from "../src/transport/ob11/special_id_params";
 import { registerSpecialResource } from "../src/utils/special_id";
@@ -2956,6 +2956,70 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(Array.isArray(cfg.CHAT_MODELS));
         } finally {
             Model.reset();
+        }
+    },
+
+    /** 会话停止信号（StopEvent/StopError/withTimeout）：stop 后同步唤醒等待者；已停止时不再执行 asyncFunc */
+    async testStopEvent(): Promise<void> {
+        // 1) 正常完成：带 stopEvent 的 withTimeout 在未 stop 时正常 resolve，并清理 waiter
+        {
+            const ev = createStopEvent();
+            const out = await withTimeout(async () => 'ok', 1000, { stopEvent: ev });
+            assert.equal(out, 'ok');
+            assert.equal(ev.waiters.length, 0, '完成后应清理等待者');
+            assert.equal(ev.fired, false);
+        }
+
+        // 2) 超时：未 stop 时按原语义 reject 超时错误
+        {
+            const ev = createStopEvent();
+            await assert.rejects(
+                withTimeout(async () => { await new Promise(r => setTimeout(r, 50)); return 'x'; }, 5, { stopEvent: ev }),
+                /操作超时/
+            );
+            assert.equal(ev.waiters.length, 0, '超时后应清理等待者');
+        }
+
+        // 3) stop 触发：进行中的 withTimeout 立即以 StopError reject（不等超时/完成）
+        {
+            const ev = createStopEvent();
+            const p = withTimeout(
+                async () => { await new Promise(r => setTimeout(r, 200)); return 'done'; },
+                5000,
+                { stopEvent: ev }
+            );
+            fireStopEvent(ev);
+            await assert.rejects(p, (e: any) => {
+                assert.ok(e instanceof StopError, `应为 StopError，实际 ${e?.name}`);
+                return true;
+            });
+            assert.equal(ev.waiters.length, 0, 'stop 后应清空等待者');
+            assert.equal(ev.fired, true);
+        }
+
+        // 4) 已停止后调用：同步 reject StopError，且不再执行 asyncFunc
+        {
+            const ev = createStopEvent();
+            fireStopEvent(ev);
+            let called = 0;
+            await assert.rejects(
+                withTimeout(async () => { called++; return 'x'; }, 1000, { stopEvent: ev }),
+                (e: any) => e instanceof StopError
+            );
+            assert.equal(called, 0, '已停止时不应再执行 asyncFunc');
+        }
+
+        // 5) resetStopEvent 后重新可用；重复 fire 不抛异常（waiters 已清空）
+        {
+            const ev = createStopEvent();
+            resetStopEvent(ev);
+            assert.equal(ev.fired, false);
+            fireStopEvent(ev);
+            fireStopEvent(ev);
+            assert.equal(ev.fired, true);
+            resetStopEvent(ev);
+            const out = await withTimeout(async () => 'again', 1000, { stopEvent: ev });
+            assert.equal(out, 'again');
         }
     }
 };

@@ -10,7 +10,7 @@ import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
 import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
-import { withTimeout } from "../utils/utils";
+import { StopError, StopEvent, withTimeout } from "../utils/utils";
 
 const log = logger.withTag('model');
 
@@ -80,7 +80,7 @@ function checkRequestBudget(messages: any[], tools: any[]): void {
 }
 
 export class streamService {
-    static async startStream(messages: any[], modelName: string = '', runId: string = ''): Promise<string> {
+    static async startStream(messages: any[], modelName: string = '', runId: string = '', stopEvent?: StopEvent): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl } = Config.backend;
         const model = Model.getChatModel('chat', modelName);
@@ -109,7 +109,7 @@ export class streamService {
                     api_key: model.apiKey,
                     body_obj: body
                 })
-            }), timeout);
+            }), timeout, { stopEvent });
 
             // log.info("响应体", JSON.stringify(response, null, 2));
 
@@ -134,6 +134,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
+            if (e instanceof StopError) throw e;
             log.exception('startStream', e);
             return '';
         }
@@ -143,7 +144,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = '', explicitModel?: ChatModel | MultimodalModel | null): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = '', explicitModel?: ChatModel | MultimodalModel | null, stopEvent?: StopEvent): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = explicitModel ?? Model.getChatModel('chat', modelName);
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -164,7 +165,7 @@ export class streamService {
             log.printRequestMessages(body.messages, runId);
 
             const time = Date.now();
-            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider });
+            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider, stopEvent });
             const response = parseProviderResponse(model.provider, data);
             if (response.choices && response.choices.length > 0) {
                 const message = response.choices[0].message;
@@ -188,21 +189,27 @@ export class streamService {
                 throw new Error('服务器响应中没有choices或choices为空\n响应体:' + JSON.stringify(data, null, 2));
             }
         } catch (e) {
+            if (e instanceof StopError) throw e;
             log.exception('sendChatRequest', e);
             return { content: '', tool_calls: [] };
         }
     }
 
-    static async pollStream(streamId: string, after: number): Promise<{ status: string, reply: string, nextAfter: number }> {
+    static async pollStream(streamId: string, after: number, stopEvent?: StopEvent): Promise<{ status: string, reply: string, nextAfter: number }> {
         const { STREAM: streamUrl } = Config.backend;
+        const { TIMEOUT } = Config.base;
 
         try {
-            const response = await fetch(`${streamUrl}/poll?id=${streamId}&after=${after}`, {
+            // stop 后立即放弃轮询，不再向流式后端发起请求
+            if (stopEvent && stopEvent.fired) {
+                return { status: 'failed', reply: '', nextAfter: 0 };
+            }
+            const response = await withTimeout(() => fetch(`${streamUrl}/poll?id=${streamId}&after=${after}`, {
                 method: 'GET',
                 headers: {
                     "Accept": "application/json"
                 }
-            });
+            }), TIMEOUT, { stopEvent });
 
             // log.info("响应体", JSON.stringify(response, null, 2));
 
@@ -231,6 +238,7 @@ export class streamService {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
+            if (e instanceof StopError) return { status: 'failed', reply: '', nextAfter: 0 };
             log.exception('pollStream', e);
             return { status: 'failed', reply: '', nextAfter: 0 };
         }

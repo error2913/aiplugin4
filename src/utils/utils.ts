@@ -217,13 +217,100 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
     return '';
 }
 
-export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number): Promise<T> {
-    return Promise.race([
-        asyncFunc(),
-        new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`操作超时 (${timeoutMs}ms)`)), timeoutMs);
-        })
-    ]);
+/**
+ * 会话级「停止事件」信号：stop 时置 fired 并同步唤醒全部等待者。
+ * 海豹 goja 环境没有 AbortController/AbortSignal（goja 核心、gojax fetch、sealdice-core 均未实现），
+ * 无法硬中断底层 fetch/网络 I/O；此信号让插件侧所有 await 在 stop 时刻立即以 StopError 退出：
+ * 不再消费模型结果、不再重试、不再回填工具链、不再续跑挂起消息。
+ */
+export interface StopEvent {
+    fired: boolean;
+    waiters: Array<() => void>;
+}
+
+/** 因会话 stop 而中止运行的控制流异常：各层捕获后静默返回，不打印堆栈 */
+export class StopError extends Error {
+    constructor() {
+        super('会话已停止');
+        this.name = 'StopError';
+    }
+}
+
+export function createStopEvent(): StopEvent {
+    return { fired: false, waiters: [] };
+}
+
+/** 触发停止信号：置 fired 并同步唤醒全部等待者（goja 单线程，唤醒在 stop 调用栈内同步执行） */
+export function fireStopEvent(ev: StopEvent): void {
+    ev.fired = true;
+    const waiters = ev.waiters;
+    ev.waiters = [];
+    for (const w of waiters) {
+        try {
+            w();
+        } catch (_e) {
+            // 等待者回调只做 reject，兜底吞掉避免 stop 流程被异常打断
+        }
+    }
+}
+
+/** 重置停止信号：新一轮 run 启动且通过代际检查后调用（同会话单 run 闸门保证此时无在跑的 waiters） */
+export function resetStopEvent(ev: StopEvent): void {
+    ev.fired = false;
+    ev.waiters = [];
+}
+
+export function withTimeout<T>(asyncFunc: () => Promise<T>, timeoutMs: number, opts?: { stopEvent?: StopEvent }): Promise<T> {
+    const { stopEvent } = opts ?? {};
+    if (!stopEvent) {
+        return Promise.race([
+            asyncFunc(),
+            new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error(`操作超时 (${timeoutMs}ms)`)), timeoutMs);
+            })
+        ]);
+    }
+
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        let timer: number | null = null;
+        const waiter = () => {
+            if (settled) return;
+            settled = true;
+            if (timer !== null) clearTimeout(timer);
+            reject(new StopError());
+        };
+        if (stopEvent.fired) {
+            reject(new StopError());
+            return;
+        }
+        timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            const idx = stopEvent.waiters.indexOf(waiter);
+            if (idx !== -1) stopEvent.waiters.splice(idx, 1);
+            reject(new Error(`操作超时 (${timeoutMs}ms)`));
+        }, timeoutMs);
+        stopEvent.waiters.push(waiter);
+        asyncFunc().then(
+            value => {
+                if (settled) return;
+                settled = true;
+                if (timer !== null) clearTimeout(timer);
+                const idx = stopEvent.waiters.indexOf(waiter);
+                if (idx !== -1) stopEvent.waiters.splice(idx, 1);
+                resolve(value);
+            },
+            error => {
+                if (settled) return;
+                settled = true;
+                if (timer !== null) clearTimeout(timer);
+                const idx = stopEvent.waiters.indexOf(waiter);
+                if (idx !== -1) stopEvent.waiters.splice(idx, 1);
+                reject(error);
+            }
+        );
+    });
 }
 
 export type TypeDescriptor<T> =

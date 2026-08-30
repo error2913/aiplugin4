@@ -2,7 +2,7 @@
 import Config from "../config/config";
 import { logger } from "../logger";
 import { UsageManager } from "../usage";
-import { withTimeout } from "../utils/utils";
+import { StopError, StopEvent, withTimeout } from "../utils/utils";
 import { fetchData } from "../utils/web";
 
 import { extractUsage } from "./adapter";
@@ -12,6 +12,8 @@ const MAX_RETRIES = 2;
 export interface RequestModelOptions {
     /** API 提供商：anthropic 使用 x-api-key 请求头与 /messages 协议 */
     provider?: string;
+    /** 会话停止信号：stop 后立即中止，不再重试 */
+    stopEvent?: StopEvent;
 }
 
 /**
@@ -20,23 +22,26 @@ export interface RequestModelOptions {
  */
 export async function requestModel(url: string, apiKey: string, body: any, options: RequestModelOptions = {}): Promise<any> {
     const { TIMEOUT } = Config.base;
-    const { provider = '' } = options;
+    const { provider = '', stopEvent } = options;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const data = await withTimeout(() => fetchProvider(provider, url, apiKey, body), TIMEOUT);
+            const data = await withTimeout(() => fetchProvider(provider, url, apiKey, body), TIMEOUT, { stopEvent });
             const usage = extractUsage(data);
             if (usage) {
                 UsageManager.updateUsage(data.model || '', usage);
             }
             return data;
         } catch (e) {
+            // 会话已停止：直接中止，不再重试，也不把 StopError 当成请求失败记录
+            if (e instanceof StopError) throw e;
             lastError = e instanceof Error ? e : new Error(String(e));
             const message = lastError ? lastError.message : '';
             // 客户端错误（4xx）不重试，属于请求本身问题
             if (/状态码: [45]\d\d/.test(message)) break;
             if (attempt < MAX_RETRIES) {
+                if (stopEvent && stopEvent.fired) throw new StopError();
                 const delay = 500 * Math.pow(2, attempt);
                 logger.warning(`模型请求失败，${delay}ms 后进行第 ${attempt + 1} 次重试: ${message}`);
                 await new Promise(resolve => setTimeout(resolve, delay));

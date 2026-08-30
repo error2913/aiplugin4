@@ -16,7 +16,7 @@ import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
 import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
-import { TypeDescriptor } from "../utils/utils";
+import { createStopEvent, fireStopEvent, StopEvent, TypeDescriptor } from "../utils/utils";
 import { getRecordMessageId, replyToSender } from "../utils/utils";
 
 import Group from "./group";
@@ -27,7 +27,7 @@ import User from "./user";
 const log = logger.withTag('session');
 
 /** 持久化时排除的运行时字段（监听器/运行状态/挂起队列等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns']);
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent']);
 
 /** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
 export interface PendingMessage {
@@ -148,6 +148,8 @@ export class Session {
     pendingQueue: PendingMessage[] = [];
     /** 运行时字段：本会话当前在跑的 run/runStream 请求数（同会话并发重叠时 >1；不持久化） */
     activeRuns = 0;
+    /** 运行时字段：会话级停止信号（stop 时 fired=true 并同步唤醒等待者，用于打断进行中的模型请求/工具链；不持久化） */
+    stopEvent: StopEvent = createStopEvent();
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -180,6 +182,7 @@ export class Session {
         this.starting = false;
         this.pendingQueue = [];
         this.activeRuns = 0;
+        this.stopEvent = createStopEvent();
         const listen = createToolListen();
         this.tool = {
             state: {} as ToolState,
@@ -445,9 +448,15 @@ export class Session {
         const hadStream = this.stream.id !== '';
         const hadRun = this.running;
         const hadTimer = this.context.timer !== null;
+        // 先触发停止信号：同步唤醒所有 withTimeout/requestModel 等待者，立即中断进行中的模型请求与工具链
+        // （goja 无法硬中断底层 fetch，但插件侧逻辑会立即以 StopError 退出，不再消费结果/重试/续跑）
+        fireStopEvent(this.stopEvent);
         await this.stopCurrentChatStream();
         this.stopVersion++;
         this.starting = false;
+        // 归零运行计数与启动标记：stop 后 .ai live 立即显示空闲；运行中循环即使被唤醒也因代际变化直接返回
+        this.activeRuns = 0;
+        this.running = false;
         // 完全暂停：清掉挂起消息（停止后不复活）与待触发的计时器（计数器/概率/触发条件保留，需主动触发）
         this.pendingQueue = [];
         if (this.context.timer) clearTimeout(this.context.timer);
