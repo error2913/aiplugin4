@@ -64,6 +64,15 @@ export function getCachedString(key: string, ttlMs: number, build: () => string 
     return promise;
 }
 
+/** 仅查询缓存状态：hit=命中未过期 / pending=有构建在途 / miss=未命中；不触发构建、不更新 LRU 顺序 */
+export function peekCachedString(key: string): 'hit' | 'pending' | 'miss' {
+    const existing = cache.get(key);
+    if (!existing) return 'miss';
+    if (existing.value !== undefined && Date.now() < existing.expiresAt) return 'hit';
+    if (existing.promise) return 'pending';
+    return 'miss';
+}
+
 /** 按前缀清理缓存，用于记忆/总结写入后主动失效，保证新写入内容立即可见 */
 export function invalidateCachedPrefix(prefix: string): void {
     for (const key of Array.from(cache.keys())) {

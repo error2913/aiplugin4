@@ -2466,6 +2466,31 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** startWaitTimer 去重：同一会话新 WAIT 轮先清旧 judgeWait 定时器，队列里只保留一个 */
+    testJudgeWaitTimerDedup(): void {
+        const origNow = Date.now;
+        const fakeNow = 1_700_000_000_000;
+        Date.now = () => fakeNow;
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        const sid = 'wait-dedup';
+        // 用真实入队逻辑（跳过持久化/启动轮询），便于断言队列里的 judgeWait 定时器数量
+        (TimerManager as any).addJudgeWaitTimer = (_ctx: any, _session: any, target: number) => {
+            TimerManager.timerQueue.push({ sid, type: 'judgeWait', target } as any);
+        };
+        try {
+            (JudgeManager as any).noteSessionTrigger(makeCtx(), makeJudgeSession(sid), '正则');
+            (JudgeManager as any).noteSessionTrigger(makeCtx(), makeJudgeSession(sid), '计数');
+            const timers = TimerManager.getTimers(sid, '', ['judgeWait']);
+            assert.equal(timers.length, 1, '同一会话只应保留一个 WAIT 轮末定时器（新轮覆盖旧轮）');
+        } finally {
+            Date.now = origNow;
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
+            TimerManager.timerQueue = TimerManager.timerQueue.filter(t => t.sid !== sid);
+            (JudgeManager as any).clearSession(sid);
+            resetConfigCache();
+        }
+    },
+
 
     /** 多模态文本转换：纯文本原样返回；图片标签转内容块数组；无法解析保留原标签 */
     async testTextToMultimodalContent(): Promise<void> {

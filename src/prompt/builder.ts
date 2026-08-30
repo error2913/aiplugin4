@@ -2,6 +2,7 @@
 import Config, { ext } from "../config/config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
+import { logger } from "../logger";
 import { knowledgeService } from "../memory/knowledge";
 import { MemoryManager } from "../memory/manager";
 import { getMemoryRevision, getSummaryRevision } from "../memory/revision";
@@ -13,7 +14,7 @@ import { getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 
-import { getCachedString } from "./prompt_cache";
+import { getCachedString, peekCachedString } from "./prompt_cache";
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
 
 export interface SystemPromptSection {
@@ -26,6 +27,8 @@ const LONG_TERM_MEMORY_TTL = 10_000;
 const SUMMARY_TTL = 60_000;
 const KNOWLEDGE_TTL = 60_000;
 
+const log = logger.withTag('prompt');
+
 function signature(parts: Array<string | number | boolean>): string {
     return parts.map(String).join('|');
 }
@@ -35,6 +38,25 @@ function toolStateSignature(session: Session): string {
         .sort()
         .map(key => `${key}:${session.toolState[key] ? '1' : '0'}`)
         .join(',');
+}
+
+/** 带耗时统计的动态段构建：区分缓存命中/等待并行构建/重新构建，便于定位 system prompt 构建慢的环节 */
+async function buildTimedSection(
+    name: string,
+    key: string,
+    ttlMs: number,
+    build: () => string | Promise<string>
+): Promise<string> {
+    const start = Date.now();
+    const status = peekCachedString(key);
+    const value = await getCachedString(key, ttlMs, build);
+    const ms = Date.now() - start;
+    if (status === 'hit') {
+        log.debug(`[prompt] ${name} 缓存命中 耗时${ms}ms`);
+    } else {
+        log.info(`[prompt] ${name} ${status === 'pending' ? '等待并行构建' : '重新构建'} 耗时${ms}ms`);
+    }
+    return value;
 }
 
 /**
@@ -145,19 +167,21 @@ export async function buildSystemPromptContent(
     ]);
     const knowledgeKey = signature(['prompt:knowledge', knowledgeService.getCacheVersion()]);
 
+    const dynamicStart = Date.now();
     const memoryTask = Config.memory.MEMORY
-        ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
+        ? buildTimedSection('长期记忆', memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');
     const summaryTask = Config.memory.SUMMARY
-        ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
+        ? buildTimedSection('总结记忆', summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
         : Promise.resolve('');
     const knowledgeTask = Config.knowledgeBase.KNOWLEDGE
-        ? getCachedString(knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
+        ? buildTimedSection('知识库', knowledgeKey, KNOWLEDGE_TTL, () => MemoryManager.buildKnowledgePrompt(session, text))
         : Promise.resolve('');
 
     const [memoryPrompt, summaryPrompt, knowledgePrompt] = await Promise.all([memoryTask, summaryTask, knowledgeTask]);
 
     const dynamicSections = [memoryPrompt, summaryPrompt, knowledgePrompt].filter(Boolean).join('\n\n');
+    log.info(`[prompt] 动态段总耗时 ${Date.now() - dynamicStart}ms（会话 ${session.sessionId}）`);
     const content = frame
         .split('**CURRENT_TIME**').join(fmtDate(Math.floor(Date.now() / 1000)))
         .split('**DYNAMIC_SECTIONS**').join(dynamicSections);
