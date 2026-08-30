@@ -144,7 +144,7 @@ const MEMO_OBS_HELP = `观察记忆操作:
   【.ai memo obs】立即生成一次观察（仅当前会话，不带 --u/--g）
   ${MEMO_SCOPE_NOTE}`;
 
-const MEMO_CONSOLIDATE_HELP = `【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
+const MEMO_CONSOLIDATE_HELP = `【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期观察记忆）
   ${MEMO_SCOPE_NOTE}`;
 
 const MEMO_REFLECT_HELP = `【.ai memo reflect <问题>】基于记忆进行推理

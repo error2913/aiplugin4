@@ -1453,6 +1453,79 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(engine.getConsolidateSince('user_ci'), 0, '巩固后应清零');
     },
 
+    /** Hindsight 式检索：新近度加权改变召回排序，命中更新访问计数与最近访问时间 */
+    async testV2RecallRecencyRankingAndAccessTracking(): Promise<void> {
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            recencyWeight: 0.4,
+            recencyHalfLifeDays: 60,
+        });
+        await engine.addMemory('user_rec', { content: '小明喜欢喝咖啡' });
+        await engine.addMemory('user_rec', { content: '小红也喜欢喝咖啡' });
+        const bank = engine.repository.getBank('user_rec')!;
+        const a = bank.units.find(u => u.text.includes('小明'))!;
+        const b = bank.units.find(u => u.text.includes('小红'))!;
+        const now = Math.floor(Date.now() / 1000);
+        a.lastAccessedAt = now - 200 * 86400; // 200 天前访问
+        b.lastAccessedAt = now;               // 刚刚访问
+        engine.repository.updateUnit('user_rec', a);
+        engine.repository.updateUnit('user_rec', b);
+
+        // 对照组：关闭新近度加权时，同分关键词命中保持写入顺序（a 在前）
+        const flat = new MemoryEngine({ storage: new InMemoryMemoryStorage(), recencyWeight: 0 });
+        await flat.addMemory('user_rec2', { content: '小明喜欢喝咖啡' });
+        await flat.addMemory('user_rec2', { content: '小红也喜欢喝咖啡' });
+        const flatResults = await flat.recall('user_rec2', '咖啡', { maxTokens: 200 });
+        assert.ok(flatResults[0].unit.text.includes('小明'), '无新近度加权时应保持写入顺序');
+
+        const results = await engine.recall('user_rec', '咖啡', { maxTokens: 200 });
+        assert.ok(results.length >= 2, '应召回两条记忆');
+        assert.ok(results[0].unit.text.includes('小红'), '最近访问的记忆应排最前，实际: ' + results[0].unit.text);
+        const aAfter = engine.repository.getUnit('user_rec', a.id)!;
+        const bAfter = engine.repository.getUnit('user_rec', b.id)!;
+        assert.ok(aAfter.accessCount >= 1 && bAfter.accessCount >= 1, '命中应递增访问计数');
+        assert.ok(aAfter.lastAccessedAt >= now - 5 && bAfter.lastAccessedAt >= now - 5, '命中应更新最近访问时间');
+    },
+
+    /** Hindsight 式惰性清理：consolidate 时清理超过 OBSERVATION_STALE_DAYS 未验证的观察记忆 */
+    async testV2ConsolidationCleansStaleObservations(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        await engine.addMemory('user_stale', { content: '小明喜欢喝咖啡' }); // pending 单元，触发 consolidate 继续执行
+        const repo = engine.repository;
+        const now = Math.floor(Date.now() / 1000);
+        const staleId = 'obs-stale';
+        const freshId = 'obs-fresh';
+        repo.addObservation('user_stale', {
+            id: staleId, bankId: 'user_stale', text: '过期观察', scopeTags: ['user:QQ1'],
+            evidence: [{ memoryId: 'm1', quote: 'q1' }], proofCount: 1,
+            createdAt: now - 200 * 86400, updatedAt: now - 200 * 86400,
+            lastVerifiedAt: now - 200 * 86400, history: [],
+        } as any);
+        repo.addObservation('user_stale', {
+            id: freshId, bankId: 'user_stale', text: '新鲜观察', scopeTags: ['user:QQ1'],
+            evidence: [{ memoryId: 'm2', quote: 'q2' }], proofCount: 1,
+            createdAt: now, updatedAt: now, lastVerifiedAt: now, history: [],
+        } as any);
+        // 过期观察的同步 unit 与指向它的 link（应一并清理）
+        repo.addUnit('user_stale', {
+            id: staleId, bankId: 'user_stale', text: '过期观察', factType: 'observation',
+            createdAt: now - 200 * 86400, updatedAt: now - 200 * 86400, embedding: [],
+            entityIds: [], tags: ['user:QQ1'], metadata: {}, importance: 0.8,
+            accessCount: 0, lastAccessedAt: now - 200 * 86400, state: 'valid', consolidationState: 'done',
+        } as any);
+        repo.addLink('user_stale', { fromUnitId: 'm1', toUnitId: staleId, linkType: 'semantic', weight: 1, createdAt: now } as any);
+
+        assert.equal(repo.listObservations('user_stale').length, 2, '清理前应有 2 条观察（1 过期 + 1 新鲜）');
+
+        await engine.consolidate('user_stale');
+
+        const after = repo.listObservations('user_stale').map(o => o.id);
+        assert.ok(!after.includes(staleId), '过期观察应被清理');
+        assert.ok(after.includes(freshId), '新鲜观察应保留');
+        assert.equal(repo.getUnit('user_stale', staleId), null, '过期观察同步 unit 应一并清理');
+        assert.ok(!repo.getBank('user_stale')!.links.some(l => l.fromUnitId === staleId || l.toUnitId === staleId), '过期观察相关 link 应清理');
+    },
+
     /** createMemoryEngine：未配置嵌入模型时自动降级（不抛错、可正常写入） */
     async testCreateMemoryEngineDegrade(): Promise<void> {
         const engine = createMemoryEngine();

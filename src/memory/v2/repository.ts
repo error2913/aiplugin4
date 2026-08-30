@@ -119,6 +119,24 @@ export class MemoryRepository {
         this.save(bankId);
     }
 
+    /**
+     * 删除观察记忆：移除 observation 条目与同步的 observation unit，
+     * 清理其他 observation 中对该观察证据的引用，并移除相关 links。
+     */
+    deleteObservation(bankId: string, observationId: string): void {
+        const bank = this.getBank(bankId);
+        if (!bank) return;
+        bank.observations = bank.observations.filter(o => o.id !== observationId);
+        bank.units = bank.units.filter(u => u.id !== observationId);
+        bank.links = bank.links.filter(l => l.fromUnitId !== observationId && l.toUnitId !== observationId);
+        bank.observations = bank.observations.map(o => ({
+            ...o,
+            evidence: o.evidence.filter(e => e.memoryId !== observationId),
+            proofCount: o.evidence.filter(e => e.memoryId !== observationId).length,
+        }));
+        this.save(bankId);
+    }
+
     // ===== Entities =====
 
     listEntities(bankId: string): MemoryEntity[] {

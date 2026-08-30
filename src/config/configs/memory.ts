@@ -11,6 +11,9 @@ export default class MemoryConfig {
         seal.ext.registerIntConfig(ext, "每隔多少轮对话生成一次观察", 10, "每累计多少轮对话自动生成一次观察记忆", "记忆");
         seal.ext.registerIntConfig(ext, "每次观察纳入最近的对话轮数", 10, "每次生成观察记忆时纳入最近的多少轮对话", "记忆");
         seal.ext.registerIntConfig(ext, "每隔多少次观察整合一次记忆", 30, "每累计多少次观察后自动整合重复观察，0 为关闭", "记忆");
+        // Hindsight 式检索新近度加权：只影响召回排序，不删除旧记忆
+        seal.ext.registerFloatConfig(ext, "记忆召回新近度权重", 0.4, "检索时给新近记忆的加分权重（0 为关闭）", "记忆");
+        seal.ext.registerIntConfig(ext, "记忆召回新近度半衰期", 60, "新近度加分半衰期（天），越大旧记忆衰减越慢", "记忆");
         // 高级 LLM 选项
         seal.ext.registerBoolConfig(ext, "用LLM抽取记忆", false, "使用 LLM 从对话中抽取原子事实（实验性，默认关闭）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM重排召回结果", false, "使用 LLM 对召回结果重新排序（较慢，默认关闭）", "记忆");
@@ -32,7 +35,9 @@ export default class MemoryConfig {
             MEMORY_OBSERVATION_SYNTH: seal.ext.getBoolConfig(ext, "用LLM合成观察记忆"),
             MEMORY_REFLECT_SYNTH: seal.ext.getBoolConfig(ext, "用LLM推理记忆"),
             MEMORY_REFRESH_AFTER_CONSOLIDATE: seal.ext.getBoolConfig(ext, "巩固后自动刷新心智模型"),
-            MEMORY_REFRESH_MIN_INTERVAL: seal.ext.getIntConfig(ext, "心智模型刷新最小间隔")
+            MEMORY_REFRESH_MIN_INTERVAL: seal.ext.getIntConfig(ext, "心智模型刷新最小间隔"),
+            MEMORY_RECENCY_WEIGHT: seal.ext.getFloatConfig(ext, "记忆召回新近度权重"),
+            MEMORY_RECENCY_HALF_LIFE_DAYS: seal.ext.getIntConfig(ext, "记忆召回新近度半衰期")
         }
     }
 }

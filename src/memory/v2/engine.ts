@@ -3,6 +3,7 @@
 import { buildCharNGrams } from "../../utils/string";
 import { cosineSimilarity, generateId } from "../../utils/utils";
 
+import { OBSERVATION_STALE_DAYS } from "./prompt";
 import { MemoryRepository, normalizeName } from "./repository";
 import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
 import type {
@@ -38,6 +39,10 @@ export interface MemoryEngineOptions {
     rerank?: Reranker;
     synthesizeObservation?: ObservationSynthesizer;
     reflectSynthesizer?: ReflectSynthesizer;
+    /** 检索新近度加分权重（0 为关闭，默认 0.4） */
+    recencyWeight?: number;
+    /** 新近度加分半衰期（天），默认 60 */
+    recencyHalfLifeDays?: number;
 }
 
 export class MemoryEngine {
@@ -55,6 +60,10 @@ export class MemoryEngine {
     private refreshMinIntervalSec = 0;
     /** 各 bank 最近一次自动刷新时间（秒） */
     private lastRefreshAt = new Map<string, number>();
+    /** 检索新近度加分权重（0 为关闭，默认 0.4） */
+    private recencyWeight = 0.4;
+    /** 新近度加分半衰期（天），默认 60 */
+    private recencyHalfLifeDays = 60;
 
     constructor(options: MemoryEngineOptions = {}) {
         this.repository = new MemoryRepository(options.storage || new InMemoryMemoryStorage());
@@ -63,6 +72,8 @@ export class MemoryEngine {
         this.rerank = options.rerank;
         this.synthesizeObservation = options.synthesizeObservation;
         this.reflectSynthesizer = options.reflectSynthesizer;
+        this.recencyWeight = options.recencyWeight ?? 0.4;
+        this.recencyHalfLifeDays = options.recencyHalfLifeDays ?? 60;
     }
 
     setExtractor(extract: FactExtractor): void {
@@ -84,6 +95,12 @@ export class MemoryEngine {
     /** 自动刷新最小间隔（秒）：consolidate 后的自动刷新受此限流，0 为不限制 */
     setRefreshMinInterval(seconds: number): void {
         this.refreshMinIntervalSec = seconds > 0 ? seconds : 0;
+    }
+
+    /** 配置检索新近度加权：weight<=0 关闭；halfLifeDays 为加分半衰期（天） */
+    setRecency(weight: number, halfLifeDays: number): void {
+        this.recencyWeight = weight > 0 ? weight : 0;
+        this.recencyHalfLifeDays = halfLifeDays > 0 ? halfLifeDays : 60;
     }
 
     // ===== Bank =====
@@ -305,6 +322,22 @@ export class MemoryEngine {
             }
         }
 
+        // Hindsight 式新近度加分：按 lastAccessedAt 做指数衰减加权（半衰期 halfLife），
+        // 让"最近用过/验证过"的记忆在同等相关度下更靠前；不删除旧记忆，只影响召回排序。
+        if (this.recencyWeight > 0 && rrfEntries.length > 0) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            rrfEntries = rrfEntries
+                .map(([id, score]) => {
+                    const u = unitById.get(id);
+                    if (!u) return [id, score] as [string, number];
+                    const last = u.lastAccessedAt || u.updatedAt || u.createdAt || nowSec;
+                    const ageDays = Math.max(0, (nowSec - last) / 86400);
+                    const bonus = this.recencyWeight * Math.exp((-Math.log(2) * ageDays) / this.recencyHalfLifeDays);
+                    return [id, score + bonus] as [string, number];
+                })
+                .sort((a, b) => b[1] - a[1]);
+        }
+
         for (const [id, rrfScoreValue] of rrfEntries) {
             const unit = unitById.get(id);
             if (!unit) continue;
@@ -313,7 +346,9 @@ export class MemoryEngine {
                 if (obs) {
                     const obsUnit = units.find(u => u.id === obs.id);
                     if (obsUnit && !results.some(r => r.unit.id === obs.id)) {
+                        const before = results.length;
                         this.pushResult(results, usedTokens, { unit: obsUnit, score: rrfScoreValue, matchedStrategies: this.matchedStrategies(strategyResults, id) }, opts.maxTokens || DEFAULT_MAX_TOKENS);
+                        if (results.length > before) this.touchUnit(bankId, obsUnit);
                         continue;
                     }
                 }
@@ -326,7 +361,9 @@ export class MemoryEngine {
             if (opts.includeChunks && unit.documentId) {
                 item.chunks = this.repository.listChunks(bankId, unit.documentId);
             }
+            const before = results.length;
             this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
+            if (results.length > before) this.touchUnit(bankId, unit);
         }
 
         // 如果 token 预算宽松，用关键词/重要性补足（Hindsight recall 同样有 backfill 行为）
@@ -338,7 +375,9 @@ export class MemoryEngine {
                 score: u.importance,
                 matchedStrategies: [],
             };
+            const before = results.length;
             this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
+            if (results.length > before) this.touchUnit(bankId, u);
         }
 
         return results;
@@ -360,6 +399,10 @@ export class MemoryEngine {
     private async doConsolidate(bankId: string): Promise<ConsolidationResult> {
         const bank = this.repository.getBank(bankId);
         if (!bank) return { created: [], updated: [], merged: [], skipped: 0 };
+
+        // Hindsight 式惰性清理：观察记忆长期未验证视为过期，直接清理（连同同步 unit/evidence/links）
+        this.cleanupStaleObservations(bankId);
+
         const pending = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending');
         if (pending.length === 0) return { created: [], updated: [], merged: [], skipped: 0 };
 
@@ -427,6 +470,20 @@ export class MemoryEngine {
         return { created, updated, merged, skipped };
     }
 
+
+    /** 清理超过 OBSERVATION_STALE_DAYS 未验证的观察记忆（与注入时的 STALE 剔除口径一致） */
+    private cleanupStaleObservations(bankId: string): void {
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return;
+        const now = Math.floor(Date.now() / 1000);
+        const staleCutoff = now - OBSERVATION_STALE_DAYS * 86400;
+        const staleIds = bank.observations
+            .filter(o => (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff)
+            .map(o => o.id);
+        for (const obsId of staleIds) {
+            this.repository.deleteObservation(bankId, obsId);
+        }
+    }
 
     // ===== Consolidation 计数（驱动「每隔多少次观察整合一次记忆」配置） =====
 
@@ -766,6 +823,16 @@ export class MemoryEngine {
         if (maxTokens > 0 && used + cost > maxTokens) return;
         results.push(item);
         usedTokens.set(item.unit.id, cost);
+    }
+
+    /** 召回命中：更新访问计数与最近访问时间并落库（新近度加分的依据） */
+    private touchUnit(bankId: string, unit: MemoryUnit): void {
+        const now = Math.floor(Date.now() / 1000);
+        // 以库中最新对象为准（backfill 可能已替换为带向量的新对象），避免回写覆盖
+        const current = this.repository.getUnit(bankId, unit.id) || unit;
+        current.accessCount = (current.accessCount || 0) + 1;
+        current.lastAccessedAt = now;
+        this.repository.updateUnit(bankId, current);
     }
 
     private sameCluster(a: MemoryUnit, b: MemoryUnit): boolean {
