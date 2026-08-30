@@ -3,7 +3,7 @@ import Config from "../../config/config";
 import { MemoryManager } from "../../memory/manager";
 import { bumpMemoryRevision } from "../../memory/revision";
 import { resolveBankId } from "../../memory/v2/bank_resolver";
-import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "../../memory/v2/index";
+import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION, OBSERVATION_STALE_DAYS } from "../../memory/v2/index";
 import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
 import { fmtDate, stripInternalTags } from "../../utils/string";
@@ -38,6 +38,8 @@ export function registerCmdMemory() {
        【.ai memo p|g st clr】清除个人/群聊设定（删除心智模型）
        【.ai memo obs [on/off]】开启/关闭观察记忆
        【.ai memo obs list】展示观察记忆
+       【.ai memo obs view <ID>】查看观察记忆详情
+       【.ai memo obs view <ID>】查看观察记忆详情
        【.ai memo obs】立即生成一次观察记忆
        【.ai memo obs clr】清除观察记忆
        【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期记忆）
@@ -438,12 +440,36 @@ export function registerCmdMemory() {
                         return ret;
                     }
                     case 'list': {
-                        const summaryPrompt = MemoryManager.buildObservationPrompt(session);
-                        if (!summaryPrompt) {
+                        const bank = resolveBankId(session.sessionId, session.sessionType === 'group' ? 'group' : 'user', session.agentName);
+                        const observations = getMemoryEngine().repository.listObservations(bank.bankId);
+                        if (observations.length === 0) {
                             seal.replyToSender(ctx, msg, '观察记忆为空');
                             return ret;
                         }
-                        seal.replyToSender(ctx, msg, summaryPrompt);
+                        const staleCutoff = Math.floor(Date.now() / 1000) - OBSERVATION_STALE_DAYS * 86400;
+                        const lines = observations.map((o, i) => {
+                            const stale = (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff;
+                            return `${i + 1}. ${o.text}\n   证据${o.proofCount}条 · 更新${fmtDate(o.updatedAt)}${stale ? ' · [已过期]' : ''}`;
+                        });
+                        seal.replyToSender(ctx, msg, `观察记忆 ${observations.length} 条\n${lines.join('\n')}`);
+                        return ret;
+                    }
+                    case 'view': {
+                        const id = cmdArgs.getArgN(4);
+                        if (!id) {
+                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo obs view <ID>】查看观察记忆详情');
+                            return ret;
+                        }
+                        const bank = resolveBankId(session.sessionId, session.sessionType === 'group' ? 'group' : 'user', session.agentName);
+                        const o = getMemoryEngine().repository.listObservations(bank.bankId).find(x => x.id === id);
+                        if (!o) {
+                            seal.replyToSender(ctx, msg, `未找到观察记忆<${id}>`);
+                            return ret;
+                        }
+                        const staleCutoff = Math.floor(Date.now() / 1000) - OBSERVATION_STALE_DAYS * 86400;
+                        const stale = (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff;
+                        const evidence = o.evidence.map(e => `- ${e.quote}`).join('\n') || '（无）';
+                        seal.replyToSender(ctx, msg, `【观察记忆】${o.text}${stale ? '\n[已过期]' : ''}\nID: ${o.id} · 证据${o.proofCount}条\n范围: ${o.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(o.createdAt)}\n更新: ${fmtDate(o.updatedAt)}${o.lastVerifiedAt ? `\n最近验证: ${fmtDate(o.lastVerifiedAt)}` : ''}\n证据:\n${evidence}`);
                         return ret;
                     }
                     case 'clear': {
@@ -471,10 +497,11 @@ export function registerCmdMemory() {
                 }
             }
             case 'consolidate': {
-                await MemoryManager.consolidateMemory(session);
+                const result = await MemoryManager.consolidateMemory(session);
                 const bank = resolveBankId(session.sessionId, session.sessionType === 'group' ? 'group' : 'user', session.agentName);
                 const obsCount = getMemoryEngine().repository.listObservations(bank.bankId).length;
-                seal.replyToSender(ctx, msg, `记忆巩固完成：观察记忆 ${obsCount} 条，长期记忆 ${session.memory.memoryIds.length} 条`);
+                const mmCount = getMemoryEngine().listMentalModels(bank.bankId).length;
+                seal.replyToSender(ctx, msg, `记忆巩固完成：新建观察 ${result.created.length} 条，更新 ${result.updated.length} 条，合并 ${result.merged.length} 条\n当前：观察记忆 ${obsCount} 条，长期记忆 ${session.memory.memoryIds.length} 条，心智模型 ${mmCount} 条`);
                 return ret;
             }
 
@@ -486,7 +513,7 @@ export function registerCmdMemory() {
                 }
                 const bank = resolveBankId(session.sessionId, session.sessionType === 'group' ? 'group' : 'user', session.agentName);
                 const result = await getMemoryEngine().reflect(bank.bankId, question);
-                seal.replyToSender(ctx, msg, result.text);
+                seal.replyToSender(ctx, msg, `${result.text}\n（来源：心智模型 ${result.basedOn.mentalModels.length} 条 · 观察 ${result.basedOn.observations.length} 条 · 事实 ${result.basedOn.memories.length} 条）`);
                 return ret;
             }
 
@@ -523,7 +550,9 @@ export function registerCmdMemory() {
                             return ret;
                         }
                         const answer = m.answer.length > 600 ? m.answer.slice(0, 600) + '…' : m.answer;
-                        seal.replyToSender(ctx, msg, `【心智模型】${m.question}\n${answer}\nID: ${m.id} · v${m.version}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(m.createdAt)}\n更新: ${fmtDate(m.updatedAt)}`);
+                        const historyInfo = Array.isArray(m.history) && m.history.length > 0 ? `\n历史: ${m.history.length} 条（最近 ${fmtDate(m.history[m.history.length - 1].at)}）` : '';
+                        const triggerText = m.trigger === 'delta' ? '增量' : '全量';
+                        seal.replyToSender(ctx, msg, `【心智模型】${m.question}\n${answer}\nID: ${m.id} · v${m.version}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(m.createdAt)}\n更新: ${fmtDate(m.updatedAt)}${m.lastRefreshedAt ? `\n最近推理: ${fmtDate(m.lastRefreshedAt)}（${triggerText}）` : ''}${historyInfo}`);
                         return ret;
                     }
                     case 'add': {
@@ -559,7 +588,7 @@ export function registerCmdMemory() {
                             }
                         }
                         const total = id ? 1 : mmEngine.listMentalModels(mmBank.bankId).length;
-                        const updated = await mmEngine.refreshMentalModels(mmBank.bankId, id || undefined);
+                        const updated = await mmEngine.refreshMentalModels(mmBank.bankId, id || undefined, { force: true });
                         if (updated > 0) bumpMemoryRevision();
                         session.save();
                         seal.replyToSender(ctx, msg, `已刷新 ${updated} 条，跳过 ${total - updated} 条`);

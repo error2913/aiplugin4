@@ -15,7 +15,7 @@ import { bumpMemoryRevision } from "./revision";
 import { parseLooseJson } from "./session_memory";
 import { resolveBankId } from "./v2/bank_resolver";
 import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "./v2/index";
-import { buildMemoryPrompt } from "./v2/prompt";
+import { buildMemoryPrompt, selectInjectionCandidates } from "./v2/prompt";
 import type { MemoryUnit, RecallOptions, RetainResult } from "./v2/types";
 
 function bankForSession(session: Session) {
@@ -68,8 +68,10 @@ export class MemoryManager {
             preferObservations: true,
             budget: 'mid',
         })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
-        const observations = engine.repository.listObservations(bank.bankId);
-        const mentalModels = engine.listMentalModels(bank.bankId);
+        const allObservations = engine.repository.listObservations(bank.bankId);
+        const allMentalModels = engine.listMentalModels(bank.bankId);
+        // E1/E2：scopeTags 过滤 + stale 剔除 + 条数上限（注入裁剪，控制 token）
+        const { mentalModels, observations } = selectInjectionCandidates(allMentalModels, allObservations, tags);
         const sessionName = ctx.isPrivate ? (ctx.player?.name || '') : (ctx.group?.groupName || '');
         return buildMemoryPrompt({
             isPrivate: ctx.isPrivate,
@@ -155,7 +157,12 @@ export class MemoryManager {
     static async consolidateMemory(session: Session) {
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
-        return engine.consolidate(bank.bankId);
+        const result = await engine.consolidate(bank.bankId);
+        // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
+        if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
+            await engine.refreshMentalModels(bank.bankId);
+        }
+        return result;
     }
 
     /** 基于记忆推理 */
@@ -218,7 +225,7 @@ export class MemoryManager {
         const memoryData = parseLooseJson(reply);
         if (!memoryData || typeof memoryData !== 'object') return;
         const facts = Array.isArray(memoryData.facts)
-            ? memoryData.facts as Array<{ text?: string; keywords?: string[]; importance?: number; type?: string; visibility?: string; related_user_ids?: string[]; related_group_ids?: string[]; memory_type?: string; target_id?: string; op?: string; existing_id?: string }>
+            ? memoryData.facts as Array<{ text?: string; keywords?: string[]; importance?: number; type?: string; visibility?: string; related_user_ids?: string[]; related_group_ids?: string[]; memory_type?: string; target_id?: string; op?: string; existing_id?: string; occurred_at?: string; entities?: string[] }>
             : [];
 
         const engine = getMemoryEngine();
@@ -231,13 +238,17 @@ export class MemoryManager {
         for (const fact of facts) {
             if (!fact || typeof fact.text !== 'string' || !fact.text.trim()) continue;
             if (fact.op === 'delete') continue;
+            // E3：结构化抽取——事件时间与实体随事实入库，供时间检索/实体关联使用
+            const occurredStart = parseOccurredAt(fact.occurred_at);
             await engine.addMemory(bank.bankId, {
                 content: fact.text.trim(),
                 tags: Array.from(new Set([...baseTags, ...(fact.keywords || [])])),
                 metadata: { type: fact.type || 'fact' },
                 importance: typeof fact.importance === 'number' ? fact.importance : 0.5,
                 factType: fact.type === 'event' ? 'experience' : 'world',
-                verbatim: true,
+                entities: Array.isArray(fact.entities) ? fact.entities.map(String) : undefined,
+                occurredStart,
+                verbatim: !Config.memory.MEMORY_LLM_EXTRACT,
             });
         }
 
@@ -250,11 +261,28 @@ export class MemoryManager {
             if (since >= consolidateInterval) {
                 await engine.consolidate(bank.bankId);
                 engine.setConsolidateSince(bank.bankId, 0);
+                // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
+                if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
+                    await engine.refreshMentalModels(bank.bankId);
+                }
             } else {
                 engine.setConsolidateSince(bank.bankId, since);
             }
         }
     }
+}
+
+/** 解析 LLM 抽取的事件时间：支持 ISO 8601、'YYYY年M月D日'/'YYYY-MM-DD' 与秒级/毫秒级时间戳；解析失败返回 undefined */
+export function parseOccurredAt(value: unknown): number | undefined {
+    if (typeof value !== 'string' || !value.trim()) return undefined;
+    const v = value.trim();
+    const num = Number(v);
+    if (Number.isFinite(num) && num > 0) return num < 1e12 ? Math.floor(num) : Math.floor(num / 1000);
+    const m = v.match(/(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})/);
+    if (m) return Math.floor(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() / 1000);
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return Math.floor(t / 1000);
+    return undefined;
 }
 
 function canSeeMemoryUnit(unit: MemoryUnit, callerSessionId: string): boolean {

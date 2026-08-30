@@ -152,6 +152,17 @@ const TEMPLATES: { [key: string]: string } = {
                     "type": "string",
                     "description": "原子事实内容，一句话，尽量简短，无需附带时间与来源"
                 },
+                "occurred_at": {
+                    "type": "string",
+                    "description": "事件发生时间，格式如 2026-08-30 或 2026年8月30日 或 ISO 8601；非事件/不确定时省略"
+                },
+                "entities": {
+                    "type": "array",
+                    "description": "涉及的人名/组织/地点等实体列表，用于建立实体关联",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "keywords": {
                     "type": "array",
                     "description": "相关关键词/标签列表",

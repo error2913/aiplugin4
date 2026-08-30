@@ -47,6 +47,14 @@ export class MemoryEngine {
     private rerank?: Reranker;
     private synthesizeObservation?: ObservationSynthesizer;
     private reflectSynthesizer?: ReflectSynthesizer;
+    /** 正在刷新心智模型的 bank（防重入） */
+    private refreshingBanks = new Set<string>();
+    /** 正在巩固的 bank（防重入） */
+    private consolidatingBanks = new Set<string>();
+    /** 自动刷新最小间隔（秒），0 为不限制 */
+    private refreshMinIntervalSec = 0;
+    /** 各 bank 最近一次自动刷新时间（秒） */
+    private lastRefreshAt = new Map<string, number>();
 
     constructor(options: MemoryEngineOptions = {}) {
         this.repository = new MemoryRepository(options.storage || new InMemoryMemoryStorage());
@@ -71,6 +79,11 @@ export class MemoryEngine {
 
     setReflectSynthesizer(reflectSynthesizer: ReflectSynthesizer): void {
         this.reflectSynthesizer = reflectSynthesizer;
+    }
+
+    /** 自动刷新最小间隔（秒）：consolidate 后的自动刷新受此限流，0 为不限制 */
+    setRefreshMinInterval(seconds: number): void {
+        this.refreshMinIntervalSec = seconds > 0 ? seconds : 0;
     }
 
     // ===== Bank =====
@@ -334,6 +347,17 @@ export class MemoryEngine {
     // ===== Observations / Consolidation =====
 
     async consolidate(bankId: string): Promise<ConsolidationResult> {
+        // 防重入：同一 bank 的巩固已在执行时直接跳过，避免并发重复合并
+        if (this.consolidatingBanks.has(bankId)) return { created: [], updated: [], merged: [], skipped: 0 };
+        this.consolidatingBanks.add(bankId);
+        try {
+            return await this.doConsolidate(bankId);
+        } finally {
+            this.consolidatingBanks.delete(bankId);
+        }
+    }
+
+    private async doConsolidate(bankId: string): Promise<ConsolidationResult> {
         const bank = this.repository.getBank(bankId);
         if (!bank) return { created: [], updated: [], merged: [], skipped: 0 };
         const pending = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending');
@@ -472,6 +496,9 @@ export class MemoryEngine {
             existing.scopeTags = scopeTags;
             existing.updatedAt = now;
             existing.version++;
+            if (typeof existing.lastRefreshedAt !== 'number') existing.lastRefreshedAt = now;
+            if (!Array.isArray(existing.history)) existing.history = [];
+            if (existing.trigger !== 'full' && existing.trigger !== 'delta') existing.trigger = 'full';
             this.repository.updateMentalModel(bankId, existing);
             return existing;
         }
@@ -484,6 +511,9 @@ export class MemoryEngine {
             createdAt: now,
             updatedAt: now,
             version: 1,
+            lastRefreshedAt: now,
+            history: [],
+            trigger: 'full',
         };
         this.repository.addMentalModel(bankId, model);
         return model;
@@ -499,26 +529,47 @@ export class MemoryEngine {
      * - 未变化跳过：结果与旧答案相同不 bump version
      * 返回实际更新的条数。
      */
-    async refreshMentalModels(bankId: string, id?: string): Promise<number> {
+    async refreshMentalModels(bankId: string, id?: string, opts: { force?: boolean } = {}): Promise<number> {
+        // 防重入：同一 bank 正在刷新时直接跳过，避免并发重复调用
+        if (this.refreshingBanks.has(bankId)) return 0;
+        // 最小间隔限流：自动刷新（非 force）受「心智模型刷新最小间隔」配置限制
+        const nowSec0 = Math.floor(Date.now() / 1000);
+        if (!opts.force && this.refreshMinIntervalSec > 0) {
+            const last = this.lastRefreshAt.get(bankId) || 0;
+            if (last > 0 && nowSec0 - last < this.refreshMinIntervalSec) return 0;
+        }
         const models = this.repository.listMentalModels(bankId).filter(m => !id || m.id === id);
         // 空内容保护：无观察/事实可依据时跳过，避免把模型自身内容当“新推理结果”反复刷版本
         const hasSource = this.repository.listObservations(bankId).length > 0
             || this.repository.listUnits(bankId).some(u => u.state === 'valid' && (u.factType === 'world' || u.factType === 'experience'));
-        if (!hasSource) return 0;
-        const now = Math.floor(Date.now() / 1000);
-        let updated = 0;
-        for (const model of models) {
-            const result = await this.reflect(bankId, model.question);
-            const text = (result.text || '').trim();
-            if (!text || text === NO_MEMORY_TEXT) continue;
-            if (text === model.answer) continue;
-            model.answer = text;
-            model.updatedAt = now;
-            model.version++;
-            this.repository.updateMentalModel(bankId, model);
-            updated++;
+        if (!hasSource) {
+            this.lastRefreshAt.set(bankId, nowSec0);
+            return 0;
         }
-        return updated;
+        this.refreshingBanks.add(bankId);
+        try {
+            const now = Math.floor(Date.now() / 1000);
+            let updated = 0;
+            for (const model of models) {
+                const result = await this.reflect(bankId, model.question);
+                const text = (result.text || '').trim();
+                if (!text || text === NO_MEMORY_TEXT) continue;
+                if (text === model.answer) continue;
+                // 旧答案入历史（最多保留 10 条），并记录最近刷新时间与触发方式
+                model.history = [...(model.history || []), { answer: model.answer, at: now, trigger: model.trigger || 'full' }].slice(-10);
+                model.answer = text;
+                model.updatedAt = now;
+                model.lastRefreshedAt = now;
+                model.trigger = 'full';
+                model.version++;
+                this.repository.updateMentalModel(bankId, model);
+                updated++;
+            }
+            return updated;
+        } finally {
+            this.refreshingBanks.delete(bankId);
+            this.lastRefreshAt.set(bankId, Math.floor(Date.now() / 1000));
+        }
     }
 
     // ===== Reflect =====

@@ -1,6 +1,47 @@
 // 记忆 Prompt 渲染：MentalModel + Observation + Recall 结果。
 import type { MentalModel, Observation, RecallResult } from "./types";
 
+/** 观察记忆过期窗口（天）：lastVerifiedAt 距今超过该值视为 STALE，注入时剔除 */
+export const OBSERVATION_STALE_DAYS = 90;
+/** 注入心智模型条数上限 */
+export const MAX_MENTAL_MODELS = 5;
+/** 注入观察记忆条数上限 */
+export const MAX_OBSERVATIONS = 20;
+
+export interface InjectionCandidates {
+    mentalModels: MentalModel[];
+    observations: Observation[];
+}
+
+/**
+ * 注入候选筛选（E1/E2）：
+ * - scopeTags 过滤：默认 all_strict，所有 scopeTags 必须命中当前会话 tags（空 scopeTags 视为全局，放行）
+ * - stale 剔除：观察记忆按 lastVerifiedAt 过期窗口过滤
+ * - 条数上限：心智模型 MAX_MENTAL_MODELS、观察 MAX_OBSERVATIONS，按更新时间倒序取最新
+ */
+export function selectInjectionCandidates(
+    mentalModels: MentalModel[],
+    observations: Observation[],
+    sessionTags: string[],
+    now: number = Date.now()
+): InjectionCandidates {
+    const tagSet = new Set(sessionTags);
+    const scopeMatch = (scope: string[] | undefined): boolean => {
+        const tags = scope || [];
+        return tags.every(t => tagSet.has(t));
+    };
+    const staleCutoff = Math.floor(now / 1000) - OBSERVATION_STALE_DAYS * 86400;
+    const fresh = (observations || [])
+        .filter(o => (o.lastVerifiedAt ?? o.updatedAt ?? 0) >= staleCutoff && scopeMatch(o.scopeTags))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, MAX_OBSERVATIONS);
+    const mms = (mentalModels || [])
+        .filter(m => scopeMatch(m.scopeTags))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, MAX_MENTAL_MODELS);
+    return { mentalModels: mms, observations: fresh };
+}
+
 export interface MemoryPromptOptions {
     isPrivate: boolean;
     sessionName: string;

@@ -32,6 +32,7 @@ export function createMemoryEngine(): MemoryEngine {
     if (memoryConfig.MEMORY_LLM_RERANK) engine.setReranker(defaultReranker);
     if (memoryConfig.MEMORY_OBSERVATION_SYNTH) engine.setObservationSynthesizer(defaultObservationSynthesizer);
     if (memoryConfig.MEMORY_REFLECT_SYNTH) engine.setReflectSynthesizer(defaultReflectSynthesizer);
+    if (memoryConfig.MEMORY_REFRESH_MIN_INTERVAL > 0) engine.setRefreshMinInterval(memoryConfig.MEMORY_REFRESH_MIN_INTERVAL * 60);
     return engine;
 }
 

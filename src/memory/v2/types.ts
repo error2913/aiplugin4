@@ -97,6 +97,15 @@ export interface ObservationHistoryEntry {
     at: number;
 }
 
+/** 心智模型刷新触发方式：full=基于全部记忆重新推理，delta=增量更新 */
+export type MentalModelTrigger = 'full' | 'delta';
+
+export interface MentalModelHistoryEntry {
+    answer: string;
+    at: number;
+    trigger: MentalModelTrigger;
+}
+
 export interface Observation {
     id: string;
     bankId: string;
@@ -119,6 +128,12 @@ export interface MentalModel {
     createdAt: number;
     updatedAt: number;
     version: number;
+    /** 最近一次基于记忆重新推理的时间（秒） */
+    lastRefreshedAt: number;
+    /** 历史答案（每次 refresh 前压入旧答案，最多保留 10 条） */
+    history: MentalModelHistoryEntry[];
+    /** 最近一次刷新方式：full=全量重推理，delta=增量更新 */
+    trigger: MentalModelTrigger;
 }
 
 export interface MemoryDocument {

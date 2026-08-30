@@ -18,12 +18,12 @@ import { SubCmd } from "../src/cmd/root_cmd";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
-import { MemoryManager } from "../src/memory/manager";
+import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
 import { resolveBankId } from "../src/memory/v2/bank_resolver";
-import { buildMemoryPrompt } from "../src/memory/v2/prompt";
+import { buildMemoryPrompt, MAX_MENTAL_MODELS, MAX_OBSERVATIONS, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
 import { createMemoryEngine, getMemoryEngine, resetMemoryEngineForTest, MENTAL_MODEL_PERSONA_QUESTION } from "../src/memory/v2";
 import { requestLimiter } from "../src/utils/concurrency";
@@ -83,6 +83,61 @@ function freshJudgeState(now: number): any {
 /** Judge 测试辅助：最小 Session 桩（context.timer 可独立覆盖） */
 function makeJudgeSession(sid: string): any {
     return { sessionId: sid, context: { timer: null, messages: [] }, running: false, starting: false };
+}
+
+/** 构造测试用 Observation（selectInjectionCandidates 纯函数测试） */
+function makeTestObservation(id: string, text: string, scopeTags: string[], updatedAt: number, lastVerifiedAt?: number): any {
+    return {
+        id,
+        bankId: 'user_c',
+        text,
+        scopeTags,
+        evidence: [],
+        proofCount: 1,
+        createdAt: updatedAt,
+        updatedAt,
+        lastVerifiedAt: lastVerifiedAt ?? updatedAt,
+        history: [],
+    };
+}
+
+/** 构造测试用 MentalModel（selectInjectionCandidates 纯函数测试） */
+function makeTestMentalModel(id: string, question: string, answer: string, scopeTags: string[], updatedAt: number): any {
+    return {
+        id,
+        bankId: 'user_c',
+        question,
+        answer,
+        scopeTags,
+        createdAt: updatedAt,
+        updatedAt,
+        version: 1,
+        lastRefreshedAt: updatedAt,
+        history: [],
+        trigger: 'full',
+    };
+}
+
+/** 构造旧版（无 E4 字段）PersistedBank 存档 */
+function makeLegacyBank(id: string, models: any[]): any {
+    return {
+        meta: {
+            id,
+            kind: 'user',
+            agentName: '',
+            sessionId: id,
+            createdAt: 1000,
+            updatedAt: 2000,
+            settings: { disposition: { skepticism: 3, literalism: 3, empathy: 3 }, directives: [] },
+        },
+        units: [],
+        entities: [],
+        links: [],
+        observations: [],
+        mentalModels: models,
+        documents: [],
+        chunks: [],
+    };
 }
 
 export const tests: Record<string, () => void | Promise<void>> = {
@@ -641,6 +696,196 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // persona 为空/无：直接返回不创建
         await MemoryManager.migrateLegacyPersona(session);
         assert.equal(engine.listMentalModels(bankId).length, 1, '空 persona 不应创建模型');
+    },
+
+        /** E1/E2 注入候选筛选：scopeTags 全局放行/严格命中、stale 90 天剔除、观察 20 / 心智模型 5 上限按更新时间倒序 */
+    testSelectInjectionCandidates(): void {
+        const now = 1800000000000; // 固定 now（毫秒）
+        const nowSec = Math.floor(now / 1000);
+        const staleCutoff = nowSec - OBSERVATION_STALE_DAYS * 86400;
+        const mkObs = (id: string, text: string, scopeTags: string[], updatedAt: number, lastVerifiedAt?: number) =>
+            makeTestObservation(id, text, scopeTags, updatedAt, lastVerifiedAt);
+        const mkMM = (id: string, question: string, answer: string, scopeTags: string[], updatedAt: number) =>
+            makeTestMentalModel(id, question, answer, scopeTags, updatedAt);
+
+        // scopeTags 过滤：空=全局放行；任一标签不命中即剔除（all_strict）
+        const sel = selectInjectionCandidates(
+            [mkMM('mm_other', '他人模型', 'C', ['user:QQ:2'], nowSec - 30), mkMM('mm_match', '命中模型', 'B', ['user:QQ:1'], nowSec - 20), mkMM('mm_global', '全局模型', 'A', [], nowSec - 10)],
+            [mkObs('o_other', '他人观察', ['user:QQ:2'], nowSec - 30), mkObs('o_multi', '多标签观察', ['user:QQ:1', 'vis:public'], nowSec - 40), mkObs('o_match', '命中观察', ['user:QQ:1'], nowSec - 20), mkObs('o_global', '全局观察', [], nowSec - 10)],
+            ['user:QQ:1'],
+            now
+        );
+        assert.deepEqual(sel.observations.map(o => o.id).sort(), ['o_global', 'o_match'], '空 scopeTags 应全局放行，不匹配/缺标签应剔除');
+        assert.deepEqual(sel.mentalModels.map(m => m.id).sort(), ['mm_global', 'mm_match']);
+
+        // stale 剔除：lastVerifiedAt 距今超过 90 天剔除；缺省 lastVerifiedAt 回退 updatedAt
+        const sel2 = selectInjectionCandidates(
+            [],
+            [mkObs('o_stale', '过期观察', [], staleCutoff - 1, staleCutoff - 1), mkObs('o_fresh', '新鲜观察', [], staleCutoff + 1, staleCutoff + 1), mkObs('o_noverify', '无验证时间', [], staleCutoff + 1, undefined)],
+            [],
+            now
+        );
+        assert.deepEqual(sel2.observations.map(o => o.id), ['o_fresh', 'o_noverify'], '过期观察应剔除，缺验证时间按 updatedAt 判断');
+
+        // 条数上限：观察最多 20、心智模型最多 5，按 updatedAt 倒序取最新
+        const manyObs = [];
+        for (let i = 0; i < 25; i++) manyObs.push(mkObs('o_' + i, '观察' + i, [], nowSec - 1000 + i * 10));
+        const manyMM = [];
+        for (let i = 0; i < 8; i++) manyMM.push(mkMM('mm_' + i, '问题' + i, '答案' + i, [], nowSec - 100 + i));
+        const sel4 = selectInjectionCandidates(manyMM, manyObs, [], now);
+        assert.equal(sel4.observations.length, MAX_OBSERVATIONS, '观察应截断到上限');
+        assert.equal(sel4.mentalModels.length, MAX_MENTAL_MODELS, '心智模型应截断到上限');
+        assert.equal(sel4.observations[0].id, 'o_24', '观察应按更新时间倒序取最新');
+        assert.equal(sel4.observations[MAX_OBSERVATIONS - 1].id, 'o_5');
+        assert.equal(sel4.mentalModels[0].id, 'mm_7', '心智模型应按更新时间倒序取最新');
+        assert.equal(sel4.mentalModels[MAX_MENTAL_MODELS - 1].id, 'mm_3');
+    },
+
+    /** E3 事件时间解析：ISO/中文日期/秒级/毫秒级时间戳；非法输入返回 undefined */
+    testParseOccurredAt(): void {
+        const iso = Math.floor(new Date(2026, 7, 30).getTime() / 1000);
+        assert.equal(parseOccurredAt('2026-08-30'), iso, 'YYYY-MM-DD 应解析为秒级时间戳');
+        assert.equal(parseOccurredAt('2026年8月30日'), iso, '中文日期应解析为秒级时间戳');
+        assert.equal(parseOccurredAt('1770000000'), 1770000000, '秒级时间戳应原样返回');
+        assert.equal(parseOccurredAt('1770000000000'), 1770000000, '毫秒级时间戳应转为秒');
+        assert.equal(parseOccurredAt(''), undefined, '空字符串应返回 undefined');
+        assert.equal(parseOccurredAt('not-a-date'), undefined, '非法字符串应返回 undefined');
+        assert.equal(parseOccurredAt(123), undefined, '非字符串应返回 undefined');
+    },
+
+    /** E4 心智模型扩展字段：创建时写入 lastRefreshedAt/history/trigger；刷新时旧答案入历史（上限 10）并更新 lastRefreshedAt */
+    async testV2MentalModelE4Fields(): Promise<void> {
+        let n = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => '答案v' + (++n),
+        });
+        const m0 = await engine.createMentalModel('user_e4', '偏好问题', '旧答案');
+        assert.equal(typeof m0.lastRefreshedAt, 'number', '创建时应写入 lastRefreshedAt');
+        assert.deepEqual(m0.history, [], '创建时历史应为空');
+        assert.equal(m0.trigger, 'full', '创建时 trigger 应为 full');
+
+        await engine.addMemory('user_e4', { content: '新事实' });
+        assert.equal(await engine.refreshMentalModels('user_e4'), 1, '答案变化应刷新');
+        const m1 = engine.listMentalModels('user_e4')[0];
+        assert.equal(m1.answer, '答案v1');
+        assert.equal(m1.version, 2);
+        assert.equal(m1.history.length, 1, '旧答案应入历史');
+        assert.equal(m1.history[0].answer, '旧答案');
+        assert.equal(typeof m1.history[0].at, 'number', '历史条目应记录时间');
+        assert.equal(m1.history[0].trigger, 'full');
+        assert.equal(m1.trigger, 'full', '刷新后 trigger 应为 full');
+        assert.ok(m1.lastRefreshedAt >= m0.lastRefreshedAt, '刷新后 lastRefreshedAt 应更新');
+
+        // 再刷新一次：历史追加（旧答案在前，最新旧答案在后）
+        assert.equal(await engine.refreshMentalModels('user_e4'), 1);
+        const m2 = engine.listMentalModels('user_e4')[0];
+        assert.equal(m2.history.length, 2);
+        assert.equal(m2.history[0].answer, '旧答案');
+        assert.equal(m2.history[1].answer, '答案v1');
+        assert.equal(m2.answer, '答案v2');
+
+        // 历史上限 10 条：持续刷新后最旧的答案被淘汰
+        for (let i = 0; i < 9; i++) await engine.refreshMentalModels('user_e4');
+        const m3 = engine.listMentalModels('user_e4')[0];
+        assert.equal(m3.history.length, 10, '历史最多保留 10 条');
+        assert.equal(m3.history[0].answer, '答案v1');
+        assert.equal(m3.history[9].answer, '答案v10', '最旧条目应被淘汰');
+        assert.equal(m3.history.some(h => h.answer === '旧答案'), false);
+    },
+
+    /** R2 引擎守卫：最小间隔限流（force 跳过）、并发防重入只执行一次 */
+    async testV2RefreshRateLimitAndReentrancy(): Promise<void> {
+        // 限流：间隔内自动刷新被跳过，force 可跳过限流
+        let n = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => '答案' + (++n),
+        });
+        engine.setRefreshMinInterval(60);
+        await engine.createMentalModel('user_r2', '问题', '旧答案');
+        await engine.addMemory('user_r2', { content: '事实1' });
+        assert.equal(await engine.refreshMentalModels('user_r2'), 1, '首次刷新应放行');
+        assert.equal(await engine.refreshMentalModels('user_r2'), 0, '间隔内自动刷新应被限流');
+        assert.equal(n, 1, '限流应跳过合成器');
+        assert.equal(await engine.refreshMentalModels('user_r2', undefined, { force: true }), 1, 'force 应跳过限流并刷新');
+        assert.equal(n, 2, 'force 应触发一次合成器');
+
+        // 防重入：并发刷新同一 bank 只执行一次
+        let calls = 0;
+        const engine2 = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => {
+                await new Promise(r => setTimeout(r, 20));
+                calls++;
+                return '并发' + calls;
+            },
+        });
+        await engine2.createMentalModel('user_r3', '问题', '旧答案');
+        await engine2.addMemory('user_r3', { content: '事实2' });
+        const results = await Promise.all([
+            engine2.refreshMentalModels('user_r3'),
+            engine2.refreshMentalModels('user_r3'),
+            engine2.refreshMentalModels('user_r3'),
+        ]);
+        assert.deepEqual(results, [1, 0, 0], '并发刷新应只执行一次，其余跳过');
+        assert.equal(calls, 1, '合成器应只被调用一次');
+        assert.equal(engine2.listMentalModels('user_r3')[0].version, 2, '只应 bump 一次版本');
+    },
+
+    /** E4 旧存档补齐：加载旧版 MentalModel 时回填 lastRefreshedAt/history/trigger */
+    testV2NormalizeLegacyMentalModelFields(): void {
+        // 缺字段：lastRefreshedAt 回退 updatedAt、history 补空数组、trigger 补 full
+        const storage = new InMemoryMemoryStorage();
+        const engine = new MemoryEngine({ storage });
+        storage.saveBank(makeLegacyBank('user_e4b', [
+            { id: 'mm_old', bankId: 'user_e4b', question: '旧问题', answer: '旧答案', scopeTags: [], createdAt: 1000, updatedAt: 2000, version: 3 },
+        ]));
+        const bank = engine.repository.getBank('user_e4b');
+        assert.ok(bank, '旧存档应可加载');
+        const m = bank.mentalModels[0];
+        assert.equal(m.lastRefreshedAt, 2000, '缺省 lastRefreshedAt 应回退到 updatedAt');
+        assert.deepEqual(m.history, [], '缺省 history 应补齐为空数组');
+        assert.equal(m.trigger, 'full', '缺省 trigger 应补齐为 full');
+
+        // 非法 trigger 归一化；合法 delta 保留
+        const storage2 = new InMemoryMemoryStorage();
+        const engine2 = new MemoryEngine({ storage: storage2 });
+        storage2.saveBank(makeLegacyBank('user_e4c', [
+            { id: 'mm_bad', bankId: 'user_e4c', question: 'Q', answer: 'A', scopeTags: [], createdAt: 1000, updatedAt: 1000, version: 1, trigger: 'bogus' },
+            { id: 'mm_delta', bankId: 'user_e4c', question: 'Q2', answer: 'B', scopeTags: [], createdAt: 1000, updatedAt: 1000, version: 1, trigger: 'delta' },
+        ]));
+        const bank2 = engine2.repository.getBank('user_e4c');
+        assert.equal(bank2.mentalModels[0].trigger, 'full', '非法 trigger 应归一化为 full');
+        assert.equal(bank2.mentalModels[1].trigger, 'delta', '合法 trigger delta 应保留');
+    },
+
+    /** R2 manager 接线：consolidateMemory 巩固后按配置自动刷新心智模型；关闭配置时不刷新 */
+    async testR2ConsolidateTriggersMentalModelRefresh(): Promise<void> {
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        const engine = getMemoryEngine();
+        const origRefresh = engine.refreshMentalModels;
+        let refreshCalls = 0;
+        engine.refreshMentalModels = async () => {
+            refreshCalls++;
+            return 0;
+        };
+        const session = new Session();
+        session.sessionId = 'QQ:88888';
+        session.sessionType = 'user';
+        try {
+            await MemoryManager.consolidateMemory(session);
+            assert.equal(refreshCalls, 1, '巩固后应自动刷新心智模型');
+            // 关闭「巩固后自动刷新心智模型」后不再触发
+            TC.boolConfigs['巩固后自动刷新心智模型'] = false;
+            resetConfigCache();
+            await MemoryManager.consolidateMemory(session);
+            assert.equal(refreshCalls, 1, '关闭配置后巩固不应触发刷新');
+        } finally {
+            delete TC.boolConfigs['巩固后自动刷新心智模型'];
+            resetConfigCache();
+            engine.refreshMentalModels = origRefresh;
+        }
     },
 
     /** 通知事件白名单解析：逗号/换行/空行/大小写容错 */

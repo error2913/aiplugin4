@@ -29,7 +29,10 @@ export class MemoryRepository {
         let bank = this.banks.get(id);
         if (!bank) {
             bank = this.storage.getBank(id) ?? undefined;
-            if (bank) this.banks.set(id, bank);
+            if (bank) {
+                normalizeBank(bank);
+                this.banks.set(id, bank);
+            }
         }
         return bank || null;
     }
@@ -308,6 +311,16 @@ export class MemoryRepository {
 
 export function normalizeName(name: string): string {
     return String(name || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+/** 补齐旧存档缺省字段：MentalModel 的 E4 扩展字段（lastRefreshedAt/history/trigger） */
+function normalizeBank(bank: PersistedBank): void {
+    if (!Array.isArray(bank.mentalModels)) return;
+    for (const m of bank.mentalModels) {
+        if (typeof m.lastRefreshedAt !== 'number') m.lastRefreshedAt = typeof m.updatedAt === 'number' ? m.updatedAt : nowSec();
+        if (!Array.isArray(m.history)) m.history = [];
+        if (m.trigger !== 'full' && m.trigger !== 'delta') m.trigger = 'full';
+    }
 }
 
 function dedupEvidence(evidence: Array<{ memoryId: string; quote: string }>): Array<{ memoryId: string; quote: string }> {
