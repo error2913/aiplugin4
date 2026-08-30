@@ -8,7 +8,7 @@ import { logger } from "../logger";
 import Image from "../resource/image";
 
 import { registerSpecialResource } from "./special_id";
-import { getRawId, normalizeGroupId, normalizeUserId } from "./target_id";
+import { getRawId, normalizeGroupId, normalizeUserId, platformOf } from "./target_id";
 import { getMilkyReplyQuoteId, resolveLocalPath, transformMsgId, transformMsgIdBack } from "./utils";
 
 const log = logger.withTag('string');
@@ -396,12 +396,12 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                     content += '[at:all]';
                     break;
                 }
-                const userId = normalizeUserId(seg.data.qq || '');
+                const userId = normalizeUserId(seg.data.qq || '', platformOf(ctx));
                 content += `[at:${userId ? getRawId(userId) : String(seg.data.qq || '')}]`;
                 break;
             }
             case 'poke': {
-                const userId = normalizeUserId(seg.data.qq || '');
+                const userId = normalizeUserId(seg.data.qq || '', platformOf(ctx));
                 content += `[poke:${userId ? getRawId(userId) : String(seg.data.qq || '')}]`;
                 break;
             }
@@ -449,13 +449,13 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                     text += '[CQ:at,qq=all]';
                     break;
                 }
-                const userId = normalizeUserId(seg.content);
+                const userId = normalizeUserId(seg.content, platformOf(ctx));
                 if (userId) text += `[CQ:at,qq=${getRawId(userId)}]`;
                 else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
             case 'poke': {
-                const userId = normalizeUserId(seg.content);
+                const userId = normalizeUserId(seg.content, platformOf(ctx));
                 if (userId) text += `[CQ:poke,qq=${getRawId(userId)}]`;
                 else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
@@ -483,7 +483,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 break;
             }
             case 'avatar': {
-                const userId = normalizeUserId(seg.content);
+                const userId = normalizeUserId(seg.content, platformOf(ctx));
                 if (userId) {
                     const image = Image.getUserAvatar(userId);
                     images.push(image);
@@ -492,7 +492,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 break;
             }
             case 'group_avatar': {
-                const groupId = normalizeGroupId(seg.content);
+                const groupId = normalizeGroupId(seg.content, platformOf(ctx));
                 if (groupId) {
                     const image = Image.getGroupAvatar(groupId);
                     images.push(image);
@@ -541,10 +541,13 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
         const segment = segments[i];
         const match = segment.match(/^[[［]from[:：]?\s?(.+?)[\]］]$/);
         if (match) {
-            // 如果臆想对象是自己，那么将下一条消息添加到s中；只读取 [from] 中的显式 QQ 号。
+            // 如果臆想对象是自己，那么将下一条消息添加到s中；读取 [from] 中的显式 ID。
             const numberMatch = match[1].match(/(?:^|\()([0-9]+)(?:\))?$/);
-            const fromUserId = numberMatch ? normalizeUserId(numberMatch[1]) : null;
-            const currentUserId = normalizeUserId(ctx.endPoint.userId);
+            const anyIdMatch = numberMatch ? null : match[1].match(/\(([^()]+)\)$/);
+            const fromUserId = numberMatch
+                ? normalizeUserId(numberMatch[1], platformOf(ctx))
+                : anyIdMatch ? normalizeUserId(anyIdMatch[1], platformOf(ctx)) : null;
+            const currentUserId = normalizeUserId(ctx.endPoint.userId, platformOf(ctx));
             if (fromUserId && currentUserId && fromUserId === currentUserId && i < segments.length - 1) s += segments[i + 1];
         } else if (i === 0) {
             s = segment;

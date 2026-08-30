@@ -27,14 +27,14 @@ export const CHAT_MODEL_TO_PROVIDER = Object.entries(CHAT_MODEL_MAP).reduce((acc
     models.forEach(model => acc[model] = provider);
     return acc;
 }, {} as { [model: string]: string });
-export const IMAGE_MODEL_MAP = {
+export const MULTIMODAL_MODEL_MAP = {
     "zhipu": ["glm-4v", "glm-4v-plus-0111", "glm-4v-flash", "glm-4.6v"],
     "alibaba": ["qwen-vl-max", "qwen-vl-plus", "qwen2.5-vl-72b-instruct"],
     "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4.1"],
     "google": ["gemini-2.5-pro", "gemini-2.5-flash"],
     "siliconflow": ["Qwen/Qwen2.5-VL-72B-Instruct", "THUDM/GLM-4.6V-9B"]
 };
-export const IMAGE_MODEL_TO_PROVIDER = Object.entries(IMAGE_MODEL_MAP).reduce((acc, [provider, models]) => {
+export const MULTIMODAL_MODEL_TO_PROVIDER = Object.entries(MULTIMODAL_MODEL_MAP).reduce((acc, [provider, models]) => {
     models.forEach(model => acc[model] = provider);
     return acc;
 }, {} as { [model: string]: string });
@@ -48,3 +48,4 @@ export const EMBEDDING_MODEL_TO_PROVIDER = Object.entries(EMBEDDING_MODEL_MAP).r
     models.forEach(model => acc[model] = provider);
     return acc;
 }, {} as { [model: string]: string });
+

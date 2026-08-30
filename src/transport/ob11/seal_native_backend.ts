@@ -1,4 +1,5 @@
 import { getCtxAndMsg } from "../../utils/seal";
+import { getPlatform } from "../../utils/target_id";
 
 import { encodeNativeMessage, normalizeMessageSegments } from "./message_segments";
 import { failure, success } from "./result";
@@ -107,9 +108,10 @@ export class SealNativeBackend implements Ob11Backend {
                 ? (context.ctx.group && context.ctx.group.groupId)
                 : (context.ctx.player && context.ctx.player.userId);
             if (!sameId(currentTarget, targetId)) {
+                const platform = getPlatform(context.endpointId);
                 const target = action === "send_group_msg"
-                    ? getCtxAndMsg(context.endpointId, "", `QQ-Group:${stripPrefix(targetId)}`)
-                    : getCtxAndMsg(context.endpointId, `QQ:${stripPrefix(targetId)}`, "");
+                    ? getCtxAndMsg(context.endpointId, "", `${platform}-Group:${stripPrefix(targetId)}`)
+                    : getCtxAndMsg(context.endpointId, `${platform}:${stripPrefix(targetId)}`, "");
                 targetCtx = target.ctx;
                 targetMsg = target.msg;
             }

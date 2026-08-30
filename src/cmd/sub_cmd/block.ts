@@ -1,6 +1,6 @@
 // .ai block：黑名单管理（拉黑用户/群，命中时忽略其消息/指令/戳一戳）
 import { BlockManager } from "../../block";
-import { normalizeTargetId } from "../../utils/target_id";
+import { normalizeTargetId, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
 import { M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -28,7 +28,7 @@ export function registerCmdBlock() {
         const val2 = cmdArgs.getArgN(2);
         switch (aliasToCmd(val2)) {
             case 'add': {
-                const targetId = normalizeTargetId(cmdArgs.getArgN(3));
+                const targetId = normalizeTargetId(cmdArgs.getArgN(3), platformOf(ctx));
                 let reason = cmdArgs.getRestArgsFrom(4).trim();
 
                 if (!targetId) {
@@ -50,7 +50,7 @@ export function registerCmdBlock() {
                 return ret;
             }
             case 'remove': {
-                const targetId = normalizeTargetId(cmdArgs.getArgN(3));
+                const targetId = normalizeTargetId(cmdArgs.getArgN(3), platformOf(ctx));
                 if (!targetId) {
                     seal.replyToSender(ctx, msg, '参数无效，【.ai block rm <用户ID/群ID>】移除黑名单');
                     return ret;

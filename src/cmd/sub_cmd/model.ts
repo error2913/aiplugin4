@@ -4,6 +4,27 @@ import { aliasToCmd } from "../../utils/utils";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
+/**
+ * 可选用作对话的模型列表：对话模型全部 + 多模态模型中 use 含 chat（或未指定用途）的条目；
+ * 同名去重（对话模型优先，命中时按纯文本处理），多模态条目标注（多模态）。
+ */
+function listChatModels(): { name: string, multimodal: boolean }[] {
+    const list: { name: string, multimodal: boolean }[] = [];
+    const seen = new Set<string>();
+    for (const m of Model.chatModels) {
+        if (seen.has(m.name)) continue;
+        seen.add(m.name);
+        list.push({ name: m.name, multimodal: false });
+    }
+    for (const m of Model.multimodalModels) {
+        if (!(m.use.includes('chat') || m.use.length === 0)) continue;
+        if (seen.has(m.name)) continue;
+        seen.add(m.name);
+        list.push({ name: m.name, multimodal: true });
+    }
+    return list;
+}
+
 export function registerCmdModel() {
     const cmd = new SubCmd('model');
     cmd.desc = '查看/设置当前会话使用的模型';
@@ -18,7 +39,8 @@ export function registerCmdModel() {
 
         if (!val2) {
             const model = Model.getChatModel('chat', session.setting.modelName);
-            seal.replyToSender(ctx, msg, `当前模型: ${session.setting.modelName || (model ? model.name : '未配置')}`);
+            const suffix = model && model.isMultimodal ? '（多模态）' : '';
+            seal.replyToSender(ctx, msg, `当前模型: ${session.setting.modelName || (model ? model.name : '未配置')}${suffix}`);
             return ret;
         }
 
@@ -29,15 +51,17 @@ export function registerCmdModel() {
             return ret;
         }
 
-        const exists = Model.chatModels.some(m => m.name === val2);
-        if (!exists) {
-            seal.replyToSender(ctx, msg, `模型 ${val2} 不存在，可用的对话模型: ${Model.chatModels.map(m => m.name).join('、')}`);
+        const candidates = listChatModels();
+        const target = candidates.find(c => c.name === val2);
+        if (!target) {
+            const listText = candidates.map(c => c.multimodal ? `${c.name}（多模态）` : c.name).join('、');
+            seal.replyToSender(ctx, msg, `模型 ${val2} 不存在，可用的对话模型: ${listText}`);
             return ret;
         }
 
         session.setting.modelName = val2;
         session.save();
-        seal.replyToSender(ctx, msg, `已设置当前会话模型为 ${val2}`);
+        seal.replyToSender(ctx, msg, `已设置当前会话模型为 ${val2}${target.multimodal ? '（多模态）' : ''}`);
         return ret;
     }
 }

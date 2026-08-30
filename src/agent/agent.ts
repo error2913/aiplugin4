@@ -2,8 +2,6 @@
 import Config from "../config/config";
 import { ext } from "../config/config";
 import Logger from "../logger";
-import ChatModel from "../model/chat";
-import ImageModel from "../model/image";
 import Model from "../model/model";
 import { ChatModelUse } from "../model/types";
 import Image from "../resource/image";
@@ -14,7 +12,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { buildSystemMessage, handleMessages } from "../utils/message";
+import { buildSystemMessage, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, TypeDescriptor } from "../utils/utils";
 
@@ -57,37 +55,42 @@ export default class Agent {
 
     /**
      * 当前会话使用的对话模型是否为多模态：
-     * 1) 直接命中「图片模型」里 use=chat 的条目（ImageModel 实例）；
-     * 2) 对话模型的名字出现在「图片模型」列表里（即该模型声明为视觉/多模态模型）。
+     * 只有最终解析到的模型实例来自「多模态模型」列表（MultimodalModel）才算多模态；
+     * 来自「对话模型」列表的模型即使同名也按纯文本处理。
      * 多模态时上下文中的图片以 image_url 内容块直接传给模型，而不是文本标签。
      */
     private isMultimodalChat(session: Session): boolean {
         const model = Model.getChatModel('chat', session.setting.modelName);
         if (!model) return false;
-        if (model instanceof ImageModel) return true;
-        return Model.imageModels.some(im => im.name === model.name);
+        return model.isMultimodal;
     }
 
     async chat(prompt: string): Promise<string> {
-        const model = Model.getChatModel(this.use) as ChatModel;
+        const model = Model.getChatModel(this.use);
         if (!model) return '';
-        const messages: { role: string, content: string }[] = [];
+        const messages: RequestMessage[] = [];
         if (this.instruction) {
             messages.push({
                 role: 'system',
                 content: typeof this.instruction === 'function' ? this.instruction(this.sessionService) : this.instruction
             });
         }
-        messages.push({ role: 'user', content: prompt });
-        const { content } = await streamService.sendChatRequest(messages, [], 'none');
+        messages.push({ role: 'user', content: model.isMultimodal ? await textToMultimodalContent(prompt) : prompt });
+        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', '', model);
         return content;
     }
 
     /** 直接发送自定义 messages（OpenAI 风格数组）到对话模型，返回回复文本；供外部插件构建消息后调用 */
     async chatMessages(messages: { role: string, content: string }[]): Promise<string> {
-        const model = Model.getChatModel(this.use) as ChatModel;
+        const model = Model.getChatModel(this.use);
         if (!model) return '';
-        const { content } = await streamService.sendChatRequest(messages, [], 'none');
+        const requestMessages: RequestMessage[] = model.isMultimodal
+            ? await Promise.all(messages.map(async m => ({
+                role: m.role,
+                content: m.role === 'user' ? await textToMultimodalContent(m.content) : m.content
+            })))
+            : messages;
+        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', '', model);
         return content;
     }
 
@@ -439,3 +442,4 @@ export default class Agent {
     }
 
 }
+

@@ -45,7 +45,8 @@ export class SessionService {
                 logger.error(`加载会话${sessionId}失败: ${error}`);
             }
             session.sessionId = sessionId;
-            if (sessionId.startsWith('QQ:')) session.sessionType = 'user';
+            // 群 ID 统一带 -Group: 标记（海豹通用），其余视为私聊用户会话，不再只认 QQ: 前缀
+            session.sessionType = sessionId.includes('-Group:') ? 'group' : 'user';
             session.agentName = this.agentName;
             // listen 是运行时对象，函数不会被 JSON 持久化；每次恢复会话都重新创建。
             session.tool.listen = createToolListen();

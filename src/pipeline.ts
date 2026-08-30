@@ -4,6 +4,7 @@ import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { Context } from "./context/context";
 import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_RAW_LIMIT, isDuplicateEvent, isEventRawRetainable, parseNoticeWhitelist } from "./event/notice";
+import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
@@ -12,9 +13,21 @@ import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
 import { registerSpecialResource } from "./utils/special_id";
 import { expandMilkySegments, formatMediaSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
+import { getPlatform } from "./utils/target_id";
 import { getRecordMessageId, transformMsgId } from "./utils/utils";
 
 const log = logger.withTag('pipeline');
+
+/** 按机器人自身 ID 反查匹配的通信端点；匹配不到返回空串（调用方跳过）。 */
+export function resolveEndpointId(selfId: string | number): string {
+    const suffix = `:${selfId}`;
+    const eps = seal.getEndPoints();
+    for (const ep of eps) {
+        if (ep.userId.endsWith(suffix)) return ep.userId;
+    }
+    return '';
+}
+
 
 /** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
 const OB11_SUPPLEMENT_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
@@ -250,15 +263,14 @@ export class MessagePipeline {
         }
         log.debug(`ob11 额外消息接收: ${event.message_type === 'group' ? '群' : '私聊'} uid=${event.user_id} segTypes=[${segTypes.join(',')}]`);
 
-        // 按端点解析平台前缀（默认 QQ），并构造与核心回调一致的 ctx/msg
-        const eps = seal.getEndPoints();
-        let epId = `QQ:${event.self_id}`;
-        for (const ep of eps) {
-            if (ep.userId === epId) break;
-            if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
+        // 按端点解析平台前缀，并构造与核心回调一致的 ctx/msg
+        const epId = resolveEndpointId(event.self_id);
+        if (!epId) {
+            log.debug(`ob11 事件未找到匹配端点 self_id=${event.self_id}，跳过`);
+            return;
         }
         log.debug(`ob11 事件 端点解析完成 ep=${epId}`);
-        const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+        const prefix = getPlatform(epId);
         const uid = `${prefix}:${event.user_id}`;
         const isPrivate = event.message_type !== 'group';
         const gid = isPrivate ? '' : `${prefix}-Group:${event.group_id}`;
@@ -313,13 +325,12 @@ export class MessagePipeline {
             return;
         }
 
-        const eps = seal.getEndPoints();
-        let epId = `QQ:${event.self_id}`;
-        for (const ep of eps) {
-            if (ep.userId === epId) break;
-            if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
+        const epId = resolveEndpointId(event.self_id);
+        if (!epId) {
+            log.debug(`ob11 事件未找到匹配端点 self_id=${event.self_id}，跳过`);
+            return;
         }
-        const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+        const prefix = getPlatform(epId);
 
         const isGroup = !!(event.group_id || noticeType.startsWith('group_'));
         let sid = '';
@@ -370,13 +381,12 @@ export class MessagePipeline {
             return;
         }
 
-        const eps = seal.getEndPoints();
-        let epId = `QQ:${event.self_id}`;
-        for (const ep of eps) {
-            if (ep.userId === epId) break;
-            if (ep.userId.endsWith(`:${event.self_id}`)) epId = ep.userId;
+        const epId = resolveEndpointId(event.self_id);
+        if (!epId) {
+            log.debug(`ob11 事件未找到匹配端点 self_id=${event.self_id}，跳过`);
+            return;
         }
-        const prefix = epId.includes(':') ? epId.slice(0, epId.indexOf(':')) : 'QQ';
+        const prefix = getPlatform(epId);
 
         // 严格会话归属：入群申请 → 群会话；好友申请 → 私聊会话；映射不到即丢弃
         let sid = '';
@@ -621,19 +631,21 @@ export class MessagePipeline {
                     return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.save());
                 }
                 return session.handleReceipt(ctx, msg, messageArray)
-                    .then((): void | Promise<void> => {
+                    .then(async (): Promise<void> => {
                         if (setting.counter > -1) {
                             session.context.counter += 1;
                             if (session.context.counter >= setting.counter) {
                                 session.context.counter = 0;
-                                return session.chat(ctx, msg, '计数器');
+                                await session.chat(ctx, msg, '计数器');
+                                return;
                             }
                         }
 
                         if (setting.prob > -1) {
                             const ran = Math.random() * 100;
                             if (ran <= setting.prob) {
-                                return session.chat(ctx, msg, '概率');
+                                await session.chat(ctx, msg, '概率');
+                                return;
                             }
                         }
 
@@ -644,6 +656,10 @@ export class MessagePipeline {
                                     log.exception('计时器触发对话出错', e);
                                 });
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
+                        }
+
+                        if (setting.judge) {
+                            await JudgeManager.evaluate(ctx, msg, session, messageText);
                         }
                     })
                     .then(() => session.save());

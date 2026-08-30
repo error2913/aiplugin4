@@ -422,12 +422,10 @@ function resolveImageById(id: string): Image | null {
 }
 
 /**
- * 多模态消息内容：把用户消息里的 [img:...] 图片标签转成 image_url 内容块直接传给模型，
- * 而不是让模型只看到文本标签；无法解析的图片（如本地路径无可用 URL）保留原标签。
+ * 多模态消息内容：把文本里的 [img:...]/[avatar:...]/[group_avatar:...] 图片标签转成 image_url 内容块直接传给模型，
+ * 而不是让模型只看到文本标签；无法解析的图片（如本地路径无可用 URL）保留原标签；纯文本（无图片标签）原样返回字符串。
  */
-export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
-    if (message.role !== 'user') return buildContent(message);
-    const text = buildContent(message);
+export async function textToMultimodalContent(text: string): Promise<RequestMessageContent> {
     if (!/\[(?:img|avatar|group_avatar)[:：]/i.test(text)) return text;
 
     const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
@@ -462,6 +460,12 @@ export async function buildMultimodalContent(message: ContextMessage): Promise<R
         else parts.push({ type: 'text', text: seg });
     }
     return parts;
+}
+
+/** 多模态消息内容：把用户消息里的图片标签转成 image_url 内容块直接传给模型；非用户消息按原逻辑构建纯文本内容。 */
+export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
+    if (message.role !== 'user') return buildContent(message);
+    return textToMultimodalContent(buildContent(message));
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {

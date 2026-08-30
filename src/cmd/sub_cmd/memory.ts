@@ -7,7 +7,7 @@ import { getMemoryEngine } from "../../memory/v2/index";
 import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
 import { stripInternalTags } from "../../utils/string";
-import { normalizeUserId } from "../../utils/target_id";
+import { normalizeUserId, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
 import { I, S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -91,7 +91,7 @@ export function registerCmdMemory() {
         const { ctx, msg, cmdArgs, session, page, ret  } = scc;
 
         const rawPlayerId = ctx.player?.userId || '';
-        const currentUserId = normalizeUserId(rawPlayerId)
+        const currentUserId = normalizeUserId(rawPlayerId, platformOf(ctx))
             || (ctx.isPrivate && session.sessionId ? session.sessionId : null);
         if (!currentUserId) {
             seal.replyToSender(ctx, msg, `当前消息缺少有效用户ID（player=${rawPlayerId || '空'}, session=${session.sessionId || '空'}）`);
@@ -105,7 +105,7 @@ export function registerCmdMemory() {
                 let statusSession = session;
                 const targetUserId = cmdArgs.getArgN(3);
                 if (targetUserId) {
-                    const normalizedUserId = normalizeUserId(targetUserId);
+                    const normalizedUserId = normalizeUserId(targetUserId, platformOf(ctx));
                     if (!normalizedUserId) {
                         seal.replyToSender(ctx, msg, '参数无效，【.ai memo status [用户ID]】');
                         return ret;

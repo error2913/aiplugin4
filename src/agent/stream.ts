@@ -5,6 +5,7 @@ import { logger } from "../logger";
 import { buildProviderBody, parseProviderResponse } from "../model/adapter";
 import ChatModel from "../model/chat";
 import Model from "../model/model";
+import MultimodalModel from "../model/multimodal";
 import { requestModel } from "../model/provider";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
@@ -142,8 +143,8 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = ''): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
-        const model = Model.getChatModel('chat', modelName) as ChatModel;
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = '', explicitModel?: ChatModel | MultimodalModel | null): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+        const model = explicitModel ?? Model.getChatModel('chat', modelName);
         if (!model) {
             log.error('未找到可用的对话模型');
             return { content: '', tool_calls: [] };

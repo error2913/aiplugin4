@@ -7,6 +7,7 @@ import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { getSessionId } from "../utils/seal";
 import { MessageSegment } from "../utils/string";
+import { getPlatform } from "../utils/target_id";
 import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 
 const log = logger.withTag('image');
@@ -16,6 +17,9 @@ const IMAGE_TEXT_COMPRESS_MIN_LENGTH = 5000;
 
 // URL 转 base64 失败后的冷却期：1 小时内不再重复请求，超时后允许重试一次
 const IMAGE_BASE64_RETRY_TTL = 60 * 60 * 1000;
+
+// URL 转 base64 连续失败达到该次数后永久放弃，不再按冷却期重试
+const IMAGE_BASE64_RETRY_MAX = 3;
 
 // 进行中的 URL→base64 请求，按 Image 实例去重（同一实例并发调用共享同一次请求）
 const pendingUrlToBase64 = new WeakMap<Image, Promise<void>>();
@@ -32,6 +36,7 @@ export default class Image {
         raw: 'string',
         base64Failed: 'boolean',
         base64FailedAt: 'number',
+        base64FailedCount: 'number',
     }
     imageId: string;
     sourceSessionId: string;
@@ -46,6 +51,8 @@ export default class Image {
     base64Failed: boolean;
     /** 最近一次 URL 转 base64 失败的毫秒时间戳，用于冷却期判断 */
     base64FailedAt: number;
+    /** URL 转 base64 连续失败次数，达到上限后永久放弃重试 */
+    base64FailedCount: number;
 
     constructor() {
         this.imageId = '';
@@ -58,6 +65,7 @@ export default class Image {
         this.raw = '';
         this.base64Failed = false;
         this.base64FailedAt = 0;
+        this.base64FailedCount = 0;
     }
 
     get type(): 'url' | 'local' | 'base64' {
@@ -68,6 +76,7 @@ export default class Image {
 
     get CQCode(): string {
         const file = this.type === 'base64' ? seal.base64ToImage(this.base64) : (this.url || this.path);
+        if (!file) return '';
         return `[CQ:image,file=${file}]`;
     }
 
@@ -112,14 +121,16 @@ export default class Image {
         return isValid;
     }
 
-    /** URL 转 base64 失败是否处于冷却期（1 小时内不再重复请求） */
+    /** URL 转 base64 失败是否应跳过请求：1 小时冷却期内，或连续失败达上限后永久阻断 */
     isBase64RetryBlocked(): boolean {
-        return this.base64Failed && Date.now() - this.base64FailedAt < IMAGE_BASE64_RETRY_TTL;
+        if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) return true;
+        if (!this.base64Failed) return false;
+        return Date.now() - this.base64FailedAt < IMAGE_BASE64_RETRY_TTL;
     }
 
     /**
      * 获取图片的 base64：URL 图片转 base64 供模型读取。
-     * 失败后进入 1 小时冷却期不再重复请求；同一实例并发调用共享同一次请求。
+     * 失败后进入 1 小时冷却期，连续失败达上限后永久放弃；同一实例并发调用共享同一次请求。
      */
     async urlToBase64() {
         if (this.type !== 'url') return;
@@ -163,12 +174,17 @@ export default class Image {
                 this.format = data.format;
                 this.base64Failed = false;
                 this.base64FailedAt = 0;
+                this.base64FailedCount = 0;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (error) {
+            this.base64FailedCount++;
             this.base64Failed = true;
             this.base64FailedAt = Date.now();
+            if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) {
+                log.warning('图片' + this.imageId + '连续' + this.base64FailedCount + '次转base64失败，已永久放弃该图片的转换重试');
+            }
             log.exception('在imageUrlToBase64中请求出错', error);
         }
 
@@ -176,8 +192,8 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        if (!Config.model.IMAGE_MODEL_ENABLED) {
-            log.info(`图片模型开关未开启，跳过识别: ${this.imageId}`);
+        if (!Config.model.IMAGE_UNDERSTANDING_ENABLED) {
+            log.info(`识图模型开关未开启，跳过识别: ${this.imageId}`);
             return;
         }
         const { URL_TO_BASE64 } = Config.image;
@@ -185,7 +201,7 @@ export default class Image {
 
         if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
 
-        const model = Model.getImageModel('image-understanding');
+        const model = Model.getMultimodalModel('image-understanding');
         if (!model) {
             log.error(`未找到支持image-understanding的模型`);
             return;
@@ -272,14 +288,17 @@ export default class Image {
     static getUserAvatar(uid: string): Image {
         const img = new Image();
         img.imageId = `user_avatar:${uid}`;
-        img.url = `https://q1.qlogo.cn/g?b=qq&nk=${uid.replace(/^.+:/, '')}&s=640`;
+        const rawId = uid.replace(/^.+:/, '');
+        // qlogo 仅 QQ 平台可用；其它平台返回空 URL，由发送路径跳过头像
+        img.url = getPlatform(uid) === 'QQ' ? `https://q1.qlogo.cn/g?b=qq&nk=${rawId}&s=640` : '';
         return img;
     }
 
     static getGroupAvatar(gid: string): Image {
         const img = new Image();
         img.imageId = `group_avatar:${gid}`;
-        img.url = `https://p.qlogo.cn/gh/${gid.replace(/^.+:/, '')}/${gid.replace(/^.+:/, '')}/640`;
+        const rawId = gid.replace(/^.+:/, '');
+        img.url = getPlatform(gid) === 'QQ' ? `https://p.qlogo.cn/gh/${rawId}/${rawId}/640` : '';
         return img;
     }
 

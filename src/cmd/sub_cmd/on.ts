@@ -21,6 +21,7 @@ export function registerCmdOn() {
 单位/%，默认10%
 【a】活跃时间段和活跃次数
 格式为"开始时间-结束时间-活跃次数"(如"09:00-18:00-5")
+【j】评分触发开关，开启后由评分智能体判断是否插话（无参数）
 
 【.ai on --t --p=42】使用示例`;
     cmd.priv = { priv: S };
@@ -85,6 +86,12 @@ export function registerCmdOn() {
             const valStr = kwarg.value.trim();
 
             switch (name) {
+                case 'j':
+                case 'judge': {
+                    setting.judge = true;
+                    text += "\n评分触发: 开启";
+                    break;
+                }
                 case 'r':
                 case 'regex': {
                     setting.regexTrigger = true;

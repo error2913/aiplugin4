@@ -4,7 +4,7 @@ import { getRegexConfig } from "../config";
 
 export default class ReceivedConfig {
     static register() {
-        seal.ext.registerBoolConfig(ext, "接收图片", true, "开启后接收图片消息并将图片 URL 记录到上下文；是否自动识别图片由图片识别条件和图片模型配置决定", "消息接收");
+        seal.ext.registerBoolConfig(ext, "接收图片", true, "开启后接收图片消息并将图片 URL 记录到上下文；是否自动识别图片由图片识别条件和识图模型配置决定", "消息接收");
         seal.ext.registerBoolConfig(ext, "接收指令消息", false, "开启后指令消息也会计入上下文（指令仍会执行）", "消息接收");
         seal.ext.registerBoolConfig(ext, "接收骰子发送的消息", false, "开启后记录非本插件发送的机器人回复（要计入上下文需同时开启待机）", "消息接收");
         seal.ext.registerBoolConfig(ext, "忽略私聊消息", false, "开启后私聊消息不触发 AI", "消息接收");

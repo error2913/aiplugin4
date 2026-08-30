@@ -1,17 +1,21 @@
-// 图片模型：图片理解（callITT）与多模态对话
+// 多模态模型：图片理解（callITT）与多模态对话
 import Logger from "../logger";
 
 import { BaseModel } from "./model";
 import { requestModel } from "./provider";
-import { ImageModelUse, ModelBody, ModelUse } from "./types";
+import { ModelBody, ModelUse, MultimodalModelUse } from "./types";
 
-const log = Logger.withTag('image');
+const log = Logger.withTag('multimodal');
 
-export default class ImageModel extends BaseModel {
-    use: ImageModelUse[];
+export default class MultimodalModel extends BaseModel {
+    use: MultimodalModelUse[];
     constructor(use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) {
         super(name, provider, base_url, api_key, body);
-        this.use = use as ImageModelUse[];
+        this.use = use as MultimodalModelUse[];
+    }
+
+    get isMultimodal(): boolean {
+        return true;
     }
 
     get url() {
@@ -54,3 +58,4 @@ export default class ImageModel extends BaseModel {
     }
 
 }
+
