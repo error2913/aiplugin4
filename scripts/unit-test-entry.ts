@@ -690,8 +690,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const ctx = { isPrivate: true, player: { userId: 'QQ:1', name: '测试员' }, group: null } as any;
             const uis = [{ isPrivate: true, id: 'QQ:1', name: '测试员' }] as any;
             const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '你好', uis, null);
-            assert.ok(prompt.includes('## 心智模型'), '长期记忆段应包含心智模型段');
-            assert.ok(prompt.includes('喜欢简洁回复'), '心智模型答案应被注入');
+            assert.ok(prompt.includes('## 个人记忆（测试员）'), '私聊应渲染个人记忆分组');
+            assert.ok(prompt.includes('心智模型：') && prompt.includes('喜欢简洁回复'), '分组内应注入心智模型');
         } finally {
             if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
             resetConfigCache();
@@ -719,12 +719,16 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const ctx = { isPrivate: false, player: { userId: 'QQ:2', name: '小明' }, group: { groupId: 'QQ-Group:1', groupName: '测试群' } } as any;
             const uis = [{ isPrivate: true, id: 'QQ:2', name: '小明' }] as any;
             const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '群规 咖啡', uis, { isPrivate: false, id: 'QQ-Group:1', name: '测试群' } as any);
-            assert.ok(prompt.includes('## 心智模型'), '应包含心智模型段');
-            assert.ok(prompt.includes('群规是什么？') && prompt.includes('不许刷屏'), '群心智模型应注入');
-            assert.ok(prompt.includes('小明的偏好？') && prompt.includes('喜欢咖啡'), '个人心智模型应注入');
-            assert.ok(prompt.includes('## 长期记忆'), '应包含长期记忆段');
-            assert.ok(prompt.includes('群规则：不许刷屏'), '群记忆应注入');
-            assert.ok(prompt.includes('小明喜欢喝咖啡'), '最近发言者的个人记忆应注入');
+            assert.ok(prompt.includes('## 群聊记忆（测试群）'), '应渲染群聊分组');
+            assert.ok(prompt.includes('## 个人记忆（小明）'), '应渲染最近发言者的个人分组');
+            assert.ok(prompt.includes('群规是什么？') && prompt.includes('不许刷屏'), '群心智模型应注入群聊分组');
+            assert.ok(prompt.includes('小明的偏好？') && prompt.includes('喜欢咖啡'), '个人心智模型应注入个人分组');
+            assert.ok(prompt.includes('群规则：不许刷屏'), '群记忆应注入群聊分组');
+            assert.ok(prompt.includes('小明喜欢喝咖啡'), '最近发言者的个人记忆应注入个人分组');
+            // 归属隔离：个人心智模型/记忆不应出现在群聊分组之前，避免混在一起
+            const groupIdx = prompt.indexOf('## 群聊记忆');
+            const personalIdx = prompt.indexOf('## 个人记忆');
+            assert.ok(groupIdx >= 0 && personalIdx > groupIdx, '群聊分组应排在个人分组之前');
         } finally {
             if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
             resetConfigCache();

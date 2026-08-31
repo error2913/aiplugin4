@@ -53,6 +53,15 @@ export interface MemoryPromptOptions {
     maxLengthPerItem?: number;
 }
 
+/** 分组记忆段：一组对应一个归属（群聊 / 某个发言者），组内独立渲染心智模型 + 观察记忆 + 长期记忆 */
+export interface MemoryPromptSection {
+    title: string;
+    mentalModels?: MentalModel[];
+    observations?: Observation[];
+    recalls?: RecallResult[];
+    maxLengthPerItem?: number;
+}
+
 export function buildMemoryPrompt(options: MemoryPromptOptions): string {
     const parts: string[] = [];
     const max = options.maxLengthPerItem ?? 1000;
@@ -75,6 +84,36 @@ export function buildMemoryPrompt(options: MemoryPromptOptions): string {
         parts.push(`## 长期记忆\n${head}${nameLine}\n记忆列表:\n${list}`);
     }
 
+    return parts.join('\n\n');
+}
+
+/**
+ * 分组渲染记忆段：按「群聊 / 每个发言者」分别渲染长期记忆 + 心智模型，
+ * 避免多个归属的心智模型/记忆混在同一段里造成归属混淆。
+ */
+export function buildGroupedMemoryPrompt(sections: MemoryPromptSection[]): string {
+    const parts: string[] = [];
+    for (const sec of sections) {
+        const hasMM = !!sec.mentalModels?.length;
+        const hasObs = !!sec.observations?.length;
+        const hasRecall = !!sec.recalls?.length;
+        if (!hasMM && !hasObs && !hasRecall) continue;
+        const max = sec.maxLengthPerItem ?? 1000;
+        const lines: string[] = [`## ${sec.title}`];
+        if (hasMM) {
+            lines.push('心智模型：');
+            lines.push(sec.mentalModels!.map(m => `${m.question}\n${truncate(m.answer, max)}`).join('\n'));
+        }
+        if (hasObs) {
+            lines.push('观察记忆：');
+            lines.push(sec.observations!.map((o, i) => `${i + 1}. ${truncate(o.text, max)}`).join('\n'));
+        }
+        if (hasRecall) {
+            lines.push('长期记忆：');
+            lines.push(sec.recalls!.map((r, i) => `${i + 1}. [${r.unit.id}] ${truncate(r.unit.text, max)}`).join('\n'));
+        }
+        parts.push(lines.join('\n'));
+    }
     return parts.join('\n\n');
 }
 
