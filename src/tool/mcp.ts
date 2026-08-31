@@ -62,13 +62,18 @@ function maxSessionsPerServer(): number {
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_SESSIONS;
 }
 
-/** 按名称取最新配置：始终实时解析当前配置（热加载后立即生效），不保留已移除服务器的旧会话 */
+// MCP 服务器配置属于启动解析一次、重载 JS 才生效的复杂配置（JSON 逐行解析）：模块级缓存
+let mcpEnabledCache: boolean | null = null;
+let mcpServersCache: MCPServer[] | null = null;
+
+/** MCP 总开关与服务器列表同一快照：启动读一次，修改后需重载 JS 生效 */
 export function isMCPEnabled(): boolean {
-    return seal.ext.getBoolConfig(ext, "是否启用MCP");
+    if (mcpEnabledCache === null) mcpEnabledCache = seal.ext.getBoolConfig(ext, "是否启用MCP");
+    return mcpEnabledCache;
 }
 
 export function getMCPServerByName(name: string): MCPServer | null {
-    // 只返回仍存在于配置中的服务器：服务器被移除后，即使工具列表尚未清理，调用也立即失败而非继续使用旧地址
+    // 服务器列表为启动解析一次的缓存快照：修改配置后需重载 JS 才生效
     return getMCPServers().find(s => s.name === name) || null;
 }
 
@@ -112,7 +117,11 @@ function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
 }
 
 function getMCPServers(): MCPServer[] {
-    if (!isMCPEnabled()) return [];
+    if (mcpServersCache) return mcpServersCache;
+    if (!isMCPEnabled()) {
+        mcpServersCache = [];
+        return mcpServersCache;
+    }
 
     const servers: MCPServer[] = [];
     for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置").map(l => (l || '').trim()).filter(Boolean)) {
@@ -131,7 +140,8 @@ function getMCPServers(): MCPServer[] {
             log.exception(`MCP服务器配置解析失败（需要标准 mcpServers JSON 格式，兼容对象/数组尾逗号），内容: ${line}`, e);
         }
     }
-    return servers.filter(s => s.name && s.url);
+    mcpServersCache = servers.filter(s => s.name && s.url);
+    return mcpServersCache;
 }
 
 async function mcpRequest(server: MCPServer, payload: object, sessionId?: string): Promise<{ status: number, body: any, sessionId?: string }> {
@@ -419,8 +429,8 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
                 }
             }
         }, true);
-        // 每次调用都重新读取当前服务器配置，支持配置热加载且不缓存旧凭据。
-        // 按 AI 会话（session.sessionId）分桶：同一会话的连续浏览器操作复用同一 MCP 会话。
+        // 服务器配置为启动解析一次的缓存快照；按 AI 会话（session.sessionId）分桶：
+        // 同一会话的连续浏览器操作复用同一 MCP 会话。
         tool.solve = async (_ctx, _msg, session, args) => {
             const current = getMCPServerByName(server.name);
             if (!current) return `MCP 服务器 ${server.name} 未配置`;
@@ -437,8 +447,8 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
 }
 
 /**
- * 注册所有已配置 MCP 服务器的工具；可随时调用刷新（全量刷新按 TTL 节流）。
- * 已从配置中移除的服务器，其已注册工具会被同步清理，实现配置热加载。
+ * 注册所有已配置 MCP 服务器的工具（启动时注册一次；服务器列表为启动解析一次的缓存快照，
+ * 修改 MCP 配置后需重载 JS 才生效）。工具列表同步仍按 TTL 节流，可发现服务器端新增的工具。
  */
 export async function registerMCPTools() {
     const now = Date.now();

@@ -1,6 +1,14 @@
 // 工具配置：函数调用开关/提示词工程/上限/禁用与默认关闭
 import { ext } from "../config";
 import { SEALDICE_COMMAND_WHITELIST } from "../static_config/sealdice_command_defaults";
+// 音乐服务配置属于启动解析一次、重载 JS 才生效的复杂配置（JSON 逐行解析）：模块级缓存
+let musicConfigCache: string[] | null = null;
+function getMusicTemplateConfig(): string[] {
+    if (musicConfigCache) return musicConfigCache;
+    musicConfigCache = seal.ext.getTemplateConfig(ext, "音乐服务配置");
+    return musicConfigCache;
+}
+
 export default class ToolConfig {
     static register() {
 
@@ -29,7 +37,7 @@ export default class ToolConfig {
     "api": "http://qqmusic.lovesealdice.online",
     "cookie": ""
 }`
-        ], "每行一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后自动生效（缓存最多 1 分钟）", "工具");
+        ], "每行一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后需重载 JS 生效", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",
@@ -74,7 +82,7 @@ export default class ToolConfig {
             ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
             COMMAND_PREFIX: seal.ext.getStringConfig(ext, "指令前缀"),
             TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色"),
-            MUSIC: seal.ext.getTemplateConfig(ext, "音乐服务配置")
+            MUSIC: getMusicTemplateConfig()
         }
     }
 }

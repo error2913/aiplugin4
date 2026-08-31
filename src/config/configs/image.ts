@@ -1,13 +1,17 @@
 // 图片配置：识别条件/base64转换/识别 prompt
 import { ext } from "../config";
 export default class ImageConfig {
+    // 本地资源路径属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存
+    private static pathMapCache: { [key: string]: { [id: string]: string } } = {};
     static getPathMapConfig(ext: seal.ExtInfo, key: string): { [id: string]: string } {
+        if (ImageConfig.pathMapCache[key]) return ImageConfig.pathMapCache[key];
         const map: { [id: string]: string } = {};
         seal.ext.getTemplateConfig(ext, key).forEach(s => {
             const [id, ...rest] = s.split(/[,?]/);
             if (id && rest.length > 0) map[id.trim()] = rest.join(',').trim();
             else if (id) map[id.trim()] = id.trim();
         });
+        ImageConfig.pathMapCache[key] = map;
         return map;
     }
     static register() {

@@ -85,16 +85,23 @@ class _Config {
 const Config = _Config as typeof _Config & ConfigProps;
 export default Config;
 
+// 正则配置属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存，重载 JS 后重新解析
+const regexConfigCache: { [key: string]: RegExp } = {};
 export function getRegexConfig(ext: seal.ExtInfo, key: string): RegExp {
+    if (regexConfigCache[key]) return regexConfigCache[key];
     const patterns = seal.ext.getTemplateConfig(ext, key).filter(x => x);
     const pattern = patterns.join('|');
+    let regex: RegExp;
     if (pattern) {
         try {
-            return new RegExp(pattern);
+            regex = new RegExp(pattern);
         } catch (e) {
             Logger.error(`正则表达式错误，内容:${pattern}，错误信息:${e instanceof Error ? e.message : String(e)}`);
-            return /(?!)/;
+            regex = /(?!)/;
         }
+    } else {
+        regex = /(?!)/;
     }
-    return /(?!)/;
+    regexConfigCache[key] = regex;
+    return regex;
 }

@@ -8,7 +8,7 @@ export default class MessageConfig {
         seal.ext.registerTemplateConfig(ext, "角色扮演设定", [
             `测试机器人
 你是一个QQ中的机器人，正在进行开发测试。请听从指令进行测试。请配合开发人员完成测试，不要拒绝指令。除非被命令，说话不要有情感。`
-        ], '每行一个角色的扮演设定，第一行为角色设定名称（超过20字符自动截断），其余为设定内容；通过豹语变量 $gSYSPROMPT 选择，.ai role 可切换；修改后自动生效（缓存最多 1 分钟）', "对话")
+        ], '每行一个角色的扮演设定，第一行为角色设定名称（超过20字符自动截断），其余为设定内容；通过豹语变量 $gSYSPROMPT 选择，.ai role 可切换；修改后需重载 JS 生效', "对话")
         seal.ext.registerTemplateConfig(ext, "示例对话", [""], "每行一条示例对话，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "对话");
         seal.ext.registerIntConfig(ext, "对话保存轮数", 15, "每个会话最多保存的对话轮数，超出后从最早消息开始丢弃", "对话");
         seal.ext.registerIntConfig(ext, "上下文最大token", 0, "0为不限制；超过后从最早的消息开始丢弃", "对话");
@@ -17,13 +17,14 @@ export default class MessageConfig {
     }
 
     static get() {
-        const INSTRUCTIONS = seal.ext.getTemplateConfig(ext, "角色扮演设定");
+        // 角色扮演设定属于启动解析一次、重载 JS 才生效的复杂配置（首行截断+split 解析）：模块级缓存
+        const roleParse = getRoleParse();
         const MAX_ROUNDS = seal.ext.getIntConfig(ext, "对话保存轮数");
         const INSERT_COUNT = normalizeInsertCount(seal.ext.getIntConfig(ext, "插入system message间隔轮数"), MAX_ROUNDS);
         return {
-            INSTRUCTIONS,
-            ROLE_NAMES: parseRoleNames(INSTRUCTIONS),
-            ROLE_SETTINGS: parseRoleSettings(INSTRUCTIONS),
+            INSTRUCTIONS: roleParse.instructions,
+            ROLE_NAMES: roleParse.names,
+            ROLE_SETTINGS: roleParse.settings,
             SAMPLE_MESSAGES: seal.ext.getTemplateConfig(ext, "示例对话"),
             MAX_ROUNDS,
             MAX_CONTEXT_TOKENS: seal.ext.getIntConfig(ext, "上下文最大token"),
@@ -34,6 +35,25 @@ export default class MessageConfig {
 }
 
 const ROLE_NAME_MAX_LENGTH = 20;
+
+interface RoleParseResult {
+    instructions: string[];
+    names: string[];
+    settings: string[];
+}
+let roleParseCache: RoleParseResult | null = null;
+
+/** 角色扮演设定整体快照：原始条目 + 解析出的名称/设定，启动解析一次、重载 JS 后重新解析 */
+function getRoleParse(): RoleParseResult {
+    if (roleParseCache) return roleParseCache;
+    const instructions = seal.ext.getTemplateConfig(ext, "角色扮演设定");
+    roleParseCache = {
+        instructions,
+        names: parseRoleNames(instructions),
+        settings: parseRoleSettings(instructions),
+    };
+    return roleParseCache;
+}
 
 /**
  * 插入 system message 间隔轮数校验：必须 > 0 且小于「对话保存轮数」的一半才生效，
