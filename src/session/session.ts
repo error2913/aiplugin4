@@ -10,7 +10,6 @@ import SessionMemoryService from "../memory/session_memory";
 import Model from "../model/model";
 import Image from "../resource/image";
 import { TimerManager } from "../timer";
-import { registerMCPTools } from "../tool/mcp";
 import { ToolState } from "../tool/tool";
 import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
@@ -350,9 +349,6 @@ export class Session {
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string): Promise<void> {
         this.lastCtx = ctx;
         log.info('trigger reply:', reason || 'unknown');
-
-        // MCP 工具按配置热加载：同步已新增/移除的服务器工具（内部按 TTL 节流，不阻塞对话）
-        registerMCPTools().catch(e => log.warning('刷新 MCP 工具失败: ' + (e instanceof Error ? e.message : String(e))));
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
         this.migrateStoredTags();

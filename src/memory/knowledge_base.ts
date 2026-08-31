@@ -16,6 +16,9 @@ export class KnowledgeBaseService {
     private chunkVectors: Map<string, number[]> = new Map();
     /** 上次加载的配置内容签名：签名不变则跳过重新切分，避免依赖数组引用稳定性 */
     private loadedSignature: string | null = null;
+    /** 启动解析一次的知识库条目快照与签名缓存（修改知识库需重载 JS 生效） */
+    private loadedItems: string[] | null = null;
+    private itemsSignature: string | null = null;
     private loadPromise: Promise<void> | null = null;
 
     /** 配置内容签名：全部条目内容 hash 拼接，配置变化后签名必然变化 */
@@ -57,16 +60,18 @@ export class KnowledgeBaseService {
             const v = oldVectors.get(c.id);
             if (v) this.chunkVectors.set(c.id, v);
         }
+        this.loadedItems = list;
         this.loadedSignature = this.getItemsSignature(list);
+        this.itemsSignature = this.loadedSignature;
         Logger.info(`知识库加载完成: ${this.chunks.length} 个分块`);
     }
 
     private ensureLoaded(): Promise<void> {
-        const items = Config.knowledgeBase.KNOWLEDGE_ITEMS;
-        const list = Array.isArray(items) ? items : [];
-        const signature = this.getItemsSignature(list);
-        if (this.loadedSignature === signature && this.loadedSignature !== null) return Promise.resolve();
+        // 知识库内容为启动解析一次、重载 JS 才生效的复杂配置：加载一次后常驻，后续调用直接返回
+        if (this.loadedSignature !== null) return Promise.resolve();
         if (!this.loadPromise) {
+            const items = Config.knowledgeBase.KNOWLEDGE_ITEMS;
+            const list = Array.isArray(items) ? items : [];
             this.loadPromise = this.reload(list);
             this.loadPromise.then(() => {
                 this.loadPromise = null;
@@ -86,10 +91,17 @@ export class KnowledgeBaseService {
         return this.chunks.length === 0;
     }
 
-    /** prompt 缓存版本：基于当前配置开关/阈值/全部条目内容生成，配置变化后自然产生新 key */
+    /** prompt 缓存版本：开关/阈值等简单项实时参与（热加载后自然产生新 key），条目签名启动解析一次并缓存 */
     getCacheVersion(): string {
-        const items = Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : [];
-        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${Config.knowledgeBase.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignature(items)}`;
+        const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : []);
+        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${Config.knowledgeBase.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignatureCached()}`;
+    }
+
+    private getItemsSignatureCached(): string {
+        if (this.itemsSignature !== null) return this.itemsSignature;
+        const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : []);
+        this.itemsSignature = this.getItemsSignature(items);
+        return this.itemsSignature;
     }
 
     /** 全部条目索引（id/标题/小节） */

@@ -50,7 +50,14 @@ function parseSkillEntry(line: string): { name: string, description: string, con
     return { name: '', description: '', content: '' };
 }
 
+// 技能配置属于启动解析一次、重载 JS 才生效的复杂配置（SKILL.md frontmatter 解析）：模块级缓存
+let skillsCache: Skill[] | null = null;
 function getSkills(): Skill[] {
+    if (skillsCache) return skillsCache;
+    skillsCache = compileSkills();
+    return skillsCache;
+}
+function compileSkills(): Skill[] {
     const configured = seal.ext.getTemplateConfig(ext, "技能配置")
         .map(line => (line || '').replace(/\r\n/g, '\n').trim())
         .filter(Boolean)
@@ -64,6 +71,11 @@ function getSkills(): Skill[] {
         .map(line => parseSkillEntry(line.trim()))
         .filter(skill => skill.name && !configuredNames.has(skill.name));
     return configured.concat(defaults);
+}
+
+/** 已编译技能列表的签名（名称+描述），供 prompt 静态缓存做 key；重载 JS 后随重新解析自然变化 */
+export function getSkillsSignature(): string {
+    return getSkills().map(s => s.description ? `${s.name}：${s.description}` : s.name).join('\n');
 }
 
 /** 返回已配置的技能名称列表 */
@@ -101,7 +113,7 @@ export function registerSkills() {
         const skills = getSkills();
         return resolveSkillContent(skills, args?.name, 0);
     };
-    Logger.info('已注册技能工具 use_skill（技能内容按配置动态加载）');
+    Logger.info('已注册技能工具 use_skill（技能内容按启动解析结果加载，修改技能配置需重载 JS 生效）');
 }
 
 /** 解析技能内容：支持 {{skill:名称}} 引用（限深度），并截断超长内容 */

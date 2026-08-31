@@ -11,7 +11,7 @@ export default class ReceivedConfig {
         seal.ext.registerStringConfig(ext, "忽略消息豹语条件", '0', "0 不忽略；1 忽略所有消息；也可填豹语表达式，命中为 1 时忽略", "消息接收");
         seal.ext.registerTemplateConfig(ext, "忽略消息正则表达式", [
             "^忽略这句话$"
-        ], "每行一个正则，匹配到的消息不触发 AI 也不计入上下文；修改后自动生效（缓存最多 1 分钟）", "消息接收");
+        ], "每行一个正则，匹配到的消息不触发 AI 也不计入上下文；修改后需重载 JS 生效", "消息接收");
     }
 
     static get() {

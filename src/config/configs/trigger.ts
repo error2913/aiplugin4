@@ -67,15 +67,19 @@ class JudgeConfigItem {
     }
 }
 
+// 评分触发配置属于启动解析一次、重载 JS 才生效的复杂配置（TOML 分段解析）：模块级缓存
+let judgeConfigCache: JudgeConfig | null = null;
+
 /** 解析评分智能体 TOML 配置；解析失败或缺省段/字段时并入默认值，不因缺字段报错 */
 function getJudgeConfig(): JudgeConfig {
+    if (judgeConfigCache) return judgeConfigCache;
     const tomlList = seal.ext.getTemplateConfig(ext, "评分触发配置");
     const tomlString = (tomlList || []).find(s => s && s.trim() !== '') || JUDGE_TOML_DEFAULT;
     const d = new JudgeConfigItem();
     try {
         const mc = revive(JudgeConfigItem, load(tomlString));
         // 每段都是部分覆盖：TOML 里只写了部分键时，其余并入默认值
-        return {
+        judgeConfigCache = {
             SCORING: { ...d.scoring, ...(mc.scoring || {}) },
             WEIGHTS: { ...d.weights, ...(mc.weights || {}) },
             ENERGY: { ...d.energy, ...(mc.energy || {}) },
@@ -84,7 +88,7 @@ function getJudgeConfig(): JudgeConfig {
         };
     } catch (e) {
         Logger.error(`评分触发配置解析错误，已使用默认值:${e instanceof Error ? e.message : String(e)}`);
-        return {
+        judgeConfigCache = {
             SCORING: { speak_threshold: 0.70, wait_cooldown: 60 },
             WEIGHTS: { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 },
             ENERGY: { initial: 100, reply_cost: 5, recover_min: 4 },
@@ -92,6 +96,7 @@ function getJudgeConfig(): JudgeConfig {
             MODEL: { context_count: 10, timeout_sec: 30, retries: 3 }
         };
     }
+    return judgeConfigCache;
 }
 
 export default class TriggerConfig {
@@ -101,7 +106,7 @@ export default class TriggerConfig {
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [
             "\\[CQ:at,qq=3893625976\\]",
             "^正确.*[。？！?!]$"
-        ], "每行一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后自动生效（缓存最多 1 分钟）", "消息触发");
+        ], "每行一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后需重载 JS 生效", "消息触发");
         seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "消息触发");
         seal.ext.registerFloatConfig(ext, "默认计时器", 60, "计时器模式下间隔多少秒触发回复", "消息触发");
         seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "消息触发");
@@ -109,7 +114,7 @@ export default class TriggerConfig {
         seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "消息触发");
         seal.ext.registerTemplateConfig(ext, "评分触发配置", [
             JUDGE_TOML_DEFAULT
-        ], "评分触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后自动生效（缓存最多 1 分钟）", "消息触发");
+        ], "评分触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后需重载 JS 生效", "消息触发");
     }
 
     static get() {

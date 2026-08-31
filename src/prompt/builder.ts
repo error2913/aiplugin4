@@ -1,5 +1,5 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/能力/记忆/知识）
-import Config, { ext } from "../config/config";
+import Config from "../config/config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
 import { knowledgeService } from "../memory/knowledge";
@@ -9,7 +9,7 @@ import Model from "../model/model";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { getSkillSummaries } from "../tool/skills";
+import { getSkillsSignature, getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 
@@ -79,7 +79,7 @@ export async function buildSystemPromptContent(
     // 静态壳：角色/平台/会话/本地资源/工具与技能，连续对话可复用 30 秒。
     // key 读取原始技能配置避免每次缓存命中都解析/打印错误；真正解析在缓存未命中时执行。
     const toolState = STATUS && PROMPT_ENGINEERING ? toolStateSignature(session) : '';
-    const skillConfigSignature = STATUS ? seal.ext.getTemplateConfig(ext, "技能配置").join('\n') : '';
+    const skillConfigSignature = STATUS ? getSkillsSignature() : '';
     const staticKey = signature([
         'prompt:static',
         roleSetting,
