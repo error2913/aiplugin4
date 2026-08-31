@@ -16,6 +16,7 @@ export const changelog: { [version: string]: string } = {
 - 修复心智模型/观察记忆 scope 严格匹配导致的注入丢失：改为任一标签命中即注入，群聊中不再因某贡献者不在最近消息而整条剔除；memory_mm_create / .ai memo mm add 的 scope_tag 非法或与目标类型不符时回退默认标签，避免静默失效
 - 观察记忆注入收敛：启用长期记忆时观察只由长期记忆段裁剪注入（上限 20 + 90 天过期剔除），不再与观察段重复渲染；观察段同样按上限裁剪；巩固生成观察后刷新观察段缓存，消除最长 60 秒滞后
 - 记忆/知识库工具描述修正：memory_update 引用的 search_memory 改为 memory_recall；knowledge_read 引用的 kb_list/kb_search 改为 knowledge_list/knowledge_search
+- 群聊长期记忆注入并入最近发言者的个人记忆：每个最近发言者（最近 2~3 条消息的发言人）的个人记忆库中的长期记忆与心智模型随群聊注入；个人记忆按分数降序 + 总字符预算截断（每用户最多 5 条/2 个心智模型），私有记忆仅创建者本人可见，不泄露其他成员隐私
 
 ## 新功能
 - 新增 memory_mm_list / memory_mm_view 工具：模型可通过 function calling 列出/查看心智模型；memory_mm_delete 支持按问题名删除（model_id 与 question 二选一）

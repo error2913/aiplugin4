@@ -30,6 +30,15 @@ function tagsForSession(uis: UserInfo[], gi: GroupInfo | null): string[] {
     return tags;
 }
 
+/** 群聊注入时，每个最近发言者个人记忆库的召回 token 预算 */
+const MERGE_USER_RECALL_MAX_TOKENS = 1024;
+/** 群聊注入时，每个最近发言者最多并入的个人记忆条数 */
+const PER_USER_RECALLS = 5;
+/** 群聊注入时，每个最近发言者最多并入的个人心智模型条数 */
+const PER_USER_MENTAL_MODELS = 2;
+/** 群聊注入时，个人记忆合并后的总字符预算（按分数降序截断，避免多库膨胀） */
+const MERGE_USER_RECALL_MAX_CHARS = 4096;
+
 export class MemoryManager {
     /**
      * 旧 persona 懒迁移：把仍存于 session.memory.persona 的旧设定写入心智模型
@@ -70,10 +79,38 @@ export class MemoryManager {
             budget: 'mid',
         })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
         const allObservations = engine.repository.listObservations(bank.bankId);
-        const allMentalModels = engine.listMentalModels(bank.bankId);
-        // E1/E2：scopeTags 过滤 + stale 剔除 + 条数上限（注入裁剪，控制 token）
-        const { mentalModels, observations } = selectInjectionCandidates(allMentalModels, allObservations, tags);
-        Logger.debug(`[记忆注入] bank=${bank.bankId} tags=[${tags.join(',')}] 心智模型 ${allMentalModels.length}→${mentalModels.length} 观察 ${allObservations.length}→${observations.length}`);
+        // 群心智模型（≤MAX_MENTAL_MODELS）与群观察（≤MAX_OBSERVATIONS）：scopeTags 过滤 + stale 剔除 + 条数上限
+        const mentalModels = selectInjectionCandidates(engine.listMentalModels(bank.bankId), allObservations, tags).mentalModels;
+        const observations = selectInjectionCandidates([], allObservations, tags).observations;
+
+        // 群聊：并入最近发言者（uis）的个人记忆库——长期记忆（召回）+ 个人心智模型。
+        // 个人记忆按用户标签召回、按分数降序 + 总字符预算截断；私有记忆仅创建者本人可见（canSeeMemoryUnit）。
+        if (session.sessionType === 'group' && uis.length > 0) {
+            const mergedRecalls: typeof recalls = [];
+            for (const u of uis) {
+                const userBankId = resolveBankId(u.id, 'user', session.agentName).bankId;
+                mergedRecalls.push(...(await engine.recall(userBankId, text, {
+                    tags: [`user:${u.id}`],
+                    maxTokens: MERGE_USER_RECALL_MAX_TOKENS,
+                    preferObservations: true,
+                    budget: 'low',
+                }))
+                    .filter(r => canSeeMemoryUnit(r.unit, callerSessionId))
+                    .slice(0, PER_USER_RECALLS));
+                // 个人心智模型：scope 过滤后每用户最多 PER_USER_MENTAL_MODELS 条，追加在群心智模型之后
+                mentalModels.push(...selectInjectionCandidates(engine.listMentalModels(userBankId), [], tags)
+                    .mentalModels
+                    .slice(0, PER_USER_MENTAL_MODELS));
+            }
+            mergedRecalls.sort((a, b) => b.score - a.score);
+            let total = 0;
+            for (const r of mergedRecalls) {
+                if (total + r.unit.text.length > MERGE_USER_RECALL_MAX_CHARS) break;
+                recalls.push(r);
+                total += r.unit.text.length;
+            }
+        }
+        Logger.debug(`[记忆注入] bank=${bank.bankId} tags=[${tags.join(',')}] 心智模型 ${mentalModels.length} 观察 ${observations.length} 长期记忆 ${recalls.length}（群聊并入了 ${uis.length} 个发言者的个人记忆）`);
         const sessionName = ctx.isPrivate ? (ctx.player?.name || '') : (ctx.group?.groupName || '');
         return buildMemoryPrompt({
             isPrivate: ctx.isPrivate,

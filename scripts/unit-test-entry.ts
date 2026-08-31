@@ -698,6 +698,39 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** 群聊长期记忆段：并入最近发言者（uis）的个人记忆库——长期记忆 + 个人心智模型，且群记忆/群心智模型保留 */
+    async testBuildLongTermPromptMergesUserMemoryInGroup(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ-Group:1';
+            session.sessionType = 'group';
+            session.memory.persona = '无';
+            // 群记忆 + 群心智模型
+            await engine.addMemory('group_QQ-Group:1', { content: '群规则：不许刷屏', tags: ['group:QQ-Group:1'] });
+            await engine.createMentalModel('group_QQ-Group:1', '群规是什么？', '不许刷屏', ['group:QQ-Group:1']);
+            // 最近发言者的个人记忆 + 个人心智模型（QQ:2）
+            await engine.addMemory('user_QQ:2', { content: '小明喜欢喝咖啡', tags: ['user:QQ:2'] });
+            await engine.createMentalModel('user_QQ:2', '小明的偏好？', '喜欢咖啡', ['user:QQ:2']);
+            const ctx = { isPrivate: false, player: { userId: 'QQ:2', name: '小明' }, group: { groupId: 'QQ-Group:1', groupName: '测试群' } } as any;
+            const uis = [{ isPrivate: true, id: 'QQ:2', name: '小明' }] as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '群规 咖啡', uis, { isPrivate: false, id: 'QQ-Group:1', name: '测试群' } as any);
+            assert.ok(prompt.includes('## 心智模型'), '应包含心智模型段');
+            assert.ok(prompt.includes('群规是什么？') && prompt.includes('不许刷屏'), '群心智模型应注入');
+            assert.ok(prompt.includes('小明的偏好？') && prompt.includes('喜欢咖啡'), '个人心智模型应注入');
+            assert.ok(prompt.includes('## 长期记忆'), '应包含长期记忆段');
+            assert.ok(prompt.includes('群规则：不许刷屏'), '群记忆应注入');
+            assert.ok(prompt.includes('小明喜欢喝咖啡'), '最近发言者的个人记忆应注入');
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            resetConfigCache();
+        }
+    },
+
     /** buildObservationPrompt：观察超过上限时裁剪到 MAX_OBSERVATIONS（不再全量注入） */
     testBuildObservationPromptTrimmed(): void {
         const origSummary = TC.boolConfigs['启用观察记忆'];
