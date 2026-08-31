@@ -42,6 +42,7 @@ import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
+import { getSkillSummariesBudgeted, SKILL_INJECT_MAX_CHARS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
@@ -656,6 +657,21 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const indexLines = prompt.split('\n').filter(l => /^\d+\. \[kb_/.test(l));
         assert.ok(indexLines.length >= 1 && indexLines.length <= 30, `预算内应尽可能多列条目，实际 ${indexLines.length}`);
         assert.ok(prompt.length <= 2000, `索引段总字数应控制在预算附近，实际 ${prompt.length}`);
+    },
+
+    /** 技能摘要注入：预算内尽可能多列，超预算截断并标记 truncated（详情用 use_skill / skill_list 按需获取） */
+    testSkillSummariesBudgeted(): void {
+        const all = getSkillSummariesBudgeted(1000000);
+        assert.ok(all.total > 0, '默认技能应非空');
+        assert.equal(all.truncated, false, '大预算不应截断');
+        assert.equal(all.summaries.length, all.total, '大预算应列出全部技能');
+        const tiny = getSkillSummariesBudgeted(1);
+        assert.ok(tiny.total > 0, '默认技能应非空');
+        assert.equal(tiny.truncated, true, '极小预算应截断');
+        assert.ok(tiny.summaries.length < tiny.total, '极小预算只应列出少量技能');
+        const budgeted = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS);
+        const rendered = budgeted.summaries.join('\n');
+        assert.ok(rendered.length <= SKILL_INJECT_MAX_CHARS, `摘要总长应不超预算，实际 ${rendered.length}`);
     },
 
     /** buildLongTermPrompt：bank 有心智模型时长期记忆段应注入 ## 心智模型 与答案 */
