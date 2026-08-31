@@ -280,7 +280,7 @@ max_tokens = 2048
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库注入阈值(字符) | 知识库总内容不超过该值时全量注入；超过时只注入条目索引，模型用 kb_read 工具读取详情（默认 5000） |
+| 知识库注入阈值(字符) | 已弃用：知识库改为按当前对话检索式注入（最多 5 个分块），未命中只注入前 50 条条目索引；模型用 knowledge_read 工具读取详情（保留该配置仅为兼容旧存档） |
 | 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 kb 工具/指令检索。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
@@ -436,8 +436,8 @@ max_tokens = 2048
 
 | 分类 | 工具函数 |
 |:---:|:---|
-| 记忆 | `add_memory`、`update_memory`、`del_memory`、`search_memory`、`clear_memory`、`reflect_memory`、`consolidate_memory` |
-| 知识库 | `kb_search`、`kb_read`、`kb_list`（只读检索，内容由配置维护） |
+| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
+| 知识库 | `knowledge_search`、`knowledge_read`、`knowledge_list`（只读检索，内容由配置维护） |
 | OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
 | 特殊ID | `resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |

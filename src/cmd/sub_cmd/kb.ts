@@ -1,5 +1,5 @@
 // .ai kb：知识库只读查询（list/search/read）
-import { knowledgeService } from "../../memory/knowledge";
+import { KB_LIST_LIMIT, knowledgeService } from "../../memory/knowledge";
 import { aliasToCmd } from "../../utils/utils";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -24,7 +24,7 @@ export function registerCmdKB() {
         switch (val2) {
             case 'list': {
                 await knowledgeService.init();
-                const index = knowledgeService.formatIndex();
+                const index = knowledgeService.formatIndex(undefined, KB_LIST_LIMIT);
                 seal.replyToSender(ctx, msg, index ? index : '知识库为空');
                 return ret;
             }

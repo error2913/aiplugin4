@@ -147,7 +147,9 @@ export async function buildSystemPromptContent(
     const memoryTask = Config.memory.MEMORY
         ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');
-    const summaryTask = Config.memory.SUMMARY
+    // 观察记忆只保留一条注入路径：MEMORY 开启时已由 buildLongTermPrompt 裁剪注入，
+    // 此处仅在 MEMORY 关闭且 SUMMARY 开启时兜底渲染，避免同一批观察重复注入
+    const summaryTask = (!Config.memory.MEMORY && Config.memory.SUMMARY)
         ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
         : Promise.resolve('');
     const knowledgeTask = Config.knowledgeBase.KNOWLEDGE

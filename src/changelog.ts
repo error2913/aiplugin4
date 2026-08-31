@@ -9,6 +9,17 @@ export const changelog: { [version: string]: string } = {
 ## 变更
 - 记忆 v2 存储拆分为 5 个分片 key（memv2:<bankId>:meta/units/links/docs/obs）：按变更分片重写，避免整库大 JSON 反复全量序列化；旧版单 key（memv2:<bankId>:bank）首次读取时一次性自动迁移并清空旧 key
 - 记忆写入收敛：retain / consolidate 全程内存累计变更、末尾统一落盘一次（原逐条整库序列化）；consolidate 触发条数上限淘汰时，淘汰结果即时落盘，不再停留在内存（重载后不会复活）
+
+## 修复
+- 修复 .ai memo mm del 删除失效：del 经别名归一化为 delete 后未命中删除分支，实际返回帮助文本；现按归一化目标匹配，del / delete 均可删除，并支持按问题名或关键词删除（唯一命中直接删，多条列出 ID 由用户指定）
+- 知识库注入改为检索式：按当前对话内容只注入命中的知识库分块（最多 5 个），未命中时只注入前 50 条条目索引兜底，不再全量注入正文/索引；knowledge_list 工具与 .ai kb list 索引上限 200 条，超出提示用 knowledge_search 检索
+- 修复心智模型/观察记忆 scope 严格匹配导致的注入丢失：改为任一标签命中即注入，群聊中不再因某贡献者不在最近消息而整条剔除；memory_mm_create / .ai memo mm add 的 scope_tag 非法或与目标类型不符时回退默认标签，避免静默失效
+- 观察记忆注入收敛：启用长期记忆时观察只由长期记忆段裁剪注入（上限 20 + 90 天过期剔除），不再与观察段重复渲染；观察段同样按上限裁剪；巩固生成观察后刷新观察段缓存，消除最长 60 秒滞后
+- 记忆/知识库工具描述修正：memory_update 引用的 search_memory 改为 memory_recall；knowledge_read 引用的 kb_list/kb_search 改为 knowledge_list/knowledge_search
+
+## 新功能
+- 新增 memory_mm_list / memory_mm_view 工具：模型可通过 function calling 列出/查看心智模型；memory_mm_delete 支持按问题名删除（model_id 与 question 二选一）
+- .ai memo status 显示心智模型将注入条数（按当前会话范围估算）
 `,    "4.19.2": `## 配置变更
 - 复杂配置（不适合热加载）改为「重载 JS 才生效」：纯文本/多模态/嵌入模型、评分触发配置、MCP 服务器配置、技能配置、知识库、角色扮演设定、触发/忽略正则、本地图片/语音/文件/视频路径、音乐服务配置等，现在启动时解析一次并常驻内存，修改后需在海豹面板「插件管理 → 重载 JS」（或重启海豹）才生效，避免配置与运行时解析结果不一致
 - 简单配置（开关/数值/单行字符串/纯字符串数组等）仍按原样 60 秒内自动生效；MCP 服务器列表与总开关、技能、知识库等修改后不再热加载，需重载 JS

@@ -1,6 +1,7 @@
 // 记忆管理器：统一长期/观察/知识库的读取入口，底层只使用 Hindsight-like 新引擎。
 import Agent from "../agent/agent";
 import Config from "../config/config";
+import Logger from "../logger";
 import { SUMMARY_PROMPT_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import Group from "../session/group";
@@ -11,7 +12,7 @@ import { buildContent } from "../utils/message";
 import { stripInternalTags } from "../utils/string";
 
 import { knowledgeService } from "./knowledge";
-import { bumpMemoryRevision } from "./revision";
+import { bumpMemoryRevision, bumpSummaryRevision } from "./revision";
 import { parseLooseJson } from "./session_memory";
 import { resolveBankId } from "./v2/bank_resolver";
 import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "./v2/index";
@@ -72,6 +73,7 @@ export class MemoryManager {
         const allMentalModels = engine.listMentalModels(bank.bankId);
         // E1/E2：scopeTags 过滤 + stale 剔除 + 条数上限（注入裁剪，控制 token）
         const { mentalModels, observations } = selectInjectionCandidates(allMentalModels, allObservations, tags);
+        Logger.debug(`[记忆注入] bank=${bank.bankId} tags=[${tags.join(',')}] 心智模型 ${allMentalModels.length}→${mentalModels.length} 观察 ${allObservations.length}→${observations.length}`);
         const sessionName = ctx.isPrivate ? (ctx.player?.name || '') : (ctx.group?.groupName || '');
         return buildMemoryPrompt({
             isPrivate: ctx.isPrivate,
@@ -90,15 +92,19 @@ export class MemoryManager {
         const bank = bankForSession(session);
         const observations = engine.repository.listObservations(bank.bankId);
         if (observations.length === 0) return '';
-        return '## 观察记忆\n' + observations.map((o, i) => `${i + 1}. ${o.text}`).join('\n');
+        // 与长期记忆段的观察注入同口径：scope 过滤 + stale 剔除 + 条数上限（按会话自身标签宽松匹配）
+        const sessionTag = session.sessionType === 'group' ? `group:${session.sessionId}` : `user:${session.sessionId}`;
+        const { observations: injectable } = selectInjectionCandidates([], observations, [sessionTag]);
+        if (injectable.length === 0) return '';
+        return '## 观察记忆\n' + injectable.map((o, i) => `${i + 1}. ${o.text}`).join('\n');
     }
 
-    /** 知识库段：按开关构建（配置驱动，全局单例加载） */
-    static async buildKnowledgePrompt(_session: Session, _text: string): Promise<string> {
+    /** 知识库段：按开关构建，按当前对话文本检索式注入（配置驱动，全局单例加载） */
+    static async buildKnowledgePrompt(_session: Session, text: string): Promise<string> {
         const { KNOWLEDGE } = Config.knowledgeBase;
         if (!KNOWLEDGE) return '';
         await knowledgeService.init();
-        return knowledgeService.buildKnowledgePrompt();
+        return knowledgeService.buildKnowledgePrompt(text);
     }
 
     /** 写入记忆：统一入口，返回新引擎结果 */
@@ -158,6 +164,7 @@ export class MemoryManager {
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
         const result = await engine.consolidate(bank.bankId);
+        bumpSummaryRevision();
         // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
             await engine.refreshMentalModels(bank.bankId);
@@ -260,6 +267,7 @@ export class MemoryManager {
             const since = engine.getConsolidateSince(bank.bankId) + 1;
             if (since >= consolidateInterval) {
                 await engine.consolidate(bank.bankId);
+                bumpSummaryRevision();
                 engine.setConsolidateSince(bank.bankId, 0);
                 // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
                 if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
