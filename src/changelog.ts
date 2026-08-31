@@ -12,7 +12,7 @@ export const changelog: { [version: string]: string } = {
 
 ## 修复
 - 修复 .ai memo mm del 删除失效：del 经别名归一化为 delete 后未命中删除分支，实际返回帮助文本；现按归一化目标匹配，del / delete 均可删除，并支持按问题名或关键词删除（唯一命中直接删，多条列出 ID 由用户指定）
-- 知识库注入改为检索式：按当前对话内容只注入命中的知识库分块（最多 5 个），未命中时只注入前 50 条条目索引兜底，不再全量注入正文/索引；knowledge_list 工具与 .ai kb list 索引上限 200 条，超出提示用 knowledge_search 检索
+- 知识库注入改为检索式：按当前对话内容检索，命中正文在 1500 字符预算内才注入（最多 5 块），正文超预算/未命中/无对话时预算优先用于条目索引（尽可能多列，最多 100 条），不再全量注入正文/索引；knowledge_list 工具与 .ai kb list 索引上限 200 条，超出提示用 knowledge_search 检索
 - 修复心智模型/观察记忆 scope 严格匹配导致的注入丢失：改为任一标签命中即注入，群聊中不再因某贡献者不在最近消息而整条剔除；memory_mm_create / .ai memo mm add 的 scope_tag 非法或与目标类型不符时回退默认标签，避免静默失效
 - 观察记忆注入收敛：启用长期记忆时观察只由长期记忆段裁剪注入（上限 20 + 90 天过期剔除），不再与观察段重复渲染；观察段同样按上限裁剪；巩固生成观察后刷新观察段缓存，消除最长 60 秒滞后
 - 记忆/知识库工具描述修正：memory_update 引用的 search_memory 改为 memory_recall；knowledge_read 引用的 kb_list/kb_search 改为 knowledge_list/knowledge_search

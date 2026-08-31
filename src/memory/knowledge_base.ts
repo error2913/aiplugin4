@@ -10,11 +10,13 @@ import { hashString, KnowledgeChunk, splitMarkdownIntoChunks } from "./knowledge
 // 向量重排候选上限：仅对关键词命中的前 N 块做惰性嵌入，控制单次检索的 API 开销
 const VECTOR_RERANK_CANDIDATE_LIMIT = 20;
 /** 知识库索引渲染上限：注入兜底/列表展示时控制单次输出条数，超出提示用 knowledge_search 检索 */
-export const KB_INDEX_LIMIT = 50;
+export const KB_INDEX_LIMIT = 100;
 /** 主动查询（.ai kb list / knowledge_list 工具）的索引上限，避免超大知识库一次输出过长 */
 export const KB_LIST_LIMIT = 200;
 /** 检索式注入上限：按当前对话内容命中时最多注入的分块数 */
 export const KB_INJECT_TOP_K = 5;
+/** 知识库注入段字符预算：正文/索引合计不超过该值，避免挤占 system prompt */
+export const KB_INJECT_MAX_CHARS = 1500;
 
 export class KnowledgeBaseService {
     private chunks: KnowledgeChunk[] = [];
@@ -225,8 +227,9 @@ export class KnowledgeBaseService {
 
     /**
      * 构造 system prompt 的知识库段（检索式注入，不再全量注入正文）：
-     * - 传入 query 时按当前对话内容检索，只注入命中的 topK 分块；
-     * - 无 query 或未命中时只注入限条数索引兜底，模型需要详情时通过 knowledge_read 按 ID 读取。
+     * - 传入 query 时按当前对话内容检索，命中的 topK 分块正文在字符预算内才注入；
+     * - 命中正文超预算 / 未命中 / 无 query 时，把预算优先花在条目索引上（尽可能多列），
+     *   模型需要详情时通过 knowledge_read 按 ID 读取。
      */
     async buildKnowledgePrompt(query = ''): Promise<string> {
         if (this.chunks.length === 0) return '';
@@ -234,10 +237,34 @@ export class KnowledgeBaseService {
         if (trimmed) {
             const hits = await this.search(trimmed, KB_INJECT_TOP_K);
             if (hits.length > 0) {
-                return `## 知识库\n${hits.map((c, i) => `${i + 1}. ${this.formatChunk(c)}`).join('\n\n')}`;
+                const body = hits.map((c, i) => `${i + 1}. ${this.formatChunk(c)}`).join('\n\n');
+                if (body.length <= KB_INJECT_MAX_CHARS) {
+                    return `## 知识库\n${body}`;
+                }
+                // 命中正文超预算：降级为索引，避免正文挤占上下文
             }
         }
-        return `## 知识库\n知识库内容较多（共 ${this.chunks.length} 个分块），以下为条目索引，需要详情时使用 knowledge_read 工具按 ID 读取：\n${this.formatIndex(this.chunks, KB_INDEX_LIMIT)}`;
+        return this.buildIndexFallback();
+    }
+
+    /** 注入索引兜底：预算内尽可能多列条目（标题 + 小节），正文按需用 knowledge_read 读取 */
+    private buildIndexFallback(): string {
+        const head = `## 知识库\n知识库内容较多（共 ${this.chunks.length} 个分块），以下为条目索引，需要详情时使用 knowledge_read 工具按 ID 读取：\n`;
+        const lines: string[] = [];
+        let total = 0;
+        for (let i = 0; i < this.chunks.length && lines.length < KB_INDEX_LIMIT; i++) {
+            const c = this.chunks[i];
+            const heading = c.heading ? ` - ${c.heading}` : '';
+            const line = `${lines.length + 1}. [${c.id}] ${c.title}${heading}`;
+            if (total + line.length + 1 > KB_INJECT_MAX_CHARS) break;
+            lines.push(line);
+            total += line.length + 1;
+        }
+        const index = lines.join('\n');
+        const remaining = this.chunks.length > lines.length
+            ? `\n…共 ${this.chunks.length} 条，检索请用 knowledge_search / knowledge_read`
+            : '';
+        return head + index + remaining;
     }
 }
 
