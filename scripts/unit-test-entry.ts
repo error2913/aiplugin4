@@ -642,22 +642,20 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(full.split('\n').length, 120, '不传 limit 应全量输出');
     },
 
-    /** 知识库注入：有 query 时检索式注入命中分块（限 topK）；无 query/未命中时只注入限条数索引兜底（不注入正文） */
-    async testKbBuildKnowledgePromptRetrieval(): Promise<void> {
+    /** 知识库注入：只展示条目索引（预算内尽可能多列），不注入正文，且条目总字数不超预算 */
+    async testKbBuildKnowledgePromptIndexOnly(): Promise<void> {
         const svc = new KnowledgeBaseService();
-        const chunks = Array.from({ length: 80 }, (_, i) => ({ id: `kb_${i + 1}`, title: `条目${i + 1}`, heading: '', content: `关于咖啡的说明 ${i + 1}` }));
+        const longBody = '很长的正文内容'.repeat(60); // 单块约 420 字符
+        const chunks = Array.from({ length: 30 }, (_, i) => ({ id: `kb_${i + 1}`, title: `条目${i + 1}`, heading: '', content: `${longBody} ${i + 1}` }));
         (svc as any).chunks = chunks;
         (svc as any).loadedSignature = 'test'; // 跳过 ensureLoaded 覆盖手动构造的 chunks
-        const hit = await svc.buildKnowledgePrompt('咖啡');
-        assert.ok(hit.startsWith('## 知识库'), '应包含知识库标题');
-        assert.ok(hit.includes('关于咖啡的说明'), '检索命中应注入正文分块');
-        assert.ok(hit.includes('[kb_'), '命中分块应带 ID');
-        const hitBodyLines = hit.split('\n').filter(l => /^\d+\. \[kb_/.test(l)).length;
-        assert.ok(hitBodyLines <= 5, `检索式注入应限制在 topK，实际 ${hitBodyLines}`);
-        const miss = await svc.buildKnowledgePrompt('完全不存在的词xyz');
-        assert.ok(miss.includes('知识库内容较多'), '未命中应退化为索引提示');
-        assert.ok(!miss.includes('关于咖啡的说明'), '索引兜底不应注入正文');
-        assert.ok(miss.includes('共 80 条'), '索引兜底应提示总数');
+        const prompt = await svc.buildKnowledgePrompt('很长的正文内容');
+        assert.ok(prompt.startsWith('## 知识库'), '应包含知识库标题');
+        assert.ok(prompt.includes('知识库内容较多'), '应展示条目索引');
+        assert.ok(!prompt.includes(longBody), '只展示条目，不应注入正文');
+        const indexLines = prompt.split('\n').filter(l => /^\d+\. \[kb_/.test(l));
+        assert.ok(indexLines.length >= 1 && indexLines.length <= 30, `预算内应尽可能多列条目，实际 ${indexLines.length}`);
+        assert.ok(prompt.length <= 2000, `索引段总字数应控制在预算附近，实际 ${prompt.length}`);
     },
 
     /** buildLongTermPrompt：bank 有心智模型时长期记忆段应注入 ## 心智模型 与答案 */

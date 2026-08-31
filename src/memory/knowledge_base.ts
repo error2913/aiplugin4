@@ -13,8 +13,6 @@ const VECTOR_RERANK_CANDIDATE_LIMIT = 20;
 export const KB_INDEX_LIMIT = 100;
 /** 主动查询（.ai kb list / knowledge_list 工具）的索引上限，避免超大知识库一次输出过长 */
 export const KB_LIST_LIMIT = 200;
-/** 检索式注入上限：按当前对话内容命中时最多注入的分块数 */
-export const KB_INJECT_TOP_K = 5;
 /** 知识库注入段字符预算：正文/索引合计不超过该值，避免挤占 system prompt */
 export const KB_INJECT_MAX_CHARS = 1500;
 
@@ -226,24 +224,12 @@ export class KnowledgeBaseService {
     }
 
     /**
-     * 构造 system prompt 的知识库段（检索式注入，不再全量注入正文）：
-     * - 传入 query 时按当前对话内容检索，命中的 topK 分块正文在字符预算内才注入；
-     * - 命中正文超预算 / 未命中 / 无 query 时，把预算优先花在条目索引上（尽可能多列），
-     *   模型需要详情时通过 knowledge_read 按 ID 读取。
+     * 构造 system prompt 的知识库段（纯索引注入，不注入正文）：
+     * 在 KB_INJECT_MAX_CHARS 字符预算内尽可能多列条目索引（上限 KB_INDEX_LIMIT），
+     * 模型需要正文时通过 knowledge_read 按 ID 读取。
      */
-    async buildKnowledgePrompt(query = ''): Promise<string> {
+    async buildKnowledgePrompt(_query = ''): Promise<string> {
         if (this.chunks.length === 0) return '';
-        const trimmed = String(query || '').trim();
-        if (trimmed) {
-            const hits = await this.search(trimmed, KB_INJECT_TOP_K);
-            if (hits.length > 0) {
-                const body = hits.map((c, i) => `${i + 1}. ${this.formatChunk(c)}`).join('\n\n');
-                if (body.length <= KB_INJECT_MAX_CHARS) {
-                    return `## 知识库\n${body}`;
-                }
-                // 命中正文超预算：降级为索引，避免正文挤占上下文
-            }
-        }
         return this.buildIndexFallback();
     }
 
