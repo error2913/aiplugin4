@@ -14,6 +14,10 @@ interface Skill {
 
 const MAX_SKILL_CONTENT_LENGTH = 12000; // 单次返回的技能内容上限
 const MAX_REF_DEPTH = 2; // 技能间引用的最大解析深度
+/** 技能摘要注入字符预算：system prompt「可用技能」段不超该值，超出提示用 skill_list 查看完整列表 */
+export const SKILL_INJECT_MAX_CHARS = 1500;
+/** skill_list 工具返回技能条目的上限，避免技能过多时一次输出过长 */
+export const SKILL_LIST_LIMIT = 200;
 
 /** 解析标准 SKILL.md frontmatter（--- 开头，name/description 键值对），兼容 Claude/Codex/Cursor 等 agent 的技能文件 */
 function parseSkillFrontmatter(raw: string): { name?: string, description?: string } {
@@ -83,20 +87,57 @@ export function getSkillNames(): string[] {
     return getSkills().map(s => s.name);
 }
 
-/** 返回技能摘要（名称 + 描述），用于注入 system prompt 的能力段 */
-export function getSkillSummaries(): string[] {
-    return getSkills().map(s => s.description ? `${s.name}：${s.description}` : s.name);
+export interface SkillSummaryResult {
+    summaries: string[];
+    total: number;
+    truncated: boolean;
+}
+
+/**
+ * 返回技能摘要（名称 + 描述），用于注入 system prompt 的能力段。
+ * 预算内尽可能多列，超出 SKILL_INJECT_MAX_CHARS 截断并标记 truncated，
+ * 模型可用 skill_list 查看完整技能名列表、用 use_skill 按需获取内容。
+ */
+export function getSkillSummariesBudgeted(maxChars = SKILL_INJECT_MAX_CHARS): SkillSummaryResult {
+    const skills = getSkills();
+    const summaries: string[] = [];
+    let total = 0;
+    for (const s of skills) {
+        const line = s.description ? `${s.name}：${s.description}` : s.name;
+        if (total + line.length + 2 > maxChars) break;
+        summaries.push(line);
+        total += line.length + 2;
+    }
+    return { summaries, total: skills.length, truncated: summaries.length < skills.length };
 }
 
 /**
  * 读取“技能配置”，注册 use_skill 工具
  */
 export function registerSkills() {
+    const toolList = new Tool({
+        type: "function",
+        function: {
+            name: "skill_list",
+            description: "列出全部技能的名称与描述（用于发现 system prompt「可用技能」段未列出的技能），随后可用 use_skill 按名称获取技能内容",
+            parameters: {
+                type: "object",
+                properties: {}
+            }
+        }
+    });
+    toolList.solve = async () => {
+        const skills = getSkills();
+        if (skills.length === 0) return '暂无技能';
+        const items = skills.slice(0, SKILL_LIST_LIMIT).map(s => s.description ? `${s.name}：${s.description}` : s.name);
+        return `技能列表（共 ${skills.length} 个）\n- ${items.join('\n- ')}${skills.length > SKILL_LIST_LIMIT ? `\n…共 ${skills.length} 个技能，超出 ${SKILL_LIST_LIMIT} 条展示上限` : ''}`;
+    };
+
     const tool = new Tool({
         type: "function",
         function: {
             name: "use_skill",
-            description: "使用指定技能完成当前任务，技能名称以 system prompt 中「可用技能」列表为准",
+            description: "使用指定技能完成当前任务，技能名称以 system prompt 中「可用技能」列表或 skill_list 返回的列表为准",
             parameters: {
                 type: "object",
                 properties: {

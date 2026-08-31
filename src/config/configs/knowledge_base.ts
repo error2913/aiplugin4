@@ -5,7 +5,7 @@ import { ext } from "../config";
 export default class KnowledgeBaseConfig {
     static register() {
         seal.ext.registerBoolConfig(ext, "启用知识库记忆", false, "开启后把知识库内容注入 system prompt，供对话参考", "知识库");
-        seal.ext.registerIntConfig(ext, "知识库注入阈值(字符)", 5000, "知识库总内容不超过该值时全量注入 system prompt；超过时只注入条目索引，需要详情时模型用 kb_read 工具读取。设为 0 时始终只注入索引", "知识库");
+        seal.ext.registerIntConfig(ext, "知识库注入阈值(字符)", 5000, "已弃用：知识库改为按当前对话内容检索式注入（最多 5 个分块），未命中时只注入前 50 条条目索引；需要详情时模型用 knowledge_read 工具读取。该配置不再参与注入", "知识库");
         seal.ext.registerTemplateConfig(ext, "知识库", [
             `# AI 骰娘4 使用指南
 

@@ -1,6 +1,7 @@
 // 记忆管理器：统一长期/观察/知识库的读取入口，底层只使用 Hindsight-like 新引擎。
 import Agent from "../agent/agent";
 import Config from "../config/config";
+import Logger from "../logger";
 import { SUMMARY_PROMPT_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import Group from "../session/group";
@@ -11,11 +12,11 @@ import { buildContent } from "../utils/message";
 import { stripInternalTags } from "../utils/string";
 
 import { knowledgeService } from "./knowledge";
-import { bumpMemoryRevision } from "./revision";
+import { bumpMemoryRevision, bumpSummaryRevision } from "./revision";
 import { parseLooseJson } from "./session_memory";
 import { resolveBankId } from "./v2/bank_resolver";
 import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "./v2/index";
-import { buildMemoryPrompt, selectInjectionCandidates } from "./v2/prompt";
+import { buildGroupedMemoryPrompt, MemoryPromptSection, selectInjectionCandidates } from "./v2/prompt";
 import type { MemoryUnit, RecallOptions, RetainResult } from "./v2/types";
 
 function bankForSession(session: Session) {
@@ -28,6 +29,15 @@ function tagsForSession(uis: UserInfo[], gi: GroupInfo | null): string[] {
     if (gi) tags.push(`group:${gi.id}`);
     return tags;
 }
+
+/** 群聊注入时，每个最近发言者个人记忆库的召回 token 预算 */
+const MERGE_USER_RECALL_MAX_TOKENS = 1024;
+/** 群聊注入时，每个最近发言者最多并入的个人记忆条数 */
+const PER_USER_RECALLS = 5;
+/** 群聊注入时，每个最近发言者最多并入的个人心智模型条数 */
+const PER_USER_MENTAL_MODELS = 2;
+/** 群聊注入时，单个最近发言者个人记忆组的字符预算（按分数降序截断，避免多库膨胀） */
+const PER_USER_RECALL_MAX_CHARS = 2048;
 
 export class MemoryManager {
     /**
@@ -62,24 +72,59 @@ export class MemoryManager {
         engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
         const tags = tagsForSession(uis, gi || null);
         const callerSessionId = ctx.player?.userId || session.sessionId;
-        const recalls = (await engine.recall(bank.bankId, text, {
+        const groupRecalls = (await engine.recall(bank.bankId, text, {
             tags,
             maxTokens: 2048,
             preferObservations: true,
             budget: 'mid',
         })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
         const allObservations = engine.repository.listObservations(bank.bankId);
-        const allMentalModels = engine.listMentalModels(bank.bankId);
-        // E1/E2：scopeTags 过滤 + stale 剔除 + 条数上限（注入裁剪，控制 token）
-        const { mentalModels, observations } = selectInjectionCandidates(allMentalModels, allObservations, tags);
-        const sessionName = ctx.isPrivate ? (ctx.player?.name || '') : (ctx.group?.groupName || '');
-        return buildMemoryPrompt({
-            isPrivate: ctx.isPrivate,
-            sessionName,
-            mentalModels,
-            observations,
-            recalls,
-        });
+        // 群心智模型（≤MAX_MENTAL_MODELS）与群观察（≤MAX_OBSERVATIONS）：scopeTags 过滤 + stale 剔除 + 条数上限
+        const groupMMs = selectInjectionCandidates(engine.listMentalModels(bank.bankId), allObservations, tags).mentalModels;
+        const groupObs = selectInjectionCandidates([], allObservations, tags).observations;
+
+        // 分组渲染：群聊按「群聊 / 每个最近发言者」分别渲染长期记忆 + 心智模型，避免归属混淆；
+        // 个人记忆按用户标签召回、单用户条数/字符预算截断，私有记忆仅创建者本人可见（canSeeMemoryUnit）。
+        const sections: MemoryPromptSection[] = [];
+        const isGroup = session.sessionType === 'group';
+        if (isGroup) {
+            sections.push({
+                title: `群聊记忆（${gi?.name || session.sessionId}）`,
+                mentalModels: groupMMs,
+                observations: groupObs,
+                recalls: groupRecalls,
+            });
+            for (const u of uis) {
+                const userBankId = resolveBankId(u.id, 'user', session.agentName).bankId;
+                const ranked = (await engine.recall(userBankId, text, {
+                    tags: [`user:${u.id}`],
+                    maxTokens: MERGE_USER_RECALL_MAX_TOKENS,
+                    preferObservations: true,
+                    budget: 'low',
+                })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
+                const userRecalls: typeof groupRecalls = [];
+                let total = 0;
+                for (const r of ranked) {
+                    if (userRecalls.length >= PER_USER_RECALLS) break;
+                    if (total + r.unit.text.length > PER_USER_RECALL_MAX_CHARS) break;
+                    userRecalls.push(r);
+                    total += r.unit.text.length;
+                }
+                const userMMs = selectInjectionCandidates(engine.listMentalModels(userBankId), [], tags)
+                    .mentalModels
+                    .slice(0, PER_USER_MENTAL_MODELS);
+                sections.push({ title: `个人记忆（${u.name || u.id}）`, mentalModels: userMMs, recalls: userRecalls });
+            }
+        } else {
+            sections.push({
+                title: `个人记忆（${ctx.player?.name || session.sessionId}）`,
+                mentalModels: groupMMs,
+                observations: groupObs,
+                recalls: groupRecalls,
+            });
+        }
+        Logger.debug(`[记忆注入] bank=${bank.bankId} tags=[${tags.join(',')}] 分组 ${sections.length} 段（群聊 ${isGroup ? uis.length + 1 : 1} 段）`);
+        return buildGroupedMemoryPrompt(sections);
     }
 
     /** 观察记忆段：由 Observation 替代旧 summaries */
@@ -90,15 +135,19 @@ export class MemoryManager {
         const bank = bankForSession(session);
         const observations = engine.repository.listObservations(bank.bankId);
         if (observations.length === 0) return '';
-        return '## 观察记忆\n' + observations.map((o, i) => `${i + 1}. ${o.text}`).join('\n');
+        // 与长期记忆段的观察注入同口径：scope 过滤 + stale 剔除 + 条数上限（按会话自身标签宽松匹配）
+        const sessionTag = session.sessionType === 'group' ? `group:${session.sessionId}` : `user:${session.sessionId}`;
+        const { observations: injectable } = selectInjectionCandidates([], observations, [sessionTag]);
+        if (injectable.length === 0) return '';
+        return '## 观察记忆\n' + injectable.map((o, i) => `${i + 1}. ${o.text}`).join('\n');
     }
 
-    /** 知识库段：按开关构建（配置驱动，全局单例加载） */
-    static async buildKnowledgePrompt(_session: Session, _text: string): Promise<string> {
+    /** 知识库段：按开关构建，按当前对话文本检索式注入（配置驱动，全局单例加载） */
+    static async buildKnowledgePrompt(_session: Session, text: string): Promise<string> {
         const { KNOWLEDGE } = Config.knowledgeBase;
         if (!KNOWLEDGE) return '';
         await knowledgeService.init();
-        return knowledgeService.buildKnowledgePrompt();
+        return knowledgeService.buildKnowledgePrompt(text);
     }
 
     /** 写入记忆：统一入口，返回新引擎结果 */
@@ -158,6 +207,7 @@ export class MemoryManager {
         const engine = getMemoryEngine();
         const bank = bankForSession(session);
         const result = await engine.consolidate(bank.bankId);
+        bumpSummaryRevision();
         // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
             await engine.refreshMentalModels(bank.bankId);
@@ -260,6 +310,7 @@ export class MemoryManager {
             const since = engine.getConsolidateSince(bank.bankId) + 1;
             if (since >= consolidateInterval) {
                 await engine.consolidate(bank.bankId);
+                bumpSummaryRevision();
                 engine.setConsolidateSince(bank.bankId, 0);
                 // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
                 if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {

@@ -9,7 +9,7 @@ import Model from "../model/model";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { getSkillsSignature, getSkillSummaries } from "../tool/skills";
+import { getSkillsSignature, getSkillSummariesBudgeted } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 
@@ -97,7 +97,7 @@ export async function buildSystemPromptContent(
         skillConfigSignature
     ]);
     const frame = await getCachedString(staticKey, STATIC_FRAME_TTL, () => {
-        const skillSummaries = getSkillSummaries();
+        const skillResult = getSkillSummariesBudgeted();
         const toolPrompt = STATUS && PROMPT_ENGINEERING ? Tool.getToolsInfoPrompt(session) : '';
 
         let content = SYSTEM_MESSAGE_TEMPLATE({
@@ -111,8 +111,8 @@ export async function buildSystemPromptContent(
             toolPrompt
         });
 
-        const skillBlock = STATUS && skillSummaries.length > 0
-            ? `\n\n## 可用技能\n- ${skillSummaries.join('\n- ')}\n需要时请使用 use_skill 工具获取对应技能内容。`
+        const skillBlock = STATUS && skillResult.summaries.length > 0
+            ? `\n\n## 可用技能\n- ${skillResult.summaries.join('\n- ')}${skillResult.truncated ? `\n…共 ${skillResult.total} 个技能，其余技能名可用 skill_list 查看` : ''}\n需要时请使用 use_skill 工具获取对应技能内容。`
             : '';
         content = content.replace('**DYNAMIC_SECTIONS**', `${skillBlock}\n\n**DYNAMIC_SECTIONS**`);
         return content;
@@ -147,7 +147,9 @@ export async function buildSystemPromptContent(
     const memoryTask = Config.memory.MEMORY
         ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');
-    const summaryTask = Config.memory.SUMMARY
+    // 观察记忆只保留一条注入路径：MEMORY 开启时已由 buildLongTermPrompt 裁剪注入，
+    // 此处仅在 MEMORY 关闭且 SUMMARY 开启时兜底渲染，避免同一批观察重复注入
+    const summaryTask = (!Config.memory.MEMORY && Config.memory.SUMMARY)
         ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
         : Promise.resolve('');
     const knowledgeTask = Config.knowledgeBase.KNOWLEDGE

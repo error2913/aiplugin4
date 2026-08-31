@@ -9,6 +9,12 @@ import { hashString, KnowledgeChunk, splitMarkdownIntoChunks } from "./knowledge
 
 // 向量重排候选上限：仅对关键词命中的前 N 块做惰性嵌入，控制单次检索的 API 开销
 const VECTOR_RERANK_CANDIDATE_LIMIT = 20;
+/** 知识库索引渲染上限：注入兜底/列表展示时控制单次输出条数，超出提示用 knowledge_search 检索 */
+export const KB_INDEX_LIMIT = 100;
+/** 主动查询（.ai kb list / knowledge_list 工具）的索引上限，避免超大知识库一次输出过长 */
+export const KB_LIST_LIMIT = 200;
+/** 知识库注入段字符预算：正文/索引合计不超过该值，避免挤占 system prompt */
+export const KB_INJECT_MAX_CHARS = 1500;
 
 export class KnowledgeBaseService {
     private chunks: KnowledgeChunk[] = [];
@@ -203,29 +209,48 @@ export class KnowledgeBaseService {
         return `[${chunk.id}] ${chunk.title}${heading}\n${chunk.content}`;
     }
 
-    /** 索引渲染：只给 id 与标题，供列表/超阈值注入使用 */
-    formatIndex(chunks: KnowledgeChunk[] = this.chunks): string {
+    /** 索引渲染：只给 id 与标题，供列表/超阈值注入使用；limit>0 时只取前 limit 条并提示总数 */
+    formatIndex(chunks: KnowledgeChunk[] = this.chunks, limit = 0): string {
         if (chunks.length === 0) return '';
-        return chunks.map((c, i) => {
+        const list = limit > 0 ? chunks.slice(0, limit) : chunks;
+        const lines = list.map((c, i) => {
             const heading = c.heading ? ` - ${c.heading}` : '';
             return `${i + 1}. [${c.id}] ${c.title}${heading}`;
         }).join('\n');
+        if (limit > 0 && chunks.length > limit) {
+            return `${lines}\n…共 ${chunks.length} 条，检索请用 knowledge_search / knowledge_read`;
+        }
+        return lines;
     }
 
     /**
-     * 构造 system prompt 的知识库段。
-     * 总内容不超过「知识库注入阈值(字符)」时全量注入；超过则只注入标题索引，
-     * 模型需要详情时通过 kb_read 工具按 ID 读取。
+     * 构造 system prompt 的知识库段（纯索引注入，不注入正文）：
+     * 在 KB_INJECT_MAX_CHARS 字符预算内尽可能多列条目索引（上限 KB_INDEX_LIMIT），
+     * 模型需要正文时通过 knowledge_read 按 ID 读取。
      */
-    buildKnowledgePrompt(): string {
+    async buildKnowledgePrompt(_query = ''): Promise<string> {
         if (this.chunks.length === 0) return '';
-        const { KNOWLEDGE_INJECT_THRESHOLD } = Config.knowledgeBase;
-        const total = this.chunks.reduce((sum, c) => sum + c.content.length, 0);
-        if (total <= KNOWLEDGE_INJECT_THRESHOLD) {
-            const body = this.chunks.map((c, i) => `${i + 1}. ${this.formatChunk(c)}`).join('\n\n');
-            return `## 知识库\n${body}`;
+        return this.buildIndexFallback();
+    }
+
+    /** 注入索引兜底：预算内尽可能多列条目（标题 + 小节），正文按需用 knowledge_read 读取 */
+    private buildIndexFallback(): string {
+        const head = `## 知识库\n知识库内容较多（共 ${this.chunks.length} 个分块），以下为条目索引，需要详情时使用 knowledge_read 工具按 ID 读取：\n`;
+        const lines: string[] = [];
+        let total = 0;
+        for (let i = 0; i < this.chunks.length && lines.length < KB_INDEX_LIMIT; i++) {
+            const c = this.chunks[i];
+            const heading = c.heading ? ` - ${c.heading}` : '';
+            const line = `${lines.length + 1}. [${c.id}] ${c.title}${heading}`;
+            if (total + line.length + 1 > KB_INJECT_MAX_CHARS) break;
+            lines.push(line);
+            total += line.length + 1;
         }
-        return `## 知识库\n知识库内容较多（共 ${this.chunks.length} 个分块），以下为条目索引，需要详情时使用 kb_read 工具按 ID 读取：\n${this.formatIndex()}`;
+        const index = lines.join('\n');
+        const remaining = this.chunks.length > lines.length
+            ? `\n…共 ${this.chunks.length} 条，检索请用 knowledge_search / knowledge_read`
+            : '';
+        return head + index + remaining;
     }
 }
 

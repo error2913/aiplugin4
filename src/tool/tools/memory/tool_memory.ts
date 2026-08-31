@@ -1,7 +1,7 @@
 // 记忆工具：添加/更新/删除/搜索/清除记忆
 import Config from "../../../config/config";
 import { MemoryManager } from "../../../memory/manager";
-import { bumpMemoryRevision } from "../../../memory/revision";
+import { bumpMemoryRevision, bumpSummaryRevision } from "../../../memory/revision";
 import { resolveTargetSession } from "../../../memory/session_target";
 import { resolveBankId } from "../../../memory/v2/bank_resolver";
 import { getMemoryEngine } from "../../../memory/v2/index";
@@ -414,7 +414,7 @@ export function registerMemory() {
                     },
                     id: {
                         type: 'string',
-                        description: '要更新的记忆ID（来自记忆列表或 search_memory 结果）'
+                        description: '要更新的记忆ID（来自 memory_recall 搜索结果）'
                     },
                     text: {
                         type: 'string',
@@ -514,6 +514,7 @@ export function registerMemory() {
         if (!target) return `目标ID格式无效<${target_id}>`;
         const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
         const result = await getMemoryEngine().consolidate(bank.bankId);
+        bumpSummaryRevision();
         // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
         let refreshText = '';
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
@@ -524,6 +525,63 @@ export function registerMemory() {
         return `观察巩固完成：新建 ${result.created.length} 条，更新 ${result.updated.length} 条，合并 ${result.merged.length} 条${refreshText}`;
     };
 
+
+    const toolMmList = new Tool({
+        type: 'function',
+        function: {
+            name: 'memory_mm_list',
+            description: '列出指定个人或群聊的心智模型（ID + 问题 + 版本），用于定位要查看/刷新/删除的模型；返回分页列表与总数',
+            parameters: {
+                type: 'object',
+                properties: {
+                    memory_type: { type: 'string', description: '记忆归属，个人或群聊', enum: ['private', 'group'] },
+                    target_id: { type: 'string', description: '目标用户ID或群ID' },
+                    page: { type: 'number', description: '可选：页码，默认 1，每页 10 条' }
+                },
+                required: ['memory_type', 'target_id']
+            }
+        }
+    });
+    toolMmList.solve = async (_ctx, _, session, args) => {
+        const { memory_type, target_id, page } = args;
+        const target = resolveTargetSession(session, memory_type, target_id);
+        if (!target) return `目标ID格式无效<${target_id}>`;
+        const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
+        const models = getMemoryEngine().listMentalModels(bank.bankId);
+        if (models.length === 0) return '暂无心智模型';
+        const perPage = 10;
+        const totalPages = Math.max(1, Math.ceil(models.length / perPage));
+        const p = typeof page === 'number' && page > 0 ? Math.min(Math.floor(page), totalPages) : 1;
+        const items = models.slice((p - 1) * perPage, p * perPage);
+        const lines = items.map(m => `${m.id} ${m.question} (v${m.version} · 更新于${new Date((m.updatedAt || 0) * 1000).toISOString().slice(0, 10)})`);
+        return `心智模型 ${models.length} 条\n${lines.join('\n')}\n当前页码: ${p}/${totalPages}`;
+    };
+
+    const toolMmView = new Tool({
+        type: 'function',
+        function: {
+            name: 'memory_mm_view',
+            description: '查看指定个人或群聊的一条心智模型详情（问题/答案/范围/版本/更新时间）',
+            parameters: {
+                type: 'object',
+                properties: {
+                    memory_type: { type: 'string', description: '记忆归属，个人或群聊', enum: ['private', 'group'] },
+                    target_id: { type: 'string', description: '目标用户ID或群ID' },
+                    model_id: { type: 'string', description: '心智模型 ID（来自 memory_mm_list）' }
+                },
+                required: ['memory_type', 'target_id', 'model_id']
+            }
+        }
+    });
+    toolMmView.solve = async (_ctx, _, session, args) => {
+        const { memory_type, target_id, model_id } = args;
+        const target = resolveTargetSession(session, memory_type, target_id);
+        if (!target) return `目标ID格式无效<${target_id}>`;
+        const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
+        const m = getMemoryEngine().listMentalModels(bank.bankId).find(x => x.id === String(model_id));
+        if (!m) return `未找到心智模型<${model_id}>`;
+        return `【心智模型】${m.question}\n${m.answer}\nID: ${m.id} · v${m.version}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${new Date((m.createdAt || 0) * 1000).toISOString()}\n更新: ${new Date((m.updatedAt || 0) * 1000).toISOString()}`;
+    };
 
     const toolMmCreate = new Tool({
         type: 'function',
@@ -550,7 +608,11 @@ export function registerMemory() {
         const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
         getMemoryEngine().ensureBank(bank.bankId, bank.kind, bank.agentName);
         const defaultTag = target.sessionType === 'group' ? `group:${target.sessionId}` : `user:${target.sessionId}`;
-        const scopeTags = typeof scope_tag === 'string' && scope_tag.trim() ? [scope_tag.trim()] : [defaultTag];
+        // scope_tag 校验/归一化：必须是 user:/group: 前缀，且私聊目标只接受 user:（群标签无意义）；
+        // 非法或与目标类型不符时回退默认标签，避免心智模型因标签不匹配而注入失效
+        const rawTag = typeof scope_tag === 'string' ? scope_tag.trim() : '';
+        const tagOk = rawTag && (rawTag.startsWith('user:') || rawTag.startsWith('group:')) && (target.sessionType === 'group' || rawTag.startsWith('user:'));
+        const scopeTags = tagOk ? [rawTag] : [defaultTag];
         if (typeof answer === 'string' && answer.trim()) {
             const m = await getMemoryEngine().createMentalModel(bank.bankId, String(question || ''), stripInternalTags(answer.trim()), scopeTags);
             bumpMemoryRevision();
@@ -601,28 +663,41 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_mm_delete',
-            description: '删除指定个人或群聊的一条心智模型',
+            description: '删除指定个人或群聊的一条心智模型：传 model_id（来自 memory_mm_list）或 question（问题名，精确匹配），二者至少提供一个',
             parameters: {
                 type: 'object',
                 properties: {
                     memory_type: { type: 'string', description: '记忆归属，个人或群聊', enum: ['private', 'group'] },
                     target_id: { type: 'string', description: '目标用户ID或群ID' },
-                    model_id: { type: 'string', description: '要删除的心智模型 ID' }
+                    model_id: { type: 'string', description: '可选：要删除的心智模型 ID（来自 memory_mm_list）' },
+                    question: { type: 'string', description: '可选：要删除的心智模型问题名（精确匹配，与 model_id 二选一）' }
                 },
-                required: ['memory_type', 'target_id', 'model_id']
+                required: ['memory_type', 'target_id']
             }
         }
     });
     toolMmDelete.solve = async (_ctx, _, session, args) => {
-        const { memory_type, target_id, model_id } = args;
+        const { memory_type, target_id, model_id, question } = args;
         const target = resolveTargetSession(session, memory_type, target_id);
         if (!target) return `目标ID格式无效<${target_id}>`;
         const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
-        const ok = getMemoryEngine().deleteMentalModel(bank.bankId, String(model_id));
-        if (!ok) return `未找到心智模型<${model_id}>`;
+        const engine = getMemoryEngine();
+        const models = engine.listMentalModels(bank.bankId);
+        const mid = model_id !== undefined && model_id !== null && String(model_id).trim() !== '' ? String(model_id).trim() : '';
+        const q = typeof question === 'string' ? question.trim() : '';
+        const targetModel = mid
+            ? models.find(m => m.id === mid)
+            : q ? models.find(m => m.question === q) : undefined;
+        if (!targetModel) {
+            if (mid) return `未找到心智模型<${mid}>`;
+            if (q) return `未找到问题为「${q}」的心智模型`;
+            return '缺少 model_id 或 question';
+        }
+        const ok = engine.deleteMentalModel(bank.bankId, targetModel.id);
+        if (!ok) return `未找到心智模型<${targetModel.id}>`;
         bumpMemoryRevision();
         SessionService.save(target);
-        return `心智模型已删除<${model_id}>`;
+        return `心智模型已删除<${targetModel.id}>：${targetModel.question}`;
     };
 
     const toolReflect = new Tool({

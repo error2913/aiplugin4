@@ -22,6 +22,7 @@ import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { registerCmdMemory } from "../src/cmd/sub_cmd/memory";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
+import { KnowledgeBaseService } from "../src/memory/knowledge_base";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
@@ -41,6 +42,7 @@ import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
+import { getSkillSummariesBudgeted, SKILL_INJECT_MAX_CHARS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
@@ -628,6 +630,148 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(prompt.includes('用户喜欢简洁的回复'), 'Prompt 应包含心智模型答案');
     },
 
+    /** 知识库索引渲染：limit 截断 + 总数提示；不传 limit 保持全量（向后兼容） */
+    testKbFormatIndexLimit(): void {
+        const svc = new KnowledgeBaseService();
+        const chunks = Array.from({ length: 120 }, (_, i) => ({ id: `kb_${i + 1}`, title: `条目${i + 1}`, heading: '', content: `内容${i + 1}` }));
+        const index = svc.formatIndex(chunks as any, 50);
+        const itemLines = index.split('\n').filter(l => /^\d+\. \[/.test(l));
+        assert.equal(itemLines[0], '1. [kb_1] 条目1', '索引首行应为 id + 标题');
+        assert.ok(index.includes('共 120 条'), '超限应提示总数');
+        assert.ok(itemLines.length <= 50, `索引行数应不超过 limit，实际 ${itemLines.length}`);
+        const full = svc.formatIndex(chunks as any);
+        assert.equal(full.split('\n').length, 120, '不传 limit 应全量输出');
+    },
+
+    /** 知识库注入：只展示条目索引（预算内尽可能多列），不注入正文，且条目总字数不超预算 */
+    async testKbBuildKnowledgePromptIndexOnly(): Promise<void> {
+        const svc = new KnowledgeBaseService();
+        const longBody = '很长的正文内容'.repeat(60); // 单块约 420 字符
+        const chunks = Array.from({ length: 30 }, (_, i) => ({ id: `kb_${i + 1}`, title: `条目${i + 1}`, heading: '', content: `${longBody} ${i + 1}` }));
+        (svc as any).chunks = chunks;
+        (svc as any).loadedSignature = 'test'; // 跳过 ensureLoaded 覆盖手动构造的 chunks
+        const prompt = await svc.buildKnowledgePrompt('很长的正文内容');
+        assert.ok(prompt.startsWith('## 知识库'), '应包含知识库标题');
+        assert.ok(prompt.includes('知识库内容较多'), '应展示条目索引');
+        assert.ok(!prompt.includes(longBody), '只展示条目，不应注入正文');
+        const indexLines = prompt.split('\n').filter(l => /^\d+\. \[kb_/.test(l));
+        assert.ok(indexLines.length >= 1 && indexLines.length <= 30, `预算内应尽可能多列条目，实际 ${indexLines.length}`);
+        assert.ok(prompt.length <= 2000, `索引段总字数应控制在预算附近，实际 ${prompt.length}`);
+    },
+
+    /** 技能摘要注入：预算内尽可能多列，超预算截断并标记 truncated（详情用 use_skill / skill_list 按需获取） */
+    testSkillSummariesBudgeted(): void {
+        const all = getSkillSummariesBudgeted(1000000);
+        assert.ok(all.total > 0, '默认技能应非空');
+        assert.equal(all.truncated, false, '大预算不应截断');
+        assert.equal(all.summaries.length, all.total, '大预算应列出全部技能');
+        const tiny = getSkillSummariesBudgeted(1);
+        assert.ok(tiny.total > 0, '默认技能应非空');
+        assert.equal(tiny.truncated, true, '极小预算应截断');
+        assert.ok(tiny.summaries.length < tiny.total, '极小预算只应列出少量技能');
+        const budgeted = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS);
+        const rendered = budgeted.summaries.join('\n');
+        assert.ok(rendered.length <= SKILL_INJECT_MAX_CHARS, `摘要总长应不超预算，实际 ${rendered.length}`);
+    },
+
+    /** buildLongTermPrompt：bank 有心智模型时长期记忆段应注入 ## 心智模型 与答案 */
+    async testBuildLongTermPromptInjectsMentalModel(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ:1';
+            session.sessionType = 'user';
+            session.memory.persona = '无';
+            await engine.createMentalModel('user_QQ:1', '这个用户的偏好是什么？', '喜欢简洁回复', ['user:QQ:1']);
+            const ctx = { isPrivate: true, player: { userId: 'QQ:1', name: '测试员' }, group: null } as any;
+            const uis = [{ isPrivate: true, id: 'QQ:1', name: '测试员' }] as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '你好', uis, null);
+            assert.ok(prompt.includes('## 个人记忆（测试员）'), '私聊应渲染个人记忆分组');
+            assert.ok(prompt.includes('心智模型：') && prompt.includes('喜欢简洁回复'), '分组内应注入心智模型');
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            resetConfigCache();
+        }
+    },
+
+    /** 群聊长期记忆段：并入最近发言者（uis）的个人记忆库——长期记忆 + 个人心智模型，且群记忆/群心智模型保留 */
+    async testBuildLongTermPromptMergesUserMemoryInGroup(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ-Group:1';
+            session.sessionType = 'group';
+            session.memory.persona = '无';
+            // 群记忆 + 群心智模型
+            await engine.addMemory('group_QQ-Group:1', { content: '群规则：不许刷屏', tags: ['group:QQ-Group:1'] });
+            await engine.createMentalModel('group_QQ-Group:1', '群规是什么？', '不许刷屏', ['group:QQ-Group:1']);
+            // 最近发言者的个人记忆 + 个人心智模型（QQ:2）
+            await engine.addMemory('user_QQ:2', { content: '小明喜欢喝咖啡', tags: ['user:QQ:2'] });
+            await engine.createMentalModel('user_QQ:2', '小明的偏好？', '喜欢咖啡', ['user:QQ:2']);
+            const ctx = { isPrivate: false, player: { userId: 'QQ:2', name: '小明' }, group: { groupId: 'QQ-Group:1', groupName: '测试群' } } as any;
+            const uis = [{ isPrivate: true, id: 'QQ:2', name: '小明' }] as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '群规 咖啡', uis, { isPrivate: false, id: 'QQ-Group:1', name: '测试群' } as any);
+            assert.ok(prompt.includes('## 群聊记忆（测试群）'), '应渲染群聊分组');
+            assert.ok(prompt.includes('## 个人记忆（小明）'), '应渲染最近发言者的个人分组');
+            assert.ok(prompt.includes('群规是什么？') && prompt.includes('不许刷屏'), '群心智模型应注入群聊分组');
+            assert.ok(prompt.includes('小明的偏好？') && prompt.includes('喜欢咖啡'), '个人心智模型应注入个人分组');
+            assert.ok(prompt.includes('群规则：不许刷屏'), '群记忆应注入群聊分组');
+            assert.ok(prompt.includes('小明喜欢喝咖啡'), '最近发言者的个人记忆应注入个人分组');
+            // 归属隔离：个人心智模型/记忆不应出现在群聊分组之前，避免混在一起
+            const groupIdx = prompt.indexOf('## 群聊记忆');
+            const personalIdx = prompt.indexOf('## 个人记忆');
+            assert.ok(groupIdx >= 0 && personalIdx > groupIdx, '群聊分组应排在个人分组之前');
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            resetConfigCache();
+        }
+    },
+
+    /** buildObservationPrompt：观察超过上限时裁剪到 MAX_OBSERVATIONS（不再全量注入） */
+    testBuildObservationPromptTrimmed(): void {
+        const origSummary = TC.boolConfigs['启用观察记忆'];
+        TC.boolConfigs['启用观察记忆'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ:1';
+            session.sessionType = 'user';
+            const nowSec = Math.floor(Date.now() / 1000);
+            const repo = engine.repository;
+            for (let i = 0; i < 25; i++) {
+                repo.addObservation('user_QQ:1', {
+                    id: `obs_${i}`,
+                    bankId: 'user_QQ:1',
+                    text: `观察${i}`,
+                    scopeTags: [],
+                    evidence: [],
+                    proofCount: 1,
+                    createdAt: nowSec - 1000 + i,
+                    updatedAt: nowSec - 1000 + i,
+                    lastVerifiedAt: nowSec - 10,
+                    history: [],
+                } as any);
+            }
+            const prompt = MemoryManager.buildObservationPrompt(session);
+            assert.ok(prompt.includes('## 观察记忆'), '观察段应包含标题');
+            const lines = prompt.split('\n').filter(l => /^\d+\. /.test(l));
+            assert.equal(lines.length, MAX_OBSERVATIONS, `观察应裁剪到上限 ${MAX_OBSERVATIONS}`);
+        } finally {
+            if (origSummary === undefined) delete TC.boolConfigs['启用观察记忆']; else TC.boolConfigs['启用观察记忆'] = origSummary;
+            resetConfigCache();
+        }
+    },
+
     /** Hindsight-like 新引擎：旧记忆迁移到新 Bank */
     async testV2MigrateLegacyMemory(): Promise<void> {
         const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
@@ -773,14 +917,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const mkMM = (id: string, question: string, answer: string, scopeTags: string[], updatedAt: number) =>
             makeTestMentalModel(id, question, answer, scopeTags, updatedAt);
 
-        // scopeTags 过滤：空=全局放行；任一标签不命中即剔除（all_strict）
+        // scopeTags 过滤：空=全局放行；任一标签命中即注入；完全不命中才剔除（放宽 all_strict）
         const sel = selectInjectionCandidates(
             [mkMM('mm_other', '他人模型', 'C', ['user:QQ:2'], nowSec - 30), mkMM('mm_match', '命中模型', 'B', ['user:QQ:1'], nowSec - 20), mkMM('mm_global', '全局模型', 'A', [], nowSec - 10)],
             [mkObs('o_other', '他人观察', ['user:QQ:2'], nowSec - 30), mkObs('o_multi', '多标签观察', ['user:QQ:1', 'vis:public'], nowSec - 40), mkObs('o_match', '命中观察', ['user:QQ:1'], nowSec - 20), mkObs('o_global', '全局观察', [], nowSec - 10)],
             ['user:QQ:1'],
             now
         );
-        assert.deepEqual(sel.observations.map(o => o.id).sort(), ['o_global', 'o_match'], '空 scopeTags 应全局放行，不匹配/缺标签应剔除');
+        assert.deepEqual(sel.observations.map(o => o.id).sort(), ['o_global', 'o_match', 'o_multi'], '任一 scopeTag 命中即注入，空 scopeTags 全局放行，完全不匹配剔除');
         assert.deepEqual(sel.mentalModels.map(m => m.id).sort(), ['mm_global', 'mm_match']);
 
         // stale 剔除：lastVerifiedAt 距今超过 90 天剔除；缺省 lastVerifiedAt 回退 updatedAt
@@ -2834,6 +2978,46 @@ export const tests: Record<string, () => void | Promise<void>> = {
             replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'list'], [{ name: 'u' }])));
             assert.ok(replied.includes('【个人:QQ:10000】心智模型为空'), `--u 查看本人应显示个人范围: ${replied}`);
             assert.ok(!replied.includes('--u 查看自己的心智模型'), `个人范围不应重复引导 --u: ${replied}`);
+        } finally {
+            if (origMemory) SubCmd.map['memory'] = origMemory; else delete SubCmd.map['memory'];
+        }
+    },
+
+    /** .ai memo：mm del 别名归一化（del→delete）后真正删除；手输 delete 同样生效 */
+    async testCmdMemoMmDeleteAlias(): Promise<void> {
+        const origMemory = SubCmd.map['memory'];
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            registerCmdMemory();
+            const groupSession = makeMemoSession('QQ-Group:1064487252');
+            const mkGroupScc = (cmdArgs: any) => makeMemoScc({
+                session: groupSession,
+                ctx: { isPrivate: false, group: { groupId: 'QQ-Group:1064487252', groupName: '测试群' } },
+                gid: 'QQ-Group:1064487252',
+                sid: 'QQ-Group:1064487252',
+                cmdArgs,
+            });
+            const bank = 'group_QQ-Group:1064487252';
+
+            // add 一条，取回模型 ID
+            let replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'add', '群规则是什么？', '不许刷屏'])));
+            assert.ok(replied.includes('心智模型已添加<'), `add 应返回模型 ID: ${replied}`);
+            const id = (replied.match(/<([^>]+)>/) || [])[1];
+            assert.ok(id, `应能解析出模型 ID: ${replied}`);
+            assert.equal(getMemoryEngine().listMentalModels(bank).length, 1, 'add 后 bank 应有 1 条');
+
+            // mm del <id>：del 经 ALIAS_MAP 归一化为 delete，应命中删除分支而非帮助文本
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'del', id])));
+            assert.ok(replied.includes('心智模型已删除'), `mm del 应真正删除: ${replied}`);
+            assert.equal(getMemoryEngine().listMentalModels(bank).length, 0, 'mm del 后 bank 应为空');
+
+            // 再 add 一条，手输 delete <id>（全名）也应删除
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'add', '偏好？', '简洁'])));
+            const id2 = (replied.match(/<([^>]+)>/) || [])[1];
+            assert.ok(id2, `第二次 add 应返回模型 ID: ${replied}`);
+            replied = await runMemo(mkGroupScc(makeMemoArgs(['memo', 'mm', 'delete', id2])));
+            assert.ok(replied.includes('心智模型已删除'), `mm delete 也应删除: ${replied}`);
+            assert.equal(getMemoryEngine().listMentalModels(bank).length, 0, 'mm delete 后 bank 应为空');
         } finally {
             if (origMemory) SubCmd.map['memory'] = origMemory; else delete SubCmd.map['memory'];
         }

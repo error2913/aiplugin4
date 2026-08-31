@@ -256,6 +256,8 @@ max_tokens = 2048
 |:---:|:---|
 | 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认包含核心命令、内置扩展命令及别名的 `run_ext_command` / `run_core_command` 调用帮助。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 
+> system prompt 的「可用技能」段只列技能摘要（名称 + 描述，1500 字符预算内尽可能多列），技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文。
+
 ### 记忆
 
 | 设置项 | 说明 |
@@ -280,7 +282,7 @@ max_tokens = 2048
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库注入阈值(字符) | 知识库总内容不超过该值时全量注入；超过时只注入条目索引，模型用 kb_read 工具读取详情（默认 5000） |
+| 知识库注入阈值(字符) | 已弃用：知识库注入只列条目索引（ID + 标题，1500 字符预算内尽可能多列，最多 100 条），不注入正文；模型用 knowledge_read 工具按 ID 读取详情（保留该配置仅为兼容旧存档） |
 | 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 kb 工具/指令检索。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
@@ -436,8 +438,8 @@ max_tokens = 2048
 
 | 分类 | 工具函数 |
 |:---:|:---|
-| 记忆 | `add_memory`、`update_memory`、`del_memory`、`search_memory`、`clear_memory`、`reflect_memory`、`consolidate_memory` |
-| 知识库 | `kb_search`、`kb_read`、`kb_list`（只读检索，内容由配置维护） |
+| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
+| 知识库 | `knowledge_search`、`knowledge_read`、`knowledge_list`（只读检索，内容由配置维护） |
 | OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
 | 特殊ID | `resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
@@ -454,7 +456,7 @@ max_tokens = 2048
 | 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
-| MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`（技能） |
+| MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`、`skill_list`（技能） |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 

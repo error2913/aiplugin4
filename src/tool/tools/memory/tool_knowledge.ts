@@ -1,5 +1,5 @@
 // 知识库工具：只读检索（search/read/list），内容由配置维护，AI 不能增删
-import { knowledgeService } from "../../../memory/knowledge";
+import { KB_LIST_LIMIT, knowledgeService } from "../../../memory/knowledge";
 import Tool from "../../tool";
 
 // 单次检索返回条数上限，防止模型请求超大 topK 造成上下文/API 浪费
@@ -39,7 +39,7 @@ export function registerKnowledgeTools() {
         type: 'function',
         function: {
             name: 'knowledge_read',
-            description: '按 ID 读取知识库中某个条目的完整内容，ID 来自 kb_list 或 kb_search 的结果',
+            description: '按 ID 读取知识库中某个条目的完整内容，ID 来自 knowledge_list 或 knowledge_search 的结果',
             parameters: {
                 type: 'object',
                 properties: {
@@ -72,7 +72,7 @@ export function registerKnowledgeTools() {
     });
     toolList.solve = async () => {
         await knowledgeService.init();
-        const index = knowledgeService.formatIndex();
+        const index = knowledgeService.formatIndex(undefined, KB_LIST_LIMIT);
         return index ? index : '知识库为空';
     };
 }
