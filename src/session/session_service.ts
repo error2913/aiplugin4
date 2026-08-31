@@ -47,6 +47,15 @@ export class SessionService {
             session.sessionId = sessionId;
             // 群 ID 统一带 -Group: 标记（海豹通用），其余视为私聊用户会话，不再只认 QQ: 前缀
             session.sessionType = sessionId.includes('-Group:') ? 'group' : 'user';
+            // 恢复挂起队列轻量分片：ctx/msg 是运行时对象，重载后由续跑时按 epId/isPrivate 重建（失败则只入库不续跑）
+            try {
+                const pendingRaw = JSON.parse(ext.storageGet(`session_${sessionId}:pending`) || '[]');
+                if (Array.isArray(pendingRaw) && pendingRaw.length > 0) {
+                    session.pendingQueue = pendingRaw as any;
+                }
+            } catch (error) {
+                logger.error(`加载会话${sessionId}的挂起队列失败: ${error}`);
+            }
             session.agentName = this.agentName;
             // listen 是运行时对象，函数不会被 JSON 持久化；每次恢复会话都重新创建。
             session.tool.listen = createToolListen();

@@ -175,7 +175,7 @@ export class MemoryEngine {
         }
 
         const unitId = generateId();
-        const entityIds = this.resolveEntityIds(bankId, input.entities || []);
+        const entityIds = this.resolveEntityIds(bankId, input.entities || [], false);
         const unit: MemoryUnit = {
             id: unitId,
             bankId,
@@ -198,7 +198,7 @@ export class MemoryEngine {
             state: 'valid',
             consolidationState: 'pending',
         };
-        this.repository.addUnit(bankId, unit);
+        this.repository.addUnit(bankId, unit, false);
 
         // 实体链接：同一实体的所有有效记忆互连。
         for (const entityId of entityIds) {
@@ -211,7 +211,7 @@ export class MemoryEngine {
                     entityId,
                     weight: 1,
                     createdAt: now,
-                });
+                }, false);
             }
         }
 
@@ -227,7 +227,7 @@ export class MemoryEngine {
                         linkType: 'semantic',
                         weight: sim,
                         createdAt: now,
-                    });
+                    }, false);
                 }
             }
         }
@@ -240,19 +240,21 @@ export class MemoryEngine {
                 contentHash: simpleHash(text),
                 createdAt: now,
                 metadata: input.metadata || {},
-            });
+            }, false);
             this.repository.addChunk(bankId, {
                 id: `${input.documentId}_${unitId}`,
                 documentId: input.documentId,
                 bankId,
                 text,
                 embedding: unit.embedding.length ? unit.embedding : undefined,
-            });
+            }, false);
         }
 
         // 遗忘机制：超限时按覆盖/衰减优先级物理删除多余记忆（上限为硬约束）
-        await this.pruneBank(bankId);
+        await this.pruneBank(bankId, false);
 
+        // 批量写穿：retain 全程 persist=false 累计变更，末尾统一落盘一次
+        this.repository.save(bankId);
         return { unitIds: [unitId], documentId: input.documentId, action: 'added' };
     }
 
@@ -423,7 +425,9 @@ export class MemoryEngine {
         try {
             const result = await this.doConsolidate(bankId);
             // 遗忘机制：consolidate 后大量细节已被 observation 覆盖，覆盖优先物理删（上限硬约束）
-            await this.pruneBank(bankId);
+            // doConsolidate 末尾已统一落盘一次；若 pruneBank 实际淘汰了单元，须再落盘一次，否则淘汰只停留在内存、重载后复活
+            const evicted = await this.pruneBank(bankId, false);
+            if (evicted.length > 0) this.repository.save(bankId);
             return result;
         } finally {
             this.consolidatingBanks.delete(bankId);
@@ -435,10 +439,14 @@ export class MemoryEngine {
         if (!bank) return { created: [], updated: [], merged: [], skipped: 0 };
 
         // Hindsight 式惰性清理：观察记忆长期未验证视为过期，直接清理（连同同步 unit/evidence/links）
-        this.cleanupStaleObservations(bankId);
+        const staleRemoved = this.cleanupStaleObservations(bankId);
 
         const pending = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending');
-        if (pending.length === 0) return { created: [], updated: [], merged: [], skipped: 0 };
+        if (pending.length === 0) {
+            // 清理过期观察可能已产生变更，仍需落盘一次
+            if (staleRemoved > 0) this.repository.save(bankId);
+            return { created: [], updated: [], merged: [], skipped: 0 };
+        }
 
         const clusters: MemoryUnit[][] = [];
         const used = new Set<string>();
@@ -474,8 +482,8 @@ export class MemoryEngine {
                 similar.history.push({ text: observationText, reason: 'refined', at: now });
                 similar.updatedAt = now;
                 similar.lastVerifiedAt = now;
-                this.repository.updateObservation(bankId, similar);
-                this.syncObservationUnit(bankId, similar, now);
+                this.repository.updateObservation(bankId, similar, false);
+                this.syncObservationUnit(bankId, similar, now, false);
                 updated.push(similar.id);
             } else {
                 const obsId = generateId();
@@ -491,32 +499,35 @@ export class MemoryEngine {
                     lastVerifiedAt: now,
                     history: [{ text: observationText, reason: 'created', at: now }],
                 };
-                this.repository.addObservation(bankId, observation);
-                this.syncObservationUnit(bankId, observation, now);
+                this.repository.addObservation(bankId, observation, false);
+                this.syncObservationUnit(bankId, observation, now, false);
                 created.push(obsId);
             }
-            this.repository.markUnitConsolidated(bankId, cluster.map(u => u.id));
+            this.repository.markUnitConsolidated(bankId, cluster.map(u => u.id), undefined, false);
         }
 
-        const dedup = this.repository.mergeSimilarObservations(bankId, SEMANTIC_SIMILARITY_THRESHOLD);
+        const dedup = this.repository.mergeSimilarObservations(bankId, SEMANTIC_SIMILARITY_THRESHOLD, false);
         merged.push(...dedup.merged);
 
+        // 批量写穿：consolidate 全程 persist=false 累计变更，末尾统一落盘一次
+        this.repository.save(bankId);
         return { created, updated, merged, skipped };
     }
 
 
     /** 清理超过 OBSERVATION_STALE_DAYS 未验证的观察记忆（与注入时的 STALE 剔除口径一致） */
-    private cleanupStaleObservations(bankId: string): void {
+    private cleanupStaleObservations(bankId: string): number {
         const bank = this.repository.getBank(bankId);
-        if (!bank) return;
+        if (!bank) return 0;
         const now = Math.floor(Date.now() / 1000);
         const staleCutoff = now - OBSERVATION_STALE_DAYS * 86400;
         const staleIds = bank.observations
             .filter(o => (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff)
             .map(o => o.id);
         for (const obsId of staleIds) {
-            this.repository.deleteObservation(bankId, obsId);
+            this.repository.deleteObservation(bankId, obsId, false);
         }
+        return staleIds.length;
     }
 
     // ===== Consolidation 计数（驱动「每隔多少次观察整合一次记忆」配置） =====
@@ -544,7 +555,7 @@ export class MemoryEngine {
         return quotes.join('；');
     }
 
-    private syncObservationUnit(bankId: string, observation: Observation, now: number): void {
+    private syncObservationUnit(bankId: string, observation: Observation, now: number, persist = true): void {
         let unit = this.repository.getUnit(bankId, observation.id);
         if (!unit) {
             unit = {
@@ -564,12 +575,12 @@ export class MemoryEngine {
                 state: 'valid',
                 consolidationState: 'done',
             };
-            this.repository.addUnit(bankId, unit);
+            this.repository.addUnit(bankId, unit, persist);
         } else {
             unit.text = observation.text;
             unit.tags = observation.scopeTags;
             unit.updatedAt = observation.updatedAt;
-            this.repository.updateUnit(bankId, unit);
+            this.repository.updateUnit(bankId, unit, persist);
         }
     }
 
@@ -726,7 +737,7 @@ export class MemoryEngine {
         }
     }
 
-    private resolveEntityIds(bankId: string, names: string[]): string[] {
+    private resolveEntityIds(bankId: string, names: string[], persist = true): string[] {
         const ids: string[] = [];
         const now = Math.floor(Date.now() / 1000);
         for (const raw of names) {
@@ -745,14 +756,14 @@ export class MemoryEngine {
                     lastSeen: now,
                     mentionCount: 1,
                 };
-                this.repository.addEntity(bankId, entity);
+                this.repository.addEntity(bankId, entity, persist);
             } else {
                 entity.lastSeen = now;
                 entity.mentionCount++;
                 if (!entity.aliases.includes(name) && normalizeName(entity.canonicalName) !== normalizeName(name)) {
                     entity.aliases.push(name);
                 }
-                this.repository.updateEntity(bankId, entity);
+                this.repository.updateEntity(bankId, entity, persist);
             }
             ids.push(entity.id);
         }
@@ -870,7 +881,7 @@ export class MemoryEngine {
     }
 
     /** 召回/巩固后触发：超过条数上限时物理删除多余记忆（上限为硬约束）。返回被淘汰的 unit id */
-    private async pruneBank(bankId: string): Promise<string[]> {
+    private async pruneBank(bankId: string, persist = true): Promise<string[]> {
         if (this.memoryCap <= 0) return [];
         const bank = this.repository.getBank(bankId);
         if (!bank) return [];
@@ -892,7 +903,7 @@ export class MemoryEngine {
             return (a.lastAccessedAt || 0) - (b.lastAccessedAt || 0);
         });
         const toEvict = sorted.slice(0, valid.length - this.memoryCap).map(u => u.id);
-        if (toEvict.length > 0) this.repository.deleteUnits(bankId, toEvict);
+        if (toEvict.length > 0) this.repository.deleteUnits(bankId, toEvict, persist);
         return toEvict;
     }
 

@@ -99,6 +99,11 @@ function getJudgeConfig(): JudgeConfig {
     return judgeConfigCache;
 }
 
+/** 仅供单元测试使用：清空模块级缓存，模拟重载 JS 后重新解析评分触发配置 */
+export function resetJudgeConfigCacheForTest(): void {
+    judgeConfigCache = null;
+}
+
 export default class TriggerConfig {
     static register() {
         seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "消息触发");

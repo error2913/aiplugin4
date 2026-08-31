@@ -13,6 +13,7 @@ import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
 import { buildSystemMessage, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { getSessionCtxAndMsg } from "../utils/seal";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, StopError, TypeDescriptor } from "../utils/utils";
 import { resetStopEvent } from "../utils/utils";
@@ -139,7 +140,18 @@ export default class Agent {
         const firstTrigger = session.pendingQueue.find(p => p.kind === 'trigger');
         const hasTrigger = await session.flushPending();
         if (hasTrigger && firstTrigger && session.stopVersion === version && !session.stopEvent.fired) {
-            await session.chat(firstTrigger.ctx, firstTrigger.msg, '挂起触发');
+            // 重载恢复的挂起消息没有 ctx/msg 运行时对象：按落盘的 epId/isPrivate 重建；失败则跳过续跑（消息已入库不丢）
+            let ctx = firstTrigger.ctx;
+            let msg = firstTrigger.msg;
+            if (!ctx || !msg) {
+                try {
+                    ({ ctx, msg } = getSessionCtxAndMsg(firstTrigger.epId, session.sessionId, firstTrigger.isPrivate));
+                } catch (e) {
+                    Logger.warning(`恢复挂起触发上下文失败，跳过续跑: ${e instanceof Error ? e.message : String(e)}`);
+                    return;
+                }
+            }
+            await session.chat(ctx, msg, '挂起触发');
         }
     }
 

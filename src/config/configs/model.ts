@@ -20,6 +20,12 @@ interface ModelConfigData {
 }
 let modelConfigCache: ModelConfigData | null = null;
 
+/** 仅供单元测试使用：清空模块级缓存，模拟重载 JS 后重新解析模型配置 */
+export function resetModelConfigCacheForTest(): void {
+    modelConfigCache = null;
+}
+
+
 export default class ModelConfig {
 
     static register() {

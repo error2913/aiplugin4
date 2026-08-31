@@ -56,8 +56,8 @@ export class TimerManager {
             const data = JSON.parse(ext.storageGet(`timerQueue`) || '[]')
             if (!Array.isArray(data)) throw new Error('timerQueue不是数组');
             data.forEach((item: any) => {
-                if (!Object.prototype.hasOwnProperty.call(item, 'sessionId')) return;
-                if (!Object.prototype.hasOwnProperty.call(item, 'sessionType')) return;
+                // 旧实现的过滤条件用 sessionId/sessionType 字段名，与 TimerInfo 的 sid/isPrivate 不一致，导致重载后队列恒空；改为校验实际存档字段 sid
+                if (!Object.prototype.hasOwnProperty.call(item, 'sid')) return;
                 this.timerQueue.push(revive(TimerInfo, item));
             });
         } catch (e) {
@@ -240,19 +240,25 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 
             this.isTaskRunning = true;
 
-            const timerQueue = [...this.timerQueue];
-            this.timerQueue = [];
-            let changed = false;
-            for (const timer of timerQueue) {
+            // 写穿式处理：不再整体清空队列再重建，改为遍历快照，逐条按语义就地变更（保留/移除）并立即落盘，
+            // 任何一步完成后存储与内存队列始终一致，进程随时被杀都不会丢已变更的状态
+            const snapshot = [...this.timerQueue];
+            const removeTimer = (timer: TimerInfo) => {
+                const idx = this.timerQueue.indexOf(timer);
+                if (idx !== -1) this.timerQueue.splice(idx, 1);
+                this.saveTimerQueue();
+            };
+            for (const timer of snapshot) {
                 try {
                     switch (timer.type) {
                         case 'target': {
                             const target = timer.target;
                             if (target > Math.floor(Date.now() / 1000)) {
-                                this.timerQueue.push(timer);
+                                // 未到点：队列本就保留该定时器，无需任何操作
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
                                 log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                removeTimer(timer);
                                 continue;
                             }
 
@@ -266,15 +272,11 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 当前触发时间：${fmtDate(Math.floor(Date.now() / 1000))}
 提示内容：${content}`;
 
-                            // 与 interval 一致：执行前先重新入队，执行失败时定时器不会静默丢失，会在下一轮重试
-                            this.timerQueue.push(timer);
                             try {
                                 await session.context.addSystemUserMessage(s, "定时器触发提示");
                                 await session.chat(ctx, msg, '定时任务');
-                                // 一次性定时器执行成功，从队列移除
-                                const idx = this.timerQueue.indexOf(timer);
-                                if (idx !== -1) this.timerQueue.splice(idx, 1);
-                                changed = true;
+                                // 一次性定时器执行成功，从队列移除并立即落盘；执行失败保留（下一轮重试）
+                                removeTimer(timer);
                             } catch (e) {
                                 log.exception(`${timer.sid} 执行 ${timer.type} 定时器出错`, e);
                             }
@@ -283,10 +285,10 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                         case 'interval': {
                             const target = timer.set + timer.interval;
                             if (target > Math.floor(Date.now() / 1000)) {
-                                this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
                                 log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                removeTimer(timer);
                                 continue;
                             }
 
@@ -294,12 +296,19 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const session = getSession(sid);
 
+                            // 无效次数：不触发，直接移除
+                            if (count === 0 || count < -1) {
+                                removeTimer(timer);
+                                break;
+                            }
+                            // 循环/未到末次：执行前先更新 set/count 并落盘，执行失败也不丢（与原「先重新入队」语义一致）
                             if (count === -1 || count > 1) {
                                 timer.set = Math.floor(Date.now() / 1000);
                                 timer.count = count === -1 ? -1 : count - 1;
-                                this.timerQueue.push(timer);
-                            } else if (count === 0 || count < -1) {
-                                continue;
+                                this.saveTimerQueue();
+                            } else {
+                                // count === 1：本次为最后一次，执行前移除并落盘（原清队语义：末次触发后不再入队）
+                                removeTimer(timer);
                             }
 
                             const s = `你设置的定时器触发了，请按照以下内容发送回复：
@@ -311,17 +320,15 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 
                             await session.context.addSystemUserMessage(s, "定时器触发提示");
                             await session.chat(ctx, msg, '定时任务');
-
-                            changed = true;
                             break;
                         }
                         case 'activeTime': {
                             const target = timer.target;
                             if (target > Math.floor(Date.now() / 1000)) {
-                                this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
                                 log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                removeTimer(timer);
                                 continue;
                             }
 
@@ -333,11 +340,14 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             const nextTimePoint = session.getNextTimePoint(curSegIndex);
                             if (curSegIndex === -1) {
                                 log.error(`${sid} 不在活跃时间内，触发了 activeTime 定时器，真奇怪\ncurSegIndex:${curSegIndex},setTime:${set},nextTimePoint:${fmtDate(nextTimePoint)}`);
+                                removeTimer(timer);
                                 continue;
                             }
                             if (nextTimePoint !== -1) {
                                 this.addActiveTimeTimer(ctx, session, nextTimePoint);
                             }
+                            // 旧 activeTime 定时器已执行/被新定时器替代，从队列移除并落盘（addActiveTimeTimer 已把新定时器入队并落盘）
+                            removeTimer(timer);
 
                             const messages = session.context.messages;
                             const lastMsg = messages[messages.length - 1] as any;
@@ -350,32 +360,30 @@ ${lastTimePrompt}
 
                             await session.context.addSystemUserMessage(s, "活跃时间触发提示");
                             await session.chat(ctx, msg, '活跃时间');
-
-                            changed = true;
                             break;
                         }
                         case 'judgeWait': {
                             const target = timer.target;
                             if (target > Math.floor(Date.now() / 1000)) {
-                                this.timerQueue.push(timer);
                                 continue;
                             } else if (Math.floor(Date.now() / 1000) - target >= 60 * 60) {
                                 log.info(`${timer.sid} 的${timer.type}定时器触发了，超时一小时，忽略执行`);
+                                removeTimer(timer);
                                 continue;
                             }
 
-                            // WAIT 轮末兜底：轮内若有挂起消息则重新过 gate 评分；一次性定时器，轮未到点（秒级定时目标与毫秒截止的舍入差）时重新入队
+                            // WAIT 轮末兜底：轮内若有挂起消息则重新过 gate 评分；一次性定时器，轮未到点（秒级定时目标与毫秒截止的舍入差）时保留
                             const ended = await JudgeManager.endWaitRound(timer.sid);
                             if (!ended) {
-                                // 未到点通常意味着 waitUntil 被新一轮 WAIT 延长；若该会话已有更新的 judgeWait 定时器，
+                                // 未到点通常意味着 waitUntil 被新一轮 WAIT 延长；若该会话已有更新的 judgeWait 定时器（非当前快照项），
                                 // 说明旧定时器已被覆盖（含 task 快照与新建之间的竞态），直接丢弃避免堆积
-                                if (this.getTimers(timer.sid, '', ['judgeWait']).length > 0) {
-                                    continue;
+                                const hasNewer = this.timerQueue.some(t => t !== timer && t.sid === timer.sid && t.type === 'judgeWait');
+                                if (hasNewer) {
+                                    removeTimer(timer);
                                 }
-                                this.timerQueue.push(timer);
                                 continue;
                             }
-                            changed = true;
+                            removeTimer(timer);
                             break;
                         }
                     }
@@ -384,10 +392,6 @@ ${lastTimePrompt}
                 } catch (e) {
                     log.error(`${timer.sid} 执行 ${timer.type} 定时器出错，错误信息:${e instanceof Error ? e.message : String(e)}`);
                 }
-            }
-
-            if (changed) {
-                this.saveTimerQueue();
             }
 
             this.isTaskRunning = false;

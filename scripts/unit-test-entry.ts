@@ -2,7 +2,9 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 
-import Config from "../src/config/config";
+import Config, { ext } from "../src/config/config";
+import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
+import { resetModelConfigCacheForTest } from "../src/config/configs/model";
 Config.registerConfig();
 
 import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages, textToMultimodalContent } from "../src/utils/message";
@@ -25,7 +27,7 @@ import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
 import { resolveBankId } from "../src/memory/v2/bank_resolver";
 import { buildMemoryPrompt, MAX_MENTAL_MODELS, MAX_OBSERVATIONS, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../src/memory/v2/prompt";
-import { InMemoryMemoryStorage } from "../src/memory/v2/storage";
+import { InMemoryMemoryStorage, SealMemoryStorage } from "../src/memory/v2/storage";
 import { createMemoryEngine, getMemoryEngine, resetMemoryEngineForTest, MENTAL_MODEL_PERSONA_QUESTION } from "../src/memory/v2";
 import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
@@ -36,7 +38,7 @@ import Model from "../src/model/model";
 import MultimodalModel from "../src/model/multimodal";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
-import { TimerManager } from "../src/timer";
+import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
@@ -49,6 +51,8 @@ const TC = (globalThis as any).__TEST_CONFIG__;
 
 function resetConfigCache() {
     (Config as any).cache = {};
+    resetJudgeConfigCacheForTest();
+    resetModelConfigCacheForTest();
 }
 
 function makeCtx(): any {
@@ -3094,5 +3098,363 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const out = await withTimeout(async () => 'again', 1000, { stopEvent: ev });
             assert.equal(out, 'again');
         }
-    }
+    },
+    /** 定时器队列重载恢复：按 TimerInfo 实际存档字段（sid/isPrivate/epId）恢复；旧字段名（sessionId/sessionType）条目被跳过（历史 bug：过滤条件与存档字段不一致导致重载后队列恒空） */
+    testTimerGetQueueRestoresFromArchive(): void {
+        const origGet = (ext as any).storageGet;
+        const origQueue = TimerManager.timerQueue;
+        const origIntervalId = TimerManager.intervalId;
+        TimerManager.timerQueue = [];
+        TimerManager.intervalId = 1; // 阻止 add* 触发轮询
+        const archived = [
+            { sid: 'QQ:10000', isPrivate: true, epId: 'QQ:999', set: 100, target: 200, interval: 0, count: 1, type: 'target', content: '提醒喝水' },
+            { sessionId: 'QQ:10000', sessionType: 'user', set: 300, target: 400, type: 'target' }, // 旧格式：应跳过
+        ];
+        (ext as any).storageGet = (key: string) => key === 'timerQueue' ? JSON.stringify(archived) : '';
+        try {
+            TimerManager.getTimerQueue();
+            assert.equal(TimerManager.timerQueue.length, 1, '只应恢复带 sid 的条目');
+            const t = TimerManager.timerQueue[0];
+            assert.equal(t.sid, 'QQ:10000');
+            assert.equal(t.isPrivate, true);
+            assert.equal(t.epId, 'QQ:999');
+            assert.equal(t.type, 'target');
+            assert.equal(t.target, 200);
+            assert.equal(t.content, '提醒喝水');
+        } finally {
+            (ext as any).storageGet = origGet;
+            TimerManager.timerQueue = origQueue;
+            TimerManager.intervalId = origIntervalId;
+        }
+    },
+
+    /** 定时器添加即写穿：addTargetTimer 后存储与内存队列一致（变更即落盘，不依赖轮询回调） */
+    testTimerAddPersistsImmediately(): void {
+        const origSet = (ext as any).storageSet;
+        const origQueue = TimerManager.timerQueue;
+        const origIntervalId = TimerManager.intervalId;
+        TimerManager.timerQueue = [];
+        TimerManager.intervalId = 1;
+        const writes = new Map<string, string>();
+        (ext as any).storageSet = (key: string, value: string) => { writes.set(key, value); };
+        try {
+            const ctx = { ...makeCtx(), isPrivate: true };
+            const session = { id: 'QQ:10000' } as any;
+            TimerManager.addTargetTimer(ctx, session, 1234567890, '测试提醒');
+            assert.equal(TimerManager.timerQueue.length, 1, '添加后内存队列应有 1 条');
+            const raw = writes.get('timerQueue');
+            assert.ok(raw, '添加后应立即写入 timerQueue 存档');
+            const saved = JSON.parse(raw!);
+            assert.equal(saved.length, 1);
+            assert.equal(saved[0].sid, 'QQ:10000');
+            assert.equal(saved[0].isPrivate, true);
+            assert.equal(saved[0].epId, 'QQ:10000');
+            assert.equal(saved[0].type, 'target');
+            assert.equal(saved[0].target, 1234567890);
+            assert.equal(saved[0].content, '测试提醒');
+            assert.deepEqual(JSON.parse(raw!), JSON.parse(JSON.stringify(TimerManager.timerQueue)), '存档应与内存队列一致');
+        } finally {
+            (ext as any).storageSet = origSet;
+            TimerManager.timerQueue = origQueue;
+            TimerManager.intervalId = origIntervalId;
+        }
+    },
+
+    /** 目标定时器到点执行：成功后从队列移除并立即落盘（写穿）；失败保留待下一轮重试 */
+    async testTimerTaskFiredTargetWriteThrough(): Promise<void> {
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        const origQueue = TimerManager.timerQueue;
+        const origIntervalId = TimerManager.intervalId;
+        const origIsTaskRunning = TimerManager.isTaskRunning;
+        const origGetEndPoints = (globalThis as any).seal.getEndPoints;
+        const origCreateTempCtx = (globalThis as any).seal.createTempCtx;
+
+        const writes = new Map<string, string>();
+        (ext as any).storageSet = (key: string, value: string) => { writes.set(key, value); };
+        (ext as any).storageGet = (key: string) => writes.get(key) ?? '';
+        (globalThis as any).seal.getEndPoints = () => [{ userId: 'QQ:10000' }];
+        (globalThis as any).seal.createTempCtx = (_ep: any, msg: any) => ({
+            player: { userId: 'QQ:10000', name: '测试员' },
+            endPoint: { userId: 'QQ:10000' },
+            isPrivate: msg?.messageType === 'private',
+            group: null,
+        });
+
+        TimerManager.timerQueue = [];
+        TimerManager.intervalId = 1;
+        TimerManager.isTaskRunning = false;
+        const svc = Agent.get('*').sessionService;
+        const sid = 'QQ:10000';
+        const origSession = svc.sessionMap[sid];
+        try {
+            let chatCalled = 0;
+            svc.sessionMap[sid] = {
+                id: sid,
+                sessionId: sid,
+                chat: async () => { chatCalled++; },
+                context: { addSystemUserMessage: async () => { } },
+            } as any;
+
+            const now = Math.floor(Date.now() / 1000);
+            const timer = new TimerInfo();
+            timer.sid = sid;
+            timer.isPrivate = true;
+            timer.epId = 'QQ:10000';
+            timer.set = now - 10;
+            timer.target = now - 5; // 已到点
+            timer.content = '到点提醒';
+            TimerManager.timerQueue.push(timer);
+            TimerManager.saveTimerQueue();
+
+            await TimerManager.task();
+
+            assert.equal(chatCalled, 1, '到点目标定时器应执行一次');
+            assert.equal(TimerManager.timerQueue.length, 0, '执行成功后应从内存队列移除');
+            assert.equal(JSON.parse(writes.get('timerQueue') || '[]').length, 0, '移除后应立即落盘空队列（写穿）');
+
+            // 执行失败：定时器保留在队列（下一轮重试，不静默丢失）
+            svc.sessionMap[sid] = {
+                id: sid,
+                sessionId: sid,
+                chat: async () => { throw new Error('chat 失败'); },
+                context: { addSystemUserMessage: async () => { } },
+            } as any;
+            TimerManager.timerQueue = [timer];
+            TimerManager.saveTimerQueue();
+            await TimerManager.task();
+            assert.equal(TimerManager.timerQueue.length, 1, '执行失败应保留定时器');
+            assert.equal(JSON.parse(writes.get('timerQueue') || '[]').length, 1, '失败保留的定时器应仍在存档中');
+        } finally {
+            svc.sessionMap[sid] = origSession;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            (globalThis as any).seal.getEndPoints = origGetEndPoints;
+            (globalThis as any).seal.createTempCtx = origCreateTempCtx;
+            TimerManager.timerQueue = origQueue;
+            TimerManager.intervalId = origIntervalId;
+            TimerManager.isTaskRunning = origIsTaskRunning;
+        }
+    },
+
+    /** 挂起队列分片：savePending 只写轻量子集（epId/isPrivate 等），不含 ctx/msg/endPoint/player 运行时对象，变更即写穿 */
+    async testSavePendingShardLightweight(): Promise<void> {
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        const writes = new Map<string, string>();
+        (ext as any).storageSet = (key: string, value: string) => { writes.set(key, value); };
+        (ext as any).storageGet = (key: string) => writes.get(key) ?? '';
+        try {
+            const session = new Session();
+            session.sessionId = 'sess_shard';
+            session.sessionType = 'user';
+            const ctx = { ...makeCtx(), isPrivate: true };
+            const msg = { message: '挂起消息' } as any;
+            const messageArray = [{ type: 'text', data: { text: '挂起消息' } }] as any;
+            await session.deferReceipt(ctx, msg, messageArray, 'trigger', '因为关键词');
+            session.savePending();
+            const key = Session.pendingKey('sess_shard');
+            const raw = writes.get(key);
+            assert.ok(raw, 'savePending 应写入分片 key: ' + key);
+            const parsed = JSON.parse(raw!);
+            assert.equal(parsed.length, 1);
+            const p = parsed[0];
+            assert.equal(p.content, '挂起消息');
+            assert.equal(p.kind, 'trigger');
+            assert.equal(p.systemReason, '因为关键词');
+            assert.equal(p.epId, 'QQ:10000');
+            assert.equal(p.isPrivate, true);
+            assert.ok(!('ctx' in p), '分片不应包含 ctx 运行时对象');
+            assert.ok(!('msg' in p), '分片不应包含 msg 运行时对象');
+            assert.ok(!('endPoint' in p), '分片不应包含 endPoint');
+            assert.ok(!('player' in p), '分片不应包含 player');
+        } finally {
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+        }
+    },
+
+    /** SessionService.getSession：从 pending 分片恢复轻量挂起队列（重载后不丢） */
+    testSessionServiceRestoresPendingShard(): void {
+        const origGet = (ext as any).storageGet;
+        const origSet = (ext as any).storageSet;
+        const writes = new Map<string, string>();
+        (ext as any).storageSet = (key: string, value: string) => { writes.set(key, value); };
+        (ext as any).storageGet = (key: string) => writes.get(key) ?? '';
+        try {
+            const sid = 'sess_restore';
+            writes.set('session_' + sid + ':pending', JSON.stringify([
+                { content: '恢复的消息', userId: 'QQ:10000', messageId: 'm1', kind: 'trigger', epId: 'QQ:10000', isPrivate: true },
+            ]));
+            const svc = new SessionService();
+            const session = svc.getSession(sid);
+            assert.equal(session.pendingQueue.length, 1, '应从分片恢复挂起队列');
+            const p = session.pendingQueue[0] as any;
+            assert.equal(p.content, '恢复的消息');
+            assert.equal(p.epId, 'QQ:10000');
+            assert.equal(p.isPrivate, true);
+            assert.equal(p.kind, 'trigger');
+        } finally {
+            (ext as any).storageGet = origGet;
+            (ext as any).storageSet = origSet;
+        }
+    },
+
+    /** flushPending：入库后清空 pending 分片（写穿空串），避免重载后脏数据复活 */
+    async testFlushPendingClearsShard(): Promise<void> {
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        const writes = new Map<string, string>();
+        (ext as any).storageSet = (key: string, value: string) => { writes.set(key, value); };
+        (ext as any).storageGet = (key: string) => writes.get(key) ?? '';
+        try {
+            const session = new Session();
+            session.sessionId = 'sess_flush_shard';
+            session.sessionType = 'user';
+            const ctx = { ...makeCtx(), isPrivate: true };
+            const msg = { message: '挂起' } as any;
+            await session.deferReceipt(ctx, msg, [{ type: 'text', data: { text: '挂起' } }] as any, 'record');
+            session.savePending();
+            const key = Session.pendingKey('sess_flush_shard');
+            assert.equal(JSON.parse(writes.get(key)!).length, 1, 'deferReceipt + savePending 后分片应有 1 条');
+            assert.equal(await session.flushPending(), false);
+            assert.equal(writes.get(key), '', 'flushPending 后分片应清空');
+        } finally {
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+        }
+    },
+
+    /** 记忆 v2 分片存储：saveBank 拆为 meta/units/links/docs/obs 五片；旧单 key 存档读取时一次性迁移，deleteBank 全量清理 */
+    testSealMemoryStorageShardedAndMigrates(): void {
+        const origGet = (ext as any).storageGet;
+        const origSet = (ext as any).storageSet;
+        const store = new Map<string, string>();
+        (ext as any).storageGet = (key: string) => store.get(key) ?? '';
+        (ext as any).storageSet = (key: string, value: string) => { if (value === '') store.delete(key); else store.set(key, value); };
+        try {
+            const storage = new SealMemoryStorage();
+            const bank = makeLegacyBank('user_shard', [{ id: 'mm1', question: 'q?', answer: 'a', scopeTags: [] }] as any) as any;
+            bank.units = [{ id: 'u1', bankId: 'user_shard', text: '记忆', factType: 'fact', createdAt: 1, updatedAt: 1, embedding: [], entityIds: [], tags: [], metadata: {}, importance: 0.8, accessCount: 0, lastAccessedAt: 1, state: 'valid', consolidationState: 'pending' }];
+            bank.observations = [{ id: 'o1', bankId: 'user_shard', text: '观察', scopeTags: [], evidence: [], proofCount: 1, createdAt: 1, updatedAt: 1, lastVerifiedAt: 1, history: [] }];
+            bank.links = [{ fromUnitId: 'u1', toUnitId: 'u1', entityId: '', linkType: 'semantic', weight: 1, createdAt: 1 }];
+            bank.documents = [{ id: 'd1', bankId: 'user_shard', title: '文档', createdAt: 1, updatedAt: 1 }];
+            bank.chunks = [{ id: 'c1', bankId: 'user_shard', documentId: 'd1', text: '分块' }];
+
+            storage.saveBank(bank);
+            assert.ok(store.has('memv2:user_shard:meta'), '应写入 meta 分片');
+            assert.ok(store.has('memv2:user_shard:units'), '应写入 units 分片');
+            assert.ok(store.has('memv2:user_shard:links'), '应写入 links 分片');
+            assert.ok(store.has('memv2:user_shard:docs'), '应写入 docs 分片');
+            assert.ok(store.has('memv2:user_shard:obs'), '应写入 obs 分片');
+            assert.ok(!store.has('memv2:user_shard:bank'), '新格式不应写整库 key');
+
+            const loaded = storage.getBank('user_shard')!;
+            assert.equal(loaded.meta.id, 'user_shard');
+            assert.equal(loaded.units.length, 1);
+            assert.equal(loaded.units[0].text, '记忆');
+            assert.equal(loaded.links.length, 1);
+            assert.equal(loaded.observations.length, 1);
+            assert.equal(loaded.mentalModels.length, 1);
+            assert.equal(loaded.documents.length, 1);
+            assert.equal(loaded.chunks.length, 1);
+
+            // 旧格式一次性迁移：只存在 memv2:<id>:bank 时，读取后写入五片并清空旧 key
+            for (const k of [...store.keys()]) store.delete(k);
+            store.set('memv2:user_shard:bank', JSON.stringify(bank));
+            const migrated = storage.getBank('user_shard')!;
+            assert.equal(migrated.units.length, 1, '旧存档迁移后内容一致');
+            assert.equal(migrated.mentalModels.length, 1);
+            assert.ok(store.has('memv2:user_shard:meta'), '迁移后应写入 meta 分片');
+            assert.ok(store.has('memv2:user_shard:obs'), '迁移后应写入 obs 分片');
+            assert.ok(!store.has('memv2:user_shard:bank'), '迁移后旧 key 应清空');
+
+            // deleteBank 清理全部分片
+            storage.deleteBank('user_shard');
+            assert.ok(!store.has('memv2:user_shard:meta'));
+            assert.ok(!store.has('memv2:user_shard:units'));
+            assert.ok(!store.has('memv2:user_shard:links'));
+            assert.ok(!store.has('memv2:user_shard:docs'));
+            assert.ok(!store.has('memv2:user_shard:obs'));
+        } finally {
+            (ext as any).storageGet = origGet;
+            (ext as any).storageSet = origSet;
+        }
+    },
+
+    /** retain 写穿收敛：新 bank 首次写入 2 次（创建 + 末尾统一保存），已存在 bank 单次写入只落盘 1 次 */
+    async testV2RetainWriteThroughConverged(): Promise<void> {
+        const saveCalls = { n: 0 };
+        const inner = new InMemoryMemoryStorage();
+        const countingStorage = {
+            getBank: (id: string) => inner.getBank(id),
+            saveBank: (bank: any) => { saveCalls.n++; inner.saveBank(bank); },
+            deleteBank: (id: string) => inner.deleteBank(id),
+        };
+        const engine = new MemoryEngine({
+            storage: countingStorage as any,
+            embedding: async (t: string) => [t.length, t.length * 2],
+        });
+        await engine.addMemory('user_conv', { content: '小明喜欢喝咖啡', entities: ['小明'], documentId: 'd1' });
+        assert.equal(saveCalls.n, 2, '新建 bank 应落盘 2 次（getOrCreateBank 1 次 + 末尾统一写穿 1 次），实际: ' + saveCalls.n);
+        saveCalls.n = 0;
+        await engine.addMemory('user_conv', { content: '小红喜欢喝茶', entities: ['小红'], documentId: 'd2' });
+        assert.equal(saveCalls.n, 1, '已存在 bank 时单次 retain 只应落盘 1 次（末尾统一写穿），实际: ' + saveCalls.n);
+        assert.equal(engine.repository.getBank('user_conv')!.units.length, 2, '两条记忆都应入库');
+        assert.equal(engine.repository.getBank('user_conv')!.entities.length, 2, '两个实体都应入库');
+    },
+
+    /** consolidate 写穿收敛：一轮巩固（清理+观察+同步+合并）全程只落盘 1 次 */
+    async testV2ConsolidateWriteThroughConverged(): Promise<void> {
+        const saveCalls = { n: 0 };
+        const inner = new InMemoryMemoryStorage();
+        const countingStorage = {
+            getBank: (id: string) => inner.getBank(id),
+            saveBank: (bank: any) => { saveCalls.n++; inner.saveBank(bank); },
+            deleteBank: (id: string) => inner.deleteBank(id),
+        };
+        const engine = new MemoryEngine({
+            storage: countingStorage as any,
+            embedding: async (t: string) => [t.length, t.length * 2],
+        });
+        await engine.addMemory('user_cons', { content: '小明喜欢喝咖啡', entities: ['小明'] });
+        await engine.addMemory('user_cons', { content: '小明喜欢喝茶', entities: ['小明'] });
+        saveCalls.n = 0;
+        const result = await engine.consolidate('user_cons');
+        assert.ok(result.created.length >= 1, '应生成观察记忆');
+        assert.equal(saveCalls.n, 1, '一轮 consolidate 全程只应落盘 1 次，实际: ' + saveCalls.n);
+        const bank = engine.repository.getBank('user_cons')!;
+        assert.ok(bank.observations.length >= 1, '观察记忆应入库');
+        assert.ok(bank.units.every(u => u.consolidationState === 'done'), 'pending 单元应标记为 done');
+    },
+
+    /** consolidate 触发上限淘汰时，淘汰结果必须额外落盘（否则只停留在内存、重载后复活） */
+    async testV2ConsolidatePrunePersistsEviction(): Promise<void> {
+        const saveCalls = { n: 0 };
+        const inner = new InMemoryMemoryStorage();
+        const countingStorage = {
+            getBank: (id: string) => inner.getBank(id),
+            saveBank: (bank: any) => { saveCalls.n++; inner.saveBank(bank); },
+            deleteBank: (id: string) => inner.deleteBank(id),
+        };
+        const engine = new MemoryEngine({
+            storage: countingStorage as any,
+            embedding: async (t: string) => [t.length, t.length * 2],
+            memoryCap: 1,
+        });
+        await engine.addMemory('user_cap', { content: '小明喜欢喝咖啡', entities: ['小明'] });
+        await engine.addMemory('user_cap', { content: '小明喜欢喝茶', entities: ['小明'] });
+        assert.equal(inner.getBank('user_cap')!.units.length, 1, 'cap=1 下 addMemory 后只应保留 1 条');
+        saveCalls.n = 0;
+        const result = await engine.consolidate('user_cap');
+        assert.ok(result.created.length >= 1, '应生成观察记忆');
+        assert.equal(saveCalls.n, 2, 'consolidate 淘汰单元后应额外落盘一次（doConsolidate 1 次 + prune 淘汰 1 次），实际: ' + saveCalls.n);
+        const bank = inner.getBank('user_cap')!;
+        assert.ok(bank.units.length <= 1, 'cap=1 下 consolidate 后单元数应不超过 1，实际: ' + bank.units.length);
+        // 用同一底层存储新建引擎读档：淘汰结果应已持久化，重载后不会复活
+        const engine2 = new MemoryEngine({ storage: inner, embedding: async (t: string) => [t.length, t.length * 2] });
+        const bank2 = engine2.repository.getBank('user_cap')!;
+        assert.equal(bank2.units.length, bank.units.length, '重载后单元数应与内存一致（淘汰已落盘）');
+    },
+
 };

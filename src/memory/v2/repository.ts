@@ -90,10 +90,10 @@ export class MemoryRepository {
         return bank ? bank.units.find(u => u.id === unitId) || null : null;
     }
 
-    addUnit(bankId: string, unit: MemoryUnit): void {
+    addUnit(bankId: string, unit: MemoryUnit, persist = true): void {
         const bank = this.getOrCreateBank(bankId, 'global');
         bank.units.push(unit);
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
     updateUnit(bankId: string, unit: MemoryUnit, persist = true): void {
@@ -124,7 +124,7 @@ export class MemoryRepository {
      * 批量物理删除单元（遗忘淘汰/手动清除用）：一次落盘，避免逐条整库序列化。
      * 同步清理相关 links 与 observation evidence 引用，返回实际删除条数。
      */
-    deleteUnits(bankId: string, unitIds: string[]): number {
+    deleteUnits(bankId: string, unitIds: string[], persist = true): number {
         const bank = this.getBank(bankId);
         if (!bank || unitIds.length === 0) return 0;
         const ids = new Set(unitIds);
@@ -136,7 +136,7 @@ export class MemoryRepository {
             evidence: o.evidence.filter(e => !ids.has(e.memoryId)),
             proofCount: o.evidence.filter(e => !ids.has(e.memoryId)).length,
         }));
-        this.save(bankId);
+        if (persist) this.save(bankId);
         return before - bank.units.length;
     }
 
@@ -144,7 +144,7 @@ export class MemoryRepository {
      * 删除观察记忆：移除 observation 条目与同步的 observation unit，
      * 清理其他 observation 中对该观察证据的引用，并移除相关 links。
      */
-    deleteObservation(bankId: string, observationId: string): void {
+    deleteObservation(bankId: string, observationId: string, persist = true): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         bank.observations = bank.observations.filter(o => o.id !== observationId);
@@ -155,7 +155,7 @@ export class MemoryRepository {
             evidence: o.evidence.filter(e => e.memoryId !== observationId),
             proofCount: o.evidence.filter(e => e.memoryId !== observationId).length,
         }));
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
     // ===== Entities =====
@@ -178,19 +178,19 @@ export class MemoryRepository {
             || e.aliases.some(a => normalizeName(a) === normalized)) || null;
     }
 
-    addEntity(bankId: string, entity: MemoryEntity): void {
+    addEntity(bankId: string, entity: MemoryEntity, persist = true): void {
         const bank = this.getOrCreateBank(bankId, 'global');
         bank.entities.push(entity);
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
-    updateEntity(bankId: string, entity: MemoryEntity): void {
+    updateEntity(bankId: string, entity: MemoryEntity, persist = true): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.entities.findIndex(e => e.id === entity.id);
         if (idx >= 0) {
             bank.entities[idx] = entity;
-            this.save(bankId);
+            if (persist) this.save(bankId);
         }
     }
 
@@ -201,7 +201,7 @@ export class MemoryRepository {
         return bank ? bank.links.slice() : [];
     }
 
-    addLink(bankId: string, link: MemoryLink): void {
+    addLink(bankId: string, link: MemoryLink, persist = true): void {
         const bank = this.getOrCreateBank(bankId, 'global');
         const exists = bank.links.some(l =>
             l.fromUnitId === link.fromUnitId
@@ -210,7 +210,7 @@ export class MemoryRepository {
             && l.entityId === link.entityId
         );
         if (!exists) bank.links.push(link);
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
     // ===== Observations =====
@@ -220,19 +220,19 @@ export class MemoryRepository {
         return bank ? bank.observations.slice() : [];
     }
 
-    addObservation(bankId: string, observation: Observation): void {
+    addObservation(bankId: string, observation: Observation, persist = true): void {
         const bank = this.getOrCreateBank(bankId, 'global');
         bank.observations.push(observation);
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
-    updateObservation(bankId: string, observation: Observation): void {
+    updateObservation(bankId: string, observation: Observation, persist = true): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.observations.findIndex(o => o.id === observation.id);
         if (idx >= 0) {
             bank.observations[idx] = observation;
-            this.save(bankId);
+            if (persist) this.save(bankId);
         }
     }
 
@@ -276,7 +276,7 @@ export class MemoryRepository {
         return bank ? bank.documents.find(d => d.id === documentId) || null : null;
     }
 
-    addDocument(bankId: string, document: MemoryDocument): MemoryDocument {
+    addDocument(bankId: string, document: MemoryDocument, persist = true): MemoryDocument {
         const bank = this.getOrCreateBank(bankId, 'global');
         const existing = bank.documents.find(d => d.id === document.id);
         if (existing) {
@@ -286,11 +286,11 @@ export class MemoryRepository {
         } else {
             bank.documents.push(document);
         }
-        this.save(bankId);
+        if (persist) this.save(bankId);
         return this.getDocument(bankId, document.id)!;
     }
 
-    addChunk(bankId: string, chunk: MemoryChunk): void {
+    addChunk(bankId: string, chunk: MemoryChunk, persist = true): void {
         const bank = this.getOrCreateBank(bankId, 'global');
         const existing = bank.chunks.find(c => c.id === chunk.id);
         if (existing) {
@@ -299,7 +299,7 @@ export class MemoryRepository {
         } else {
             bank.chunks.push(chunk);
         }
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
     listChunks(bankId: string, documentId?: string): MemoryChunk[] {
@@ -310,7 +310,7 @@ export class MemoryRepository {
 
     // ===== Consolidation helpers =====
 
-    markUnitConsolidated(bankId: string, unitIds: string[], observationId?: string): void {
+    markUnitConsolidated(bankId: string, unitIds: string[], observationId?: string, persist = true): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const now = nowSec();
@@ -321,10 +321,10 @@ export class MemoryRepository {
                 if (observationId) unit.metadata = { ...unit.metadata, observationId };
             }
         }
-        this.save(bankId);
+        if (persist) this.save(bankId);
     }
 
-    mergeSimilarObservations(bankId: string, threshold: number): ConsolidationResult {
+    mergeSimilarObservations(bankId: string, threshold: number, persist = true): ConsolidationResult {
         const bank = this.getBank(bankId);
         if (!bank) return { created: [], updated: [], merged: [], skipped: 0 };
         const merged: string[] = [];
@@ -343,7 +343,7 @@ export class MemoryRepository {
             }
         }
         bank.observations = kept;
-        this.save(bankId);
+        if (persist) this.save(bankId);
         return { created: [], updated: [], merged, skipped: 0 };
     }
 }

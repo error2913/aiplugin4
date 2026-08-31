@@ -552,7 +552,7 @@ export class MessagePipeline {
             const supplementTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
             if (supplementTypes.some(type => !CQ_TYPES_ALLOW.includes(type))) return;
             if (sessionBusy) {
-                return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.save());
+                return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
             }
             return session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
         }
@@ -583,7 +583,7 @@ export class MessagePipeline {
                 if (fmtCondition === 1) {
                     markCoreMessageRecorded(coreMessageKey);
                     if (sessionBusy) {
-                        return session.deferReceipt(ctx, msg, messageArray, 'trigger').then(() => session.save());
+                        return session.deferReceipt(ctx, msg, messageArray, 'trigger').then(() => session.savePending());
                     }
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.chat(ctx, msg, '非指令'));
@@ -615,7 +615,7 @@ export class MessagePipeline {
                     if (sessionBusy) {
                         // 先消费一次性触发条件再挂起，避免条件残留导致下次重复触发
                         triggerConditionMap[sid].splice(i, 1);
-                        return session.deferReceipt(ctx, msg, messageArray, 'trigger', condition.reason).then(() => session.save());
+                        return session.deferReceipt(ctx, msg, messageArray, 'trigger', condition.reason).then(() => session.savePending());
                     }
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.context.addSystemUserMessage(condition.reason, '触发原因提示'))
@@ -630,7 +630,7 @@ export class MessagePipeline {
                 markCoreMessageRecorded(coreMessageKey);
                 if (sessionBusy) {
                     // 运行中待机消息只挂起入库：计数/概率/计时器一律跳过，不推进、不触发
-                    return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.save());
+                    return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
                 }
                 return session.handleReceipt(ctx, msg, messageArray)
                     .then(async (): Promise<void> => {

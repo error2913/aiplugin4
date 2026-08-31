@@ -37,6 +37,9 @@ export interface PendingMessage {
     messageId: string;
     kind: 'trigger' | 'record';
     systemReason?: string;
+    /** 落盘轻量字段：重载后用于重建 ctx/msg（getSessionCtxAndMsg）与续跑 */
+    epId: string;
+    isPrivate: boolean;
 }
 
 export class Setting {
@@ -232,6 +235,29 @@ export class Session {
         ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
     }
 
+    /** 挂起队列轻量分片 key：ctx/msg 是运行时对象不可序列化，只落盘重建所需字段，变更即写穿 */
+    static pendingKey(sessionId: string): string {
+        return `session_${sessionId}:pending`;
+    }
+
+    savePending() {
+        const light = this.pendingQueue.map(p => ({
+            content: p.content,
+            userId: p.userId,
+            messageId: p.messageId,
+            kind: p.kind,
+            systemReason: p.systemReason,
+            epId: p.epId,
+            isPrivate: p.isPrivate,
+        }));
+        ext.storageSet(Session.pendingKey(this.sessionId), JSON.stringify(light));
+    }
+
+    /** 清空挂起队列分片：空队列即清空存档，避免重载后残留脏数据复活 */
+    clearPending() {
+        ext.storageSet(Session.pendingKey(this.sessionId), '');
+    }
+
     get curActiveTimeSegIndex(): number {
         const now = new Date();
         const cur = now.getHours() * 60 + now.getMinutes();
@@ -296,7 +322,9 @@ export class Session {
             userId: ctx.player!.userId,
             messageId: getRecordMessageId(ctx, msg),
             kind,
-            systemReason
+            systemReason,
+            epId: ctx.endPoint.userId,
+            isPrivate: ctx.isPrivate,
         });
     }
 
@@ -318,6 +346,7 @@ export class Session {
             if (p.systemReason) await this.context.addSystemUserMessage(p.systemReason, '触发原因提示');
         }
         this.save();
+        this.clearPending();
         return hasTrigger;
     }
 
@@ -455,6 +484,7 @@ export class Session {
         this.running = false;
         // 完全暂停：清掉挂起消息（停止后不复活）与待触发的计时器（计数器/概率/触发条件保留，需主动触发）
         this.pendingQueue = [];
+        this.clearPending();
         if (this.context.timer) clearTimeout(this.context.timer);
         this.context.timer = null;
         // 评分触发：停止会话时清掉 WAIT 轮末定时器与内存状态
