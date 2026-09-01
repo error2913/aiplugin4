@@ -7,6 +7,29 @@ export interface KnowledgeChunk {
     /** 二级/三级标题（可为空） */
     heading: string;
     content: string;
+    /** 所属知识库 ID */
+    libraryId?: string;
+    /** 所属知识库名称 */
+    libraryName?: string;
+    /** 所属知识库描述 */
+    libraryDescription?: string;
+    /** 库内文档 ID */
+    docId?: string;
+    /** 库内文档标题 */
+    docTitle?: string;
+}
+
+export interface KnowledgeLibrary {
+    /** 库 ID */
+    id: string;
+    /** 库名 */
+    name: string;
+    /** 库描述 */
+    description: string;
+    /** 原始配置文本 */
+    raw: string;
+    /** 该库的全部分块 */
+    chunks: KnowledgeChunk[];
 }
 
 export interface ChunkOptions {

@@ -22,7 +22,7 @@ import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { registerCmdMemory } from "../src/cmd/sub_cmd/memory";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
-import { KnowledgeBaseService } from "../src/memory/knowledge_base";
+import { KnowledgeBaseService, parseKnowledgeLibrary } from "../src/memory/knowledge_base";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
@@ -42,7 +42,7 @@ import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
-import { getSkillSummariesBudgeted, SKILL_INJECT_MAX_CHARS } from "../src/tool/skills";
+import { getSkillSummaries, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
@@ -690,8 +690,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const ctx = { isPrivate: true, player: { userId: 'QQ:1', name: '测试员' }, group: null } as any;
             const uis = [{ isPrivate: true, id: 'QQ:1', name: '测试员' }] as any;
             const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '你好', uis, null);
-            assert.ok(prompt.includes('## 个人记忆（测试员）'), '私聊应渲染个人记忆分组');
-            assert.ok(prompt.includes('心智模型：') && prompt.includes('喜欢简洁回复'), '分组内应注入心智模型');
+            assert.ok(prompt.includes('## 心智模型'), '私聊应渲染独立心智模型段');
+            assert.ok(prompt.includes('喜欢简洁回复'), '应注入心智模型答案');
         } finally {
             if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
             resetConfigCache();
@@ -719,14 +719,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const ctx = { isPrivate: false, player: { userId: 'QQ:2', name: '小明' }, group: { groupId: 'QQ-Group:1', groupName: '测试群' } } as any;
             const uis = [{ isPrivate: true, id: 'QQ:2', name: '小明' }] as any;
             const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '群规 咖啡', uis, { isPrivate: false, id: 'QQ-Group:1', name: '测试群' } as any);
-            assert.ok(prompt.includes('## 群聊记忆（测试群）'), '应渲染群聊分组');
+            assert.ok(prompt.includes('## 群聊心智模型') && prompt.includes('## 群聊长期记忆'), '应渲染群聊心智模型与长期记忆');
             assert.ok(prompt.includes('## 个人记忆（小明）'), '应渲染最近发言者的个人分组');
             assert.ok(prompt.includes('群规是什么？') && prompt.includes('不许刷屏'), '群心智模型应注入群聊分组');
             assert.ok(prompt.includes('小明的偏好？') && prompt.includes('喜欢咖啡'), '个人心智模型应注入个人分组');
             assert.ok(prompt.includes('群规则：不许刷屏'), '群记忆应注入群聊分组');
             assert.ok(prompt.includes('小明喜欢喝咖啡'), '最近发言者的个人记忆应注入个人分组');
             // 归属隔离：个人心智模型/记忆不应出现在群聊分组之前，避免混在一起
-            const groupIdx = prompt.indexOf('## 群聊记忆');
+            const groupIdx = prompt.indexOf('## 群聊心智模型');
             const personalIdx = prompt.indexOf('## 个人记忆');
             assert.ok(groupIdx >= 0 && personalIdx > groupIdx, '群聊分组应排在个人分组之前');
         } finally {
@@ -3640,5 +3640,193 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const bank2 = engine2.repository.getBank('user_cap')!;
         assert.equal(bank2.units.length, bank.units.length, '重载后单元数应与内存一致（淘汰已落盘）');
     },
+
+    /** 知识库 frontmatter 解析：库名/描述应来自 frontmatter */
+    testKbParseFrontmatter(): void {
+        const lib = parseKnowledgeLibrary(`---
+name: 测试库
+description: 测试描述
+---
+# 文档
+正文内容`, 0);
+        assert.equal(lib.name, '测试库');
+        assert.equal(lib.description, '测试描述');
+        assert.ok(lib.chunks.length > 0, '应解析出分块');
+        assert.ok(lib.chunks[0].libraryId === lib.id, '分块应携带库 ID');
+        assert.ok(lib.chunks[0].libraryName === '测试库', '分块应携带库名');
+    },
+
+    /** 知识库静态段：超过 100 个库时只显示 100 个并提示总数 */
+    testKbFormatLibrariesLimit100(): void {
+        const svc = new KnowledgeBaseService();
+        (svc as any).libraries = Array.from({ length: 120 }, (_, i) => ({
+            id: `kb_lib_${i}`,
+            name: `库${i}`,
+            description: `描述${i}`,
+            chunks: [],
+        }));
+        const out = svc.formatLibraries(100);
+        assert.ok(out.includes('共 120 个库'), '应提示总数');
+        assert.ok(!out.includes('库120'), '不应显示第 120 个库');
+        const libLines = out.split('\n').filter(l => l.startsWith('- '));
+        assert.ok(libLines.length <= 100, `库行数应不超过 100，实际 ${libLines.length}`);
+    },
+
+    /** knowledge_docs 应返回库内文档/章节结构 */
+    testKbDocsHierarchy(): void {
+        const lib = parseKnowledgeLibrary(`---
+name: 测试库
+description: 描述
+---
+# 文档A
+## 章节1
+内容1
+## 章节2
+内容2`, 0);
+        const svc = new KnowledgeBaseService();
+        (svc as any).libraries = [lib];
+        (svc as any).chunks = lib.chunks;
+        const out = svc.formatLibraryDocs(lib.id, 1, 20);
+        assert.ok(out.includes('知识库：测试库'), '应包含库名');
+        assert.ok(out.includes('文档：文档A'), '应包含文档标题');
+        assert.ok(out.includes('章节1') && out.includes('章节2'), '应包含章节标题');
+    },
+
+    /** knowledge_search 支持按库过滤 */
+    async testKnowledgeSearchByLibraryId(): Promise<void> {
+        const lib1 = parseKnowledgeLibrary(`---
+name: 库A
+description: 咖啡库
+---
+# 咖啡文档
+咖啡因含量`, 0);
+        const lib2 = parseKnowledgeLibrary(`---
+name: 库B
+description: 茶库
+---
+# 茶文档
+茶多酚含量`, 1);
+        const svc = new KnowledgeBaseService();
+        (svc as any).libraries = [lib1, lib2];
+        (svc as any).chunks = [...lib1.chunks, ...lib2.chunks];
+        (svc as any).loadedSignature = 'test';
+        const result = await svc.search('咖啡', 5, lib1.id);
+        assert.ok(result.length > 0, '应命中库A');
+        assert.ok(result.every(c => c.libraryId === lib1.id), '搜索结果应限定在指定库内');
+    },
+
+    /** list_tools 支持分页 */
+    async testListToolsPagination(): Promise<void> {
+        registerDispatchTools();
+        const fake = new Tool({
+            type: 'function',
+            function: {
+                name: 'zzz_list_pagination_test',
+                description: '分页测试工具',
+                parameters: { type: 'object', properties: {} }
+            }
+        });
+        try {
+            const session = {
+                sessionType: 'group',
+                toolState: {
+                    list_tools: true,
+                    search_tools: true,
+                    call_tool: true,
+                    zzz_list_pagination_test: true,
+                }
+            } as any;
+            const out = await toolMap['list_tools'].solve(makeCtx(), {} as any, session as any, { page: 1, page_size: 100 });
+            assert.ok(out.includes('可用工具'), '应返回工具列表');
+            assert.ok(out.includes('zzz_list_pagination_test'), '应包含测试工具');
+            assert.ok(out.includes('当前第 1 页'), '应包含页码信息');
+        } finally {
+            delete toolMap['zzz_list_pagination_test'];
+        }
+    },
+
+    /** 原生 function calling 的 tools 只应包含 list_tools/search_tools/call_tool */
+    testNativeRequestToolsOnlyListSearchCall(): void {
+        registerDispatchTools();
+        const fake = new Tool({
+            type: 'function',
+            function: {
+                name: 'zzz_native_fake',
+                description: '不应出现在原生 tools 中',
+                parameters: { type: 'object', properties: {} }
+            }
+        });
+        try {
+            const session = {
+                sessionType: 'group',
+                toolState: {
+                    list_tools: true,
+                    search_tools: true,
+                    call_tool: true,
+                    zzz_native_fake: true,
+                }
+            } as any;
+            const native = Tool.getNativeRequestTools(session);
+            assert.ok(native, '应返回原生引导工具');
+            assert.ok(native.every(t => ['list_tools', 'search_tools', 'call_tool'].includes(t.function.name)), '原生 tools 只应包含引导工具');
+        } finally {
+            delete toolMap['zzz_native_fake'];
+        }
+    },
+
+    /** 工具摘要支持条数限制 */
+    testToolSummariesLimit100(): void {
+        registerDispatchTools();
+        const session = {
+            sessionType: 'group',
+            toolState: {
+                list_tools: true,
+                search_tools: true,
+                call_tool: true,
+            }
+        } as any;
+        const r = Tool.getToolSummaries(session, 2);
+        assert.ok(r.summaries.length <= 2, '摘要应受 limit 限制');
+        assert.ok(r.total >= r.summaries.length, 'total 不应小于已展示条数');
+    },
+
+    /** 提示词工程工具块应包含调用格式和元工具参数 */
+    testPromptEngineeringToolBlockContainsMetaParams(): void {
+        registerDispatchTools();
+        const session = {
+            sessionType: 'group',
+            toolState: {
+                list_tools: true,
+                search_tools: true,
+                call_tool: true,
+            }
+        } as any;
+        const block = Tool.getPromptEngineeringToolBlock(session);
+        assert.ok(block.includes('## 调用格式'), '应包含调用格式说明');
+        assert.ok(block.includes('### list_tools'), '应包含 list_tools 参数');
+        assert.ok(block.includes('### search_tools'), '应包含 search_tools 参数');
+        assert.ok(block.includes('### call_tool'), '应包含 call_tool 参数');
+        assert.ok(block.includes('page_size'), '应包含元工具参数说明');
+    },
+
+    /** skill_list 支持分页参数 */
+    async testSkillListPagination(): Promise<void> {
+        registerSkills();
+        const out = await toolMap['skill_list'].solve(makeCtx(), {} as any, {} as any, { page: 1, page_size: 2 });
+        assert.ok(out.includes('技能列表'), '应返回技能列表');
+        assert.ok(out.includes('当前第 1 页'), '应包含页码信息');
+    },
+
+    /** 技能摘要按条数上限截断 */
+    testSkillSummariesLimit(): void {
+        const r = getSkillSummaries(SKILL_INJECT_MAX_ITEMS);
+        assert.ok(r.summaries.length <= SKILL_INJECT_MAX_ITEMS, '技能摘要条数应不超过 100');
+        if (r.truncated) {
+            assert.ok(r.total > r.summaries.length, '截断时 total 应大于已展示条数');
+        } else {
+            assert.equal(r.total, r.summaries.length, '未截断时 total 应等于已展示条数');
+        }
+    },
+
 
 };

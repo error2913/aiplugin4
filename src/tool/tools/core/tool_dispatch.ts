@@ -11,6 +11,60 @@ import { ToolInfo } from "../../types";
 const MAX_SEARCH_RESULTS = 8; // search_tools 单次返回工具数上限
 
 export function registerDispatchTools() {
+
+    // 工具列表：返回工具名称 + 一句话描述，不返回参数详情
+    const listTool = new Tool({
+        type: "function",
+        function: {
+            name: "list_tools",
+            description: `分页列出当前会话可用工具的名称与一句话描述；不返回参数详情。需要获取某个工具的参数说明时使用 search_tools。`,
+            parameters: {
+                type: "object",
+                properties: {
+                    page: {
+                        type: "integer",
+                        description: "页码，从 1 开始，默认 1"
+                    },
+                    page_size: {
+                        type: "integer",
+                        description: "每页数量，默认 20，最大 100"
+                    },
+                    query: {
+                        type: "string",
+                        description: "按工具名称或描述关键词过滤"
+                    }
+                },
+                required: []
+            }
+        }
+    });
+    listTool.solve = async (_ctx, _msg, session: Session, args) => {
+        const { page = 1, page_size = 20, query = '' } = args || {};
+        const tools = Tool.getAvailableTools(session)
+            .sort((a, b) => a.function.name.localeCompare(b.function.name));
+        const q = String(query || '').trim().toLowerCase();
+        const filtered = q
+            ? tools.filter(t =>
+                t.function.name.toLowerCase().includes(q) ||
+                t.function.description.toLowerCase().includes(q)
+            )
+            : tools;
+        const size = Math.min(Math.max(parseInt(page_size, 10) || 20, 1), 100);
+        const current = Math.max(parseInt(page, 10) || 1, 1);
+        const totalPages = Math.max(1, Math.ceil(filtered.length / size));
+        const start = (current - 1) * size;
+        const items = filtered.slice(start, start + size);
+        if (filtered.length === 0) return '当前没有可用工具';
+        const lines = [`可用工具（共 ${filtered.length} 个）`];
+        items.forEach((t, i) => {
+            const desc = String(t.function.description || '').replace(/\s+/g, ' ').trim();
+            const shortDesc = desc.length > 120 ? desc.slice(0, 120) + '...' : desc;
+            lines.push(`${start + i + 1}. ${t.function.name}：${shortDesc}`);
+        });
+        lines.push(`当前第 ${current} 页，共 ${totalPages} 页；使用 search_tools 获取具体参数说明。`);
+        return lines.join('\n');
+    };
+
     // 工具发现：返回匹配工具的完整 schema（含参数说明），供 call_tool 使用
     const searchTool = new Tool({
         type: "function",
@@ -52,7 +106,7 @@ export function registerDispatchTools() {
         // 不传参数：返回全部工具名字列表（紧凑），详情按需查询
         if (!String(query || '').trim()) {
             if (tools.length === 0) return '当前没有可用工具';
-            return `可用工具（共 ${tools.length} 个）：\n${tools.map((t, i) => `${i + 1}. ${t.function.name}`).join('\n')}\n查看某个工具的详情：调用 search_tools 并指定 name=工具名`;
+            return `可用工具（共 ${tools.length} 个）：\n${tools.map((t, i) => `${i + 1}. ${t.function.name}`).join('\n')}\n查看工具名称与描述：调用 list_tools；查看某个工具的详情：调用 search_tools 并指定 name=工具名`;
         }
 
         // 关键词搜索：分词匹配，返回匹配工具的完整详情

@@ -11,7 +11,7 @@ const TEMPLATES: { [key: string]: string } = {
 
 ## 会话信息
 - 平台:{{{platform}}} | 类型:{{{sessionType}}} | 名称:{{{sessionName}}} | ID:{{{sessionId}}}
-- 当前时间:**CURRENT_TIME**
+- BotID:{{{botId}}}
 
 ## 消息标记
 - [at:ID] @某人；[poke:ID] 戳一戳；[quote:ID] 引用；[face:名称] 表情
@@ -38,7 +38,7 @@ const TEMPLATES: { [key: string]: string } = {
 - 确认确实要调用工具才说方向，说了就一定要做，不要说了方向却什么都不做
 - 方向说明不是最终回答；说完方向照常调用工具完成任务，最终回答里不要复述这句话
 {{/if}}
-{{{toolPrompt}}}
+{{{toolBlock}}}
 
 **DYNAMIC_SECTIONS**`,
     "长期记忆prompt模板": `{{#if MEMORY}}
@@ -65,7 +65,7 @@ const TEMPLATES: { [key: string]: string } = {
 {{/if}}`,
     "工具函数prompt模板": `{{#if PROMPT_ENGINEERING}}
 
-## 调用函数
+## 调用格式
 当需要调用函数功能时，请将函数调用数组放入以 \`\`\`function 开头、\`\`\` 结尾的代码块中，严格使用以下JSON格式，示例：
 
 \`\`\`function
@@ -80,15 +80,15 @@ const TEMPLATES: { [key: string]: string } = {
 要使用成对的代码块围栏：\`\`\`function 在前面，\`\`\` 在后面包裹调用工具的数组。
 可调用多个函数，每个调用需包含name字段和arguments字段，且arguments字段必须是JSON字符串。
 
-可用函数列表:
+## 元工具参数
     {{#each tools}}
-{{index @index}}. 名称:{{{name}}}
-    - 描述:{{{description}}}
+### {{{name}}}
+- 描述:{{{description}}}
     {{#if parameterText}}
-    - 参数:{{{parameterText}}}
+{{{parameterText}}}
     {{/if}}
     {{else}}
-暂无可用函数。
+暂无可用元工具。
     {{/each}}
 {{/if}}`,
     "图片识别prompt模板": "请帮我用简短的语言概括这张图片的特征，包括图片类型、场景、主题、主体等信息，如果有文字，请全部输出",

@@ -22,12 +22,29 @@ export type ToolState = { [key: string]: boolean };
 // 核心常驻工具：始终注入函数 schema，保证基本对话能力与“发现/执行”入口；
 // 其余工具按需加载：AI 先用 search_tools 查找工具，再用 call_tool 执行，避免全量工具定义浪费 token
 export const CORE_TOOL_NAMES: string[] = [
+    'list_tools', // 工具列表（名称+描述）
     'search_tools', // 按需发现工具（返回完整参数说明）
     'call_tool',    // 统一执行入口（调用任意已开启工具）
     'use_skill',    // 技能调用
     'call_ob11_api', // 唯一 OB11 API 调用入口
     'run_ext_command',  // 扩展指令调用
     'run_core_command' // 核心指令调用
+];
+
+/** 原生 function calling 模式下只向 API 暴露的引导工具 */
+export const NATIVE_TOOL_NAMES: string[] = ['list_tools', 'search_tools', 'call_tool'];
+
+/** 提示词工程模式下需要完整参数说明的元工具 */
+export const META_TOOL_NAMES: string[] = [
+    'list_tools',
+    'search_tools',
+    'call_tool',
+    'skill_list',
+    'use_skill',
+    'knowledge_list',
+    'knowledge_docs',
+    'knowledge_search',
+    'knowledge_read'
 ];
 
 const ON_DEMAND_PROMPT_LIMIT = 20;
@@ -305,4 +322,75 @@ export default class Tool {
         }
         return s;
     }
+
+    /** 返回工具摘要（名称 + 一句话描述），用于 system prompt 静态工具块 */
+    static getToolSummaries(session: Session, limit = 100): { summaries: string[]; total: number; truncated: boolean } {
+        const tools = this.getAvailableTools(session)
+            .sort((a, b) => a.function.name.localeCompare(b.function.name));
+        const summaries = tools.map(t => {
+            const desc = flattenText(t.function.description, 120);
+            return `- ${t.function.name}：${desc}`;
+        });
+        return {
+            summaries: summaries.slice(0, limit),
+            total: summaries.length,
+            truncated: summaries.length > limit
+        };
+    }
+
+    /** 原生 function calling 模式：只暴露引导工具 */
+    static getNativeRequestTools(session: Session): ToolInfo[] | null {
+        const tools = NATIVE_TOOL_NAMES
+            .map(name => toolMap[name])
+            .filter(Boolean)
+            .filter(t => session.toolState?.[t.toolInfo.function.name])
+            .filter(t => t.sessionType === 'any' || t.sessionType === session.sessionType)
+            .map(t => t.toolInfo);
+        return tools.length > 0 ? tools : null;
+    }
+
+    /** 提示词工程模式：返回需要完整参数说明的元工具 */
+    static getMetaToolInfos(session: Session): ToolInfo[] {
+        return META_TOOL_NAMES
+            .map(name => toolMap[name])
+            .filter(Boolean)
+            .filter(t => session.toolState?.[t.toolInfo.function.name])
+            .filter(t => t.sessionType === 'any' || t.sessionType === session.sessionType)
+            .map(t => t.toolInfo);
+    }
+
+    /** 提示词工程模式工具块：调用格式 + 元工具参数 + 全部工具摘要 */
+    static getPromptEngineeringToolBlock(session: Session): string {
+        const metaTools = this.getMetaToolInfos(session);
+        const flatTools = metaTools.map(t => ({
+            name: t.function.name,
+            description: flattenText(t.function.description, 120),
+            parameterText: formatParameterText(t.function.parameters)
+        }));
+        const formatPart = TOOLS_PROMPT_TEMPLATE({
+            "PROMPT_ENGINEERING": true,
+            "tools": flatTools
+        });
+        const summary = this.getToolSummaries(session, 100);
+        const lines = ['## 可用工具', ...summary.summaries];
+        if (summary.truncated) {
+            lines.push(`（共 ${summary.total} 个工具，最多显示 100 个）`);
+        }
+        lines.push('需要参数详情：search_tools；需要完整列表：list_tools。');
+        const summaryPart = lines.join('\n');
+        return [formatPart, summaryPart].filter(Boolean).join('\n\n');
+    }
+
+    /** 原生模式工具块：仅名称 + 描述 */
+    static getToolSummaryBlock(session: Session): string {
+        const r = this.getToolSummaries(session, 100);
+        if (r.summaries.length === 0) return '';
+        const lines = ['## 可用工具', ...r.summaries];
+        if (r.truncated) {
+            lines.push(`（共 ${r.total} 个工具，最多显示 100 个）`);
+        }
+        lines.push('需要参数详情：search_tools；需要完整列表：list_tools。');
+        return lines.join('\n');
+    }
+
 }

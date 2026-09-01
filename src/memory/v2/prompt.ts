@@ -62,6 +62,28 @@ export interface MemoryPromptSection {
     maxLengthPerItem?: number;
 }
 
+
+export function buildMentalModelsPrompt(mentalModels: MentalModel[], max = 1000): string {
+    if (!mentalModels?.length) return '';
+    const lines = ['## 心智模型'];
+    for (const m of mentalModels) {
+        lines.push(`${m.question}\n${truncate(m.answer, max)}`);
+    }
+    return lines.join('\n');
+}
+
+export function buildLongTermMemoryPrompt(
+    recalls: RecallResult[],
+    isPrivate: boolean,
+    sessionName: string,
+    max = 1000
+): string {
+    if (!recalls?.length) return '';
+    const head = isPrivate ? '记忆类型:个人记忆' : `记忆类型:群聊记忆\n群聊名称:${sessionName}`;
+    const list = recalls.map((r, i) => `${i + 1}. [${r.unit.id}] ${truncate(r.unit.text, max)}`).join('\n');
+    return `## 长期记忆\n${head}\n记忆列表:\n${list}`;
+}
+
 export function buildMemoryPrompt(options: MemoryPromptOptions): string {
     const parts: string[] = [];
     const max = options.maxLengthPerItem ?? 1000;
@@ -88,34 +110,47 @@ export function buildMemoryPrompt(options: MemoryPromptOptions): string {
 }
 
 /**
- * 分组渲染记忆段：按「群聊 / 每个发言者」分别渲染长期记忆 + 心智模型，
- * 避免多个归属的心智模型/记忆混在同一段里造成归属混淆。
+ * 分组渲染记忆段：群聊拆分为「群聊心智模型 / 群聊长期记忆 / 个人记忆」，
+ * 私聊拆分为「心智模型 / 长期记忆」。
+ * 观察记忆由独立的 buildObservationPrompt 注入，不再出现在长期记忆分组中。
  */
 export function buildGroupedMemoryPrompt(sections: MemoryPromptSection[]): string {
     const parts: string[] = [];
+
     for (const sec of sections) {
         const hasMM = !!sec.mentalModels?.length;
-        const hasObs = !!sec.observations?.length;
         const hasRecall = !!sec.recalls?.length;
-        if (!hasMM && !hasObs && !hasRecall) continue;
+        if (!hasMM && !hasRecall) continue;
         const max = sec.maxLengthPerItem ?? 1000;
-        const lines: string[] = [`## ${sec.title}`];
-        if (hasMM) {
-            lines.push('心智模型：');
-            lines.push(sec.mentalModels!.map(m => `${m.question}\n${truncate(m.answer, max)}`).join('\n'));
+
+        const isGroupLevel = sec.title.startsWith('群聊');
+        if (isGroupLevel) {
+            if (hasMM) {
+                const mm = buildMentalModelsPrompt(sec.mentalModels, max).replace('## 心智模型', '## 群聊心智模型');
+                parts.push(mm);
+            }
+            if (hasRecall) {
+                const mem = buildLongTermMemoryPrompt(sec.recalls, false, sec.title.replace(/^群聊记忆（|）$/g, ''), max)
+                    .replace('## 长期记忆', '## 群聊长期记忆');
+                parts.push(mem);
+            }
+        } else {
+            const lines: string[] = [`## ${sec.title}`];
+            if (hasMM) {
+                lines.push('心智模型：');
+                lines.push(sec.mentalModels!.map(m => `${m.question}\n${truncate(m.answer, max)}`).join('\n'));
+            }
+            if (hasRecall) {
+                lines.push('长期记忆：');
+                lines.push(sec.recalls!.map((r, i) => `${i + 1}. [${r.unit.id}] ${truncate(r.unit.text, max)}`).join('\n'));
+            }
+            parts.push(lines.join('\n'));
         }
-        if (hasObs) {
-            lines.push('观察记忆：');
-            lines.push(sec.observations!.map((o, i) => `${i + 1}. ${truncate(o.text, max)}`).join('\n'));
-        }
-        if (hasRecall) {
-            lines.push('长期记忆：');
-            lines.push(sec.recalls!.map((r, i) => `${i + 1}. [${r.unit.id}] ${truncate(r.unit.text, max)}`).join('\n'));
-        }
-        parts.push(lines.join('\n'));
     }
-    return parts.join('\n\n');
+
+    return parts.filter(Boolean).join('\n\n');
 }
+
 
 function truncate(text: string, max: number): string {
     const s = String(text || '');

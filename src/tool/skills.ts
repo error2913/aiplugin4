@@ -17,7 +17,9 @@ const MAX_REF_DEPTH = 2; // 技能间引用的最大解析深度
 /** 技能摘要注入字符预算：system prompt「可用技能」段不超该值，超出提示用 skill_list 查看完整列表 */
 export const SKILL_INJECT_MAX_CHARS = 1500;
 /** skill_list 工具返回技能条目的上限，避免技能过多时一次输出过长 */
-export const SKILL_LIST_LIMIT = 200;
+export const SKILL_LIST_LIMIT = 100;
+/** system prompt 技能摘要最多展示条数 */
+export const SKILL_INJECT_MAX_ITEMS = 100;
 
 /** 解析标准 SKILL.md frontmatter（--- 开头，name/description 键值对），兼容 Claude/Codex/Cursor 等 agent 的技能文件 */
 function parseSkillFrontmatter(raw: string): { name?: string, description?: string } {
@@ -111,6 +113,14 @@ export function getSkillSummariesBudgeted(maxChars = SKILL_INJECT_MAX_CHARS): Sk
     return { summaries, total: skills.length, truncated: summaries.length < skills.length };
 }
 
+/** 返回技能摘要（名称 + 描述），按条数上限截断，用于 system prompt 静态技能块 */
+export function getSkillSummaries(maxItems = SKILL_INJECT_MAX_ITEMS): SkillSummaryResult {
+    const skills = getSkills();
+    const summaries = skills.slice(0, maxItems).map(s => s.description ? `${s.name}：${s.description}` : s.name);
+    return { summaries, total: skills.length, truncated: skills.length > maxItems };
+}
+
+
 /**
  * 读取“技能配置”，注册 use_skill 工具
  */
@@ -122,15 +132,43 @@ export function registerSkills() {
             description: "列出全部技能的名称与描述（用于发现 system prompt「可用技能」段未列出的技能），随后可用 use_skill 按名称获取技能内容",
             parameters: {
                 type: "object",
-                properties: {}
+                properties: {
+                    page: {
+                        type: "integer",
+                        description: "页码，从 1 开始，默认 1"
+                    },
+                    page_size: {
+                        type: "integer",
+                        description: "每页数量，默认 20，最大 100"
+                    },
+                    query: {
+                        type: "string",
+                        description: "按技能名称或描述关键词过滤"
+                    }
+                }
             }
         }
     });
-    toolList.solve = async () => {
-        const skills = getSkills();
-        if (skills.length === 0) return '暂无技能';
-        const items = skills.slice(0, SKILL_LIST_LIMIT).map(s => s.description ? `${s.name}：${s.description}` : s.name);
-        return `技能列表（共 ${skills.length} 个）\n- ${items.join('\n- ')}${skills.length > SKILL_LIST_LIMIT ? `\n…共 ${skills.length} 个技能，超出 ${SKILL_LIST_LIMIT} 条展示上限` : ''}`;
+    toolList.solve = async (_ctx, _msg, _session, args) => {
+        const { page = 1, page_size = 20, query = '' } = args || {};
+        const all = getSkills();
+        if (all.length === 0) return '暂无技能';
+        const q = String(query || '').trim().toLowerCase();
+        const filtered = q
+            ? all.filter(s =>
+                s.name.toLowerCase().includes(q) ||
+                (s.description || '').toLowerCase().includes(q)
+            )
+            : all;
+        const size = Math.min(Math.max(parseInt(page_size, 10) || 20, 1), SKILL_LIST_LIMIT);
+        const current = Math.max(parseInt(page, 10) || 1, 1);
+        const totalPages = Math.max(1, Math.ceil(filtered.length / size));
+        const start = (current - 1) * size;
+        const items = filtered.slice(start, start + size).map(s => s.description ? `${s.name}：${s.description}` : s.name);
+        const lines = [`技能列表（共 ${filtered.length} 个）`];
+        items.forEach((item, i) => lines.push(`${start + i + 1}. ${item}`));
+        lines.push(`当前第 ${current} 页，共 ${totalPages} 页；使用 use_skill 获取技能正文。`);
+        return lines.join('\n');
     };
 
     const tool = new Tool({

@@ -5,7 +5,7 @@ import Model from "../model/model";
 import { buildCharNGrams } from "../utils/string";
 import { cosineSimilarity } from "../utils/utils";
 
-import { hashString, KnowledgeChunk, splitMarkdownIntoChunks } from "./knowledge_chunk";
+import { hashString, KnowledgeChunk, KnowledgeLibrary, splitMarkdownIntoChunks } from "./knowledge_chunk";
 
 // 向量重排候选上限：仅对关键词命中的前 N 块做惰性嵌入，控制单次检索的 API 开销
 const VECTOR_RERANK_CANDIDATE_LIMIT = 20;
@@ -15,9 +15,108 @@ export const KB_INDEX_LIMIT = 100;
 export const KB_LIST_LIMIT = 200;
 /** 知识库注入段字符预算：正文/索引合计不超过该值，避免挤占 system prompt */
 export const KB_INJECT_MAX_CHARS = 1500;
+/** system prompt 静态知识库段最多展示的库数量 */
+export const KB_INJECT_MAX_LIBRARIES = 100;
+/** 知识库列表工具单页最大条数 */
+export const KB_PAGE_SIZE_LIMIT = 100;
+
+function parseFrontmatter(raw: string): { name?: string; description?: string } {
+    const meta: { name?: string; description?: string } = {};
+    for (const line of raw.split('\n')) {
+        const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+        if (!m) continue;
+        const key = m[1].toLowerCase();
+        const value = m[2].trim().replace(/^['"]|['"]$/g, '');
+        if (!value) continue;
+        if (key === 'name') meta.name = value;
+        else if (key === 'description') meta.description = value;
+    }
+    return meta;
+}
+
+function extractFirstParagraph(markdown: string): string {
+    const lines = (markdown || '').replace(/\r\n/g, '\n').split('\n');
+    let started = false;
+    const buffer: string[] = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!started) {
+            if (/^#\s+/.test(trimmed)) {
+                started = true;
+            }
+            continue;
+        }
+        if (/^#{1,6}\s+/.test(trimmed)) break;
+        if (!trimmed) {
+            if (buffer.length > 0) break;
+            continue;
+        }
+        buffer.push(trimmed);
+        if (buffer.join(' ').length >= 200) break;
+    }
+    return buffer.join(' ').slice(0, 200);
+}
+
+/** 解析单个知识库配置项为一个库 */
+export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibrary {
+    const text = String(raw || '').replace(/\r\n/g, '\n').trim();
+    const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+    let name = '';
+    let description = '';
+    let body = text;
+
+    if (fmMatch) {
+        const meta = parseFrontmatter(fmMatch[1]);
+        name = meta.name || '';
+        description = meta.description || '';
+        body = fmMatch[2].trim();
+    }
+
+    const docChunks = splitMarkdownIntoChunks(body);
+    const headingTitle = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || '';
+    if (!name) name = headingTitle || `库${index + 1}`;
+    const firstTitle = headingTitle || name;
+    if (!description) description = extractFirstParagraph(body);
+
+    const libraryId = `kb_lib_${hashString(text)}`;
+    const chunks: KnowledgeChunk[] = [];
+
+    for (const c of docChunks) {
+        const docTitle = c.title || firstTitle;
+        chunks.push({
+            id: `kb_${index + 1}_${c.id.replace(/^kb_/, '')}`,
+            title: docTitle,
+            heading: c.heading,
+            content: c.content,
+            libraryId,
+            libraryName: name,
+            libraryDescription: description,
+            docId: `kb_doc_${hashString(`${libraryId}|${docTitle}`)}`,
+            docTitle,
+        });
+    }
+
+    // 完全没有标题的纯文本：整体作为一条
+    if (chunks.length === 0) {
+        chunks.push({
+            id: `kb_${index + 1}_${hashString(text)}_whole`,
+            title: name,
+            heading: '',
+            content: body,
+            libraryId,
+            libraryName: name,
+            libraryDescription: description,
+            docId: `kb_doc_${hashString(`${libraryId}|${name}`)}`,
+            docTitle: name,
+        });
+    }
+
+    return { id: libraryId, name, description, raw: text, chunks };
+}
 
 export class KnowledgeBaseService {
     private chunks: KnowledgeChunk[] = [];
+    private libraries: KnowledgeLibrary[] = [];
     /** 惰性向量缓存：检索时才按块嵌入，加载知识库本身不请求嵌入模型 */
     private chunkVectors: Map<string, number[]> = new Map();
     /** 上次加载的配置内容签名：签名不变则跳过重新切分，避免依赖数组引用稳定性 */
@@ -39,28 +138,16 @@ export class KnowledgeBaseService {
         const oldVectors = this.chunkVectors;
         this.chunkVectors = new Map();
         this.chunks = [];
-        list.forEach((md, index) => {
-            const raw = (md || '').replace(/\r\n/g, '\n').trim();
-            if (!raw) return;
-            // 条目标题：取文档首个 #，无标题时用条目序号兜底
-            const firstTitle = raw.match(/^#\s+(.+)$/m)?.[1]?.trim() || `条目${index + 1}`;
-            const docChunks = splitMarkdownIntoChunks(raw);
-            docChunks.forEach(c => {
-                if (!c.title) c.title = firstTitle;
-                // 条目序号参与 ID：跨条目内容完全相同时 ID 仍全局唯一（顺序变化会让未变动条目失效，可接受）
-                c.id = `kb_${index + 1}_${c.id.replace(/^kb_/, '')}`;
-                this.chunks.push(c);
-            });
-            // 完全没有标题的纯文本：整体作为一条
-            if (docChunks.length === 0) {
-                this.chunks.push({
-                    id: `kb_${index + 1}_${hashString(raw)}_whole`,
-                    title: firstTitle,
-                    heading: '',
-                    content: raw
-                });
-            }
-        });
+        this.libraries = [];
+
+        for (let i = 0; i < list.length; i++) {
+            const raw = (list[i] || '').replace(/\r\n/g, '\n').trim();
+            if (!raw) continue;
+            const library = parseKnowledgeLibrary(raw, i);
+            this.libraries.push(library);
+            for (const c of library.chunks) this.chunks.push(c);
+        }
+
         // 保留未变分块的向量缓存：ID 稳定（内容 hash）时旧向量仍然有效
         for (const c of this.chunks) {
             const v = oldVectors.get(c.id);
@@ -69,7 +156,7 @@ export class KnowledgeBaseService {
         this.loadedItems = list;
         this.loadedSignature = this.getItemsSignature(list);
         this.itemsSignature = this.loadedSignature;
-        Logger.info(`知识库加载完成: ${this.chunks.length} 个分块`);
+        Logger.info(`知识库加载完成: ${this.libraries.length} 个库, ${this.chunks.length} 个分块`);
     }
 
     private ensureLoaded(): Promise<void> {
@@ -113,6 +200,66 @@ export class KnowledgeBaseService {
     /** 全部条目索引（id/标题/小节） */
     list(): KnowledgeChunk[] {
         return this.chunks;
+    }
+
+    /** 全部知识库 */
+    getLibraries(): KnowledgeLibrary[] {
+        return this.libraries;
+    }
+
+    /** 知识库静态缓存签名：库元数据 + 分块数量变化都会使签名变化 */
+    getLibrariesSignature(): string {
+        return this.libraries
+            .map(l => `${l.id}|${l.name}|${l.description}|${l.chunks.length}`)
+            .join('\n');
+    }
+
+    /** system prompt 静态知识库段：只展示库名和描述 */
+    formatLibraries(limit = KB_INJECT_MAX_LIBRARIES): string {
+        if (this.libraries.length === 0) return '';
+        const lines = ['## 知识库'];
+        for (const lib of this.libraries.slice(0, limit)) {
+            lines.push(`- ${lib.name}：${lib.description || '无描述'}`);
+        }
+        if (this.libraries.length > limit) {
+            lines.push(`（共 ${this.libraries.length} 个库，最多显示 ${limit} 个）`);
+        }
+        lines.push('需要查看结构：knowledge_docs；搜索内容：knowledge_search；读取分块：knowledge_read。');
+        return lines.join('\n');
+    }
+
+    /** 某个库下的文档/章节树 */
+    formatLibraryDocs(libraryId: string, page = 1, pageSize = 20): string {
+        const lib = this.libraries.find(x => x.id === libraryId);
+        if (!lib) return `未找到知识库:${libraryId}`;
+        if (lib.chunks.length === 0) return `知识库 ${lib.name} 暂无内容`;
+
+        const size = Math.min(Math.max(Number(pageSize) || 20, 1), KB_PAGE_SIZE_LIMIT);
+        const current = Math.max(Number(page) || 1, 1);
+        const groups: { docId: string; docTitle: string; items: string[] }[] = [];
+        const map = new Map<string, typeof groups[number]>();
+        for (const c of lib.chunks) {
+            const docId = c.docId || c.id;
+            let g = map.get(docId);
+            if (!g) {
+                g = { docId, docTitle: c.docTitle || c.title, items: [] };
+                map.set(docId, g);
+                groups.push(g);
+            }
+            const heading = c.heading ? ` - ${c.heading}` : '';
+            g.items.push(`${c.id}${heading}`);
+        }
+
+        const totalPages = Math.max(1, Math.ceil(groups.length / size));
+        const pageGroups = groups.slice((current - 1) * size, current * size);
+        const lines = [`知识库：${lib.name}（${lib.id}）`];
+        for (const g of pageGroups) {
+            lines.push('');
+            lines.push(`文档：${g.docTitle}（${g.docId}）`);
+            for (const item of g.items) lines.push(`- ${item}`);
+        }
+        lines.push(`当前第 ${current} 页，共 ${totalPages} 页；使用 knowledge_read 读取具体分块，knowledge_search 搜索内容。`);
+        return lines.join('\n');
     }
 
     /** 按稳定 ID 读取单个分块 */
@@ -172,16 +319,20 @@ export class KnowledgeBaseService {
      * 先按标题/小节/内容关键词过滤排序，嵌入可用时仅对命中候选做惰性向量相似度重排；
      * 嵌入失败/未配置时直接返回关键词结果，不影响可用性。
      */
-    async search(query: string, topK = 5): Promise<KnowledgeChunk[]> {
+    async search(query: string, topK = 5, libraryId?: string): Promise<KnowledgeChunk[]> {
         await this.ensureLoaded();
-        if (this.chunks.length === 0) return [];
+        let baseChunks = this.chunks;
+        if (libraryId) {
+            baseChunks = this.chunks.filter(c => c.libraryId === libraryId);
+        }
+        if (baseChunks.length === 0) return [];
         if (topK < 1) topK = 1;
         const tokens = this.tokenize(query);
         if (tokens.length === 0) {
             // 空查询：返回前 topK 条（按注入顺序）
-            return this.chunks.slice(0, topK);
+            return baseChunks.slice(0, topK);
         }
-        const hits = this.chunks
+        const hits = baseChunks
             .map(chunk => ({ chunk, score: this.keywordScore(chunk, tokens, query) }))
             .filter(x => x.score > 0)
             .sort((a, b) => b.score - a.score || b.chunk.content.length - a.chunk.content.length);
@@ -229,6 +380,7 @@ export class KnowledgeBaseService {
      * 模型需要正文时通过 knowledge_read 按 ID 读取。
      */
     async buildKnowledgePrompt(_query = ''): Promise<string> {
+        await this.ensureLoaded();
         if (this.chunks.length === 0) return '';
         return this.buildIndexFallback();
     }

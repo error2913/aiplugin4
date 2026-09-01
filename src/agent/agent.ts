@@ -51,7 +51,9 @@ export default class Agent {
     }
 
     getRequestTools(session?: Session): ToolInfo[] | null {
-        if (session) return Tool.getToolsInfo(session);
+        if (!session) return null;
+        if (!Config.tool.STATUS || Config.tool.PROMPT_ENGINEERING) return null;
+        return Tool.getNativeRequestTools(session);
         return null;
     }
 
@@ -157,7 +159,7 @@ export default class Agent {
 
     private async runInternal(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-        const toolInfos = Tool.getToolsInfo(session);
+        const toolInfos = STATUS && !PROMPT_ENGINEERING ? Tool.getNativeRequestTools(session) : [];
         const trace = new AgentRunContext();
         const version = session.stopVersion;
 
