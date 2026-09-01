@@ -3895,8 +3895,10 @@ description: 茶库
             const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '记忆', uis, { isPrivate: false, id: 'QQ-Group:cap', name: '上限测试群' } as any);
 
             const recallLines = prompt.split('\n').filter(l => /^\d+\. \[/.test(l));
+            const groupRecallCount = prompt.split('\n').filter(l => /^\d+\. \[/.test(l) && l.includes('群记忆')).length;
             const mmCount = (prompt.match(/## 群聊心智模型|## 心智模型/g) || []).length;
             assert.ok(recallLines.length <= 20, `长期记忆总条数应 ≤ 20，实际 ${recallLines.length}`);
+            assert.ok(groupRecallCount > 10, `群聊长期记忆上限应为 20，实际群聊记忆 ${groupRecallCount} 条`);
             assert.ok(uis.length >= 4, '测试应准备 4 个最近发言者');
             assert.ok((prompt.match(/## 个人记忆（/g) || []).length <= 3, '最近发言者人数应 ≤ 3');
             assert.ok(mmCount >= 1, '应包含心智模型段');

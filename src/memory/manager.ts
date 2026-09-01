@@ -33,7 +33,7 @@ function tagsForSession(uis: UserInfo[], gi: GroupInfo | null): string[] {
 /** 群聊注入时，每个最近发言者个人记忆库的召回 token 预算 */
 const MERGE_USER_RECALL_MAX_TOKENS = 1024;
 /** 群聊注入时，每个最近发言者最多并入的个人记忆条数 */
-const PER_USER_RECALLS = 5;
+const PER_USER_RECALLS = 20;
 /** 群聊注入时，每个最近发言者最多并入的个人心智模型条数 */
 const PER_USER_MENTAL_MODELS = 2;
 /** 群聊注入时，单个最近发言者个人记忆组的字符预算（按分数降序截断，避免多库膨胀） */
@@ -42,7 +42,7 @@ const PER_USER_RECALL_MAX_CHARS = 2048;
 /** 最近发言者注入人数上限 */
 const MAX_RECENT_USERS = 3;
 /** 群聊长期记忆注入条数上限 */
-const MAX_GROUP_RECALLS = 10;
+const MAX_GROUP_RECALLS = 20;
 /** 长期记忆全段总条数上限 */
 const MAX_TOTAL_RECALLS = 20;
 /** 群聊心智模型注入条数上限 */
