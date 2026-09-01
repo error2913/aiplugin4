@@ -88,7 +88,7 @@ export class MemoryManager {
             maxTokens: 2048,
             preferObservations: true,
             budget: 'mid',
-        })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId)).slice(0, MAX_GROUP_RECALLS);
+        })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
         // 群聊不再在此处注入观察记忆；观察记忆由 buildObservationPrompt 独立注入
         // 群心智模型：scopeTags 过滤 + stale 剔除 + 条数上限
         const groupMMs = selectInjectionCandidates(engine.listMentalModels(bank.bankId), [], tags)
@@ -100,13 +100,14 @@ export class MemoryManager {
         const sections: MemoryPromptSection[] = [];
         const isGroup = session.sessionType === 'group';
         if (isGroup) {
+            const groupRecallList = groupRecalls.slice(0, MAX_GROUP_RECALLS);
             sections.push({
                 title: `群聊记忆（${gi?.name || session.sessionId}）`,
                 mentalModels: groupMMs,
-                recalls: groupRecalls,
+                recalls: groupRecallList,
             });
 
-            let recallBudget = MAX_TOTAL_RECALLS - groupRecalls.length;
+            let recallBudget = MAX_TOTAL_RECALLS - groupRecallList.length;
             let mmBudget = MAX_TOTAL_MENTAL_MODELS - groupMMs.length;
             const recentUsers = uis.slice(0, MAX_RECENT_USERS);
 
