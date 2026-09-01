@@ -107,12 +107,10 @@ export class MemoryManager {
                 recalls: groupRecallList,
             });
 
-            let recallBudget = MAX_TOTAL_RECALLS - groupRecallList.length;
             let mmBudget = MAX_TOTAL_MENTAL_MODELS - groupMMs.length;
             const recentUsers = uis.slice(0, MAX_RECENT_USERS);
 
             for (const u of recentUsers) {
-                if (recallBudget <= 0 && mmBudget <= 0) break;
                 const userBankId = resolveBankId(u.id, 'user', session.agentName).bankId;
                 const ranked = (await engine.recall(userBankId, text, {
                     tags: [`user:${u.id}`],
@@ -124,7 +122,6 @@ export class MemoryManager {
                 let total = 0;
                 for (const r of ranked) {
                     if (userRecalls.length >= PER_USER_RECALLS) break;
-                    if (userRecalls.length >= recallBudget) break;
                     if (total + r.unit.text.length > PER_USER_RECALL_MAX_CHARS) break;
                     userRecalls.push(r);
                     total += r.unit.text.length;
@@ -133,7 +130,6 @@ export class MemoryManager {
                     .mentalModels
                     .slice(0, Math.min(PER_USER_MENTAL_MODELS, mmBudget));
                 sections.push({ title: `个人记忆（${u.name || u.id}）`, mentalModels: userMMs, recalls: userRecalls });
-                recallBudget -= userRecalls.length;
                 mmBudget -= userMMs.length;
             }
         } else {
