@@ -38,7 +38,8 @@ export function selectInjectionCandidates(
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
         .slice(0, MAX_OBSERVATIONS);
     const mms = (mentalModels || [])
-        .filter(m => scopeMatch(m.scopeTags))
+        // 只注入可用（ready）心智模型：pending=占位待生成、failed=上次失败，均不注入占位/过期文本
+        .filter(m => (m.status === 'ready' || m.status === undefined) && scopeMatch(m.scopeTags))
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
         .slice(0, MAX_MENTAL_MODELS);
     return { mentalModels: mms, observations: fresh };
@@ -64,9 +65,10 @@ export interface MemoryPromptSection {
 
 
 export function buildMentalModelsPrompt(mentalModels: MentalModel[], max = 1000): string {
-    if (!mentalModels?.length) return '';
+    const ready = (mentalModels || []).filter(m => m.status === 'ready' || m.status === undefined);
+    if (ready.length === 0) return '';
     const lines = ['## 心智模型'];
-    for (const m of mentalModels) {
+    for (const m of ready) {
         lines.push(`${m.question}\n${truncate(m.answer, max)}`);
     }
     return lines.join('\n');

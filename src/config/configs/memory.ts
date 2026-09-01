@@ -23,6 +23,10 @@ export default class MemoryConfig {
         seal.ext.registerBoolConfig(ext, "用LLM推理记忆", true, "使用 LLM 合成心智模型推理答案（.ai memo mm / reflect 使用，默认开启）", "记忆");
         seal.ext.registerBoolConfig(ext, "巩固后自动刷新心智模型", true, "巩固记忆后自动基于最新记忆刷新心智模型（默认开启）", "记忆");
         seal.ext.registerIntConfig(ext, "心智模型刷新最小间隔", 30, "自动刷新心智模型的最小间隔（分钟），0 为不限制", "记忆");
+        // Hindsight 式心智模型刷新配置
+        seal.ext.registerStringConfig(ext, "心智模型默认刷新模式", "full", "新增心智模型默认刷新方式：full=基于全部记忆重新推理，delta=只按新增记忆增量更新", "记忆");
+        seal.ext.registerBoolConfig(ext, "心智模型刷新排除其它心智模型", true, "刷新心智模型时不把其它心智模型作为推理输入，避免互相引用", "记忆");
+        seal.ext.registerIntConfig(ext, "心智模型定时刷新间隔", 0, "每累计该分钟数自动检查并刷新心智模型（仅当有新记忆时实际刷新），0 为关闭", "记忆");
     }
 
     static get() {
@@ -38,6 +42,9 @@ export default class MemoryConfig {
             MEMORY_REFLECT_SYNTH: seal.ext.getBoolConfig(ext, "用LLM推理记忆"),
             MEMORY_REFRESH_AFTER_CONSOLIDATE: seal.ext.getBoolConfig(ext, "巩固后自动刷新心智模型"),
             MEMORY_REFRESH_MIN_INTERVAL: seal.ext.getIntConfig(ext, "心智模型刷新最小间隔"),
+            MEMORY_MM_DEFAULT_MODE: seal.ext.getStringConfig(ext, "心智模型默认刷新模式"),
+            MEMORY_MM_EXCLUDE_SIBLINGS: seal.ext.getBoolConfig(ext, "心智模型刷新排除其它心智模型"),
+            MEMORY_MM_TICK_INTERVAL: seal.ext.getIntConfig(ext, "心智模型定时刷新间隔"),
             MEMORY_RECENCY_WEIGHT: seal.ext.getFloatConfig(ext, "记忆召回新近度权重"),
             MEMORY_RECENCY_HALF_LIFE_DAYS: seal.ext.getIntConfig(ext, "记忆召回新近度半衰期"),
             MEMORY_CAP: seal.ext.getIntConfig(ext, "长期记忆条数上限")

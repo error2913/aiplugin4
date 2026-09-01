@@ -48,13 +48,21 @@ const OBSERVATION_PROMPT = `你是一个记忆观察合成器。根据以下支�
   "observation": "合成后的观察文本"
 }`;
 
-const REFLECT_PROMPT = `你是一个基于记忆的推理助手。根据用户的问题和相关记忆，给出简洁、准确的回答。
+const REFLECT_PROMPT_FULL = `你是一个基于记忆的推理助手。根据用户的问题和相关记忆，给出简洁、准确的回答。
 
 要求：
 - 只依据提供的记忆内容作答；
 - 记忆不足时如实说明缺少哪些信息；
 - 不要编造记忆中没有的信息；
 - 回答控制在 200 字以内，直接输出答案，不要输出解释。`;
+
+const REFLECT_PROMPT_DELTA = `你是一个心智模型维护器。基于「当前答案」与「最近新增的记忆」，对答案做增量更新。
+
+要求：
+- 保留仍然成立的内容，只修改被新增记忆影响的部分；
+- 用新增记忆补充、修正或删除过期结论；
+- 不要编造新增记忆中没有的信息；
+- 直接输出更新后的完整答案，控制在 200 字以内，不要输出解释。`;
 
 function parseLooseJson(text: string): any {
     if (!text || typeof text !== 'string') return null;
@@ -147,8 +155,13 @@ export const defaultReflectSynthesizer: ReflectSynthesizer = async (query, conte
             parts.push('【事实】');
             parts.push(context.memories.map(m => `- ${m.text}`).join('\n'));
         }
+        const isDelta = context.mode === 'delta' && !!context.existingAnswer;
+        const prompt = isDelta ? REFLECT_PROMPT_DELTA : REFLECT_PROMPT_FULL;
+        const input = isDelta
+            ? `当前答案：\n${context.existingAnswer}\n\n最近新增的相关记忆：\n${parts.join('\n\n') || '（无）'}`
+            : `问题：${query}\n相关记忆：\n${parts.join('\n\n') || '（无）'}`;
         const reply = await Agent.get('summarize_agent').chat(
-            `${REFLECT_PROMPT}\n\n问题：${query}\n相关记忆：\n${parts.join('\n\n') || '（无）'}`
+            `${prompt}\n\n${input}`
         );
         return (reply || '').trim();
     } catch {

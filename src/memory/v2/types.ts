@@ -100,6 +100,21 @@ export interface ObservationHistoryEntry {
 /** 心智模型刷新触发方式：full=基于全部记忆重新推理，delta=增量更新 */
 export type MentalModelTrigger = 'full' | 'delta';
 
+/** 心智模型生命周期状态：ready=可用，pending=占位待生成，failed=上次生成失败 */
+export type MentalModelStatus = 'ready' | 'pending' | 'failed';
+
+/** 心智模型刷新触发配置（Hindsight MentalModelTrigger 的 TS 裁剪版） */
+export interface MentalModelTriggerConfig {
+    /** 刷新方式：full=基于全部记忆重新推理，delta=只按新增记忆增量更新 */
+    mode: MentalModelTrigger;
+    /** 巩固后是否自动刷新（对应 Hindsight refresh_after_consolidation） */
+    refreshAfterConsolidation: boolean;
+    /** 刷新时读取的记忆类型，缺省=全部（world/experience/observation） */
+    factTypes?: FactType[];
+    /** 刷新时排除其它心智模型，避免模型间互相引用（Hindsight exclude_mental_models） */
+    excludeMentalModels?: boolean;
+}
+
 export interface MentalModelHistoryEntry {
     answer: string;
     at: number;
@@ -134,6 +149,16 @@ export interface MentalModel {
     history: MentalModelHistoryEntry[];
     /** 最近一次刷新方式：full=全量重推理，delta=增量更新 */
     trigger: MentalModelTrigger;
+    /** 刷新触发配置（mode/自动刷新/读取类型/排除其它模型） */
+    triggerConfig?: MentalModelTriggerConfig;
+    /** 生命周期状态：pending=占位待生成，failed=上次生成失败 */
+    status?: MentalModelStatus;
+    /** watermark：上次刷新见过的最新 in-scope 记忆时间（秒），用于 staleness gating */
+    lastMemorySeenAt?: number;
+    /** 上次生成失败时间（秒），用于失败重试冷却 */
+    lastFailedAt?: number;
+    /** (question+answer) 语义向量，用于注入语义排序与 searchMentalModels 召回 */
+    embedding?: number[];
 }
 
 export interface MemoryDocument {
@@ -201,6 +226,10 @@ export type ReflectSynthesizer = (query: string, context: {
     mentalModels: MentalModel[];
     observations: Observation[];
     memories: MemoryUnit[];
+    /** delta 模式：待增量更新的旧答案（full 模式为空） */
+    existingAnswer?: string;
+    /** 本次合成方式：full=全量重写，delta=增量更新 */
+    mode?: MentalModelTrigger;
 }) => Promise<string>;
 
 export interface RetainResult {
@@ -241,4 +270,17 @@ export interface ReflectResult {
         observations: Observation[];
         memories: MemoryUnit[];
     };
+}
+
+/** 心智模型刷新触发来源 */
+export type MentalModelRefreshReason = 'consolidate' | 'manual' | 'tick' | 'create';
+
+/** 心智模型批量刷新结果（Hindsight 语义：updated 推进 watermark；skipped 不调 LLM；failed 保留旧答案） */
+export interface MentalModelRefreshSummary {
+    updated: number;
+    skipped: number;
+    failed: number;
+    /** 跳过原因计数，便于调试：no_source/not_stale/unchanged/failed_cooldown */
+    skippedReasons: Record<string, number>;
+    refreshedIds: string[];
 }

@@ -90,10 +90,20 @@ export class MemoryManager {
             budget: 'mid',
         })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
         // 群聊不再在此处注入观察记忆；观察记忆由 buildObservationPrompt 独立注入
-        // 群心智模型：scopeTags 过滤 + stale 剔除 + 条数上限
-        const groupMMs = selectInjectionCandidates(engine.listMentalModels(bank.bankId), [], tags)
-            .mentalModels
-            .slice(0, MAX_GROUP_MENTAL_MODELS);
+        // 群心智模型：Hindsight 心智模型语义召回式注入（相关度排序 + scope 过滤 + 条数上限）；
+        // 查询向量每轮只算一次，复用于群聊/各发言者个人库
+        let qEmbed: number[] | null | undefined;
+        const queryEmbedding = async (): Promise<number[] | null> => {
+            if (qEmbed === undefined) qEmbed = await engine.embedQuery(text);
+            return qEmbed;
+        };
+        const groupMMs = engine.listMentalModels(bank.bankId).length > 0
+            ? await engine.searchMentalModels(bank.bankId, text, {
+                tags,
+                limit: MAX_GROUP_MENTAL_MODELS,
+                queryEmbedding: await queryEmbedding(),
+            })
+            : [];
 
         // 分组渲染：群聊按「群聊 / 每个最近发言者」分别渲染长期记忆 + 心智模型，避免归属混淆；
         // 个人记忆按用户标签召回、单用户条数/字符预算截断，私有记忆仅创建者本人可见（canSeeMemoryUnit）。
@@ -126,9 +136,13 @@ export class MemoryManager {
                     userRecalls.push(r);
                     total += r.unit.text.length;
                 }
-                const userMMs = selectInjectionCandidates(engine.listMentalModels(userBankId), [], tags)
-                    .mentalModels
-                    .slice(0, Math.min(PER_USER_MENTAL_MODELS, mmBudget));
+                const userMMs = engine.listMentalModels(userBankId).length > 0
+                    ? await engine.searchMentalModels(userBankId, text, {
+                        tags: [`user:${u.id}`],
+                        limit: Math.min(PER_USER_MENTAL_MODELS, mmBudget),
+                        queryEmbedding: await queryEmbedding(),
+                    })
+                    : [];
                 sections.push({ title: `个人记忆（${u.name || u.id}）`, mentalModels: userMMs, recalls: userRecalls });
                 mmBudget -= userMMs.length;
             }
@@ -225,7 +239,7 @@ export class MemoryManager {
         bumpSummaryRevision();
         // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
-            await engine.refreshMentalModels(bank.bankId);
+            await engine.refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
         }
         return result;
     }
@@ -242,6 +256,16 @@ export class MemoryManager {
      * 写入新引擎后触发 Observation 巩固。
      */
     static async retainConversation(session: Session): Promise<void> {
+        // Hindsight cron 等价物：定时刷新心智模型（仅当 scope 内有新记忆时实际刷新，staleness gating 保证不烧 token）
+        const tickIntervalMin = Config.memory.MEMORY_MM_TICK_INTERVAL;
+        if (tickIntervalMin > 0) {
+            const tickEngine = getMemoryEngine();
+            const tickBank = bankForSession(session);
+            const last = tickEngine.getLastAutoRefreshAt(tickBank.bankId);
+            if (last <= 0 || Date.now() / 1000 - last >= tickIntervalMin * 60) {
+                await tickEngine.refreshMentalModels(tickBank.bankId, undefined, { reason: 'tick' });
+            }
+        }
         const { SUMMARY, SUMMARY_SIZE } = Config.memory;
         if (session.memory.summaryOverride === false) return;
         if (session.memory.summaryOverride !== true && !SUMMARY) return;
@@ -329,7 +353,7 @@ export class MemoryManager {
                 engine.setConsolidateSince(bank.bankId, 0);
                 // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
                 if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
-                    await engine.refreshMentalModels(bank.bankId);
+                    await engine.refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
                 }
             } else {
                 engine.setConsolidateSince(bank.bankId, since);

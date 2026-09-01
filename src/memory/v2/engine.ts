@@ -9,9 +9,14 @@ import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
 import type {
     ConsolidationResult,
     FactExtractor,
+    FactType,
     MemoryBankMeta,
     MemoryUnit,
     MentalModel,
+    MentalModelRefreshReason,
+    MentalModelRefreshSummary,
+    MentalModelTrigger,
+    MentalModelTriggerConfig,
     Observation,
     ObservationSynthesizer,
     RecallOptions,
@@ -49,6 +54,8 @@ export interface MemoryEngineOptions {
     recencyHalfLifeDays?: number;
     /** 长期记忆条数上限（0 = 不限制，默认 100 由配置注入） */
     memoryCap?: number;
+    /** 可注入时钟（返回秒级时间戳），测试用；默认 Date.now()/1000 */
+    now?: () => number;
 }
 
 export class MemoryEngine {
@@ -72,7 +79,12 @@ export class MemoryEngine {
     private recencyHalfLifeDays = 60;
     /** 长期记忆条数上限（0 = 不限制） */
     private memoryCap = 0;
-
+    /** 时钟（秒级时间戳），测试可注入 */
+    private nowFn: () => number;
+    /** 心智模型默认刷新模式（未显式指定时） */
+    private defaultMentalModelMode: MentalModelTrigger = 'full';
+    /** 心智模型刷新时默认是否排除其它心智模型 */
+    private defaultExcludeMentalModels = true;
     constructor(options: MemoryEngineOptions = {}) {
         this.repository = new MemoryRepository(options.storage || new InMemoryMemoryStorage());
         this.embedding = options.embedding;
@@ -83,6 +95,12 @@ export class MemoryEngine {
         this.recencyWeight = options.recencyWeight ?? 0.4;
         this.recencyHalfLifeDays = options.recencyHalfLifeDays ?? 60;
         this.memoryCap = options.memoryCap ?? 0;
+        this.nowFn = options.now || (() => Math.floor(Date.now() / 1000));
+    }
+
+    /** 秒级当前时间（统一走可注入时钟） */
+    private nowSec(): number {
+        return this.nowFn();
     }
 
     setExtractor(extract: FactExtractor): void {
@@ -115,6 +133,17 @@ export class MemoryEngine {
     /** 配置长期记忆条数上限：cap<=0 为不限制（默认 100 由 createMemoryEngine 注入） */
     setMemoryCap(cap: number): void {
         this.memoryCap = cap > 0 ? cap : 0;
+    }
+
+    /** 配置心智模型默认刷新参数（createMentalModel 未显式指定时生效） */
+    setMentalModelDefaults(opts: { mode?: MentalModelTrigger; excludeMentalModels?: boolean }): void {
+        if (opts.mode === 'full' || opts.mode === 'delta') this.defaultMentalModelMode = opts.mode;
+        if (typeof opts.excludeMentalModels === 'boolean') this.defaultExcludeMentalModels = opts.excludeMentalModels;
+    }
+
+    /** 各 bank 最近一次心智模型自动刷新时间（秒），供定时 tick 判断是否到点 */
+    getLastAutoRefreshAt(bankId: string): number {
+        return this.lastRefreshAt.get(bankId) || 0;
     }
 
     // ===== Bank =====
@@ -590,34 +619,71 @@ export class MemoryEngine {
         return this.repository.listMentalModels(bankId);
     }
 
-    async createMentalModel(bankId: string, question: string, answer: string, scopeTags: string[] = []): Promise<MentalModel> {
-        const now = Math.floor(Date.now() / 1000);
+    async createMentalModel(
+        bankId: string,
+        question: string,
+        answer: string,
+        scopeTags: string[] = [],
+        opts: {
+            mode?: MentalModelTrigger;
+            autoRefresh?: boolean;
+            factTypes?: FactType[];
+            excludeMentalModels?: boolean;
+        } = {}
+    ): Promise<MentalModel> {
+        const now = this.nowSec();
         const existing = this.repository.listMentalModels(bankId).find(m => m.question === question);
         if (existing) {
+            const mode = opts.mode || existing.triggerConfig?.mode || 'full';
             existing.answer = answer;
             existing.scopeTags = scopeTags;
             existing.updatedAt = now;
             existing.version++;
             if (typeof existing.lastRefreshedAt !== 'number') existing.lastRefreshedAt = now;
             if (!Array.isArray(existing.history)) existing.history = [];
-            if (existing.trigger !== 'full' && existing.trigger !== 'delta') existing.trigger = 'full';
+            existing.trigger = mode;
+            existing.triggerConfig = {
+                mode,
+                refreshAfterConsolidation: opts.autoRefresh !== undefined
+                    ? opts.autoRefresh !== false
+                    : existing.triggerConfig?.refreshAfterConsolidation ?? true,
+                excludeMentalModels: opts.excludeMentalModels ?? existing.triggerConfig?.excludeMentalModels ?? this.defaultExcludeMentalModels,
+                factTypes: opts.factTypes ?? existing.triggerConfig?.factTypes,
+            };
+            // 手写答案：watermark=now（只有更新的记忆才触发自动刷新）；生成式：重置为 0 等待生成
+            existing.status = answer ? 'ready' : 'pending';
+            existing.lastMemorySeenAt = answer ? now : 0;
+            existing.lastFailedAt = undefined;
+            existing.embedding = [];
             this.repository.updateMentalModel(bankId, existing);
             return existing;
         }
+        const mode = opts.mode || this.defaultMentalModelMode;
         const model: MentalModel = {
             id: generateId(),
             bankId,
             question,
-            answer,
+            answer: answer || '生成中…',
             scopeTags,
             createdAt: now,
             updatedAt: now,
             version: 1,
             lastRefreshedAt: now,
             history: [],
-            trigger: 'full',
+            trigger: mode,
+            triggerConfig: {
+                mode,
+                refreshAfterConsolidation: opts.autoRefresh !== false,
+                excludeMentalModels: opts.excludeMentalModels ?? this.defaultExcludeMentalModels,
+                factTypes: opts.factTypes,
+            },
+            status: answer ? 'ready' : 'pending',
+            lastMemorySeenAt: answer ? now : 0,
+            embedding: [],
         };
         this.repository.addMentalModel(bankId, model);
+        // 手写答案：best-effort 异步算向量（不阻塞、失败静默），供注入语义排序/召回使用
+        if (answer) this.computeMentalModelEmbedding(bankId, model).catch(() => { });
         return model;
     }
 
@@ -626,75 +692,309 @@ export class MemoryEngine {
     }
 
     /**
-     * 刷新心智模型：基于现有记忆重新推理每个问题；传 id 时只刷新该条。
-     * - 空内容保护：合成失败 / 无足够记忆时不覆盖旧答案
-     * - 未变化跳过：结果与旧答案相同不 bump version
-     * 返回实际更新的条数。
+     * 刷新心智模型（Hindsight refresh_mental_model 的 TS 版）：per-model 管线。
+     * - scope：factTypes + scopeTags 过滤；排除自身（默认还排除其它心智模型）
+     * - staleness gating：非 force 且 scope 内无新记忆（> lastMemorySeenAt）时跳过，不调 LLM
+     * - watermark：成功后 lastMemorySeenAt 推进到快照内最新记忆时间；失败不推进
+     * - delta：只喂 createdAfter=lastMemorySeenAt 窗口内的新记忆 + 旧答案做增量更新
+     * 返回 {updated, skipped, failed, skippedReasons, refreshedIds}。
      */
-    async refreshMentalModels(bankId: string, id?: string, opts: { force?: boolean } = {}): Promise<number> {
+    async refreshMentalModels(
+        bankId: string,
+        id?: string,
+        opts: { force?: boolean; reason?: MentalModelRefreshReason } = {}
+    ): Promise<MentalModelRefreshSummary> {
+        const summary: MentalModelRefreshSummary = { updated: 0, skipped: 0, failed: 0, skippedReasons: {}, refreshedIds: [] };
         // 防重入：同一 bank 正在刷新时直接跳过，避免并发重复调用
-        if (this.refreshingBanks.has(bankId)) return 0;
+        if (this.refreshingBanks.has(bankId)) return summary;
         // 最小间隔限流：自动刷新（非 force）受「心智模型刷新最小间隔」配置限制
-        const nowSec0 = Math.floor(Date.now() / 1000);
+        const now0 = this.nowSec();
         if (!opts.force && this.refreshMinIntervalSec > 0) {
             const last = this.lastRefreshAt.get(bankId) || 0;
-            if (last > 0 && nowSec0 - last < this.refreshMinIntervalSec) return 0;
+            if (last > 0 && now0 - last < this.refreshMinIntervalSec) return summary;
         }
         const models = this.repository.listMentalModels(bankId).filter(m => !id || m.id === id);
-        // 空内容保护：无观察/事实可依据时跳过，避免把模型自身内容当“新推理结果”反复刷版本
-        const hasSource = this.repository.listObservations(bankId).length > 0
-            || this.repository.listUnits(bankId).some(u => u.state === 'valid' && (u.factType === 'world' || u.factType === 'experience'));
+        if (models.length === 0) return summary;
+        // 空库短路：无任何有效记忆/观察时不调 LLM（pending 保持 pending，不烧 token）
+        const bank0 = this.repository.getBank(bankId);
+        const hasSource = !!bank0 && (bank0.observations.length > 0
+            || bank0.units.some(u => u.state === 'valid' && (u.factType === 'world' || u.factType === 'experience')));
         if (!hasSource) {
-            this.lastRefreshAt.set(bankId, nowSec0);
-            return 0;
+            this.lastRefreshAt.set(bankId, now0);
+            for (let i = 0; i < models.length; i++) this.bumpSkip(summary, 'no_source');
+            return summary;
         }
         this.refreshingBanks.add(bankId);
         try {
-            const now = Math.floor(Date.now() / 1000);
-            let updated = 0;
             for (const model of models) {
-                const result = await this.reflect(bankId, model.question);
-                const text = (result.text || '').trim();
-                if (!text || text === NO_MEMORY_TEXT) continue;
-                if (text === model.answer) continue;
-                // 旧答案入历史（最多保留 10 条），并记录最近刷新时间与触发方式
-                model.history = [...(model.history || []), { answer: model.answer, at: now, trigger: model.trigger || 'full' }].slice(-10);
-                model.answer = text;
-                model.updatedAt = now;
-                model.lastRefreshedAt = now;
-                model.trigger = 'full';
-                model.version++;
-                this.repository.updateMentalModel(bankId, model);
-                updated++;
+                const outcome = await this.refreshOneMentalModel(bankId, model, {
+                    force: !!opts.force,
+                    reason: opts.reason || 'manual',
+                });
+                if (outcome.status === 'updated') {
+                    summary.updated++;
+                    summary.refreshedIds.push(model.id);
+                } else if (outcome.status === 'skipped') {
+                    this.bumpSkip(summary, outcome.reason || 'skipped');
+                } else {
+                    summary.failed++;
+                }
             }
-            return updated;
+            return summary;
         } finally {
             this.refreshingBanks.delete(bankId);
-            this.lastRefreshAt.set(bankId, Math.floor(Date.now() / 1000));
+            this.lastRefreshAt.set(bankId, this.nowSec());
         }
+    }
+
+    /** 刷新单条心智模型：返回 updated / skipped(reason) / failed */
+    private async refreshOneMentalModel(
+        bankId: string,
+        model: MentalModel,
+        opts: { force: boolean; reason: MentalModelRefreshReason }
+    ): Promise<{ status: 'updated' | 'skipped' | 'failed'; reason?: string }> {
+        const now = this.nowSec();
+        const cfg = this.resolveTriggerConfig(model);
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return { status: 'skipped', reason: 'no_bank' };
+
+        // per-model 自动刷新开关：consolidate/tick 触发的自动刷新跳过 refreshAfterConsolidation=false 的模型
+        // （用户手写/FAQ 类模型，--no-auto；manual/create 强制路径不受影响）
+        if (!opts.force && (opts.reason === 'consolidate' || opts.reason === 'tick') && cfg.refreshAfterConsolidation === false) {
+            return { status: 'skipped', reason: 'auto_off' };
+        }
+
+        // 失败冷却：failed 模型在冷却期内自动刷新跳过，避免反复烧 token（冷却默认复用最小间隔，未配置则 30 分钟）
+        if (!opts.force && model.status === 'failed' && model.lastFailedAt) {
+            const cooldown = this.refreshMinIntervalSec > 0 ? this.refreshMinIntervalSec : 1800;
+            if (now - model.lastFailedAt < cooldown) return { status: 'skipped', reason: 'failed_cooldown' };
+        }
+
+        // scope 解析：factTypes + scopeTags（空 scopeTags=全局放行，any 命中）；observation 直接读 observation 对象
+        const factTypes: FactType[] = cfg.factTypes && cfg.factTypes.length > 0
+            ? cfg.factTypes
+            : ['world', 'experience', 'observation'];
+        const scopeTags = model.scopeTags || [];
+        const tagMatch = (tags: string[] | undefined): boolean => {
+            const t = tags || [];
+            if (scopeTags.length === 0) return true;
+            return t.some(x => scopeTags.includes(x));
+        };
+        const factUnits = bank.units.filter(u => u.state === 'valid'
+            && u.factType !== 'observation'
+            && factTypes.includes(u.factType)
+            && tagMatch(u.tags));
+        const obsList = factTypes.includes('observation') ? bank.observations.filter(o => tagMatch(o.scopeTags)) : [];
+
+        // watermark 快照：scope 内最新记忆时间（world/experience 用 unit.updatedAt，observation 用 observation.updatedAt）
+        const newest = Math.max(
+            0,
+            ...factUnits.map(u => u.updatedAt || u.createdAt || 0),
+            ...obsList.map(o => o.updatedAt || o.createdAt || 0),
+        );
+        if (newest === 0) return { status: 'skipped', reason: 'no_source' };
+
+        // staleness gating：scope 内没有比上次见过更新的记忆 → 跳过，不调 LLM
+        const seenAt = model.lastMemorySeenAt || 0;
+        if (!opts.force && seenAt > 0 && newest <= seenAt) return { status: 'skipped', reason: 'not_stale' };
+
+        // delta 窗口：只读上次刷新之后的新记忆
+        const createdAfter = cfg.mode === 'delta' && seenAt > 0 ? seenAt : undefined;
+
+        // 排除自身（默认还排除其它心智模型，避免模型间互相引用/自我强化）
+        const excludeIds = [model.id];
+        if (cfg.excludeMentalModels !== false) {
+            for (const other of bank.mentalModels) if (other.id !== model.id) excludeIds.push(other.id);
+        }
+
+        let result: ReflectResult;
+        try {
+            result = await this.reflect(bankId, model.question, {
+                factTypes,
+                scopeTags,
+                excludeMentalModelIds: excludeIds,
+                createdAfter,
+                mode: cfg.mode,
+                // delta 基线：占位文本不算基线（无基线时回退全量重写）
+                existingAnswer: cfg.mode === 'delta' && model.answer && model.answer !== '生成中…' ? model.answer : undefined,
+                strict: true,
+                maxTokens: 4096,
+            });
+        } catch {
+            return this.markRefreshFailed(bankId, model, now);
+        }
+        const text = (result.text || '').trim();
+        if (!text || text === NO_MEMORY_TEXT) {
+            return this.markRefreshFailed(bankId, model, now);
+        }
+
+        const changed = text !== model.answer;
+        if (changed) {
+            model.history = [...(model.history || []), { answer: model.answer, at: now, trigger: cfg.mode }].slice(-10);
+            model.answer = text;
+            model.version++;
+            model.updatedAt = now;
+        }
+        // watermark 推进：成功（含"无变化"）即推进，避免空窗口反复触发
+        model.lastRefreshedAt = now;
+        model.lastMemorySeenAt = newest;
+        model.status = 'ready';
+        model.lastFailedAt = undefined;
+        model.trigger = cfg.mode;
+        model.triggerConfig = cfg;
+        this.repository.updateMentalModel(bankId, model);
+        if (changed) this.computeMentalModelEmbedding(bankId, model).catch(() => { });
+        return changed ? { status: 'updated' } : { status: 'skipped', reason: 'unchanged' };
+    }
+
+    /** 刷新失败：保留旧答案、不推进 watermark、记录失败时间（供冷却重试） */
+    private markRefreshFailed(
+        bankId: string,
+        model: MentalModel,
+        now: number
+    ): { status: 'failed'; reason: string } {
+        model.status = 'failed';
+        model.lastFailedAt = now;
+        this.repository.updateMentalModel(bankId, model);
+        return { status: 'failed', reason: 'empty' };
+    }
+
+    /** 归一化心智模型触发配置（旧数据缺省字段兜底） */
+    private resolveTriggerConfig(model: MentalModel): MentalModelTriggerConfig {
+        const t = model.triggerConfig;
+        return {
+            mode: t?.mode === 'delta' ? 'delta' : 'full',
+            refreshAfterConsolidation: t?.refreshAfterConsolidation !== false,
+            excludeMentalModels: t?.excludeMentalModels !== false,
+            factTypes: Array.isArray(t?.factTypes) && (t?.factTypes?.length ?? 0) > 0 ? t!.factTypes!.slice() : undefined,
+        };
+    }
+
+    /** 跳过原因计数 */
+    private bumpSkip(summary: MentalModelRefreshSummary, reason: string): void {
+        summary.skipped++;
+        summary.skippedReasons[reason] = (summary.skippedReasons[reason] || 0) + 1;
+    }
+
+    /** 计算查询向量（未配置 embedding 或失败返回 null），供注入语义排序复用，避免每库各算一次 */
+    async embedQuery(text: string): Promise<number[] | null> {
+        const q = String(text || '').trim();
+        if (!q) return null;
+        const v = await this.embedText(q);
+        return v && v.length > 0 ? v : null;
+    }
+
+    /**
+     * 心智模型语义召回（Hindsight 心智模型参与检索的 TS 版）：只返回 ready，
+     * 按 query 相关度排序（语义向量优先，关键词兜底，最后更新时间兜底）。
+     * 传入 queryEmbedding 可复用同一查询向量（注入场景每轮只算一次）。
+     */
+    async searchMentalModels(
+        bankId: string,
+        query: string,
+        opts: { tags?: string[]; limit?: number; queryEmbedding?: number[] | null } = {}
+    ): Promise<MentalModel[]> {
+        const models = this.repository.listMentalModels(bankId)
+            .filter(m => m.status === 'ready' || m.status === undefined)
+            .filter(m => {
+                if (!opts.tags || opts.tags.length === 0) return true;
+                const tags = m.scopeTags || [];
+                if (tags.length === 0) return true; // 全局心智模型放行
+                return tags.some(t => opts.tags!.includes(t));
+            });
+        if (models.length === 0) return [];
+        const q = String(query || '').trim();
+        const qv = opts.queryEmbedding !== undefined
+            ? (opts.queryEmbedding || [])
+            : (q ? await this.embedText(q) : []);
+        const scored = models.map(m => {
+            let score = 0;
+            if (qv.length > 0 && m.embedding && m.embedding.length > 0) {
+                score = Math.max(score, cosineSimilarity(qv, m.embedding));
+            }
+            if (q) {
+                // 关键词兜底：无向量或向量未命中时仍可按 question/answer 命中排序
+                score = Math.max(score, this.keywordScore(`${m.question} ${m.answer}`, q) * 0.5);
+            }
+            return { m, score };
+        });
+        scored.sort((a, b) => b.score - a.score || (b.m.updatedAt || 0) - (a.m.updatedAt || 0));
+        return scored.slice(0, opts.limit ?? 5).map(x => x.m);
+    }
+
+    /** 计算并落库心智模型语义向量（best-effort，失败静默） */
+    private async computeMentalModelEmbedding(bankId: string, model: MentalModel): Promise<void> {
+        const vec = await this.embedText(`${model.question} ${model.answer}`);
+        if (!vec || vec.length === 0) return;
+        const current = this.repository.getBank(bankId)?.mentalModels.find(m => m.id === model.id);
+        if (!current) return;
+        current.embedding = vec;
+        this.repository.updateMentalModel(bankId, current);
     }
 
     // ===== Reflect =====
 
-    async reflect(bankId: string, query: string): Promise<ReflectResult> {
-        const mentalModels = this.repository.listMentalModels(bankId);
-        const observations = this.repository.listObservations(bankId);
-        const memories = (await this.recall(bankId, query, { types: ['world', 'experience'], maxTokens: 4096 }))
-            .map(r => r.unit);
+    async reflect(
+        bankId: string,
+        query: string,
+        opts: {
+            factTypes?: FactType[];
+            scopeTags?: string[];
+            excludeMentalModelIds?: string[];
+            createdAfter?: number;
+            mode?: MentalModelTrigger;
+            existingAnswer?: string;
+            strict?: boolean;
+            maxTokens?: number;
+        } = {}
+    ): Promise<ReflectResult> {
+        const bank = this.repository.getBank(bankId);
+        const exclude = new Set(opts.excludeMentalModelIds || []);
+        const mentalModels = (bank ? bank.mentalModels : [])
+            .filter(m => !exclude.has(m.id) && (m.status === 'ready' || m.status === undefined));
+        const observations = (bank ? bank.observations : [])
+            .filter(o => {
+                if (opts.scopeTags && opts.scopeTags.length) {
+                    const tags = o.scopeTags || [];
+                    if (!tags.some(t => opts.scopeTags!.includes(t))) return false;
+                }
+                if (opts.createdAfter && (o.updatedAt || 0) <= opts.createdAfter) return false;
+                return true;
+            });
+        // 事实类记忆走 recall；observation 由 observations 列表单独提供，避免 unit 与 observation 双重注入
+        const unitTypes = (opts.factTypes || ['world', 'experience', 'observation']).filter(t => t !== 'observation');
+        const memories = (await this.recall(bankId, query, {
+            types: unitTypes.length > 0 ? unitTypes : ['world', 'experience'],
+            tags: opts.scopeTags || [],
+            maxTokens: opts.maxTokens || 4096,
+        }))
+            .map(r => r.unit)
+            .filter(u => !opts.createdAfter || (u.updatedAt || 0) > opts.createdAfter);
         let text = '';
         if (this.reflectSynthesizer) {
             try {
-                text = (await this.reflectSynthesizer(query, { mentalModels, observations, memories })) || '';
+                text = (await this.reflectSynthesizer(query, {
+                    mentalModels,
+                    observations,
+                    memories,
+                    existingAnswer: opts.existingAnswer,
+                    mode: opts.mode,
+                })) || '';
             } catch {
                 text = '';
             }
         }
         if (!text.trim()) {
-            text = [
-                ...mentalModels.map(m => `【心智模型】${m.question}\n${m.answer}`),
-                ...observations.map(o => `【观察】${o.text}`),
-                ...memories.map(m => `【事实】${m.text}`),
-            ].join('\n') || NO_MEMORY_TEXT;
+            if (opts.strict) {
+                // 刷新路径：禁止把记忆原文/心智模型 dump 成"答案"（避免把占位文本/记忆清单写进心智模型）
+                text = '';
+            } else {
+                text = [
+                    ...mentalModels.map(m => `【心智模型】${m.question}\n${m.answer}`),
+                    ...observations.map(o => `【观察】${o.text}`),
+                    ...memories.map(m => `【事实】${m.text}`),
+                ].join('\n') || NO_MEMORY_TEXT;
+            }
         }
         return {
             text,

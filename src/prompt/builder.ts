@@ -9,7 +9,7 @@ import Model from "../model/model";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { getSkillSummaries, getSkillsSignature } from "../tool/skills";
+import { getSkillsSignature, getSkillSummaries } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 

@@ -815,10 +815,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
             reflectSynthesizer: async (query) => `推理结果：${query}`,
         });
         await refreshEngine.createMentalModel('user_m2', '偏好是什么？', '旧答案');
-        assert.equal(await refreshEngine.refreshMentalModels('user_m2'), 0, '空库无依据时应跳过');
+        assert.equal((await refreshEngine.refreshMentalModels('user_m2')).updated, 0, '空库无依据时应跳过');
         assert.equal(refreshEngine.listMentalModels('user_m2')[0].version, 1, '空库不应刷版本');
         await refreshEngine.addMemory('user_m2', { content: '偏好 小明喜欢简洁' });
-        assert.equal(await refreshEngine.refreshMentalModels('user_m2'), 1, '有依据时应刷新');
+        assert.equal((await refreshEngine.refreshMentalModels('user_m2', undefined, { force: true })).updated, 1, '有依据时应刷新');
         const model = refreshEngine.listMentalModels('user_m2')[0];
         assert.equal(model.version, 2, 'MentalModel 应被刷新版本号');
         assert.equal(model.answer, '推理结果：偏好是什么？', '刷新后应使用合成器结果');
@@ -853,7 +853,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(r.text, '暂无足够记忆进行推理', '空库 reflect 应返回占位文本');
         // 无观察/事实可依据：refresh 跳过，版本不变
         await engine.createMentalModel('user_g1', '问题A', '旧答案');
-        assert.equal(await engine.refreshMentalModels('user_g1'), 0, '无依据时应跳过');
+        assert.equal((await engine.refreshMentalModels('user_g1')).updated, 0, '无依据时应跳过');
         assert.equal(engine.listMentalModels('user_g1')[0].version, 1, '无依据时版本不变');
         // 结果未变化：不 bump version
         const engine2 = new MemoryEngine({
@@ -862,7 +862,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         await engine2.createMentalModel('user_g2', '问题B', '固定答案');
         await engine2.addMemory('user_g2', { content: '偏好 小明喜欢简洁' });
-        assert.equal(await engine2.refreshMentalModels('user_g2'), 0, '结果未变化时不更新');
+        assert.equal((await engine2.refreshMentalModels('user_g2', undefined, { force: true })).updated, 0, '结果未变化时不更新');
         assert.equal(engine2.listMentalModels('user_g2')[0].version, 1);
         // 合成器返回占位文本：不覆盖旧答案
         const engine3 = new MemoryEngine({
@@ -871,11 +871,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         await engine3.createMentalModel('user_g3', '问题C', '旧答案');
         await engine3.addMemory('user_g3', { content: '偏好 小明喜欢简洁' });
-        assert.equal(await engine3.refreshMentalModels('user_g3'), 0, '占位文本不应覆盖旧答案');
+        assert.equal((await engine3.refreshMentalModels('user_g3', undefined, { force: true })).updated, 0, '占位文本不应覆盖旧答案');
         assert.equal(engine3.listMentalModels('user_g3')[0].answer, '旧答案');
         // 单条刷新：id 过滤，只刷目标模型
         const mD = await engine2.createMentalModel('user_g2', '问题D', '旧答案D');
-        assert.equal(await engine2.refreshMentalModels('user_g2', mD.id), 1, '单条刷新应只更新目标模型');
+        assert.equal((await engine2.refreshMentalModels('user_g2', mD.id, { force: true })).updated, 1, '单条刷新应只更新目标模型');
         assert.equal(engine2.listMentalModels('user_g2').find(m => m.id === mD.id)!.version, 2);
         assert.equal(engine2.listMentalModels('user_g2').find(m => m.question === '问题B')!.version, 1, '非目标模型版本不变');
     },
@@ -975,7 +975,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(m0.trigger, 'full', '创建时 trigger 应为 full');
 
         await engine.addMemory('user_e4', { content: '新事实' });
-        assert.equal(await engine.refreshMentalModels('user_e4'), 1, '答案变化应刷新');
+        assert.equal((await engine.refreshMentalModels('user_e4', undefined, { force: true })).updated, 1, '答案变化应刷新');
         const m1 = engine.listMentalModels('user_e4')[0];
         assert.equal(m1.answer, '答案v1');
         assert.equal(m1.version, 2);
@@ -987,7 +987,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(m1.lastRefreshedAt >= m0.lastRefreshedAt, '刷新后 lastRefreshedAt 应更新');
 
         // 再刷新一次：历史追加（旧答案在前，最新旧答案在后）
-        assert.equal(await engine.refreshMentalModels('user_e4'), 1);
+        assert.equal((await engine.refreshMentalModels('user_e4', undefined, { force: true })).updated, 1);
         const m2 = engine.listMentalModels('user_e4')[0];
         assert.equal(m2.history.length, 2);
         assert.equal(m2.history[0].answer, '旧答案');
@@ -995,7 +995,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(m2.answer, '答案v2');
 
         // 历史上限 10 条：持续刷新后最旧的答案被淘汰
-        for (let i = 0; i < 9; i++) await engine.refreshMentalModels('user_e4');
+        for (let i = 0; i < 9; i++) await engine.refreshMentalModels('user_e4', undefined, { force: true });
         const m3 = engine.listMentalModels('user_e4')[0];
         assert.equal(m3.history.length, 10, '历史最多保留 10 条');
         assert.equal(m3.history[0].answer, '答案v1');
@@ -1014,10 +1014,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         engine.setRefreshMinInterval(60);
         await engine.createMentalModel('user_r2', '问题', '旧答案');
         await engine.addMemory('user_r2', { content: '事实1' });
-        assert.equal(await engine.refreshMentalModels('user_r2'), 1, '首次刷新应放行');
-        assert.equal(await engine.refreshMentalModels('user_r2'), 0, '间隔内自动刷新应被限流');
+        assert.equal((await engine.refreshMentalModels('user_r2', undefined, { force: true })).updated, 1, '首次刷新应放行');
+        assert.equal((await engine.refreshMentalModels('user_r2')).updated, 0, '间隔内自动刷新应被限流');
         assert.equal(n, 1, '限流应跳过合成器');
-        assert.equal(await engine.refreshMentalModels('user_r2', undefined, { force: true }), 1, 'force 应跳过限流并刷新');
+        assert.equal((await engine.refreshMentalModels('user_r2', undefined, { force: true })).updated, 1, 'force 应跳过限流并刷新');
         assert.equal(n, 2, 'force 应触发一次合成器');
 
         // 防重入：并发刷新同一 bank 只执行一次
@@ -1033,11 +1033,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await engine2.createMentalModel('user_r3', '问题', '旧答案');
         await engine2.addMemory('user_r3', { content: '事实2' });
         const results = await Promise.all([
-            engine2.refreshMentalModels('user_r3'),
-            engine2.refreshMentalModels('user_r3'),
-            engine2.refreshMentalModels('user_r3'),
+            engine2.refreshMentalModels('user_r3', undefined, { force: true }),
+            engine2.refreshMentalModels('user_r3', undefined, { force: true }),
+            engine2.refreshMentalModels('user_r3', undefined, { force: true }),
         ]);
-        assert.deepEqual(results, [1, 0, 0], '并发刷新应只执行一次，其余跳过');
+        assert.deepEqual(results.map(r => r.updated), [1, 0, 0], '并发刷新应只执行一次，其余跳过');
         assert.equal(calls, 1, '合成器应只被调用一次');
         assert.equal(engine2.listMentalModels('user_r3')[0].version, 2, '只应 bump 一次版本');
     },
@@ -1069,6 +1069,258 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(bank2.mentalModels[1].trigger, 'delta', '合法 trigger delta 应保留');
     },
 
+    /** Hindsight 式创建：无答案 → pending 占位；有依据后 force 刷新 → ready，答案来自合成器，watermark 推进 */
+    async testV2MentalModelCreatePendingAndGenerate(): Promise<void> {
+        let now = 1_000_000;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => now,
+            reflectSynthesizer: async (q) => `推理:${q}`,
+        });
+        const m = await engine.createMentalModel('user_pg', '偏好？', '', ['user:QQ:1']);
+        assert.equal(m.status, 'pending', '无答案创建应为 pending');
+        assert.equal(m.answer, '生成中…', '无答案创建应写入占位文本');
+        assert.equal(m.lastMemorySeenAt, 0, 'pending 模型 watermark 应为 0（等生成）');
+
+        // 空库 force 刷新：无来源，保持 pending 不烧 token
+        const s0 = await engine.refreshMentalModels('user_pg', m.id, { force: true, reason: 'create' });
+        assert.equal(s0.updated, 0);
+        assert.equal(engine.listMentalModels('user_pg')[0].status, 'pending');
+
+        // 有记忆后 force 刷新：生成并转 ready
+        await engine.addMemory('user_pg', { content: '小明喜欢咖啡', tags: ['user:QQ:1'] });
+        const unit = engine.repository.listUnits('user_pg')[0];
+        unit.updatedAt = 2_000_000;
+        engine.repository.updateUnit('user_pg', unit);
+        const s1 = await engine.refreshMentalModels('user_pg', m.id, { force: true, reason: 'create' });
+        assert.equal(s1.updated, 1);
+        const fresh = engine.listMentalModels('user_pg')[0];
+        assert.equal(fresh.status, 'ready');
+        assert.equal(fresh.answer, '推理:偏好？');
+        assert.equal(fresh.lastMemorySeenAt, 2_000_000, '生成成功后 watermark 应推进到最新记忆');
+        assert.equal(fresh.version, 2);
+    },
+
+    /** Hindsight staleness gating：scope 内无新记忆时自动刷新跳过（不调合成器）；有新记忆时刷新并推进 watermark */
+    async testV2MentalModelStalenessGating(): Promise<void> {
+        let now = 1_000_000;
+        let calls = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => now,
+            reflectSynthesizer: async () => { calls++; return '答案' + calls; },
+        });
+        await engine.createMentalModel('user_st', '偏好？', '旧答案'); // watermark = 1_000_000
+        await engine.addMemory('user_st', { content: '事实A' });
+        const u1 = engine.repository.listUnits('user_st')[0];
+        u1.updatedAt = 2_000_000;
+        engine.repository.updateUnit('user_st', u1);
+
+        // 有新记忆 → 自动刷新
+        const s1 = await engine.refreshMentalModels('user_st');
+        assert.equal(s1.updated, 1);
+        assert.equal(s1.skippedReasons['not_stale'], undefined);
+        assert.equal(calls, 1);
+        const m1 = engine.listMentalModels('user_st')[0];
+        assert.equal(m1.lastMemorySeenAt, 2_000_000, '刷新后 watermark 应为最新记忆时间');
+
+        // 无新记忆 → not_stale 跳过，不调合成器
+        const s2 = await engine.refreshMentalModels('user_st');
+        assert.equal(s2.updated, 0);
+        assert.equal(s2.skipped, 1);
+        assert.equal(s2.skippedReasons['not_stale'], 1);
+        assert.equal(calls, 1, '无新记忆不应调用合成器');
+
+        // 再新增记忆 → 再次刷新
+        await engine.addMemory('user_st', { content: '事实B' });
+        const u2 = engine.repository.listUnits('user_st')[1];
+        u2.updatedAt = 3_000_000;
+        engine.repository.updateUnit('user_st', u2);
+        const s3 = await engine.refreshMentalModels('user_st');
+        assert.equal(s3.updated, 1);
+        assert.equal(calls, 2);
+        assert.equal(engine.listMentalModels('user_st')[0].lastMemorySeenAt, 3_000_000);
+    },
+
+    /** Hindsight watermark 语义：合成失败不覆盖旧答案、不推进 watermark、标记 failed */
+    async testV2MentalModelWatermarkFailureNotAdvanced(): Promise<void> {
+        let now = 1_000_000;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => now,
+            reflectSynthesizer: async () => '', // 合成空 → strict 失败
+        });
+        await engine.createMentalModel('user_wf', '偏好？', '旧答案'); // watermark = 1_000_000
+        await engine.addMemory('user_wf', { content: '事实' });
+        const u = engine.repository.listUnits('user_wf')[0];
+        u.updatedAt = 2_000_000;
+        engine.repository.updateUnit('user_wf', u);
+
+        const s = await engine.refreshMentalModels('user_wf', undefined, { force: true });
+        assert.equal(s.updated, 0);
+        assert.equal(s.failed, 1);
+        const m = engine.listMentalModels('user_wf')[0];
+        assert.equal(m.status, 'failed');
+        assert.equal(m.answer, '旧答案', '失败不应覆盖旧答案');
+        assert.equal(m.lastMemorySeenAt, 1_000_000, '失败不应推进 watermark');
+        assert.equal(typeof m.lastFailedAt, 'number', '应记录失败时间供冷却重试');
+    },
+
+    /** Hindsight 刷新输入排除：刷新自身不应出现在合成器输入；默认也排除其它心智模型 */
+    async testV2MentalModelRefreshExcludesSelfAndSiblings(): Promise<void> {
+        const seen: string[] = [];
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async (_q, ctx) => {
+                seen.push(...ctx.mentalModels.map(x => x.id));
+                return '答案';
+            },
+        });
+        const a = await engine.createMentalModel('user_ex', '问题A', '答案A');
+        const b = await engine.createMentalModel('user_ex', '问题B', '答案B');
+        await engine.addMemory('user_ex', { content: '事实' });
+        const u = engine.repository.listUnits('user_ex')[0];
+        u.updatedAt = 2_000_000;
+        engine.repository.updateUnit('user_ex', u);
+
+        await engine.refreshMentalModels('user_ex', a.id, { force: true });
+        assert.ok(!seen.includes(a.id), '刷新自身不应出现在输入');
+        assert.ok(!seen.includes(b.id), '默认 excludeMentalModels 应排除其它心智模型');
+    },
+
+    /** per-model 自动刷新开关：consolidate/tick 跳过 refreshAfterConsolidation=false 的模型；manual 不受影响 */
+    async testV2MentalModelAutoRefreshOffRespected(): Promise<void> {
+        let calls = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => { calls++; return '答案'; },
+        });
+        await engine.createMentalModel('user_ao', '问题', '旧答案', [], { autoRefresh: false });
+        await engine.addMemory('user_ao', { content: '事实' });
+        const u = engine.repository.listUnits('user_ao')[0];
+        u.updatedAt = 2_000_000;
+        engine.repository.updateUnit('user_ao', u);
+
+        // consolidate 触发：auto_off 跳过
+        const s1 = await engine.refreshMentalModels('user_ao', undefined, { reason: 'consolidate' });
+        assert.equal(s1.updated, 0);
+        assert.equal(s1.skipped, 1);
+        assert.equal(s1.skippedReasons['auto_off'], 1);
+        assert.equal(calls, 0, '自动刷新关闭的模型不应被 consolidate 触发');
+
+        // manual force：仍可刷新
+        const s2 = await engine.refreshMentalModels('user_ao', undefined, { force: true, reason: 'manual' });
+        assert.equal(s2.updated, 1);
+        assert.equal(calls, 1);
+    },
+
+    /** 注入侧：pending/failed 心智模型不进入注入候选 */
+    async testV2MentalModelInjectionSkipsPending(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        await engine.createMentalModel('user_inj', '问题1', '答案1'); // ready
+        await engine.createMentalModel('user_inj', '问题2', '');      // pending
+        await engine.createMentalModel('user_inj', '问题3', '答案3');
+        const failed = engine.listMentalModels('user_inj')[0];
+        failed.status = 'failed';
+        engine.repository.updateMentalModel('user_inj', failed);
+
+        const injected = selectInjectionCandidates(engine.listMentalModels('user_inj'), [], ['user:x']).mentalModels;
+        assert.equal(injected.length, 1, '只应注入 ready 模型');
+        assert.equal(injected[0].question, '问题3', '注入应按更新时间取最新的 ready 模型');
+    },
+
+    /** Hindsight 语义召回：searchMentalModels 按相关度排序（语义优先，关键词兜底，更新时间兜底） */
+    async testV2MentalModelSearchSemanticRanking(): Promise<void> {
+        const fakeEmbed = (text: string): number[] => {
+            const v = [0, 0, 0, 0];
+            for (const ch of String(text)) {
+                const c = (ch.codePointAt(0) || 0) % 4;
+                v[c] = (v[c] || 0) + 1;
+            }
+            const len = Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1;
+            return v.map(x => x / len);
+        };
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            embedding: async (t) => fakeEmbed(t),
+        });
+        const m1 = await engine.createMentalModel('user_sr', '喜欢什么饮品？', '用户喜欢喝咖啡');
+        const m2 = await engine.createMentalModel('user_sr', '喜欢什么运动？', '用户喜欢跑步');
+        // 手动写入向量（异步算向不等待，直接置入保证确定性）
+        const bank = engine.repository.getBank('user_sr')!;
+        bank.mentalModels.find(x => x.id === m1.id)!.embedding = fakeEmbed('咖啡 用户喜欢喝咖啡');
+        bank.mentalModels.find(x => x.id === m2.id)!.embedding = fakeEmbed('跑步 用户喜欢跑步');
+        engine.repository.save('user_sr');
+
+        const qv = fakeEmbed('咖啡');
+        const ranked = await engine.searchMentalModels('user_sr', '咖啡', { queryEmbedding: qv, limit: 5 });
+        assert.equal(ranked[0].id, m1.id, '语义相关的心智模型应排最前');
+        assert.equal(ranked.length, 2);
+
+        // 无向量（清空 embedding）：关键词兜底仍可排序
+        bank.mentalModels.forEach(x => { x.embedding = []; });
+        engine.repository.save('user_sr');
+        const kw = await engine.searchMentalModels('user_sr', '跑步', {});
+        assert.equal(kw[0].id, m2.id, '无向量时关键词命中应优先');
+    },
+
+    /** Hindsight delta：只喂 watermark 后新记忆 + 旧答案；无基线（pending）不把占位文本当基线 */
+    async testV2MentalModelDeltaWindowAndBaseline(): Promise<void> {
+        let seenCtx: any = null;
+        let now = 1_000_000;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => now,
+            reflectSynthesizer: async (_q, ctx) => {
+                seenCtx = ctx;
+                return '增量答案';
+            },
+        });
+        // 旧记忆（早于模型 watermark，应被 delta 窗口排除）
+        await engine.addMemory('user_dl', { content: '偏好 旧事实' });
+        const u0 = engine.repository.listUnits('user_dl')[0];
+        u0.updatedAt = 500_000;
+        engine.repository.updateUnit('user_dl', u0);
+        // 模型创建（watermark = 1_000_000）
+        await engine.createMentalModel('user_dl', '偏好？', '旧答案', [], { mode: 'delta' });
+        // 新记忆（晚于 watermark，应进入 delta 窗口）
+        await engine.addMemory('user_dl', { content: '偏好 小明喜欢简洁' });
+        const u1 = engine.repository.listUnits('user_dl')[1];
+        u1.updatedAt = 2_000_000;
+        engine.repository.updateUnit('user_dl', u1);
+
+        await engine.refreshMentalModels('user_dl', undefined, { force: true });
+        assert.equal(seenCtx.mode, 'delta');
+        assert.equal(seenCtx.existingAnswer, '旧答案', 'delta 应传入旧答案做基线');
+        assert.equal(seenCtx.memories.length, 1, 'delta 只喂窗口内新记忆');
+        assert.ok(seenCtx.memories[0].text.includes('小明喜欢简洁'), '旧记忆应被 delta 窗口排除');
+
+        // 无基线（pending 占位）：existingAnswer 应为 undefined（不把"生成中…"当基线），窗口全量
+        const p = await engine.createMentalModel('user_dl', '新问题', '', [], { mode: 'delta' });
+        await engine.refreshMentalModels('user_dl', p.id, { force: true, reason: 'create' });
+        assert.equal(seenCtx.existingAnswer, undefined, '占位文本不应作为 delta 基线');
+        assert.equal(seenCtx.mode, 'delta');
+    },
+
+    /** Hindsight 式旧存档回填：triggerConfig/status/watermark/embedding 缺省字段补齐 */
+    testV2NormalizeHindsightMentalModelFields(): void {
+        const storage = new InMemoryMemoryStorage();
+        const engine = new MemoryEngine({ storage });
+        storage.saveBank(makeLegacyBank('user_hs', [
+            { id: 'mm_h', bankId: 'user_hs', question: 'Q', answer: 'A', scopeTags: [], createdAt: 1000, updatedAt: 2000, version: 1 },
+        ]));
+        const m = engine.repository.getBank('user_hs')!.mentalModels[0];
+        assert.deepEqual(m.triggerConfig, {
+            mode: 'full',
+            refreshAfterConsolidation: true,
+            excludeMentalModels: true,
+            factTypes: undefined,
+        }, '缺省 triggerConfig 应补齐');
+        assert.equal(m.status, 'ready', '缺省 status 应补齐为 ready');
+        assert.equal(m.lastMemorySeenAt, 2000, '缺省 watermark 应回退到 updatedAt');
+        assert.deepEqual(m.embedding, [], '缺省 embedding 应补齐为空数组');
+    },
+
     /** R2 manager 接线：consolidateMemory 巩固后按配置自动刷新心智模型；关闭配置时不刷新 */
     async testR2ConsolidateTriggersMentalModelRefresh(): Promise<void> {
         resetMemoryEngineForTest(new InMemoryMemoryStorage());
@@ -1077,7 +1329,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         let refreshCalls = 0;
         engine.refreshMentalModels = async () => {
             refreshCalls++;
-            return 0;
+            return { updated: 0, skipped: 0, failed: 0, skippedReasons: {}, refreshedIds: [] };
         };
         const session = new Session();
         session.sessionId = 'QQ:88888';

@@ -338,6 +338,14 @@ export class MemoryRepository {
                 target.updatedAt = nowSec();
                 merged.push(obs.id);
                 bank.units = bank.units.filter(u => u.id !== obs.id);
+                // 同步保留观察的 synced unit（文本/标签/时间），避免 observation 与 unit 失同步，
+                // 否则心智模型 watermark/staleness 基于 unit 时间判断会漏掉合并产生的更新
+                const unit = bank.units.find(u => u.id === target.id);
+                if (unit) {
+                    unit.text = target.text;
+                    unit.tags = target.scopeTags;
+                    unit.updatedAt = target.updatedAt;
+                }
             } else {
                 kept.push(obs);
             }
@@ -352,13 +360,24 @@ export function normalizeName(name: string): string {
     return String(name || '').trim().toLowerCase().replace(/\s+/g, '');
 }
 
-/** 补齐旧存档缺省字段：MentalModel 的 E4 扩展字段（lastRefreshedAt/history/trigger） */
+/** 补齐旧存档缺省字段：MentalModel 的 E4 扩展字段与 Hindsight 式心智模型字段 */
 function normalizeBank(bank: PersistedBank): void {
     if (!Array.isArray(bank.mentalModels)) return;
     for (const m of bank.mentalModels) {
         if (typeof m.lastRefreshedAt !== 'number') m.lastRefreshedAt = typeof m.updatedAt === 'number' ? m.updatedAt : nowSec();
         if (!Array.isArray(m.history)) m.history = [];
         if (m.trigger !== 'full' && m.trigger !== 'delta') m.trigger = 'full';
+        // Hindsight 式心智模型扩展字段回填（triggerConfig/status/watermark/embedding）
+        const cfg = m.triggerConfig;
+        m.triggerConfig = {
+            mode: cfg?.mode === 'delta' ? 'delta' : m.trigger === 'delta' ? 'delta' : 'full',
+            refreshAfterConsolidation: cfg?.refreshAfterConsolidation !== false,
+            excludeMentalModels: cfg?.excludeMentalModels !== false,
+            factTypes: Array.isArray(cfg?.factTypes) && (cfg?.factTypes?.length ?? 0) > 0 ? cfg!.factTypes!.slice() : undefined,
+        };
+        if (m.status !== 'ready' && m.status !== 'pending' && m.status !== 'failed') m.status = 'ready';
+        if (typeof m.lastMemorySeenAt !== 'number') m.lastMemorySeenAt = typeof m.updatedAt === 'number' ? m.updatedAt : nowSec();
+        if (!Array.isArray(m.embedding)) m.embedding = [];
     }
 }
 

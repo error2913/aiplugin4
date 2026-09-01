@@ -518,8 +518,8 @@ export function registerMemory() {
         // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
         let refreshText = '';
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
-            const refreshed = await getMemoryEngine().refreshMentalModels(bank.bankId);
-            refreshText = `，刷新心智模型 ${refreshed} 条`;
+            const summary = await getMemoryEngine().refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
+            refreshText = `，刷新心智模型 ${summary.updated} 条（跳过 ${summary.skipped}）`;
         }
         SessionService.save(target);
         return `观察巩固完成：新建 ${result.created.length} 条，更新 ${result.updated.length} 条，合并 ${result.merged.length} 条${refreshText}`;
@@ -619,11 +619,18 @@ export function registerMemory() {
             SessionService.save(target);
             return `心智模型已创建<${m.id}>：${m.question} => ${m.answer.slice(0, 200)}`;
         }
-        const result = await getMemoryEngine().reflect(bank.bankId, String(question || ''));
-        const m = await getMemoryEngine().createMentalModel(bank.bankId, String(question || ''), result.text, scopeTags);
+        // Hindsight 式：占位创建（pending）+ 同步生成（strict reflect，不 dump 记忆原文）
+        const engine = getMemoryEngine();
+        const m = await engine.createMentalModel(bank.bankId, String(question || ''), '', scopeTags);
+        await engine.refreshMentalModels(bank.bankId, m.id, { force: true, reason: 'create' });
+        const fresh = engine.listMentalModels(bank.bankId).find(x => x.id === m.id) || m;
         bumpMemoryRevision();
         SessionService.save(target);
-        return `心智模型已创建<${m.id}>（基于记忆推理）\n问题: ${m.question}\n答案: ${result.text}`;
+        if (fresh.status === 'ready') {
+            return `心智模型已创建<${fresh.id}>（基于记忆推理）\n问题: ${fresh.question}\n答案: ${fresh.answer}`;
+        }
+        const reason = fresh.status === 'failed' ? '生成失败' : '记忆不足';
+        return `心智模型已创建<${fresh.id}>（${reason}，暂为占位：${fresh.answer}）\n问题: ${fresh.question}，积累记忆后会自动生成`;
     };
 
     const toolMmRefresh = new Tool({
@@ -652,11 +659,12 @@ export function registerMemory() {
             const exists = engine.listMentalModels(bank.bankId).some(m => m.id === model_id);
             if (!exists) return `未找到心智模型<${model_id}>`;
         }
-        const total = model_id ? 1 : engine.listMentalModels(bank.bankId).length;
-        const updated = await engine.refreshMentalModels(bank.bankId, model_id ? String(model_id) : undefined, { force: true });
-        if (updated > 0) bumpMemoryRevision();
+        const summary = await engine.refreshMentalModels(bank.bankId, model_id ? String(model_id) : undefined, { force: true, reason: 'manual' });
+        if (summary.updated > 0) bumpMemoryRevision();
         SessionService.save(target);
-        return `心智模型刷新完成：更新 ${updated} 条，跳过 ${total - updated} 条`;
+        const reasonText = Object.entries(summary.skippedReasons)
+            .map(([k, v]) => `${k}=${v}`).join(' ');
+        return `心智模型刷新完成：更新 ${summary.updated} 条，跳过 ${summary.skipped} 条，失败 ${summary.failed} 条${reasonText ? `（${reasonText}）` : ''}`;
     };
 
     const toolMmDelete = new Tool({
