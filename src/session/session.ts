@@ -403,8 +403,11 @@ export class Session {
         this.resetState();
         this.bucket.count--;
 
-        // 评分触发：无论以何种方式触发会话，都起一轮 WAIT 作为冷却（不扣精力）；轮内新消息挂起、轮末重新过 gate
-        JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
+        // 评分触发：仅当评分触发开启时，无论以何种方式触发会话，都起一轮 WAIT 作为冷却（不扣精力）；
+        // 未开启评分时不创建 judgeWait 定时器，避免非指令/其他模式回复也残留评分轮末定时器
+        if (this.setting.judge) {
+            JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
+        }
 
         const model = Model.getChatModel('chat', this.setting.modelName);
         if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
