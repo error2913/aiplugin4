@@ -1,6 +1,10 @@
 // 版本更新日志（changelog），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const changelog: { [version: string]: string } = {
+    "4.20.1": `## 配置变更
+- 「心智模型默认刷新模式」改为下拉选项「心智模型刷新模式」：可选 full（基于全部记忆重新推理）/ delta（只按新增记忆增量更新），默认 full，功能与原先一致
+- 知识库默认示例补充 frontmatter（name/description）：默认库名与描述改由 frontmatter 定义，正文不变；配置描述同步说明 frontmatter 格式（无 frontmatter 时回退用 # 一级标题 + 正文首段）
+`,
     "4.20.0": `## 新功能
 - 心智模型升级为 Hindsight 式刷新管线（.ai memo mm）：不填答案时先创建占位（状态「生成中」），积累记忆后自动生成；刷新按「上次读到记忆」水位线判断，scope 内无新记忆直接跳过、不消耗 token；生成失败保留旧答案并在冷却期后重试
 - 心智模型支持按条配置：--mode=full|delta 指定刷新方式（delta 只喂新增记忆 + 旧答案做增量更新，无基线自动回退全量），--no-auto 关闭该条的自动刷新（consolidate / 定时刷新跳过，手动 refresh 仍可刷新）
