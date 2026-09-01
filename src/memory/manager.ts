@@ -39,6 +39,17 @@ const PER_USER_MENTAL_MODELS = 2;
 /** 群聊注入时，单个最近发言者个人记忆组的字符预算（按分数降序截断，避免多库膨胀） */
 const PER_USER_RECALL_MAX_CHARS = 2048;
 
+/** 最近发言者注入人数上限 */
+const MAX_RECENT_USERS = 3;
+/** 群聊长期记忆注入条数上限 */
+const MAX_GROUP_RECALLS = 10;
+/** 长期记忆全段总条数上限 */
+const MAX_TOTAL_RECALLS = 20;
+/** 群聊心智模型注入条数上限 */
+const MAX_GROUP_MENTAL_MODELS = 3;
+/** 心智模型全段总条数上限 */
+const MAX_TOTAL_MENTAL_MODELS = 5;
+
 export class MemoryManager {
     /**
      * 旧 persona 懒迁移：把仍存于 session.memory.persona 的旧设定写入心智模型
@@ -77,11 +88,12 @@ export class MemoryManager {
             maxTokens: 2048,
             preferObservations: true,
             budget: 'mid',
-        })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
+        })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId)).slice(0, MAX_GROUP_RECALLS);
         // 群聊不再在此处注入观察记忆；观察记忆由 buildObservationPrompt 独立注入
-        // 群心智模型（≤MAX_MENTAL_MODELS）：scopeTags 过滤 + stale 剔除 + 条数上限
-        const groupMMs = selectInjectionCandidates(engine.listMentalModels(bank.bankId), [], tags).mentalModels;
-
+        // 群心智模型：scopeTags 过滤 + stale 剔除 + 条数上限
+        const groupMMs = selectInjectionCandidates(engine.listMentalModels(bank.bankId), [], tags)
+            .mentalModels
+            .slice(0, MAX_GROUP_MENTAL_MODELS);
 
         // 分组渲染：群聊按「群聊 / 每个最近发言者」分别渲染长期记忆 + 心智模型，避免归属混淆；
         // 个人记忆按用户标签召回、单用户条数/字符预算截断，私有记忆仅创建者本人可见（canSeeMemoryUnit）。
@@ -93,7 +105,13 @@ export class MemoryManager {
                 mentalModels: groupMMs,
                 recalls: groupRecalls,
             });
-            for (const u of uis) {
+
+            let recallBudget = MAX_TOTAL_RECALLS - groupRecalls.length;
+            let mmBudget = MAX_TOTAL_MENTAL_MODELS - groupMMs.length;
+            const recentUsers = uis.slice(0, MAX_RECENT_USERS);
+
+            for (const u of recentUsers) {
+                if (recallBudget <= 0 && mmBudget <= 0) break;
                 const userBankId = resolveBankId(u.id, 'user', session.agentName).bankId;
                 const ranked = (await engine.recall(userBankId, text, {
                     tags: [`user:${u.id}`],
@@ -105,18 +123,23 @@ export class MemoryManager {
                 let total = 0;
                 for (const r of ranked) {
                     if (userRecalls.length >= PER_USER_RECALLS) break;
+                    if (userRecalls.length >= recallBudget) break;
                     if (total + r.unit.text.length > PER_USER_RECALL_MAX_CHARS) break;
                     userRecalls.push(r);
                     total += r.unit.text.length;
                 }
                 const userMMs = selectInjectionCandidates(engine.listMentalModels(userBankId), [], tags)
                     .mentalModels
-                    .slice(0, PER_USER_MENTAL_MODELS);
+                    .slice(0, Math.min(PER_USER_MENTAL_MODELS, mmBudget));
                 sections.push({ title: `个人记忆（${u.name || u.id}）`, mentalModels: userMMs, recalls: userRecalls });
+                recallBudget -= userRecalls.length;
+                mmBudget -= userMMs.length;
             }
         } else {
             const sessionName = ctx.player?.name || session.sessionId || '';
-            return [buildMentalModelsPrompt(groupMMs), buildLongTermMemoryPrompt(groupRecalls, true, sessionName)].filter(Boolean).join('\n\n');
+            const privateRecalls = groupRecalls.slice(0, MAX_TOTAL_RECALLS);
+            const privateMMs = groupMMs.slice(0, MAX_TOTAL_MENTAL_MODELS);
+            return [buildMentalModelsPrompt(privateMMs), buildLongTermMemoryPrompt(privateRecalls, true, sessionName)].filter(Boolean).join('\n\n');
         }
         Logger.debug(`[记忆注入] bank=${bank.bankId} tags=[${tags.join(',')}] 分组 ${sections.length} 段（群聊 ${isGroup ? uis.length + 1 : 1} 段）`);
         return buildGroupedMemoryPrompt(sections);

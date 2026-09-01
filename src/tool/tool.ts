@@ -359,7 +359,18 @@ export default class Tool {
             .map(t => t.toolInfo);
     }
 
-    /** 提示词工程模式工具块：调用格式 + 元工具参数 + 全部工具摘要 */
+    /** 工具获取说明：不列出全部工具，由 AI 通过元工具自行发现 */
+    static getToolDiscoveryBlock(_session: Session): string {
+        return [
+            '## 工具获取',
+            '当前不直接列出全部工具。需要发现工具时：',
+            '- list_tools：分页查看当前可用工具的名称与描述',
+            '- search_tools：按名称或关键词获取某个工具的完整参数说明',
+            '- call_tool：执行指定工具'
+        ].join('\n');
+    }
+
+    /** 提示词工程模式工具块：调用格式 + 元工具参数 + 工具获取说明 */
     static getPromptEngineeringToolBlock(session: Session): string {
         const metaTools = this.getMetaToolInfos(session);
         const flatTools = metaTools.map(t => ({
@@ -371,14 +382,8 @@ export default class Tool {
             "PROMPT_ENGINEERING": true,
             "tools": flatTools
         });
-        const summary = this.getToolSummaries(session, 100);
-        const lines = ['## 可用工具', ...summary.summaries];
-        if (summary.truncated) {
-            lines.push(`（共 ${summary.total} 个工具，最多显示 100 个）`);
-        }
-        lines.push('需要参数详情：search_tools；需要完整列表：list_tools。');
-        const summaryPart = lines.join('\n');
-        return [formatPart, summaryPart].filter(Boolean).join('\n\n');
+        const guidePart = this.getToolDiscoveryBlock(session);
+        return [formatPart, guidePart].filter(Boolean).join('\n\n');
     }
 
     /** 原生模式工具块：仅名称 + 描述 */

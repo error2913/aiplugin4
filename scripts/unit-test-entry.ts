@@ -3828,5 +3828,121 @@ description: 茶库
         }
     },
 
+    /** 提示词工程工具块不应列出普通工具名称，只保留元工具与获取说明 */
+    testPromptEngineeringToolBlockDoesNotListOrdinaryTools(): void {
+        registerDispatchTools();
+        const fake = new Tool({
+            type: 'function',
+            function: {
+                name: 'zzz_ordinary_tool_not_in_prompt',
+                description: '普通工具不应出现在 system prompt 工具块中',
+                parameters: { type: 'object', properties: {} }
+            }
+        });
+        try {
+            const session = {
+                sessionType: 'group',
+                toolState: {
+                    list_tools: true,
+                    search_tools: true,
+                    call_tool: true,
+                    zzz_ordinary_tool_not_in_prompt: true,
+                }
+            } as any;
+            const block = Tool.getPromptEngineeringToolBlock(session);
+            assert.ok(!block.includes('zzz_ordinary_tool_not_in_prompt'), '普通工具名称不应出现在提示词工程工具块中');
+            assert.ok(block.includes('## 工具获取'), '应包含工具获取说明');
+        } finally {
+            delete toolMap['zzz_ordinary_tool_not_in_prompt'];
+        }
+    },
+
+    /** 群聊长期记忆总条数不超过 20，心智模型总条数不超过 5，最近发言者不超过 3 */
+    async testBuildLongTermPromptRespectsCaps(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ-Group:cap';
+            session.sessionType = 'group';
+            session.memory.persona = '无';
+
+            for (let i = 0; i < 15; i++) {
+                await engine.addMemory('group_QQ-Group:cap', { content: `群记忆${i}`, tags: ['group:QQ-Group:cap'] });
+            }
+            await engine.createMentalModel('group_QQ-Group:cap', '群偏好', '群喜欢跑团', ['group:QQ-Group:cap']);
+
+            const uis: any[] = [];
+            for (let u = 1; u <= 4; u++) {
+                const uid = `QQ:user${u}`;
+                const bankId = `user_${uid}`;
+                for (let i = 0; i < 6; i++) {
+                    await engine.addMemory(bankId, { content: `用户${u}记忆${i}`, tags: [`user:${uid}`] });
+                }
+                await engine.createMentalModel(bankId, `用户${u}偏好`, `喜欢${u}`, [`user:${uid}`]);
+                await engine.createMentalModel(bankId, `用户${u}第二偏好`, `第二喜欢${u}`, [`user:${uid}`]);
+                uis.push({ isPrivate: true, id: uid, name: `用户${u}` });
+            }
+
+            const ctx = {
+                isPrivate: false,
+                player: { userId: 'QQ:user1', name: '用户1' },
+                group: { groupId: 'QQ-Group:cap', groupName: '上限测试群' }
+            } as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '记忆', uis, { isPrivate: false, id: 'QQ-Group:cap', name: '上限测试群' } as any);
+
+            const recallLines = prompt.split('\n').filter(l => /^\d+\. \[/.test(l));
+            const mmCount = (prompt.match(/## 群聊心智模型|## 心智模型/g) || []).length;
+            assert.ok(recallLines.length <= 20, `长期记忆总条数应 ≤ 20，实际 ${recallLines.length}`);
+            assert.ok(uis.length >= 4, '测试应准备 4 个最近发言者');
+            assert.ok((prompt.match(/## 个人记忆（/g) || []).length <= 3, '最近发言者人数应 ≤ 3');
+            assert.ok(mmCount >= 1, '应包含心智模型段');
+            assert.ok(prompt.includes('群喜欢跑团'), '应包含群心智模型');
+            const secondLikeCount = (prompt.match(/第二喜欢/g) || []).length;
+            assert.ok(secondLikeCount >= 1 && secondLikeCount <= 2, `心智模型总数超过 5 时应截断后续发言者，第二喜欢出现 ${secondLikeCount} 次`);
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            resetConfigCache();
+        }
+    },
+
+    /** 私聊长期记忆总条数不超过 20，心智模型不超过 5 */
+    async testBuildLongTermPromptPrivateCaps(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ:cap';
+            session.sessionType = 'user';
+            session.memory.persona = '无';
+
+            for (let i = 0; i < 25; i++) {
+                await engine.addMemory('user_QQ:cap', { content: `私聊记忆${i}`, tags: ['user:QQ:cap'] });
+            }
+            for (let i = 0; i < 8; i++) {
+                await engine.createMentalModel('user_QQ:cap', `问题${i}`, `答案${i}`, ['user:QQ:cap']);
+            }
+
+            const ctx = { isPrivate: true, player: { userId: 'QQ:cap', name: '上限用户' }, group: null } as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '记忆', [{ isPrivate: true, id: 'QQ:cap', name: '上限用户' }] as any, null);
+
+            const recallLines = prompt.split('\n').filter(l => /^\d+\. \[/.test(l));
+            assert.ok(recallLines.length <= 20, `私聊长期记忆总条数应 ≤ 20，实际 ${recallLines.length}`);
+            assert.ok(prompt.includes('## 心智模型'), '应包含心智模型段');
+            assert.ok(prompt.includes('答案0'), '应包含心智模型内容');
+            assert.ok(!prompt.includes('答案5'), '私聊心智模型总条数应 ≤ 5');
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            resetConfigCache();
+        }
+    },
+
+
 
 };

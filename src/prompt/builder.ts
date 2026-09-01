@@ -113,7 +113,7 @@ export async function buildSystemPromptContent(
     ]);
     const frame = await getCachedString(staticKey, STATIC_FRAME_TTL, async () => {
         const toolBlock = STATUS
-            ? (PROMPT_ENGINEERING ? Tool.getPromptEngineeringToolBlock(session) : Tool.getToolSummaryBlock(session))
+            ? (PROMPT_ENGINEERING ? Tool.getPromptEngineeringToolBlock(session) : Tool.getToolDiscoveryBlock(session))
             : '';
         const skillBlock = STATUS ? buildSkillSummaryBlock() : '';
         const knowledgeBlock = STATUS && Config.knowledgeBase.KNOWLEDGE ? knowledgeService.formatLibraries() : '';
