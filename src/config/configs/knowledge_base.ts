@@ -7,7 +7,12 @@ export default class KnowledgeBaseConfig {
         seal.ext.registerBoolConfig(ext, "启用知识库记忆", false, "开启后把知识库内容注入 system prompt，供对话参考", "知识库");
         seal.ext.registerIntConfig(ext, "知识库注入阈值(字符)", 5000, "已弃用：知识库改为按当前对话内容检索式注入（最多 5 个分块），未命中时只注入前 50 条条目索引；需要详情时模型用 knowledge_read 工具读取。该配置不再参与注入", "知识库");
         seal.ext.registerTemplateConfig(ext, "知识库", [
-            `# AI 骰娘4 使用指南
+            `---
+name: AI 骰娘4 使用指南
+description: 本插件为骰娘接入大模型 API，支持智能对话、TRPG 辅助、记忆与知识库等能力。
+---
+
+# AI 骰娘4 使用指南
 
 ## 功能简介
 本插件为骰娘接入大模型 API，支持智能对话、TRPG 辅助、记忆与知识库等能力。
@@ -36,7 +41,7 @@ export default class KnowledgeBaseConfig {
 ## 注意事项
 - 修改知识库内容后需重载 JS 生效
 - 超长文档会按段落自动分块，块间保留少量重叠`
-        ], "每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件内容）。\n格式：文档用 # 一级标题作为条目标题，## / ### 作为小节标题，支持列表、表格、引用、代码块等标准 Markdown 语法；无标题时自动用条目序号命名；超长文档按段落自动分块（单块约 800 字符，块间保留少量重叠）。\n格式定义见 https://commonmark.org/help/ （CommonMark 官方规范，国内可访问）。\n知识库为只读数据：内容只能由管理员在配置里修改，AI 通过 kb_search / kb_read / kb_list 工具或 .ai kb 指令检索，不能增删。\n下方默认值即单个完整示例（含标题/小节/列表/表格/引用/代码块），可修改为实际知识内容。修改后需重载 JS 生效", "知识库");
+        ], "每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件内容）。\n格式：文档以 --- 开头的 YAML frontmatter 写 name（库名，必填）/ description（库描述，可选），正文为文档内容，支持列表、表格、引用、代码块等标准 Markdown 语法；无 frontmatter 时自动用 # 一级标题作为库名、正文首段作为描述，无标题时用条目序号命名；超长文档按段落自动分块（单块约 800 字符，块间保留少量重叠）。\n格式定义见 https://commonmark.org/help/ （CommonMark 官方规范，国内可访问）。\n知识库为只读数据：内容只能由管理员在配置里修改，AI 通过 kb_search / kb_read / kb_list 工具或 .ai kb 指令检索，不能增删。\n下方默认值即单个完整示例（含 frontmatter/标题/小节/列表/表格/引用/代码块），可修改为实际知识内容。修改后需重载 JS 生效", "知识库");
     }
 
     static get() {
