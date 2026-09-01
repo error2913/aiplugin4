@@ -64,7 +64,7 @@ export interface MemoryPromptSection {
 }
 
 
-export function buildMentalModelsPrompt(mentalModels: MentalModel[], max = 1000): string {
+export function buildMentalModelsPrompt(mentalModels: MentalModel[] | undefined, max = 1000): string {
     const ready = (mentalModels || []).filter(m => m.status === 'ready' || m.status === undefined);
     if (ready.length === 0) return '';
     const lines = ['## 心智模型'];
@@ -75,7 +75,7 @@ export function buildMentalModelsPrompt(mentalModels: MentalModel[], max = 1000)
 }
 
 export function buildLongTermMemoryPrompt(
-    recalls: RecallResult[],
+    recalls: RecallResult[] | undefined,
     isPrivate: boolean,
     sessionName: string,
     max = 1000
