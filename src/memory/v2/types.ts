@@ -237,6 +237,8 @@ export type ReflectSynthesizer = (query: string, context: {
     existingAnswer?: string;
     /** 本次合成方式：full=全量重写，delta=增量更新 */
     mode?: MentalModelTrigger;
+    /** 当前范围提示行（如 平台=QQ，会话=群聊 QQ-Group:xxx），置于 prompt 开头 */
+    scopeNote?: string;
 }) => Promise<string>;
 
 export interface RetainResult {

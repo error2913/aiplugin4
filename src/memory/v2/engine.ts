@@ -1044,6 +1044,7 @@ export class MemoryEngine {
             existingAnswer?: string;
             strict?: boolean;
             maxTokens?: number;
+            scopeNote?: string;
         } = {}
     ): Promise<ReflectResult> {
         const bank = this.repository.getBank(bankId);
@@ -1077,6 +1078,7 @@ export class MemoryEngine {
                     memories,
                     existingAnswer: opts.existingAnswer,
                     mode: opts.mode,
+                    scopeNote: opts.scopeNote || this.scopeNoteForBank(bankId),
                 })) || '';
             } catch {
                 text = '';
@@ -1098,6 +1100,19 @@ export class MemoryEngine {
             text,
             basedOn: { mentalModels, observations, memories },
         };
+    }
+
+    /** 由 bankId（user_/group_ 前缀 + 平台前缀 ID）生成 reflect 范围提示行 */
+    private scopeNoteForBank(bankId: string): string {
+        const sep = bankId.indexOf('_');
+        const prefix = sep > 0 ? bankId.slice(0, sep) : '';
+        const raw = sep > 0 ? bankId.slice(sep + 1) : bankId;
+        const kindLabel = prefix === 'group' ? '群聊' : prefix === 'user' ? '私聊' : '会话';
+        const colon = raw.indexOf(':');
+        const platform = colon > 0 ? raw.slice(0, colon) : '';
+        return platform
+            ? `当前范围：平台=${platform}，会话=${kindLabel} ${raw}`
+            : `当前范围：会话=${kindLabel} ${raw}`;
     }
 
     // ===== Utility =====

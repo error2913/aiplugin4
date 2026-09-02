@@ -157,11 +157,12 @@ export const defaultReflectSynthesizer: ReflectSynthesizer = async (query, conte
         }
         const isDelta = context.mode === 'delta' && !!context.existingAnswer;
         const prompt = isDelta ? REFLECT_PROMPT_DELTA : REFLECT_PROMPT_FULL;
+        const scopeLine = context.scopeNote ? `${context.scopeNote}\n\n` : '';
         const input = isDelta
             ? `当前答案：\n${context.existingAnswer}\n\n最近新增的相关记忆：\n${parts.join('\n\n') || '（无）'}`
             : `问题：${query}\n相关记忆：\n${parts.join('\n\n') || '（无）'}`;
         const reply = await Agent.get('summarize_agent').chat(
-            `${prompt}\n\n${input}`
+            `${scopeLine}${prompt}\n\n${input}`
         );
         return (reply || '').trim();
     } catch {
