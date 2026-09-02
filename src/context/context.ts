@@ -8,6 +8,7 @@ import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
+import { estimateMessageTokens } from "../utils/message";
 import { callOb11Api } from "../utils/ob11";
 import { stripInternalTags } from "../utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
@@ -38,6 +39,93 @@ function flushGroupUserMemories(session: Session): void {
     }
 }
 
+/** 归档分块 token 预算：避免单次总结上下文过大 */
+export const ARCHIVE_CHUNK_TOKENS = 50000;
+
+/** 真实用户轮：role=user 且包含真实用户消息项；system-only user 不算轮 */
+export function isRealUserMessage(m: MessageType): boolean {
+    if (m.role !== 'user') return false;
+    if (!Array.isArray((m as UserMessage).contentItems)) return false;
+    return (m as UserMessage).contentItems.some(
+        item => typeof (item as UserMessageItem).userId === 'string'
+    );
+}
+
+/** 将消息列表切成“真实 user 轮”段；assistant/tool 不新开轮，system-only 不新开轮 */
+export function buildRoundSegments(messages: MessageType[]): Array<{ start: number; end: number }> {
+    const segments: Array<{ start: number; end: number }> = [];
+    let currentStart: number | null = null;
+    let inUserTurn = false;
+
+    for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
+
+        if (m.role === 'assistant' || m.role === 'tool') {
+            inUserTurn = false;
+            continue;
+        }
+
+        const realUser = isRealUserMessage(m);
+
+        if (realUser && !inUserTurn) {
+            if (currentStart !== null) segments.push({ start: currentStart, end: i });
+            currentStart = i;
+            inUserTurn = true;
+        }
+    }
+
+    if (currentStart !== null) segments.push({ start: currentStart, end: messages.length });
+    return segments;
+}
+
+/** 返回“保留最近 keepRounds 个真实 user 轮”的起始消息下标；不足时返回 0 */
+export function getKeepStart(messages: MessageType[], keepRounds: number): number {
+    if (keepRounds <= 0) return messages.length;
+    const segments = buildRoundSegments(messages);
+    if (segments.length <= keepRounds) return 0;
+    return segments[segments.length - keepRounds].start;
+}
+
+/** 估算 Context 内持久化消息 token 数 */
+export function estimateContextMessagesTokens(messages: MessageType[]): number {
+    return messages.reduce((sum, m) => sum + estimateMessageTokens(m as any), 0);
+}
+
+/** 将待归档消息按 token 预算切成连续块，保证每条消息都进入且只进入一个块 */
+export function splitMessagesByToken(messages: MessageType[], maxTokens: number): MessageType[][] {
+    const chunks: MessageType[][] = [];
+    let current: MessageType[] = [];
+    let currentTokens = 0;
+
+    for (const m of messages) {
+        const t = estimateMessageTokens(m as any);
+        if (current.length > 0 && currentTokens + t > maxTokens) {
+            chunks.push(current);
+            current = [];
+            currentTokens = 0;
+        }
+        current.push(m);
+        currentTokens += t;
+    }
+
+    if (current.length > 0) chunks.push(current);
+    return chunks;
+}
+
+/** 丢弃最早的一个真实 user 轮（含其 assistant/tool 消息）；无轮时丢弃最早一条消息 */
+export function dropOldestRound(messages: MessageType[]): boolean {
+    const segments = buildRoundSegments(messages);
+    if (segments.length === 0) {
+        if (messages.length === 0) return false;
+        messages.splice(0, 1);
+        return true;
+    }
+    const oldest = segments[0];
+    messages.splice(oldest.start, oldest.end - oldest.start);
+    return true;
+}
+
+
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
         agentName: 'string',
@@ -45,8 +133,6 @@ export class Context {
         messages: { array: 'any' },
         ignoreList: { array: 'string' },
         autoNameMod: 'number',
-        summaryCounter: 'number',
-        lastSummarizedIndex: 'number'
     }
     agentName: string;
     sessionId: string;
@@ -56,9 +142,6 @@ export class Context {
     counter: number;
     timer: number | null;
     autoNameMod: number;
-    summaryCounter: number;
-    /** 总结记忆增量游标：只总结该索引之后的消息（limitMessages 裁剪时同步回退） */
-    lastSummarizedIndex: number;
 
     constructor() {
         this.agentName = '';
@@ -69,8 +152,6 @@ export class Context {
         this.counter = 0;
         this.timer = null;
         this.autoNameMod = 0;
-        this.summaryCounter = 0;
-        this.lastSummarizedIndex = 0;
     }
 
     get agent(): Agent { return Agent.get(this.agentName); }
@@ -90,26 +171,11 @@ export class Context {
 
     clearMessages(...roles: Array<'user' | 'assistant' | 'tool'>) {
         if (roles.length === 0) {
-            this.summaryCounter = 0;
-            this.lastSummarizedIndex = 0;
             this.messages = [];
             return;
         }
 
-        // 同步修正总结游标：删除游标前的消息会使游标前移；游标本身被删则回到 0 重新总结
-        const removedBefore = this.messages
-            .slice(0, this.lastSummarizedIndex)
-            .filter(m => roles.includes(m.role as any)).length;
-        const cursorRemoved = this.lastSummarizedIndex < this.messages.length
-            && roles.includes(this.messages[this.lastSummarizedIndex].role as any);
-
         this.messages = this.messages.filter(m => !roles.includes(m.role as any));
-
-        if (cursorRemoved) {
-            this.lastSummarizedIndex = 0;
-        } else {
-            this.lastSummarizedIndex = Math.max(0, this.lastSummarizedIndex - removedBefore);
-        }
     }
 
     reviveMessages() {
@@ -199,15 +265,10 @@ export class Context {
             contentItems: [ami]
         });
         flushGroupUserMemories(this.session);
-        // 按配置的间隔轮数触发对话记忆抽取与巩固（Hindsight-like Retain + Consolidation）
-        this.summaryCounter++;
-        if (this.summaryCounter >= Config.memory.SUMMARY_INTERVAL) {
-            this.summaryCounter = 0;
-            MemoryManager.retainConversation(this.session).catch(e => {
-                log.warning('记忆抽取/巩固失败: ' + (e instanceof Error ? e.message : String(e)));
-            });
-        }
-        this.limitMessages();
+        // 不再按轮数周期观察：上下文 token 超限后统一由 archiveByTokenIfNeeded 异步归档
+        void this.archiveByTokenIfNeeded().catch(e => {
+            log.warning('上下文归档失败: ' + (e instanceof Error ? e.message : String(e)));
+        });
     }
 
     addSystemUserMessage(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }) {
@@ -283,29 +344,83 @@ export class Context {
         this.messages.push(tcbm);
     }
 
-    limitMessages() {
-        const { MAX_ROUNDS } = Config.message;
-        if (MAX_ROUNDS <= 0) return;
+    /**
+     * 基于持久化上下文 token 上限执行归档：
+     * - 超过上限时保留最近 MAX_ROUNDS 个真实 user 轮；
+     * - 更早消息分块归档，成功一块删一块；
+     * - 单块重试耗尽后降级丢弃最早轮次，直到不超上限。
+     */
+    async archiveByTokenIfNeeded(): Promise<boolean> {
+        if (this.archiving) return false;
+        this.archiving = true;
 
-        const messages = this.messages;
-        let round = 0;
+        try {
+            const { MAX_ROUNDS, MAX_CONTEXT_TOKENS } = Config.message;
+            const keepRounds = MAX_ROUNDS > 0 ? MAX_ROUNDS : 5;
 
-        for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'user') round++;
+            while (estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS) {
+                const keepStart = getKeepStart(this.messages, keepRounds);
+                const toArchive = this.messages.slice(0, keepStart);
 
-            if (round > MAX_ROUNDS) {
-                // 删除超限的这条 user 及其后紧跟的 assistant/tool，直到下一条 user 前
-                let removeEnd = i + 1;
-                while (removeEnd < messages.length && messages[removeEnd].role !== 'user') {
-                    removeEnd++;
+                if (toArchive.length > 0) {
+                    const ok = await this.archivePrefix(toArchive);
+                    if (ok) continue;
+
+                    await this.forceFitContext();
+                    return false;
                 }
 
-                messages.splice(0, removeEnd);
-                this.lastSummarizedIndex = Math.max(0, this.lastSummarizedIndex - removeEnd);
-                return;
+                await this.forceFitContext();
+                return false;
+            }
+
+            return true;
+        } finally {
+            this.archiving = false;
+        }
+    }
+
+    private async archivePrefix(toArchive: MessageType[]): Promise<boolean> {
+        const chunks = splitMessagesByToken(toArchive, ARCHIVE_CHUNK_TOKENS);
+
+        for (const chunk of chunks) {
+            const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
+            if (!ok) return false;
+            // chunk 始终是当前消息数组最前的一段（前面的块成功后已删除）
+            this.messages.splice(0, chunk.length);
+            try { this.session.save(); } catch { /* 无宿主会话时跳过保存（测试/游离 Context） */ }
+        }
+
+        return true;
+    }
+
+    private async forceFitContext(): Promise<void> {
+        const { MAX_CONTEXT_TOKENS } = Config.message;
+        let safety = 0;
+
+        while (estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS && this.messages.length > 0 && safety < 10000) {
+            const dropped = dropOldestRound(this.messages);
+            if (!dropped) break;
+            safety++;
+            log.warning(`上下文归档失败降级：已丢弃最早 1 轮，剩余 token=${estimateContextMessagesTokens(this.messages)}`);
+        }
+
+        if (this.messages.length > 0 && estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS) {
+            // 极端单条超限：截断最旧消息文本到预算内（仅兜底，尽量保留尾部）
+            const m = this.messages[0] as any;
+            const tokens = estimateMessageTokens(m);
+            const text = (m.text ?? (m.contentItems?.[0]?.text ?? '')) as string;
+            const maxTextLen = Math.max(1, Math.floor(text.length * MAX_CONTEXT_TOKENS / Math.max(1, tokens)));
+            if (text.length > maxTextLen) {
+                const cut = text.slice(-maxTextLen);
+                if (m.contentItems) m.contentItems = [{ text: cut, time: m.contentItems[0]?.time ?? Math.floor(Date.now() / 1000) }];
+                else m.text = cut;
             }
         }
     }
+
+    /** 运行时归档锁，不持久化 */
+    private archiving = false;
 
     getUserById(userId: string | number): User | null {
         const normalizedId = normalizeUserId(userId, getPlatform(this.sessionId));

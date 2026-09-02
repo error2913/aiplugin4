@@ -312,40 +312,11 @@ export class MemoryManager {
     }
 
     /**
-     * 对话记忆抽取：参考 Hindsight Retain，复用 summarize_agent 从最近对话抽取 facts，
-     * 写入新引擎后触发 Observation 巩固。
+     * 归档单块消息：将一段即将从 Context 删除的消息交给 summarize_agent 抽取 facts，
+     * 写入长期记忆并尝试 consolidate 为观察记忆。成功返回 true，失败返回 false。
      */
-    static async retainConversation(session: Session): Promise<void> {
-        // Hindsight cron 等价物：定时刷新心智模型（仅当 scope 内有新记忆时实际刷新，staleness gating 保证不烧 token）
-        const tickIntervalMin = Config.memory.MEMORY_MM_TICK_INTERVAL;
-        if (tickIntervalMin > 0) {
-            const tickEngine = getMemoryEngine();
-            const tickBank = bankForSession(session);
-            const last = tickEngine.getLastAutoRefreshAt(tickBank.bankId);
-            if (last <= 0 || Date.now() / 1000 - last >= tickIntervalMin * 60) {
-                const summary = await tickEngine.refreshMentalModels(tickBank.bankId, undefined, { reason: 'tick' });
-                // 放在任何提前 return 之前：summary 关闭时 tick 也可能刷新，需主动失效缓存
-                if (summary.updated > 0) bumpMemoryRevision();
-            }
-        }
-        const { SUMMARY, SUMMARY_SIZE } = Config.memory;
-        if (session.memory.summaryOverride === false) return;
-        if (session.memory.summaryOverride !== true && !SUMMARY) return;
-        const messages = session.context.messages;
-        let start = session.context.lastSummarizedIndex || 0;
-        if (start > messages.length) start = 0;
-        let end = messages.length;
-        let round = 0;
-        for (let i = start; i < messages.length; i++) {
-            if ((messages[i] as any).role === 'user') round++;
-            if (round > SUMMARY_SIZE) {
-                end = i;
-                break;
-            }
-        }
-        const sumMessages = messages.slice(start, end);
-        if (sumMessages.length === 0) return;
-
+    static async summarizeChunk(session: Session, messages: any[]): Promise<boolean> {
+        if (!messages || messages.length === 0) return true;
         const roleSetting = (Config.message.ROLE_SETTINGS || [])[0] || '';
         const isPrivate = session.sessionType !== 'group';
         const sessionId = session.sessionId;
@@ -362,7 +333,7 @@ export class MemoryManager {
             "用户号码": userNumber,
             "群聊名称": groupName,
             "群聊号码": groupNumber,
-            "对话内容": sumMessages.map(message => {
+            "对话内容": messages.map((message: any) => {
                 const toolCalls = (message as any).toolCalls || (message as any).tool_calls;
                 if (message.role === 'assistant' && toolCalls && toolCalls.length > 0) {
                     return `\n[function_call]: ${toolCalls.map((tool_call: any, index: number) => `${index + 1}. ${JSON.stringify(tool_call.function, null, 2)}`).join('\n')}`;
@@ -371,56 +342,60 @@ export class MemoryManager {
             }).join('\n')
         });
 
-        const reply = await Agent.get('summarize_agent').chat(prompt);
-        if (!reply) return;
-        const memoryData = parseLooseJson(reply);
-        if (!memoryData || typeof memoryData !== 'object') return;
-        const facts = Array.isArray(memoryData.facts)
-            ? memoryData.facts as Array<{ text?: string; keywords?: string[]; importance?: number; type?: string; visibility?: string; related_user_ids?: string[]; related_group_ids?: string[]; memory_type?: string; target_id?: string; op?: string; existing_id?: string; occurred_at?: string; entities?: string[] }>
-            : [];
+        try {
+            const reply = await Agent.get('summarize_agent').chat(prompt);
+            if (!reply) return false;
+            const memoryData = parseLooseJson(reply);
+            if (!memoryData || typeof memoryData !== 'object') return false;
+            const facts = Array.isArray(memoryData.facts) ? memoryData.facts : [];
 
-        const engine = getMemoryEngine();
-        const bank = bankForSession(session);
-        engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
-        const baseTags = [
-            ...(isPrivate ? [`user:${sessionId}`] : [`group:${sessionId}`]),
-            'vis:public',
-        ];
-        for (const fact of facts) {
-            if (!fact || typeof fact.text !== 'string' || !fact.text.trim()) continue;
-            if (fact.op === 'delete') continue;
-            // E3：结构化抽取——事件时间与实体随事实入库，供时间检索/实体关联使用
-            const occurredStart = parseOccurredAt(fact.occurred_at);
-            await engine.addMemory(bank.bankId, {
-                content: fact.text.trim(),
-                tags: Array.from(new Set([...baseTags, ...(fact.keywords || [])])),
-                metadata: { type: fact.type || 'fact' },
-                importance: typeof fact.importance === 'number' ? fact.importance : 0.5,
-                factType: fact.type === 'event' ? 'experience' : 'world',
-                entities: Array.isArray(fact.entities) ? fact.entities.map(String) : undefined,
-                occurredStart,
-                verbatim: !Config.memory.MEMORY_LLM_EXTRACT,
-            });
-        }
+            const engine = getMemoryEngine();
+            const bank = bankForSession(session);
+            engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
+            const baseTags = [
+                ...(isPrivate ? [`user:${sessionId}`] : [`group:${sessionId}`]),
+                'vis:public',
+            ];
 
-        bumpMemoryRevision();
-        session.context.lastSummarizedIndex = end;
-        // 巩固间隔：每累计 CONSOLIDATE_INTERVAL 次观察整合一次重复观察；0 为关闭（consolidate_memory 工具 / .ai memo 手动巩固不受影响）
-        const consolidateInterval = Config.memory.CONSOLIDATE_INTERVAL;
-        if (consolidateInterval > 0) {
-            const since = engine.getConsolidateSince(bank.bankId) + 1;
-            if (since >= consolidateInterval) {
+            for (const fact of facts as any[]) {
+                if (!fact || typeof fact.text !== 'string' || !fact.text.trim()) continue;
+                if (fact.op === 'delete') continue;
+                const occurredStart = parseOccurredAt(fact.occurred_at);
+                await engine.addMemory(bank.bankId, {
+                    content: fact.text.trim(),
+                    tags: Array.from(new Set([...baseTags, ...(Array.isArray(fact.keywords) ? fact.keywords : [])])),
+                    metadata: { type: fact.type || 'fact' },
+                    importance: typeof fact.importance === 'number' ? fact.importance : 0.5,
+                    factType: fact.type === 'event' ? 'experience' : 'world',
+                    entities: Array.isArray(fact.entities) ? fact.entities.map(String) : undefined,
+                    occurredStart,
+                    verbatim: !Config.memory.MEMORY_LLM_EXTRACT,
+                });
+            }
+
+            bumpMemoryRevision();
+            try {
                 await engine.consolidate(bank.bankId);
                 bumpSummaryRevision();
-                engine.setConsolidateSince(bank.bankId, 0);
-                // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
-                if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
-                    await engine.refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
-                }
-            } else {
-                engine.setConsolidateSince(bank.bankId, since);
+            } catch (e) {
+                Logger.warning('归档后 consolidate 失败（不影响 facts 已写入）: ' + (e instanceof Error ? e.message : String(e)));
             }
+            return true;
+        } catch (e) {
+            Logger.warning('归档总结失败: ' + (e instanceof Error ? e.message : String(e)));
+            return false;
         }
+    }
+
+    /** 单块归档最多尝试 MAX_ARCHIVE_ATTEMPTS 次，全部失败返回 false */
+    static async summarizeChunkWithRetry(session: Session, messages: any[]): Promise<boolean> {
+        const MAX_ARCHIVE_ATTEMPTS = 3;
+        for (let attempt = 1; attempt <= MAX_ARCHIVE_ATTEMPTS; attempt++) {
+            const ok = await MemoryManager.summarizeChunk(session, messages);
+            if (ok) return true;
+            Logger.warning(`归档总结第 ${attempt} 次失败，准备重试`);
+        }
+        return false;
     }
 }
 

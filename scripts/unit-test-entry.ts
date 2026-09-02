@@ -43,7 +43,7 @@ import {
 } from "../src/memory/v2";
 import { getMemoryRevision } from "../src/memory/revision";
 import { requestLimiter } from "../src/utils/concurrency";
-import { Context } from "../src/context/context";
+import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken } from "../src/context/context";
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import ChatModel from "../src/model/chat";
@@ -636,17 +636,97 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parseLooseJson(''), null, '空串返回 null');
     },
 
-    testContextSummaryCursorAdjustsOnTrim(): void {
-        TC.intConfigs['对话保存轮数'] = 2;
+    testArchiveRoundSegmentsAndKeepStart(): void {
+        const u1 = { role: 'user', contentItems: [{ text: '你好1', time: 0, userId: '1', messageId: '' }] };
+        const u2 = { role: 'user', contentItems: [{ text: '你好2', time: 0, userId: '1', messageId: '' }] };
+        const a1 = { role: 'assistant', contentItems: [{ text: '回复1', time: 0, messageId: '' }] };
+        const u3 = { role: 'user', contentItems: [{ text: '你好3', time: 0, userId: '1', messageId: '' }] };
+        const a2 = { role: 'assistant', contentItems: [{ text: '回复2', time: 0, messageId: '' }] };
+        const a3 = { role: 'assistant', contentItems: [{ text: '回复3', time: 0, messageId: '' }] };
+        const systemOnly = { role: 'user', contentItems: [{ text: '系统事件', time: 0, systemName: 'event' }] };
+
+        // 连续 u1/u2 属于同一轮；system-only 不新开轮
+        assert.equal(isRealUserMessage(u1 as any), true);
+        assert.equal(isRealUserMessage(systemOnly as any), false);
+
+        const segments = buildRoundSegments([u1, u2, a1, u3, a2, systemOnly] as any);
+        assert.equal(segments.length, 2);
+        assert.deepEqual(segments, [{ start: 0, end: 3 }, { start: 3, end: 6 }]);
+        assert.equal(getKeepStart([u1, a1, u2, a2, u3, a3] as any, 1), 4);
+    },
+
+    testArchiveSplitMessagesCoversAll(): void {
+        const messages = Array.from({ length: 10 }, (_, i) => ({
+            role: 'user',
+            contentItems: [{ text: '消息'.repeat(20) + i, time: i, userId: '1', messageId: 'm' + i }],
+        }));
+        const chunks = splitMessagesByToken(messages as any, 20);
+        const total = chunks.reduce((n, c) => n + c.length, 0);
+        assert.equal(total, messages.length, '每条消息都应恰好进入一个 chunk');
+        assert.ok(chunks.length > 1, '小预算应产生多个 chunk');
+    },
+
+    async testArchiveByTokenKeepsRecentRounds(): Promise<void> {
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => true;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 20;
         resetConfigCache();
-        const ctx = new Context();
-        ctx.messages = [
-            { role: 'user' }, { role: 'user' }, { role: 'user' }, { role: 'user' }
-        ] as any;
-        ctx.lastSummarizedIndex = 3;
-        ctx.limitMessages();
-        assert.equal(ctx.messages.length, 2, '应裁剪头部保留最近窗口');
-        assert.equal(ctx.lastSummarizedIndex, 1, '游标应随头部裁剪回退');
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:777';
+            session.sessionType = 'user';
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: 'u1', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a1', time: 0, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
+            ] as any;
+            const ok = await session.context.archiveByTokenIfNeeded();
+            assert.equal(ok, true);
+            assert.equal(session.context.messages.length, 2, '应只保留最近 1 轮');
+            assert.equal((session.context.messages[0] as any).contentItems[0].text, 'u2');
+        } finally {
+            MemoryManager.summarizeChunkWithRetry = old;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
+    async testArchiveFailureFallsBackDropOldestRound(): Promise<void> {
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => false;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 20;
+        resetConfigCache();
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:778';
+            session.sessionType = 'user';
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: 'u1', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a1', time: 0, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u3', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a3', time: 0, messageId: '' }] },
+            ] as any;
+            const ok = await session.context.archiveByTokenIfNeeded();
+            assert.equal(ok, false);
+            assert.ok(estimateContextMessagesTokens(session.context.messages) <= 20, '失败降级后应不超上限');
+            assert.equal(session.context.messages.length, 2, '应降级丢弃到只剩最近 1 轮');
+            assert.equal((session.context.messages[0] as any).contentItems[0].text, 'u3');
+        } finally {
+            MemoryManager.summarizeChunkWithRetry = old;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
     },
 
 

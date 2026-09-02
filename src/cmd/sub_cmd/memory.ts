@@ -442,9 +442,7 @@ export function registerCmdMemory() {
                             seal.replyToSender(ctx, msg, '立即生成观察记忆仅支持当前会话（不要带 --u/--g）');
                             return ret;
                         }
-                        session.context.summaryCounter = 0;
-                        session.save();
-                        MemoryManager.retainConversation(session)
+                        MemoryManager.summarizeChunk(session, session.context.messages)
                             .then(() => session.save())
                             .catch(() => undefined);
                         seal.replyToSender(ctx, msg, '正在生成观察记忆，请稍后用 .ai memo obs list 查看');

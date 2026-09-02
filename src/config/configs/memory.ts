@@ -6,11 +6,7 @@ export default class MemoryConfig {
     static register() {
         // 总开关
         seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "开启后对话内容会沉淀为长期记忆", "记忆");
-        seal.ext.registerBoolConfig(ext, "启用观察记忆", true, "开启后定期对对话进行观察记忆", "记忆");
-        // 观察记忆参数
-        seal.ext.registerIntConfig(ext, "每隔多少轮对话生成一次观察", 10, "每累计多少轮对话自动生成一次观察记忆", "记忆");
-        seal.ext.registerIntConfig(ext, "每次观察纳入最近的对话轮数", 10, "每次生成观察记忆时纳入最近的多少轮对话", "记忆");
-        seal.ext.registerIntConfig(ext, "每隔多少次观察整合一次记忆", 30, "每累计多少次观察后自动整合重复观察，0 为关闭", "记忆");
+        seal.ext.registerBoolConfig(ext, "启用观察记忆", true, "开启后上下文归档删除前会将旧对话沉淀为观察记忆", "记忆");
         // Hindsight 式检索新近度加权：只影响召回排序，不删除旧记忆
         seal.ext.registerFloatConfig(ext, "记忆召回新近度权重", 0.4, "检索时给新近记忆的加分权重（0 为关闭）", "记忆");
         seal.ext.registerIntConfig(ext, "记忆召回新近度半衰期", 60, "新近度加分半衰期（天），越大旧记忆衰减越慢", "记忆");
@@ -34,9 +30,6 @@ export default class MemoryConfig {
         return {
             MEMORY: seal.ext.getBoolConfig(ext, "启用长期记忆"),
             SUMMARY: seal.ext.getBoolConfig(ext, "启用观察记忆"),
-            SUMMARY_INTERVAL: seal.ext.getIntConfig(ext, "每隔多少轮对话生成一次观察"),
-            SUMMARY_SIZE: seal.ext.getIntConfig(ext, "每次观察纳入最近的对话轮数"),
-            CONSOLIDATE_INTERVAL: seal.ext.getIntConfig(ext, "每隔多少次观察整合一次记忆"),
             MEMORY_LLM_EXTRACT: seal.ext.getBoolConfig(ext, "用LLM抽取记忆"),
             MEMORY_LLM_RERANK: seal.ext.getBoolConfig(ext, "用LLM重排召回结果"),
             MEMORY_OBSERVATION_SYNTH: seal.ext.getBoolConfig(ext, "用LLM合成观察记忆"),
