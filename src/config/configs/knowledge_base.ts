@@ -1,7 +1,6 @@
 // 知识库配置（独立「知识库」页签）：开关/注入阈值/Markdown 模板
 import { ext } from "../config";
 
-
 export default class KnowledgeBaseConfig {
     static register() {
         seal.ext.registerBoolConfig(ext, "启用知识库记忆", false, "开启后把知识库内容注入 system prompt，供对话参考", "知识库");
@@ -30,18 +29,12 @@ description: 本插件为骰娘接入大模型 API，支持智能对话、TRPG �
 | .ai memo status | 查看记忆状态 |
 
 ## 引用说明
-> 知识库内容为只读：仅管理员可在配置中修改，AI 通过 kb_search / kb_read / kb_list 工具或 .ai kb 指令检索，不能增删。
-
-## 代码块示例
-\`\`\`
-.ai kb list
-.ai kb search 触发方式
-\`\`\`
+> 知识库内容为只读：仅管理员可在配置中修改，AI 通过 knowledge_search / knowledge_read / knowledge_list / knowledge_docs 工具检索，不能增删。
 
 ## 注意事项
 - 修改知识库内容后需重载 JS 生效
 - 超长文档会按段落自动分块，块间保留少量重叠`
-        ], "每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件内容）。\n格式：文档以 --- 开头的 YAML frontmatter 写 name（库名，必填）/ description（库描述，可选），正文为文档内容，支持列表、表格、引用、代码块等标准 Markdown 语法；无 frontmatter 时自动用 # 一级标题作为库名、正文首段作为描述，无标题时用条目序号命名；超长文档按段落自动分块（单块约 800 字符，块间保留少量重叠）。\n格式定义见 https://commonmark.org/help/ （CommonMark 官方规范，国内可访问）。\n知识库为只读数据：内容只能由管理员在配置里修改，AI 通过 kb_search / kb_read / kb_list 工具或 .ai kb 指令检索，不能增删。\n下方默认值即单个完整示例（含 frontmatter/标题/小节/列表/表格/引用/代码块），可修改为实际知识内容。修改后需重载 JS 生效", "知识库");
+        ], "每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件内容）。\n格式：文档以 --- 开头的 YAML frontmatter 写 name（库名，必填）/ description（库描述，可选），正文为文档内容，支持列表、表格、引用、代码块等标准 Markdown 语法；无 frontmatter 时自动用 # 一级标题作为库名、正文首段作为描述，无标题时用条目序号命名；超长文档按段落自动分块（单块约 800 字符，块间保留少量重叠）。\n格式定义见 https://commonmark.org/help/ （CommonMark 官方规范，国内可访问）。\n知识库为只读数据：内容只能由管理员在配置里修改，AI 通过 knowledge_search / knowledge_read / knowledge_list / knowledge_docs 工具检索，不能增删。\n下方默认值即单个完整示例（含 frontmatter/标题/小节/列表/表格/引用/代码块），可修改为实际知识内容。修改后需重载 JS 生效", "知识库");
     }
 
     static get() {
