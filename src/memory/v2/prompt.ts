@@ -73,6 +73,8 @@ export interface MemoryPromptOptions {
 /** 分组记忆段：一组对应一个归属（群聊 / 某个发言者），组内独立渲染心智模型 + 观察记忆 + 长期记忆 */
 export interface MemoryPromptSection {
     title: string;
+    /** 会话身份行（如 群聊：QQ-Group:xxx（群名）/ 个人：QQ:xxx（名字）），渲染到该段头部 */
+    scopeLabel?: string;
     mentalModels?: MentalModel[];
     observations?: Observation[];
     recalls?: RecallResult[];
@@ -143,17 +145,23 @@ export function buildGroupedMemoryPrompt(sections: MemoryPromptSection[]): strin
 
         const isGroupLevel = sec.title.startsWith('群聊');
         if (isGroupLevel) {
+            const block: string[] = [];
+            if (sec.scopeLabel) block.push(sec.scopeLabel);
+            block.push('当前回答范围：仅该群记忆；提到其他群的记录只算背景，不算该群设定');
             if (hasMM) {
-                const mm = buildMentalModelsPrompt(sec.mentalModels, max).replace('## 心智模型', '## 群聊心智模型');
-                parts.push(mm);
+                block.push('');
+                block.push(buildMentalModelsPrompt(sec.mentalModels, max).replace('## 心智模型', '## 群聊心智模型'));
             }
             if (hasRecall) {
-                const mem = buildLongTermMemoryPrompt(sec.recalls, false, sec.title.replace(/^群聊记忆（|）$/g, ''), max)
-                    .replace('## 长期记忆', '## 群聊长期记忆');
-                parts.push(mem);
+                block.push('');
+                block.push(buildLongTermMemoryPrompt(sec.recalls, false, sec.title.replace(/^群聊记忆（|）$/g, ''), max)
+                    .replace('## 长期记忆', '## 群聊长期记忆'));
             }
+            parts.push(block.join('\n'));
         } else {
             const lines: string[] = [`## ${sec.title}`];
+            if (sec.scopeLabel) lines.push(sec.scopeLabel);
+            lines.push('本段仅用于理解该发言者，不作为“群设定/群规则”的依据');
             if (hasMM) {
                 lines.push('心智模型：');
                 lines.push(sec.mentalModels!.map(m => `${m.question}\n${truncate(m.answer, max)}`).join('\n'));

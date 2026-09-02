@@ -157,8 +157,11 @@ export class MemoryManager {
         const isGroup = session.sessionType === 'group';
         if (isGroup) {
             const groupRecallList = groupRecalls.slice(0, MAX_GROUP_RECALLS);
+            const groupId = gi?.id || session.sessionId;
+            const groupName = gi?.name || '';
             sections.push({
                 title: `群聊记忆（${gi?.name || session.sessionId}）`,
+                scopeLabel: groupName ? `群聊：${groupId}（${groupName}）` : `群聊：${groupId}`,
                 mentalModels: groupMMs,
                 recalls: groupRecallList,
             });
@@ -201,7 +204,13 @@ export class MemoryManager {
                     })
                     : [];
                 const userMMs = mergeMentalModels(userFixed.slice(0, usedFixed), userRanked, userTotal);
-                sections.push({ title: `个人记忆（${u.name || u.id}）`, mentalModels: userMMs, recalls: userRecalls });
+                const userName = u.name && u.name !== u.id ? u.name : '';
+                sections.push({
+                    title: `个人记忆（${u.name || u.id}）`,
+                    scopeLabel: userName ? `个人：${u.id}（${userName}）` : `个人：${u.id}`,
+                    mentalModels: userMMs,
+                    recalls: userRecalls,
+                });
                 mmBudget -= userMMs.length;
             }
         } else {
