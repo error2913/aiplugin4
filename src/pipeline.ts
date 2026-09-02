@@ -3,7 +3,7 @@ import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
 import { Context } from "./context/context";
-import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_RAW_LIMIT, isDuplicateEvent, isEventRawRetainable, isNoticeInWhitelist, parseNoticeWhitelist } from "./event/notice";
+import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, parseNoticeWhitelist } from "./event/notice";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { getSession } from "./session/session_service";
@@ -486,10 +486,8 @@ export class MessagePipeline {
         const text = await Context.compressIfLong(opts.text);
         session.context.addSystemUserMessage(text, opts.systemName, {
             eventType: opts.eventType,
-            raw: isEventRawRetainable(opts.raw) ? opts.raw : undefined,
+            raw: opts.raw,
         });
-        // 事件原始数据条目上限：超出从最旧删除 raw（文本提示词保留），避免会话存储无限膨胀
-        session.context.pruneSystemUserRaws(EVENT_RAW_LIMIT);
         session.save();
         log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
         return true;

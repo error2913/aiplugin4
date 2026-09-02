@@ -6,6 +6,7 @@ import { registerImageTools } from "./image/init";
 import { registerManageTools } from "./manage/init";
 import { registerMemoryTools } from "./memory/init";
 import { registerOb11Tools } from "./ob11/init";
+import { registerRawToolSet } from "./raw/init";
 import { registerResourceTools } from "./resource/init";
 import { registerSealTools } from "./seal/init";
 import { registerWebTools } from "./web/init";
@@ -16,6 +17,7 @@ export function registerTools() {
     registerSealTools();
     registerContextTools();
     registerEventToolSet();
+    registerRawToolSet();
     registerMemoryTools();
     registerResourceTools();
     registerCoreTools();
