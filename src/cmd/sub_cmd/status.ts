@@ -1,4 +1,5 @@
 // .ai status：查看当前会话 AI 状态
+import Model from "../../model/model";
 import { platformOf } from "../../utils/target_id";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -17,7 +18,7 @@ export function registerCmdStatus() {
         seal.replyToSender(ctx, msg, `${sid}
         平台: ${platformOf(ctx) || '未知'}
         会话类型: ${session.sessionType === 'user' ? '私聊' : '群聊'}
-        模型: ${session.setting.modelName || '全局默认'}
+        模型(全局): ${Model.getChatModel('chat')?.name || '未配置'}
         权限: ${setting.priv}
         上下文轮数: ${session.context.messages.filter(m => m.role === 'user').length}
         非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}

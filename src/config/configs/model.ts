@@ -4,13 +4,14 @@ import { load } from 'js-toml'
 import Logger from "../../logger";
 import ChatModel from "../../model/chat";
 import EmbeddingModel from "../../model/embedding";
-import Model from "../../model/model";
+import Model, { ModelSource } from "../../model/model";
 import MultimodalModel from "../../model/multimodal";
 import { ModelBody, ModelUse } from "../../model/types";
 import { revive, TypeDescriptor } from "../../utils/utils";
 import { ext } from "../config";
 import { CHAT_MODEL_TO_PROVIDER, EMBEDDING_MODEL_TO_PROVIDER, MULTIMODAL_MODEL_TO_PROVIDER, PROVIDER_MAP } from "../static_config";
 
+export const MODEL_PURPOSE_OVERRIDES_KEY = 'modelPurposeOverrides';
 
 // 模型配置属于启动解析一次、重载 JS 才生效的复杂配置（TOML 逐行解析）：模块级缓存，重载 JS 后重新解析
 interface ModelConfigData {
@@ -25,6 +26,21 @@ export function resetModelConfigCacheForTest(): void {
     modelConfigCache = null;
 }
 
+export function loadPurposeModelOverrides(): Partial<Record<ModelUse, string>> {
+    try {
+        const raw = ext.storageGet(MODEL_PURPOSE_OVERRIDES_KEY);
+        if (!raw) return {};
+        const data = JSON.parse(raw);
+        return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+        Logger.error(`读取全局模型覆盖失败: ${e instanceof Error ? e.message : String(e)}`);
+        return {};
+    }
+}
+
+export function savePurposeModelOverrides(): void {
+    ext.storageSet(MODEL_PURPOSE_OVERRIDES_KEY, JSON.stringify(Model.purposeModelOverrides));
+}
 
 export default class ModelConfig {
 
@@ -42,7 +58,7 @@ base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取�
 temperature = 1                     # 可选
 top_p = 1                           # 可选
 max_tokens = 8192                   # 可选`
-        ], '每行一个纯文本模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途，可多个）。可选：provider（服务商，省略时按模型名自动识别：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）/judge（群聊插话评分，未单独配置时回退到 chat 模型）。ignore 可选：1=忽略该条配置（不出现在列表/不可选中），0/不写=正常；默认纯文本模型取列表第一项；body 未配置时使用 max_tokens=8192、stop=null、stream=false。下方默认值即完整示例，可直接修改。完整格式指导与各平台模型示例见 https://github.com/error2913/aiplugin4/blob/main/docs/MODELS-chat.md （仓库文档）。修改后需重载 JS 生效。', "模型");
+        ], '每行一个纯文本模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途，可多个）。可选：provider（服务商，省略时按模型名自动识别：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：chat（普通对话）/compression（消息压缩）/summarization（记忆总结）/judge（群聊插话评分）。ignore 可选：1=忽略该条配置（不出现在列表/不可选中），0/不写=正常；默认纯文本模型取该用途第一个精确匹配项；body 未配置时使用 max_tokens=8192、stop=null、stream=false。下方默认值即完整示例，可直接修改。完整格式指导与各平台模型示例见 https://github.com/error2913/aiplugin4/blob/main/docs/MODELS-chat.md （仓库文档）。修改后需重载 JS 生效。', "模型");
         seal.ext.registerTemplateConfig(ext, "多模态模型", [
             `# 使用toml格式
 name = "glm-4v"                     # 必填，模型名
@@ -55,7 +71,7 @@ ignore = 1                         # 可选，1=忽略该条配置，0/不写=�
 [body]                              # 可选，请求参数覆盖；默认 max_tokens=2048、stop=null、stream=false
 temperature = 1                     # 可选
 max_tokens = 2048                   # 可选`
-        ], '每行一个多模态模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：zhipu/alibaba/openai/google/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：image-understanding（图片理解/图片转文字）、chat/compression/summarization/judge（把该模型当作对应用途的对话模型使用，上下文里的图片会以图片内容直接传给模型，不再转成文本标签；.ai model 可选中 use 含 chat 的条目作为会话模型）。本列表内的模型一律按多模态处理；同名模型若也出现在纯文本模型列表，按纯文本模型处理；ignore 可选：1=忽略该条配置（不出现在列表/不可选中），0/不写=正常；示例默认 ignore=1（占位不生效），配置真实模型后删除该行即可启用。body 未配置时使用 max_tokens=2048、stop=null、stream=false。完整格式指导与各平台模型示例见 https://github.com/error2913/aiplugin4/blob/main/docs/MODELS-image.md （仓库文档）。修改后需重载 JS 生效。', "模型");
+        ], '每行一个多模态模型（TOML）。必填：name（模型名）、api_key（API 密钥）、use（用途）。可选：provider（服务商，省略时按模型名自动识别：zhipu/alibaba/openai/google/siliconflow）、base_url（API 地址，省略时按服务商取默认）、body（请求参数覆盖）。use 可选值：image-understanding（图片理解/图片转文字）、chat/compression/summarization/judge（把该模型当作对应用途的对话模型使用，上下文里的图片会以图片内容直接传给模型，不再转成文本标签）。本列表内的模型一律按多模态处理；同名模型若同时出现在不同来源，用 来源[序号]:模型名 区分；ignore 可选：1=忽略该条配置（不出现在列表/不可选中），0/不写=正常；示例默认 ignore=1（占位不生效），配置真实模型后删除该行即可启用。body 未配置时使用 max_tokens=2048、stop=null、stream=false。完整格式指导与各平台模型示例见 https://github.com/error2913/aiplugin4/blob/main/docs/MODELS-image.md （仓库文档）。修改后需重载 JS 生效。', "模型");
         seal.ext.registerTemplateConfig(ext, "嵌入模型", [
             `# 使用toml格式
 name = "text-embedding-v4"          # 必填，模型名
@@ -73,10 +89,11 @@ dimensions = 1024                   # 可选，输出向量维度，须与后端
     static get() {
         if (!modelConfigCache) {
             modelConfigCache = {
-                CHAT_MODELS: getModelsConfig("纯文本模型", CHAT_MODEL_TO_PROVIDER, ChatModel),
-                MULTIMODAL_MODELS: getModelsConfig("多模态模型", MULTIMODAL_MODEL_TO_PROVIDER, MultimodalModel),
-                EMBEDDING_MODELS: getModelsConfig("嵌入模型", EMBEDDING_MODEL_TO_PROVIDER, EmbeddingModel),
+                CHAT_MODELS: getModelsConfig("纯文本模型", "text", CHAT_MODEL_TO_PROVIDER, ChatModel),
+                MULTIMODAL_MODELS: getModelsConfig("多模态模型", "multimodal", MULTIMODAL_MODEL_TO_PROVIDER, MultimodalModel),
+                EMBEDDING_MODELS: getModelsConfig("嵌入模型", "embedding", EMBEDDING_MODEL_TO_PROVIDER, EmbeddingModel),
             };
+            Model.purposeModelOverrides = loadPurposeModelOverrides();
         }
         // 同步到 Model 静态列表，供 Model.getChatModel 等使用（幂等；修改模型配置需重载 JS 后重新解析）
         Model.chatModels = modelConfigCache.CHAT_MODELS;
@@ -116,12 +133,13 @@ class ModelConfigItem {
 
 function getModelsConfig<T extends ChatModel | MultimodalModel | EmbeddingModel>(
     key: string,
+    source: ModelSource,
     m2p: { [model: string]: string },
     modelConstructor: new (use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) => T
 ): T[] {
     // 构造器实参收窄为各自 use 类型，这里做兼容转换
     const Ctor = modelConstructor as new (use: ModelUse[], name: string, provider: string, base_url: string, api_key: string, body: ModelBody) => T;
-    return seal.ext.getTemplateConfig(ext, key).map(tomlString => {
+    return seal.ext.getTemplateConfig(ext, key).map((tomlString, index) => {
         try {
             const mc = revive(ModelConfigItem, load(tomlString));
             // ignore=1：忽略该条模型配置（不出现在列表、不可选中、不作为默认）
@@ -135,7 +153,10 @@ function getModelsConfig<T extends ChatModel | MultimodalModel | EmbeddingModel>
                 mc.base_url = PROVIDER_MAP?.[mc.provider as keyof typeof PROVIDER_MAP] || "";
                 if (mc.base_url === "") throw new Error('缺失模型基础URL');
             }
-            return new Ctor(mc.use, mc.name, mc.provider, mc.base_url, mc.api_key, mc.body);
+            const model = new Ctor(mc.use, mc.name, mc.provider, mc.base_url, mc.api_key, mc.body);
+            model.source = source;
+            model.configIndex = index;
+            return model;
         } catch (e) {
             Logger.error(`${key}解析错误，内容:${tomlString}，错误信息:${e instanceof Error ? e.message : String(e)}`);
             return null;

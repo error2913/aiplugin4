@@ -80,10 +80,10 @@ function checkRequestBudget(messages: any[], tools: any[]): void {
 }
 
 export class streamService {
-    static async startStream(messages: any[], modelName: string = '', runId: string = '', stopEvent?: StopEvent): Promise<string> {
+    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl } = Config.backend;
-        const model = Model.getChatModel('chat', modelName);
+        const model = Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
             return '';
@@ -144,8 +144,8 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, modelName: string = '', runId: string = '', explicitModel?: ChatModel | MultimodalModel | null, stopEvent?: StopEvent): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
-        const model = explicitModel ?? Model.getChatModel('chat', modelName);
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ChatModel | MultimodalModel | null, stopEvent?: StopEvent): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+        const model = explicitModel ?? Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
             return { content: '', tool_calls: [] };
