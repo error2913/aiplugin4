@@ -13,17 +13,26 @@ export function createMsg(messageType: "group" | "private", uid: string, gid: st
     return msg;
 }
 
+function buildCtx(ep: seal.EndPointInfo, msg: seal.Message): seal.MsgContext {
+    const ctx = seal.createTempCtx(ep, msg);
+    ctx.isPrivate = msg.messageType === 'private';
+    if (ctx.player!.userId === ep.userId) ctx.player!.name = seal.formatTmpl(ctx, "核心:骰子名字");
+    return ctx;
+}
+
+/** 按 epId 反查端点构造临时 ctx。
+ *  双连接冗余下同一 QQ 可能同时存在直连与桥两个端点：优先选 state=1（已连接）的端点，
+ *  避免桥账号排在列表前面且已断线时，挂起/定时/重载后重建的 ctx 选中断线端点导致回复丢失；
+ *  全部不在线时回退到第一个匹配端点（与旧行为一致）。 */
 export function createCtx(epId: string, msg: seal.Message): seal.MsgContext | undefined {
     const eps = seal.getEndPoints();
-    for (let i = 0; i < eps.length; i++) {
-        if (eps[i].userId === epId) {
-            const ctx = seal.createTempCtx(eps[i], msg);
-            ctx.isPrivate = msg.messageType === 'private';
-            if (ctx.player!.userId === epId) ctx.player!.name = seal.formatTmpl(ctx, "核心:骰子名字");
-            return ctx;
-        }
+    let fallback: seal.EndPointInfo | undefined;
+    for (const ep of eps) {
+        if (ep.userId !== epId) continue;
+        if (ep.state === 1) return buildCtx(ep, msg);
+        if (!fallback) fallback = ep;
     }
-    return undefined;
+    return fallback ? buildCtx(fallback, msg) : undefined;
 }
 
 export function getCtxAndMsg(epId: string, uid: string, gid: string): { ctx: seal.MsgContext, msg: seal.Message } {

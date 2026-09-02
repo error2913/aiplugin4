@@ -12,6 +12,7 @@ import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
+import { createCtx } from "../src/utils/seal";
 import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isEventRawRetainable, isNoticeInWhitelist, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerEventTools } from "../src/tool/tools/event/tool_event";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
@@ -1681,6 +1682,68 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(resolveEndpointId(10000), 'QQ:10000', '数字 self_id 应兼容');
         } finally {
             (globalThis as any).seal.getEndPoints = origGetEndPoints;
+        }
+    },
+
+    /** resolveEndpointId：同号双端点（直连+桥）仍返回该 QQ epId；已连接端点优先（回归保障） */
+    testResolveEndpointIdOnDuplicateUserIdPrefersConnected(): void {
+        const origGetEndPoints = (globalThis as any).seal.getEndPoints;
+        (globalThis as any).seal.getEndPoints = () => [
+            { userId: 'QQ:10000', state: 0 },
+            { userId: 'QQ:10000', state: 1 },
+            { userId: 'DISCORD:10001', state: 1 }
+        ];
+        try {
+            assert.equal(resolveEndpointId('10000'), 'QQ:10000', '同号双端点仍应反查到该 QQ epId');
+            assert.equal(resolveEndpointId('10001'), 'DISCORD:10001');
+            assert.equal(resolveEndpointId('99999'), '', '未匹配端点应返回空串');
+        } finally {
+            (globalThis as any).seal.getEndPoints = origGetEndPoints;
+        }
+    },
+
+    /** createCtx：同号双端点（直连+桥）优先已连接（state=1）端点；全部不在线时回退首个匹配端点 */
+    testCreateCtxPrefersConnectedEndpointOnDuplicateUserId(): void {
+        const origGetEndPoints = (globalThis as any).seal.getEndPoints;
+        const origCreateTempCtx = (globalThis as any).seal.createTempCtx;
+        let used: any = null;
+        (globalThis as any).seal.createTempCtx = (ep: any, msg: any) => {
+            used = ep;
+            return {
+                endPoint: ep,
+                player: { userId: ep.userId, name: '' },
+                group: null,
+                isPrivate: msg?.messageType === 'private'
+            };
+        };
+        const msg = (globalThis as any).seal.newMessage();
+        try {
+            (globalThis as any).seal.getEndPoints = () => [
+                { id: 'bridge', userId: 'QQ:10000', state: 0 },
+                { id: 'direct', userId: 'QQ:10000', state: 1 }
+            ];
+            used = null;
+            const ctx = createCtx('QQ:10000', msg);
+            assert.equal(used?.id, 'direct', '同号双端点应优先选择已连接（state=1）的端点');
+            assert.equal(ctx?.endPoint.id, 'direct', '返回的 ctx 应绑定已连接端点');
+
+            (globalThis as any).seal.getEndPoints = () => [
+                { id: 'bridge', userId: 'QQ:10000', state: 0 },
+                { id: 'direct', userId: 'QQ:10000', state: 0 }
+            ];
+            used = null;
+            const fallbackCtx = createCtx('QQ:10000', msg);
+            assert.equal(used?.id, 'bridge', '全部不在线时应回退到第一个匹配端点（旧行为）');
+            assert.equal(fallbackCtx?.endPoint.id, 'bridge');
+
+            (globalThis as any).seal.getEndPoints = () => [{ userId: 'QQ:10000' }];
+            used = null;
+            const legacyCtx = createCtx('QQ:10000', msg);
+            assert.equal(used?.userId, 'QQ:10000', '无 state 字段的历史端点应兼容回退');
+            assert.equal(legacyCtx?.endPoint.userId, 'QQ:10000');
+        } finally {
+            (globalThis as any).seal.getEndPoints = origGetEndPoints;
+            (globalThis as any).seal.createTempCtx = origCreateTempCtx;
         }
     },
 
