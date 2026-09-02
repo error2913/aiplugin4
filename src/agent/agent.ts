@@ -58,13 +58,13 @@ export default class Agent {
     }
 
     /**
-     * 当前会话使用的对话模型是否为多模态：
+     * 当前全局 chat 模型是否为多模态：
      * 只有最终解析到的模型实例来自「多模态模型」列表（MultimodalModel）才算多模态；
      * 来自「纯文本模型」列表的模型即使同名也按纯文本处理。
      * 多模态时上下文中的图片以 image_url 内容块直接传给模型，而不是文本标签。
      */
-    private isMultimodalChat(session: Session): boolean {
-        const model = Model.getChatModel('chat', session.setting.modelName);
+    private isMultimodalChat(): boolean {
+        const model = Model.getChatModel('chat');
         if (!model) return false;
         return model.isMultimodal;
     }
@@ -80,7 +80,7 @@ export default class Agent {
             });
         }
         messages.push({ role: 'user', content: model.isMultimodal ? await textToMultimodalContent(prompt) : prompt });
-        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', '', model);
+        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model);
         return content;
     }
 
@@ -94,7 +94,7 @@ export default class Agent {
                 content: m.role === 'user' ? await textToMultimodalContent(m.content) : m.content
             })))
             : messages;
-        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', '', model);
+        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model);
         return content;
     }
 
@@ -182,8 +182,8 @@ export default class Agent {
             trace.beginTurn();
             // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
             await session.flushPending();
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), toolInfos || [], systemMessage);
-            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', session.setting.modelName, trace.runId, undefined, session.stopEvent);
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage);
+            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent);
             // stop 中止检查点：模型请求期间被 stop，丢弃本轮输出直接中止
             if (session.stopVersion !== version) return;
             lastReasoning = reasoning_content;
@@ -342,8 +342,8 @@ export default class Agent {
         await session.flushPending();
 
         const sys = systemMessage ?? await buildSystemMessage(ctx, session);
-        const messages = await handleMessages(ctx, session, this.isMultimodalChat(session), undefined, sys);
-        const id = await streamService.startStream(messages, session.setting.modelName, trace.runId, session.stopEvent);
+        const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys);
+        const id = await streamService.startStream(messages, trace.runId, session.stopEvent);
         if (!id) return;
         // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
         if (session.stopVersion !== version) {

@@ -43,7 +43,7 @@ export interface PendingMessage {
 }
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'modelName', 'regexTrigger', 'judge'];
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'judge'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
         standby: 'boolean',
@@ -52,7 +52,6 @@ export class Setting {
         prob: 'number',
         regexTrigger: 'boolean',
         judge: 'boolean',
-        modelName: 'string',
         activeTimeInfo: { objectValue: 'any' }
     }
     priv: number;
@@ -62,7 +61,6 @@ export class Setting {
     prob: number;
     regexTrigger: boolean;
     judge: boolean;
-    modelName: string;
     activeTimeInfo: {
         start: number;
         end: number;
@@ -77,7 +75,6 @@ export class Setting {
         this.prob = -1;
         this.regexTrigger = true;
         this.judge = false;
-        this.modelName = '';
         this.activeTimeInfo = {
             start: 0,
             end: 0,
@@ -409,7 +406,8 @@ export class Session {
             JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
         }
 
-        const model = Model.getChatModel('chat', this.setting.modelName);
+        const model = Model.getChatModel('chat');
+
         if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
             log.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
         }
