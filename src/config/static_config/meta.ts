@@ -1,5 +1,5 @@
 // 静态常量：版本/作者/模型映射表/权限等级/别名/表情表等
-export const VERSION = "4.20.1";
+export const VERSION = "4.21.0";
 export const AUTHOR = "baiyu&错误";
 export const NAME = "aiplugin4";
 
