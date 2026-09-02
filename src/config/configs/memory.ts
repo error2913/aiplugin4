@@ -21,6 +21,7 @@ export default class MemoryConfig {
         seal.ext.registerBoolConfig(ext, "用LLM重排召回结果", false, "使用 LLM 对召回结果重新排序（较慢，默认关闭）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM合成观察记忆", true, "使用 LLM 合成观察记忆（默认开启）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM推理记忆", true, "使用 LLM 合成心智模型推理答案（.ai memo mm / reflect 使用，默认开启）", "记忆");
+        seal.ext.registerBoolConfig(ext, "自动维护固定心智模型", true, "自动为个人/群聊补建写死的固定心智模型问题（设定/偏好/规则），并优先固定注入；删除后不会自动重建", "记忆");
         seal.ext.registerBoolConfig(ext, "巩固后自动刷新心智模型", true, "巩固记忆后自动基于最新记忆刷新心智模型（默认开启）", "记忆");
         seal.ext.registerIntConfig(ext, "心智模型刷新最小间隔", 30, "自动刷新心智模型的最小间隔（分钟），0 为不限制", "记忆");
         // Hindsight 式心智模型刷新配置
@@ -40,6 +41,7 @@ export default class MemoryConfig {
             MEMORY_LLM_RERANK: seal.ext.getBoolConfig(ext, "用LLM重排召回结果"),
             MEMORY_OBSERVATION_SYNTH: seal.ext.getBoolConfig(ext, "用LLM合成观察记忆"),
             MEMORY_REFLECT_SYNTH: seal.ext.getBoolConfig(ext, "用LLM推理记忆"),
+            MEMORY_MM_TEMPLATES: seal.ext.getBoolConfig(ext, "自动维护固定心智模型"),
             MEMORY_REFRESH_AFTER_CONSOLIDATE: seal.ext.getBoolConfig(ext, "巩固后自动刷新心智模型"),
             MEMORY_REFRESH_MIN_INTERVAL: seal.ext.getIntConfig(ext, "心智模型刷新最小间隔"),
             MEMORY_MM_DEFAULT_MODE: seal.ext.getOptionConfig(ext, "心智模型刷新模式"),

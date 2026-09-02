@@ -362,7 +362,11 @@ export function normalizeName(name: string): string {
 
 /** 补齐旧存档缺省字段：MentalModel 的 E4 扩展字段与 Hindsight 式心智模型字段 */
 function normalizeBank(bank: PersistedBank): void {
-    if (!Array.isArray(bank.mentalModels)) return;
+    // meta/settings 缺省补齐（旧存档/异常存档兜底），模板播种版本缺省为 0
+    if (!bank.meta) bank.meta = { id: 'unknown', kind: 'global', createdAt: nowSec(), updatedAt: nowSec(), settings: {} };
+    if (!bank.meta.settings) bank.meta.settings = {};
+    if (typeof bank.meta.settings.seededMentalModelVersion !== 'number') bank.meta.settings.seededMentalModelVersion = 0;
+    if (!Array.isArray(bank.mentalModels)) bank.mentalModels = [];
     for (const m of bank.mentalModels) {
         if (typeof m.lastRefreshedAt !== 'number') m.lastRefreshedAt = typeof m.updatedAt === 'number' ? m.updatedAt : nowSec();
         if (!Array.isArray(m.history)) m.history = [];

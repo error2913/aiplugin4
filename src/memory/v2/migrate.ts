@@ -1,7 +1,7 @@
 // 旧记忆迁移：把旧存档中的记忆数据写入 Hindsight-like 新引擎。
 import type { MemoryEngine } from "./engine";
 
-import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "./index";
+import { bankKindOfBankId, getMemoryEngine, personaQuestionFor } from "./index";
 
 export interface LegacyMemoryItem {
     id?: string;
@@ -66,7 +66,8 @@ export async function migrateLegacyMemory(
     }
 
     if (source.persona && source.persona !== '无') {
-        await engine.createMentalModel(bankId, MENTAL_MODEL_PERSONA_QUESTION, source.persona, tags);
+        const kind = bankKindOfBankId(bankId);
+        await engine.createMentalModel(bankId, personaQuestionFor(kind), source.persona, tags, { templateId: 'persona' });
     }
 
     return count;

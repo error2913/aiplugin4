@@ -519,6 +519,8 @@ export function registerMemory() {
         let refreshText = '';
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
             const summary = await getMemoryEngine().refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
+            // 自动刷新实际更新（含 failed→ready 恢复）后失效长期记忆 prompt 缓存
+            if (summary.updated > 0) bumpMemoryRevision();
             refreshText = `，刷新心智模型 ${summary.updated} 条（跳过 ${summary.skipped}）`;
         }
         SessionService.save(target);
@@ -553,7 +555,10 @@ export function registerMemory() {
         const totalPages = Math.max(1, Math.ceil(models.length / perPage));
         const p = typeof page === 'number' && page > 0 ? Math.min(Math.floor(page), totalPages) : 1;
         const items = models.slice((p - 1) * perPage, p * perPage);
-        const lines = items.map(m => `${m.id} ${m.question} (v${m.version} · 更新于${new Date((m.updatedAt || 0) * 1000).toISOString().slice(0, 10)})`);
+        const lines = items.map(m => {
+            const builtin = m.templateId ? ' [内置]' : '';
+            return `${m.id} ${m.question} (v${m.version} · 更新于${new Date((m.updatedAt || 0) * 1000).toISOString().slice(0, 10)})${builtin}`;
+        });
         return `心智模型 ${models.length} 条\n${lines.join('\n')}\n当前页码: ${p}/${totalPages}`;
     };
 
@@ -580,7 +585,8 @@ export function registerMemory() {
         const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
         const m = getMemoryEngine().listMentalModels(bank.bankId).find(x => x.id === String(model_id));
         if (!m) return `未找到心智模型<${model_id}>`;
-        return `【心智模型】${m.question}\n${m.answer}\nID: ${m.id} · v${m.version}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${new Date((m.createdAt || 0) * 1000).toISOString()}\n更新: ${new Date((m.updatedAt || 0) * 1000).toISOString()}`;
+        const builtin = m.templateId ? ' · 内置' : '';
+        return `【心智模型】${m.question}\n${m.answer}\nID: ${m.id} · v${m.version}${builtin}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${new Date((m.createdAt || 0) * 1000).toISOString()}\n更新: ${new Date((m.updatedAt || 0) * 1000).toISOString()}`;
     };
 
     const toolMmCreate = new Tool({
@@ -606,7 +612,12 @@ export function registerMemory() {
         const target = resolveTargetSession(session, memory_type, target_id);
         if (!target) return `目标ID格式无效<${target_id}>`;
         const bank = resolveBankId(target.sessionId, target.sessionType === 'group' ? 'group' : 'user', target.agentName);
-        getMemoryEngine().ensureBank(bank.bankId, bank.kind, bank.agentName);
+        const engine = getMemoryEngine();
+        engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
+        const q = String(question || '').trim();
+        const prevModel = engine.listMentalModels(bank.bankId).find(x => x.question === q);
+        const isUpdate = !!prevModel;
+        const hadAnswerBefore = !!(prevModel && prevModel.answer && prevModel.answer !== '生成中…');
         const defaultTag = target.sessionType === 'group' ? `group:${target.sessionId}` : `user:${target.sessionId}`;
         // scope_tag 校验/归一化：必须是 user:/group: 前缀，且私聊目标只接受 user:（群标签无意义）；
         // 非法或与目标类型不符时回退默认标签，避免心智模型因标签不匹配而注入失效
@@ -614,23 +625,24 @@ export function registerMemory() {
         const tagOk = rawTag && (rawTag.startsWith('user:') || rawTag.startsWith('group:')) && (target.sessionType === 'group' || rawTag.startsWith('user:'));
         const scopeTags = tagOk ? [rawTag] : [defaultTag];
         if (typeof answer === 'string' && answer.trim()) {
-            const m = await getMemoryEngine().createMentalModel(bank.bankId, String(question || ''), stripInternalTags(answer.trim()), scopeTags);
+            const m = await engine.createMentalModel(bank.bankId, q, stripInternalTags(answer.trim()), scopeTags);
             bumpMemoryRevision();
             SessionService.save(target);
-            return `心智模型已创建<${m.id}>：${m.question} => ${m.answer.slice(0, 200)}`;
+            return `心智模型${isUpdate ? '已更新' : '已创建'}<${m.id}>：${m.question} => ${m.answer.slice(0, 200)}`;
         }
         // Hindsight 式：占位创建（pending）+ 同步生成（strict reflect，不 dump 记忆原文）
-        const engine = getMemoryEngine();
-        const m = await engine.createMentalModel(bank.bankId, String(question || ''), '', scopeTags);
+        const m = await engine.createMentalModel(bank.bankId, q, '', scopeTags);
         await engine.refreshMentalModels(bank.bankId, m.id, { force: true, reason: 'create' });
         const fresh = engine.listMentalModels(bank.bankId).find(x => x.id === m.id) || m;
         bumpMemoryRevision();
         SessionService.save(target);
         if (fresh.status === 'ready') {
-            return `心智模型已创建<${fresh.id}>（基于记忆推理）\n问题: ${fresh.question}\n答案: ${fresh.answer}`;
+            return `心智模型${isUpdate ? '已更新' : '已创建'}<${fresh.id}>（基于记忆推理）\n问题: ${fresh.question}\n答案: ${fresh.answer}`;
         }
         const reason = fresh.status === 'failed' ? '生成失败' : '记忆不足';
-        return `心智模型已创建<${fresh.id}>（${reason}，暂为占位：${fresh.answer}）\n问题: ${fresh.question}，积累记忆后会自动生成`;
+        const keepText = hadAnswerBefore ? `，保留原答案：${fresh.answer}` : `，暂为占位：${fresh.answer}`;
+        const hint = hadAnswerBefore ? '稍后 consolidate / memory_mm_refresh 重试' : '积累记忆后会自动生成';
+        return `心智模型${isUpdate ? '已更新' : '已创建'}<${fresh.id}>（${reason}${keepText}）\n问题: ${fresh.question}，${hint}`;
     };
 
     const toolMmRefresh = new Tool({
@@ -705,7 +717,8 @@ export function registerMemory() {
         if (!ok) return `未找到心智模型<${targetModel.id}>`;
         bumpMemoryRevision();
         SessionService.save(target);
-        return `心智模型已删除<${targetModel.id}>：${targetModel.question}`;
+        const builtinNote = targetModel.templateId ? '（内置模板，不会自动重建）' : '';
+        return `心智模型已删除<${targetModel.id}>：${targetModel.question}${builtinNote}`;
     };
 
     const toolReflect = new Tool({

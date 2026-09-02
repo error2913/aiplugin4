@@ -15,9 +15,9 @@ import { knowledgeService } from "./knowledge";
 import { bumpMemoryRevision, bumpSummaryRevision } from "./revision";
 import { parseLooseJson } from "./session_memory";
 import { resolveBankId } from "./v2/bank_resolver";
-import { getMemoryEngine, MENTAL_MODEL_PERSONA_QUESTION } from "./v2/index";
-import { buildGroupedMemoryPrompt, buildLongTermMemoryPrompt, buildMentalModelsPrompt, MemoryPromptSection, selectInjectionCandidates } from "./v2/prompt";
-import type { MemoryUnit, RecallOptions, RetainResult } from "./v2/types";
+import { getMemoryEngine, mentalModelTemplatesFor, personaQuestionFor } from "./v2/index";
+import { buildGroupedMemoryPrompt, buildLongTermMemoryPrompt, buildMentalModelsPrompt, MemoryPromptSection, mergeMentalModels, selectInjectionCandidates } from "./v2/prompt";
+import type { BankKind, MemoryUnit, MentalModel, RecallOptions, RetainResult } from "./v2/types";
 
 function bankForSession(session: Session) {
     const kind = session.sessionType === 'group' ? 'group' : 'user';
@@ -50,10 +50,41 @@ const MAX_GROUP_MENTAL_MODELS = 3;
 /** 心智模型全段总条数上限 */
 const MAX_TOTAL_MENTAL_MODELS = 5;
 
+/** 群聊内某发言者个人段固定注入的内置心智模型条数上限（预留语义召回名额） */
+const SPEAKER_FIXED_MENTAL_MODELS = 1;
+
+/**
+ * 固定心智模型挑选：按模板目录顺序取 ready 且 scope 命中的内置模型。
+ * 用户自定义模型（无 templateId）不在此列，由语义召回竞争剩余名额。
+ */
+function pickFixedMentalModels(
+    kind: BankKind,
+    models: MentalModel[],
+    sessionTags: string[],
+    max?: number
+): MentalModel[] {
+    const tagSet = new Set(sessionTags);
+    const byTemplate = new Map<string, MentalModel>();
+    for (const m of models) {
+        if (!m.templateId) continue;
+        if (m.status !== 'ready' && m.status !== undefined) continue;
+        const tags = m.scopeTags || [];
+        if (tags.length > 0 && !tags.some(t => tagSet.has(t))) continue;
+        if (!byTemplate.has(m.templateId)) byTemplate.set(m.templateId, m);
+    }
+    const out: MentalModel[] = [];
+    for (const tpl of mentalModelTemplatesFor(kind)) {
+        const m = byTemplate.get(tpl.id);
+        if (m) out.push(m);
+        if (max !== undefined && out.length >= max) break;
+    }
+    return out;
+}
+
 export class MemoryManager {
     /**
      * 旧 persona 懒迁移：把仍存于 session.memory.persona 的旧设定写入心智模型
-     * （固定问题 MENTAL_MODEL_PERSONA_QUESTION），随后清空 persona。
+     * （固定模板 persona 问题，按会话类型取专属文案），随后清空 persona。
      * 幂等：bank 已有该问题的模型时只清空 persona，不重复写入。
      */
     static async migrateLegacyPersona(session: Session): Promise<void> {
@@ -63,9 +94,10 @@ export class MemoryManager {
         const bank = bankForSession(session);
         engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
         const scopeTag = session.sessionType === 'group' ? `group:${session.sessionId}` : `user:${session.sessionId}`;
-        const existing = engine.listMentalModels(bank.bankId).find(m => m.question === MENTAL_MODEL_PERSONA_QUESTION);
+        const personaQuestion = personaQuestionFor(bank.kind);
+        const existing = engine.listMentalModels(bank.bankId).find(m => m.question === personaQuestion);
         if (!existing) {
-            await engine.createMentalModel(bank.bankId, MENTAL_MODEL_PERSONA_QUESTION, stripInternalTags(persona), [scopeTag]);
+            await engine.createMentalModel(bank.bankId, personaQuestion, stripInternalTags(persona), [scopeTag], { templateId: 'persona' });
             bumpMemoryRevision();
         }
         session.memory.persona = '无';
@@ -83,27 +115,41 @@ export class MemoryManager {
         engine.ensureBank(bank.bankId, bank.kind, bank.agentName);
         const tags = tagsForSession(uis, gi || null);
         const callerSessionId = ctx.player?.userId || session.sessionId;
+        // 固定模板懒补建：有记忆/观察的 bank 才播种（含旧 persona 问题改名迁移）；无模板总开关则跳过
+        if (Config.memory.MEMORY_MM_TEMPLATES) {
+            const tplScope = session.sessionType === 'group'
+                ? `group:${session.sessionId}`
+                : `user:${ctx.player?.userId || session.sessionId || ''}`;
+            engine.ensureDefaultMentalModels(bank.bankId, session.sessionType === 'group' ? 'group' : 'user', tplScope);
+        }
         const groupRecalls = (await engine.recall(bank.bankId, text, {
             tags,
             maxTokens: 2048,
             preferObservations: true,
             budget: 'mid',
         })).filter(r => canSeeMemoryUnit(r.unit, callerSessionId));
-        // 群聊不再在此处注入观察记忆；观察记忆由 buildObservationPrompt 独立注入
-        // 群心智模型：Hindsight 心智模型语义召回式注入（相关度排序 + scope 过滤 + 条数上限）；
-        // 查询向量每轮只算一次，复用于群聊/各发言者个人库
+        // 群聊不再在此处注入观察记忆；观察记忆由 buildObservationPrompt 独立注入。
+        // 心智模型注入：固定模板（写死）优先 + 语义召回（Hindsight 相关度排序）填余量；
+        // 查询向量每轮只算一次，复用于群聊/各发言者个人库。
         let qEmbed: number[] | null | undefined;
         const queryEmbedding = async (): Promise<number[] | null> => {
             if (qEmbed === undefined) qEmbed = await engine.embedQuery(text);
             return qEmbed;
         };
-        const groupMMs = engine.listMentalModels(bank.bankId).length > 0
+        const templatesEnabled = Config.memory.MEMORY_MM_TEMPLATES;
+        const allBankMMs = engine.listMentalModels(bank.bankId);
+        const fixedMMs = templatesEnabled ? pickFixedMentalModels(bank.kind, allBankMMs, tags) : [];
+        const bankMMCap = session.sessionType === 'group' ? MAX_GROUP_MENTAL_MODELS : MAX_TOTAL_MENTAL_MODELS;
+        const bankSemanticLimit = Math.max(0, bankMMCap - fixedMMs.length);
+        const bankRanked = bankSemanticLimit > 0 && allBankMMs.length > fixedMMs.length
             ? await engine.searchMentalModels(bank.bankId, text, {
                 tags,
-                limit: MAX_GROUP_MENTAL_MODELS,
+                limit: bankSemanticLimit,
                 queryEmbedding: await queryEmbedding(),
+                excludeTemplates: templatesEnabled,
             })
             : [];
+        const groupMMs = mergeMentalModels(fixedMMs, bankRanked, bankMMCap);
 
         // 分组渲染：群聊按「群聊 / 每个最近发言者」分别渲染长期记忆 + 心智模型，避免归属混淆；
         // 个人记忆按用户标签召回、单用户条数/字符预算截断，私有记忆仅创建者本人可见（canSeeMemoryUnit）。
@@ -122,6 +168,10 @@ export class MemoryManager {
 
             for (const u of recentUsers) {
                 const userBankId = resolveBankId(u.id, 'user', session.agentName).bankId;
+                // 固定模板懒补建：该发言者个人库有记忆时补建（设定/偏好），供个人分组固定注入
+                if (templatesEnabled) {
+                    engine.ensureDefaultMentalModels(userBankId, 'user', `user:${u.id}`);
+                }
                 const ranked = (await engine.recall(userBankId, text, {
                     tags: [`user:${u.id}`],
                     maxTokens: MERGE_USER_RECALL_MAX_TOKENS,
@@ -136,13 +186,21 @@ export class MemoryManager {
                     userRecalls.push(r);
                     total += r.unit.text.length;
                 }
-                const userMMs = engine.listMentalModels(userBankId).length > 0
+                const userAllMMs = engine.listMentalModels(userBankId);
+                const userFixed = templatesEnabled
+                    ? pickFixedMentalModels('user', userAllMMs, [`user:${u.id}`], SPEAKER_FIXED_MENTAL_MODELS)
+                    : [];
+                const userTotal = Math.min(PER_USER_MENTAL_MODELS, Math.max(0, mmBudget));
+                const usedFixed = Math.min(userFixed.length, userTotal);
+                const userRanked = usedFixed < userTotal && userAllMMs.length > userFixed.length
                     ? await engine.searchMentalModels(userBankId, text, {
                         tags: [`user:${u.id}`],
-                        limit: Math.min(PER_USER_MENTAL_MODELS, mmBudget),
+                        limit: userTotal - usedFixed,
                         queryEmbedding: await queryEmbedding(),
+                        excludeTemplates: templatesEnabled,
                     })
                     : [];
+                const userMMs = mergeMentalModels(userFixed.slice(0, usedFixed), userRanked, userTotal);
                 sections.push({ title: `个人记忆（${u.name || u.id}）`, mentalModels: userMMs, recalls: userRecalls });
                 mmBudget -= userMMs.length;
             }
@@ -239,7 +297,9 @@ export class MemoryManager {
         bumpSummaryRevision();
         // R2：巩固后自动刷新心智模型（引擎层防重入 + 最小间隔限流）
         if (Config.memory.MEMORY_REFRESH_AFTER_CONSOLIDATE) {
-            await engine.refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
+            const summary = await engine.refreshMentalModels(bank.bankId, undefined, { reason: 'consolidate' });
+            // 自动刷新实际更新（含 failed→ready 恢复）后失效长期记忆 prompt 缓存
+            if (summary.updated > 0) bumpMemoryRevision();
         }
         return result;
     }
@@ -263,7 +323,9 @@ export class MemoryManager {
             const tickBank = bankForSession(session);
             const last = tickEngine.getLastAutoRefreshAt(tickBank.bankId);
             if (last <= 0 || Date.now() / 1000 - last >= tickIntervalMin * 60) {
-                await tickEngine.refreshMentalModels(tickBank.bankId, undefined, { reason: 'tick' });
+                const summary = await tickEngine.refreshMentalModels(tickBank.bankId, undefined, { reason: 'tick' });
+                // 放在任何提前 return 之前：summary 关闭时 tick 也可能刷新，需主动失效缓存
+                if (summary.updated > 0) bumpMemoryRevision();
             }
         }
         const { SUMMARY, SUMMARY_SIZE } = Config.memory;

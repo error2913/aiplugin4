@@ -109,6 +109,21 @@ function scopePrefix(target: MemoTarget): string {
     return target.explicit ? `【${target.scopeLabel}:${target.session.sessionId}】` : `【${target.scopeLabel}】`;
 }
 
+/** .ai memo mm add 的 mode/autoRefresh 解析：未显式指定时不覆盖引擎默认/模型原有配置 */
+export function resolveMmAddOptions(
+    modeValue?: string | null,
+    auto = false,
+    noAuto = false
+): { mode?: 'full' | 'delta'; autoRefresh?: boolean } {
+    const opts: { mode?: 'full' | 'delta'; autoRefresh?: boolean } = {};
+    if (modeValue !== undefined && modeValue !== null && modeValue !== '') {
+        opts.mode = modeValue === 'delta' ? 'delta' : 'full';
+    }
+    if (noAuto) opts.autoRefresh = false;
+    else if (auto) opts.autoRefresh = true;
+    return opts;
+}
+
 const MEMO_SCOPE_NOTE = `范围: 默认当前会话（私聊=个人，群聊=当前群）；--u 本人个人记忆、--g 当前群；--u=<ID>/--g=<ID> 仅骰主`;
 
 const MEMO_HELP = `帮助:
@@ -154,7 +169,7 @@ const MEMO_REFLECT_HELP = `【.ai memo reflect <问题>】基于记忆进行推�
 const MEMO_MM_HELP = `心智模型操作:
   【.ai memo mm list [页码]】查看心智模型列表
   【.ai memo mm view <ID>】查看心智模型详情
-  【.ai memo mm add <问题> [答案]】添加心智模型（不填答案时基于记忆自动生成；--tag=xx 范围标签；--mode=full|delta 刷新方式；--no-auto 关闭自动刷新）
+  【.ai memo mm add <问题> [答案]】添加/更新心智模型（不填答案时基于记忆自动生成，已有答案会保留作失败兜底；--tag=xx 范围标签；--mode=full|delta 刷新方式，缺省跟随「心智模型刷新模式」配置且更新时保留原配置；--no-auto 关闭自动刷新；--auto 重新开启）
   【.ai memo mm refresh [ID]】刷新心智模型（基于当前记忆重新推理，自动跳过无新记忆项）
   【.ai memo mm del <ID|问题关键词>】删除心智模型（ID 或问题名/关键词，关键词唯一命中时直接删除）
   ${MEMO_SCOPE_NOTE}`;
@@ -487,7 +502,8 @@ export function registerCmdMemory() {
                         const items = models.slice((cur - 1) * perPage, cur * perPage);
                         const lines = items.map(m => {
                             const flag = m.status === 'pending' ? ' ⏳生成中' : m.status === 'failed' ? ' ⚠生成失败' : '';
-                            return `${m.id} ${m.question} (v${m.version} · 更新于${fmtDate(m.updatedAt)})${flag}`;
+                            const builtin = m.templateId ? ' [内置]' : '';
+                            return `${m.id} ${m.question} (v${m.version} · 更新于${fmtDate(m.updatedAt)})${builtin}${flag}`;
                         });
                         seal.replyToSender(ctx, msg, `${prefix}心智模型 ${models.length} 条\n${lines.join('\n')}\n当前页码: ${cur}/${totalPages}`);
                         return ret;
@@ -508,8 +524,9 @@ export function registerCmdMemory() {
                         const triggerText = m.trigger === 'delta' ? '增量' : '全量';
                         const statusText = m.status === 'pending' ? '生成中' : m.status === 'failed' ? '生成失败' : '可用';
                         const autoText = m.triggerConfig?.refreshAfterConsolidation === false ? ' · 不自动刷新' : '';
+                        const builtinText = m.templateId ? ' · 内置' : '';
                         const seenText = m.lastMemorySeenAt ? `\n最近读到记忆: ${fmtDate(m.lastMemorySeenAt)}` : '';
-                        seal.replyToSender(ctx, msg, `【心智模型】${m.question}\n${answer}\nID: ${m.id} · v${m.version}\n状态: ${statusText}${autoText}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(m.createdAt)}\n更新: ${fmtDate(m.updatedAt)}${m.lastRefreshedAt ? `\n最近推理: ${fmtDate(m.lastRefreshedAt)}（${triggerText}）` : ''}${seenText}${historyInfo}`);
+                        seal.replyToSender(ctx, msg, `【心智模型】${m.question}\n${answer}\nID: ${m.id} · v${m.version}${builtinText}\n状态: ${statusText}${autoText}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(m.createdAt)}\n更新: ${fmtDate(m.updatedAt)}${m.lastRefreshedAt ? `\n最近推理: ${fmtDate(m.lastRefreshedAt)}（${triggerText}）` : ''}${seenText}${historyInfo}`);
                         return ret;
                     }
                     case 'add': {
@@ -521,34 +538,44 @@ export function registerCmdMemory() {
                         const answer = cmdArgs.getRestArgsFrom(5);
                         const tagKw = cmdArgs.getKwarg('tag');
                         const modeKw = cmdArgs.getKwarg('mode');
+                        const autoKw = cmdArgs.getKwarg('auto');
                         const noAutoKw = cmdArgs.getKwarg('no-auto');
-                        const mode = modeKw && modeKw.value === 'delta' ? 'delta' : 'full';
-                        const autoRefresh = !noAutoKw;
+                        const mmAddOpts = resolveMmAddOptions(modeKw?.value, !!autoKw, !!noAutoKw);
+                        const prevModel = mmEngine.listMentalModels(bank.bankId).find(x => x.question === question);
+                        const isUpdate = !!prevModel;
+                        const hadAnswerBefore = !!(prevModel && prevModel.answer && prevModel.answer !== '生成中…');
                         // --tag 校验/归一化：必须是 user:/group: 前缀，且个人目标只接受 user:；
                         // 非法或与目标类型不符时回退默认标签，避免心智模型因标签不匹配而注入失效
                         const rawTag = tagKw && tagKw.value ? String(tagKw.value).trim() : '';
                         const tagOk = rawTag && (rawTag.startsWith('user:') || rawTag.startsWith('group:')) && (target.kind === 'group' || rawTag.startsWith('user:'));
                         const scopeTags = tagOk ? [rawTag] : [target.kind === 'group' ? `group:${targetSession.sessionId}` : `user:${targetSession.sessionId}`];
                         if (!answer) {
-                            // Hindsight 式：占位创建（pending）+ 同步生成（strict reflect，不 dump 记忆原文）
-                            const m = await mmEngine.createMentalModel(bank.bankId, question, '', scopeTags, { mode, autoRefresh });
+                            // Hindsight 式：占位创建（pending）+ 同步生成（strict reflect，不 dump 记忆原文）；
+                            // 更新已有模型时引擎保留旧答案作失败兜底
+                            const m = await mmEngine.createMentalModel(bank.bankId, question, '', scopeTags, mmAddOpts);
                             await mmEngine.refreshMentalModels(bank.bankId, m.id, { force: true, reason: 'create' });
                             const fresh = mmEngine.listMentalModels(bank.bankId).find(x => x.id === m.id) || m;
                             bumpMemoryRevision();
                             targetSession.save();
                             if (fresh.status === 'ready') {
-                                seal.replyToSender(ctx, msg, `${prefix}心智模型已添加<${fresh.id}>\n问题: ${question}\n答案: ${fresh.answer}`);
+                                seal.replyToSender(ctx, msg, `${prefix}心智模型${isUpdate ? '已更新' : '已添加'}<${fresh.id}>\n问题: ${question}\n答案: ${fresh.answer}`);
                             } else {
                                 const reason = fresh.status === 'failed' ? '生成失败' : '记忆不足';
-                                seal.replyToSender(ctx, msg, `${prefix}心智模型已创建<${fresh.id}>（${reason}，暂为占位：${fresh.answer}）\n问题: ${question}\n积累记忆后 consolidate / mm refresh 会自动生成`);
+                                const keepText = hadAnswerBefore ? `，保留原答案：${fresh.answer}` : `，暂为占位：${fresh.answer}`;
+                                const hint = hadAnswerBefore
+                                    ? '稍后 consolidate / mm refresh 重试'
+                                    : '积累记忆后 consolidate / mm refresh 会自动生成';
+                                seal.replyToSender(ctx, msg, `${prefix}心智模型${isUpdate ? '已更新' : '已创建'}<${fresh.id}>（${reason}${keepText}）\n问题: ${question}\n${hint}`);
                             }
                             return ret;
                         }
-                        const m = await mmEngine.createMentalModel(bank.bankId, question, stripInternalTags(answer), scopeTags, { mode, autoRefresh });
+                        const m = await mmEngine.createMentalModel(bank.bankId, question, stripInternalTags(answer), scopeTags, mmAddOpts);
                         bumpMemoryRevision();
                         targetSession.save();
-                        const flagText = `${mode === 'delta' ? '（增量模式）' : ''}${!autoRefresh ? '（不自动刷新）' : ''}`;
-                        seal.replyToSender(ctx, msg, `${prefix}心智模型已添加<${m.id}>${flagText}`);
+                        const flagParts: string[] = [];
+                        if (m.trigger === 'delta') flagParts.push('（增量模式）');
+                        if (m.triggerConfig?.refreshAfterConsolidation === false) flagParts.push('（不自动刷新）');
+                        seal.replyToSender(ctx, msg, `${prefix}心智模型${isUpdate ? '已更新' : '已添加'}<${m.id}>${flagParts.join('')}`);
                         return ret;
                     }
                     case 'refresh': {
@@ -595,7 +622,8 @@ export function registerCmdMemory() {
                         }
                         bumpMemoryRevision();
                         targetSession.save();
-                        seal.replyToSender(ctx, msg, `${prefix}心智模型已删除<${target.id}>：${target.question}`);
+                        const builtinNote = target.templateId ? '（内置模板，不会自动重建）' : '';
+                        seal.replyToSender(ctx, msg, `${prefix}心智模型已删除<${target.id}>：${target.question}${builtinNote}`);
                         return ret;
                     }
                     default: {

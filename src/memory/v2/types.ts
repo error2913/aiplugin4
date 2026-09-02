@@ -29,6 +29,8 @@ export interface MemoryBankMeta {
         }>;
         /** 距上次巩固的观察次数（驱动「每隔多少次观察整合一次记忆」配置） */
         consolidateSince?: number;
+        /** 固定心智模型模板已播种版本：推进后删除内置模型不会自动复活，版本升级只增量补新 */
+        seededMentalModelVersion?: number;
     };
 }
 
@@ -100,6 +102,9 @@ export interface ObservationHistoryEntry {
 /** 心智模型刷新触发方式：full=基于全部记忆重新推理，delta=增量更新 */
 export type MentalModelTrigger = 'full' | 'delta';
 
+/** 固定心智模型模板标识：persona=设定 / preference=偏好 / rules=规则 */
+export type MentalModelTemplateId = 'persona' | 'preference' | 'rules';
+
 /** 心智模型生命周期状态：ready=可用，pending=占位待生成，failed=上次生成失败 */
 export type MentalModelStatus = 'ready' | 'pending' | 'failed';
 
@@ -159,6 +164,8 @@ export interface MentalModel {
     lastFailedAt?: number;
     /** (question+answer) 语义向量，用于注入语义排序与 searchMentalModels 召回 */
     embedding?: number[];
+    /** 内置模板标记；未设置=用户自定义心智模型 */
+    templateId?: MentalModelTemplateId;
 }
 
 export interface MemoryDocument {

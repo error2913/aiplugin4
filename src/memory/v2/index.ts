@@ -11,9 +11,9 @@ export { MemoryEngine } from "./engine";
 export { MemoryRepository } from "./repository";
 export { InMemoryMemoryStorage, SealMemoryStorage, setDefaultMemoryStorage, getDefaultMemoryStorage } from "./storage";
 export * from "./types";
-export { MENTAL_MODEL_PERSONA_QUESTION } from "./engine";
 export * from "./bank_resolver";
 export * from "./prompt";
+export * from "./templates";
 export { defaultFactExtractor, defaultReranker, defaultObservationSynthesizer, defaultReflectSynthesizer } from "./llm";
 
 export function createMemoryEngine(): MemoryEngine {

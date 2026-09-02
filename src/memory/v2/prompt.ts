@@ -14,6 +14,22 @@ export interface InjectionCandidates {
 }
 
 /**
+ * 心智模型注入合并：固定模板在前、语义召回补余，按 limit 截断并去重（同 id 只取第一次出现）。
+ * 固定/语义列表需已按各自排序（模板目录顺序 / 相关度降序）。
+ */
+export function mergeMentalModels(fixed: MentalModel[], ranked: MentalModel[], limit: number): MentalModel[] {
+    const out: MentalModel[] = [];
+    const seen = new Set<string>();
+    for (const m of [...fixed, ...ranked]) {
+        if (out.length >= limit) break;
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        out.push(m);
+    }
+    return out;
+}
+
+/**
  * 注入候选筛选（E1/E2）：
  * - scopeTags 过滤：任一命中即注入（空 scopeTags 视为全局放行），
  *   避免 all_strict 下群聊中「未在最近消息出现的贡献者」导致整条被剔除

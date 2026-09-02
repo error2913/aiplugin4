@@ -6,6 +6,12 @@ import { cosineSimilarity, generateId } from "../../utils/utils";
 import { OBSERVATION_STALE_DAYS } from "./prompt";
 import { MemoryRepository, normalizeName } from "./repository";
 import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
+import {
+    LEGACY_PERSONA_QUESTION,
+    mentalModelTemplatesFor,
+    personaQuestionFor,
+    TEMPLATE_VERSION,
+} from "./templates";
 import type {
     ConsolidationResult,
     FactExtractor,
@@ -15,6 +21,7 @@ import type {
     MentalModel,
     MentalModelRefreshReason,
     MentalModelRefreshSummary,
+    MentalModelTemplateId,
     MentalModelTrigger,
     MentalModelTriggerConfig,
     Observation,
@@ -33,13 +40,12 @@ const DEFAULT_MAX_TOKENS = 2048;
 const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
 const BACKFILL_BATCH_LIMIT = 20;
 const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
+/** 心智模型占位答案：无答案创建时的 pending 文案（不作为 delta 基线/有效答案） */
+const PENDING_ANSWER = '生成中…';
 /** 遗忘保护：importance 达到该值（或 pinned）的记忆最后淘汰（上限仍是硬约束，超限仍会删） */
 const PROTECT_IMPORTANCE = 0.9;
 /** 衰减分半衰期（天）：decayScore = importance × 2^(−未访问天数/半衰期)，用于超限时排序 */
 const DECAY_HALF_LIFE_DAYS = 60;
-
-/** 「设定」心智模型的固定问题：.ai memo p|g st 与 persona 迁移共用，同问题名即同一条 */
-export const MENTAL_MODEL_PERSONA_QUESTION = '这个用户/群的设定是什么？';
 
 export interface MemoryEngineOptions {
     storage?: MemoryStorage;
@@ -629,16 +635,32 @@ export class MemoryEngine {
             autoRefresh?: boolean;
             factTypes?: FactType[];
             excludeMentalModels?: boolean;
+            templateId?: MentalModelTemplateId;
         } = {}
     ): Promise<MentalModel> {
         const now = this.nowSec();
         const existing = this.repository.listMentalModels(bankId).find(m => m.question === question);
         if (existing) {
             const mode = opts.mode || existing.triggerConfig?.mode || 'full';
-            existing.answer = answer;
+            const hadAnswer = !!(existing.answer && existing.answer !== PENDING_ANSWER);
+            if (answer) {
+                // 手写覆盖：内容更新（版本+1），向量清空待重算
+                existing.answer = answer;
+                existing.status = 'ready';
+                existing.lastMemorySeenAt = now;
+                existing.version++;
+                existing.embedding = [];
+            } else if (!hadAnswer) {
+                // 原本无有效答案（空/占位）：保持待生成语义；版本由成功刷新推进，避免双跳
+                existing.answer = '';
+                existing.status = 'pending';
+                existing.lastMemorySeenAt = 0;
+                existing.embedding = [];
+            }
+            // 已有旧答案 + 无答案 add = 重新生成语义：保留旧答案/watermark/版本作失败兜底，
+            // 只更新 scope/刷新配置，成功与否由 refresh 路径负责
             existing.scopeTags = scopeTags;
             existing.updatedAt = now;
-            existing.version++;
             if (typeof existing.lastRefreshedAt !== 'number') existing.lastRefreshedAt = now;
             if (!Array.isArray(existing.history)) existing.history = [];
             existing.trigger = mode;
@@ -650,12 +672,11 @@ export class MemoryEngine {
                 excludeMentalModels: opts.excludeMentalModels ?? existing.triggerConfig?.excludeMentalModels ?? this.defaultExcludeMentalModels,
                 factTypes: opts.factTypes ?? existing.triggerConfig?.factTypes,
             };
-            // 手写答案：watermark=now（只有更新的记忆才触发自动刷新）；生成式：重置为 0 等待生成
-            existing.status = answer ? 'ready' : 'pending';
-            existing.lastMemorySeenAt = answer ? now : 0;
             existing.lastFailedAt = undefined;
-            existing.embedding = [];
+            if (opts.templateId) existing.templateId = opts.templateId;
             this.repository.updateMentalModel(bankId, existing);
+            // 同问题覆盖手写答案：embedding 已清空，异步重算（失败静默），避免语义召回失效
+            if (answer) this.computeMentalModelEmbedding(bankId, existing).catch(() => { });
             return existing;
         }
         const mode = opts.mode || this.defaultMentalModelMode;
@@ -663,7 +684,7 @@ export class MemoryEngine {
             id: generateId(),
             bankId,
             question,
-            answer: answer || '生成中…',
+            answer: answer || PENDING_ANSWER,
             scopeTags,
             createdAt: now,
             updatedAt: now,
@@ -680,6 +701,7 @@ export class MemoryEngine {
             status: answer ? 'ready' : 'pending',
             lastMemorySeenAt: answer ? now : 0,
             embedding: [],
+            templateId: opts.templateId,
         };
         this.repository.addMentalModel(bankId, model);
         // 手写答案：best-effort 异步算向量（不阻塞、失败静默），供注入语义排序/召回使用
@@ -689,6 +711,75 @@ export class MemoryEngine {
 
     deleteMentalModel(bankId: string, id: string): boolean {
         return this.repository.deleteMentalModel(bankId, id);
+    }
+
+    /**
+     * 固定心智模型补建与旧 persona 问题迁移：
+     * - 旧合体问题（这个用户/群的设定是什么？）按 kind 原地改名到专属问题并标记 templateId=persona；
+     *   新旧两条并存时把旧答案并入新条（新条无有效内容时）后删除旧条
+     * - 版本门：seededMentalModelVersion 推进后不再补旧模板 → 用户删除内置模型后不会自动复活；
+     *   模板版本升级（TEMPLATE_VERSION+1）只增量补新条目
+     * - 有源才补建：bank 尚无有效记忆/观察时等待（避免空库 pending 占位污染 .ai memo mm list）
+     */
+    ensureDefaultMentalModels(
+        bankId: string,
+        kind: 'user' | 'group',
+        scopeTag: string
+    ): { created: number; renamed: number } {
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return { created: 0, renamed: 0 };
+        const now = this.nowSec();
+        let renamed = 0;
+        const targetQuestion = personaQuestionFor(kind);
+        const legacyModels = bank.mentalModels.filter(m => m.question === LEGACY_PERSONA_QUESTION);
+        for (const legacy of legacyModels) {
+            const twin = bank.mentalModels.find(x => x.id !== legacy.id && x.question === targetQuestion);
+            if (twin) {
+                const legacyAnswer = legacy.answer && legacy.answer !== PENDING_ANSWER ? legacy.answer : '';
+                const twinEmpty = !twin.answer || twin.answer === PENDING_ANSWER;
+                if (legacyAnswer && twinEmpty) {
+                    twin.answer = legacyAnswer;
+                    twin.status = 'ready';
+                    twin.updatedAt = now;
+                    twin.version++;
+                    twin.embedding = [];
+                    this.computeMentalModelEmbedding(bankId, twin).catch(() => { });
+                }
+                twin.history = [...(twin.history || []), ...(legacy.history || [])].slice(-10);
+                twin.templateId = 'persona';
+                if (typeof twin.lastRefreshedAt !== 'number') twin.lastRefreshedAt = twin.updatedAt;
+                if (typeof twin.lastMemorySeenAt !== 'number') twin.lastMemorySeenAt = legacy.lastMemorySeenAt || 0;
+                this.repository.updateMentalModel(bankId, twin);
+                bank.mentalModels = bank.mentalModels.filter(x => x.id !== legacy.id);
+            } else {
+                legacy.question = targetQuestion;
+                legacy.templateId = 'persona';
+                legacy.updatedAt = now;
+            }
+            renamed++;
+        }
+        if (renamed > 0) this.repository.save(bankId);
+
+        const settings = bank.meta.settings;
+        const seeded = typeof settings.seededMentalModelVersion === 'number' ? settings.seededMentalModelVersion : 0;
+        if (seeded >= TEMPLATE_VERSION) return { created: 0, renamed };
+        const hasSource = bank.observations.length > 0 || bank.units.some(u => u.state === 'valid');
+        if (!hasSource) return { created: 0, renamed };
+
+        let created = 0;
+        for (const tpl of mentalModelTemplatesFor(kind)) {
+            const existing = bank.mentalModels.find(m => m.question === tpl.question);
+            if (!existing) {
+                this.createMentalModel(bankId, tpl.question, '', [scopeTag], { templateId: tpl.id });
+                created++;
+            } else if (!existing.templateId) {
+                existing.templateId = tpl.id;
+                this.repository.updateMentalModel(bankId, existing);
+            }
+        }
+        settings.seededMentalModelVersion = TEMPLATE_VERSION;
+        this.repository.save(bankId);
+        return { created, renamed };
     }
 
     /**
@@ -816,7 +907,7 @@ export class MemoryEngine {
                 createdAfter,
                 mode: cfg.mode,
                 // delta 基线：占位文本不算基线（无基线时回退全量重写）
-                existingAnswer: cfg.mode === 'delta' && model.answer && model.answer !== '生成中…' ? model.answer : undefined,
+                existingAnswer: cfg.mode === 'delta' && model.answer && model.answer !== PENDING_ANSWER ? model.answer : undefined,
                 strict: true,
                 maxTokens: 4096,
             });
@@ -824,11 +915,14 @@ export class MemoryEngine {
             return this.markRefreshFailed(bankId, model, now);
         }
         const text = (result.text || '').trim();
-        if (!text || text === NO_MEMORY_TEXT) {
+        if (!text || text === NO_MEMORY_TEXT || text === PENDING_ANSWER) {
             return this.markRefreshFailed(bankId, model, now);
         }
 
         const changed = text !== model.answer;
+        // failed 状态恢复且内容未变也算有效更新：状态从「不注入」变「注入」，
+        // 需让调用方（updated>0）推进 memory revision 缓存失效
+        const recovered = !changed && model.status === 'failed';
         if (changed) {
             model.history = [...(model.history || []), { answer: model.answer, at: now, trigger: cfg.mode }].slice(-10);
             model.answer = text;
@@ -843,8 +937,11 @@ export class MemoryEngine {
         model.trigger = cfg.mode;
         model.triggerConfig = cfg;
         this.repository.updateMentalModel(bankId, model);
-        if (changed) this.computeMentalModelEmbedding(bankId, model).catch(() => { });
-        return changed ? { status: 'updated' } : { status: 'skipped', reason: 'unchanged' };
+        // 内容变化/状态恢复/向量缺失时补算 embedding，兜底历史遗留无向量模型
+        if (changed || recovered || !model.embedding || model.embedding.length === 0) {
+            this.computeMentalModelEmbedding(bankId, model).catch(() => { });
+        }
+        return changed || recovered ? { status: 'updated' } : { status: 'skipped', reason: 'unchanged' };
     }
 
     /** 刷新失败：保留旧答案、不推进 watermark、记录失败时间（供冷却重试） */
@@ -892,10 +989,11 @@ export class MemoryEngine {
     async searchMentalModels(
         bankId: string,
         query: string,
-        opts: { tags?: string[]; limit?: number; queryEmbedding?: number[] | null } = {}
+        opts: { tags?: string[]; limit?: number; queryEmbedding?: number[] | null; excludeTemplates?: boolean } = {}
     ): Promise<MentalModel[]> {
         const models = this.repository.listMentalModels(bankId)
             .filter(m => m.status === 'ready' || m.status === undefined)
+            .filter(m => !(opts.excludeTemplates && m.templateId))
             .filter(m => {
                 if (!opts.tags || opts.tags.length === 0) return true;
                 const tags = m.scopeTags || [];

@@ -21,7 +21,7 @@ import { SubCmd } from "../src/cmd/root_cmd";
 import { defaultCmdPriv } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { registerCmdModel } from "../src/cmd/sub_cmd/model";
-import { registerCmdMemory } from "../src/cmd/sub_cmd/memory";
+import { registerCmdMemory, resolveMmAddOptions } from "../src/cmd/sub_cmd/memory";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
 import { KnowledgeBaseService, parseKnowledgeLibrary } from "../src/memory/knowledge_base";
@@ -29,9 +29,19 @@ import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memo
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
 import { resolveBankId } from "../src/memory/v2/bank_resolver";
-import { buildMemoryPrompt, MAX_MENTAL_MODELS, MAX_OBSERVATIONS, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../src/memory/v2/prompt";
+import { buildMemoryPrompt, MAX_MENTAL_MODELS, MAX_OBSERVATIONS, mergeMentalModels, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage, SealMemoryStorage } from "../src/memory/v2/storage";
-import { createMemoryEngine, getMemoryEngine, resetMemoryEngineForTest, MENTAL_MODEL_PERSONA_QUESTION } from "../src/memory/v2";
+import {
+    createMemoryEngine,
+    getMemoryEngine,
+    LEGACY_PERSONA_QUESTION,
+    MENTAL_MODEL_TEMPLATES,
+    PERSONA_QUESTION_GROUP,
+    PERSONA_QUESTION_USER,
+    resetMemoryEngineForTest,
+    TEMPLATE_VERSION,
+} from "../src/memory/v2";
+import { getMemoryRevision } from "../src/memory/revision";
 import { requestLimiter } from "../src/utils/concurrency";
 import { Context } from "../src/context/context";
 import Agent from "../src/agent/agent";
@@ -955,7 +965,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const bankId = resolveBankId('QQ:77777', 'user', '').bankId;
         const models = engine.listMentalModels(bankId);
         assert.equal(models.length, 1);
-        assert.equal(models[0].question, MENTAL_MODEL_PERSONA_QUESTION);
+        assert.equal(models[0].question, PERSONA_QUESTION_USER, 'persona 应迁移到用户专属设定问题');
+        assert.equal(models[0].templateId, 'persona', 'persona 应标记为内置模板');
         assert.equal(models[0].answer, '我是小明，喜欢简洁');
         assert.deepEqual(models[0].scopeTags, ['user:QQ:77777']);
         assert.equal(session.memory.persona, '无', '迁移后应清空 persona');
@@ -4431,5 +4442,269 @@ description: 茶库
             }
             defaultCmdPriv.ai.args = beforeAiArgs;
         }
-    }
+    },
+
+    /** A1：同问题覆盖手写答案后应异步重算 embedding（语义召回不失效） */
+    async testMMUpdateAnswerRecomputesEmbedding(): Promise<void> {
+        let embedCalls = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            embedding: async () => {
+                embedCalls++;
+                return [1, 2, 3];
+            },
+        });
+        await engine.createMentalModel('user_emb1', '偏好？', '旧答案');
+        await new Promise(r => setTimeout(r, 5));
+        assert.equal(engine.listMentalModels('user_emb1')[0].embedding.length, 3, '新建手写答案应补算向量');
+
+        await engine.createMentalModel('user_emb1', '偏好？', '新答案');
+        await new Promise(r => setTimeout(r, 5));
+        const m = engine.listMentalModels('user_emb1')[0];
+        assert.equal(m.answer, '新答案');
+        assert.equal(m.embedding.length, 3, '同问题覆盖后不应把向量清空留空');
+        assert.equal(embedCalls, 2, '覆盖更新应再次调用 embedding');
+    },
+
+    /** A3：无答案 add 命中已有模型 = 重新生成；失败保留旧答案，成功只 bump 一次版本 */
+    async testMMNoAnswerAddKeepsOldAnswer(): Promise<void> {
+        let now = 1_000_000;
+        let fail = true;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => now,
+            reflectSynthesizer: async () => {
+                if (fail) throw new Error('boom');
+                return '生成答案';
+            },
+        });
+        await engine.createMentalModel('user_keep', '问题', '旧答案');
+        // 无答案 add 命中已有：不清空旧答案、不提前 bump 版本
+        await engine.createMentalModel('user_keep', '问题', '', ['user:QQ:1']);
+        let m = engine.listMentalModels('user_keep')[0];
+        assert.equal(m.answer, '旧答案', '无答案 add 不应清空已有答案');
+        assert.equal(m.version, 1, '无答案 add 不应提前 bump 版本');
+        // 生成失败：状态 failed、旧答案保留、watermark/版本不变
+        await engine.addMemory('user_keep', { content: '事实', tags: ['user:QQ:1'] });
+        const failSummary = await engine.refreshMentalModels('user_keep', m.id, { force: true, reason: 'create' });
+        assert.equal(failSummary.failed, 1);
+        m = engine.listMentalModels('user_keep')[0];
+        assert.equal(m.status, 'failed');
+        assert.equal(m.answer, '旧答案', '失败应保留旧答案');
+        assert.equal(m.version, 1);
+        // 重试成功：答案更新、版本只 +1、旧答案入历史
+        fail = false;
+        const okSummary = await engine.refreshMentalModels('user_keep', m.id, { force: true, reason: 'create' });
+        assert.equal(okSummary.updated, 1);
+        m = engine.listMentalModels('user_keep')[0];
+        assert.equal(m.status, 'ready');
+        assert.equal(m.answer, '生成答案');
+        assert.equal(m.version, 2, '成功刷新应只 bump 一次版本');
+        assert.equal(m.history[0].answer, '旧答案');
+    },
+
+    /** A5：failed→ready 且文本未变时也算有效更新（updated=1），供缓存失效使用 */
+    async testMMFailedRecoveryCountsAsUpdated(): Promise<void> {
+        let text = '';
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            reflectSynthesizer: async () => text,
+        });
+        await engine.createMentalModel('user_rec', '问题', '答案');
+        await engine.addMemory('user_rec', { content: '事实' });
+        // 空结果 → failed（保留旧答案）
+        const failSummary = await engine.refreshMentalModels('user_rec', undefined, { force: true });
+        assert.equal(failSummary.failed, 1);
+        let m = engine.listMentalModels('user_rec')[0];
+        assert.equal(m.status, 'failed');
+        assert.equal(m.answer, '答案');
+        // 恢复：合成结果与旧答案相同，内容未变但状态 failed→ready，应计 updated
+        text = '答案';
+        const okSummary = await engine.refreshMentalModels('user_rec', undefined, { force: true });
+        assert.equal(okSummary.updated, 1, 'failed 恢复应视为有效更新');
+        m = engine.listMentalModels('user_rec')[0];
+        assert.equal(m.status, 'ready');
+        assert.equal(m.answer, '答案');
+        assert.equal(m.version, 1, '内容未变不应 bump 版本');
+        assert.equal(m.lastFailedAt, undefined, '恢复后应清除失败时间');
+    },
+
+    /** A2：mode/autoRefresh 未显式指定时引擎保留默认/原有配置；cmd 解析器缺省不覆盖 */
+    async testMMDefaultsAndUpdatePreserveConfig(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        // 显式创建 delta + 不自动刷新
+        const m0 = await engine.createMentalModel('user_cfg', '问题', '答案1', [], { mode: 'delta', autoRefresh: false });
+        assert.equal(m0.trigger, 'delta');
+        assert.equal(m0.triggerConfig?.refreshAfterConsolidation, false);
+        // 不带 mode/autoRefresh 覆盖更新：保留原有配置
+        await engine.createMentalModel('user_cfg', '问题', '答案2');
+        const m1 = engine.listMentalModels('user_cfg')[0];
+        assert.equal(m1.trigger, 'delta', '未显式传 mode 不应重置原 delta');
+        assert.equal(m1.triggerConfig?.refreshAfterConsolidation, false, '未显式传 auto 不应覆盖原 --no-auto');
+        // 新模型缺省跟随引擎默认（配置 MEMORY_MM_DEFAULT_MODE 注入到 setMentalModelDefaults）
+        engine.setMentalModelDefaults({ mode: 'delta' });
+        const m2 = await engine.createMentalModel('user_cfg', '新问题', '', [], { autoRefresh: false });
+        assert.equal(m2.trigger, 'delta', '新模型缺省 mode 应使用引擎默认');
+        assert.equal(m2.triggerConfig?.refreshAfterConsolidation, false);
+        // cmd 参数解析：未传 flag 时不生成覆盖项；--auto/--no-auto 显式覆盖
+        assert.deepEqual(resolveMmAddOptions(undefined, false, false), {});
+        assert.deepEqual(resolveMmAddOptions('delta', false, false), { mode: 'delta' });
+        assert.deepEqual(resolveMmAddOptions('full', true, false), { mode: 'full', autoRefresh: true });
+        assert.deepEqual(resolveMmAddOptions('delta', true, true), { mode: 'delta', autoRefresh: false }, '--no-auto 优先于 --auto');
+        assert.deepEqual(resolveMmAddOptions('', false, true), { autoRefresh: false });
+    },
+
+    /** mergeMentalModels：固定在前、语义补余、limit 截断、同 id 去重 */
+    testMergeMentalModelsFixedFirst(): void {
+        const mk = (id: string) => makeTestMentalModel(id, id, 'a', [], 0);
+        const fixed = [mk('f1'), mk('f2')];
+        const ranked = [mk('f2'), mk('c1'), mk('c2')];
+        assert.deepEqual(mergeMentalModels(fixed, ranked, 3).map(m => m.id), ['f1', 'f2', 'c1'], '固定优先且去重');
+        assert.deepEqual(mergeMentalModels(fixed, ranked, 2).map(m => m.id), ['f1', 'f2'], 'limit 应截断');
+        assert.deepEqual(mergeMentalModels([], ranked, 10).map(m => m.id), ['f2', 'c1', 'c2'], '无固定时全量语义补余');
+    },
+
+    /** B：固定模板版本化补建——幂等、有源才建、删除不复活 */
+    async testMMEnsureDefaultTemplatesSeeds(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        engine.ensureBank('user_tpl', 'user', '');
+        // 空库：不补建（避免 pending 占位污染）
+        assert.deepEqual(engine.ensureDefaultMentalModels('user_tpl', 'user', 'user:QQ:1'), { created: 0, renamed: 0 });
+        assert.equal(engine.listMentalModels('user_tpl').length, 0, '空库不应创建模板');
+        // 有源后补建 user 模板（设定 + 偏好）
+        await engine.addMemory('user_tpl', { content: '小明喜欢咖啡', tags: ['user:QQ:1'] });
+        const r = engine.ensureDefaultMentalModels('user_tpl', 'user', 'user:QQ:1');
+        assert.equal(r.created, 2);
+        const models = engine.listMentalModels('user_tpl');
+        const questions = models.map(m => m.question);
+        assert.ok(questions.includes(PERSONA_QUESTION_USER), '应补建用户设定模板');
+        assert.ok(questions.includes(MENTAL_MODEL_TEMPLATES.user[1].question), '应补建偏好模板');
+        for (const m of models) {
+            assert.equal(m.status, 'pending', '模板先落 pending，答案交给自动刷新');
+            assert.ok(m.templateId, '模板应打 templateId 标记');
+        }
+        assert.equal(engine.repository.getBank('user_tpl')!.meta.settings.seededMentalModelVersion, TEMPLATE_VERSION);
+        // 幂等：再次 ensure 不新增
+        assert.equal(engine.ensureDefaultMentalModels('user_tpl', 'user', 'user:QQ:1').created, 0);
+        // 删除后不复活（版本已推进）
+        const pref = models.find(m => m.templateId === 'preference')!;
+        engine.deleteMentalModel('user_tpl', pref.id);
+        assert.equal(engine.listMentalModels('user_tpl').length, 1);
+        assert.equal(engine.ensureDefaultMentalModels('user_tpl', 'user', 'user:QQ:1').created, 0, '删除的内置模板不应自动复活');
+        assert.equal(engine.listMentalModels('user_tpl').length, 1);
+    },
+
+    /** B：旧 persona 合体问题按 kind 改名到专属问题；新旧并存时合并并删旧 */
+    async testMMEnsureMigratesLegacyPersonaQuestion(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        await engine.createMentalModel('user_leg1', LEGACY_PERSONA_QUESTION, '旧设定', ['user:QQ:1']);
+        const r = engine.ensureDefaultMentalModels('user_leg1', 'user', 'user:QQ:1');
+        assert.equal(r.renamed, 1);
+        const m = engine.listMentalModels('user_leg1')[0];
+        assert.equal(m.question, PERSONA_QUESTION_USER, '旧问题应原地改名');
+        assert.equal(m.answer, '旧设定');
+        assert.equal(m.templateId, 'persona');
+
+        // 新旧并存（群聊场景）：旧答案并入空的新条后删除旧条
+        const engine2 = new MemoryEngine({ storage: new InMemoryMemoryStorage() });
+        await engine2.createMentalModel('group_leg2', LEGACY_PERSONA_QUESTION, '群旧设定', ['group:QQ-Group:9']);
+        await engine2.createMentalModel('group_leg2', PERSONA_QUESTION_GROUP, '', ['group:QQ-Group:9']);
+        const r2 = engine2.ensureDefaultMentalModels('group_leg2', 'group', 'group:QQ-Group:9');
+        assert.equal(r2.renamed, 1);
+        const models = engine2.listMentalModels('group_leg2');
+        assert.equal(models.length, 1, '旧条应被删除');
+        assert.equal(models[0].question, PERSONA_QUESTION_GROUP);
+        assert.equal(models[0].answer, '群旧设定', '旧答案应并入新条');
+        assert.equal(models[0].status, 'ready');
+        assert.equal(models[0].templateId, 'persona');
+    },
+
+    /** B：固定模板（ready）在私聊中固定注入且排在自定义心智模型之前 */
+    async testMMFixedTemplatesInjectedFirstPrivate(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        const origTemplates = TC.boolConfigs['自动维护固定心智模型'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        TC.boolConfigs['自动维护固定心智模型'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ:9001';
+            session.sessionType = 'user';
+            session.memory.persona = '无';
+            await engine.addMemory('user_QQ:9001', { content: '小明喜欢咖啡', tags: ['user:QQ:9001'] });
+            await engine.createMentalModel('user_QQ:9001', PERSONA_QUESTION_USER, '设定答案', ['user:QQ:9001'], { templateId: 'persona' });
+            await engine.createMentalModel('user_QQ:9001', MENTAL_MODEL_TEMPLATES.user[1].question, '偏好答案', ['user:QQ:9001'], { templateId: 'preference' });
+            await engine.createMentalModel('user_QQ:9001', '随机冷门问题？', '自定义答案', ['user:QQ:9001']);
+            const ctx = { isPrivate: true, player: { userId: 'QQ:9001', name: '测试员' }, group: null } as any;
+            const uis = [{ isPrivate: true, id: 'QQ:9001', name: '测试员' }] as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '今天天气如何？', uis, null);
+            assert.ok(prompt.includes('设定答案'), '固定「设定」应无条件注入');
+            assert.ok(prompt.includes('偏好答案'), '固定「偏好」应无条件注入');
+            const personaIdx = prompt.indexOf('设定答案');
+            const preferenceIdx = prompt.indexOf('偏好答案');
+            assert.ok(personaIdx >= 0 && preferenceIdx >= 0 && personaIdx < preferenceIdx, '固定模板应按目录顺序在前');
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            if (origTemplates === undefined) delete TC.boolConfigs['自动维护固定心智模型']; else TC.boolConfigs['自动维护固定心智模型'] = origTemplates;
+            resetConfigCache();
+        }
+    },
+
+    /** B：群聊个人分组固定注入该发言者的「设定」1 条，并在群聊构建时懒补建该用户模板 */
+    async testMMFixedTemplatesInjectedInGroupSpeaker(): Promise<void> {
+        const origLongTerm = TC.boolConfigs['启用长期记忆'];
+        const origTemplates = TC.boolConfigs['自动维护固定心智模型'];
+        TC.boolConfigs['启用长期记忆'] = true;
+        TC.boolConfigs['自动维护固定心智模型'] = true;
+        resetConfigCache();
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        try {
+            const engine = getMemoryEngine();
+            const session = new Session();
+            session.sessionId = 'QQ-Group:8';
+            session.sessionType = 'group';
+            session.memory.persona = '无';
+            // 群库有源；发言者个人库有源 + 已有 ready 的「设定」
+            await engine.addMemory('group_QQ-Group:8', { content: '群规则：文明聊天', tags: ['group:QQ-Group:8'] });
+            await engine.addMemory('user_QQ:9002', { content: '小芳喜欢画画', tags: ['user:QQ:9002'] });
+            await engine.createMentalModel('user_QQ:9002', PERSONA_QUESTION_USER, '小芳设定答案', ['user:QQ:9002'], { templateId: 'persona' });
+            const ctx = { isPrivate: false, player: { userId: 'QQ:9002', name: '小芳' }, group: { groupId: 'QQ-Group:8', groupName: '测试群' } } as any;
+            const uis = [{ isPrivate: true, id: 'QQ:9002', name: '小芳' }] as any;
+            const prompt = await MemoryManager.buildLongTermPrompt(ctx, session, '今天画了什么？', uis, { isPrivate: false, id: 'QQ-Group:8', name: '测试群' } as any);
+            assert.ok(prompt.includes('小芳设定答案'), '个人分组应固定注入该发言者的「设定」');
+            // 群聊构建应懒补建该用户「偏好」模板（pending 不注入，等自动刷新）
+            const userModels = engine.listMentalModels('user_QQ:9002');
+            assert.ok(userModels.some(m => m.templateId === 'preference' && m.status === 'pending'), '群聊构建应补建该用户偏好模板');
+            assert.ok(!prompt.includes('生成中…'), 'pending 模板不应注入');
+        } finally {
+            if (origLongTerm === undefined) delete TC.boolConfigs['启用长期记忆']; else TC.boolConfigs['启用长期记忆'] = origLongTerm;
+            if (origTemplates === undefined) delete TC.boolConfigs['自动维护固定心智模型']; else TC.boolConfigs['自动维护固定心智模型'] = origTemplates;
+            resetConfigCache();
+        }
+    },
+
+    /** A4：consolidate 后自动刷新实际更新（updated>0）时 bump memory revision */
+    async testR2ConsolidateBumpsRevisionOnRefreshUpdate(): Promise<void> {
+        resetMemoryEngineForTest(new InMemoryMemoryStorage());
+        const engine = getMemoryEngine();
+        const session = new Session();
+        session.sessionId = 'QQ:88889';
+        session.sessionType = 'user';
+        const origRefresh = engine.refreshMentalModels;
+        let stubResult: any = { updated: 1, skipped: 0, failed: 0, skippedReasons: {}, refreshedIds: [] };
+        engine.refreshMentalModels = async () => stubResult;
+        const before = getMemoryRevision();
+        try {
+            await MemoryManager.consolidateMemory(session);
+            assert.equal(getMemoryRevision(), before + 1, '刷新有更新时应 bump memory revision');
+            stubResult = { updated: 0, skipped: 1, failed: 0, skippedReasons: { not_stale: 1 }, refreshedIds: [] };
+            const before2 = getMemoryRevision();
+            await MemoryManager.consolidateMemory(session);
+            assert.equal(getMemoryRevision(), before2, '无更新时不应 bump');
+        } finally {
+            engine.refreshMentalModels = origRefresh;
+        }
+    },
 };
