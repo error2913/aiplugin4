@@ -8,6 +8,7 @@ import { resetModelConfigCacheForTest } from "../src/config/configs/model";
 Config.registerConfig();
 
 import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages, textToMultimodalContent } from "../src/utils/message";
+import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
@@ -209,21 +210,24 @@ async function runMemo(scc: any): Promise<string> {
 }
 
 export const tests: Record<string, () => void | Promise<void>> = {
-    /** token 估算口径：ASCII 4 字符/token，非 ASCII 1 字符/token */
+    /** token 估算：细化 Unicode 分类后仍保持基础 ASCII/CJK 口径 */
     testEstimateTextTokens(): void {
         assert.equal(estimateTextTokens('abcd'), 1);
         assert.equal(estimateTextTokens('abcdefgh'), 2);
         assert.equal(estimateTextTokens('你好'), 2);
         assert.equal(estimateTextTokens('abc你好'), 3);
         assert.equal(estimateTextTokens(''), 0);
+        // Emoji 不应被当作 1 个字符 1 token
+        assert.ok(estimateTextTokens('😀') >= 2, `emoji 估算应至少 2 token，实际 ${estimateTextTokens('😀')}`);
     },
 
-    /** 单条消息估算：覆盖文本/contentItems/多模态/工具调用，多模态图片按固定开销而非 base64 原文 */
+    /** 单条消息估算：覆盖文本/contentItems/多模态/工具调用/思维链/结构 overhead */
     testEstimateMessageTokens(): void {
-        assert.equal(estimateMessageTokens({ role: 'user', content: '你好' } as any), 2);
+        // 基础内容 2 token + 消息结构 overhead 4 token
+        assert.equal(estimateMessageTokens({ role: 'user', content: '你好' } as any), 6);
         assert.equal(
             estimateMessageTokens({ role: 'user', contentItems: [{ text: '你好', time: 0 }] } as any),
-            2
+            6
         );
         // 10KB base64 图片只按 [image] 占位估算，总估算必须远小于把 base64 当文本算的结果
         const multimodal = {
@@ -235,13 +239,20 @@ export const tests: Record<string, () => void | Promise<void>> = {
         };
         const multimodalEst = estimateMessageTokens(multimodal as any);
         assert.ok(multimodalEst < 10, `多模态估算应远小于 base64 原文(${multimodalEst})`);
-        // tool_calls JSON 计入估算
+        // tool_calls JSON 与结构 overhead 计入估算
         const withTools = {
             role: 'assistant',
             content: '调用',
             tool_calls: [{ id: '1', type: 'function', function: { name: 'get_weather', arguments: '{}' } }]
         };
         assert.ok(estimateMessageTokens(withTools as any) > estimateTextTokens('调用'));
+        // reasoning_content 必须计入估算
+        const withoutReasoning = { role: 'assistant', content: '结果' };
+        const withReasoning = { role: 'assistant', content: '结果', reasoning_content: '因为A所以B' };
+        assert.ok(
+            estimateMessageTokens(withReasoning as any) > estimateMessageTokens(withoutReasoning as any),
+            'reasoning_content 应使单条消息估算增加'
+        );
     },
 
     /** MCP 结果归一化：text/image/resource 转成文本引用 + 多模态 contentParts */
@@ -331,11 +342,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 预算裁剪：整条丢弃最早的未保护消息，system 永不丢弃 */
     async testTokenBudgetDropsEarliest(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 200;
+        TC.intConfigs['上下文最大token'] = 220;
         TC.intConfigs['插入system message间隔轮数'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
-        const system = { role: 'system', text: '系'.repeat(100) }; // 100 token
+        const system = { role: 'system', text: '系'.repeat(100) }; // 100 汉字内容 token + 4 结构 overhead
         const session = {
             context: {
                 messages: [
@@ -354,12 +365,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 预算裁剪：单条超大消息不再整条丢弃清空上下文，而是按缺口截断并保留尾部 */
     async testTokenBudgetTruncatesHugeMessage(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 200;
+        TC.intConfigs['上下文最大token'] = 208;
         TC.intConfigs['插入system message间隔轮数'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
-        const system = { role: 'system', text: '系'.repeat(100) }; // 100 token
-        const huge = '超'.repeat(300); // 300 token，单条超出整个可用预算
+        const system = { role: 'system', text: '系'.repeat(100) }; // 100 汉字内容 token + 4 结构 overhead
+        const huge = '超'.repeat(300); // 300 汉字内容 token + 4 结构 overhead，单条超出整个可用预算
         const session = { context: { messages: [{ role: 'user', text: huge }] } };
         const out = await handleMessages(makeCtx(), session as any, false, undefined, system as any);
         assert.equal(out.length, 2, '超大消息应被截断而不是整条丢弃');
@@ -367,7 +378,53 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(out[1].content, huge.slice(-100), '应保留最近 100 字符');
         // 总估算不超过预算
         const total = estimateMessageTokens(out[0] as any) + estimateMessageTokens(out[1] as any);
-        assert.ok(total <= 200, `裁剪后应不超预算，实际 ${total}`);
+        assert.ok(total <= 208, `裁剪后应不超预算，实际 ${total}`);
+    },
+    /** TokenCalibration：默认系数 1、记录样本后 EMA 更新预测 */
+    testTokenCalibrationEma(): void {
+        TokenCalibration.resetForTest();
+        try {
+            assert.equal(TokenCalibration.getFactor('cal-model'), 1);
+            assert.equal(TokenCalibration.predict('cal-model', 100), 100);
+
+            TokenCalibration.record('cal-model', 100, 150);
+            assert.equal(TokenCalibration.getFactor('cal-model'), 1.5);
+            assert.equal(TokenCalibration.predict('cal-model', 100), 150);
+
+            // 第二次 ratio = 1，alpha = 1/2：1.5 + 0.5 * (1 - 1.5) = 1.25
+            TokenCalibration.record('cal-model', 100, 100);
+            assert.equal(TokenCalibration.getFactor('cal-model'), 1.25);
+
+            // 无效样本不更新
+            TokenCalibration.record('cal-model', 0, 100);
+            TokenCalibration.record('cal-model', 100, 0);
+            assert.equal(TokenCalibration.getFactor('cal-model'), 1.25);
+        } finally {
+            TokenCalibration.resetForTest();
+        }
+    },
+
+    /** 预算裁剪应使用模型校准系数：factor > 1 时比默认更早裁剪 */
+    async testTokenBudgetUsesCalibrationFactor(): Promise<void> {
+        TC.intConfigs['上下文最大token'] = 300;
+        TC.intConfigs['插入system message间隔轮数'] = 0;
+        TC.boolConfigs['切换为提示词工程'] = false;
+        resetConfigCache();
+        TokenCalibration.resetForTest();
+        try {
+            TokenCalibration.record('cal-model', 100, 200); // factor = 2
+            const system = { role: 'system', text: '系'.repeat(100) }; // 104 token
+            const session = { context: { messages: [{ role: 'user', text: '一'.repeat(50) }] } }; // 54 token
+
+            const normal = await handleMessages(makeCtx(), session as any, false, undefined, system as any);
+            assert.equal(normal.length, 2, '未校准时 158 token 应留在 300 预算内');
+
+            const calibrated = await handleMessages(makeCtx(), session as any, false, undefined, system as any, 'cal-model');
+            assert.equal(calibrated.length, 2, 'factor=2 时不应直接清空历史，而应触发更早的预算裁剪');
+            assert.ok((calibrated[1].content as string).length < 50, 'factor=2 时历史消息应被截断以降低预测 token');
+        } finally {
+            TokenCalibration.resetForTest();
+        }
     },
 
     /** prompt 工程模式：工具结果转 user 时保留工具名来源 */
@@ -4231,7 +4288,5 @@ description: 茶库
             resetConfigCache();
         }
     },
-
-
 
 };

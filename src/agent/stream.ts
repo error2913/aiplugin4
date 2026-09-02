@@ -7,6 +7,7 @@ import ChatModel from "../model/chat";
 import Model from "../model/model";
 import MultimodalModel from "../model/multimodal";
 import { requestModel } from "../model/provider";
+import { TokenCalibration } from "../token_calibration";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
 import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
@@ -66,20 +67,28 @@ function sanitizeRequestMessages(messages: any[]): any[] {
     return result;
 }
 
-/** 发送前校验整包预算：估算 messages + tools 的 token 总量，超出「上下文最大token」时告警 */
-function checkRequestBudget(messages: any[], tools: any[]): void {
-    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
-    if (maxTokens <= 0) return;
+/** 估算 messages + tools 的 raw token，并用模型校准系数预测是否超出「上下文最大token」 */
+function estimateRequestTokens(messages: any[], tools: any[]): number {
     const toolsEstimate = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
     // 与 handleMessages 的 applyTokenBudget 统一估算口径（文本 + tool_calls + tools 预留），
     // 避免两套口径不一致导致裁剪后请求体仍超限；多模态图片按固定开销而非 base64 原文估算
-    const estimate = (messages || []).reduce((acc, m) => acc + estimateMessageTokens(m), 0) + toolsEstimate;
-    if (estimate > maxTokens) {
-        log.warning(`请求体估算 token（含 tools JSON）超出「上下文最大token」预算: ${estimate} / ${maxTokens}`);
+    return (messages || []).reduce((acc, m) => acc + estimateMessageTokens(m), 0) + toolsEstimate;
+}
+
+function checkRequestBudget(messages: any[], tools: any[], modelName?: string): number {
+    const rawEstimate = estimateRequestTokens(messages, tools);
+    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
+    if (maxTokens > 0) {
+        const predicted = TokenCalibration.predict(modelName || '', rawEstimate);
+        if (predicted > maxTokens) {
+            log.warning(`请求体预测 token（含 tools JSON）超出「上下文最大token」预算: ${predicted} / ${maxTokens}`);
+        }
     }
+    return rawEstimate;
 }
 
 export class streamService {
+    private static streamMeta = new Map<string, { modelName: string; rawEstimate: number }>();
     static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl } = Config.backend;
@@ -94,6 +103,7 @@ export class streamService {
                 messages
             }, DEFAULT_CHAT_MODEL_BODY);
             body.messages = sanitizeRequestMessages(body.messages);
+            const rawEstimate = estimateRequestTokens(body.messages, []);
 
             // 打印请求发送前的上下文
             log.printRequestMessages(body.messages, runId);
@@ -129,6 +139,7 @@ export class streamService {
                 if (!data.id) {
                     throw new Error("服务器响应中没有id字段");
                 }
+                this.streamMeta.set(data.id, { modelName: model.name, rawEstimate });
                 return data.id;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
@@ -161,11 +172,11 @@ export class streamService {
                 if (tools && tools.length > 0) body.tools = tools;
                 body.tool_choice = tool_choice;
             }
-            checkRequestBudget(body.messages, tools || []);
+            const rawEstimate = checkRequestBudget(body.messages, tools || [], model.name);
             log.printRequestMessages(body.messages, runId);
 
             const time = Date.now();
-            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider, stopEvent });
+            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider, stopEvent, modelName: model.name, rawEstimateTokens: rawEstimate });
             const response = parseProviderResponse(model.provider, data);
             if (response.choices && response.choices.length > 0) {
                 const message = response.choices[0].message;
@@ -275,6 +286,11 @@ export class streamService {
                 }
                 log.info('对话结束', data.status === 'success' ? '成功' : '失败');
                 if (data.status === 'success') {
+                    const meta = this.streamMeta.get(streamId);
+                    if (meta && data.usage && data.usage.prompt_tokens) {
+                        TokenCalibration.record(meta.modelName, meta.rawEstimate, data.usage.prompt_tokens);
+                    }
+                    this.streamMeta.delete(streamId);
                     UsageManager.updateUsage(data.model, data.usage);
                 }
                 return data.status;
