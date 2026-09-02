@@ -285,34 +285,27 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     let tokens = totalTokens();
 
     while (tokens > budget && messages.length > protectedCount) {
-        const over = tokens - budget;
-
-        // 找未保护段中渲染文本最长的一条
-        let longestIdx = -1, longestLen = 0, longestEst = 0;
-        for (let i = protectedCount; i < messages.length; i++) {
-            const len = buildContent(messages[i]).length;
-            if (len > longestLen) {
-                longestLen = len;
-                longestIdx = i;
-                longestEst = estimateMessageTokens(messages[i]);
-            }
-        }
-
-        // 单条消息本身超过缺口：截断比整条丢弃更能保留上下文
-        if (longestIdx >= 0 && longestLen > 0 && longestEst > over) {
-            const prev = tokens;
-            // 按超出量折算需移除的字符数（每 token 约等于该消息的字符/token 比值）
-            const charsToRemove = Math.max(1, Math.ceil(longestLen * (over / longestEst)));
-            truncateMessageText(messages[longestIdx], Math.max(1, longestLen - charsToRemove));
-            tokens = totalTokens();
-            // 截断未降低估算（如超出量主要来自 tool_calls）时停止，避免死循环
-            if (tokens >= prev) break;
+        // 常规情况：整条丢弃最早的未保护消息（system/samples 受保护，永不丢弃）
+        if (messages.length - protectedCount > 1) {
+            tokens -= estimateMessageTokens(messages[protectedCount]);
+            messages.splice(protectedCount, 1);
             continue;
         }
 
-        // 常规情况：整条丢弃最早的未保护消息
-        tokens -= estimateMessageTokens(messages[protectedCount]);
-        messages.splice(protectedCount, 1);
+        // 兜底：只剩一条未保护消息仍超预算时，截断其渲染文本保留尾部，
+        // 而不是整条丢弃清空用户上下文（典型为合并转发/工具长结果等超大单条）
+        const over = tokens - budget;
+        const last = messages[protectedCount];
+        const len = buildContent(last).length;
+        const est = estimateMessageTokens(last);
+        if (len <= 0 || est <= 0) break;
+        const prev = tokens;
+        // 按超出量折算需移除的字符数（每 token 约等于该消息的字符/token 比值）
+        const charsToRemove = Math.max(1, Math.ceil(len * (over / est)));
+        truncateMessageText(last, Math.max(1, len - charsToRemove));
+        tokens = totalTokens();
+        // 截断未降低估算（如超出量主要来自 tool_calls）时停止，避免死循环
+        if (tokens >= prev) break;
     }
     return messages;
 }
