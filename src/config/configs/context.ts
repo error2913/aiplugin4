@@ -4,7 +4,7 @@ import { ext } from "../config";
 
 export default class ContextConfig {
     static register() {
-        seal.ext.registerIntConfig(ext, "上下文最大token", 500000, "持久化上下文 token 上限；0/负数视为无效并回退默认 500000", "上下文");
+        seal.ext.registerIntConfig(ext, "上下文最大token", 1000000, "持久化上下文 token 上限；0/负数视为无效并回退默认 1000000", "上下文");
         seal.ext.registerIntConfig(ext, "对话保存轮数", 5, "上下文超过最大 token 后保留的最近真实用户轮数；更早消息会先归档总结再删除", "上下文");
         seal.ext.registerTemplateConfig(ext, "预设上下文", [""], "每行一条预设上下文，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "上下文");
         seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，预设上下文不计入轮数", "上下文");
@@ -15,9 +15,9 @@ export default class ContextConfig {
         const MAX_ROUNDS = seal.ext.getIntConfig(ext, "对话保存轮数");
         const INSERT_COUNT = normalizeInsertCount(seal.ext.getIntConfig(ext, "插入system message间隔轮数"), MAX_ROUNDS);
         const rawMaxTokens = seal.ext.getIntConfig(ext, "上下文最大token");
-        const MAX_CONTEXT_TOKENS = rawMaxTokens > 0 ? rawMaxTokens : 500000;
+        const MAX_CONTEXT_TOKENS = rawMaxTokens > 0 ? rawMaxTokens : 1000000;
         if (rawMaxTokens <= 0) {
-            logger.warning(`「上下文最大token」不能为 0，已自动使用默认值 500000`);
+            logger.warning(`「上下文最大token」不能为 0，已自动使用默认值 1000000`);
         }
         return {
             SAMPLE_MESSAGES: seal.ext.getTemplateConfig(ext, "预设上下文"),
