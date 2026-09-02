@@ -11,6 +11,9 @@ import Tool, { toolMap } from "./tool";
 
 const log = Logger.withTag('mcp');
 
+/** tools/call 携带的 AI 会话标识头：mcp-files-exec 等后端按它隔离默认工作区 */
+const SESSION_KEY_HEADER = 'X-Aiplugin4-Session';
+
 export interface MCPServer {
     name: string;
     url: string;
@@ -144,7 +147,7 @@ function getMCPServers(): MCPServer[] {
     return mcpServersCache;
 }
 
-async function mcpRequest(server: MCPServer, payload: object, sessionId?: string): Promise<{ status: number, body: any, sessionId?: string }> {
+async function mcpRequest(server: MCPServer, payload: object, sessionId?: string, sessionKey?: string): Promise<{ status: number, body: any, sessionId?: string }> {
     const headers: { [key: string]: string } = {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
@@ -152,6 +155,7 @@ async function mcpRequest(server: MCPServer, payload: object, sessionId?: string
     };
     if (server.token && !headers["Authorization"]) headers["Authorization"] = `Bearer ${server.token}`;
     if (sessionId) headers["Mcp-Session-Id"] = sessionId;
+    if (sessionKey) headers[SESSION_KEY_HEADER] = encodeURIComponent(sessionKey);
 
     const response = await fetch(server.url, {
         method: 'POST',
@@ -237,13 +241,13 @@ async function listTools(server: MCPServer, sessionId: string): Promise<MCPToolD
     return tools;
 }
 
-async function doCallTool(server: MCPServer, sessionId: string, name: string, args: any): Promise<MCPCallResult> {
+async function doCallTool(server: MCPServer, sessionId: string, name: string, args: any, sessionKey?: string): Promise<MCPCallResult> {
     const res = await mcpRequest(server, {
         jsonrpc: '2.0',
         id: 3,
         method: 'tools/call',
         params: { name, arguments: args }
-    }, sessionId);
+    }, sessionId, sessionKey);
     const result = res.body && res.body.result;
     if (res.body && res.body.error) {
         throw new Error(`MCP 工具 ${name} 调用失败: ${formatError(res.status, res.body)}`);
@@ -369,13 +373,13 @@ async function withSessionRetry<T>(server: MCPServer, key: string, fn: (sessionI
 }
 
 /** 供资源工具等内部桥接调用 MCP 工具，不依赖 MCP 工具是否已注册到 AI 工具列表。 */
-export async function callMCPTool(serverName: string, name: string, args: any = {}): Promise<MCPCallResult> {
+export async function callMCPTool(serverName: string, name: string, args: any = {}, sessionKey = ''): Promise<MCPCallResult> {
     const server = getMCPServerByName(serverName);
     if (!server) throw new Error(`MCP 服务器 ${serverName} 未配置`);
-    return callTool(server, '', name, args);
+    return callTool(server, sessionKey, name, args);
 }
 async function callTool(server: MCPServer, key: string, name: string, args: any): Promise<MCPCallResult> {
-    const { value } = await withSessionRetry(server, key, sessionId => doCallTool(server, sessionId, name, args));
+    const { value } = await withSessionRetry(server, key, sessionId => doCallTool(server, sessionId, name, args, key));
     return value;
 }
 

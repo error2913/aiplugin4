@@ -30,7 +30,8 @@ export function registerAudioTools() {
 
         try {
             if (path) {
-                const resource = await resolveResourceReference(path, args.source, args.server);
+                const sessionKey = _session && _session.sessionId ? _session.sessionId : '';
+                const resource = await resolveResourceReference(path, args.source, args.server, sessionKey);
                 return JSON.stringify({ kind: "resource", type: "record", name: resource.name, segment: { type: "record", data: { file: resource.path } } });
             }
             if (!globalThis.tts) {

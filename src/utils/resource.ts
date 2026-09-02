@@ -66,14 +66,14 @@ function parseMCPResult(result: MCPCallResult): any {
 }
 
 /** 将 MCP export_file 结果统一成可交给消息适配器的 URI/路径。 */
-export async function resolveResourceReference(value: string, source?: string, serverName?: string): Promise<ResolvedResource> {
+export async function resolveResourceReference(value: string, source?: string, serverName?: string, sessionKey?: string): Promise<ResolvedResource> {
     const mcp = parseMCPReference(value, source, serverName);
     if (!mcp) {
         const path = resolveLocalPath(value);
         return { path, name: basename(path) };
     }
 
-    const result = parseMCPResult(await callMCPTool(mcp.server, 'export_file', { path: mcp.path }));
+    const result = parseMCPResult(await callMCPTool(mcp.server, 'export_file', { path: mcp.path }, sessionKey || ''));
     if (!result || typeof result !== 'object') throw new Error('MCP export_file 未返回文件信息');
     const downloadValue = String(result.downloadUrl || result.url || result.fileUri || result.uri || '').trim();
     const path = makeMCPDownloadUrl(mcp.server, downloadValue);
