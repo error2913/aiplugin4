@@ -1,20 +1,5 @@
 import { FACE_MAP } from "../config/static_config";
 import { truncateText } from "../utils/string";
-// 上下文内保留事件原始数据的条目上限（超出从最旧删除 raw，文本提示词保留）
-export const EVENT_RAW_LIMIT = 20;
-/** 单条事件原始数据序列化后的最大长度，超过则丢弃 raw（防御性上限，正常事件远小于此） */
-export const EVENT_RAW_MAX_CHARS = 4000;
-
-/** 事件原始数据是否可安全保留：可 JSON 序列化且不超过长度上限 */
-export function isEventRawRetainable(raw: unknown): boolean {
-    if (raw === undefined || raw === null) return false;
-    try {
-        const s = JSON.stringify(raw);
-        return !!s && s.length <= EVENT_RAW_MAX_CHARS;
-    } catch {
-        return false;
-    }
-}
 
 // 依赖事件 → 文本提示词：纯函数转换 + 去重守卫（ob11 依赖 notice/request 事件）
 

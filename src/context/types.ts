@@ -37,6 +37,8 @@ export interface ToolCallsMessage {
 export interface ToolCallbackMessage {
     role: 'tool';
     text: string;
+    /** 压缩前的完整工具返回：不参与渲染与 token 估算，仅由 grep_tool_raw/read_tool_raw 按需读取；随所在消息清理/归档失效 */
+    rawText?: string;
     contentParts?: ToolContentPart[];
     toolCallId: string;
     toolName?: string; // 工具名：prompt 工程模式下把工具结果转回 user 消息时保留来源

@@ -289,19 +289,6 @@ export class Context {
 
     }
 
-    /** 限制上下文内携带事件原始数据（raw）的条目数：超出从最旧开始删除 raw 字段，文本提示词保留 */
-    pruneSystemUserRaws(limit: number) {
-        if (limit <= 0) return;
-        const raws: SystemUserMessageItem[] = [];
-        for (const m of this.messages) {
-            if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
-            for (const item of (m as UserMessage).contentItems) {
-                if (Message.getUserMessageItemType(item) === 'system' && (item as SystemUserMessageItem).raw !== undefined) raws.push(item as SystemUserMessageItem);
-            }
-        }
-        const overflow = raws.length - limit;
-        for (let i = 0; i < overflow; i++) delete raws[i].raw;
-    }
     addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {
         // 防御：空数组不应入库，避免后续请求体携带 "tool_calls":[] 被后端拒绝
         if (!toolCalls || toolCalls.length === 0) {
@@ -320,6 +307,8 @@ export class Context {
     // 独立于用户消息压缩阈值；web_search 压缩时附带搜索目标，帮助保留与问题相关的信息
     async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, searchTarget?: string, contentParts?: ToolContentPart[]) {
         const { TOOL_RESPONSE_COMPRESS_MIN_LENGTH } = Config.tool;
+        // 压缩前原文：仅当文本确实被压缩替换后保留，供只读工具按需读取（不参与渲染/预算）
+        let rawText: string | undefined;
         if (TOOL_RESPONSE_COMPRESS_MIN_LENGTH > 0 && text.length > TOOL_RESPONSE_COMPRESS_MIN_LENGTH) {
             try {
                 let prompt = text;
@@ -327,16 +316,25 @@ export class Context {
                     prompt = `搜索目标:${searchTarget}\n\n工具返回结果:\n${text}`;
                 }
                 const compressed = await Agent.get('compress_agent').chat(prompt);
-                if (compressed) text = compressed;
+                if (compressed && compressed !== text) {
+                    rawText = text;
+                    text = compressed;
+                }
             } catch (e) {
                 log.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
         // 防注入：工具返回内容（如历史消息、网页文本）中的内部上下文标签直接剥离，不进入上下文
         text = stripInternalTags(text);
+        if (rawText !== undefined) {
+            // 原文与展示文本走同一防注入处理；附加指针提示让模型知道可以按需深挖
+            rawText = stripInternalTags(rawText);
+            text += `\n[完整原文已保留: tool_call_id=${toolCallId}；需核对细节时可用 grep_tool_raw / read_tool_raw 查阅]`;
+        }
         const tcbm: ToolCallbackMessage = {
             role: 'tool',
             text,
+            ...(rawText !== undefined ? { rawText } : {}),
             toolCallId,
             contentParts,
             toolName
