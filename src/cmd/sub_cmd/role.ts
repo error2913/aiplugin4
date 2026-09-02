@@ -14,7 +14,7 @@ export function registerCmdRole() {
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, ret } = scc;
 
-        const { ROLE_NAMES: roleSettingNames, INSTRUCTIONS: roleSettingTemplate } = Config.message;
+        const { ROLE_NAMES: roleSettingNames, INSTRUCTIONS: roleSettingTemplate } = Config.role;
         const { roleName } = getRoleSetting(ctx);
         // 以 . 开头的角色设定为隐藏角色：不出现在列表中，但可通过 .ai role 直接切换
         const visibleNames = roleSettingNames.filter(name => !name.startsWith('.'));

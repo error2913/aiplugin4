@@ -173,7 +173,7 @@ export async function replyToSender(ctx: seal.MsgContext, msg: seal.Message, ses
         return '';
     }
 
-    const { showMsgId = true } = Config.message as any;
+    const { showMsgId = true } = Config.context as any;
     if (showMsgId && netExists()) {
         try {
             const rawMessageArray = transformTextToArray(s);

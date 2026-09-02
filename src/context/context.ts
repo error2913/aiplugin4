@@ -198,7 +198,7 @@ export class Context {
 
     /** 文本超过压缩阈值时交给压缩智能体，返回压缩结果；未超阈值或失败时返回原文 */
     static async compressIfLong(text: string): Promise<string> {
-        const { COMPRESS_THRESHOLD } = Config.message;
+        const { COMPRESS_THRESHOLD } = Config.context;
         if (text.length <= COMPRESS_THRESHOLD) return text;
         try {
             const compressed = await Agent.get('compress_agent').chat(text);
@@ -355,7 +355,7 @@ export class Context {
         this.archiving = true;
 
         try {
-            const { MAX_ROUNDS, MAX_CONTEXT_TOKENS } = Config.message;
+            const { MAX_ROUNDS, MAX_CONTEXT_TOKENS } = Config.context;
             const keepRounds = MAX_ROUNDS > 0 ? MAX_ROUNDS : 5;
 
             while (estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS) {
@@ -395,7 +395,7 @@ export class Context {
     }
 
     private async forceFitContext(): Promise<void> {
-        const { MAX_CONTEXT_TOKENS } = Config.message;
+        const { MAX_CONTEXT_TOKENS } = Config.context;
         let safety = 0;
 
         while (estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS && this.messages.length > 0 && safety < 10000) {
@@ -529,5 +529,3 @@ export class Context {
     }
 
 }
-
-

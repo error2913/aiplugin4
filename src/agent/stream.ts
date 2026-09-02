@@ -77,7 +77,7 @@ function estimateRequestTokens(messages: any[], tools: any[]): number {
 
 function checkRequestBudget(messages: any[], tools: any[], modelName?: string): number {
     const rawEstimate = estimateRequestTokens(messages, tools);
-    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
+    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.context;
     if (maxTokens > 0) {
         const predicted = TokenCalibration.predict(modelName || '', rawEstimate);
         if (predicted > maxTokens) {

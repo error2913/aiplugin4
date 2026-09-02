@@ -1,6 +1,6 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
-import { parseRoleEntry } from "../config/configs/message";
+import { parseRoleEntry } from "../config/configs/role";
 import { logger } from "../logger";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
@@ -185,7 +185,7 @@ export async function buildSystemMessage(ctx: seal.MsgContext, session: Session)
 }
 
 function buildSamplesMessages(ctx: seal.MsgContext): ContextMessage[] {
-    const { SAMPLE_MESSAGES } = Config.message;
+    const { SAMPLE_MESSAGES } = Config.context;
 
     return SAMPLE_MESSAGES
         .map((item, index) => ({ item, index }))
@@ -201,7 +201,7 @@ function buildSamplesMessages(ctx: seal.MsgContext): ContextMessage[] {
 }
 
 function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
-    const { INSERT_COUNT } = Config.message;
+    const { INSERT_COUNT } = Config.context;
 
     const contextMessages = messages.slice();
     if (INSERT_COUNT <= 0) return contextMessages;
@@ -273,7 +273,7 @@ function truncateMessageText(message: ContextMessage, maxChars: number): number 
  * 而不是让请求体带着超限预算直接发送，也不会把整个会话上下文一次性清空。
  */
 function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[], modelName?: string): ContextMessage[] {
-    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
+    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.context;
     if (maxTokens <= 0) return messages;
 
     const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
@@ -533,7 +533,7 @@ export async function buildMultimodalContent(message: ContextMessage): Promise<R
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {
-    const { ROLE_NAMES, INSTRUCTIONS } = Config.message;
+    const { ROLE_NAMES, INSTRUCTIONS } = Config.role;
     const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
     let roleIndex = 0;
     if (exists && roleName !== '' && ROLE_NAMES.includes(roleName)) {

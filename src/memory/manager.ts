@@ -317,7 +317,7 @@ export class MemoryManager {
      */
     static async summarizeChunk(session: Session, messages: any[]): Promise<boolean> {
         if (!messages || messages.length === 0) return true;
-        const roleSetting = (Config.message.ROLE_SETTINGS || [])[0] || '';
+        const roleSetting = (Config.role.ROLE_SETTINGS || [])[0] || '';
         const isPrivate = session.sessionType !== 'group';
         const sessionId = session.sessionId;
         const userNumber = isPrivate ? sessionId.replace(/^.+:/, '') : '';

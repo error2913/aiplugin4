@@ -2,16 +2,17 @@ import Logger from "../logger";
 
 import BackendConfig from "./configs/backend";
 import BaseConfig from "./configs/base";
+import ContextConfig from "./configs/context";
 import EventConfig from "./configs/event";
 import ImageConfig from "./configs/image";
 import KnowledgeBaseConfig from "./configs/knowledge_base";
 import McpConfig from "./configs/mcp";
 import MemoryConfig from "./configs/memory";
-import MessageConfig from "./configs/message";
 import ModelConfig from "./configs/model";
 import ReceivedConfig from "./configs/received";
 import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
+import RoleConfig from "./configs/role";
 import SkillsConfig from "./configs/skills";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
@@ -28,7 +29,8 @@ export const ext: seal.ExtInfo = (() => {
 const configMap = {
     base: BaseConfig,
     model: ModelConfig,
-    message: MessageConfig,
+    role: RoleConfig,
+    context: ContextConfig,
     received: ReceivedConfig,
     trigger: TriggerConfig,
     reply: ReplyConfig,
