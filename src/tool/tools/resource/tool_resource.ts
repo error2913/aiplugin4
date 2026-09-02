@@ -16,7 +16,7 @@ export function registerResourceTools() {
         type: "function",
         function: {
             name: "list_resources",
-            description: "查询当前已配置的本地资源名称。发送资源请使用 call_ob11_api 的 image/record/video/file 消息段，并将 file 写成 resource:资源名。",
+            description: "查询当前已配置的本地资源名称。发送图片时优先在当前回复中使用 [img:图片ID]；发送语音/视频/文件，或通过 call_ob11_api 向指定会话发送资源时，将 file 写成 resource:资源名。如需资源的实际路径/URI，使用 get_resource_path。",
             parameters: {
                 type: "object",
                 properties: {

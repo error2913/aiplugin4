@@ -23,7 +23,7 @@ function basename(value: string): string {
     return match ? safeDecode(match[0]) : 'resource';
 }
 
-function parseMCPReference(value: string, source?: string, serverName?: string): { server: string; path: string } | null {
+export function parseMCPReference(value: string, source?: string, serverName?: string): { server: string; path: string } | null {
     const raw = String(value || '').trim();
     if (/^mcp:\/\//i.test(raw)) {
         const match = /^mcp:\/\/([^\/]+)\/(.*)$/i.exec(raw);

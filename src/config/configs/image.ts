@@ -14,6 +14,10 @@ export default class ImageConfig {
         ImageConfig.pathMapCache[key] = map;
         return map;
     }
+    static resetCacheForTest(): void {
+        ImageConfig.pathMapCache = {};
+    }
+
     static register() {
         seal.ext.registerStringConfig(ext, "图片全局识别豹语条件", '0', "0 不自动识别；1 所有图片自动识别转文字；也可填豹语表达式（如 $t群号_RAW=='2001'）按群启用", "图片");
         seal.ext.registerOptionConfig(ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题", "图片");
@@ -26,4 +30,7 @@ export default class ImageConfig {
             LOCAL_IMAGE_PATH_MAP: ImageConfig.getPathMapConfig(ext, "本地图片路径")
         }
     }
+}
+export function resetImageConfigCacheForTest(): void {
+    ImageConfig.resetCacheForTest();
 }

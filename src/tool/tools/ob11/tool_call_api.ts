@@ -13,7 +13,8 @@ export function registerCallOb11Api() {
                 "消息发送格式：\n" +
                 "- 发私聊/群聊消息使用 send_private_msg / send_group_msg，params.message 传文本或消息段数组。\n" +
                 "- 图片/语音/视频/文件分别使用 image/record/video/file 消息段。\n" +
-                "- 本地资源将 file 写成 resource:资源ID。\n" +
+                "- 当前会话直接回复图片优先使用 [img:图片ID]，不要在 call_ob11_api 中发送。\n" +
+                "- 需要 call_ob11_api 发送本地资源时，将 file 写成 resource:资源ID。\n" +
                 "- 上传文件使用 upload_group_file / upload_private_file，不要把上传动作伪装成普通 file 消息段。\n" +
                 "- 资源路径支持本地绝对路径、file:// URI、HTTP(S) URL、base64://、mcp://服务器名/沙箱相对路径。",
             parameters: {
