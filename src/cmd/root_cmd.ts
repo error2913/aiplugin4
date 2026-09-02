@@ -11,7 +11,6 @@ import { registerCmdCtxn } from "./sub_cmd/ctxn";
 import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
 import { registerCmdImage } from "./sub_cmd/image";
-import { registerCmdKB } from "./sub_cmd/kb";
 import { registerCmdLive } from "./sub_cmd/live";
 import { registerCmdMemory } from "./sub_cmd/memory";
 import { registerCmdModel } from "./sub_cmd/model";
@@ -72,7 +71,6 @@ export class SubCmd {
         registerCmdRole();
         registerCmdImage();
         registerCmdMemory();
-        registerCmdKB();
         registerCmdTool();
         registerCmdIgnore();
         registerCmdToken();

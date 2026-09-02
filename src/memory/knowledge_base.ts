@@ -11,8 +11,6 @@ import { hashString, KnowledgeChunk, KnowledgeLibrary, splitMarkdownIntoChunks }
 const VECTOR_RERANK_CANDIDATE_LIMIT = 20;
 /** 知识库索引渲染上限：注入兜底/列表展示时控制单次输出条数，超出提示用 knowledge_search 检索 */
 export const KB_INDEX_LIMIT = 100;
-/** 主动查询（.ai kb list / knowledge_list 工具）的索引上限，避免超大知识库一次输出过长 */
-export const KB_LIST_LIMIT = 200;
 /** 知识库注入段字符预算：正文/索引合计不超过该值，避免挤占 system prompt */
 export const KB_INJECT_MAX_CHARS = 1500;
 /** system prompt 静态知识库段最多展示的库数量 */

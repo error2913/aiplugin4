@@ -18,6 +18,7 @@ import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { SessionService } from "../src/session/session_service";
 import { SubCmd } from "../src/cmd/root_cmd";
+import { defaultCmdPriv } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { registerCmdMemory } from "../src/cmd/sub_cmd/memory";
@@ -4412,6 +4413,23 @@ description: 茶库
         assert.ok(pathTool, "get_resource_path 应已注册");
         assert.ok(pathTool.toolInfo.function.parameters.required.includes("type"), "get_resource_path 应要求 type");
         assert.ok(pathTool.toolInfo.function.parameters.required.includes("id"), "get_resource_path 应要求 id");
-    }
+    },
 
+    /** 移除 .ai kb：完整注册命令表后不应再包含 kb，知识库访问保留给 knowledge_* 工具 */
+    testAiKbCommandRemoved(): void {
+        const beforeMap = { ...SubCmd.map };
+        const beforeAiArgs = defaultCmdPriv.ai.args;
+        try {
+            SubCmd.register();
+            assert.equal(SubCmd.map['kb'], undefined, '.ai kb 子命令应已移除');
+            assert.ok(!Object.prototype.hasOwnProperty.call(SubCmd.map, 'kb'), 'SubCmd.map 不应注册 kb');
+            assert.ok(SubCmd.map['memory'], 'memory 子命令应保留');
+            assert.ok(SubCmd.map['tool'], 'tool 子命令应保留');
+        } finally {
+            for (const key of Object.keys(SubCmd.map)) {
+                if (!Object.prototype.hasOwnProperty.call(beforeMap, key)) delete SubCmd.map[key];
+            }
+            defaultCmdPriv.ai.args = beforeAiArgs;
+        }
+    }
 };
