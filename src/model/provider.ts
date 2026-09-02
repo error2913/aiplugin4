@@ -1,6 +1,7 @@
 // 模型 Provider：统一模型请求（超时 / 重试 / 用量上报）
 import Config from "../config/config";
 import { logger } from "../logger";
+import { TokenCalibration } from "../token_calibration";
 import { UsageManager } from "../usage";
 import { StopError, StopEvent, withTimeout } from "../utils/utils";
 import { fetchData } from "../utils/web";
@@ -14,6 +15,10 @@ export interface RequestModelOptions {
     provider?: string;
     /** 会话停止信号：stop 后立即中止，不再重试 */
     stopEvent?: StopEvent;
+    /** 发送前启发式估算的原始 token 数，用于校准 */
+    rawEstimateTokens?: number;
+    /** 配置中的模型名，优先用于校准 key */
+    modelName?: string;
 }
 
 /**
@@ -31,6 +36,7 @@ export async function requestModel(url: string, apiKey: string, body: any, optio
             const usage = extractUsage(data);
             if (usage) {
                 UsageManager.updateUsage(data.model || '', usage);
+                TokenCalibration.record(options.modelName || data.model || '', options.rawEstimateTokens || 0, usage.prompt_tokens);
             }
             return data;
         } catch (e) {

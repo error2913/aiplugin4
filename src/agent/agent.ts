@@ -160,6 +160,7 @@ export default class Agent {
     private async runInternal(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const toolInfos = STATUS && !PROMPT_ENGINEERING ? Tool.getNativeRequestTools(session) : [];
+        const modelName = Model.getChatModel('chat')?.name || '';
         const trace = new AgentRunContext();
         const version = session.stopVersion;
 
@@ -182,7 +183,7 @@ export default class Agent {
             trace.beginTurn();
             // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
             await session.flushPending();
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage);
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName);
             const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent);
             // stop 中止检查点：模型请求期间被 stop，丢弃本轮输出直接中止
             if (session.stopVersion !== version) return;
@@ -334,6 +335,7 @@ export default class Agent {
         systemMessage?: Awaited<ReturnType<typeof buildSystemMessage>>
     ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
+        const modelName = Model.getChatModel('chat')?.name || '';
         const trace = new AgentRunContext();
         const version = session.stopVersion;
 
@@ -342,7 +344,7 @@ export default class Agent {
         await session.flushPending();
 
         const sys = systemMessage ?? await buildSystemMessage(ctx, session);
-        const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys);
+        const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName);
         const id = await streamService.startStream(messages, trace.runId, session.stopEvent);
         if (!id) return;
         // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流

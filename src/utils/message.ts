@@ -6,6 +6,7 @@ import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import User from "../session/user";
+import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
 import { fmtDate } from "./string";
@@ -49,21 +50,73 @@ interface ContextMessage {
 const SYSTEM_REMINDER_TEXT = '请继续遵守上方角色设定、上下文标记和工具调用规范。';
 
 /**
- * 无依赖的 token 估算：ASCII 约 4 字符/token，非 ASCII（中文等）约 1 字符/token。
+ * 无依赖的 token 估算：按 Unicode 类别分桶近似 BPE。
  * 用于「上下文最大token」的整包预算估算，避免依赖外部 tokenizer。
  */
 export function estimateTextTokens(text: string): number {
-    let ascii = 0;
-    for (let i = 0; i < text.length; i++) {
-        if (text.charCodeAt(i) <= 0x7F) ascii++;
+    let asciiAlnum = 0;
+    let asciiSpace = 0;
+    let asciiPunct = 0;
+    let cjk = 0;
+    let cjkLike = 0;
+    let otherBmp = 0;
+    let astral = 0;
+
+    for (const ch of String(text || '')) {
+        const cp = ch.codePointAt(0) as number;
+        if (isCjkCodePoint(cp)) {
+            cjk++;
+        } else if (cp > 0xFFFF) {
+            astral++;
+        } else if (cp <= 0x7F) {
+            if ((cp >= 0x30 && cp <= 0x39) || (cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A)) {
+                asciiAlnum++;
+            } else if (cp === 0x20 || (cp >= 0x09 && cp <= 0x0D)) {
+                asciiSpace++;
+            } else if (cp >= 0x21 && cp <= 0x7E) {
+                asciiPunct++;
+            } else {
+                asciiSpace++;
+            }
+        } else if (isCjkLikeCodePoint(cp)) {
+            cjkLike++;
+        } else {
+            otherBmp++;
+        }
     }
-    return Math.ceil(ascii / 4) + (text.length - ascii);
+
+    return Math.ceil(asciiAlnum / 4)
+        + Math.ceil(asciiSpace / 4)
+        + Math.ceil(asciiPunct / 2)
+        + cjk
+        + Math.ceil(cjkLike * 3 / 2)
+        + Math.ceil(otherBmp / 2)
+        + astral * 2;
 }
 
+function isCjkCodePoint(cp: number): boolean {
+    return (cp >= 0x3400 && cp <= 0x4DBF)
+        || (cp >= 0x4E00 && cp <= 0x9FFF)
+        || (cp >= 0xF900 && cp <= 0xFAFF)
+        || (cp >= 0x20000 && cp <= 0x2FA1F);
+}
+
+function isCjkLikeCodePoint(cp: number): boolean {
+    return (cp >= 0x3040 && cp <= 0x30FF)
+        || (cp >= 0xAC00 && cp <= 0xD7AF);
+}
+
+/** 请求体结构 overhead 默认值 */
+const MESSAGE_BASE_OVERHEAD = 4;
+const TOOL_CALL_OVERHEAD = 6;
+const TOOL_RESULT_OVERHEAD = 3;
+const REASONING_FIELD_OVERHEAD = 2;
+
 /**
- * 单条消息 token 估算：与 estimateTextTokens 同一口径（ASCII 4 字符/token，非 ASCII 1 字符/token）。
+ * 单条消息 token 估算：与 estimateTextTokens 同一口径，额外计入请求 JSON 结构开销。
  * 兼容 RequestMessage（content 为字符串或多模态内容块）与 ContextMessage（contentItems/text），
- * 并把 assistant 的 tool_calls JSON 一并计入，使「上下文最大token」与请求体真实负载一致；
+ * 并把 assistant 的 tool_calls JSON、reasoning_content/思维链一并计入，
+ * 使「上下文最大token」与请求体真实负载一致。
  * applyTokenBudget 与 stream.checkRequestBudget 统一使用该口径，避免两套估算不一致。
  * 多模态图片 URL/base64 只按固定 [image] 开销估算，避免把 base64 当纯文本猛算。
  */
@@ -84,11 +137,24 @@ export function estimateMessageTokens(m: ContextMessage | RequestMessage): numbe
             text = buildContent(contextMessage);
         }
     }
+
     const toolCalls = (m as ContextMessage).toolCalls || (m as RequestMessage).tool_calls;
     const toolCallsEst = Array.isArray(toolCalls) && toolCalls.length > 0
         ? estimateTextTokens(JSON.stringify(toolCalls))
         : 0;
-    return estimateTextTokens(text) + toolCallsEst;
+
+    const requestReasoning = (m as RequestMessage).reasoning_content;
+    const reasoningText = requestReasoning !== undefined
+        ? requestReasoning
+        : resolveReasoningContent(m as ContextMessage);
+    const reasoningTokens = reasoningText !== undefined
+        ? estimateTextTokens(reasoningText) + REASONING_FIELD_OVERHEAD
+        : 0;
+
+    let tokens = estimateTextTokens(text) + toolCallsEst + MESSAGE_BASE_OVERHEAD + reasoningTokens;
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) tokens += TOOL_CALL_OVERHEAD;
+    if (m.role === 'tool') tokens += TOOL_RESULT_OVERHEAD;
+    return tokens;
 }
 
 /**
@@ -206,12 +272,15 @@ function truncateMessageText(message: ContextMessage, maxChars: number): number 
  * 单条消息过大，整条丢弃会清空全部上下文）时，改为按超出量截断其渲染文本（保留尾部），
  * 而不是让请求体带着超限预算直接发送，也不会把整个会话上下文一次性清空。
  */
-function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[]): ContextMessage[] {
+function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[], modelName?: string): ContextMessage[] {
     const { MAX_CONTEXT_TOKENS: maxTokens } = Config.message;
     if (maxTokens <= 0) return messages;
 
     const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
-    const budget = Math.max(maxTokens - reserve, 1);
+    const factor = TokenCalibration.getFactor(modelName || '');
+    const budget = factor > 0
+        ? Math.max(Math.floor(maxTokens / factor - reserve), 1)
+        : Math.max(maxTokens - reserve, 1);
     const totalTokens = () => messages.reduce((acc, m) => acc + estimateMessageTokens(m), 0);
     let tokens = totalTokens();
 
@@ -253,7 +322,8 @@ export async function handleMessages(
     session: Session,
     multimodal = false,
     tools?: unknown[],
-    systemMessage?: ContextMessage
+    systemMessage?: ContextMessage,
+    modelName?: string
 ): Promise<RequestMessage[]> {
     const system = systemMessage ?? await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -264,7 +334,8 @@ export async function handleMessages(
     const messages: ContextMessage[] = applyTokenBudget(
         [system, ...samplesMessages, ...contextMessages],
         samplesMessages.length + 1,
-        tools
+        tools,
+        modelName
     );
 
     // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
