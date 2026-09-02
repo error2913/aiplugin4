@@ -64,7 +64,9 @@ data：
 不要把图片、语音、视频或文件静默改成文本路径；必须保留对应 segment type。资源路径无法解析时应让工具返回错误并修正路径，不要假装发送成功。
 
 ## 4. 本地资源引用
-需要发送插件资源时，先调用 \`list_resources\` 查询资源 ID（这是资源查询工具，不是发送工具），然后在消息段中写 \`resource:资源ID\`。例如：
+- 当前会话回复中发送图片，优先直接输出 \`[img:资源ID]\`，不需要调用 \`call_ob11_api\`。
+- 需要发送插件资源时，先调用 \`list_resources\` 查询资源 ID（这是资源查询工具，不是发送工具）。
+- \`call_ob11_api\` + \`resource:资源ID\` 用于发送语音/视频/文件，或向指定会话/按 API 组合消息发送图片。例如：
 
 {"action":"send_group_msg","params":{"group_id":"123","message":[{"type":"image","data":{"file":"resource:角色头像"}}]}}
 

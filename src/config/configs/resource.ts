@@ -1,4 +1,5 @@
-// 资源配置：本地图片/语音/文件/视频路径（供 system prompt 列出可发送资源）
+// 资源配置：本地图片/语音/文件/视频路径
+// 供 list_resources 查询资源 ID、get_resource_path 查询实际路径/URI
 import Logger from "../../logger";
 import Image from "../../resource/image";
 import { ext } from "../config";
@@ -22,6 +23,11 @@ export default class ResourceConfig {
 
 // 本地资源路径属于启动解析一次、重载 JS 才生效的复杂配置（名=路径 解析）：模块级缓存
 const pathMapCache: { [key: string]: { [id: string]: string } } = {};
+
+/** 仅测试用：清空资源路径模块缓存，使下一次 get() 重新读取当前模板配置。 */
+export function resetResourceConfigCacheForTest(): void {
+    for (const key of Object.keys(pathMapCache)) delete pathMapCache[key];
+}
 function getPathMapConfig(key: string): { [id: string]: string } {
     if (pathMapCache[key]) return pathMapCache[key];
     const paths = seal.ext.getTemplateConfig(ext, key).filter(x => x);

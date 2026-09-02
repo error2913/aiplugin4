@@ -10,7 +10,7 @@ Config.registerConfig();
 import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages, textToMultimodalContent } from "../src/utils/message";
 import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
-import { SUMMARY_PROMPT_TEMPLATE } from "../src/prompt/templates";
+import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/templates";
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
 import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isEventRawRetainable, isNoticeInWhitelist, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerEventTools } from "../src/tool/tools/event/tool_event";
@@ -48,6 +48,10 @@ import { getSkillSummaries, getSkillSummariesBudgeted, registerSkills, SKILL_INJ
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
+import { resetResourceConfigCacheForTest } from "../src/config/configs/resource";
+import { resetImageConfigCacheForTest } from "../src/config/configs/image";
+import { registerResourcePathTool } from "../src/tool/tools/resource/tool_resource_path";
+import { registerResourceTools } from "../src/tool/tools/resource/init";
 import { normalizeSpecialIdParams, validateSpecialIdParams } from "../src/transport/ob11/special_id_params";
 import { registerSpecialResource } from "../src/utils/special_id";
 
@@ -4288,5 +4292,126 @@ description: 茶库
             resetConfigCache();
         }
     },
+
+    /** get_resource_path：本地文件/图片资源应返回解析后的路径，兼容 resource: 与 [img:] */
+    async testGetResourcePathLocalAndImage(): Promise<void> {
+        const keys = ["本地图片路径", "本地语音路径", "本地文件路径", "本地视频路径"];
+        const saved = keys.map(k => [k, TC.templateConfigs[k]] as const);
+        TC.templateConfigs["本地图片路径"] = ["unit_img=data/images/unit.png"];
+        TC.templateConfigs["本地语音路径"] = ["unit_audio=records/unit.mp3"];
+        TC.templateConfigs["本地文件路径"] = ["unit_file=data/files/unit.pdf"];
+        TC.templateConfigs["本地视频路径"] = ["unit_video=data/videos/unit.mp4"];
+        resetResourceConfigCacheForTest();
+        resetImageConfigCacheForTest();
+        resetConfigCache();
+        registerResourceTools();
+        try {
+            const tool = toolMap["get_resource_path"];
+            assert.ok(tool, "get_resource_path 应已注册");
+            const file = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: "file", id: "unit_file" }));
+            assert.equal(file.ok, true);
+            assert.equal(file.type, "file");
+            assert.equal(file.id, "unit_file");
+            assert.equal(file.scheme, "local");
+            assert.ok(String(file.path).includes("unit.pdf"), "本地路径应包含文件名");
+            const prefixed = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: "file", id: "resource:unit_file" }));
+            assert.equal(prefixed.ok, true);
+            assert.equal(prefixed.id, "unit_file");
+            const image = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: "image", id: "[img:unit_img:测试图]" }));
+            assert.equal(image.ok, true);
+            assert.equal(image.id, "unit_img");
+            assert.equal(image.scheme, "local");
+            assert.ok(String(image.path).includes("unit.png"), "图片路径应包含文件名");
+        } finally {
+            for (const [k, v] of saved) {
+                if (v === undefined) delete TC.templateConfigs[k];
+                else TC.templateConfigs[k] = v;
+            }
+            resetResourceConfigCacheForTest();
+            resetImageConfigCacheForTest();
+            resetConfigCache();
+        }
+    },
+
+    /** get_resource_path：mcp:// 默认只做结构解析，不触发 export_file */
+    async testGetResourcePathMCPDefault(): Promise<void> {
+        const saved = TC.templateConfigs["本地文件路径"];
+        TC.templateConfigs["本地文件路径"] = ["unit_mcp=mcp://mcp-files-exec/output/unit.pdf"];
+        resetResourceConfigCacheForTest();
+        resetImageConfigCacheForTest();
+        resetConfigCache();
+        registerResourceTools();
+        try {
+            const tool = toolMap["get_resource_path"];
+            const out = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: "file", id: "unit_mcp" }));
+            assert.equal(out.ok, true);
+            assert.equal(out.scheme, "mcp");
+            assert.equal(out.server, "mcp-files-exec");
+            assert.equal(out.mcp_path, "output/unit.pdf");
+            assert.equal(out.download_url, undefined);
+        } finally {
+            if (saved === undefined) delete TC.templateConfigs["本地文件路径"];
+            else TC.templateConfigs["本地文件路径"] = saved;
+            resetResourceConfigCacheForTest();
+            resetImageConfigCacheForTest();
+            resetConfigCache();
+        }
+    },
+
+    /** get_resource_path：类型错误和未找到资源返回结构化错误 */
+    async testGetResourcePathErrors(): Promise<void> {
+        const saved = TC.templateConfigs["本地文件路径"];
+        TC.templateConfigs["本地文件路径"] = ["unit_file=data/files/unit.pdf"];
+        resetResourceConfigCacheForTest();
+        resetImageConfigCacheForTest();
+        resetConfigCache();
+        registerResourceTools();
+        try {
+            const tool = toolMap["get_resource_path"];
+            const invalidType = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: "foo", id: "unit_file" }));
+            assert.equal(invalidType.ok, false);
+            assert.equal(invalidType.error.code, "INVALID_PARAMS");
+            const missing = JSON.parse(await tool.solve(makeCtx(), {} as any, {} as any, { type: "file", id: "missing" }));
+            assert.equal(missing.ok, false);
+            assert.equal(missing.error.code, "NOT_FOUND");
+            assert.ok(String(missing.error.message).includes("missing"), "错误信息应包含缺失的资源 ID");
+        } finally {
+            if (saved === undefined) delete TC.templateConfigs["本地文件路径"];
+            else TC.templateConfigs["本地文件路径"] = saved;
+            resetResourceConfigCacheForTest();
+            resetImageConfigCacheForTest();
+            resetConfigCache();
+        }
+    },
+
+    /** system prompt 应引导当前会话发图片时优先使用 [img:图片ID] */
+    testSystemPromptPrefersImgTagForSendingImages(): void {
+        const rendered = SYSTEM_MESSAGE_TEMPLATE({
+            instruction: "",
+            platform: "QQ",
+            sessionType: "private",
+            sessionName: "测试",
+            sessionId: "QQ:1",
+            botId: "QQ:10000",
+            RECEIVE_IMAGE: true,
+            DIRECTION_PROMPT: false,
+            toolBlock: ""
+        });
+        assert.ok(rendered.includes("发送图片时优先直接在最终回复中输出 [img:图片ID]"), "应包含优先使用 [img] 的指令");
+        assert.ok(rendered.includes("本地图片 ID 先用 list_resources(type=image) 查询"), "应包含先查询本地图片 ID 的说明");
+    },
+
+    /** list_resources 描述应指向新的图片发送优先规则与 get_resource_path */
+    testResourceToolDescriptionsSynced(): void {
+        registerResourceTools();
+        const list = toolMap["list_resources"];
+        assert.ok(list, "list_resources 应已注册");
+        assert.ok(list.toolInfo.function.description.includes("[img:图片ID]"), "list_resources 描述应提到优先使用 [img]");
+        assert.ok(list.toolInfo.function.description.includes("get_resource_path"), "list_resources 描述应提到 get_resource_path");
+        const pathTool = toolMap["get_resource_path"];
+        assert.ok(pathTool, "get_resource_path 应已注册");
+        assert.ok(pathTool.toolInfo.function.parameters.required.includes("type"), "get_resource_path 应要求 type");
+        assert.ok(pathTool.toolInfo.function.parameters.required.includes("id"), "get_resource_path 应要求 id");
+    }
 
 };

@@ -319,8 +319,10 @@ max_tokens = 2048
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 本地图片路径 | 每行一个本地图片路径，供 system prompt 列出可发送资源；修改后需重载 JS 生效 |
-| 本地语音路径 | 每行一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 system prompt 列出；发送语音需要配置 ffmpeg 到环境变量；修改后需重载 JS 生效 |
+| 本地图片路径 | 每行一个本地图片路径，供 `list_resources` / `get_resource_path` 查询；当前会话发图片优先用 `[img:图片ID]`；修改后需重载 JS 生效 |
+| 本地语音路径 | 每行一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送语音需要配置 ffmpeg 到环境变量；修改后需重载 JS 生效 |
+| 本地文件路径 | 每行一个本地文件：`文件名=路径`（省略文件名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送文件需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
+| 本地视频路径 | 每行一个本地视频：`视频名=路径`（省略视频名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送视频需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
 
 ### prompt 模板
 
@@ -451,7 +453,7 @@ max_tokens = 2048
 | 属性 | `attr_get`、`attr_set` |
 | 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
 | OB11 管理/查询 | 统一通过 `call_ob11_api` 传入 `set_group_ban`、`set_group_name`、`get_group_list` 等 action |
-| 资源/群资料 | `list_resources`；群资料统一通过 `call_ob11_api` 传入对应 action |
+| 资源/群资料 | `list_resources`、`get_resource_path`；群资料统一通过 `call_ob11_api` 传入对应 action |
 | 精华消息 | 统一通过 `call_ob11_api` 传入 `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
 | 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
@@ -460,7 +462,7 @@ max_tokens = 2048
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 
-> OB11 说明：AI 只调用 `call_ob11_api`。安装 ob11 网络连接依赖时，action 原样交给 `net.callApi`；未安装时仍由 SealDice 原生后端完成当前上下文可完成的发送和查询，远端 action 返回 `OB11_DEPENDENCY_REQUIRED`，不会假装成功。图片、语音、视频、文件、JSON、Markdown、音乐和合并转发均通过 message segment 保留格式；`generate_audio`、`search_music` 只生成可发送的 segment。
+> OB11 说明：协议动作统一通过 `call_ob11_api`。安装 ob11 网络连接依赖时，action 原样交给 `net.callApi`；未安装时仍由 SealDice 原生后端完成当前上下文可完成的发送和查询，远端 action 返回 `OB11_DEPENDENCY_REQUIRED`，不会假装成功。当前会话回复中发送图片优先使用 `[img:图片ID]`；图片、语音、视频、文件、JSON、Markdown、音乐和合并转发均通过 message segment 保留格式；`generate_audio`、`search_music` 只生成可发送的 segment。
 
 > 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「后端」配置「核心桥WS地址」，默认 `ws://127.0.0.1:46880/plugin`）。
 
