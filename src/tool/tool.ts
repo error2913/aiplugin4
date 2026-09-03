@@ -160,9 +160,6 @@ export default class Tool {
             if (typeof solved !== 'string' && solved.contentParts && solved.contentParts.length > 0) {
                 result.contentParts = solved.contentParts;
             }
-            if (name === 'web_search' && args && typeof args.q === 'string' && args.q.trim()) {
-                result.searchTarget = args.q.trim();
-            }
             return { result, callBack: tool.callBack };
         } catch (e) {
             // stop 中断工具执行：向上抛出让工具链立即中止（不把 StopError 当工具失败回填给模型）

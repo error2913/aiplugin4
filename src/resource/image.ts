@@ -1,19 +1,16 @@
 // 图片资源：URL/base64/本地路径图片，图片识别与存储
-import Agent from "../agent/agent";
 import { ext } from "../config/config";
 import Config from "../config/config";
 import { logger } from "../logger";
 import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
+import { buildImageTruncateMarker } from "../utils/raw_marker";
 import { getSessionId } from "../utils/seal";
 import { MessageSegment } from "../utils/string";
 import { getPlatform } from "../utils/target_id";
 import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 
 const log = logger.withTag('image');
-
-// 图片转文字结果超过该字数时交给压缩智能体压缩，避免撑爆上下文
-const IMAGE_TEXT_COMPRESS_MIN_LENGTH = 5000;
 
 // URL 转 base64 失败后的冷却期：1 小时内不再重复请求，超时后允许重试一次
 const IMAGE_BASE64_RETRY_TTL = 60 * 60 * 1000;
@@ -33,6 +30,7 @@ export default class Image {
         base64: 'string',
         format: 'string',
         description: 'string',
+        rawDescription: 'string',
         raw: 'string',
         base64Failed: 'boolean',
         base64FailedAt: 'number',
@@ -45,6 +43,8 @@ export default class Image {
     base64: string;
     format: string;
     description: string;
+    /** 识别转文字结果的完整原文：仅在展示文本被截断时写入（不参与渲染/预算），供 read_raw kind=image 按需读取 */
+    rawDescription: string;
     /** 接收时的原始消息段 data（JSON），含 file/file_unique/md5/subType/url 等，供 resolve_special_id 查询 */
     raw: string;
     /** URL 转 base64 是否失败过（冷却期内不再重复请求） */
@@ -62,6 +62,7 @@ export default class Image {
         this.base64 = '';
         this.format = '';
         this.description = '';
+        this.rawDescription = '';
         this.raw = '';
         this.base64Failed = false;
         this.base64FailedAt = 0;
@@ -203,25 +204,25 @@ export default class Image {
             return;
         }
 
-        this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
+        this.description = this.truncateIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
 
         if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url' && !this.isBase64RetryBlocked()) {
             log.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
-            this.description = await this.compressIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
+            this.description = this.truncateIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
         }
 
         if (!this.description) log.error(`图片${this.imageId}识别失败`);
+        else Image.save(this); // 持久化 description/rawDescription（含截断时保留的完整识别原文）
     }
 
-    /** 图片转文字结果过长时交给压缩智能体压缩，失败时保留原文 */
-    private async compressIfLong(text: string): Promise<string> {
-        if (!text || text.length <= IMAGE_TEXT_COMPRESS_MIN_LENGTH) return text;
-        try {
-            const compressed = await Agent.get('compress_agent').chat(text);
-            if (compressed) return compressed;
-        } catch (e) {
-            log.warning('压缩图片识别结果失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
+    /** 图片转文字结果超长时不再交给压缩智能体，改为只展示开头 N 字并把完整原文存入 rawDescription；未超阈值时展示即原文 */
+    private truncateIfLong(text: string): string {
+        const { IMAGE_TEXT_TRUNCATE_CHARS } = Config.image;
+        if (!text) return text;
+        if (IMAGE_TEXT_TRUNCATE_CHARS > 0 && text.length > IMAGE_TEXT_TRUNCATE_CHARS) {
+            this.rawDescription = text;
+            return text.slice(0, IMAGE_TEXT_TRUNCATE_CHARS);
         }
         return text;
     }
@@ -348,6 +349,11 @@ ${img.CQCode}`;
             Image.save(image); // 持久化原始字段
 
             content += image.description ? `[img:${image.imageId}:${image.description}]` : `[img:${image.imageId}]`;
+            // 展示描述被截断时（rawDescription 存在且长于展示），在 [img] 标签外追加指针标记，
+            // 让纯文本/多模态模型都能看到 image_id 并可 read_raw kind=image 翻完整识别原文
+            if (image.rawDescription && image.description && image.rawDescription.length > image.description.length) {
+                content += buildImageTruncateMarker(image.rawDescription.length, image.description.length, image.imageId);
+            }
             images.push(image);
         } catch (error) {
             log.exception('在handleImageMessage中处理图片时出错', error);

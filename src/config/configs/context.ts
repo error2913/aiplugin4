@@ -8,7 +8,7 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "对话保存轮数", 5, "上下文超过最大 token 后保留的最近真实用户轮数；更早消息会先归档总结再删除", "上下文");
         seal.ext.registerTemplateConfig(ext, "预设上下文", [""], "每行一条预设上下文，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "上下文");
         seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，预设上下文不计入轮数", "上下文");
-        seal.ext.registerIntConfig(ext, "消息压缩阈值", 2000, "用户消息（含连续多条合并后）超过该字符数时，使用压缩智能体压缩后存入上下文", "上下文");
+        seal.ext.registerIntConfig(ext, "消息压缩阈值", 2000, "用户消息（含连续多条合并后）超过该字符数时，使用压缩智能体压缩后存入上下文；压缩前原文自动保留，AI 可用 read_raw kind=user 按 msg_id/blk:id 查看原文", "上下文");
     }
 
     static get() {

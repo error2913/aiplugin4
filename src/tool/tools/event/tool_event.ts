@@ -1,5 +1,7 @@
 // 事件详情工具：读取上下文事件条目携带的原始数据（raw），供 AI 在需要时查看完整事件字段。
 // 事件提示词只渲染摘要文本（防注入边界内），原始数据不进入模型上下文渲染，仅经本工具读取返回。
+// 【已弃用】事件原始数据已并入通用原文检索：请使用 read_raw kind=event / grep_raw kind=event。
+// 本工具在过渡期保留（含 target 跨会话能力），后续版本移除。
 import Message from "../../../context/message";
 import { SystemUserMessageItem, UserMessage } from "../../../context/types";
 import type { Session } from "../../../session/session";
@@ -39,7 +41,7 @@ export function registerEventTools() {
         type: 'function',
         function: {
             name: 'get_event_detail',
-            description: '查看最近录入上下文的事件原始数据（JSON，含完整字段）。事件提示词只有摘要，处理入群/好友申请或核对事件细节时需要调用本工具读取完整数据。默认只读当前会话，可用 target 跨会话查看',
+            description: '【已弃用】请改用 read_raw kind=event（通用原文检索，等价功能，不含跨会话）。本工具保留 target 跨会话查看能力，过渡期后将被移除',
             parameters: {
                 type: 'object',
                 properties: {

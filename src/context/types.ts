@@ -5,9 +5,23 @@ export interface BaseMessageItem {
     time: number; // 秒
     text: string;
 }
+
+/** 合并压缩块内的一条原始用户消息（rawItems 条目） */
+export interface RawUserItem {
+    userId: string;
+    messageId: string;
+    time: number;
+    /** 该条被压缩前的原文（含单条压缩时的 rawText 兜底） */
+    text: string;
+}
+
 export interface UserMessageItem extends BaseMessageItem {
     userId: string;
     messageId: string;
+    /** 单条消息被压缩前的完整原文：不参与渲染与 token 估算，仅由 read_raw/grep_raw(kind=user) 按需读取；随消息归档/清理失效 */
+    rawText?: string;
+    /** 连续多条 user 消息合并压缩后，块内各条原始消息（含各自 messageId/time）；块寻址 id 为 blk:<末条messageId> */
+    rawItems?: RawUserItem[];
 }
 export interface AssistantMessageItem extends BaseMessageItem {
     messageId: string;
@@ -37,7 +51,7 @@ export interface ToolCallsMessage {
 export interface ToolCallbackMessage {
     role: 'tool';
     text: string;
-    /** 压缩前的完整工具返回：不参与渲染与 token 估算，仅由 grep_tool_raw/read_tool_raw 按需读取；随所在消息清理/归档失效 */
+    /** 截断前的完整工具返回：不参与渲染与 token 估算，仅由 grep_raw/read_raw(kind=tool) 按需读取；随所在消息清理/归档失效 */
     rawText?: string;
     contentParts?: ToolContentPart[];
     toolCallId: string;

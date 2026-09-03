@@ -21,12 +21,14 @@ export default class ImageConfig {
     static register() {
         seal.ext.registerStringConfig(ext, "图片全局识别豹语条件", '0', "0 不自动识别；1 所有图片自动识别转文字；也可填豹语表达式（如 $t群号_RAW=='2001'）按群启用", "图片");
         seal.ext.registerOptionConfig(ext, "识别图片时将url转换为base64", "永不", ["永不", "自动", "总是"], "解决大模型无法正常获取QQ图床图片的问题", "图片");
+        seal.ext.registerIntConfig(ext, "图片识别展示截断字数", 5000, "图片识别转文字结果超过该字数时不再压缩，改为仅展示开头部分，并保留完整识别原文（read_raw kind=image 可按图片 ID 阅读）；0 为不截断不保留", "图片");
     }
 
     static get() {
         return {
             IMAGE_CONDITION: seal.ext.getStringConfig(ext, "图片全局识别豹语条件"),
             URL_TO_BASE64: seal.ext.getOptionConfig(ext, "识别图片时将url转换为base64"),
+            IMAGE_TEXT_TRUNCATE_CHARS: seal.ext.getIntConfig(ext, "图片识别展示截断字数"),
             LOCAL_IMAGE_PATH_MAP: ImageConfig.getPathMapConfig(ext, "本地图片路径")
         }
     }

@@ -10,6 +10,7 @@ import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
 import { estimateMessageTokens } from "../utils/message";
 import { callOb11Api } from "../utils/ob11";
+import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, stripRawMarkers } from "../utils/raw_marker";
 import { stripInternalTags } from "../utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor, withTimeout } from "../utils/utils";
@@ -196,20 +197,24 @@ export class Context {
         }).filter(m => m !== null);
     }
 
-    /** 文本超过压缩阈值时交给压缩智能体，返回压缩结果；未超阈值或失败时返回原文 */
-    static async compressIfLong(text: string): Promise<string> {
+    /** 文本超过压缩阈值时交给压缩智能体，返回 {display, original, changed}；未超阈值或压缩失败时 changed=false、display=原文 */
+    static async compressPreserveIfLong(text: string): Promise<{ display: string; original: string; changed: boolean }> {
         const { COMPRESS_THRESHOLD } = Config.context;
-        if (text.length <= COMPRESS_THRESHOLD) return text;
+        if (text.length <= COMPRESS_THRESHOLD) return { display: text, original: text, changed: false };
         try {
             const compressed = await Agent.get('compress_agent').chat(text);
-            return compressed || text;
+            if (compressed && compressed !== text) {
+                return { display: compressed, original: text, changed: true };
+            }
         } catch (e) {
             log.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
-            return text;
         }
+        return { display: text, original: text, changed: false };
     }
 
     // 用户消息入库：单条超长或连续多条合并后超阈值时，交给压缩智能体压缩后存入上下文
+    // 压缩前原文保留在条目 rawText/rawItems（不参与渲染与 token 估算），展示文本末尾带标记，
+    // AI 可用 read_raw/grep_raw(kind=user) 按 msg_id（单条）/ blk:<末条messageId>（合并块）核对原文
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
         // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
         if (this.autoNameMod > 0) {
@@ -219,25 +224,48 @@ export class Context {
                 log.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
-        text = await Context.compressIfLong(text);
-        // 防注入：压缩智能体可能回带标签，入库前再兜底剥离一次（主入口在 transformArrayToContent）
-        text = stripInternalTags(text);
+        // 单条压缩：替换发生时保留压缩前原文 rawText
+        const single = await Context.compressPreserveIfLong(text);
+        let itemText = stripInternalTags(single.display);
+        const rawText = single.changed ? stripInternalTags(single.original) : undefined;
+        if (rawText !== undefined) {
+            // 防注入：压缩智能体可能回带标签，入库前再兜底剥离一次（主入口在 transformArrayToContent）
+            itemText = stripInternalTags(itemText);
+            itemText += buildUserSingleMarker(single.original.length, itemText.length, messageId);
+        }
         const umi: UserMessageItem = {
-            text,
+            text: itemText,
             time: Math.floor(Date.now() / 1000),
             userId,
-            messageId
+            messageId,
+            ...(rawText !== undefined ? { rawText } : {})
         };
         const lastMessage = this.messages[this.messages.length - 1];
         if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) {
             const userMsg = lastMessage as UserMessage;
             userMsg.contentItems.push(umi);
             // 连续多条 user 消息合并后总长超阈值 → 合并压缩，替换为该条压缩结果
-            // 分隔符与 buildContent 渲染保持一致（真实 \f），避免压缩前后表示差异误判重复压缩
-            const merged = userMsg.contentItems.map(item => item.text).join('\f');
-            const compressed = await Context.compressIfLong(merged);
-            if (compressed !== merged) {
-                userMsg.contentItems = [{ text: compressed, time: umi.time, userId: umi.userId, messageId: umi.messageId }];
+            // 块内原文逐条保留（各条若已单条压缩，取 rawText 原文而非摘要，避免二次压缩失真）；
+            // 分隔符与 buildContent 渲染保持一致（真实 \f）
+            const items = userMsg.contentItems as UserMessageItem[];
+            const joined = items.map(it => stripRawMarkers(it.rawText ?? it.text)).join('\f');
+            const block = await Context.compressPreserveIfLong(joined);
+            if (block.changed && block.display !== joined) {
+                const rawItems = items.map(it => ({
+                    userId: it.userId,
+                    messageId: it.messageId,
+                    time: it.time,
+                    text: stripRawMarkers(it.rawText ?? it.text)
+                }));
+                let display = stripInternalTags(block.display);
+                display += buildUserBlockMarker(items.length, joined.length, umi.messageId);
+                userMsg.contentItems = [{
+                    text: display,
+                    time: umi.time,
+                    userId: umi.userId,
+                    messageId: umi.messageId,
+                    rawItems
+                }];
             }
         } else {
             this.messages.push({
@@ -303,33 +331,22 @@ export class Context {
         this.messages.push(tcm);
     }
 
-    // 工具回调消息：过长的结果同样交给压缩智能体压缩后再存入上下文
-    // 独立于用户消息压缩阈值；web_search 压缩时附带搜索目标，帮助保留与问题相关的信息
-    async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, searchTarget?: string, contentParts?: ToolContentPart[]) {
-        const { TOOL_RESPONSE_COMPRESS_MIN_LENGTH } = Config.tool;
-        // 压缩前原文：仅当文本确实被压缩替换后保留，供只读工具按需读取（不参与渲染/预算）
+    // 工具回调消息：过长的结果不再交给压缩智能体，改为只展示开头 N 字（head 截断），
+    // 完整原文以 rawText 保留（不参与渲染/预算），供 read_raw/grep_raw(kind=tool) 按 tool_call_id 按需读取。
+    async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, contentParts?: ToolContentPart[]) {
+        const { TOOL_RESPONSE_TRUNCATE_CHARS } = Config.tool;
+        // 截断前原文：仅当文本确实被截断后保留，供只读工具按需读取（不参与渲染/预算）
         let rawText: string | undefined;
-        if (TOOL_RESPONSE_COMPRESS_MIN_LENGTH > 0 && text.length > TOOL_RESPONSE_COMPRESS_MIN_LENGTH) {
-            try {
-                let prompt = text;
-                if (toolName === 'web_search' && searchTarget) {
-                    prompt = `搜索目标:${searchTarget}\n\n工具返回结果:\n${text}`;
-                }
-                const compressed = await Agent.get('compress_agent').chat(prompt);
-                if (compressed && compressed !== text) {
-                    rawText = text;
-                    text = compressed;
-                }
-            } catch (e) {
-                log.warning('压缩工具回调失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
-            }
+        if (TOOL_RESPONSE_TRUNCATE_CHARS > 0 && text.length > TOOL_RESPONSE_TRUNCATE_CHARS) {
+            rawText = text;
+            text = text.slice(0, TOOL_RESPONSE_TRUNCATE_CHARS);
         }
         // 防注入：工具返回内容（如历史消息、网页文本）中的内部上下文标签直接剥离，不进入上下文
         text = stripInternalTags(text);
         if (rawText !== undefined) {
-            // 原文与展示文本走同一防注入处理；附加指针提示让模型知道可以按需深挖
+            // 原文与展示文本走同一防注入处理；附加指针提示让模型知道内容被截断、可以按需翻原文
             rawText = stripInternalTags(rawText);
-            text += `\n[完整原文已保留: tool_call_id=${toolCallId}；需核对细节时可用 grep_tool_raw / read_tool_raw 查阅]`;
+            text += buildToolTruncateMarker(rawText.length, text.length, toolCallId);
         }
         const tcbm: ToolCallbackMessage = {
             role: 'tool',

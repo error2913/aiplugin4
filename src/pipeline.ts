@@ -2,7 +2,6 @@
 import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
-import { Context } from "./context/context";
 import { buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, parseNoticeWhitelist } from "./event/notice";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
@@ -449,7 +448,7 @@ export class MessagePipeline {
         });
     }
 
-    /** 事件提示词统一入库：黑名单 → 待机 → 去重 → 压缩 → 录入上下文（仅背景，不触发 AI） */
+    /** 事件提示词统一入库：黑名单 → 待机 → 去重 → 纯代码兜底 → 录入上下文（仅背景，不触发 AI） */
     private static async recordEventPrompt(opts: {
         sid: string;
         text: string;
@@ -482,8 +481,9 @@ export class MessagePipeline {
             log.debug(`事件去重丢弃：${opts.eventType} @ ${opts.sid}`);
             return false;
         }
-        // 事件文本过长时交给压缩智能体（复用全局「消息压缩阈值」，默认 2000），失败保留原文
-        const text = await Context.compressIfLong(opts.text);
+        // 事件提示词不再走压缩智能体：文本由纯代码按模板从事件 JSON 生成，通常很短；
+        // 此处仅做纯代码兜底（超 2000 字 head 截断），完整原始数据仍挂在条目 raw 上，可用 read_raw kind=event 查看
+        const text = opts.text.length > 2000 ? opts.text.slice(0, 2000) : opts.text;
         session.context.addSystemUserMessage(text, opts.systemName, {
             eventType: opts.eventType,
             raw: opts.raw,

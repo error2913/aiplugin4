@@ -18,7 +18,9 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "无工具调用时续跑提示", false, "上一轮调用过工具、本轮只回文字时，向上下文注入续跑提示再转一轮，避免只说方向不调用工具就停；默认关闭", "工具");
         seal.ext.registerBoolConfig(ext, "工具方向提示", true, "开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块；关闭后直接调用工具，不播报方向", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
-        seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "工具返回结果超过该字数时压缩后再存入上下文；设为 0 不压缩", "工具");
+        seal.ext.registerIntConfig(ext, "工具响应截断字数", 10000, "工具返回结果超过该字数时不再压缩，改为仅展示开头部分，并保留完整原文供 read_raw kind=tool 阅读；0 为不截断不保留", "工具");
+        // 旧 key（v4.21「工具响应压缩触发字数」）：保留注册以读取存量用户配置做一次性迁移，功能已由「工具响应截断字数」接管
+        seal.ext.registerIntConfig(ext, "工具响应压缩触发字数", 10000, "已废弃：请改用「工具响应截断字数」（历史值会自动沿用）", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的 OB11 action", [''], "每行一个禁止 call_ob11_api 调用的原始 OB11 action，例如 set_group_ban；修改后自动生效", "工具");
@@ -65,7 +67,17 @@ export default class ToolConfig {
         ], "该功能在选择预设音色时，需要安装 http 依赖插件，且需要可调用 AI 语音 API 的 napcat/lagrange 等。\n选择自定义音色时，则需要生成音频依赖（tts）和 ffmpeg", "工具");
     }
 
+    /** 新配置默认值：与旧 key 默认一致，保证未改配置的用户无感迁移 */
+    static readonly TRUNCATE_DEFAULT = 10000;
+
     static get() {
+        // 「工具响应截断字数」为新 key：一旦用户显式设置过（≠默认值）就优先；
+        // 未设置时沿用旧 key「工具响应压缩触发字数」的历史值做一次性迁移，两值都为默认则取默认。
+        const newVal = seal.ext.getIntConfig(ext, "工具响应截断字数");
+        const oldVal = seal.ext.getIntConfig(ext, "工具响应压缩触发字数");
+        const TOOL_RESPONSE_TRUNCATE_CHARS = newVal !== ToolConfig.TRUNCATE_DEFAULT
+            ? newVal
+            : (oldVal !== ToolConfig.TRUNCATE_DEFAULT ? oldVal : ToolConfig.TRUNCATE_DEFAULT);
         return {
             STATUS: seal.ext.getBoolConfig(ext, "开启调用函数功能"),
             PROMPT_ENGINEERING: seal.ext.getBoolConfig(ext, "切换为提示词工程"),
@@ -73,7 +85,7 @@ export default class ToolConfig {
             MAX_CALL_COUNT: seal.ext.getIntConfig(ext, "允许连续调用函数次数"),
             NUDGE_ENABLED: seal.ext.getBoolConfig(ext, "无工具调用时续跑提示"),
             DIRECTION_PROMPT: seal.ext.getBoolConfig(ext, "工具方向提示"),
-            TOOL_RESPONSE_COMPRESS_MIN_LENGTH: seal.ext.getIntConfig(ext, "工具响应压缩触发字数"),
+            TOOL_RESPONSE_TRUNCATE_CHARS,
             BLOCKED: seal.ext.getTemplateConfig(ext, "禁止调用的函数"),
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ext, "默认关闭的函数"),
             OB11_BLOCKED_ACTIONS: seal.ext.getTemplateConfig(ext, "禁止调用的 OB11 action"),

@@ -228,7 +228,7 @@ export default class Agent {
                             // stop 中止检查点：工具执行期间被 stop，不再回调/续轮
                             if (session.stopVersion !== version) return;
                             for (const r of callResults) {
-                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.contentParts);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
                                 log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
@@ -258,7 +258,7 @@ export default class Agent {
                             // stop 中止检查点：工具执行期间被 stop，不再回调/续轮
                             if (session.stopVersion !== version) return;
                             for (const r of callResults) {
-                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.contentParts);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
                                 log.info('工具执行完成且不回调（callBack=false），结束本轮编排');
@@ -517,7 +517,7 @@ export default class Agent {
                             // stop 中止检查点：工具执行期间被 stop，不递归续流，直接中止工具链
                             if (session.stopVersion !== version) return;
                             for (const r of callResults) {
-                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.searchTarget, r.contentParts);
+                                if (r.callBack !== false) await session.context.addToolCallbackMessage(r.content, r.tool_call_id, r.toolName, r.contentParts);
                             }
                             if (callResults.length > 0 && callResults.every(r => r.callBack === false)) {
                                 log.info('工具执行完成且不回调（callBack=false），结束本轮编排');

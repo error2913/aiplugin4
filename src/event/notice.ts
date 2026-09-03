@@ -154,7 +154,7 @@ export function buildRequestText(event: any, prefix: string): string {
     const user = uniUserId(event.user_id, prefix);
     const group = uniGroupId(event.group_id, prefix);
     const comment = event.comment ? `：${truncateText(String(event.comment), 80)}` : '';
-    const hint = '（完整事件数据可调用 get_event_detail 查看，处理申请需要）';
+    const hint = '（完整事件数据可用 read_raw kind=event 查看，处理申请需要）';
     if (requestType === 'friend') {
         return `【好友请求】${user || '未知用户'} 请求添加好友${comment}${hint}`;
     }
