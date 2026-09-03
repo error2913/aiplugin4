@@ -11,7 +11,6 @@ import Image from "../../../resource/image";
 import type { Session } from "../../../session/session";
 import { stripRawMarkers } from "../../../utils/raw_marker";
 import Tool from "../../tool";
-import { collectEventRaws } from "../event/tool_event";
 
 /** 单次返回总长度上限（请求体预算，非留存限制）：远小于各截断阈值，避免回读结果再次被截断 */
 const RAW_RESPONSE_DEFAULT_CHARS = 6000;
@@ -139,9 +138,19 @@ export interface EventRawEntry {
     raw: unknown;
 }
 
-/** 收集会话内携带原始数据的事件条目（与 get_event_detail 同源），按时间从旧到新 */
+/** 收集会话内携带原始数据的事件条目（系统名义消息带 raw + eventType），按时间从旧到新 */
 export function collectEventRawEntries(session: Session): EventRawEntry[] {
-    return collectEventRaws(session);
+    const out: EventRawEntry[] = [];
+    for (const m of session.context.messages) {
+        if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
+        for (const item of (m as UserMessage).contentItems) {
+            if (Message.getUserMessageItemType(item) !== 'system') continue;
+            const si = item as { eventType?: string; time?: number; text?: string; raw?: unknown };
+            if (si.raw === undefined || !si.eventType) continue;
+            out.push({ eventType: si.eventType, time: si.time || 0, text: si.text || '', raw: si.raw });
+        }
+    }
+    return out;
 }
 
 /** 图片识别原文目录条目（扫描上下文内 [img:图片ID] 引用，命中带 rawDescription 的图片） */
@@ -499,16 +508,11 @@ function readImageById(id: string, opts: { startLine?: unknown; maxLines?: unkno
     );
 }
 
-/** 事件详情目录/全文（read_raw kind=event 与 get_event_detail 共用语义） */
-function readEventDetails(session: Session, opts: { eventType?: unknown; count?: unknown; target?: unknown }): string {
-    if (opts.target) {
-        // get_event_detail 的历史 target 跨会话能力；通用 read_raw 默认只查当前会话，跨会话请用旧别名
-        return 'read_raw kind=event 只查看当前会话；跨会话查看事件请使用已弃用的 get_event_detail（其 target 参数保留）';
-    }
-    const targetSession = session;
+/** 事件详情目录/全文（read_raw kind=event） */
+function readEventDetails(session: Session, opts: { eventType?: unknown; count?: unknown }): string {
     const { eventType } = opts;
     const limit = Math.min(Math.max(toInt(opts.count, 5), 1), 20);
-    const events = collectEventRawEntries(targetSession).filter(e => !eventType || e.eventType === eventType);
+    const events = collectEventRawEntries(session).filter(e => !eventType || e.eventType === eventType);
     if (events.length === 0) {
         return eventType
             ? `没有找到类型为<${eventType}>的事件原始数据`
@@ -675,60 +679,5 @@ export function registerRawTools() {
             default:
                 return `未知 kind=<${kind}>：支持 tool / user / image / event`;
         }
-    };
-
-    // ===== 弃用别名：grep_tool_raw / read_tool_raw（历史标记与旧上下文里的指针文本仍引用旧名，过渡期保留）=====
-    const aliasGrep = new Tool({
-        type: 'function',
-        function: {
-            name: 'grep_tool_raw',
-            description: '已弃用：等价于 grep_raw kind=tool。请改用 grep_raw（kind 参数支持 tool/user/event/image）。过渡期后本工具将被移除',
-            parameters: {
-                type: 'object',
-                properties: {
-                    pattern: { type: 'string', description: '检索关键字（子串匹配，忽略大小写）；不传则只返回保留条目的目录元信息' },
-                    tool_name: { type: 'string', description: '可选：只检索某个工具的原文，如 web_search；不传检索全部工具' },
-                    count: { type: 'integer', description: `可选：最多返回的条目数，默认 ${RAW_ENTRY_DEFAULT_COUNT}，最大 ${RAW_ENTRY_MAX_COUNT}，按时间从新到旧` },
-                    context_lines: { type: 'integer', description: `可选：命中行前后各附带的行数，默认 0，最大 ${RAW_CONTEXT_MAX_LINES}` },
-                    max_chars: { type: 'integer', description: `可选：单次返回最大字符数，默认 ${RAW_RESPONSE_DEFAULT_CHARS}，最大 ${RAW_RESPONSE_MAX_CHARS}` }
-                },
-                required: []
-            }
-        }
-    });
-    aliasGrep.solve = async (_, __, session, args) =>
-        grepToolOutput(session, {
-            pattern: args?.pattern as string | undefined,
-            toolName: args?.tool_name as string | undefined,
-            count: args?.count,
-            ctxLines: args?.context_lines,
-            maxChars: args?.max_chars
-        });
-
-    const aliasRead = new Tool({
-        type: 'function',
-        function: {
-            name: 'read_tool_raw',
-            description: '已弃用：等价于 read_raw kind=tool id=tool_call_id。请改用 read_raw。过渡期后本工具将被移除',
-            parameters: {
-                type: 'object',
-                properties: {
-                    tool_call_id: { type: 'string', description: '必填：目标工具原文的调用 ID（来自展示文本标记或 grep_raw 结果）' },
-                    start_line: { type: 'integer', description: '可选：起始行号（从 1 开始），默认 1' },
-                    max_lines: { type: 'integer', description: `可选：最多读取行数，默认 100，最大 ${RAW_READ_MAX_LINES}` },
-                    max_chars: { type: 'integer', description: `可选：单次返回最大字符数，默认 ${RAW_RESPONSE_DEFAULT_CHARS}，最大 ${RAW_RESPONSE_MAX_CHARS}` }
-                },
-                required: ['tool_call_id']
-            }
-        }
-    });
-    aliasRead.solve = async (_, __, session, args) => {
-        const id = String(args?.tool_call_id || '').trim();
-        if (!id) return '缺少 tool_call_id：请先调用 grep_raw kind=tool 获取目标原文的 tool_call_id';
-        return readToolById(session, id, {
-            startLine: args?.start_line,
-            maxLines: args?.max_lines,
-            maxChars: args?.max_chars
-        });
     };
 }

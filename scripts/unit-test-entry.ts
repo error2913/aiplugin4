@@ -16,7 +16,6 @@ import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "
 import { stripRawMarkers } from "../src/utils/raw_marker";
 import { createCtx } from "../src/utils/seal";
 import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
-import { registerEventTools } from "../src/tool/tools/event/tool_event";
 import { registerRawToolSet } from "../src/tool/tools/raw/init";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
@@ -1951,13 +1950,16 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** grep_tool_raw / read_tool_raw：只读检索压缩前保留的工具原文 */
+    /** grep_raw / read_raw kind=tool：只读检索截断前保留的工具原文 */
     async testToolRawGrepAndRead(): Promise<void> {
         registerRawToolSet();
-        const grepTool = toolMap['grep_tool_raw'];
-        const readTool = toolMap['read_tool_raw'];
-        assert.ok(grepTool, 'grep_tool_raw 应已注册');
-        assert.ok(readTool, 'read_tool_raw 应已注册');
+        const grepTool = toolMap['grep_raw'];
+        const readTool = toolMap['read_raw'];
+        assert.ok(grepTool, 'grep_raw 应已注册');
+        assert.ok(readTool, 'read_raw 应已注册');
+        assert.equal(toolMap['grep_tool_raw'], undefined, 'grep_tool_raw 旧工具应已删除');
+        assert.equal(toolMap['read_tool_raw'], undefined, 'read_tool_raw 旧工具应已删除');
+        assert.equal(toolMap['get_event_detail'], undefined, 'get_event_detail 旧工具应已删除');
         const ctx = new Context();
         ctx.messages.push({
             role: 'tool', text: '搜索摘要一：12345 相关',
@@ -1970,39 +1972,39 @@ export const tests: Record<string, () => void | Promise<void>> = {
         ctx.messages.push({ role: 'tool', text: '未压缩短结果', toolCallId: 'call_c', toolName: 'web_search' } as any);
         const session = { context: ctx } as any;
         // 目录模式：只列出带 rawText 的条目
-        let r = await grepTool.solve(makeCtx(), {} as any, session, {});
+        let r = await grepTool.solve(makeCtx(), {} as any, session, { kind: 'tool' });
         assert.ok(r.includes('call_a'), '目录应列出 call_a');
         assert.ok(r.includes('call_b'), '目录应列出 call_b');
         assert.ok(!r.includes('call_c'), '未压缩结果不应出现在目录');
         assert.ok(r.includes('仅作参考'), '应带外部数据边界声明');
         // 关键字命中：返回条目、行号与命中行内容
-        r = await grepTool.solve(makeCtx(), {} as any, session, { pattern: '12345' });
+        r = await grepTool.solve(makeCtx(), {} as any, session, { kind: 'tool', pattern: '12345' });
         assert.ok(r.includes('call_a'));
         assert.ok(r.includes('第 2 行'));
         assert.ok(r.includes('关键数字 12345'));
         // 大小写不敏感
-        r = await grepTool.solve(makeCtx(), {} as any, session, { pattern: 'NEEDLE' });
+        r = await grepTool.solve(makeCtx(), {} as any, session, { kind: 'tool', pattern: 'NEEDLE' });
         assert.ok(r.includes('call_b'), '关键字应大小写不敏感');
         assert.ok(r.includes('第 2 行'));
         // 未命中
-        r = await grepTool.solve(makeCtx(), {} as any, session, { pattern: '不存在的关键字' });
+        r = await grepTool.solve(makeCtx(), {} as any, session, { kind: 'tool', pattern: '不存在的关键字' });
         assert.ok(r.includes('未命中'));
         // 工具名过滤
-        r = await grepTool.solve(makeCtx(), {} as any, session, { pattern: '12345', tool_name: 'web_search' });
+        r = await grepTool.solve(makeCtx(), {} as any, session, { kind: 'tool', pattern: '12345', tool_name: 'web_search' });
         assert.ok(r.includes('call_a'));
-        r = await grepTool.solve(makeCtx(), {} as any, session, { pattern: '12345', tool_name: 'browser' });
+        r = await grepTool.solve(makeCtx(), {} as any, session, { kind: 'tool', pattern: '12345', tool_name: 'browser' });
         assert.ok(r.includes('没有找到工具<browser>的保留原文'));
         // 按行读取精确原文
-        r = await readTool.solve(makeCtx(), {} as any, session, { tool_call_id: 'call_a', start_line: 2, max_lines: 1 });
+        r = await readTool.solve(makeCtx(), {} as any, session, { kind: 'tool', id: 'call_a', start_line: 2, max_lines: 1 });
         assert.ok(r.includes('第 2 行 | 关键数字 12345'), '应返回目标行原文');
-        // 未知/缺失 tool_call_id
-        r = await readTool.solve(makeCtx(), {} as any, session, { tool_call_id: 'call_zzz' });
+        // 未知/缺失 id
+        r = await readTool.solve(makeCtx(), {} as any, session, { kind: 'tool', id: 'call_zzz' });
         assert.ok(r.includes('未找到 tool_call_id=call_zzz'));
-        r = await readTool.solve(makeCtx(), {} as any, session, {});
-        assert.ok(r.includes('缺少 tool_call_id'));
+        r = await readTool.solve(makeCtx(), {} as any, session, { kind: 'tool' });
+        assert.ok(r.includes('缺少 id'), '缺失 id 应提示缺少 id');
         // 空会话
         const empty = new Context();
-        r = await grepTool.solve(makeCtx(), {} as any, { context: empty } as any, {});
+        r = await grepTool.solve(makeCtx(), {} as any, { context: empty } as any, { kind: 'tool' });
         assert.ok(r.includes('没有可检索的工具原文'));
     },
 
@@ -2145,14 +2147,13 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 通用 grep_raw / read_raw：注册四个工具；event/image/kind=tool 链路 */
+    /** 通用 grep_raw / read_raw：注册两个通用工具；event/image/kind=tool 链路 */
     async testGenericRawToolsKinds(): Promise<void> {
         registerRawToolSet();
-        registerEventTools();
         assert.ok(toolMap['grep_raw'], 'grep_raw 应已注册');
         assert.ok(toolMap['read_raw'], 'read_raw 应已注册');
-        assert.ok(toolMap['grep_tool_raw'], 'grep_tool_raw 弃用别名应保留');
-        assert.ok(toolMap['read_tool_raw'], 'read_tool_raw 弃用别名应保留');
+        assert.equal(toolMap['grep_tool_raw'], undefined, '旧工具 grep_tool_raw 应已删除');
+        assert.equal(toolMap['read_tool_raw'], undefined, '旧工具 read_tool_raw 应已删除');
         const grepRaw = toolMap['grep_raw'];
         const readRaw = toolMap['read_raw'];
 
@@ -2167,7 +2168,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         const session = { context: ctx } as any;
 
-        // kind=tool 通用参数 id（等价旧 read_tool_raw）
+        // kind=tool 通用参数 id
         let r = await readRaw.solve(makeCtx(), {} as any, session, { kind: 'tool', id: 'call_a', start_line: 2, max_lines: 1 });
         assert.ok(r.includes('第 2 行 | 关键数字 12345'), '通用 read_raw kind=tool 应按行读原文');
         // kind=user 单条
@@ -2222,44 +2223,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
         assert.equal(stripRawMarkers('正文[msg_id:x]保持'), '正文[msg_id:x]保持', 'stripRawMarkers 不得剥离内部标签');
         assert.equal(stripRawMarkers('正文[img:a:图]保持'), '正文[img:a:图]保持', 'stripRawMarkers 不得剥离图片标签');
-    },
-
-    /** get_event_detail 工具：读取事件原始数据（当前会话/过滤/无数据/非法目标） */
-    async testGetEventDetail(): Promise<void> {
-        registerEventTools();
-        const tool = toolMap['get_event_detail'];
-        assert.ok(tool, 'get_event_detail 应已注册');
-        const ctx = new Context();
-        ctx.addSystemUserMessage('【入群请求】QQ:1001 申请加入群', '请求事件提示', {
-            eventType: 'group_request',
-            raw: { post_type: 'request', request_type: 'group', group_id: 2001, user_id: 1001, comment: '想进群', flag: 'FLAG_1' }
-        });
-        ctx.addSystemUserMessage('【群事件】QQ:1002 被禁言', '群事件提示', {
-            eventType: 'group_ban',
-            raw: { notice_type: 'group_ban', user_id: 1002, operator_id: 1003, duration: 60 }
-        });
-        const session = { context: ctx } as any;
-        // 无过滤：两条都返回，且带边界声明
-        let r = await tool.solve(makeCtx(), {} as any, session, {});
-        assert.ok(r.includes('FLAG_1'), '应返回入群申请原始数据');
-        assert.ok(r.includes('group_request'));
-        assert.ok(r.includes('group_ban'));
-        assert.ok(r.includes('仅作参考'), '应带外部数据边界声明');
-        // 按类型过滤
-        r = await tool.solve(makeCtx(), {} as any, session, { event_type: 'group_request' });
-        assert.ok(r.includes('FLAG_1'));
-        assert.ok(!r.includes('group_ban'), '过滤后不应返回其他类型');
-        // count 限制：只返回最新一条（后录入的 group_ban）
-        r = await tool.solve(makeCtx(), {} as any, session, { count: 1 });
-        assert.ok(r.includes('group_ban'), 'count=1 应返回最新一条');
-        assert.ok(!r.includes('FLAG_1'), 'count=1 不应返回更早的入群申请');
-        // 无数据
-        const empty = new Context();
-        r = await tool.solve(makeCtx(), {} as any, { context: empty } as any, {});
-        assert.ok(r.includes('没有可查看的事件原始数据'));
-        // 非法跨会话目标
-        r = await tool.solve(makeCtx(), {} as any, session, { target: 'abc' });
-        assert.ok(r.includes('目标ID格式无效'));
     },
 
     /** 事件去重：同 key 窗口内只录一次（会话级限流已移除，仅保留 3s 事件级去重防双录） */

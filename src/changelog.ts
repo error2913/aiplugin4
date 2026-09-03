@@ -8,7 +8,7 @@ export const changelog: { [version: string]: string } = {
 - 图片识别文本同改截断：展示开头 N 字，完整识别原文保留在 Image.rawDescription，[img] 标签外带 [图片识别原文过长…] 标记（image_id 可寻址）
 - 用户消息压缩保留原文：单条超长压缩存 rawText（按原 msg_id 寻址）；连续多条合并压缩为块存 rawItems（块 id=blk:xxx，先 read 块目录、再按内层 msg_id 精确读），展示带 [原文已压缩…] 标记；合并压缩取各条压缩前原文拼接，不再二次压缩失真
 - 事件提示词不再走压缩智能体：文本由纯代码按模板从事件 JSON 生成（通常很短），超长仅纯代码 head 截断兜底；完整事件 JSON 仍随条目保留可读
-- 原文检索统一为 grep_raw / read_raw（kind=tool / user / image / event）：按 kind+id 定位截断/压缩前保留的完整原文；grep_tool_raw / read_tool_raw 与 get_event_detail 标记弃用（过渡期保留别名，历史指针文本仍可兜底）
+- 原文检索统一为 grep_raw / read_raw（kind=tool / user / image / event）：按 kind+id 定位截断/压缩前保留的完整原文；旧工具 grep_tool_raw / read_tool_raw / get_event_detail 已删除
 - system prompt 增加标记约定：看到 [原文已压缩]/[工具原文过长]/[图片识别原文过长] 按标记 kind/id 用 read_raw 核对原文，不得臆测缺失内容
 ## 配置变更
 - 新增「错误处理」配置页：启用报错自动处理 / 上下文超长自动归档重试 / 余额不足自动切换模型（默认开启）/ 自动切换触发错误（默认 balance，可追加 permission 等类别）/ 自动切换策略（跨厂商优先 / 配置顺序）/ 切换后发送通知（默认开启）
