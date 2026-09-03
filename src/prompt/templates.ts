@@ -30,6 +30,11 @@ const TEMPLATES: { [key: string]: string } = {
 - [avatar:用户ID] 头像；[group_avatar:群ID] 群头像
 {{/if}}
 - [msg_id:ID]/[quote:ID]/[img:图片ID] 是短 ID；语音/视频/文件是闭合标签 [record:句柄]摘要[/record]、[video:句柄]摘要[/video]、[file:句柄]摘要[/file]，句柄在开标签参数里：需要对接协议 API 或读取原始 url/path/file/file_id 时，先用 resolve_special_id 还原；已有完整 url 时直接用，不要调 get_image/get_record
+
+## 回复方式
+- 当前会话的回复直接输出文本即可，系统会自动把最终回复发送到当前会话，不要为回复当前会话调用 call_ob11_api
+- 回复文本中可直接夹带 [at:ID]/[poke:ID]/[quote:ID]/[face:名称]/[img:图片ID] 等可发送标签
+- 仅当需要向其他会话主动外发，或发送语音/视频/文件等文本标签表达不了的特殊消息段时，才使用 call_ob11_api 的 send_group_msg / send_private_msg
 {{#if DIRECTION_PROMPT}}
 
 ## 工作方向

@@ -3,8 +3,11 @@ import { truncateText } from "../utils/string";
 
 // 依赖事件 → 文本提示词：纯函数转换 + 去重守卫（ob11 依赖 notice/request 事件）
 
-/** 事件级去重窗口：同 key 事件在此窗口内只记录一次（原生回调与 ob11 依赖双路径防双录） */
-const EVENT_DEDUP_WINDOW_MS = 3000;
+/** 事件级去重窗口：同 key 事件在此窗口内只记录一次（原生回调与 ob11 依赖双路径防双录；
+ *  去重命中时以最后到达的事件为唯一事件，见 pipeline.recordEventPrompt） */
+export const EVENT_DEDUP_WINDOW_MS = 3000;
+/** 去重表最大条目数：超限时淘汰最旧一项，防极端洪峰下内存失控 */
+const EVENT_DEDUP_MAX = 5000;
 const eventDedupMap = new Map<string, number>();
 
 /** 重置去重状态（单元测试用） */
@@ -19,6 +22,10 @@ export function isDuplicateEvent(key: string, now: number = Date.now()): boolean
     });
     if (eventDedupMap.has(key)) return true;
     eventDedupMap.set(key, now + EVENT_DEDUP_WINDOW_MS);
+    if (eventDedupMap.size > EVENT_DEDUP_MAX) {
+        const oldest = eventDedupMap.keys().next().value;
+        if (oldest !== undefined) eventDedupMap.delete(oldest);
+    }
     return false;
 }
 
@@ -46,9 +53,99 @@ export function isNoticeInWhitelist(noticeType: string, subType: string, whiteli
     return whitelist.has(noticeType) || (!!subType && whitelist.has(subType));
 }
 
-/** 事件去重 key：epId + 会话 + 事件类型 + 用户 + 消息ID（撤回用）。窗口内同 key 视为同一事件双路径到达 */
-export function buildEventDedupKey(epId: string, sessionId: string, eventType: string, userId: string, messageId: string = ''): string {
-    return `${epId}|${sessionId}|${eventType}|${userId}|${messageId}`;
+/**
+ * 机器人自身相关的群增减通知（user_id === self_id）：入群 / 被移出 / 主动退群。
+ * 这类事件原生回调（onGroupJoined / onGroupLeave）已经覆盖，ob11 依赖侧应跳过，
+ * 否则同一条物理事件会在两条路径上以不同 eventType / 不同文本各录一次（去重 key 拼不上）。
+ */
+export function isSelfCoveredNoticeEvent(noticeType: string, userId: any, selfId: any): boolean {
+    if (noticeType !== 'group_increase' && noticeType !== 'group_decrease') return false;
+    if (userId === undefined || userId === null || selfId === undefined || selfId === null) return false;
+    return String(userId) === String(selfId);
+}
+
+/** 事件去重 key：epId + 会话 + 事件类型 + 用户 + 消息ID + 内容指纹。
+ *  窗口内同 key 视为同一事件双路径/重复到达（应去重）；
+ *  指纹段细分"同一 eventType 下内容不同"的事件，避免 3s 窗口吞掉连续但不同的事件。 */
+export function buildEventDedupKey(epId: string, sessionId: string, eventType: string, userId: string, messageId: string = '', extra: string = ''): string {
+    return `${epId}|${sessionId}|${eventType}|${userId}|${messageId}|${extra}`;
+}
+
+/** 原生回调已覆盖、与 ob11 依赖双路径重叠的通知类型：
+ *  这类事件必须由两条路径按同一套（摘要）字段拼 key——原生回调只能提供 noticeType/userId 等
+ *  摘要，复现不了整包指纹，故不指纹、返回空串；它们的不同事件已由 userId/messageId/eventType 区分。 */
+const NATIVE_OVERLAP_NOTICE_TYPES = new Set([
+    'group_increase',
+    'group_decrease',
+    'group_recall',
+    'friend_recall',
+    'friend_add',
+    'group_joined',
+]);
+
+/**
+ * 事件"内容指纹"：把 3s 去重窗口内连续但内容不同的事件彻底拆开（通用方案，不再按类型枚举）。
+ *
+ * 原理：同一条物理事件被重复投递/双路径 echo 时，载荷完全一致；两条内容不同的事件必然在
+ * 载荷的某个字段上有差异。因此对整包做规范化指纹：
+ * - 内容不同的事件 → 指纹不同 → key 不同 → 后者不再被吞（自动覆盖任意现有/未来/自定义类型）；
+ * - 同一事件重复到达 → 指纹相同 → 照常去重。
+ *
+ * 例外：NATIVE_OVERLAP_NOTICE_TYPES 内类型不指纹（见上）；请求类（request）没有 notice_type，
+ * 走整包指纹，天然按 flag/comment/user 等区分不同请求。
+ */
+export function buildEventDedupExtra(event: any): string {
+    if (!event || typeof event !== 'object') return '';
+    const noticeType = String(event.notice_type || '');
+    if (noticeType && NATIVE_OVERLAP_NOTICE_TYPES.has(noticeType)) return '';
+    return fnv1a(canonicalJson(event));
+}
+
+/** raw 是否为 ob11 原始事件载荷（原生路径传的是 info 摘要，无 notice_type/request_type/post_type，不会误判） */
+export function isOb11EventPayload(raw: any): boolean {
+    if (!raw || typeof raw !== 'object') return false;
+    return typeof raw.notice_type === 'string'
+        || typeof raw.request_type === 'string'
+        || typeof raw.post_type === 'string';
+}
+
+/** 递归规范化：对象键排序、剔除 undefined，保证同一事件不同投递/不同键序得到相同指纹输入 */
+function canonicalJson(value: any): string {
+    if (value === null) return 'null';
+    const t = typeof value;
+    if (t === 'number') return Number.isFinite(value) ? String(value) : 'null';
+    if (t === 'string') return JSON.stringify(value);
+    if (t === 'boolean') return value ? 'true' : 'false';
+    if (t === 'undefined' || t === 'function' || t === 'symbol') return '';
+    if (Array.isArray(value)) {
+        let out = '[';
+        for (let i = 0; i < value.length; i++) {
+            if (i > 0) out += ',';
+            out += canonicalJson(value[i]);
+        }
+        return out + ']';
+    }
+    const keys = Object.keys(value).sort();
+    let out = '{';
+    let first = true;
+    for (const k of keys) {
+        const v = value[k];
+        if (v === undefined) continue;
+        if (!first) out += ',';
+        first = false;
+        out += JSON.stringify(k) + ':' + canonicalJson(v);
+    }
+    return out + '}';
+}
+
+/** FNV-1a 32 位哈希 → base36 短串：把整包指纹压成定长 key 段（容量有界，碰撞概率在窗口规模内可忽略） */
+function fnv1a(str: string): string {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(36);
 }
 
 function uniUserId(id: any, prefix: string): string {

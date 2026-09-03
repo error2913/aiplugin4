@@ -8,10 +8,10 @@ export function registerCallOb11Api() {
         function: {
             name: "call_ob11_api",
             description: "调用 OneBot 11 API 或已支持的 NapCat/Milky API。运行时会自动选择 ob11-net 后端或 SealDice 原生后端；不要调用旧的按功能拆分工具。\n" +
-                "发送消息必须使用本工具，禁止在回复中伪造发送动作。\n" +
+                "回复当前会话请直接输出文本（会自动发送给用户），不要在 call_ob11_api 中发送；本工具仅用于向其他会话主动外发消息、或发送语音/视频/文件等文本标签表达不了的特殊消息段。禁止在回复中伪造已发送动作。\n" +
                 "\n" +
-                "消息发送格式：\n" +
-                "- 发私聊/群聊消息使用 send_private_msg / send_group_msg，params.message 传文本或消息段数组。\n" +
+                "发送消息格式：\n" +
+                "- 主动向指定私聊/群聊外发消息使用 send_private_msg / send_group_msg，params.message 传文本或消息段数组。\n" +
                 "- 图片/语音/视频/文件分别使用 image/record/video/file 消息段。\n" +
                 "- 当前会话直接回复图片优先使用 [img:图片ID]，不要在 call_ob11_api 中发送。\n" +
                 "- 需要 call_ob11_api 发送本地资源时，将 file 写成 resource:资源ID。\n" +

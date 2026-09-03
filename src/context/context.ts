@@ -126,6 +126,11 @@ export function dropOldestRound(messages: MessageType[]): boolean {
     return true;
 }
 
+/** 上下文条目定位引用：addSystemUserMessageTracked 的返回值，供事件去重"后到覆盖先到"就地替换 */
+export interface SystemEntryRef {
+    messageIndex: number;
+    itemIndex: number;
+}
 
 export class Context {
     static validKeysMap: { [key in keyof Context]?: TypeDescriptor<Context[key]> } = {
@@ -315,6 +320,50 @@ export class Context {
             contentItems: [sumi]
         });
 
+    }
+
+    /** 追加系统用户消息并返回条目定位引用（供事件去重窗口内"后到覆盖先到"的就地替换使用）。与 addSystemUserMessage 同构。 */
+    addSystemUserMessageTracked(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }): SystemEntryRef | null {
+        text = stripInternalTags(text);
+        const sumi: SystemUserMessageItem = {
+            text,
+            time: Math.floor(Date.now() / 1000),
+            systemName,
+            ...(extra?.eventType ? { eventType: extra.eventType } : {}),
+            ...(extra?.raw !== undefined ? { raw: extra.raw } : {})
+        };
+        const lastMessage = this.messages[this.messages.length - 1];
+        let messageIndex: number;
+        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) {
+            messageIndex = this.messages.length - 1;
+            (lastMessage as UserMessage).contentItems.push(sumi);
+        } else {
+            messageIndex = this.messages.length;
+            this.messages.push({ role: 'user', contentItems: [sumi] });
+        }
+        const container = (this.messages[messageIndex] as UserMessage).contentItems;
+        return { messageIndex, itemIndex: container.length - 1 };
+    }
+
+    /**
+     * 按引用就地替换系统用户消息条目：事件去重命中时把已入库的旧副本更新为"最后到达的事件"，
+     * 保证同一去重窗口内上下文只保留一条、内容取最新。条目已被合并压缩/归档等改写导致引用
+     * 失效时返回 false，由调用方自行兜底（如追加新副本）。
+     */
+    replaceSystemUserMessage(ref: SystemEntryRef, text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }): boolean {
+        const m = this.messages[ref.messageIndex];
+        if (!m || m.role !== 'user' || !Array.isArray(m.contentItems)) return false;
+        const item = m.contentItems[ref.itemIndex];
+        // 仅当原位置仍是"系统用户消息"（未被压缩成块/清理/归档改写）时才可安全替换
+        if (!item || typeof item.text !== 'string' || !(item as SystemUserMessageItem).systemName) return false;
+        const systemItem = item as SystemUserMessageItem;
+        systemItem.text = stripInternalTags(text);
+        systemItem.systemName = systemName;
+        if (extra?.eventType) systemItem.eventType = extra.eventType;
+        else delete systemItem.eventType;
+        if (extra?.raw !== undefined) systemItem.raw = extra.raw;
+        else delete systemItem.raw;
+        return true;
     }
 
     addToolCallsMessage(toolCalls: ToolCall[], reasoningContent?: string) {

@@ -16,8 +16,9 @@ import { TimerManager } from "./timer";
 import Tool from "./tool/tool";
 import { createMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
-import { getPlatform } from "./utils/target_id";
+import { getPlatform, normalizeGroupId, normalizeUserId } from "./utils/target_id";
 import { checkUpdate } from "./utils/update";
+import { normalizeMsgId } from "./utils/utils";
 
 const log = logger.withTag('main');
 
@@ -73,12 +74,21 @@ function main() {
   // 原生已覆盖的群/好友事件（成员加入/退出/撤回/加好友/入驻）：
   // 这些类型默认就在通知事件白名单中，事件仅作背景不触发 AI；
   // 与 ob11 依赖的通知事件双路径共用 3s 事件级去重，防止同一条事件被记录两次。
+  // 注意：seal 原生回调给出的 ID 已是 UNI-ID（QQ:xxx / QQ-Group:xxx），这里统一再经
+  // normalizeGroupId/normalizeUserId 归一（兼容个别仍给裸数字的旧适配器），保证与 ob11
+  // 依赖路径（统一单前缀）拼出的去重 key 完全一致；无法归一时跳过，避免污染会话/黑名单判定。
   ext.onGroupMemberJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const prefix = getPlatform(ctx.endPoint.userId);
-      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
+      const platform = getPlatform(ctx.endPoint.userId);
+      const sid = normalizeGroupId(msg.groupId, platform);
+      const userId = normalizeUserId(msg.sender.userId, platform);
+      if (!sid || !userId) {
+        log.debug(`群成员加入事件 ID 无法归一化，跳过: group=${msg.groupId} sender=${msg.sender.userId}`);
+        return;
+      }
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, sid, {
         noticeType: 'group_increase',
-        userId: msg.sender.userId,
+        userId,
       }).catch((e: any) => log.exception('群成员加入事件处理出错', e));
     } catch (e) {
       log.exception('群成员加入事件处理出错', e);
@@ -87,12 +97,22 @@ function main() {
 
   ext.onGroupLeave = (ctx: seal.MsgContext, event: seal.GroupLeaveEvent) => {
     try {
-      const prefix = getPlatform(ctx.endPoint.userId);
-      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${event.groupId}`, {
+      const platform = getPlatform(ctx.endPoint.userId);
+      const sid = normalizeGroupId(event.groupId, platform);
+      const userId = normalizeUserId(event.userId, platform);
+      const operatorId = event.operatorId ? (normalizeUserId(event.operatorId, platform) ?? '') : '';
+      if (!sid || !userId) {
+        log.debug(`群成员退出事件 ID 无法归一化，跳过: group=${event.groupId} user=${event.userId}`);
+        return;
+      }
+      // 被移出的是机器人自身（归一后等于端点）→ kick_me；其余按是否有操作者区分踢出/退群
+      const isSelf = userId === ctx.endPoint.userId;
+      const subType = isSelf && !!event.operatorId ? 'kick_me' : event.operatorId ? 'kick' : 'leave';
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, sid, {
         noticeType: 'group_decrease',
-        subType: event.operatorId ? 'kick' : 'leave',
-        userId: `${prefix}:${event.userId}`,
-        operatorId: event.operatorId ? `${prefix}:${event.operatorId}` : '',
+        subType,
+        userId,
+        operatorId,
       }).catch((e: any) => log.exception('群成员退出事件处理出错', e));
     } catch (e) {
       log.exception('群成员退出事件处理出错', e);
@@ -101,18 +121,29 @@ function main() {
 
   ext.onMessageDeleted = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const prefix = getPlatform(ctx.endPoint.userId);
-      const messageId = msg.rawId !== undefined && msg.rawId !== null ? String(msg.rawId) : '';
+      const platform = getPlatform(ctx.endPoint.userId);
+      const messageId = normalizeMsgId(msg.rawId);
       if (msg.messageType === 'group') {
-        MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
+        const sid = normalizeGroupId(msg.groupId, platform);
+        const userId = normalizeUserId(msg.sender.userId, platform) || '';
+        if (!sid) {
+          log.debug(`消息撤回事件群 ID 无法归一化，跳过: group=${msg.groupId}`);
+          return;
+        }
+        MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, sid, {
           noticeType: 'group_recall',
-          userId: msg.sender.userId,
+          userId,
           messageId,
         }).catch((e: any) => log.exception('消息撤回事件处理出错', e));
       } else {
-        MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, msg.sender.userId, {
+        const sid = normalizeUserId(msg.sender.userId, platform);
+        if (!sid) {
+          log.debug(`消息撤回事件用户 ID 无法归一化，跳过: sender=${msg.sender.userId}`);
+          return;
+        }
+        MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, sid, {
           noticeType: 'friend_recall',
-          userId: msg.sender.userId,
+          userId: sid,
           messageId,
         }).catch((e: any) => log.exception('消息撤回事件处理出错', e));
       }
@@ -123,9 +154,15 @@ function main() {
 
   ext.onBecomeFriend = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, msg.sender.userId, {
+      const platform = getPlatform(ctx.endPoint.userId);
+      const sid = normalizeUserId(msg.sender.userId, platform);
+      if (!sid) {
+        log.debug(`成为好友事件用户 ID 无法归一化，跳过: sender=${msg.sender.userId}`);
+        return;
+      }
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, sid, {
         noticeType: 'friend_add',
-        userId: msg.sender.userId,
+        userId: sid,
       }).catch((e: any) => log.exception('成为好友事件处理出错', e));
     } catch (e) {
       log.exception('成为好友事件处理出错', e);
@@ -134,8 +171,13 @@ function main() {
 
   ext.onGroupJoined = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      const prefix = getPlatform(ctx.endPoint.userId);
-      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, `${prefix}-Group:${msg.groupId}`, {
+      const platform = getPlatform(ctx.endPoint.userId);
+      const sid = normalizeGroupId(msg.groupId, platform);
+      if (!sid) {
+        log.debug(`加入群聊事件群 ID 无法归一化，跳过: group=${msg.groupId}`);
+        return;
+      }
+      MessagePipeline.handleNativeNoticeEvent(ctx.endPoint.userId, sid, {
         noticeType: 'group_joined',
       }).catch((e: any) => log.exception('加入群聊事件处理出错', e));
     } catch (e) {

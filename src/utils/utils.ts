@@ -30,6 +30,19 @@ export function transformMsgId(msgId: string | number | null): string {
 }
 
 /**
+ * 去重/比对用消息 ID 归一：十进制（含负数，QQ/NapCat 形态）转 base36，与上下文记录
+ * （getRecordMessageId）口径一致，保证原生回调与 ob11 依赖两条路径对同一 messageId
+ * 拼出相同字符串；已是 base36/非十进制（其它平台）保持原样。空值返回 ''。
+ */
+export function normalizeMsgId(msgId: string | number | null | undefined): string {
+    if (msgId === undefined || msgId === null) return '';
+    const s = String(msgId).trim();
+    if (!s) return '';
+    const base36 = transformMsgId(s);
+    return base36 || s;
+}
+
+/**
  * base36 短 ID → 原始十进制消息 ID。
  * 安全整数（|n| ≤ 2^53-1）返回 number（兼容旧行为），超出安全范围返回精确十进制字符串，避免精度丢失。
  * 非法输入返回 ''。

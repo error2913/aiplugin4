@@ -15,7 +15,7 @@ import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/
 import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
 import { stripRawMarkers } from "../src/utils/raw_marker";
 import { createCtx } from "../src/utils/seal";
-import { buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
+import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerRawToolSet } from "../src/tool/tools/raw/init";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
@@ -61,7 +61,7 @@ import Image from "../src/resource/image";
 import Tool, { toolMap } from "../src/tool/tool";
 import { getSkillSummaries, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
-import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
+import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
 import { resetResourceConfigCacheForTest } from "../src/config/configs/resource";
 import { resetImageConfigCacheForTest } from "../src/config/configs/image";
@@ -2234,6 +2234,166 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(isDuplicateEvent('k2', now + 1000), false, '不同 key 不重复');
         assert.equal(isDuplicateEvent('k1', now + 4000), false, '窗口过期后不再重复');
         resetEventGuards();
+    },
+
+    /** 去重 key 粒度：3s 窗口内"连续但不同"的事件不得共 key（回归：曾因只按 notice_type 聚合把后者吞掉）；
+     *  采用整包内容指纹（通用，不依赖类型枚举）：内容不同 → 指纹不同；同一事件重复投递（echo）→ 指纹一致；
+     *  双路径重叠类型不加指纹以保持两路 key 一致。 */
+    testEventDedupKeyGranularity(): void {
+        const ep = 'QQ:999';
+        const sid = 'QQ-Group:1';
+
+        // group_upload：同一人连续上传两个不同文件是不同事件
+        const up1 = { notice_type: 'group_upload', user_id: 1001, file: { id: 'f1', name: 'a.pdf', size: 10 } };
+        const up2 = { notice_type: 'group_upload', user_id: 1001, file: { id: 'f2', name: 'b.pdf', size: 20 } };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'group_upload', 'QQ:1001', '', buildEventDedupExtra(up1)),
+            buildEventDedupKey(ep, sid, 'group_upload', 'QQ:1001', '', buildEventDedupExtra(up2)),
+            '同一人连续上传两个不同文件：后者不应被吞');
+        assert.equal(
+            buildEventDedupKey(ep, sid, 'group_upload', 'QQ:1001', '', buildEventDedupExtra(up1)),
+            buildEventDedupKey(ep, sid, 'group_upload', 'QQ:1001', '', buildEventDedupExtra({ ...up1 })),
+            '同一文件重复投递应去重');
+
+        // group_ban：禁言与解禁是不同事件；同一条禁言重复投递应去重
+        const ban = { notice_type: 'group_ban', sub_type: 'ban', user_id: 1001, operator_id: 1002, duration: 300 };
+        const lift = { notice_type: 'group_ban', sub_type: 'lift_ban', user_id: 1001, operator_id: 1002 };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'group_ban', 'QQ:1001', '', buildEventDedupExtra(ban)),
+            buildEventDedupKey(ep, sid, 'group_ban', 'QQ:1001', '', buildEventDedupExtra(lift)),
+            '禁言后立刻解禁是不同事件：后者不应被吞');
+        assert.equal(
+            buildEventDedupKey(ep, sid, 'group_ban', 'QQ:1001', '', buildEventDedupExtra(ban)),
+            buildEventDedupKey(ep, sid, 'group_ban', 'QQ:1001', '', buildEventDedupExtra({ ...ban })),
+            '同一条禁言重复投递应去重');
+
+        // notify 大类：honor 与 lucky_king 是不同事件
+        const honor = { notice_type: 'notify', sub_type: 'honor', user_id: 1001, honor_type: 'talkative' };
+        const lucky = { notice_type: 'notify', sub_type: 'lucky_king', user_id: 1001 };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'notify', 'QQ:1001', '', buildEventDedupExtra(honor)),
+            buildEventDedupKey(ep, sid, 'notify', 'QQ:1001', '', buildEventDedupExtra(lucky)),
+            '荣誉与运气王是不同事件：后者不应被吞');
+
+        // notify/profile_like：不同点赞人（key 的 userId 相同）是不同事件
+        const likeA = { notice_type: 'notify', sub_type: 'profile_like', user_id: 999, operator_id: 1001 };
+        const likeB = { notice_type: 'notify', sub_type: 'profile_like', user_id: 999, operator_id: 1002 };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'notify', 'QQ:999', '', buildEventDedupExtra(likeA)),
+            buildEventDedupKey(ep, sid, 'notify', 'QQ:999', '', buildEventDedupExtra(likeB)),
+            '不同人点赞同一资料：第二次不应被吞');
+
+        // essence：设/撤精华是不同事件，不同目标消息也不同事件
+        const essAdd = { notice_type: 'essence', sub_type: 'add', message_id: 11, sender_id: 1001, operator_id: 1002 };
+        const essDel = { notice_type: 'essence', sub_type: 'delete', message_id: 11, sender_id: 1001, operator_id: 1002 };
+        const essAdd2 = { notice_type: 'essence', sub_type: 'add', message_id: 22, sender_id: 1001, operator_id: 1002 };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'essence', 'QQ:1002', '', buildEventDedupExtra(essAdd)),
+            buildEventDedupKey(ep, sid, 'essence', 'QQ:1002', '', buildEventDedupExtra(essDel)),
+            '设/撤精华是不同事件：后者不应被吞');
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'essence', 'QQ:1002', '', buildEventDedupExtra(essAdd)),
+            buildEventDedupKey(ep, sid, 'essence', 'QQ:1002', '', buildEventDedupExtra(essAdd2)),
+            '不同消息设精华是不同事件');
+
+        // group_msg_emoji_like：添加与取消是不同事件
+        const emoAdd = { notice_type: 'group_msg_emoji_like', user_id: 1001, is_add: true, message_id: 5, likes: [{ emoji_id: '14' }] };
+        const emoDel = { notice_type: 'group_msg_emoji_like', user_id: 1001, is_add: false, message_id: 5, likes: [{ emoji_id: '14' }] };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'group_msg_emoji_like', 'QQ:1001', '', buildEventDedupExtra(emoAdd)),
+            buildEventDedupKey(ep, sid, 'group_msg_emoji_like', 'QQ:1001', '', buildEventDedupExtra(emoDel)),
+            '添加/取消表情是不同事件：后者不应被吞');
+
+        // 双路径重叠类型（撤回/加群等）：不加区分串，echo 仍共 key 且与 5 参旧 key 构造一致
+        assert.equal(buildEventDedupExtra({ notice_type: 'group_recall', message_id: 9 }), '', '撤回类不加区分串');
+        assert.equal(buildEventDedupExtra({ notice_type: 'group_increase', user_id: 1001 }), '', '成员加入不加区分串');
+        assert.equal(buildEventDedupExtra({ notice_type: 'group_decrease', sub_type: 'kick', user_id: 1001 }), '', '成员退出不加区分串');
+        const k5 = buildEventDedupKey(ep, sid, 'group_recall', 'QQ:1002', 'm1');
+        const k6 = buildEventDedupKey(ep, sid, 'group_recall', 'QQ:1002', 'm1', buildEventDedupExtra({ notice_type: 'group_recall', message_id: 9 }));
+        assert.equal(k5, k6, '重叠类型 extra 为空时应与旧 key 构造一致');
+
+        // 通用性（不再依赖类型枚举）：任意未枚举/未来/自定义类型同样按整包内容区分
+        const customA = { notice_type: 'group_custom_future', user_id: 1001, payload: { value: 'a' } };
+        const customB = { notice_type: 'group_custom_future', user_id: 1001, payload: { value: 'b' } };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'group_custom_future', 'QQ:1001', '', buildEventDedupExtra(customA)),
+            buildEventDedupKey(ep, sid, 'group_custom_future', 'QQ:1001', '', buildEventDedupExtra(customB)),
+            '未枚举类型内容不同也不应被吞');
+        assert.equal(
+            buildEventDedupKey(ep, sid, 'group_custom_future', 'QQ:1001', '', buildEventDedupExtra(customA)),
+            buildEventDedupKey(ep, sid, 'group_custom_future', 'QQ:1001', '', buildEventDedupExtra({ ...customA })),
+            '未枚举类型同事件重复投递应去重');
+
+        // 请求类：同一人两条不同好友请求（flag 不同）是不同事件
+        const reqA = { post_type: 'request', request_type: 'friend', user_id: 1001, flag: 'req-1', comment: 'hi' };
+        const reqB = { post_type: 'request', request_type: 'friend', user_id: 1001, flag: 'req-2', comment: 'hi' };
+        assert.notEqual(
+            buildEventDedupKey(ep, sid, 'friend_request', 'QQ:1001', '', buildEventDedupExtra(reqA)),
+            buildEventDedupKey(ep, sid, 'friend_request', 'QQ:1001', '', buildEventDedupExtra(reqB)),
+            '两条不同好友请求（不同 flag）：后者不应被吞');
+
+        // 规范化：字段键序不同的同一事件 → 指纹一致（echo 识别不依赖投递端键序）
+        assert.equal(
+            buildEventDedupExtra({ notice_type: 'group_ban', user_id: 1, duration: 30, operator_id: 2 }),
+            buildEventDedupExtra({ operator_id: 2, duration: 30, notice_type: 'group_ban', user_id: 1 }),
+            '键序不同的同一事件指纹一致');
+
+        // 载荷识别：ob11 原始事件 vs 原生 info 摘要
+        assert.equal(isOb11EventPayload({ post_type: 'notice', notice_type: 'group_ban', user_id: 1 }), true, 'ob11 notice 载荷识别');
+        assert.equal(isOb11EventPayload({ post_type: 'request', request_type: 'friend', flag: 'f' }), true, 'ob11 request 载荷识别');
+        assert.equal(isOb11EventPayload({ noticeType: 'group_recall', userId: 'QQ:1' }), false, '原生 info 摘要不是 ob11 载荷');
+        assert.equal(isOb11EventPayload(null), false, 'null 不是 ob11 载荷');
+    },
+
+    /** 撤回/比对消息 ID 归一：十进制（含负数）转 base36 与上下文口径一致；非十进制原样；空值空串 */
+    testNormalizeMsgId(): void {
+        assert.equal(normalizeMsgId(123), '3f', '正整数转 base36');
+        assert.equal(normalizeMsgId('9007199254740993'), transformMsgId('9007199254740993'), '大整数不丢精度');
+        assert.equal(normalizeMsgId(-123), '-3f', '负数转 base36');
+        assert.equal(normalizeMsgId('0'), '0', '零保持零');
+        assert.equal(normalizeMsgId('m1'), 'm1', '非十进制（已 base36/平台字符串）保持原样');
+        assert.equal(normalizeMsgId('abc'), 'abc', '非数字原样保留');
+        assert.equal(normalizeMsgId(''), '', '空串不变');
+        assert.equal(normalizeMsgId(undefined), '', 'undefined 归一为空');
+        assert.equal(normalizeMsgId(null), '', 'null 归一为空');
+    },
+
+    /** 机器人自身入群/被移出/退群由原生回调（onGroupJoined/onGroupLeave）覆盖：ob11 依赖侧应跳过；其余类型不误伤 */
+    testSelfCoveredNoticeEvent(): void {
+        assert.equal(isSelfCoveredNoticeEvent('group_increase', 1001, 1001), true, '机器人自身入群由原生覆盖，依赖侧跳过');
+        assert.equal(isSelfCoveredNoticeEvent('group_decrease', 1001, 1001), true, '机器人自身被移出/退群由原生覆盖');
+        assert.equal(isSelfCoveredNoticeEvent('group_increase', 1002, 1001), false, '他人入群不跳过');
+        assert.equal(isSelfCoveredNoticeEvent('group_decrease', 1002, 1001), false, '他人退出不跳过');
+        assert.equal(isSelfCoveredNoticeEvent('profile_like', 1001, 1001), false, '资料点赞等 notify 不误伤');
+        assert.equal(isSelfCoveredNoticeEvent('group_ban', 1001, 1001), false, '禁言类与原生无重叠，不跳过');
+        assert.equal(isSelfCoveredNoticeEvent('group_increase', undefined, 1001), false, '缺 user_id 不判定为自身');
+    },
+
+    /** 事件去重"后到覆盖先到"：同 key 重复到达时不丢弃，就地替换旧条目（文本/raw 取最后到达），条目数不变；
+     *  原位置已被压缩/归档改写时替换失败，由调用方追加兜底 */
+    testEventLastArrivalSupersedes(): void {
+        const ctx = new Context();
+        const ref1 = ctx.addSystemUserMessageTracked('【群事件】QQ:1 撤回了一条消息', '群事件提示', { eventType: 'group_recall', raw: { from: 'native' } });
+        assert.ok(ref1, '首条事件应返回定位引用');
+        const ref2 = ctx.addSystemUserMessageTracked('【好友事件】已与 QQ:2 成为好友', '群事件提示', { eventType: 'friend_add', raw: { from: 'ob11' } });
+        assert.ok(ref2, '不同事件照常追加并返回定位');
+        assert.equal(ctx.messages.length, 1, '系统事件都落入 user 容器');
+        assert.equal((ctx.messages[0] as any).contentItems.length, 2, '普通追加两条');
+
+        // 同 key 重复（去重命中）：用最后到达的副本就地替换，条目总数不变、位置保留
+        assert.equal(
+            ctx.replaceSystemUserMessage(ref1!, '【群事件】管理员 撤回了一条消息', '群事件提示', { eventType: 'group_recall', raw: { from: 'ob11', operator_id: 9 } }),
+            true,
+            '引用有效时应就地替换成功');
+        assert.equal((ctx.messages[0] as any).contentItems.length, 2, '替换不得新增条目');
+        const first = (ctx.messages[0] as any).contentItems[0];
+        assert.equal(first.text, '【群事件】管理员 撤回了一条消息', '文本应取最后到达的副本');
+        assert.equal(first.raw.from, 'ob11', 'raw 应取最后到达的副本');
+        assert.equal(first.systemName, '群事件提示');
+
+        // 原位置被改写（合并压缩/归档等）：替换失败返回 false，调用方自行兜底
+        (ctx.messages[0] as any).contentItems[0] = { text: '压缩块', time: 0, userId: 'QQ:1', messageId: 'x', rawItems: [] };
+        assert.equal(ctx.replaceSystemUserMessage(ref1!, '新文本', '群事件提示', {}), false, '条目已被改写时应返回 false');
     },
 
     /** 消息 ID base36 转换：超出 2^53 的大整数不再丢精度，负数无损往返，非法输入返回空 */
