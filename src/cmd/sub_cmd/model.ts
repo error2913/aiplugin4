@@ -32,31 +32,15 @@ function modelRef(m: BaseModel, source: ModelSource): string {
     return `${source}[${m.configIndex}]:${m.name}`;
 }
 
-/** 列出某用途的全部候选：use 精确匹配，不包含空 use 任意用途 */
+/** 列出某用途的全部候选：use 精确匹配，不包含空 use 任意用途（复用 Model.listModelsForUse） */
 function listModelsForPurpose(use: ModelUse): ModelCandidate[] {
-    const candidates: ModelCandidate[] = [];
-    const add = (models: BaseModel[], source: ModelSource) => {
-        for (const m of models) {
-            if (!(m as any).use.includes(use)) continue;
-            candidates.push({
-                ref: modelRef(m, source),
-                name: m.name,
-                source,
-                configIndex: m.configIndex,
-                isMultimodal: m.isMultimodal
-            });
-        }
-    };
-
-    if (use === 'image-understanding') {
-        add(Model.multimodalModels, 'multimodal');
-    } else if (use === 'text-embedding') {
-        add(Model.embeddingModels, 'embedding');
-    } else {
-        add(Model.chatModels, 'text');
-        add(Model.multimodalModels, 'multimodal');
-    }
-    return candidates;
+    return Model.listModelsForUse(use).map(m => ({
+        ref: m.ref,
+        name: m.name,
+        source: m.source,
+        configIndex: m.configIndex,
+        isMultimodal: m.isMultimodal
+    }));
 }
 
 function resolvePurposeModel(use: ModelUse): BaseModel | null {

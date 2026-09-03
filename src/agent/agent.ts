@@ -1,8 +1,9 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
-import Config from "../config/config";
-import { ext } from "../config/config";
+import Config, { ext } from "../config/config";
+import { savePurposeModelOverrides } from "../config/configs/model";
 import Logger from "../logger";
-import Model from "../model/model";
+import { ApiError, computeArchiveTarget, KIND_LABEL } from "../model/api_error";
+import Model, { BaseModel } from "../model/model";
 import { ChatModelUse } from "../model/types";
 import Image from "../resource/image";
 import { Session } from "../session/session";
@@ -177,6 +178,9 @@ export default class Agent {
         let nudgeCount = 0;
         const MaxNudge = 2;
 
+        // 模型分类错误自动处理的 run 级状态：上下文超长归档 / 自动切模型各自至多触发一次，避免反复恢复死循环
+        const handled = { archived: false, switched: false };
+
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // stop 中止检查点：上一轮工具执行/回调期间被 stop 则不再发下一轮请求
             if (session.stopVersion !== version) return;
@@ -184,9 +188,23 @@ export default class Agent {
             // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
             await session.flushPending();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName);
-            const { content: raw_reply, tool_calls, reasoning_content } = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent);
+
+            let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
+            try {
+                // throwClassified=true：分类错误（超长/余额不足等）在此上抛，由 handleModelError 自动处理后重发；
+                // 其余调用方不传该选项，维持原有吞错返回空的静默行为
+                turn = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, { throwClassified: true });
+            } catch (e) {
+                if (e instanceof StopError) return;
+                if (!(e instanceof ApiError)) throw e;
+                const action = await this.handleModelError(ctx, session, e, handled);
+                if (action !== 'retry') return;
+                // 已归档/已切模型：重跑一轮（handleMessages 会基于归档后的上下文重建请求体）
+                continue;
+            }
             // stop 中止检查点：模型请求期间被 stop，丢弃本轮输出直接中止
             if (session.stopVersion !== version) return;
+            const { content: raw_reply, tool_calls, reasoning_content } = turn;
             lastReasoning = reasoning_content;
             // 提示词工程模式下模型可能返回 ```function ... ``` 代码块包裹的工具调用：
             // 发送前先剥离该块，避免代码块原文进入回复/上下文；调用内容仍以 match[0] 原样记录
@@ -293,10 +311,77 @@ export default class Agent {
         log.info(`[run] ${trace.summary()}`);
     }
 
+    /**
+     * 模型分类错误的自动处理（runInternal / runStreamInner 共用）：
+     * - context_too_long：按「观察归档+删除」链路把持久化上下文压到模型窗口内（目标=min(本地预算, 报文窗口×0.8)），返回 retry；
+     * - 配置触发的类别（默认 balance）：自动切换 chat 备用模型并持久化（可选 ctx.notice 通知），返回 retry；
+     * - 其余类别 / 动作已用过仍失败：仅记日志，返回 giveup（静默结束本轮，不回复用户）。
+     * 每类动作由 handled 限流为单次 run 至多一次。
+     */
+    private async handleModelError(
+        ctx: seal.MsgContext,
+        session: Session,
+        e: ApiError,
+        handled: { archived: boolean; switched: boolean }
+    ): Promise<'retry' | 'giveup'> {
+        const { ENABLED, CONTEXT_ARCHIVE_RETRY, AUTO_SWITCH_MODEL, SWITCH_KINDS, SWITCH_STRATEGY, SWITCH_NOTIFY } = Config.error;
+        const current = Model.getChatModel('chat');
+        const modelLabel = e.modelName || current?.name || '';
+        const snippet = e.message.length > 200 ? e.message.slice(0, 200) + '…' : e.message;
+        log.error(`[model-error] kind=${e.kind}(${KIND_LABEL[e.kind]}) provider=${e.provider || '?'} model=${modelLabel} status=${e.status} msg=${snippet}`);
+
+        // 动作一：上下文超长 → 观察归档删除 → 自动重发
+        if (e.kind === 'context_too_long' && !handled.archived) {
+            if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
+            const target = computeArchiveTarget(Config.context.MAX_CONTEXT_TOKENS, e.rawText);
+            if (target === undefined) return 'giveup';
+            handled.archived = true;
+            await session.context.archiveByTokenIfNeeded(target);
+            log.info(`[model-error] 上下文超长：已观察归档删除至 ${target} tokens，自动重发`);
+            return 'retry';
+        }
+
+        // 动作二：余额不足/权限不足等（按「自动切换触发错误」配置）→ 切备用 chat 模型 → 自动重发
+        if (SWITCH_KINDS.includes(e.kind) && !handled.switched) {
+            if (!ENABLED || !AUTO_SWITCH_MODEL) return 'giveup';
+            const next = this.pickFallbackModel(current, SWITCH_STRATEGY);
+            if (!next) return 'giveup';
+            handled.switched = true;
+            Model.purposeModelOverrides['chat'] = next.ref;
+            savePurposeModelOverrides();
+            if (SWITCH_NOTIFY && (ctx as any).notice) {
+                try {
+                    (ctx as any).notice(`模型 ${current ? current.ref : modelLabel} 调用失败（${KIND_LABEL[e.kind]}），已自动切换为 ${next.ref}`);
+                } catch (noticeErr) {
+                    log.warning(`[model-error] 自动切换通知发送失败: ${noticeErr instanceof Error ? noticeErr.message : String(noticeErr)}`);
+                }
+            }
+            log.info(`[model-error] ${e.kind}：chat 模型 ${current ? current.ref : modelLabel} → ${next.ref}（自动切换），重发`);
+            return 'retry';
+        }
+
+        // 其余类别（auth/参数/内容安全/unknown 等）或自动动作已用过仍失败：仅日志，静默结束本轮
+        return 'giveup';
+    }
+
+    /** 选取 chat 用途的备用模型：排除当前模型；跨厂商优先（cross）或配置顺序下一个（order），无候选返回 null */
+    private pickFallbackModel(current: BaseModel | null, strategy: 'cross' | 'order'): BaseModel | null {
+        const currentRef = current ? current.ref : '';
+        const cands = Model.listModelsForUse('chat').filter(c => c.ref !== currentRef);
+        if (cands.length === 0) return null;
+        if (strategy === 'cross' && current) {
+            const cross = cands.find(c => c.provider !== current.provider);
+            if (cross) return cross;
+        }
+        return cands[0];
+    }
+
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const version = session.stopVersion;
+        // 模型分类错误自动处理的 run 级状态（runInternal 同款：每类动作单次 run 至多一次）
+        const handled = { archived: false, switched: false };
         // 同会话闸门：已有 run/runStream 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
         if (session.running || session.starting) return;
         session.starting = true;
@@ -310,7 +395,7 @@ export default class Agent {
             session.running = true;
             session.starting = false;
             session.activeRuns++;
-            await this.runStreamInner(session, ctx, msg);
+            await this.runStreamInner(session, ctx, msg, undefined, handled);
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
             if (e instanceof StopError) return;
@@ -332,28 +417,47 @@ export default class Agent {
         session: Session,
         ctx: seal.MsgContext,
         msg: seal.Message,
-        systemMessage?: Awaited<ReturnType<typeof buildSystemMessage>>
+        systemMessage?: Awaited<ReturnType<typeof buildSystemMessage>>,
+        handled?: { archived: boolean; switched: boolean }
     ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const modelName = Model.getChatModel('chat')?.name || '';
         const trace = new AgentRunContext();
         const version = session.stopVersion;
+        const h = handled ?? { archived: false, switched: false };
 
         await session.stopCurrentChatStream();
         // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
         await session.flushPending();
 
-        const sys = systemMessage ?? await buildSystemMessage(ctx, session);
-        const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName);
-        const id = await streamService.startStream(messages, trace.runId, session.stopEvent);
-        if (!id) return;
-        // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
-        if (session.stopVersion !== version) {
-            session.stream.id = id;
-            await session.stopCurrentChatStream();
-            return;
+        // 建立流；模型分类错误（上下文超长/余额不足等）由 handleModelError 自动处理一次后重建重试
+        let sys = systemMessage;
+        let id = '';
+        for (let attempt = 0; attempt <= 1; attempt++) {
+            try {
+                sys = sys ?? await buildSystemMessage(ctx, session);
+                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName);
+                const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
+                if (!newId) return;
+                // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
+                if (session.stopVersion !== version) {
+                    session.stream.id = newId;
+                    await session.stopCurrentChatStream();
+                    return;
+                }
+                id = newId;
+                break;
+            } catch (e) {
+                if (e instanceof StopError) return;
+                if (!(e instanceof ApiError)) {
+                    log.exception('runStreamInner startStream', e);
+                    return;
+                }
+                const action = await this.handleModelError(ctx, session, e, h);
+                if (action !== 'retry') return;
+                // 自动处理已生效：进入下一轮重建（归档后上下文已收敛 / 已切备用模型）
+            }
         }
-
         session.stream.id = id;
         let status = 'processing';
         let after = 0;
@@ -428,7 +532,7 @@ export default class Agent {
                         }
 
                         if (session.stopVersion !== version) return;
-                        await this.runStreamInner(session, ctx, msg, sys);
+                        await this.runStreamInner(session, ctx, msg, sys, h);
                         return;
                     } else {
                         after = result.nextAfter;

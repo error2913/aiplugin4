@@ -45,6 +45,7 @@ import {
 } from "../src/memory/v2";
 import { getMemoryRevision } from "../src/memory/revision";
 import { requestLimiter } from "../src/utils/concurrency";
+import { ApiError, classifyApiError, computeArchiveTarget, parseMaxContextTokens } from "../src/model/api_error";
 import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken } from "../src/context/context";
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
@@ -4961,6 +4962,235 @@ description: 茶库
             assert.equal(getMemoryRevision(), before2, '无更新时不应 bump');
         } finally {
             engine.refreshMentalModels = origRefresh;
+        }
+    },
+
+    /** 模型报错分类：跨厂商真实/典型报文 → 语义类别（含各陷阱：阿里 insufficient_quota 是限流非欠费等） */
+    testClassifyApiErrorKinds(): void {
+        const c = (provider: string, status: number, raw: string) => classifyApiError(provider, status, raw);
+        // OpenAI 系
+        assert.equal(c('openai', 429, '{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}'), 'balance');
+        assert.equal(c('openai', 429, '{"error":{"message":"Insufficient credits","type":"insufficient_quota","code":"credit_balance_exhausted"}}'), 'balance');
+        assert.equal(c('', 429, '{"error":{"message":"Rate limit reached for requests","type":"requests","code":"rate_limit_exceeded"}}'), 'rate_limit');
+        assert.equal(c('openai', 400, '{"error":{"message":"This model\'s maximum context length is 128000 tokens. However, you requested 130000 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}'), 'context_too_long');
+        assert.equal(c('openai', 401, '{"error":{"message":"Incorrect API key provided: sk-xxx.","type":"invalid_request_error","code":"invalid_api_key"}}'), 'auth');
+        assert.equal(c('', 403, '{"error":{"message":"You do not have permission","type":"permission_error"}}'), 'permission');
+        assert.equal(c('openai', 400, '{"error":{"message":"The response was filtered due to the prompt triggering Azure OpenAI\'s content management policy.","code":"content_filter","type":"content_filter"}}'), 'content_filter');
+        assert.equal(c('openai', 404, '{"error":{"message":"The model `gpt-7` does not exist","code":"model_not_found"}}'), 'model_not_found');
+        assert.equal(c('openai', 422, '{"error":{"message":"Range of max_tokens should be [1, 65536]","type":"invalid_request_error"}}'), 'invalid_request');
+        assert.equal(c('openai', 500, '{"error":{"message":"The server had an error","type":"server_error"}}'), 'server');
+        // DeepSeek：402=欠费；401 的 code 不可信（是 invalid_request_error）但仍应归 auth
+        assert.equal(c('deepseek', 402, '{"error":{"message":"Insufficient Balance","type":"insufficient_quota"}}'), 'balance');
+        assert.equal(c('deepseek', 401, '{"error":{"message":"Authentication Fails, Your api key: ****0000 is invalid","type":"authentication_error","code":"invalid_request_error"}}'), 'auth');
+        // Kimi/Moonshot：429 三态细分
+        assert.equal(c('moonshot', 429, '{"error":{"type":"exceeded_current_quota_error","message":"账户欠费或已停用。检查余额与账单。"}}'), 'balance');
+        assert.equal(c('moonshot', 429, '{"error":{"type":"rate_limit_reached_error","message":"Your account reached TPM rate limit"}}'), 'rate_limit');
+        assert.equal(c('moonshot', 429, '{"error":{"type":"engine_overloaded_error","message":"The engine is currently overloaded, please try again later"}}'), 'overloaded');
+        assert.equal(c('moonshot', 400, '{"error":{"type":"invalid_request_error","message":"Input token length too long"}}'), 'context_too_long');
+        assert.equal(c('moonshot', 401, '{"error":{"type":"invalid_authentication_error","message":"Invalid Authentication"}}'), 'auth');
+        // Anthropic：原生 messages 协议
+        assert.equal(c('anthropic', 403, '{"type":"error","error":{"type":"billing_error","message":"Your account has insufficient credits"}}'), 'balance');
+        assert.equal(c('anthropic', 529, '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'), 'overloaded');
+        assert.equal(c('anthropic', 400, '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 400 tokens > 200000 maximum"}}'), 'context_too_long');
+        assert.equal(c('anthropic', 401, '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'), 'auth');
+        // 智谱：code 是字符串
+        assert.equal(c('zhipu', 429, '{"error":{"code":"1113","message":"您的账户已欠费，请充值后重试"}}'), 'balance');
+        assert.equal(c('zhipu', 400, '{"error":{"code":"1261","message":"Prompt 超长"}}'), 'context_too_long');
+        assert.equal(c('zhipu', 400, '{"error":{"code":"1301","message":"系统检测到输入或生成内容可能包含不安全或敏感内容"}}'), 'content_filter');
+        assert.equal(c('zhipu', 429, '{"error":{"code":"1302","message":"您的账户已达到速率限制"}}'), 'rate_limit');
+        assert.equal(c('zhipu', 429, '{"error":{"code":"1305","message":"该模型当前访问量过大，请您稍后再试"}}'), 'overloaded');
+        // 阿里百炼：欠费 400 Arrearage；⚠ insufficient_quota 别名是 TPM 限流不是余额不足
+        assert.equal(c('alibaba', 400, '{"error":{"message":"Access denied, please make sure your account is in good standing.","code":"Arrearage","type":"Arrearage"}}'), 'balance');
+        assert.equal(c('alibaba', 400, '{"code":"Arrearage","message":"Access denied, please make sure your account is in good standing."}'), 'balance');
+        assert.equal(c('alibaba', 429, '{"error":{"message":"Allocated quota exceeded, please increase your quota limit.","code":"Throttling.AllocationQuota"}}'), 'rate_limit');
+        assert.equal(c('alibaba', 429, '{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","code":"insufficient_quota"}}'), 'rate_limit', '阿里 insufficient_quota 别名应判限流而非欠费');
+        assert.equal(c('alibaba', 403, '{"error":{"message":"Access denied.","code":"AccessDenied"}}'), 'permission');
+        assert.equal(c('alibaba', 400, '{"error":{"message":"Input or output data may contain inappropriate content.","code":"DataInspectionFailed"}}'), 'content_filter');
+        assert.equal(c('alibaba', 404, '{"error":{"message":"The model qwen-xxx does not exist.","code":"model_not_found"}}'), 'model_not_found');
+        assert.equal(c('alibaba', 400, '{"error":{"message":"Range of input length should be [1, 64000]","code":"InvalidParameter"}}'), 'context_too_long');
+        // SiliconFlow：顶层数字 code（无码表，靠 status/message）
+        assert.equal(c('siliconflow', 401, '{"code":30014,"message":"Token is invalid.","data":null}'), 'auth');
+        assert.equal(c('siliconflow', 402, '{"code":20002,"message":"账户欠费，请充值后重试","data":null}'), 'balance');
+        assert.equal(c('siliconflow', 400, '{"code":20012,"message":"Model does not exist. Please check it carefully.","data":null}'), 'model_not_found');
+        // Google（原生或 OpenAI 兼容端点都可能出现）
+        assert.equal(c('google', 400, '{"error":{"code":400,"message":"The input token count (202188) exceeds the maximum number of tokens allowed (131072).","status":"INVALID_ARGUMENT"}}'), 'context_too_long');
+        assert.equal(c('google', 429, '{"error":{"code":429,"message":"Quota exceeded for quota metric","status":"RESOURCE_EXHAUSTED"}}'), 'rate_limit');
+        assert.equal(c('google', 403, '{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED"}}'), 'permission');
+        // 其它：纯 message 中文兜底 / 未知 / 成功态带错误对象
+        assert.equal(c('', 400, '{"error":{"message":"输入内容超出模型限制，请精简后重试"}}'), 'context_too_long');
+        assert.equal(c('', 200, '{"error":{"message":"some gateway error","code":"X"}}'), 'unknown');
+        assert.equal(c('', 0, 'fetch failed'), 'unknown');
+    },
+
+    /** 超长报文的模型窗口 N 解析 + 归档目标预算计算 */
+    testParseMaxContextTokensAndArchiveTarget(): void {
+        assert.equal(parseMaxContextTokens('This model\'s maximum context length is 128,000 tokens. However, you requested 130000 tokens. Please reduce the length of the messages before retrying.'), 128000);
+        assert.equal(parseMaxContextTokens('The input token count (202188) exceeds the maximum number of tokens allowed (131072).'), 131072);
+        assert.equal(parseMaxContextTokens('prompt is too long: 402 tokens > 200000 maximum'), 200000);
+        assert.equal(parseMaxContextTokens('Range of input length should be [1, 64000]'), 64000);
+        assert.equal(parseMaxContextTokens('Total message token length exceed model limit (10000000 tokens).'), 10000000);
+        assert.equal(parseMaxContextTokens('{"error":{"message":"Prompt 超长"}}'), undefined, '无数字上限应返回 undefined');
+        assert.equal(parseMaxContextTokens(''), undefined);
+
+        // 报文窗口 < 本地预算 → min(N, budget)×0.8
+        assert.equal(computeArchiveTarget(1000000, 'maximum context length is 128000 tokens'), Math.floor(128000 * 0.8));
+        // 本地预算更小 → min 取本地
+        assert.equal(computeArchiveTarget(20000, 'exceeds the maximum number of tokens allowed (131072)'), Math.floor(20000 * 0.8));
+        // 无 N 但本地预算存在 → 按本地预算×0.8（超长归档仍可按配置预算收敛）
+        assert.equal(computeArchiveTarget(1000000, '{"error":{"message":"Prompt 超长"}}'), Math.floor(1000000 * 0.8));
+        // 都没有 → undefined（调用方放弃自动动作）
+        assert.equal(computeArchiveTarget(0, ''), undefined);
+        assert.equal(computeArchiveTarget(0, 'maximum context length is 128000 tokens'), Math.floor(128000 * 0.8));
+    },
+
+    /** 备用模型选择：跨厂商优先 / 配置顺序 / 无候选 */
+    testPickFallbackModelStrategy(): void {
+        const savedChat = Model.chatModels;
+        const savedMul = Model.multimodalModels;
+        const savedOv = Model.purposeModelOverrides;
+        try {
+            const a = new ChatModel(['chat'], 'model-a', 'deepseek', 'https://a', 'k1', {});
+            a.source = 'text'; a.configIndex = 0;
+            const b = new ChatModel(['chat'], 'model-b', 'openai', 'https://b', 'k2', {});
+            b.source = 'text'; b.configIndex = 1;
+            const c = new MultimodalModel(['chat'], 'model-c', 'anthropic', 'https://c', 'k3', {});
+            c.source = 'multimodal'; c.configIndex = 0;
+            const e = new ChatModel(['chat'], 'model-e', 'deepseek', 'https://e', 'k4', {});
+            e.source = 'text'; e.configIndex = 2;
+            const agent: any = Object.create(Agent.prototype);
+
+            // 跨厂商优先：候选为 b(openai)/c(anthropic)，当前 a(deepseek) → 第一个不同厂商 b
+            Model.chatModels = [a, b]; Model.multimodalModels = [c]; Model.purposeModelOverrides = { chat: 'text[0]:model-a' };
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross').ref, 'text[1]:model-b');
+            // 配置顺序：候选顺序 b,c 取第一个不同模型 b
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'order').ref, 'text[1]:model-b');
+
+            // 无跨厂商候选时 cross 回退配置顺序第一个
+            Model.chatModels = [a, e]; Model.multimodalModels = []; Model.purposeModelOverrides = { chat: 'text[0]:model-a' };
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross').ref, 'text[2]:model-e');
+
+            // 候选里只剩自己（无其它可用）→ null
+            Model.chatModels = [a]; Model.multimodalModels = []; Model.purposeModelOverrides = {};
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross'), null);
+        } finally {
+            Model.chatModels = savedChat;
+            Model.multimodalModels = savedMul;
+            Model.purposeModelOverrides = savedOv;
+        }
+    },
+
+    /** 归档参数化：archiveByTokenIfNeeded(自定义 target) 收敛到 target（不依赖「上下文最大token」配置） */
+    async testArchiveByTokenCustomTarget(): Promise<void> {
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => true;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 1000000; // 配置预算设大：只有显式 target 才会触发归档
+        resetConfigCache();
+        try {
+            const longText = '很长很长的历史消息内容。'.repeat(400);
+            const session = new Session();
+            session.sessionId = 'QQ:901';
+            session.sessionType = 'user';
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: longText, time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: longText, time: 0, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
+            ] as any;
+            const ok = await session.context.archiveByTokenIfNeeded(50);
+            assert.equal(ok, true);
+            assert.ok(estimateContextMessagesTokens(session.context.messages) <= 50, `应收敛到显式 target=50，实际=${estimateContextMessagesTokens(session.context.messages)}`);
+            assert.equal((session.context.messages[0] as any).contentItems[0].text, 'u2', '应保留最近轮');
+        } finally {
+            MemoryManager.summarizeChunkWithRetry = old;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
+    /** handleModelError 动作二：余额不足 → 自动切 chat 备用模型 + ctx.notice，同 run 只切一次 */
+    async testHandleModelErrorAutoSwitch(): Promise<void> {
+        const savedChat = Model.chatModels;
+        const savedMul = Model.multimodalModels;
+        const savedOv = Model.purposeModelOverrides;
+        try {
+            const a = new ChatModel(['chat'], 'model-a', 'deepseek', 'https://a', 'k1', {});
+            a.source = 'text'; a.configIndex = 0;
+            const b = new ChatModel(['chat'], 'model-b', 'openai', 'https://b', 'k2', {});
+            b.source = 'text'; b.configIndex = 1;
+            Model.chatModels = [a, b]; Model.multimodalModels = []; Model.purposeModelOverrides = { chat: 'text[0]:model-a' };
+
+            const agent: any = Object.create(Agent.prototype);
+            const notices: string[] = [];
+            const ctx: any = { notice: (t: string) => notices.push(t) };
+            const session: any = { context: { archiveByTokenIfNeeded: async () => true } };
+            const err = ApiError.fromResponse(429, 'deepseek', '{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota"}}');
+
+            const handled = { archived: false, switched: false };
+            assert.equal(err.kind, 'balance');
+            const action = await agent.handleModelError(ctx, session, err, handled);
+            assert.equal(action, 'retry');
+            assert.equal(Model.purposeModelOverrides.chat, 'text[1]:model-b', '应把 chat 覆盖切到备用模型并持久化');
+            assert.equal(notices.length, 1);
+            assert.ok(notices[0].includes('已自动切换为 text[1]:model-b'), '应通过 ctx.notice 通知');
+            assert.equal(handled.switched, true);
+
+            // 同一 run 再次失败：不再切换，返回 giveup
+            const action2 = await agent.handleModelError(ctx, session, err, handled);
+            assert.equal(action2, 'giveup');
+            assert.equal(notices.length, 1, '不应重复通知');
+        } finally {
+            Model.chatModels = savedChat;
+            Model.multimodalModels = savedMul;
+            Model.purposeModelOverrides = savedOv;
+        }
+    },
+
+    /** handleModelError 动作一：上下文超长 → 按 min(本地预算, 报文窗口)×0.8 归档后重发；开关关闭时给 giveup */
+    async testHandleModelErrorContextArchive(): Promise<void> {
+        const agent: any = Object.create(Agent.prototype);
+        const ctx: any = { notice: () => undefined };
+        const targets: number[] = [];
+        const session: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets.push(t); } } };
+        const raw = '{"error":{"message":"This model\'s maximum context length is 128000 tokens. However, you requested 130000 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}';
+        const err = ApiError.fromResponse(400, 'openai', raw);
+
+        // 配置：上下文归档重试开（默认 true），本地预算经 TC 配置为 1000000 → target = min(1e6, 128000)*0.8
+        const origEnabled = TC.boolConfigs['启用报错自动处理'];
+        const origArchive = TC.boolConfigs['上下文超长自动归档重试'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.boolConfigs['启用报错自动处理'] = true;
+        TC.boolConfigs['上下文超长自动归档重试'] = true;
+        TC.intConfigs['上下文最大token'] = 1000000;
+        resetConfigCache();
+        try {
+            assert.equal(err.kind, 'context_too_long');
+            const handled = { archived: false, switched: false };
+            const action = await agent.handleModelError(ctx, session, err, handled);
+            assert.equal(action, 'retry');
+            assert.deepEqual(targets, [Math.floor(128000 * 0.8)], '归档目标应为 min(本地预算, 报文窗口)×0.8');
+            assert.equal(handled.archived, true);
+
+            // 同 run 再次超长：不再归档，giveup
+            const action2 = await agent.handleModelError(ctx, session, err, handled);
+            assert.equal(action2, 'giveup');
+            assert.equal(targets.length, 1);
+
+            // 开关关闭 → giveup 且不触发归档
+            TC.boolConfigs['上下文超长自动归档重试'] = false;
+            resetConfigCache();
+            const handled2 = { archived: false, switched: false };
+            const action3 = await agent.handleModelError(ctx, session, err, handled2);
+            assert.equal(action3, 'giveup');
+            assert.equal(targets.length, 1, '开关关闭时不应归档');
+        } finally {
+            if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;
+            if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
         }
     },
 };

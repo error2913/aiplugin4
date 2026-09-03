@@ -3,6 +3,7 @@ import Config from "../config/config";
 import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { buildProviderBody, parseProviderResponse } from "../model/adapter";
+import { ApiError } from "../model/api_error";
 import ChatModel from "../model/chat";
 import Model from "../model/model";
 import MultimodalModel from "../model/multimodal";
@@ -89,7 +90,7 @@ function checkRequestBudget(messages: any[], tools: any[], modelName?: string): 
 
 export class streamService {
     private static streamMeta = new Map<string, { modelName: string; rawEstimate: number }>();
-    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent): Promise<string> {
+    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean }): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl } = Config.backend;
         const model = Model.getChatModel('chat');
@@ -146,6 +147,8 @@ export class streamService {
             }
         } catch (e) {
             if (e instanceof StopError) throw e;
+            // 主链路（agent 编排）需要按语义自动处理：把分类错误上抛；其余调用方维持吞错返回空
+            if (e instanceof ApiError && opts?.throwClassified) throw e;
             log.exception('startStream', e);
             return '';
         }
@@ -155,7 +158,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ChatModel | MultimodalModel | null, stopEvent?: StopEvent): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ChatModel | MultimodalModel | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = explicitModel ?? Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -201,6 +204,8 @@ export class streamService {
             }
         } catch (e) {
             if (e instanceof StopError) throw e;
+            // 主链路（agent 编排）需要按语义自动处理：把分类错误上抛；其余调用方（judge/压缩/外部 chatMessages 等）维持吞错返回空
+            if (e instanceof ApiError && opts?.throwClassified) throw e;
             log.exception('sendChatRequest', e);
             return { content: '', tool_calls: [] };
         }

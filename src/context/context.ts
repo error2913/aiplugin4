@@ -343,20 +343,24 @@ export class Context {
     }
 
     /**
-     * 基于持久化上下文 token 上限执行归档：
+     * 基于 token 上限执行归档（观察归档 + 逐块删除）：
+     * - targetTokens 缺省时用「上下文最大token」配置；
      * - 超过上限时保留最近 MAX_ROUNDS 个真实 user 轮；
      * - 更早消息分块归档，成功一块删一块；
-     * - 单块重试耗尽后降级丢弃最早轮次，直到不超上限。
+     * - 单块重试耗尽后降级丢弃最早轮次（forceFit 到 target），直到不超上限。
+     * @returns 是否已收敛到上限以内（false 表示归档失败、仅做了降级硬删）
      */
-    async archiveByTokenIfNeeded(): Promise<boolean> {
+    async archiveByTokenIfNeeded(targetTokens?: number): Promise<boolean> {
         if (this.archiving) return false;
         this.archiving = true;
 
         try {
             const { MAX_ROUNDS, MAX_CONTEXT_TOKENS } = Config.context;
+            // target <= 0 视为不限制；未传 target 时回退配置上限（配置层已保证其 > 0）
+            const target = targetTokens && targetTokens > 0 ? targetTokens : (MAX_CONTEXT_TOKENS > 0 ? MAX_CONTEXT_TOKENS : Infinity);
             const keepRounds = MAX_ROUNDS > 0 ? MAX_ROUNDS : 5;
 
-            while (estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS) {
+            while (estimateContextMessagesTokens(this.messages) > target) {
                 const keepStart = getKeepStart(this.messages, keepRounds);
                 const toArchive = this.messages.slice(0, keepStart);
 
@@ -364,11 +368,11 @@ export class Context {
                     const ok = await this.archivePrefix(toArchive);
                     if (ok) continue;
 
-                    await this.forceFitContext();
+                    await this.forceFitContext(target);
                     return false;
                 }
 
-                await this.forceFitContext();
+                await this.forceFitContext(target);
                 return false;
             }
 
@@ -392,23 +396,22 @@ export class Context {
         return true;
     }
 
-    private async forceFitContext(): Promise<void> {
-        const { MAX_CONTEXT_TOKENS } = Config.context;
+    private async forceFitContext(targetTokens: number): Promise<void> {
         let safety = 0;
 
-        while (estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS && this.messages.length > 0 && safety < 10000) {
+        while (estimateContextMessagesTokens(this.messages) > targetTokens && this.messages.length > 0 && safety < 10000) {
             const dropped = dropOldestRound(this.messages);
             if (!dropped) break;
             safety++;
             log.warning(`上下文归档失败降级：已丢弃最早 1 轮，剩余 token=${estimateContextMessagesTokens(this.messages)}`);
         }
 
-        if (this.messages.length > 0 && estimateContextMessagesTokens(this.messages) > MAX_CONTEXT_TOKENS) {
+        if (this.messages.length > 0 && estimateContextMessagesTokens(this.messages) > targetTokens) {
             // 极端单条超限：截断最旧消息文本到预算内（仅兜底，尽量保留尾部）
             const m = this.messages[0] as any;
             const tokens = estimateMessageTokens(m);
             const text = (m.text ?? (m.contentItems?.[0]?.text ?? '')) as string;
-            const maxTextLen = Math.max(1, Math.floor(text.length * MAX_CONTEXT_TOKENS / Math.max(1, tokens)));
+            const maxTextLen = Math.max(1, Math.floor(text.length * targetTokens / Math.max(1, tokens)));
             if (text.length > maxTextLen) {
                 const cut = text.slice(-maxTextLen);
                 if (m.contentItems) m.contentItems = [{ text: cut, time: m.contentItems[0]?.time ?? Math.floor(Date.now() / 1000) }];

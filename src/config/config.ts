@@ -3,6 +3,7 @@ import Logger from "../logger";
 import BackendConfig from "./configs/backend";
 import BaseConfig from "./configs/base";
 import ContextConfig from "./configs/context";
+import ErrorConfig from "./configs/error";
 import EventConfig from "./configs/event";
 import ImageConfig from "./configs/image";
 import KnowledgeBaseConfig from "./configs/knowledge_base";
@@ -28,6 +29,7 @@ export const ext: seal.ExtInfo = (() => {
 })();
 const configMap = {
     base: BaseConfig,
+    error: ErrorConfig,
     model: ModelConfig,
     role: RoleConfig,
     context: ContextConfig,

@@ -131,4 +131,22 @@ export default class Model {
         const dim = { ...DEFAULT_EMBEDDING_MODEL_BODY, ...model.body }.dimensions;
         return typeof dim === 'number' && dim > 0 ? dim : 0;
     }
+
+    /**
+     * 列出某用途的全部候选模型（use 精确匹配、保持配置顺序：纯文本优先，其次多模态）。
+     * 供 .ai model 列表展示与「报错自动切换备用模型」共用，避免两套候选逻辑漂移。
+     */
+    static listModelsForUse(use: ModelUse): BaseModel[] {
+        if (use === 'image-understanding') {
+            return Model.multimodalModels.filter(m => (m as MultimodalModel).use.includes('image-understanding'));
+        }
+        if (use === 'text-embedding') {
+            return Model.embeddingModels.filter(m => (m as EmbeddingModel).use.includes('text-embedding'));
+        }
+        const chatUse = use as ChatModelUse;
+        return [
+            ...Model.chatModels.filter(m => (m as ChatModel).use.includes(chatUse)),
+            ...Model.multimodalModels.filter(m => (m as MultimodalModel).use.includes(chatUse))
+        ];
+    }
 }
