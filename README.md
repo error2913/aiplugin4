@@ -161,7 +161,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| api连接 | TOML 格式，每行一个服务商连接。`provider` / `api_key` 必填，`base_url` 可选（缺省取服务商默认）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
+| api连接 | TOML 格式，每行一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
 | 模型规则 | TOML 格式，每行一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按行序逐键合并、后覆盖先 |
 
 ```toml
@@ -180,7 +180,7 @@ temperature = 1
 
 > 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型仅当某用途候选恰好唯一时自动生效（出厂 deepseek 钉住单模型即唯一）；多候选或无候选请用全局覆盖指定。
 >
-> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次保存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
+> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
 >
 > 嵌入输出维度取 text-embedding 用途组规则的 `[body] dimensions`（默认 1024）；配置后长期记忆与知识库启用语义检索，未配置/不匹配自动降级为关键词检索。
 
@@ -408,7 +408,7 @@ temperature = 1
 | `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近保存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 
 ### 记忆管理命令

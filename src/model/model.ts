@@ -1,5 +1,5 @@
 // 模型管理器（v4：api连接 + 模型规则）：
-// - 模型实例由「api连接」产出（pinned 钉住清单 / 启动自动拉取 / 失败降级到缓存），按 (连接序号, 模型名) 组织；
+// - 模型实例由「api连接」产出（pinned 钉住清单 / 启动自动拉取），只存内存、不做持久化，按 (连接序号, 模型名) 组织；
 // - 能力标签（text/vision/embed/gen）决定用途候选；默认模型只在该用途候选「恰好唯一」时自动生效；
 // - .ai model 写入的全局分用途覆盖（modelPurposeOverrides）优先级最高，失效自动回退默认。
 import Logger from "../logger";
@@ -13,8 +13,8 @@ import { ChatModelUse, EmbeddingModelUse, ModelUse, MultimodalModelUse } from ".
 
 const log = Logger.withTag('model');
 
-/** 连接产出模型的来源 */
-export type ListSource = 'pinned' | 'auto' | 'cache';
+/** 连接产出模型的来源（只存内存，不持久化） */
+export type ListSource = 'pinned' | 'auto';
 export type ConnStatus = 'ok' | 'pending' | 'error' | 'ignored';
 
 /** 「api连接」配置解析结果的运行时视图（一条连接；不含 api_key，密钥只在请求时从配置取） */
@@ -27,7 +27,7 @@ export interface ConnState {
     errorKind?: string;
     errorText?: string;
     updatedAt: number;
-    /** 该连接当前可用模型名（pinned/拉取/缓存结果），按列表顺序 */
+    /** 该连接当前可用模型名（pinned 钉住/启动拉取结果），按列表顺序 */
     modelNames: string[];
 }
 
@@ -44,20 +44,6 @@ export interface ConnConfigLike {
     /** 连接配置 [request]（列表拉取覆盖），默认 {} */
     request?: Record<string, any>;
 }
-
-/** 缓存（ext storage 镜像，供断网/重载兜底） */
-export interface ModelCacheStore {
-    get(): string | null;
-    set(json: string): void;
-}
-
-interface CacheConn {
-    fingerprint: string;
-    names: string[];
-    updatedAt: number;
-}
-
-const CACHE_VERSION = 1;
 
 function isIgnoredValue(v: any): boolean {
     return v === 1 || v === true || v === '1';
@@ -189,7 +175,6 @@ export default class Model {
     /** 连接序号 → 原始配置（含 api_key 与列表覆盖），供拉取与请求时取用；不放入展示用 states */
     private static connByIndex = new Map<number, ConnConfigLike>();
     private static fetcher: ListFetchFn = fetchModelList;
-    private static cacheStore: ModelCacheStore | null = null;
     private static activeLoad: Promise<void> | null = null;
 
     /** 重置注册表（测试/重载用；规则模板由 configs/model 负责重置） */
@@ -200,18 +185,16 @@ export default class Model {
         Model.connByIndex = new Map();
         Model.activeLoad = null;
         Model.fetcher = fetchModelList;
-        Model.cacheStore = null;
         ModelEntry.vectorCache = {};
     }
 
     /**
      * 由 configs/model 在解析 TOML 后调用：
-     * 1) 写入规则模板；2) 建连接状态机（pinned 立即有模型）；3) 对未钉住连接异步拉取列表。
+     * 1) 写入规则模板；2) 建连接状态机（pinned 立即有模型）；3) 对未钉住连接异步拉取列表（结果只存内存）。
      */
-    static bootstrap(conns: ConnConfigLike[], rules: ModelRuleTemplate[], opts?: { fetch?: ListFetchFn, store?: ModelCacheStore }) {
+    static bootstrap(conns: ConnConfigLike[], rules: ModelRuleTemplate[], opts?: { fetch?: ListFetchFn }) {
         setRuleRows(rules);
         if (opts?.fetch) Model.fetcher = opts.fetch;
-        if (opts?.store) Model.cacheStore = opts.store;
 
         Model.connByIndex = new Map();
         const connStates: ConnState[] = [];
@@ -246,27 +229,8 @@ export default class Model {
     }
 
     private static async runLoad(): Promise<void> {
-        const store = Model.cacheStore;
-        const cacheMap = new Map<string, CacheConn>();
-        if (store) {
-            try {
-                const raw = store.get();
-                if (raw) {
-                    const parsed = JSON.parse(raw);
-                    if (Array.isArray(parsed?.conns)) {
-                        for (const c of parsed.conns) {
-                            if (c && typeof c.fingerprint === 'string' && Array.isArray(c.names)) {
-                                cacheMap.set(c.fingerprint, { fingerprint: c.fingerprint, names: c.names, updatedAt: Number(c.updatedAt) || 0 });
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                log.warning('读取模型列表缓存失败', e);
-            }
-        }
-
-        const pending = Model.states.filter(s => s.status === 'pending');
+        // pending：启动预热未拉取；error：已降级失败（.ai model pull 重试时再次拉取）
+        const pending = Model.states.filter(s => s.status === 'pending' || s.status === 'error');
         await Promise.all(pending.map(async state => {
             const conn = Model.connByIndex.get(state.connIndex);
             if (!conn) {
@@ -275,7 +239,6 @@ export default class Model {
                 state.errorText = '连接配置缺失';
                 return;
             }
-            const fingerprint = `${conn.provider}|${conn.baseUrl}`;
             try {
                 const names = await Model.fetcher({
                     provider: conn.provider,
@@ -289,34 +252,14 @@ export default class Model {
                 state.updatedAt = Date.now();
                 delete state.errorKind;
                 delete state.errorText;
-                cacheMap.set(fingerprint, { fingerprint, names, updatedAt: Date.now() });
             } catch (e) {
-                const cached = cacheMap.get(fingerprint);
-                if (cached && cached.names.length > 0) {
-                    state.status = 'ok';
-                    state.source = 'cache';
-                    state.modelNames = cached.names;
-                    state.updatedAt = cached.updatedAt;
-                    delete state.errorKind;
-                    delete state.errorText;
-                } else {
-                    const d = describeListError(e);
-                    state.status = 'error';
-                    state.modelNames = [];
-                    state.errorKind = d.kind;
-                    state.errorText = d.text;
-                }
+                const d = describeListError(e);
+                state.status = 'error';
+                state.modelNames = [];
+                state.errorKind = d.kind;
+                state.errorText = d.text;
             }
         }));
-
-        // 写缓存（只存指纹+名单+时间，绝不含 api_key）
-        if (store) {
-            try {
-                store.set(JSON.stringify({ version: CACHE_VERSION, savedAt: Date.now(), conns: Array.from(cacheMap.values()) }));
-            } catch (e) {
-                log.warning('保存模型列表缓存失败', e);
-            }
-        }
         Model.rebuildEntries();
     }
 

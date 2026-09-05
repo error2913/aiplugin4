@@ -37,11 +37,11 @@ export function formatConnState(state: ConnState): string {
     if (state.status === 'ignored') return `${head} · 已忽略`;
     if (state.status === 'pending') return `${head} · 拉取中…`;
     if (state.status === 'error') return `${head} · ${state.errorText || '拉取失败'}`;
-    const sourceLabel = state.source === 'pinned' ? '钉住' : state.source === 'cache' ? '缓存' : '自动';
+    const sourceLabel = state.source === 'pinned' ? '钉住' : '自动';
     return `${head} · ${sourceLabel} · ${state.modelNames.length} 个模型`;
 }
 
-/** 展示全部连接与对应模型列表（数据源：加载/最近一次保存的列表，不联网） */
+/** 展示全部连接与对应模型列表（数据源：加载/最近一次拉取到内存的列表，不联网、不持久化） */
 export function formatModelList(connFilter?: (st: ConnState) => boolean): string {
     const states = Model.states;
     const show = connFilter ? states.filter(connFilter) : states;
@@ -146,7 +146,7 @@ export function registerCmdModel() {
     cmd.desc = '查看/设置全局分用途模型与模型列表';
     cmd.help = `帮助:
 【.ai model】查看全部分用途模型与连接状态
-【.ai model list】展示加载/最近一次保存的模型列表（不联网，按连接序号分组）
+【.ai model list】展示加载/最近一次拉取的模型列表（不联网，按连接序号分组）
 【.ai model pull】立即重新拉取全部连接的可用模型列表并展示
 【.ai model <用途>】查看指定用途可用模型
 【.ai model <用途> <模型标识>】设置指定用途的全局模型（支持编号/裸名/[连接序号]:模型名）

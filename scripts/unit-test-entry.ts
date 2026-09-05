@@ -5676,51 +5676,79 @@ description: 茶库
         }
     },
 
-    /** 自动拉取：失败按连接降级（error、不进注册表、不抛）；有缓存镜像时回退缓存；成功后写入缓存 */
-    async testModelListAutoLoadDegradeAndCache(): Promise<void> {
+    /** 自动拉取：失败按连接降级（error、不进注册表、不抛）；模型只存内存、不持久化（无缓存回退）；pull 可重试 */
+    async testModelListAutoLoadMemoryOnly(): Promise<void> {
         try {
-            // 1) 拉取失败且无缓存 → 该连接 error，注册表为空，ensureLoaded 不抛
+            // 1) 拉取失败 → 该连接 error，注册表为空，ensureLoaded 不抛
             Model.reset();
             Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], [], {
                 fetch: async () => { throw new Error('boom'); },
-                store: { get: () => null, set: () => undefined },
             });
             await Model.ensureLoaded();
             assert.equal(Model.states[0].status, 'error', '拉取失败应降级为 error');
-            assert.equal(Model.entries.length, 0, '失败且无缓存不应有模型');
+            assert.equal(Model.states[0].modelNames.length, 0);
+            assert.equal(Model.entries.length, 0, '失败时不应有模型');
 
-            // 2) 拉取失败但有缓存镜像 → 回退缓存（来源 cache），仍可用
-            const saved: any[] = [];
+            // 2) 失败后 .ai model pull 重试成功 → auto 来源、内存更新（不依赖任何持久化）
             Model.reset();
-            const cachedJson = () => JSON.stringify({
-                version: 1,
-                savedAt: Date.now(),
-                conns: [{ fingerprint: 'openai|https://o', names: ['cached-m1'], updatedAt: Date.now() }],
-            });
+            let fail = true;
             Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], [], {
-                fetch: async () => { throw new Error('boom'); },
-                store: { get: cachedJson, set: (j) => { saved.push(j); } },
+                fetch: async (ctx: any) => {
+                    if (fail) throw new Error('boom');
+                    assert.equal(ctx.baseUrl, 'https://o');
+                    assert.equal(ctx.apiKey, 'k');
+                    return ['m1', 'text-embedding-3-small'];
+                },
             });
             await Model.ensureLoaded();
-            assert.equal(Model.states[0].status, 'ok', '缓存兜底应可用');
-            assert.equal(Model.states[0].source, 'cache');
-            assert.deepEqual(Model.states[0].modelNames, ['cached-m1']);
-            assert.equal(Model.entries[0].name, 'cached-m1');
-
-            // 3) 拉取成功 → auto 来源、写缓存、注册表重建
-            Model.reset();
-            let fetched = false;
-            Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], [], {
-                fetch: async (ctx: any) => { fetched = true; assert.equal(ctx.baseUrl, 'https://o'); return ['m1', 'text-embedding-3-small']; },
-                store: { get: () => null, set: (j) => { saved.push(j); } },
-            });
-            await Model.ensureLoaded();
-            assert.equal(fetched, true);
+            assert.equal(Model.states[0].status, 'error');
+            fail = false;
+            await Model.pull();
+            assert.equal(Model.states[0].status, 'ok');
             assert.equal(Model.states[0].source, 'auto');
             assert.deepEqual(Model.states[0].modelNames, ['m1', 'text-embedding-3-small']);
             assert.ok(Model.entries.some(e => e.tags.includes('embed')), '拉取模型应完成分类');
-            assert.ok(saved.length > 0, '拉取成功应写缓存');
+
+            // 3) pinned 钉住清单不受网络影响（只存内存的例外：来自配置本身）
+            Model.reset();
+            Model.bootstrap([{ provider: 'deepseek', apiKey: 'k', baseUrl: 'https://d', ignore: false, models: ['deepseek-v4-flash'], request: {} }], [], {
+                fetch: async () => { throw new Error('不应拉取 pinned 连接'); },
+            });
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.states[0].source, 'pinned');
+            assert.equal(Model.entries[0].name, 'deepseek-v4-flash');
         } finally {
+            Model.reset();
+        }
+    },
+
+    /** api连接 provider 选填：省略 provider + 显式 base_url 按 OpenAI 兼容解析；省略 base_url 取 provider 默认；两者都缺跳过 */
+    testApiConnectionProviderOptional(): void {
+        const orig = TC.templateConfigs['api连接'];
+        const origRules = TC.templateConfigs['模型规则'];
+        try {
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nbase_url = "https://my-gateway/v1"\nmodels = ["gw-model"]',
+                'api_key = "k"\nprovider = "deepseek"\nmodels = ["deepseek-v4-flash"]',
+                'api_key = "k"', // 缺 provider 与 base_url → 整行跳过
+            ];
+            TC.templateConfigs['模型规则'] = [];
+            resetConfigCache();
+            const cfg = (Config as any).model;
+            assert.equal(cfg.conns.length, 2, '缺 provider+base_url 的行应被跳过');
+            assert.equal(cfg.conns[0].provider, '', '省略 provider 时应为空（按 OpenAI 兼容处理）');
+            assert.equal(cfg.conns[0].baseUrl, 'https://my-gateway/v1');
+            assert.equal(cfg.conns[1].provider, 'deepseek');
+            assert.equal(cfg.conns[1].baseUrl, 'https://api.deepseek.com/v1', '省略 base_url 应取 provider 默认');
+            assert.equal(Model.states.length, 2);
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.states[0].source, 'pinned');
+        } finally {
+            if (orig === undefined) delete TC.templateConfigs['api连接']; else TC.templateConfigs['api连接'] = orig;
+            if (origRules === undefined) delete TC.templateConfigs['模型规则']; else TC.templateConfigs['模型规则'] = origRules;
+            resetModelConfigCacheForTest();
+            setModelListDepsForTest();
+            resetConfigCache();
             Model.reset();
         }
     },

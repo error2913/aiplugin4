@@ -1,8 +1,8 @@
-// 模型列表拉取：连接级「获取可用模型列表」适配。
+// 模型列表拉取：连接级「获取可用模型列表」适配（结果只存内存、不持久化）。
 // 默认 OpenAI 兼容：GET {base}/models（Bearer），解析 data[].id；
 // Anthropic 特判：GET {base}/models，x-api-key + anthropic-version，limit=1000 循环翻页到 has_more=false。
 // 连接配置里可选 [request]（list_url/list_headers/auth_header_name/timeout）可覆盖默认行为；
-// 智谱/部分兼容网关无 /models 端点时自然报错，由上层按连接降级处理（可走 models 钉住清单或缓存）。
+// 智谱/部分兼容网关无 /models 端点时自然报错，由上层按连接降级处理（可走 models 钉住清单）。
 import { logger } from "../logger";
 
 import { ApiError } from "./api_error";
