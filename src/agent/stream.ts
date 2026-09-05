@@ -1,13 +1,11 @@
 // 流式/非流式请求服务：基于 Model 配置构建请求体并调用后端
 import Config from "../config/config";
-import { DEFAULT_CHAT_MODEL_BODY } from "../config/static_config";
 import { logger } from "../logger";
 import { buildProviderBody, parseProviderResponse } from "../model/adapter";
 import { ApiError } from "../model/api_error";
-import ChatModel from "../model/chat";
-import Model from "../model/model";
-import MultimodalModel from "../model/multimodal";
+import Model, { ModelEntry } from "../model/model";
 import { requestModel } from "../model/provider";
+import { ChatModelUse } from "../model/types";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
@@ -99,10 +97,10 @@ export class streamService {
             return '';
         }
         try {
-            const body = model.buildBody({
+            const body = Model.buildRequestBody('chat', {
                 model: model.name,
                 messages
-            }, DEFAULT_CHAT_MODEL_BODY);
+            });
             body.messages = sanitizeRequestMessages(body.messages);
             const rawEstimate = estimateRequestTokens(body.messages, []);
 
@@ -158,18 +156,19 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ChatModel | MultimodalModel | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = explicitModel ?? Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
             return { content: '', tool_calls: [] };
         }
+        const forUse: ChatModelUse = opts?.use ?? 'chat';
         try {
             const { STATUS, PROMPT_ENGINEERING } = Config.tool;
-            const body = model.buildBody({
+            const body = Model.buildRequestBody(forUse, {
                 model: model.name,
                 messages
-            }, DEFAULT_CHAT_MODEL_BODY);
+            });
             body.messages = sanitizeRequestMessages(body.messages);
             if (STATUS && !PROMPT_ENGINEERING) {
                 if (tools && tools.length > 0) body.tools = tools;
@@ -179,7 +178,7 @@ export class streamService {
             log.printRequestMessages(body.messages, runId);
 
             const time = Date.now();
-            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider, stopEvent, modelName: model.name, rawEstimateTokens: rawEstimate });
+            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider, stopEvent, modelName: model.name, rawEstimateTokens: rawEstimate, use: forUse });
             const response = parseProviderResponse(model.provider, data);
             if (response.choices && response.choices.length > 0) {
                 const message = response.choices[0].message;

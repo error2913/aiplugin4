@@ -29,7 +29,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 - `src/agent/`：智能体编排（run/runStream、对外 API `globalThis.aiplugin4`）。
 - `src/context/`、`src/session/`：会话与上下文管理；`src/prompt/`：提示词组装。
 - `src/tool/`：工具系统（注册表、MCP、skills、按需加载；内置工具在 `src/tool/tools/`）。
-- `src/config/`：配置注册/读取与静态常量；`src/model/`：对话/图片/嵌入模型。
+- `src/config/`：配置注册/读取与静态常量；`src/model/`：模型注册表/api连接列表拉取与分类/模型规则请求模板。
 - `src/cmd/`：`.ai` 命令系统与权限；`src/memory/`：记忆与知识库；`src/resource/`：资源；`src/utils/`：通用工具。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 04 工具系统 / 05 命令配置 / 07 开发指南 / 09 常见问题）。
 - `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）。
@@ -42,7 +42,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 3. **中文提交信息 / PR 正文通过 UTF-8 文件传递**（如 `.dev/commit-msg.txt`、`.dev/pr-body.json`），不要在 shell 里拼接中文。
 4. **新增消息级能力优先做成"工具"**（`src/tool/tools/` 下新建文件导出 `registerXxx()`，在 `src/tool/tools/init.ts` 注册）；敏感操作（发消息/禁言/改名等）置 `sensitive = true`；工具名不要与已有工具重复。
 5. **`registerTemplateConfig` 默认值不能是空数组**，至少保留一个元素（占位用 `['']`）。
-6. **配置项描述要引导用户**：写清格式、必填/可选参数、示例；配置页签按重要性排列（基础/错误处理/模型/角色设定/上下文/消息接收/事件接收/消息触发/回复/工具/MCP/技能/记忆/知识库/图片/后端/资源）。
+6. **配置项描述要引导用户**：写清格式、必填/可选参数、示例；配置页签按重要性排列（基础/模型/角色设定/上下文/消息接收/事件接收/消息触发/回复/工具/MCP/技能/记忆/知识库/图片/后端/资源/错误处理）。
 7. **模板文案放内置模板**（`src/prompt/templates.ts`），不要硬编码在业务逻辑。
 8. **日志统一走 `Logger`**（脱敏/截断），不要直接打明文密钥；网络请求统一 `withTimeout` + `fetchData`/`requestModel`，避免卡死。
 9. **修改持久化类字段后检查 `validKeysMap`** 是否需要同步更新（用 `revive()` 恢复）。

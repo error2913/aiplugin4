@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 import Config, { ext } from "../src/config/config";
 import ToolConfig from "../src/config/configs/tool";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
-import { resetModelConfigCacheForTest } from "../src/config/configs/model";
 Config.registerConfig();
 
 import { buildContent, buildMultimodalContent, estimateTextTokens, estimateMessageTokens, handleMessages, textToMultimodalContent } from "../src/utils/message";
@@ -50,10 +49,8 @@ import { ApiError, classifyApiError, computeArchiveTarget, parseMaxContextTokens
 import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken } from "../src/context/context";
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
-import ChatModel from "../src/model/chat";
-import EmbeddingModel from "../src/model/embedding";
 import Model from "../src/model/model";
-import MultimodalModel from "../src/model/multimodal";
+import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
@@ -228,8 +225,38 @@ async function runMemo(scc: any): Promise<string> {
     return replied;
 }
 
+/* ---------- v4 模型配置测试辅助：直接播种 Model 注册表，不走真实网络 ---------- */
+
+/** 构造一条 pinned 钉住连接（同步就绪，无需拉取） */
+function pinConn(provider: string, models: string[], baseUrl = 'https://x', apiKey = 'k'): any {
+    return { provider, apiKey, baseUrl, ignore: false, models, request: {} };
+}
+
+/** 播种 pinned 连接（可选带规则模板）并复位注册表 */
+function seedPinnedConns(conns: any[], rules: any[] = []) {
+    Model.reset();
+    Model.bootstrap(conns, rules);
+}
+
+/** 播种「自动拉取」连接：注入假 fetcher（返回模型名数组；可跨次调用改变），随后等待拉取完成 */
+async function seedAutoConns(conns: any[], fetchFn: (ctx: any) => Promise<string[]>, rules: any[] = []) {
+    Model.reset();
+    Model.bootstrap(conns, rules, { fetch: fetchFn as any });
+    await Model.ensureLoaded();
+}
+
+/** 从「api连接」模板配置播种（解析 → Model.bootstrap），供解析/降级类测试使用 */
+function seedFromTemplate(connToml: string[], ruleToml: string[] = [], fetchFn?: (ctx: any) => Promise<string[]>) {
+    resetModelConfigCacheForTest();
+    TC.templateConfigs['api连接'] = connToml;
+    TC.templateConfigs['模型规则'] = ruleToml;
+    resetConfigCache();
+    const cfg = (Config as any).model;
+    if (fetchFn) setModelListDepsForTest({ fetch: fetchFn as any });
+    return cfg;
+}
+
 export const tests: Record<string, () => void | Promise<void>> = {
-    /** token 估算：细化 Unicode 分类后仍保持基础 ASCII/CJK 口径 */
     testEstimateTextTokens(): void {
         assert.equal(estimateTextTokens('abcd'), 1);
         assert.equal(estimateTextTokens('abcdefgh'), 2);
@@ -3664,55 +3691,56 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 模型解析：精确 use 匹配；空 use 不再任意可用；覆盖失效自动回退默认；同名模型按来源/序号区分 */
+    /** 模型解析（v4）：候选按能力标签；默认仅候选唯一时自动生效；覆盖优先、失效回退；重名用 [序号]:模型名 */
     testGetChatModelResolution(): void {
-        Model.reset();
-        const chatA = new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {});
-        (chatA as any).source = 'text'; (chatA as any).configIndex = 0;
-        const compressB = new ChatModel(['compression'], 'text-compress', 'deepseek', 'https://b', 'k', {});
-        (compressB as any).source = 'text'; (compressB as any).configIndex = 1;
-        const sameText = new ChatModel(['chat'], 'same', 'deepseek', 'https://c', 'k', {});
-        (sameText as any).source = 'text'; (sameText as any).configIndex = 2;
-        Model.chatModels = [chatA, compressB, sameText];
-
-        const visionX = new MultimodalModel(['image-understanding'], 'vision-x', 'zhipu', 'https://x', 'k', {});
-        (visionX as any).source = 'multimodal'; (visionX as any).configIndex = 0;
-        const sameMm = new MultimodalModel(['chat'], 'same', 'zhipu', 'https://y', 'k', {});
-        (sameMm as any).source = 'multimodal'; (sameMm as any).configIndex = 1;
-        const judgeMm = new MultimodalModel(['judge'], 'vision-judge', 'zhipu', 'https://z', 'k', {});
-        (judgeMm as any).source = 'multimodal'; (judgeMm as any).configIndex = 2;
-        Model.multimodalModels = [visionX, sameMm, judgeMm];
         try {
-            // chat 默认：纯文本优先，多模态同名不作为默认候选
+            // 单文本候选 → 四个对话用途自动默认同一模型
+            seedPinnedConns([pinConn('deepseek', ['text-a'])]);
             assert.equal(Model.getChatModel('chat')?.name, 'text-a');
-            // judge 可从多模态精确命中
-            const judge = Model.getChatModel('judge');
-            assert.equal(judge?.name, 'vision-judge');
-            assert.equal(judge?.isMultimodal, true);
-            // compression 精确命中文本模型
-            assert.equal(Model.getChatModel('compression')?.name, 'text-compress');
-            // 空 use 不参与任何用途
-            Model.multimodalModels.push(new MultimodalModel([], 'vision-any', 'zhipu', 'https://w', 'k', {}));
-            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '空 use 不应作为 chat 候选');
-            // summarization 无精确匹配：不回退 chat
-            assert.equal(Model.getChatModel('summarization'), null);
+            assert.equal(Model.getChatModel('compression')?.name, 'text-a');
+            assert.equal(Model.getChatModel('summarization')?.name, 'text-a');
+            assert.equal(Model.getChatModel('judge')?.name, 'text-a');
+            // 嵌入/识图候选为空 → 无默认（不猜）
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null);
+            assert.equal(Model.getMultimodalModel('image-understanding'), null);
 
-            // 同名模型：全局覆盖可指定 multimodal 来源
-            Model.purposeModelOverrides.chat = 'multimodal[1]:same';
-            const overrideSame = Model.getChatModel('chat');
-            assert.equal(overrideSame?.name, 'same');
-            assert.equal(overrideSame?.isMultimodal, true, '覆盖应能选中多模态同名模型');
+            // 多文本候选 → 无默认
+            seedPinnedConns([pinConn('deepseek', ['text-a', 'text-b'])]);
+            assert.equal(Model.getChatModel('chat'), null, '多候选不应自动默认');
 
-            // 覆盖 use 不匹配：自动回退默认
-            Model.purposeModelOverrides.chat = 'text[1]:text-compress';
-            assert.equal(Model.getChatModel('chat')?.name, 'text-a', 'use 不匹配应回退默认');
+            // 视觉模型：唯一 → image-understanding 默认，也可作 chat 候选
+            seedPinnedConns([pinConn('zhipu', ['glm-4v'])]);
+            const itt = Model.getMultimodalModel('image-understanding');
+            assert.equal(itt?.name, 'glm-4v');
+            assert.equal(itt?.isMultimodal, true, 'glm-4v 应识别为视觉模型');
+            assert.equal(Model.getChatModel('chat')?.name, 'glm-4v', '视觉模型可作对话候选');
 
-            // 覆盖不存在：自动回退默认
-            Model.purposeModelOverrides.compression = 'text[99]:nope';
-            assert.equal(Model.getChatModel('compression')?.name, 'text-compress', '无效覆盖应回退默认');
+            // 嵌入白名单：进 text-embedding 但绝不进对话候选
+            seedPinnedConns([pinConn('openai', ['text-embedding-3-small'])]);
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small');
+            assert.equal(Model.getChatModel('chat'), null, '嵌入模型不得进对话候选');
 
-            // 识图：精确匹配多模态
-            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'vision-x');
+            // 生图类不进任何候选
+            seedPinnedConns([pinConn('openai', ['dall-e-3', 'gpt-image-1'])]);
+            assert.equal(Model.getChatModel('chat'), null);
+            assert.equal(Model.getMultimodalModel('image-understanding'), null);
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null);
+
+            // 覆盖：多候选时绑定唯一名生效；失效覆盖回退默认
+            seedPinnedConns([pinConn('deepseek', ['text-a', 'text-b'])]);
+            Model.purposeModelOverrides.chat = 'text-a';
+            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '裸名覆盖应生效');
+            Model.purposeModelOverrides.chat = 'no-such';
+            assert.equal(Model.getChatModel('chat'), null, '失效覆盖回退默认（无唯一默认）');
+
+            // 重名跨连接 → ref=[序号]:模型名；裸名歧义视为失效，不猜测
+            seedPinnedConns([pinConn('deepseek', ['same']), pinConn('openai', ['same'])]);
+            assert.equal(Model.entries.length, 2);
+            assert.deepEqual(Model.entries.map(e => e.ref).sort(), ['[0]:same', '[1]:same']);
+            Model.purposeModelOverrides.chat = 'same';
+            assert.equal(Model.getChatModel('chat'), null, '裸名重名歧义应失效');
+            Model.purposeModelOverrides.chat = '[1]:same';
+            assert.equal(Model.getChatModel('chat')?.provider, 'openai', '[序号]:名 覆盖应精确命中');
         } finally {
             Model.reset();
         }
@@ -3727,10 +3755,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             return { content: '回复', tool_calls: [] };
         };
         try {
-            // 多模态：content 为内容块数组，模型为多模态实例
-            Model.reset();
-            Model.chatModels = [];
-            Model.multimodalModels = [new MultimodalModel(['chat'], 'glm-4v', 'zhipu', 'https://x', 'k', {})];
+            // 多模态：content 为内容块数组，模型为视觉实例
+            seedPinnedConns([pinConn('zhipu', ['glm-4v'])]);
             const agent = new Agent();
             const ret = await agent.chat('看看[img:not_exist_zz]');
             assert.equal(ret, '回复');
@@ -3738,10 +3764,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(captured.model.name, 'glm-4v', '请求层应收到解析出的多模态模型');
             assert.equal(captured.model.isMultimodal, true);
 
-            // 纯文本：content 为字符串，模型为对话实例
-            Model.reset();
-            Model.chatModels = [new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {})];
-            Model.multimodalModels = [];
+            // 纯文本：content 为字符串，模型为文本实例
+            seedPinnedConns([pinConn('deepseek', ['text-a'])]);
             const agent2 = new Agent();
             await agent2.chat('你好');
             assert.equal(typeof captured.messages[0].content, 'string', '纯文本 user content 应为字符串');
@@ -3753,35 +3777,34 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** isMultimodalChat：跟随全局 chat 模型；同名时纯文本优先，仅多模态列表时为多模态 */
+    /** isMultimodalChat：跟随全局 chat 模型；默认仅唯一候选；多候选/覆盖指定文本模型时按纯文本处理 */
     testIsMultimodalChat(): void {
         const agent = new Agent();
         const stubSession = {} as any;
-        Model.reset();
-        const textSame = new ChatModel(['chat'], 'same', 'deepseek', 'https://a', 'k', {});
-        (textSame as any).source = 'text'; (textSame as any).configIndex = 0;
-        const mmSame = new MultimodalModel(['chat'], 'same', 'zhipu', 'https://x', 'k', {});
-        (mmSame as any).source = 'multimodal'; (mmSame as any).configIndex = 0;
-        Model.chatModels = [textSame];
-        Model.multimodalModels = [mmSame];
         try {
-            assert.equal((agent as any).isMultimodalChat(stubSession), false, '同名时对话列表优先，按纯文本处理');
-            Model.chatModels = [];
-            assert.equal((agent as any).isMultimodalChat(stubSession), true, '仅多模态列表时按多模态处理');
-            Model.purposeModelOverrides.chat = 'multimodal[0]:same';
-            assert.equal((agent as any).isMultimodalChat(stubSession), true, '全局覆盖指定多模态时按多模态处理');
+            // 文本 + 视觉两个不同候选 → chat 无默认 → 按纯文本处理（不猜）
+            seedPinnedConns([pinConn('deepseek', ['text-a']), pinConn('zhipu', ['glm-4v'])]);
+            assert.equal((agent as any).isMultimodalChat(stubSession), false, '多候选无默认时应按纯文本处理');
+            // 覆盖指定视觉模型 → 多模态
+            Model.purposeModelOverrides.chat = 'glm-4v';
+            assert.equal((agent as any).isMultimodalChat(stubSession), true, '覆盖视觉模型时按多模态处理');
+            // 覆盖指定文本模型 → 纯文本
+            Model.purposeModelOverrides.chat = 'text-a';
+            assert.equal((agent as any).isMultimodalChat(stubSession), false, '覆盖文本模型时按纯文本处理');
+            // 仅视觉候选 → 唯一默认 → 多模态
+            seedPinnedConns([pinConn('zhipu', ['glm-4v'])]);
+            assert.equal((agent as any).isMultimodalChat(stubSession), true, '仅视觉候选时按多模态处理');
         } finally {
             Model.reset();
         }
     },
 
-    /** .ai model：全局分用途模型查看/设置；支持完整标识、裸名唯一设置、同名歧义；无 clr */
-    testCmdModelSetAndQuery(): void {
+    /** .ai model：list 读加载快照（不联网）、pull 立即拉取并展示、分用途查看/设置/歧义/编号 */
+    async testCmdModelSetAndQuery(): Promise<void> {
         const origReply = (globalThis as any).seal.replyToSender;
         const origModel = SubCmd.map['model'];
         let replied = '';
         (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
-        const makeArgs = (args: string[]) => ({ getArgN: (n: number) => args[n] ?? '' });
         const base = {
             ctx: { endPoint: { userId: 'QQ:10000' }, player: { userId: 'QQ:10000', name: '测试员' } } as any,
             msg: {} as any,
@@ -3792,70 +3815,82 @@ export const tests: Record<string, () => void | Promise<void>> = {
             page: 1,
             ret: {} as any
         };
+        const runCmd = async (...args: string[]) => {
+            replied = '';
+            await SubCmd.map['model'].solve({ ...base, cmdArgs: { getArgN: (n: number) => args[n - 1] ?? '' } } as any);
+        };
         try {
             registerCmdModel(); // 注册到 SubCmd.map（幂等覆盖）
 
-            // 无参数总览应包含六个用途
-            Model.reset();
-            const chat = new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {});
-            (chat as any).source = 'text'; (chat as any).configIndex = 0;
-            const vision = new MultimodalModel(['chat'], 'vision-chat', 'zhipu', 'https://x', 'k', {});
-            (vision as any).source = 'multimodal'; (vision as any).configIndex = 0;
-            const itt = new MultimodalModel(['image-understanding'], 'vision-itt', 'zhipu', 'https://i', 'k', {});
-            (itt as any).source = 'multimodal'; (itt as any).configIndex = 1;
-            const emb = new EmbeddingModel(['text-embedding'], 'embed-a', 'openai', 'https://e', 'k', {});
-            (emb as any).source = 'embedding'; (emb as any).configIndex = 0;
-            Model.chatModels = [chat];
-            Model.multimodalModels = [vision, itt];
-            Model.embeddingModels = [emb];
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model']) } as any);
+            // list：使用钉住/加载保存的列表，不联网（pinned 来源），展示序号与模型
+            seedPinnedConns([pinConn('deepseek', ['deepseek-v4-flash', 'deepseek-reasoner'], 'https://api.deepseek.com/v1')]);
+            await runCmd('model', 'list');
+            assert.ok(replied.includes('[0] deepseek · https://api.deepseek.com/v1 · 钉住 · 2 个模型'), 'list 应展示连接头: ' + replied);
+            assert.ok(replied.includes('deepseek-v4-flash'), 'list 应包含模型: ' + replied);
+            assert.ok(replied.includes('deepseek-reasoner'), 'list 应包含全部模型: ' + replied);
+
+            // pull：自动连接 + 假 fetcher 立即拉取并更新列表
+            await seedAutoConns(
+                [pinConn('openai', [], 'https://api.openai.com/v1')],
+                async (ctx: any) => { assert.equal(ctx.provider, 'openai'); return ['gpt-5.1', 'text-embedding-3-small']; }
+            );
+            await runCmd('model', 'pull');
+            assert.ok(replied.includes('gpt-5.1'), 'pull 后应展示拉取到的模型: ' + replied);
+            assert.equal(Model.states[0].source, 'auto', '自动拉取来源应为 auto');
+            assert.equal(Model.entries.some(e => e.tags.includes('embed')), true, '嵌入模型应被分类');
+
+            // 无参数总览应包含六个用途 + 连接状态
+            await runCmd('model');
             assert.ok(replied.includes('对话（chat）'), '总览应包含 chat: ' + replied);
             assert.ok(replied.includes('识图（image-understanding）'), '总览应包含识图: ' + replied);
             assert.ok(replied.includes('嵌入（text-embedding）'), '总览应包含嵌入: ' + replied);
-            assert.ok(replied.includes('text[0]:text-a'), '应显示完整标识: ' + replied);
+            assert.ok(replied.includes('连接状态'), '总览应包含连接状态: ' + replied);
 
-            // 查看单用途
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'image-understanding']) } as any);
-            assert.ok(replied.includes('multimodal[1]:vision-itt'), '识图用途应列出多模态完整标识');
+            // 分用途：chat 有两个文本候选 → 未绑定无默认
+            seedPinnedConns([pinConn('deepseek', ['text-a', 'text-b'])]);
+            await runCmd('model', 'chat');
+            assert.ok(replied.includes('候选多个'), '多候选应提示未自动默认: ' + replied);
 
-            // 设置 chat 完整标识
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'chat', 'text[0]:text-a']) } as any);
-            assert.equal(Model.purposeModelOverrides.chat, 'text[0]:text-a');
-            assert.ok(replied.includes('已设置对话（chat）全局模型: text[0]:text-a'), replied);
+            // 设置 chat：裸名 → 覆盖持久化；再查总览显示覆盖
+            await runCmd('model', 'chat', 'text-b');
+            assert.equal(Model.purposeModelOverrides.chat, 'text-b');
+            assert.ok(replied.includes('已设置对话（chat）全局模型: text-b'), replied);
+            assert.equal(Model.getChatModel('chat')?.name, 'text-b', '覆盖应立即生效');
 
-            // 裸名唯一设置：自动转完整标识
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'chat', 'vision-chat']) } as any);
-            assert.equal(Model.purposeModelOverrides.chat, 'multimodal[0]:vision-chat', '裸名唯一时应自动转完整标识');
+            // 覆盖失效（模型被移除）→ 自动回退默认，且失效标注保留
+            seedPinnedConns([pinConn('deepseek', ['text-a'])]);
+            Model.purposeModelOverrides.chat = 'text-b';
+            await runCmd('model', 'chat');
+            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '失效覆盖回退唯一默认');
+            assert.ok(replied.includes('text-b 已失效'), '应标注覆盖已失效: ' + replied);
 
-            // 同名歧义：text same 与 multimodal same 同时存在时报错并列完整标识
-            const sameText = new ChatModel(['chat'], 'same', 'deepseek', 'https://a', 'k', {});
-            (sameText as any).source = 'text'; (sameText as any).configIndex = 2;
-            const sameMm = new MultimodalModel(['chat'], 'same', 'zhipu', 'https://x', 'k', {});
-            (sameMm as any).source = 'multimodal'; (sameMm as any).configIndex = 2;
-            Model.chatModels.push(sameText);
-            Model.multimodalModels.push(sameMm);
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'chat', 'same']) } as any);
+            // 重名跨连接 → 裸名歧义；[序号]:模型名 精确
+            seedPinnedConns([pinConn('deepseek', ['same']), pinConn('openai', ['same'])]);
+            await runCmd('model', 'chat', 'same');
             assert.ok(replied.includes('多个同名模型'), '同名裸名应提示歧义: ' + replied);
-            assert.ok(replied.includes('text[2]:same'), '应列出 text 完整标识');
-            assert.ok(replied.includes('multimodal[2]:same'), '应列出 multimodal 完整标识');
+            assert.ok(replied.includes('[0]:same'), '应列出 [0]:same: ' + replied);
+            assert.ok(replied.includes('[1]:same'), '应列出 [1]:same: ' + replied);
+            await runCmd('model', 'chat', '[1]:same');
+            assert.equal(Model.purposeModelOverrides.chat, '[1]:same');
+            assert.equal(Model.getChatModel('chat')?.provider, 'openai');
 
-            // 设置 text 完整标识后覆盖生效
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'chat', 'text[2]:same']) } as any);
-            assert.equal(Model.purposeModelOverrides.chat, 'text[2]:same');
+            // 编号选择（候选列表第 N 个）
+            seedPinnedConns([pinConn('deepseek', ['model-x', 'model-y'])]);
+            await runCmd('model', 'chat', '2');
+            assert.equal(Model.purposeModelOverrides.chat, 'model-y', '编号 2 应命中第 2 个候选');
 
-            // 设置 image-understanding 和 text-embedding
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'image-understanding', 'multimodal[1]:vision-itt']) } as any);
-            assert.equal(Model.purposeModelOverrides['image-understanding'], 'multimodal[1]:vision-itt');
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'text-embedding', 'embedding[0]:embed-a']) } as any);
-            assert.equal(Model.purposeModelOverrides['text-embedding'], 'embedding[0]:embed-a');
-
-            // 不存在的模型应报错
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'chat', 'no-such']) } as any);
+            // 不存在的模型应报错；clr 视为模型名不存在（无清除分支）
+            await runCmd('model', 'chat', 'no-such');
             assert.ok(replied.includes('模型 no-such 不存在'), replied);
-
-            // 不存在 clr 语义：clr 会当作模型名处理并提示不存在
-            SubCmd.map['model'].solve({ ...base, cmdArgs: makeArgs(['', 'model', 'clr']) } as any);
+            await runCmd('model', 'clr');
             assert.ok(replied.includes('模型 clr 不存在'), '不应再有 clr 清除分支');
+
+            // 识图/嵌入：视觉与嵌入候选可分别绑定
+            seedPinnedConns([pinConn('zhipu', ['glm-4v']), pinConn('openai', ['text-embedding-3-small'])]);
+            await runCmd('model', 'image-understanding', 'glm-4v');
+            assert.equal(Model.purposeModelOverrides['image-understanding'], 'glm-4v');
+            await runCmd('model', 'text-embedding', '1');
+            assert.equal(Model.purposeModelOverrides['text-embedding'], 'text-embedding-3-small');
         } finally {
             (globalThis as any).seal.replyToSender = origReply;
             if (origModel) SubCmd.map['model'] = origModel; else delete SubCmd.map['model'];
@@ -4098,9 +4133,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         };
         try {
             // 多模态：user content 为内容块数组，assistant content 保持字符串，模型为多模态实例
-            Model.reset();
-            Model.chatModels = [];
-            Model.multimodalModels = [new MultimodalModel(['chat'], 'glm-4v', 'zhipu', 'https://x', 'k', {})];
+            seedPinnedConns([pinConn('zhipu', ['glm-4v'])]);
             const agent = new Agent();
             const ret = await agent.chatMessages([
                 { role: 'user', content: '看看[img:not_exist_zz]' },
@@ -4113,10 +4146,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(captured.model.name, 'glm-4v', '请求层应收到解析出的多模态模型');
             assert.equal(captured.model.isMultimodal, true);
 
-            // 纯文本：user content 保持字符串，模型为对话实例
-            Model.reset();
-            Model.chatModels = [new ChatModel(['chat'], 'text-a', 'deepseek', 'https://a', 'k', {})];
-            Model.multimodalModels = [];
+            // 纯文本：user content 保持字符串，模型为文本实例
+            seedPinnedConns([pinConn('deepseek', ['text-a'])]);
             const agent2 = new Agent();
             await agent2.chatMessages([{ role: 'user', content: '看看[img:not_exist_zz]' }]);
             assert.equal(typeof captured.messages[0].content, 'string', '纯文本 user content 应为字符串');
@@ -4147,15 +4178,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const imgOn = new Image();
             imgOn.imageId = 'img_itt_on';
             imgOn.url = 'https://example.com/on.png';
-            const vision = new MultimodalModel(['image-understanding'], 'vision-itt', 'zhipu', 'https://x', 'k', {});
+            const vision: any = { name: 'vision-itt', isMultimodal: true, callITT: async () => '' };
             let capturedSrc = '';
             let capturedPrompt = '';
-            (vision as any).callITT = async (src: string, prompt: string) => {
+            vision.callITT = async (src: string, prompt: string) => {
                 capturedSrc = src;
                 capturedPrompt = prompt;
                 return '图片中有一只猫';
             };
-            Model.multimodalModels = [vision];
             Model.getMultimodalModel = (_use: any) => vision;
             await imgOn.imageToText('描述这张图');
             assert.equal(imgOn.description, '图片中有一只猫', '配置识图模型后识别结果应写入 description');
@@ -4176,9 +4206,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origGet = Model.getMultimodalModel;
         try {
             const full = '识别结果第一段描述文字较长'.repeat(5); // 远长于 20
-            const vision = new MultimodalModel(['image-understanding'], 'vision-trunc', 'zhipu', 'https://x', 'k', {});
-            (vision as any).callITT = async () => full;
-            Model.multimodalModels = [vision];
+            const vision: any = { name: 'vision-trunc', isMultimodal: true, callITT: async () => full };
             Model.getMultimodalModel = (_use: any) => vision;
             const img = new Image();
             img.imageId = 'img_trunc_1';
@@ -4203,42 +4231,55 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 模型配置键：CHAT/MULTIMODAL/EMBEDDING 列表键存在，两个旧开关键与旧图片键已移除 */
+    /** 模型配置（v4）：Config.model 返回 {conns, rules}；旧列表键全部移除 */
     testModelConfigKeys(): void {
         try {
             resetConfigCache();
             const cfg = (Config as any).model;
-            assert.ok('MULTIMODAL_MODELS' in cfg, '应包含 MULTIMODAL_MODELS 键');
-            assert.ok('CHAT_MODELS' in cfg, '应包含 CHAT_MODELS 键');
-            assert.ok('EMBEDDING_MODELS' in cfg, '应包含 EMBEDDING_MODELS 键');
-            assert.ok(!('IMAGE_UNDERSTANDING_ENABLED' in cfg), '开关键 IMAGE_UNDERSTANDING_ENABLED 应已移除');
-            assert.ok(!('EMBEDDING_MODEL_ENABLED' in cfg), '开关键 EMBEDDING_MODEL_ENABLED 应已移除');
-            assert.ok(!('IMAGE_MODELS' in cfg), '旧键 IMAGE_MODELS 应已移除');
-            assert.ok(!('IMAGE_MODEL_ENABLED' in cfg), '旧键 IMAGE_MODEL_ENABLED 应已移除');
-            assert.ok(Array.isArray(cfg.MULTIMODAL_MODELS));
-            assert.ok(Array.isArray(cfg.CHAT_MODELS));
+            assert.ok(Array.isArray(cfg.conns), '应包含 conns 数组');
+            assert.ok(Array.isArray(cfg.rules), '应包含 rules 数组');
+            assert.ok(!('MULTIMODAL_MODELS' in cfg), '旧键 MULTIMODAL_MODELS 应已移除');
+            assert.ok(!('CHAT_MODELS' in cfg), '旧键 CHAT_MODELS 应已移除');
+            assert.ok(!('EMBEDDING_MODELS' in cfg), '旧键 EMBEDDING_MODELS 应已移除');
         } finally {
             Model.reset();
         }
     },
 
-    /** 模型 ignore 字段：ignore=1 的条目被忽略，0/缺失正常 */
+    /** api连接 ignore 字段与钉住清单：ignore=1 跳过；解析错误行跳过且不占序号语义受影响 */
     testModelIgnoreField(): void {
-        const orig = TC.templateConfigs['纯文本模型'];
+        const orig = TC.templateConfigs['api连接'];
+        const origRules = TC.templateConfigs['模型规则'];
         try {
-            TC.templateConfigs['纯文本模型'] = [
-                'name = "keep-a"\napi_key = "k"\nuse = ["chat"]\nprovider = "deepseek"\nbase_url = "https://api.deepseek.com/v1"',
-                'name = "skip-b"\napi_key = "k"\nuse = ["chat"]\nprovider = "deepseek"\nbase_url = "https://api.deepseek.com/v1"\nignore = 1',
-                'name = "keep-c"\napi_key = "k"\nuse = ["chat"]\nprovider = "deepseek"\nbase_url = "https://api.deepseek.com/v1"\nignore = 0',
+            TC.templateConfigs['api连接'] = [
+                'provider = "deepseek"\napi_key = "k"\nmodels = ["deepseek-v4-flash", "deepseek-reasoner"]',
+                'provider = "openai"\napi_key = "k"\nbase_url = "https://api.openai.com/v1"\nmodels = ["gpt-5.1"]\nignore = 1',
+                'provider = "openai"\napi_key = "k"\nbase_url = "https://api.openai.com/v1"\nmodels = ["gpt-4o"]\nignore = 0',
+                'not = a valid key only\nprovider_typo = "x"', // 缺 provider/api_key/base_url → 整行跳过
+            ];
+            TC.templateConfigs['模型规则'] = [
+                'use = ["chat", "compression"]',
+                'use = ["no-such-use"]',
             ];
             resetConfigCache();
             const cfg = (Config as any).model;
-            assert.ok(Array.isArray(cfg.CHAT_MODELS), 'CHAT_MODELS 应为数组');
-            const names = cfg.CHAT_MODELS.map((m: any) => m.name);
-            assert.deepEqual(names, ['keep-a', 'keep-c'], 'ignore=1 的条目应被忽略，0/缺失正常: ' + JSON.stringify(names));
+            // 无效行被跳过：3 条有效连接
+            assert.equal(cfg.conns.length, 3, '无效连接行应被跳过: ' + JSON.stringify(cfg.conns));
+            assert.equal(cfg.rules.length, 1, '非法 use 的规则行应被跳过');
+            // ignore=1 的连接不出现在可用状态与模型里
+            assert.equal(Model.states.length, 3, 'states 保留全部有效连接行（含 ignore）以稳定序号');
+            const okStates = Model.states.filter(s => s.status === 'ok');
+            assert.equal(okStates.length, 2, 'ignore 连接不参与模型');
+            assert.deepEqual(Model.states.map(s => s.connIndex), [0, 1, 2]);
+            assert.equal(Model.states[1].status, 'ignored');
+            assert.equal(Model.entries.some(e => e.name === 'gpt-5.1'), false, 'ignore 连接的模型不应进入注册表');
+            assert.equal(Model.entries.some(e => e.name === 'deepseek-v4-flash'), true);
+            assert.equal(Model.entries.some(e => e.name === 'gpt-4o'), true);
         } finally {
-            if (orig === undefined) delete TC.templateConfigs['纯文本模型'];
-            else TC.templateConfigs['纯文本模型'] = orig;
+            if (orig === undefined) delete TC.templateConfigs['api连接']; else TC.templateConfigs['api连接'] = orig;
+            if (origRules === undefined) delete TC.templateConfigs['模型规则']; else TC.templateConfigs['模型规则'] = origRules;
+            resetModelConfigCacheForTest();
+            setModelListDepsForTest();
             resetConfigCache();
             Model.reset();
         }
@@ -5455,39 +5496,32 @@ description: 茶库
         assert.equal(computeArchiveTarget(0, 'maximum context length is 128000 tokens'), Math.floor(128000 * 0.8));
     },
 
-    /** 备用模型选择：跨厂商优先 / 配置顺序 / 无候选 */
+    /** 备用模型选择（v4）：跨厂商优先 / 连接顺序 / 无候选 */
     testPickFallbackModelStrategy(): void {
-        const savedChat = Model.chatModels;
-        const savedMul = Model.multimodalModels;
-        const savedOv = Model.purposeModelOverrides;
+        const agent: any = Object.create(Agent.prototype);
         try {
-            const a = new ChatModel(['chat'], 'model-a', 'deepseek', 'https://a', 'k1', {});
-            a.source = 'text'; a.configIndex = 0;
-            const b = new ChatModel(['chat'], 'model-b', 'openai', 'https://b', 'k2', {});
-            b.source = 'text'; b.configIndex = 1;
-            const c = new MultimodalModel(['chat'], 'model-c', 'anthropic', 'https://c', 'k3', {});
-            c.source = 'multimodal'; c.configIndex = 0;
-            const e = new ChatModel(['chat'], 'model-e', 'deepseek', 'https://e', 'k4', {});
-            e.source = 'text'; e.configIndex = 2;
-            const agent: any = Object.create(Agent.prototype);
+            // 跨厂商优先：候选 model-a/deepseek、model-b/openai、model-c/anthropic、model-e/deepseek，
+            // 当前 a → 第一个不同厂商 = b（跳过同厂商 e）；order 策略取候选顺序第一个不同模型 = b
+            seedPinnedConns([
+                pinConn('deepseek', ['model-a']),
+                pinConn('openai', ['model-b']),
+                pinConn('anthropic', ['model-c']),
+                pinConn('deepseek', ['model-e']),
+            ]);
+            Model.purposeModelOverrides.chat = 'model-a';
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross').ref, 'model-b');
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'order').ref, 'model-b');
 
-            // 跨厂商优先：候选为 b(openai)/c(anthropic)，当前 a(deepseek) → 第一个不同厂商 b
-            Model.chatModels = [a, b]; Model.multimodalModels = [c]; Model.purposeModelOverrides = { chat: 'text[0]:model-a' };
-            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross').ref, 'text[1]:model-b');
-            // 配置顺序：候选顺序 b,c 取第一个不同模型 b
-            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'order').ref, 'text[1]:model-b');
-
-            // 无跨厂商候选时 cross 回退配置顺序第一个
-            Model.chatModels = [a, e]; Model.multimodalModels = []; Model.purposeModelOverrides = { chat: 'text[0]:model-a' };
-            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross').ref, 'text[2]:model-e');
+            // 无跨厂商候选时 cross 回退连接顺序第一个不同模型
+            seedPinnedConns([pinConn('deepseek', ['model-a', 'model-e'])]);
+            Model.purposeModelOverrides.chat = 'model-a';
+            assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross').ref, 'model-e');
 
             // 候选里只剩自己（无其它可用）→ null
-            Model.chatModels = [a]; Model.multimodalModels = []; Model.purposeModelOverrides = {};
+            seedPinnedConns([pinConn('deepseek', ['model-a'])]);
             assert.equal(agent.pickFallbackModel(Model.getChatModel('chat'), 'cross'), null);
         } finally {
-            Model.chatModels = savedChat;
-            Model.multimodalModels = savedMul;
-            Model.purposeModelOverrides = savedOv;
+            Model.reset();
         }
     },
 
@@ -5525,15 +5559,10 @@ description: 茶库
 
     /** handleModelError 动作二：余额不足 → 自动切 chat 备用模型 + ctx.notice，同 run 只切一次 */
     async testHandleModelErrorAutoSwitch(): Promise<void> {
-        const savedChat = Model.chatModels;
-        const savedMul = Model.multimodalModels;
         const savedOv = Model.purposeModelOverrides;
         try {
-            const a = new ChatModel(['chat'], 'model-a', 'deepseek', 'https://a', 'k1', {});
-            a.source = 'text'; a.configIndex = 0;
-            const b = new ChatModel(['chat'], 'model-b', 'openai', 'https://b', 'k2', {});
-            b.source = 'text'; b.configIndex = 1;
-            Model.chatModels = [a, b]; Model.multimodalModels = []; Model.purposeModelOverrides = { chat: 'text[0]:model-a' };
+            seedPinnedConns([pinConn('deepseek', ['model-a']), pinConn('openai', ['model-b'])]);
+            Model.purposeModelOverrides.chat = 'model-a';
 
             const agent: any = Object.create(Agent.prototype);
             const notices: string[] = [];
@@ -5545,9 +5574,9 @@ description: 茶库
             assert.equal(err.kind, 'balance');
             const action = await agent.handleModelError(ctx, session, err, handled);
             assert.equal(action, 'retry');
-            assert.equal(Model.purposeModelOverrides.chat, 'text[1]:model-b', '应把 chat 覆盖切到备用模型并持久化');
+            assert.equal(Model.purposeModelOverrides.chat, 'model-b', '应把 chat 覆盖切到备用模型并持久化');
             assert.equal(notices.length, 1);
-            assert.ok(notices[0].includes('已自动切换为 text[1]:model-b'), '应通过 ctx.notice 通知');
+            assert.ok(notices[0].includes('已自动切换为 model-b'), '应通过 ctx.notice 通知');
             assert.equal(handled.switched, true);
 
             // 同一 run 再次失败：不再切换，返回 giveup
@@ -5555,9 +5584,8 @@ description: 茶库
             assert.equal(action2, 'giveup');
             assert.equal(notices.length, 1, '不应重复通知');
         } finally {
-            Model.chatModels = savedChat;
-            Model.multimodalModels = savedMul;
             Model.purposeModelOverrides = savedOv;
+            Model.reset();
         }
     },
 
@@ -5603,6 +5631,97 @@ description: 茶库
             if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;
             if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
             resetConfigCache();
+        }
+    },
+
+    /** 模型规则用途组模板：body 模板命中合并、重叠行后覆盖先；request 覆盖可取回 */
+    testModelRuleTemplateAndRequestOverrides(): void {
+        try {
+            // 单行模板：chat/compression 命中 body 覆盖，summarization/judge 未命中走代码兜底
+            seedPinnedConns([pinConn('deepseek', ['text-a'])], [{
+                use: ['chat', 'compression'],
+                body: { max_tokens: 4096, temperature: 0.7 },
+                request: { auth_header_name: 'x-custom', headers: { 'X-Tag': 'v1' }, timeout: 5 },
+            }]);
+            assert.equal(Model.getBodyDefaultsFor('chat').max_tokens, 4096, '规则 body 应覆盖代码兜底');
+            assert.equal(Model.getBodyDefaultsFor('chat').temperature, 0.7);
+            assert.equal(Model.getBodyDefaultsFor('compression').max_tokens, 4096);
+            assert.equal(Model.getBodyDefaultsFor('summarization').max_tokens, 8192, '未命中规则走对话代码兜底');
+            const ov = Model.requestOverridesFor('chat');
+            assert.equal(ov?.auth_header_name, 'x-custom');
+            assert.equal(ov?.headers['X-Tag'], 'v1');
+            assert.equal(ov?.timeout, 5);
+            assert.equal(Model.requestOverridesFor('summarization'), null, '未命中规则无 request 覆盖');
+
+            // 重叠行按行序逐键合并、后覆盖先
+            seedPinnedConns([pinConn('deepseek', ['text-a'])], [
+                { use: ['chat'], body: { max_tokens: 1000, temperature: 0.1 }, request: {} },
+                { use: ['chat'], body: { max_tokens: 2000 }, request: {} },
+            ]);
+            assert.equal(Model.getBodyDefaultsFor('chat').max_tokens, 2000, '后写覆盖先写');
+            assert.equal(Model.getBodyDefaultsFor('chat').temperature, 0.1, '未被覆盖的键保留先写值');
+
+            // 嵌入维度读取规则模板 body.dimensions
+            seedPinnedConns([pinConn('openai', ['text-embedding-3-small'])], [{
+                use: ['text-embedding'],
+                body: { dimensions: 1536 },
+                request: {},
+            }]);
+            assert.equal(Model.getEmbeddingDimension(), 1536, '维度应取 text-embedding 规则模板');
+            // 未配置 → 代码兜底 1024
+            seedPinnedConns([pinConn('openai', ['text-embedding-3-small'])], []);
+            assert.equal(Model.getEmbeddingDimension(), 1024);
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** 自动拉取：失败按连接降级（error、不进注册表、不抛）；有缓存镜像时回退缓存；成功后写入缓存 */
+    async testModelListAutoLoadDegradeAndCache(): Promise<void> {
+        try {
+            // 1) 拉取失败且无缓存 → 该连接 error，注册表为空，ensureLoaded 不抛
+            Model.reset();
+            Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], [], {
+                fetch: async () => { throw new Error('boom'); },
+                store: { get: () => null, set: () => undefined },
+            });
+            await Model.ensureLoaded();
+            assert.equal(Model.states[0].status, 'error', '拉取失败应降级为 error');
+            assert.equal(Model.entries.length, 0, '失败且无缓存不应有模型');
+
+            // 2) 拉取失败但有缓存镜像 → 回退缓存（来源 cache），仍可用
+            const saved: any[] = [];
+            Model.reset();
+            const cachedJson = () => JSON.stringify({
+                version: 1,
+                savedAt: Date.now(),
+                conns: [{ fingerprint: 'openai|https://o', names: ['cached-m1'], updatedAt: Date.now() }],
+            });
+            Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], [], {
+                fetch: async () => { throw new Error('boom'); },
+                store: { get: cachedJson, set: (j) => { saved.push(j); } },
+            });
+            await Model.ensureLoaded();
+            assert.equal(Model.states[0].status, 'ok', '缓存兜底应可用');
+            assert.equal(Model.states[0].source, 'cache');
+            assert.deepEqual(Model.states[0].modelNames, ['cached-m1']);
+            assert.equal(Model.entries[0].name, 'cached-m1');
+
+            // 3) 拉取成功 → auto 来源、写缓存、注册表重建
+            Model.reset();
+            let fetched = false;
+            Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], [], {
+                fetch: async (ctx: any) => { fetched = true; assert.equal(ctx.baseUrl, 'https://o'); return ['m1', 'text-embedding-3-small']; },
+                store: { get: () => null, set: (j) => { saved.push(j); } },
+            });
+            await Model.ensureLoaded();
+            assert.equal(fetched, true);
+            assert.equal(Model.states[0].source, 'auto');
+            assert.deepEqual(Model.states[0].modelNames, ['m1', 'text-embedding-3-small']);
+            assert.ok(Model.entries.some(e => e.tags.includes('embed')), '拉取模型应完成分类');
+            assert.ok(saved.length > 0, '拉取成功应写缓存');
+        } finally {
+            Model.reset();
         }
     },
 };

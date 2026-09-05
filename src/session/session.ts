@@ -407,11 +407,13 @@ export class Session {
         }
 
         const model = Model.getChatModel('chat');
+        // 是否流式由「chat 用途」规则模板 body 里的 stream=true 决定（v4：模型不再自带 body，读用途组模板）
+        const chatStream = (Model.getBodyDefaultsFor('chat') as any).stream === true;
 
-        if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
+        if (model && model.provider === 'anthropic' && chatStream) {
             log.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
         }
-        if (model && (model.body as any).stream === true && model.provider !== 'anthropic') {
+        if (model && chatStream && model.provider !== 'anthropic') {
             await this.chatStream(ctx, msg);
             this.save();
             return;

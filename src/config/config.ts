@@ -27,9 +27,9 @@ export const ext: seal.ExtInfo = (() => {
     }
     return e;
 })();
+// 注册顺序 = 配置页签顺序；「错误处理」固定放到最后（模型新配置紧随基础）
 const configMap = {
     base: BaseConfig,
-    error: ErrorConfig,
     model: ModelConfig,
     role: RoleConfig,
     context: ContextConfig,
@@ -45,6 +45,7 @@ const configMap = {
     backend: BackendConfig,
     event: EventConfig,
     resource: ResourceConfig,
+    error: ErrorConfig,
 } as const;
 
 type ConfigMap = typeof configMap;

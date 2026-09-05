@@ -3,7 +3,7 @@ import Config, { ext } from "../config/config";
 import { savePurposeModelOverrides } from "../config/configs/model";
 import Logger from "../logger";
 import { ApiError, computeArchiveTarget, KIND_LABEL } from "../model/api_error";
-import Model, { BaseModel } from "../model/model";
+import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
 import Image from "../resource/image";
 import { Session } from "../session/session";
@@ -71,6 +71,7 @@ export default class Agent {
     }
 
     async chat(prompt: string): Promise<string> {
+        await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
         if (!model) return '';
         const messages: RequestMessage[] = [];
@@ -81,12 +82,13 @@ export default class Agent {
             });
         }
         messages.push({ role: 'user', content: model.isMultimodal ? await textToMultimodalContent(prompt) : prompt });
-        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model);
+        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model, undefined, { use: this.use });
         return content;
     }
 
     /** 直接发送自定义 messages（OpenAI 风格数组）到对话模型，返回回复文本；供外部插件构建消息后调用 */
     async chatMessages(messages: { role: string, content: string }[]): Promise<string> {
+        await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
         if (!model) return '';
         const requestMessages: RequestMessage[] = model.isMultimodal
@@ -95,7 +97,7 @@ export default class Agent {
                 content: m.role === 'user' ? await textToMultimodalContent(m.content) : m.content
             })))
             : messages;
-        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model);
+        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model, undefined, { use: this.use });
         return content;
     }
 
@@ -111,6 +113,8 @@ export default class Agent {
         session.starting = true;
         let acquired = false;
         try {
+            // 首轮对话前等待模型列表预热完成（连接拉取失败已按连接降级，不会阻塞）
+            await Model.ensureLoaded();
             acquired = await requestLimiter.acquire(session.sessionId);
             if (!acquired) return;
             if (session.stopVersion !== version) return;
@@ -365,7 +369,7 @@ export default class Agent {
     }
 
     /** 选取 chat 用途的备用模型：排除当前模型；跨厂商优先（cross）或配置顺序下一个（order），无候选返回 null */
-    private pickFallbackModel(current: BaseModel | null, strategy: 'cross' | 'order'): BaseModel | null {
+    private pickFallbackModel(current: ModelEntry | null, strategy: 'cross' | 'order'): ModelEntry | null {
         const currentRef = current ? current.ref : '';
         const cands = Model.listModelsForUse('chat').filter(c => c.ref !== currentRef);
         if (cands.length === 0) return null;
@@ -387,6 +391,8 @@ export default class Agent {
         session.starting = true;
         let acquired = false;
         try {
+            // 首轮对话前等待模型列表预热完成
+            await Model.ensureLoaded();
             acquired = await requestLimiter.acquire(session.sessionId);
             if (!acquired) return;
             if (session.stopVersion !== version) return;
