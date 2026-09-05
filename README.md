@@ -20,23 +20,21 @@
 
 ### 3. 配置大模型
 
-- 在 WebUI →「JS插件」→「插件设置」中找到 `aiplugin4`，点击展开；
-- 进入「模型」分组，在「纯文本模型」中用 **TOML 格式**填写你的模型，例如：
+- 在 WebUI →「JS插件」→「插件设置」中找到 `aiplugin4`，点击展开，进入「模型」分组；
+- 在 **api连接** 中用 **TOML 格式**填写服务商连接（出厂默认已带 deepseek 示例，只改 `api_key` 即可用）：
 
 ```toml
-name = "deepseek-chat" # 模型名，查看你所用大模型平台的文档
-api_key = "sk-xxxx"    # 你的 API Key
-use = ["chat"]         # 用途，纯文本模型填 chat
-
-[body]                 # 可选：覆盖请求参数
-temperature = 1
-max_tokens = 2048
+provider = "deepseek"                        # 服务商：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow
+api_key = "sk-xxxx"                          # 你的 API Key
+base_url = "https://api.deepseek.com/v1"     # 可选，省略时取服务商默认
+models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后跳过自动拉取，离线/无列表接口时用）；删掉该行=启动自动获取模型列表
 ```
 
-- `provider` / `base_url` 可以省略（deepseek / openai / google / zhipu / alibaba / anthropic / moonshot / xai / mistral / siliconflow 会自动识别），也可以显式填写 `base_url`；
-- `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式；
-- 图片识别需要配置「多模态模型」（`use = ["image-understanding"]`）；如果模型支持视觉，可在「多模态模型」的 `use` 里加 `chat` 把它当多模态对话模型用（上下文中的图片直接传给模型）；向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度从嵌入模型的 `[body] dimensions` 读取，默认 1024）；
-- 各用途默认取该用途配置的第一项（纯文本/多模态列表里 `use` 精确匹配的第一个）；可用 `.ai model` 查看当前各用途全局模型，`.ai model <用途> <模型标识>` 设置全局覆盖（兼容旧写法：`.ai model <模型名>` 等价于设置 chat 用途）。
+- 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
+- **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
+- 默认模型仅在该用途候选**恰好唯一**时自动生效（出厂 deepseek 钉住单模型 → chat 直接可用）；多候选或无候选时用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
+- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示，`.ai model` 查看各用途与连接状态；
+- `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
 
 ### 4. 设置触发与角色
 
@@ -149,7 +147,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 ### 安装
 
 - 参考[海豹手册](https://docs.sealdice.com/config/jsscript.html)进行插件上传安装；
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效。
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「api连接/模型规则」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效。
 
 ---
 
@@ -159,25 +157,32 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 模型
 
+模型分两个 TOML 配置：
+
 | 设置项 | 说明 |
 |:---:|:---|
-| 纯文本模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）/ `judge`（评分，`.ai on --j` 插话判断）；`provider` / `base_url` 可省略自动识别；各用途默认取该用途第一个精确匹配项；可选 `[body]` 覆盖请求参数；`ignore` 可选：1=忽略该条配置（不出现在列表/不可选中/不作为默认），0/不写=正常 |
-| 多模态模型 | TOML 格式，`use` 可选 `["image-understanding"]`（识图/图片转文字），也可填 `chat` / `compression` / `summarization` / `judge` 把该模型当作对应对话用途使用（上下文中的图片以图片内容直接传给模型），可多用途并存；列表内模型一律按多模态处理 |
-| 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`（文本嵌入），输出维度在 `[body] dimensions` 配置（默认 1024），未配置时自动降级为关键词/分数检索 |
+| api连接 | TOML 格式，每行一个服务商连接。`provider` / `api_key` 必填，`base_url` 可选（缺省取服务商默认）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
+| 模型规则 | TOML 格式，每行一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按行序逐键合并、后覆盖先 |
 
 ```toml
-# 纯文本模型示例
-name = "deepseek-chat"
+# api连接 示例（出厂默认即此结构，只改 api_key 即可用）
+provider = "deepseek"
 api_key = "sk-xxxx"
-use = ["chat"]
-provider = "deepseek" # 可省略，按名称自动识别
+base_url = "https://api.deepseek.com/v1"
+models = ["deepseek-v4-flash"]   # 可选：钉住清单；删掉该行=启动自动拉取
 
-[body]                # 可选：覆盖请求参数
-temperature = 0.8
-max_tokens = 2048
+# 模型规则 示例（同一行内只保留一组字段）
+use = ["chat", "compression", "summarization", "judge"]
+
+[body]                           # 可选：请求参数模板
+temperature = 1
 ```
 
-> 模型选择支持全局分用途覆盖：`.ai model` 查看全部用途当前模型与可用列表；`.ai model <用途>` 查看指定用途；`.ai model <用途> <模型标识>`（如 `text[0]:deepseek-chat`）设置该用途的全局模型；`.ai model <模型名>` 兼容为设置 chat 用途。覆盖的模型失效时自动回退该用途默认模型。
+> 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型仅当某用途候选恰好唯一时自动生效（出厂 deepseek 钉住单模型即唯一）；多候选或无候选请用全局覆盖指定。
+>
+> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次保存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
+>
+> 嵌入输出维度取 text-embedding 用途组规则的 `[body] dimensions`（默认 1024）；配置后长期记忆与知识库启用语义检索，未配置/不匹配自动降级为关键词检索。
 
 ### 基础
 
@@ -200,7 +205,7 @@ max_tokens = 2048
 | 上下文超长自动归档重试 | 模型返回上下文超长时，把会话历史按「观察归档 + 删除」链路压到模型窗口内后自动重发一次；关闭则该场景仅记日志（默认开启） |
 | 余额不足自动切换模型 | 对话模型报余额不足 / 欠费 / 额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可用 `.ai model` 改回）（默认开启） |
 | 自动切换触发错误 | 每行一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
-| 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；配置顺序 = 按纯文本模型列表顺序取下一个不同模型 |
+| 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 api连接/候选顺序取下一个不同模型 |
 | 切换后发送通知 | 自动切换模型后用 `ctx.notice` 向当前会话发送一条切换通知（默认开启） |
 
 ### 角色设定
@@ -403,7 +408,7 @@ max_tokens = 2048
 | `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [<用途> [<模型标识>]]` | `.ai model chat text[0]:deepseek-chat` | 查看 / 设置全局分用途模型（骰主）：无参数查看全部用途，`<用途>` 查看指定用途，`<用途> <模型标识>` 设置全局覆盖；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近保存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 
 ### 记忆管理命令
@@ -514,8 +519,8 @@ max_tokens = 2048
 ## 🚨 注意事项
 
 - 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效；
-- 嵌入模型输出维度从 `[body] dimensions` 读取（默认 1024）；配置嵌入模型后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
-- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；`body.stream = true` 的模型才会走流式；
+- 嵌入输出维度取「模型规则」text-embedding 用途组的 `[body] dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
+- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在「模型规则」chat 用途组的 `[body]` 里设 `stream = true` 的模型才会走流式；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
 - CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）；卡片/视频/文件/语音/合并转发等段经 ob11 事件分发接收，不受该白名单限制。
 
@@ -538,7 +543,7 @@ max_tokens = 2048
 
 **记忆/知识库检索不到**
 
-- 记忆检索确认「嵌入模型」已配置，「启用长期记忆」开关打开；
+- 记忆检索确认已有嵌入模型可用（「api连接」里含嵌入类模型，且 `.ai model text-embedding` 显示已绑定或唯一默认），「启用长期记忆」开关打开；
 - 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置，修改后需重载 JS 生效，可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 
@@ -546,7 +551,7 @@ max_tokens = 2048
 
 - 确认图片 URL 可以在浏览器访问（过期或 QQ 图床 bug 时更换协议端版本）；
 - 模型不支持 QQ 图床时，把「识别图片时将url转换为base64」设为「总是」或「自动」；
-- 图片转文字依赖视觉模型配置（「多模态模型」TOML，`use = ["image-understanding"]`）。
+- 图片转文字依赖视觉模型：先在「api连接」配置含视觉模型的连接（拉取/钉住后模型带"识图"标签），再用 `.ai model image-understanding <模型>` 绑定。
 
 **HTTP 请求出错**
 
@@ -569,7 +574,7 @@ max_tokens = 2048
 
 > 注：× 为不支持 function call；▲ 为需要开启合并 user 消息开关。视觉模型不一定支持 QQ 图床识别，可使用中转插件。
 
-> 在「模型」配置中，上表平台的 `provider` / `base_url` 大多可省略（自动识别），未列出的平台填写 `base_url` 即可使用。
+> 在「模型」配置中，上表平台请照填 `provider`（决定协议/默认地址与列表接口适配），`base_url` 可省略（取该服务商默认）；未列出的平台/网关可填任意 `provider` 标识 + 完整 `base_url`，按 OpenAI 兼容方式使用（anthropic 除外，需走其专有适配）。模型名以各平台「模型列表」接口/官方文档为准，插件启动时按连接自动获取。
 
 > 仅列出部分官方的本插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。国外大模型网络问题请自行解决。
 
