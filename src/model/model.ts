@@ -1,7 +1,7 @@
 // 模型管理器（v4：api连接 + 模型规则）：
 // - 模型实例由「api连接」产出（pinned 钉住清单 / 启动自动拉取），只存内存、不做持久化，按 (连接序号, 模型名) 组织；
-// - 能力标签（text/vision/embed/gen）决定用途候选；默认模型只在该用途候选「恰好唯一」时自动生效；
-// - .ai model 写入的全局分用途覆盖（modelPurposeOverrides）优先级最高，失效自动回退默认。
+// - 能力标签（text/vision/embed/gen）决定用途候选；默认模型取该用途候选中的第一个（首个可用同类型模型）；
+// - .ai model 写入的全局分用途覆盖（modelPurposeOverrides）优先级最高，失效回退默认。
 import Logger from "../logger";
 
 import { buildProviderBody, parseProviderResponse } from "./adapter";
@@ -221,17 +221,44 @@ export default class Model {
         return Model.activeLoad ?? Promise.resolve();
     }
 
-    /** 立即重拉全部非 pinned 连接（.ai model pull 用），完成时已重建注册表 */
+    /**
+     * 立即重拉全部连接（.ai model pull 用）：无论连接配置是否写了 models 钉住清单，
+     * 一律向网络请求模型列表并用结果覆盖（pinned/auto/error 都会被刷新）；失败则按连接降级为 error。
+     */
     static pull(): Promise<void> {
-        Model.activeLoad = Model.runLoad();
+        Model.activeLoad = Model.runPull();
         void Model.activeLoad.catch(e => log.error('模型列表拉取出错', e));
         return Model.activeLoad;
     }
 
+    /** 单连接拉取并更新 state（成功 → auto；失败 → error，只存内存） */
+    private static async fetchConnState(state: ConnState, conn: ConnConfigLike): Promise<void> {
+        try {
+            const names = await Model.fetcher({
+                provider: conn.provider,
+                baseUrl: conn.baseUrl,
+                apiKey: conn.apiKey,
+                listOverride: conn.request ?? {},
+            });
+            state.status = 'ok';
+            state.source = 'auto';
+            state.modelNames = names;
+            state.updatedAt = Date.now();
+            delete state.errorKind;
+            delete state.errorText;
+        } catch (e) {
+            const d = describeListError(e);
+            state.status = 'error';
+            state.modelNames = [];
+            state.errorKind = d.kind;
+            state.errorText = d.text;
+        }
+    }
+
     private static async runLoad(): Promise<void> {
-        // pending：启动预热未拉取；error：已降级失败（.ai model pull 重试时再次拉取）
-        const pending = Model.states.filter(s => s.status === 'pending' || s.status === 'error');
-        await Promise.all(pending.map(async state => {
+        // pending：启动预热未拉取；error：已降级失败（pull/重试时再次拉取）
+        const targets = Model.states.filter(s => s.status === 'pending' || s.status === 'error');
+        await Promise.all(targets.map(async state => {
             const conn = Model.connByIndex.get(state.connIndex);
             if (!conn) {
                 state.status = 'error';
@@ -239,26 +266,23 @@ export default class Model {
                 state.errorText = '连接配置缺失';
                 return;
             }
-            try {
-                const names = await Model.fetcher({
-                    provider: conn.provider,
-                    baseUrl: conn.baseUrl,
-                    apiKey: conn.apiKey,
-                    listOverride: conn.request ?? {},
-                });
-                state.status = 'ok';
-                state.source = 'auto';
-                state.modelNames = names;
-                state.updatedAt = Date.now();
-                delete state.errorKind;
-                delete state.errorText;
-            } catch (e) {
-                const d = describeListError(e);
+            await Model.fetchConnState(state, conn);
+        }));
+        Model.rebuildEntries();
+    }
+
+    /** pull：全部非忽略连接都强制拉取，无视配置里的 models 钉住字段 */
+    private static async runPull(): Promise<void> {
+        const targets = Model.states.filter(s => s.status !== 'ignored');
+        await Promise.all(targets.map(async state => {
+            const conn = Model.connByIndex.get(state.connIndex);
+            if (!conn) {
                 state.status = 'error';
-                state.modelNames = [];
-                state.errorKind = d.kind;
-                state.errorText = d.text;
+                state.errorKind = 'unknown';
+                state.errorText = '连接配置缺失';
+                return;
             }
+            await Model.fetchConnState(state, conn);
         }));
         Model.rebuildEntries();
     }
@@ -305,7 +329,7 @@ export default class Model {
         return Model.entries.filter(e => Model.isEligible(e, use));
     }
 
-    /** 解析 use 当前生效模型：全局覆盖 > 默认（候选恰好唯一时自动成为默认，否则无默认） */
+    /** 解析 use 当前生效模型：全局覆盖 > 默认（取该用途候选中的第一个：首个可用的同类型模型） */
     private static resolveForUse(use: ModelUse): ModelEntry | null {
         const ref = Model.purposeModelOverrides[use];
         if (ref) {
@@ -315,7 +339,7 @@ export default class Model {
             log.warning(`全局模型覆盖 ${ref}（${use}）已失效，回退默认`);
         }
         const pool = Model.listModelsForUse(use);
-        return pool.length === 1 ? pool[0] : null;
+        return pool.length > 0 ? pool[0] : null;
     }
 
     static getChatModel(use: ChatModelUse): ModelEntry | null {

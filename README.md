@@ -32,8 +32,8 @@ models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后
 
 - 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
 - **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
-- 默认模型仅在该用途候选**恰好唯一**时自动生效（出厂 deepseek 钉住单模型 → chat 直接可用）；多候选或无候选时用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
-- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示，`.ai model` 查看各用途与连接状态；
+- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
+- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
 
 ### 4. 设置触发与角色
@@ -178,9 +178,9 @@ use = ["chat", "compression", "summarization", "judge"]
 temperature = 1
 ```
 
-> 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型仅当某用途候选恰好唯一时自动生效（出厂 deepseek 钉住单模型即唯一）；多候选或无候选请用全局覆盖指定。
+> 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
 >
-> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
+> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
 >
 > 嵌入输出维度取 text-embedding 用途组规则的 `[body] dimensions`（默认 1024）；配置后长期记忆与知识库启用语义检索，未配置/不匹配自动降级为关键词检索。
 
@@ -408,7 +408,7 @@ temperature = 1
 | `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 
 ### 记忆管理命令
@@ -543,7 +543,7 @@ temperature = 1
 
 **记忆/知识库检索不到**
 
-- 记忆检索确认已有嵌入模型可用（「api连接」里含嵌入类模型，且 `.ai model text-embedding` 显示已绑定或唯一默认），「启用长期记忆」开关打开；
+- 记忆检索确认已有嵌入模型可用（「api连接」里含嵌入类模型，且 `.ai model text-embedding` 显示已绑定或存在可用默认），「启用长期记忆」开关打开；
 - 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置，修改后需重载 JS 生效，可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 

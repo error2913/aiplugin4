@@ -3691,7 +3691,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 模型解析（v4）：候选按能力标签；默认仅候选唯一时自动生效；覆盖优先、失效回退；重名用 [序号]:模型名 */
+    /** 模型解析（v4）：候选按能力标签；默认取首个可用同类型模型；覆盖优先、失效回退；重名用 [序号]:模型名 */
     testGetChatModelResolution(): void {
         try {
             // 单文本候选 → 四个对话用途自动默认同一模型
@@ -3700,24 +3700,27 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(Model.getChatModel('compression')?.name, 'text-a');
             assert.equal(Model.getChatModel('summarization')?.name, 'text-a');
             assert.equal(Model.getChatModel('judge')?.name, 'text-a');
-            // 嵌入/识图候选为空 → 无默认（不猜）
+            // 嵌入/识图候选为空 → 无默认
             assert.equal(Model.getEmbeddingModel('text-embedding'), null);
             assert.equal(Model.getMultimodalModel('image-understanding'), null);
 
-            // 多文本候选 → 无默认
+            // 多文本候选 → 默认取第一个（首个可用）
             seedPinnedConns([pinConn('deepseek', ['text-a', 'text-b'])]);
-            assert.equal(Model.getChatModel('chat'), null, '多候选不应自动默认');
+            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '多候选默认应取第一个');
 
-            // 视觉模型：唯一 → image-understanding 默认，也可作 chat 候选
+            // 视觉模型：默认 image-understanding；也可作对话候选
             seedPinnedConns([pinConn('zhipu', ['glm-4v'])]);
             const itt = Model.getMultimodalModel('image-understanding');
             assert.equal(itt?.name, 'glm-4v');
             assert.equal(itt?.isMultimodal, true, 'glm-4v 应识别为视觉模型');
             assert.equal(Model.getChatModel('chat')?.name, 'glm-4v', '视觉模型可作对话候选');
+            // 多个视觉候选 → 识图默认取第一个
+            seedPinnedConns([pinConn('zhipu', ['glm-4v']), pinConn('openai', ['gpt-4o'])]);
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'glm-4v', '识图默认取首个视觉模型');
 
-            // 嵌入白名单：进 text-embedding 但绝不进对话候选
-            seedPinnedConns([pinConn('openai', ['text-embedding-3-small'])]);
-            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small');
+            // 嵌入白名单：进 text-embedding（首个）但绝不进对话候选
+            seedPinnedConns([pinConn('openai', ['text-embedding-3-small']), pinConn('siliconflow', ['BAAI/bge-m3'])]);
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small', '嵌入默认取首个');
             assert.equal(Model.getChatModel('chat'), null, '嵌入模型不得进对话候选');
 
             // 生图类不进任何候选
@@ -3726,19 +3729,19 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(Model.getMultimodalModel('image-understanding'), null);
             assert.equal(Model.getEmbeddingModel('text-embedding'), null);
 
-            // 覆盖：多候选时绑定唯一名生效；失效覆盖回退默认
+            // 覆盖：多候选时绑定任意可用模型生效；失效覆盖回退默认（首个）
             seedPinnedConns([pinConn('deepseek', ['text-a', 'text-b'])]);
-            Model.purposeModelOverrides.chat = 'text-a';
-            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '裸名覆盖应生效');
+            Model.purposeModelOverrides.chat = 'text-b';
+            assert.equal(Model.getChatModel('chat')?.name, 'text-b', '覆盖应生效');
             Model.purposeModelOverrides.chat = 'no-such';
-            assert.equal(Model.getChatModel('chat'), null, '失效覆盖回退默认（无唯一默认）');
+            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '失效覆盖回退默认（首个可用）');
 
-            // 重名跨连接 → ref=[序号]:模型名；裸名歧义视为失效，不猜测
+            // 重名跨连接 → ref=[序号]:模型名；裸名歧义覆盖失效回退默认首个
             seedPinnedConns([pinConn('deepseek', ['same']), pinConn('openai', ['same'])]);
             assert.equal(Model.entries.length, 2);
             assert.deepEqual(Model.entries.map(e => e.ref).sort(), ['[0]:same', '[1]:same']);
             Model.purposeModelOverrides.chat = 'same';
-            assert.equal(Model.getChatModel('chat'), null, '裸名重名歧义应失效');
+            assert.equal(Model.getChatModel('chat')?.provider, 'deepseek', '裸名重名歧义失效应回退默认首个（[0]）');
             Model.purposeModelOverrides.chat = '[1]:same';
             assert.equal(Model.getChatModel('chat')?.provider, 'openai', '[序号]:名 覆盖应精确命中');
         } finally {
@@ -3777,23 +3780,23 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** isMultimodalChat：跟随全局 chat 模型；默认仅唯一候选；多候选/覆盖指定文本模型时按纯文本处理 */
+    /** isMultimodalChat：跟随全局 chat 模型；默认取首个可用；覆盖指定视觉模型时按多模态处理 */
     testIsMultimodalChat(): void {
         const agent = new Agent();
         const stubSession = {} as any;
         try {
-            // 文本 + 视觉两个不同候选 → chat 无默认 → 按纯文本处理（不猜）
+            // 首个文本候选在前的两个候选 → chat 默认 text-a → 按纯文本处理
             seedPinnedConns([pinConn('deepseek', ['text-a']), pinConn('zhipu', ['glm-4v'])]);
-            assert.equal((agent as any).isMultimodalChat(stubSession), false, '多候选无默认时应按纯文本处理');
+            assert.equal((agent as any).isMultimodalChat(stubSession), false, '默认文本模型应按纯文本处理');
             // 覆盖指定视觉模型 → 多模态
             Model.purposeModelOverrides.chat = 'glm-4v';
             assert.equal((agent as any).isMultimodalChat(stubSession), true, '覆盖视觉模型时按多模态处理');
             // 覆盖指定文本模型 → 纯文本
             Model.purposeModelOverrides.chat = 'text-a';
             assert.equal((agent as any).isMultimodalChat(stubSession), false, '覆盖文本模型时按纯文本处理');
-            // 仅视觉候选 → 唯一默认 → 多模态
-            seedPinnedConns([pinConn('zhipu', ['glm-4v'])]);
-            assert.equal((agent as any).isMultimodalChat(stubSession), true, '仅视觉候选时按多模态处理');
+            // 视觉模型排在前 → 默认取它 → 多模态
+            seedPinnedConns([pinConn('zhipu', ['glm-4v']), pinConn('deepseek', ['text-a'])]);
+            assert.equal((agent as any).isMultimodalChat(stubSession), true, '首个候选为视觉模型时按多模态处理');
         } finally {
             Model.reset();
         }
@@ -3845,11 +3848,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(replied.includes('识图（image-understanding）'), '总览应包含识图: ' + replied);
             assert.ok(replied.includes('嵌入（text-embedding）'), '总览应包含嵌入: ' + replied);
             assert.ok(replied.includes('连接状态'), '总览应包含连接状态: ' + replied);
+            assert.ok(!replied.includes('候选模型'), '总览不应展示候选列表: ' + replied);
 
-            // 分用途：chat 有两个文本候选 → 未绑定无默认
+            // 分用途：chat 多候选 → 默认取首个可用；单用途视图展示该用途候选
             seedPinnedConns([pinConn('deepseek', ['text-a', 'text-b'])]);
             await runCmd('model', 'chat');
-            assert.ok(replied.includes('候选多个'), '多候选应提示未自动默认: ' + replied);
+            assert.ok(replied.includes('对话（chat）: text-a（默认·首个可用）'), '默认应取首个可用: ' + replied);
+            assert.ok(replied.includes('候选模型:'), '.ai model <用途> 应展示该用途候选: ' + replied);
+            assert.ok(replied.includes('text-b'), '候选应含第二个模型: ' + replied);
 
             // 设置 chat：裸名 → 覆盖持久化；再查总览显示覆盖
             await runCmd('model', 'chat', 'text-b');
@@ -3861,8 +3867,19 @@ export const tests: Record<string, () => void | Promise<void>> = {
             seedPinnedConns([pinConn('deepseek', ['text-a'])]);
             Model.purposeModelOverrides.chat = 'text-b';
             await runCmd('model', 'chat');
-            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '失效覆盖回退唯一默认');
+            assert.equal(Model.getChatModel('chat')?.name, 'text-a', '失效覆盖回退默认（首个可用）');
             assert.ok(replied.includes('text-b 已失效'), '应标注覆盖已失效: ' + replied);
+
+            // ignore=1 的连接不在指令输出中（.ai model list 不显示忽略连接与“已忽略”行）
+            Model.reset();
+            Model.bootstrap([
+                { provider: 'deepseek', apiKey: 'k', baseUrl: 'https://d', ignore: false, models: ['visible-a'], request: {} },
+                { provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: true, models: ['hidden-b'], request: {} },
+            ], []);
+            await runCmd('model', 'list');
+            assert.ok(replied.includes('visible-a'), 'list 应包含非忽略连接模型: ' + replied);
+            assert.ok(!replied.includes('hidden-b'), '忽略连接的模型不应出现在 list: ' + replied);
+            assert.ok(!replied.includes('已忽略'), '忽略连接不应以“已忽略”行出现: ' + replied);
 
             // 重名跨连接 → 裸名歧义；[序号]:模型名 精确
             seedPinnedConns([pinConn('deepseek', ['same']), pinConn('openai', ['same'])]);
@@ -5749,6 +5766,35 @@ description: 茶库
             resetModelConfigCacheForTest();
             setModelListDepsForTest();
             resetConfigCache();
+            Model.reset();
+        }
+    },
+
+    /** .ai model pull：无视配置里的 models 钉住字段，一律向网络拉取并用结果覆盖 */
+    async testModelPullIgnoresPinnedModels(): Promise<void> {
+        try {
+            let callCount = 0;
+            Model.reset();
+            Model.bootstrap([{ provider: 'deepseek', apiKey: 'k', baseUrl: 'https://d', ignore: false, models: ['pinned-model'], request: {} }], [], {
+                fetch: async () => { callCount++; return ['fetched-x', 'fetched-y']; },
+            });
+            // 加载时 pinned 生效：不请求网络
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.states[0].source, 'pinned');
+            assert.deepEqual(Model.states[0].modelNames, ['pinned-model']);
+            assert.equal(callCount, 0, '加载时钉住清单不应触发拉取');
+
+            // pull：无视 models 字段强制拉取并覆盖
+            await Model.pull();
+            assert.equal(callCount, 1, 'pull 应请求网络一次');
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.states[0].source, 'auto');
+            assert.deepEqual(Model.states[0].modelNames, ['fetched-x', 'fetched-y'], 'pull 结果应覆盖钉住清单');
+
+            // pull 再次执行也会重新拉取（不会因为已 ok 而跳过）
+            await Model.pull();
+            assert.equal(callCount, 2, '重复 pull 每次都会请求网络');
+        } finally {
             Model.reset();
         }
     },

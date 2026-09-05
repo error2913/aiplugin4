@@ -31,25 +31,29 @@ function entryTagsText(e: ModelEntry): string {
     return e.tags.map(t => TAG_LABEL[t] ?? t).join('/');
 }
 
-/** 连接状态单行（供 list / 总览 / status 复用） */
+/** 参与展示/统计的连接：ignore=1 的忽略连接不出现在任何指令里 */
+function activeStates(): ConnState[] {
+    return Model.states.filter(s => s.status !== 'ignored');
+}
+
+/** 连接状态单行（供 list / 总览 / status 复用；只传非 ignore 连接） */
 export function formatConnState(state: ConnState): string {
     const head = `[${state.connIndex}] ${state.provider || '(未知)'} · ${state.baseUrl || '(无地址)'}`;
-    if (state.status === 'ignored') return `${head} · 已忽略`;
     if (state.status === 'pending') return `${head} · 拉取中…`;
     if (state.status === 'error') return `${head} · ${state.errorText || '拉取失败'}`;
     const sourceLabel = state.source === 'pinned' ? '钉住' : '自动';
     return `${head} · ${sourceLabel} · ${state.modelNames.length} 个模型`;
 }
 
-/** 展示全部连接与对应模型列表（数据源：加载/最近一次拉取到内存的列表，不联网、不持久化） */
+/** 展示全部连接与对应模型列表（数据源：加载/最近一次拉取到内存的列表，不联网、不持久化；忽略连接不显示） */
 export function formatModelList(connFilter?: (st: ConnState) => boolean): string {
-    const states = Model.states;
-    const show = connFilter ? states.filter(connFilter) : states;
+    const base = activeStates();
+    const show = connFilter ? base.filter(connFilter) : base;
     if (show.length === 0) return '（未配置任何 api连接）';
 
     // 全量模型名计数：重名模型在列表里标注 [序号]:模型名，唯一名直接裸名
     const counts = new Map<string, number>();
-    for (const st of states) {
+    for (const st of base) {
         if (st.status !== 'ok') continue;
         for (const name of st.modelNames) counts.set(name, (counts.get(name) || 0) + 1);
     }
@@ -76,13 +80,12 @@ export function formatModelList(connFilter?: (st: ConnState) => boolean): string
     return lines.join('\n');
 }
 
-/** 单用途当前状态 + 候选列表 */
+/** 单用途当前模型（供总览与单用途查看共用；不内嵌候选） */
 function formatPurpose(use: ModelUse): string {
-    const candidates = Model.listModelsForUse(use);
+    const defaultEntry = Model.listModelsForUse(use)[0] ?? null; // 首个可用同类型模型
     const overrideRef = Model.purposeModelOverrides[use];
     const overrideEntry = overrideRef ? Model.findModelByRef(overrideRef, use) : null;
-    let effective = overrideEntry;
-    if (!effective && candidates.length === 1) effective = candidates[0];
+    const effective = overrideEntry ?? defaultEntry;
 
     let currentText: string;
     if (overrideEntry) {
@@ -90,19 +93,33 @@ function formatPurpose(use: ModelUse): string {
     } else if (overrideRef) {
         currentText = `${overrideRef} 已失效，当前默认: ${effective ? effective.ref : '（无）'}`;
     } else if (effective) {
-        currentText = `${effective.ref}（配置默认）`;
+        currentText = `${effective.ref}（默认·首个可用）`;
     } else {
-        currentText = candidates.length > 0
-            ? '（候选多个，未自动默认，请用 .ai model <用途> <模型> 指定）'
-            : '（未配置可用模型）';
+        currentText = '（未配置可用模型）';
     }
+    return `${PURPOSE_LABEL[use]}（${use}）: ${currentText}`;
+}
 
-    let text = `${PURPOSE_LABEL[use]}（${use}）: ${currentText}`;
-    if (candidates.length > 0) {
-        const listText = candidates.map((c, i) => `${i + 1}. ${c.ref}${c.isMultimodal ? '（多模态）' : ''}${c.ref === overrideRef ? '（覆盖）' : ''}${effective && c.ref === effective.ref ? '（当前）' : ''}`).join('\n');
-        text += `\n候选模型:\n${listText}`;
-    }
+/** 单用途详情：当前模型 + 该用途候选列表（.ai model <用途>） */
+function formatPurposeDetail(use: ModelUse): string {
+    const candidates = Model.listModelsForUse(use);
+    const overrideRef = Model.purposeModelOverrides[use];
+    const defaultEntry = candidates[0] ?? null;
+    const overrideEntry = overrideRef ? Model.findModelByRef(overrideRef, use) : null;
+    const effective = overrideEntry ?? defaultEntry;
+
+    let text = formatPurpose(use);
+    if (candidates.length === 0) return text;
+    const listText = candidates.map((c, i) => `${i + 1}. ${c.ref}${c.isMultimodal ? '（多模态）' : ''}${c.ref === overrideRef ? '（覆盖）' : ''}${effective && c.ref === effective.ref ? '（当前）' : ''}`).join('\n');
+    text += `\n候选模型:\n${listText}`;
     return text;
+}
+
+/** 连接状态简表（只含非忽略连接，仅一行/连接：状态与模型数；完整模型见 .ai model list） */
+function formatConnSummary(): string {
+    const states = activeStates();
+    if (states.length === 0) return '（未配置任何 api连接）';
+    return states.map(formatConnState).join('\n');
 }
 
 /** 候选内解析用户输入：完整 ref / 裸名唯一 / 编号 / 歧义 */
@@ -125,8 +142,7 @@ function setPurposeModel(scc: SubCmdContext, purpose: ModelUse, raw: string) {
     const candidates = Model.listModelsForUse(purpose);
     const target = resolveCandidate(raw, candidates);
     if (!target) {
-        const listText = candidates.map(c => c.ref).join('、');
-        seal.replyToSender(ctx, msg, `模型 ${raw} 不存在${PURPOSE_LABEL[purpose]}用途，可用的模型: ${listText || '（无）'}`);
+        seal.replyToSender(ctx, msg, `模型 ${raw} 不存在${PURPOSE_LABEL[purpose]}用途，请用 .ai model list 查看可用模型后重试`);
         return ret;
     }
     if ('ambiguous' in target) {
@@ -145,12 +161,13 @@ export function registerCmdModel() {
     const cmd = new SubCmd('model');
     cmd.desc = '查看/设置全局分用途模型与模型列表';
     cmd.help = `帮助:
-【.ai model】查看全部分用途模型与连接状态
+【.ai model】查看全部分用途当前模型与连接状态
 【.ai model list】展示加载/最近一次拉取的模型列表（不联网，按连接序号分组）
-【.ai model pull】立即重新拉取全部连接的可用模型列表并展示
-【.ai model <用途>】查看指定用途可用模型
-【.ai model <用途> <模型标识>】设置指定用途的全局模型（支持编号/裸名/[连接序号]:模型名）
-用途: chat / compression / summarization / judge / image-understanding / text-embedding`;
+【.ai model pull】立即重拉全部连接的模型列表并展示（无视配置里的 models 钉住清单，强制走网络）
+【.ai model <用途>】查看指定用途当前模型与该用途候选（默认=该用途首个可用模型）
+【.ai model <用途> <模型>】设置指定用途的全局模型（支持编号/裸名/[连接序号]:模型名）
+用途: chat / compression / summarization / judge / image-understanding / text-embedding
+说明: 全量模型列表用 .ai model list；ignore=1 的忽略连接不参与展示/统计`;
     cmd.priv = { priv: M };
     cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, ret } = scc;
@@ -159,28 +176,26 @@ export function registerCmdModel() {
 
         if (val2 === 'list') {
             await Model.ensureLoaded();
-            seal.replyToSender(ctx, msg, `当前模型列表（连接 ${Model.states.filter(s => s.status !== 'ignored').length} 条）:\n${formatModelList()}`);
+            seal.replyToSender(ctx, msg, `当前模型列表（连接 ${activeStates().length} 条）:\n${formatModelList()}`);
             return ret;
         }
 
         if (val2 === 'pull') {
             await Model.pull();
-            seal.replyToSender(ctx, msg, `已重新拉取模型列表（连接 ${Model.states.filter(s => s.status !== 'ignored').length} 条）:\n${formatModelList()}`);
+            seal.replyToSender(ctx, msg, `已重新拉取模型列表（连接 ${activeStates().length} 条）:\n${formatModelList()}`);
             return ret;
         }
 
         if (!val2) {
             await Model.ensureLoaded();
-            const text = MODEL_PURPOSES.map(use => formatPurpose(use)).join('\n\n');
-            const conns = formatModelList().split('\n');
-            const connSummary = conns.slice(0, 30).join('\n') + (conns.length > 30 ? `\n…（共 ${conns.length} 行，详情 .ai model list）` : '');
-            seal.replyToSender(ctx, msg, `当前全局模型:\n${text}\n\n连接状态:\n${connSummary}`);
+            const text = MODEL_PURPOSES.map(use => formatPurpose(use)).join('\n');
+            seal.replyToSender(ctx, msg, `当前全局模型:\n${text}\n\n连接状态:\n${formatConnSummary()}`);
             return ret;
         }
 
         if (isPurpose(val2)) {
             if (!val3) {
-                seal.replyToSender(ctx, msg, formatPurpose(val2));
+                seal.replyToSender(ctx, msg, formatPurposeDetail(val2));
                 return ret;
             }
             return setPurposeModel(scc, val2, val3);
