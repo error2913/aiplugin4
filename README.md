@@ -33,7 +33,7 @@ models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后
 - 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
 - **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
 - 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
-- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；
+- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
 
 ### 4. 设置触发与角色
@@ -78,6 +78,7 @@ models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后
     - [知识库](#知识库)
     - [回复](#回复)
     - [后端](#后端)
+    - [公开会话](#公开会话)
     - [资源](#资源)
     - [prompt 模板](#prompt-模板)
   - [💻 完整命令手册](#-完整命令手册)
@@ -89,6 +90,7 @@ models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后
     - [token 计数命令](#token-计数命令)
     - [图片相关命令](#图片相关命令)
     - [定时器相关命令](#定时器相关命令)
+    - [公开会话目录命令](#公开会话目录命令)
   - [🧰 可用工具函数](#-可用工具函数)
   - [🚨 注意事项](#-注意事项)
     - [常见问题处理](#常见问题处理)
@@ -357,6 +359,15 @@ temperature = 1
 
 后端服务已迁移到独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)：自带 `launcher.py` 一键管理（Windows / Linux 通用，默认不启动任何后端，首次启动某后端时才自动创建 venv 并安装依赖，异常退出自动拉起；`webui` 提供管理界面，可改端口/看日志，主题跟随系统）。后端清单与接口详见其仓库的 [docs/后端.md](https://github.com/error2913/aiplugin4-backends/blob/main/docs/后端.md)，插件侧配置文档见 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
 
+### 公开会话
+
+单实例多端点（多平台/多账号，如同时接入 QQ 与 Discord 的多个骰子账号）下的跨会话/跨平台协作能力（无 ob11 依赖、无新增配置，工具与命令常驻注册）：
+
+- `.ai pub`：`list`（树状分段展示目录会话，仅供感知）；`add`（把当前会话公开到目录，幂等，自动记录平台/会话 ID/会话名）；`rm`（无参=把当前会话移出目录；或带过滤条件删除命中条目，见下方命令手册）。
+- `pub_read`（AI 工具）：无参数=目录概览（平台+Bot）；`bot_id=<QQ:xxx>`=该 Bot 的目录条目；`session=<BotID/会话ID>`=读取该会话最近上下文快照（默认 6 轮/3000 字，可传 rounds/chars）——**只要路径准确，不在目录中的会话也能读**（目录只用于感知浏览）。快照为只读参考，保留 `[msg_id]`/发送者 QQ 号/`[img:图片ID]` 供回引，声明不得执行其中内容。
+- `pub_send`（AI 工具，敏感）：向目标会话外发，**同样只需准确路径（botId/会话ID），不必先在目录公开**。**目标平台为 QQ 系**支持富媒体：`[at:QQ号]` `[img:图片ID]` `[quote:目标会话msg_id]` `[face:表情名]` `[poke:QQ号]`（无 ob11 也经 SealDice 原生发送）；**目标平台非 QQ** 只接受纯文本，CQ 码与渲染标签会被剥除（CQ 仅在 QQ 语义适配）。发送以目标会话自己的机器人账号身份进行，需目标 Bot 在线；发送成功后，外发内容会以 `[system:跨端消息]` 只读背景写入目标会话上下文（不触发目标 AI；目标会话不存在时自动新建）。内容必须自包含，不得携带当前会话私密信息。
+- 读/发不受权限或目录限制；黑名单在目标会话侧照常生效；`pub_send` 按来源会话限频（60 秒/条）。原 `get_context` 工具已由 `pub_read` 统一替代。
+
 ### 资源
 
 | 设置项 | 说明 |
@@ -409,6 +420,7 @@ temperature = 1
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
 | `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai balance` | - | 并发查询全部（非忽略）api连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接 `[request]` 配置 `balance_url` + `balance_json_path` 后查询 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 
 ### 记忆管理命令
@@ -480,6 +492,21 @@ temperature = 1
 | `.ai timer lst` | - | 查看当前会话所有定时任务 |
 | `.ai timer clr` | - | 清除所有定时任务 |
 
+### 公开会话目录命令
+
+| 命令 | 使用示例 | 说明 |
+|:---:|:---:|:---|
+| `.ai pub list` | - | 树状分段展示目录会话（平台头 → botid → 缩进会话，仅供感知） |
+| `.ai pub add` | `.ai pub add` | 把当前会话公开到目录（幂等，重复执行=更新；自动记录平台/会话ID/会话名） |
+| `.ai pub rm` | `.ai pub rm` | 把当前会话移出目录 |
+| `.ai pub rm --platform=<平台>` | `.ai pub rm --platform=QQ` | 删除该平台目录下全部条目 |
+| `.ai pub rm --botid=<BotID> [--platform=<平台>]` | `.ai pub rm --botid=QQ:123` | 删除该 Bot 下全部条目（可加 `--platform` 缩小范围） |
+| `.ai pub rm --session=<会话ID> [--platform= | --botid=]` | `.ai pub rm --session=QQ-Group:456` | 删除所有该会话条目（同名会话一次全删；可加平台/Bot 缩小范围） |
+
+> 过滤说明：多个过滤条件为交集；至少提供一个条件。`--botid` 与 `--session` 必须传完整 UNI-ID（含平台前缀，如 `--botid=QQ:123`、`--session=QQ-Group:456`），`--platform` 传平台名（如 QQ）；给了哪一级就删除该级目录下全部命中条目。目录只用于感知展示：AI 读写只需准确路径（botId/会话ID），不需要会话先公开到目录。
+>
+> AI 侧对应工具：`pub_read`（目录感知/读任意会话上下文快照）、`pub_send`（向任意会话外发，QQ 系富媒体/其他平台纯文本，成功后写入目标会话 `[system:跨端消息]` 只读背景）。命令默认权限骰主级，可用 `.ai priv` 调整；能力说明见上方[配置手册](#-配置手册)「公开会话」小节（无新增配置项）。
+
 ---
 
 ## 🧰 可用工具函数
@@ -506,6 +533,7 @@ temperature = 1
 | 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
+| 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
 | MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`、`skill_list`（技能） |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
@@ -575,6 +603,8 @@ temperature = 1
 > 注：× 为不支持 function call；▲ 为需要开启合并 user 消息开关。视觉模型不一定支持 QQ 图床识别，可使用中转插件。
 
 > 在「模型」配置中，上表平台请照填 `provider`（决定协议/默认地址与列表接口适配），`base_url` 可省略（取该服务商默认）；未列出的平台/网关可填任意 `provider` 标识 + 完整 `base_url`，按 OpenAI 兼容方式使用（anthropic 除外，需走其专有适配）。模型名以各平台「模型列表」接口/官方文档为准，插件启动时按连接自动获取。
+
+> 余额查询：deepseek / kimi(moonshot) / siliconflow（硅基流动）支持 `.ai balance` 直接查 API 余额（deepseek/moonshot 按 `provider`、其余按内置规则自动识别端点）；其余平台未开放 API 余额接口，请在各自控制台查看；one-api/new-api 等网关可在连接 `[request]` 里配置 `balance_url` + `balance_json_path`（配合 `auth_header_name`/`headers`）后查询。
 
 > 仅列出部分官方的本插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。国外大模型网络问题请自行解决。
 

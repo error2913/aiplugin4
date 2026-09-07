@@ -231,6 +231,16 @@ export default class Model {
         return Model.activeLoad;
     }
 
+    /** 余额查询（.ai balance）用：非忽略连接的只读快照（apiKey 仅供请求时取用，不进展示态） */
+    static balanceConns(): Array<{ connIndex: number, provider: string, baseUrl: string, apiKey: string, request: Record<string, any> }> {
+        const out: Array<{ connIndex: number, provider: string, baseUrl: string, apiKey: string, request: Record<string, any> }> = [];
+        Model.connByIndex.forEach((c, connIndex) => {
+            out.push({ connIndex, provider: c.provider, baseUrl: c.baseUrl, apiKey: c.apiKey, request: c.request ?? {} });
+        });
+        out.sort((a, b) => a.connIndex - b.connIndex);
+        return out;
+    }
+
     /** 单连接拉取并更新 state（成功 → auto；失败 → error，只存内存） */
     private static async fetchConnState(state: ConnState, conn: ConnConfigLike): Promise<void> {
         try {

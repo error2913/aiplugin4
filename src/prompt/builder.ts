@@ -9,9 +9,10 @@ import Model from "../model/model";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { getSkillsSignature, getSkillSummaries } from "../tool/skills";
+import { getSkillsSignature, getSkillSummaries, SKILL_INJECT_MAX_ITEMS } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
+import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { getCachedString } from "./prompt_cache";
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
@@ -36,13 +37,25 @@ function toolStateSignature(session: Session): string {
         .join(',');
 }
 
-function buildSkillSummaryBlock(): string {
-    const r = getSkillSummaries();
+/** 会话级技能/知识库关闭开关签名：仅记录被 off 的项，参与静态段缓存 key */
+function flagStateSignature(state: { [key: string]: boolean } | undefined): string {
+    if (!state) return '';
+    return Object.keys(state)
+        .filter(k => state[k] === false)
+        .sort()
+        .join(',');
+}
+
+/** 技能摘要块：只列当前平台可用且本会话未关闭的技能 */
+function buildSkillSummaryBlock(session: Session, platform: string): string {
+    const r = getSkillSummaries(SKILL_INJECT_MAX_ITEMS, s =>
+        matchesPlatform(s.platforms, platform) && session.skillState?.[s.name] !== false
+    );
     if (r.summaries.length === 0) return '';
     const lines = ['## 可用技能'];
     for (const s of r.summaries) lines.push(`- ${s}`);
     if (r.truncated) {
-        lines.push(`（共 ${r.total} 个技能，最多显示 100 个）`);
+        lines.push(`（共 ${r.total} 个技能，最多显示 ${SKILL_INJECT_MAX_ITEMS} 个）`);
     }
     lines.push('需要完整列表：skill_list；需要技能内容：use_skill。');
     return lines.join('\n');
@@ -90,13 +103,16 @@ export async function buildSystemPromptContent(
     if (text.length > 2000) text = text.slice(-2000);
 
     // 静态壳：角色/平台/会话/BotID/工具/技能/知识库，连续对话可复用 30 秒。
+    const platform = platformOf(ctx);
     const toolState = STATUS ? toolStateSignature(session) : '';
     const skillConfigSignature = STATUS ? getSkillsSignature() : '';
     const knowledgeSignature = Config.knowledgeBase.KNOWLEDGE ? knowledgeService.getLibrariesSignature() : '';
+    const skillStateSig = STATUS ? flagStateSignature(session.skillState) : '';
+    const kbStateSig = STATUS && Config.knowledgeBase.KNOWLEDGE ? flagStateSignature(session.kbState) : '';
     const staticKey = signature([
         'prompt:static',
         roleSetting,
-        ctx.endPoint.platform,
+        platform,
         ctx.isPrivate ? 'private' : 'group',
         ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
         ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
@@ -109,19 +125,28 @@ export async function buildSystemPromptContent(
         Config.tool.DEFAULT_CLOSED.join(','),
         toolState,
         skillConfigSignature,
-        knowledgeSignature
+        knowledgeSignature,
+        skillStateSig,
+        kbStateSig
     ]);
     const frame = await getCachedString(staticKey, STATIC_FRAME_TTL, async () => {
         const toolBlock = STATUS
-            ? (PROMPT_ENGINEERING ? Tool.getPromptEngineeringToolBlock(session) : Tool.getToolDiscoveryBlock(session))
+            ? (PROMPT_ENGINEERING ? Tool.getPromptEngineeringToolBlock(session, platform) : Tool.getToolDiscoveryBlock(session))
             : '';
-        const skillBlock = STATUS ? buildSkillSummaryBlock() : '';
-        const knowledgeBlock = STATUS && Config.knowledgeBase.KNOWLEDGE ? knowledgeService.formatLibraries() : '';
+        const skillBlock = STATUS ? buildSkillSummaryBlock(session, platform) : '';
+        let knowledgeBlock = '';
+        if (STATUS && Config.knowledgeBase.KNOWLEDGE) {
+            const enabledIds = new Set<string>();
+            for (const lib of knowledgeService.getLibraries()) {
+                if (session.kbState?.[lib.id] !== false) enabledIds.add(lib.id);
+            }
+            knowledgeBlock = knowledgeService.formatLibrariesFor(platform, enabledIds);
+        }
         const staticBlocks = [toolBlock, skillBlock, knowledgeBlock].filter(Boolean).join('\n\n');
 
         return SYSTEM_MESSAGE_TEMPLATE({
             instruction: roleSetting,
-            platform: ctx.endPoint.platform,
+            platform,
             sessionType: ctx.isPrivate ? 'private' : 'group',
             sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
             sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,

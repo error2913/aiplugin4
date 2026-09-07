@@ -118,7 +118,10 @@ export class Session {
                 state: { objectValue: 'boolean' }
             },
             objectValue: 'default'
-        }
+        },
+        // 技能/知识库的会话级启用开关：仅记录被 .ai skill/.ai kb off 关闭的项，缺省=开启
+        skillState: { objectValue: 'boolean' },
+        kbState: { objectValue: 'boolean' }
     }
     agentName: string;
     sessionId: string;
@@ -154,6 +157,10 @@ export class Session {
         callCount: number, // 单次触发调用函数计数
         listen: ToolListen // 监听调用函数发送的内容
     }
+    /** 技能会话级启用开关：false=本会话关闭，缺省/true=开启 */
+    skillState: { [name: string]: boolean };
+    /** 知识库会话级启用开关（按库 ID）：false=本会话关闭，缺省/true=开启 */
+    kbState: { [id: string]: boolean };
 
     constructor() {
         this.agentName = '';
@@ -188,6 +195,8 @@ export class Session {
             callCount: 0,
             listen
         }
+        this.skillState = {};
+        this.kbState = {};
     }
 
     get agent(): Agent {

@@ -73,10 +73,15 @@ provider = "deepseek"               # 可选，服务商，省略时自动识别
 base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取服务商默认
 models = ["deepseek-v4-flash"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
 
-# [request]                                  # 可选，列表拉取覆盖（默认不写，由插件按 provider 解析）
+# [request]                                  # 可选，列表/余额查询覆盖（默认不写，由插件按 provider 解析）
 # list_url = "https://your-gateway/v1/models"    # 自定义列表端点（服务商无 /models 时用）
-# auth_header_name = "x-api-key"                  # 缺省 Authorization: Bearer
+# auth_header_name = "x-api-key"                  # 缺省 Authorization: Bearer（给了则原样放 key 不拼 Bearer）
 # timeout = 10                                    # 秒
+# # 余额查询（.ai balance）：deepseek/moonshot/siliconflow 内置端点，无需写任何余额配置
+# balance_url = "https://your-gateway/api/user/self"  # 自定义余额端点（one-api/new-api 等网关管理 API 用）
+# balance_json_path = "data.quota"                    # 余额数字所在路径（配合 balance_url）
+# balance_divisor = 500000                            # 可选，金额 = 取值/除数（new-api 默认 500000/元）
+# balance_currency = "CNY"                            # 可选，显示币种（缺省无符号）
 `,
             `api_key = "sk-xxxx"                 # 必填，API 密钥
 provider = "zhipu"                  # 可选，服务商，省略时自动识别
@@ -88,7 +93,7 @@ provider = "alibaba"                # 可选，服务商，省略时自动识别
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 可选，API 地址，省略时取服务商默认
 models = ["text-embedding-v4"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
 ignore = 1                         # 可选，1=忽略该条配置，0/不写=正常，使用前删除该行`,
-        ], `每框一个 API 连接（TOML）。必填：provider（服务商）、api_key（密钥）。可选：base_url（API 地址，省略取服务商默认）、models（模型钉住清单：填写则跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）、ignore（1=忽略该连接）。未写 models 的连接启动时自动请求模型列表接口（OpenAI 兼容 GET /models；anthropic 走 x-api-key 的 /v1/models 并自动翻页），失败按连接降级展示，不会拖垮其他连接。下方默认值即完整示例，可直接修改：出厂默认钉住 deepseek-v4-flash，删掉 models 行即改为启动自动拉取。连接行序 = 连接序号；重名模型用 [连接序号]:模型名 区分。修改后需重载 JS 生效。`, CONFIG_GROUP);
+        ], `每框一个 API 连接（TOML）。必填：provider（服务商）、api_key（密钥）。可选：base_url（API 地址，省略取服务商默认）、models（模型钉住清单：填写则跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）、ignore（1=忽略该连接）。未写 models 的连接启动时自动请求模型列表接口（OpenAI 兼容 GET /models；anthropic 走 x-api-key 的 /v1/models 并自动翻页），失败按连接降级展示，不会拖垮其他连接。下方默认值即完整示例，可直接修改：出厂默认钉住 deepseek-v4-flash，删掉 models 行即改为启动自动拉取。连接行序 = 连接序号；重名模型用 [连接序号]:模型名 区分。修改后需重载 JS 生效。余额查询（.ai balance）：deepseek/moonshot/siliconflow 连接无需配置即可查；其余平台未开放余额接口（仅控制台）；one-api/new-api 等网关可在连接 [request] 里配 balance_url + balance_json_path（配合 auth_header_name/headers）后查询。`, CONFIG_GROUP);
         seal.ext.registerTemplateConfig(ext, MODEL_RULE_CONFIG_KEY, [
             `# 每框一个用途组模板（TOML）：绑定到这些 use 的模型发起请求时统一套用下面的 body/request。
 # use 可选值：chat/compression/summarization/judge/image-understanding/text-embedding。

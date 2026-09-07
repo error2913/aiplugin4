@@ -3,7 +3,9 @@
 // 复用同一 MCP 会话，保持服务端浏览器/登录状态；空闲或超限的会话按 LRU 回收。
 import { ext } from "../config/config";
 import Logger from "../logger";
+import { splitFrontmatter } from "../utils/frontmatter";
 import { parseJSONWithTrailingCommas } from "../utils/json";
+import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { buildContentParts, normalizeMCPResult } from "./mcp/result";
 import { MCPCallResult } from "./mcp/types";
@@ -19,6 +21,8 @@ export interface MCPServer {
     url: string;
     token: string;
     headers: { [key: string]: string };
+    /** frontmatter platform 白名单：缺省 = 所有平台 */
+    platforms?: string[];
 }
 
 interface MCPToolDef {
@@ -119,6 +123,44 @@ function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
     };
 }
 
+/**
+ * 解析一个 MCP 服务器条目（新格式，一元素一台服务器）：
+ *   ---
+ *   name: mcp-files-exec
+ *   platform: [QQ, DISCORD]
+ *   ---
+ *   { "type": "http", "url": "...", "headers": {...} }
+ * 不再兼容旧格式 {"mcpServers":{...}}；解析失败/旧格式返回 null 并记错误。
+ */
+export function parseMCPServerElement(line: string): MCPServer | null {
+    const text = String(line || '').replace(/\r\n/g, '\n').trim();
+    const fm = splitFrontmatter(text);
+    if (!fm) {
+        log.error(`MCP服务器配置需为新格式（frontmatter 写 name/platform + 单服务器 JSON 正文），已跳过: ${text.split('\n')[0] || text.slice(0, 60)}`);
+        return null;
+    }
+    const name = String(fm.meta.name || '').trim();
+    if (!name) {
+        log.error(`MCP服务器配置缺少 name 字段，已跳过: ${text.split('\n')[0]}`);
+        return null;
+    }
+    let j: any = null;
+    try {
+        j = parseJSONWithTrailingCommas(fm.body);
+    } catch (e) {
+        log.exception(`MCP服务器配置 JSON 解析失败（${name}），已跳过`, e);
+        return null;
+    }
+    if (!j || typeof j !== 'object' || j.mcpServers) {
+        log.error(`MCP服务器配置仅支持单服务器 JSON（旧 mcpServers 块格式已不再支持），已跳过: ${name}`);
+        return null;
+    }
+    const server = normalizeMCPServer(name, j);
+    if (!server) return null;
+    server.platforms = fm.meta.platforms;
+    return server;
+}
+
 function getMCPServers(): MCPServer[] {
     if (mcpServersCache) return mcpServersCache;
     if (!isMCPEnabled()) {
@@ -127,24 +169,31 @@ function getMCPServers(): MCPServer[] {
     }
 
     const servers: MCPServer[] = [];
-    for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置").map(l => (l || '').trim()).filter(Boolean)) {
-        try {
-            const j = parseJSONWithTrailingCommas(line);
-            // 标准 mcpServers 块：{"mcpServers":{"名称":{...}}}（Claude Desktop / Cursor .mcp.json）
-            if (!j || typeof j !== 'object' || !j.mcpServers || typeof j.mcpServers !== 'object' || Array.isArray(j.mcpServers)) {
-                log.error(`MCP服务器配置仅支持标准 mcpServers JSON 格式（{"mcpServers":{...}}），已忽略该行: ${line.slice(0, 120)}`);
-                continue;
-            }
-            for (const [name, cfg] of Object.entries(j.mcpServers)) {
-                const s = normalizeMCPServer(name, cfg);
-                if (s) servers.push(s);
-            }
-        } catch (e) {
-            log.exception(`MCP服务器配置解析失败（需要标准 mcpServers JSON 格式，兼容对象/数组尾逗号），内容: ${line}`, e);
-        }
+    for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置")) {
+        if (!(line || '').trim()) continue;
+        const s = parseMCPServerElement(line);
+        if (s) servers.push(s);
     }
     mcpServersCache = servers.filter(s => s.name && s.url);
     return mcpServersCache;
+}
+
+/** 返回全部已解析的 MCP 服务器快照（供 list_mcps / .ai mcp list 使用） */
+export function getConfiguredMCPServers(): MCPServer[] {
+    return getMCPServers();
+}
+
+/** 清空服务器缓存并重读配置（.ai mcp refresh 使用，随后强制重同步工具） */
+export function refreshMCPConfig(): void {
+    mcpEnabledCache = null;
+    mcpServersCache = null;
+}
+
+/** 测试用：复位模块级缓存 */
+export function resetMCPCacheForTest(): void {
+    mcpEnabledCache = null;
+    mcpServersCache = null;
+    lastRefreshAt = 0;
 }
 
 async function mcpRequest(server: MCPServer, payload: object, sessionId?: string, sessionKey?: string): Promise<{ status: number, body: any, sessionId?: string }> {
@@ -432,12 +481,16 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
                     required: Array.isArray(schema.required) ? schema.required : []
                 }
             }
-        }, true);
+        }, true, server.name, server.platforms);
         // 服务器配置为启动解析一次的缓存快照；按 AI 会话（session.sessionId）分桶：
         // 同一会话的连续浏览器操作复用同一 MCP 会话。
-        tool.solve = async (_ctx, _msg, session, args) => {
+        tool.solve = async (ctx, _msg, session, args) => {
             const current = getMCPServerByName(server.name);
             if (!current) return `MCP 服务器 ${server.name} 未配置`;
+            // 平台守卫：发现层之外再兜一层，避免绕过发现直接调用受限平台工具
+            if (!matchesPlatform(current.platforms, platformOf(ctx))) {
+                return `MCP 服务器 ${server.name} 的工具在当前平台不可用`;
+            }
             const key = session && session.sessionId ? session.sessionId : '';
             const result = await callTool(current, key, t.name, args || {});
             const normalized = normalizeMCPResult(result);
@@ -452,9 +505,10 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
 
 /**
  * 注册所有已配置 MCP 服务器的工具（启动时注册一次；服务器列表为启动解析一次的缓存快照，
- * 修改 MCP 配置后需重载 JS 才生效）。工具列表同步仍按 TTL 节流，可发现服务器端新增的工具。
+ * 修改 MCP 配置后需 .ai mcp refresh / 重载 JS 才生效）。工具列表同步仍按 TTL 节流，可发现服务器端新增的工具。
+ * force=true 时绕过节流并强制重拉每个服务器的工具列表（refresh 使用）。
  */
-export async function registerMCPTools() {
+export async function registerMCPTools(force = false) {
     const now = Date.now();
 
     const servers = getMCPServers();
@@ -480,15 +534,25 @@ export async function registerMCPTools() {
         log.info(`MCP 服务器 ${name} 已从配置移除，清理其会话`);
     }
 
-    // 工具列表同步按 TTL 节流
-    if (now - lastRefreshAt < TOOLS_CACHE_TTL) return;
-    lastRefreshAt = now;
+    // 工具列表同步按 TTL 节流；force 时跳过（refresh）
+    if (!force && now - lastRefreshAt < TOOLS_CACHE_TTL) return;
+    if (!force) lastRefreshAt = now;
 
     for (const server of servers) {
         try {
-            await syncTools(server);
+            await syncTools(server, force);
         } catch (e) {
             log.exception(`MCP 服务器 ${server.name} 注册失败`, e);
         }
     }
+}
+
+/** 重新解析 MCP 服务器配置并强制重同步全部工具（.ai mcp refresh 使用） */
+export async function refreshMCP(): Promise<{ servers: number; removed: number }> {
+    const before = new Set(Object.keys(serverStates));
+    refreshMCPConfig();
+    await registerMCPTools(true);
+    const after = new Set(Object.keys(serverStates));
+    const removed = [...before].filter(n => !after.has(n)).length;
+    return { servers: getMCPServers().length, removed };
 }

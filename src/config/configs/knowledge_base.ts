@@ -34,7 +34,7 @@ description: 本插件为骰娘接入大模型 API，支持智能对话、TRPG �
 ## 注意事项
 - 修改知识库内容后需重载 JS 生效
 - 超长文档会按段落自动分块，块间保留少量重叠`
-        ], "每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件内容）。\n格式：文档以 --- 开头的 YAML frontmatter 写 name（库名，必填）/ description（库描述，可选），正文为文档内容，支持列表、表格、引用、代码块等标准 Markdown 语法；无 frontmatter 时自动用 # 一级标题作为库名、正文首段作为描述，无标题时用条目序号命名；超长文档按段落自动分块（单块约 800 字符，块间保留少量重叠）。\n格式定义见 https://commonmark.org/help/ （CommonMark 官方规范，国内可访问）。\n知识库为只读数据：内容只能由管理员在配置里修改，AI 通过 knowledge_search / knowledge_read / knowledge_list / knowledge_docs 工具检索，不能增删。\n下方默认值即单个完整示例（含 frontmatter/标题/小节/列表/表格/引用/代码块），可修改为实际知识内容。修改后需重载 JS 生效", "知识库");
+        ], "每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件内容）。\n格式：文档以 --- 开头的 YAML frontmatter 写 name（库名，必填）/ description（库描述，可选）/ platform（可选平台白名单数组，如 [QQ, DISCORD]，缺省=所有平台），正文为文档内容，支持列表、表格、引用、代码块等标准 Markdown 语法；无 frontmatter 时自动用 # 一级标题作为库名、正文首段作为描述，无标题时用条目序号命名；超长文档按段落自动分块（单块约 800 字符，块间保留少量重叠）。\n格式定义见 https://commonmark.org/help/ （CommonMark 官方规范，国内可访问）。\n知识库为只读数据：内容只能由管理员在配置里修改，AI 通过 knowledge_search / knowledge_read / knowledge_list / knowledge_docs 工具检索，不能增删；管理员可用 .ai kb 子命令查看/开关（按会话）/refresh。\n下方默认值即单个完整示例（含 frontmatter/标题/小节/列表/表格/引用/代码块），可修改为实际知识内容。修改后用 .ai kb refresh 生效（或重载 JS）", "知识库");
     }
 
     static get() {

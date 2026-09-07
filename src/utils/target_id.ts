@@ -117,3 +117,17 @@ export function platformOf(ctx: { endPoint?: { platform?: string; userId?: strin
 export function getRawId(id: string): string {
     return id.replace(/^.+:/, '');
 }
+
+/**
+ * 平台白名单匹配：platforms 缺省/空 = 全部平台（返回 true）；
+ * 当前平台为空时受限内容不误放行；比较前剥掉 '-Group' 后缀并忽略大小写。
+ */
+export function matchesPlatform(platforms: string[] | undefined, current: string): boolean {
+    const list = platforms && platforms.length > 0 ? platforms : undefined;
+    if (!list) return true;
+    const cur = String(current ?? '').trim();
+    if (!cur) return false;
+    const norm = (s: string) => s.trim().replace(/-Group$/i, '').toLowerCase();
+    const c = norm(cur);
+    return list.some(p => norm(p) === c);
+}

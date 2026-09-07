@@ -30,6 +30,8 @@ export interface KnowledgeLibrary {
     raw: string;
     /** 该库的全部分块 */
     chunks: KnowledgeChunk[];
+    /** frontmatter platform 白名单：缺省 = 所有平台 */
+    platforms?: string[];
 }
 
 export interface ChunkOptions {
