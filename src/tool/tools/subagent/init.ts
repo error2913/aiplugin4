@@ -76,7 +76,7 @@ function registerDelegate(fork: boolean): void {
         },
     });
     tool.sessionType = 'any';
-    tool.solve = async (ctx, msg, session, args: ToolArgs) => {
+    tool.solve = async (ctx, msg, session, args: any) => {
         if (!session) return '子代理调用失败：缺少会话上下文';
         if (Config.subagent.ENABLE === false) return '子代理功能未开启（配置：「子代理」分组）';
         const svc = initSubAgentService();
