@@ -1,4 +1,5 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/静态能力/动态记忆）
+import { buildDelegationGuide } from "../agent/subagent/limits";
 import Config from "../config/config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
@@ -16,7 +17,6 @@ import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { getCachedString } from "./prompt_cache";
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
-import { buildDelegationGuide } from "../agent/subagent/limits";
 
 export interface SystemPromptSection {
     name: string;

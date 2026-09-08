@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.21.2-green)
+![Version](https://img.shields.io/badge/Version-4.22.0-green)
 
 ## 快速开始
 
@@ -74,6 +74,7 @@ models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后
     - [工具](#工具)
     - [MCP](#mcp)
     - [技能](#技能)
+    - [子代理](#子代理)
     - [记忆](#记忆)
     - [知识库](#知识库)
     - [回复](#回复)
@@ -86,6 +87,7 @@ models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后
     - [基础控制命令](#基础控制命令)
     - [记忆管理命令](#记忆管理命令)
     - [工具管理命令](#工具管理命令)
+    - [MCP 技能 知识库管理命令](#mcp-技能-知识库管理命令)
     - [忽略名单相关命令](#忽略名单相关命令)
     - [token 计数命令](#token-计数命令)
     - [图片相关命令](#图片相关命令)
@@ -108,6 +110,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 - **工具系统**：内置 40+ 工具函数（TRPG 检定、牌堆抽取、消息、图片、禁言、定时器等），支持函数调用与提示词工程两种模式，可接入外部 MCP 服务器与可配置技能；
 - **图片处理**：图片识别、表情包管理、Markdown/HTML 渲染为图片与本地图片资源；
 - **权限体系**：命令权限（会话/用户/强触三维）与工具权限（禁止/默认关闭/按会话开关）；
+- **多智能体与多端协作**：子代理委派（后台并行 / 可续跑 / 完成通知）与公开会话目录（跨平台、跨账号的会话只读与外发）；
 - **可观测性**：结构化日志（级别控制、密钥脱敏）、token 用量统计与图表、工具调用审计。
 
 ---
@@ -149,7 +152,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 ### 安装
 
 - 参考[海豹手册](https://docs.sealdice.com/config/jsscript.html)进行插件上传安装；
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「api连接/模型规则」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效。
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「api连接/模型规则」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」三类改动也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）。
 
 ---
 
@@ -288,18 +291,46 @@ temperature = 1
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方的 MCP 服务器，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 仅支持标准 `mcpServers` JSON 格式（Claude/Cursor/.mcp.json 可直接粘贴）；stdio 服务器会跳过；配置增删需重载 JS 生效。默认包含三个服务器：mcp-files-exec（文件执行）、md-html-render（Markdown/HTML 渲染）、mcp-browser（AI 浏览器操作：导航/点击/输入/快照/截图，按 AI 会话隔离）；`run_core_command` 由插件本地注册，通过「后端 → 核心桥WS地址」直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）。工具名称、描述和参数均从远端 `tools/list` 自动发现，同名冲突自动跳过；`run_ext_command` 仅由插件本地实现，不由 MCP 提供。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方「MCP服务器配置」中的服务器并注册其工具，未安装对应 MCP 后端时建议保持关闭 |
+| MCP服务器配置 | 逐台配置：每个数组元素 = 以 `---` 开头的 YAML frontmatter（`name` 服务器名必填 / `platform` 可选平台白名单数组，如 `[QQ, DISCORD]`，`[]` 或省略 = 所有平台）+ 正文为**单个服务器**的 JSON（`type: http` 即 Streamable HTTP、`url`、`headers`、`token`）；**不再兼容旧整块 `mcpServers` JSON**，`command`(stdio) 服务器会被跳过。工具名称、描述与参数 schema 连接后经远端 `tools/list` 自动发现并注册（来源分组 = 服务器名），同名冲突自动跳过；服务器 platform 与当前平台不匹配时其工具不可见且调用被拦截。默认三台：mcp-files-exec（read_file/list_dir/write_file/delete_file/download_file/run_shell/export_file，相对路径与命令工作目录按 AI 会话隔离）、md-html-render（platform: [QQ]，render_markdown/render_html）、mcp-browser（browser_navigate/click/type/snapshot/take_screenshot/wait_for/close 等浏览器操作，按 AI 会话隔离）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
 | MCP会话空闲回收分钟 | MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 不回收（默认 10） |
 | MCP每服务器最大会话数 | 每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话；浏览器操作按 AI 会话隔离（默认 3） |
+
+```markdown
+---
+name: mcp-files-exec
+platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISCORD]
+---
+{
+  "type": "http",
+  "url": "http://127.0.0.1:3910/mcp",
+  "headers": { "Authorization": "Bearer token" }
+}
+```
+
+> MCP 配置修改后用 `.ai mcp refresh` 立即重新解析并强制重同步工具列表（refresh 需骰主，或重载 JS）；`.ai mcp list` 查看当前平台可用服务器及工具开关状态；`.ai mcp on/off [<服务器>]` 按会话批量开启/关闭某服务器（或缺省全部当前平台服务器）下的工具（on 时跳过「禁止调用的函数」）。
+>
+> `run_core_command` 由插件本地注册，通过「后端 → 核心桥WS地址」直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）；`run_ext_command` 仅由插件本地实现。二者不由 MCP 提供。
 
 ### 技能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认只含「录卡」技能（Excel 角色卡录入），SealDice 核心/扩展指令与 OB11 API 的调用帮助已移到「知识库」页签的默认库（核心指令 / 扩展指令 / ob11-api）中。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
+| 技能配置 | 每条配置项一个技能，仅支持标准 SKILL.md 格式：以 `---` 开头的 YAML frontmatter 里写 `name`（必填）/`description`（可选）/`platform`（可选平台白名单数组，如 `[QQ, DISCORD]`，`[]` 或省略 = 所有平台），正文为技能内容，可直接粘贴其他 agent 的技能文件。默认只含「录卡」技能（Excel 角色卡录入）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：核心指令 / 扩展指令 / ob11-api）。格式定义见 [agentskills.io 规范](https://agentskills.io/specification)。修改后用 `.ai skill refresh` 生效（或重载 JS） |
 
-> system prompt 的「可用技能」段只列技能摘要（名称 + 描述，1500 字符预算内尽可能多列），技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文。
+> system prompt 的「可用技能」段只列「当前平台可用且本会话未关闭」的技能摘要（名称 + 描述，1500 字符预算内尽可能多列）；技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文。`.ai skill list` 可查看当前平台技能与开关状态，`.ai skill on/off <名称>` 按会话开关。
+
+### 子代理
+
+| 设置项 | 说明 |
+|:---:|:---|
+| 是否启用子代理 | 子代理功能总开关（默认开启）；关闭后 AI 调用 `subagent` / `subagent_fork` 会直接提示已关闭 |
+| 最大委派深度 | 子代理最多嵌套几层（默认 3，0=禁止委派）；主会话为 0 层，每层 +1（当前版本子代理不可再嵌套委派，该值 >0 即允许主会话委派） |
+| 子代理禁止调用工具 | 每行一个子代理不可调用的工具名（如 `call_ob11_api`）；留空 = 继承主会话全部已开启工具 |
+
+> 委派工具：`subagent`（spawn：子代理看不到本会话历史，任务必须自包含）、`subagent_fork`（fork：继承本会话已完成轮次、看不到当前正在执行的这一轮）。参数：`prompt`（必填）/`description`/`persona`/`run_in_background`（后台执行并返回 job id，用 `job_list` / `job_output` / `job_kill` 收取结果）/`continuable`（建立可续跑子代理并立即返回 id，之后用 `send_message` 续派、`interrupt_agent` 打断、`list_agents` 盘点）。前台调用直接返回最终结论；子代理有独立上下文与工具面（按上面配置收窄），不向聊天发消息。
+>
+> 可续跑子代理结算后以 `[system:子代理]` 只读通知写入主会话上下文，主会话空闲且未待机时自动唤醒一轮补答（受令牌桶/全局待机约束）；单次激活默认最多 8 个模型轮、120 秒护栏；记录与断点落盘，重载 JS 后运行中的子代理标记「已中断·可续」，`send_message` 可继续。管理命令 `.ai subagent`（list / stop <ID|all> / clean）。本会话开启委派工具时（默认开启），system prompt 会注入「子代理委派」指引。
 
 ### 记忆
 
@@ -326,7 +357,7 @@ temperature = 1
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；默认三条：核心指令、扩展指令（各扩展为 # 子条目、命令为 ## 小节）、ob11-api（frontmatter 限定 QQ 平台）；只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` 工具只读检索（`.ai kb` 指令已移除）。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
+| 知识库 | 每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件）：以 `---` 开头的 YAML frontmatter 写 `name`（库名，必填）/`description`（可选）/`platform`（可选平台白名单数组，如 `[QQ, DISCORD]`，`[]` 或省略 = 所有平台），正文支持列表/表格/引用/代码块等标准 Markdown（`#` 一级标题为一个条目，`##`/`###` 为该条目下的小节，超长自动分块）。默认三个库：核心指令、扩展指令（各扩展为 `#` 子条目、命令为 `##` 小节）、ob11-api（frontmatter 限定 `platform: [QQ]`，仅 QQ 平台可见与注入）。知识库只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` / `knowledge_docs` 工具只读检索（检索范围 = 当前平台可用 + 本会话开启的库）；管理员可用 `.ai kb list/on/off/refresh` 查看与按会话开关。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
 
@@ -421,6 +452,9 @@ temperature = 1
 | `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
 | `.ai balance` | - | 并发查询全部（非忽略）api连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接 `[request]` 配置 `balance_url` + `balance_json_path` 后查询 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
+| `.ai subagent` / `.ai subagent list` | - | 查看本会话子代理运行情况：列出 ID / 用途 / 状态 |
+| `.ai subagent stop <ID\|all>` | `.ai subagent stop all` | 停止指定子代理（仅中断当前轮、可续跑；all = 停止本会话全部） |
+| `.ai subagent clean` | - | 清理已结束/已停止的子代理记录 |
 
 ### 记忆管理命令
 
@@ -456,6 +490,22 @@ temperature = 1
 | `.ai tool [on/off]` | - | 开启/关闭全部工具函数 |
 | `.ai tool [on/off] <函数名>` | `.ai tool on run_ext_command` | 开启/关闭指定工具函数 |
 | `.ai tool call <函数名> --参数=值` | `.ai tool call run_ext_command --action=call --extension=fun --command=jrrp` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
+
+### MCP 技能 知识库管理命令
+
+| 命令 | 使用示例 | 说明 |
+|:---:|:---:|:---|
+| `.ai mcp list` | - | 列出当前平台可用的 MCP 服务器及工具开关状态（未启用 MCP 时提示先开启配置） |
+| `.ai mcp on/off [<服务器>]` | `.ai mcp on mcp-browser` | 按会话批量开启/关闭某服务器（或缺省全部当前平台服务器）下的工具；开启时跳过「禁止调用的函数」（on/off 需邀请者以上） |
+| `.ai mcp refresh` | - | 重新解析 MCP 服务器配置并强制重同步工具列表（骰主；MCP 配置修改后无需重载 JS） |
+| `.ai skill list` | - | 列出当前平台可用的技能及会话开关状态（名称带 `（平台：…）` 标注） |
+| `.ai skill on/off <技能名>` | `.ai skill off 录卡` | 按会话开启/关闭指定技能（on/off 需邀请者以上） |
+| `.ai skill refresh` | - | 重新解析「技能配置」（骰主） |
+| `.ai kb list` | - | 列出当前平台可用且本会话开启的知识库（含平台标注） |
+| `.ai kb on/off <库ID或名称>` | `.ai kb off ob11-api` | 按会话开启/关闭指定知识库（名称唯一命中时也可用名称；on/off 需邀请者以上） |
+| `.ai kb refresh` | - | 重新解析「知识库」配置（骰主） |
+
+> 三个管理命令的行为一致：`list` 只显示「当前平台可用」的项（平台限制来自对应 frontmatter 的 `platform` 字段，如知识库默认 ob11-api 与 MCP 默认 md-html-render 均限定 QQ）；`on/off` 开关按会话保存（只记录被关闭的项，缺省=开启）；`refresh` 立即重解析配置生效，无需重载 JS。
 
 ### 忽略名单相关命令
 
@@ -515,13 +565,13 @@ temperature = 1
 | 分类 | 工具函数 |
 |:---:|:---|
 | 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
-| 知识库 | `knowledge_search`、`knowledge_read`、`knowledge_list`（只读检索，内容由配置维护） |
+| 知识库 | `knowledge_search`、`knowledge_read`、`knowledge_list`、`knowledge_docs`（只读检索，范围 = 当前平台可用 + 本会话开启的库；内容由配置维护） |
 | OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
 | 特殊ID | `resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
 | 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
-| 工具调度 | `search_tools`（按需搜索工具）、`call_tool`（统一执行任意工具） |
+| 工具调度 | `list_tools`（按来源分组列出当前平台工具）、`search_tools`（按名称/关键词/来源分组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
 | 音频资源 | `generate_audio`（生成 record 消息段，不直接发送） |
 | 网页 | `web_search` |
 | 属性 | `attr_get`、`attr_set` |
@@ -533,7 +583,8 @@ temperature = 1
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
-| MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`、`skill_list`（技能） |
+| 子代理 | `subagent`、`subagent_fork`（委派）、`send_message`、`interrupt_agent`、`list_agents`（可续跑子代理控制）、`job_list`、`job_output`、`job_kill`（后台 job 管理）；默认开启，详见上方「子代理」配置小节 |
+| MCP / 技能 | 远端工具名（MCP 工具，来源分组 = 服务器名，同名冲突时跳过，仅当前平台可见）、`use_skill`、`skill_list`（技能；平台受限或本会话已关闭时明确返回不可用提示） |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 
@@ -545,7 +596,7 @@ temperature = 1
 
 ## 🚨 注意事项
 
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效；
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）；
 - 嵌入输出维度取「模型规则」text-embedding 用途组的 `[body] dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
 - 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在「模型规则」chat 用途组的 `[body]` 里设 `stream = true` 的模型才会走流式；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
@@ -571,7 +622,7 @@ temperature = 1
 **记忆/知识库检索不到**
 
 - 记忆检索确认已有嵌入模型可用（「api连接」里含嵌入类模型，且 `.ai model text-embedding` 显示已绑定或存在可用默认），「启用长期记忆」开关打开；
-- 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置，修改后需重载 JS 生效，可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
+- 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置（`.ai kb refresh` 或重载 JS 生效）；若仍检索不到，用 `.ai kb list` 确认库在当前平台可用且未被本会话关闭（frontmatter `platform` 限定当前平台、未执行过 `.ai kb off`），可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 
 **图片识别异常**

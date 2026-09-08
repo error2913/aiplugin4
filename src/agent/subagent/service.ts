@@ -10,8 +10,8 @@ import {
 } from './rules';
 import type { SubAgentStore } from './store';
 import {
-    ChildStatus,
     ChildRecord,
+    ChildStatus,
     ParentRef,
     StartRequest,
     SubAgentProvider,

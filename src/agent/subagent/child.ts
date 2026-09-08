@@ -2,21 +2,23 @@
 // 语义与主链 runInternal 对齐，但：不 acquire requestLimiter、不向聊天发送、
 // 本地 RequestMessage 数组装配（不复用持久化 Context）、stopEvent=child.stopEvent。
 // 中断（interrupt/.ai stop）由服务层 fireStopEvent(child.stopEvent) 触发 → 循环抛 StopError → aborted。
+import { streamService } from '../../agent/stream';
 import Config from '../../config/config';
 import Logger from '../../logger';
-import { streamService } from '../../agent/stream';
-import Tool from '../../tool/tool';
-import { ToolRunner } from '../../tool/runner';
+import type { ApiError } from '../../model/api_error';
 import Model from '../../model/model';
 import type { ChatModelUse } from '../../model/types';
+import { Session } from '../../session/session';
+import { ToolRunner } from '../../tool/runner';
+import Tool from '../../tool/tool';
 import type { RequestMessage } from '../../utils/message';
 import { buildContent } from '../../utils/message';
-import { Session } from '../../session/session';
-import type { ToolFilter } from './types';
-import { completedTurnPrefixCount } from './rules';
-import type { SubAgentResult } from './types';
 import { StopError } from '../../utils/utils';
-import type { ApiError } from '../../model/api_error';
+
+import { completedTurnPrefixCount } from './rules';
+import type { ToolFilter } from './types';
+import type { SubAgentResult } from './types';
+
 
 const log = Logger.withTag('subagent');
 

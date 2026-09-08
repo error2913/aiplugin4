@@ -5,18 +5,21 @@ import Logger from '../../logger';
 import type { Session } from '../../session/session';
 import { getSession } from '../../session/session_service';
 import { getSessionCtxAndMsg } from '../../utils/seal';
+import { fireStopEvent } from '../../utils/utils';
+
+import { buildForkSeed, createChildSession, decodeCheckpoint, encodeCheckpoint, runHeadlessActivation } from './child';
+import type { CheckpointMessage } from './child';
+import { buildChildSystemContent } from './child_system';
 import { SubAgentJobs } from './jobs';
+import { createForkProvider, createSpawnProvider } from './providers';
+import type { SubAgentExecutor } from './providers';
 import { SubAgentService } from './service';
 import { SubAgentStore } from './store';
 import type { KvLike } from './store';
-import { createForkProvider, createSpawnProvider } from './providers';
-import type { SubAgentExecutor } from './providers';
-import { buildChildSystemContent } from './child_system';
-import { decideWake, WAKE_REASON } from './wake';
-import { runHeadlessActivation, createChildSession, buildForkSeed, encodeCheckpoint, decodeCheckpoint } from './child';
-import type { CheckpointMessage } from './child';
-import { fireStopEvent } from '../../utils/utils';
 import type { ChildRecord, StartRequest, SubAgentResult } from './types';
+import { decideWake, WAKE_REASON } from './wake';
+
+
 
 const log = Logger.withTag('subagent');
 
