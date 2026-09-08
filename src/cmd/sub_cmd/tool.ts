@@ -1,7 +1,8 @@
-// .ai tool：查看/开关/调用工具函数
+// .ai tool：查看/开关/调用工具函数（列表按来源分组、只显示当前平台）
 import Config from "../../config/config";
 import { logger } from "../../logger";
-import { toolMap } from "../../tool/tool";
+import Tool, { toolMap } from "../../tool/tool";
+import { platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -10,7 +11,7 @@ export function registerCmdTool() {
     const cmd = new SubCmd('tool');
     cmd.desc = '工具相关操作';
     cmd.help = `帮助:
-      【.ai tool】列出所有工具
+      【.ai tool】列出当前平台可用工具（按来源分组）
       【.ai tool [on/off] <函数名>】开启或关闭工具函数
       【.ai tool help <函数名>】查看工具详情
       【.ai tool call <函数名> --参数名=具体参数】试用工具函数`;
@@ -151,15 +152,28 @@ export function registerCmdTool() {
             }
             default: {
                 const toolStatus = session.toolState;
+                const platform = platformOf(ctx);
 
-                let i = 1;
-                let s = '工具函数如下:';
-                Object.keys(toolStatus).forEach(key => {
+                const s = '工具函数（当前平台，按来源分组）:';
+                const lines = [s];
+                // 按来源分组：仅显示当前平台可用工具
+                const groups: { [group: string]: { name: string; status: string }[] } = {};
+                for (const key of Object.keys(toolStatus)) {
+                    const tool = toolMap[key];
+                    if (!tool) continue;
+                    if (platform && !Tool.isAllowedPlatform(tool, platform)) continue;
                     const status = toolStatus[key] ? '开' : '关';
-                    s += `\n${i++}. ${key}[${status}]`;
-                });
+                    const g = Tool.groupLabel(tool.group);
+                    (groups[g] = groups[g] || []).push({ name: key, status });
+                }
+                for (const g of Object.keys(groups).sort()) {
+                    lines.push(`${g}:`);
+                    for (const item of groups[g].sort((a, b) => a.name.localeCompare(b.name))) {
+                        lines.push(`  ${item.name}[${item.status}]`);
+                    }
+                }
 
-                seal.replyToSender(ctx, msg, s);
+                seal.replyToSender(ctx, msg, lines.join('\n'));
                 return ret;
             }
         }

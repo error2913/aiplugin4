@@ -1,6 +1,8 @@
-/* 提示词/上下文构建单元测试 runner。
- * 纯 Node 环境：不打起 SealDice/QQ，用最小 seal 桩 + 可覆盖的 __TEST_CONFIG__ 运行
- * scripts/unit-test-entry.ts 里的全部单测（esbuild 打包成 CJS 后 require）。
+/* 单元测试 runner：纯 Node 环境，不打起 SealDice/QQ。
+ * 用最小 seal 桩 + 可覆盖的 __TEST_CONFIG__ 运行打包后的测试入口（esbuild CJS）。
+ * - scripts/unit-test-entry.ts：提示词/上下文/工具等既有单测
+ * - scripts/unit-test-subagent.ts：子代理机制层单测（不依赖 seal）
+ * 可选：UNIT_FILTER=<子串> 只跑名字含该子串的用例，便于迭代。
  */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -10,12 +12,15 @@ const esbuild = require('esbuild');
 
 const repo = path.resolve(__dirname, '..');
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiplugin4-unit-'));
-const bundle = path.join(outDir, 'unit.cjs');
+const bundles = {
+    main: path.join(outDir, 'unit-main.cjs'),
+    subagent: path.join(outDir, 'unit-subagent.cjs'),
+};
 
 // 测试可覆盖的配置值（unit-test-entry.ts 通过 globalThis.__TEST_CONFIG__ 读写）
 const TC = {
-    intConfigs: {},      // 整数配置覆盖，如 上下文最大token
-    boolConfigs: {},     // 布尔配置覆盖，如 切换为提示词工程
+    intConfigs: {},
+    boolConfigs: {},
     stringConfigs: {},
     optionConfigs: {},
     floatConfigs: {},
@@ -24,9 +29,8 @@ const TC = {
 
 // 模板配置默认值：模型类返回空数组避免 TOML 解析；其余返回空条目
 const TEMPLATE_DEFAULTS = {
-    '纯文本模型': [],
-    '多模态模型': [],
-    '嵌入模型': [],
+    'api连接': [],
+    '模型规则': [],
     '角色扮演设定': ['测试机器人\n你是测试角色'],
     '预设上下文': [''],
     '技能配置': [''],
@@ -76,20 +80,32 @@ globalThis.seal = {
 globalThis.__TEST_CONFIG__ = TC;
 
 (async () => {
-    await esbuild.build({
-        entryPoints: [path.join(repo, 'scripts/unit-test-entry.ts')],
-        bundle: true,
-        platform: 'node',
-        format: 'cjs',
-        outfile: bundle,
-        logLevel: 'silent'
-    });
+    const entries = [
+        ['main', path.join(repo, 'scripts/unit-test-entry.ts')],
+        ['subagent', path.join(repo, 'scripts/unit-test-subagent.ts')]
+    ];
+    const all = {};
+    for (const [name, entryPoint] of entries) {
+        await esbuild.build({
+            entryPoints: [entryPoint],
+            bundle: true,
+            platform: 'node',
+            format: 'cjs',
+            outfile: bundles[name],
+            logLevel: 'silent'
+        });
+        const mod = require(bundles[name]);
+        for (const key of Object.keys(mod.tests)) {
+            if (all[key] !== undefined) throw new Error(`重复的单元测试名: ${key}`);
+            all[key] = mod.tests[key];
+        }
+    }
 
-    const entry = require(bundle);
-    const names = Object.keys(entry.tests);
-    if (names.length === 0) throw new Error('未发现任何单元测试');
+    const filter = process.env.UNIT_FILTER;
+    const names = Object.keys(all).filter(n => !filter || n.includes(filter));
+    if (names.length === 0) throw new Error('未发现任何单元测试（或 UNIT_FILTER 无匹配）');
     for (const name of names) {
-        await entry.tests[name]();
+        await all[name]();
         console.log('PASS', name);
     }
     console.log(`全部 ${names.length} 个单元测试通过`);

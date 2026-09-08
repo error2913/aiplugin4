@@ -1,24 +1,34 @@
-// .ai status：查看当前会话 AI 状态
+// .ai status：查看当前会话 AI 状态（含 api连接 健康总览）
 import Model from "../../model/model";
 import { platformOf } from "../../utils/target_id";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
+import { formatConnState } from "./model";
+
 export function registerCmdStatus() {
     const cmd = new SubCmd('status');
     cmd.desc = '查看当前AI状态';
     cmd.help = `帮助:
-【.ai status】查看当前会话 AI 状态（平台/权限/上下文轮数/各触发模式）`;
+【.ai status】查看当前会话 AI 状态（平台/权限/上下文轮数/各触发模式/api连接状态）`;
     cmd.priv = { priv: U };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, sid, session, ret } = scc;
         const setting = session.setting;
         const { start, end, segs } = setting.activeTimeInfo;
 
+        const states = Model.states;
+        const active = states.filter(s => s.status !== 'ignored');
+        const okCount = states.filter(s => s.status === 'ok').length;
+        const connText = active.length === 0
+            ? '未配置'
+            : `${active.length} 条 · 可用 ${okCount}${states.some(s => s.status === 'error') ? ` · 失败 ${states.filter(s => s.status === 'error').length}` : ''}\n${active.map(formatConnState).join('\n')}`;
+
         seal.replyToSender(ctx, msg, `${sid}
         平台: ${platformOf(ctx) || '未知'}
         会话类型: ${session.sessionType === 'user' ? '私聊' : '群聊'}
         模型(全局): ${Model.getChatModel('chat')?.name || '未配置'}
+        模型连接: ${connText}
         权限: ${setting.priv}
         上下文轮数: ${session.context.messages.filter(m => m.role === 'user').length}
         非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}

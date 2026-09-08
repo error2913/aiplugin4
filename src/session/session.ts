@@ -26,7 +26,7 @@ import User from "./user";
 const log = logger.withTag('session');
 
 /** 持久化时排除的运行时字段（监听器/运行状态/挂起队列等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent']);
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript']);
 
 /** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
 export interface PendingMessage {
@@ -118,7 +118,10 @@ export class Session {
                 state: { objectValue: 'boolean' }
             },
             objectValue: 'default'
-        }
+        },
+        // 技能/知识库的会话级启用开关：仅记录被 .ai skill/.ai kb off 关闭的项，缺省=开启
+        skillState: { objectValue: 'boolean' },
+        kbState: { objectValue: 'boolean' }
     }
     agentName: string;
     sessionId: string;
@@ -149,11 +152,27 @@ export class Session {
     activeRuns = 0;
     /** 运行时字段：会话级停止信号（stop 时 fired=true 并同步唤醒等待者，用于打断进行中的模型请求/工具链；不持久化） */
     stopEvent: StopEvent = createStopEvent();
+    /** 运行时字段（子代理）：headless=true 时 reply() 不发送，文本进 headlessTranscript（不持久化） */
+    headless = false;
+    /** 运行时字段（子代理）：工具面求交（≈ DSH toolFilter；allow 求交、deny 优先），null=不限制（不持久化） */
+    toolRestriction: { allow?: string[]; deny?: string[] } | null = null;
+    /** 运行时字段（子代理）：父会话 id（不持久化） */
+    parentSessionId = '';
+    /** 运行时字段（子代理）：委派深度（主会话=0，逐层+1；不持久化） */
+    subagentDepth = 0;
+    /** 运行时字段（子代理/父侧通用）：后台子代理结算 notice 队列，每轮请求前 flush（不持久化） */
+    noticeQueue: { text: string; from: string; time: number }[] = [];
+    /** 运行时字段（子代理）：headless 下 reply() 收集的回复文本（不持久化） */
+    headlessTranscript: string[] = [];
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
         listen: ToolListen // 监听调用函数发送的内容
     }
+    /** 技能会话级启用开关：false=本会话关闭，缺省/true=开启 */
+    skillState: { [name: string]: boolean };
+    /** 知识库会话级启用开关（按库 ID）：false=本会话关闭，缺省/true=开启 */
+    kbState: { [id: string]: boolean };
 
     constructor() {
         this.agentName = '';
@@ -188,6 +207,8 @@ export class Session {
             callCount: 0,
             listen
         }
+        this.skillState = {};
+        this.kbState = {};
     }
 
     get agent(): Agent {
@@ -210,6 +231,14 @@ export class Session {
             if (BLOCKED.includes(tool)) return;
             if (!Object.prototype.hasOwnProperty.call(state, tool)) state[tool] = !DEFAULT_CLOSED.includes(tool);
         })
+        // 子代理工具面求交（≈ DSH toolFilter）：deny 优先，其次 allow 白名单
+        const restriction = this.toolRestriction;
+        if (restriction) {
+            for (const key of Object.keys(state)) {
+                if (restriction.deny && restriction.deny.includes(key)) state[key] = false;
+                else if (restriction.allow && !restriction.allow.includes(key)) state[key] = false;
+            }
+        }
         return state;
     }
 
@@ -347,7 +376,32 @@ export class Session {
         return hasTrigger;
     }
 
+    /** 把子代理结算 notice 队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数 */
+    async flushNotices(): Promise<number> {
+        const queue = this.noticeQueue;
+        if (queue.length === 0) return 0;
+        this.noticeQueue = [];
+        for (const n of queue) {
+            const tag = n.from && n.from !== '' ? `子代理 ${n.from} ` : '子代理 ';
+            // raw 标记：子代理生命周期绑定（父上下文淘汰该 notice 时清扫对应记录）
+            await this.context.addSystemUserMessage(tag + n.text, '子代理', {
+                raw: { kind: 'subagent-notice', childId: n.from || '' },
+            });
+        }
+        return queue.length;
+    }
+
     async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}, reasoningContent?: string) {
+        // headless（子代理）：不向聊天发送，仅把回复写入上下文与 transcript
+        if (this.headless) {
+            for (let i = 0; i < contextArray.length; i++) {
+                const content = contextArray[i];
+                const reply = replyArray[i];
+                await this.context.addAssistantMessage(content, `sub:${this.headlessTranscript.length}`, reasoningContent);
+                if (reply !== undefined && reply.trim() !== '') this.headlessTranscript.push(reply);
+            }
+            return;
+        }
         const { withSegmentDelay = false } = options;
         const { SEGMENT_DELAY_ENABLED, SEGMENT_DELAY_MS, SEGMENT_IMAGE_EXTRA_DELAY_MS } = Config.reply;
 
@@ -407,11 +461,13 @@ export class Session {
         }
 
         const model = Model.getChatModel('chat');
+        // 是否流式由「chat 用途」规则模板 body 里的 stream=true 决定（v4：模型不再自带 body，读用途组模板）
+        const chatStream = (Model.getBodyDefaultsFor('chat') as any).stream === true;
 
-        if (model && model.provider === 'anthropic' && (model.body as any).stream === true) {
+        if (model && model.provider === 'anthropic' && chatStream) {
             log.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
         }
-        if (model && (model.body as any).stream === true && model.provider !== 'anthropic') {
+        if (model && chatStream && model.provider !== 'anthropic') {
             await this.chatStream(ctx, msg);
             this.save();
             return;

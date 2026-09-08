@@ -6,22 +6,28 @@ import { getSession } from "../session/session_service";
 import { aliasToCmd } from "../utils/utils";
 
 import { CmdPriv, CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
+import { registerCmdBalance } from "./sub_cmd/balance";
 import { registerCmdBlock } from "./sub_cmd/block";
 import { registerCmdCtxn } from "./sub_cmd/ctxn";
 import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
 import { registerCmdImage } from "./sub_cmd/image";
+import { registerCmdKb } from "./sub_cmd/kb";
 import { registerCmdLive } from "./sub_cmd/live";
+import { registerCmdMcp } from "./sub_cmd/mcp";
 import { registerCmdMemory } from "./sub_cmd/memory";
 import { registerCmdModel } from "./sub_cmd/model";
 import { registerCmdOff } from "./sub_cmd/off";
 import { registerCmdOn } from "./sub_cmd/on";
 import { registerCmdPrivilege } from "./sub_cmd/privilege";
 import { registerCmdPrompt } from "./sub_cmd/prompt";
+import { registerCmdPub } from "./sub_cmd/pub";
 import { registerCmdRole } from "./sub_cmd/role";
+import { registerCmdSkill } from "./sub_cmd/skill";
 import { registerCmdStandby } from "./sub_cmd/standby";
 import { registerCmdStatus } from "./sub_cmd/status";
 import { registerCmdStop } from "./sub_cmd/stop";
+import { registerCmdSubAgent } from "./sub_cmd/subagent";
 import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
@@ -60,6 +66,7 @@ export class SubCmd {
     static register() {
         registerCmdPrivilege();
         registerCmdPrompt();
+        registerCmdPub();
         registerCmdStatus();
         registerCmdLive();
         registerCmdCtxn();
@@ -72,11 +79,16 @@ export class SubCmd {
         registerCmdImage();
         registerCmdMemory();
         registerCmdTool();
+        registerCmdSkill();
+        registerCmdKb();
+        registerCmdMcp();
         registerCmdIgnore();
         registerCmdToken();
         registerCmdStop();
         registerCmdModel();
+        registerCmdBalance();
         registerCmdBlock();
+        registerCmdSubAgent();
 
         defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc: CmdPriv, sc) => {
             acc[sc.name] = sc.priv;

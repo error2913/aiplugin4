@@ -1,4 +1,4 @@
-// 模型 Provider：统一模型请求（超时 / 重试 / 用量上报）
+// 模型 Provider：统一模型请求（超时 / 重试 / 用量上报 / use 级 request 覆盖）
 import Config from "../config/config";
 import { logger } from "../logger";
 import { TokenCalibration } from "../token_calibration";
@@ -8,7 +8,8 @@ import { fetchData } from "../utils/web";
 
 import { extractUsage } from "./adapter";
 import { ApiError, ApiErrorKind, classifyApiError } from "./api_error";
-
+import { requestOverridesFor } from "./request_rules";
+import { ModelUse } from "./types";
 
 const MAX_RETRIES = 2;
 
@@ -21,6 +22,16 @@ export interface RequestModelOptions {
     rawEstimateTokens?: number;
     /** 配置中的模型名，优先用于校准 key */
     modelName?: string;
+    /** 请求所属用途：命中「模型规则」[request] 模板时应用其 headers/content_type/auth_header_name/timeout 覆盖 */
+    use?: ModelUse;
+}
+
+/** request 覆盖（由「模型规则」[request] 模板解析而来，默认无） */
+export interface RequestOverrides {
+    headers?: Record<string, string>;
+    authHeaderName?: string;
+    contentType?: string;
+    timeoutMs?: number;
 }
 
 /** 是否值得按指数退避重试：限速/过载/服务端故障/网络层错误（无 HTTP 状态）重试，其余立即失败 */
@@ -31,6 +42,23 @@ function isRetryableApiError(err: ApiError): boolean {
     return false;
 }
 
+/** 读取规则模板覆盖 → RequestOverrides（timeout 单位秒转毫秒） */
+function resolveOverrides(use?: ModelUse): RequestOverrides | null {
+    if (!use) return null;
+    const ov = requestOverridesFor(use);
+    if (!ov) return null;
+    const out: RequestOverrides = {};
+    if (ov.headers && typeof ov.headers === 'object') {
+        out.headers = {};
+        for (const k of Object.keys(ov.headers)) out.headers[k] = String(ov.headers[k]);
+    }
+    if (typeof ov.auth_header_name === 'string' && ov.auth_header_name) out.authHeaderName = ov.auth_header_name;
+    if (typeof ov.content_type === 'string' && ov.content_type) out.contentType = ov.content_type;
+    const t = Number(ov.timeout);
+    if (Number.isFinite(t) && t > 0) out.timeoutMs = t * 1000;
+    return out;
+}
+
 /**
  * 发起模型请求：带超时、按错误类别重试（限速/过载/服务端/网络类退避重试，
  * 余额/超长/认证等 4xx 不重试）与用量上报。
@@ -38,12 +66,14 @@ function isRetryableApiError(err: ApiError): boolean {
  */
 export async function requestModel(url: string, apiKey: string, body: any, options: RequestModelOptions = {}): Promise<any> {
     const { TIMEOUT } = Config.base;
-    const { provider = '', stopEvent } = options;
+    const { provider = '', stopEvent, use } = options;
+    const overrides = resolveOverrides(use);
+    const timeoutMs = overrides?.timeoutMs && overrides.timeoutMs > 0 ? overrides.timeoutMs : TIMEOUT;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const data = await withTimeout(() => fetchProvider(provider, url, apiKey, body), TIMEOUT, { stopEvent });
+            const data = await withTimeout(() => fetchProvider(provider, url, apiKey, body, overrides ?? undefined), timeoutMs, { stopEvent });
             const usage = extractUsage(data);
             if (usage) {
                 UsageManager.updateUsage(data.model || '', usage);
@@ -71,17 +101,22 @@ export async function requestModel(url: string, apiKey: string, body: any, optio
 }
 
 /** 按提供商发起请求：anthropic 使用 x-api-key 与 anthropic-version 请求头，其余走 OpenAI 兼容 Authorization */
-async function fetchProvider(provider: string, url: string, apiKey: string, body: any): Promise<any> {
-    if (provider !== 'anthropic') return fetchData(url, apiKey, body, provider);
+async function fetchProvider(provider: string, url: string, apiKey: string, body: any, overrides?: RequestOverrides): Promise<any> {
+    if (provider !== 'anthropic') return fetchData(url, apiKey, body, provider, overrides);
+
+    const headers: Record<string, string> = {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        ...(overrides?.headers ?? {})
+    };
+    if (overrides?.authHeaderName) headers[overrides.authHeaderName] = apiKey;
+    if (overrides?.contentType) headers["Content-Type"] = overrides.contentType;
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        },
+        headers,
         body: JSON.stringify(body)
     });
 

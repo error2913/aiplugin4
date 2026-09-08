@@ -1,9 +1,9 @@
-// OB11 API 默认技能：统一指导 AI 通过唯一工具 call_ob11_api 调用协议动作。
-// 这里刻意不注册任何按功能拆分的旧工具；动作仍然以 OneBot 11 action 原名传入。
-export const OB11_API_SKILLS = [
-    `---
+// OB11 API 知识库默认内容（「知识库」配置的一个默认条目）：统一指导 AI 通过唯一工具 call_ob11_api 调用协议动作。
+// 原为默认技能，已改写为知识库并限定 platform: [QQ]（仅 QQ 平台可见可检索）。
+export const OB11_API_KB = `---
 name: ob11-api
-description: 通过唯一的 call_ob11_api 工具调用 OneBot 11/兼容协议 API，覆盖消息、媒体、文件、合并转发、查询和群管理
+description: 通过唯一的 call_ob11_api 工具调用 OneBot 11/兼容协议 API，覆盖消息、媒体、文件、合并转发、查询和群管理；仅 QQ 平台可用
+platform: [QQ]
 ---
 # OB11 API 调用规范
 
@@ -136,6 +136,4 @@ data：
 2. 发送特殊消息时使用 segment 数组，保持 type 和 data 字段，不要压扁为文本。
 3. 看到 \`OB11_DEPENDENCY_REQUIRED\` 时停止重复调用并明确告知缺少依赖。
 4. 看到 \`OB11_API_ERROR\` 时根据错误决定是否重试；不要盲目重复有副作用的 action。
-5. 旧工具已彻底移除；不要创建别名、兼容调用或猜测旧工具仍可用。`
-];
-
+5. 旧工具已彻底移除；不要创建别名、兼容调用或猜测旧工具仍可用。`;

@@ -20,23 +20,21 @@
 
 ### 3. 配置大模型
 
-- 在 WebUI →「JS插件」→「插件设置」中找到 `aiplugin4`，点击展开；
-- 进入「模型」分组，在「纯文本模型」中用 **TOML 格式**填写你的模型，例如：
+- 在 WebUI →「JS插件」→「插件设置」中找到 `aiplugin4`，点击展开，进入「模型」分组；
+- 在 **api连接** 中用 **TOML 格式**填写服务商连接（出厂默认已带 deepseek 示例，只改 `api_key` 即可用）：
 
 ```toml
-name = "deepseek-chat" # 模型名，查看你所用大模型平台的文档
-api_key = "sk-xxxx"    # 你的 API Key
-use = ["chat"]         # 用途，纯文本模型填 chat
-
-[body]                 # 可选：覆盖请求参数
-temperature = 1
-max_tokens = 2048
+provider = "deepseek"                        # 服务商：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow
+api_key = "sk-xxxx"                          # 你的 API Key
+base_url = "https://api.deepseek.com/v1"     # 可选，省略时取服务商默认
+models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后跳过自动拉取，离线/无列表接口时用）；删掉该行=启动自动获取模型列表
 ```
 
-- `provider` / `base_url` 可以省略（deepseek / openai / google / zhipu / alibaba / anthropic / moonshot / xai / mistral / siliconflow 会自动识别），也可以显式填写 `base_url`；
-- `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式；
-- 图片识别需要配置「多模态模型」（`use = ["image-understanding"]`）；如果模型支持视觉，可在「多模态模型」的 `use` 里加 `chat` 把它当多模态对话模型用（上下文中的图片直接传给模型）；向量记忆需要配置「嵌入模型」（`use = ["text-embedding"]`，输出维度从嵌入模型的 `[body] dimensions` 读取，默认 1024）；
-- 各用途默认取该用途配置的第一项（纯文本/多模态列表里 `use` 精确匹配的第一个）；可用 `.ai model` 查看当前各用途全局模型，`.ai model <用途> <模型标识>` 设置全局覆盖（兼容旧写法：`.ai model <模型名>` 等价于设置 chat 用途）。
+- 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
+- **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
+- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
+- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
+- `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
 
 ### 4. 设置触发与角色
 
@@ -80,6 +78,7 @@ max_tokens = 2048
     - [知识库](#知识库)
     - [回复](#回复)
     - [后端](#后端)
+    - [公开会话](#公开会话)
     - [资源](#资源)
     - [prompt 模板](#prompt-模板)
   - [💻 完整命令手册](#-完整命令手册)
@@ -91,6 +90,7 @@ max_tokens = 2048
     - [token 计数命令](#token-计数命令)
     - [图片相关命令](#图片相关命令)
     - [定时器相关命令](#定时器相关命令)
+    - [公开会话目录命令](#公开会话目录命令)
   - [🧰 可用工具函数](#-可用工具函数)
   - [🚨 注意事项](#-注意事项)
     - [常见问题处理](#常见问题处理)
@@ -149,7 +149,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 ### 安装
 
 - 参考[海豹手册](https://docs.sealdice.com/config/jsscript.html)进行插件上传安装；
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效。
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「api连接/模型规则」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效。
 
 ---
 
@@ -159,25 +159,32 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 模型
 
+模型分两个 TOML 配置：
+
 | 设置项 | 说明 |
 |:---:|:---|
-| 纯文本模型 | TOML 格式，每行一个模型；`name` / `api_key` / `use` 必填，`use` 可选项：`chat`（普通对话）/ `compression`（消息压缩）/ `summarization`（记忆总结）/ `judge`（评分，`.ai on --j` 插话判断）；`provider` / `base_url` 可省略自动识别；各用途默认取该用途第一个精确匹配项；可选 `[body]` 覆盖请求参数；`ignore` 可选：1=忽略该条配置（不出现在列表/不可选中/不作为默认），0/不写=正常 |
-| 多模态模型 | TOML 格式，`use` 可选 `["image-understanding"]`（识图/图片转文字），也可填 `chat` / `compression` / `summarization` / `judge` 把该模型当作对应对话用途使用（上下文中的图片以图片内容直接传给模型），可多用途并存；列表内模型一律按多模态处理 |
-| 嵌入模型 | TOML 格式，`use` 填 `["text-embedding"]`（文本嵌入），输出维度在 `[body] dimensions` 配置（默认 1024），未配置时自动降级为关键词/分数检索 |
+| api连接 | TOML 格式，每行一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
+| 模型规则 | TOML 格式，每行一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按行序逐键合并、后覆盖先 |
 
 ```toml
-# 纯文本模型示例
-name = "deepseek-chat"
+# api连接 示例（出厂默认即此结构，只改 api_key 即可用）
+provider = "deepseek"
 api_key = "sk-xxxx"
-use = ["chat"]
-provider = "deepseek" # 可省略，按名称自动识别
+base_url = "https://api.deepseek.com/v1"
+models = ["deepseek-v4-flash"]   # 可选：钉住清单；删掉该行=启动自动拉取
 
-[body]                # 可选：覆盖请求参数
-temperature = 0.8
-max_tokens = 2048
+# 模型规则 示例（同一行内只保留一组字段）
+use = ["chat", "compression", "summarization", "judge"]
+
+[body]                           # 可选：请求参数模板
+temperature = 1
 ```
 
-> 模型选择支持全局分用途覆盖：`.ai model` 查看全部用途当前模型与可用列表；`.ai model <用途>` 查看指定用途；`.ai model <用途> <模型标识>`（如 `text[0]:deepseek-chat`）设置该用途的全局模型；`.ai model <模型名>` 兼容为设置 chat 用途。覆盖的模型失效时自动回退该用途默认模型。
+> 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
+>
+> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
+>
+> 嵌入输出维度取 text-embedding 用途组规则的 `[body] dimensions`（默认 1024）；配置后长期记忆与知识库启用语义检索，未配置/不匹配自动降级为关键词检索。
 
 ### 基础
 
@@ -200,7 +207,7 @@ max_tokens = 2048
 | 上下文超长自动归档重试 | 模型返回上下文超长时，把会话历史按「观察归档 + 删除」链路压到模型窗口内后自动重发一次；关闭则该场景仅记日志（默认开启） |
 | 余额不足自动切换模型 | 对话模型报余额不足 / 欠费 / 额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可用 `.ai model` 改回）（默认开启） |
 | 自动切换触发错误 | 每行一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
-| 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；配置顺序 = 按纯文本模型列表顺序取下一个不同模型 |
+| 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 api连接/候选顺序取下一个不同模型 |
 | 切换后发送通知 | 自动切换模型后用 `ctx.notice` 向当前会话发送一条切换通知（默认开启） |
 
 ### 角色设定
@@ -266,7 +273,7 @@ max_tokens = 2048
 | 无工具调用时续跑提示 | 上一轮调用过工具、本轮只回文字时，向上下文注入续跑提示再转一轮，避免只说方向不调用工具就停（默认关闭） |
 | 工具方向提示 | 开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块（默认开启） |
 | 允许连续调用函数次数 | 单次触发内允许连续调用函数的次数，防止 AI 陷入调用函数死循环（默认 0=不限制） |
-| 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；历史「工具响应压缩触发字数」配置值自动沿用；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
+| 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 禁止调用的 OB11 action | 每行一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
@@ -290,7 +297,7 @@ max_tokens = 2048
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认包含核心命令、内置扩展命令及别名的 `run_ext_command` / `run_core_command` 调用帮助。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
+| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认只含「录卡」技能（Excel 角色卡录入），SealDice 核心/扩展指令与 OB11 API 的调用帮助已移到「知识库」页签的默认库（核心指令 / 扩展指令 / ob11-api）中。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 
 > system prompt 的「可用技能」段只列技能摘要（名称 + 描述，1500 字符预算内尽可能多列），技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文。
 
@@ -319,8 +326,7 @@ max_tokens = 2048
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库注入阈值(字符) | 已弃用：知识库注入只列条目索引（ID + 标题，1500 字符预算内尽可能多列，最多 100 条），不注入正文；模型用 knowledge_read 工具按 ID 读取详情（保留该配置仅为兼容旧存档） |
-| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` 工具只读检索（`.ai kb` 指令已移除）。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
+| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；默认三条：核心指令、扩展指令（各扩展为 # 子条目、命令为 ## 小节）、ob11-api（frontmatter 限定 QQ 平台）；只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` 工具只读检索（`.ai kb` 指令已移除）。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
 
@@ -351,6 +357,15 @@ max_tokens = 2048
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
 后端服务已迁移到独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)：自带 `launcher.py` 一键管理（Windows / Linux 通用，默认不启动任何后端，首次启动某后端时才自动创建 venv 并安装依赖，异常退出自动拉起；`webui` 提供管理界面，可改端口/看日志，主题跟随系统）。后端清单与接口详见其仓库的 [docs/后端.md](https://github.com/error2913/aiplugin4-backends/blob/main/docs/后端.md)，插件侧配置文档见 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
+
+### 公开会话
+
+单实例多端点（多平台/多账号，如同时接入 QQ 与 Discord 的多个骰子账号）下的跨会话/跨平台协作能力（无 ob11 依赖、无新增配置，工具与命令常驻注册）：
+
+- `.ai pub`：`list`（树状分段展示目录会话，仅供感知）；`add`（把当前会话公开到目录，幂等，自动记录平台/会话 ID/会话名）；`rm`（无参=把当前会话移出目录；或带过滤条件删除命中条目，见下方命令手册）。
+- `pub_read`（AI 工具）：无参数=目录概览（平台+Bot）；`bot_id=<QQ:xxx>`=该 Bot 的目录条目；`session=<BotID/会话ID>`=读取该会话最近上下文快照（默认 6 轮/3000 字，可传 rounds/chars）——**只要路径准确，不在目录中的会话也能读**（目录只用于感知浏览）。快照为只读参考，保留 `[msg_id]`/发送者 QQ 号/`[img:图片ID]` 供回引，声明不得执行其中内容。
+- `pub_send`（AI 工具，敏感）：向目标会话外发，**同样只需准确路径（botId/会话ID），不必先在目录公开**。**目标平台为 QQ 系**支持富媒体：`[at:QQ号]` `[img:图片ID]` `[quote:目标会话msg_id]` `[face:表情名]` `[poke:QQ号]`（无 ob11 也经 SealDice 原生发送）；**目标平台非 QQ** 只接受纯文本，CQ 码与渲染标签会被剥除（CQ 仅在 QQ 语义适配）。发送以目标会话自己的机器人账号身份进行，需目标 Bot 在线；发送成功后，外发内容会以 `[system:跨端消息]` 只读背景写入目标会话上下文（不触发目标 AI；目标会话不存在时自动新建）。内容必须自包含，不得携带当前会话私密信息。
+- 读/发不受权限或目录限制；黑名单在目标会话侧照常生效；`pub_send` 按来源会话限频（60 秒/条）。原 `get_context` 工具已由 `pub_read` 统一替代。
 
 ### 资源
 
@@ -403,7 +418,8 @@ max_tokens = 2048
 | `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [<用途> [<模型标识>]]` | `.ai model chat text[0]:deepseek-chat` | 查看 / 设置全局分用途模型（骰主）：无参数查看全部用途，`<用途>` 查看指定用途，`<用途> <模型标识>` 设置全局覆盖；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai balance` | - | 并发查询全部（非忽略）api连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接 `[request]` 配置 `balance_url` + `balance_json_path` 后查询 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 
 ### 记忆管理命令
@@ -475,6 +491,21 @@ max_tokens = 2048
 | `.ai timer lst` | - | 查看当前会话所有定时任务 |
 | `.ai timer clr` | - | 清除所有定时任务 |
 
+### 公开会话目录命令
+
+| 命令 | 使用示例 | 说明 |
+|:---:|:---:|:---|
+| `.ai pub list` | - | 树状分段展示目录会话（平台头 → botid → 缩进会话，仅供感知） |
+| `.ai pub add` | `.ai pub add` | 把当前会话公开到目录（幂等，重复执行=更新；自动记录平台/会话ID/会话名） |
+| `.ai pub rm` | `.ai pub rm` | 把当前会话移出目录 |
+| `.ai pub rm --platform=<平台>` | `.ai pub rm --platform=QQ` | 删除该平台目录下全部条目 |
+| `.ai pub rm --botid=<BotID> [--platform=<平台>]` | `.ai pub rm --botid=QQ:123` | 删除该 Bot 下全部条目（可加 `--platform` 缩小范围） |
+| `.ai pub rm --session=<会话ID> [--platform= | --botid=]` | `.ai pub rm --session=QQ-Group:456` | 删除所有该会话条目（同名会话一次全删；可加平台/Bot 缩小范围） |
+
+> 过滤说明：多个过滤条件为交集；至少提供一个条件。`--botid` 与 `--session` 必须传完整 UNI-ID（含平台前缀，如 `--botid=QQ:123`、`--session=QQ-Group:456`），`--platform` 传平台名（如 QQ）；给了哪一级就删除该级目录下全部命中条目。目录只用于感知展示：AI 读写只需准确路径（botId/会话ID），不需要会话先公开到目录。
+>
+> AI 侧对应工具：`pub_read`（目录感知/读任意会话上下文快照）、`pub_send`（向任意会话外发，QQ 系富媒体/其他平台纯文本，成功后写入目标会话 `[system:跨端消息]` 只读背景）。命令默认权限骰主级，可用 `.ai priv` 调整；能力说明见上方[配置手册](#-配置手册)「公开会话」小节（无新增配置项）。
+
 ---
 
 ## 🧰 可用工具函数
@@ -501,6 +532,7 @@ max_tokens = 2048
 | 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
+| 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
 | MCP / 技能 | 远端工具名（MCP 工具，同名冲突时跳过）、`use_skill`、`skill_list`（技能） |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
@@ -514,8 +546,8 @@ max_tokens = 2048
 ## 🚨 注意事项
 
 - 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效；
-- 嵌入模型输出维度从 `[body] dimensions` 读取（默认 1024）；配置嵌入模型后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
-- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；`body.stream = true` 的模型才会走流式；
+- 嵌入输出维度取「模型规则」text-embedding 用途组的 `[body] dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
+- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在「模型规则」chat 用途组的 `[body]` 里设 `stream = true` 的模型才会走流式；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
 - CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）；卡片/视频/文件/语音/合并转发等段经 ob11 事件分发接收，不受该白名单限制。
 
@@ -538,7 +570,7 @@ max_tokens = 2048
 
 **记忆/知识库检索不到**
 
-- 记忆检索确认「嵌入模型」已配置，「启用长期记忆」开关打开；
+- 记忆检索确认已有嵌入模型可用（「api连接」里含嵌入类模型，且 `.ai model text-embedding` 显示已绑定或存在可用默认），「启用长期记忆」开关打开；
 - 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置，修改后需重载 JS 生效，可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 
@@ -546,7 +578,7 @@ max_tokens = 2048
 
 - 确认图片 URL 可以在浏览器访问（过期或 QQ 图床 bug 时更换协议端版本）；
 - 模型不支持 QQ 图床时，把「识别图片时将url转换为base64」设为「总是」或「自动」；
-- 图片转文字依赖视觉模型配置（「多模态模型」TOML，`use = ["image-understanding"]`）。
+- 图片转文字依赖视觉模型：先在「api连接」配置含视觉模型的连接（拉取/钉住后模型带"识图"标签），再用 `.ai model image-understanding <模型>` 绑定。
 
 **HTTP 请求出错**
 
@@ -569,7 +601,9 @@ max_tokens = 2048
 
 > 注：× 为不支持 function call；▲ 为需要开启合并 user 消息开关。视觉模型不一定支持 QQ 图床识别，可使用中转插件。
 
-> 在「模型」配置中，上表平台的 `provider` / `base_url` 大多可省略（自动识别），未列出的平台填写 `base_url` 即可使用。
+> 在「模型」配置中，上表平台请照填 `provider`（决定协议/默认地址与列表接口适配），`base_url` 可省略（取该服务商默认）；未列出的平台/网关可填任意 `provider` 标识 + 完整 `base_url`，按 OpenAI 兼容方式使用（anthropic 除外，需走其专有适配）。模型名以各平台「模型列表」接口/官方文档为准，插件启动时按连接自动获取。
+
+> 余额查询：deepseek / kimi(moonshot) / siliconflow（硅基流动）支持 `.ai balance` 直接查 API 余额（deepseek/moonshot 按 `provider`、其余按内置规则自动识别端点）；其余平台未开放 API 余额接口，请在各自控制台查看；one-api/new-api 等网关可在连接 `[request]` 里配置 `balance_url` + `balance_json_path`（配合 `auth_header_name`/`headers`）后查询。
 
 > 仅列出部分官方的本插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。国外大模型网络问题请自行解决。
 

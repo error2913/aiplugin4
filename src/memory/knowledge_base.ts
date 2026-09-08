@@ -1,8 +1,10 @@
 // 知识库服务：配置驱动（Markdown 模板，每条一份完整文档）、只读检索、惰性向量增强
-import Config from "../config/config";
+import Config, { ext } from "../config/config";
 import Logger from "../logger";
 import Model from "../model/model";
+import { splitFrontmatter } from "../utils/frontmatter";
 import { buildCharNGrams } from "../utils/string";
+import { matchesPlatform } from "../utils/target_id";
 import { cosineSimilarity } from "../utils/utils";
 
 import { hashString, KnowledgeChunk, KnowledgeLibrary, splitMarkdownIntoChunks } from "./knowledge_chunk";
@@ -17,20 +19,6 @@ export const KB_INJECT_MAX_CHARS = 1500;
 export const KB_INJECT_MAX_LIBRARIES = 100;
 /** 知识库列表工具单页最大条数 */
 export const KB_PAGE_SIZE_LIMIT = 100;
-
-function parseFrontmatter(raw: string): { name?: string; description?: string } {
-    const meta: { name?: string; description?: string } = {};
-    for (const line of raw.split('\n')) {
-        const m = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
-        if (!m) continue;
-        const key = m[1].toLowerCase();
-        const value = m[2].trim().replace(/^['"]|['"]$/g, '');
-        if (!value) continue;
-        if (key === 'name') meta.name = value;
-        else if (key === 'description') meta.description = value;
-    }
-    return meta;
-}
 
 function extractFirstParagraph(markdown: string): string {
     const lines = (markdown || '').replace(/\r\n/g, '\n').split('\n');
@@ -58,16 +46,17 @@ function extractFirstParagraph(markdown: string): string {
 /** 解析单个知识库配置项为一个库 */
 export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibrary {
     const text = String(raw || '').replace(/\r\n/g, '\n').trim();
-    const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+    const fm = splitFrontmatter(text);
     let name = '';
     let description = '';
     let body = text;
+    let platforms: string[] | undefined;
 
-    if (fmMatch) {
-        const meta = parseFrontmatter(fmMatch[1]);
-        name = meta.name || '';
-        description = meta.description || '';
-        body = fmMatch[2].trim();
+    if (fm) {
+        name = fm.meta.name || '';
+        description = fm.meta.description || '';
+        platforms = fm.meta.platforms;
+        body = fm.body;
     }
 
     const docChunks = splitMarkdownIntoChunks(body);
@@ -109,7 +98,7 @@ export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibr
         });
     }
 
-    return { id: libraryId, name, description, raw: text, chunks };
+    return { id: libraryId, name, description, raw: text, chunks, platforms };
 }
 
 export class KnowledgeBaseService {
@@ -182,10 +171,10 @@ export class KnowledgeBaseService {
         return this.chunks.length === 0;
     }
 
-    /** prompt 缓存版本：开关/阈值等简单项实时参与（热加载后自然产生新 key），条目签名启动解析一次并缓存 */
+    /** prompt 缓存版本：开关等简单项实时参与（热加载后自然产生新 key），条目签名启动解析一次并缓存 */
     getCacheVersion(): string {
         const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : []);
-        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${Config.knowledgeBase.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignatureCached()}`;
+        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${items.length}|${this.getItemsSignatureCached()}`;
     }
 
     private getItemsSignatureCached(): string {
@@ -205,25 +194,53 @@ export class KnowledgeBaseService {
         return this.libraries;
     }
 
-    /** 知识库静态缓存签名：库元数据 + 分块数量变化都会使签名变化 */
+    /** 知识库静态缓存签名：库元数据 + 分块数量 + 平台变化都会使签名变化 */
     getLibrariesSignature(): string {
         return this.libraries
-            .map(l => `${l.id}|${l.name}|${l.description}|${l.chunks.length}`)
+            .map(l => `${l.id}|${l.name}|${l.description}|${l.chunks.length}|${l.platforms && l.platforms.length > 0 ? l.platforms.join(',') : '*'}`)
             .join('\n');
     }
 
     /** system prompt 静态知识库段：只展示库名和描述 */
     formatLibraries(limit = KB_INJECT_MAX_LIBRARIES): string {
-        if (this.libraries.length === 0) return '';
+        return this.formatLibrariesFor(undefined, undefined, limit);
+    }
+
+    /**
+     * 平台 + 会话启用过滤后的知识库静态段：仅展示本平台可用且会话未关闭的库。
+     * platform 缺省 = 全部；enabledIds 缺省 = 全部视为启用。
+     */
+    formatLibrariesFor(platform?: string, enabledIds?: Set<string> | null, limit = KB_INJECT_MAX_LIBRARIES): string {
+        const libs = this.filterLibraries(platform, enabledIds);
+        if (libs.length === 0) return '';
         const lines = ['## 知识库'];
-        for (const lib of this.libraries.slice(0, limit)) {
+        for (const lib of libs.slice(0, limit)) {
             lines.push(`- ${lib.name}：${lib.description || '无描述'}`);
         }
-        if (this.libraries.length > limit) {
-            lines.push(`（共 ${this.libraries.length} 个库，最多显示 ${limit} 个）`);
+        if (libs.length > limit) {
+            lines.push(`（共 ${libs.length} 个库，最多显示 ${limit} 个）`);
         }
         lines.push('需要查看结构：knowledge_docs；搜索内容：knowledge_search；读取分块：knowledge_read。');
         return lines.join('\n');
+    }
+
+    /** 过滤库列表：平台匹配 + 会话启用集合 */
+    filterLibraries(platform?: string, enabledIds?: Set<string> | null): KnowledgeLibrary[] {
+        return this.libraries.filter(l =>
+            (!platform || matchesPlatform(l.platforms, platform)) &&
+            (!enabledIds || enabledIds.has(l.id))
+        );
+    }
+
+    /** 重新解析「知识库」配置（.ai kb refresh 使用）：直读模板配置，重走分块（未变分块保留向量缓存） */
+    async refresh(): Promise<{ libraries: number; chunks: number }> {
+        this.loadedSignature = null;
+        this.loadedItems = null;
+        this.itemsSignature = null;
+        this.loadPromise = null;
+        const items = seal.ext.getTemplateConfig(ext, '知识库') || [];
+        await this.reload(Array.isArray(items) ? items : []);
+        return { libraries: this.libraries.length, chunks: this.chunks.length };
     }
 
     /** 某个库下的文档/章节树 */
@@ -316,12 +333,16 @@ export class KnowledgeBaseService {
      * 关键词检索 + 可选向量重排。
      * 先按标题/小节/内容关键词过滤排序，嵌入可用时仅对命中候选做惰性向量相似度重排；
      * 嵌入失败/未配置时直接返回关键词结果，不影响可用性。
+     * libraryId 限定单个库；allowedLibraryIds 限定一批可用库（平台 + 会话开关过滤后的白名单）。
      */
-    async search(query: string, topK = 5, libraryId?: string): Promise<KnowledgeChunk[]> {
+    async search(query: string, topK = 5, libraryId?: string, allowedLibraryIds?: Set<string>): Promise<KnowledgeChunk[]> {
         await this.ensureLoaded();
         let baseChunks = this.chunks;
         if (libraryId) {
             baseChunks = this.chunks.filter(c => c.libraryId === libraryId);
+        }
+        if (allowedLibraryIds) {
+            baseChunks = baseChunks.filter(c => c.libraryId ? allowedLibraryIds.has(c.libraryId) : false);
         }
         if (baseChunks.length === 0) return [];
         if (topK < 1) topK = 1;

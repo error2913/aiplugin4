@@ -5,6 +5,7 @@ import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { fixJsonString } from "../utils/string";
+import { matchesPlatform } from "../utils/target_id";
 import { StopError, withTimeout } from "../utils/utils";
 
 import { registerMCPTools } from "./mcp";
@@ -22,8 +23,9 @@ export type ToolState = { [key: string]: boolean };
 // 核心常驻工具：始终注入函数 schema，保证基本对话能力与“发现/执行”入口；
 // 其余工具按需加载：AI 先用 search_tools 查找工具，再用 call_tool 执行，避免全量工具定义浪费 token
 export const CORE_TOOL_NAMES: string[] = [
-    'list_tools', // 工具列表（名称+描述）
+    'list_tools', // 工具列表（名称+描述，按来源分组）
     'search_tools', // 按需发现工具（返回完整参数说明）
+    'list_mcps',    // 列出所有 MCP 服务器及其工具
     'call_tool',    // 统一执行入口（调用任意已开启工具）
     'use_skill',    // 技能调用
     'call_ob11_api', // 唯一 OB11 API 调用入口
@@ -38,13 +40,22 @@ export const NATIVE_TOOL_NAMES: string[] = ['list_tools', 'search_tools', 'call_
 export const META_TOOL_NAMES: string[] = [
     'list_tools',
     'search_tools',
+    'list_mcps',
     'call_tool',
     'skill_list',
     'use_skill',
     'knowledge_list',
     'knowledge_docs',
     'knowledge_search',
-    'knowledge_read'
+    'knowledge_read',
+    'subagent',
+    'subagent_fork',
+    'send_message',
+    'interrupt_agent',
+    'list_agents',
+    'job_output',
+    'job_list',
+    'job_kill'
 ];
 
 const ON_DEMAND_PROMPT_LIMIT = 20;
@@ -72,13 +83,19 @@ export default class Tool {
     sessionType: 'any' | SessionType; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
     sensitive: boolean; // 敏感工具（发送消息/封禁/改名等），调用会显著记录
+    /** 来源分组：内置工具为空；技能工具='技能'；知识库工具='知识库'；MCP 工具=所属服务器名 */
+    group?: string;
+    /** 平台白名单（继承自源单元：MCP 服务器/技能/知识库的 platform），缺省 = 所有平台 */
+    platforms?: string[];
     solve: (ctx: seal.MsgContext, msg: seal.Message, session: Session, args: { [key: string]: any }) => Promise<string | ToolSolveContent>;
 
-    constructor(info: ToolInfo, sensitive = false) {
+    constructor(info: ToolInfo, sensitive = false, group?: string, platforms?: string[]) {
         this.toolInfo = info;
         this.sensitive = sensitive;
         this.sessionType = "any";
         this.callBack = true;
+        this.group = group;
+        this.platforms = platforms;
         this.solve = async (_, __, ___, ____) => "函数未实现";
 
         toolMap[info.function.name] = this;
@@ -239,7 +256,18 @@ export default class Tool {
         }
     }
 
-    static getToolsInfo(session: Session): ToolInfo[] | null {
+    /** 平台白名单是否放行当前平台；platform 缺省时不做过滤 */
+    static isAllowedPlatform(tool: Tool, platform?: string): boolean {
+        if (!platform) return true;
+        return matchesPlatform(tool.platforms, platform);
+    }
+
+    /** 来源分组显示名：无 group 的内置工具显示「内置」 */
+    static groupLabel(group?: string): string {
+        return group || '内置';
+    }
+
+    static getToolsInfo(session: Session, platform?: string): ToolInfo[] | null {
         const toolState = session.toolState;
         const sessionType = session.sessionType;
         const tools = Object.keys(toolState)
@@ -251,6 +279,7 @@ export default class Tool {
                         return null;
                     }
                     const tool: Tool = toolMap[key];
+                    if (!Tool.isAllowedPlatform(tool, platform)) return null;
                     if (tool.sessionType !== "any" && tool.sessionType !== sessionType) return null;
                     return tool.toolInfo;
                 } else {
@@ -263,7 +292,7 @@ export default class Tool {
     }
 
     /** 按需加载工具：非核心且当前会话已开启的工具，供 search_tools 发现 */
-    static getOnDemandTools(session: Session): ToolInfo[] {
+    static getOnDemandTools(session: Session, platform?: string): ToolInfo[] {
         const toolState = session.toolState;
         const sessionType = session.sessionType;
         const tools: ToolInfo[] = [];
@@ -274,22 +303,39 @@ export default class Tool {
                 continue;
             }
             const tool: Tool = toolMap[key];
+            if (!Tool.isAllowedPlatform(tool, platform)) continue;
             if (tool.sessionType !== "any" && tool.sessionType !== sessionType) continue;
             tools.push(tool.toolInfo);
         }
         return tools;
     }
 
-    /** 全部可用工具：核心常驻 + 按需加载（均已开启且匹配会话类型），供 search_tools 列名/查详情 */
-    static getAvailableTools(session: Session): ToolInfo[] {
-        const core = this.getToolsInfo(session) || [];
-        return core.concat(this.getOnDemandTools(session));
+    /** 全部可用工具：核心常驻 + 按需加载（均已开启、匹配会话类型与平台），供 search_tools 列名/查详情 */
+    static getAvailableTools(session: Session, platform?: string): ToolInfo[] {
+        const core = this.getToolsInfo(session, platform) || [];
+        return core.concat(this.getOnDemandTools(session, platform));
     }
 
-    static getToolsInfoPrompt(session: Session): string {
+    /** 按来源分组返回可用工具（过滤平台），组内按工具名排序，组按显示名排序 */
+    static getGroupedAvailableTools(session: Session, platform?: string): { group: string; tools: ToolInfo[] }[] {
+        const infos = this.getAvailableTools(session, platform);
+        const byGroup: { [key: string]: ToolInfo[] } = {};
+        for (const info of infos) {
+            const tool = toolMap[info.function.name];
+            const label = Tool.groupLabel(tool?.group);
+            (byGroup[label] = byGroup[label] || []).push(info);
+        }
+        const keys = Object.keys(byGroup).sort();
+        for (const k of keys) {
+            byGroup[k].sort((a, b) => a.function.name.localeCompare(b.function.name));
+        }
+        return keys.map(g => ({ group: g, tools: byGroup[g] }));
+    }
+
+    static getToolsInfoPrompt(session: Session, platform?: string): string {
         const { PROMPT_ENGINEERING } = Config.tool;
 
-        const tools = this.getToolsInfo(session);
+        const tools = this.getToolsInfo(session, platform);
         let s = '';
         if (tools && tools.length > 0) {
             // 模板按扁平结构读取 name/description/parameterText，从 function 字段映射后传入
@@ -305,7 +351,7 @@ export default class Tool {
         }
 
         // 按需工具：只给名称 + 一行描述，详细参数通过 search_tools 获取，控制 token 占用
-        const onDemand = this.getOnDemandTools(session);
+        const onDemand = this.getOnDemandTools(session, platform);
         if (onDemand.length > 0) {
             const summaries = onDemand.slice(0, ON_DEMAND_PROMPT_LIMIT).map((t, i) => {
                 const desc = flattenText(t.function.description, 120);
@@ -320,13 +366,15 @@ export default class Tool {
         return s;
     }
 
-    /** 返回工具摘要（名称 + 一句话描述），用于 system prompt 静态工具块 */
-    static getToolSummaries(session: Session, limit = 100): { summaries: string[]; total: number; truncated: boolean } {
-        const tools = this.getAvailableTools(session)
+    /** 返回工具摘要（名称 + 一句话描述），用于 system prompt 静态工具块（平台过滤） */
+    static getToolSummaries(session: Session, limit = 100, platform?: string): { summaries: string[]; total: number; truncated: boolean } {
+        const tools = this.getAvailableTools(session, platform)
             .sort((a, b) => a.function.name.localeCompare(b.function.name));
         const summaries = tools.map(t => {
+            const tool = toolMap[t.function.name];
+            const group = Tool.groupLabel(tool?.group);
             const desc = flattenText(t.function.description, 120);
-            return `- ${t.function.name}：${desc}`;
+            return `- ${t.function.name}：${desc}（来源：${group}）`;
         });
         return {
             summaries: summaries.slice(0, limit),
@@ -346,13 +394,14 @@ export default class Tool {
         return tools.length > 0 ? tools : null;
     }
 
-    /** 提示词工程模式：返回需要完整参数说明的元工具 */
-    static getMetaToolInfos(session: Session): ToolInfo[] {
+    /** 提示词工程模式：返回需要完整参数说明的元工具（平台过滤） */
+    static getMetaToolInfos(session: Session, platform?: string): ToolInfo[] {
         return META_TOOL_NAMES
             .map(name => toolMap[name])
             .filter(Boolean)
             .filter(t => session.toolState?.[t.toolInfo.function.name])
             .filter(t => t.sessionType === 'any' || t.sessionType === session.sessionType)
+            .filter(t => Tool.isAllowedPlatform(t as Tool, platform))
             .map(t => t.toolInfo);
     }
 
@@ -361,15 +410,16 @@ export default class Tool {
         return [
             '## 工具获取',
             '当前不直接列出全部工具。需要发现工具时：',
-            '- list_tools：分页查看当前可用工具的名称与描述',
-            '- search_tools：按名称或关键词获取某个工具的完整参数说明',
+            '- list_tools：分页查看当前可用工具的名称与描述（按来源分组）',
+            '- search_tools：按名称/关键词/MCP 服务器获取工具的完整参数说明',
+            '- list_mcps：列出当前平台可用的全部 MCP 服务器及其工具',
             '- call_tool：执行指定工具'
         ].join('\n');
     }
 
     /** 提示词工程模式工具块：调用格式 + 元工具参数 + 工具获取说明 */
-    static getPromptEngineeringToolBlock(session: Session): string {
-        const metaTools = this.getMetaToolInfos(session);
+    static getPromptEngineeringToolBlock(session: Session, platform?: string): string {
+        const metaTools = this.getMetaToolInfos(session, platform);
         const flatTools = metaTools.map(t => ({
             name: t.function.name,
             description: flattenText(t.function.description, 120),
@@ -383,9 +433,9 @@ export default class Tool {
         return [formatPart, guidePart].filter(Boolean).join('\n\n');
     }
 
-    /** 原生模式工具块：仅名称 + 描述 */
-    static getToolSummaryBlock(session: Session): string {
-        const r = this.getToolSummaries(session, 100);
+    /** 原生模式工具块：仅名称 + 描述（按来源分组） */
+    static getToolSummaryBlock(session: Session, platform?: string): string {
+        const r = this.getToolSummaries(session, 100, platform);
         if (r.summaries.length === 0) return '';
         const lines = ['## 可用工具', ...r.summaries];
         if (r.truncated) {
