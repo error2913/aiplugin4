@@ -16,6 +16,7 @@ import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { getCachedString } from "./prompt_cache";
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
+import { buildDelegationGuide } from "../agent/subagent/limits";
 
 export interface SystemPromptSection {
     name: string;
@@ -143,6 +144,11 @@ export async function buildSystemPromptContent(
             knowledgeBlock = knowledgeService.formatLibrariesFor(platform, enabledIds);
         }
         const staticBlocks = [toolBlock, skillBlock, knowledgeBlock].filter(Boolean).join('\n\n');
+        // 子代理委派指引：仅当本会话开启了委派工具时注入
+        const delegationGuide = STATUS ? buildDelegationGuide(session.toolState) : '';
+        const blocksWithGuide = delegationGuide === ''
+            ? staticBlocks
+            : staticBlocks === '' ? delegationGuide : `${staticBlocks}\n\n${delegationGuide}`;
 
         return SYSTEM_MESSAGE_TEMPLATE({
             instruction: roleSetting,
@@ -153,7 +159,7 @@ export async function buildSystemPromptContent(
             botId: ctx.endPoint.userId,
             RECEIVE_IMAGE,
             DIRECTION_PROMPT,
-            toolBlock: staticBlocks
+            toolBlock: blocksWithGuide
         });
     });
 

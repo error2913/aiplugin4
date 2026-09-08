@@ -47,7 +47,15 @@ export const META_TOOL_NAMES: string[] = [
     'knowledge_list',
     'knowledge_docs',
     'knowledge_search',
-    'knowledge_read'
+    'knowledge_read',
+    'subagent',
+    'subagent_fork',
+    'send_message',
+    'interrupt_agent',
+    'list_agents',
+    'job_output',
+    'job_list',
+    'job_kill'
 ];
 
 const ON_DEMAND_PROMPT_LIMIT = 20;

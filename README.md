@@ -273,7 +273,7 @@ temperature = 1
 | 无工具调用时续跑提示 | 上一轮调用过工具、本轮只回文字时，向上下文注入续跑提示再转一轮，避免只说方向不调用工具就停（默认关闭） |
 | 工具方向提示 | 开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块（默认开启） |
 | 允许连续调用函数次数 | 单次触发内允许连续调用函数的次数，防止 AI 陷入调用函数死循环（默认 0=不限制） |
-| 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；历史「工具响应压缩触发字数」配置值自动沿用；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
+| 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
 | 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
 | 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 禁止调用的 OB11 action | 每行一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
@@ -297,7 +297,7 @@ temperature = 1
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认包含核心命令、内置扩展命令及别名的 `run_ext_command` / `run_core_command` 调用帮助。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
+| 技能配置 | 仅支持标准 SKILL.md 格式（frontmatter 的 name/description 自动解析，正文为技能内容），可直接粘贴其他 agent 的技能文件；默认只含「录卡」技能（Excel 角色卡录入），SealDice 核心/扩展指令与 OB11 API 的调用帮助已移到「知识库」页签的默认库（核心指令 / 扩展指令 / ob11-api）中。格式定义见 [agentskills.io 规范](https://agentskills.io/specification) |
 
 > system prompt 的「可用技能」段只列技能摘要（名称 + 描述，1500 字符预算内尽可能多列），技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文。
 
@@ -326,8 +326,7 @@ temperature = 1
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库注入阈值(字符) | 已弃用：知识库注入只列条目索引（ID + 标题，1500 字符预算内尽可能多列，最多 100 条），不注入正文；模型用 knowledge_read 工具按 ID 读取详情（保留该配置仅为兼容旧存档） |
-| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` 工具只读检索（`.ai kb` 指令已移除）。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
+| 知识库 | Markdown 模板，每条一份完整文档（# 条目标题、##/### 小节，超长自动分块）；默认三条：核心指令、扩展指令（各扩展为 # 子条目、命令为 ## 小节）、ob11-api（frontmatter 限定 QQ 平台）；只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` 工具只读检索（`.ai kb` 指令已移除）。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
 

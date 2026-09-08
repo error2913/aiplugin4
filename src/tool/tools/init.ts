@@ -8,6 +8,7 @@ import { registerPubToolSet } from "./pub/init";
 import { registerRawToolSet } from "./raw/init";
 import { registerResourceTools } from "./resource/init";
 import { registerSealTools } from "./seal/init";
+import { registerSubagentTools } from "./subagent/init";
 import { registerWebTools } from "./web/init";
 
 export function registerTools() {
@@ -21,4 +22,5 @@ export function registerTools() {
     registerWebTools();
     registerManageTools();
     registerPubToolSet();
+    registerSubagentTools();
 }

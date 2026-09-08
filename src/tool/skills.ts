@@ -1,6 +1,5 @@
 // Skills：配置驱动的技能，AI 通过 use_skill 工具按需获取技能内容
 import { ext } from "../config/config";
-import { OB11_API_SKILLS } from "../config/static_config/ob11_api_skills";
 import { SEALDICE_COMMAND_SKILLS } from "../config/static_config/sealdice_command_defaults";
 import Logger from "../logger";
 import { splitFrontmatter } from "../utils/frontmatter";
@@ -62,7 +61,7 @@ function compileSkills(): Skill[] {
     // registerTemplateConfig 不会覆盖已有安装的配置。为避免升级后新默认技能（如“录卡”）
     // 因旧配置持久化而不可用，补入缺失的默认技能；同名自定义技能优先保留。
     const configuredNames = new Set(configured.map(skill => skill.name));
-    const defaults = [...SEALDICE_COMMAND_SKILLS, ...OB11_API_SKILLS]
+    const defaults = [...SEALDICE_COMMAND_SKILLS]
         .map(line => parseSkillEntry(line.trim()))
         .filter(skill => skill.name && !configuredNames.has(skill.name));
     return configured.concat(defaults);

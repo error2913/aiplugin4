@@ -191,6 +191,8 @@ export default class Agent {
             trace.beginTurn();
             // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
             await session.flushPending();
+            // 子代理结算 notice 入库（后台子代理完成，父下一轮可见）
+            await session.flushNotices();
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName);
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
@@ -435,6 +437,8 @@ export default class Agent {
         await session.stopCurrentChatStream();
         // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
         await session.flushPending();
+        // 子代理结算 notice 入库（父下一轮可见）
+        await session.flushNotices();
 
         // 建立流；模型分类错误（上下文超长/余额不足等）由 handleModelError 自动处理一次后重建重试
         let sys = systemMessage;

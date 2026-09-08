@@ -171,10 +171,10 @@ export class KnowledgeBaseService {
         return this.chunks.length === 0;
     }
 
-    /** prompt 缓存版本：开关/阈值等简单项实时参与（热加载后自然产生新 key），条目签名启动解析一次并缓存 */
+    /** prompt 缓存版本：开关等简单项实时参与（热加载后自然产生新 key），条目签名启动解析一次并缓存 */
     getCacheVersion(): string {
         const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : []);
-        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${Config.knowledgeBase.KNOWLEDGE_INJECT_THRESHOLD}|${items.length}|${this.getItemsSignatureCached()}`;
+        return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${items.length}|${this.getItemsSignatureCached()}`;
     }
 
     private getItemsSignatureCached(): string {

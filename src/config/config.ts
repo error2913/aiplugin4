@@ -15,6 +15,7 @@ import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
 import RoleConfig from "./configs/role";
 import SkillsConfig from "./configs/skills";
+import SubAgentConfig from "./configs/subagent";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
@@ -39,6 +40,7 @@ const configMap = {
     tool: ToolConfig,
     mcp: McpConfig,
     skills: SkillsConfig,
+    subagent: SubAgentConfig,
     memory: MemoryConfig,
     knowledgeBase: KnowledgeBaseConfig,
     image: ImageConfig,

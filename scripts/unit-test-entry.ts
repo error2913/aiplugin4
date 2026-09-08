@@ -3,7 +3,6 @@
 import assert from "node:assert/strict";
 
 import Config, { ext } from "../src/config/config";
-import ToolConfig from "../src/config/configs/tool";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
@@ -2113,38 +2112,23 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 配置迁移：「工具响应截断字数」未设置时沿用旧 key「工具响应压缩触发字数」的历史值 */
-    testToolTruncateConfigMigration(): void {
-        TC.intConfigs['工具响应截断字数'] = ToolConfig.TRUNCATE_DEFAULT; // 模拟新 key 未改过（=默认）
-        TC.intConfigs['工具响应压缩触发字数'] = 5000;
+    /** 「工具响应截断字数」直接决定截断阈值（旧 key「工具响应压缩触发字数」已移除，不再迁移读取） */
+    testToolTruncateConfigDirect(): void {
+        TC.intConfigs['工具响应截断字数'] = 5000;
         resetConfigCache();
         try {
-            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 5000, '新 key 未设置时应迁移旧值');
+            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 5000, '显式设置应生效');
         } finally {
             delete TC.intConfigs['工具响应截断字数'];
-            delete TC.intConfigs['工具响应压缩触发字数'];
-            resetConfigCache();
-        }
-
-        TC.intConfigs['工具响应截断字数'] = 3000; // 显式设置新 key 优先
-        TC.intConfigs['工具响应压缩触发字数'] = 5000;
-        resetConfigCache();
-        try {
-            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 3000, '新 key 显式设置时应优先');
-        } finally {
-            delete TC.intConfigs['工具响应截断字数'];
-            delete TC.intConfigs['工具响应压缩触发字数'];
             resetConfigCache();
         }
 
         TC.intConfigs['工具响应截断字数'] = 0; // 显式关闭
-        TC.intConfigs['工具响应压缩触发字数'] = 5000;
         resetConfigCache();
         try {
-            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 0, '新 key=0 应表示关闭，不回退旧值');
+            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 0, '显式关闭=0 应生效');
         } finally {
             delete TC.intConfigs['工具响应截断字数'];
-            delete TC.intConfigs['工具响应压缩触发字数'];
             resetConfigCache();
         }
     },

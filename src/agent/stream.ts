@@ -156,7 +156,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse, stream?: boolean }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = explicitModel ?? Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -169,6 +169,8 @@ export class streamService {
                 model: model.name,
                 messages
             });
+            // 显式非流式：headless 子代理/单轮直呼等需要一次性 JSON 响应（chat 用途模板可能配 stream:true）
+            if (opts?.stream === false) body.stream = false;
             body.messages = sanitizeRequestMessages(body.messages);
             if (STATUS && !PROMPT_ENGINEERING) {
                 if (tools && tools.length > 0) body.tools = tools;

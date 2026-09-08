@@ -27,6 +27,7 @@ import { registerCmdSkill } from "./sub_cmd/skill";
 import { registerCmdStandby } from "./sub_cmd/standby";
 import { registerCmdStatus } from "./sub_cmd/status";
 import { registerCmdStop } from "./sub_cmd/stop";
+import { registerCmdSubAgent } from "./sub_cmd/subagent";
 import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
@@ -87,6 +88,7 @@ export class SubCmd {
         registerCmdModel();
         registerCmdBalance();
         registerCmdBlock();
+        registerCmdSubAgent();
 
         defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc: CmdPriv, sc) => {
             acc[sc.name] = sc.priv;
