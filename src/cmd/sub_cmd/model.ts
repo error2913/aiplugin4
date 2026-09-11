@@ -167,6 +167,7 @@ export function registerCmdModel() {
 【.ai model <用途>】查看指定用途当前模型与该用途候选（默认=该用途首个可用模型）
 【.ai model <用途> <模型>】设置指定用途的全局模型（支持编号/裸名/[连接序号]:模型名）
 用途: chat / compression / summarization / judge / image-understanding / text-embedding
+模型类型: 自动按命名/接口能力位判定；可在「api连接」用 [types] 手动声明（text/vision/embed，优先级最高）
 说明: 全量模型列表用 .ai model list；ignore=1 的忽略连接不参与展示/统计`;
     cmd.priv = { priv: M };
     cmd.solve = async (scc: SubCmdContext) => {

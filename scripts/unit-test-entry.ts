@@ -51,6 +51,7 @@ import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, est
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
+import Logger from "../src/logger";
 import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
@@ -244,6 +245,11 @@ async function runMemo(scc: any): Promise<string> {
 /** 构造一条 pinned 钉住连接（同步就绪，无需拉取） */
 function pinConn(provider: string, models: string[], baseUrl = 'https://x', apiKey = 'k'): any {
     return { provider, apiKey, baseUrl, ignore: false, models, request: {} };
+}
+
+/** 构造一条带 [types] 手动类型声明的 pinned 连接 */
+function pinConnTyped(provider: string, models: string[], modelTypes: Record<string, string>, baseUrl = 'https://x', apiKey = 'k'): any {
+    return { provider, apiKey, baseUrl, ignore: false, models, modelTypes, request: {} };
 }
 
 /** 播种 pinned 连接（可选带规则模板）并复位注册表 */
@@ -3901,6 +3907,157 @@ export const tests: Record<string, () => void | Promise<void>> = {
             Model.purposeModelOverrides.chat = '[1]:same';
             assert.equal(Model.getChatModel('chat')?.provider, 'openai', '[序号]:名 覆盖应精确命中');
         } finally {
+            Model.reset();
+        }
+    },
+
+    /** 模型类型手动声明（api连接 [types]）：声明后立即进对应用途候选，嵌入模型不再误入对话候选 */
+    testModelTypesManualDeclaration(): void {
+        try {
+            // 未声明：网关自命名模型（名字不含 embed/vision 等关键词）全部归 text，嵌入模型被误用为对话模型、嵌入/识图无候选
+            seedPinnedConns([pinConn('custom', ['gw-vec-1', 'gw-vl-1', 'gw-chat-1'])]);
+            assert.equal(Model.entries.every(e => e.tags.includes('text')), true, '未声明时应全部归 text');
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null);
+            assert.equal(Model.getMultimodalModel('image-understanding'), null);
+            assert.equal(Model.getChatModel('chat')?.name, 'gw-vec-1', '未声明时首个候选被误用为对话模型');
+
+            // 声明后：嵌入/识图各有候选，对话候选只剩纯文本
+            seedPinnedConns([pinConnTyped('custom', ['gw-vec-1', 'gw-vl-1', 'gw-chat-1'], {
+                'gw-vec-1': 'embed',
+                'gw-vl-1': 'vision',
+                'gw-chat-1': 'text',
+            })]);
+            const embed = Model.getEmbeddingModel('text-embedding');
+            assert.equal(embed?.name, 'gw-vec-1', 'embed 声明应进嵌入候选');
+            assert.equal(embed?.tags.includes('embed'), true);
+            assert.equal(Model.getChatModel('chat')?.name, 'gw-vl-1', '对话候选按列表顺序取首个非嵌入/非生图模型（vision 可当对话模型）');
+            assert.equal(Model.listModelsForUse('chat').some(m => m.name === 'gw-vec-1'), false, '嵌入声明后不得再进对话候选');
+            const vl = Model.getMultimodalModel('image-understanding');
+            assert.equal(vl?.name, 'gw-vl-1', 'vision 声明应进识图候选');
+            assert.equal(vl?.isMultimodal, true, 'vision 声明应让模型按多模态处理');
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** 手动声明绝对优先：可把视觉模型声明为纯文本、把嵌入模型声明为多模态（两个方向都成立） */
+    testModelTypesManualAbsolutePriority(): void {
+        try {
+            // 方向一：视觉模型 → text（摘出识图候选，仍可作对话模型）
+            seedPinnedConns([pinConnTyped('zhipu', ['glm-4v'], { 'glm-4v': 'text' })]);
+            assert.equal(Model.entries[0].tags.includes('text'), true, '声明应覆盖命名视觉白名单');
+            assert.equal(Model.getMultimodalModel('image-understanding'), null, '声明 text 应摘出识图候选');
+            assert.equal(Model.getChatModel('chat')?.name, 'glm-4v', '声明 text 后仍可作对话模型');
+
+            // 方向二：嵌入模型 → vision（摘出嵌入候选，进识图与对话候选）
+            seedPinnedConns([pinConnTyped('openai', ['text-embedding-3-small'], { 'text-embedding-3-small': 'vision' })]);
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null, '声明 vision 应摘出嵌入候选');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'text-embedding-3-small');
+            assert.equal(Model.getChatModel('chat')?.name, 'text-embedding-3-small', 'vision 声明可作对话候选');
+
+            // 方向三：覆盖生图/排序等命名终值白名单
+            seedPinnedConns([pinConnTyped('openai', ['dall-e-3', 'bge-reranker-v2'], { 'dall-e-3': 'text', 'bge-reranker-v2': 'text' })]);
+            assert.equal(Model.getChatModel('chat')?.name, 'dall-e-3', '手动声明应覆盖生图白名单');
+            assert.equal(Model.getChatModel('compression')?.name, 'dall-e-3');
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** [types] 解析：合法值生效（大小写/空格/带点号引号键）、非法值只忽略该键、TOML 顺序坑整行跳过 */
+    testModelTypesParsingAndInvalidValues(): void {
+        const orig = TC.templateConfigs['api连接'];
+        const origRules = TC.templateConfigs['模型规则'];
+        const loadConn = () => {
+            resetConfigCache();
+            (Config as any).model;
+        };
+        try {
+            // 1) 合法值：大小写与空格容错；含点号的模型名用引号键（该名字本身不含任何关键词，只能靠声明进候选）
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nprovider = "custom"\nbase_url = "https://gw/v1"\nmodels = ["gw-vec-1", "gw.model.v1", "plain"]\n\n[types]\n"gw-vec-1" = "  EMBED "\n"gw.model.v1" = "Vision"\n"plain" = "text"',
+            ];
+            TC.templateConfigs['模型规则'] = [];
+            loadConn();
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'gw-vec-1', '大小写/空格应容错');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'gw.model.v1', '带点号的模型名用引号键应生效');
+            assert.equal(Model.getChatModel('chat')?.name, 'gw.model.v1', '对话候选按列表顺序（vision 可当对话模型）');
+            assert.equal(Model.listModelsForUse('chat').some(m => m.name === 'gw-vec-1'), false, '嵌入声明后不得再进对话候选');
+
+            // 2) 非法值：只忽略该键，整行连接仍可用（该模型回退命名猜测）
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nprovider = "custom"\nbase_url = "https://gw/v1"\nmodels = ["a", "b"]\n\n[types]\n"a" = "多模态"\n"b" = "vision"',
+            ];
+            loadConn();
+            assert.equal(Model.states[0].status, 'ok', '非法 [types] 值不应影响整行解析');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'b');
+            assert.equal(Model.entries.find(e => e.name === 'a')?.tags.includes('text'), true, '非法值该键被忽略');
+
+            // 3) 裸键带点号 → TOML 解析成嵌套表：该键不生效（回退命名猜测），但连接正常（仅记 error 日志）
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nprovider = "custom"\nbase_url = "https://gw/v1"\nmodels = ["gw.model.v2"]\n\n[types]\ngw.model.v2 = "embed"',
+            ];
+            loadConn();
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null, '裸键带点号不生效');
+            assert.equal(Model.getChatModel('chat')?.name, 'gw.model.v2', '该模型回退为 text 猜测');
+
+            // 4) [types] 写在标量键之前 → api_key/models 被吞进 types 表 → 整行因缺 api_key 被跳过
+            TC.templateConfigs['api连接'] = [
+                'provider = "custom"\nbase_url = "https://gw/v1"\n\n[types]\n"a" = "embed"\napi_key = "k"\nmodels = ["a"]',
+            ];
+            loadConn();
+            assert.equal(Model.states.length, 0, 'TOML 顺序错误应整行跳过');
+        } finally {
+            if (orig === undefined) delete TC.templateConfigs['api连接']; else TC.templateConfigs['api连接'] = orig;
+            if (origRules === undefined) delete TC.templateConfigs['模型规则']; else TC.templateConfigs['模型规则'] = origRules;
+            resetModelConfigCacheForTest();
+            setModelListDepsForTest();
+            resetConfigCache();
+            Model.reset();
+        }
+    },
+
+    /** [types] 声明未命中模型列表：打一行 warning（同一声明只打一次），列表未就绪/已命中时不提示 */
+    testModelTypesUnusedDeclarationWarning(): void {
+        const origEmit = (Logger as any).emit;
+        const warnings: string[] = [];
+        (Logger as any).emit = (level: string, ...data: any[]) => {
+            if (level !== '警告') return;
+            warnings.push(data.map(d => typeof d === 'string' ? d : JSON.stringify(d)).join(' '));
+        };
+        try {
+            // 1) 拼写错误的声明 → 恰好一条 warning，且含声明的模型名
+            seedPinnedConns([pinConnTyped('custom', ['real-model'], { 'ghost-model': 'embed' })]);
+            assert.equal(warnings.length, 1, '未命中的声明应恰好提示一次');
+            assert.ok(warnings[0].includes('ghost-model'), '提示应含声明的模型名');
+
+            // 2) 重建/重拉不重复提示
+            Model.rebuildEntries();
+            assert.equal(warnings.length, 1, '同一进程内同一声明不重复提示');
+
+            // 3) 命中的声明不提示
+            warnings.length = 0;
+            seedPinnedConns([pinConnTyped('custom', ['real-model'], { 'real-model': 'embed' })]);
+            assert.equal(warnings.length, 0, '命中的声明不应提示');
+
+            // 4) 列表未就绪（拉取中/失败）不误报
+            warnings.length = 0;
+            Model.reset();
+            Model.bootstrap([{
+                provider: 'openai', apiKey: 'k', baseUrl: 'https://o',
+                ignore: false, models: null, modelTypes: { 'x': 'embed' }, request: {},
+            }], [], { fetch: async () => { throw new Error('boom'); } });
+            assert.equal(Model.states[0].status, 'pending', '拉取完成前不判定');
+            assert.equal(warnings.length, 0, '列表未就绪时不应误报');
+
+            // 5) ignore=1 的忽略连接不提示
+            warnings.length = 0;
+            seedPinnedConns([{ provider: 'custom', apiKey: 'k', baseUrl: 'https://x', ignore: true, models: ['real-model'], modelTypes: { 'ghost': 'embed' }, request: {} }]);
+            assert.equal(warnings.length, 0, '忽略连接不应提示');
+        } finally {
+            (Logger as any).emit = origEmit;
             Model.reset();
         }
     },

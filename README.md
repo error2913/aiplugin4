@@ -28,11 +28,14 @@ provider = "deepseek"                        # 服务商：deepseek/openai/googl
 api_key = "sk-xxxx"                          # 你的 API Key
 base_url = "https://api.deepseek.com/v1"     # 可选，省略时取服务商默认
 models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后跳过自动拉取，离线/无列表接口时用）；删掉该行=启动自动获取模型列表
+# [types]                                    # 可选：手动声明模型类型，必须写在本行最后（其后不能再写 api_key 等键）
+# "my-embed-1" = "embed"                     #   网关自命名的嵌入模型：不再被误当对话模型
+# "inhouse-vl" = "vision"                    #   未命中命名白名单的多模态模型：进识图候选
 ```
 
 - 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
 - **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
-- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
+- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；模型名若无法被自动识别（网关自命名、新模型等），在 **api连接** 的 `[types]` 表里手动声明 `text`/`vision`/`embed`（优先级最高，详见下方配置手册）；
 - 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
 
@@ -166,7 +169,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| api连接 | TOML 格式，每行一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
+| api连接 | TOML 格式，每行一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[types]`（**手动声明模型类型**：每行 `"模型名" = "text"` / `"vision"` / `"embed"`，优先级最高，可覆盖命名猜测与接口能力位；模型名含 `.` `:` `/` 等字符必须加引号；**必须写在该行最后**，其后不能再写 `api_key` 等键，否则整行解析失败；无效值只忽略该键并记日志）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
 | 模型规则 | TOML 格式，每行一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按行序逐键合并、后覆盖先 |
 
 ```toml
@@ -176,6 +179,10 @@ api_key = "sk-xxxx"
 base_url = "https://api.deepseek.com/v1"
 models = ["deepseek-v4-flash"]   # 可选：钉住清单；删掉该行=启动自动拉取
 
+# [types]                        # 可选：手动声明模型类型，必须写在本行最后（其后不能再写 api_key 等键）
+# "my-embed-1" = "embed"         #   取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号
+# "inhouse-vl" = "vision"        #   声明未命中当前模型列表时会在日志里给一条 warning 提示（检查拼写）
+
 # 模型规则 示例（同一行内只保留一组字段）
 use = ["chat", "compression", "summarization", "judge"]
 
@@ -183,7 +190,7 @@ use = ["chat", "compression", "summarization", "judge"]
 temperature = 1
 ```
 
-> 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
+> 模型类型判定优先级：**`[types]` 手动声明 > 命名终值（reranker/生图/嵌入白名单） > 接口自报能力位 > 命名能力位 > 兜底纯文本**（手动声明即最终答案，与自动判定冲突时按声明执行）。模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
 >
 > 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
 >
@@ -449,7 +456,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途。模型类型自动判定，可用「api连接」的 `[types]` 手动声明（text/vision/embed，优先级最高） |
 | `.ai balance` | - | 并发查询全部（非忽略）api连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接 `[request]` 配置 `balance_url` + `balance_json_path` 后查询 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 | `.ai subagent` / `.ai subagent list` | - | 查看本会话子代理运行情况：列出 ID / 用途 / 状态 |
