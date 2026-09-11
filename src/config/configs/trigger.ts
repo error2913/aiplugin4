@@ -111,7 +111,7 @@ export default class TriggerConfig {
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [
             "\\[CQ:at,qq=3893625976\\]",
             "^正确.*[。？！?!]$"
-        ], "每行一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后需重载 JS 生效", "消息触发");
+        ], "每框一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后需重载 JS 生效", "消息触发");
         seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "消息触发");
         seal.ext.registerFloatConfig(ext, "默认计时器", 60, "计时器模式下间隔多少秒触发回复", "消息触发");
         seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "消息触发");

@@ -73,7 +73,7 @@ api_key = "sk-xxxx"                 # 必填，API 密钥
 provider = "deepseek"               # 可选，服务商，省略时自动识别
 base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取服务商默认
 models = ["deepseek-v4-flash"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
-# [types]                                  # 可选，必须写在本行最后（其后不能再写 api_key 等键）：手动声明模型类型，优先级最高
+# [types]                                  # 可选，必须写在本框最后（其后不能再写 api_key 等键）：手动声明模型类型，优先级最高
 # "my-embed-1" = "embed"                   # 取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号；无效值只忽略该键并记日志
 # "inhouse-vl" = "vision"
 
@@ -97,12 +97,12 @@ provider = "alibaba"                # 可选，服务商，省略时自动识别
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 可选，API 地址，省略时取服务商默认
 models = ["text-embedding-v4"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
 ignore = 1                         # 可选，1=忽略该条配置，0/不写=正常，使用前删除该行`,
-        ], `每框一个 API 连接（TOML）。必填：provider（服务商）、api_key（密钥）。可选：base_url（API 地址，省略取服务商默认）、models（模型钉住清单：填写则跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）、[types]（可选，手动声明模型类型：每行写作 "模型名" = "text" / "vision" / "embed"，优先级最高，可覆盖命名猜测与接口自报能力位；模型名含 . : / 等字符必须加引号；必须写在该行最后，其后不能再写 api_key 等键，否则整行解析失败；无效值只忽略该键并记日志）、ignore（1=忽略该连接）。未写 models 的连接启动时自动请求模型列表接口（OpenAI 兼容 GET /models；anthropic 走 x-api-key 的 /v1/models 并自动翻页），失败按连接降级展示，不会拖垮其他连接。下方默认值即完整示例，可直接修改：出厂默认钉住 deepseek-v4-flash，删掉 models 行即改为启动自动拉取。连接行序 = 连接序号；重名模型用 [连接序号]:模型名 区分。修改后需重载 JS 生效。余额查询（.ai balance）：deepseek/moonshot/siliconflow 连接无需配置即可查；其余平台未开放余额接口（仅控制台）；one-api/new-api 等网关可在连接 [request] 里配 balance_url + balance_json_path（配合 auth_header_name/headers）后查询。`, CONFIG_GROUP);
+        ], `每框一个 API 连接（TOML）。必填：provider（服务商）、api_key（密钥）。可选：base_url（API 地址，省略取服务商默认）、models（模型钉住清单：填写则跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）、[types]（可选，手动声明模型类型：在本框末尾追加 [types] 表，表内每个模型写一条 "模型名" = "text" / "vision" / "embed"，优先级最高，可覆盖命名猜测与接口自报能力位；模型名含 . : / 等字符必须加引号；必须写在本框最后，其后不能再写 api_key 等键，否则整框解析失败；无效值只忽略该键并记日志）、ignore（1=忽略该连接）。未写 models 的连接启动时自动请求模型列表接口（OpenAI 兼容 GET /models；anthropic 走 x-api-key 的 /v1/models 并自动翻页），失败按连接降级展示，不会拖垮其他连接。下方默认值即完整示例，可直接修改：出厂默认钉住 deepseek-v4-flash，删掉 models 行即改为启动自动拉取。框序 = 连接序号（自上而下，第一个框为 0）；重名模型用 [连接序号]:模型名 区分。修改后需重载 JS 生效。余额查询（.ai balance）：deepseek/moonshot/siliconflow 连接无需配置即可查；其余平台未开放余额接口（仅控制台）；one-api/new-api 等网关可在连接 [request] 里配 balance_url + balance_json_path（配合 auth_header_name/headers）后查询。`, CONFIG_GROUP);
         seal.ext.registerTemplateConfig(ext, MODEL_RULE_CONFIG_KEY, [
             `# 每框一个用途组模板（TOML）：绑定到这些 use 的模型发起请求时统一套用下面的 body/request。
 # use 可选值：chat/compression/summarization/judge/image-understanding/text-embedding。
 # 默认对话类（chat/压缩/总结/judge）共用对话默认 max_tokens=8192、stop=null、stream=false；本表可覆盖。
-# 注意：多条规则 use 重叠时按行序逐键合并（后覆盖先）；建议不同框不重叠。
+# 注意：多条规则 use 重叠时按框顺序逐键合并（后覆盖先）；建议不同框不重叠。
 
 use = ["chat", "compression", "summarization", "judge"]   # 用途组
 
@@ -191,8 +191,8 @@ function trimLines(list: string[]): string[] {
 const DECLARABLE_TAGS: DeclarableModelTag[] = ['text', 'vision', 'embed'];
 
 /**
- * 解析一行「api连接」的 [types] 表：模型名 → 手动声明的类型（优先级最高）。
- * 非法值只忽略该键并记 error 日志，不影响整行连接；模型名含点号未加引号会被 TOML 解析成嵌套表，单独提示。
+ * 解析一个「api连接」框的 [types] 表：模型名 → 手动声明的类型（优先级最高）。
+ * 非法值只忽略该键并记 error 日志，不影响整框连接；模型名含点号未加引号会被 TOML 解析成嵌套表，单独提示。
  */
 function parseModelTypes(raw: any, rowIndex: number): Record<string, DeclarableModelTag> {
     const out: Record<string, DeclarableModelTag> = {};
@@ -214,7 +214,7 @@ function parseModelTypes(raw: any, rowIndex: number): Record<string, DeclarableM
 }
 
 function buildModelConfig(): ModelConfigData {
-    // api连接：行序即连接序号（含 ignore 行，保证序号稳定）
+    // api连接：框序即连接序号（含被忽略的框，保证序号稳定）
     const conns: ConnConfigLike[] = [];
     const rawConnRows = trimLines(seal.ext.getTemplateConfig(ext, API_CONNECTION_CONFIG_KEY));
     rawConnRows.forEach((tomlString, index) => {

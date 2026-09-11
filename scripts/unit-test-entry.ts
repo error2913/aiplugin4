@@ -6070,7 +6070,7 @@ description: 茶库
             assert.equal(ov?.timeout, 5);
             assert.equal(Model.requestOverridesFor('summarization'), null, '未命中规则无 request 覆盖');
 
-            // 重叠行按行序逐键合并、后覆盖先
+            // 重叠规则按框顺序逐键合并、后面的框覆盖前面的
             seedPinnedConns([pinConn('deepseek', ['text-a'])], [
                 { use: ['chat'], body: { max_tokens: 1000, temperature: 0.1 }, request: {} },
                 { use: ['chat'], body: { max_tokens: 2000 }, request: {} },
