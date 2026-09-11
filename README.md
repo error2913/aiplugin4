@@ -190,7 +190,7 @@ use = ["chat", "compression", "summarization", "judge"]
 temperature = 1
 ```
 
-> 模型类型判定优先级：**`[types]` 手动声明 > 命名终值（reranker/生图/嵌入白名单） > 接口自报能力位 > 命名能力位 > 兜底纯文本**（手动声明即最终答案，与自动判定冲突时按声明执行）。模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
+> 模型类型判定优先级：**`[types]` 手动声明 > 命名终值（reranker/生图/嵌入白名单） > 接口自报能力位 > 命名能力位 > 兜底纯文本**（手动声明即最终答案，与自动判定冲突时按声明执行）。模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口自报能力位：`type`/`model_type`/`task`、`architecture.input_modalities`、`capabilities`、`supports_vision`）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
 >
 > 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
 >

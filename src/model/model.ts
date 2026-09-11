@@ -6,7 +6,7 @@ import Logger from "../logger";
 
 import { buildProviderBody, parseProviderResponse } from "./adapter";
 import { classifyModel, DeclarableModelTag, ModelTag } from "./catalog";
-import { describeListError, fetchModelList, ListFetchFn } from "./list";
+import { describeListError, fetchModelList, ListFetchFn, ModelCapabilityHints, normalizeModelListResult } from "./list";
 import { requestModel } from "./provider";
 import { bodyDefaultsFor, ModelRuleTemplate, requestOverridesFor, setRuleRows } from "./request_rules";
 import { ChatModelUse, EmbeddingModelUse, ModelUse, MultimodalModelUse } from "./types";
@@ -29,6 +29,8 @@ export interface ConnState {
     updatedAt: number;
     /** 该连接当前可用模型名（pinned 钉住/启动拉取结果），按列表顺序 */
     modelNames: string[];
+    /** 供应商自报的能力位（仅自动拉取会填；只存内存、不持久化） */
+    hints: Record<string, ModelCapabilityHints>;
 }
 
 /** 连接配置原始形态（configs/model.ts 解析 TOML 后传入） */
@@ -207,11 +209,11 @@ export default class Model {
             const rawIndex = typeof c.connIndex === 'number' ? c.connIndex : arrayIndex;
             if (!c.ignore) Model.connByIndex.set(rawIndex, c);
             if (c.ignore) {
-                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'ignored' as const, updatedAt: Date.now(), modelNames: [] });
+                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'ignored' as const, updatedAt: Date.now(), modelNames: [], hints: {} });
             } else if (c.models && c.models.length > 0) {
-                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'pinned' as const, status: 'ok' as const, updatedAt: Date.now(), modelNames: [...c.models] });
+                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'pinned' as const, status: 'ok' as const, updatedAt: Date.now(), modelNames: [...c.models], hints: {} });
             } else {
-                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'pending' as const, updatedAt: 0, modelNames: [] });
+                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'pending' as const, updatedAt: 0, modelNames: [], hints: {} });
             }
         });
         Model.states = connStates;
@@ -249,15 +251,17 @@ export default class Model {
     /** 单连接拉取并更新 state（成功 → auto；失败 → error，只存内存） */
     private static async fetchConnState(state: ConnState, conn: ConnConfigLike): Promise<void> {
         try {
-            const names = await Model.fetcher({
+            const raw = await Model.fetcher({
                 provider: conn.provider,
                 baseUrl: conn.baseUrl,
                 apiKey: conn.apiKey,
                 listOverride: conn.request ?? {},
             });
+            const { names, hints } = normalizeModelListResult(raw);
             state.status = 'ok';
             state.source = 'auto';
             state.modelNames = names;
+            state.hints = hints;
             state.updatedAt = Date.now();
             delete state.errorKind;
             delete state.errorText;
@@ -265,6 +269,7 @@ export default class Model {
             const d = describeListError(e);
             state.status = 'error';
             state.modelNames = [];
+            state.hints = {};
             state.errorKind = d.kind;
             state.errorText = d.text;
         }
@@ -315,13 +320,15 @@ export default class Model {
         }
         const entries = pairs.map(({ st, name }) => {
             const conn = Model.connByIndex.get(st.connIndex);
+            const manual = conn?.modelTypes?.[name];
+            const hints = st.hints?.[name];
             const entry = new ModelEntry(
                 st.connIndex,
                 name,
                 st.provider,
                 st.baseUrl,
                 conn?.apiKey ?? '',
-                classifyModel(st.provider, name, { manual: conn?.modelTypes?.[name] }),
+                classifyModel(st.provider, name, { manual, ...(hints ?? {}) }),
                 st.source,
             );
             entry.ref = (counts.get(name) || 0) > 1 ? `[${st.connIndex}]:${name}` : name;

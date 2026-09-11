@@ -52,6 +52,7 @@ import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
 import Logger from "../src/logger";
+import { ModelListResult } from "../src/model/list";
 import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
@@ -258,15 +259,15 @@ function seedPinnedConns(conns: any[], rules: any[] = []) {
     Model.bootstrap(conns, rules);
 }
 
-/** 播种「自动拉取」连接：注入假 fetcher（返回模型名数组；可跨次调用改变），随后等待拉取完成 */
-async function seedAutoConns(conns: any[], fetchFn: (ctx: any) => Promise<string[]>, rules: any[] = []) {
+/** 播种「自动拉取」连接：注入假 fetcher（返回模型名数组或带能力位的列表项；可跨次调用改变），随后等待拉取完成 */
+async function seedAutoConns(conns: any[], fetchFn: (ctx: any) => Promise<ModelListResult>, rules: any[] = []) {
     Model.reset();
     Model.bootstrap(conns, rules, { fetch: fetchFn as any });
     await Model.ensureLoaded();
 }
 
 /** 从「api连接」模板配置播种（解析 → Model.bootstrap），供解析/降级类测试使用 */
-function seedFromTemplate(connToml: string[], ruleToml: string[] = [], fetchFn?: (ctx: any) => Promise<string[]>) {
+function seedFromTemplate(connToml: string[], ruleToml: string[] = [], fetchFn?: (ctx: any) => Promise<ModelListResult>) {
     resetModelConfigCacheForTest();
     TC.templateConfigs['api连接'] = connToml;
     TC.templateConfigs['模型规则'] = ruleToml;
@@ -4058,6 +4059,90 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(warnings.length, 0, '忽略连接不应提示');
         } finally {
             (Logger as any).emit = origEmit;
+            Model.reset();
+        }
+    },
+
+    /** 列表接口能力位：真实解析路径（桩 HTTP 响应）下，供应商自报能力位参与分类 */
+    async testModelListCapabilityHints(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        try {
+            const data = {
+                data: [
+                    { id: 'gw-vec', type: 'embeddings' },
+                    { id: 'gw-vl', architecture: { input_modalities: ['text', 'image'] } },
+                    { id: 'gw-task', task: 'embed' },
+                    { id: 'gw-caps', capabilities: ['completion', 'vision'] },
+                    { id: 'gw-flag', supports_vision: true },
+                    { id: 'claude-x', type: 'model' },   // anthropic 风格：type=model 不应误判
+                    { id: 'plain-model' },                // 无能力位字段：退回命名猜测
+                ],
+            };
+            (globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(data) });
+            Model.reset();
+            Model.bootstrap([{ provider: 'openrouter', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], []);
+            await Model.ensureLoaded();
+            assert.equal(Model.states[0].status, 'ok');
+
+            const tagsOf = (name: string) => Model.entries.find(e => e.name === name)?.tags ?? [];
+            assert.deepEqual(tagsOf('gw-vec'), ['embed'], 'type=embeddings 应识别为嵌入');
+            assert.deepEqual(tagsOf('gw-vl'), ['vision'], 'input_modalities 含 image 应识别为多模态');
+            assert.deepEqual(tagsOf('gw-task'), ['embed'], 'task=embed 应识别为嵌入');
+            assert.deepEqual(tagsOf('gw-caps'), ['vision'], 'capabilities 含 vision 应识别为多模态');
+            assert.deepEqual(tagsOf('gw-flag'), ['vision'], 'supports_vision 应识别为多模态');
+            assert.deepEqual(tagsOf('claude-x'), ['text'], 'type=model 不应误判');
+            assert.deepEqual(tagsOf('plain-model'), ['text'], '无能力位字段应退回命名猜测');
+
+            // 候选生效：嵌入进嵌入候选且不进对话候选；多模态进识图候选
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'gw-vec');
+            assert.equal(Model.listModelsForUse('chat').some(m => m.name === 'gw-vec'), false, '接口声明的嵌入模型不应进对话候选');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'gw-vl');
+
+            // states 侧：模型名保序去重；能力位只存内存
+            assert.deepEqual(Model.states[0].modelNames, ['gw-vec', 'gw-vl', 'gw-task', 'gw-caps', 'gw-flag', 'claude-x', 'plain-model']);
+            assert.deepEqual(Model.states[0].hints['gw-vl'], { vision: true });
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            Model.reset();
+        }
+    },
+
+    /** 接口能力位只取正向证据：保守元数据不降级命名判定；命名终值优先于接口能力位 */
+    async testModelListHintsNoDowngrade(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        try {
+            const data = {
+                data: [
+                    { id: 'glm-4v', capabilities: ['completion'] },   // 保守元数据：不产出 text，命名仍判视觉
+                    { id: 'text-embedding-3-small', type: 'vlm' },    // 命名终值优先于接口（防网关元数据质量差）
+                ],
+            };
+            (globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(data) });
+            Model.reset();
+            Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], []);
+            await Model.ensureLoaded();
+
+            const tagsOf = (name: string) => Model.entries.find(e => e.name === name)?.tags ?? [];
+            assert.deepEqual(tagsOf('glm-4v'), ['vision'], '无正向证据时不应把视觉模型降级为 text');
+            assert.deepEqual(tagsOf('text-embedding-3-small'), ['embed'], '命名终值应优先于接口能力位');
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'glm-4v');
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            Model.reset();
+        }
+    },
+
+    /** 老式 string[] 拉取结果仍按原行为工作（无能力位 → 纯命名猜测） */
+    async testModelListLegacyStringResult(): Promise<void> {
+        try {
+            await seedAutoConns([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], async () => ['m1', 'text-embedding-3-small']);
+            assert.deepEqual(Model.states[0].modelNames, ['m1', 'text-embedding-3-small']);
+            assert.deepEqual(Model.states[0].hints, {}, '字符串结果不应产生能力位');
+            assert.equal(Model.getChatModel('chat')?.name, 'm1');
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small');
+            assert.ok(Model.entries.some(e => e.tags.includes('embed')), '拉取模型应完成分类');
+        } finally {
             Model.reset();
         }
     },

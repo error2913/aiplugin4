@@ -4,6 +4,7 @@ export const changelog: { [version: string]: string } = {
     "4.23.0": `## 新功能
 - 模型类型可手动声明：「模型」页 api连接 新增可选 [types] 表（每行 "模型名" = "text" / "vision" / "embed"），**优先级最高**，可覆盖命名猜测——网关自命名的嵌入模型不再被误当对话模型、未命中命名白名单的多模态模型也能进识图候选；模型名含 . : / 等字符需加引号，[types] 必须写在该行最后（其后不能再写 api_key 等键），无效值只忽略该键并记日志
 - 手动类型声明未命中当前模型列表时（模型名拼写错误 / 已移出清单）记一条 warning 提示，不再静默失效
+- 列表接口能力位自动识别：连接拉取模型列表时读取供应商自报的能力位（type / model_type / kind / task、architecture.input_modalities、capabilities、supports_vision），自动区分多模态与嵌入模型（适配 OpenRouter / LM Studio / vLLM / Ollama 风格字段）；只取正向证据（保守元数据不会把模型降级），命名终值白名单（如 text-embedding-*）优先于接口元数据；只返回纯模型名、不自报能力的网关行为完全不变。仍只发一次列表请求，不做任何额外探测
 ## 配置变更
 - 「模型」页 api连接：新增可选 [types] 表（模型名 → text/vision/embed，优先级最高）
 `,
