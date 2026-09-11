@@ -28,13 +28,13 @@ provider = "deepseek"                        # 服务商：deepseek/openai/googl
 api_key = "sk-xxxx"                          # 你的 API Key
 base_url = "https://api.deepseek.com/v1"     # 可选，省略时取服务商默认
 models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后跳过自动拉取，离线/无列表接口时用）；删掉该行=启动自动获取模型列表
-# [types]                                    # 可选：手动声明模型类型，必须写在本行最后（其后不能再写 api_key 等键）
+# [types]                                    # 可选：手动声明模型类型，必须写在本框最后（其后不能再写 api_key 等键）
 # "my-embed-1" = "embed"                     #   网关自命名的嵌入模型：不再被误当对话模型
 # "inhouse-vl" = "vision"                    #   未命中命名白名单的多模态模型：进识图候选
 ```
 
 - 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
-- **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
+- **模型规则** 每框是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
 - 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；模型名若无法被自动识别（网关自命名、新模型等），在 **api连接** 的 `[types]` 表里手动声明 `text`/`vision`/`embed`（优先级最高，详见下方配置手册）；
 - 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
@@ -169,8 +169,8 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| api连接 | TOML 格式，每行一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[types]`（**手动声明模型类型**：每行 `"模型名" = "text"` / `"vision"` / `"embed"`，优先级最高，可覆盖命名猜测与接口能力位；模型名含 `.` `:` `/` 等字符必须加引号；**必须写在该行最后**，其后不能再写 `api_key` 等键，否则整行解析失败；无效值只忽略该键并记日志）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
-| 模型规则 | TOML 格式，每行一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按行序逐键合并、后覆盖先 |
+| api连接 | TOML 格式，每框一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[types]`（**手动声明模型类型**：在本框末尾追加 `[types]` 表，表内每个模型写一条 `"模型名" = "text"` / `"vision"` / `"embed"`，优先级最高，可覆盖命名猜测与接口能力位；模型名含 `.` `:` `/` 等字符必须加引号；**必须写在本框最后**，其后不能再写 `api_key` 等键，否则整框解析失败；无效值只忽略该键并记日志）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
+| 模型规则 | TOML 格式，每框一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按框顺序逐键合并、后覆盖先 |
 
 ```toml
 # api连接 示例（出厂默认即此结构，只改 api_key 即可用）
@@ -179,11 +179,11 @@ api_key = "sk-xxxx"
 base_url = "https://api.deepseek.com/v1"
 models = ["deepseek-v4-flash"]   # 可选：钉住清单；删掉该行=启动自动拉取
 
-# [types]                        # 可选：手动声明模型类型，必须写在本行最后（其后不能再写 api_key 等键）
+# [types]                        # 可选：手动声明模型类型，必须写在本框最后（其后不能再写 api_key 等键）
 # "my-embed-1" = "embed"         #   取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号
 # "inhouse-vl" = "vision"        #   声明未命中当前模型列表时会在日志里给一条 warning 提示（检查拼写）
 
-# 模型规则 示例（同一行内只保留一组字段）
+# 模型规则 示例（同一框内只保留一组字段）
 use = ["chat", "compression", "summarization", "judge"]
 
 [body]                           # 可选：请求参数模板
@@ -216,7 +216,7 @@ temperature = 1
 | 启用报错自动处理 | 模型请求报错时按语义类别自动处理（上下文超长归档重试 / 余额不足切模型 / 限速退避等）；未覆盖或无法处理的错误仅记日志不回复（默认开启） |
 | 上下文超长自动归档重试 | 模型返回上下文超长时，把会话历史按「观察归档 + 删除」链路压到模型窗口内后自动重发一次；关闭则该场景仅记日志（默认开启） |
 | 余额不足自动切换模型 | 对话模型报余额不足 / 欠费 / 额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可用 `.ai model` 改回）（默认开启） |
-| 自动切换触发错误 | 每行一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
+| 自动切换触发错误 | 每框一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
 | 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 api连接/候选顺序取下一个不同模型 |
 | 切换后发送通知 | 自动切换模型后用 `ctx.notice` 向当前会话发送一条切换通知（默认开启） |
 
@@ -224,13 +224,13 @@ temperature = 1
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 角色扮演设定 | 每行一个角色的扮演设定：第一行为角色设定名称（超过 20 字符自动截断，可通过 `.ai role <名称>` 或豹语变量 `$gSYSPROMPT` 切换），其余为设定内容；修改后需重载 JS 生效 |
+| 角色扮演设定 | 每框一个角色的扮演设定：第一行为角色设定名称（超过 20 字符自动截断，可通过 `.ai role <名称>` 或豹语变量 `$gSYSPROMPT` 切换），其余为设定内容；修改后需重载 JS 生效 |
 
 ### 上下文
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 预设上下文 | 每行一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
+| 预设上下文 | 每框一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
 | 对话保存轮数 | 上下文超过「上下文最大token」后保留的最近真实用户轮数（默认 5）；更早消息会先归档沉淀为观察/长期记忆，再删除 |
 | 上下文最大token | 持久化上下文 token 上限（默认 1000000）；填 0 / 负数视为无效并自动回退默认值；超过后触发上面归档逻辑 |
 | 插入system message间隔轮数 | 需小于「对话保存轮数」的二分之一才能生效，为 0 时不生效，预设上下文不计入轮数 |
@@ -284,14 +284,14 @@ temperature = 1
 | 工具方向提示 | 开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块（默认开启） |
 | 允许连续调用函数次数 | 单次触发内允许连续调用函数的次数，防止 AI 陷入调用函数死循环（默认 0=不限制） |
 | 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
-| 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
-| 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
-| 禁止调用的 OB11 action | 每行一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
-| 默认关闭的 OB11 action | 每行一个默认关闭的原始 OB11 action，例如 `get_group_member_list`；关闭后 AI 不会调用 |
-| 可调用指令白名单 | 每行一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
+| 禁止调用的函数 | 每框一个，设置后将不被允许开启 |
+| 默认关闭的函数 | 每框一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
+| 禁止调用的 OB11 action | 每框一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
+| 默认关闭的 OB11 action | 每框一个默认关闭的原始 OB11 action，例如 `get_group_member_list`；关闭后 AI 不会调用 |
+| 可调用指令白名单 | 每框一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
 | 是否允许调用所有指令 | 开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 `run_core_command` 调用 |
 | 指令前缀 | 注入到 SealDice 核心的指令前缀，通常为 `.`；核心前缀改动时需同步修改 |
-| 音乐服务配置 | 每行一条 JSON：`{"platform":"网易云/qq","api":"域名","cookie":"Cookie（可留空）"}`，供 `search_music` 使用；修改后需重载 JS 生效 |
+| 音乐服务配置 | 每框一条 JSON：`{"platform":"网易云/qq","api":"域名","cookie":"Cookie（可留空）"}`，供 `search_music` 使用；修改后需重载 JS 生效 |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
 ### MCP
@@ -333,7 +333,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 |:---:|:---|
 | 是否启用子代理 | 子代理功能总开关（默认开启）；关闭后 AI 调用 `subagent` / `subagent_fork` 会直接提示已关闭 |
 | 最大委派深度 | 子代理最多嵌套几层（默认 3，0=禁止委派）；主会话为 0 层，每层 +1（当前版本子代理不可再嵌套委派，该值 >0 即允许主会话委派） |
-| 子代理禁止调用工具 | 每行一个子代理不可调用的工具名（如 `call_ob11_api`）；留空 = 继承主会话全部已开启工具 |
+| 子代理禁止调用工具 | 每框一个子代理不可调用的工具名（如 `call_ob11_api`）；留空 = 继承主会话全部已开启工具 |
 
 > 委派工具：`subagent`（spawn：子代理看不到本会话历史，任务必须自包含）、`subagent_fork`（fork：继承本会话已完成轮次、看不到当前正在执行的这一轮）。参数：`prompt`（必填）/`description`/`persona`/`run_in_background`（后台执行并返回 job id，用 `job_list` / `job_output` / `job_kill` 收取结果）/`continuable`（建立可续跑子代理并立即返回 id，之后用 `send_message` 续派、`interrupt_agent` 打断、`list_agents` 盘点）。前台调用直接返回最终结论；子代理有独立上下文与工具面（按上面配置收窄），不向聊天发消息。
 >
@@ -409,10 +409,10 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 本地图片路径 | 每行一个本地图片路径，供 `list_resources` / `get_resource_path` 查询；当前会话发图片优先用 `[img:图片ID]`；修改后需重载 JS 生效 |
-| 本地语音路径 | 每行一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送语音需要配置 ffmpeg 到环境变量；修改后需重载 JS 生效 |
-| 本地文件路径 | 每行一个本地文件：`文件名=路径`（省略文件名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送文件需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
-| 本地视频路径 | 每行一个本地视频：`视频名=路径`（省略视频名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送视频需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
+| 本地图片路径 | 每框一个本地图片路径，供 `list_resources` / `get_resource_path` 查询；当前会话发图片优先用 `[img:图片ID]`；修改后需重载 JS 生效 |
+| 本地语音路径 | 每框一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送语音需要配置 ffmpeg 到环境变量；修改后需重载 JS 生效 |
+| 本地文件路径 | 每框一个本地文件：`文件名=路径`（省略文件名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送文件需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
+| 本地视频路径 | 每框一个本地视频：`视频名=路径`（省略视频名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送视频需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
 
 ### prompt 模板
 

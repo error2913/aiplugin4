@@ -7,7 +7,7 @@ export const changelog: { [version: string]: string } = {
 - 列表接口能力位自动识别：连接拉取模型列表时读取供应商自报的能力位（type / model_type / kind / task、architecture.input_modalities、capabilities、supports_vision），自动区分多模态与嵌入模型（适配 OpenRouter / LM Studio / vLLM / Ollama 风格字段）；只取正向证据（保守元数据不会把模型降级），命名终值白名单（如 text-embedding-*）优先于接口元数据；只返回纯模型名、不自报能力的网关行为完全不变。仍只发一次列表请求，不做任何额外探测
 ## 配置变更
 - 「模型」页 api连接：新增可选 [types] 表（模型名 → text/vision/embed，优先级最高）
-- 配置描述统一按「框」表述模板配置的每个文本框：模板配置的每个元素是一个文本框，不再用「行」描述元素（如「每行一个」→「每框一个」）；框内内容自身的「行」表述（如角色设定「第一行为名称」、TOML/JSON 语法行）保持原样
+- 配置描述统一按「框」表述模板配置的每个文本框：模板配置的每个元素是一个文本框，不再用「行」描述元素（如「每行一个」→「每框一个」；模板解析失败的日志同步改为「第 N 框」）；框内内容自身的「行」表述（如角色设定「第一行为名称」、TOML/JSON 语法行）保持原样
 `,
     "4.22.0": `## 新功能
 - 模型配置 v4：模型配置改为两个 TOML ——「模型」页的 **api连接**（每行一个服务商连接：api_key 必填；provider 选填，省略按 OpenAI 兼容处理（此时需显式填 base_url）；base_url 选填，省略取该服务商默认；可选 models 钉住清单（填写=跳过自动拉取，离线/无列表接口时用）；可选 ignore（1=忽略该连接）；可选 [request]（列表拉取与余额查询等连接级覆盖））与 **模型规则**（每行一个"用途组"请求模板：use 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 [body]/[request]，**不写任何模型名**，命中这些用途的模型统一套用，行序重叠逐键合并、后覆盖先）

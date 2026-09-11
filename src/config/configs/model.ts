@@ -72,10 +72,10 @@ export default class ModelConfig {
 api_key = "sk-xxxx"                 # 必填，API 密钥
 provider = "deepseek"               # 可选，服务商，省略时自动识别
 base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取服务商默认
-models = ["deepseek-v4-flash"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
-# [types]                                  # 可选，必须写在本框最后（其后不能再写 api_key 等键）：手动声明模型类型，优先级最高
-# "my-embed-1" = "embed"                   # 取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号；无效值只忽略该键并记日志
-# "inhouse-vl" = "vision"
+models = ["deepseek-flash"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
+
+[types]                                  # 可选，必须写在本框最后（其后不能再写 api_key 等键）：手动声明模型类型，优先级最高
+deepseek-flash = "vision"                   # 取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号；无效值只忽略该键并记日志
 
 # [request]                                  # 可选，列表/余额查询覆盖（默认不写，由插件按 provider 解析）
 # list_url = "https://your-gateway/v1/models"    # 自定义列表端点（服务商无 /models 时用）
@@ -205,9 +205,9 @@ function parseModelTypes(raw: any, rowIndex: number): Record<string, DeclarableM
             continue;
         }
         if (value && typeof value === 'object') {
-            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${rowIndex + 1} 行 [types] 的 "${key}" 值非法：模型名含点号时未加引号（被解析成嵌套表），请写作 "模型名" = "embed" 形式，已忽略该键`);
+            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${rowIndex + 1} 框 [types] 的 "${key}" 值非法：模型名含点号时未加引号（被解析成嵌套表），请写作 "模型名" = "embed" 形式，已忽略该键`);
         } else {
-            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${rowIndex + 1} 行 [types] 的 "${key}" 值非法: ${String(value)}（可选 text/vision/embed），已忽略该键`);
+            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${rowIndex + 1} 框 [types] 的 "${key}" 值非法: ${String(value)}（可选 text/vision/embed），已忽略该键`);
         }
     }
     return out;
@@ -245,7 +245,7 @@ function buildModelConfig(): ModelConfigData {
             });
             Logger.info(`api连接[${index}]解析成功: ${provider} ${baseUrl}${pinned ? '（钉住 ' + pinned.length + ' 个模型）' : ''}`);
         } catch (e) {
-            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${index + 1} 行解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
+            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${index + 1} 框解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
         }
     });
 
@@ -265,7 +265,7 @@ function buildModelConfig(): ModelConfigData {
                 request: item.request && typeof item.request === 'object' ? item.request : {},
             });
         } catch (e) {
-            Logger.error(`「${MODEL_RULE_CONFIG_KEY}」第 ${index + 1} 行解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
+            Logger.error(`「${MODEL_RULE_CONFIG_KEY}」第 ${index + 1} 框解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
         }
     });
 

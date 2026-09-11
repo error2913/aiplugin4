@@ -35,7 +35,7 @@ export interface ConnState {
 
 /** 连接配置原始形态（configs/model.ts 解析 TOML 后传入） */
 export interface ConnConfigLike {
-    /** 模板行序号（稳定标识；省略时按数组位置） */
+    /** 模板框序号（稳定标识；省略时按数组位置） */
     connIndex?: number;
     provider: string;
     apiKey: string;
