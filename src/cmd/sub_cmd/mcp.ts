@@ -1,7 +1,7 @@
 // .ai mcp：MCP 服务器查看 / 批量开关其工具 / refresh 重走配置解析
-import Config from "../../config/config";
 import { getConfiguredMCPServers, isMCPEnabled, refreshMCP } from "../../tool/mcp";
 import { toolMap } from "../../tool/tool";
+import { setToolGroupState } from "../../tool/tool_group";
 import { matchesPlatform, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
@@ -53,7 +53,7 @@ export function registerCmdMcp() {
                     }
                     if (names.length === 0) lines.push('  （工具未注册，服务器不可达或未同步，可 .ai mcp refresh）');
                 }
-                lines.push('工具开关按会话保存；.ai mcp on/off <服务器> 可批量切换。');
+                lines.push('工具开关按会话保存；.ai mcp on/off <服务器> 可批量切换（等价 .ai tool on/off <服务器>）。');
                 seal.replyToSender(ctx, msg, lines.join('\n'));
                 return ret;
             }
@@ -66,7 +66,6 @@ export function registerCmdMcp() {
                     seal.replyToSender(ctx, msg, '当前平台没有可用的 MCP 服务器（未配置或平台不匹配）');
                     return ret;
                 }
-                const blocked = Config.tool.BLOCKED;
                 const enable = op === 'on';
                 let serversToUse = servers;
                 if (target) {
@@ -81,11 +80,10 @@ export function registerCmdMcp() {
                 let skipped = 0;
                 for (const s of serversToUse) {
                     const names = Object.keys(toolMap).filter(k => toolMap[k].group === s.name);
-                    for (const n of names) {
-                        if (enable && blocked.includes(n)) { skipped++; continue; }
-                        session.tool.state[n] = enable;
-                        changed++;
-                    }
+                    // 与 .ai tool on/off <组名> 共用批量开关实现（MCP 工具不涉及核心常驻工具）
+                    const result = setToolGroupState(session, names, enable, { skipBlocked: enable });
+                    changed += result.changed + result.unchanged;
+                    skipped += result.skippedBlocked;
                 }
                 const scope = target ? `服务器 ${target}` : '全部当前平台服务器';
                 if (changed === 0) {

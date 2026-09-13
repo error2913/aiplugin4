@@ -246,8 +246,10 @@ function registerControlTools(): void {
 }
 
 export function registerSubagentTools(): void {
-    registerDelegate(false);
-    registerDelegate(true);
-    registerJobTools();
-    registerControlTools();
+    Tool.withCategory('子代理', () => {
+        registerDelegate(false);
+        registerDelegate(true);
+        registerJobTools();
+        registerControlTools();
+    });
 }

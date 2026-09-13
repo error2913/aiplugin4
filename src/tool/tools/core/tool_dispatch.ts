@@ -1,6 +1,6 @@
 // 按需加载调度工具：list_tools（分组列表）+ search_tools（发现工具，支持按 MCP 过滤）+ list_mcps（列出全部 MCP）+ call_tool（统一执行）
 // 非核心工具不再全量注入函数 schema；AI 先搜索工具获得参数说明，再通过 call_tool 执行，
-// 大幅降低每轮请求中工具定义占用的 token。工具按来源分组（MCP 服务器/内置/技能/知识库），
+// 大幅降低每轮请求中工具定义占用的 token。工具按工具组分组（内置分类/MCP 服务器/技能/知识库），
 // 且只对当前平台可用（platform 白名单）的工具可见/可调用。
 import Config from "../../../config/config";
 import Logger from "../../../logger";
@@ -16,12 +16,12 @@ const MCP_PAGE_SIZE_LIMIT = 100;
 
 export function registerDispatchTools() {
 
-    // 工具列表：按来源分组返回工具名称 + 一句话描述，不返回参数详情
+    // 工具列表：按工具组返回工具名称 + 一句话描述，不返回参数详情
     const listTool = new Tool({
         type: "function",
         function: {
             name: "list_tools",
-            description: `分页列出当前会话可用（当前平台）工具的名称与一句话描述，按来源分组（MCP 服务器/内置/技能/知识库）；不返回参数详情。需要获取某个工具的参数说明时使用 search_tools。`,
+            description: `分页列出当前会话可用（当前平台）工具的名称与一句话描述，按工具组分组（内置分类如 记忆/图片/子代理、MCP 服务器名、技能、知识库）；不返回参数详情。需要获取某个工具的参数说明时使用 search_tools。`,
             parameters: {
                 type: "object",
                 properties: {
@@ -39,7 +39,7 @@ export function registerDispatchTools() {
                     },
                     mcp: {
                         type: "string",
-                        description: "可选，只列出某个来源分组（如 MCP 服务器名）下的工具"
+                        description: "可选，只列出某个来源分组或内置分类下的工具（如 MCP 服务器名 mcp-browser、分类 记忆/图片/子代理）"
                     }
                 },
                 required: []
@@ -52,7 +52,7 @@ export function registerDispatchTools() {
         let tools = Tool.getAvailableTools(session, platform)
             .sort((a, b) => a.function.name.localeCompare(b.function.name));
         const groupFilter = String(mcp || '').trim();
-        if (groupFilter) tools = tools.filter(t => (toolMap[t.function.name]?.group || '') === groupFilter);
+        if (groupFilter) tools = tools.filter(t => Tool.matchesGroupFilter(toolMap[t.function.name], groupFilter));
         const q = String(query || '').trim().toLowerCase();
         const filtered = q
             ? tools.filter(t =>
@@ -61,7 +61,7 @@ export function registerDispatchTools() {
             )
             : tools;
         if (filtered.length === 0) {
-            return groupFilter ? `未找到来源分组「${groupFilter}」下的工具；可用 list_mcps 查看全部 MCP 服务器` : '当前没有可用工具';
+            return groupFilter ? `未找到来源分组/分类「${groupFilter}」下的工具；可用 list_mcps 查看 MCP 服务器，.ai tool 查看工具组` : '当前没有可用工具';
         }
         const size = Math.min(Math.max(parseInt(page_size, 10) || 20, 1), 100);
         const current = Math.max(parseInt(page, 10) || 1, 1);
@@ -69,10 +69,10 @@ export function registerDispatchTools() {
         const start = (current - 1) * size;
         const pageItems = filtered.slice(start, start + size);
         const lines = [`可用工具（共 ${filtered.length} 个）`];
-        // 按来源分组渲染（组头 + 组内工具，编号全局连续）
+        // 按组渲染（组头 + 组内工具，编号全局连续）；组头用「内置·分类 / MCP 服务器名 / 技能 / 知识库」
         const groups: { [group: string]: ToolInfo[] } = {};
         for (const t of pageItems) {
-            const g = Tool.groupLabel(toolMap[t.function.name]?.group);
+            const g = Tool.groupDisplay(toolMap[t.function.name]);
             (groups[g] = groups[g] || []).push(t);
         }
         let n = start;
@@ -94,7 +94,7 @@ export function registerDispatchTools() {
         type: "function",
         function: {
             name: "search_tools",
-            description: `查看/搜索当前会话可用（当前平台）的工具。不传参数：返回全部可用工具的名字列表；指定 name：返回该工具的完整参数说明；指定 query：按关键词搜索匹配工具并返回完整参数说明；指定 mcp：只在该 MCP 服务器（或来源分组）内搜索。需要调用未直接在函数列表中提供的工具时，先通过本工具获取参数格式，再通过 call_tool 执行。`,
+            description: `查看/搜索当前会话可用（当前平台）的工具。不传参数：返回全部可用工具的名字列表；指定 name：返回该工具的完整参数说明；指定 query：按关键词搜索匹配工具并返回完整参数说明；指定 mcp：只在该 MCP 服务器或内置分类（如 记忆/图片/子代理）内搜索。需要调用未直接在函数列表中提供的工具时，先通过本工具获取参数格式，再通过 call_tool 执行。`,
             parameters: {
                 type: "object",
                 properties: {
@@ -108,7 +108,7 @@ export function registerDispatchTools() {
                     },
                     mcp: {
                         type: "string",
-                        description: "可选，限定在某个来源分组（MCP 服务器名等）内搜索工具；可用 list_mcps 查看全部 MCP 服务器名"
+                        description: "可选，限定在某个来源分组或内置分类内搜索工具（MCP 服务器名如 mcp-browser、分类如 记忆/图片/子代理）；可用 list_mcps 查看 MCP 服务器名"
                     },
                     limit: {
                         type: "integer",
@@ -125,9 +125,9 @@ export function registerDispatchTools() {
         let tools = Tool.getAvailableTools(session, platform);
         const groupFilter = String(mcp || '').trim();
         if (groupFilter) {
-            tools = tools.filter(t => (toolMap[t.function.name]?.group || '') === groupFilter);
+            tools = tools.filter(t => Tool.matchesGroupFilter(toolMap[t.function.name], groupFilter));
         }
-        const notFoundInGroup = () => `未找到来源分组「${groupFilter}」下的工具；可用 list_mcps 查看全部 MCP 服务器`;
+        const notFoundInGroup = () => `未找到来源分组/分类「${groupFilter}」下的工具；可用 list_mcps 查看 MCP 服务器，.ai tool 查看工具组`;
         if (groupFilter && tools.length === 0) {
             return notFoundInGroup();
         }
@@ -137,16 +137,16 @@ export function registerDispatchTools() {
         if (toolName) {
             const target = tools.find(t => t.function.name === toolName);
             if (!target) {
-                if (groupFilter) return `来源分组「${groupFilter}」中没有工具 ${toolName}；可用 list_mcps 查看 MCP 服务器，search_tools（不传参数）查看全部工具名`;
+                if (groupFilter) return `来源分组/分类「${groupFilter}」中没有工具 ${toolName}；可用 list_mcps 查看 MCP 服务器，search_tools（不传参数）查看全部工具名`;
                 return `工具 ${toolName} 不存在、未开启或当前平台不可用；可调用 search_tools（不传参数）查看全部工具名`;
             }
-            return formatToolDetail(target, 1, toolMap[target.function.name]?.group);
+            return formatToolDetail(target, 1);
         }
 
         // 不传参数：返回全部工具名字列表（紧凑），详情按需查询
         if (!String(query || '').trim()) {
             if (tools.length === 0) {
-                return groupFilter ? `未找到来源分组「${groupFilter}」下的工具；可用 list_mcps 查看全部 MCP 服务器` : '当前没有可用工具';
+                return groupFilter ? `未找到来源分组/分类「${groupFilter}」下的工具；可用 list_mcps 查看 MCP 服务器，.ai tool 查看工具组` : '当前没有可用工具';
             }
             return `可用工具（共 ${tools.length} 个）：\n${tools.map((t, i) => `${i + 1}. ${t.function.name}`).join('\n')}\n查看工具名称与描述：调用 list_tools；查看某个工具的详情：调用 search_tools 并指定 name=工具名；查看 MCP 服务器：调用 list_mcps`;
         }
@@ -165,7 +165,7 @@ export function registerDispatchTools() {
         if (list.length === 0) {
             return `没有找到与「${query}」匹配的工具`;
         }
-        return list.map((t, i) => formatToolDetail(t, i + 1, toolMap[t.function.name]?.group)).join('\n\n') + `\n\n共匹配 ${matched.length} 个，已返回 ${list.length} 个。`;
+        return list.map((t, i) => formatToolDetail(t, i + 1)).join('\n\n') + `\n\n共匹配 ${matched.length} 个，已返回 ${list.length} 个。`;
     };
 
     // 列出全部 MCP 服务器及其工具（按 MCP 分组的能力入口）
@@ -308,9 +308,9 @@ export function registerDispatchTools() {
     };
 }
 
-/** 输出单个工具的完整详情（名称/描述/来源/参数 schema/调用方式） */
-function formatToolDetail(tool: ToolInfo, index: number, group?: string): string {
-    const source = Tool.groupLabel(group);
+/** 输出单个工具的完整详情（名称/描述/来源/参数 schema/调用方式）；来源统一用 groupDisplay 口径 */
+function formatToolDetail(tool: ToolInfo, index: number): string {
+    const source = Tool.groupDisplay(toolMap[tool.function.name]);
     return `${index}. ${tool.function.name}（来源：${source}）\n描述：${tool.function.description}\n参数（JSON Schema）：\n${JSON.stringify(tool.function.parameters, null, 2)}\n调用方式：使用 call_tool，参数为 {"name": "${tool.function.name}", "arguments": {…}}`;
 }
 

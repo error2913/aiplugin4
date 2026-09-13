@@ -284,7 +284,7 @@ temperature = 1
 | 工具方向提示 | 开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块（默认开启） |
 | 允许连续调用函数次数 | 单次触发内允许连续调用函数的次数，防止 AI 陷入调用函数死循环（默认 0=不限制） |
 | 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
-| 禁止调用的函数 | 每框一个，设置后将不被允许开启 |
+| 禁止调用的函数 | 每框一个，设置后将不被允许开启（`.ai tool on <组名>` 会跳过名单内的工具并回报跳过个数）；该工具也不参与 `.ai tool` 的组统计 |
 | 默认关闭的函数 | 每框一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 禁止调用的 OB11 action | 每框一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
 | 默认关闭的 OB11 action | 每框一个默认关闭的原始 OB11 action，例如 `get_group_member_list`；关闭后 AI 不会调用 |
@@ -492,11 +492,15 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai tool` | - | 列出所有工具及开关状态 |
+| `.ai tool` | - | 工具组概览：按「内置分类 + MCP 服务器」列出每组工具数与开/关统计（不再刷屏列出全部工具） |
+| `.ai tool <组名>` | `.ai tool 记忆` | 查看该组内工具与开关状态（显式写法 `--group=<组名>`，可绕开 on/off/help/call/list/all 等保留字与撞名） |
+| `.ai tool <函数名>` | `.ai tool memory_add` | 查看指定工具的详细说明和参数需求（等价 `.ai tool help <函数名>`） |
+| `.ai tool all` | - | 扁平列出全部工具及开关状态（含技能/知识库工具） |
+| `.ai tool [on/off] [<组名\|函数名>]` | `.ai tool off 记忆` | 开启/关闭整组或单个工具函数；不带参数=全部工具。关闭时默认**跳过核心常驻工具**（`list_tools`/`search_tools`/`list_mcps`/`call_tool`/`use_skill`/`call_ob11_api`/`run_ext_command`/`run_core_command`），确需一并关闭加 `--force`；开启时跳过「禁止调用的函数」并回报变更/跳过个数（on/off 需邀请者以上） |
 | `.ai tool help <函数名>` | `.ai tool help set_timer` | 查看指定工具的详细说明和参数需求 |
-| `.ai tool [on/off]` | - | 开启/关闭全部工具函数 |
-| `.ai tool [on/off] <函数名>` | `.ai tool on run_ext_command` | 开启/关闭指定工具函数 |
 | `.ai tool call <函数名> --参数=值` | `.ai tool call run_ext_command --action=call --extension=fun --command=jrrp` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
+
+> 工具组 = 内置工具的 14 个能力分类（基础调度 / 指令 / 定时 / 触发 / 记忆 / 图片 / OB11 / 资源 / 属性 / 原文检索 / 黑名单 / 网页 / 公开会话 / 子代理；外部插件注册的工具归「外部插件」）+ 每台 MCP 服务器各一组，`.ai tool on/off <服务器名>` 与 `.ai mcp on/off <服务器名>` 等价。技能与知识库不参与工具组维度（其会话开关仍用 `.ai skill on/off`、`.ai kb on/off`），但单工具开关照旧可用（如 `.ai tool off use_skill`）。
 
 ### MCP 技能 知识库管理命令
 
@@ -567,31 +571,28 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 ## 🧰 可用工具函数
 
-以下为内置工具函数（基于当前源码），可通过 `.ai tool help <name>` 查看详细用法，也可按分类在群里使用：
+以下为内置工具函数（基于当前源码），下表「工具组」列即 `.ai tool` 的工具组名（可直接 `.ai tool <工具组>` 查明细、`.ai tool on/off <工具组>` 整组开关），可通过 `.ai tool help <name>` 查看详细用法：
 
-| 分类 | 工具函数 |
+| 工具组 | 工具函数 |
 |:---:|:---|
-| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
-| 知识库 | `knowledge_search`、`knowledge_read`、`knowledge_list`、`knowledge_docs`（只读检索，范围 = 当前平台可用 + 本会话开启的库；内容由配置维护） |
-| OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
-| 特殊ID | `resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
+| 基础调度 | `list_tools`（按工具组列出当前平台工具）、`search_tools`（按名称/关键词/工具组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
+| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
-| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
-| 工具调度 | `list_tools`（按来源分组列出当前平台工具）、`search_tools`（按名称/关键词/来源分组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
-| 音频资源 | `generate_audio`（生成 record 消息段，不直接发送） |
-| 网页 | `web_search` |
+| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
+| 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |
+| OB11 | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API；群资料、精华消息等均传入对应 action）、`resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
+| 资源 | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（生成 record 消息段，不直接发送）、`search_music`（返回 music 消息段，不直接发送） |
 | 属性 | `attr_get`、`attr_set` |
-| 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
-| OB11 管理/查询 | 统一通过 `call_ob11_api` 传入 `set_group_ban`、`set_group_name`、`get_group_list` 等 action |
-| 资源/群资料 | `list_resources`、`get_resource_path`；群资料统一通过 `call_ob11_api` 传入对应 action |
-| 精华消息 | 统一通过 `call_ob11_api` 传入 `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
-| 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
+| 原文检索 | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
-| 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
+| 网页 | `web_search`；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
 | 子代理 | `subagent`、`subagent_fork`（委派）、`send_message`、`interrupt_agent`、`list_agents`（可续跑子代理控制）、`job_list`、`job_output`、`job_kill`（后台 job 管理）；默认开启，详见上方「子代理」配置小节 |
-| MCP / 技能 | 远端工具名（MCP 工具，来源分组 = 服务器名，同名冲突时跳过，仅当前平台可见）、`use_skill`、`skill_list`（技能；平台受限或本会话已关闭时明确返回不可用提示） |
+| 外部插件 | 其他海豹插件经 `globalThis.aiplugin4.registerTool` 注册的工具 |
+| 技能（来源分组，不参与工具组开关） | `use_skill`、`skill_list`（平台受限或本会话已关闭时明确返回不可用提示） |
+| 知识库（来源分组，不参与工具组开关） | `knowledge_search`、`knowledge_read`、`knowledge_list`、`knowledge_docs`（只读检索，范围 = 当前平台可用 + 本会话开启的库；内容由配置维护） |
+| MCP（来源分组 = 服务器名，可整组开关） | 远端工具名（同名冲突时跳过，仅当前平台可见）；`render_markdown` / `render_html` 由默认服务器 `md-html-render` 提供 |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 

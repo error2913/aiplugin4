@@ -58,7 +58,10 @@ import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
-import Tool, { toolMap } from "../src/tool/tool";
+import Tool, { BUILTIN_CATEGORY_ORDER, CORE_TOOL_NAMES, DEFAULT_CATEGORY, EXTERNAL_CATEGORY, toolMap } from "../src/tool/tool";
+import { setToolGroupState } from "../src/tool/tool_group";
+import { registerTools } from "../src/tool/tools/init";
+import { registerCmdTool } from "../src/cmd/sub_cmd/tool";
 import { getSkillSummaries, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
@@ -6859,7 +6862,8 @@ platform: [QQ, DISCORD]
             assert.ok(String(callOut).includes('不可用'), `call_tool 应拦截平台外工具: ${callOut}`);
             const grouped = Tool.getGroupedAvailableTools(session, 'QQ');
             const labels = grouped.map(g => g.group);
-            assert.ok(labels.includes('内置') && labels.includes('mcp-files-exec'), `分组应含内置与 mcp-files-exec: ${labels.join(',')}`);
+            // 未打分类的工具（本用例直接 new Tool 注册）落兜底分类：显示为「内置·其他」
+            assert.ok(labels.includes(`内置·${DEFAULT_CATEGORY}`) && labels.includes('mcp-files-exec'), `分组应含内置·其他与 mcp-files-exec: ${labels.join(',')}`);
             assert.ok(!labels.includes('mcp-browser'), '平台过滤后的分组不应含 mcp-browser');
         } finally {
             for (const k of ['zz_mcp_file', 'zz_browser', 'zz_plain_calc']) delete toolMap[k];
@@ -6894,12 +6898,257 @@ platform: [QQ, DISCORD]
             resetMCPCacheForTest();
         }
     },
+
+    /** 工具组：内置工具必须打上分类；技能/知识库不参与组维度（无 category） */
+    testToolCategoryCoverage(): void {
+        // 复位注册表后只跑内置注册链，断言不受其它用例临时注册的工具干扰
+        Tool.reset();
+        registerTools();
+        registerSkills();
+
+        const builtin = Object.keys(toolMap).filter(n => !toolMap[n].group);
+        const missing = builtin.filter(n => !toolMap[n].category);
+        assert.deepEqual(missing, [], `内置工具必须打上分类（缺: ${missing.join('、')}）`);
+        assert.equal(builtin.length, 58, `内置工具数应为 58，实际 ${builtin.length}`);
+
+        const byCategory: { [k: string]: string[] } = {};
+        for (const n of builtin) (byCategory[Tool.categoryOf(toolMap[n])] = byCategory[Tool.categoryOf(toolMap[n])] || []).push(n);
+        assert.equal(byCategory['基础调度'].length, 4, `基础调度应有 4 个: ${byCategory['基础调度']}`);
+        assert.ok(byCategory['基础调度'].includes('list_tools') && byCategory['基础调度'].includes('call_tool'), '调度组应含 list_tools/call_tool');
+        assert.equal(byCategory['记忆'].length, 12, `记忆应有 12 个: ${byCategory['记忆']}`);
+        assert.equal(byCategory['子代理'].length, 8, `子代理应有 8 个: ${byCategory['子代理']}`);
+        assert.ok(byCategory['子代理'].includes('subagent') && byCategory['子代理'].includes('job_kill'), '子代理组应含 subagent/job_kill');
+        assert.ok(byCategory['图片'].includes('meme_generator') && byCategory['资源'].includes('search_music'), '图片/资源分类应命中各自的工具');
+        // 未列入固定顺序表的分类只允许兜底「其他」（防新增工具漏加分类）
+        const unknown = Object.keys(byCategory).filter(k => !BUILTIN_CATEGORY_ORDER.includes(k));
+        assert.deepEqual(unknown, [], `分类必须在 BUILTIN_CATEGORY_ORDER 内: ${unknown.join('、')}`);
+        assert.equal(byCategory[DEFAULT_CATEGORY], undefined, '分类完整时不应出现兜底分类');
+
+        // 技能/知识库：来源分组明确、且不参与组维度
+        assert.equal(toolMap['use_skill'].group, '技能');
+        assert.equal(toolMap['skill_list'].group, '技能');
+        assert.equal(toolMap['knowledge_search'].group, '知识库');
+        for (const n of ['use_skill', 'skill_list', 'knowledge_search', 'knowledge_read', 'knowledge_list', 'knowledge_docs']) {
+            assert.equal(Tool.categoryOf(toolMap[n]), '', `${n} 不应参与工具组维度（无 category）`);
+            assert.equal(Tool.isGroupable(toolMap[n]), false, `${n} 不应是可切换组工具`);
+        }
+        // 外部插件注册的工具归入固定分类
+        const external = Tool.withCategory(EXTERNAL_CATEGORY, () => new Tool({
+            type: 'function',
+            function: { name: 'zz_external_probe', description: '外部插件工具', parameters: { type: 'object', properties: {} } }
+        }));
+        assert.equal(Tool.categoryOf(external), EXTERNAL_CATEGORY);
+        assert.equal(Tool.groupDisplay(external), `内置·${EXTERNAL_CATEGORY}`);
+        delete toolMap['zz_external_probe'];
+    },
+
+    /** 工具组：分组视图（内置分类 + MCP 服务器；排序、平台过滤、技能/知识库排除） */
+    testToolGroupsView(): void {
+        registerTools();
+        registerSkills();
+        const fakeQQ = new Tool({
+            type: 'function',
+            function: { name: 'zz_group_mcp_qq', description: 'MCP 工具', parameters: { type: 'object', properties: {} } }
+        }, false, 'zz-mcp-server', ['QQ']);
+        const fakeDC = new Tool({
+            type: 'function',
+            function: { name: 'zz_group_mcp_dc', description: '仅 Discord 的 MCP 工具', parameters: { type: 'object', properties: {} } }
+        }, false, 'zz-mcp-server', ['DISCORD']);
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:1';
+            const groups = Tool.getToolGroups(session, 'QQ');
+            const keys = groups.map(g => g.key);
+
+            // 内置分类组按固定顺序排列，且都在顺序表内
+            const builtinKeys = groups.filter(g => g.kind === 'builtin').map(g => g.key);
+            assert.deepEqual(builtinKeys, BUILTIN_CATEGORY_ORDER.filter(k => builtinKeys.includes(k)), `内置分类顺序错误: ${builtinKeys.join('、')}`);
+            // MCP 服务器组排在内置之后，键=服务器名
+            const mcpKeys = groups.filter(g => g.kind === 'mcp').map(g => g.key);
+            assert.deepEqual(mcpKeys, ['zz-mcp-server'], `MCP 组应为服务器名: ${mcpKeys.join('、')}`);
+            assert.equal(groups[groups.length - 1].kind, 'mcp', 'MCP 组应排在内置分类之后');
+
+            // 平台过滤：DISCORD 限定工具不进 QQ 视图；组内计数与实际开关一致
+            const memory = groups.find(g => g.key === '记忆')!;
+            assert.equal(memory.names.length, 12);
+            assert.equal(memory.on, 12);
+            assert.equal(memory.off, 0);
+            assert.equal(memory.label, '内置·记忆');
+            const mcp = groups.find(g => g.key === 'zz-mcp-server')!;
+            assert.deepEqual(mcp.names, ['zz_group_mcp_qq'], '平台不符的 MCP 工具不应进组');
+            assert.equal(Tool.isAllowedPlatform(toolMap['zz_group_mcp_dc'], 'QQ'), false);
+
+            // 技能/知识库不作为组出现
+            assert.ok(!keys.includes('技能') && !keys.includes('知识库'), `技能/知识库不应作为工具组: ${keys.join('、')}`);
+            assert.ok(!mcp.names.concat(memory.names).some(n => n.startsWith('knowledge_')), '知识库工具不应进任何组');
+
+            // 开关状态参与计数
+            session.tool.state['memory_add'] = false;
+            session.tool.state['memory_delete'] = false;
+            const memory2 = Tool.getToolGroups(session, 'QQ').find(g => g.key === '记忆')!;
+            assert.equal(memory2.on, 10);
+            assert.equal(memory2.off, 2);
+
+            // 显示名/分类名/服务器名都能解析；未命中与多命中给可读错误
+            assert.equal((Tool.resolveToolGroup('记忆', groups) as any).key, '记忆');
+            assert.equal((Tool.resolveToolGroup('内置·记忆', groups) as any).key, '记忆');
+            assert.equal((Tool.resolveToolGroup('zz-mcp-server', groups) as any).key, 'zz-mcp-server');
+            assert.equal((Tool.resolveToolGroup('mcp-server', groups) as any).key, 'zz-mcp-server', '唯一包含匹配应命中该组');
+            assert.ok(typeof Tool.resolveToolGroup('不存在的组', groups) === 'string', '未命中应返回错误说明');
+            // 多命中：再加一台同前缀服务器 → 报歧义而不是随便挑一个
+            const fakeQQ2 = new Tool({
+                type: 'function',
+                function: { name: 'zz_group_mcp_qq2', description: 'MCP 工具 2', parameters: { type: 'object', properties: {} } }
+            }, false, 'zz-mcp-server-2', ['QQ']);
+            const groups2 = Tool.getToolGroups(session, 'QQ');
+            assert.ok(String(Tool.resolveToolGroup('zz-mcp', groups2)).includes('匹配多个'), '多命中应提示歧义');
+            assert.deepEqual(groups2.filter(g => g.kind === 'mcp').map(g => g.key), ['zz-mcp-server', 'zz-mcp-server-2'], 'MCP 组应按服务器名排序');
+            delete toolMap['zz_group_mcp_qq2'];
+        } finally {
+            delete toolMap['zz_group_mcp_qq'];
+            delete toolMap['zz_group_mcp_dc'];
+            delete toolMap['zz_group_mcp_qq2'];
+        }
+    },
+
+    /** 工具组：批量开关（核心常驻跳过 / --force 覆盖 / 禁用名单跳过） */
+    testToolGroupToggleRules(): void {
+        registerTools();
+        const session = new Session();
+        session.sessionId = 'QQ:1';
+
+        // 普通分类：整组关闭 / 开启
+        const memory = Tool.getToolGroups(session, 'QQ').find(g => g.key === '记忆')!;
+        const off = setToolGroupState(session, memory.names, false, { skipCore: true });
+        assert.equal(off.changed, 12);
+        assert.equal(session.toolState['memory_add'], false);
+        const on = setToolGroupState(session, memory.names, true, { skipBlocked: true });
+        assert.equal(on.changed, 12);
+        assert.equal(session.toolState['memory_add'], true);
+        const again = setToolGroupState(session, memory.names, true, { skipBlocked: true });
+        assert.equal(again.changed, 0);
+        assert.equal(again.unchanged, 12, '已是目标状态应计入 unchanged');
+
+        // 核心常驻工具：默认跳过，--force（skipCore=false）才真正关闭
+        const dispatch = Tool.getToolGroups(session, 'QQ').find(g => g.key === '基础调度')!;
+        assert.deepEqual(dispatch.names, ['call_tool', 'list_mcps', 'list_tools', 'search_tools']);
+        assert.ok(dispatch.names.every(n => CORE_TOOL_NAMES.includes(n)), '基础调度组应全部是核心常驻工具');
+        const skipped = setToolGroupState(session, dispatch.names, false, { skipCore: true });
+        assert.equal(skipped.changed, 0);
+        assert.equal(skipped.skippedCore, 4);
+        assert.equal(session.toolState['list_tools'], true, '核心常驻工具默认不被关闭');
+        const forced = setToolGroupState(session, dispatch.names, false, { skipCore: false });
+        assert.equal(forced.changed, 4);
+        assert.equal(session.toolState['list_tools'], false, '--force 应能关闭核心常驻工具');
+        setToolGroupState(session, dispatch.names, true, { skipBlocked: true });
+
+        // 禁用名单：on 时跳过并计数；名单内工具也不进入组视图
+        const prior = TC.templateConfigs['禁止调用的函数'];
+        TC.templateConfigs['禁止调用的函数'] = ['memory_add'];
+        resetConfigCache();
+        try {
+            const s2 = new Session();
+            s2.sessionId = 'QQ:2';
+            const memory2 = Tool.getToolGroups(s2, 'QQ').find(g => g.key === '记忆')!;
+            assert.equal(memory2.names.includes('memory_add'), false, '禁止调用的函数不应出现在组内');
+            assert.equal(memory2.names.length, 11);
+            s2.tool.state['memory_delete'] = false;
+            const r = setToolGroupState(s2, ['memory_add', 'memory_delete'], true, { skipBlocked: true });
+            assert.equal(r.skippedBlocked, 1, '禁用名单内的工具应被跳过');
+            assert.equal(r.changed, 1, '仅未被跳过的工具被开启');
+            assert.equal(s2.toolState['memory_delete'], true);
+        } finally {
+            if (prior === undefined) delete TC.templateConfigs['禁止调用的函数']; else TC.templateConfigs['禁止调用的函数'] = prior;
+            resetConfigCache();
+        }
+    },
+
+    /** .ai tool：组概览 / 组明细 / 组开关 / --group= / --force / 兼容旧用法 */
+    async testAiToolCommandGroups(): Promise<void> {
+        registerTools();
+        registerSkills();
+        if (!SubCmd.map['tool']) registerCmdTool();
+        const session = new Session();
+        session.sessionId = 'QQ:1';
+
+        // 组概览：只列组与统计，不展开工具名
+        const overview = await runSubCmd('tool', [''], { session });
+        assert.ok(overview.startsWith('工具组（当前平台 QQ'), `应输出组概览: ${overview.slice(0, 120)}`);
+        assert.ok(overview.includes('1. 基础调度（4，开 4 关 0）'), `概览应含基础调度统计: ${overview}`);
+        assert.ok(overview.includes('记忆（12，开 12 关 0）'), `概览应含记忆统计: ${overview}`);
+        assert.ok(!overview.includes('memory_add'), '概览不应展开组内工具');
+        assert.ok(overview.includes('技能/知识库工具不在工具组范围'), '概览应提示技能/知识库管理入口');
+        assert.ok(!overview.includes('技能（'), '概览不应把技能列为工具组');
+
+        // 组明细
+        const detail = await runSubCmd('tool', ['', '记忆'], { session });
+        assert.ok(detail.includes('工具组「记忆」（内置）：12 个，开 12 关 0'), `组明细头部错误: ${detail.slice(0, 120)}`);
+        assert.ok(detail.includes('memory_add[开]') && detail.includes('memory_recall[开]'), '组明细应列出组内工具与开关');
+        assert.ok(detail.includes('.ai tool on/off 记忆'), '组明细应给出批量开关提示');
+
+        // 组开关：关 → 概览与状态同步，开 → 恢复
+        const off = await runSubCmd('tool', ['', 'off', '记忆'], { session });
+        assert.ok(off.includes('已关闭工具组「记忆」') && off.includes('实际变更 12 个'), `组关闭回复错误: ${off}`);
+        assert.equal(session.toolState['memory_add'], false);
+        const overviewOff = await runSubCmd('tool', [''], { session });
+        assert.ok(overviewOff.includes('记忆（12，开 0 关 12）'), `关闭后概览统计应更新: ${overviewOff}`);
+        const on = await runSubCmd('tool', ['', 'on', '记忆'], { session });
+        assert.ok(on.includes('已开启工具组「记忆」'), `组开启回复错误: ${on}`);
+        assert.equal(session.toolState['memory_add'], true);
+
+        // 核心常驻：组 off 默认跳过并提示 --force；--force 才真正关闭
+        const offCore = await runSubCmd('tool', ['', 'off', '基础调度'], { session });
+        assert.ok(offCore.includes('跳过核心常驻工具 4 个'), `应报告跳过的核心工具: ${offCore}`);
+        assert.ok(offCore.includes('--force'), '应提示 --force 用法');
+        assert.equal(session.toolState['list_tools'], true);
+        const forced = await runSubCmd('tool', ['', 'off', '基础调度'], { session }, [{ name: 'force', valueExists: false }]);
+        assert.ok(forced.includes('实际变更 4 个'), `--force 应真正关闭: ${forced}`);
+        assert.equal(session.toolState['list_tools'], false);
+        await runSubCmd('tool', ['', 'on', '基础调度'], { session });
+        assert.equal(session.toolState['list_tools'], true);
+
+        // 无参 off：跳过核心常驻工具（AI 的工具入口不会静默失效）
+        const offAll = await runSubCmd('tool', ['', 'off'], { session });
+        assert.ok(offAll.includes('全部工具') && offAll.includes('跳过核心常驻工具'), `无参 off 应跳过核心工具: ${offAll}`);
+        assert.equal(session.toolState['list_tools'], true, '无参 off 默认保留核心常驻工具');
+        assert.equal(session.toolState['memory_add'], false, '无参 off 应关闭普通工具');
+        const offAllForced = await runSubCmd('tool', ['', 'off'], { session }, [{ name: 'force', valueExists: false }]);
+        assert.ok(offAllForced.includes('实际变更'), `无参 off --force 应执行: ${offAllForced}`);
+        assert.equal(session.toolState['list_tools'], false, '无参 off --force 应关闭核心常驻工具');
+        await runSubCmd('tool', ['', 'on'], { session });
+
+        // 显式 --group= 写法（绕开保留字与撞名）
+        const byFlag = await runSubCmd('tool', [''], { session }, [{ name: 'group', value: '记忆', valueExists: true }]);
+        assert.ok(byFlag.includes('工具组「记忆」'), `--group= 应列出该组: ${byFlag.slice(0, 120)}`);
+        const offByFlag = await runSubCmd('tool', ['', 'off'], { session }, [{ name: 'group', value: '记忆', valueExists: true }]);
+        assert.ok(offByFlag.includes('已关闭工具组「记忆」'), `--group= off 应关闭该组: ${offByFlag}`);
+        await runSubCmd('tool', ['', 'on'], { session });
+
+        // 兼容：技能/知识库仍可按单工具开关；工具名照旧查看详情
+        const offSkill = await runSubCmd('tool', ['', 'off', 'use_skill'], { session });
+        assert.ok(offSkill.includes('已关闭工具函数 use_skill'), `单工具开关应保持原行为: ${offSkill}`);
+        assert.equal(session.toolState['use_skill'], false);
+        await runSubCmd('tool', ['', 'on', 'use_skill'], { session });
+        const toolDetail = await runSubCmd('tool', ['', 'memory_add'], { session });
+        assert.ok(toolDetail.includes('memory_add') && toolDetail.includes('来源:内置·记忆'), `工具名应展示详情: ${toolDetail.slice(0, 120)}`);
+        const helpDetail = await runSubCmd('tool', ['', 'help', 'memory_add'], { session });
+        assert.ok(helpDetail.includes('来源:内置·记忆'), 'help 详情应标注分类来源');
+
+        // 未命中给可读提示；.ai tool all 保留扁平全量视图（含技能/知识库）
+        const miss = await runSubCmd('tool', ['', '不存在的组'], { session });
+        assert.ok(miss.includes('未找到工具组') && miss.includes('可用组：'), `未命中应有候选提示: ${miss}`);
+        const all = await runSubCmd('tool', ['', 'all'], { session });
+        assert.ok(all.includes('use_skill') && all.includes('knowledge_search'), '.ai tool all 应含技能/知识库工具');
+        assert.ok(all.includes('内置·记忆:'), 'all 视图应沿用分类组头');
+        const listAlias = await runSubCmd('tool', ['', 'list'], { session });
+        assert.ok(listAlias.startsWith('工具组（当前平台 QQ'), 'list 别名应输出组概览');
+    },
 };
 
-/** 执行一个已注册的子命令（SubCmd.map），捕获最后一次回复文本 */
-async function runSubCmd(name: string, args: string[], sccOver: any = {}): Promise<string> {
+/** 执行一个已注册的子命令（SubCmd.map），捕获最后一次回复文本（kwargs 可选，如 --group=/--force） */
+async function runSubCmd(name: string, args: string[], sccOver: any = {}, kwargs: any[] = []): Promise<string> {
     const scc = makeMemoScc(sccOver);
-    scc.cmdArgs = makeMemoArgs(args);
+    scc.cmdArgs = makeMemoArgs(args, kwargs);
     const origReply = (globalThis as any).seal.replyToSender;
     let replied = '';
     (globalThis as any).seal.replyToSender = (_c: any, _m: any, text: string) => { replied = text; };
