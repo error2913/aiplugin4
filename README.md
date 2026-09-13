@@ -28,11 +28,14 @@ provider = "deepseek"                        # 服务商：deepseek/openai/googl
 api_key = "sk-xxxx"                          # 你的 API Key
 base_url = "https://api.deepseek.com/v1"     # 可选，省略时取服务商默认
 models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后跳过自动拉取，离线/无列表接口时用）；删掉该行=启动自动获取模型列表
+# [types]                                    # 可选：手动声明模型类型，必须写在本框最后（其后不能再写 api_key 等键）
+# "my-embed-1" = "embed"                     #   网关自命名的嵌入模型：不再被误当对话模型
+# "inhouse-vl" = "vision"                    #   未命中命名白名单的多模态模型：进识图候选
 ```
 
 - 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
-- **模型规则** 每行是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
-- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；
+- **模型规则** 每框是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
+- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；模型名若无法被自动识别（网关自命名、新模型等），在 **api连接** 的 `[types]` 表里手动声明 `text`/`vision`/`embed`（优先级最高，详见下方配置手册）；
 - 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
 - `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
 
@@ -166,8 +169,8 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| api连接 | TOML 格式，每行一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
-| 模型规则 | TOML 格式，每行一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按行序逐键合并、后覆盖先 |
+| api连接 | TOML 格式，每框一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[types]`（**手动声明模型类型**：在本框末尾追加 `[types]` 表，表内每个模型写一条 `"模型名" = "text"` / `"vision"` / `"embed"`，优先级最高，可覆盖命名猜测与接口能力位；模型名含 `.` `:` `/` 等字符必须加引号；**必须写在本框最后**，其后不能再写 `api_key` 等键，否则整框解析失败；无效值只忽略该键并记日志）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
+| 模型规则 | TOML 格式，每框一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按框顺序逐键合并、后覆盖先 |
 
 ```toml
 # api连接 示例（出厂默认即此结构，只改 api_key 即可用）
@@ -176,14 +179,18 @@ api_key = "sk-xxxx"
 base_url = "https://api.deepseek.com/v1"
 models = ["deepseek-v4-flash"]   # 可选：钉住清单；删掉该行=启动自动拉取
 
-# 模型规则 示例（同一行内只保留一组字段）
+# [types]                        # 可选：手动声明模型类型，必须写在本框最后（其后不能再写 api_key 等键）
+# "my-embed-1" = "embed"         #   取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号
+# "inhouse-vl" = "vision"        #   声明未命中当前模型列表时会在日志里给一条 warning 提示（检查拼写）
+
+# 模型规则 示例（同一框内只保留一组字段）
 use = ["chat", "compression", "summarization", "judge"]
 
 [body]                           # 可选：请求参数模板
 temperature = 1
 ```
 
-> 模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口返回视觉能力位）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
+> 模型类型判定优先级：**`[types]` 手动声明 > 命名终值（reranker/生图/嵌入白名单） > 接口自报能力位 > 命名能力位 > 兜底纯文本**（手动声明即最终答案，与自动判定冲突时按声明执行）。模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口自报能力位：`type`/`model_type`/`task`、`architecture.input_modalities`、`capabilities`、`supports_vision`）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
 >
 > 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
 >
@@ -209,7 +216,7 @@ temperature = 1
 | 启用报错自动处理 | 模型请求报错时按语义类别自动处理（上下文超长归档重试 / 余额不足切模型 / 限速退避等）；未覆盖或无法处理的错误仅记日志不回复（默认开启） |
 | 上下文超长自动归档重试 | 模型返回上下文超长时，把会话历史按「观察归档 + 删除」链路压到模型窗口内后自动重发一次；关闭则该场景仅记日志（默认开启） |
 | 余额不足自动切换模型 | 对话模型报余额不足 / 欠费 / 额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可用 `.ai model` 改回）（默认开启） |
-| 自动切换触发错误 | 每行一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
+| 自动切换触发错误 | 每框一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
 | 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 api连接/候选顺序取下一个不同模型 |
 | 切换后发送通知 | 自动切换模型后用 `ctx.notice` 向当前会话发送一条切换通知（默认开启） |
 
@@ -217,13 +224,13 @@ temperature = 1
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 角色扮演设定 | 每行一个角色的扮演设定：第一行为角色设定名称（超过 20 字符自动截断，可通过 `.ai role <名称>` 或豹语变量 `$gSYSPROMPT` 切换），其余为设定内容；修改后需重载 JS 生效 |
+| 角色扮演设定 | 每框一个角色的扮演设定：第一行为角色设定名称（超过 20 字符自动截断，可通过 `.ai role <名称>` 或豹语变量 `$gSYSPROMPT` 切换），其余为设定内容；修改后需重载 JS 生效 |
 
 ### 上下文
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 预设上下文 | 每行一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
+| 预设上下文 | 每框一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
 | 对话保存轮数 | 上下文超过「上下文最大token」后保留的最近真实用户轮数（默认 5）；更早消息会先归档沉淀为观察/长期记忆，再删除 |
 | 上下文最大token | 持久化上下文 token 上限（默认 1000000）；填 0 / 负数视为无效并自动回退默认值；超过后触发上面归档逻辑 |
 | 插入system message间隔轮数 | 需小于「对话保存轮数」的二分之一才能生效，为 0 时不生效，预设上下文不计入轮数 |
@@ -277,14 +284,14 @@ temperature = 1
 | 工具方向提示 | 开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块（默认开启） |
 | 允许连续调用函数次数 | 单次触发内允许连续调用函数的次数，防止 AI 陷入调用函数死循环（默认 0=不限制） |
 | 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
-| 禁止调用的函数 | 每行一个，设置后将不被允许开启 |
-| 默认关闭的函数 | 每行一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
-| 禁止调用的 OB11 action | 每行一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
-| 默认关闭的 OB11 action | 每行一个默认关闭的原始 OB11 action，例如 `get_group_member_list`；关闭后 AI 不会调用 |
-| 可调用指令白名单 | 每行一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
+| 禁止调用的函数 | 每框一个，设置后将不被允许开启（`.ai tool on <组名>` 会跳过名单内的工具并回报跳过个数）；该工具也不参与 `.ai tool` 的组统计 |
+| 默认关闭的函数 | 每框一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
+| 禁止调用的 OB11 action | 每框一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
+| 默认关闭的 OB11 action | 每框一个默认关闭的原始 OB11 action，例如 `get_group_member_list`；关闭后 AI 不会调用 |
+| 可调用指令白名单 | 每框一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
 | 是否允许调用所有指令 | 开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 `run_core_command` 调用 |
 | 指令前缀 | 注入到 SealDice 核心的指令前缀，通常为 `.`；核心前缀改动时需同步修改 |
-| 音乐服务配置 | 每行一条 JSON：`{"platform":"网易云/qq","api":"域名","cookie":"Cookie（可留空）"}`，供 `search_music` 使用；修改后需重载 JS 生效 |
+| 音乐服务配置 | 每框一条 JSON：`{"platform":"网易云/qq","api":"域名","cookie":"Cookie（可留空）"}`，供 `search_music` 使用；修改后需重载 JS 生效 |
 | ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
 
 ### MCP
@@ -326,7 +333,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 |:---:|:---|
 | 是否启用子代理 | 子代理功能总开关（默认开启）；关闭后 AI 调用 `subagent` / `subagent_fork` 会直接提示已关闭 |
 | 最大委派深度 | 子代理最多嵌套几层（默认 3，0=禁止委派）；主会话为 0 层，每层 +1（当前版本子代理不可再嵌套委派，该值 >0 即允许主会话委派） |
-| 子代理禁止调用工具 | 每行一个子代理不可调用的工具名（如 `call_ob11_api`）；留空 = 继承主会话全部已开启工具 |
+| 子代理禁止调用工具 | 每框一个子代理不可调用的工具名（如 `call_ob11_api`）；留空 = 继承主会话全部已开启工具 |
 
 > 委派工具：`subagent`（spawn：子代理看不到本会话历史，任务必须自包含）、`subagent_fork`（fork：继承本会话已完成轮次、看不到当前正在执行的这一轮）。参数：`prompt`（必填）/`description`/`persona`/`run_in_background`（后台执行并返回 job id，用 `job_list` / `job_output` / `job_kill` 收取结果）/`continuable`（建立可续跑子代理并立即返回 id，之后用 `send_message` 续派、`interrupt_agent` 打断、`list_agents` 盘点）。前台调用直接返回最终结论；子代理有独立上下文与工具面（按上面配置收窄），不向聊天发消息。
 >
@@ -402,10 +409,10 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 本地图片路径 | 每行一个本地图片路径，供 `list_resources` / `get_resource_path` 查询；当前会话发图片优先用 `[img:图片ID]`；修改后需重载 JS 生效 |
-| 本地语音路径 | 每行一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送语音需要配置 ffmpeg 到环境变量；修改后需重载 JS 生效 |
-| 本地文件路径 | 每行一个本地文件：`文件名=路径`（省略文件名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送文件需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
-| 本地视频路径 | 每行一个本地视频：`视频名=路径`（省略视频名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送视频需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
+| 本地图片路径 | 每框一个本地图片路径，供 `list_resources` / `get_resource_path` 查询；当前会话发图片优先用 `[img:图片ID]`；修改后需重载 JS 生效 |
+| 本地语音路径 | 每框一个本地语音：`语音名=路径`（省略语音名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送语音需要配置 ffmpeg 到环境变量；修改后需重载 JS 生效 |
+| 本地文件路径 | 每框一个本地文件：`文件名=路径`（省略文件名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送文件需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
+| 本地视频路径 | 每框一个本地视频：`视频名=路径`（省略视频名时默认用文件名），供 `list_resources` / `get_resource_path` 查询；发送视频需安装 ob11 网络连接依赖；修改后需重载 JS 生效 |
 
 ### prompt 模板
 
@@ -449,7 +456,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途。模型类型自动判定，可用「api连接」的 `[types]` 手动声明（text/vision/embed，优先级最高） |
 | `.ai balance` | - | 并发查询全部（非忽略）api连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接 `[request]` 配置 `balance_url` + `balance_json_path` 后查询 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 | `.ai subagent` / `.ai subagent list` | - | 查看本会话子代理运行情况：列出 ID / 用途 / 状态 |
@@ -485,11 +492,15 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai tool` | - | 列出所有工具及开关状态 |
+| `.ai tool` | - | 工具组概览：按「内置分类 + MCP 服务器」列出每组工具数与开/关统计（不再刷屏列出全部工具） |
+| `.ai tool <组名>` | `.ai tool 记忆` | 查看该组内工具与开关状态（显式写法 `--group=<组名>`，可绕开 on/off/help/call/list/all 等保留字与撞名） |
+| `.ai tool <函数名>` | `.ai tool memory_add` | 查看指定工具的详细说明和参数需求（等价 `.ai tool help <函数名>`） |
+| `.ai tool all` | - | 扁平列出全部工具及开关状态（含技能/知识库工具） |
+| `.ai tool [on/off] [<组名\|函数名>]` | `.ai tool off 记忆` | 开启/关闭整组或单个工具函数；不带参数=全部工具。关闭时默认**跳过核心常驻工具**（`list_tools`/`search_tools`/`list_mcps`/`call_tool`/`use_skill`/`call_ob11_api`/`run_ext_command`/`run_core_command`），确需一并关闭加 `--force`；开启时跳过「禁止调用的函数」并回报变更/跳过个数（on/off 需邀请者以上） |
 | `.ai tool help <函数名>` | `.ai tool help set_timer` | 查看指定工具的详细说明和参数需求 |
-| `.ai tool [on/off]` | - | 开启/关闭全部工具函数 |
-| `.ai tool [on/off] <函数名>` | `.ai tool on run_ext_command` | 开启/关闭指定工具函数 |
 | `.ai tool call <函数名> --参数=值` | `.ai tool call run_ext_command --action=call --extension=fun --command=jrrp` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
+
+> 工具组 = 内置工具的 14 个能力分类（基础调度 / 指令 / 定时 / 触发 / 记忆 / 图片 / OB11 / 资源 / 属性 / 原文检索 / 黑名单 / 网页 / 公开会话 / 子代理；外部插件注册的工具归「外部插件」）+ 每台 MCP 服务器各一组，`.ai tool on/off <服务器名>` 与 `.ai mcp on/off <服务器名>` 等价。技能与知识库不参与工具组维度（其会话开关仍用 `.ai skill on/off`、`.ai kb on/off`），但单工具开关照旧可用（如 `.ai tool off use_skill`）。
 
 ### MCP 技能 知识库管理命令
 
@@ -560,31 +571,28 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 ## 🧰 可用工具函数
 
-以下为内置工具函数（基于当前源码），可通过 `.ai tool help <name>` 查看详细用法，也可按分类在群里使用：
+以下为内置工具函数（基于当前源码），下表「工具组」列即 `.ai tool` 的工具组名（可直接 `.ai tool <工具组>` 查明细、`.ai tool on/off <工具组>` 整组开关），可通过 `.ai tool help <name>` 查看详细用法：
 
-| 分类 | 工具函数 |
+| 工具组 | 工具函数 |
 |:---:|:---|
-| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
-| 知识库 | `knowledge_search`、`knowledge_read`、`knowledge_list`、`knowledge_docs`（只读检索，范围 = 当前平台可用 + 本会话开启的库；内容由配置维护） |
-| OB11 API | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API） |
-| 特殊ID | `resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
+| 基础调度 | `list_tools`（按工具组列出当前平台工具）、`search_tools`（按名称/关键词/工具组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
+| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
-| 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
-| 工具调度 | `list_tools`（按来源分组列出当前平台工具）、`search_tools`（按名称/关键词/来源分组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
-| 音频资源 | `generate_audio`（生成 record 消息段，不直接发送） |
-| 网页 | `web_search` |
+| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
+| 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |
+| OB11 | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API；群资料、精华消息等均传入对应 action）、`resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
+| 资源 | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（生成 record 消息段，不直接发送）、`search_music`（返回 music 消息段，不直接发送） |
 | 属性 | `attr_get`、`attr_set` |
-| 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator`、`render_markdown`、`render_html` |
-| OB11 管理/查询 | 统一通过 `call_ob11_api` 传入 `set_group_ban`、`set_group_name`、`get_group_list` 等 action |
-| 资源/群资料 | `list_resources`、`get_resource_path`；群资料统一通过 `call_ob11_api` 传入对应 action |
-| 精华消息 | 统一通过 `call_ob11_api` 传入 `set_essence_msg`、`get_essence_msg_list`、`delete_essence_msg` |
-| 音乐资源 | `search_music`（返回 music 消息段，不直接发送） |
+| 原文检索 | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
-| 论坛 | `forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
+| 网页 | `web_search`；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
 | 子代理 | `subagent`、`subagent_fork`（委派）、`send_message`、`interrupt_agent`、`list_agents`（可续跑子代理控制）、`job_list`、`job_output`、`job_kill`（后台 job 管理）；默认开启，详见上方「子代理」配置小节 |
-| MCP / 技能 | 远端工具名（MCP 工具，来源分组 = 服务器名，同名冲突时跳过，仅当前平台可见）、`use_skill`、`skill_list`（技能；平台受限或本会话已关闭时明确返回不可用提示） |
+| 外部插件 | 其他海豹插件经 `globalThis.aiplugin4.registerTool` 注册的工具 |
+| 技能（来源分组，不参与工具组开关） | `use_skill`、`skill_list`（平台受限或本会话已关闭时明确返回不可用提示） |
+| 知识库（来源分组，不参与工具组开关） | `knowledge_search`、`knowledge_read`、`knowledge_list`、`knowledge_docs`（只读检索，范围 = 当前平台可用 + 本会话开启的库；内容由配置维护） |
+| MCP（来源分组 = 服务器名，可整组开关） | 远端工具名（同名冲突时跳过，仅当前平台可见）；`render_markdown` / `render_html` 由默认服务器 `md-html-render` 提供 |
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 

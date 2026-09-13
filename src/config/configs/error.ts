@@ -35,7 +35,7 @@ export default class ErrorConfig {
         seal.ext.registerBoolConfig(ext, "启用报错自动处理", true, "模型请求报错时按语义类别自动处理（上下文超长归档重试 / 余额不足切模型 / 限速退避等），未覆盖或无法处理的错误仅记日志不回复", "错误处理");
         seal.ext.registerBoolConfig(ext, "上下文超长自动归档重试", true, "模型返回上下文超长时，把会话历史按「观察归档+删除」链路压到模型窗口内后自动重发一次；关闭则该场景仅记日志", "错误处理");
         seal.ext.registerBoolConfig(ext, "余额不足自动切换模型", true, "对话模型报余额不足/欠费/额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可 .ai model 改回）", "错误处理");
-        seal.ext.registerTemplateConfig(ext, "自动切换触发错误", ['balance'], "每行一个触发自动切换模型的错误类别：balance（余额不足）/permission（权限不足）；其余类别仅退避重试或记日志", "错误处理");
+        seal.ext.registerTemplateConfig(ext, "自动切换触发错误", ['balance'], "每框一个触发自动切换模型的错误类别：balance（余额不足）/permission（权限不足）；其余类别仅退避重试或记日志", "错误处理");
         seal.ext.registerOptionConfig(ext, "自动切换策略", "跨厂商优先", ["跨厂商优先", "配置顺序"], "跨厂商优先=优先切到不同服务商的模型；配置顺序=按纯文本模型列表顺序取下一个不同模型", "错误处理");
         seal.ext.registerBoolConfig(ext, "切换后发送通知", true, "自动切换模型后用 ctx.notice 向当前会话发送一条切换通知", "错误处理");
     }

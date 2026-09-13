@@ -2,7 +2,7 @@
 // 按库过滤：frontmatter platform（平台白名单）+ 会话级 kbState 开关。
 import { knowledgeService } from "../../../memory/knowledge";
 import { matchesPlatform, platformOf } from "../../../utils/target_id";
-import Tool from "../../tool";
+import Tool, { KNOWLEDGE_GROUP } from "../../tool";
 
 // 单次检索返回条数上限，防止模型请求超大 topK 造成上下文/API 浪费
 const KB_SEARCH_TOPK_MAX = 50;
@@ -45,7 +45,7 @@ export function registerKnowledgeTools() {
                 required: ['query']
             }
         }
-    }, false, '知识库');
+    }, false, KNOWLEDGE_GROUP);
     toolSearch.solve = async (ctx, _msg, session, args) => {
         const query = typeof args.query === 'string' ? args.query : '';
         const libraryId = typeof args.library_id === 'string' ? args.library_id : '';
@@ -74,7 +74,7 @@ export function registerKnowledgeTools() {
                 required: ['id']
             }
         }
-    }, false, '知识库');
+    }, false, KNOWLEDGE_GROUP);
     toolRead.solve = async (ctx, _msg, session, args) => {
         const id = typeof args.id === 'string' ? args.id : '';
         await knowledgeService.init();
@@ -109,7 +109,7 @@ export function registerKnowledgeTools() {
                 required: []
             }
         }
-    }, false, '知识库');
+    }, false, KNOWLEDGE_GROUP);
     toolList.solve = async (ctx, _msg, session, args) => {
         await knowledgeService.init();
         const { page = 1, page_size = 20, query = '' } = args || {};
@@ -160,7 +160,7 @@ export function registerKnowledgeTools() {
                 required: ['library_id']
             }
         }
-    }, false, '知识库');
+    }, false, KNOWLEDGE_GROUP);
     toolDocs.solve = async (ctx, _msg, session, args) => {
         await knowledgeService.init();
         const libraryId = typeof args.library_id === 'string' ? args.library_id : '';

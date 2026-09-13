@@ -5,8 +5,8 @@
 import Logger from "../logger";
 
 import { buildProviderBody, parseProviderResponse } from "./adapter";
-import { classifyModel, ModelTag } from "./catalog";
-import { describeListError, fetchModelList, ListFetchFn } from "./list";
+import { classifyModel, DeclarableModelTag, ModelTag } from "./catalog";
+import { describeListError, fetchModelList, ListFetchFn, ModelCapabilityHints, normalizeModelListResult } from "./list";
 import { requestModel } from "./provider";
 import { bodyDefaultsFor, ModelRuleTemplate, requestOverridesFor, setRuleRows } from "./request_rules";
 import { ChatModelUse, EmbeddingModelUse, ModelUse, MultimodalModelUse } from "./types";
@@ -29,11 +29,13 @@ export interface ConnState {
     updatedAt: number;
     /** 该连接当前可用模型名（pinned 钉住/启动拉取结果），按列表顺序 */
     modelNames: string[];
+    /** 供应商自报的能力位（仅自动拉取会填；只存内存、不持久化） */
+    hints: Record<string, ModelCapabilityHints>;
 }
 
 /** 连接配置原始形态（configs/model.ts 解析 TOML 后传入） */
 export interface ConnConfigLike {
-    /** 模板行序号（稳定标识；省略时按数组位置） */
+    /** 模板框序号（稳定标识；省略时按数组位置） */
     connIndex?: number;
     provider: string;
     apiKey: string;
@@ -41,6 +43,8 @@ export interface ConnConfigLike {
     ignore: boolean;
     /** models 钉住清单：null=不钉住（启动自动拉取） */
     models: string[] | null;
+    /** 「api连接」[types]：模型名 → 手动声明的类型（优先级最高），默认 {} */
+    modelTypes?: Record<string, DeclarableModelTag>;
     /** 连接配置 [request]（列表拉取覆盖），默认 {} */
     request?: Record<string, any>;
 }
@@ -176,6 +180,8 @@ export default class Model {
     private static connByIndex = new Map<number, ConnConfigLike>();
     private static fetcher: ListFetchFn = fetchModelList;
     private static activeLoad: Promise<void> | null = null;
+    /** 已提示过的「[types] 声明未命中模型列表」键（连接序号:模型名），避免同一声明重复刷屏 */
+    private static warnedMissingTypes = new Set<string>();
 
     /** 重置注册表（测试/重载用；规则模板由 configs/model 负责重置） */
     static reset() {
@@ -185,6 +191,7 @@ export default class Model {
         Model.connByIndex = new Map();
         Model.activeLoad = null;
         Model.fetcher = fetchModelList;
+        Model.warnedMissingTypes.clear();
         ModelEntry.vectorCache = {};
     }
 
@@ -202,11 +209,11 @@ export default class Model {
             const rawIndex = typeof c.connIndex === 'number' ? c.connIndex : arrayIndex;
             if (!c.ignore) Model.connByIndex.set(rawIndex, c);
             if (c.ignore) {
-                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'ignored' as const, updatedAt: Date.now(), modelNames: [] });
+                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'ignored' as const, updatedAt: Date.now(), modelNames: [], hints: {} });
             } else if (c.models && c.models.length > 0) {
-                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'pinned' as const, status: 'ok' as const, updatedAt: Date.now(), modelNames: [...c.models] });
+                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'pinned' as const, status: 'ok' as const, updatedAt: Date.now(), modelNames: [...c.models], hints: {} });
             } else {
-                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'pending' as const, updatedAt: 0, modelNames: [] });
+                connStates.push({ connIndex: rawIndex, provider: c.provider, baseUrl: c.baseUrl, source: 'none' as const, status: 'pending' as const, updatedAt: 0, modelNames: [], hints: {} });
             }
         });
         Model.states = connStates;
@@ -244,15 +251,17 @@ export default class Model {
     /** 单连接拉取并更新 state（成功 → auto；失败 → error，只存内存） */
     private static async fetchConnState(state: ConnState, conn: ConnConfigLike): Promise<void> {
         try {
-            const names = await Model.fetcher({
+            const raw = await Model.fetcher({
                 provider: conn.provider,
                 baseUrl: conn.baseUrl,
                 apiKey: conn.apiKey,
                 listOverride: conn.request ?? {},
             });
+            const { names, hints } = normalizeModelListResult(raw);
             state.status = 'ok';
             state.source = 'auto';
             state.modelNames = names;
+            state.hints = hints;
             state.updatedAt = Date.now();
             delete state.errorKind;
             delete state.errorText;
@@ -260,6 +269,7 @@ export default class Model {
             const d = describeListError(e);
             state.status = 'error';
             state.modelNames = [];
+            state.hints = {};
             state.errorKind = d.kind;
             state.errorText = d.text;
         }
@@ -310,19 +320,43 @@ export default class Model {
         }
         const entries = pairs.map(({ st, name }) => {
             const conn = Model.connByIndex.get(st.connIndex);
+            const manual = conn?.modelTypes?.[name];
+            const hints = st.hints?.[name];
             const entry = new ModelEntry(
                 st.connIndex,
                 name,
                 st.provider,
                 st.baseUrl,
                 conn?.apiKey ?? '',
-                classifyModel(st.provider, name),
+                classifyModel(st.provider, name, { manual, ...(hints ?? {}) }),
                 st.source,
             );
             entry.ref = (counts.get(name) || 0) > 1 ? `[${st.connIndex}]:${name}` : name;
             return entry;
         });
         Model.entries = entries;
+        Model.warnUnusedModelTypes();
+    }
+
+    /**
+     * 「api连接」[types] 的手动声明未命中当前模型列表时提示一次（warning）：
+     * 模型名拼写错误/大小写不符/已从清单移除时，声明不再静默失效。
+     * 只在连接列表就绪（status=ok）时判定，避免拉取失败/未完成时误报；同一声明每进程只提示一次。
+     */
+    private static warnUnusedModelTypes() {
+        for (const st of Model.states) {
+            if (st.status !== 'ok') continue;
+            const declared = Model.connByIndex.get(st.connIndex)?.modelTypes;
+            if (!declared) continue;
+            const names = new Set(st.modelNames);
+            for (const name of Object.keys(declared)) {
+                if (names.has(name)) continue;
+                const key = `${st.connIndex}:${name}`;
+                if (Model.warnedMissingTypes.has(key)) continue;
+                Model.warnedMissingTypes.add(key);
+                log.warning(`api连接[${st.connIndex}] 的 [types] 声明 "${name}" = "${declared[name]}" 未命中当前模型列表（请检查模型名拼写；该连接当前 ${st.modelNames.length} 个模型）`);
+            }
+        }
     }
 
     // ---- 用途候选 / 默认解析 ----

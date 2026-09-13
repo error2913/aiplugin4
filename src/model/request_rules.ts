@@ -1,7 +1,7 @@
 // 模型规则：use 组模板（body/request）。按“用途组”给命中该用途的模型统一套用请求参数。
 // 纯模块：不依赖 seal / Config（仅引用静态 body 默认常量），便于单元测试。
-// 语义：bodyDefaultsFor(use) = 代码兜底默认 < 规则模板 body（多条命中按行序逐键覆盖）；
-//       requestOverridesFor(use) = 规则模板 request 合并（多条命中按行序逐键覆盖）。
+// 语义：bodyDefaultsFor(use) = 代码兜底默认 < 规则模板 body（多条命中按框序逐键覆盖）；
+//       requestOverridesFor(use) = 规则模板 request 合并（多条命中按框序逐键覆盖）。
 import {
     DEFAULT_CHAT_MODEL_BODY,
     DEFAULT_EMBEDDING_MODEL_BODY,
@@ -48,7 +48,7 @@ function mergeInto(target: any, src: any): any {
 
 /**
  * 某用途合并后的 body 默认值（不含调用方显式参数）。
- * 优先级：代码兜底默认 < 规则模板 body（行序，后覆盖先）
+ * 优先级：代码兜底默认 < 规则模板 body（框序，后覆盖先）
  */
 export function bodyDefaultsFor(use: ModelUse): any {
     let out: any = classDefaultBody(use);

@@ -19,11 +19,11 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "工具方向提示", true, "开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块；关闭后直接调用工具，不播报方向", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
         seal.ext.registerIntConfig(ext, "工具响应截断字数", 10000, "工具返回结果超过该字数时不再压缩，改为仅展示开头部分，并保留完整原文供 read_raw kind=tool 阅读；0 为不截断不保留", "工具");
-        seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每行一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
-        seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每行一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
-        seal.ext.registerTemplateConfig(ext, "禁止调用的 OB11 action", [''], "每行一个禁止 call_ob11_api 调用的原始 OB11 action，例如 set_group_ban；修改后自动生效", "工具");
-        seal.ext.registerTemplateConfig(ext, "默认关闭的 OB11 action", [''], "每行一个默认关闭的原始 OB11 action，例如 get_group_member_list；关闭后 AI 不会调用，修改后自动生效", "工具");
-        seal.ext.registerTemplateConfig(ext, "可调用指令白名单", SEALDICE_COMMAND_WHITELIST, "每行一个 AI 可调用的海豹指令；格式：扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔；核心指令的扩展名统一写 core（如 core|roll/r/rd）。默认已包含当前 SealDice 源码中的全部核心命令、内置扩展命令及其别名；修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每框一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每框一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "禁止调用的 OB11 action", [''], "每框一个禁止 call_ob11_api 调用的原始 OB11 action，例如 set_group_ban；修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "默认关闭的 OB11 action", [''], "每框一个默认关闭的原始 OB11 action，例如 get_group_member_list；关闭后 AI 不会调用，修改后自动生效", "工具");
+        seal.ext.registerTemplateConfig(ext, "可调用指令白名单", SEALDICE_COMMAND_WHITELIST, "每框一个 AI 可调用的海豹指令；格式：扩展名|指令名/别名1/别名2，同一元素内的别名用 / 分隔；核心指令的扩展名统一写 core（如 core|roll/r/rd）。默认已包含当前 SealDice 源码中的全部核心命令、内置扩展命令及其别名；修改后自动生效", "工具");
         seal.ext.registerBoolConfig(ext, "是否允许调用所有指令", false, "开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 run_core_command 调用", "工具");
         seal.ext.registerStringConfig(ext, "指令前缀", ".", "注入到 SealDice 核心的指令前缀，通常为 .；如果核心改成其他前缀，请同步修改", "工具");
         seal.ext.registerTemplateConfig(ext, "音乐服务配置", [
@@ -37,7 +37,7 @@ export default class ToolConfig {
     "api": "http://qqmusic.lovesealdice.online",
     "cookie": ""
 }`
-        ], "每行一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后需重载 JS 生效", "工具");
+        ], "每框一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后需重载 JS 生效", "工具");
         seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
             "小新",
             "猴哥",

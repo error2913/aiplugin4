@@ -5,7 +5,7 @@ import Model from "../model/model";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
-import Tool, { toolMap } from "../tool/tool";
+import Tool, { EXTERNAL_CATEGORY, toolMap } from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 
 import Agent from "./agent";
@@ -107,7 +107,8 @@ export function registerAgentApi(): void {
                 return false;
             }
             try {
-                const tool = new Tool(info, options.sensitive || false);
+                // 外部插件注册的工具统一归入「外部插件」分类（.ai tool 组概览与组开关可见）
+                const tool = Tool.withCategory(EXTERNAL_CATEGORY, () => new Tool(info, options.sensitive || false));
                 (tool as any).apiRegistered = true; // 允许同名 API 工具在 JS 重载后重新注册
                 tool.sessionType = options.sessionType || 'any';
                 if (options.callBack !== undefined) tool.callBack = options.callBack;

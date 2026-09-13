@@ -51,12 +51,17 @@ import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, est
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
+import Logger from "../src/logger";
+import { ModelListResult } from "../src/model/list";
 import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
-import Tool, { toolMap } from "../src/tool/tool";
+import Tool, { BUILTIN_CATEGORY_ORDER, CORE_TOOL_NAMES, DEFAULT_CATEGORY, EXTERNAL_CATEGORY, toolMap } from "../src/tool/tool";
+import { setToolGroupState } from "../src/tool/tool_group";
+import { registerTools } from "../src/tool/tools/init";
+import { registerCmdTool } from "../src/cmd/sub_cmd/tool";
 import { getSkillSummaries, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
@@ -246,21 +251,26 @@ function pinConn(provider: string, models: string[], baseUrl = 'https://x', apiK
     return { provider, apiKey, baseUrl, ignore: false, models, request: {} };
 }
 
+/** 构造一条带 [types] 手动类型声明的 pinned 连接 */
+function pinConnTyped(provider: string, models: string[], modelTypes: Record<string, string>, baseUrl = 'https://x', apiKey = 'k'): any {
+    return { provider, apiKey, baseUrl, ignore: false, models, modelTypes, request: {} };
+}
+
 /** 播种 pinned 连接（可选带规则模板）并复位注册表 */
 function seedPinnedConns(conns: any[], rules: any[] = []) {
     Model.reset();
     Model.bootstrap(conns, rules);
 }
 
-/** 播种「自动拉取」连接：注入假 fetcher（返回模型名数组；可跨次调用改变），随后等待拉取完成 */
-async function seedAutoConns(conns: any[], fetchFn: (ctx: any) => Promise<string[]>, rules: any[] = []) {
+/** 播种「自动拉取」连接：注入假 fetcher（返回模型名数组或带能力位的列表项；可跨次调用改变），随后等待拉取完成 */
+async function seedAutoConns(conns: any[], fetchFn: (ctx: any) => Promise<ModelListResult>, rules: any[] = []) {
     Model.reset();
     Model.bootstrap(conns, rules, { fetch: fetchFn as any });
     await Model.ensureLoaded();
 }
 
 /** 从「api连接」模板配置播种（解析 → Model.bootstrap），供解析/降级类测试使用 */
-function seedFromTemplate(connToml: string[], ruleToml: string[] = [], fetchFn?: (ctx: any) => Promise<string[]>) {
+function seedFromTemplate(connToml: string[], ruleToml: string[] = [], fetchFn?: (ctx: any) => Promise<ModelListResult>) {
     resetModelConfigCacheForTest();
     TC.templateConfigs['api连接'] = connToml;
     TC.templateConfigs['模型规则'] = ruleToml;
@@ -3905,6 +3915,241 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** 模型类型手动声明（api连接 [types]）：声明后立即进对应用途候选，嵌入模型不再误入对话候选 */
+    testModelTypesManualDeclaration(): void {
+        try {
+            // 未声明：网关自命名模型（名字不含 embed/vision 等关键词）全部归 text，嵌入模型被误用为对话模型、嵌入/识图无候选
+            seedPinnedConns([pinConn('custom', ['gw-vec-1', 'gw-vl-1', 'gw-chat-1'])]);
+            assert.equal(Model.entries.every(e => e.tags.includes('text')), true, '未声明时应全部归 text');
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null);
+            assert.equal(Model.getMultimodalModel('image-understanding'), null);
+            assert.equal(Model.getChatModel('chat')?.name, 'gw-vec-1', '未声明时首个候选被误用为对话模型');
+
+            // 声明后：嵌入/识图各有候选，对话候选只剩纯文本
+            seedPinnedConns([pinConnTyped('custom', ['gw-vec-1', 'gw-vl-1', 'gw-chat-1'], {
+                'gw-vec-1': 'embed',
+                'gw-vl-1': 'vision',
+                'gw-chat-1': 'text',
+            })]);
+            const embed = Model.getEmbeddingModel('text-embedding');
+            assert.equal(embed?.name, 'gw-vec-1', 'embed 声明应进嵌入候选');
+            assert.equal(embed?.tags.includes('embed'), true);
+            assert.equal(Model.getChatModel('chat')?.name, 'gw-vl-1', '对话候选按列表顺序取首个非嵌入/非生图模型（vision 可当对话模型）');
+            assert.equal(Model.listModelsForUse('chat').some(m => m.name === 'gw-vec-1'), false, '嵌入声明后不得再进对话候选');
+            const vl = Model.getMultimodalModel('image-understanding');
+            assert.equal(vl?.name, 'gw-vl-1', 'vision 声明应进识图候选');
+            assert.equal(vl?.isMultimodal, true, 'vision 声明应让模型按多模态处理');
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** 手动声明绝对优先：可把视觉模型声明为纯文本、把嵌入模型声明为多模态（两个方向都成立） */
+    testModelTypesManualAbsolutePriority(): void {
+        try {
+            // 方向一：视觉模型 → text（摘出识图候选，仍可作对话模型）
+            seedPinnedConns([pinConnTyped('zhipu', ['glm-4v'], { 'glm-4v': 'text' })]);
+            assert.equal(Model.entries[0].tags.includes('text'), true, '声明应覆盖命名视觉白名单');
+            assert.equal(Model.getMultimodalModel('image-understanding'), null, '声明 text 应摘出识图候选');
+            assert.equal(Model.getChatModel('chat')?.name, 'glm-4v', '声明 text 后仍可作对话模型');
+
+            // 方向二：嵌入模型 → vision（摘出嵌入候选，进识图与对话候选）
+            seedPinnedConns([pinConnTyped('openai', ['text-embedding-3-small'], { 'text-embedding-3-small': 'vision' })]);
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null, '声明 vision 应摘出嵌入候选');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'text-embedding-3-small');
+            assert.equal(Model.getChatModel('chat')?.name, 'text-embedding-3-small', 'vision 声明可作对话候选');
+
+            // 方向三：覆盖生图/排序等命名终值白名单
+            seedPinnedConns([pinConnTyped('openai', ['dall-e-3', 'bge-reranker-v2'], { 'dall-e-3': 'text', 'bge-reranker-v2': 'text' })]);
+            assert.equal(Model.getChatModel('chat')?.name, 'dall-e-3', '手动声明应覆盖生图白名单');
+            assert.equal(Model.getChatModel('compression')?.name, 'dall-e-3');
+        } finally {
+            Model.reset();
+        }
+    },
+
+    /** [types] 解析：合法值生效（大小写/空格/带点号引号键）、非法值只忽略该键、TOML 顺序坑整行跳过 */
+    testModelTypesParsingAndInvalidValues(): void {
+        const orig = TC.templateConfigs['api连接'];
+        const origRules = TC.templateConfigs['模型规则'];
+        const loadConn = () => {
+            resetConfigCache();
+            (Config as any).model;
+        };
+        try {
+            // 1) 合法值：大小写与空格容错；含点号的模型名用引号键（该名字本身不含任何关键词，只能靠声明进候选）
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nprovider = "custom"\nbase_url = "https://gw/v1"\nmodels = ["gw-vec-1", "gw.model.v1", "plain"]\n\n[types]\n"gw-vec-1" = "  EMBED "\n"gw.model.v1" = "Vision"\n"plain" = "text"',
+            ];
+            TC.templateConfigs['模型规则'] = [];
+            loadConn();
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'gw-vec-1', '大小写/空格应容错');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'gw.model.v1', '带点号的模型名用引号键应生效');
+            assert.equal(Model.getChatModel('chat')?.name, 'gw.model.v1', '对话候选按列表顺序（vision 可当对话模型）');
+            assert.equal(Model.listModelsForUse('chat').some(m => m.name === 'gw-vec-1'), false, '嵌入声明后不得再进对话候选');
+
+            // 2) 非法值：只忽略该键，整行连接仍可用（该模型回退命名猜测）
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nprovider = "custom"\nbase_url = "https://gw/v1"\nmodels = ["a", "b"]\n\n[types]\n"a" = "多模态"\n"b" = "vision"',
+            ];
+            loadConn();
+            assert.equal(Model.states[0].status, 'ok', '非法 [types] 值不应影响整行解析');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'b');
+            assert.equal(Model.entries.find(e => e.name === 'a')?.tags.includes('text'), true, '非法值该键被忽略');
+
+            // 3) 裸键带点号 → TOML 解析成嵌套表：该键不生效（回退命名猜测），但连接正常（仅记 error 日志）
+            TC.templateConfigs['api连接'] = [
+                'api_key = "k"\nprovider = "custom"\nbase_url = "https://gw/v1"\nmodels = ["gw.model.v2"]\n\n[types]\ngw.model.v2 = "embed"',
+            ];
+            loadConn();
+            assert.equal(Model.states[0].status, 'ok');
+            assert.equal(Model.getEmbeddingModel('text-embedding'), null, '裸键带点号不生效');
+            assert.equal(Model.getChatModel('chat')?.name, 'gw.model.v2', '该模型回退为 text 猜测');
+
+            // 4) [types] 写在标量键之前 → api_key/models 被吞进 types 表 → 整行因缺 api_key 被跳过
+            TC.templateConfigs['api连接'] = [
+                'provider = "custom"\nbase_url = "https://gw/v1"\n\n[types]\n"a" = "embed"\napi_key = "k"\nmodels = ["a"]',
+            ];
+            loadConn();
+            assert.equal(Model.states.length, 0, 'TOML 顺序错误应整行跳过');
+        } finally {
+            if (orig === undefined) delete TC.templateConfigs['api连接']; else TC.templateConfigs['api连接'] = orig;
+            if (origRules === undefined) delete TC.templateConfigs['模型规则']; else TC.templateConfigs['模型规则'] = origRules;
+            resetModelConfigCacheForTest();
+            setModelListDepsForTest();
+            resetConfigCache();
+            Model.reset();
+        }
+    },
+
+    /** [types] 声明未命中模型列表：打一行 warning（同一声明只打一次），列表未就绪/已命中时不提示 */
+    testModelTypesUnusedDeclarationWarning(): void {
+        const origEmit = (Logger as any).emit;
+        const warnings: string[] = [];
+        (Logger as any).emit = (level: string, ...data: any[]) => {
+            if (level !== '警告') return;
+            warnings.push(data.map(d => typeof d === 'string' ? d : JSON.stringify(d)).join(' '));
+        };
+        try {
+            // 1) 拼写错误的声明 → 恰好一条 warning，且含声明的模型名
+            seedPinnedConns([pinConnTyped('custom', ['real-model'], { 'ghost-model': 'embed' })]);
+            assert.equal(warnings.length, 1, '未命中的声明应恰好提示一次');
+            assert.ok(warnings[0].includes('ghost-model'), '提示应含声明的模型名');
+
+            // 2) 重建/重拉不重复提示
+            Model.rebuildEntries();
+            assert.equal(warnings.length, 1, '同一进程内同一声明不重复提示');
+
+            // 3) 命中的声明不提示
+            warnings.length = 0;
+            seedPinnedConns([pinConnTyped('custom', ['real-model'], { 'real-model': 'embed' })]);
+            assert.equal(warnings.length, 0, '命中的声明不应提示');
+
+            // 4) 列表未就绪（拉取中/失败）不误报
+            warnings.length = 0;
+            Model.reset();
+            Model.bootstrap([{
+                provider: 'openai', apiKey: 'k', baseUrl: 'https://o',
+                ignore: false, models: null, modelTypes: { 'x': 'embed' }, request: {},
+            }], [], { fetch: async () => { throw new Error('boom'); } });
+            assert.equal(Model.states[0].status, 'pending', '拉取完成前不判定');
+            assert.equal(warnings.length, 0, '列表未就绪时不应误报');
+
+            // 5) ignore=1 的忽略连接不提示
+            warnings.length = 0;
+            seedPinnedConns([{ provider: 'custom', apiKey: 'k', baseUrl: 'https://x', ignore: true, models: ['real-model'], modelTypes: { 'ghost': 'embed' }, request: {} }]);
+            assert.equal(warnings.length, 0, '忽略连接不应提示');
+        } finally {
+            (Logger as any).emit = origEmit;
+            Model.reset();
+        }
+    },
+
+    /** 列表接口能力位：真实解析路径（桩 HTTP 响应）下，供应商自报能力位参与分类 */
+    async testModelListCapabilityHints(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        try {
+            const data = {
+                data: [
+                    { id: 'gw-vec', type: 'embeddings' },
+                    { id: 'gw-vl', architecture: { input_modalities: ['text', 'image'] } },
+                    { id: 'gw-task', task: 'embed' },
+                    { id: 'gw-caps', capabilities: ['completion', 'vision'] },
+                    { id: 'gw-flag', supports_vision: true },
+                    { id: 'claude-x', type: 'model' },   // anthropic 风格：type=model 不应误判
+                    { id: 'plain-model' },                // 无能力位字段：退回命名猜测
+                ],
+            };
+            (globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(data) });
+            Model.reset();
+            Model.bootstrap([{ provider: 'openrouter', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], []);
+            await Model.ensureLoaded();
+            assert.equal(Model.states[0].status, 'ok');
+
+            const tagsOf = (name: string) => Model.entries.find(e => e.name === name)?.tags ?? [];
+            assert.deepEqual(tagsOf('gw-vec'), ['embed'], 'type=embeddings 应识别为嵌入');
+            assert.deepEqual(tagsOf('gw-vl'), ['vision'], 'input_modalities 含 image 应识别为多模态');
+            assert.deepEqual(tagsOf('gw-task'), ['embed'], 'task=embed 应识别为嵌入');
+            assert.deepEqual(tagsOf('gw-caps'), ['vision'], 'capabilities 含 vision 应识别为多模态');
+            assert.deepEqual(tagsOf('gw-flag'), ['vision'], 'supports_vision 应识别为多模态');
+            assert.deepEqual(tagsOf('claude-x'), ['text'], 'type=model 不应误判');
+            assert.deepEqual(tagsOf('plain-model'), ['text'], '无能力位字段应退回命名猜测');
+
+            // 候选生效：嵌入进嵌入候选且不进对话候选；多模态进识图候选
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'gw-vec');
+            assert.equal(Model.listModelsForUse('chat').some(m => m.name === 'gw-vec'), false, '接口声明的嵌入模型不应进对话候选');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'gw-vl');
+
+            // states 侧：模型名保序去重；能力位只存内存
+            assert.deepEqual(Model.states[0].modelNames, ['gw-vec', 'gw-vl', 'gw-task', 'gw-caps', 'gw-flag', 'claude-x', 'plain-model']);
+            assert.deepEqual(Model.states[0].hints['gw-vl'], { vision: true });
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            Model.reset();
+        }
+    },
+
+    /** 接口能力位只取正向证据：保守元数据不降级命名判定；命名终值优先于接口能力位 */
+    async testModelListHintsNoDowngrade(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        try {
+            const data = {
+                data: [
+                    { id: 'glm-4v', capabilities: ['completion'] },   // 保守元数据：不产出 text，命名仍判视觉
+                    { id: 'text-embedding-3-small', type: 'vlm' },    // 命名终值优先于接口（防网关元数据质量差）
+                ],
+            };
+            (globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(data) });
+            Model.reset();
+            Model.bootstrap([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], []);
+            await Model.ensureLoaded();
+
+            const tagsOf = (name: string) => Model.entries.find(e => e.name === name)?.tags ?? [];
+            assert.deepEqual(tagsOf('glm-4v'), ['vision'], '无正向证据时不应把视觉模型降级为 text');
+            assert.deepEqual(tagsOf('text-embedding-3-small'), ['embed'], '命名终值应优先于接口能力位');
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small');
+            assert.equal(Model.getMultimodalModel('image-understanding')?.name, 'glm-4v');
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            Model.reset();
+        }
+    },
+
+    /** 老式 string[] 拉取结果仍按原行为工作（无能力位 → 纯命名猜测） */
+    async testModelListLegacyStringResult(): Promise<void> {
+        try {
+            await seedAutoConns([{ provider: 'openai', apiKey: 'k', baseUrl: 'https://o', ignore: false, models: null, request: {} }], async () => ['m1', 'text-embedding-3-small']);
+            assert.deepEqual(Model.states[0].modelNames, ['m1', 'text-embedding-3-small']);
+            assert.deepEqual(Model.states[0].hints, {}, '字符串结果不应产生能力位');
+            assert.equal(Model.getChatModel('chat')?.name, 'm1');
+            assert.equal(Model.getEmbeddingModel('text-embedding')?.name, 'text-embedding-3-small');
+            assert.ok(Model.entries.some(e => e.tags.includes('embed')), '拉取模型应完成分类');
+        } finally {
+            Model.reset();
+        }
+    },
+
     /** Agent.chat：多模态 user content 为内容块数组、纯文本为字符串；请求层收到解析出的模型实例 */
     async testAgentChatPassesResolvedModel(): Promise<void> {
         const origSend = (streamService as any).sendChatRequest;
@@ -5828,7 +6073,7 @@ description: 茶库
             assert.equal(ov?.timeout, 5);
             assert.equal(Model.requestOverridesFor('summarization'), null, '未命中规则无 request 覆盖');
 
-            // 重叠行按行序逐键合并、后覆盖先
+            // 重叠规则按框顺序逐键合并、后面的框覆盖前面的
             seedPinnedConns([pinConn('deepseek', ['text-a'])], [
                 { use: ['chat'], body: { max_tokens: 1000, temperature: 0.1 }, request: {} },
                 { use: ['chat'], body: { max_tokens: 2000 }, request: {} },
@@ -6617,7 +6862,8 @@ platform: [QQ, DISCORD]
             assert.ok(String(callOut).includes('不可用'), `call_tool 应拦截平台外工具: ${callOut}`);
             const grouped = Tool.getGroupedAvailableTools(session, 'QQ');
             const labels = grouped.map(g => g.group);
-            assert.ok(labels.includes('内置') && labels.includes('mcp-files-exec'), `分组应含内置与 mcp-files-exec: ${labels.join(',')}`);
+            // 未打分类的工具（本用例直接 new Tool 注册）落兜底分类：显示为「内置·其他」
+            assert.ok(labels.includes(`内置·${DEFAULT_CATEGORY}`) && labels.includes('mcp-files-exec'), `分组应含内置·其他与 mcp-files-exec: ${labels.join(',')}`);
             assert.ok(!labels.includes('mcp-browser'), '平台过滤后的分组不应含 mcp-browser');
         } finally {
             for (const k of ['zz_mcp_file', 'zz_browser', 'zz_plain_calc']) delete toolMap[k];
@@ -6652,12 +6898,257 @@ platform: [QQ, DISCORD]
             resetMCPCacheForTest();
         }
     },
+
+    /** 工具组：内置工具必须打上分类；技能/知识库不参与组维度（无 category） */
+    testToolCategoryCoverage(): void {
+        // 复位注册表后只跑内置注册链，断言不受其它用例临时注册的工具干扰
+        Tool.reset();
+        registerTools();
+        registerSkills();
+
+        const builtin = Object.keys(toolMap).filter(n => !toolMap[n].group);
+        const missing = builtin.filter(n => !toolMap[n].category);
+        assert.deepEqual(missing, [], `内置工具必须打上分类（缺: ${missing.join('、')}）`);
+        assert.equal(builtin.length, 58, `内置工具数应为 58，实际 ${builtin.length}`);
+
+        const byCategory: { [k: string]: string[] } = {};
+        for (const n of builtin) (byCategory[Tool.categoryOf(toolMap[n])] = byCategory[Tool.categoryOf(toolMap[n])] || []).push(n);
+        assert.equal(byCategory['基础调度'].length, 4, `基础调度应有 4 个: ${byCategory['基础调度']}`);
+        assert.ok(byCategory['基础调度'].includes('list_tools') && byCategory['基础调度'].includes('call_tool'), '调度组应含 list_tools/call_tool');
+        assert.equal(byCategory['记忆'].length, 12, `记忆应有 12 个: ${byCategory['记忆']}`);
+        assert.equal(byCategory['子代理'].length, 8, `子代理应有 8 个: ${byCategory['子代理']}`);
+        assert.ok(byCategory['子代理'].includes('subagent') && byCategory['子代理'].includes('job_kill'), '子代理组应含 subagent/job_kill');
+        assert.ok(byCategory['图片'].includes('meme_generator') && byCategory['资源'].includes('search_music'), '图片/资源分类应命中各自的工具');
+        // 未列入固定顺序表的分类只允许兜底「其他」（防新增工具漏加分类）
+        const unknown = Object.keys(byCategory).filter(k => !BUILTIN_CATEGORY_ORDER.includes(k));
+        assert.deepEqual(unknown, [], `分类必须在 BUILTIN_CATEGORY_ORDER 内: ${unknown.join('、')}`);
+        assert.equal(byCategory[DEFAULT_CATEGORY], undefined, '分类完整时不应出现兜底分类');
+
+        // 技能/知识库：来源分组明确、且不参与组维度
+        assert.equal(toolMap['use_skill'].group, '技能');
+        assert.equal(toolMap['skill_list'].group, '技能');
+        assert.equal(toolMap['knowledge_search'].group, '知识库');
+        for (const n of ['use_skill', 'skill_list', 'knowledge_search', 'knowledge_read', 'knowledge_list', 'knowledge_docs']) {
+            assert.equal(Tool.categoryOf(toolMap[n]), '', `${n} 不应参与工具组维度（无 category）`);
+            assert.equal(Tool.isGroupable(toolMap[n]), false, `${n} 不应是可切换组工具`);
+        }
+        // 外部插件注册的工具归入固定分类
+        const external = Tool.withCategory(EXTERNAL_CATEGORY, () => new Tool({
+            type: 'function',
+            function: { name: 'zz_external_probe', description: '外部插件工具', parameters: { type: 'object', properties: {} } }
+        }));
+        assert.equal(Tool.categoryOf(external), EXTERNAL_CATEGORY);
+        assert.equal(Tool.groupDisplay(external), `内置·${EXTERNAL_CATEGORY}`);
+        delete toolMap['zz_external_probe'];
+    },
+
+    /** 工具组：分组视图（内置分类 + MCP 服务器；排序、平台过滤、技能/知识库排除） */
+    testToolGroupsView(): void {
+        registerTools();
+        registerSkills();
+        const fakeQQ = new Tool({
+            type: 'function',
+            function: { name: 'zz_group_mcp_qq', description: 'MCP 工具', parameters: { type: 'object', properties: {} } }
+        }, false, 'zz-mcp-server', ['QQ']);
+        const fakeDC = new Tool({
+            type: 'function',
+            function: { name: 'zz_group_mcp_dc', description: '仅 Discord 的 MCP 工具', parameters: { type: 'object', properties: {} } }
+        }, false, 'zz-mcp-server', ['DISCORD']);
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:1';
+            const groups = Tool.getToolGroups(session, 'QQ');
+            const keys = groups.map(g => g.key);
+
+            // 内置分类组按固定顺序排列，且都在顺序表内
+            const builtinKeys = groups.filter(g => g.kind === 'builtin').map(g => g.key);
+            assert.deepEqual(builtinKeys, BUILTIN_CATEGORY_ORDER.filter(k => builtinKeys.includes(k)), `内置分类顺序错误: ${builtinKeys.join('、')}`);
+            // MCP 服务器组排在内置之后，键=服务器名
+            const mcpKeys = groups.filter(g => g.kind === 'mcp').map(g => g.key);
+            assert.deepEqual(mcpKeys, ['zz-mcp-server'], `MCP 组应为服务器名: ${mcpKeys.join('、')}`);
+            assert.equal(groups[groups.length - 1].kind, 'mcp', 'MCP 组应排在内置分类之后');
+
+            // 平台过滤：DISCORD 限定工具不进 QQ 视图；组内计数与实际开关一致
+            const memory = groups.find(g => g.key === '记忆')!;
+            assert.equal(memory.names.length, 12);
+            assert.equal(memory.on, 12);
+            assert.equal(memory.off, 0);
+            assert.equal(memory.label, '内置·记忆');
+            const mcp = groups.find(g => g.key === 'zz-mcp-server')!;
+            assert.deepEqual(mcp.names, ['zz_group_mcp_qq'], '平台不符的 MCP 工具不应进组');
+            assert.equal(Tool.isAllowedPlatform(toolMap['zz_group_mcp_dc'], 'QQ'), false);
+
+            // 技能/知识库不作为组出现
+            assert.ok(!keys.includes('技能') && !keys.includes('知识库'), `技能/知识库不应作为工具组: ${keys.join('、')}`);
+            assert.ok(!mcp.names.concat(memory.names).some(n => n.startsWith('knowledge_')), '知识库工具不应进任何组');
+
+            // 开关状态参与计数
+            session.tool.state['memory_add'] = false;
+            session.tool.state['memory_delete'] = false;
+            const memory2 = Tool.getToolGroups(session, 'QQ').find(g => g.key === '记忆')!;
+            assert.equal(memory2.on, 10);
+            assert.equal(memory2.off, 2);
+
+            // 显示名/分类名/服务器名都能解析；未命中与多命中给可读错误
+            assert.equal((Tool.resolveToolGroup('记忆', groups) as any).key, '记忆');
+            assert.equal((Tool.resolveToolGroup('内置·记忆', groups) as any).key, '记忆');
+            assert.equal((Tool.resolveToolGroup('zz-mcp-server', groups) as any).key, 'zz-mcp-server');
+            assert.equal((Tool.resolveToolGroup('mcp-server', groups) as any).key, 'zz-mcp-server', '唯一包含匹配应命中该组');
+            assert.ok(typeof Tool.resolveToolGroup('不存在的组', groups) === 'string', '未命中应返回错误说明');
+            // 多命中：再加一台同前缀服务器 → 报歧义而不是随便挑一个
+            const fakeQQ2 = new Tool({
+                type: 'function',
+                function: { name: 'zz_group_mcp_qq2', description: 'MCP 工具 2', parameters: { type: 'object', properties: {} } }
+            }, false, 'zz-mcp-server-2', ['QQ']);
+            const groups2 = Tool.getToolGroups(session, 'QQ');
+            assert.ok(String(Tool.resolveToolGroup('zz-mcp', groups2)).includes('匹配多个'), '多命中应提示歧义');
+            assert.deepEqual(groups2.filter(g => g.kind === 'mcp').map(g => g.key), ['zz-mcp-server', 'zz-mcp-server-2'], 'MCP 组应按服务器名排序');
+            delete toolMap['zz_group_mcp_qq2'];
+        } finally {
+            delete toolMap['zz_group_mcp_qq'];
+            delete toolMap['zz_group_mcp_dc'];
+            delete toolMap['zz_group_mcp_qq2'];
+        }
+    },
+
+    /** 工具组：批量开关（核心常驻跳过 / --force 覆盖 / 禁用名单跳过） */
+    testToolGroupToggleRules(): void {
+        registerTools();
+        const session = new Session();
+        session.sessionId = 'QQ:1';
+
+        // 普通分类：整组关闭 / 开启
+        const memory = Tool.getToolGroups(session, 'QQ').find(g => g.key === '记忆')!;
+        const off = setToolGroupState(session, memory.names, false, { skipCore: true });
+        assert.equal(off.changed, 12);
+        assert.equal(session.toolState['memory_add'], false);
+        const on = setToolGroupState(session, memory.names, true, { skipBlocked: true });
+        assert.equal(on.changed, 12);
+        assert.equal(session.toolState['memory_add'], true);
+        const again = setToolGroupState(session, memory.names, true, { skipBlocked: true });
+        assert.equal(again.changed, 0);
+        assert.equal(again.unchanged, 12, '已是目标状态应计入 unchanged');
+
+        // 核心常驻工具：默认跳过，--force（skipCore=false）才真正关闭
+        const dispatch = Tool.getToolGroups(session, 'QQ').find(g => g.key === '基础调度')!;
+        assert.deepEqual(dispatch.names, ['call_tool', 'list_mcps', 'list_tools', 'search_tools']);
+        assert.ok(dispatch.names.every(n => CORE_TOOL_NAMES.includes(n)), '基础调度组应全部是核心常驻工具');
+        const skipped = setToolGroupState(session, dispatch.names, false, { skipCore: true });
+        assert.equal(skipped.changed, 0);
+        assert.equal(skipped.skippedCore, 4);
+        assert.equal(session.toolState['list_tools'], true, '核心常驻工具默认不被关闭');
+        const forced = setToolGroupState(session, dispatch.names, false, { skipCore: false });
+        assert.equal(forced.changed, 4);
+        assert.equal(session.toolState['list_tools'], false, '--force 应能关闭核心常驻工具');
+        setToolGroupState(session, dispatch.names, true, { skipBlocked: true });
+
+        // 禁用名单：on 时跳过并计数；名单内工具也不进入组视图
+        const prior = TC.templateConfigs['禁止调用的函数'];
+        TC.templateConfigs['禁止调用的函数'] = ['memory_add'];
+        resetConfigCache();
+        try {
+            const s2 = new Session();
+            s2.sessionId = 'QQ:2';
+            const memory2 = Tool.getToolGroups(s2, 'QQ').find(g => g.key === '记忆')!;
+            assert.equal(memory2.names.includes('memory_add'), false, '禁止调用的函数不应出现在组内');
+            assert.equal(memory2.names.length, 11);
+            s2.tool.state['memory_delete'] = false;
+            const r = setToolGroupState(s2, ['memory_add', 'memory_delete'], true, { skipBlocked: true });
+            assert.equal(r.skippedBlocked, 1, '禁用名单内的工具应被跳过');
+            assert.equal(r.changed, 1, '仅未被跳过的工具被开启');
+            assert.equal(s2.toolState['memory_delete'], true);
+        } finally {
+            if (prior === undefined) delete TC.templateConfigs['禁止调用的函数']; else TC.templateConfigs['禁止调用的函数'] = prior;
+            resetConfigCache();
+        }
+    },
+
+    /** .ai tool：组概览 / 组明细 / 组开关 / --group= / --force / 兼容旧用法 */
+    async testAiToolCommandGroups(): Promise<void> {
+        registerTools();
+        registerSkills();
+        if (!SubCmd.map['tool']) registerCmdTool();
+        const session = new Session();
+        session.sessionId = 'QQ:1';
+
+        // 组概览：只列组与统计，不展开工具名
+        const overview = await runSubCmd('tool', [''], { session });
+        assert.ok(overview.startsWith('工具组（当前平台 QQ'), `应输出组概览: ${overview.slice(0, 120)}`);
+        assert.ok(overview.includes('1. 基础调度（4，开 4 关 0）'), `概览应含基础调度统计: ${overview}`);
+        assert.ok(overview.includes('记忆（12，开 12 关 0）'), `概览应含记忆统计: ${overview}`);
+        assert.ok(!overview.includes('memory_add'), '概览不应展开组内工具');
+        assert.ok(overview.includes('技能/知识库工具不在工具组范围'), '概览应提示技能/知识库管理入口');
+        assert.ok(!overview.includes('技能（'), '概览不应把技能列为工具组');
+
+        // 组明细
+        const detail = await runSubCmd('tool', ['', '记忆'], { session });
+        assert.ok(detail.includes('工具组「记忆」（内置）：12 个，开 12 关 0'), `组明细头部错误: ${detail.slice(0, 120)}`);
+        assert.ok(detail.includes('memory_add[开]') && detail.includes('memory_recall[开]'), '组明细应列出组内工具与开关');
+        assert.ok(detail.includes('.ai tool on/off 记忆'), '组明细应给出批量开关提示');
+
+        // 组开关：关 → 概览与状态同步，开 → 恢复
+        const off = await runSubCmd('tool', ['', 'off', '记忆'], { session });
+        assert.ok(off.includes('已关闭工具组「记忆」') && off.includes('实际变更 12 个'), `组关闭回复错误: ${off}`);
+        assert.equal(session.toolState['memory_add'], false);
+        const overviewOff = await runSubCmd('tool', [''], { session });
+        assert.ok(overviewOff.includes('记忆（12，开 0 关 12）'), `关闭后概览统计应更新: ${overviewOff}`);
+        const on = await runSubCmd('tool', ['', 'on', '记忆'], { session });
+        assert.ok(on.includes('已开启工具组「记忆」'), `组开启回复错误: ${on}`);
+        assert.equal(session.toolState['memory_add'], true);
+
+        // 核心常驻：组 off 默认跳过并提示 --force；--force 才真正关闭
+        const offCore = await runSubCmd('tool', ['', 'off', '基础调度'], { session });
+        assert.ok(offCore.includes('跳过核心常驻工具 4 个'), `应报告跳过的核心工具: ${offCore}`);
+        assert.ok(offCore.includes('--force'), '应提示 --force 用法');
+        assert.equal(session.toolState['list_tools'], true);
+        const forced = await runSubCmd('tool', ['', 'off', '基础调度'], { session }, [{ name: 'force', valueExists: false }]);
+        assert.ok(forced.includes('实际变更 4 个'), `--force 应真正关闭: ${forced}`);
+        assert.equal(session.toolState['list_tools'], false);
+        await runSubCmd('tool', ['', 'on', '基础调度'], { session });
+        assert.equal(session.toolState['list_tools'], true);
+
+        // 无参 off：跳过核心常驻工具（AI 的工具入口不会静默失效）
+        const offAll = await runSubCmd('tool', ['', 'off'], { session });
+        assert.ok(offAll.includes('全部工具') && offAll.includes('跳过核心常驻工具'), `无参 off 应跳过核心工具: ${offAll}`);
+        assert.equal(session.toolState['list_tools'], true, '无参 off 默认保留核心常驻工具');
+        assert.equal(session.toolState['memory_add'], false, '无参 off 应关闭普通工具');
+        const offAllForced = await runSubCmd('tool', ['', 'off'], { session }, [{ name: 'force', valueExists: false }]);
+        assert.ok(offAllForced.includes('实际变更'), `无参 off --force 应执行: ${offAllForced}`);
+        assert.equal(session.toolState['list_tools'], false, '无参 off --force 应关闭核心常驻工具');
+        await runSubCmd('tool', ['', 'on'], { session });
+
+        // 显式 --group= 写法（绕开保留字与撞名）
+        const byFlag = await runSubCmd('tool', [''], { session }, [{ name: 'group', value: '记忆', valueExists: true }]);
+        assert.ok(byFlag.includes('工具组「记忆」'), `--group= 应列出该组: ${byFlag.slice(0, 120)}`);
+        const offByFlag = await runSubCmd('tool', ['', 'off'], { session }, [{ name: 'group', value: '记忆', valueExists: true }]);
+        assert.ok(offByFlag.includes('已关闭工具组「记忆」'), `--group= off 应关闭该组: ${offByFlag}`);
+        await runSubCmd('tool', ['', 'on'], { session });
+
+        // 兼容：技能/知识库仍可按单工具开关；工具名照旧查看详情
+        const offSkill = await runSubCmd('tool', ['', 'off', 'use_skill'], { session });
+        assert.ok(offSkill.includes('已关闭工具函数 use_skill'), `单工具开关应保持原行为: ${offSkill}`);
+        assert.equal(session.toolState['use_skill'], false);
+        await runSubCmd('tool', ['', 'on', 'use_skill'], { session });
+        const toolDetail = await runSubCmd('tool', ['', 'memory_add'], { session });
+        assert.ok(toolDetail.includes('memory_add') && toolDetail.includes('来源:内置·记忆'), `工具名应展示详情: ${toolDetail.slice(0, 120)}`);
+        const helpDetail = await runSubCmd('tool', ['', 'help', 'memory_add'], { session });
+        assert.ok(helpDetail.includes('来源:内置·记忆'), 'help 详情应标注分类来源');
+
+        // 未命中给可读提示；.ai tool all 保留扁平全量视图（含技能/知识库）
+        const miss = await runSubCmd('tool', ['', '不存在的组'], { session });
+        assert.ok(miss.includes('未找到工具组') && miss.includes('可用组：'), `未命中应有候选提示: ${miss}`);
+        const all = await runSubCmd('tool', ['', 'all'], { session });
+        assert.ok(all.includes('use_skill') && all.includes('knowledge_search'), '.ai tool all 应含技能/知识库工具');
+        assert.ok(all.includes('内置·记忆:'), 'all 视图应沿用分类组头');
+        const listAlias = await runSubCmd('tool', ['', 'list'], { session });
+        assert.ok(listAlias.startsWith('工具组（当前平台 QQ'), 'list 别名应输出组概览');
+    },
 };
 
-/** 执行一个已注册的子命令（SubCmd.map），捕获最后一次回复文本 */
-async function runSubCmd(name: string, args: string[], sccOver: any = {}): Promise<string> {
+/** 执行一个已注册的子命令（SubCmd.map），捕获最后一次回复文本（kwargs 可选，如 --group=/--force） */
+async function runSubCmd(name: string, args: string[], sccOver: any = {}, kwargs: any[] = []): Promise<string> {
     const scc = makeMemoScc(sccOver);
-    scc.cmdArgs = makeMemoArgs(args);
+    scc.cmdArgs = makeMemoArgs(args, kwargs);
     const origReply = (globalThis as any).seal.replyToSender;
     let replied = '';
     (globalThis as any).seal.replyToSender = (_c: any, _m: any, text: string) => { replied = text; };

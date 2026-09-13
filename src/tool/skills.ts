@@ -5,7 +5,7 @@ import Logger from "../logger";
 import { splitFrontmatter } from "../utils/frontmatter";
 import { matchesPlatform, platformOf } from "../utils/target_id";
 
-import Tool from "./tool";
+import Tool, { SKILL_GROUP } from "./tool";
 
 interface Skill {
     name: string;
@@ -171,7 +171,7 @@ export function registerSkills() {
                 }
             }
         }
-    }, false, '技能');
+    }, false, SKILL_GROUP);
     toolList.solve = async (ctx, _msg, session, args) => {
         const { page = 1, page_size = 20, query = '' } = args || {};
         const platform = platformOf(ctx);
@@ -213,7 +213,7 @@ export function registerSkills() {
                 required: ["name"]
             }
         }
-    }, false, '技能');
+    }, false, SKILL_GROUP);
     tool.solve = async (ctx, _msg, session, args) => {
         const name = typeof args?.name === 'string' ? args.name.trim() : '';
         if (!name) return 'use_skill 缺少技能名称 name';

@@ -6,6 +6,7 @@
 import { load } from 'js-toml'
 
 import Logger from "../../logger";
+import { DeclarableModelTag } from "../../model/catalog";
 import { fetchModelList, ListFetchFn } from "../../model/list";
 import Model, { ConnConfigLike, isIgnoredConfig } from "../../model/model";
 import { ModelRuleTemplate, resetRuleRowsForTest } from "../../model/request_rules";
@@ -71,7 +72,10 @@ export default class ModelConfig {
 api_key = "sk-xxxx"                 # 必填，API 密钥
 provider = "deepseek"               # 可选，服务商，省略时自动识别
 base_url = "https://api.deepseek.com/v1"  # 可选，API 地址，省略时取服务商默认
-models = ["deepseek-v4-flash"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
+models = ["deepseek-flash"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
+
+[types]                                  # 可选，必须写在本框最后（其后不能再写 api_key 等键）：手动声明模型类型，优先级最高
+deepseek-flash = "vision"                   # 取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号；无效值只忽略该键并记日志
 
 # [request]                                  # 可选，列表/余额查询覆盖（默认不写，由插件按 provider 解析）
 # list_url = "https://your-gateway/v1/models"    # 自定义列表端点（服务商无 /models 时用）
@@ -93,12 +97,12 @@ provider = "alibaba"                # 可选，服务商，省略时自动识别
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 可选，API 地址，省略时取服务商默认
 models = ["text-embedding-v4"]               # 可选，模型清单：填写=跳过自动拉取直接用该清单
 ignore = 1                         # 可选，1=忽略该条配置，0/不写=正常，使用前删除该行`,
-        ], `每框一个 API 连接（TOML）。必填：provider（服务商）、api_key（密钥）。可选：base_url（API 地址，省略取服务商默认）、models（模型钉住清单：填写则跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）、ignore（1=忽略该连接）。未写 models 的连接启动时自动请求模型列表接口（OpenAI 兼容 GET /models；anthropic 走 x-api-key 的 /v1/models 并自动翻页），失败按连接降级展示，不会拖垮其他连接。下方默认值即完整示例，可直接修改：出厂默认钉住 deepseek-v4-flash，删掉 models 行即改为启动自动拉取。连接行序 = 连接序号；重名模型用 [连接序号]:模型名 区分。修改后需重载 JS 生效。余额查询（.ai balance）：deepseek/moonshot/siliconflow 连接无需配置即可查；其余平台未开放余额接口（仅控制台）；one-api/new-api 等网关可在连接 [request] 里配 balance_url + balance_json_path（配合 auth_header_name/headers）后查询。`, CONFIG_GROUP);
+        ], `每框一个 API 连接（TOML）。必填：provider（服务商）、api_key（密钥）。可选：base_url（API 地址，省略取服务商默认）、models（模型钉住清单：填写则跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）、[types]（可选，手动声明模型类型：在本框末尾追加 [types] 表，表内每个模型写一条 "模型名" = "text" / "vision" / "embed"，优先级最高，可覆盖命名猜测与接口自报能力位；模型名含 . : / 等字符必须加引号；必须写在本框最后，其后不能再写 api_key 等键，否则整框解析失败；无效值只忽略该键并记日志）、ignore（1=忽略该连接）。未写 models 的连接启动时自动请求模型列表接口（OpenAI 兼容 GET /models；anthropic 走 x-api-key 的 /v1/models 并自动翻页），失败按连接降级展示，不会拖垮其他连接。下方默认值即完整示例，可直接修改：出厂默认钉住 deepseek-v4-flash，删掉 models 行即改为启动自动拉取。框序 = 连接序号（自上而下，第一个框为 0）；重名模型用 [连接序号]:模型名 区分。修改后需重载 JS 生效。余额查询（.ai balance）：deepseek/moonshot/siliconflow 连接无需配置即可查；其余平台未开放余额接口（仅控制台）；one-api/new-api 等网关可在连接 [request] 里配 balance_url + balance_json_path（配合 auth_header_name/headers）后查询。`, CONFIG_GROUP);
         seal.ext.registerTemplateConfig(ext, MODEL_RULE_CONFIG_KEY, [
             `# 每框一个用途组模板（TOML）：绑定到这些 use 的模型发起请求时统一套用下面的 body/request。
 # use 可选值：chat/compression/summarization/judge/image-understanding/text-embedding。
 # 默认对话类（chat/压缩/总结/judge）共用对话默认 max_tokens=8192、stop=null、stream=false；本表可覆盖。
-# 注意：多条规则 use 重叠时按行序逐键合并（后覆盖先）；建议不同框不重叠。
+# 注意：多条规则 use 重叠时按框顺序逐键合并（后覆盖先）；建议不同框不重叠。
 
 use = ["chat", "compression", "summarization", "judge"]   # 用途组
 
@@ -142,6 +146,7 @@ class ApiConnectionItem {
         base_url: 'string',
         ignore: 'any',
         models: { array: 'string' },
+        types: { objectValue: 'any' },
         request: { objectValue: 'any' },
     }
     provider: string;
@@ -149,6 +154,7 @@ class ApiConnectionItem {
     base_url: string;
     ignore: any;
     models: string[];
+    types: Record<string, any>;
     request: any;
     constructor() {
         this.provider = "";
@@ -156,6 +162,7 @@ class ApiConnectionItem {
         this.base_url = "";
         this.ignore = 0;
         this.models = [];
+        this.types = {};
         this.request = {};
     }
 }
@@ -180,8 +187,34 @@ function trimLines(list: string[]): string[] {
     return list.map(s => String(s ?? '').trim()).filter(s => s !== '');
 }
 
+/** [types] 可声明的类型（内部排除值 gen 不可声明：生图/reranker 仅由命名白名单判定） */
+const DECLARABLE_TAGS: DeclarableModelTag[] = ['text', 'vision', 'embed'];
+
+/**
+ * 解析一个「api连接」框的 [types] 表：模型名 → 手动声明的类型（优先级最高）。
+ * 非法值只忽略该键并记 error 日志，不影响整框连接；模型名含点号未加引号会被 TOML 解析成嵌套表，单独提示。
+ */
+function parseModelTypes(raw: any, rowIndex: number): Record<string, DeclarableModelTag> {
+    const out: Record<string, DeclarableModelTag> = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+    for (const key of Object.keys(raw)) {
+        const value = raw[key];
+        const tag = typeof value === 'string' ? value.trim().toLowerCase() : '';
+        if ((DECLARABLE_TAGS as string[]).includes(tag)) {
+            out[String(key).trim()] = tag as DeclarableModelTag;
+            continue;
+        }
+        if (value && typeof value === 'object') {
+            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${rowIndex + 1} 框 [types] 的 "${key}" 值非法：模型名含点号时未加引号（被解析成嵌套表），请写作 "模型名" = "embed" 形式，已忽略该键`);
+        } else {
+            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${rowIndex + 1} 框 [types] 的 "${key}" 值非法: ${String(value)}（可选 text/vision/embed），已忽略该键`);
+        }
+    }
+    return out;
+}
+
 function buildModelConfig(): ModelConfigData {
-    // api连接：行序即连接序号（含 ignore 行，保证序号稳定）
+    // api连接：框序即连接序号（含被忽略的框，保证序号稳定）
     const conns: ConnConfigLike[] = [];
     const rawConnRows = trimLines(seal.ext.getTemplateConfig(ext, API_CONNECTION_CONFIG_KEY));
     rawConnRows.forEach((tomlString, index) => {
@@ -207,11 +240,12 @@ function buildModelConfig(): ModelConfigData {
                 baseUrl,
                 ignore: isIgnoredConfig(item.ignore),
                 models: pinned && pinned.length > 0 ? pinned : null,
+                modelTypes: parseModelTypes(item.types, index),
                 request: item.request && typeof item.request === 'object' ? item.request : {},
             });
             Logger.info(`api连接[${index}]解析成功: ${provider} ${baseUrl}${pinned ? '（钉住 ' + pinned.length + ' 个模型）' : ''}`);
         } catch (e) {
-            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${index + 1} 行解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
+            Logger.error(`「${API_CONNECTION_CONFIG_KEY}」第 ${index + 1} 框解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
         }
     });
 
@@ -231,7 +265,7 @@ function buildModelConfig(): ModelConfigData {
                 request: item.request && typeof item.request === 'object' ? item.request : {},
             });
         } catch (e) {
-            Logger.error(`「${MODEL_RULE_CONFIG_KEY}」第 ${index + 1} 行解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
+            Logger.error(`「${MODEL_RULE_CONFIG_KEY}」第 ${index + 1} 框解析错误，已跳过，内容:${tomlString.slice(0, 200)}，错误:${e instanceof Error ? e.message : String(e)}`);
         }
     });
 
