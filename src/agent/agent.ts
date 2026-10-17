@@ -381,15 +381,16 @@ export default class Agent {
             if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
             const target = computeArchiveTarget(Config.context.MAX_CONTEXT_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
-            // 必须检查返回值：归档被并发锁挡下或 summarize 失败时并未真正收敛；
-            // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）
-            const archived = await session.context.archiveByTokenIfNeeded(target);
-            if (!archived) {
+            // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），
+            // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）；
+            // 'busy' 表示已有归档在飞，允许重发一次（重试会用归档后的上下文重建请求）。
+            const outcome = await session.context.archiveByTokenIfNeeded(target);
+            if (outcome === 'failed') {
                 log.warning(`[ctx-cost] 归档未完成（目标 ${target} tokens），本轮不重发`);
                 return 'giveup';
             }
             handled.archived = true;
-            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens，自动重发`);
+            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
             return 'retry';
         }
 

@@ -509,10 +509,11 @@ export class Context {
      * - 超过上限时保留最近 MAX_ROUNDS 个真实 user 轮，更早消息分块归档（summarize 沉淀记忆）；
      * - 归档的群聊原文写进独立分片 key（**只写一次、永不重写**），再从上下文移除；
      * - 轮数不够时（待机群常见：只有 1 轮）按"条"归档，**不再整段硬删**（修 M7）。
-     * @returns 是否已收敛到上限以内（false = 归档失败，数据保持原样留给下次重试；不再做降级硬删）
+     * @returns 'converged' 已收敛到上限内 / 'busy' 已有归档在飞（本次未做事，调用方可稍后重试）/
+     *          'failed' 归档失败（数据保持原样，不再做降级硬删）
      */
-    async archiveByTokenIfNeeded(targetTokens?: number): Promise<boolean> {
-        if (this.archiving) return false;
+    async archiveByTokenIfNeeded(targetTokens?: number): Promise<'converged' | 'busy' | 'failed'> {
+        if (this.archiving) return 'busy';
         this.archiving = true;
 
         try {
@@ -536,7 +537,7 @@ export class Context {
                 break;
             }
 
-            return converged;
+            return converged ? 'converged' : 'failed';
         } finally {
             this.archiving = false;
         }

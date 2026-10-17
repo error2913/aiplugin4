@@ -1066,7 +1066,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
             ] as any;
             const ok = await session.context.archiveByTokenIfNeeded();
-            assert.equal(ok, true);
+            assert.equal(ok, 'converged');
             assert.equal(session.context.messages.length, 2, '应只保留最近 1 轮');
             assert.equal((session.context.messages[0] as any).contentItems[0].text, 'u2');
         } finally {
@@ -1100,10 +1100,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ] as any;
             const before = JSON.stringify(session.context.messages);
             const ok = await session.context.archiveByTokenIfNeeded();
-            assert.equal(ok, false, '归档失败应返回 false（供调用方如实记录，不再谎报成功）');
+            assert.equal(ok, 'failed', '归档失败应返回 failed（供调用方如实记录，不再谎报成功）');
             assert.equal(session.context.messages.length, 6, '失败时不得丢弃任何消息（不再整段硬删）');
             assert.equal(JSON.stringify(session.context.messages), before, '内容应保持原样');
             assert.equal(session.archiveSeq, 0, '失败时不应写入归档分片');
+
+            // 并发归档在飞：返回 busy（调用方可稍后重试），而不是 failed
+            (session.context as any).archiving = true;
+            assert.equal(await session.context.archiveByTokenIfNeeded(), 'busy', '已有归档在飞应返回 busy');
+            (session.context as any).archiving = false;
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
@@ -1245,7 +1250,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { role: 'assistant', contentItems: [{ text: 'a2', time: 13, messageId: '' }] },
             ] as any;
             const ok = await session.context.archiveByTokenIfNeeded();
-            assert.equal(ok, true, '归档应收敛');
+            assert.equal(ok, 'converged', '归档应收敛');
             assert.ok(session.archiveSeq >= 1, '应写入归档分片');
             const seq1 = session.archiveSeq;
             const raw = store.get('session_QQ:999:arc:001') ?? '';
@@ -6800,7 +6805,7 @@ description: 茶库
                 { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
             ] as any;
             const ok = await session.context.archiveByTokenIfNeeded(50);
-            assert.equal(ok, true);
+            assert.equal(ok, 'converged');
             assert.ok(estimateContextMessagesTokens(session.context.messages) <= 50, `应收敛到显式 target=50，实际=${estimateContextMessagesTokens(session.context.messages)}`);
             assert.equal((session.context.messages[0] as any).contentItems[0].text, 'u2', '应保留最近轮');
         } finally {
@@ -6821,7 +6826,7 @@ description: 茶库
             const agent: any = Object.create(Agent.prototype);
             const notices: string[] = [];
             const ctx: any = { notice: (t: string) => notices.push(t) };
-            const session: any = { context: { archiveByTokenIfNeeded: async () => true } };
+            const session: any = { context: { archiveByTokenIfNeeded: async () => 'converged' } };
             const err = ApiError.fromResponse(429, 'deepseek', '{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota"}}');
 
             const handled = { archived: false, switched: false };
@@ -6902,7 +6907,7 @@ description: 茶库
         const agent: any = Object.create(Agent.prototype);
         const ctx: any = { notice: () => undefined };
         const targets: number[] = [];
-        const session: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets.push(t); return true; } } };
+        const session: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets.push(t); return 'converged'; } } };
         const raw = '{"error":{"message":"This model\'s maximum context length is 128000 tokens. However, you requested 130000 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}';
         const err = ApiError.fromResponse(400, 'openai', raw);
 
@@ -6939,12 +6944,18 @@ description: 茶库
             TC.boolConfigs['上下文超长自动归档重试'] = true;
             resetConfigCache();
             const targets2: number[] = [];
-            const session2: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets2.push(t); return false; } } };
+            const session2: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets2.push(t); return 'failed'; } } };
             const handled3 = { archived: false, switched: false };
             const action4 = await agent.handleModelError(ctx, session2, err, handled3);
             assert.equal(action4, 'giveup', '归档未完成时不应重发');
             assert.equal(handled3.archived, false, '未收敛时不得标记 archived（否则后续重试直接放弃）');
             assert.equal(targets2.length, 1);
+
+            // 归档在飞（busy）→ 允许重发一次（重试会用归档后的上下文重建请求），不再误判为失败
+            const session3: any = { context: { archiveByTokenIfNeeded: async () => 'busy' } };
+            const handled4 = { archived: false, switched: false };
+            assert.equal(await agent.handleModelError(ctx, session3, err, handled4), 'retry', 'busy 应允许重发一次');
+            assert.equal(handled4.archived, true);
         } finally {
             if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;
             if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;
