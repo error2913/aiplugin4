@@ -27,8 +27,16 @@ import User from "./user";
 
 const log = logger.withTag('session');
 
-/** 持久化时排除的运行时字段（监听器/运行状态/挂起队列等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript']);
+/** 保存节流：合并写的最小间隔与批量上限（海豹 storage 为叠加式，重复写会持续占空间；见 docs/14 §5.11） */
+export const SAVE_MIN_INTERVAL_MS = 5000;
+export const SAVE_BATCH = 20;
+
+/** 冷热状态的两个时间窗（内置常量，见 docs/14 §3） */
+export const HOT_HOLD_MS = 180_000;
+export const COOL_DOWN_MS = 60_000;
+
+/** 持久化时排除的运行时字段（监听器/运行状态/挂起队列/节流状态等），不写入存储、不参与 revive 恢复 */
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats']);
 
 /** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
 export interface PendingMessage {
@@ -100,6 +108,8 @@ export class Session {
         context: Context,
         memory: SessionMemoryService,
         setting: Setting,
+        archiveSeq: 'number',
+        lastArchivedAt: 'number',
         stream: {
             object: {
                 id: 'string',
@@ -141,6 +151,13 @@ export class Session {
         count: number,
         lastTime: number
     }
+    /**
+     * 已写入的归档分片数（**持久化**）：归档内容写在 `session_<id>:arc:<seq>` 独立键里（只写一次、不重写），
+     * session 只多这一个数字，避免每次归档都重写整份会话存档（见 docs/14 §5.4）。
+     */
+    archiveSeq = 0;
+    /** 最近一次归档时间（秒；持久化，仅审计与 `.ai ctx` 展示用） */
+    lastArchivedAt = 0;
     lastCtx: seal.MsgContext | null = null;
     /** 运行时字段：当前是否有 run/runStream 在跑（含工具执行阶段；不持久化） */
     running = false;
@@ -171,6 +188,14 @@ export class Session {
     noticeQueue: { text: string; from: string; time: number; kind?: 'subagent' | 'media'; taskId?: string }[] = [];
     /** 运行时字段（子代理）：headless 下 reply() 收集的回复文本（不持久化） */
     headlessTranscript: string[] = [];
+    /** 运行时字段：最近一次"相关活动"＝任何一次 session.chat（@/触发/送达/定时任务都走它）；普通消息入库不算（不持久化） */
+    lastRelevantAt = 0;
+    /** 运行时字段：本会话账本——压缩/归档/评分各调用了多少次（不持久化） */
+    ctxStats: { compression: number; summarization: number; judge: number } = { compression: 0, summarization: 0, judge: 0 };
+    /** 运行时字段：保存节流状态（不持久化） */
+    private lastSaveAt = 0;
+    private saveDeferCount = 0;
+    private saveTimer: any = null;
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
@@ -264,8 +289,55 @@ export class Session {
         this.tool.callCount = 0;
     }
 
-    save() {
+    /**
+     * 保存会话。
+     * @param coalesce 合并写：高频入库路径（待机群每条消息/事件）传 true，5 秒或 20 次最多落盘一次，
+     *        并安排一次兜底写入保证最后一次变更落地；命令、归档、回复等关键路径用默认的立即写。
+     *        海豹 storage 是叠加式存储（写同样的内容也占新空间），因此高频路径必须合并写。
+     */
+    save(coalesce = false) {
+        const now = Date.now();
+        if (coalesce) {
+            this.saveDeferCount++;
+            if (now - this.lastSaveAt < SAVE_MIN_INTERVAL_MS && this.saveDeferCount < SAVE_BATCH) {
+                if (!this.saveTimer) {
+                    this.saveTimer = setTimeout(() => {
+                        this.saveTimer = null;
+                        try { this.save(); } catch (e) {
+                            log.warning('会话延迟保存失败: ' + (e instanceof Error ? e.message : String(e)));
+                        }
+                    }, SAVE_MIN_INTERVAL_MS);
+                }
+                return;
+            }
+        }
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
         ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
+        this.lastSaveAt = now;
+        this.saveDeferCount = 0;
+    }
+
+    /**
+     * 冷热状态：**算出来的**，不持久化（重载后回默认＝回冷态，安全）。
+     * - HOT：非待机（正常对话模式）／有在途任务／距上次相关活动 < 热态保持
+     * - COOLING：距上次相关活动 ≥ 热态保持且 < 热态保持 + 冷态回落
+     * - COLD：再往后（入库零 LLM、窗口按冷态窗口字数折叠）
+     * "相关活动"＝任何一次 `session.chat()`（@/触发命中/结果送达/定时任务都走它）；普通群消息入库不算。
+     */
+    stateOf(now: number = Date.now()): 'HOT' | 'COOLING' | 'COLD' {
+        if (!(this.setting.standby || Config.base.GLOBAL_STANDBY)) return 'HOT';
+        const busy = this.running || this.starting || this.activeRuns > 0;
+        if (busy) {
+            this.lastRelevantAt = now;   // 在途任务冻结衰减
+            return 'HOT';
+        }
+        const idle = Math.max(0, now - this.lastRelevantAt);   // 防时钟回拨
+        if (idle < HOT_HOLD_MS) return 'HOT';
+        if (idle < HOT_HOLD_MS + COOL_DOWN_MS) return 'COOLING';
+        return 'COLD';
     }
 
     /** 挂起队列轻量分片 key：ctx/msg 是运行时对象不可序列化，只落盘重建所需字段，变更即写穿 */
@@ -447,6 +519,8 @@ export class Session {
             const msgId = await replyToSender(ctx, msg, this, reply);
             await this.context.addAssistantMessage(content, msgId, reasoningContent);
         }
+        // 回复与助手消息属于"必须落盘"的关键变更（保存节流只作用于高频入库路径）
+        this.save();
 
     }
 
@@ -458,6 +532,8 @@ export class Session {
      */
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean } = {}): Promise<void> {
         this.lastCtx = ctx;
+        // 冷热状态的"相关活动"：任何一次起一轮对话（@/触发命中/结果送达/定时任务）都算，普通消息入库不算
+        this.lastRelevantAt = Date.now();
         log.info('trigger reply:', reason || 'unknown');
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）

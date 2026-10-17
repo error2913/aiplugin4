@@ -9,6 +9,8 @@ export default class ContextConfig {
         seal.ext.registerTemplateConfig(ext, "预设上下文", [""], "每框一条预设上下文，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "上下文");
         seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，预设上下文不计入轮数", "上下文");
         seal.ext.registerIntConfig(ext, "消息压缩阈值", 2000, "用户消息（含连续多条合并后）超过该字符数时，使用压缩智能体压缩后存入上下文；压缩前原文自动保留，AI 可用 read_raw kind=user 按 msg_id/blk:id 查看原文", "上下文");
+        seal.ext.registerIntConfig(ext, "冷态窗口字数", 5000, "待机（冷态）下模型可见的最近内容字数：超过则把更早内容折叠为纯代码摘要（不调用模型）；0=不折叠", "上下文");
+        seal.ext.registerIntConfig(ext, "冷态单条截断字数", 500, "待机（冷态）时单条消息超过该字数则留头留尾（原文仍可用 read_raw 查）；0=不截断", "上下文");
     }
 
     static get() {
@@ -24,7 +26,9 @@ export default class ContextConfig {
             MAX_ROUNDS,
             MAX_CONTEXT_TOKENS,
             INSERT_COUNT,
-            COMPRESS_THRESHOLD: seal.ext.getIntConfig(ext, "消息压缩阈值")
+            COMPRESS_THRESHOLD: seal.ext.getIntConfig(ext, "消息压缩阈值"),
+            COLD_WINDOW_CHARS: seal.ext.getIntConfig(ext, "冷态窗口字数"),
+            COLD_SINGLE_TRUNCATE: seal.ext.getIntConfig(ext, "冷态单条截断字数")
         }
     }
 }

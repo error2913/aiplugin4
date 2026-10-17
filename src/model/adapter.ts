@@ -3,6 +3,17 @@ import { ToolCall } from "../tool/types";
 
 import { isAnthropicMessages } from "./api_dialect";
 
+/** 统一用量结构：缓存字段单独带出，供账本与 token 校准使用 */
+export interface NormalizedUsage {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    /** 命中前缀缓存的输入 token：OpenAI `prompt_tokens_details.cached_tokens` / DeepSeek `prompt_cache_hit_tokens` / Anthropic `cache_read_input_tokens` */
+    cache_read_tokens: number;
+    /** 写入缓存的输入 token：Anthropic `cache_creation_input_tokens`（其余厂商无此字段，记 0） */
+    cache_write_tokens: number;
+}
+
 export interface NormalizedChatResponse {
     choices: Array<{
         index: number,
@@ -15,7 +26,7 @@ export interface NormalizedChatResponse {
         }
     }>,
     model?: string,
-    usage?: { prompt_tokens: number, completion_tokens: number, total_tokens: number }
+    usage?: NormalizedUsage
 }
 
 const ANTHROPIC_FINISH_REASON_MAP: { [key: string]: string } = {
@@ -46,16 +57,26 @@ export function parseProviderResponse(provider: string, data: any, api?: string)
     return data;
 }
 
-/** 提取统一格式的用量（兼容 anthropic 的 input/output_tokens 与 OpenAI 的 prompt/completion_tokens） */
-export function extractUsage(data: any): { prompt_tokens: number, completion_tokens: number, total_tokens: number } | undefined {
+/**
+ * 提取统一格式的用量（兼容 anthropic 的 input/output_tokens 与 OpenAI 的 prompt/completion_tokens）。
+ *
+ * 缓存字段：Anthropic 方言的 `input_tokens` **不含**缓存读/写，必须补回；否则 prompt_tokens 少算，
+ * 会让 TokenCalibration 的校准比值偏小、系数向 0.5 漂移，进而把本地预算放大到约 2 倍（见 docs/14 §5.6）。
+ */
+export function extractUsage(data: any): NormalizedUsage | undefined {
     if (!data || !data.usage) return undefined;
     const u = data.usage;
-    const prompt = u.input_tokens ?? u.prompt_tokens ?? 0;
+    const cacheRead = u.cache_read_input_tokens ?? u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
+    const cacheWrite = u.cache_creation_input_tokens ?? 0;
+    const rawPrompt = u.input_tokens ?? u.prompt_tokens ?? 0;
+    const prompt = u.input_tokens !== undefined ? rawPrompt + cacheRead + cacheWrite : rawPrompt;
     const completion = u.output_tokens ?? u.completion_tokens ?? 0;
     return {
         prompt_tokens: prompt,
         completion_tokens: completion,
-        total_tokens: u.total_tokens ?? (prompt + completion)
+        total_tokens: u.total_tokens ?? (prompt + completion),
+        cache_read_tokens: cacheRead,
+        cache_write_tokens: cacheWrite,
     };
 }
 

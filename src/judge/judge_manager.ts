@@ -242,6 +242,9 @@ export class JudgeManager {
         ctx: seal.MsgContext, msg: seal.Message, session: Session,
         cfg: JudgeConfig, built: JudgeBuilt
     ): Promise<void> {
+        // 账本：评分触发的评分次数（`.ai ctx` 展示；游离会话无 ctxStats 时忽略）
+        const stats: any = (session as any).ctxStats;
+        if (stats && typeof stats.judge === 'number') stats.judge += 1;
         const result = await this.requestScore(built.messages, cfg);
         if ('error' in result) {
             log.info(`评分失败(${result.error})，本次不插话`);

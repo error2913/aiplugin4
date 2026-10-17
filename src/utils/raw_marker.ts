@@ -7,7 +7,7 @@
 // 也不会被发送解析当作消息段。标记始终放在文本末尾，即使发生预算兜底「保留尾部」截断，id 信息仍然存活。
 
 /** 全部标记前缀词，与内部标签剥离名单不冲突 */
-export const RAW_MARKER_PREFIXES: string[] = ['原文已压缩', '工具原文过长', '图片识别原文过长'];
+export const RAW_MARKER_PREFIXES: string[] = ['原文已压缩', '工具原文过长', '图片识别原文过长', '原文已截断'];
 
 /**
  * 生成单条用户消息压缩标记。
@@ -34,6 +34,17 @@ export function buildUserBlockMarker(count: number, totalLength: number, lastMes
 /** 工具回调结果截断标记 */
 export function buildToolTruncateMarker(totalLength: number, shownLength: number, toolCallId: string): string {
     return `\n[工具原文过长: 共${totalLength}字,仅展示开头${shownLength}字;完整原文 read_raw kind=tool id=${toolCallId}]`;
+}
+
+/**
+ * 用户消息"冷态纯代码截断"标记（待机时不调用压缩智能体，只留头留尾）。
+ * @param totalLength 截断前原文长度
+ * @param shownLength 实际展示（头+尾）长度
+ * @param messageId 该条消息 ID（空时省略 id 子句）
+ */
+export function buildUserTruncateMarker(totalLength: number, shownLength: number, messageId: string): string {
+    const idText = messageId ? `;原文 read_raw kind=user id=${messageId}` : ';原文 read_raw kind=user（无消息ID，可 grep_raw 检索）';
+    return `\n[原文已截断: 共${totalLength}字,仅展示头尾${shownLength}字${idText}]`;
 }
 
 /** 图片识别文本截断标记 */

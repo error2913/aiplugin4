@@ -205,10 +205,123 @@ function buildSamplesMessages(ctx: seal.MsgContext): ContextMessage[] {
         }));
 }
 
-function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
-    const { INSERT_COUNT } = Config.context;
+/**
+ * 转热装回档位（纯代码判定，只看本轮最新一条消息的文本；见 docs/14 §5.5）：
+ * - L2：明确要求回顾（总结/回顾/整理一下…）→ 不折叠，交给 token 预算兜底
+ * - L1：含指代或追问词（它/这个/刚才/上面/继续…）→ 多装一段
+ * - L0：默认 → 只装最近 `冷态窗口字数`
+ */
+export function pickTier(text: string): 'L0' | 'L1' | 'L2' {
+    if (/总结|回顾|整理一下|前面说过|之前说过|汇总/.test(text)) return 'L2';
+    if (/它|这个|那个|刚才|上面|继续|为什么|然后呢|结果呢|那呢/.test(text)) return 'L1';
+    return 'L0';
+}
 
-    const contextMessages = messages.slice();
+/** 档位 → 折叠预算字数（0 = 不折叠） */
+export function windowCharsForTier(tier: 'L0' | 'L1' | 'L2', baseChars: number): number {
+    if (baseChars <= 0) return 0;
+    if (tier === 'L2') return 0;
+    if (tier === 'L1') return baseChars + 20000;
+    return baseChars;
+}
+
+/** 折叠行的短摘要（纯代码，零 LLM）：保留发送者/时间与开头若干字 */
+function foldLine(item: any, max = 40): string {
+    const who = item.userId ? formatFromPrefix(item.userId) : (item.systemName ? `[system:${item.systemName}]` : '');
+    const time = item.time ? `[time:${fmtDate(item.time)}]` : '';
+    const text = String(item.text || '').replace(/\s+/g, ' ').trim();
+    const head = text.length > max ? `${text.slice(0, max)}…` : text;
+    return `- ${who}${time} ${head}`;
+}
+
+/** 折叠摘要自身占整包预算的比例（保证"窗口 + 摘要"整体不超预算） */
+const FOLD_BUDGET_RATIO = 0.4;
+const FOLD_MIN_CHARS = 200;
+
+/**
+ * 渲染窗口折叠：把超出预算的**更早内容**折叠成一条纯代码摘要（零 LLM），只保留最近一段。
+ * - 按条目粒度裁剪（待机群里整段历史是同一条 user 消息，必须能切进 contentItems 内部）；
+ * - 折叠摘要本身也受预算限制：从新到旧填充明细行，放不下的只统计条数（否则短消息群里"折叠"反而更长）；
+ * - 整包（窗口 + 摘要）不超过 budgetChars。
+ * @param budgetChars 整包预算字数；<= 0 表示不折叠
+ */
+export function foldContextMessages(messages: ContextMessage[], budgetChars: number): ContextMessage[] {
+    if (budgetChars <= 0) return messages;
+    const total = messages.reduce((n, m) => n + buildContent(m).length, 0);
+    if (total <= budgetChars) return messages;
+
+    const foldBudget = Math.max(FOLD_MIN_CHARS, Math.floor(budgetChars * FOLD_BUDGET_RATIO));
+    const windowBudget = Math.max(1, budgetChars - foldBudget);
+
+    const kept: ContextMessage[] = [];
+    const foldedNewestFirst: string[] = [];
+    let used = 0;
+    let keptAny = false;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        const items = Array.isArray(m.contentItems) ? m.contentItems : null;
+        if (items && items.length > 0) {
+            const keptItems: any[] = [];
+            for (let j = items.length - 1; j >= 0; j--) {
+                const one = { ...m, contentItems: [items[j]] } as ContextMessage;
+                const len = buildContent(one).length;
+                // 最新的一条无论多长都保留（否则窗口会空）
+                if (!keptAny || used + len <= windowBudget) {
+                    keptItems.unshift(items[j]);
+                    used += len;
+                    keptAny = true;
+                } else {
+                    foldedNewestFirst.push(foldLine(items[j]));
+                }
+            }
+            if (keptItems.length > 0) kept.unshift({ ...m, contentItems: keptItems });
+        } else {
+            const len = buildContent(m).length;
+            if (!keptAny || used + len <= windowBudget) {
+                kept.unshift(m);
+                used += len;
+                keptAny = true;
+            } else {
+                foldedNewestFirst.push(foldLine(m));
+            }
+        }
+    }
+
+    if (foldedNewestFirst.length === 0) return kept;
+    const header = `更早的群聊内容已折叠为摘要（共 ${foldedNewestFirst.length} 条；需要原文时用 read_raw / grep_raw kind=user 回查）：`;
+    const detail: string[] = [];
+    let foldUsed = header.length + 1;
+    let omitted = 0;
+    for (const line of foldedNewestFirst) {   // 从新到旧填充，优先保留较近的折叠明细
+        if (foldUsed + line.length + 1 <= foldBudget) {
+            detail.push(line);
+            foldUsed += line.length + 1;
+        } else {
+            omitted++;
+        }
+    }
+    const aggLine = omitted > 0 ? `- 更早的 ${omitted} 条已省略（同上，按需回查原文）` : '';
+    const foldText = [header, aggLine, ...detail.reverse()].filter(Boolean).join('\n');
+
+    const foldItem = {
+        text: foldText,
+        time: Math.floor(Date.now() / 1000),
+        systemName: '折叠摘要',
+    };
+    const first = kept[0];
+    if (first && first.role === 'user' && Array.isArray(first.contentItems)) first.contentItems.unshift(foldItem);
+    else kept.unshift({ role: 'user', contentItems: [foldItem] });
+    return kept;
+}
+
+function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
+    const { INSERT_COUNT, COLD_WINDOW_CHARS } = Config.context;
+
+    // 渲染窗口折叠：按本轮最新一条消息判定档位（L0 默认 / L1 含指代 / L2 明确要求回顾）
+    const newest = [...messages].reverse().find(m => m.role === 'user' && Array.isArray(m.contentItems) && m.contentItems.length > 0);
+    const newestText = newest ? String((newest.contentItems as any)[(newest.contentItems as any).length - 1]?.text || '') : '';
+    const contextMessages = foldContextMessages(messages.slice(), windowCharsForTier(pickTier(newestText), COLD_WINDOW_CHARS));
     if (INSERT_COUNT <= 0) return contextMessages;
 
     // 顺序遍历：在第 INSERT_COUNT+1 条及之后每隔 INSERT_COUNT 条用户消息前插入短提醒，

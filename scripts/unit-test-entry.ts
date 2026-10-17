@@ -6,7 +6,7 @@ import Config, { ext } from "../src/config/config";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
-import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTokens, estimateMessageTokens, handleMessages, textToMultimodalContent } from "../src/utils/message";
+import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTokens, estimateMessageTokens, foldContextMessages, handleMessages, pickTier, textToMultimodalContent, windowCharsForTier } from "../src/utils/message";
 import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/templates";
@@ -50,7 +50,8 @@ import { getMemoryRevision } from "../src/memory/revision";
 import { requestLimiter } from "../src/utils/concurrency";
 import { ApiError, classifyApiError, computeArchiveTarget, isImageDownloadFailure, parseMaxContextTokens } from "../src/model/api_error";
 import { describeBalanceError, fetchBalance, parseBalancePayload, resolveBalanceEndpoint } from "../src/model/balance";
-import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken } from "../src/context/context";
+import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken, truncateMiddle } from "../src/context/context";
+import { readShard, writeShardIfAbsent } from "../src/context/archive_store";
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
@@ -96,7 +97,7 @@ import { adaptV5 } from "../src/config/v5/adapt";
 import { parseBaseUrl } from "../src/model/base_url";
 import { normalizePurposeList, parseV5Config } from "../src/config/v5/schema";
 import { classifyModel } from "../src/model/catalog";
-import { buildProviderBody } from "../src/model/adapter";
+import { buildProviderBody, extractUsage } from "../src/model/adapter";
 import { MEDIA_PRESETS, resolveMediaPreset } from "../src/config/static_config/media_presets";
 import {
     collectPlaceholders,
@@ -1076,7 +1077,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    async testArchiveFailureFallsBackDropOldestRound(): Promise<void> {
+    /** 归档失败：**不再降级硬删**（修 M7），数据保持原样并如实返回 false */
+    async testArchiveFailureKeepsData(): Promise<void> {
         const old = MemoryManager.summarizeChunkWithRetry;
         MemoryManager.summarizeChunkWithRetry = async () => false;
         const origRounds = TC.intConfigs['对话保存轮数'];
@@ -1096,17 +1098,330 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { role: 'user', contentItems: [{ text: 'u3', time: 0, userId: '1', messageId: '' }] },
                 { role: 'assistant', contentItems: [{ text: 'a3', time: 0, messageId: '' }] },
             ] as any;
+            const before = JSON.stringify(session.context.messages);
             const ok = await session.context.archiveByTokenIfNeeded();
-            assert.equal(ok, false);
-            assert.ok(estimateContextMessagesTokens(session.context.messages) <= 20, '失败降级后应不超上限');
-            assert.equal(session.context.messages.length, 2, '应降级丢弃到只剩最近 1 轮');
-            assert.equal((session.context.messages[0] as any).contentItems[0].text, 'u3');
+            assert.equal(ok, false, '归档失败应返回 false（供调用方如实记录，不再谎报成功）');
+            assert.equal(session.context.messages.length, 6, '失败时不得丢弃任何消息（不再整段硬删）');
+            assert.equal(JSON.stringify(session.context.messages), before, '内容应保持原样');
+            assert.equal(session.archiveSeq, 0, '失败时不应写入归档分片');
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
             if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
             resetConfigCache();
         }
+    },
+
+    /** 冷态入库零 LLM：待机时只追加 + 纯代码截断，绝不调用压缩智能体；超长单条保留原文并带截断标记 */
+    async testColdIngestZeroLLM(): Promise<void> {
+        const origGet = Agent.get;
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origTruncate = TC.intConfigs['冷态单条截断字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;   // 测试桩默认 true，必须显式关掉
+        TC.intConfigs['冷态单条截断字数'] = 20;
+        resetConfigCache();
+        const compressCalls: string[] = [];
+        const session = new Session();
+        session.sessionId = 'QQ:cold';
+        session.sessionType = 'group';
+        session.setting.standby = true;
+        Agent.get = (name: any) => name === 'compress_agent'
+            ? { chat: async (t: string) => { compressCalls.push(String(t)); return '不该被调用'; } }
+            : { sessionService: { getSession: () => session } };
+        try {
+            const ctx = session.context;
+            for (let i = 0; i < 100; i++) await ctx.addUserMessage(makeCtx(), `第${i}条群消息`, 'QQ:1', `c${i}`);
+            assert.equal(compressCalls.length, 0, '冷态入库不得调用压缩智能体');
+            const items = (ctx.messages[0] as any).contentItems;
+            assert.equal(items.length, 100, '冷态消息应全部追加进同一块');
+            assert.equal(items[0].compressed, true, '冷态条目应标记为永不参与 LLM 压缩');
+            assert.equal(items[0].rawText, undefined, '未超长时不保留原文副本');
+
+            const long = '长'.repeat(100);
+            await ctx.addUserMessage(makeCtx(), long, 'QQ:1', 'c_long');
+            const last = (ctx.messages[0] as any).contentItems.slice(-1)[0];
+            assert.equal(last.rawText, long, '超长单条应保留完整原文（read_raw 可查）');
+            assert.ok(last.text.includes('原文已截断'), '展示文本应带"原文已截断"标记');
+            assert.ok(last.text.includes('id=c_long'), '标记应携带 msg_id 供 read_raw 寻址');
+            assert.ok(last.text.length < long.length, '展示文本应短于原文');
+            assert.equal(compressCalls.length, 0, '冷态超长单条同样不得调用压缩智能体');
+        } finally {
+            Agent.get = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origTruncate === undefined) delete TC.intConfigs['冷态单条截断字数']; else TC.intConfigs['冷态单条截断字数'] = origTruncate;
+            resetConfigCache();
+        }
+    },
+
+    /** 压缩采纳规则：结果必须比原文更短，否则保留原文（不更短就不采纳） */
+    async testCompressRejectsNotShorter(): Promise<void> {
+        const origGet = Agent.get;
+        const origThreshold = TC.intConfigs['消息压缩阈值'];
+        TC.intConfigs['消息压缩阈值'] = 10;
+        resetConfigCache();
+        const fakeAgent = { sessionService: { getSession: () => ({ sessionType: 'user', save: () => undefined }) } };
+        try {
+            // 压缩结果比原文更长 → 不采纳
+            Agent.get = (name: any) => name === 'compress_agent'
+                ? { chat: async () => '这是一段比原文还要长的压缩结果'.repeat(5) }
+                : fakeAgent;
+            const ctx = new Context();
+            const original = '原始消息内容需要超过十个字';
+            await ctx.addUserMessage(makeCtx(), original, 'QQ:1', 'm_longer');
+            const item = (ctx.messages[0] as any).contentItems[0];
+            assert.equal(item.text, original, '结果未变短时应保留原文');
+            assert.equal(item.rawText, undefined, '未采纳时不产生 rawText 副本');
+            assert.equal(item.compressed, true, '尝试过（含未采纳）应标记，避免反复付费');
+
+            // 压缩结果等于原文 → 同样不采纳
+            Agent.get = (name: any) => name === 'compress_agent'
+                ? { chat: async (t: string) => t }
+                : fakeAgent;
+            const ctx2 = new Context();
+            const original2 = '原文原样返回的情况需要更长一些';
+            await ctx2.addUserMessage(makeCtx(), original2, 'QQ:1', 'm_same');
+            assert.equal((ctx2.messages[0] as any).contentItems[0].text, original2, '结果等于原文时保留原文');
+        } finally {
+            Agent.get = origGet;
+            if (origThreshold === undefined) delete TC.intConfigs['消息压缩阈值']; else TC.intConfigs['消息压缩阈值'] = origThreshold;
+            resetConfigCache();
+        }
+    },
+
+    /** 只压一次：已尝试过（含失败）的批次不再进入压缩输入，新批次才允许再试一次 */
+    async testCompressAttemptedOnceOnFailure(): Promise<void> {
+        const origGet = Agent.get;
+        const origThreshold = TC.intConfigs['消息压缩阈值'];
+        TC.intConfigs['消息压缩阈值'] = 10;
+        resetConfigCache();
+        const inputs: string[] = [];
+        const fakeAgent = { sessionService: { getSession: () => ({ sessionType: 'user', save: () => undefined }) } };
+        Agent.get = (name: any) => name === 'compress_agent'
+            ? { chat: async (t: string) => { inputs.push(String(t)); throw new Error('模拟压缩失败'); } }
+            : fakeAgent;
+        try {
+            const ctx = new Context();
+            await ctx.addUserMessage(makeCtx(), '第一条超阈值的长消息内容', 'QQ:1', 'f1');
+            assert.equal(inputs.length, 1, '单条超阈值应尝试一次');
+            await ctx.addUserMessage(makeCtx(), '第二条消息', 'QQ:1', 'f2');
+            assert.equal(inputs.length, 1, '合计未超阈值时不应调用');
+            await ctx.addUserMessage(makeCtx(), '第三条消息内容', 'QQ:1', 'f3');
+            assert.equal(inputs.length, 2, '新一批合计超阈值才尝试一次');
+            assert.ok(!inputs[1].includes('第一条'), '新批次的压缩输入不得包含已尝试过的旧条目（只压新增）');
+            await ctx.addUserMessage(makeCtx(), '第四条消息内容', 'QQ:1', 'f4');
+            assert.equal(inputs.length, 2, '已尝试过的批次不得重试（失败也不再付费重压）');
+        } finally {
+            Agent.get = origGet;
+            if (origThreshold === undefined) delete TC.intConfigs['消息压缩阈值']; else TC.intConfigs['消息压缩阈值'] = origThreshold;
+            resetConfigCache();
+        }
+    },
+
+    /** 归档分片：移出窗口的原文写进独立 key（只写一次），session 只推进 archiveSeq */
+    async testArchiveWritesShardAndKeepsOriginal(): Promise<void> {
+        const store = new Map<string, string>();
+        const origStorageSet = (ext as any).storageSet;
+        const origStorageGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => true;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 20;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:999';
+            session.sessionType = 'user';
+            // Context.session 经 Agent.get(...).sessionService.getSession 取会话，测试里指回本对象
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: 'u1 原文', time: 10, userId: 'QQ:1', messageId: 'm1' }] },
+                { role: 'assistant', contentItems: [{ text: 'a1', time: 11, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 12, userId: 'QQ:1', messageId: 'm2' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 13, messageId: '' }] },
+            ] as any;
+            const ok = await session.context.archiveByTokenIfNeeded();
+            assert.equal(ok, true, '归档应收敛');
+            assert.ok(session.archiveSeq >= 1, '应写入归档分片');
+            const seq1 = session.archiveSeq;
+            const raw = store.get('session_QQ:999:arc:001') ?? '';
+            assert.ok(raw.length > 0, '分片应已落盘');
+            const shard = JSON.parse(raw);
+            assert.equal(shard.items[0].text, 'u1 原文', '分片应保留被移出窗口的原文');
+            assert.equal(shard.items[0].messageId, 'm1');
+            assert.ok(session.context.messages.length < 4, '移出窗口的消息应从上下文移除');
+
+            // 第二批：写新分片，旧分片不得被重写
+            const firstShard = store.get('session_QQ:999:arc:001');
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: 'u3', time: 20, userId: 'QQ:1', messageId: 'm3' }] },
+                { role: 'assistant', contentItems: [{ text: 'a3', time: 21, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u4', time: 22, userId: 'QQ:1', messageId: 'm4' }] },
+                { role: 'assistant', contentItems: [{ text: 'a4', time: 23, messageId: '' }] },
+            ] as any;
+            await session.context.archiveByTokenIfNeeded();
+            assert.equal(store.get('session_QQ:999:arc:001'), firstShard, '已存在的分片不得被重写（增量存储）');
+            assert.ok(session.archiveSeq > seq1, '新一批写新分片');
+
+            // read_raw 按 id=arc:001 回查归档原文
+            registerRawToolSet();
+            const readRaw = toolMap['read_raw'];
+            const sessionStub = { context: session.context, sessionId: session.sessionId, archiveSeq: session.archiveSeq } as any;
+            const dir = await readRaw.solve(makeCtx(), {} as any, sessionStub, { kind: 'user', id: 'arc:001' });
+            assert.ok(dir.includes('m1'), '分片目录应列出内层 msg_id');
+            const one = await readRaw.solve(makeCtx(), {} as any, sessionStub, { kind: 'user', id: 'arc:001', msg_id: 'm1' });
+            assert.ok(one.includes('u1 原文'), '应能按 msg_id 读到归档原文');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origStorageSet;
+            (ext as any).storageGet = origStorageGet;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
+    /** 归档分片写入幂等：同一序号写第二次被跳过，内容不被覆盖 */
+    testArchiveShardIdempotent(): void {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        try {
+            const shard = { seq: 1, from: 1, to: 2, items: [{ messageId: 'm', userId: 'QQ:1', time: 1, text: '原文' }] };
+            assert.equal(writeShardIfAbsent('QQ:999', 1, shard), true, '首次写入应成功');
+            const written = store.get('session_QQ:999:arc:001');
+            assert.equal(writeShardIfAbsent('QQ:999', 1, { ...shard, items: [{ messageId: 'm', userId: 'QQ:1', time: 1, text: '改了' }] }), false, '已存在应跳过写入');
+            assert.equal(store.get('session_QQ:999:arc:001'), written, '已存在的分片不得被重写');
+            assert.equal(readShard('QQ:999', 1)?.items[0].text, '原文', '应读回首次写入的内容');
+            assert.equal(readShard('QQ:999', 2), null, '不存在的分片返回 null');
+            assert.equal(readShard('', 1), null, '空会话 id 返回 null');
+        } finally {
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+        }
+    },
+
+    /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
+    testExtractUsageCacheFields(): void {
+        const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
+        assert.ok(a);
+        assert.equal(a.prompt_tokens, 1050, 'Anthropic 方言应把缓存读/写补进 prompt_tokens（否则校准系数偏低、预算被放大）');
+        assert.equal(a.cache_read_tokens, 900);
+        assert.equal(a.cache_write_tokens, 50);
+        assert.equal(a.total_tokens, 1070);
+
+        const d = extractUsage({ usage: { prompt_tokens: 1000, completion_tokens: 30, prompt_cache_hit_tokens: 800 } });
+        assert.ok(d);
+        assert.equal(d.prompt_tokens, 1000, 'DeepSeek 的 prompt_tokens 已含缓存命中，不得重复累加');
+        assert.equal(d.cache_read_tokens, 800);
+
+        const o = extractUsage({ usage: { prompt_tokens: 500, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 128 } } });
+        assert.ok(o);
+        assert.equal(o.prompt_tokens, 500);
+        assert.equal(o.cache_read_tokens, 128);
+
+        assert.equal(extractUsage({}), undefined, '无 usage 返回 undefined');
+    },
+
+    /** 冷热状态（假时钟）：两个时间窗的边界、在途任务冻结衰减、时钟回拨、非待机恒为 HOT */
+    testSessionStateOf(): void {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        resetConfigCache();
+        try {
+            const s = new Session();
+            s.sessionId = 'QQ:state';
+            s.sessionType = 'user';
+            s.setting.standby = true;
+            const t0 = 1_000_000;
+            s.lastRelevantAt = t0;
+            assert.equal(s.stateOf(t0 + 179_000), 'HOT', '热态保持内应为 HOT');
+            assert.equal(s.stateOf(t0 + 180_000), 'COOLING', '到热态保持应进入余温');
+            assert.equal(s.stateOf(t0 + 239_000), 'COOLING', '冷态回落前仍是余温');
+            assert.equal(s.stateOf(t0 + 240_000), 'COLD', '两级衰减后应转冷');
+
+            // 在途任务冻结衰减
+            s.running = true;
+            assert.equal(s.stateOf(t0 + 10_000_000), 'HOT', '有在途任务时应保持 HOT');
+            assert.equal(s.lastRelevantAt, t0 + 10_000_000, '在途任务应刷新相关活动时间');
+            s.running = false;
+
+            // 时钟回拨：不推进状态
+            s.lastRelevantAt = t0 + 5_000;
+            assert.equal(s.stateOf(t0), 'HOT', '时钟回拨时 idle 取 0，不应误判为冷');
+
+            // 非待机＝正常对话模式：永远 HOT
+            s.setting.standby = false;
+            assert.equal(s.stateOf(t0 + 10_000_000), 'HOT', '非待机模式恒为 HOT');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            resetConfigCache();
+        }
+    },
+
+    /** 保存节流：连续 30 次合并写最多落盘 1 次（海豹 storage 是叠加式存储） */
+    testSessionSaveCoalesced(): void {
+        const session = new Session();
+        session.sessionId = 'QQ:save';
+        let writes = 0;
+        const origSet = (ext as any).storageSet;
+        (ext as any).storageSet = () => { writes++; };
+        try {
+            session.save(true);                                  // 首次：立即写
+            for (let i = 0; i < 19; i++) session.save(true);     // 后续 19 次全部延迟
+            assert.equal(writes, 1, `20 次以内的合并写应只落盘 1 次，实际 ${writes}`);
+            session.save(true);                                  // 累计到批量上限（20 条）→ 落盘一次
+            assert.equal(writes, 2, '达到批量上限应落盘一次');
+            session.save();                                      // 关键路径：立即写
+            assert.equal(writes, 3, '关键路径的 save() 应立即落盘');
+        } finally {
+            const timer = (session as any).saveTimer;
+            if (timer) clearTimeout(timer);
+            (ext as any).storageSet = origSet;
+        }
+    },
+
+    /** 转热档位判定与折叠预算 */
+    testPickTierAndFold(): void {
+        assert.equal(pickTier('@bot 骰个先攻'), 'L0');
+        assert.equal(pickTier('刚才那个呢'), 'L1');
+        assert.equal(pickTier('总结一下上面聊的'), 'L2');
+        assert.equal(windowCharsForTier('L0', 5000), 5000);
+        assert.equal(windowCharsForTier('L1', 5000), 25000);
+        assert.equal(windowCharsForTier('L2', 5000), 0, 'L2（明确要求回顾）不折叠');
+        assert.equal(windowCharsForTier('L0', 0), 0, '基准 0 = 不折叠');
+
+        // 折叠：按条目粒度裁剪，最新一条必须保留，更早内容折叠成摘要
+        const items = Array.from({ length: 50 }, (_, i) => ({ text: `第${i}条消息内容`.repeat(5), time: i, userId: 'QQ:1', messageId: `m${i}` }));
+        const folded = foldContextMessages([{ role: 'user', contentItems: items }] as any, 500);
+        const rendered = buildContent(folded[0]);
+        assert.ok(rendered.includes('第49条'), '最新一条必须保留在窗口内');
+        assert.ok(rendered.includes('折叠摘要'), '更早内容应折叠为摘要');
+        assert.ok(rendered.includes('read_raw'), '折叠摘要应提示可用 read_raw 回查原文');
+        assert.ok(rendered.length < buildContent({ role: 'user', contentItems: items } as any).length, '折叠后应短于原文');
+        assert.ok(rendered.length <= 500 * 1.1, `整包（窗口+摘要）应不超预算，实际 ${rendered.length}`);
+        assert.ok(rendered.includes('已省略'), '折叠明细放不下时应给出省略条数（避免短消息群里折叠反而更长）');
+        // 预算 0 = 不折叠
+        const notFolded = foldContextMessages([{ role: 'user', contentItems: items }] as any, 0);
+        assert.equal(notFolded[0].contentItems!.length, 50, '预算 0 时不折叠');
+    },
+
+    /** 中段截断：留头 2/3 + 尾 1/3，未超长原样返回 */
+    testTruncateMiddle(): void {
+        const text = 'ABCDEFGHIJ';
+        assert.equal(truncateMiddle(text, 10), text, '未超长原样返回');
+        assert.equal(truncateMiddle(text, 0), text, 'max=0 不截断');
+        const cut = truncateMiddle(text, 6);
+        assert.equal(cut.length, 7, '头4+省略号+尾2');
+        assert.ok(cut.startsWith('ABCD'), '应保留头部');
+        assert.ok(cut.endsWith('IJ'), '应保留尾部（不切断结尾标签）');
     },
 
 
@@ -2594,25 +2909,33 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 合并块中的前驱单条压缩消息用 rawText 原文拼接（不二次失真）；未超阈值不设 raw */
-    async testUserMessageBlockUsesPriorRawText(): Promise<void> {
+    /**
+     * 只压一次（docs/14 §5.3）：已单条压缩过的条目不再进入后续合并压缩输入，避免对同一批内容反复付费。
+     * 旧行为是"把已压缩条目的 rawText 原文再拼进来重压"，那正是被修掉的"每条消息重压整块"。
+     */
+    async testUserMessageBlockSkipsAlreadyCompressed(): Promise<void> {
         const origGet = Agent.get;
         const origThreshold = TC.intConfigs['消息压缩阈值'];
         TC.intConfigs['消息压缩阈值'] = 10;
         resetConfigCache();
+        const compressCalls: string[] = [];
         const fakeAgent = { sessionService: { getSession: () => ({ sessionType: 'user', save: () => undefined }) } };
         Agent.get = (name: any) => name === 'compress_agent'
-            ? { chat: async () => '【摘要】' }
+            ? { chat: async (t: string) => { compressCalls.push(String(t)); return '【摘要】'; } }
             : fakeAgent;
         try {
             const ctx = new Context();
-            const longFirst = '超长原文内容'.repeat(8); // 单条超阈值
+            const longFirst = '超长原文内容'.repeat(8); // 单条超阈值 → 单条压缩并标记已尝试
             await ctx.addUserMessage(makeCtx(), longFirst, 'QQ:1', 'm1');
             await ctx.addUserMessage(makeCtx(), '短尾巴', 'QQ:1', 'm2');
-            const blockItem = ctx.messages[0].contentItems[0] as any;
-            assert.ok(Array.isArray(blockItem.rawItems), '应合并为块');
-            assert.equal(blockItem.rawItems[0].text, longFirst, '块内第 1 条应取单条压缩前的完整原文（避免二次压缩失真）');
-            assert.ok(!blockItem.rawItems[0].text.includes('【摘要】'), '块内不得存单条压缩摘要');
+            const items = ctx.messages[0].contentItems as any[];
+            assert.equal(items.length, 2, '已压缩条目与后续新条目各自保留（不再整块重压）');
+            assert.equal(items[0].compressed, true, '单条压缩过的条目应标记 compressed');
+            assert.equal(items[0].rawText, longFirst, '单条压缩保留压缩前原文 rawText');
+            assert.equal(items[1].text, '短尾巴', '新短消息原样保留');
+            assert.equal(items[1].compressed, undefined, '合计未超阈值的条目不应被标记（留待后续累积再合并）');
+            assert.equal(compressCalls.length, 1, '只应发生单条压缩这一次调用');
+            assert.ok(!compressCalls[0].includes('短尾巴'), '合并输入不得包含已压缩条目');
         } finally {
             Agent.get = origGet;
             if (origThreshold === undefined) delete TC.intConfigs['消息压缩阈值']; else TC.intConfigs['消息压缩阈值'] = origThreshold;
@@ -6574,7 +6897,7 @@ description: 茶库
         const agent: any = Object.create(Agent.prototype);
         const ctx: any = { notice: () => undefined };
         const targets: number[] = [];
-        const session: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets.push(t); } } };
+        const session: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets.push(t); return true; } } };
         const raw = '{"error":{"message":"This model\'s maximum context length is 128000 tokens. However, you requested 130000 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}';
         const err = ApiError.fromResponse(400, 'openai', raw);
 
@@ -6606,6 +6929,17 @@ description: 茶库
             const action3 = await agent.handleModelError(ctx, session, err, handled2);
             assert.equal(action3, 'giveup');
             assert.equal(targets.length, 1, '开关关闭时不应归档');
+
+            // 归档未收敛（返回 false，例如被并发锁挡下或 summarize 失败）→ 不重发、不标记已处理（修 M8）
+            TC.boolConfigs['上下文超长自动归档重试'] = true;
+            resetConfigCache();
+            const targets2: number[] = [];
+            const session2: any = { context: { archiveByTokenIfNeeded: async (t: number) => { targets2.push(t); return false; } } };
+            const handled3 = { archived: false, switched: false };
+            const action4 = await agent.handleModelError(ctx, session2, err, handled3);
+            assert.equal(action4, 'giveup', '归档未完成时不应重发');
+            assert.equal(handled3.archived, false, '未收敛时不得标记 archived（否则后续重试直接放弃）');
+            assert.equal(targets2.length, 1);
         } finally {
             if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;
             if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;

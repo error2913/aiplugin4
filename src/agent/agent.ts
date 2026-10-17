@@ -376,14 +376,20 @@ export default class Agent {
         const snippet = e.message.length > 200 ? e.message.slice(0, 200) + '…' : e.message;
         log.error(`[model-error] kind=${e.kind}(${KIND_LABEL[e.kind]}) provider=${e.provider || '?'} model=${modelLabel} status=${e.status} msg=${snippet}`);
 
-        // 动作一：上下文超长 → 观察归档删除 → 自动重发
+        // 动作一：上下文超长 → 观察归档（原文进归档分片）→ 自动重发
         if (e.kind === 'context_too_long' && !handled.archived) {
             if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
             const target = computeArchiveTarget(Config.context.MAX_CONTEXT_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
+            // 必须检查返回值：归档被并发锁挡下或 summarize 失败时并未真正收敛；
+            // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）
+            const archived = await session.context.archiveByTokenIfNeeded(target);
+            if (!archived) {
+                log.warning(`[ctx-cost] 归档未完成（目标 ${target} tokens），本轮不重发`);
+                return 'giveup';
+            }
             handled.archived = true;
-            await session.context.archiveByTokenIfNeeded(target);
-            log.info(`[model-error] 上下文超长：已观察归档删除至 ${target} tokens，自动重发`);
+            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens，自动重发`);
             return 'retry';
         }
 

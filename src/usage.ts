@@ -3,40 +3,102 @@ import { ext } from "./config/config";
 import Config from "./config/config";
 import { logger } from "./logger";
 
-export class UsageManager {
-    static usageMapCache: { [model: string]: { [time: string]: { prompt_tokens: number, completion_tokens: number } } } | null = null;
+/** 用量计数（输入/输出；缓存字段按厂商提供时累加，用于观察缓存命中） */
+interface UsageCount { prompt_tokens: number; completion_tokens: number; cache_read_tokens?: number; cache_write_tokens?: number }
+/** 维度（模型或用途）→ 日期 → 计数 */
+type UsageByDate = { [time: string]: UsageCount };
+/** 存储结构：models 为原有「模型」维度，purposes 为新增「用途」维度；同一 key 一次写入，避免多写一份 */
+interface UsageStore { models: { [name: string]: UsageByDate }; purposes: { [use: string]: UsageByDate } }
 
-    static get usageMap(): { [model: string]: { [time: string]: { prompt_tokens: number, completion_tokens: number } } } {
-        if (!this.usageMapCache) {
+export class UsageManager {
+    static storeCache: UsageStore | null = null;
+
+    /** 读取存储；兼容旧格式（旧值就是「模型 → 日期 → 计数」映射，没有 models/purposes 包裹） */
+    static get store(): UsageStore {
+        if (!this.storeCache) {
+            let parsed: any = {};
             try {
-                this.usageMapCache = JSON.parse(ext.storageGet('usageMap') || '{}');
+                parsed = JSON.parse(ext.storageGet('usageMap') || '{}');
             } catch (error) {
                 logger.error('从存储中获取 usageMap 失败:', error);
             }
+            if (parsed && typeof parsed === 'object' && parsed.models && typeof parsed.models === 'object') {
+                this.storeCache = {
+                    models: parsed.models,
+                    purposes: parsed.purposes && typeof parsed.purposes === 'object' ? parsed.purposes : {},
+                };
+            } else {
+                this.storeCache = { models: parsed && typeof parsed === 'object' ? parsed : {}, purposes: {} };
+            }
         }
-        return this.usageMapCache || (this.usageMapCache = {});
+        return this.storeCache;
     }
 
-    static updateUsage(model: string, usage: { prompt_tokens: number, completion_tokens: number, total_tokens: number }) {
+    static get usageMap(): { [model: string]: UsageByDate } {
+        return this.store.models;
+    }
+
+    /** 按用途维度的用量（chat / compression / summarization / judge / text-embedding / …） */
+    static get purposeUsage(): { [use: string]: UsageByDate } {
+        return this.store.purposes;
+    }
+
+    /**
+     * 记录一次用量。
+     * @param use 用途（模型请求的 use），传入时同时累计到用途维度；旧调用方不传即只记模型维度
+     */
+    static updateUsage(model: string, usage: { prompt_tokens: number, completion_tokens: number, total_tokens: number }, use?: string) {
         if (!model) return;
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
-        const key = `${year}-${month}-${day}`;
-        if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) {
-            this.usageMap[model] = {};
-        }
-        if (!Object.prototype.hasOwnProperty.call(this.usageMap[model], key)) {
-            this.usageMap[model][key] = { prompt_tokens: 0, completion_tokens: 0 };
-            this.clearExpiredUsage(model);
-        }
-        this.usageMap[model][key].prompt_tokens += usage.prompt_tokens || 0;
-        this.usageMap[model][key].completion_tokens += usage.completion_tokens || 0;
+        const key = this.todayKey();
+        this.accumulate(this.usageMap, model, key, usage);
+        if (use) this.accumulate(this.purposeUsage, use, key, usage);
         this.saveUsageMap();
     }
 
+    /** 累加到「维度 → 日期」结构；该维度首次出现时顺带做一次过期归并 */
+    private static accumulate(map: { [name: string]: UsageByDate }, name: string, key: string, usage: { prompt_tokens: number, completion_tokens: number }) {
+        if (!Object.prototype.hasOwnProperty.call(map, name)) {
+            map[name] = {};
+            this.sweep(map[name]);
+        }
+        if (!Object.prototype.hasOwnProperty.call(map[name], key)) {
+            map[name][key] = { prompt_tokens: 0, completion_tokens: 0 };
+        }
+        map[name][key].prompt_tokens += usage.prompt_tokens || 0;
+        map[name][key].completion_tokens += usage.completion_tokens || 0;
+        const cacheRead = (usage as any).cache_read_tokens || 0;
+        const cacheWrite = (usage as any).cache_write_tokens || 0;
+        if (cacheRead) map[name][key].cache_read_tokens = (map[name][key].cache_read_tokens || 0) + cacheRead;
+        if (cacheWrite) map[name][key].cache_write_tokens = (map[name][key].cache_write_tokens || 0) + cacheWrite;
+    }
+
+    /** 全局缓存命中/写入 token 汇总（`.ai ctx` 展示用；按厂商提供时才有值） */
+    static getCacheUsage(): { read: number; write: number } {
+        let read = 0;
+        let write = 0;
+        const map = this.usageMap;
+        for (const model of Object.keys(map)) {
+            for (const key in map[model]) {
+                read += map[model][key].cache_read_tokens || 0;
+                write += map[model][key].cache_write_tokens || 0;
+            }
+        }
+        return { read, write };
+    }
+
+    private static todayKey(): string {
+        const now = new Date();
+        return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    }
+
+    /** 保留旧签名：对指定模型做过期归并 */
     static clearExpiredUsage(model: string) {
+        if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) return;
+        this.sweep(this.usageMap[model]);
+    }
+
+    /** 过期归并：超过 12 个月归入 `0-0-0`，超过 30 天的按天桶归入当月桶 */
+    private static sweep(map: UsageByDate) {
         const now = new Date();
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth() + 1;
@@ -44,12 +106,9 @@ export class UsageManager {
         const currentYM = currentYear * 12 + currentMonth;
         const currentYMD = currentYear * 12 * 31 + currentMonth * 31 + currentDay;
 
-        if (!Object.prototype.hasOwnProperty.call(this.usageMap, model)) return;
-
-        const map = this.usageMap[model];
         // 先收集过期 key 与归并结果，完成后再统一替换，避免遍历同一对象时增删导致数据丢失/翻倍
         const expiredKeys: string[] = [];
-        const merged: { [time: string]: { prompt_tokens: number, completion_tokens: number } } = {};
+        const merged: UsageByDate = {};
         for (const key in map) {
             if (key === '0-0-0') continue; // 长期汇总桶常驻，不再参与归并
             const [year, month, day] = key.split('-').map(Number);
@@ -94,12 +153,24 @@ export class UsageManager {
         return usage;
     }
 
+    /** 按用途维度取总用量 */
+    static getPurposeUsage(use: string): { prompt_tokens: number, completion_tokens: number } {
+        const map = this.purposeUsage;
+        if (!Object.prototype.hasOwnProperty.call(map, use)) return { prompt_tokens: 0, completion_tokens: 0 };
+        const usage = { prompt_tokens: 0, completion_tokens: 0 };
+        for (const key in map[use]) {
+            usage.prompt_tokens += map[use][key].prompt_tokens;
+            usage.completion_tokens += map[use][key].completion_tokens;
+        }
+        return usage;
+    }
+
     static saveUsageMap() {
-        ext.storageSet('usageMap', JSON.stringify(this.usageMapCache));
+        ext.storageSet('usageMap', JSON.stringify(this.store));
     }
 
     static clearUsageMap() {
-        this.usageMapCache = {};
+        this.storeCache = { models: {}, purposes: {} };
     }
 }
 

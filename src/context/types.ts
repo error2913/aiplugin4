@@ -18,6 +18,11 @@ export interface RawUserItem {
 export interface UserMessageItem extends BaseMessageItem {
     userId: string;
     messageId: string;
+    /**
+     * 该条已尝试过压缩（**含失败**）：不再进入下一次压缩输入，避免同一批内容被反复付费压缩。
+     * 冷态（待机）入库的条目始终为 true（冷态只做纯代码截断，永不调用压缩智能体）。
+     */
+    compressed?: boolean;
     /** 单条消息被压缩前的完整原文：不参与渲染与 token 估算，仅由 read_raw/grep_raw(kind=user) 按需读取；随消息归档/清理失效 */
     rawText?: string;
     /** 连续多条 user 消息合并压缩后，块内各条原始消息（含各自 messageId/time）；块寻址 id 为 blk:<末条messageId> */

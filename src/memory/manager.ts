@@ -353,6 +353,9 @@ export class MemoryManager {
 
         try {
             const reply = await Agent.get('summarize_agent').chat(prompt);
+            // 账本：归档总结的调用次数（`.ai ctx` 展示；游离会话无 ctxStats 时忽略）
+            const stats: any = (session as any).ctxStats;
+            if (stats && typeof stats.summarization === 'number') stats.summarization += 1;
             if (!reply) return false;
             const memoryData = parseLooseJson(reply);
             if (!memoryData || typeof memoryData !== 'object') return false;

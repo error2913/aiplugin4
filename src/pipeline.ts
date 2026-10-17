@@ -585,13 +585,13 @@ export class MessagePipeline {
                 const newRef = session.context.addSystemUserMessageTracked(text, opts.systemName, entryExtra);
                 if (newRef) rememberEventEntryRef(dedupKey, newRef);
             }
-            session.save();
+            session.save(true);   // 合并写：事件是高频入库路径
             log.debug(`事件去重合并（保留最后到达）：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
             return true;
         }
         const entryRef = session.context.addSystemUserMessageTracked(text, opts.systemName, entryExtra);
         if (entryRef) rememberEventEntryRef(dedupKey, entryRef);
-        session.save();
+        session.save(true);   // 合并写：事件是高频入库路径
         log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
         return true;
     }
@@ -670,7 +670,7 @@ export class MessagePipeline {
             if (sessionBusy) {
                 return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
             }
-            return session.handleReceipt(ctx, msg, messageArray).then(() => session.save());
+            return session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true));
         }
 
         // 忽略条件（豹语表达式）命中时直接忽略
@@ -780,7 +780,7 @@ export class MessagePipeline {
                             await JudgeManager.evaluate(ctx, msg, session, messageText);
                         }
                     })
-                    .then(() => session.save());
+                    .then(() => session.save(true));   // 合并写：待机群每条消息都会走到这里
             }
         }
     }

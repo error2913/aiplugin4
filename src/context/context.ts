@@ -10,20 +10,32 @@ import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
 import { estimateMessageTokens } from "../utils/message";
 import { callOb11Api } from "../utils/ob11";
-import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, stripRawMarkers } from "../utils/raw_marker";
+import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, buildUserTruncateMarker, stripRawMarkers } from "../utils/raw_marker";
 import { stripInternalTags } from "../utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor, withTimeout } from "../utils/utils";
 
+import { ARCHIVE_SHARD_LIMIT, ArchiveShardItem, clearShard, writeShardIfAbsent } from "./archive_store";
 import Message from "./message";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
 const log = Logger.withTag('context');
 
-// 群内用户会话的记忆权重（accessCount/lastAccessedAt）节流持久化：每会话 5 分钟内最多写一次，
-// 避免每条消息都对所有历史发言者全量序列化。当前会话由对话收尾统一保存。
+/** 群内用户会话的记忆权重（accessCount/lastAccessedAt）节流持久化：每会话 5 分钟内最多写一次，
+// 避免每条消息都对所有历史发言者全量序列化。当前会话由对话收尾统一保存。 */
 const lastUserMemorySaveAt: { [sessionId: string]: number } = {};
 const USER_MEMORY_SAVE_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * 中段截断：保留头 2/3 + 尾 1/3（保留尾部是为了不切断 [img:…] / [record:…] 这类结尾标签）。
+ * max ≤ 0 或未超长时原样返回。冷态入库用它做零 LLM 的纯代码截断。
+ */
+export function truncateMiddle(text: string, max: number): string {
+    if (max <= 0 || text.length <= max) return text;
+    const head = Math.floor(max * 2 / 3);
+    const tail = max - head;
+    return `${text.slice(0, head)}…${tail > 0 ? text.slice(-tail) : ''}`;
+}
 
 function flushGroupUserMemories(session: Session): void {
     if (session.sessionType !== 'group') return;
@@ -202,22 +214,115 @@ export class Context {
         }).filter(m => m !== null);
     }
 
-    /** 文本超过压缩阈值时交给压缩智能体，返回 {display, original, changed}；未超阈值或压缩失败时 changed=false、display=原文 */
-    static async compressPreserveIfLong(text: string): Promise<{ display: string; original: string; changed: boolean }> {
+    /**
+     * 文本超过压缩阈值时交给压缩智能体，返回 {display, original, changed, called}。
+     * 采纳条件（docs/14 §5.3）：结果必须**比原文更短**，否则保留原文（不更短就不采纳）；
+     * `called` 表示这次是否真的调用了压缩智能体（未超阈值时为 false，供账本计数用）。
+     */
+    static async compressPreserveIfLong(text: string): Promise<{ display: string; original: string; changed: boolean; called: boolean }> {
         const { COMPRESS_THRESHOLD } = Config.context;
-        if (text.length <= COMPRESS_THRESHOLD) return { display: text, original: text, changed: false };
+        if (text.length <= COMPRESS_THRESHOLD) return { display: text, original: text, changed: false, called: false };
         try {
             const compressed = await Agent.get('compress_agent').chat(text);
-            if (compressed && compressed !== text) {
-                return { display: compressed, original: text, changed: true };
+            if (compressed && compressed !== text && compressed.length < text.length) {
+                return { display: compressed, original: text, changed: true, called: true };
+            }
+            if (compressed && compressed.length >= text.length) {
+                log.info(`[ctx-cost] 压缩结果未变短（原 ${text.length} 字 → ${compressed.length} 字），保留原文`);
             }
         } catch (e) {
             log.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
         }
-        return { display: text, original: text, changed: false };
+        return { display: text, original: text, changed: false, called: true };
     }
 
-    // 用户消息入库：单条超长或连续多条合并后超阈值时，交给压缩智能体压缩后存入上下文
+    /** 冷态判定：待机（会话或全局）且无在途对话。游离 Context / 测试桩没有 stateOf 时按热态处理，保持原行为 */
+    private isColdSession(): boolean {
+        const s: any = this.session;
+        if (!s || typeof s.stateOf !== 'function') return false;
+        return s.stateOf() === 'COLD';
+    }
+
+    /** 本会话账本计数（游离/桩会话没有 ctxStats 时忽略） */
+    private bumpStat(key: 'compression' | 'summarization' | 'judge'): void {
+        const s: any = this.session;
+        if (s && s.ctxStats && typeof s.ctxStats[key] === 'number') s.ctxStats[key] += 1;
+    }
+
+    /**
+     * 冷态入库条目：**零 LLM** —— 只做纯代码截断（留头留尾），原文进 rawText 并带"原文已截断"标记。
+     * 标记 compressed=true 表示"永不参与 LLM 压缩"（冷态诞生的内容转热后也不会被回溯压缩）。
+     */
+    private buildColdUserItem(text: string, userId: string, messageId: string): UserMessageItem {
+        const { COLD_SINGLE_TRUNCATE } = Config.context;
+        const original = stripInternalTags(text);
+        const item: UserMessageItem = {
+            text: original,
+            time: Math.floor(Date.now() / 1000),
+            userId,
+            messageId,
+            compressed: true,
+        };
+        if (COLD_SINGLE_TRUNCATE > 0 && original.length > COLD_SINGLE_TRUNCATE) {
+            const shown = truncateMiddle(original, COLD_SINGLE_TRUNCATE);
+            item.text = shown + buildUserTruncateMarker(original.length, shown.length, messageId);
+            item.rawText = original;
+        }
+        return item;
+    }
+
+    /** 追加用户条目：延续"连续 user 消息并入同一条消息"的现有语义 */
+    private appendUserItem(item: UserMessageItem): void {
+        const lastMessage = this.messages[this.messages.length - 1];
+        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) {
+            (lastMessage as UserMessage).contentItems.push(item);
+        } else {
+            this.messages.push({ role: 'user', contentItems: [item] });
+        }
+    }
+
+    /**
+     * 合并压缩块内**尚未尝试过压缩**的尾部条目（已尝试过的一律不再进入压缩输入）。
+     * - 采纳：这批条目替换为一条块条目（rawItems 保留原文），块条目 compressed=true；
+     * - 未采纳/失败：把这批条目标记为已尝试，避免下一条消息到来时再次付费重压。
+     * 不变量：未压缩条目永远是数组尾部连续一段（只追加、只整体替换尾部），因此可按 compressed 过滤重建。
+     */
+    private async compressPendingTail(userMsg: UserMessage): Promise<void> {
+        const items = userMsg.contentItems as UserMessageItem[];
+        const pending = items.filter(it => !it.compressed);
+        if (pending.length === 0) return;
+        const joined = pending.map(it => stripRawMarkers(it.rawText ?? it.text)).join('\f');
+        const block = await Context.compressPreserveIfLong(joined);
+        if (block.called) this.bumpStat('compression');
+        if (block.changed && block.display !== joined) {
+            const last = pending[pending.length - 1];
+            const rawItems = pending.map(it => ({
+                userId: it.userId,
+                messageId: it.messageId,
+                time: it.time,
+                text: stripRawMarkers(it.rawText ?? it.text)
+            }));
+            let display = stripInternalTags(block.display);
+            display += buildUserBlockMarker(pending.length, joined.length, last.messageId);
+            userMsg.contentItems = [
+                ...items.filter(it => it.compressed),
+                {
+                    text: display,
+                    time: last.time,
+                    userId: last.userId,
+                    messageId: last.messageId,
+                    compressed: true,
+                    rawItems
+                }
+            ];
+        } else if (block.called) {
+            // 真的调用过压缩但未采纳/失败：标记为已尝试，避免下一条消息到来时再次付费重压
+            for (const it of pending) it.compressed = true;
+        }
+        // called=false（合计未超阈值）：不标记，留待后续消息累积后再合并
+    }
+
+    // 用户消息入库：热态下"单条超长 / 连续多条合并后超阈值"交给压缩智能体；冷态（待机）只做纯代码截断。
     // 压缩前原文保留在条目 rawText/rawItems（不参与渲染与 token 估算），展示文本末尾带标记，
     // AI 可用 read_raw/grep_raw(kind=user) 按 msg_id（单条）/ blk:<末条messageId>（合并块）核对原文
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
@@ -229,8 +334,17 @@ export class Context {
                 log.warning('自动改名失败: ' + (e instanceof Error ? e.message : String(e)));
             }
         }
-        // 单条压缩：替换发生时保留压缩前原文 rawText
+
+        // 冷态（待机且无在途对话）：入库零 LLM —— 只追加 + 纯代码截断，不调用压缩智能体、不做合并压缩
+        if (this.isColdSession()) {
+            this.appendUserItem(this.buildColdUserItem(text, userId, messageId));
+            flushGroupUserMemories(this.session);
+            return;
+        }
+
+        // —— 热态：单条压缩（超阈值即视为"已尝试过"，含未采纳/失败，避免反复付费） ——
         const single = await Context.compressPreserveIfLong(text);
+        if (single.called) this.bumpStat('compression');
         let itemText = stripInternalTags(single.display);
         const rawText = single.changed ? stripInternalTags(single.original) : undefined;
         if (rawText !== undefined) {
@@ -243,35 +357,16 @@ export class Context {
             time: Math.floor(Date.now() / 1000),
             userId,
             messageId,
+            // 真的调用过压缩（含未采纳/失败）才标记"已尝试"，避免反复付费；未超阈值时不标记，留待后续合并
+            ...(single.called ? { compressed: true } : {}),
             ...(rawText !== undefined ? { rawText } : {})
         };
         const lastMessage = this.messages[this.messages.length - 1];
         if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) {
             const userMsg = lastMessage as UserMessage;
             userMsg.contentItems.push(umi);
-            // 连续多条 user 消息合并后总长超阈值 → 合并压缩，替换为该条压缩结果
-            // 块内原文逐条保留（各条若已单条压缩，取 rawText 原文而非摘要，避免二次压缩失真）；
-            // 分隔符与 buildContent 渲染保持一致（真实 \f）
-            const items = userMsg.contentItems as UserMessageItem[];
-            const joined = items.map(it => stripRawMarkers(it.rawText ?? it.text)).join('\f');
-            const block = await Context.compressPreserveIfLong(joined);
-            if (block.changed && block.display !== joined) {
-                const rawItems = items.map(it => ({
-                    userId: it.userId,
-                    messageId: it.messageId,
-                    time: it.time,
-                    text: stripRawMarkers(it.rawText ?? it.text)
-                }));
-                let display = stripInternalTags(block.display);
-                display += buildUserBlockMarker(items.length, joined.length, umi.messageId);
-                userMsg.contentItems = [{
-                    text: display,
-                    time: umi.time,
-                    userId: umi.userId,
-                    messageId: umi.messageId,
-                    rawItems
-                }];
-            }
+            // 连续多条 user 消息合并后总长超阈值 → 合并压缩（只压未尝试过的尾部，见 compressPendingTail）
+            await this.compressPendingTail(userMsg);
         } else {
             this.messages.push({
                 role: 'user',
@@ -409,12 +504,12 @@ export class Context {
     }
 
     /**
-     * 基于 token 上限执行归档（观察归档 + 逐块删除）：
+     * 基于 token 上限执行归档（观察归档 + 分片留档 + 移除条目）：
      * - targetTokens 缺省时用「上下文最大token」配置；
-     * - 超过上限时保留最近 MAX_ROUNDS 个真实 user 轮；
-     * - 更早消息分块归档，成功一块删一块；
-     * - 单块重试耗尽后降级丢弃最早轮次（forceFit 到 target），直到不超上限。
-     * @returns 是否已收敛到上限以内（false 表示归档失败、仅做了降级硬删）
+     * - 超过上限时保留最近 MAX_ROUNDS 个真实 user 轮，更早消息分块归档（summarize 沉淀记忆）；
+     * - 归档的群聊原文写进独立分片 key（**只写一次、永不重写**），再从上下文移除；
+     * - 轮数不够时（待机群常见：只有 1 轮）按"条"归档，**不再整段硬删**（修 M7）。
+     * @returns 是否已收敛到上限以内（false = 归档失败，数据保持原样留给下次重试；不再做降级硬删）
      */
     async archiveByTokenIfNeeded(targetTokens?: number): Promise<boolean> {
         if (this.archiving) return false;
@@ -425,24 +520,23 @@ export class Context {
             // target <= 0 视为不限制；未传 target 时回退配置上限（配置层已保证其 > 0）
             const target = targetTokens && targetTokens > 0 ? targetTokens : (MAX_CONTEXT_TOKENS > 0 ? MAX_CONTEXT_TOKENS : Infinity);
             const keepRounds = MAX_ROUNDS > 0 ? MAX_ROUNDS : 5;
+            let converged = true;
 
             while (estimateContextMessagesTokens(this.messages) > target) {
                 const keepStart = getKeepStart(this.messages, keepRounds);
                 const toArchive = this.messages.slice(0, keepStart);
 
                 if (toArchive.length > 0) {
-                    const ok = await this.archivePrefix(toArchive);
-                    if (ok) continue;
-
-                    await this.forceFitContext(target);
-                    return false;
+                    if (await this.archivePrefix(toArchive)) continue;
+                } else if (await this.archiveOldestItems()) {
+                    continue;
                 }
-
-                await this.forceFitContext(target);
-                return false;
+                // 归档失败：不删数据、不做硬删兜底，如实返回"未收敛"（调用方据此提示/重试）
+                converged = false;
+                break;
             }
 
-            return true;
+            return converged;
         } finally {
             this.archiving = false;
         }
@@ -454,7 +548,9 @@ export class Context {
         for (const chunk of chunks) {
             const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
             if (!ok) return false;
-            // chunk 始终是当前消息数组最前的一段（前面的块成功后已删除）
+            // 先把这批原文写进归档分片（幂等，只写一次），再从上下文移除：移出窗口的内容仍可用 read_raw 回查
+            this.writeArchiveShard(chunk);
+            // chunk 始终是当前消息数组最前的一段（前面的块成功后已移除）
             this.messages.splice(0, chunk.length);
             try { this.session.save(); } catch { /* 无宿主会话时跳过保存（测试/游离 Context） */ }
         }
@@ -462,27 +558,86 @@ export class Context {
         return true;
     }
 
-    private async forceFitContext(targetTokens: number): Promise<void> {
-        let safety = 0;
-
-        while (estimateContextMessagesTokens(this.messages) > targetTokens && this.messages.length > 0 && safety < 10000) {
-            const dropped = dropOldestRound(this.messages);
-            if (!dropped) break;
-            safety++;
-            log.warning(`上下文归档失败降级：已丢弃最早 1 轮，剩余 token=${estimateContextMessagesTokens(this.messages)}`);
-        }
-
-        if (this.messages.length > 0 && estimateContextMessagesTokens(this.messages) > targetTokens) {
-            // 极端单条超限：截断最旧消息文本到预算内（仅兜底，尽量保留尾部）
-            const m = this.messages[0] as any;
-            const tokens = estimateMessageTokens(m);
-            const text = (m.text ?? (m.contentItems?.[0]?.text ?? '')) as string;
-            const maxTextLen = Math.max(1, Math.floor(text.length * targetTokens / Math.max(1, tokens)));
-            if (text.length > maxTextLen) {
-                const cut = text.slice(-maxTextLen);
-                if (m.contentItems) m.contentItems = [{ text: cut, time: m.contentItems[0]?.time ?? Math.floor(Date.now() / 1000) }];
-                else m.text = cut;
+    /**
+     * 轮数不够时的兜底归档：按 contentItem 粒度取出最旧一段（受 ARCHIVE_CHUNK_TOKENS 限制），
+     * 先 summarize 沉淀记忆，再写归档分片并移除条目。**不做整段硬删**（修 M7）。
+     */
+    private async archiveOldestItems(): Promise<boolean> {
+        const picked: MessageType[] = [];
+        let tokens = 0;
+        for (const m of this.messages) {
+            if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
+            const taken: UserMessageItem[] = [];
+            for (const it of (m as UserMessage).contentItems as UserMessageItem[]) {
+                const t = estimateMessageTokens({ role: 'user', contentItems: [it] } as any);
+                if (tokens > 0 && tokens + t > ARCHIVE_CHUNK_TOKENS) break;
+                taken.push(it);
+                tokens += t;
             }
+            if (taken.length === 0) continue;
+            picked.push({ role: 'user', contentItems: taken } as UserMessage);
+            if (tokens >= ARCHIVE_CHUNK_TOKENS) break;
+        }
+        if (picked.length === 0) return false;
+
+        const ok = await MemoryManager.summarizeChunkWithRetry(this.session, picked);
+        if (!ok) return false;
+
+        this.writeArchiveShard(picked);
+        this.removeArchivedItems(picked);
+        try { this.session.save(); } catch { /* 游离 Context */ }
+        return true;
+    }
+
+    /** 把这批消息里的 user 条目原文写进归档分片（幂等：分片已存在则跳过），并推进 archiveSeq */
+    private writeArchiveShard(chunk: MessageType[]): void {
+        const s: any = this.session;
+        if (!s || typeof s.archiveSeq !== 'number') return;   // 游离/桩会话：不写分片
+        const items: ArchiveShardItem[] = [];
+        for (const m of chunk) {
+            if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
+            for (const raw of (m as UserMessage).contentItems as UserMessageItem[]) {
+                if (!raw || typeof raw.text !== 'string' || !raw.userId) continue;   // 系统条目（事件/提示）不入分片
+                if (Array.isArray(raw.rawItems) && raw.rawItems.length > 0) {
+                    // 压缩块：块内逐条原文才是真原文
+                    for (const ri of raw.rawItems) items.push({ messageId: ri.messageId || '', userId: ri.userId, time: ri.time || 0, text: ri.text });
+                    continue;
+                }
+                items.push({
+                    messageId: raw.messageId || '',
+                    userId: raw.userId,
+                    time: raw.time || 0,
+                    text: stripRawMarkers(raw.rawText ?? raw.text),
+                });
+            }
+        }
+        if (items.length === 0) return;
+        const seq = s.archiveSeq + 1;
+        const wrote = writeShardIfAbsent(s.sessionId, seq, {
+            seq,
+            from: items[0].time,
+            to: items[items.length - 1].time,
+            items,
+        });
+        if (wrote) s.archiveSeq = seq;
+        s.lastArchivedAt = Math.floor(Date.now() / 1000);
+        // 分片数量上限：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
+        if (s.archiveSeq > ARCHIVE_SHARD_LIMIT) clearShard(s.sessionId, s.archiveSeq - ARCHIVE_SHARD_LIMIT);
+    }
+
+    /** 从 messages 中移除已归档的条目（按条目对象定位，保持其余内容与顺序不变） */
+    private removeArchivedItems(archived: MessageType[]): void {
+        const marked = new Set<any>();
+        for (const m of archived) {
+            if (Message.getMessageType(m) !== 'user') continue;
+            for (const it of (m as UserMessage).contentItems || []) marked.add(it);
+        }
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+            const m = this.messages[i];
+            if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
+            const um = m as UserMessage;
+            um.contentItems = um.contentItems.filter(it => !marked.has(it));
+            if (um.contentItems.length === 0) this.messages.splice(i, 1);
         }
     }
 

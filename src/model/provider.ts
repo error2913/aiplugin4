@@ -125,7 +125,8 @@ export async function requestModel(url: string, apiKey: string, body: any, optio
             if (countUsage) {
                 const usage = extractUsage(data);
                 if (usage) {
-                    UsageManager.updateUsage(data.model || '', usage);
+                    // 同时按「模型」与「用途」记账（用途用于区分 chat/压缩/归档/评分各花了多少）
+                    UsageManager.updateUsage(data.model || '', usage, options.use);
                     TokenCalibration.record(options.modelName || data.model || '', options.rawEstimateTokens || 0, usage.prompt_tokens);
                 }
             }

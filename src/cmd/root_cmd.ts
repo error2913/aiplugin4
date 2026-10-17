@@ -8,6 +8,7 @@ import { aliasToCmd } from "../utils/utils";
 import { CmdPriv, CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
 import { registerCmdBalance } from "./sub_cmd/balance";
 import { registerCmdBlock } from "./sub_cmd/block";
+import { registerCmdCtx } from "./sub_cmd/ctx";
 import { registerCmdCtxn } from "./sub_cmd/ctxn";
 import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
@@ -71,6 +72,7 @@ export class SubCmd {
         registerCmdPrompt();
         registerCmdPub();
         registerCmdStatus();
+        registerCmdCtx();
         registerCmdLive();
         registerCmdCtxn();
         registerCmdTimer();
