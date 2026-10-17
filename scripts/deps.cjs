@@ -15,16 +15,8 @@ module.exports = {
       name: "ob11 网络连接依赖",
       url: "https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js",
       filename: "ob11-net-connection.js"
-    },
-    {
-      name: "生成音频依赖",
-      url: "https://raw.githubusercontent.com/error2913/aiplugin4-dependencies/main/tts/dist/tts.js",
-      filename: "tts.js"
-    },
-    {
-      name: "生成图片依赖",
-      url: "https://raw.githubusercontent.com/error2913/aiplugin4-dependencies/main/tti/dist/tti.js",
-      filename: "tti.js"
     }
+    // 生成音频（tts）/ 生成图片（tti）依赖插件已废弃：相关能力内置在本插件
+    //（「api连接」+「模型规则」的 tts / image-generation 用途），不再随包分发。
   ]
 };

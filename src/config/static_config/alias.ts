@@ -23,5 +23,7 @@ export const ALIAS_MAP: { [key: string]: string } = {
     "m": "month",
     "lcl": "local",
     "ran": "random",
-    "nick": "nickname"
+    "nick": "nickname",
+    "md": "media",
+    "mda": "media"
 }

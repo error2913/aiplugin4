@@ -15,9 +15,12 @@
 | TOOL-09 | `.ai tool call 不存在的函数` | M | `调用函数失败:未注册的函数` | 错误路径 |
 | TOOL-10 | `.ai tool on <禁止调用的函数>` | I | `不被允许开启` | 仅当知道"禁止调用的函数"配置项内容时测，否则 SKIP(env) |
 | TOOL-11 | `.ai tool help draw_deck` | U | `没有这个工具函数` | 回归：旧牌堆独立工具已移除，牌堆抽取改用 `run_ext_command` 的 `deck|draw` |
+| TOOL-12 | `.ai tool help media_tasks` | U | `media_tasks`、`必需参数` | 4.24.0 新增：媒体生成任务队列（list/cancel），归类「多媒体」 |
+| TOOL-13 | `.ai tool 多媒体` | U | `media_tasks` | 分组视图应命中「多媒体」分类（4.24.0 起；旧版无该组 → SKIP(version)） |
 
 说明：
 
 - `call_ob11_api` 可能调用有副作用的 action（如 `set_group_ban`、`send_group_msg`）；模拟测试只验证参数校验和依赖分流，不连接真实海豹。
 - `run_ext_command` 不依赖会话历史中的 `Tool.cmdArgs`，也不要求先使用 `.r`；每次调用都会按工具参数现场构造 `CmdArgs`。核心指令使用 `run_core_command`，需要 OB11 核心桥。牌堆、模组、今日人品等能力不再提供独立工具名，统一通过扩展白名单调用 `deck|draw`、`story|modu`、`fun|jrrp` 等指令。
+- `generate_audio` / `text_to_image` 自 4.24.0 起为**异步**（提交即返回任务号），其参数与生效范围由「模型规则」的 `[params]`/`[body]` 决定，相关用例见 [media.md](media.md)。
 - TOOL-04~07 结束后按 TOOL-01 快照逐工具还原（`on`/`off <工具名>`）。

@@ -2,7 +2,8 @@
 import Config, { ext } from "../config/config";
 import { savePurposeModelOverrides } from "../config/configs/model";
 import Logger from "../logger";
-import { ApiError, computeArchiveTarget, KIND_LABEL } from "../model/api_error";
+import { MediaTaskManager } from "../media/task_queue";
+import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL } from "../model/api_error";
 import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
 import Image from "../resource/image";
@@ -13,7 +14,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { buildSystemMessage, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { buildSystemMessage, collectImageUrls, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
 import { getSessionCtxAndMsg } from "../utils/seal";
 import { checkRepeat, handleReply } from "../utils/string";
 import { revive, StopError, TypeDescriptor } from "../utils/utils";
@@ -21,6 +22,39 @@ import { resetStopEvent } from "../utils/utils";
 
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
+
+/**
+ * 从**有序**候选列表里选下一个备用模型。
+ *
+ * **只往后走，不回头**：从当前模型在列表里的位置往下一个一个取。
+ * 候选列表已按用户的 purposes 顺序排（见 `Model.listModelsForUse`），
+ * 所以多级回退严格按用户排的顺序推进。
+ *
+ * 为什么不是"取第一个不等于当前的"（原实现）：当前模型若不是列表首位，
+ * 那个写法会**绕回开头** —— A→B 之后 B 失败又切回 A，在两个模型间来回跳。
+ * 走到末尾就没有下一个了（返回 null），而不是重试已经失败过的。
+ *
+ * 导出为纯函数是为了**单测能跑真代码**：复刻一份逻辑的测试证明不了实现对
+ * （本轮踩过：测试里复刻了旧写法，于是实现改对了测试仍然失败）。
+ *
+ * @param strategy 'cross' 时优先挑不同 provider 的（避开整家厂商故障）
+ */
+export function pickNextModel(
+    pool: ModelEntry[],
+    current: ModelEntry | null,
+    strategy: 'cross' | 'order',
+): ModelEntry | null {
+    if (pool.length === 0) return null;
+    const idx = current ? pool.findIndex(c => c.ref === current.ref) : -1;
+    // current 不在候选里（已退役/改名/类型变了）→ 从列表头开始找
+    const forward = idx >= 0 ? pool.slice(idx + 1) : pool;
+    if (forward.length === 0) return null;
+    if (strategy === 'cross' && current) {
+        const cross = forward.find(c => c.provider !== current.provider);
+        if (cross) return cross;
+    }
+    return forward[0];
+}
 
 const log = Logger.withTag('agent');
 
@@ -138,6 +172,10 @@ export default class Agent {
                 await this.resumePending(session, version);
             }
             session.starting = false;
+            // 轮末补触发：会话真正空闲后，补发仍未被消费的媒体完成通知。
+            // 必须在 resumePending 之后、starting 归零之后 —— 此时判定"空闲"才是准的，
+            // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
+            if (acquired) MediaTaskManager.wakePendingNotices(session);
         }
     }
 
@@ -182,8 +220,8 @@ export default class Agent {
         let nudgeCount = 0;
         const MaxNudge = 2;
 
-        // 模型分类错误自动处理的 run 级状态：上下文超长归档 / 自动切模型各自至多触发一次，避免反复恢复死循环
-        const handled = { archived: false, switched: false };
+        // 模型分类错误自动处理的 run 级状态：上下文超长归档 / 自动切模型 / 图片降级各自至多触发一次，避免反复恢复死循环
+        const handled = { archived: false, switched: false, imageDegraded: false };
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // stop 中止检查点：上一轮工具执行/回调期间被 stop 则不再发下一轮请求
@@ -193,7 +231,7 @@ export default class Agent {
             await session.flushPending();
             // 子代理结算 notice 入库（后台子代理完成，父下一轮可见）
             await session.flushNotices();
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName);
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded });
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
             try {
@@ -203,7 +241,7 @@ export default class Agent {
             } catch (e) {
                 if (e instanceof StopError) return;
                 if (!(e instanceof ApiError)) throw e;
-                const action = await this.handleModelError(ctx, session, e, handled);
+                const action = await this.handleModelError(ctx, session, e, handled, collectImageUrls(messages));
                 if (action !== 'retry') return;
                 // 已归档/已切模型：重跑一轮（handleMessages 会基于归档后的上下文重建请求体）
                 continue;
@@ -320,6 +358,7 @@ export default class Agent {
     /**
      * 模型分类错误的自动处理（runInternal / runStreamInner 共用）：
      * - context_too_long：按「观察归档+删除」链路把持久化上下文压到模型窗口内（目标=min(本地预算, 报文窗口×0.8)），返回 retry；
+     * - 图片下载失败（invalid_request：QQ 图床直链过期等）：把这些图片标记为不可用并降级为文本标签后重发，返回 retry；
      * - 配置触发的类别（默认 balance）：自动切换 chat 备用模型并持久化（可选 ctx.notice 通知），返回 retry；
      * - 其余类别 / 动作已用过仍失败：仅记日志，返回 giveup（静默结束本轮，不回复用户）。
      * 每类动作由 handled 限流为单次 run 至多一次。
@@ -328,7 +367,8 @@ export default class Agent {
         ctx: seal.MsgContext,
         session: Session,
         e: ApiError,
-        handled: { archived: boolean; switched: boolean }
+        handled: { archived: boolean; switched: boolean; imageDegraded: boolean },
+        imageUrls: string[] = []
     ): Promise<'retry' | 'giveup'> {
         const { ENABLED, CONTEXT_ARCHIVE_RETRY, AUTO_SWITCH_MODEL, SWITCH_KINDS, SWITCH_STRATEGY, SWITCH_NOTIFY } = Config.error;
         const current = Model.getChatModel('chat');
@@ -347,7 +387,17 @@ export default class Agent {
             return 'retry';
         }
 
-        // 动作二：余额不足/权限不足等（按「自动切换触发错误」配置）→ 切备用 chat 模型 → 自动重发
+        // 动作二：模型无法下载上下文里的图片（QQ 图床直链过期等）→ 标记这些图片为不可用并降级为文本标签后重发。
+        // 排在自动切换模型之前：换模型救不了死链，而重新组包（不再带 image_url）能立刻救回这一轮。
+        if (isImageDownloadFailure(e.message) && !handled.imageDegraded) {
+            if (!ENABLED || imageUrls.length === 0) return 'giveup';
+            handled.imageDegraded = true;
+            const marked = Image.markUrlBrokenByUrls(imageUrls);
+            log.warning(`[model-error] 模型无法下载上下文图片：已标记 ${marked}/${imageUrls.length} 张不可用，本轮改为文本标签重发`);
+            return 'retry';
+        }
+
+        // 动作三：余额不足/权限不足等（按「自动切换触发错误」配置）→ 切备用 chat 模型 → 自动重发
         if (SWITCH_KINDS.includes(e.kind) && !handled.switched) {
             if (!ENABLED || !AUTO_SWITCH_MODEL) return 'giveup';
             const next = this.pickFallbackModel(current, SWITCH_STRATEGY);
@@ -371,15 +421,11 @@ export default class Agent {
     }
 
     /** 选取 chat 用途的备用模型：排除当前模型；跨厂商优先（cross）或配置顺序下一个（order），无候选返回 null */
+    /**
+     * 选下一个备用 chat 模型（真正的逻辑在导出的纯函数 `pickNextModel` 里，便于单测）。
+     */
     private pickFallbackModel(current: ModelEntry | null, strategy: 'cross' | 'order'): ModelEntry | null {
-        const currentRef = current ? current.ref : '';
-        const cands = Model.listModelsForUse('chat').filter(c => c.ref !== currentRef);
-        if (cands.length === 0) return null;
-        if (strategy === 'cross' && current) {
-            const cross = cands.find(c => c.provider !== current.provider);
-            if (cross) return cross;
-        }
-        return cands[0];
+        return pickNextModel(Model.listModelsForUse('chat'), current, strategy);
     }
 
 
@@ -387,7 +433,7 @@ export default class Agent {
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const version = session.stopVersion;
         // 模型分类错误自动处理的 run 级状态（runInternal 同款：每类动作单次 run 至多一次）
-        const handled = { archived: false, switched: false };
+        const handled = { archived: false, switched: false, imageDegraded: false };
         // 同会话闸门：已有 run/runStream 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
         if (session.running || session.starting) return;
         session.starting = true;
@@ -418,6 +464,10 @@ export default class Agent {
                 await this.resumePending(session, version);
             }
             session.starting = false;
+            // 轮末补触发：会话真正空闲后，补发仍未被消费的媒体完成通知。
+            // 必须在 resumePending 之后、starting 归零之后 —— 此时判定"空闲"才是准的，
+            // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
+            if (acquired) MediaTaskManager.wakePendingNotices(session);
         }
     }
 
@@ -426,13 +476,13 @@ export default class Agent {
         ctx: seal.MsgContext,
         msg: seal.Message,
         systemMessage?: Awaited<ReturnType<typeof buildSystemMessage>>,
-        handled?: { archived: boolean; switched: boolean }
+        handled?: { archived: boolean; switched: boolean; imageDegraded: boolean }
     ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const modelName = Model.getChatModel('chat')?.name || '';
         const trace = new AgentRunContext();
         const version = session.stopVersion;
-        const h = handled ?? { archived: false, switched: false };
+        const h = handled ?? { archived: false, switched: false, imageDegraded: false };
 
         await session.stopCurrentChatStream();
         // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
@@ -440,13 +490,15 @@ export default class Agent {
         // 子代理结算 notice 入库（父下一轮可见）
         await session.flushNotices();
 
-        // 建立流；模型分类错误（上下文超长/余额不足等）由 handleModelError 自动处理一次后重建重试
+        // 建立流；模型分类错误（上下文超长/余额不足/图片下载失败等）由 handleModelError 自动处理一次后重建重试
         let sys = systemMessage;
         let id = '';
+        let requestImages: string[] = [];
         for (let attempt = 0; attempt <= 1; attempt++) {
             try {
                 sys = sys ?? await buildSystemMessage(ctx, session);
-                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName);
+                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName, { imagesAsText: h.imageDegraded });
+                requestImages = collectImageUrls(messages);
                 const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
                 if (!newId) return;
                 // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
@@ -463,9 +515,9 @@ export default class Agent {
                     log.exception('runStreamInner startStream', e);
                     return;
                 }
-                const action = await this.handleModelError(ctx, session, e, h);
+                const action = await this.handleModelError(ctx, session, e, h, requestImages);
                 if (action !== 'retry') return;
-                // 自动处理已生效：进入下一轮重建（归档后上下文已收敛 / 已切备用模型）
+                // 自动处理已生效：进入下一轮重建（归档后上下文已收敛 / 已切备用模型 / 图片已降级为文本标签）
             }
         }
         session.stream.id = id;

@@ -1,5 +1,7 @@
-// 模型适配层：不同 API 提供商的请求体与响应格式互转（当前支持 anthropic）
+// 模型适配层：不同 API 协议方言的请求体与响应格式互转
 import { ToolCall } from "../tool/types";
+
+import { isAnthropicMessages } from "./api_dialect";
 
 export interface NormalizedChatResponse {
     choices: Array<{
@@ -25,15 +27,22 @@ const ANTHROPIC_FINISH_REASON_MAP: { [key: string]: string } = {
     refusal: 'content_filter'
 };
 
-/** 按提供商转换请求体：默认 OpenAI 兼容格式原样透传 */
-export function buildProviderBody(provider: string, body: any): any {
-    if (provider === 'anthropic') return buildAnthropicBody(body);
+/**
+ * 按协议方言转换请求体：
+ * - 对话/识图：anthropic-messages 走 Messages 格式，其余 OpenAI 兼容原样透传；
+ * - 媒体用途（tts / image-generation）：原样透传——请求结构已由**内置预设**（media_presets）
+ *   或配置里的 per-model request.body 写出，适配层不再二次包装。
+ *
+ * @param api 协议方言（v5）。缺省时按 provider 推断，兼容旧调用。
+ */
+export function buildProviderBody(provider: string, body: any, api?: string): any {
+    if (isAnthropicMessages(api, provider)) return buildAnthropicBody(body);
     return body;
 }
 
-/** 按提供商归一化响应：默认 OpenAI 兼容格式原样透传 */
-export function parseProviderResponse(provider: string, data: any): NormalizedChatResponse {
-    if (provider === 'anthropic') return parseAnthropicResponse(data);
+/** 按协议方言归一化响应：默认 OpenAI 兼容格式原样透传（媒体用途由 model/media 单独解析） */
+export function parseProviderResponse(provider: string, data: any, api?: string): NormalizedChatResponse {
+    if (isAnthropicMessages(api, provider)) return parseAnthropicResponse(data);
     return data;
 }
 

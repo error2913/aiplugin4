@@ -17,6 +17,8 @@ export default class ToolConfig {
         seal.ext.registerBoolConfig(ext, "拉黑前需要骰主确认", true, "AI 建议拉黑时需骰主确认后才生效；关闭后 AI 可直接拉黑", "工具");
         seal.ext.registerBoolConfig(ext, "无工具调用时续跑提示", false, "上一轮调用过工具、本轮只回文字时，向上下文注入续跑提示再转一轮，避免只说方向不调用工具就停；默认关闭", "工具");
         seal.ext.registerBoolConfig(ext, "工具方向提示", true, "开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块；关闭后直接调用工具，不播报方向", "工具");
+        seal.ext.registerIntConfig(ext, "媒体任务并发上限", 3, "同时进行的语音/图片生成任务数上限（默认 3）；超出的任务排队等待，避免一次提交过多把接口打满", "工具");
+        seal.ext.registerIntConfig(ext, "媒体生成同步等待秒数", 5, "调用生图/语音工具后，先等待这么多秒看是否已经出结果（默认 5）：期间生成完就当场把结果返回给 AI，不再走异步通知；超时未完成则正常返回任务号、生成完再通知唤醒。填 0 关闭等待（一律走异步）", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
         seal.ext.registerIntConfig(ext, "工具响应截断字数", 10000, "工具返回结果超过该字数时不再压缩，改为仅展示开头部分，并保留完整原文供 read_raw kind=tool 阅读；0 为不截断不保留", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每框一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
@@ -38,31 +40,6 @@ export default class ToolConfig {
     "cookie": ""
 }`
         ], "每框一条音乐服务配置，仅支持 JSON 格式：{\"platform\":\"网易云\",\"api\":\"域名\",\"cookie\":\"Cookie（可留空，网易云部分接口需要）\"}。platform 支持：网易云、qq。修改后需重载 JS 生效", "工具");
-        seal.ext.registerOptionConfig(ext, "ai语音使用的音色", '傲娇少女', [
-            "小新",
-            "猴哥",
-            "四郎",
-            "东北老妹儿",
-            "广西大表哥",
-            "妲己",
-            "霸道总裁",
-            "酥心御姐",
-            "说书先生",
-            "憨憨小弟",
-            "憨厚老哥",
-            "吕布",
-            "元气少女",
-            "文艺少女",
-            "磁性大叔",
-            "邻家小妹",
-            "低沉男声",
-            "傲娇少女",
-            "爹系男友",
-            "暖心姐姐",
-            "温柔妹妹",
-            "书香少女",
-            "自定义"
-        ], "该功能在选择预设音色时，需要安装 http 依赖插件，且需要可调用 AI 语音 API 的 napcat/lagrange 等。\n选择自定义音色时，则需要生成音频依赖（tts）和 ffmpeg", "工具");
     }
 
     static get() {
@@ -71,6 +48,8 @@ export default class ToolConfig {
             PROMPT_ENGINEERING: seal.ext.getBoolConfig(ext, "切换为提示词工程"),
             BLOCK_REQUIRE_OWNER_CONFIRM: seal.ext.getBoolConfig(ext, "拉黑前需要骰主确认"),
             MAX_CALL_COUNT: seal.ext.getIntConfig(ext, "允许连续调用函数次数"),
+            MEDIA_MAX_CONCURRENT: seal.ext.getIntConfig(ext, "媒体任务并发上限"),
+            MEDIA_SYNC_WAIT_SECONDS: seal.ext.getIntConfig(ext, "媒体生成同步等待秒数"),
             NUDGE_ENABLED: seal.ext.getBoolConfig(ext, "无工具调用时续跑提示"),
             DIRECTION_PROMPT: seal.ext.getBoolConfig(ext, "工具方向提示"),
             TOOL_RESPONSE_TRUNCATE_CHARS: seal.ext.getIntConfig(ext, "工具响应截断字数"),
@@ -81,7 +60,6 @@ export default class ToolConfig {
             CMD_WHITELIST: seal.ext.getTemplateConfig(ext, "可调用指令白名单"),
             ALLOW_ALL_CMDS: seal.ext.getBoolConfig(ext, "是否允许调用所有指令"),
             COMMAND_PREFIX: seal.ext.getStringConfig(ext, "指令前缀"),
-            TTS_CHARACTER: seal.ext.getOptionConfig(ext, "ai语音使用的音色"),
             MUSIC: getMusicTemplateConfig()
         }
     }

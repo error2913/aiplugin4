@@ -47,8 +47,8 @@ export const EXTERNAL_CATEGORY = '外部插件';
 
 /** 内置分类的固定展示顺序（未列入的分类按名称追加在末尾，避免依赖中文 localeCompare 排序） */
 export const BUILTIN_CATEGORY_ORDER: string[] = [
-    '基础调度', '指令', '定时', '触发', '记忆', '图片', 'OB11', '资源',
-    '属性', '原文检索', '黑名单', '网页', '公开会话', '子代理',
+    '基础调度', '指令', '定时', '触发', '记忆', '图片', '多媒体', 'OB11', '资源',
+    '属性', '原文检索', '上下文编辑', '黑名单', '网页', '公开会话', '子代理',
     DEFAULT_CATEGORY, EXTERNAL_CATEGORY
 ];
 
@@ -349,14 +349,23 @@ export default class Tool {
         return false;
     }
 
-    /** 按组聚合工具名：组键=分类名或来源分组，显示名取 groupDisplay，组内按工具名排序 */
+    /**
+     * 按组聚合工具名。组内按工具名排序。
+     *
+     * 内部聚合键必须带 kind 前缀（`builtin:记忆` / `mcp:记忆`）：分类名与 MCP 服务器名共用一个命名空间，
+     * 而 MCP 服务器名来自用户 frontmatter、无保留字校验 —— 若直接拿 name 当键，一台名为「记忆」的
+     * MCP 服务器会被并进内置「记忆」组（概览显示成 `内置·记忆`），`.ai tool off 记忆` 会连带关掉 MCP 工具
+     * 且完全看不出来；服务器取名「技能」还会让整个 MCP 组因 isGroupable 判定而从概览消失。
+     * 对外的 key/label 保持原样（命令参数与显示都依赖它，且 .ai tool 的 MCP 空服务器提示需要按名字比对）。
+     */
     private static groupEntries(entries: { name: string; tool: Tool }[]): { key: string; label: string; kind: 'builtin' | 'mcp'; names: string[] }[] {
         const map: { [key: string]: { key: string; label: string; kind: 'builtin' | 'mcp'; names: string[] } } = {};
         for (const { name, tool } of entries) {
             const kind: 'builtin' | 'mcp' = tool.group ? 'mcp' : 'builtin';
             const key = tool.group || Tool.categoryOf(tool);
-            if (!map[key]) map[key] = { key, label: Tool.groupDisplay(tool), kind, names: [] };
-            map[key].names.push(name);
+            const bucket = `${kind}:${key}`;
+            if (!map[bucket]) map[bucket] = { key, label: Tool.groupDisplay(tool), kind, names: [] };
+            map[bucket].names.push(name);
         }
         const groups = Object.keys(map).map(k => map[k]);
         for (const g of groups) g.names.sort((a, b) => a.localeCompare(b));

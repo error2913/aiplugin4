@@ -5,6 +5,7 @@ export default class BackendConfig {
     static register() {
         seal.ext.registerStringConfig(ext, "流式输出", "http://localhost:3010", '流式输出后端地址（aiplugin4-backends 的 stream-output）。\n模型 body.stream=true 且非 anthropic 提供商时走流式，经该地址对接后端', "后端");
         seal.ext.registerStringConfig(ext, "图片转base64", "http://127.0.0.1:46678", '图片转 base64 后端地址（aiplugin4-backends 的 image-url-to-base64），用于把图片 URL 转成 base64 供模型读取', "后端");
+        seal.ext.registerStringConfig(ext, "媒体转base64", "http://127.0.0.1:46679", '媒体接口中转后端地址（aiplugin4-backends 的 media-fetch）。\n海豹的 JS 引擎（goja）读不了二进制响应（fetch 只有 text/json；text 会按 UTF-8 解码损坏原始字节），\n因此「整个响应体即音频/图片」的语音/生图接口（阿里 CosyVoice、百度、OpenAI 兼容等）需要该后端代发请求并把二进制转成 base64 返回。\n留空 = 禁用中转，这类接口会明确报错。', "后端");
         seal.ext.registerStringConfig(ext, "联网搜索", "https://searxng.fishwhite.top", '联网搜索后端地址（SearXNG 兼容实例），供 web_search 工具使用', "后端");
         seal.ext.registerStringConfig(ext, "用量图表", "http://127.0.0.1:3009", '用量统计图表后端地址（aiplugin4-backends 的 usage-chart），供 .ai token 用量图表使用', "后端");
         seal.ext.registerStringConfig(ext, "论坛地址", "https://aiplugin-forum.fishwhite.top", 'aiplugin4 专用论坛地址，用于论坛工具；一般保持默认', "后端");
@@ -19,6 +20,7 @@ export default class BackendConfig {
         return {
             STREAM: seal.ext.getStringConfig(ext, "流式输出"),
             IMAGE_TO_BASE64: seal.ext.getStringConfig(ext, "图片转base64"),
+            MEDIA_FETCH: seal.ext.getStringConfig(ext, "媒体转base64"),
             WEB_SEARCH: seal.ext.getStringConfig(ext, "联网搜索"),
             USAGE_CHART: seal.ext.getStringConfig(ext, "用量图表"),
             FORUM_URL: seal.ext.getStringConfig(ext, "论坛地址"),

@@ -15,6 +15,7 @@ import { registerCmdImage } from "./sub_cmd/image";
 import { registerCmdKb } from "./sub_cmd/kb";
 import { registerCmdLive } from "./sub_cmd/live";
 import { registerCmdMcp } from "./sub_cmd/mcp";
+import { registerCmdMedia } from "./sub_cmd/media";
 import { registerCmdMemory } from "./sub_cmd/memory";
 import { registerCmdModel } from "./sub_cmd/model";
 import { registerCmdOff } from "./sub_cmd/off";
@@ -31,6 +32,8 @@ import { registerCmdSubAgent } from "./sub_cmd/subagent";
 import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
+import { registerCmdTti } from "./sub_cmd/tti";
+import { registerCmdTts } from "./sub_cmd/tts";
 
 export interface SubCmdContext {
     ctx: seal.MsgContext;
@@ -89,6 +92,9 @@ export class SubCmd {
         registerCmdBalance();
         registerCmdBlock();
         registerCmdSubAgent();
+        registerCmdTts();
+        registerCmdTti();
+        registerCmdMedia();
 
         defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc: CmdPriv, sc) => {
             acc[sc.name] = sc.priv;

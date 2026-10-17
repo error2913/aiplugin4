@@ -18,6 +18,15 @@ const IMAGE_BASE64_RETRY_TTL = 60 * 60 * 1000;
 // URL 转 base64 连续失败达到该次数后永久放弃，不再按冷却期重试
 const IMAGE_BASE64_RETRY_MAX = 3;
 
+// QQ 图床临时直链的域名：带 rkey 且到手后很快失效，服务端下载方（插件后端/模型）常常拿不到
+const TEMPORARY_IMAGE_URL_HOSTS = [
+    'multimedia.nt.qq.com.cn',
+    'multimedia.nt.qq.com',
+    'gchat.qpic.cn',
+    'c2cpicdw.qpic.cn',
+    'c2cpic.qpic.cn',
+];
+
 // 进行中的 URL→base64 请求，按 Image 实例去重（同一实例并发调用共享同一次请求）
 const pendingUrlToBase64 = new WeakMap<Image, Promise<void>>();
 
@@ -35,6 +44,7 @@ export default class Image {
         base64Failed: 'boolean',
         base64FailedAt: 'number',
         base64FailedCount: 'number',
+        urlBroken: 'boolean',
     }
     imageId: string;
     sourceSessionId: string;
@@ -53,6 +63,8 @@ export default class Image {
     base64FailedAt: number;
     /** URL 转 base64 连续失败次数，达到上限后永久放弃重试 */
     base64FailedCount: number;
+    /** URL 已确认不可用（后端下载被 4xx 拒绝 / 模型报下载图片失败），不再发给模型也不再重试转换 */
+    urlBroken: boolean;
 
     constructor() {
         this.imageId = '';
@@ -67,6 +79,7 @@ export default class Image {
         this.base64Failed = false;
         this.base64FailedAt = 0;
         this.base64FailedCount = 0;
+        this.urlBroken = false;
     }
 
     get type(): 'url' | 'local' | 'base64' {
@@ -122,11 +135,63 @@ export default class Image {
         return isValid;
     }
 
-    /** URL 转 base64 失败是否应跳过请求：1 小时冷却期内，或连续失败达上限后永久阻断 */
+    /** 转换失败是否应跳过请求：URL 已确认不可用，或 1 小时冷却期内，或连续失败达上限后永久阻断 */
     isBase64RetryBlocked(): boolean {
+        if (this.urlBroken) return true;
         if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) return true;
         if (!this.base64Failed) return false;
         return Date.now() - this.base64FailedAt < IMAGE_BASE64_RETRY_TTL;
+    }
+
+    /** QQ 图床等带 rkey 的临时直链：到手后很快失效，模型侧往往也下载不到，不宜作为 image_url 交给模型 */
+    static isTemporaryUrl(url: string): boolean {
+        if (!url) return false;
+        if (/[?&]rkey=/i.test(url)) return true;
+        let host = '';
+        try {
+            host = new URL(url).hostname.toLowerCase();
+        } catch (_e) {
+            return false;
+        }
+        return TEMPORARY_IMAGE_URL_HOSTS.some(h => host === h || host.endsWith(`.${h}`));
+    }
+
+    /**
+     * 该图片是否已不适合作为 image_url 交给模型：URL 已确认不可用，
+     * 或 QQ 临时直链转换失败后进入冷却/永久放弃（链接多半已过期，不值得再赌）。
+     * base64 图片与稳定公网 URL 不受影响。
+     */
+    isUrlUnusable(): boolean {
+        if (this.base64) return false;
+        if (this.urlBroken) return true;
+        if (this.type !== 'url') return false;
+        return this.isBase64RetryBlocked() && Image.isTemporaryUrl(this.url);
+    }
+
+    /** 模型侧报告无法下载这些 URL 时调用：把对应图片标记为不可用并落盘，后续请求降级为文本标签；返回标记数量 */
+    static markUrlBrokenByUrls(urls: string[]): number {
+        const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
+        if (targets.size === 0) return 0;
+        let marked = 0;
+        for (const img of Object.values(this.imageMap)) {
+            if (!img || img.base64 || !img.url || img.urlBroken) continue;
+            if (!targets.has(img.url)) continue;
+            img.urlBroken = true;
+            this.save(img);
+            marked++;
+        }
+        return marked;
+    }
+
+    /**
+     * 转换失败是否属于「该 URL 已不可用」的永久性失败：后端会把上游下载被 4xx 拒绝的原因写进错误正文
+     * （如 "400 Client Error: Bad Request for url: ..."、QQ 的 download url has expired），重试没有意义；
+     * 429 限速与 5xx 仍按可重试处理。
+     */
+    private isPermanentUrlError(text: string): boolean {
+        if (/url has expired|retcode["'\s:]*-\s*5503007/i.test(text)) return true;
+        const m = text.match(/\b(4\d{2})\s+Client Error\b/i);
+        return !!m && m[1] !== '429';
     }
 
     /**
@@ -176,14 +241,22 @@ export default class Image {
                 this.base64Failed = false;
                 this.base64FailedAt = 0;
                 this.base64FailedCount = 0;
+                this.urlBroken = false;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (error) {
-            this.base64FailedCount++;
+            const message = error instanceof Error ? error.message : String(error);
+            const permanent = this.isPermanentUrlError(message);
+            // 永久性失败直接按「连续失败达上限」处理：不再按冷却期重试，且不再作为 image_url 交给模型
+            this.base64FailedCount = permanent ? IMAGE_BASE64_RETRY_MAX : this.base64FailedCount + 1;
             this.base64Failed = true;
             this.base64FailedAt = Date.now();
-            if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) {
+            if (permanent) {
+                this.urlBroken = true;
+                const snippet = message.length > 120 ? message.slice(0, 120) + '…' : message;
+                log.warning('图片' + this.imageId + '的URL已确认不可用（' + snippet + '），不再重试转换，发送给模型时降级为文本标签');
+            } else if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) {
                 log.warning('图片' + this.imageId + '连续' + this.base64FailedCount + '次转base64失败，已永久放弃该图片的转换重试');
             }
             log.exception('在imageUrlToBase64中请求出错', error);
@@ -197,6 +270,13 @@ export default class Image {
         const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
 
         if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
+
+        // URL 已确认不可用（QQ 直链过期等）：识图模型同样下载不到，不再白花一次请求
+        if (this.urlBroken) {
+            log.warning(`图片${this.imageId}的URL已确认不可用，跳过识图`);
+            Image.save(this);
+            return;
+        }
 
         const model = Model.getMultimodalModel('image-understanding');
         if (!model) {

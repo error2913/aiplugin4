@@ -1,0 +1,114 @@
+# GitHub Pages 站点配置（MkDocs Material）
+#
+# 构建流程：node docs-site/build-site-src.js → mkdocs build（docs_dir = site-src/）
+# site-src/ 是生成物（已 gitignore），源文档始终是仓库里的 README.md / docs/ / ccdocs/。
+
+site_name: AI 骰娘4 文档
+site_description: AI 骰娘4（aiplugin4）—— 运行在 SealDice 上的 AI 对话插件。安装、配置、命令手册与开发者知识库。
+site_url: https://error2913.github.io/aiplugin4/
+site_author: error2913
+copyright: MIT License · AI 骰娘4（aiplugin4）
+
+repo_url: https://github.com/error2913/aiplugin4
+repo_name: error2913/aiplugin4
+edit_uri: edit/main/
+
+docs_dir: site-src
+site_dir: site
+
+theme:
+  name: material
+  language: zh
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色模式
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # 关键：用自定义 slugify 保留中文锚点，否则 README 里 48 个唯一
+      # `#中文标题` 内部链接会因为默认 slugify 剥掉 CJK 而全部失效。
+      # 该模块需要能被 Python import：构建命令会把 docs-site/ 加进 PYTHONPATH
+      # （见 package.json 的 docs:build / .github/workflows/docs.yml）。
+      slugify: !!python/name:hooks_cjk_slug.slugify
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+
+nav:
+  - 首页: index.md
+  - 用户手册:
+      - guide/index.md
+  - 开发者知识库:
+      - kb/index.md
+      - 01 项目概览: kb/01-项目概览.md
+      - 02 架构设计: kb/02-架构设计.md
+      - 03 核心模块详解: kb/03-核心模块详解.md
+      - 04 工具系统: kb/04-工具系统.md
+      - 05 命令与配置: kb/05-命令与配置.md
+      - 06 数据存储: kb/06-数据存储.md
+      - 07 开发指南: kb/07-开发指南.md
+      - 08 相关后端项目: kb/08-相关后端项目.md
+      - 09 注意事项与常见问题: kb/09-注意事项与常见问题.md
+      - 10 待办与后续计划: kb/10-TODO.md
+      - 11 ob11-core-bridge 使用指南: kb/11-ob11-core-bridge-使用指南.md
+      - "12 子代理方案设计（已实现）": kb/12-子代理方案设计.md
+      - "13 模型配置 v5 方案（已实现）": kb/13-模型配置v5方案.md
+      - "14 上下文成本治理（设计稿·未实现）": kb/14-会话冷热态与上下文成本治理方案.md
+      - "15 上下文成本治理：详细设计与调研存档": kb/15-上下文成本治理-详细设计与调研存档.md
+      - "16 图片生命周期与图床（设计稿·未实现）": kb/16-图片生命周期与图床方案.md
+  - 第三方参考（Claude Code）:
+      - reference/index.md
+      - Amazon Bedrock: reference/amazon-bedrock.md
+      - Google Vertex AI: reference/google-vertex-ai.md
+      - Hooks 参考: reference/hooks.md
+      - MCP: reference/mcp.md
+      - Settings 参考: reference/settings-reference.md
+      - 第三方集成: reference/third-party-integrations.md

@@ -7,4 +7,6 @@ export * from "./alias";
 export * from "./face";
 export * from "./providers";
 export * from "./model_defaults";
+export * from "./ai_voice_characters";
+export * from "./media_presets";
 

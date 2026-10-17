@@ -3,7 +3,10 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.22.0-green)
+![Version](https://img.shields.io/badge/Version-4.25.0-green)
+![Docs](https://img.shields.io/badge/docs-文档站-blue)
+
+> 📖 **文档站**：<https://error2913.github.io/aiplugin4/> —— 在线阅读体验更好（全文搜索、深色模式、目录导航）。
 
 ## 快速开始
 
@@ -21,23 +24,38 @@
 ### 3. 配置大模型
 
 - 在 WebUI →「JS插件」→「插件设置」中找到 `aiplugin4`，点击展开，进入「模型」分组；
-- 在 **api连接** 中用 **TOML 格式**填写服务商连接（出厂默认已带 deepseek 示例，只改 `api_key` 即可用）：
+- 在 **模型配置** 中填写**一份 JSON**（出厂默认已带 deepseek 示例，只改 `apiKey` 即可用）：
 
-```toml
-provider = "deepseek"                        # 服务商：deepseek/openai/google/zhipu/alibaba/anthropic/moonshot/xai/mistral/siliconflow
-api_key = "sk-xxxx"                          # 你的 API Key
-base_url = "https://api.deepseek.com/v1"     # 可选，省略时取服务商默认
-models = ["deepseek-v4-flash"]               # 可选：钉住清单（填写后跳过自动拉取，离线/无列表接口时用）；删掉该行=启动自动获取模型列表
-# [types]                                    # 可选：手动声明模型类型，必须写在本框最后（其后不能再写 api_key 等键）
-# "my-embed-1" = "embed"                     #   网关自命名的嵌入模型：不再被误当对话模型
-# "inhouse-vl" = "vision"                    #   未命中命名白名单的多模态模型：进识图候选
+```json
+{
+  "version": 5,
+  "providers": [
+    {
+      "api": "openai-completions",
+      "baseURL": "https://api.deepseek.com/v1",
+      "apiKey": "sk-xxxx",
+      "models": [
+        { "id": "flash", "name": "deepseek-v4-flash", "kind": "vision" },
+        { "id": "pro",   "name": "deepseek-v4-pro",   "kind": "text" }
+      ]
+    }
+  ],
+  "purposes": { "chat": ["flash"], "compression": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
+  "groups": [
+    { "purposes": ["chat", "compression", "summarization", "judge"],
+      "body": { "temperature": 1, "top_p": 1, "max_tokens": 8192, "stop": null, "stream": false } }
+  ]
+}
 ```
 
-- 未填 `models` 的连接启动时会自动获取该平台的可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 并自动翻页）；获取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；
-- **模型规则** 每框是一个"用途组"请求模板：`use` 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 `[body]`/`[request]`，**不写任何模型名**；出厂默认给 chat/压缩/总结/judge 预设了对话参数；
-- 默认模型自动取该用途**首个可用**的同类型模型（出厂 deepseek 拉取/钉住的首个文本模型 → chat 即用）；要换别的模型用 `.ai model <用途> <模型>` 绑定。图片识别 / 向量记忆需要先有可被识别为视觉 / 嵌入的模型（如 `glm-4v` / `text-embedding-3-small`），再绑定到 image-understanding / text-embedding 用途；模型名若无法被自动识别（网关自命名、新模型等），在 **api连接** 的 `[types]` 表里手动声明 `text`/`vision`/`embed`（优先级最高，详见下方配置手册）；
-- 常用命令：`.ai model list` 查看当前模型列表（读加载结果、不联网），`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络），`.ai model` 查看各用途与连接状态；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
-- `anthropic`（Claude）已适配请求/响应格式（system 拆出、tool_result 合并、响应归一化）；其流式暂不支持，配置 `stream = true` 时会自动回退为非流式。
+- **推荐用配置生成器生成后粘贴**：<https://error2913.github.io/aiplugin4-config/> —— 它会按 `baseURL` 拉取模型列表、自动预填 `kind`，并把「用途绑定」可视化；
+- `providers[].models` **留空/不写 = 启动时自动拉取**该连接的模型列表（OpenAI 兼容 `GET /models`；`anthropic-messages` 走 `/v1/models` 并自动翻页）；拉取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；离线或没有列表接口的服务，就把模型写死在 `models` 里；
+- `models[].kind` 取 `text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**。⚠️ **视觉能力不再按模型名猜测**：`gpt-4o`、`gemini`、`qwen-vl` 这类名字**不会**被自动认成视觉模型，要识图必须显式写 `"kind": "vision"`（生成器会自动预填）；嵌入/生图/语音仍可按命名推断；
+- `purposes` 是**用途 → 模型 id 的有序数组**：优先用列出的，按此顺序取用（首选失败时顺着往后切）；未列出的同类型模型仍在候选池里、排在后面。留空则由插件取该用途**首个可用**模型；
+- 常用命令：`.ai model` 查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）、`.ai model list` 读当前模型列表（不联网）、`.ai model pull` 立即重拉全部连接（无视 `models` 钉住清单，强制网络）、`.ai model <用途> <模型>` 绑定为该用途的**运行时覆盖**（优先级最高，但只在插件存储里；想进配置就把它填进 `purposes`）；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
+- `api` 支持 `openai-completions`（默认）与 `anthropic-messages`（Claude，请求/响应格式自动转换：system 拆出、tool_result 合并、响应归一化，流式暂不支持、配 `stream = true` 会回退非流式）。`openai-responses` **本期未实现**，写上会明确报错而不是静默走错协议；
+- `provider`（厂商标识）**通常不用填**：由 `baseURL` 的 host 自动识别；只有自动识别失败、且该地址代理某家原生接口时才手工指定；
+- **修改「模型配置」后需重载 JS 生效**。
 
 ### 4. 设置触发与角色
 
@@ -147,15 +165,16 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 以下依赖按需安装，均可通过 GitHub 下载或在 QQ 群中获取：
 
-- [生成音频依赖插件](https://github.com/error2913/aiplugin4-dependencies/tree/main/tts)：自定义音色的 AI 语音；
-- [ob11 网络连接依赖.js](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js)（推荐）或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)：ob11 相关工具（发消息、用户/群信息、禁言、打卡、AI 语音等）；
-- [生成图片依赖插件](https://github.com/error2913/aiplugin4-dependencies/tree/main/tti)：AI 生图工具；
+- [ob11 网络连接依赖.js](https://raw.githubusercontent.com/error2913/sealdice-plugin-ob11-net-connection/refs/heads/main/dist/ob11%E7%BD%91%E7%BB%9C%E8%BF%9E%E6%8E%A5%E4%BE%9D%E8%B5%96.js)（推荐）或 [http 依赖插件](https://github.com/error2913/sealdice-js/blob/main/HTTP%E4%BE%9D%E8%B5%96.js)：ob11 相关工具（发消息、用户/群信息、禁言、打卡等）；
 - ffmpeg：发送本地语音需要配置到环境变量中。
+
+> 自 4.24.0 起，**语音合成与文生图已内置到本插件**（由「模型」页的模型配置声明 `kind`）。
+> 不再需要「生成音频（tts）」「生成图片（tti）」依赖插件；完整包也只附带 ob11 网络连接一个依赖。
 
 ### 安装
 
 - 参考[海豹手册](https://docs.sealdice.com/config/jsscript.html)进行插件上传安装；
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「api连接/模型规则」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」三类改动也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）。
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「模型配置」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」三类改动也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）。
 
 ---
 
@@ -165,36 +184,125 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 模型
 
-模型分两个 TOML 配置：
+模型配置是**一份 JSON**（单个「模型配置」框）。⚠️ **自 5.0 起，旧的「api连接」「模型规则」两个 TOML 框已废弃**——插件不再读取它们，请按下方格式重建（推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)）。
 
 | 设置项 | 说明 |
 |:---:|:---|
-| api连接 | TOML 格式，每框一个服务商连接。`api_key` 必填；`provider` 选填（省略时按 OpenAI 兼容处理，此时需显式填 `base_url`）；`base_url` 可选（省略时取该 provider 默认地址）。可选 `models`（模型钉住清单：填写后跳过自动拉取，直接用该清单，适合离线/无列表接口的服务商）；可选 `[types]`（**手动声明模型类型**：在本框末尾追加 `[types]` 表，表内每个模型写一条 `"模型名" = "text"` / `"vision"` / `"embed"`，优先级最高，可覆盖命名猜测与接口能力位；模型名含 `.` `:` `/` 等字符必须加引号；**必须写在本框最后**，其后不能再写 `api_key` 等键，否则整框解析失败；无效值只忽略该键并记日志）；可选 `[request]`（列表拉取覆盖：list_url/auth_header_name/headers/timeout）。未填 `models` 的连接启动时自动获取可用模型列表（OpenAI 兼容 `GET /models`；anthropic 走 `/v1/models` 自动翻页），失败按连接降级展示，不拖垮其它连接。`ignore` 可选：1=忽略该连接 |
-| 模型规则 | TOML 格式，每框一个"用途组"模板：`use` 数组（`chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`，可多选）+ 可选 `[body]`（请求参数模板）+ 可选 `[request]`（method/url/headers/content_type/auth_header_name/timeout，默认不写由插件解析）。**不写模型名**：命中这些用途的模型统一套用该模板；多条规则 use 重叠时按框顺序逐键合并、后覆盖先 |
+| 模型配置 | **整份模型配置（一个 JSON）**。顶层字段：`version`（固定 `5`，必填）、`providers`（连接数组，至少 1 项，必填）、`purposes`（用途 → 模型 id 的有序数组）、`groups`（用途组默认请求体）。<br>**`providers[]`**：`api`（必填，`openai-completions` / `anthropic-messages` / `openai-responses`）、`baseURL`（必填，`http(s)://` 开头，**不再兜默认值**）、`apiKey`（必填，明文）、`provider`（厂商标识，**通常不填**，由 `baseURL` 的 host 自动识别）、`models`（该连接的模型；**留空/不写 = 启动时自动拉取**）、`enabled`（默认 `true`；`false`=忽略该连接，取代旧的 `ignore = 1`）、`displayName`（仅展示用）、`timeout`（秒）、`request`（连接级覆盖：`list_url`/`auth_header_name`/`headers`/`balance_url`/`balance_json_path`/`balance_divisor`/`balance_currency`）。<br>**`providers[].models[]`**：`id`（必填，**全局唯一**，被 `purposes` 引用）、`name`（必填，发给 API 的真实模型名，可含 `/` `.` `:`，**不需加引号**）、`kind`（`text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**）、`contextWindow`、`maxTokens`、`request`（**per-model** 覆盖：`body`/`request`/`response`/`params`/`prompt`，取代旧的 `models` 定向规则）、`bodyMode`（`merge`/`replace`，媒体用途与内置预设的合成方式）。<br>**`purposes`**：用途 → 模型 id 的**有序数组**（优先用这些、按此顺序；首选失效自动往后切）；留空取该用途首个可用模型。用途取 `chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`/`tts`/`image-generation`。<br>**`groups[]`**：`purposes` + `body`，给一组用途预设请求体。校验失败**整份拒绝**（不做部分生效）并一次报出全部问题（带 `$.providers[0].models[1].name` 式路径）。**修改后需重载 JS 生效** |
+| 媒体用途（tts / image-generation） | **默认走内置预设**：不写 `request.body` 时，插件按 vendor + 模型名套用该供应商的原生请求结构（覆盖 OpenAI / 硅基流动 / 智谱 / 百炼 / Google Cloud / Gemini / MiniMax / FishAudio / ElevenLabs / 火山方舟 / 腾讯 TokenHub / Stability / 百度 / 本地自建等），骰主只填连接与 `kind` 即可生成。写了 `body` 默认**逐键合并**预设（`bodyMode: "replace"` 可改回整体替换），用 `{占位符}` 标出可被 AI/命令覆写的字段、用嵌套表表达字段路径（同一个"语速"在阿里是 `input.parameters.rate`、在 Google 是 `audioConfig.speakingRate`）。内置占位符：`{text}`（语音正文）/`{prompt}`（图片正文）/`{negative_prompt}`/`{image}`/`{image_url}`/`{image_base64}`（参考图）/`{model}`/`{api_key}`。取值优先级：**AI/命令传参 > `params.default` > 预设自带默认 > 无值且无默认时整个键不发送**；未在模板里出现的参数一律忽略（模型不支持的参数不会污染请求）。`request`/`response` 是**逐键覆盖**预设（`headers` 逐键合并），只想改一项时不必重写整段 |
 
-```toml
-# api连接 示例（出厂默认即此结构，只改 api_key 即可用）
-provider = "deepseek"
-api_key = "sk-xxxx"
-base_url = "https://api.deepseek.com/v1"
-models = ["deepseek-v4-flash"]   # 可选：钉住清单；删掉该行=启动自动拉取
-
-# [types]                        # 可选：手动声明模型类型，必须写在本框最后（其后不能再写 api_key 等键）
-# "my-embed-1" = "embed"         #   取值只能填 text/vision/embed；模型名含 . : / 等字符必须加引号
-# "inhouse-vl" = "vision"        #   声明未命中当前模型列表时会在日志里给一条 warning 提示（检查拼写）
-
-# 模型规则 示例（同一框内只保留一组字段）
-use = ["chat", "compression", "summarization", "judge"]
-
-[body]                           # 可选：请求参数模板
-temperature = 1
+```json
+{
+  "version": 5,
+  "providers": [
+    {
+      "api": "openai-completions",
+      "baseURL": "https://api.deepseek.com/v1",
+      "apiKey": "sk-xxxx",
+      "models": [
+        { "id": "flash", "name": "deepseek-v4-flash", "kind": "vision" },
+        { "id": "pro",   "name": "deepseek-v4-pro",   "kind": "text" }
+      ]
+    }
+  ],
+  "purposes": { "chat": ["flash"], "compression": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
+  "groups": [
+    { "purposes": ["chat", "compression", "summarization", "judge"],
+      "body": { "temperature": 1, "top_p": 1, "max_tokens": 8192, "stop": null, "stream": false } }
+  ]
+}
 ```
 
-> 模型类型判定优先级：**`[types]` 手动声明 > 命名终值（reranker/生图/嵌入白名单） > 接口自报能力位 > 命名能力位 > 兜底纯文本**（手动声明即最终答案，与自动判定冲突时按声明执行）。模型来自「api连接」的自动拉取或 `models` 钉住清单，并按能力分类进各用途候选：文本类进对话候选；带明确视觉标签的模型（如 glm-4v/gemini/pixtral，或接口自报能力位：`type`/`model_type`/`task`、`architecture.input_modalities`、`capabilities`、`supports_vision`）进识图与对话候选；嵌入白名单命名（如 `text-embedding-*`/`bge-*`/`gemini-embedding-*`）进嵌入候选；生图/reranker 类不进任何候选。默认模型自动取该用途第一个候选（首个可用的同类型模型）；想换别的模型用全局覆盖指定。
+多个连接（含语音/生图）就再往 `providers` 数组里加项——**模型嵌在连接内**，不会出现"引用了不存在的连接"这类错误：
+
+```json
+{
+  "version": 5,
+  "providers": [
+    { "api": "openai-completions", "baseURL": "https://api.deepseek.com/v1", "apiKey": "sk-xxxx",
+      "models": [{ "id": "flash", "name": "deepseek-v4-flash", "kind": "vision" }] },
+
+    { "api": "openai-completions", "baseURL": "https://api.siliconflow.cn/v1", "apiKey": "sk-yyyy",
+      "models": [
+        { "id": "sf-tts",   "name": "FunAudioLLM/CosyVoice2-0.5B", "kind": "tts" },
+        { "id": "sf-image", "name": "black-forest-labs/FLUX.1-schnell", "kind": "gen" }
+      ] },
+
+    { "api": "openai-completions", "baseURL": "https://tsn.baidu.com/text2audio", "apiKey": "APIKey:SecretKey",
+      "models": [{ "id": "baidu-tts", "name": "baidu-tts", "kind": "tts" }] }
+  ],
+  "purposes": { "chat": ["flash"], "tts": ["sf-tts", "baidu-tts"], "image-generation": ["sf-image"] }
+}
+```
+
+**改默认值 / 声明参数**：写在该模型的 `request` 里（`params` 是给 AI 看的元信息，`body` 是请求模板；预设里已有的 `{voice}`/`{rate}` 等占位符本就可被 AI/命令覆写）：
+
+```json
+{ "id": "sf-tts", "name": "FunAudioLLM/CosyVoice2-0.5B", "kind": "tts",
+  "request": {
+    "params": { "voice": { "default": "longxiaochun", "desc": "音色" },
+                "rate":  { "default": 1.0, "min": 0.5, "max": 2.0, "type": "number", "desc": "语速" } },
+    "prompt": { "extra": "本模型语速 0.5~2.0，超过会报错。" }
+  } }
+```
+
+内置预设按 **vendor + 模型名**给出该供应商的原生结构，已覆盖：
+
+| 用途 | 已内置结构的 provider |
+| --- | --- |
+| 语音合成 | `openai` / `siliconflow` / `zhipu` / `dashscope`（兼容模式）/ `alibaba` / `minimax`（hex 输出）/ `fishaudio` / `elevenlabs`（音色进地址 + `xi-api-key`）/ `google-cloud`（`text:synthesize`）/ `google` / `baidu`（短文本在线合成，双密钥换 token） |
+| 文生图 | `openai`（`gpt-image-*` 与 `dall-e` 分开）/ `volcengine` / `tencent-tokenhub` / `zhipu` / `alibaba`（兼容模式）/ `dashscope`（原生 `wanx*` 异步轮询、`qwen-image*` 同步）/ `siliconflow` / `gemini` / `stability`（core / ultra）/ `custom`（本地 SD WebUI） |
+
+未收录的 vendor 一律按 **OpenAI 兼容**结构处理。也就是说：**只要在 `providers` 里填好 `baseURL`（根地址，如 `https://api.siliconflow.cn/v1`）+ `apiKey`，再给模型声明 `kind: "tts"` / `"gen"`，语音与图片就能直接生成**（`provider` 一般不用填，由 `baseURL` 自动识别）。
+
+> **百度短文本语音合成**（`baseURL` 为 `tsn.baidu.com` 时自动识别为 `baidu`）是个例外：它的鉴权是 `access_token` 而非 API Key，插件按连接自动换取（30 天有效、按连接缓存复用，同一连接不会反复请求），所以 `apiKey` 有两种填法：
+> - `"APIKey:SecretKey"` —— 直接填控制台的 **API Key** 和 **Secret Key**（冒号分隔），插件自动换取并缓存 `access_token`；
+> - `"<access_token>"` —— 手头已有令牌时直填（不触发换取）。
 >
-> 全局分用途覆盖：`.ai model` 查看各用途当前模型与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网、不持久化，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置（支持编号 / 裸名唯一 / `[序号]:模型名` 精确，重名歧义会提示；覆盖失效自动回退默认）。`.ai model <模型名>` 兼容为设置 chat 用途。
+> 密钥本身含冒号时用 `\:` 转义；出现 2 个以上未转义冒号会被视为写法非法、整体当令牌使用（不会猜着拆）。百度没有 `/models` 列表，**必须**把模型写死在 `models` 里并声明 `kind: "tts"`：
 >
-> 嵌入输出维度取 text-embedding 用途组规则的 `[body] dimensions`（默认 1024）；配置后长期记忆与知识库启用语义检索，未配置/不匹配自动降级为关键词检索。
+> ```json
+> { "api": "openai-completions", "baseURL": "https://tsn.baidu.com/text2audio",
+>   "apiKey": "你的APIKey:你的SecretKey",
+>   "models": [{ "id": "baidu-tts", "name": "baidu-tts", "kind": "tts" }] }
+> ```
+>
+> 音色用 `params.voice` 传百度的 `per` 编号（默认 `5003` 度逍遥精品；`0`=度小美、`4189`=度涵竹），语速/音调/音量对应 `rate`/`pitch`/`volume`（`0~15`，默认 `5`）——都可在 `.ai tts` 用 `--voice=` / `--rate=` / `--pitch=` / `--volume=` 或工具参数覆写。音色编号完整列表见[百度音色列表文档](https://cloud.baidu.com/doc/SPEECH/s/Rluv3uq3d)。
+
+接口与预设不一致时才写 per-model 覆盖（示例：阿里原生语音 + 自定义参数约束）：
+
+```json
+{ "id": "cosy", "name": "cosyvoice-v1", "kind": "tts",
+  "request": {
+    "body": {                                  // 默认与预设逐键合并；"bodyMode": "replace" 可改回整体替换
+      "model": "cosyvoice-v1",                 // 固定值，AI 不可改
+      "input": {
+        "text": "{text}",                      // 内置占位符：语音正文
+        "voice": "{voice}",                    // 自定义占位符：AI/命令可覆写
+        "parameters": { "rate": "{rate}", "pitch": "{pitch}" }   // 阿里的嵌套结构由配置表达，代码零分支
+      }
+    },
+    "params": {                                // 可选：AI 可覆写参数的元信息（省略时从 {占位符} 自动推断）
+      "voice": { "default": "longxiaochun", "desc": "音色" },
+      "rate":  { "default": 1.0, "min": 0.5, "max": 2.0, "type": "number", "desc": "语速" }
+    },
+    "prompt": { "extra": "本模型语速 0.5~2.0，超过会报错。" },   // 可选：给 AI 的额外自由提示词，原样注入
+    "request": {                               // 可选：逐键覆盖预设。url=绝对地址；urlSuffix=拼在 baseURL 之后
+      "url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+    },
+    "response": {                              // 可选：逐键覆盖预设的取数规则
+      "data_path": "output.audio.data",        // 音频在返回里的路径；留空=整个响应体即数据（如 TTS 音频流）
+      "data_type": "base64",                   // auto / url / base64 / hex
+      "error_message_path": "message"
+    }
+  } }
+```
+
+> 模型类型判定优先级：**`models[].kind` 显式声明 > 命名终值（reranker/生图/语音/嵌入白名单） > 接口自报能力位 > 兜底纯文本**。⚠️ **视觉能力不再按命名猜测**——`gpt-4o`/`gemini`/`qwen-vl` 这类名字**不会**被自动认成视觉模型，要进识图候选必须在配置里显式写 `"kind": "vision"`（生成器会自动预填；接口自报能力位 `vision` 仍作正向证据）。模型按类型进各用途候选：`text`/`vision` 进对话候选（`vision` 另进识图候选）；嵌入白名单命名（如 `text-embedding-*`/`bge-*`）进嵌入候选；生图白名单命名（如 `gpt-image-*`/`wanx*`/`flux*`/`stable-diffusion*`）进生图候选；语音白名单命名（如 `tts-*`/`*-tts`/`cosyvoice*`/`fish-speech*`）进语音候选；reranker 不进任何候选。
+>
+> 用途绑定：`purposes` 里写**模型 id 的有序数组**（优先用这些、按此顺序，首选失效自动往后切）；留空则取该用途首个可用模型。`.ai model` 查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）、`.ai model list` 读当前模型列表（不联网、不持久化）、`.ai model pull` 立即重拉全部连接（无视 `models` 钉住清单，强制网络）、`.ai model <用途>` 查看候选（按取用顺序编号）、`.ai model <用途> <模型>` 设为**运行时覆盖**（优先级最高，存插件存储、重装会丢；想进配置就填进 `purposes`）。
+>
+> 嵌入输出维度取该模型 `request.body` 里的 `dimensions`（默认 1024）；配置后长期记忆与知识库启用语义检索，未配置/不匹配自动降级为关键词检索。
 
 ### 基础
 
@@ -217,7 +325,7 @@ temperature = 1
 | 上下文超长自动归档重试 | 模型返回上下文超长时，把会话历史按「观察归档 + 删除」链路压到模型窗口内后自动重发一次；关闭则该场景仅记日志（默认开启） |
 | 余额不足自动切换模型 | 对话模型报余额不足 / 欠费 / 额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可用 `.ai model` 改回）（默认开启） |
 | 自动切换触发错误 | 每框一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
-| 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 api连接/候选顺序取下一个不同模型 |
+| 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 `providers` 顺序 / 候选顺序取下一个不同模型 |
 | 切换后发送通知 | 自动切换模型后用 `ctx.notice` 向当前会话发送一条切换通知（默认开启） |
 
 ### 角色设定
@@ -292,7 +400,13 @@ temperature = 1
 | 是否允许调用所有指令 | 开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 `run_core_command` 调用 |
 | 指令前缀 | 注入到 SealDice 核心的指令前缀，通常为 `.`；核心前缀改动时需同步修改 |
 | 音乐服务配置 | 每框一条 JSON：`{"platform":"网易云/qq","api":"域名","cookie":"Cookie（可留空）"}`，供 `search_music` 使用；修改后需重载 JS 生效 |
-| ai语音使用的音色 | 预设音色需要支持 AI 语音的协议端，自定义音色需要生成音频依赖（tts）和 ffmpeg |
+| 媒体任务并发上限 | 同时进行的语音/图片生成任务数上限（默认 3）；超出的任务排队等待 |
+| 媒体生成同步等待秒数 | 调用生图/语音工具后先等待这么多秒看是否已出结果（默认 5）：期间生成完就**当场返回结果**、不再走异步通知；超时未完成则返回任务号，生成完再自动通知并唤醒 AI。填 0 关闭等待（一律走异步） |
+| （仅 AI 调工具受影响） | 该等待只作用于 `generate_audio` / `text_to_image` 工具调用；命令 `.ai tts` / `.ai tti` 始终由插件直接投递，与它无关 |
+
+> 自 4.24.0 起「ai语音使用的音色」下拉已移除，请按链路区分：
+> **协议端自带 AI 语音**（下拉里的小新/猴哥/妲己…等角色，由 NapCat/Lagrange 实现、无需配置模型）——AI 现在直接用 `call_ob11_api` 调 `get_ai_characters`（查角色）/ `send_group_ai_record`、`send_private_ai_record`（发送）/ `get_ai_record`（只取语音 URL）；用法与常见角色名见默认知识库 ob11-api。
+> **插件自建 TTS**（下拉里的「自定义」，已内置）——内置预设里已经带 `{voice}` 占位符，音色改该模型 `request.params.voice` 的 `default` 或生成时传 `--voice`（`.ai tts`）/工具参数 `voice`（AI）即可。
 
 ### MCP
 
@@ -386,6 +500,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 |:---:|:---|
 | 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/stream-output)，`body.stream = true` 的模型才会走流式 |
 | 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
+| 媒体转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/media-fetch)，让「整个响应体即音频」的语音接口（阿里 CosyVoice、百度、OpenAI 兼容等）可用：海豹的 JS 引擎读不了二进制响应，由该后端代发请求并转成 base64 返回。不启动它时这些接口会明确报错；返回 JSON 的接口（MiniMax、Google Cloud、绝大多数生图）不受影响 |
 | 联网搜索 | [searxng](https://github.com/searxng/searxng)，有能力建议自己搭建，为 AI 提供联网搜索功能 |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/usage-chart)，token 使用情况图表生成 |
 | 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
@@ -452,12 +567,12 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | `.ai ctxn mod <0\|1\|2>` | - | 自动修改上下文中的名字：0 不修改，1 昵称，2 群名片 |
 | `.ai on` / `.ai on --r` | - | 开启 AI：非指令正则触发默认随之开启；`.ai off --r` 仅关闭正则触发，`.ai on` 重新开启 |
 | `.ai on [--r --j --c=<条> --t=<秒> --p=<%> --a=<开始-结束-次数>]` | `.ai on --c=10 --t=60` | 开启 AI：--r 开启非指令正则触发，--j 开启评分触发（评分智能体判断是否插话），--c/--t/--p/--a 开启计数器/计时器/概率/活跃时间段模式，不带参数仅开启非指令正则触发 |
-| `.ai standby` | - | 待机模式：仅录入上下文不主动发言，非指令关键词触发才发言 |
-| `.ai off [--r/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式 |
+| `.ai standby [on/off]` | `.ai standby off` | 待机模式：仅录入上下文不主动发言，非指令关键词触发才发言；`off` 仅关闭待机、保留其它触发模式（适合只播报不读群消息） |
+| `.ai off [--r/--j/--c/--t/--p/--a/--sb]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式（`--sb` 仅关闭待机） |
 | `.ai fgt [assistant/user]` | - | 遗忘当前上下文；assistant 为遗忘 AI 发言与函数调用，user 为遗忘用户发言与函数返回 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
-| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途与连接状态；`.ai model list` 查看加载/最近一次拉取到内存的模型列表（不联网，按 `[连接序号]` 分组）；`.ai model pull` 立即重拉全部连接并展示（无视 models 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选；`.ai model <用途> <模型>` 设置全局覆盖（支持编号 / 裸名唯一 / `[序号]:模型名`，重名歧义会提示）；旧写法 `.ai model <模型名>` 等价于设置 chat 用途。模型类型自动判定，可用「api连接」的 `[types]` 手动声明（text/vision/embed，优先级最高） |
-| `.ai balance` | - | 并发查询全部（非忽略）api连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接 `[request]` 配置 `balance_url` + `balance_json_path` 后查询 |
+| `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）与连接状态；`.ai model list` 读加载/最近一次拉取到内存的模型列表（不联网，按连接序号分组）；`.ai model pull` 立即重拉全部连接并展示（无视 `models` 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选（按取用顺序编号）；`.ai model <用途> <模型>` 设为该用途的**运行时覆盖**（支持编号 / 模型 id / 模型名，优先级最高、存插件存储）。模型类型在「模型配置」里用 `kind` 声明（text/vision/embed/gen/tts） |
+| `.ai balance` | - | 并发查询全部（非忽略）连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接的 `request` 里配置 `balance_url` + `balance_json_path` 后查询 |
 | `.ai stop` | - | 完全暂停当前对话（打断流式输出/工具链/排队请求，清计时器） |
 | `.ai subagent` / `.ai subagent list` | - | 查看本会话子代理运行情况：列出 ID / 用途 / 状态 |
 | `.ai subagent stop <ID\|all>` | `.ai subagent stop all` | 停止指定子代理（仅中断当前轮、可续跑；all = 停止本会话全部） |
@@ -500,7 +615,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | `.ai tool help <函数名>` | `.ai tool help set_timer` | 查看指定工具的详细说明和参数需求 |
 | `.ai tool call <函数名> --参数=值` | `.ai tool call run_ext_command --action=call --extension=fun --command=jrrp` | 试用指定工具函数，输出调用返回信息；参数可尝试 JSON 解析，数字需要引号包裹 |
 
-> 工具组 = 内置工具的 14 个能力分类（基础调度 / 指令 / 定时 / 触发 / 记忆 / 图片 / OB11 / 资源 / 属性 / 原文检索 / 黑名单 / 网页 / 公开会话 / 子代理；外部插件注册的工具归「外部插件」）+ 每台 MCP 服务器各一组，`.ai tool on/off <服务器名>` 与 `.ai mcp on/off <服务器名>` 等价。技能与知识库不参与工具组维度（其会话开关仍用 `.ai skill on/off`、`.ai kb on/off`），但单工具开关照旧可用（如 `.ai tool off use_skill`）。
+> 工具组 = 内置工具的 16 个能力分类（基础调度 / 指令 / 定时 / 触发 / 记忆 / 图片 / 多媒体 / OB11 / 资源 / 属性 / 原文检索 / 上下文编辑 / 黑名单 / 网页 / 公开会话 / 子代理；外部插件注册的工具归「外部插件」）+ 每台 MCP 服务器各一组，`.ai tool on/off <服务器名>` 与 `.ai mcp on/off <服务器名>` 等价。技能与知识库不参与工具组维度（其会话开关仍用 `.ai skill on/off`、`.ai kb on/off`），但单工具开关照旧可用（如 `.ai tool off use_skill`）。
 
 ### MCP 技能 知识库管理命令
 
@@ -552,6 +667,20 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | `.ai timer lst` | - | 查看当前会话所有定时任务 |
 | `.ai timer clr` | - | 清除所有定时任务 |
 
+### 媒体生成命令（4.24.0 起内置）
+
+语音合成与文生图都是**异步任务**：提交后立即返回任务号，生成完成后**直接发到本会话**（命令发起的由插件投递，不需要 AI 介入）。
+
+| 命令 | 使用示例 | 说明 |
+|:---:|:---:|:---|
+| `.ai tts <文本>` | `.ai tts 今天天气真不错 --rate=1.5 --instruction=用欢快的语气说` | 合成语音并发送；可选 `--model` `--voice` `--rate` `--pitch` `--volume` `--instruction` `--emotion`（是否生效取决于该模型的 `request.params` / `request.body` 声明） |
+| `.ai tti <描述>` | `.ai tti 一只在雪地里奔跑的白狐 --size=1024x1024` | 生成图片并发送；可选 `--model` `--size` `--steps` `--seed` `--quality` `--style` `--negative` `--save` `--name` |
+| `.ai media` | - | 查看本会话生成任务队列（未完成 + 最近 10 条已结束，含状态/耗时/结果句柄/失败原因） |
+| `.ai media list [页码] [--all]` | `.ai media list 2 --all` | 分页查看；`--all` 包含全部已结束任务。别名 `.ai md` |
+| `.ai media cancel <任务号>` | `.ai media cancel 3` | 取消未完成的任务（已结束的任务无法取消）；**运行中**的任务也能取消，取消后结果被丢弃、不发送 |
+
+> 命令与 AI 工具的区别：`.ai tts` / `.ai tti` 由插件**直接投递**结果（不看「媒体生成同步等待秒数」）；AI 调 `generate_audio` / `text_to_image` 时才会先等同步窗口——窗口内出结果就把结果**当场返回给 AI**（由 AI 决定怎么发），超时才返回任务号走异步通知。
+
 ### 公开会话目录命令
 
 | 命令 | 使用示例 | 说明 |
@@ -565,7 +694,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 > 过滤说明：多个过滤条件为交集；至少提供一个条件。`--botid` 与 `--session` 必须传完整 UNI-ID（含平台前缀，如 `--botid=QQ:123`、`--session=QQ-Group:456`），`--platform` 传平台名（如 QQ）；给了哪一级就删除该级目录下全部命中条目。目录只用于感知展示：AI 读写只需准确路径（botId/会话ID），不需要会话先公开到目录。
 >
-> AI 侧对应工具：`pub_read`（目录感知/读任意会话上下文快照）、`pub_send`（向任意会话外发，QQ 系富媒体/其他平台纯文本，成功后写入目标会话 `[system:跨端消息]` 只读背景）。命令默认权限骰主级，可用 `.ai priv` 调整；能力说明见上方[配置手册](#-配置手册)「公开会话」小节（无新增配置项）。
+> AI 侧对应工具：`pub_read`（目录感知/读任意会话上下文快照）、`pub_send`（向任意会话外发，QQ 系富媒体/其他平台纯文本，成功后写入目标会话 `[system:跨端消息]` 只读背景）。命令默认权限骰主级，可用 `.ai priv` 调整；能力说明见上方[配置手册](#️-配置手册)「公开会话」小节（无新增配置项）。
 
 ---
 
@@ -581,10 +710,12 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | 触发 | `set_trigger_condition` |
 | 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
 | 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |
+| 多媒体 | `media_tasks`（查看/取消本会话的语音与图片生成任务队列） |
 | OB11 | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API；群资料、精华消息等均传入对应 action）、`resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
-| 资源 | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（生成 record 消息段，不直接发送）、`search_music`（返回 music 消息段，不直接发送） |
+| 资源 | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（提交语音生成任务，立即返回任务号，完成后自动通知；传 `path` 时同步解析本地/MCP 音频资源）、`search_music`（返回 music 消息段，不直接发送） |
 | 属性 | `attr_get`、`attr_set` |
 | 原文检索 | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文） |
+| 上下文编辑 | `context_edit_list`（按序号定位任意会话上下文条目，支持 role/keyword/时间过滤）、`context_edit_replace`（按 scope 批量替换正文文本：字面量/正则、空串删除、原文副本同步、持久化；敏感工具，默认开启，详见下方说明） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | 网页 | `web_search`；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
@@ -596,7 +727,11 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 > 指令类技能（今日人品、COC 模组抽取/搜索、属性展示、属性检定、san 检定等）通过 `use_skill` 按需获取内容，内部统一使用 `run_ext_command` / `run_core_command` 调用海豹指令，对应指令需加入「可调用指令白名单」。
 
-> OB11 说明：协议动作统一通过 `call_ob11_api`。安装 ob11 网络连接依赖时，action 原样交给 `net.callApi`；未安装时仍由 SealDice 原生后端完成当前上下文可完成的发送和查询，远端 action 返回 `OB11_DEPENDENCY_REQUIRED`，不会假装成功。当前会话回复中发送图片优先使用 `[img:图片ID]`；图片、语音、视频、文件、JSON、Markdown、音乐和合并转发均通过 message segment 保留格式；`generate_audio`、`search_music` 只生成可发送的 segment。
+> 上下文编辑说明：`context_edit_list` / `context_edit_replace` 允许 AI 定位并批量替换任意会话上下文中的正文文本（纯文本字面量或全局正则，`replacement` 传空串=删除匹配文本）。目标会话缺省=当前会话，也可用 `bot_id`（如 `QQ:123`）+ `session_id`（如 `QQ-Group:456`）跨会话定位，同一 SealDice 实例内多端点/多账号可写；压缩/截断保留的原文副本（`rawText`/`rawItems`）会同步修改并持久化。属敏感操作、**不可自动回滚**，工具默认开启，可用 `.ai tool off context_edit_replace` 或加入「禁止调用的函数」硬禁。
+
+> OB11 说明：协议动作统一通过 `call_ob11_api`。安装 ob11 网络连接依赖时，action 原样交给 `net.callApi`；未安装时仍由 SealDice 原生后端完成当前上下文可完成的发送和查询，远端 action 返回 `OB11_DEPENDENCY_REQUIRED`，不会假装成功。当前会话回复中发送图片优先使用 `[img:图片ID]`；图片、语音、视频、文件、JSON、Markdown、音乐和合并转发均通过 message segment 保留格式；`search_music` 只生成可发送的 segment。
+
+> 语音/图片生成说明（4.24.0 起内置）：`generate_audio` / `text_to_image` 是**异步任务**——提交后**先等一段同步窗口**（「工具 → 媒体生成同步等待秒数」，默认 5 秒），窗口内就生成完则**当场把结果返回给 AI**（图片直接给 `[img:图片ID]`、语音给 record 段指引），不再走异步通知；窗口内没完成则立即返回任务号，生成完成后写入会话通知并**尽力唤醒 AI**投递（该送达**免触发令牌桶**，桶空也送达；**待机中同样唤醒**，因为这是用户请求的结果而不是主动搭话；会话忙则通知留在队列，由**本轮结束时的补触发**接手，不会丢；端点离线时通知保留、下一轮呈现）。命令 `.ai tts` / `.ai tti` 发起的由插件直接投递。AI 收到完成通知后：**语音走 `call_ob11_api` 的 record 段**（`[audio:xxx]` 只认「资源」页配置的本地语音资源名，不接受生成结果的路径/URL），**图片优先直接在回复里写 `[img:图片ID]`**（系统会自动发送，**非必要不要为此调用 `call_ob11_api`**）。任务队列可用 `media_tasks` 工具或 `.ai media` 查看与取消。请求结构默认由内置供应商预设提供（见「模型」页说明），参数（音色/语速/尺寸等）由「模型规则」`[params]` 与模板里的 `{占位符}` 决定。
 
 > 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「后端」配置「核心桥WS地址」，默认 `ws://127.0.0.1:46880/plugin`）。
 
@@ -605,8 +740,8 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 ## 🚨 注意事项
 
 - 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）；
-- 嵌入输出维度取「模型规则」text-embedding 用途组的 `[body] dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
-- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在「模型规则」chat 用途组的 `[body]` 里设 `stream = true` 的模型才会走流式；
+- 嵌入输出维度取该模型 `request.body` 里的 `dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
+- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在 chat 用途组 `groups[].body` 里设 `stream = true` 的模型才会走流式（`anthropic-messages` 协议不支持，会自动回退非流式）；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
 - CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）；卡片/视频/文件/语音/合并转发等段经 ob11 事件分发接收，不受该白名单限制。
 
@@ -629,7 +764,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 **记忆/知识库检索不到**
 
-- 记忆检索确认已有嵌入模型可用（「api连接」里含嵌入类模型，且 `.ai model text-embedding` 显示已绑定或存在可用默认），「启用长期记忆」开关打开；
+- 记忆检索确认已有嵌入模型可用（「模型配置」里有 `kind: "embed"` 的模型，且 `.ai model text-embedding` 显示已绑定或存在可用默认），「启用长期记忆」开关打开；
 - 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置（`.ai kb refresh` 或重载 JS 生效）；若仍检索不到，用 `.ai kb list` 确认库在当前平台可用且未被本会话关闭（frontmatter `platform` 限定当前平台、未执行过 `.ai kb off`），可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 
@@ -637,7 +772,9 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 - 确认图片 URL 可以在浏览器访问（过期或 QQ 图床 bug 时更换协议端版本）；
 - 模型不支持 QQ 图床时，把「识别图片时将url转换为base64」设为「总是」或「自动」；
-- 图片转文字依赖视觉模型：先在「api连接」配置含视觉模型的连接（拉取/钉住后模型带"识图"标签），再用 `.ai model image-understanding <模型>` 绑定。
+- 图片转文字依赖视觉模型：先在「模型配置」里给视觉模型显式写 `"kind": "vision"`（⚠️ 视觉**不再**按模型名自动识别），再用 `.ai model image-understanding <模型>` 绑定；
+- **图片直链失效不会再卡死会话**：QQ 直链 rkey 过期时（图床返回 `download url has expired`，后端与模型都拿不到图），插件会把这些图片降级为 `[img:ID]` 文本标签、不再产生 image_url，模型也就不会因「下载图片失败」整轮 400 而静默不回复；日志出现 `图片xxx的URL已确认不可用` 或 `[model-error] 模型无法下载上下文图片` 属正常兜底；
+- 若**历史上下文**里已有坏图片（旧版本遗留）导致该会话一直不回复，执行 `.ai forget` 清上下文即可恢复。
 
 **HTTP 请求出错**
 
@@ -660,9 +797,9 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 > 注：× 为不支持 function call；▲ 为需要开启合并 user 消息开关。视觉模型不一定支持 QQ 图床识别，可使用中转插件。
 
-> 在「模型」配置中，上表平台请照填 `provider`（决定协议/默认地址与列表接口适配），`base_url` 可省略（取该服务商默认）；未列出的平台/网关可填任意 `provider` 标识 + 完整 `base_url`，按 OpenAI 兼容方式使用（anthropic 除外，需走其专有适配）。模型名以各平台「模型列表」接口/官方文档为准，插件启动时按连接自动获取。
+> 在「模型配置」中，上表平台只需填 `baseURL`（`provider` 一般不用填，由 `baseURL` 的 host 自动识别，它决定用哪套原生请求结构与列表接口适配）；未列出的平台/网关填根地址的 `baseURL` 即可，按 OpenAI 兼容方式使用（Claude 需把 `api` 设为 `anthropic-messages` 走其专有适配）。模型名以各平台「模型列表」接口/官方文档为准，连接的 `models` 留空时插件启动会自动获取。
 
-> 余额查询：deepseek / kimi(moonshot) / siliconflow（硅基流动）支持 `.ai balance` 直接查 API 余额（deepseek/moonshot 按 `provider`、其余按内置规则自动识别端点）；其余平台未开放 API 余额接口，请在各自控制台查看；one-api/new-api 等网关可在连接 `[request]` 里配置 `balance_url` + `balance_json_path`（配合 `auth_header_name`/`headers`）后查询。
+> 余额查询：deepseek / kimi(moonshot) / siliconflow（硅基流动）支持 `.ai balance` 直接查 API 余额（deepseek/moonshot 按 vendor、其余按内置规则自动识别端点）；其余平台未开放 API 余额接口，请在各自控制台查看；one-api/new-api 等网关可在连接的 `request` 里配置 `balance_url` + `balance_json_path`（配合 `auth_header_name`/`headers`）后查询。
 
 > 仅列出部分官方的本插件支持的模型，部分大模型平台同一模型有多个版本并未在上表写出，且更新不及时，存在过期可能，未列出的不一定不能使用，最好到文档自己查看。国外大模型网络问题请自行解决。
 

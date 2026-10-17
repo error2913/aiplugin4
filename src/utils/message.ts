@@ -25,6 +25,11 @@ export interface RequestMessage {
     reasoning_content?: string;
 }
 
+/** 多模态请求构建选项：imagesAsText=本轮把 URL 型图片降级为文本标签（模型报「图片下载失败」后重发用） */
+export interface MultimodalBuildOptions {
+    imagesAsText?: boolean;
+}
+
 interface MessageItem {
     text: string;
     time: number;
@@ -316,7 +321,8 @@ export async function handleMessages(
     multimodal = false,
     tools?: unknown[],
     systemMessage?: ContextMessage,
-    modelName?: string
+    modelName?: string,
+    opts?: MultimodalBuildOptions
 ): Promise<RequestMessage[]> {
     const system = systemMessage ?? await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
@@ -345,7 +351,7 @@ export async function handleMessages(
             }
             const out: RequestMessage = {
                 role: message.role,
-                content: multimodal ? await buildMultimodalContent(message) : buildContent(message)
+                content: multimodal ? await buildMultimodalContent(message, opts) : buildContent(message)
             };
             const reasoning = resolveReasoningContent(message);
             if (reasoning !== undefined) out.reasoning_content = reasoning;
@@ -406,7 +412,7 @@ export async function handleMessages(
                 ? (multimodal && Array.isArray(message.contentParts) && message.contentParts.length > 0
                     ? message.contentParts
                     : buildContent(message))
-                : (multimodal ? await buildMultimodalContent(message) : buildContent(message))
+                : (multimodal ? await buildMultimodalContent(message, opts) : buildContent(message))
         };
         // 只在 assistant 且 tool_calls 非空时附带该字段：空数组在 JSON 里是合法值，
         // 会被原样序列化为 "tool_calls":[]，部分后端直接报错拒绝请求
@@ -488,8 +494,9 @@ function resolveImageById(id: string): Image | null {
 /**
  * 多模态消息内容：把文本里的 [img:...]/[avatar:...]/[group_avatar:...] 图片标签转成 image_url 内容块直接传给模型，
  * 而不是让模型只看到文本标签；无法解析的图片（如本地路径无可用 URL）保留原标签；纯文本（无图片标签）原样返回字符串。
+ * 图片不可用（URL 已确认失效 / QQ 临时直链转换失败）时也只保留文本标签：死链会让模型整轮请求报错，整个会话不回复。
  */
-export async function textToMultimodalContent(text: string): Promise<RequestMessageContent> {
+export async function textToMultimodalContent(text: string, opts?: MultimodalBuildOptions): Promise<RequestMessageContent> {
     if (!/\[(?:img|avatar|group_avatar)[:：]/i.test(text)) return text;
 
     const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
@@ -519,7 +526,9 @@ export async function textToMultimodalContent(text: string): Promise<RequestMess
                 logger.warning(`多模态图片转 base64 失败，改用原 URL: ${image.imageId}（${e instanceof Error ? e.message : String(e)}）`);
             }
         }
-        const src = image && image.src;
+        // 不可用图片（URL 已确认失效，或 QQ 临时直链转换失败后进入冷却）与「本轮已降级」一律只留文本标签
+        const unusable = !!image && (image.isUrlUnusable() || (!!opts?.imagesAsText && image.type === 'url' && !image.base64));
+        const src = image && !unusable ? image.src : '';
         if (src) parts.push({ type: 'image_url', image_url: { url: src } });
         else parts.push({ type: 'text', text: seg });
     }
@@ -527,9 +536,23 @@ export async function textToMultimodalContent(text: string): Promise<RequestMess
 }
 
 /** 多模态消息内容：把用户消息里的图片标签转成 image_url 内容块直接传给模型；非用户消息按原逻辑构建纯文本内容。 */
-export async function buildMultimodalContent(message: ContextMessage): Promise<RequestMessageContent> {
+export async function buildMultimodalContent(message: ContextMessage, opts?: MultimodalBuildOptions): Promise<RequestMessageContent> {
     if (message.role !== 'user') return buildContent(message);
-    return textToMultimodalContent(buildContent(message));
+    return textToMultimodalContent(buildContent(message), opts);
+}
+
+/** 收集请求体里所有非 data: 的图片 URL（模型报「无法下载图片」时用来定位并降级这些图片） */
+export function collectImageUrls(messages: RequestMessage[]): string[] {
+    const urls: string[] = [];
+    for (const message of messages || []) {
+        if (!message || !Array.isArray(message.content)) continue;
+        for (const part of message.content) {
+            if (!part || part.type !== 'image_url') continue;
+            const url = part.image_url && part.image_url.url || '';
+            if (url && !url.startsWith('data:')) urls.push(url);
+        }
+    }
+    return urls;
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {

@@ -15,6 +15,7 @@ const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiplugin4-unit-'));
 const bundles = {
     main: path.join(outDir, 'unit-main.cjs'),
     subagent: path.join(outDir, 'unit-subagent.cjs'),
+    v5: path.join(outDir, 'unit-v5.cjs'),
 };
 
 // 测试可覆盖的配置值（unit-test-entry.ts 通过 globalThis.__TEST_CONFIG__ 读写）
@@ -24,10 +25,15 @@ const TC = {
     stringConfigs: {},
     optionConfigs: {},
     floatConfigs: {},
-    templateConfigs: {}
+    templateConfigs: {},
+    // 出厂默认模板框（registerTemplateConfig 登记的内容）：供"默认配置能解析"类用例校验
+    factoryTemplateConfigs: {},
+    // 出厂默认字符串配置（registerStringConfig 登记的内容）：v5 的「模型配置」在这里
+    factoryStringConfigs: {}
 };
 
 // 模板配置默认值：模型类返回空数组避免 TOML 解析；其余返回空条目
+// 注：'api连接'/'模型规则' 已是**废弃**项，仅用于迁移读取，故默认为空（不触发迁移）。
 const TEMPLATE_DEFAULTS = {
     'api连接': [],
     '模型规则': [],
@@ -49,9 +55,9 @@ globalThis.seal = {
         registerBoolConfig: () => undefined,
         registerIntConfig: () => undefined,
         registerFloatConfig: () => undefined,
-        registerStringConfig: () => undefined,
+        registerStringConfig: (_ext, key, value) => { TC.factoryStringConfigs[key] = value; },
         registerOptionConfig: () => undefined,
-        registerTemplateConfig: () => undefined,
+        registerTemplateConfig: (_ext, key, values) => { TC.factoryTemplateConfigs[key] = values; },
         getTemplateConfig: (_ext, key) => {
             if (TC.templateConfigs[key] !== undefined) return TC.templateConfigs[key];
             if (TEMPLATE_DEFAULTS[key] !== undefined) return TEMPLATE_DEFAULTS[key];
@@ -75,14 +81,17 @@ globalThis.seal = {
     newMessage: () => ({ sender: {}, messageType: 'group', segment: [] }),
     getEndPoints: () => [],
     createTempCtx: () => ({}),
-    replyToSender: () => undefined
+    replyToSender: () => undefined,
+    // base64 媒体落盘：测试里返回确定性本地路径（Image.CQCode 与语音落地都依赖它）
+    base64ToImage: (b64) => `/tmp/aiplugin4-test-media-${String(b64 ?? '').length}.bin`
 };
 globalThis.__TEST_CONFIG__ = TC;
 
 (async () => {
     const entries = [
         ['main', path.join(repo, 'scripts/unit-test-entry.ts')],
-        ['subagent', path.join(repo, 'scripts/unit-test-subagent.ts')]
+        ['subagent', path.join(repo, 'scripts/unit-test-subagent.ts')],
+        ['v5', path.join(repo, 'scripts/unit-test-v5.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

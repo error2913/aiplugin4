@@ -1,6 +1,8 @@
 // SealDice 运行期跨插件共享的全局对象：
-// 由其他插件注入的依赖（ob11 网络连接 / tti 生成图片 / tts 生成音频），
-// 以及本插件暴露给其他插件的智能体 API（aiplugin4，见 src/agent/api.ts）
+// 由其他插件注入的依赖（ob11 网络连接），
+// 以及本插件暴露给其他插件的智能体 API（aiplugin4，见 src/agent/api.ts）。
+// 注：生成图片（tti）/ 生成音频（tts）依赖插件已废弃，相关能力内置在本插件
+//（「api连接」+「模型规则」的 tts / image-generation 用途），不再读取 globalThis.tti / globalThis.tts。
 /* eslint-disable no-var */
 interface EventDispatcher {
     name: string;
@@ -21,28 +23,8 @@ interface NetApi {
     messageId?(input: { scene?: string, id?: number | string, peer_id?: number | string, msgid?: number | string, message_seq?: number | string, message_id?: number | string }): number | { scene: string, id: number, msgid: number };
 }
 
-interface AiDrawingApi {
-    sendImageRequest?(prompt: string, negativePrompt?: string): Promise<string>;
-    generateImage?(prompt: string, ctx: any, msg: any, negativePrompt?: string): Promise<any>;
-}
-
-interface TtiApi {
-    readonly name: string;
-    readonly version: string;
-    generate(request: { text: string; negativeText?: string; model?: string; image?: string }): Promise<{ success: boolean; type: 'image'; data: string; error?: string }>;
-}
-
-interface TtsApi {
-    readonly name: string;
-    readonly version: string;
-    generate(request: { text: string; model?: string }): Promise<{ success: boolean; type: 'audio'; data: string; error?: string }>;
-}
-
 declare var net: NetApi | undefined;
 declare var http: NetApi | undefined;
-declare var aiDrawing: AiDrawingApi | undefined;
-declare var tti: TtiApi | undefined;
-declare var tts: TtsApi | undefined;
 
 // 本插件在启动时通过 registerAgentApi() 注入，其他插件可调用 globalThis.aiplugin4 驱动智能体
 declare var aiplugin4: import("./agent/api").AgentGlobalApi | undefined;

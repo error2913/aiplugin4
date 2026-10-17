@@ -6,7 +6,9 @@ import Config from "../config/config";
 import { Context } from "../context/context";
 import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
+import { MediaTaskManager } from "../media/task_queue";
 import SessionMemoryService from "../memory/session_memory";
+import { isAnthropicMessages } from "../model/api_dialect";
 import Model from "../model/model";
 import Image from "../resource/image";
 import { TimerManager } from "../timer";
@@ -160,8 +162,13 @@ export class Session {
     parentSessionId = '';
     /** 运行时字段（子代理）：委派深度（主会话=0，逐层+1；不持久化） */
     subagentDepth = 0;
-    /** 运行时字段（子代理/父侧通用）：后台子代理结算 notice 队列，每轮请求前 flush（不持久化） */
-    noticeQueue: { text: string; from: string; time: number }[] = [];
+    /**
+     * 运行时字段：后台完成通知队列，每轮请求前 flush（不持久化）。
+     * `kind` 区分来源：缺省/'subagent' = 子代理结算；'media' = 媒体生成任务完成。
+     * 子代理通知会带 `raw: subagent-notice`（父上下文淘汰时清扫对应记录），媒体通知没有生命周期绑定，不带 raw。
+     * 媒体通知带 `taskId`：供"是否已被本会话消费"判定（轮末补触发/重复投递拦截）。
+     */
+    noticeQueue: { text: string; from: string; time: number; kind?: 'subagent' | 'media'; taskId?: string }[] = [];
     /** 运行时字段（子代理）：headless 下 reply() 收集的回复文本（不持久化） */
     headlessTranscript: string[] = [];
     tool: {
@@ -376,12 +383,29 @@ export class Session {
         return hasTrigger;
     }
 
-    /** 把子代理结算 notice 队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数 */
+    /**
+     * 把后台完成通知队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数。
+     * 两类来源分开口径：媒体生成任务用 `[system:生成任务]`，子代理结算用 `[system:子代理]`
+     * 并附 `raw: subagent-notice`（供生命周期清扫识别）。
+     */
     async flushNotices(): Promise<number> {
         const queue = this.noticeQueue;
         if (queue.length === 0) return 0;
         this.noticeQueue = [];
         for (const n of queue) {
+            if (n.kind === 'media') {
+                await this.context.addSystemUserMessage(n.text, '生成任务');
+                // 真正呈现给 AI 后才回置 notified：这是"结果已送达、不再需要任何补发"的唯一时机。
+                // 放在入队时置位会谎报成功，让重载补发与轮末补触发两条兜底同时失效（原实现的永久等待）。
+                if (n.taskId) {
+                    try {
+                        MediaTaskManager.markNotifiedByNotice(this.sessionId, n.taskId);
+                    } catch (e) {
+                        log.warning(`媒体任务 #${n.taskId} 回置 notified 失败：${e instanceof Error ? e.message : String(e)}`);
+                    }
+                }
+                continue;
+            }
             const tag = n.from && n.from !== '' ? `子代理 ${n.from} ` : '子代理 ';
             // raw 标记：子代理生命周期绑定（父上下文淘汰该 notice 时清扫对应记录）
             await this.context.addSystemUserMessage(tag + n.text, '子代理', {
@@ -426,14 +450,21 @@ export class Session {
 
     }
 
-    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string): Promise<void> {
+    /**
+     * 起一轮对话。
+     * @param options.skipBucket 跳过触发令牌桶（不检查也不扣减）：用于"用户请求的结果送达"这类
+     *        非主动搭话的场景（如媒体生成完成唤醒）。注意与旧有的 `reason === '函数回调触发'`
+     *        不同：那条豁免只跳过检查、仍会扣减令牌，此处保持原样不动。
+     */
+    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean } = {}): Promise<void> {
         this.lastCtx = ctx;
         log.info('trigger reply:', reason || 'unknown');
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
         this.migrateStoredTags();
 
-        if (reason !== '函数回调触发') {
+        const skipBucket = options.skipBucket === true;
+        if (reason !== '函数回调触发' && !skipBucket) {
             const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
             if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
                 const fillCount = (Date.now() - this.bucket.lastTime) / (FILL_INTERVAL * 1000);
@@ -452,7 +483,7 @@ export class Session {
         });
 
         this.resetState();
-        this.bucket.count--;
+        if (!skipBucket) this.bucket.count--;
 
         // 评分触发：仅当评分触发开启时，无论以何种方式触发会话，都起一轮 WAIT 作为冷却（不扣精力）；
         // 未开启评分时不创建 judgeWait 定时器，避免非指令/其他模式回复也残留评分轮末定时器
@@ -464,10 +495,11 @@ export class Session {
         // 是否流式由「chat 用途」规则模板 body 里的 stream=true 决定（v4：模型不再自带 body，读用途组模板）
         const chatStream = (Model.getBodyDefaultsFor('chat') as any).stream === true;
 
-        if (model && model.provider === 'anthropic' && chatStream) {
-            log.warning(`anthropic 提供商（${model.name}）暂不支持流式输出，已自动切换为非流式`);
+        const isAnthropic = !!model && isAnthropicMessages(model.api, model.provider);
+        if (isAnthropic && chatStream) {
+            log.warning(`anthropic-messages 协议（${model!.name}）暂不支持流式输出，已自动切换为非流式`);
         }
-        if (model && chatStream && model.provider !== 'anthropic') {
+        if (model && chatStream && !isAnthropic) {
             await this.chatStream(ctx, msg);
             this.save();
             return;

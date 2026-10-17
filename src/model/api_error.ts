@@ -190,6 +190,15 @@ export function classifyApiError(providerRaw: string, status: number, rawText: s
     return 'unknown';
 }
 
+/**
+ * 模型因无法下载请求里的图片而拒绝整轮请求（典型：QQ 图床直链过期，模型侧拉取报错）。
+ * 各家措辞不同，按关键词识别，供调用方把图片降级为文本标签后重发一次。
+ */
+export function isImageDownloadFailure(message: string): boolean {
+    const text = String(message ?? '');
+    return /failed to (download|fetch|load) (the )?image|error while downloading|unable to download (the )?image|image (download|fetch) failed|(图片|图像).{0,6}下载失败|下载图片失败/i.test(text);
+}
+
 /** 上下文/输入超长的 message 判定：跨厂关键词（中英双语），并排除文件大小/参数范围等近义误伤 */
 function matchContextTooLong(text: string, message: string): boolean {
     const target = `${message || ''}\n${text || ''}`;

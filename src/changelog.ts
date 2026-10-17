@@ -1,6 +1,90 @@
 // 版本更新日志（changelog），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const changelog: { [version: string]: string } = {
+    "4.25.0": `## ⚠️ 破坏性变更：模型配置 v4 → v5（升级前必读）
+
+**「模型」页的「api连接」「模型规则」两个 TOML 框已废弃**：两个配置项已注销、界面上不再出现，插件**不再读取**它们，也**不做自动迁移**。
+
+**升级后原有模型会全部不可用**，插件会载入出厂 DeepSeek 示例并在日志打 WARN 提示。请注意：
+
+- **请用配置生成器重新生成一份 JSON 粘进「模型配置」**：https://error2913.github.io/aiplugin4-config/ （它会按 \`baseURL\` 拉取你的模型列表、自动预填类型）——旧配置删不掉也读不了，只能重建；
+- **为什么不做自动迁移**：海豹的 \`seal.ext\` 只有 \`register*Config\`/\`get*Config\`，**没有配置写入 API**（\`seal.d.ts\`）。迁移的本质是"读旧 → 转换 → **写新**"，第三步永远做不到；做成兼容垫片只会退化成每次启动跑一遍、旧配置删不掉、用户也看不到转换结果（因而无法编辑它）。既然永远无法自我完成，就直接硬切。
+- **字段对照速查**：\`api_key\` → \`providers[].apiKey\`；\`base_url\` → \`providers[].baseURL\`（**变必填，不再兜厂商默认地址**）；\`provider\` → 通常**不用填**（由 \`baseURL\` 的 host 自动识别 vendor）；\`models\` → \`providers[].models[]\`（每项 \`{id, name, kind}\`，\`id\` 全局唯一、被 \`purposes\` 引用）；\`[types]\` → \`models[].kind\`；\`ignore = 1\` → \`providers[].enabled = false\`；连接的 \`[request]\` → \`providers[].request\`；规则的 \`use\` 用途组 → 顶层 \`purposes\`（**有序数组**）+ \`groups\`；规则的 \`models\` 定向与 \`[body]\`/\`[params]\`/\`[prompt]\`/\`[response]\` → 该模型的 \`models[].request.{body,params,prompt,response}\`。
+
+**另一处行为变更**：**视觉能力不再按模型名猜测**。\`gpt-4o\`、\`gemini\`、\`qwen-vl\`、\`*vision\` 这类名字**不会**再被自动认成视觉模型，一律归 \`text\`——要识图必须在配置里显式写 \`"kind": "vision"\`（配置生成器会自动预填）。原因是一批正则最容易过期（新模型名永远追不上），且猜错会让用户误以为模型已具备视觉能力。嵌入/生图/语音/reranker 仍按命名白名单推断；接口自报的能力位（\`vision\`）仍作正向证据。
+
+## 新功能
+- **「模型配置」改为单个 JSON**（v5）：连接与模型嵌套（模型写在 \`providers[].models[]\` 内，因此**不存在"规则引用了不存在的连接"这类错误**），用途绑定进配置（\`purposes\` 有序数组，跟配置走、重装不丢），模型类型显式声明（\`kind\`）。校验失败**整份拒绝**（不做部分生效）并一次报出全部问题，每条带 \`$.providers[0].models[1].name\` 形式的路径——不再出现"模型莫名没了"
+- **协议按协议方言分派**（\`providers[].api\`：\`openai-completions\` / \`anthropic-messages\`），取代按厂商名猜协议（原先同一判断散落在 7 处，新增一家用 Messages 协议的中转站就得改插件源码）。\`openai-responses\` 本期未实现，写上会**明确报错**而不是静默走错协议
+- **厂商标识由 \`baseURL\` 自动识别**（\`provider\` 一般不用填）：决定用哪套内置媒体预设与列表接口适配
+- **「媒体生成同步等待秒数」**（「工具」页，默认 5）：调用生图/语音工具后先等这么多秒看是否已出结果——窗口内生成完就**当场把结果返回给 AI**（图片直接给 \`[img:图片ID]\`、语音给 record 段发送指引），根本不进异步通知链路；超时未完成才返回任务号走异步。填 0 关闭等待（一律走异步）
+- **百度短文本语音合成内置**（\`baseURL\` 为 \`tsn.baidu.com\` 时识别为 \`baidu\`）：百度音频接口只认 \`access_token\` 而非 API Key，插件按连接自动换取并缓存（30 天有效、带 5 分钟提前量、同一连接不重复换），所以 \`apiKey\` 有两种填法——填 \`"APIKey:SecretKey"\`（冒号分隔，插件自动换取）或直填已有 \`access_token\`；密钥含冒号用 \`\\:\` 转义。百度返回**失败时仍是 HTTP 200**，靠 Content-Type 区分、取 \`err_msg\` 作为错误信息。百度无 \`/models\` 列表，需把模型写死在 \`models\` 里并声明 \`kind: "tts"\`
+- **「媒体转base64」后端**（「后端」页，默认 \`http://127.0.0.1:46679\`）：海豹的 JS 引擎（goja）读不了二进制响应，因此「整个响应体即音频」的语音接口需要该后端代发请求并转 base64。留空 = 禁用中转，这类接口会明确报错并提示去启动后端
+
+## 优化
+- **供应商请求预设大幅补齐**（预设为主、规则仅作可选覆盖）：语音合成新增百度（短文本在线合成，双密钥换 token）与百炼 VoiceDesign；文生图新增阿里原生 \`qwen-image*\` 同步档（与 \`wanx*\` 异步档分流）；生图命名白名单的 \`flux\` / \`sd3\` / \`seedream\` / \`midjourney\` / \`imagen\` / \`veo\` 改为**词边界**匹配并补 \`qwen-image\`——聚合平台的厂商前缀名（\`black-forest-labs/FLUX.1-schnell\`）从此能被识别，百炼官方生图模型也不再被当成对话模型
+- **媒体请求体默认改为与预设逐键合并**（\`bodyMode: "merge"\`）：只想改预设里一两个字段时不必再重写整段结构（旧的"写了 body 就整体替换"仍可用 \`bodyMode: "replace"\` 显式声明）
+- **\`.ai model\` 显示"当前值来自哪一层"**：明确标注 运行时覆盖（\`.ai model\` 设的）/ 配置绑定（\`purposes\` 里第几个）/ 自动（首个可用），失效的层会显式提示"已失效并回退"——不再让用户困惑"我改了为什么配置里没变"。候选列表也按**取用顺序**编号并标出绑定序号
+- **用途绑定支持有序数组**（\`purposes\`）：可以写 \`"chat": ["flash", "pro"]\` 表达"优先 flash，失败切 pro"，而不是只能绑一个
+- **地址是完整接口端点时给出可操作提示**：把供应商原生的完整端点（如百炼 \`.../multimodal-generation/generation\`）误当 \`baseURL\` 填时，拼出的 \`/models\` 必然不存在——现在直接提示"改填基础地址或用 list_url 指定"，而不是发一个注定失败的请求再报含糊的 404
+- 媒体结果通知带上 \`taskId\` 身份标识，用于判断"该通知是否已被本会话消费"，避免重复唤醒
+- 图片生成结果给 AI 的发送指引改为**优先用 \`[img:图片ID]\`**（系统自动发送），并明确标注**非必要不要为此调用 \`call_ob11_api\`**——少一次无谓的协议端调用
+- 同步等待窗口把"生成够快"的常见情况从异步改为当场返回：既省掉一轮唤醒与一次模型调用，也天然避开临界点
+
+## 修复
+- 修复**生成响应过快时唤醒丢失、永久等待**：工具来源的媒体任务完成后会无条件 \`session.chat()\` 起一轮投递，而 \`Agent.run()\`/\`runStream()\` 开头有一道同会话闸门 \`if (running || starting) return\` —— 那是**静默 return**（不抛错、不排队、不打日志），且媒体唤醒是唯一绕开消息管线分流、直接调 \`chat()\` 的调用方（普通消息已由 \`deferReceipt\` 挂起，撞不到它）。于是生成极快时（本地模型/缓存命中/极短文本）：通知入队 → \`chat()\` 撞闸门被静默丢弃（Promise 正常 resolve、\`.catch\` 不触发、日志还写着"触发成功"）→ 若本轮已过最后一次模型请求，\`flushNotices\` 不会再消费它 → **结果永远送不出去**；更糟的是入队时就把 \`notified\` 置了 true（谎报成功），把"重载补发"这条兜底也一并堵死。现改为三段式：① **提交后同步等待窗口**（「工具 → 媒体生成同步等待秒数」，默认 5 秒）——窗口内出结果就**当场返回**（图片直接给 \`[img:ID]\`、语音给 record 段指引），根本不进唤醒链路；② 窗口内没完成则入队（带 \`taskId\`）、**空闲才唤醒**，会话忙则 defer 且通知留在队列；③ **轮末补触发**——\`Agent.run()\`/\`runStream()\` 的 \`finally\` 中（\`resumePending\` 之后、\`starting\` 归零之后）调用 \`MediaTaskManager.wakePendingNotices()\`，由"会话真的结束了"这一确定事件驱动，把仍未被消费的媒体通知补起一轮。补触发起的这一轮结束时再检查，届时通知已被消费 → 自动停止，**不会死循环**；\`notified\` 改由 \`flushNotices\` 真正消费时回置（\`markNotifiedByNotice\`），重载补发因此恢复有效
+- 修复**取消正在生成的媒体任务不生效**：\`.ai media cancel\` / \`media_tasks action=cancel\` 取消运行中的任务后，结果落地仍会把状态覆盖回「已完成」并照常投递（命令侧直接发到群里）——现在落地与失败两条路径都会先检查取消状态，已取消的任务丢弃结果、不写记忆、不投递
+- 修复**上下文编辑可能写入可发送标签**：\`context_edit_replace\` 的替换文本原先用 \`stripInternalTags\` 清洗，而该函数按设计**保留** \`[at:…]\` / \`[img:…]\` / \`[record:…]\` 等可发送标签，被写入并持久化后经回复管线渲染即成为真实发送指令（等价于让被污染的上下文获得「@全体成员 / 发外链图」能力，且反复生效）；现改用用户输入口径的 \`stripUserTags\`，可发送标签转义为字面量、伪造闭合标签整段删除
+- 修复**上下文编辑可凭空创建会话**：\`getSession()\` 对任意未知 sessionId 都会新建会话，原先对不存在的目标会话（如群里随手写的 \`QQ-Group:999999\`）也会照常写入并落盘；现在写入前先确认目标会话在存储中确有存档，否则拒绝并给出可读提示
+- 修复**上下文编辑的参数错误被误报为「未命中」**：\`count\` 传 0 / 负数 / 非数字时，原先被 \`parseInt(...) || 0\` 归零并被静默短路，最终回复"范围内未命中"——会让 AI 误以为文本没匹配上而放宽 scope 甚至改成 \`scope=all\` 重试；现在非法 \`count\` 直接报参数错。\`scope\` 的 \`idx:\` 写法非法或越界也改为显式报错（此前一律退化成"未命中"），越界区间被收敛时在回复中标注实际生效范围
+- 修复**工具组同名撞车导致误开关**：内置分类名与 MCP 服务器名原先共用同一聚合键，一台名为「记忆」的 MCP 服务器会被并进内置「记忆」组（概览显示成 \`内置·记忆\`），\`.ai tool off 记忆\` 会连带关掉 MCP 工具且完全看不出来；现在按「内置/MCP」分别成组，同名时按组名解析会报歧义而不是静默选中
+- 修复**\`.ai off\` 未知参数被静默忽略**：开关分支没有 default，\`--standb\` 这类拼写错误会被完全忽略却照旧回复"AI已关闭："，用户误判为已生效；现在会回显未识别的参数名，一个有效参数都没有时明确回复"未做任何更改"
+- 修复**备用模型回退会在两个模型间来回跳**：\`pickNextModel\` 原先取"第一个不等于当前的"候选，当前模型不在列表首位时会**绕回开头**——A→B 之后 B 失败又切回 A。现改为在候选列表里**只往后走**（候选已按用户配置的顺序排），走到末尾就返回 null，不再重试已经失败过的
+- 修复 \`media_template.ts\` 的联合类型未收窄（\`Property 'error' does not exist\`）：改判 \`coerced.ok === false\`。同时**修正 CI 的类型门禁**——原 \`npx tsc --noEmit --strict\` 的命令行 \`--strict\` 会覆盖 tsconfig 严格选项，把该错误静默吞掉（同一份代码 tsconfig 直跑 exit=2，加 \`--strict\` 后 exit=0），现改为直跑 tsconfig；并把 \`npm run test:unit\` 接入 build-check 与 release 工作流（此前单测在 CI 中完全不执行）
+- 修复**「整个响应体即音频」的接口在无中转后端时报错难懂**：现在明确报出"当前运行时无法读取二进制响应体"、当前响应的 Content-Type，以及去启动 \`media-fetch\` 后端的位置；该错误标记为不可重试，不再白走两次指数退避
+- 修复**版本列表接口在 base_url 填成完整端点时静默 404**：当 \`base_url\` 是供应商独有的完整接口端点（如百炼原生的 \`.../multimodal-generation/generation\`）时，拼出的 \`/models\` 必然不存在；现在直接给出"改填基础地址或用 list_url 指定"的可操作提示，而不是发一个注定失败的请求再报含糊的 404
+`,
+    "4.24.0": `## 新功能
+- 语音合成与文生图**内置到主插件**：「模型」页的 api连接 + 模型规则新增 **tts**（语音合成）与 **image-generation**（文生图）两个用途，不再依赖外部插件——「生成音频（tts）」「生成图片（tti）」依赖插件已废弃（完整包不再附带三个依赖，只保留 ob11 网络连接），\`globalThis.tts\` / \`globalThis.tti\` / \`globalThis.aiDrawing\` 的读取与兜底全部移除
+- 模型规则新增四个字段：**models**（按模型定向：只对这些模型生效，优先级高于 use）、**[params]**（声明 AI 可覆写参数的元信息：default/min/max/enum/type/desc）、**[prompt]**（extra 写一段自由提示词，原样注入给 AI）、**[response]**（data_path / data_type / error_message_path / task_id_path / task_status_path / success_values / failure_values / poll_url / poll_interval / poll_max，用于从返回里取音频或图片，支持异步任务轮询）
+- **自定义参数在「模型规则」的 [body] 里书写**：用 {占位符} 标出可被 AI/命令覆写的字段，用 TOML 嵌套表表达各供应商真实的字段结构（阿里 \`[body.input.parameters] rate = "{rate}"\`、Google \`[body.audioConfig] speakingRate = "{rate}"\`）——同一个"语速"落到完全不同的字段，供应商差异全部由配置表达、代码零分支；内置占位符：{text} / {prompt} / {negative_prompt} / {image} / {image_url} / {image_base64} / {model} / {api_key}
+- 取值优先级：**AI/命令传参 > [params].default > 无值且无默认时整个键不发送**——模型不支持的参数不会进入请求体（未在模板里出现的键一律忽略、不报错），声明了但没值的字段不会以空值污染请求；整值占位符保留原始类型（number 仍是 number），嵌套表内键全被删时自动剪枝（不发送 "parameters": {}）
+- **生成改为异步任务**：generate_audio / text_to_image 提交后**立即返回任务号**，不再阻塞（工具层 180s 超时不再会截断慢出图，HTTP 超时改由该模型规则 [request].timeout 控制）；完成后按来源分流——AI 调工具发起的先写入会话通知（入队与唤醒分离，通知不会因唤醒失败而丢），再**唤醒 AI** 起一轮投递，且该送达**免触发令牌桶**（桶空也送达）；会话忙时不起新对话，改由本轮下一次模型请求前的 flushNotices 注入（任务完成得早就在同一条回复里发出，不必另起一轮）；待机/端点离线时通知保留，下一轮对话呈现。人类敲命令发起的由插件**直接投递**（图片走 Image.CQCode 真实文件/URL，不用插件内部 imageId）
+- 工具描述与参数 schema **由「模型规则」生成**（逐模型参数清单 + 默认值/范围/枚举 + [prompt].extra），不是硬编码超集：只配一个模型时 schema 就是该模型的精确参数，配多个时标注"仅某模型支持"；修改模型规则需重载 JS 刷新
+- 参数校验：类型能安全强转就转（"1.5" → 1.5），无法强转报可读错误；min/max 越界、enum 非法在**提交前**即拒绝，不会建任务；emotion 在模板未声明 emotion 时归一到 instruction
+- [types] 可声明类型扩展为 text / vision / embed / **gen**（生图）/ **tts**（语音）；gen 由"内部排除值"改为生图用途的正常标签，语音/生图命名白名单同步扩充（cosyvoice / fish-speech / speech-* / tts-* / chattts / sovits 等），且**语音必须先于 vision 命名能力位判定**（否则 gpt-4o-mini-tts 会被误判为视觉模型）
+- 媒体返回支持**非 JSON 响应**：按 [response].data_type 决定取数方式（有 data_path 走 JSON；base64/hex 且无 data_path 表示整个响应体即数据，如 TTS 音频流，并按 content-type 自适应，避免把 JSON 当二进制读）；hex 返回自动转 base64
+
+## 配置变更
+- **「工具」页删除「ai语音使用的音色」下拉**：该下拉服务的是**协议端自带的 AI 语音**（NapCat/Lagrange 的 AI 语音 API），与插件 TTS 无关——协议端这条链路骰主本就无需配置模型，AI 现在可直接用 \`call_ob11_api\` 调 \`get_ai_characters\`（查角色）/ \`send_group_ai_record\`、\`send_private_ai_record\`（发送）/ \`get_ai_record\`（只取语音 URL），用法与常见角色名已写进默认知识库 ob11-api。下拉里的「自定义」选项对应的才是插件 TTS 链路，现已内置：自建 TTS（阿里 CosyVoice / 硅基流动 / OpenAI 等）的音色在「模型规则」\`tts\` 用途的 \`[params].voice\`（配合 \`[body]\` 的 \`{voice}\` 占位符）里配置，AI/命令也能按次传 \`voice\`
+- 「工具」页新增**媒体任务并发上限**（默认 3）：同时进行的语音/图片生成任务数上限，超出的任务排队等待，避免一次提交过多把接口打满
+- 「工具」页新增**媒体生成同步等待秒数**（默认 5）：调用生图/语音工具后先等待这么多秒看是否已出结果，期间生成完就当场把结果返回给 AI、不再走异步通知；超时未完成则正常返回任务号、生成完再通知唤醒。填 0 关闭等待（一律走异步）
+- 「模型」页 api连接 / 模型规则 的配置说明同步补充 tts / image-generation 用途与 [params]/[prompt]/[response]/models 字段说明；模型规则出厂模板新增语音（阿里云 CosyVoice）与生图（OpenAI gpt-image-1）两框完整示例
+- api连接 [types] 现可声明 gen / tts；无 /models 列表接口的语音/生图服务（Google Cloud TTS 等）用 models 钉住自定名 + [types] 声明即可接入
+
+## 命令与工具变更
+- 新增 **.ai tts <文本>**：合成语音并发送，支持 --model / --voice / --rate / --pitch / --volume / --instruction / --emotion；提交后立即回话，完成后由插件直接投递到本会话
+- 新增 **.ai tti <描述>**：生成图片并发送，支持 --model / --size / --steps / --seed / --quality / --style / --negative / --save / --name；同上直接投递，--save 会在完成时写入记忆
+- 新增 **.ai media**：查看本会话生成任务队列（默认未完成 + 最近 10 条已结束；\`.ai media list [页码] [--all]\` 分页/查看全部；\`.ai media cancel <任务号>\` 取消未完成的任务）；别名 .ai md
+- 新增 **media_tasks** 工具（list / cancel）：AI 查看或取消本会话的生成任务队列，归入新增的「多媒体」内置分类
+- generate_audio 改为提交任务并立即返回（传 path 时仍**同步**解析本地/MCP 音频资源，不排队）；text_to_image 同样改为提交任务，save / name 意图在完成时写回记忆（异步完成后用 epId/sid 重建 ctx）
+- 队列只在存储里放句柄/短摘要（本地文件路径、图片 ID、URL），**绝不落盘 base64**；每会话最多保留 50 条已结束任务，未结束任务永不淘汰；进程重启后 running 任务标记「插件重载中断」并补通知
+- 媒体请求**不计入用量统计与 token 校准**（媒体响应里的 usage 与对话 token 语义无关）
+- \`.ai model\` 的用途列表与 \`[types]\` 提示同步加入 tts / image-generation 与 gen / tts
+
+## 修复
+- 修复**生成响应过快时唤醒丢失、永久等待**：工具来源的媒体任务完成后会无条件 \`session.chat()\` 起一轮投递，而 \`Agent.run()\`/\`runStream()\` 开头有一道同会话闸门 \`if (running || starting) return\` —— 那是**静默 return**（不抛错、不排队、不打日志），且媒体唤醒是唯一绕开消息管线分流、直接调 \`chat()\` 的调用方（普通消息已由 \`deferReceipt\` 挂起，撞不到它）。于是生成极快时（本地模型/缓存命中/极短文本）：通知入队 → \`chat()\` 撞闸门被静默丢弃（Promise 正常 resolve、\`.catch\` 不触发、日志还写着"触发成功"）→ 若本轮已过最后一次模型请求，\`flushNotices\` 不会再消费它 → **结果永远送不出去**；更糟的是入队时就把 \`notified\` 置了 true（谎报成功），把"重载补发"这条兜底也一并堵死。现改为三段式：① **提交后同步等待窗口**（「工具 → 媒体生成同步等待秒数」，默认 5 秒）——窗口内出结果就**当场返回**（图片直接给 \`[img:ID]\`、语音给 record 段指引），根本不进唤醒链路；② 窗口内没完成则入队（带 \`taskId\`）、**空闲才唤醒**，会话忙则 defer 且通知留在队列；③ **轮末补触发**——\`Agent.run()\`/\`runStream()\` 的 \`finally\` 中（\`resumePending\` 之后、\`starting\` 归零之后）调用 \`MediaTaskManager.wakePendingNotices()\`，由"会话真的结束了"这一确定事件驱动，把仍未被消费的媒体通知补起一轮。补触发起的这一轮结束时再检查，届时通知已被消费 → 自动停止，**不会死循环**；\`notified\` 改由 \`flushNotices\` 真正消费时回置（\`markNotifiedByNotice\`），重载补发因此恢复有效
+- 媒体结果通知新增 \`taskId\` 身份标识（\`noticeQueue\`），用于判断"该通知是否已被本会话消费"，避免重复唤醒
+- 修复**一条 QQ 图床死链卡死整个会话**：图片 URL 转 base64 失败后仍会原样作为 image_url 交给模型，模型侧下载失败（QQ 直链 rkey 过期 → 400）会让整轮请求报 invalid_request，而该类别不在报错自动处理范围 → 静默不回复；更麻烦的是这条坏消息已持久化进上下文，此后每轮组包都会重复 400（表现为「卡住」）。现在三处兜底：① 后端回包里出现上游 4xx（\`400 Client Error\`、QQ 的 \`download url has expired\`）即判定 URL 已不可用，不再走 1 小时冷却 × 3 次的无意义重试；② 请求组装时，已确认不可用或 QQ 临时直链（multimedia.nt.qq.com.cn / gchat.qpic.cn / c2cpic\*.qpic.cn / 带 rkey 的链接）转换失败的图片只保留 \`[img:id]\` 文本标签，不再产生 image_url 内容块；③ 模型报 \`Failed to download image\` 时自动把这些图片标记为不可用并降级重发一次（旧上下文里的死链图片也一并自动清理），不再静默卡住
+- 识图请求遇到已确认不可用的 URL 直接跳过，不再白花一次视觉模型请求
+- 修复**取消正在生成的媒体任务不生效**：\`.ai media cancel\` / \`media_tasks action=cancel\` 取消运行中的任务后，结果落地仍会把状态覆盖回「已完成」并照常投递（命令侧直接发到群里）——现在落地与失败两条路径都会先检查取消状态，已取消的任务丢弃结果、不写记忆、不投递
+- 修复**上下文编辑可能写入可发送标签**：\`context_edit_replace\` 的替换文本原先用 \`stripInternalTags\` 清洗，而该函数按设计**保留** \`[at:…]\` / \`[img:…]\` / \`[record:…]\` 等可发送标签，被写入并持久化后经回复管线渲染即成为真实发送指令（等价于让被污染的上下文获得「@全体成员 / 发外链图」能力，且反复生效）；现改用用户输入口径的 \`stripUserTags\`，可发送标签转义为字面量、伪造闭合标签整段删除
+- 修复**上下文编辑可凭空创建会话**：\`getSession()\` 对任意未知 sessionId 都会新建会话，原先对不存在的目标会话（如群里随手写的 \`QQ-Group:999999\`）也会照常写入并落盘；现在写入前先确认目标会话在存储中确有存档，否则拒绝并给出可读提示
+- 修复**上下文编辑的参数错误被误报为「未命中」**：\`count\` 传 0 / 负数 / 非数字时，原先被 \`parseInt(...) || 0\` 归零并被静默短路，最终回复"范围内未命中"——会让 AI 误以为文本没匹配上而放宽 scope 甚至改成 \`scope=all\` 重试；现在非法 \`count\` 直接报参数错。\`scope\` 的 \`idx:\` 写法非法或越界也改为显式报错（此前一律退化成"未命中"），越界区间被收敛时在回复中标注实际生效范围
+- 修复**工具组同名撞车导致误开关**：内置分类名与 MCP 服务器名原先共用同一聚合键，一台名为「记忆」的 MCP 服务器会被并进内置「记忆」组（概览显示成 \`内置·记忆\`），\`.ai tool off 记忆\` 会连带关掉 MCP 工具且完全看不出来；现在按「内置/MCP」分别成组，同名时按组名解析会报歧义而不是静默选中
+- 修复**\`.ai off\` 未知参数被静默忽略**：开关分支没有 default，\`--standb\` 这类拼写错误会被完全忽略却照旧回复"AI已关闭："，用户误判为已生效；现在会回显未识别的参数名，一个有效参数都没有时明确回复"未做任何更改"
+- 修复 \`media_template.ts\` 的联合类型未收窄（\`Property 'error' does not exist\`）：改判 \`coerced.ok === false\`。同时**修正 CI 的类型门禁**——原 \`npx tsc --noEmit --strict\` 的命令行 \`--strict\` 会覆盖 tsconfig 严格选项，把该错误静默吞掉（同一份代码 tsconfig 直跑 exit=2，加 \`--strict\` 后 exit=0），现改为直跑 tsconfig；并把 \`npm run test:unit\` 接入 build-check 与 release 工作流（此前 279 项单测在 CI 中完全不执行）
+`,
     "4.23.0": `## 新功能
 - 模型类型可手动声明：「模型」页 api连接 新增可选 [types] 表（在本框末尾追加，表内每个模型写一条 "模型名" = "text" / "vision" / "embed"），**优先级最高**，可覆盖命名猜测——网关自命名的嵌入模型不再被误当对话模型、未命中命名白名单的多模态模型也能进识图候选；模型名含 . : / 等字符需加引号，[types] 必须写在本框最后（其后不能再写 api_key 等键），无效值只忽略该键并记日志
 - 手动类型声明未命中当前模型列表时（模型名拼写错误 / 已移出清单）记一条 warning 提示，不再静默失效
@@ -14,6 +98,8 @@ export const changelog: { [version: string]: string } = {
 - .ai tool on/off <组名> 支持**整组批量开关**（显式写法 --group=<组名>，可绕开 on/off/help/call/list/all 等保留字与撞名）；**关闭时默认跳过核心常驻工具**（list_tools / search_tools / list_mcps / call_tool / use_skill / call_ob11_api / run_ext_command / run_core_command），避免一键关掉 AI 的工具发现与执行入口——无参 .ai tool off 同样适用，确需全关加 --force；开启时跳过「禁止调用的函数」并如实回报变更/跳过个数
 - 技能与知识库不参与工具组维度（其会话开关仍由 .ai skill / .ai kb 管理，单工具开关 .ai tool on/off use_skill 等行为不变）；.ai mcp on/off <服务器> 与 .ai tool on/off <服务器> 等价，两者共用同一批量开关实现
 - AI 侧工具发现同步分组口径：list_tools 组头与 search_tools 详情的「来源」改为「内置·记忆」这类两级显示名，list_tools / search_tools 的 mcp= 参数可按分类名（如 记忆、图片、子代理）或 MCP 服务器名过滤，mcp=内置 仍匹配全部内置工具
+- 新增「上下文编辑」工具组：context_edit_list（按序号定位任意会话上下文条目，支持 role/keyword/时间过滤）与 context_edit_replace（按 scope 批量替换正文文本，支持字面量/正则、空串删除、原文副本同步与持久化）；目标会话缺省=当前会话，可用 bot_id + session_id 跨会话定位（同一 SealDice 实例内多端点/多账号），敏感工具但默认开启
+- .ai standby 支持子参数：.ai standby on 等同原 .ai standby（开启待机）；.ai standby off **仅关闭待机、保留计数器/计时器/概率/活跃时间段/评分等其它触发模式与运行态**（适合「只播报不读群消息」的机器人）；.ai off --sb 等价 standby off
 `,
     "4.22.0": `## 新功能
 - 模型配置 v4：模型配置改为两个 TOML ——「模型」页的 **api连接**（每行一个服务商连接：api_key 必填；provider 选填，省略按 OpenAI 兼容处理（此时需显式填 base_url）；base_url 选填，省略取该服务商默认；可选 models 钉住清单（填写=跳过自动拉取，离线/无列表接口时用）；可选 ignore（1=忽略该连接）；可选 [request]（列表拉取与余额查询等连接级覆盖））与 **模型规则**（每行一个"用途组"请求模板：use 数组（chat/compression/summarization/judge/image-understanding/text-embedding）+ 可选 [body]/[request]，**不写任何模型名**，命中这些用途的模型统一套用，行序重叠逐键合并、后覆盖先）

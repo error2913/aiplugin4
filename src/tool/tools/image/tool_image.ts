@@ -1,8 +1,10 @@
-// 图片工具：图片转文字/文生图（tti）
+// 图片工具：图片转文字/文生图（内置媒体队列）
+import Config from "../../../config/config";
 import { logger } from "../../../logger";
-import Image from "../../../resource/image";
-import { generateId } from "../../../utils/utils";
+import { MediaTaskManager } from "../../../media/task_queue";
+import Model from "../../../model/model";
 import Tool from "../../tool";
+import { buildMediaSubmitReply, buildMediaToolInfo, resolveMediaEntry } from "../media/shared";
 
 const log = logger.withTag('tool');
 
@@ -70,109 +72,86 @@ export function registerImage() {
         return image.description || '图片识别失败';
     }
 
-    const toolTTI = new Tool({
-        type: 'function',
-        function: {
-            name: 'text_to_image',
-            description: '通过文字描述生成图像',
-            parameters: {
-                type: 'object',
-                properties: {
-                    prompt: {
-                        type: 'string',
-                        description: '图像描述'
-                    },
-                    negative_prompt: {
-                        type: 'string',
-                        description: '不希望图片中出现的内容描述'
-                    },
-                    save: {
-                        type: "boolean",
-                        description: "是否保存图片"
-                    },
-                    name: {
-                        type: "string",
-                        description: "如果保存图片，图片的名称"
-                    },
-                    image: {
-                        type: "string",
-                        description: "可选参考图，用于以图生图。支持图片ID、user_avatar:用户ID、group_avatar:群ID、http(s)图片URL、data:image/...;base64或base64数据"
-                    }
-                },
-                required: ['prompt', 'save', 'name']
+    const toolTTI = new Tool(buildMediaToolInfo({
+        name: 'text_to_image',
+        description:
+            '生成图片（提交生成任务，立即返回任务号；生成完成后会自动通知你，届时在回复里用返回的 [img:图片ID] 把图发给用户）。',
+        properties: {
+            prompt: { type: 'string', description: '图像描述' },
+            negative_prompt: { type: 'string', description: '不希望图片中出现的内容描述' },
+            model: { type: 'string', description: '可选，指定生图模型（来自「api连接」）；缺省用 image-generation 用途默认模型' },
+            save: { type: 'boolean', description: '是否保存图片（生成完成后写入记忆）' },
+            name: { type: 'string', description: '如果保存图片，图片的名称' },
+            image: {
+                type: 'string',
+                description: '可选参考图，用于以图生图。支持图片ID、user_avatar:用户ID、group_avatar:群ID、http(s)图片URL、data:image/...;base64或base64数据'
             }
-        }
-    });
-    toolTTI.solve = async (ctx, msg, session, args) => {
+        },
+        required: ['prompt'],
+    }, 'image-generation'));
+
+    toolTTI.solve = async (ctx, _msg, session, args) => {
         const { prompt, negative_prompt, save, name, image } = args;
-
-        const ext = seal.ext.find('tti');
-        if (!ext) {
-            log.error(`未找到生成图片依赖（tti）`);
-            return `未找到生成图片依赖（tti），请提示用户安装生成图片依赖`;
-        }
-
-        // 切换到当前会话ai
-        // 会话已由 Tool.handleToolCall 传入，直接使用 session
-
-        const kws = ["tti", name];
+        if (!prompt || typeof prompt !== 'string') return '必须提供 prompt';
 
         try {
-            // tti 统一 API
-            if (globalThis.tti && typeof globalThis.tti.generate === 'function') {
-                const request: { text: string; negativeText?: string; image?: string } = { text: prompt };
-                if (negative_prompt) request.negativeText = negative_prompt;
-                if (image) {
-                    const reference = await resolveTtiImage(ctx, session, image);
-                    if (!reference) return `未找到参考图${image}`;
-                    request.image = reference;
-                }
+            await Model.ensureLoaded();
+            const { entry, error } = resolveMediaEntry('image-generation', args.model);
+            if (!entry) return JSON.stringify({ ok: false, code: 'MEDIA_MODEL_UNAVAILABLE', message: error });
 
-                const result = await globalThis.tti.generate(request);
-                if (!result.success) throw new Error(result.error || '图像生成失败');
-                const img = new Image();
-                img.imageId = `${name}_${generateId()}`;
-                if (result.data.startsWith("http://") || result.data.startsWith("https://")) {
-                    img.url = result.data;
-                    try {
-                        await img.urlToBase64();
-                    } catch (e) {
-                        log.exception(`将图片URL转换为base64失败`, e);
-                    }
-                } else {
-                    // tti 依赖可能返回带 data:image/...;base64 前缀的字符串，统一剥离后再存
-                    img.base64 = /^data:/i.test(result.data) && result.data.includes(',')
-                        ? result.data.slice(result.data.indexOf(',') + 1)
-                        : result.data;
-                }
-
-                img.format = img.format || 'unknown';
-                img.description = `AI绘图[img:${img.imageId}]\n${prompt ? `描述: ${prompt}` : ''}\n${negative_prompt ? `不希望出现: ${negative_prompt}` : ''}\n${image ? `参考图: 已提供` : ''}`;
-
-                if (save) session.memory.addMemory(ctx, session, [], [], kws, [img], img.description);
-
-                return `生成成功，请使用[img:${img.imageId}]发送`;
+            // 参考图在提交时解析（需要 ctx/session）；base64 只进内存，不落盘
+            let reference = '';
+            if (image) {
+                const resolved = await resolveTtiImage(ctx, session, image);
+                if (!resolved) return `未找到参考图${image}`;
+                reference = resolved;
             }
 
-            // 兼容旧版 AIDrawing
-            if (globalThis.aiDrawing && typeof globalThis.aiDrawing.generateImage === 'function') {
-                try {
-                    await globalThis.aiDrawing.generateImage(prompt, ctx, msg, negative_prompt);
-                    if (save) {
-                        log.warning('旧版 AIDrawing，无法直接保存图片');
-                        return `图像生成请求已发送`;
-                    }
-                    return `图像生成请求已发送`;
-                } catch (e) {
-                    log.exception('图像生成失败', e);
-                    return `图像生成失败：${e}`;
-                }
+            // 同步校验（不建任务；双密钥鉴权会在此换 token）
+            const prepared = await entry.prepareTTI(prompt, { negativePrompt: negative_prompt, image: reference, params: args });
+            if ('error' in prepared) {
+                return JSON.stringify({ ok: false, code: 'MEDIA_PARAM_ERROR', message: prepared.error });
             }
-            log.error('未找到可用的 tti 接口，生成图片插件可能存在问题');
-            return `未找到可用的 tti 接口，生成图片插件可能存在问题`;
+
+            const task = MediaTaskManager.submit({
+                ctx,
+                kind: 'tti',
+                origin: 'tool',
+                entry,
+                text: prompt,
+                image: reference,
+                negativePrompt: typeof negative_prompt === 'string' ? negative_prompt : '',
+                params: args,
+                save: save === true,
+                name: typeof name === 'string' ? name : '',
+                modelLabel: entry.ref,
+            });
+            const queued = MediaTaskManager.pendingCount(task.sid) - 1;
+
+            // 同步等待窗口：生成够快就当场返回结果，不再走异步通知（省一轮唤醒、也避免撞会话闸门）
+            const waitMs = Number(Config.tool.MEDIA_SYNC_WAIT_SECONDS) * 1000;
+            const settled = await MediaTaskManager.waitForSettle(task, waitMs);
+            if (settled) {
+                return buildMediaSubmitReply({
+                    mode: 'sync',
+                    taskId: task.id,
+                    kind: 'tti',
+                    modelLabel: entry.ref,
+                    queued,
+                    imageId: settled.result?.imageId,
+                    errorText: settled.status === 'failed' ? (settled.error || '未知错误') : undefined,
+                });
+            }
+            return buildMediaSubmitReply({
+                mode: 'async',
+                taskId: task.id,
+                kind: 'tti',
+                modelLabel: entry.ref,
+                queued,
+            });
         } catch (e) {
-            log.exception('图像生成失败', e);
-            return `图像生成失败：${e}`;
+            log.exception('提交生图任务失败', e);
+            return `提交生图任务失败：${e instanceof Error ? e.message : String(e)}`;
         }
     }
 }

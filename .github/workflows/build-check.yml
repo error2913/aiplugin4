@@ -25,8 +25,16 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Type check (strict)
-        run: npx tsc --noEmit --strict
+      # 必须直跑 tsconfig（npx tsc --noEmit），不要加 --strict：
+      # 命令行 --strict 会覆盖 tsconfig 的严格选项，实测会把「联合类型未收窄」
+      # （Property 'error' does not exist）这类错误静默吞掉 ——
+      # 同一份代码 tsconfig 直跑 exit=2，换成 `--strict` 后 exit=0，类型门禁形同失效。
+      # tsconfig 已启用 noImplicitReturns / noUnusedLocals 等；如需更严，请改 tsconfig 而非命令行覆盖。
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm run test:unit
 
       - name: Build and validate package
         run: npm run package:check

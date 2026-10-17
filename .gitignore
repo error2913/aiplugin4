@@ -18,3 +18,8 @@ skills/**/.env
 __pycache__/
 *.pyc
 *.pyo
+
+# MkDocs 站点构建产物（源文档始终是 README.md / docs/ / ccdocs/）
+docs-site/site-src/
+docs-site/site/
+.mkdocs-venv/

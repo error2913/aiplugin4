@@ -1,19 +1,23 @@
 // 模型列表拉取：连接级「获取可用模型列表」适配（结果只存内存、不持久化）。
 // 默认 OpenAI 兼容：GET {base}/models（Bearer），解析 data[].id；
-// Anthropic 特判：GET {base}/models，x-api-key + anthropic-version，limit=1000 循环翻页到 has_more=false。
+// anthropic-messages 协议：GET {base}/models，x-api-key + anthropic-version，limit=1000 循环翻页到 has_more=false。
 // 对象项额外提取供应商自报的能力位（vision/embed，仅正向证据），无相关字段时由上层退回命名猜测；
-// 连接配置里可选 [request]（list_url/list_headers/auth_header_name/timeout）可覆盖默认行为；
+// 连接配置里可选 request（list_url/headers/auth_header_name/timeout）可覆盖默认行为；
 // 智谱/部分兼容网关无 /models 端点时自然报错，由上层按连接降级处理（可走 models 钉住清单）。
+import { vendorByUrlSuffix } from "../config/v5/vendor";
 import { logger } from "../logger";
 
+import { isAnthropicMessages } from "./api_dialect";
 import { ApiError } from "./api_error";
 
-/** 一次列表拉取需要的最小信息（来自「api连接」配置解析结果） */
+/** 一次列表拉取需要的最小信息（来自连接配置解析结果） */
 export interface ListRequestContext {
     provider: string;
+    /** 协议方言（v5）：缺省按 provider 推断 */
+    api?: string;
     baseUrl: string;
     apiKey: string;
-    /** 连接配置 [request] 中与列表相关的覆盖项（默认不写时为空对象） */
+    /** 连接配置 request 中与列表相关的覆盖项（默认不写时为空对象） */
     listOverride?: Record<string, any>;
 }
 
@@ -187,9 +191,26 @@ export async function fetchModelList(ctx: ListRequestContext): Promise<ModelList
     let listUrl = joinUrl(ctx.baseUrl, '/models');
     if (typeof listOverride.list_url === 'string' && listOverride.list_url.trim()) {
         listUrl = listOverride.list_url.trim();
+    } else {
+        // 地址是**完整接口端点**时，拼 /models 得到的是 `<端点>/models` —— 一个不存在的地址。
+        // 典型：用户直接把百炼原生的
+        //   https://.../api/v1/services/aigc/multimodal-generation/generation
+        // 当 baseURL 填了（v4 的 api连接就是这么填的），于是列表请求必然 404。
+        // 这里**直接给可操作的提示**，而不是发一个注定失败的请求、再报个含糊的 404。
+        //
+        // 判据来自 media_presets 里"vendor 独有的端点路径"（vendor.ts 的 vendorByUrlSuffix）：
+        // 只有唯一 vendor 拥有的路径才会命中，所以自建网关的 /images/generations 之类不会误报。
+        const fullEndpointVendor = vendorByUrlSuffix(ctx.baseUrl);
+        if (fullEndpointVendor) {
+            // 注意：describeListError 会把普通 Error 截到 120 字符，这句必须短且完整
+            throw new Error(
+                `「${fullEndpointVendor}」的完整接口端点推导不出 /models（会拼成不存在的地址）；`
+                + `请改填基础地址，或在连接的 request 里指定 list_url`,
+            );
+        }
     }
 
-    if (ctx.provider === 'anthropic') {
+    if (isAnthropicMessages(ctx.api, ctx.provider)) {
         return fetchAnthropicModels(ctx, listUrl, timeoutMs);
     }
 

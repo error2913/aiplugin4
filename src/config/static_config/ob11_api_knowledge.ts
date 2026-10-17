@@ -1,5 +1,7 @@
 // OB11 API 知识库默认内容（「知识库」配置的一个默认条目）：统一指导 AI 通过唯一工具 call_ob11_api 调用协议动作。
 // 原为默认技能，已改写为知识库并限定 platform: [QQ]（仅 QQ 平台可见可检索）。
+import { PROTOCOL_AI_VOICE_CHARACTERS } from "./ai_voice_characters";
+
 export const OB11_API_KB = `---
 name: ob11-api
 description: 通过唯一的 call_ob11_api 工具调用 OneBot 11/兼容协议 API，覆盖消息、媒体、文件、合并转发、查询和群管理；仅 QQ 平台可用
@@ -83,7 +85,20 @@ data：
   \`{"action":"upload_group_file","params":{"group_id":"123","file":"/data/a.zip","name":"a.zip"}}\`。
 - 上传 action 的 \`file\` 也支持 \`resource:资源ID\`；工具会先解析到已配置资源的实际路径，再交给文件上传 API。
 - \`file\` 消息段是消息中的文件卡片，不等同于 \`upload_group_file\`；不要用普通 \`file\` segment 冒充群文件区上传。
-- 语音生成先使用 \`generate_audio\` 得到 record segment，再把该 segment 原样交给 \`call_ob11_api\`。
+- 语音生成是**异步任务**：\`generate_audio\` 只提交任务并立即返回任务号，不会当场给出 segment。生成完成后系统会通知你结果（含本地文件路径或 URL），届时应把 record segment（\`{"type":"record","data":{"file":"路径或URL"}}\`）交给 \`call_ob11_api\` 发送。**注意：回复里的 \`[audio:xxx]\` 只认「资源」页配置的本地语音资源名，不接受任意文件路径/URL**，生成结果必须走 record 段。队列状态用 \`media_tasks\` 查询。
+- 语音/图片也可由用户直接用 \`.ai tts\` / \`.ai tti\` 命令触发，那条路径由插件直接投递，不需要工具介入。
+
+### 5.1 协议端自带 AI 语音（与插件 TTS 是两条不同链路）
+
+协议端（NapCat / Lagrange 等）自己实现了「AI 语音」，**不需要插件配置任何模型**，直接用 \`call_ob11_api\` 调扩展接口：
+
+- 先查可用角色：\`{"action":"get_ai_characters","params":{"group_id":"群号","chat_type":1}}\` → \`data[].characters[]\`，每项含 \`character_id\`（角色 ID）、\`character_name\`（角色名）、\`preview_url\`（试听）。
+- 直接发到群：\`{"action":"send_group_ai_record","params":{"character":"角色ID","group_id":"群号","text":"要说的话"}}\` → 返回 \`data.message_id\`。这是**异步/耗时**接口，失败时按 retcode 判断（1400 参数错 / 1401 权限不足 / 1404 资源不存在）。
+- 只拿语音不发送：\`{"action":"get_ai_record","params":{"character":"角色ID","group_id":"群号","text":"要说的话"}}\` → \`data\` 是语音 URL（silk），再由你自己决定怎么发。
+- 私聊场景对应 \`send_private_ai_record\`，参数结构同上（\`group_id\` 换成对应会话参数按协议端要求填）。
+- **\`character\` 要求的是角色 ID**（\`character_id\`，如 \`ai_char_1\` 形态），不是中文角色名；拿不准就先调 \`get_ai_characters\`，不要凭记忆编造。
+- 常见角色名（\`character_name\`，**仅作对照参考**，实际以 \`get_ai_characters\` 返回为准）：${PROTOCOL_AI_VOICE_CHARACTERS.join('、')}。
+- 与插件的 \`generate_audio\` / \`.ai tts\` 区分：那条链路走「模型」页 api连接 + 模型规则的 \`tts\` 用途（阿里 CosyVoice、硅基流动、OpenAI 等自建 TTS），音色在模型规则里配；本节这条链路吃协议端能力，二者互不影响。协议端不支持这些 action 时（部分实现只支持群聊 / 未开启 AI 语音）会返回 retcode 或 \`OB11_DEPENDENCY_REQUIRED\`，此时应改走 \`generate_audio\`。
 - 音乐搜索先使用 \`search_music\` 得到 music segment，再把该 segment 放入发送 action；不要直接发送，继续使用 \`call_ob11_api\`。
 
 ## 6. JSON、Markdown、音乐

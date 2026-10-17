@@ -10,6 +10,7 @@ import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
 import { logger } from "./logger";
+import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
 import { TimerManager } from "./timer";
@@ -33,6 +34,7 @@ function main() {
   checkUpdate();
   Tool.registerTool();
   TimerManager.init();
+  MediaTaskManager.init();
   knowledgeService.init();
   BlockManager.initBlockList();
 

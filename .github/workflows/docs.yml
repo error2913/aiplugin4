@@ -1,0 +1,81 @@
+name: Docs
+
+# 只负责把 README.md / docs/ / ccdocs/ 发布到 GitHub Pages。
+# 与 build-check.yml、release.yml 相互独立，不要在这里加发布相关逻辑。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'ccdocs/**'
+      - 'docs-site/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'ccdocs/**'
+      - 'docs-site/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # PR 上只做构建校验，不发布（发布需要 pages/id-token 写权限，PR 不给）
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install MkDocs Material
+        run: pip install -r docs-site/requirements-docs.txt
+
+      # 防回归：确认自定义 slugify 产出的锚点仍与 GitHub 一致。
+      # 一旦有人在 mkdocs.yml 里动 toc.slugify，README 的中文目录就会静默失效。
+      - name: Verify CJK anchors match GitHub
+        working-directory: docs-site
+        run: python verify_slugify_against_github.py
+
+      - name: Build site (strict) and check links
+        run: npm run docs:build
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs-site/site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

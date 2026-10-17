@@ -180,8 +180,8 @@ export class streamService {
             log.printRequestMessages(body.messages, runId);
 
             const time = Date.now();
-            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body), { provider: model.provider, stopEvent, modelName: model.name, rawEstimateTokens: rawEstimate, use: forUse });
-            const response = parseProviderResponse(model.provider, data);
+            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body, model.api), { provider: model.provider, api: model.api, stopEvent, modelName: model.name, rawEstimateTokens: rawEstimate, use: forUse });
+            const response = parseProviderResponse(model.provider, data, model.api);
             if (response.choices && response.choices.length > 0) {
                 const message = response.choices[0].message;
                 const finish_reason = response.choices[0].finish_reason;

@@ -36,8 +36,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Type check (strict)
-        run: npx tsc --noEmit --strict
+      # 与 build-check 一致：直跑 tsconfig，不加 --strict（命令行覆盖会让部分类型错误被静默吞掉）
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm run test:unit
 
       - name: Build and validate package
         run: npm run package:check
