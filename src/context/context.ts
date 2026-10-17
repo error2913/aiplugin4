@@ -548,8 +548,8 @@ export class Context {
         for (const chunk of chunks) {
             const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
             if (!ok) return false;
-            // 先把这批原文写进归档分片（幂等，只写一次），再从上下文移除：移出窗口的内容仍可用 read_raw 回查
-            this.writeArchiveShard(chunk);
+            // 原文必须先安全落进归档分片（幂等），才允许从上下文移除
+            if (this.writeArchiveShard(chunk) === 'failed') return false;
             // chunk 始终是当前消息数组最前的一段（前面的块成功后已移除）
             this.messages.splice(0, chunk.length);
             try { this.session.save(); } catch { /* 无宿主会话时跳过保存（测试/游离 Context） */ }
@@ -583,16 +583,20 @@ export class Context {
         const ok = await MemoryManager.summarizeChunkWithRetry(this.session, picked);
         if (!ok) return false;
 
-        this.writeArchiveShard(picked);
+        if (this.writeArchiveShard(picked) === 'failed') return false;   // 未留档成功则不移除
         this.removeArchivedItems(picked);
         try { this.session.save(); } catch { /* 游离 Context */ }
         return true;
     }
 
-    /** 把这批消息里的 user 条目原文写进归档分片（幂等：分片已存在则跳过），并推进 archiveSeq */
-    private writeArchiveShard(chunk: MessageType[]): void {
+    /**
+     * 把这批消息里的 user 条目原文写进归档分片（幂等：分片已存在则跳过），并推进 archiveSeq。
+     * @returns 'stored' 已安全留档（可移除来源）/ 'nothing' 没有可留档的群聊原文（移除是安全的）/ 'failed' 写入失败（**不得移除来源**）
+     */
+    private writeArchiveShard(chunk: MessageType[]): 'stored' | 'nothing' | 'failed' {
         const s: any = this.session;
-        if (!s || typeof s.archiveSeq !== 'number') return;   // 游离/桩会话：不写分片
+        // 游离/桩会话（无 archiveSeq 或无语会 id）没有持久化身份，无处留档——此时移除是安全的
+        if (!s || typeof s.archiveSeq !== 'number' || !s.sessionId) return 'nothing';
         const items: ArchiveShardItem[] = [];
         for (const m of chunk) {
             if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
@@ -600,7 +604,10 @@ export class Context {
                 if (!raw || typeof raw.text !== 'string' || !raw.userId) continue;   // 系统条目（事件/提示）不入分片
                 if (Array.isArray(raw.rawItems) && raw.rawItems.length > 0) {
                     // 压缩块：块内逐条原文才是真原文
-                    for (const ri of raw.rawItems) items.push({ messageId: ri.messageId || '', userId: ri.userId, time: ri.time || 0, text: ri.text });
+                    for (const ri of raw.rawItems) {
+                        if (!ri || !ri.userId) continue;
+                        items.push({ messageId: ri.messageId || '', userId: ri.userId, time: ri.time || 0, text: ri.text });
+                    }
                     continue;
                 }
                 items.push({
@@ -611,18 +618,20 @@ export class Context {
                 });
             }
         }
-        if (items.length === 0) return;
+        if (items.length === 0) return 'nothing';   // 这批里没有群聊原文，无需留档即可移除
         const seq = s.archiveSeq + 1;
-        const wrote = writeShardIfAbsent(s.sessionId, seq, {
+        const outcome = writeShardIfAbsent(s.sessionId, seq, {
             seq,
             from: items[0].time,
             to: items[items.length - 1].time,
             items,
         });
-        if (wrote) s.archiveSeq = seq;
+        if (outcome === 'failed') return 'failed';
+        if (outcome === 'written') s.archiveSeq = seq;
         s.lastArchivedAt = Math.floor(Date.now() / 1000);
         // 分片数量上限：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
         if (s.archiveSeq > ARCHIVE_SHARD_LIMIT) clearShard(s.sessionId, s.archiveSeq - ARCHIVE_SHARD_LIMIT);
+        return 'stored';
     }
 
     /** 从 messages 中移除已归档的条目（按条目对象定位，保持其余内容与顺序不变） */

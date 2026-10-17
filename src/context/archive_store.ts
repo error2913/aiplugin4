@@ -51,21 +51,21 @@ export function readShard(sessionId: string, seq: number): ArchiveShard | null {
 
 /**
  * 写入分片；**已存在则跳过**（幂等：同一批归档重试/并发不会重复写）。
- * @returns 是否真的新写入了
+ * @returns 'written' 新写入 / 'exists' 已存在（内容已在盘上，可安全移除来源）/ 'failed' 写入失败（**调用方不得移除来源**）
  */
-export function writeShardIfAbsent(sessionId: string, seq: number, shard: ArchiveShard): boolean {
-    if (!sessionId || seq <= 0) return false;
+export function writeShardIfAbsent(sessionId: string, seq: number, shard: ArchiveShard): 'written' | 'exists' | 'failed' {
+    if (!sessionId || seq <= 0) return 'failed';
     const key = shardKey(sessionId, seq);
     try {
-        if (ext.storageGet(key)) return false;
+        if (ext.storageGet(key)) return 'exists';
     } catch {
         // 读取异常按"不存在"处理，继续写入（避免因读失败而丢归档）
     }
     try {
         ext.storageSet(key, JSON.stringify(shard));
-        return true;
+        return 'written';
     } catch {
-        return false;
+        return 'failed';
     }
 }
 

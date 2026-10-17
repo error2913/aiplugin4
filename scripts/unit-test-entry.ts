@@ -1295,13 +1295,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (ext as any).storageGet = (k: string) => store.get(k) ?? '';
         try {
             const shard = { seq: 1, from: 1, to: 2, items: [{ messageId: 'm', userId: 'QQ:1', time: 1, text: '原文' }] };
-            assert.equal(writeShardIfAbsent('QQ:999', 1, shard), true, '首次写入应成功');
+            assert.equal(writeShardIfAbsent('QQ:999', 1, shard), 'written', '首次写入应成功');
             const written = store.get('session_QQ:999:arc:001');
-            assert.equal(writeShardIfAbsent('QQ:999', 1, { ...shard, items: [{ messageId: 'm', userId: 'QQ:1', time: 1, text: '改了' }] }), false, '已存在应跳过写入');
+            assert.equal(writeShardIfAbsent('QQ:999', 1, { ...shard, items: [{ messageId: 'm', userId: 'QQ:1', time: 1, text: '改了' }] }), 'exists', '已存在应跳过写入');
             assert.equal(store.get('session_QQ:999:arc:001'), written, '已存在的分片不得被重写');
             assert.equal(readShard('QQ:999', 1)?.items[0].text, '原文', '应读回首次写入的内容');
             assert.equal(readShard('QQ:999', 2), null, '不存在的分片返回 null');
             assert.equal(readShard('', 1), null, '空会话 id 返回 null');
+            // 写入异常 → 'failed'：调用方据此**不移除**来源条目，避免丢原文
+            const origSetForThrow = (ext as any).storageSet;
+            (ext as any).storageSet = () => { throw new Error('模拟存储写入失败'); };
+            assert.equal(writeShardIfAbsent('QQ:999', 3, shard), 'failed', '写入异常应返回 failed');
+            (ext as any).storageSet = origSetForThrow;
         } finally {
             (ext as any).storageSet = origSet;
             (ext as any).storageGet = origGet;
