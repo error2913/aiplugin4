@@ -6,7 +6,7 @@ import Config, { ext } from "../src/config/config";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
-import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTokens, estimateMessageTokens, foldContextMessages, handleMessages, pickTier, textToMultimodalContent, windowCharsForTier } from "../src/utils/message";
+import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTokens, estimateMessageTokens, foldContextMessages, handleMessages, pickTier, renderFoldBudget, textToMultimodalContent, windowCharsForTier } from "../src/utils/message";
 import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/templates";
@@ -1318,6 +1318,143 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** 合并压缩只取"尾部连续未压缩段"：夹在中间的已压缩条目不参与，消息时序不被打乱 */
+    async testCompressKeepsMessageOrder(): Promise<void> {
+        const origGet = Agent.get;
+        const origThreshold = TC.intConfigs['消息压缩阈值'];
+        TC.intConfigs['消息压缩阈值'] = 2000;
+        resetConfigCache();
+        const calls: string[] = [];
+        const fakeAgent = { sessionService: { getSession: () => ({ sessionType: 'user', save: () => undefined }) } };
+        Agent.get = (name: any) => name === 'compress_agent'
+            ? { chat: async (t: string) => { calls.push(String(t)); return '【摘要】'; } }
+            : fakeAgent;
+        try {
+            const ctx = new Context();
+            const a = '甲'.repeat(1500);
+            const b = '乙'.repeat(3000);
+            const c = '丙'.repeat(1500);
+            await ctx.addUserMessage(makeCtx(), a, 'QQ:1', 'mA');
+            await ctx.addUserMessage(makeCtx(), b, 'QQ:1', 'mB');   // 单条超阈值 → 压缩并标记
+            await ctx.addUserMessage(makeCtx(), c, 'QQ:1', 'mC');
+            const items = (ctx.messages[0] as any).contentItems as any[];
+            assert.equal(items.length, 3, '三条消息应各自保留（不得把 A、C 合并后搬到末尾）');
+            assert.equal(items[0].text, a, '第 1 条应仍是 A 的原文（时序不变）');
+            assert.equal(items[1].compressed, true, '第 2 条应是已压缩的 B');
+            assert.equal(items[2].text, c, '第 3 条应仍是 C 的原文');
+            assert.equal(calls.length, 1, '只有 B 触发过压缩（A+C 未被合并重压）');
+        } finally {
+            Agent.get = origGet;
+            if (origThreshold === undefined) delete TC.intConfigs['消息压缩阈值']; else TC.intConfigs['消息压缩阈值'] = origThreshold;
+            resetConfigCache();
+        }
+    },
+
+    /** 折叠必须把 assistant(tool_calls) 与其 tool 结果作为原子组同留同折（否则孤儿 tool 会被清理，模型看不到工具返回） */
+    testFoldKeepsToolGroups(): void {
+        const mk = (text: string) => ({ role: 'user', contentItems: [{ text, time: 1, userId: 'QQ:1', messageId: 'm' }] });
+        const asst: any = { role: 'assistant', toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'x', arguments: '{}' } }] };
+        const tool: any = { role: 'tool', text: '工具返回内容'.repeat(2000), toolCallId: 'call_1', toolName: 'x' };
+        const messages: any[] = [mk('历史内容'.repeat(3000)), asst, tool, mk('@bot 在吗')];
+        const folded = foldContextMessages(messages, 5000);
+        const asstKept = folded.filter(m => m.role === 'assistant' && Array.isArray((m as any).toolCalls) && (m as any).toolCalls.length > 0);
+        const toolsKept = folded.filter(m => m.role === 'tool');
+        assert.equal(asstKept.length, toolsKept.length, `tool_calls 与 tool 结果必须同留同折（assistant=${asstKept.length} tool=${toolsKept.length}）`);
+        assert.equal(toolsKept.length, 0, '工具组超预算时应整组折叠，不得留下孤儿 tool 结果');
+        assert.ok(buildContent(folded[folded.length - 1]).includes('在吗'), '最新一条消息必须保留');
+
+        // 工具组能装下时：整组一起保留
+        const small: any[] = [mk('历史'.repeat(3000)), { ...asst, toolCalls: [{ id: 'c2', type: 'function', function: { name: 'x', arguments: '{}' } }] }, { role: 'tool', text: '短结果', toolCallId: 'c2', toolName: 'x' }];
+        const folded2 = foldContextMessages(small, 20000);
+        const asst2 = folded2.filter(m => m.role === 'assistant' && Array.isArray((m as any).toolCalls) && (m as any).toolCalls.length > 0);
+        const tool2 = folded2.filter(m => m.role === 'tool');
+        assert.equal(asst2.length, 1, '能装下时 assistant(tool_calls) 应保留');
+        assert.equal(tool2.length, 1, '能装下时 tool 结果应保留');
+    },
+
+    /** 分片已存在（exists）也要推进 archiveSeq：否则一次错位会让后续归档永远撞同一个 seq，原文静默丢失 */
+    async testArchiveSeqAdvancesOnExistingShard(): Promise<void> {
+        const store = new Map<string, string>();
+        const origStorageSet = (ext as any).storageSet;
+        const origStorageGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => true;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 30;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        const makeMsgs = (tag: string) => [
+            { role: 'user', contentItems: [{ text: `${tag}1`, time: 1, userId: 'QQ:1', messageId: `${tag}m1` }] },
+            { role: 'assistant', contentItems: [{ text: 'a1', time: 2, messageId: '' }] },
+            { role: 'user', contentItems: [{ text: `${tag}2`, time: 3, userId: 'QQ:1', messageId: `${tag}m2` }] },
+            { role: 'assistant', contentItems: [{ text: 'a2', time: 4, messageId: '' }] },
+        ] as any;
+        try {
+            // 预置"已存在"的分片，但 archiveSeq=0（模拟崩溃/存档写失败造成的错位）
+            store.set('session_QQ:998:arc:001', JSON.stringify({ seq: 1, from: 0, to: 0, items: [{ messageId: 'old', userId: 'QQ:1', time: 0, text: '旧内容' }] }));
+            const session = new Session();
+            session.sessionId = 'QQ:998';
+            session.sessionType = 'user';
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            session.context.messages = makeMsgs('p');
+            assert.equal(await session.context.archiveByTokenIfNeeded(), 'converged');
+            assert.equal(session.archiveSeq, 1, 'exists 也应把序号推进到该 seq');
+            assert.equal(JSON.parse(store.get('session_QQ:998:arc:001')!).items[0].text, '旧内容', '既有分片不得被覆盖');
+            // 下一批应写 arc:002，而不是又撞 arc:001
+            session.context.messages = makeMsgs('q');
+            await session.context.archiveByTokenIfNeeded();
+            assert.equal(session.archiveSeq, 2, '下一批应推进到 2');
+            assert.ok(store.get('session_QQ:998:arc:002'), '下一批应写新分片');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origStorageSet;
+            (ext as any).storageGet = origStorageGet;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
+    /** 归档连续失败到阈值后允许一次降级丢弃（否则 summarize 长期不可用时会话永久无法回复） */
+    async testArchiveFailureFallbackAfterLimit(): Promise<void> {
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => false;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 20;
+        resetConfigCache();
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:997';
+            session.sessionType = 'user';
+            const msgs = () => [
+                { role: 'user', contentItems: [{ text: 'u1', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a1', time: 0, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 0, userId: '1', messageId: '' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
+            ] as any;
+            session.context.messages = msgs();
+            assert.equal(await session.context.archiveByTokenIfNeeded(), 'failed', '第 1 次失败应如实返回 failed');
+            assert.equal(session.context.messages.length, 4, '前两次失败不得丢数据');
+            session.context.messages = msgs();
+            assert.equal(await session.context.archiveByTokenIfNeeded(), 'failed', '第 2 次失败仍是 failed');
+            session.context.messages = msgs();
+            assert.equal(await session.context.archiveByTokenIfNeeded(), 'converged', '连续失败到阈值后应降级丢弃最早轮次，保证会话还能回复');
+            assert.ok(estimateContextMessagesTokens(session.context.messages) <= 20, '降级后应收敛到目标内');
+        } finally {
+            MemoryManager.summarizeChunkWithRetry = old;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
     /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
     testExtractUsageCacheFields(): void {
         const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
@@ -1421,6 +1558,32 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // 预算 0 = 不折叠
         const notFolded = foldContextMessages([{ role: 'user', contentItems: items }] as any, 0);
         assert.equal(notFolded[0].contentItems!.length, 50, '预算 0 时不折叠');
+
+        // 折叠预算只对待机会话生效（正常对话模式渲染全文，交给 token 预算）
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['冷态窗口字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['冷态窗口字数'] = 5000;
+        resetConfigCache();
+        try {
+            const msgs = [{ role: 'user', contentItems: items }] as any;
+            assert.equal(renderFoldBudget({ setting: { standby: false } } as any, msgs), 0, '非待机会话不应折叠（正常对话渲染全文）');
+            assert.equal(renderFoldBudget({ setting: { standby: true } } as any, msgs), 5000, '待机会话按冷态窗口字数折叠');
+            TC.boolConfigs['是否开启全局待机'] = true;
+            resetConfigCache();
+            assert.equal(renderFoldBudget({ setting: { standby: false } } as any, msgs), 5000, '全局待机同样生效');
+
+            // 档位只看最新一条**真实用户发言**：系统条目里的"总结/继续"不应带偏档位
+            const withSystem = [{ role: 'user', contentItems: [
+                { text: '刚才那个呢', time: 1, userId: 'QQ:1', messageId: 'm1' },
+                { text: '请总结一下并继续干活', time: 2, systemName: '任务续跑提示' },
+            ] }] as any;
+            assert.equal(renderFoldBudget({ setting: { standby: true } } as any, withSystem), 25000, '应看真实用户发言（L1）而不是系统条目的"总结"（L2）');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
+            resetConfigCache();
+        }
     },
 
     /** 中段截断：留头 2/3 + 尾 1/3，未超长原样返回 */

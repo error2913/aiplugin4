@@ -1,7 +1,7 @@
 // 流式/非流式请求服务：基于 Model 配置构建请求体并调用后端
 import Config from "../config/config";
 import { logger } from "../logger";
-import { buildProviderBody, parseProviderResponse } from "../model/adapter";
+import { buildProviderBody, extractUsage, parseProviderResponse } from "../model/adapter";
 import { ApiError } from "../model/api_error";
 import Model, { ModelEntry } from "../model/model";
 import { requestModel } from "../model/provider";
@@ -87,7 +87,7 @@ function checkRequestBudget(messages: any[], tools: any[], modelName?: string): 
 }
 
 export class streamService {
-    private static streamMeta = new Map<string, { modelName: string; rawEstimate: number }>();
+    private static streamMeta = new Map<string, { modelName: string; rawEstimate: number; use: ChatModelUse }>();
     static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean }): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl } = Config.backend;
@@ -138,7 +138,7 @@ export class streamService {
                 if (!data.id) {
                     throw new Error("服务器响应中没有id字段");
                 }
-                this.streamMeta.set(data.id, { modelName: model.name, rawEstimate });
+                this.streamMeta.set(data.id, { modelName: model.name, rawEstimate, use: 'chat' });
                 return data.id;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
@@ -292,12 +292,15 @@ export class streamService {
                 }
                 log.info('对话结束', data.status === 'success' ? '成功' : '失败');
                 if (data.status === 'success') {
+                    // 与非流式同口径：走 extractUsage（含缓存字段）并按用途记账，
+                    // 否则 stream:true 的用户在 .ai ctx 里看不到用途用量与缓存命中
                     const meta = this.streamMeta.get(streamId);
-                    if (meta && data.usage && data.usage.prompt_tokens) {
-                        TokenCalibration.record(meta.modelName, meta.rawEstimate, data.usage.prompt_tokens);
+                    const usage = extractUsage(data);
+                    if (usage) {
+                        if (meta) TokenCalibration.record(meta.modelName, meta.rawEstimate, usage.prompt_tokens);
+                        UsageManager.updateUsage(data.model, usage, meta?.use ?? 'chat');
                     }
                     this.streamMeta.delete(streamId);
-                    UsageManager.updateUsage(data.model, data.usage);
                 }
                 return data.status;
             } catch (e) {

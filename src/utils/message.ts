@@ -241,8 +241,10 @@ const FOLD_MIN_CHARS = 200;
 /**
  * 渲染窗口折叠：把超出预算的**更早内容**折叠成一条纯代码摘要（零 LLM），只保留最近一段。
  * - 按条目粒度裁剪（待机群里整段历史是同一条 user 消息，必须能切进 contentItems 内部）；
+ * - **`assistant(tool_calls)` + 紧随的 `tool` 结果作为原子组同留同折**：否则可能只折掉 tool_calls
+ *   而留下 tool 结果，随后被 handleMessages 的孤儿清理删掉 → 模型静默看不到工具返回；
  * - 折叠摘要本身也受预算限制：从新到旧填充明细行，放不下的只统计条数（否则短消息群里"折叠"反而更长）；
- * - 整包（窗口 + 摘要）不超过 budgetChars。
+ * - 窗口优先：最新一条（或最新一个原子组）无论多长都保留，因此单条超大时整包可能略超预算。
  * @param budgetChars 整包预算字数；<= 0 表示不折叠
  */
 export function foldContextMessages(messages: ContextMessage[], budgetChars: number): ContextMessage[] {
@@ -260,6 +262,23 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
 
     for (let i = messages.length - 1; i >= 0; i--) {
         const m = messages[i];
+        if (m.role === 'tool') continue;   // 由前面的 assistant(tool_calls) 原子组统一处理
+
+        const toolCalls = (m as any).toolCalls || (m as any).tool_calls;
+        if (m.role === 'assistant' && Array.isArray(toolCalls) && toolCalls.length > 0) {
+            const group: ContextMessage[] = [m];
+            for (let j = i + 1; j < messages.length && messages[j].role === 'tool'; j++) group.push(messages[j]);
+            const groupLen = group.reduce((n, g) => n + buildContent(g).length, 0);
+            if (!keptAny || used + groupLen <= windowBudget) {
+                for (let g = group.length - 1; g >= 0; g--) kept.unshift(group[g]);
+                used += groupLen;
+                keptAny = true;
+            } else {
+                for (const g of group) foldedNewestFirst.push(foldLine(g));   // 整组一起折
+            }
+            continue;
+        }
+
         const items = Array.isArray(m.contentItems) ? m.contentItems : null;
         if (items && items.length > 0) {
             const keptItems: any[] = [];
@@ -289,7 +308,7 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
     }
 
     if (foldedNewestFirst.length === 0) return kept;
-    const header = `更早的群聊内容已折叠为摘要（共 ${foldedNewestFirst.length} 条；需要原文时用 read_raw / grep_raw kind=user 回查）：`;
+    const header = `更早的群聊/工具内容已折叠为摘要（共 ${foldedNewestFirst.length} 条；需要原文时用 read_raw / grep_raw 回查）：`;
     const detail: string[] = [];
     let foldUsed = header.length + 1;
     let omitted = 0;
@@ -315,13 +334,37 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
     return kept;
 }
 
-function buildContextMessages(messages: ContextMessage[]): ContextMessage[] {
-    const { INSERT_COUNT, COLD_WINDOW_CHARS } = Config.context;
+/**
+ * 渲染折叠预算（字数；0 = 不折叠）：
+ * - **只有待机会话**（会话待机或全局待机）才折叠——这是"冷态窗口"的用途；正常对话模式渲染全文，交给 token 预算；
+ * - 档位按本轮最新一条 user 条目判定（L0 默认 / L1 含指代 / L2 明确要求回顾不折叠）。
+ */
+export function renderFoldBudget(session: Session, messages: ContextMessage[]): number {
+    const standby = session.setting?.standby === true || Config.base.GLOBAL_STANDBY === true;
+    if (!standby) return 0;
+    const base = Config.context.COLD_WINDOW_CHARS;
+    if (base <= 0) return 0;
+    // 档位只看"最新一条**真实用户发言**"：跳过系统条目（事件/触发提示/折叠摘要本身），
+    // 否则"继续""总结"这类系统文案会把档位带偏（例如续跑提示含"继续"→ 误升 L1）。
+    let newestText = '';
+    for (let i = messages.length - 1; i >= 0 && !newestText; i--) {
+        const m = messages[i];
+        if (m.role !== 'user' || !Array.isArray(m.contentItems)) continue;
+        for (let j = m.contentItems.length - 1; j >= 0; j--) {
+            const it = m.contentItems[j] as any;
+            if (it && typeof it.text === 'string' && it.userId) {
+                newestText = it.text;
+                break;
+            }
+        }
+    }
+    return windowCharsForTier(pickTier(newestText), base);
+}
 
-    // 渲染窗口折叠：按本轮最新一条消息判定档位（L0 默认 / L1 含指代 / L2 明确要求回顾）
-    const newest = [...messages].reverse().find(m => m.role === 'user' && Array.isArray(m.contentItems) && m.contentItems.length > 0);
-    const newestText = newest ? String((newest.contentItems as any)[(newest.contentItems as any).length - 1]?.text || '') : '';
-    const contextMessages = foldContextMessages(messages.slice(), windowCharsForTier(pickTier(newestText), COLD_WINDOW_CHARS));
+function buildContextMessages(messages: ContextMessage[], foldBudget: number): ContextMessage[] {
+    const { INSERT_COUNT } = Config.context;
+
+    const contextMessages = foldContextMessages(messages.slice(), foldBudget);
     if (INSERT_COUNT <= 0) return contextMessages;
 
     // 顺序遍历：在第 INSERT_COUNT+1 条及之后每隔 INSERT_COUNT 条用户消息前插入短提醒，
@@ -439,9 +482,8 @@ export async function handleMessages(
 ): Promise<RequestMessage[]> {
     const system = systemMessage ?? await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
-    const contextMessages = buildContextMessages(
-        (session.context.messages as ContextMessage[]).map(cloneContextMessage)
-    );
+    const clonedContext = (session.context.messages as ContextMessage[]).map(cloneContextMessage);
+    const contextMessages = buildContextMessages(clonedContext, renderFoldBudget(session, clonedContext));
 
     const messages: ContextMessage[] = applyTokenBudget(
         [system, ...samplesMessages, ...contextMessages],

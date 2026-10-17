@@ -807,7 +807,7 @@ export class MessagePipeline {
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
             if (setting.standby) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save()).catch((e: any) => {
+                session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
                     log.exception('指令消息入库出错', e);
                 });
             }
@@ -849,7 +849,7 @@ export class MessagePipeline {
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
             if (setting.standby) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save()).catch((e: any) => {
+                session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
                     log.exception('机器人消息入库出错', e);
                 });
             }

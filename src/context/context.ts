@@ -37,6 +37,21 @@ export function truncateMiddle(text: string, max: number): string {
     return `${text.slice(0, head)}…${tail > 0 ? text.slice(-tail) : ''}`;
 }
 
+/** Context 的运行时状态（放 WeakMap，不进会话存档）：入库串行化链 + 归档连续失败计数 */
+interface ContextRuntime { ingestChain: Promise<void>; archiveFailCount: number }
+const contextRuntime = new WeakMap<object, ContextRuntime>();
+function runtimeOf(ctx: object): ContextRuntime {
+    let rt = contextRuntime.get(ctx);
+    if (!rt) {
+        rt = { ingestChain: Promise.resolve(), archiveFailCount: 0 };
+        contextRuntime.set(ctx, rt);
+    }
+    return rt;
+}
+
+/** 归档连续失败达到该次数后，允许一次"降级丢弃最早轮次"兜底，避免长会话永久无法回复 */
+const ARCHIVE_FAIL_LIMIT = 3;
+
 function flushGroupUserMemories(session: Session): void {
     if (session.sessionType !== 'group') return;
     const now = Date.now();
@@ -282,30 +297,42 @@ export class Context {
     }
 
     /**
-     * 合并压缩块内**尚未尝试过压缩**的尾部条目（已尝试过的一律不再进入压缩输入）。
+     * 合并压缩块内**尚未尝试过压缩的尾部连续条目**（已尝试过的一律不再进入压缩输入）。
      * - 采纳：这批条目替换为一条块条目（rawItems 保留原文），块条目 compressed=true；
      * - 未采纳/失败：把这批条目标记为已尝试，避免下一条消息到来时再次付费重压。
-     * 不变量：未压缩条目永远是数组尾部连续一段（只追加、只整体替换尾部），因此可按 compressed 过滤重建。
+     *
+     * 注意：必须取"**尾部连续**未压缩段"（从末尾向前扫到第一个已压缩条目为止），不能用
+     * `filter(it => !it.compressed)` —— 单条压缩成功的条目会带 compressed 夹在中间，过滤会把
+     * 夹在其前后的旧条目合并后搬到末尾，打乱消息时序。
      */
     private async compressPendingTail(userMsg: UserMessage): Promise<void> {
         const items = userMsg.contentItems as UserMessageItem[];
-        const pending = items.filter(it => !it.compressed);
+        let start = items.length;
+        while (start > 0 && !items[start - 1].compressed) start--;
+        const pending = items.slice(start);
         if (pending.length === 0) return;
+        // 尾部若全是系统条目（事件/提示，没有 userId），不做压缩：没有群聊原文值得付这笔钱
+        if (!pending.some(it => it.userId)) return;
+
         const joined = pending.map(it => stripRawMarkers(it.rawText ?? it.text)).join('\f');
         const block = await Context.compressPreserveIfLong(joined);
         if (block.called) this.bumpStat('compression');
         if (block.changed && block.display !== joined) {
-            const last = pending[pending.length - 1];
-            const rawItems = pending.map(it => ({
-                userId: it.userId,
-                messageId: it.messageId,
-                time: it.time,
-                text: stripRawMarkers(it.rawText ?? it.text)
-            }));
+            // 块条目的身份取"最后一条真实用户条目"（系统条目没有 messageId，不能当块 id）
+            const last = [...pending].reverse().find(it => it.userId) as UserMessageItem;
+            // 系统条目不进块内原文（read_raw 的块目录按 msg_id 寻址，无 userId 的条目会变成 undefined）
+            const rawItems = pending
+                .filter(it => it.userId)
+                .map(it => ({
+                    userId: it.userId,
+                    messageId: it.messageId,
+                    time: it.time,
+                    text: stripRawMarkers(it.rawText ?? it.text)
+                }));
             let display = stripInternalTags(block.display);
             display += buildUserBlockMarker(pending.length, joined.length, last.messageId);
             userMsg.contentItems = [
-                ...items.filter(it => it.compressed),
+                ...items.slice(0, start),
                 {
                     text: display,
                     time: last.time,
@@ -322,10 +349,22 @@ export class Context {
         // called=false（合计未超阈值）：不标记，留待后续消息累积后再合并
     }
 
+    /**
+     * 用户消息入库（串行化入口）：压缩段是异步的，两条消息并发时会在 await 期间互相覆盖
+     * `contentItems`（后完成者用旧快照重建，可能丢掉中间追加的条目）。这里用每会话的
+     * promise 链把入库串行化——运行时状态放模块级 WeakMap，不污染持久化字段。
+     */
+    async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string): Promise<void> {
+        const rt = runtimeOf(this);
+        const run = rt.ingestChain.then(() => this.addUserMessageInner(ctx, text, userId, messageId));
+        rt.ingestChain = run.then(() => undefined, () => undefined);   // 前一次失败不阻塞后续入库
+        return run;
+    }
+
     // 用户消息入库：热态下"单条超长 / 连续多条合并后超阈值"交给压缩智能体；冷态（待机）只做纯代码截断。
     // 压缩前原文保留在条目 rawText/rawItems（不参与渲染与 token 估算），展示文本末尾带标记，
     // AI 可用 read_raw/grep_raw(kind=user) 按 msg_id（单条）/ blk:<末条messageId>（合并块）核对原文
-    async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
+    private async addUserMessageInner(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
         // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
         if (this.autoNameMod > 0) {
             try {
@@ -537,10 +576,32 @@ export class Context {
                 break;
             }
 
-            return converged ? 'converged' : 'failed';
+            const rt = runtimeOf(this);
+            if (converged) {
+                rt.archiveFailCount = 0;
+                return 'converged';
+            }
+            // 连续失败兜底：summarize 长期不可用（或超长内容集中在 assistant/tool、无 user 条目可归档）时，
+            // 若一直只返回 failed，会话会永久无法回复。连续失败到阈值后允许一次"降级丢弃最早轮次"（不写记忆），
+            // 让会话恢复可用——这是旧 forceFit 行为的受限版，且日志可见。
+            rt.archiveFailCount++;
+            if (rt.archiveFailCount < ARCHIVE_FAIL_LIMIT) return 'failed';
+            rt.archiveFailCount = 0;
+            await this.forceFitAsLastResort(target);
+            return estimateContextMessagesTokens(this.messages) <= target ? 'converged' : 'failed';
         } finally {
             this.archiving = false;
         }
+    }
+
+    /** 归档连续失败后的最后手段：丢弃最早的轮次（不含 summarize），只保证会话还能回复 */
+    private async forceFitAsLastResort(targetTokens: number): Promise<void> {
+        let safety = 0;
+        while (estimateContextMessagesTokens(this.messages) > targetTokens && this.messages.length > 0 && safety < 10000) {
+            if (!dropOldestRound(this.messages)) break;
+            safety++;
+        }
+        log.warning(`[ctx-cost] 归档连续失败 ${ARCHIVE_FAIL_LIMIT} 次，已降级丢弃最早轮次（不写记忆），剩余 token=${estimateContextMessagesTokens(this.messages)}`);
     }
 
     private async archivePrefix(toArchive: MessageType[]): Promise<boolean> {
@@ -628,7 +689,9 @@ export class Context {
             items,
         });
         if (outcome === 'failed') return 'failed';
-        if (outcome === 'written') s.archiveSeq = seq;
+        // 'exists' 也必须把序号推进到该 seq：否则一旦出现"分片已写、archiveSeq 未落盘"的错位
+        // （崩溃/存档写失败），后续每批都会撞上同一个 seq（永远 exists）→ 原文再也不会写进分片。
+        s.archiveSeq = Math.max(s.archiveSeq, seq);
         s.lastArchivedAt = Math.floor(Date.now() / 1000);
         // 分片数量上限：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
         if (s.archiveSeq > ARCHIVE_SHARD_LIMIT) clearShard(s.sessionId, s.archiveSeq - ARCHIVE_SHARD_LIMIT);
