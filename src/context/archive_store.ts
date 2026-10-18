@@ -149,3 +149,24 @@ export function listShardsAsc(sessionId: string, fromSeq: number, toSeq: number,
     }
     return out;
 }
+
+/**
+ * 惰性 TTL 淘汰：把 `from` 早于 `now - ttlDays` 的分片置空（docs/17 §4）。
+ * 惰性＝不额外起定时器，只在"访问某会话分片"时顺带做一次，避免后台任务与重载后状态丢失。
+ * @returns 实际淘汰的分片数
+ */
+export function evictExpiredShards(sessionId: string, kind: ShardKind, maxSeq: number, ttlDays: number, nowSec: number): number {
+    if (!sessionId || maxSeq <= 0 || ttlDays <= 0) return 0;
+    const cutoff = nowSec - ttlDays * 86400;
+    let evicted = 0;
+    for (let seq = 1; seq <= maxSeq; seq++) {
+        const shard = readShard(sessionId, seq, kind);
+        if (!shard) continue;
+        // from<=0 视为"时间未知"，不淘汰（宁可多留，也不误删无时间戳的旧数据）
+        if (shard.from > 0 && shard.from < cutoff) {
+            clearShard(sessionId, seq, kind);
+            evicted++;
+        }
+    }
+    return evicted;
+}

@@ -15,7 +15,7 @@ import { stripInternalTags } from "../utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor, withTimeout } from "../utils/utils";
 
-import { ARCHIVE_SHARD_LIMIT, ArchiveShardItem, clearShard, listShardsAsc, writeShardIfAbsent } from "./archive_store";
+import { ArchiveShardItem, clearShard, evictExpiredShards, listShardsAsc, writeShardIfAbsent } from "./archive_store";
 import Message from "./message";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
@@ -669,8 +669,10 @@ export class Context {
             if (outcome === 'failed') return 0;
             s.rawSeq = Math.max(typeof s.rawSeq === 'number' ? s.rawSeq : 0, nextSeq);
             s.lastRawAt = Math.floor(Date.now() / 1000);
-            // raw 分片上限：最旧的置空（海豹无删除 API，置空即项目内先例做法）
-            if (s.rawSeq > ARCHIVE_SHARD_LIMIT) clearShard(s.sessionId, s.rawSeq - ARCHIVE_SHARD_LIMIT, 'raw');
+            // 分片上限（可配）与惰性 TTL 淘汰：最旧/过期的置空（海豹无删除 API，置空即项目内先例做法）
+            const { SHARD_LIMIT, SHARD_TTL_DAYS } = Config.context;
+            if (SHARD_LIMIT > 0 && s.rawSeq > SHARD_LIMIT) clearShard(s.sessionId, s.rawSeq - SHARD_LIMIT, 'raw');
+            evictExpiredShards(s.sessionId, 'raw', s.rawSeq, SHARD_TTL_DAYS, Math.floor(Date.now() / 1000));
         }
 
         // 移除窗口外条目（含 assistant/tool：它们已随窗口滚出，原文不值得留档）
@@ -903,8 +905,9 @@ export class Context {
         // （崩溃/存档写失败），后续每批都会撞上同一个 seq（永远 exists）→ 原文再也不会写进分片。
         s.archiveSeq = Math.max(s.archiveSeq, seq);
         s.lastArchivedAt = Math.floor(Date.now() / 1000);
-        // 分片数量上限：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
-        if (s.archiveSeq > ARCHIVE_SHARD_LIMIT) clearShard(s.sessionId, s.archiveSeq - ARCHIVE_SHARD_LIMIT);
+        // 分片数量上限（可配）：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
+        const { SHARD_LIMIT } = Config.context;
+        if (SHARD_LIMIT > 0 && s.archiveSeq > SHARD_LIMIT) clearShard(s.sessionId, s.archiveSeq - SHARD_LIMIT);
         return 'stored';
     }
 

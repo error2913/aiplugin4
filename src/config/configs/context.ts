@@ -17,6 +17,8 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "结算最小门槛", 20000, "上下文总量低于该 token 数时不做 LLM 结算，避免短会话也调用总结智能体", "上下文");
         seal.ext.registerIntConfig(ext, "结算空闲门槛", 600, "距上次相关活动达到该秒数才结算（0=不要求空闲）；会话转入冷态时也会结算一次", "上下文");
         seal.ext.registerIntConfig(ext, "单次结算调用上限", 2, "每次结算最多处理多少个分片（限制单次 LLM 调用量）", "上下文");
+        seal.ext.registerIntConfig(ext, "原文分片保留天数", 30, "原文分片（归档/窗口移出）超过该天数后惰性淘汰；0=不按时间淘汰", "上下文");
+        seal.ext.registerIntConfig(ext, "原文分片上限", 200, "每个会话的原文分片数量上限：超出时把最旧的分片置空（海豹无删除 API，置空即项目内先例做法）", "上下文");
     }
 
     static get() {
@@ -42,7 +44,9 @@ export default class ContextConfig {
             SETTLE_IDLE_SEC: seal.ext.getIntConfig(ext, "结算空闲门槛"),
             // 上限 <= 0 会静默关闭结算（无任何提示），与「结算水位」的"0=关闭"语义混淆。
             // 这里统一回退到默认 2，只把"水位=0"作为唯一的关闭开关，避免用户误设后以为坏了。
-            SETTLE_MAX_SHARDS: normalizePositive(seal.ext.getIntConfig(ext, "单次结算调用上限"), 2, "单次结算调用上限")
+            SETTLE_MAX_SHARDS: normalizePositive(seal.ext.getIntConfig(ext, "单次结算调用上限"), 2, "单次结算调用上限"),
+            SHARD_TTL_DAYS: seal.ext.getIntConfig(ext, "原文分片保留天数"),
+            SHARD_LIMIT: normalizePositive(seal.ext.getIntConfig(ext, "原文分片上限"), 200, "原文分片上限")
         }
     }
 }
