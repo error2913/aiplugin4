@@ -2,6 +2,8 @@
 import Config from "../config/config";
 import { parseRoleEntry } from "../config/configs/role";
 import { logger } from "../logger";
+import { resolveEffectiveMaxTokens } from "../model/api_error";
+import { getProbedContextWindow } from "../model/window_cache";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
@@ -483,7 +485,10 @@ function truncateMessageText(message: ContextMessage, maxChars: number): number 
  * 而不是让请求体带着超限预算直接发送，也不会把整个会话上下文一次性清空。
  */
 function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[], modelName?: string): ContextMessage[] {
-    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.context;
+    const { MAX_CONTEXT_TOKENS: configuredTokens } = Config.context;
+    // P2-3：配置为 0 时跟随"报错探测到的模型真实窗口"（按模型名持久化缓存）。
+    // 这里而不是 Config.context 里解析，是因为需要 modelName，且 Config 的组级 getter 有 60s 缓存、不带模型维度。
+    const { tokens: maxTokens } = resolveEffectiveMaxTokens(configuredTokens, getProbedContextWindow(modelName || ''));
     if (maxTokens <= 0) return messages;
 
     const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;

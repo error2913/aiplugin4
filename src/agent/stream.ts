@@ -2,10 +2,11 @@
 import Config from "../config/config";
 import { logger } from "../logger";
 import { buildProviderBody, extractUsage, parseProviderResponse } from "../model/adapter";
-import { ApiError } from "../model/api_error";
+import { ApiError, resolveEffectiveMaxTokens } from "../model/api_error";
 import Model, { ModelEntry } from "../model/model";
 import { requestModel } from "../model/provider";
 import { ChatModelUse } from "../model/types";
+import { getProbedContextWindow } from "../model/window_cache";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
@@ -76,11 +77,13 @@ function estimateRequestTokens(messages: any[], tools: any[]): number {
 
 function checkRequestBudget(messages: any[], tools: any[], modelName?: string): number {
     const rawEstimate = estimateRequestTokens(messages, tools);
-    const { MAX_CONTEXT_TOKENS: maxTokens } = Config.context;
+    // P2-3：与 applyTokenBudget 同一解析口径（配置为 0 时跟随探测到的模型窗口），
+    // 否则"预算告警"会与实际裁剪用的预算不一致（一个按 100 万、一个按真实窗口）。
+    const { tokens: maxTokens } = resolveEffectiveMaxTokens(Config.context.MAX_CONTEXT_TOKENS, getProbedContextWindow(modelName || ''));
     if (maxTokens > 0) {
         const predicted = TokenCalibration.predict(modelName || '', rawEstimate);
         if (predicted > maxTokens) {
-            log.warning(`请求体预测 token（含 tools JSON）超出「上下文最大token」预算: ${predicted} / ${maxTokens}`);
+            log.warning(`请求体预测 token（含 tools JSON）超出上下文预算: ${predicted} / ${maxTokens}`);
         }
     }
     return rawEstimate;

@@ -1577,11 +1577,27 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ] as any;
             ctx.trimToWindow();
 
-            const roles = (ctx.messages as any[]).map(m => m.role);
-            const hasAssistantWithTools = (ctx.messages as any[]).some(m => m.role === 'assistant' && Array.isArray(m.toolCalls) && m.toolCalls.length > 0);
-            const toolCount = roles.filter(r => r === 'tool').length;
-            assert.equal(toolCount === 0 || hasAssistantWithTools, true,
-                `不得留下孤儿 tool 结果（roles=${roles.join(',')}）`);
+            // 强断言（旧断言 `toolCount===0 || hasAssistantWithTools` 近乎恒真：
+            // 只要"没有任何 tool"或"存在任意带 toolCalls 的 assistant"就通过，发现不了部分拆组）。
+            // 这里逐条核对 tool_call_id ↔ toolCalls[].id 的配对关系。
+            const kept = ctx.messages as any[];
+            const keptCallIds = new Set<string>();
+            for (const m of kept) {
+                if (m.role !== 'assistant') continue;
+                for (const tc of (m.toolCalls || m.tool_calls || [])) keptCallIds.add(tc.id);
+            }
+            for (const m of kept) {
+                if (m.role !== 'tool') continue;
+                assert.ok(keptCallIds.has(m.tool_call_id),
+                    `保留的 tool(${m.tool_call_id}) 必须有配对的 assistant(tool_calls)（roles=${kept.map(x => x.role).join(',')}）`);
+            }
+            for (const m of kept) {
+                if (m.role !== 'assistant') continue;
+                for (const tc of (m.toolCalls || m.tool_calls || [])) {
+                    assert.ok(kept.some(x => x.role === 'tool' && x.tool_call_id === tc.id),
+                        `保留的 assistant(tool_calls ${tc.id}) 必须有 tool 结果（roles=${kept.map(x => x.role).join(',')}）`);
+                }
+            }
         } finally {
             Agent.get = origAgentGet;   // 必须还原：Agent.get 是全局桩，泄漏会让后续用例 sessionMap 取不到
             (ext as any).storageSet = origSet;
@@ -2227,6 +2243,70 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             (globalThis as any).seal.replyToSender = origReply;
             UsageManager.storeCache = null;
+        }
+    },
+
+    /**
+     * P1-2 不变量（强断言）：窗口移出后**每一条保留的 tool 都必须有配对的 assistant(tool_calls)**，
+     * 且每一条保留的 assistant(tool_calls) 的每个 id 都必须有对应 tool 结果。
+     * 旧断言 `toolCount===0 || hasAssistantWithTools` 近乎恒真（只要"没有任何 tool"或"存在任意一个带 toolCalls 的
+     * assistant"就通过），无法发现**部分拆组**——而部分拆组会让请求 400。
+     */
+    testWindowTrimToolPairingInvariant(): void {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        const origAgentGet = Agent.get;
+        try {
+            // 关键：遍历多个预算，命中"边界落在工具组中间"的各种切法
+            for (const budget of [40, 60, 68, 80, 100, 120, 160, 200, 300]) {
+                TC.intConfigs['窗口上限字数'] = budget;
+                resetConfigCache();
+                const session = new Session();
+                session.sessionId = `QQ:pairing-${budget}`;
+                session.sessionType = 'group';
+                session.setting.standby = true;
+                Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+                const ctx = session.context;
+                ctx.messages = [
+                    { role: 'user', contentItems: [{ text: '早先消息'.repeat(12), time: 1, userId: 'QQ:1', messageId: 'u0' }] },
+                    { role: 'assistant', contentItems: [{ text: '调用工具', time: 2, messageId: '' }], toolCalls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }] },
+                    { role: 'tool', tool_call_id: 'c1', contentItems: [{ text: '工具结果一'.repeat(10), time: 3, messageId: '' }] },
+                    { role: 'tool', tool_call_id: 'c1', contentItems: [{ text: '工具结果二'.repeat(10), time: 4, messageId: '' }] },
+                    { role: 'user', contentItems: [{ text: '最新消息', time: 5, userId: 'QQ:1', messageId: 'u1' }] },
+                ] as any;
+                ctx.trimToWindow();
+
+                const kept = ctx.messages as any[];
+                const keptToolIds = kept.filter(m => m.role === 'tool').map(m => m.tool_call_id);
+                const keptCallIds = new Set<string>();
+                for (const m of kept) {
+                    if (m.role !== 'assistant') continue;
+                    for (const tc of (m.toolCalls || m.tool_calls || [])) keptCallIds.add(tc.id);
+                }
+                for (const id of keptToolIds) {
+                    assert.ok(keptCallIds.has(id),
+                        `budget=${budget}：保留的 tool(tool_call_id=${id}) 缺少配对的 assistant(tool_calls) → 请求会 400。roles=${kept.map(m => m.role).join(',')}`);
+                }
+                // 反向：保留的 assistant(tool_calls) 也必须有全部 tool 结果（否则模型看不到工具返回）
+                for (const m of kept) {
+                    if (m.role !== 'assistant') continue;
+                    for (const tc of (m.toolCalls || m.tool_calls || [])) {
+                        const hasResult = kept.some(x => x.role === 'tool' && x.tool_call_id === tc.id);
+                        assert.ok(hasResult,
+                            `budget=${budget}：保留的 assistant(tool_calls id=${tc.id}) 缺少 tool 结果。roles=${kept.map(x => x.role).join(',')}`);
+                    }
+                }
+            }
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
         }
     },
 

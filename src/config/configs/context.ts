@@ -16,7 +16,7 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "结算水位", 3000, "待结算积压达到该 token 数才把窗口外原文总结进长期记忆（0=关闭自动结算）", "上下文");
         seal.ext.registerIntConfig(ext, "结算最小门槛", 20000, "上下文总量低于该 token 数时不做 LLM 结算，避免短会话也调用总结智能体", "上下文");
         seal.ext.registerIntConfig(ext, "结算空闲门槛", 600, "距上次相关活动达到该秒数才结算（0=不要求空闲）；会话转入冷态时也会结算一次", "上下文");
-        seal.ext.registerIntConfig(ext, "单次结算调用上限", 2, "每次结算最多处理多少个分片（限制单次 LLM 调用量）", "上下文");
+        seal.ext.registerIntConfig(ext, "单次结算调用上限", 2, "每次结算最多处理多少个**分片**（注意是分片数，不是 LLM 调用数：每个分片内部还会按失败重试）", "上下文");
         seal.ext.registerIntConfig(ext, "原文分片保留天数", 30, "原文分片（归档/窗口移出）超过该天数后惰性淘汰；0=不按时间淘汰", "上下文");
         seal.ext.registerIntConfig(ext, "原文分片上限", 200, "每个会话的原文分片数量上限：超出时把最旧的分片置空（海豹无删除 API，置空即项目内先例做法）", "上下文");
         seal.ext.registerIntConfig(ext, "待机入库配额", 0, "待机会话每小时最多入库多少条普通群消息（0=不限制）；超出后只计数不入库，用于防极端灌水群", "上下文");
@@ -25,11 +25,10 @@ export default class ContextConfig {
     static get() {
         const MAX_ROUNDS = seal.ext.getIntConfig(ext, "对话保存轮数");
         const INSERT_COUNT = normalizeInsertCount(seal.ext.getIntConfig(ext, "插入system message间隔轮数"), MAX_ROUNDS);
-        const rawMaxTokens = seal.ext.getIntConfig(ext, "上下文最大token");
-        const MAX_CONTEXT_TOKENS = rawMaxTokens > 0 ? rawMaxTokens : 1000000;
-        if (rawMaxTokens <= 0) {
-            logger.warning(`「上下文最大token」不能为 0，已自动使用默认值 1000000`);
-        }
+        // P2-3：0/负数**不再在这里回退 100 万** —— 保留 0 交给 applyTokenBudget 解析为
+        // "跟随报错探测到的模型真实窗口 × 0.8"（拿不到探测值时那边同样回退 100 万）。
+        // 若这里先回退成正数，探测就永远没有生效机会。
+        const MAX_CONTEXT_TOKENS = seal.ext.getIntConfig(ext, "上下文最大token");
         return {
             SAMPLE_MESSAGES: seal.ext.getTemplateConfig(ext, "预设上下文"),
             MAX_ROUNDS,

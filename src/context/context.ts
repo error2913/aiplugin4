@@ -3,6 +3,9 @@ import Agent from "../agent/agent";
 import Config from "../config/config";
 import Logger from "../logger";
 import { MemoryManager } from "../memory/manager";
+import { resolveEffectiveMaxTokens } from "../model/api_error";
+import Model from "../model/model";
+import { getProbedContextWindow } from "../model/window_cache";
 import Image from "../resource/image";
 import Group from "../session/group";
 import { Session } from "../session/session";
@@ -707,8 +710,11 @@ export class Context {
 
         // 移除窗口外条目（含 assistant/tool：它们已随窗口滚出，原文不值得留档）
         this.messages.splice(0, keep.startIndex);
-        // 合并写：移出发生在高频入库路径上，必须走节流（否则又会每条消息全量写盘）
-        try { s.save(true); } catch { /* 游离/桩会话无 save */ }
+        // **必须立即写**（不用 save(true)）：这里已经"破坏性移除"了消息，若延迟到 5 秒后写盘，
+        // 期间进程被杀会留下"分片已写 + rawSeq 已推进（都只在内存）+ 上下文仍是旧内容"的错位，
+        // 重载后这些消息**复活**，下次又写一份新分片 → 原文重复留档、体积重新越界。
+        // 移出本身是低频事件（只在窗口真正溢出时发生），立即写的代价可接受。
+        try { s.save(); } catch { /* 游离/桩会话无 save */ }
         return moved.length;
     }
 
@@ -716,35 +722,77 @@ export class Context {
      * 选出"要保留的窗口尾部"：从新到旧按**条目**粒度累加渲染字数，直到达到预算。
      * 返回 `startIndex`＝messages 中保留区间的起始下标（0 表示全部保留）。
      *
-     * 工具原子组（`assistant(tool_calls)` + 紧随 tool 结果）作为整体判定：
+     * 工具原子组（`assistant(tool_calls)` + 紧随的 tool 结果）作为整体判定：
      * 要么整组保留，要么整组移出——否则会留下孤儿 tool 结果（请求 400 / 被孤儿清理删掉）。
+     *
+     * 实现要点（修 BUG：曾经会拆组）：**从后往前扫描时，遇到 `tool` 必须"向上找到它的
+     * assistant(tool_calls) 并把两者一起判定"**，绝不能把 `tool` 当普通消息单独保留。
+     * 旧实现只在遇到 assistant 时向前吞并其后的 tool，而从后往前扫时 `tool` 会先被访问到，
+     * 于是被当作普通消息计入窗口；一旦随后 break（预算不够），就留下"有 tool 无 assistant"的
+     * 孤儿（`roles=tool,user`），真实请求会 400。
      */
     private pickWindowTail(budgetChars: number): { startIndex: number } {
         let used = 0;
-        let i = this.messages.length - 1;
         let startIndex = this.messages.length;
+        // 已判定过的下标（避免组内成员被重复计入）
+        const settled = new Set<number>();
 
-        while (i >= 0) {
+        const groupLength = (from: number, to: number): number => {
+            let n = 0;
+            for (let k = from; k <= to; k++) n += buildContent(this.messages[k] as any).length;
+            return n;
+        };
+
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+            if (settled.has(i)) continue;
             const m = this.messages[i] as any;
+
+            // 工具结果：向上找配对的 assistant(tool_calls)，把 [assistant .. i] 整段作为一个原子单位。
+            // 找不到配对（历史遗留的异常数据）时，按单条处理——此时没有"配对"可保护。
+            if (m.role === 'tool') {
+                let start = i;
+                while (start - 1 >= 0) {
+                    const prev = this.messages[start - 1] as any;
+                    if (prev.role === 'tool') { start--; continue; }
+                    const prevCalls = prev.toolCalls || prev.tool_calls;
+                    if (prev.role === 'assistant' && Array.isArray(prevCalls) && prevCalls.length > 0) start--;
+                    break;
+                }
+                const owner = this.messages[start] as any;
+                const ownerCalls = owner ? (owner.toolCalls || owner.tool_calls) : undefined;
+                const paired = start < i && owner && owner.role === 'assistant'
+                    && Array.isArray(ownerCalls) && ownerCalls.length > 0;
+                if (paired) {
+                    const len = groupLength(start, i);
+                    if (used + len > budgetChars) break;
+                    used += len;
+                    startIndex = start;
+                    for (let k = start; k <= i; k++) settled.add(k);
+                    i = start;   // for 循环还会 i--，下一轮从 start-1 继续
+                    continue;
+                }
+                // 无配对：按单条处理（防御异常数据）
+            }
+
+            // assistant(tool_calls)：其后的 tool 结果由上面的分支（或本分支）统一处理；
+            // 这里把 [i .. 末尾连续 tool] 作为一组判定，保证"带 toolCalls 的 assistant 不会丢结果"。
             const toolCalls = m.toolCalls || m.tool_calls;
             if (m.role === 'assistant' && Array.isArray(toolCalls) && toolCalls.length > 0) {
-                // 原子组：[i .. j]（含紧随的 tool 结果）
                 let j = i;
                 while (j + 1 < this.messages.length && (this.messages[j + 1] as any).role === 'tool') j++;
-                let groupLen = 0;
-                for (let k = i; k <= j; k++) groupLen += buildContent(this.messages[k] as any).length;
-                if (used + groupLen > budgetChars) break;
-                used += groupLen;
+                const len = groupLength(i, j);
+                if (used + len > budgetChars) break;
+                used += len;
                 startIndex = i;
-                i = i - 1;
+                for (let k = i; k <= j; k++) settled.add(k);
                 continue;
             }
-            // tool 结果由上面的原子组统一处理；孤立 tool 单独按条处理（防御）
+
             const len = buildContent(m).length;
             if (used + len > budgetChars) break;
             used += len;
             startIndex = i;
-            i--;
+            settled.add(i);
         }
         return { startIndex };
     }
@@ -789,8 +837,11 @@ export class Context {
 
         try {
             const { MAX_ROUNDS, MAX_CONTEXT_TOKENS } = Config.context;
-            // target <= 0 视为不限制；未传 target 时回退配置上限（配置层已保证其 > 0）
-            const target = targetTokens && targetTokens > 0 ? targetTokens : (MAX_CONTEXT_TOKENS > 0 ? MAX_CONTEXT_TOKENS : Infinity);
+            // 未传 target 时回退配置上限；配置为 0（P2-3：跟随探测窗口）时解析为有效预算。
+            // 解析仍拿不到（未探测过）时回退默认值——**不再当作"不限制"**，否则归档永远不触发。
+            const target = targetTokens && targetTokens > 0
+                ? targetTokens
+                : resolveEffectiveMaxTokens(MAX_CONTEXT_TOKENS, getProbedContextWindow(Model.getChatModel('chat')?.name || '')).tokens;
             const keepRounds = MAX_ROUNDS > 0 ? MAX_ROUNDS : 5;
             let converged = true;
 
