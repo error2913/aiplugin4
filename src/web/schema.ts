@@ -22,7 +22,7 @@ function toStringRecord(obj: Record<string, any>): Record<string, string> {
 }
 
 export function defaultWebDefaults(): WebDefaults {
-    return { count: 5, detail: 'summary', timeout: 20, maxContentChars: 4000, fallback: true };
+    return { count: 10, detail: 'summary', timeout: 20, maxContentChars: 5000, fallback: true };
 }
 
 const DETAILS: WebDetail[] = ['snippet', 'summary', 'content'];

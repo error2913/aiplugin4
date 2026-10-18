@@ -64,8 +64,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg!.providers.length, 1);
         assert.equal(cfg!.providers[0].id, 'deepseek');
         assert.equal(cfg!.providers[0].baseURL, 'https://api.deepseek.com');
-        assert.equal(cfg!.defaults.count, 5);
+        assert.equal(cfg!.defaults.count, 10);
         assert.equal(cfg!.defaults.detail, 'summary');
+        assert.equal(cfg!.defaults.maxContentChars, 5000);
     },
 
     testWebSchemaFull(): void {
@@ -135,8 +136,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.providers[0].id, 'default-searxng');
         assert.equal(cfg.providers[0].dialect, 'searxng');
         assert.equal(cfg.providers[0].baseURL, 'https://searxng.fishwhite.top');
-        assert.equal(cfg.defaults.count, 5);
+        assert.equal(cfg.defaults.count, 10);
         assert.equal(cfg.defaults.detail, 'summary');
+        assert.equal(cfg.defaults.maxContentChars, 5000);
     },
 
     testWebConfigCustomJson(): void {
