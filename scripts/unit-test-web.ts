@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 import { resolveWebConfig } from '../src/web/schema';
 import { ADAPTERS, getAdapter } from '../src/web/presets';
-import { parseWebConfig } from '../src/web/schema';
+import { normalizeWebDefaults, parseWebConfig } from '../src/web/schema';
 import { runSearch, runFetch, renderSearchResult, renderFetchResult, isPlaceholderKey } from '../src/web/service';
 import { getByPath, renderTemplate } from '../src/web/template';
 import { SearchInput, WebConfig, WebProviderRuntime } from '../src/web/types';
@@ -64,15 +64,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg!.providers.length, 1);
         assert.equal(cfg!.providers[0].id, 'deepseek');
         assert.equal(cfg!.providers[0].baseURL, 'https://api.deepseek.com');
+        // defaults 只是运行时占位，真正值由「联网」页独立配置项填充
         assert.equal(cfg!.defaults.count, 10);
         assert.equal(cfg!.defaults.detail, 'summary');
-        assert.equal(cfg!.defaults.maxContentChars, 5000);
     },
 
     testWebSchemaFull(): void {
         const text = JSON.stringify({
             version: 1,
-            defaults: { count: 8, detail: 'content', timeout: 9, maxContentChars: 1234, fallback: false },
             providers: [
                 { id: 'ds', dialect: 'deepseek', apiKey: 'k' },
                 { id: 'g', dialect: 'generic', baseURL: 'https://x.test', search: { path: '/search', fields: { title: 'a.b' } } },
@@ -83,7 +82,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(issues.length, 0, JSON.stringify(issues));
         assert.equal(cfg!.providers[1].genericSearch?.path, '/search');
         assert.deepEqual(cfg!.routes.search, ['ds', 'g']);
-        assert.equal(cfg!.defaults.fallback, false);
+    },
+
+    testWebSchemaIgnoresLegacyDefaults(): void {
+        // 旧的 defaults 字段已废弃：忽略、不报错；运行时由配置项覆盖
+        const { config: cfg, issues } = parseWebConfig(JSON.stringify({
+            version: 1,
+            defaults: { count: 0, detail: 'x' },
+            providers: [{ dialect: 'deepseek', apiKey: 'k' }],
+        }));
+        assert.equal(issues.length, 0, JSON.stringify(issues));
+        assert.ok(cfg);
+        assert.equal(cfg!.defaults.count, 10, 'JSON 里的非法 defaults 不应影响运行时占位');
+    },
+
+    testWebDefaultsNormalize(): void {
+        assert.deepEqual(normalizeWebDefaults({}), { count: 10, detail: 'summary', timeout: 20, maxContentChars: 5000, fallback: true });
+        assert.equal(normalizeWebDefaults({ count: 0 }).count, 10, '越界回退');
+        assert.equal(normalizeWebDefaults({ count: 99 }).count, 10);
+        assert.equal(normalizeWebDefaults({ count: 8 }).count, 8);
+        assert.equal(normalizeWebDefaults({ detail: 'content' }).detail, 'content');
+        assert.equal(normalizeWebDefaults({ detail: 'bad' as any }).detail, 'summary');
+        assert.equal(normalizeWebDefaults({ timeout: 0 }).timeout, 20);
+        assert.equal(normalizeWebDefaults({ maxContentChars: -1 }).maxContentChars, 5000);
+        assert.equal(normalizeWebDefaults({ fallback: false }).fallback, false);
     },
 
     testWebSchemaErrors(): void {
@@ -93,8 +115,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ['{"providers":[{"dialect":"nope"}]}', '$.providers[0].dialect'],
             ['{"providers":[{"dialect":"deepseek"},{"dialect":"deepseek"}]}', '$.providers[1].id'],
             ['{"providers":[{"dialect":"generic"}]}', '$.providers[0].baseURL'],
-            ['{"providers":[],"defaults":{"count":0}}', '$.defaults.count'],
-            ['{"providers":[],"defaults":{"detail":"x"}}', '$.defaults.detail'],
             ['{"providers":[],"routes":{"search":["missing"]}}', '$.routes.search'],
         ];
         for (const [text, path] of cases) {

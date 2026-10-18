@@ -59,32 +59,20 @@ export function defaultWebConfig(): WebConfig {
     };
 }
 
-function readDefaults(raw: unknown, issues: WebIssue[]): WebDefaults {
-    const d = isPlainObject(raw) ? raw : {};
+/**
+ * 归一化「联网」页 5 个默认项配置。
+ * 这些值来自独立配置项（不再写进联网 JSON）；越界/非法值回退默认，不阻断 provider 解析。
+ */
+export function normalizeWebDefaults(raw: Partial<WebDefaults> = {}): WebDefaults {
     const out = defaultWebDefaults();
-    if (d.count !== undefined) {
-        const n = Number(d.count);
-        if (!Number.isFinite(n) || n < 1 || n > 50) issues.push({ path: '$.defaults.count', msg: 'count 需在 1~50 之间' });
-        else out.count = Math.floor(n);
-    }
-    if (d.detail !== undefined) {
-        if (!DETAILS.includes(d.detail)) issues.push({ path: '$.defaults.detail', msg: `detail 只能是 ${DETAILS.join(' / ')}` });
-        else out.detail = d.detail;
-    }
-    if (d.timeout !== undefined) {
-        const n = Number(d.timeout);
-        if (!Number.isFinite(n) || n <= 0) issues.push({ path: '$.defaults.timeout', msg: 'timeout 需为正数（秒）' });
-        else out.timeout = n;
-    }
-    if (d.maxContentChars !== undefined) {
-        const n = Number(d.maxContentChars);
-        if (!Number.isFinite(n) || n <= 0) issues.push({ path: '$.defaults.maxContentChars', msg: 'maxContentChars 需为正数' });
-        else out.maxContentChars = Math.floor(n);
-    }
-    if (d.fallback !== undefined) {
-        if (typeof d.fallback !== 'boolean') issues.push({ path: '$.defaults.fallback', msg: 'fallback 需为布尔值' });
-        else out.fallback = d.fallback;
-    }
+    const count = Number(raw.count);
+    if (Number.isFinite(count) && count >= 1 && count <= 50) out.count = Math.floor(count);
+    if (raw.detail && DETAILS.includes(raw.detail)) out.detail = raw.detail;
+    const timeout = Number(raw.timeout);
+    if (Number.isFinite(timeout) && timeout > 0) out.timeout = timeout;
+    const maxContentChars = Number(raw.maxContentChars);
+    if (Number.isFinite(maxContentChars) && maxContentChars > 0) out.maxContentChars = Math.floor(maxContentChars);
+    if (typeof raw.fallback === 'boolean') out.fallback = raw.fallback;
     return out;
 }
 
@@ -256,14 +244,15 @@ export function parseWebConfig(text: string): { config: WebConfig | null; issues
         });
     }
 
-    const defaults = readDefaults(obj.defaults, issues);
+    // 旧 JSON 里的 defaults 字段已废弃：忽略；运行时 defaults 由「联网」页的独立配置项填充。
     const routes = readRoutes(obj.routes, usedIds, issues);
 
     if (issues.length > 0) return { config: null, issues };
     return {
         config: {
             version: WEB_CONFIG_VERSION,
-            defaults,
+            // 占位默认值；WebConfigStore.get() 会用 5 个配置项覆盖
+            defaults: defaultWebDefaults(),
             providers,
             routes,
         },

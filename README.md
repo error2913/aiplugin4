@@ -60,7 +60,7 @@
 ### 4. 设置触发与角色
 
 - 在「消息触发」分组中修改「触发正则表达式」，改为你希望的触发方式（默认示例为 @ 骰娘，可直接替换）；
-- 在「角色设定」分组中修改「角色扮演设定」，决定 AI 扮演的角色；每条设定第一行为角色设定名称（可通过 `.ai role <名称>` 切换），其余为设定内容。「上下文」分组可调整「预设上下文」「对话保存轮数」「上下文最大token」等上下文参数。
+- 在「角色设定」分组中修改「角色设定（JSON）」，决定 AI 扮演的角色（`roles[].name` 为名称，可用 `.ai role <名称>` 切换；`prompt` 为设定内容）。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成后粘贴。「上下文」分组可调整「预设上下文」「对话保存轮数」「上下文最大token」等上下文参数。
 
 ### 5. 开始对话
 
@@ -127,7 +127,7 @@
 AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能对话插件，基于 OpenAI 兼容 API 开发，深度整合海豹骰子生态的 TRPG 功能：
 
 - **智能对话**：支持上下文感知的 AI 对话、角色设定与预设上下文（示例对话）；
-- **记忆体系**：长期记忆（向量检索 + 标签/用户/群组过滤）、观察记忆、配置驱动的知识库（Markdown 模板 + 自动分块）；
+- **记忆体系**：长期记忆（向量检索 + 标签/用户/群组过滤）、观察记忆、配置驱动的知识库（JSON 配置 + Markdown 正文自动分块）；
 - **工具系统**：内置 40+ 工具函数（TRPG 检定、牌堆抽取、消息、图片、禁言、定时器等），支持函数调用与提示词工程两种模式，可接入外部 MCP 服务器与可配置技能；
 - **图片处理**：图片识别、表情包管理、Markdown/HTML 渲染为图片与本地图片资源；
 - **权限体系**：命令权限（会话/用户/强触三维）与工具权限（禁止/默认关闭/按会话开关）；
@@ -174,7 +174,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 ### 安装
 
 - 参考[海豹手册](https://docs.sealdice.com/config/jsscript.html)进行插件上传安装；
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「模型配置」、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」三类改动也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）。
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型「模型配置」、触发/忽略正则、评分触发、「角色设定（JSON）」、「MCP服务器配置（JSON）」、「技能配置（JSON）」、「知识库（JSON）」、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置（JSON）」「技能配置（JSON）」「知识库（JSON）」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）。
 
 ---
 
@@ -332,7 +332,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 角色扮演设定 | 每框一个角色的扮演设定：第一行为角色设定名称（超过 20 字符自动截断，可通过 `.ai role <名称>` 或豹语变量 `$gSYSPROMPT` 切换），其余为设定内容；修改后需重载 JS 生效 |
+| 角色设定（JSON） | 整份角色设定配置（JSON v1）：`{"version":1,"roles":[{"name":"角色名","prompt":"设定内容"}]}`。`name` 超过 20 字符自动截断；可通过 `.ai role <名称>` 或豹语变量 `$gSYSPROMPT` 切换。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)「角色设定」页生成后粘贴；修改后需重载 JS 生效 |
 
 ### 上下文
 
@@ -423,7 +423,12 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 联网配置 | 联网搜索/抓取配置（v1，一个 JSON）。**留空 = 使用内置 SearXNG**（`https://searxng.fishwhite.top`）。内置方言：DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；`providers` 顺序即尝试顺序（失败自动回退），`routes` 可分别指定搜索/抓取顺序。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)的「联网搜索」页生成后粘贴；修改后需重载 JS 生效 |
+| 联网配置 | 联网搜索/抓取配置（v1，一个 JSON）。**留空 = 使用内置 SearXNG**（`https://searxng.fishwhite.top`）。内置方言：DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；`providers` 顺序即尝试顺序（失败自动回退），`routes` 可分别指定搜索/抓取顺序。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)的「联网搜索」页生成后粘贴；修改后需重载 JS 生效。**返回条数 / 详细程度 / 超时 / 正文截断 / 失败回退不写进 JSON**，见下方 5 个独立配置项 |
+| 联网搜索返回条数 | 默认返回条数，1~50（默认 10）；工具调用未指定 `count` 时使用 |
+| 联网搜索详细程度 | `snippet` 短摘要 / `summary` 长摘要 / `content` 正文（默认 `summary`）；工具未指定 `detail` 时使用 |
+| 联网搜索超时 | 单次搜索/抓取默认超时秒数（默认 20）；provider 自己的 `timeout` 优先 |
+| 联网搜索正文截断 | `detail=content` 时单条正文最大字符数（默认 5000） |
+| 联网搜索失败回退 | 失败时自动换下一个 provider（默认开启）；关闭后只试第一个，便于排障 |
 
 > AI 侧工具：`web_search`（搜索，支持 `allowed_domains` / `blocked_domains` / `time_range` / `detail`，失败自动换 provider）与 `web_fetch`（抓取网页正文，按 `start_index` 续读）。模型厂商自带的托管搜索（OpenAI / Anthropic / Gemini / xAI / Qwen）默认不启用，属于模型请求参数，见 docs/18 §6.8。
 
@@ -431,20 +436,21 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方「MCP服务器配置」中的服务器并注册其工具，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器配置 | 逐台配置：每个数组元素 = 以 `---` 开头的 YAML frontmatter（`name` 服务器名必填 / `platform` 可选平台白名单数组，如 `[QQ, DISCORD]`，`[]` 或省略 = 所有平台）+ 正文为**单个服务器**的 JSON（`type: http` 即 Streamable HTTP、`url`、`headers`、`token`）；**不再兼容旧整块 `mcpServers` JSON**，`command`(stdio) 服务器会被跳过。工具名称、描述与参数 schema 连接后经远端 `tools/list` 自动发现并注册（来源分组 = 服务器名），同名冲突自动跳过；服务器 platform 与当前平台不匹配时其工具不可见且调用被拦截。默认三台：mcp-files-exec（read_file/list_dir/write_file/delete_file/download_file/run_shell/export_file，相对路径与命令工作目录按 AI 会话隔离）、md-html-render（platform: [QQ]，render_markdown/render_html）、mcp-browser（browser_navigate/click/type/snapshot/take_screenshot/wait_for/close 等浏览器操作，按 AI 会话隔离）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest) |
+| 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方「MCP服务器配置（JSON）」中的服务器并注册其工具，未安装对应 MCP 后端时建议保持关闭 |
+| MCP服务器配置（JSON） | **标准 MCP 配置 JSON**（与 Claude Desktop / Cursor 的 `.mcp.json` 顶层结构一致）：`{"mcpServers":{"服务器名":{"type":"http","url":"…","headers":{…}}}}`。键 = 服务器名；`type` 仅支持 `http` / `streamable-http`，stdio（`command`）与 SSE 会被跳过；`platform` 是 aiplugin4 扩展字段（可选平台白名单，`[]` 或省略 = 所有平台）。生成器里用「启用」开关控制是否写入，关闭的服务器不会出现在 JSON 里（不写 `enabled` 字段）。工具名称、描述与参数 schema 连接后经远端 `tools/list` 自动发现并注册（来源分组 = 服务器名），同名冲突自动跳过；服务器 platform 与当前平台不匹配时其工具不可见且调用被拦截。默认三台：mcp-files-exec（read_file/list_dir/write_file/delete_file/download_file/run_shell/export_file，相对路径与命令工作目录按 AI 会话隔离）、md-html-render（platform: [QQ]，render_markdown/render_html）、mcp-browser（browser_navigate/click/type/snapshot/take_screenshot/wait_for/close 等浏览器操作，按 AI 会话隔离）。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest)；推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)「MCP」页生成后粘贴 |
 | MCP会话空闲回收分钟 | MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 不回收（默认 10） |
 | MCP每服务器最大会话数 | 每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话；浏览器操作按 AI 会话隔离（默认 3） |
 
-```markdown
----
-name: mcp-files-exec
-platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISCORD]
----
+```json
 {
-  "type": "http",
-  "url": "http://127.0.0.1:3910/mcp",
-  "headers": { "Authorization": "Bearer token" }
+  "mcpServers": {
+    "mcp-files-exec": {
+      "type": "http",
+      "url": "http://127.0.0.1:3910/mcp",
+      "headers": { "Authorization": "Bearer token" },
+      "platform": []
+    }
+  }
 }
 ```
 
@@ -456,7 +462,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 技能配置 | 每条配置项一个技能，仅支持标准 SKILL.md 格式：以 `---` 开头的 YAML frontmatter 里写 `name`（必填）/`description`（可选）/`platform`（可选平台白名单数组，如 `[QQ, DISCORD]`，`[]` 或省略 = 所有平台），正文为技能内容，可直接粘贴其他 agent 的技能文件。默认只含「录卡」技能（Excel 角色卡录入）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：核心指令 / 扩展指令 / ob11-api）。格式定义见 [agentskills.io 规范](https://agentskills.io/specification)。修改后用 `.ai skill refresh` 生效（或重载 JS） |
+| 技能配置（JSON） | 整份技能配置（JSON v1）：`{"version":1,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"技能正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一。生成器的「技能」页支持直接拖入标准 `SKILL.md`（`---` frontmatter + 正文，其他 agent 通用格式）自动转成 JSON，推荐生成后粘贴。默认只含「录卡」技能（Excel 角色卡录入）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：核心指令 / 扩展指令 / ob11-api）。修改后用 `.ai skill refresh` 生效（或重载 JS） |
 
 > system prompt 的「可用技能」段只列「当前平台可用且本会话未关闭」的技能摘要（名称 + 描述，1500 字符预算内尽可能多列）；技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文。`.ai skill list` 可查看当前平台技能与开关状态，`.ai skill on/off <名称>` 按会话开关。
 
@@ -497,7 +503,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库 | 每条配置项一份完整 Markdown 文档（可直接粘贴 .md 文件）：以 `---` 开头的 YAML frontmatter 写 `name`（库名，必填）/`description`（可选）/`platform`（可选平台白名单数组，如 `[QQ, DISCORD]`，`[]` 或省略 = 所有平台），正文支持列表/表格/引用/代码块等标准 Markdown（`#` 一级标题为一个条目，`##`/`###` 为该条目下的小节，超长自动分块）。默认三个库：核心指令、扩展指令（各扩展为 `#` 子条目、命令为 `##` 小节）、ob11-api（frontmatter 限定 `platform: [QQ]`，仅 QQ 平台可见与注入）。知识库只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` / `knowledge_docs` 工具只读检索（检索范围 = 当前平台可用 + 本会话开启的库）；管理员可用 `.ai kb list/on/off/refresh` 查看与按会话开关。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
+| 知识库（JSON） | 整份知识库配置（JSON v1）：`{"version":1,"libraries":[{"name":"库名","description":"描述","platform":["QQ"],"content":"Markdown 正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；描述省略时用正文首段兜底。正文支持列表/表格/引用/代码块等标准 Markdown（`#` 一级标题为一个条目，`##`/`###` 为该条目下的小节，超长自动分块）。生成器「知识库」页可直接拖入 `.md` / `.txt` 自动转成 JSON，推荐生成后粘贴。默认三个库：核心指令、扩展指令（各扩展为 `#` 子条目、命令为 `##` 小节）、ob11-api（`platform: [QQ]`，仅 QQ 平台可见与注入）。知识库只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` / `knowledge_docs` 工具只读检索（检索范围 = 当前平台可用 + 本会话开启的库）；管理员可用 `.ai kb list/on/off/refresh` 查看与按会话开关。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
 
@@ -646,12 +652,12 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | `.ai mcp refresh` | - | 重新解析 MCP 服务器配置并强制重同步工具列表（骰主；MCP 配置修改后无需重载 JS） |
 | `.ai skill list` | - | 列出当前平台可用的技能及会话开关状态（名称带 `（平台：…）` 标注） |
 | `.ai skill on/off <技能名>` | `.ai skill off 录卡` | 按会话开启/关闭指定技能（on/off 需邀请者以上） |
-| `.ai skill refresh` | - | 重新解析「技能配置」（骰主） |
+| `.ai skill refresh` | - | 重新解析「技能配置（JSON）」（骰主） |
 | `.ai kb list` | - | 列出当前平台可用且本会话开启的知识库（含平台标注） |
 | `.ai kb on/off <库ID或名称>` | `.ai kb off ob11-api` | 按会话开启/关闭指定知识库（名称唯一命中时也可用名称；on/off 需邀请者以上） |
-| `.ai kb refresh` | - | 重新解析「知识库」配置（骰主） |
+| `.ai kb refresh` | - | 重新解析「知识库（JSON）」配置（骰主） |
 
-> 三个管理命令的行为一致：`list` 只显示「当前平台可用」的项（平台限制来自对应 frontmatter 的 `platform` 字段，如知识库默认 ob11-api 与 MCP 默认 md-html-render 均限定 QQ）；`on/off` 开关按会话保存（只记录被关闭的项，缺省=开启）；`refresh` 立即重解析配置生效，无需重载 JS。
+> 三个管理命令的行为一致：`list` 只显示「当前平台可用」的项（平台限制来自对应 JSON 条目的 `platform` 字段，如知识库默认 ob11-api 与 MCP 默认 md-html-render 均限定 QQ）；`on/off` 开关按会话保存（只记录被关闭的项，缺省=开启）；`refresh` 立即重解析 JSON 配置生效，无需重载 JS。
 
 ### 忽略名单相关命令
 
@@ -760,7 +766,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 
 ## 🚨 注意事项
 
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、角色扮演设定、MCP、技能、知识库、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置」「技能配置」「知识库」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）；
+- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、「角色设定（JSON）」、「MCP服务器配置（JSON）」、「技能配置（JSON）」、「知识库（JSON）」、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器配置（JSON）」「技能配置（JSON）」「知识库（JSON）」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）；
 - 嵌入输出维度取该模型 `request.body` 里的 `dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
 - 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在 chat 用途组 `groups[].body` 里设 `stream = true` 的模型才会走流式（`anthropic-messages` 协议不支持，会自动回退非流式）；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
@@ -786,7 +792,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 **记忆/知识库检索不到**
 
 - 记忆检索确认已有嵌入模型可用（「模型配置」里有 `kind: "embed"` 的模型，且 `.ai model text-embedding` 显示已绑定或存在可用默认），「启用长期记忆」开关打开；
-- 知识库为配置驱动（Markdown 模板），不按角色加载；「启用知识库记忆」开关打开后修改「知识库」配置（`.ai kb refresh` 或重载 JS 生效）；若仍检索不到，用 `.ai kb list` 确认库在当前平台可用且未被本会话关闭（frontmatter `platform` 限定当前平台、未执行过 `.ai kb off`），可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
+- 知识库为配置驱动（JSON 里的 Markdown 内容），不按角色加载；「启用知识库记忆」开关打开后修改「知识库（JSON）」（`.ai kb refresh` 或重载 JS 生效）；若仍检索不到，用 `.ai kb list` 确认库在当前平台可用且未被本会话关闭（`platform` 限定当前平台、未执行过 `.ai kb off`），可让 AI 通过 knowledge_search / knowledge_read 工具检索验证；
 - 记忆检索有相似度下限过滤，条目太旧（衰减）或相似度过低不会展示。
 
 **图片识别异常**

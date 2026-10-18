@@ -1,8 +1,8 @@
 // 知识库服务：配置驱动（Markdown 模板，每条一份完整文档）、只读检索、惰性向量增强
-import Config, { ext } from "../config/config";
+import Config from "../config/config";
+import { KbEntry } from "../config/domain/types";
 import Logger from "../logger";
 import Model from "../model/model";
-import { splitFrontmatter } from "../utils/frontmatter";
 import { buildCharNGrams } from "../utils/string";
 import { matchesPlatform } from "../utils/target_id";
 import { cosineSimilarity } from "../utils/utils";
@@ -44,20 +44,11 @@ function extractFirstParagraph(markdown: string): string {
 }
 
 /** 解析单个知识库配置项为一个库 */
-export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibrary {
-    const text = String(raw || '').replace(/\r\n/g, '\n').trim();
-    const fm = splitFrontmatter(text);
-    let name = '';
-    let description = '';
-    let body = text;
-    let platforms: string[] | undefined;
-
-    if (fm) {
-        name = fm.meta.name || '';
-        description = fm.meta.description || '';
-        platforms = fm.meta.platforms;
-        body = fm.body;
-    }
+export function parseKnowledgeLibrary(entry: KbEntry, index: number): KnowledgeLibrary {
+    const body = String(entry.content || '').replace(/\r\n/g, '\n').trim();
+    let name = String(entry.name || '').trim();
+    let description = String(entry.description || '').trim();
+    const platforms = entry.platforms && entry.platforms.length > 0 ? entry.platforms : undefined;
 
     const docChunks = splitMarkdownIntoChunks(body);
     const headingTitle = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || '';
@@ -65,7 +56,8 @@ export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibr
     const firstTitle = headingTitle || name;
     if (!description) description = extractFirstParagraph(body);
 
-    const libraryId = `kb_lib_${hashString(text)}`;
+    const canonical = `${name}\n${description}\n${(platforms || []).join(',')}\n${body}`;
+    const libraryId = `kb_lib_${hashString(canonical)}`;
     const chunks: KnowledgeChunk[] = [];
 
     for (const c of docChunks) {
@@ -86,7 +78,7 @@ export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibr
     // 完全没有标题的纯文本：整体作为一条
     if (chunks.length === 0) {
         chunks.push({
-            id: `kb_${index + 1}_${hashString(text)}_whole`,
+            id: `kb_${index + 1}_${hashString(canonical)}_whole`,
             title: name,
             heading: '',
             content: body,
@@ -98,7 +90,7 @@ export function parseKnowledgeLibrary(raw: string, index: number): KnowledgeLibr
         });
     }
 
-    return { id: libraryId, name, description, raw: text, chunks, platforms };
+    return { id: libraryId, name, description, raw: body, chunks, platforms };
 }
 
 export class KnowledgeBaseService {
@@ -109,18 +101,20 @@ export class KnowledgeBaseService {
     /** 上次加载的配置内容签名：签名不变则跳过重新切分，避免依赖数组引用稳定性 */
     private loadedSignature: string | null = null;
     /** 启动解析一次的知识库条目快照与签名缓存（修改知识库需重载 JS 生效） */
-    private loadedItems: string[] | null = null;
+    private loadedItems: KbEntry[] | null = null;
     private itemsSignature: string | null = null;
     private loadPromise: Promise<void> | null = null;
 
     /** 配置内容签名：全部条目内容 hash 拼接，配置变化后签名必然变化 */
-    private getItemsSignature(items: string[]): string {
+    private getItemsSignature(items: KbEntry[]): string {
         const list = Array.isArray(items) ? items : [];
-        return list.map(item => hashString(item || '')).join(',');
+        return list.map(item => hashString(
+            `${item.name || ''}\n${item.description || ''}\n${(item.platforms || []).join(',')}\n${item.content || ''}`,
+        )).join(',');
     }
 
     /** 解析配置中的全部 Markdown 文档为分块（不含向量）；未变分块保留已有向量缓存 */
-    private async reload(items: string[]): Promise<void> {
+    private async reload(items: KbEntry[]): Promise<void> {
         const list = Array.isArray(items) ? items : [];
         const oldVectors = this.chunkVectors;
         this.chunkVectors = new Map();
@@ -128,9 +122,9 @@ export class KnowledgeBaseService {
         this.libraries = [];
 
         for (let i = 0; i < list.length; i++) {
-            const raw = (list[i] || '').replace(/\r\n/g, '\n').trim();
-            if (!raw) continue;
-            const library = parseKnowledgeLibrary(raw, i);
+            const entry = list[i];
+            if (!entry || !String(entry.content || '').trim()) continue;
+            const library = parseKnowledgeLibrary(entry, i);
             this.libraries.push(library);
             for (const c of library.chunks) this.chunks.push(c);
         }
@@ -150,7 +144,7 @@ export class KnowledgeBaseService {
         // 知识库内容为启动解析一次、重载 JS 才生效的复杂配置：加载一次后常驻，后续调用直接返回
         if (this.loadedSignature !== null) return Promise.resolve();
         if (!this.loadPromise) {
-            const items = Config.knowledgeBase.KNOWLEDGE_ITEMS;
+            const items = Config.knowledgeBase.LIBRARIES;
             const list = Array.isArray(items) ? items : [];
             this.loadPromise = this.reload(list);
             this.loadPromise.then(() => {
@@ -173,13 +167,13 @@ export class KnowledgeBaseService {
 
     /** prompt 缓存版本：开关等简单项实时参与（热加载后自然产生新 key），条目签名启动解析一次并缓存 */
     getCacheVersion(): string {
-        const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : []);
+        const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.LIBRARIES) ? Config.knowledgeBase.LIBRARIES : []);
         return `${Config.knowledgeBase.KNOWLEDGE ? '1' : '0'}|${items.length}|${this.getItemsSignatureCached()}`;
     }
 
     private getItemsSignatureCached(): string {
         if (this.itemsSignature !== null) return this.itemsSignature;
-        const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.KNOWLEDGE_ITEMS) ? Config.knowledgeBase.KNOWLEDGE_ITEMS : []);
+        const items = this.loadedItems ?? (Array.isArray(Config.knowledgeBase.LIBRARIES) ? Config.knowledgeBase.LIBRARIES : []);
         this.itemsSignature = this.getItemsSignature(items);
         return this.itemsSignature;
     }
@@ -232,13 +226,14 @@ export class KnowledgeBaseService {
         );
     }
 
-    /** 重新解析「知识库」配置（.ai kb refresh 使用）：直读模板配置，重走分块（未变分块保留向量缓存） */
+    /** 重新解析「知识库」配置（.ai kb refresh 使用）：重读 JSON，重走分块（未变分块保留向量缓存） */
     async refresh(): Promise<{ libraries: number; chunks: number }> {
         this.loadedSignature = null;
         this.loadedItems = null;
         this.itemsSignature = null;
         this.loadPromise = null;
-        const items = seal.ext.getTemplateConfig(ext, '知识库') || [];
+        Config.invalidate('knowledgeBase');
+        const items = Config.knowledgeBase.LIBRARIES;
         await this.reload(Array.isArray(items) ? items : []);
         return { libraries: this.libraries.length, chunks: this.chunks.length };
     }

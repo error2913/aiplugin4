@@ -76,6 +76,11 @@ class _Config {
         ModelConfig.get();
     }
 
+    /** 让指定分区的配置缓存失效（.ai xxx refresh 使用） */
+    static invalidate(...keys: ConfigKey[]) {
+        for (const key of keys) delete this.cache[key];
+    }
+
     static getCache(key: ConfigKey, getFunc: () => ConfigProp): ConfigProp {
         const timestamp = Date.now()
         if (this.cache?.[key] && timestamp - this.cache[key].timestamp < CONFIG_CACHE_TTL) {

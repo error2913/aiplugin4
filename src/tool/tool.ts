@@ -353,7 +353,7 @@ export default class Tool {
      * 按组聚合工具名。组内按工具名排序。
      *
      * 内部聚合键必须带 kind 前缀（`builtin:记忆` / `mcp:记忆`）：分类名与 MCP 服务器名共用一个命名空间，
-     * 而 MCP 服务器名来自用户 frontmatter、无保留字校验 —— 若直接拿 name 当键，一台名为「记忆」的
+     * 而 MCP 服务器名来自 mcpServers 的键、无保留字校验 —— 若直接拿 name 当键，一台名为「记忆」的
      * MCP 服务器会被并进内置「记忆」组（概览显示成 `内置·记忆`），`.ai tool off 记忆` 会连带关掉 MCP 工具
      * 且完全看不出来；服务器取名「技能」还会让整个 MCP 组因 isGroupable 判定而从概览消失。
      * 对外的 key/label 保持原样（命令参数与显示都依赖它，且 .ai tool 的 MCP 空服务器提示需要按名字比对）。

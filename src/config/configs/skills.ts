@@ -1,16 +1,58 @@
-// 技能配置：标准 SKILL.md，AI 通过 use_skill 按需调用
+// 技能配置：整份 JSON（v1），AI 通过 use_skill 按需调用。
+//
+// 新键名 `技能配置（JSON）`；旧的 `技能配置` 模板键不再注册/读取（不做迁移）。
+import Logger from "../../logger";
 import { ext } from "../config";
-import { SEALDICE_COMMAND_SKILLS } from "../static_config/sealdice_command_defaults";
+import { DEFAULT_SKILLS, DEFAULT_SKILLS_JSON } from "../domain/defaults";
+import { parseSkillsConfig } from "../domain/parse";
+import { SkillEntry } from "../domain/types";
+
+export const SKILLS_CONFIG_KEY = '技能配置（JSON）';
+
+function fallbackSkills(): SkillEntry[] {
+    return DEFAULT_SKILLS.map(s => ({ ...s, platforms: [...s.platforms] }));
+}
+
+function readSkills(): SkillEntry[] {
+    let text = '';
+    try {
+        text = seal.ext.getStringConfig(ext, SKILLS_CONFIG_KEY) ?? '';
+    } catch (e) {
+        Logger.error(`读取配置项「${SKILLS_CONFIG_KEY}」失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!text.trim()) {
+        Logger.warning(`「${SKILLS_CONFIG_KEY}」为空，已载入出厂技能。`);
+        return fallbackSkills();
+    }
+    const result = parseSkillsConfig(text);
+    for (const issue of result.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
+    for (const warning of result.warnings) Logger.warning(`  ${warning.path} ${warning.msg}`);
+    if (!result.config) {
+        Logger.error(`「${SKILLS_CONFIG_KEY}」校验失败（共 ${result.issues.length} 处），本次按空技能处理。`);
+        Logger.error('提示：可用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「技能」页）。');
+        return [];
+    }
+    return result.config.skills;
+}
 
 export default class SkillsConfig {
     static register() {
-
-        seal.ext.registerTemplateConfig(ext, "技能配置", [...SEALDICE_COMMAND_SKILLS], "每条配置项一个技能，仅支持标准 SKILL.md 格式：以 --- 开头的 YAML frontmatter 里写 name（必填）/description（可选）/platform（可选平台白名单数组，如 [QQ, DISCORD]，[] 或省略 = 所有平台），正文为技能内容。默认只含「录卡」技能（角色卡录入流程）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（知识库页签的「核心指令」「扩展指令」「ob11-api」，需在知识库配置中查看/修改）。修改后可用 .ai skill refresh 生效（或重载 JS）。AI 可通过 use_skill 工具按需调用", "技能");
+        seal.ext.registerStringConfig(
+            ext,
+            SKILLS_CONFIG_KEY,
+            DEFAULT_SKILLS_JSON,
+            '整份技能配置（JSON v1）：{"version":1,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"SKILL.md 正文"}]}。'
+            + 'platform 省略或 [] = 所有平台；name 唯一。'
+            + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「技能」页）。'
+            + '修改后可用 .ai skill refresh 生效（或重载 JS）。',
+            '技能',
+        );
     }
 
     static get() {
         return {
-            SKILLS: seal.ext.getTemplateConfig(ext, "技能配置"),
+            SKILLS: readSkills(),
         };
     }
 }
+

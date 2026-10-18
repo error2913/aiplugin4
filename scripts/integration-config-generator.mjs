@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -22,6 +23,7 @@ const genRoot = process.env.AIPLUGIN4_CONFIG_REPO
 
 const genV5 = path.join(genRoot, 'js', 'v5.js');
 const genTpl = path.join(genRoot, 'js', 'templates.js');
+const genDomains = path.join(genRoot, 'js', 'domains', 'index.js');
 
 if (!fs.existsSync(genV5)) {
     console.log(`SKIP 未找到配置生成器仓库（${genRoot}）。`);
@@ -46,6 +48,9 @@ fs.writeFileSync(entryFile, [
     `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/static_config/media_presets.ts'))};`,
     `export * from ${JSON.stringify(path.join(repoRoot, 'src/model/request_rules.ts'))};`,
     `export * from ${JSON.stringify(path.join(repoRoot, 'src/model/catalog.ts'))};`,
+    `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/domain/parse.ts'))};`,
+    `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/domain/defaults.ts'))};`,
+    `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/domain/types.ts'))};`,
 ].join('\n'));
 await esbuild.build({
     entryPoints: [entryFile],
@@ -64,10 +69,13 @@ const {
     composeMediaTemplate, resolveMediaUrl, renderMediaBody, MEDIA_PRESETS, resolveMediaPreset, classifyModel,
     setRuleRows, resetRuleRowsForTest,
     templateParamKeys, normalizeMediaParams,
+    parseRolesConfig, parseSkillsConfig, parseMcpConfig, parseKbConfig,
+    DEFAULT_ROLES, DEFAULT_SKILLS, DEFAULT_MCP, DEFAULT_KB,
 } = plugin;
 
 const gen = await import(pathToFileURL(genV5).href);
 const tpl = await import(pathToFileURL(genTpl).href);
+const genDomain = await import(pathToFileURL(genDomains).href);
 
 process.on('exit', () => { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } });
 
@@ -196,7 +204,7 @@ const scenarios = [
         },
     },
     {
-        name: '禁用连接（enabled:false）',
+        name: '禁用连接：生成器直接从输出移除（不写 enabled 字段）',
         providers: [
             uiConn(),
             uiConn({
@@ -209,8 +217,10 @@ const scenarios = [
         purposes: {},
         expect: (rt, p) => {
             ok('  插件解析成功', p.config !== null, JSON.stringify(p.issues));
+            ok('  停用连接不写入配置', rt.built.providers.length === 1, JSON.stringify(rt.built.providers));
             const { conns } = adaptIfOk(p);
-            ok('  ignore 映射正确', conns[0].ignore === false && conns[1].ignore === true);
+            ok('  适配后只剩启用连接', conns.length === 1 && conns[0].ignore === false, JSON.stringify(conns));
+            ok('  输出不含 enabled 字段', !gen.serialize(rt.built).includes('"enabled"'));
             return true;
         },
     },
@@ -1167,6 +1177,74 @@ console.log('\n=== O. purposes 有序数组：生成器产出 → 插件按顺�
     ok('  normalizePurposeList 与生成器同规则',
         JSON.stringify(normalizePurposeList([' a ', '', 'b'])) === JSON.stringify(gen.normalizePurposeList([' a ', '', 'b'])),
         JSON.stringify(normalizePurposeList([' a ', '', 'b'])) + ' vs ' + JSON.stringify(gen.normalizePurposeList([' a ', '', 'b'])));
+}
+
+// ---------------------------------------------------------------- C. 四个内容分区
+
+console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → 插件解析 ===');
+{
+    const specs = Object.fromEntries(genDomain.DOMAIN_SPECS.map(s => [s.id, s]));
+    const pluginParsers = {
+        roles: parseRolesConfig,
+        skills: parseSkillsConfig,
+        mcp: parseMcpConfig,
+        kb: parseKbConfig,
+    };
+    const pluginDefaults = {
+        roles: DEFAULT_ROLES,
+        skills: DEFAULT_SKILLS,
+        mcp: DEFAULT_MCP,
+        kb: DEFAULT_KB,
+    };
+    const collections = { roles: 'roles', skills: 'skills', mcp: 'servers', kb: 'libraries' };
+    const listsOf = (id, cfg) => (id === 'mcp' ? cfg.servers : cfg[collections[id]]);
+    const stripEnabled = (item) => {
+        const copy = JSON.parse(JSON.stringify(item));
+        delete copy.enabled;
+        return copy;
+    };
+    /** 生成器内部字段是 platform，插件运行时字段是 platforms */
+    const toPluginShape = (item) => {
+        const copy = stripEnabled(item);
+        if (copy.platform !== undefined) {
+            copy.platforms = copy.platform;
+            delete copy.platform;
+        }
+        return copy;
+    };
+
+    for (const id of ['roles', 'skills', 'mcp', 'kb']) {
+        const spec = specs[id];
+        ok(`${id}：生成器存在该分区`, !!spec);
+        if (!spec) continue;
+
+        const genItems = spec.defaults.map(x => spec.normalizeItem(x));
+        const built = spec.build(genItems);
+        const json = JSON.stringify(built);
+        const parsed = pluginParsers[id](json);
+        ok(`${id}：生成器默认产出被插件接受`, !!parsed.config, JSON.stringify(parsed.issues));
+        const list = parsed.config ? listsOf(id, parsed.config) : [];
+        ok(`${id}：默认条数一致`, list.length === spec.defaults.length,
+            `生成器 ${spec.defaults.length} / 插件 ${list.length}`);
+        ok(`${id}：两边默认数据一致`,
+            isDeepStrictEqual(genItems.map(toPluginShape), pluginDefaults[id].map(stripEnabled)),
+            JSON.stringify(genItems.map(toPluginShape)).slice(0, 200));
+
+        const disabled = spec.build(genItems.map(item => ({ ...item, enabled: false })));
+        const disabledList = id === 'mcp' ? Object.keys(disabled.mcpServers) : disabled[collections[id]];
+        ok(`${id}：停用后不写进生成配置`, disabledList.length === 0, JSON.stringify(disabledList));
+
+        const invalid = {
+            roles: '{"version":1,"roles":[{"name":"","prompt":"x"}]}',
+            skills: '{"version":1,"skills":[{"name":"","content":"x"}]}',
+            mcp: '{"mcpServers":{"x":{"url":"ftp://x"}}}',
+            kb: '{"version":1,"libraries":[{"name":"","content":"x"}]}',
+        }[id];
+        const genInvalid = spec.parseImport(invalid);
+        const pluginInvalid = pluginParsers[id](invalid);
+        ok(`${id}：非法样例两边都拒绝`, !genInvalid.ok && !pluginInvalid.config,
+            `generator=${JSON.stringify(genInvalid)} plugin=${JSON.stringify(pluginInvalid.issues)}`);
+    }
 }
 
 console.log(`\n===== 联测：${pass} 通过 / ${fail} 失败 =====`);

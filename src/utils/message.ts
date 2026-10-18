@@ -1,6 +1,5 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
-import { parseRoleEntry } from "../config/configs/role";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
@@ -804,7 +803,7 @@ export function collectImageUrls(messages: RequestMessage[]): string[] {
 }
 
 export function getRoleSetting(ctx: seal.MsgContext) {
-    const { ROLE_NAMES, INSTRUCTIONS } = Config.role;
+    const { ROLE_NAMES, ROLE_SETTINGS, INSTRUCTIONS } = Config.role;
     const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
     let roleIndex = 0;
     if (exists && roleName !== '' && ROLE_NAMES.includes(roleName)) {
@@ -814,5 +813,5 @@ export function getRoleSetting(ctx: seal.MsgContext) {
         const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
         if (exists2 && roleIndex2 >= 0 && roleIndex2 < INSTRUCTIONS.length) roleIndex = roleIndex2;
     }
-    return { roleName, roleIndex, roleSetting: parseRoleEntry(INSTRUCTIONS[roleIndex]).setting }
+    return { roleName, roleIndex, roleSetting: ROLE_SETTINGS[roleIndex] || '' }
 }

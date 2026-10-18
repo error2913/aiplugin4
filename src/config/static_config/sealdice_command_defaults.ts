@@ -37,6 +37,8 @@ export const SEALDICE_COMMAND_WHITELIST = [
 // 默认技能：仅保留「录卡」。
 // SealDice 核心/扩展指令与 OB11 API 的调用帮助已改写为默认知识库（见 knowledge_base_defaults.ts：
 // 「核心指令」「扩展指令」「ob11-api(仅 QQ)」），不再作为技能默认值。
+// 注意：运行时已改为 src/config/domain/default_data.ts 里的 JSON 默认值；这里仅作为
+// scripts/gen-domain-default-data.mjs 的同步源，改默认技能后需重跑该脚本。
 export const SEALDICE_COMMAND_SKILLS = [
     `---
 name: 录卡

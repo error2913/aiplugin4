@@ -1,19 +1,13 @@
 // Skills：配置驱动的技能，AI 通过 use_skill 工具按需获取技能内容
-import { ext } from "../config/config";
-import { SEALDICE_COMMAND_SKILLS } from "../config/static_config/sealdice_command_defaults";
+import Config from "../config/config";
+import { DEFAULT_SKILLS } from "../config/domain/defaults";
+import { SkillEntry } from "../config/domain/types";
 import Logger from "../logger";
-import { splitFrontmatter } from "../utils/frontmatter";
 import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import Tool, { SKILL_GROUP } from "./tool";
 
-interface Skill {
-    name: string;
-    description: string;
-    content: string;
-    /** frontmatter platform 白名单：缺省 = 所有平台 */
-    platforms?: string[];
-}
+type Skill = SkillEntry;
 
 const MAX_SKILL_CONTENT_LENGTH = 12000; // 单次返回的技能内容上限
 const MAX_REF_DEPTH = 2; // 技能间引用的最大解析深度
@@ -24,46 +18,25 @@ export const SKILL_LIST_LIMIT = 100;
 /** system prompt 技能摘要最多展示条数 */
 export const SKILL_INJECT_MAX_ITEMS = 100;
 
-/** 解析单条技能配置：仅支持标准 SKILL.md（--- frontmatter + 正文） */
-function parseSkillEntry(line: string): { name: string, description: string, content: string, platforms?: string[] } {
-    // 标准 SKILL.md：--- frontmatter（name/description/platform）--- 正文，可直接粘贴其他 agent 的技能文件
-    const fm = splitFrontmatter(line);
-    if (fm) {
-        if (fm.meta.name) {
-            return {
-                name: fm.meta.name.trim(),
-                description: (fm.meta.description || '').trim(),
-                content: fm.body,
-                platforms: fm.meta.platforms
-            };
-        }
-        Logger.error(`技能配置缺少 name 字段，已跳过: ${line.split('\n')[0]}`);
-        return { name: '', description: '', content: '' };
-    }
-    Logger.error(`技能配置不是标准 SKILL.md 格式，已跳过: ${line.split('\n')[0]}`);
-    return { name: '', description: '', content: '' };
-}
-
-// 技能配置属于启动解析一次、重载 JS 才生效的复杂配置（SKILL.md frontmatter 解析）：模块级缓存
+// 技能配置属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存
 let skillsCache: Skill[] | null = null;
 function getSkills(): Skill[] {
     if (skillsCache) return skillsCache;
     skillsCache = compileSkills();
     return skillsCache;
 }
+function copySkill(skill: Skill): Skill {
+    return { ...skill, platforms: [...(skill.platforms || [])] };
+}
 function compileSkills(): Skill[] {
-    const configured = seal.ext.getTemplateConfig(ext, "技能配置")
-        .map(line => (line || '').replace(/\r\n/g, '\n').trim())
-        .filter(Boolean)
-        .map(parseSkillEntry)
-        .filter(s => s.name);
+    const configured = Config.skills.SKILLS.map(copySkill).filter(s => s.name);
 
-    // registerTemplateConfig 不会覆盖已有安装的配置。为避免升级后新默认技能（如“录卡”）
-    // 因旧配置持久化而不可用，补入缺失的默认技能；同名自定义技能优先保留。
+    // 补入缺失的默认技能：旧配置升级后新默认技能（如“录卡”）仍可用；
+    // 同名自定义技能优先保留。
     const configuredNames = new Set(configured.map(skill => skill.name));
-    const defaults = [...SEALDICE_COMMAND_SKILLS]
-        .map(line => parseSkillEntry(line.trim()))
-        .filter(skill => skill.name && !configuredNames.has(skill.name));
+    const defaults = DEFAULT_SKILLS
+        .filter(skill => skill.name && !configuredNames.has(skill.name))
+        .map(copySkill);
     return configured.concat(defaults);
 }
 

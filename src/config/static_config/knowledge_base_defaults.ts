@@ -2,6 +2,9 @@
 //  1. 核心指令 —— SealDice 核心指令的调用规则与逐条帮助（run_core_command）
 //  2. 扩展指令 —— SealDice 内置扩展（fun/story/coc7/deck/dnd5e/log）逐扩展、逐命令帮助（run_ext_command）
 //  3. ob11-api —— OB11 API 调用规范（frontmatter 限定 platform: [QQ]，仅 QQ 平台可见可检索，见 ob11_api_knowledge.ts）
+//
+// 注意：运行时已改为 src/config/domain/default_data.ts 里的 JSON 默认值；这里仅作为
+// scripts/gen-domain-default-data.mjs 的同步源，改默认知识库后需重跑该脚本。
 import { OB11_API_KB } from "./ob11_api_knowledge";
 
 // SealDice 核心指令知识库：原默认技能「SealDice核心指令调用帮助」改写为知识库。

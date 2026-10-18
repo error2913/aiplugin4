@@ -1,4 +1,5 @@
 // .ai skill：查看 / 开关 / refresh 技能（按当前平台 + 会话级启用）
+import Config from "../../config/config";
 import { getSkillNames, getSkillViews, refreshSkills, SKILL_LIST_LIMIT } from "../../tool/skills";
 import { matchesPlatform, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
@@ -74,6 +75,7 @@ export function registerCmdSkill() {
                 return ret;
             }
             case 'refresh': {
+                Config.invalidate('skills');
                 refreshSkills();
                 seal.replyToSender(ctx, msg, `技能配置已重新解析，共 ${getSkillNames().length} 个技能。`);
                 return ret;

@@ -1,10 +1,9 @@
 // MCP 客户端：把外部 MCP 服务器（Streamable HTTP / JSON-RPC）的工具注册为 AI 工具
 // 多会话：按 AI 会话（session.sessionId）分桶维护 MCP 会话，同一 AI 会话的连续调用
 // 复用同一 MCP 会话，保持服务端浏览器/登录状态；空闲或超限的会话按 LRU 回收。
-import { ext } from "../config/config";
+import Config, { ext } from "../config/config";
+import { McpServerEntry } from "../config/domain/types";
 import Logger from "../logger";
-import { splitFrontmatter } from "../utils/frontmatter";
-import { parseJSONWithTrailingCommas } from "../utils/json";
 import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { buildContentParts, normalizeMCPResult } from "./mcp/result";
@@ -16,14 +15,7 @@ const log = Logger.withTag('mcp');
 /** tools/call 携带的 AI 会话标识头：mcp-files-exec 等后端按它隔离默认工作区 */
 const SESSION_KEY_HEADER = 'X-Aiplugin4-Session';
 
-export interface MCPServer {
-    name: string;
-    url: string;
-    token: string;
-    headers: { [key: string]: string };
-    /** frontmatter platform 白名单：缺省 = 所有平台 */
-    platforms?: string[];
-}
+export type MCPServer = McpServerEntry;
 
 interface MCPToolDef {
     name: string;
@@ -84,83 +76,6 @@ export function getMCPServerByName(name: string): MCPServer | null {
     return getMCPServers().find(s => s.name === name) || null;
 }
 
-/** 归一化一个 MCP 服务器配置（兼容 Claude Desktop / Cursor .mcp.json 的 mcpServers 条目） */
-function normalizeMCPServer(name: string, cfg: any): MCPServer | null {
-    if (typeof cfg === 'string') {
-        // 简写：{ "name": "http://..." }
-        return { name, url: cfg, token: '', headers: {} };
-    }
-    if (!cfg || typeof cfg !== 'object') return null;
-
-    // stdio 需要拉起子进程，海豹 goja 环境不支持，明确提示后跳过
-    if (cfg.command) {
-        log.warning(`MCP 服务器 ${name} 使用 stdio 传输，海豹运行环境无法拉起进程，已跳过；请改用 Streamable HTTP（type=http + url）`);
-        return null;
-    }
-    const type = String(cfg.type || 'http').toLowerCase();
-    if (type !== 'http' && type !== 'streamable-http') {
-        log.warning(`MCP 服务器 ${name} 传输类型 ${type} 不受支持（当前仅支持 Streamable HTTP），已跳过`);
-        return null;
-    }
-
-    const headers: { [key: string]: string } = {};
-    if (cfg.headers && typeof cfg.headers === 'object') {
-        for (const [key, value] of Object.entries(cfg.headers)) {
-            if (typeof value === 'string' && value) headers[key] = value;
-        }
-    }
-    let token = String(cfg.token || '').trim();
-    if (token && !headers['Authorization']) headers['Authorization'] = `Bearer ${token}`;
-    // 未单独给 token 时，从 headers 的 Authorization 里取，保持请求逻辑一致
-    const auth = headers['Authorization'] || '';
-    if (!token && auth.startsWith('Bearer ')) token = auth.slice(7).trim();
-
-    return {
-        name: String(cfg.name || name || '').trim(),
-        url: String(cfg.url || '').trim(),
-        token,
-        headers
-    };
-}
-
-/**
- * 解析一个 MCP 服务器条目（新格式，一元素一台服务器）：
- *   ---
- *   name: mcp-files-exec
- *   platform: [QQ, DISCORD]
- *   ---
- *   { "type": "http", "url": "...", "headers": {...} }
- * 不再兼容旧格式 {"mcpServers":{...}}；解析失败/旧格式返回 null 并记错误。
- */
-export function parseMCPServerElement(line: string): MCPServer | null {
-    const text = String(line || '').replace(/\r\n/g, '\n').trim();
-    const fm = splitFrontmatter(text);
-    if (!fm) {
-        log.error(`MCP服务器配置需为新格式（frontmatter 写 name/platform + 单服务器 JSON 正文），已跳过: ${text.split('\n')[0] || text.slice(0, 60)}`);
-        return null;
-    }
-    const name = String(fm.meta.name || '').trim();
-    if (!name) {
-        log.error(`MCP服务器配置缺少 name 字段，已跳过: ${text.split('\n')[0]}`);
-        return null;
-    }
-    let j: any = null;
-    try {
-        j = parseJSONWithTrailingCommas(fm.body);
-    } catch (e) {
-        log.exception(`MCP服务器配置 JSON 解析失败（${name}），已跳过`, e);
-        return null;
-    }
-    if (!j || typeof j !== 'object' || j.mcpServers) {
-        log.error(`MCP服务器配置仅支持单服务器 JSON（旧 mcpServers 块格式已不再支持），已跳过: ${name}`);
-        return null;
-    }
-    const server = normalizeMCPServer(name, j);
-    if (!server) return null;
-    server.platforms = fm.meta.platforms;
-    return server;
-}
-
 function getMCPServers(): MCPServer[] {
     if (mcpServersCache) return mcpServersCache;
     if (!isMCPEnabled()) {
@@ -168,13 +83,11 @@ function getMCPServers(): MCPServer[] {
         return mcpServersCache;
     }
 
-    const servers: MCPServer[] = [];
-    for (const line of seal.ext.getTemplateConfig(ext, "MCP服务器配置")) {
-        if (!(line || '').trim()) continue;
-        const s = parseMCPServerElement(line);
-        if (s) servers.push(s);
-    }
-    mcpServersCache = servers.filter(s => s.name && s.url);
+    // 仅在 MCP 开启时解析/消费配置；解析失败由 config 层回退为空并记日志
+    const servers = Config.mcp.MCP_SERVERS
+        .map(s => ({ ...s, platforms: [...s.platforms], headers: { ...s.headers } }))
+        .filter(s => s.name && s.url);
+    mcpServersCache = servers;
     return mcpServersCache;
 }
 
@@ -187,6 +100,7 @@ export function getConfiguredMCPServers(): MCPServer[] {
 export function refreshMCPConfig(): void {
     mcpEnabledCache = null;
     mcpServersCache = null;
+    Config.invalidate('mcp');
 }
 
 /** 测试用：复位模块级缓存 */
@@ -194,6 +108,7 @@ export function resetMCPCacheForTest(): void {
     mcpEnabledCache = null;
     mcpServersCache = null;
     lastRefreshAt = 0;
+    Config.invalidate('mcp');
 }
 
 async function mcpRequest(server: MCPServer, payload: object, sessionId?: string, sessionKey?: string): Promise<{ status: number, body: any, sessionId?: string }> {
