@@ -53,6 +53,10 @@ import { describeBalanceError, fetchBalance, parseBalancePayload, resolveBalance
 import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken, truncateMiddle } from "../src/context/context";
 import { evictExpiredShards, readShard, writeShardIfAbsent } from "../src/context/archive_store";
 import { registerCmdForget } from "../src/cmd/sub_cmd/forget";
+import { registerCmdToken } from "../src/cmd/sub_cmd/token";
+import { UsageManager } from "../src/usage";
+import { resolveEffectiveMaxTokens } from "../src/model/api_error";
+import { getProbedContextWindow, rememberProbedContextWindow } from "../src/model/window_cache";
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
@@ -2067,6 +2071,162 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             (ext as any).storageSet = origSet;
             (ext as any).storageGet = origGet;
+        }
+    },
+
+    /** P2-2：待机入库配额——超出后只计数不入库；0=不限制 */
+    async testStandbyIngestQuota(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origQuota = TC.intConfigs['待机入库配额'];
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['窗口上限字数'] = 0;      // 隔离：本用例只看配额
+        TC.intConfigs['待机入库配额'] = 5;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:quota';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            for (let i = 0; i < 20; i++) await ctx.addUserMessage(makeCtx(), `配额消息${i}`, 'QQ:1', `q${i}`);
+
+            const items = ((ctx.messages[0] as any)?.contentItems || []).length;
+            assert.equal(items, 5, `配额 5 应只入库 5 条（实际 ${items}）`);
+
+            // 0 = 不限制
+            TC.intConfigs['待机入库配额'] = 0;
+            resetConfigCache();
+            const ctx2 = new Context();
+            (ctx2 as any).session = { setting: { standby: true }, sessionType: 'group', sessionId: 'QQ:quota2' };
+            for (let i = 0; i < 20; i++) await ctx2.addUserMessage(makeCtx(), `不限消息${i}`, 'QQ:1', `n${i}`);
+            const items2 = ((ctx2.messages[0] as any)?.contentItems || []).length;
+            assert.equal(items2, 20, '配额 0 时不应限制入库');
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origQuota === undefined) delete TC.intConfigs['待机入库配额']; else TC.intConfigs['待机入库配额'] = origQuota;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P2-1：按会话覆盖——overrideOr 只接受正数（0/负数/未设一律回退全局），并真正影响渲染预算 */
+    testSessionOverrideOr(): void {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['冷态窗口字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['冷态窗口字数'] = 5000;
+        resetConfigCache();
+        try {
+            const s = new Session();
+            s.sessionId = 'QQ:ovr';
+            s.sessionType = 'group';
+            s.setting.standby = true;
+
+            // 未覆盖 → 回退全局
+            assert.equal(s.setting.overrideOr('coldWindowChars', 5000), 5000, '未覆盖应回退全局值');
+            // 正数 → 生效
+            s.setting.overrides.coldWindowChars = 800;
+            assert.equal(s.setting.overrideOr('coldWindowChars', 5000), 800, '正数覆盖应生效');
+            // 0/负数/非数字 → 视为未覆盖（避免与全局"0=关闭"语义混淆）
+            s.setting.overrides.coldWindowChars = 0;
+            assert.equal(s.setting.overrideOr('coldWindowChars', 5000), 5000, '0 应视为未覆盖');
+            s.setting.overrides.coldWindowChars = -1;
+            assert.equal(s.setting.overrideOr('coldWindowChars', 5000), 5000, '负数应视为未覆盖');
+            (s.setting.overrides as any).coldWindowChars = 'abc';
+            assert.equal(s.setting.overrideOr('coldWindowChars', 5000), 5000, '非数字应视为未覆盖');
+
+            // 真正影响渲染预算：覆盖成很小 → 折叠预算变小
+            s.setting.overrides.coldWindowChars = 600;
+            const big = '很长的一段内容'.repeat(500);
+            const msgs = [{ role: 'user', contentItems: [{ text: big, time: 1, userId: 'QQ:1', messageId: 'm' }] }] as any;
+            assert.equal(renderFoldBudget(s, msgs), 600, '覆盖值应进入渲染预算');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P2-3：模型窗口探测缓存——按模型名持久化，只写变化；resolveEffectiveMaxTokens 三态 */
+    testProbedContextWindowCache(): void {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        try {
+            assert.equal(getProbedContextWindow('m1'), undefined, '未探测过应返回 undefined');
+            rememberProbedContextWindow('m1', 128000);
+            assert.equal(getProbedContextWindow('m1'), 128000, '应能取回探测到的窗口');
+            // 无效值不记录
+            rememberProbedContextWindow('m2', 0);
+            rememberProbedContextWindow('m2', NaN);
+            assert.equal(getProbedContextWindow('m2'), undefined, '无效窗口不应被记录');
+
+            // resolveEffectiveMaxTokens：配置优先 / 跟随探测 / 回退默认
+            assert.equal(resolveEffectiveMaxTokens(50000, 128000).source, 'configured', '配置 > 0 时以配置为准');
+            assert.equal(resolveEffectiveMaxTokens(50000, 128000).tokens, 50000);
+            const probed = resolveEffectiveMaxTokens(0, 128000);
+            assert.equal(probed.source, 'probed', '配置为 0 时应跟随探测窗口');
+            assert.equal(probed.tokens, Math.floor(128000 * 0.8), '探测窗口应按安全系数折算');
+            assert.equal(resolveEffectiveMaxTokens(0, undefined).source, 'default', '未探测到时回退默认');
+            assert.equal(resolveEffectiveMaxTokens(0, undefined).tokens, 1000000);
+        } finally {
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+        }
+    },
+
+    /** P2-4：`.ai tk use` 按用途查看用量；无记录时给可读提示 */
+    async testTokenUseView(): Promise<void> {
+        const origReply = (globalThis as any).seal.replyToSender;
+        let replied = '';
+        (globalThis as any).seal.replyToSender = (_c: any, _m: any, t: string) => { replied = String(t); };
+        try {
+            if (!SubCmd.map['token']) registerCmdToken();
+            // 空记录
+            UsageManager.storeCache = { models: {}, purposes: {} };
+            await SubCmd.map['token'].solve({
+                ctx: makeCtx(), msg: {} as any,
+                cmdArgs: { kwargs: [], getArgN: (n: number) => n === 2 ? 'use' : '' } as any,
+                epId: 'QQ:10000', uid: 'QQ:10000', gid: '', sid: 'QQ:10000',
+                session: {} as any, page: 1, ret: {} as any
+            } as any);
+            assert.ok(replied.includes('暂无按用途'), `空记录应给提示（实际：${replied}）`);
+
+            // 有记录
+            UsageManager.storeCache = {
+                models: {},
+                purposes: {
+                    chat: { '2025-1-1': { prompt_tokens: 100, completion_tokens: 20 } },
+                    summarization: { '2025-1-1': { prompt_tokens: 300, completion_tokens: 10 } },
+                },
+            };
+            await SubCmd.map['token'].solve({
+                ctx: makeCtx(), msg: {} as any,
+                cmdArgs: { kwargs: [], getArgN: (n: number) => n === 2 ? 'use' : '' } as any,
+                epId: 'QQ:10000', uid: 'QQ:10000', gid: '', sid: 'QQ:10000',
+                session: {} as any, page: 1, ret: {} as any
+            } as any);
+            assert.ok(replied.includes('chat'), `应列出 chat 用途（实际：${replied}）`);
+            assert.ok(replied.includes('summarization'), `应列出 summarization 用途（实际：${replied}）`);
+            assert.ok(replied.includes('120'), '应显示 chat 合计 100+20');
+            assert.ok(replied.includes('310'), '应显示 summarization 合计 300+10');
+            assert.ok(replied.includes('430'), '应显示总计 430');
+        } finally {
+            (globalThis as any).seal.replyToSender = origReply;
+            UsageManager.storeCache = null;
         }
     },
 

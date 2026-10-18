@@ -52,6 +52,9 @@ function runtimeOf(ctx: object): ContextRuntime {
 /** 归档连续失败达到该次数后，允许一次"降级丢弃最早轮次"兜底，避免长会话永久无法回复 */
 const ARCHIVE_FAIL_LIMIT = 3;
 
+/** 待机入库配额计数（P2-2）：模块级 WeakMap，按"小时桶"计数，不持久化 */
+const coldQuota = new WeakMap<object, { hour: number; count: number }>();
+
 function flushGroupUserMemories(session: Session): void {
     if (session.sessionType !== 'group') return;
     const now = Date.now();
@@ -265,11 +268,33 @@ export class Context {
     }
 
     /**
+     * 待机入库配额（P2-2）：本会话**每小时**最多入库 `待机入库配额` 条普通群消息（0=不限制）。
+     * 计数放模块级 WeakMap（运行时状态，不持久化）——重载后重置等价于"新的一小时"，是安全的放宽。
+     * @returns 是否允许本次入库
+     */
+    private allowColdIngest(): boolean {
+        const quota = Config.context.STANDBY_INGEST_QUOTA;
+        if (quota <= 0) return true;
+        const hour = Math.floor(Date.now() / 3600000);   // 整点分桶
+        let q = coldQuota.get(this);
+        if (!q || q.hour !== hour) {
+            q = { hour, count: 0 };
+            coldQuota.set(this, q);
+        }
+        q.count++;
+        if (q.count > quota) return false;
+        return true;
+    }
+
+    /**
      * 冷态入库条目：**零 LLM** —— 只做纯代码截断（留头留尾），原文进 rawText 并带"原文已截断"标记。
      * 标记 compressed=true 表示"永不参与 LLM 压缩"（冷态诞生的内容转热后也不会被回溯压缩）。
      */
     private buildColdUserItem(text: string, userId: string, messageId: string): UserMessageItem {
-        const { COLD_SINGLE_TRUNCATE } = Config.context;
+        // 按会话覆盖优先（P2-1）
+        const s: any = this.session;
+        const COLD_SINGLE_TRUNCATE = s?.setting?.overrideOr?.('coldTruncate', Config.context.COLD_SINGLE_TRUNCATE)
+            ?? Config.context.COLD_SINGLE_TRUNCATE;
         const original = stripInternalTags(text);
         const item: UserMessageItem = {
             text: original,
@@ -376,6 +401,8 @@ export class Context {
 
         // 冷态（待机且无在途对话）：入库零 LLM —— 只追加 + 纯代码截断，不调用压缩智能体、不做合并压缩
         if (this.isColdSession()) {
+            // 待机入库配额（P2-2）：极端灌水群防滥用。超出后只计数不入库（不报错、不回复）。
+            if (!this.allowColdIngest()) return;
             this.appendUserItem(this.buildColdUserItem(text, userId, messageId));
             // L1 窗口移出（P1-2）：纯代码、零 LLM，让 session 体积有上界。必须在入库之后做，
             // 且**不能**因为移出失败而影响入库本身（尽力而为）。
@@ -644,10 +671,13 @@ export class Context {
      * @returns 本次移出的条目数（0 表示未超上限或没得移）
      */
     trimToWindow(): number {
-        const { WINDOW_MAX_CHARS, ARCHIVE_KEEP_RAW } = Config.context;
-        if (WINDOW_MAX_CHARS <= 0) return 0;   // 0=不移出（保持 P0 行为）
+        const { ARCHIVE_KEEP_RAW } = Config.context;
         const s: any = this.session;
         if (!s || !s.sessionId) return 0;       // 游离/桩会话：无持久化身份，无处留档
+        // 按会话覆盖优先（P2-1）
+        const WINDOW_MAX_CHARS = s.setting?.overrideOr?.('windowMaxChars', Config.context.WINDOW_MAX_CHARS)
+            ?? Config.context.WINDOW_MAX_CHARS;
+        if (WINDOW_MAX_CHARS <= 0) return 0;   // 0=不移出（保持 P0 行为）
 
         const keep = this.pickWindowTail(WINDOW_MAX_CHARS);
         if (keep.startIndex <= 0) return 0;

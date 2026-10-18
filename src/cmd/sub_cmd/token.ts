@@ -15,6 +15,7 @@ export function registerCmdToken() {
        【.ai tk [y/m] (chart)】查看所有模型今年/这个月的token使用记录
        【.ai tk <模型名称>】查看模型的token使用记录
        【.ai tk <模型名称> [y/m] (chart)】查看模型今年/这个月的token使用记录
+       【.ai tk use】按**用途**查看用量（chat/compression/summarization/judge…）
        【.ai tk clr】清除token使用记录
        【.ai tk clr <模型名称>】清除token使用记录`;
     cmd.priv = {
@@ -22,6 +23,7 @@ export function registerCmdToken() {
             list: { priv: U },
             sum: { priv: U },
             all: { priv: U },
+            use: { priv: U },
             year: {
                 priv: U, args: {
                     chart: { priv: U }
@@ -239,6 +241,25 @@ export function registerCmdToken() {
                 UsageManager.saveUsageMap();
                 return ret;
             }
+            case 'use': {
+                // 按用途维度查看用量（P2-4）：purposeUsage 由 updateUsage 的第三参写入
+                const purposes = Object.keys(UsageManager.purposeUsage);
+                if (purposes.length === 0) {
+                    seal.replyToSender(ctx, msg, '暂无按用途的使用记录（旧记录可能只有模型维度）');
+                    return ret;
+                }
+                const rows = purposes.map(use => {
+                    const u = UsageManager.getPurposeUsage(use);
+                    const total = u.prompt_tokens + u.completion_tokens;
+                    return `${use}: 输入 ${u.prompt_tokens} · 输出 ${u.completion_tokens} · 合计 ${total}`;
+                });
+                const sum = purposes.reduce((n, use) => {
+                    const u = UsageManager.getPurposeUsage(use);
+                    return n + u.prompt_tokens + u.completion_tokens;
+                }, 0);
+                seal.replyToSender(ctx, msg, `按用途使用记录：\n${rows.join('\n')}\n——\n总计 ${sum} token`);
+                return ret;
+            }
             case '':
             case 'help': {
                 seal.replyToSender(ctx, msg, `帮助:
@@ -248,6 +269,7 @@ export function registerCmdToken() {
        【.ai tk [y/m] (chart)】查看所有模型今年/这个月的token使用记录
        【.ai tk <模型名称>】查看模型的token使用记录
        【.ai tk <模型名称> [y/m] (chart)】查看模型今年/这个月的token使用记录
+       【.ai tk use】按**用途**查看用量（chat/compression/summarization/judge…）
        【.ai tk clr】清除token使用记录
        【.ai tk clr <模型名称>】清除token使用记录`);
                 return ret;

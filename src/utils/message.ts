@@ -342,7 +342,9 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
 export function renderFoldBudget(session: Session, messages: ContextMessage[]): number {
     const standby = session.setting?.standby === true || Config.base.GLOBAL_STANDBY === true;
     if (!standby) return 0;
-    const base = Config.context.COLD_WINDOW_CHARS;
+    // 按会话覆盖优先（P2-1）：本会话设了「冷态窗口字数」就用它，否则用全局配置
+    const base = session.setting?.overrideOr?.('coldWindowChars', Config.context.COLD_WINDOW_CHARS)
+        ?? Config.context.COLD_WINDOW_CHARS;
     if (base <= 0) return 0;
     // 档位只看"最新一条**真实用户发言**"：跳过系统条目（事件/触发提示/折叠摘要本身），
     // 否则"继续""总结"这类系统文案会把档位带偏（例如续跑提示含"继续"→ 误升 L1）。

@@ -10,6 +10,7 @@ import { registerCmdBalance } from "./sub_cmd/balance";
 import { registerCmdBlock } from "./sub_cmd/block";
 import { registerCmdCtx } from "./sub_cmd/ctx";
 import { registerCmdCtxn } from "./sub_cmd/ctxn";
+import { registerCmdCtxSet } from "./sub_cmd/ctxset";
 import { registerCmdForget } from "./sub_cmd/forget";
 import { registerCmdIgnore } from "./sub_cmd/ignore";
 import { registerCmdImage } from "./sub_cmd/image";
@@ -73,6 +74,7 @@ export class SubCmd {
         registerCmdPub();
         registerCmdStatus();
         registerCmdCtx();
+        registerCmdCtxSet();
         registerCmdLive();
         registerCmdCtxn();
         registerCmdTimer();

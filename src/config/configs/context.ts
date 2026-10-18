@@ -19,6 +19,7 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "单次结算调用上限", 2, "每次结算最多处理多少个分片（限制单次 LLM 调用量）", "上下文");
         seal.ext.registerIntConfig(ext, "原文分片保留天数", 30, "原文分片（归档/窗口移出）超过该天数后惰性淘汰；0=不按时间淘汰", "上下文");
         seal.ext.registerIntConfig(ext, "原文分片上限", 200, "每个会话的原文分片数量上限：超出时把最旧的分片置空（海豹无删除 API，置空即项目内先例做法）", "上下文");
+        seal.ext.registerIntConfig(ext, "待机入库配额", 0, "待机会话每小时最多入库多少条普通群消息（0=不限制）；超出后只计数不入库，用于防极端灌水群", "上下文");
     }
 
     static get() {
@@ -46,7 +47,8 @@ export default class ContextConfig {
             // 这里统一回退到默认 2，只把"水位=0"作为唯一的关闭开关，避免用户误设后以为坏了。
             SETTLE_MAX_SHARDS: normalizePositive(seal.ext.getIntConfig(ext, "单次结算调用上限"), 2, "单次结算调用上限"),
             SHARD_TTL_DAYS: seal.ext.getIntConfig(ext, "原文分片保留天数"),
-            SHARD_LIMIT: normalizePositive(seal.ext.getIntConfig(ext, "原文分片上限"), 200, "原文分片上限")
+            SHARD_LIMIT: normalizePositive(seal.ext.getIntConfig(ext, "原文分片上限"), 200, "原文分片上限"),
+            STANDBY_INGEST_QUOTA: seal.ext.getIntConfig(ext, "待机入库配额")
         }
     }
 }

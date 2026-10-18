@@ -3,9 +3,10 @@ import Config, { ext } from "../config/config";
 import { savePurposeModelOverrides } from "../config/configs/model";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
-import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL } from "../model/api_error";
+import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL, parseMaxContextTokens } from "../model/api_error";
 import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
+import { rememberProbedContextWindow } from "../model/window_cache";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionService } from "../session/session_service";
@@ -395,6 +396,9 @@ export default class Agent {
         // 动作一：上下文超长 → 观察归档（原文进归档分片）→ 自动重发
         if (e.kind === 'context_too_long' && !handled.archived) {
             if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
+            // P2-3：把报文里解析出的模型窗口**按模型名持久化**，下次不必再撞一次超长报错
+            const probed = parseMaxContextTokens(e.rawText);
+            if (probed !== undefined) rememberProbedContextWindow(modelLabel, probed);
             const target = computeArchiveTarget(Config.context.MAX_CONTEXT_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
             // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），

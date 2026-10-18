@@ -246,3 +246,32 @@ export function computeArchiveTarget(localBudget: number, rawText: string): numb
     target = Math.floor(target * CONTEXT_RETRY_SAFETY);
     return target > 0 ? target : undefined;
 }
+
+/**
+ * 探测到的模型上下文窗口缓存（P2-3）的**纯计算部分**。
+ *
+ * 注意：本文件刻意保持"纯模块：不依赖 seal / Config"（见文件头），因此这里只放
+ * 纯函数；真正的读写（ext.storageGet/Set）在 `src/model/window_cache.ts`，
+ * 由 `resolveEffectiveMaxTokens` 的调用方注入，便于单元测试。
+ */
+export const MODEL_WINDOW_SAFETY = CONTEXT_RETRY_SAFETY;
+
+/** 默认上下文预算（配置无效/未探测时的回退值，与旧版「上下文最大token」默认一致） */
+export const DEFAULT_MAX_CONTEXT_TOKENS = 1000000;
+
+/**
+ * 有效上下文预算（纯函数，P2-3）：
+ * - `configured` > 0 → 用它（用户显式设定优先，行为与旧版一致）；
+ * - `configured` = 0 → **跟随已探测到的模型窗口 × 安全系数**；未探测到则回退默认值。
+ * 这样默认值不再是"形同虚设的 100 万"，而是逐步收敛到模型真实窗口。
+ */
+export function resolveEffectiveMaxTokens(
+    configured: number,
+    probedWindow: number | undefined,
+): { tokens: number; source: 'configured' | 'probed' | 'default' } {
+    if (configured > 0) return { tokens: configured, source: 'configured' };
+    if (probedWindow !== undefined && Number.isFinite(probedWindow) && probedWindow > 0) {
+        return { tokens: Math.max(1, Math.floor(probedWindow * MODEL_WINDOW_SAFETY)), source: 'probed' };
+    }
+    return { tokens: DEFAULT_MAX_CONTEXT_TOKENS, source: 'default' };
+}
