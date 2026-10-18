@@ -708,7 +708,13 @@ export class Context {
             s.lastRawAt = Math.floor(Date.now() / 1000);
             // 分片上限（可配）与惰性 TTL 淘汰：最旧/过期的置空（海豹无删除 API，置空即项目内先例做法）
             const { SHARD_LIMIT, SHARD_TTL_DAYS } = Config.context;
-            if (SHARD_LIMIT > 0 && s.rawSeq > SHARD_LIMIT) clearShard(s.sessionId, s.rawSeq - SHARD_LIMIT, 'raw');
+            // **必须清到"所有超出上限的"**，不能只清 `rawSeq - SHARD_LIMIT` 这一个：
+            // 只清一个的话，一旦出现"多次写入但只触发部分 trim"（批量灌水、写入失败后重试、
+            // 进程重启丢掉未落盘的 rawSeq 等），旧分片会永久滞留 —— 上限形同虚设。
+            // 已由 sim-matrix 的 D3 用例暴露（上限设 3 时实际残留 101 个活跃分片）。
+            if (SHARD_LIMIT > 0) {
+                for (let seq = s.rawSeq - SHARD_LIMIT; seq >= 1; seq--) clearShard(s.sessionId, seq, 'raw');
+            }
             evictExpiredShards(s.sessionId, 'raw', s.rawSeq, SHARD_TTL_DAYS, Math.floor(Date.now() / 1000));
         }
 
@@ -1007,8 +1013,11 @@ export class Context {
         s.archiveSeq = Math.max(s.archiveSeq, seq);
         s.lastArchivedAt = Math.floor(Date.now() / 1000);
         // 分片数量上限（可配）：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
+        // 同 raw 分支：必须清到"所有超出上限的"，只清一个会在跳号/重试时让旧分片永久滞留。
         const { SHARD_LIMIT } = Config.context;
-        if (SHARD_LIMIT > 0 && s.archiveSeq > SHARD_LIMIT) clearShard(s.sessionId, s.archiveSeq - SHARD_LIMIT);
+        if (SHARD_LIMIT > 0) {
+            for (let old = s.archiveSeq - SHARD_LIMIT; old >= 1; old--) clearShard(s.sessionId, old, 'arc');
+        }
         return 'stored';
     }
 
