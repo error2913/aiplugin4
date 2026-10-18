@@ -27,14 +27,13 @@ export function defaultWebDefaults(): WebDefaults {
 
 const DETAILS: WebDetail[] = ['snippet', 'summary', 'content'];
 
-/** 旧的「后端 → 联网搜索」合成一个 SearXNG provider（不写盘，运行时构造） */
-export function legacySearxngProvider(baseURL: string): WebProviderRuntime {
+/** 空配置：没有任何 provider（工具层会提示去「联网」页配置） */
+export function emptyWebConfig(): WebConfig {
     return {
-        id: 'legacy-searxng',
-        dialect: 'searxng',
-        baseURL: String(baseURL || '').trim() || defaultBaseURL('searxng'),
-        apiKey: '',
-        enabled: true,
+        version: WEB_CONFIG_VERSION,
+        defaults: defaultWebDefaults(),
+        providers: [],
+        routes: {},
     };
 }
 
@@ -250,31 +249,18 @@ export function parseWebConfig(text: string): { config: WebConfig | null; issues
     };
 }
 
-/** 由旧「联网搜索」地址构造完整 legacy 配置（SearXNG） */
-export function buildLegacyWebConfig(legacySearchUrl: string): WebConfig {
-    const provider = legacySearxngProvider(legacySearchUrl);
-    return {
-        version: WEB_CONFIG_VERSION,
-        defaults: defaultWebDefaults(),
-        providers: [provider],
-        routes: { search: [provider.id] },
-    };
-}
-
 /**
  * 配置页取配置的纯逻辑：
- * - 文本为空 → legacy SearXNG（升级不改行为）
- * - 校验失败 → 同样回退 legacy（不抛错），issues 供调用方记录日志
+ * - 文本为空 → 空配置（providers=[]，工具层提示去「联网」页配置）
+ * - 校验失败 → 同样返回空配置（不抛错），issues 供调用方记录日志
  */
-export function resolveWebConfig(text: string, legacySearchUrl: string): {
+export function resolveWebConfig(text: string): {
     config: WebConfig;
     issues: WebIssue[];
-    usedLegacy: boolean;
 } {
-    if (!String(text ?? '').trim()) {
-        return { config: buildLegacyWebConfig(legacySearchUrl), issues: [], usedLegacy: true };
-    }
-    const parsed = parseWebConfig(text);
-    if (parsed.config) return { config: parsed.config, issues: [], usedLegacy: false };
-    return { config: buildLegacyWebConfig(legacySearchUrl), issues: parsed.issues, usedLegacy: true };
+    const raw = String(text ?? '').trim();
+    if (!raw) return { config: emptyWebConfig(), issues: [] };
+    const parsed = parseWebConfig(raw);
+    if (parsed.config) return { config: parsed.config, issues: [] };
+    return { config: emptyWebConfig(), issues: parsed.issues };
 }

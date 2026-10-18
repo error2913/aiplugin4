@@ -2,10 +2,8 @@
 //
 // 解析策略（与模型配置 v5 一致）：
 //   1. 读「联网配置」→ parseWebConfig（JSON + 结构校验，带 $.a.b 路径报错）
-//   2. 文本为空 → 用「后端 → 联网搜索」合成 legacy SearXNG provider（升级不破坏现状）
-//   3. 校验失败 → 整体拒绝并回退 legacy（不让插件因搜索配置崩掉）
-//
-// 海豹没有配置写入 API，因此不做自动迁移：升级用户的行为由 legacy 合成保证。
+//   2. 文本为空 → 空配置（providers=[]；工具层提示去「联网」页配置）
+//   3. 校验失败 → 整体拒绝 + 日志，同样落到空配置（不让插件因搜索配置崩掉）
 
 import Logger from '../../logger';
 import { resolveWebConfig } from '../../web/schema';
@@ -13,7 +11,6 @@ import { WebConfig } from '../../web/types';
 import { ext } from '../config';
 
 const CONFIG_KEY = '联网配置';
-const LEGACY_KEY = '联网搜索';
 const CONFIG_GROUP = '联网';
 
 let cache: WebConfig | null = null;
@@ -33,9 +30,9 @@ function readStringConfig(key: string): string {
 }
 
 function buildConfig(): WebConfig {
-    const resolved = resolveWebConfig(readStringConfig(CONFIG_KEY), readStringConfig(LEGACY_KEY));
+    const resolved = resolveWebConfig(readStringConfig(CONFIG_KEY));
     if (resolved.issues.length > 0) {
-        Logger.error(`「${CONFIG_KEY}」校验失败（共 ${resolved.issues.length} 处），本次不生效，已回退 legacy SearXNG：`);
+        Logger.error(`「${CONFIG_KEY}」校验失败（共 ${resolved.issues.length} 处），本次不生效：`);
         for (const issue of resolved.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
         Logger.error('提示：可用配置生成器 https://error2913.github.io/aiplugin4-config/ 的「联网搜索」页生成后粘贴。');
     }
@@ -48,7 +45,7 @@ export default class WebConfigStore {
             ext,
             CONFIG_KEY,
             '',
-            '联网搜索/抓取配置（v1，一个 JSON）。留空 = 沿用「后端 → 联网搜索」的 SearXNG。'
+            '联网搜索/抓取配置（v1，一个 JSON）。留空 = 未配置（web_search 会提示去本页填写）。'
             + '可配置 DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；'
             + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「联网搜索」页）。修改后需重载 JS 生效。',
             CONFIG_GROUP,
@@ -61,4 +58,4 @@ export default class WebConfigStore {
     }
 }
 
-export { CONFIG_KEY as WEB_CONFIG_KEY, LEGACY_KEY as WEB_LEGACY_KEY };
+export { CONFIG_KEY as WEB_CONFIG_KEY };

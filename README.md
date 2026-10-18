@@ -423,7 +423,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 联网配置 | 联网搜索/抓取配置（v1，一个 JSON）。**留空 = 沿用「后端 → 联网搜索」的 SearXNG**，升级后行为不变。内置方言：DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；`providers` 顺序即尝试顺序（失败自动回退），`routes` 可分别指定搜索/抓取顺序。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)的「联网搜索」页生成后粘贴；修改后需重载 JS 生效。格式见 [docs/18-联网搜索与抓取接入方案](docs/18-联网搜索与抓取接入方案.md) |
+| 联网配置 | 联网搜索/抓取配置（v1，一个 JSON）。**留空 = 未配置**，`web_search` / `web_fetch` 会提示去本页填写。内置方言：DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；`providers` 顺序即尝试顺序（失败自动回退），`routes` 可分别指定搜索/抓取顺序。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)的「联网搜索」页生成后粘贴；修改后需重载 JS 生效。格式见 [docs/18-联网搜索与抓取接入方案](docs/18-联网搜索与抓取接入方案.md) |
 
 > AI 侧工具：`web_search`（搜索，支持 `allowed_domains` / `blocked_domains` / `time_range` / `detail`，失败自动换 provider）与 `web_fetch`（抓取网页正文，按 `start_index` 续读）。模型厂商自带的托管搜索（OpenAI / Anthropic / Gemini / xAI / Qwen）默认不启用，属于模型请求参数，见 docs/18 §6.8。
 
@@ -520,7 +520,6 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/stream-output)，`body.stream = true` 的模型才会走流式 |
 | 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
 | 媒体转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/media-fetch)，让「整个响应体即音频」的语音接口（阿里 CosyVoice、百度、OpenAI 兼容等）可用：海豹的 JS 引擎读不了二进制响应，由该后端代发请求并转成 base64 返回。不启动它时这些接口会明确报错；返回 JSON 的接口（MiniMax、Google Cloud、绝大多数生图）不受影响 |
-| 联网搜索 | **【已废弃，保留兼容】** [searxng](https://github.com/searxng/searxng) 地址。仅当「联网 → 联网配置」为空或校验失败时作为 legacy provider；新配置请到「联网」页填写 |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/usage-chart)，token 使用情况图表生成 |
 | 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
 | 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
