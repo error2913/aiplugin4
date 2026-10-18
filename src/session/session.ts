@@ -36,7 +36,7 @@ export const HOT_HOLD_MS = 180_000;
 export const COOL_DOWN_MS = 60_000;
 
 /** 持久化时排除的运行时字段（监听器/运行状态/挂起队列/节流状态等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats']);
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats', 'settleBackoffUntil']);
 
 /** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
 export interface PendingMessage {
@@ -110,6 +110,9 @@ export class Session {
         setting: Setting,
         archiveSeq: 'number',
         lastArchivedAt: 'number',
+        rawSeq: 'number',
+        lastRawAt: 'number',
+        settledSeq: 'number',
         stream: {
             object: {
                 id: 'string',
@@ -158,6 +161,20 @@ export class Session {
     archiveSeq = 0;
     /** 最近一次归档时间（秒；持久化，仅审计与 `.ai ctx` 展示用） */
     lastArchivedAt = 0;
+    /**
+     * 已写入的**窗口移出**分片数（**持久化**）：窗口外原文写在 `session_<id>:raw:<seq>` 独立键里
+     * （只写一次、不重写），session 只多这一个数字，使 `session_<id>` 体积与消息总量解耦（docs/17 §2）。
+     */
+    rawSeq = 0;
+    /** 最近一次窗口移出时间（秒；持久化，仅审计与 `.ai ctx` 展示用） */
+    lastRawAt = 0;
+    /**
+     * 已**结算**（summarize 沉淀进记忆）到的分片序号（**持久化**，docs/17 §3）：
+     * 结算只处理 `settledSeq+1 .. rawSeq`，天然幂等——同一批分片跑两次不会重复总结。
+     */
+    settledSeq = 0;
+    /** 运行时字段：结算失败退避截止时间戳（ms；不持久化，重载后回 0＝允许立即重试） */
+    settleBackoffUntil = 0;
     lastCtx: seal.MsgContext | null = null;
     /** 运行时字段：当前是否有 run/runStream 在跑（含工具执行阶段；不持久化） */
     running = false;

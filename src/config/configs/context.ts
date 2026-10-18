@@ -12,6 +12,7 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "冷态窗口字数", 5000, "待机（冷态）下模型可见的最近内容字数：超过则把更早内容折叠为纯代码摘要（不调用模型）；0=不折叠", "上下文");
         seal.ext.registerIntConfig(ext, "冷态单条截断字数", 500, "待机（冷态）时单条消息超过该字数则留头留尾（原文仍可用 read_raw 查）；0=不截断", "上下文");
         seal.ext.registerBoolConfig(ext, "归档保留原文", true, "开启时：归档时把群聊原文写入归档分片（可用 read_raw kind=user id=arc:序号 回查），并调用总结智能体沉淀记忆；关闭时：归档不留原文、不写分片（省存储），但仍会调用总结智能体沉淀记忆——历史依旧进长期记忆，只是之后无法回查原文", "上下文");
+        seal.ext.registerIntConfig(ext, "窗口上限字数", 20000, "上下文里保留的最近内容字数上界：超出部分移出到原文分片（session_<会话ID>:raw:<序号>，可用 read_raw kind=user id=raw:序号 回查），使会话存档体积与消息总量解耦；0=不移出（保持旧行为）", "上下文");
     }
 
     static get() {
@@ -30,7 +31,8 @@ export default class ContextConfig {
             COMPRESS_THRESHOLD: seal.ext.getIntConfig(ext, "消息压缩阈值"),
             COLD_WINDOW_CHARS: seal.ext.getIntConfig(ext, "冷态窗口字数"),
             COLD_SINGLE_TRUNCATE: seal.ext.getIntConfig(ext, "冷态单条截断字数"),
-            ARCHIVE_KEEP_RAW: seal.ext.getBoolConfig(ext, "归档保留原文")
+            ARCHIVE_KEEP_RAW: seal.ext.getBoolConfig(ext, "归档保留原文"),
+            WINDOW_MAX_CHARS: seal.ext.getIntConfig(ext, "窗口上限字数")
         }
     }
 }

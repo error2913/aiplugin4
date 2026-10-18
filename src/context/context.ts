@@ -8,7 +8,7 @@ import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
-import { estimateMessageTokens } from "../utils/message";
+import { buildContent, estimateMessageTokens } from "../utils/message";
 import { callOb11Api } from "../utils/ob11";
 import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, buildUserTruncateMarker, stripRawMarkers } from "../utils/raw_marker";
 import { stripInternalTags } from "../utils/string";
@@ -377,6 +377,11 @@ export class Context {
         // 冷态（待机且无在途对话）：入库零 LLM —— 只追加 + 纯代码截断，不调用压缩智能体、不做合并压缩
         if (this.isColdSession()) {
             this.appendUserItem(this.buildColdUserItem(text, userId, messageId));
+            // L1 窗口移出（P1-2）：纯代码、零 LLM，让 session 体积有上界。必须在入库之后做，
+            // 且**不能**因为移出失败而影响入库本身（尽力而为）。
+            try { this.trimToWindow(); } catch (e) {
+                log.warning('窗口移出失败（不影响入库）: ' + (e instanceof Error ? e.message : String(e)));
+            }
             flushGroupUserMemories(this.session);
             return;
         }
@@ -540,6 +545,119 @@ export class Context {
             toolName
         }
         this.messages.push(tcbm);
+    }
+
+    /**
+     * L1 窗口移出（P1-2，docs/17 §2.3）：纯代码、零 LLM，让 `session_<id>` 的体积**有上界**。
+     *
+     * 与 L2（`archiveByTokenIfNeeded` 的 summarize 结算）解耦：这里只做"搬走原文"，
+     * 不调用任何模型。窗口外的条目写进 `session_<id>:raw:<seq>` 分片（只写一次、幂等），
+     * 然后从 messages 移除；`read_raw kind=user id=raw:<seq>` 仍可回查。
+     *
+     * 关键不变量：
+     * - **绝不拆散工具原子组**（`assistant(tool_calls)` + 紧随的 `tool` 结果同进同留）；
+     * - **写分片失败则不移除**（与归档同一原则：宁可留着重试，也不丢原文）；
+     * - 「归档保留原文」关闭时不写分片，直接移除（省存储）。
+     *
+     * @returns 本次移出的条目数（0 表示未超上限或没得移）
+     */
+    trimToWindow(): number {
+        const { WINDOW_MAX_CHARS, ARCHIVE_KEEP_RAW } = Config.context;
+        if (WINDOW_MAX_CHARS <= 0) return 0;   // 0=不移出（保持 P0 行为）
+        const s: any = this.session;
+        if (!s || !s.sessionId) return 0;       // 游离/桩会话：无持久化身份，无处留档
+
+        const keep = this.pickWindowTail(WINDOW_MAX_CHARS);
+        if (keep.startIndex <= 0) return 0;
+
+        const moved = this.messages.slice(0, keep.startIndex);
+        const rawItems = this.collectRawItems(moved);
+
+        // 留档顺序：**先安全落分片，再从上下文移除**（与归档同一不变量）。
+        // 关掉「归档保留原文」= 不留原文，此时跳过写分片、直接移除（省存储）。
+        if (ARCHIVE_KEEP_RAW && rawItems.length > 0) {
+            const nextSeq = (typeof s.rawSeq === 'number' ? s.rawSeq : 0) + 1;
+            const outcome = writeShardIfAbsent(s.sessionId, nextSeq, {
+                seq: nextSeq,
+                from: rawItems[0].time,
+                to: rawItems[rawItems.length - 1].time,
+                items: rawItems,
+            }, false, 'raw');
+            // 写不进去就不移：宁可 session 继续变大，也不丢原文（与归档 B1 一致）
+            if (outcome === 'failed') return 0;
+            s.rawSeq = Math.max(typeof s.rawSeq === 'number' ? s.rawSeq : 0, nextSeq);
+            s.lastRawAt = Math.floor(Date.now() / 1000);
+            // raw 分片上限：最旧的置空（海豹无删除 API，置空即项目内先例做法）
+            if (s.rawSeq > ARCHIVE_SHARD_LIMIT) clearShard(s.sessionId, s.rawSeq - ARCHIVE_SHARD_LIMIT, 'raw');
+        }
+
+        // 移除窗口外条目（含 assistant/tool：它们已随窗口滚出，原文不值得留档）
+        this.messages.splice(0, keep.startIndex);
+        // 合并写：移出发生在高频入库路径上，必须走节流（否则又会每条消息全量写盘）
+        try { s.save(true); } catch { /* 游离/桩会话无 save */ }
+        return moved.length;
+    }
+
+    /**
+     * 选出"要保留的窗口尾部"：从新到旧按**条目**粒度累加渲染字数，直到达到预算。
+     * 返回 `startIndex`＝messages 中保留区间的起始下标（0 表示全部保留）。
+     *
+     * 工具原子组（`assistant(tool_calls)` + 紧随 tool 结果）作为整体判定：
+     * 要么整组保留，要么整组移出——否则会留下孤儿 tool 结果（请求 400 / 被孤儿清理删掉）。
+     */
+    private pickWindowTail(budgetChars: number): { startIndex: number } {
+        let used = 0;
+        let i = this.messages.length - 1;
+        let startIndex = this.messages.length;
+
+        while (i >= 0) {
+            const m = this.messages[i] as any;
+            const toolCalls = m.toolCalls || m.tool_calls;
+            if (m.role === 'assistant' && Array.isArray(toolCalls) && toolCalls.length > 0) {
+                // 原子组：[i .. j]（含紧随的 tool 结果）
+                let j = i;
+                while (j + 1 < this.messages.length && (this.messages[j + 1] as any).role === 'tool') j++;
+                let groupLen = 0;
+                for (let k = i; k <= j; k++) groupLen += buildContent(this.messages[k] as any).length;
+                if (used + groupLen > budgetChars) break;
+                used += groupLen;
+                startIndex = i;
+                i = i - 1;
+                continue;
+            }
+            // tool 结果由上面的原子组统一处理；孤立 tool 单独按条处理（防御）
+            const len = buildContent(m).length;
+            if (used + len > budgetChars) break;
+            used += len;
+            startIndex = i;
+            i--;
+        }
+        return { startIndex };
+    }
+
+    /** 从一批消息里抽取可留档的群聊原文（复用归档分片的条目口径） */
+    private collectRawItems(chunk: MessageType[]): ArchiveShardItem[] {
+        const items: ArchiveShardItem[] = [];
+        for (const m of chunk) {
+            if (Message.getMessageType(m) !== 'user' || !Array.isArray((m as UserMessage).contentItems)) continue;
+            for (const raw of (m as UserMessage).contentItems as UserMessageItem[]) {
+                if (!raw || typeof raw.text !== 'string' || !raw.userId) continue;   // 系统条目不入分片
+                if (Array.isArray(raw.rawItems) && raw.rawItems.length > 0) {
+                    for (const ri of raw.rawItems) {
+                        if (!ri || !ri.userId) continue;
+                        items.push({ messageId: ri.messageId || '', userId: ri.userId, time: ri.time || 0, text: ri.text });
+                    }
+                    continue;
+                }
+                items.push({
+                    messageId: raw.messageId || '',
+                    userId: raw.userId,
+                    time: raw.time || 0,
+                    text: stripRawMarkers(raw.rawText ?? raw.text),
+                });
+            }
+        }
+        return items;
     }
 
     /**

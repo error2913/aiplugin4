@@ -1505,9 +1505,254 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /**
+     * P1-2：窗口上限触发时把窗口外原文移出到 `raw:` 分片，并让 `messages` 的渲染字数回到上界内。
+     */
+    async testWindowTrimWritesRawShard(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        const origCold = TC.intConfigs['冷态单条截断字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['窗口上限字数'] = 2000;
+        TC.intConfigs['冷态单条截断字数'] = 0;   // 不截断，方便断言原文
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:win';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            for (let i = 0; i < 200; i++) await ctx.addUserMessage(makeCtx(), `第${i}条群消息${'填充'.repeat(10)}`, 'QQ:1', `w${i}`);
+
+            assert.ok((session as any).rawSeq >= 1, `应写入 raw 分片（实际 rawSeq=${(session as any).rawSeq}）`);
+            const rendered = ctx.messages.reduce((n: number, m: any) => n + buildContent(m as any).length, 0);
+            assert.ok(rendered <= 2000 * 1.2, `窗口应回到上界内：实际 ${rendered} 字`);
+            assert.equal(Array.from(store.keys()).filter(k => k.includes(':raw:')).length, (session as any).rawSeq, '分片键数应与 rawSeq 一致');
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            if (origCold === undefined) delete TC.intConfigs['冷态单条截断字数']; else TC.intConfigs['冷态单条截断字数'] = origCold;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-2：窗口边界落在工具组中间时，`assistant(tool_calls)` + 紧随 tool 结果必须整组同进同留（不产生孤儿 tool） */
+    testWindowTrimKeepsToolGroups(): void {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        TC.intConfigs['窗口上限字数'] = 60;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:win-tool';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            ctx.messages = [
+                { role: 'user', contentItems: [{ text: '很早的群消息'.repeat(20), time: 1, userId: 'QQ:1', messageId: 'u0' }] },
+                { role: 'assistant', contentItems: [{ text: '我要调工具', time: 2, messageId: '' }], toolCalls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }] },
+                { role: 'tool', tool_call_id: 'c1', contentItems: [{ text: '工具结果'.repeat(30), time: 3, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: '最新消息', time: 4, userId: 'QQ:1', messageId: 'u1' }] },
+            ] as any;
+            ctx.trimToWindow();
+
+            const roles = (ctx.messages as any[]).map(m => m.role);
+            const hasAssistantWithTools = (ctx.messages as any[]).some(m => m.role === 'assistant' && Array.isArray(m.toolCalls) && m.toolCalls.length > 0);
+            const toolCount = roles.filter(r => r === 'tool').length;
+            assert.equal(toolCount === 0 || hasAssistantWithTools, true,
+                `不得留下孤儿 tool 结果（roles=${roles.join(',')}）`);
+        } finally {
+            Agent.get = origAgentGet;   // 必须还原：Agent.get 是全局桩，泄漏会让后续用例 sessionMap 取不到
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-2：灌 1000 条后 `session_<id>` 的 JSON 长度有常数上界（体积与消息总量解耦——这才是本项的真正目标） */
+    async testSessionBlobBounded(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        let maxBlob = 0;
+        (ext as any).storageSet = (k: string, v: string) => {
+            store.set(k, v);
+            if (k === 'session_QQ:blob') maxBlob = Math.max(maxBlob, v.length);
+        };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['窗口上限字数'] = 2000;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:blob';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            for (let i = 0; i < 1000; i++) {
+                await ctx.addUserMessage(makeCtx(), `第${i}条群消息${'填充内容'.repeat(5)}`, 'QQ:1', `b${i}`);
+                if (i % 20 === 0) session.save();   // 模拟真实落盘节奏，观察 blob 增长
+            }
+            session.save();
+            // 上界：窗口 2000 字 + 序列化开销/元数据，留足余量仍应远小于"1000 条全文"
+            const fullText = 1000 * `第0条群消息${'填充内容'.repeat(5)}`.length;
+            assert.ok(maxBlob > 0, '应有落盘');
+            assert.ok(maxBlob < fullText / 2,
+                `session blob 应有上界：实际 ${maxBlob} 字，而 1000 条全文约 ${fullText} 字`);
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-2：`read_raw kind=user id=raw:001` 能读回移出的原文 */
+    async testReadRawFromRawShard(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['窗口上限字数'] = 1000;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:raw-read';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            for (let i = 0; i < 100; i++) await ctx.addUserMessage(makeCtx(), `可回查原文第${i}条`, 'QQ:1', `r${i}`);
+            assert.ok((session as any).rawSeq >= 1, '应有 raw 分片');
+
+            registerRawToolSet();
+            const readRaw = toolMap['read_raw'];
+            const stub = { context: ctx, sessionId: session.sessionId, archiveSeq: 0, rawSeq: (session as any).rawSeq } as any;
+            const dir = await readRaw.solve(makeCtx(), {} as any, stub, { kind: 'user', id: 'raw:001' });
+            assert.ok(dir.includes('可回查原文第0条') || dir.includes('msg_id'), `应能列出 raw 分片内容（实际：${String(dir).slice(0, 200)}）`);
+            const one = await readRaw.solve(makeCtx(), {} as any, stub, { kind: 'user', id: 'raw:001', msg_id: 'r0' });
+            assert.ok(one.includes('可回查原文第0条'), '应能按 msg_id 读回窗口移出的原文');
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-2：`窗口上限字数=0` → 不移出、不产生 raw 分片（行为同 P0） */
+    async testWindowTrimOffKeepsP0Behavior(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['窗口上限字数'] = 0;   // 关闭窗口移出
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:win-off';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            for (let i = 0; i < 100; i++) await ctx.addUserMessage(makeCtx(), `第${i}条群消息${'填充'.repeat(10)}`, 'QQ:1', `o${i}`);
+            assert.equal((session as any).rawSeq, 0, '关闭时不得产生 raw 分片');
+            assert.equal(Array.from(store.keys()).filter(k => k.includes(':raw:')).length, 0, '关闭时不得产生 raw 分片键');
+            assert.equal((ctx.messages[0] as any).contentItems.length, 100, '关闭时消息应全部留在同一块（P0 行为）');
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /**
+     * P1-2 边界：单条巨大消息（自身超窗口预算）不得让整个窗口移出失效，否则 session 体积仍会无界增长。
+     * 保留策略：最新条目"窗口优先"保留，但更早的内容仍必须被移出。
+     */
+    async testWindowTrimWithHugeNewestMessage(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        const origCold = TC.intConfigs['冷态单条截断字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['窗口上限字数'] = 1000;
+        TC.intConfigs['冷态单条截断字数'] = 0;   // 不截断 → 制造"单条远大于窗口"
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:win-huge';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            const ctx = session.context;
+            for (let i = 0; i < 50; i++) await ctx.addUserMessage(makeCtx(), `早先消息第${i}条${'填充'.repeat(10)}`, 'QQ:1', `h${i}`);
+            // 一条 20000 字的巨消息（远超窗口 1000）
+            await ctx.addUserMessage(makeCtx(), '巨'.repeat(20000), 'QQ:1', 'huge');
+
+            assert.ok((session as any).rawSeq >= 1,
+                `巨大单条也应让更早内容被移出（实际 rawSeq=${(session as any).rawSeq}）`);
+            const earlier = (session.context.messages as any[])
+                .flatMap(m => (m.contentItems || []).map((i: any) => i.text || ''))
+                .filter((t: string) => t.startsWith('早先消息第'))
+                .length;
+            assert.equal(earlier, 0, `更早的消息应已被移出（实际还剩 ${earlier} 条）`);
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            if (origCold === undefined) delete TC.intConfigs['冷态单条截断字数']; else TC.intConfigs['冷态单条截断字数'] = origCold;
+            resetConfigCache();
+        }
+    },
+
     /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
-    testExtractUsageCacheFields(): void {
-        const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
+    testExtractUsageCacheFields(): void {        const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
         assert.ok(a);
         assert.equal(a.prompt_tokens, 1050, 'Anthropic 方言应把缓存读/写补进 prompt_tokens（否则校准系数偏低、预算被放大）');
         assert.equal(a.cache_read_tokens, 900);

@@ -133,14 +133,24 @@ export function collectUserRawEntries(session: Session): UserRawEntry[] {
             }
         }
     }
-    // 归档分片：已移出上下文的群聊原文（写一次、不重写）。目录只列最近若干片，避免每次调用都解析全部历史；
-    // 更早的分片仍可用 read_raw kind=user id=arc:<seq> 直接按 id 读取。
-    const maxSeq = (session as any).archiveSeq || 0;
-    for (const shard of listShardsDesc(session.sessionId, maxSeq, ARCHIVE_DIR_LIST_MAX_SHARDS).reverse()) {
+    // 归档/窗口移出分片：已移出上下文的群聊原文（写一次、不重写）。目录只列最近若干片，避免每次调用
+    // 都解析全部历史；更早的分片仍可用 read_raw kind=user id=arc:<seq> / id=raw:<seq> 直接按 id 读取。
+    // 语义区分（docs/17 §2.7）：arc=归档（token 超限），raw=窗口移出（窗口上限）。
+    const maxArc = (session as any).archiveSeq || 0;
+    for (const shard of listShardsDesc(session.sessionId, maxArc, ARCHIVE_DIR_LIST_MAX_SHARDS, 'arc').reverse()) {
         out.push({
             mode: 'block',
             id: `arc:${String(shard.seq).padStart(3, '0')}`,
             summary: `归档分片（${shard.items.length} 条 · ${fmtDate(shard.from)} ~ ${fmtDate(shard.to)}）`,
+            items: shard.items,
+        });
+    }
+    const maxRaw = (session as any).rawSeq || 0;
+    for (const shard of listShardsDesc(session.sessionId, maxRaw, ARCHIVE_DIR_LIST_MAX_SHARDS, 'raw').reverse()) {
+        out.push({
+            mode: 'block',
+            id: `raw:${String(shard.seq).padStart(3, '0')}`,
+            summary: `窗口移出分片（${shard.items.length} 条 · ${fmtDate(shard.from)} ~ ${fmtDate(shard.to)}）`,
             items: shard.items,
         });
     }
@@ -496,12 +506,15 @@ function readUserById(session: Session, id: string, opts: { msgId?: unknown; sta
         }
         return renderUserBlock(block.items, id, opts, cap);
     }
-    if (id.startsWith('arc:')) {
-        // 归档分片按 id 直接读（不依赖目录列出的最近若干片），因此更早的分片也能读到
+    if (id.startsWith('arc:') || id.startsWith('raw:')) {
+        // 分片按 id 直接读（不依赖目录列出的最近若干片），因此更早的分片也能读到。
+        // arc=归档（token 超限），raw=窗口移出（窗口上限）；键前缀不同，读写函数同一套。
+        const kind = id.startsWith('arc:') ? 'arc' : 'raw';
         const seq = parseInt(id.slice(4), 10);
-        const shard = Number.isFinite(seq) ? readShard(session.sessionId, seq) : null;
+        const shard = Number.isFinite(seq) ? readShard(session.sessionId, seq, kind) : null;
         if (!shard) {
-            return `未找到归档分片 ${id}（可能已被清理或序号有误），可用 grep_raw kind=user 查看当前仍保留的条目`;
+            const label = kind === 'arc' ? '归档分片' : '窗口移出分片';
+            return `未找到${label} ${id}（可能已被清理或序号有误），可用 grep_raw kind=user 查看当前仍保留的条目`;
         }
         return renderUserBlock(shard.items, id, opts, cap);
     }
