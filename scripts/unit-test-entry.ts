@@ -1751,6 +1751,249 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** P1-3：结算三条件（水位/门槛/空闲或转冷）任一不满足都不结算 */
+    async testSettleGateThreeConditions(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWatermark = TC.intConfigs['结算水位'];
+        const origMin = TC.intConfigs['结算最小门槛'];
+        const origIdle = TC.intConfigs['结算空闲门槛'];
+        const old = MemoryManager.summarizeChunkWithRetry;
+        let calls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { calls++; return true; };
+        resetConfigCache();
+        const origAgentGet0 = Agent.get;
+        try {
+            const mk = (rawText: string) => {
+                const session = new Session();
+                session.sessionId = 'QQ:settle';
+                session.sessionType = 'group';
+                session.setting.standby = true;
+                Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+                const seq = 1;
+                store.set(`session_QQ:settle:raw:001`, JSON.stringify({ seq, from: 1, to: 2, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: rawText }] }));
+                (session as any).rawSeq = seq;
+                (session as any).settledSeq = 0;
+                return session;
+            };
+
+            // ① 积压不足（水位 3000，1 条短原文远不够）→ 不结算
+            TC.intConfigs['结算水位'] = 3000;
+            TC.intConfigs['结算最小门槛'] = 0;
+            TC.intConfigs['结算空闲门槛'] = 0;
+            resetConfigCache();
+            calls = 0;
+            let s = mk('很短');
+            await s.context.settleWindowIfNeeded(1_000_000);
+            assert.equal(calls, 0, '积压不足水位时不应结算');
+
+            // ① 满足：把水位降到很低
+            TC.intConfigs['结算水位'] = 1;
+            TC.intConfigs['结算最小门槛'] = 0;
+            TC.intConfigs['结算空闲门槛'] = 0;
+            resetConfigCache();
+            calls = 0;
+            s = mk('很短');
+            await s.context.settleWindowIfNeeded(1_000_000);
+            assert.ok(calls > 0, '水位满足且无其它门槛时应结算');
+
+            // ② 上下文总量门槛不满足 → 不结算
+            TC.intConfigs['结算水位'] = 1;
+            TC.intConfigs['结算最小门槛'] = 999999;
+            TC.intConfigs['结算空闲门槛'] = 0;
+            resetConfigCache();
+            calls = 0;
+            s = mk('很短');
+            await s.context.settleWindowIfNeeded(1_000_000);
+            assert.equal(calls, 0, '上下文总量低于最小门槛时不应结算');
+
+            // ③ 空闲门槛不满足且未转冷 → 不结算
+            TC.intConfigs['结算水位'] = 1;
+            TC.intConfigs['结算最小门槛'] = 0;
+            TC.intConfigs['结算空闲门槛'] = 600;
+            resetConfigCache();
+            calls = 0;
+            s = mk('很短');
+            s.lastRelevantAt = 1_000_000;          // 刚刚有活动
+            await s.context.settleWindowIfNeeded(1_000_000 + 1000);
+            assert.equal(calls, 0, '未达空闲门槛且非冷态时不应结算');
+
+            // ③ 转冷后即使未达空闲门槛也结算
+            TC.intConfigs['结算水位'] = 1;
+            TC.intConfigs['结算最小门槛'] = 0;
+            TC.intConfigs['结算空闲门槛'] = 999999;
+            resetConfigCache();
+            calls = 0;
+            s = mk('很短');
+            s.lastRelevantAt = 1_000_000;          // 远超冷静止期 → COLD
+            await s.context.settleWindowIfNeeded(1_000_000 + 10_000_000);
+            assert.ok(calls > 0, '转入 COLD 时应结算一次（即使未达空闲门槛）');
+        } finally {
+            Agent.get = origAgentGet0;   // 必须还原全局桩，避免泄漏到后续用例
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWatermark === undefined) delete TC.intConfigs['结算水位']; else TC.intConfigs['结算水位'] = origWatermark;
+            if (origMin === undefined) delete TC.intConfigs['结算最小门槛']; else TC.intConfigs['结算最小门槛'] = origMin;
+            if (origIdle === undefined) delete TC.intConfigs['结算空闲门槛']; else TC.intConfigs['结算空闲门槛'] = origIdle;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-3：水位幂等——同一批分片跑两次，第二次不得重复 summarize */
+    async testSettleIsIdempotentByWatermark(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWatermark = TC.intConfigs['结算水位'];
+        const origMin = TC.intConfigs['结算最小门槛'];
+        const origIdle = TC.intConfigs['结算空闲门槛'];
+        const old = MemoryManager.summarizeChunkWithRetry;
+        let calls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { calls++; return true; };
+        TC.intConfigs['结算水位'] = 1;
+        TC.intConfigs['结算最小门槛'] = 0;
+        TC.intConfigs['结算空闲门槛'] = 0;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:settle-idem';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            store.set('session_QQ:settle-idem:raw:001', JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: '原文一' }] }));
+            (session as any).rawSeq = 1;
+            (session as any).settledSeq = 0;
+
+            await session.context.settleWindowIfNeeded(2_000_000);
+            const first = calls;
+            assert.ok(first > 0, '首次应结算');
+            assert.equal((session as any).settledSeq, 1, '水位应推进到 1');
+
+            await session.context.settleWindowIfNeeded(2_000_000);
+            assert.equal(calls, first, '第二次不得重复 summarize（水位已推进）');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWatermark === undefined) delete TC.intConfigs['结算水位']; else TC.intConfigs['结算水位'] = origWatermark;
+            if (origMin === undefined) delete TC.intConfigs['结算最小门槛']; else TC.intConfigs['结算最小门槛'] = origMin;
+            if (origIdle === undefined) delete TC.intConfigs['结算空闲门槛']; else TC.intConfigs['结算空闲门槛'] = origIdle;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-3：单次结算受「单次结算调用上限」约束（积压 5 个分片 + 上限 2 → 只处理 2 个） */
+    async testSettleRespectsCallLimit(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWatermark = TC.intConfigs['结算水位'];
+        const origMin = TC.intConfigs['结算最小门槛'];
+        const origIdle = TC.intConfigs['结算空闲门槛'];
+        const origMax = TC.intConfigs['单次结算调用上限'];
+        const old = MemoryManager.summarizeChunkWithRetry;
+        let calls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { calls++; return true; };
+        TC.intConfigs['结算水位'] = 1;
+        TC.intConfigs['结算最小门槛'] = 0;
+        TC.intConfigs['结算空闲门槛'] = 0;
+        TC.intConfigs['单次结算调用上限'] = 2;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:settle-limit';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            for (let i = 1; i <= 5; i++) {
+                store.set(`session_QQ:settle-limit:raw:${String(i).padStart(3, '0')}`,
+                    JSON.stringify({ seq: i, from: i, to: i, items: [{ messageId: `m${i}`, userId: 'QQ:1', time: i, text: `原文${i}` }] }));
+            }
+            (session as any).rawSeq = 5;
+            (session as any).settledSeq = 0;
+
+            const done = await session.context.settleWindowIfNeeded(2_000_000);
+            assert.equal(done, 2, `单次最多处理 2 个分片（实际 ${done}）`);
+            assert.equal(calls, 2, `LLM 调用数应受限（实际 ${calls}）`);
+            assert.equal((session as any).settledSeq, 2, '水位应停在已成功处理的最后一个序号');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWatermark === undefined) delete TC.intConfigs['结算水位']; else TC.intConfigs['结算水位'] = origWatermark;
+            if (origMin === undefined) delete TC.intConfigs['结算最小门槛']; else TC.intConfigs['结算最小门槛'] = origMin;
+            if (origIdle === undefined) delete TC.intConfigs['结算空闲门槛']; else TC.intConfigs['结算空闲门槛'] = origIdle;
+            if (origMax === undefined) delete TC.intConfigs['单次结算调用上限']; else TC.intConfigs['单次结算调用上限'] = origMax;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-3：结算失败后退避——退避窗口内不再尝试（不重复付费） */
+    async testSettleBackoffOnFailure(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWatermark = TC.intConfigs['结算水位'];
+        const origMin = TC.intConfigs['结算最小门槛'];
+        const origIdle = TC.intConfigs['结算空闲门槛'];
+        const old = MemoryManager.summarizeChunkWithRetry;
+        let calls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { calls++; return false; };   // 一直失败
+        TC.intConfigs['结算水位'] = 1;
+        TC.intConfigs['结算最小门槛'] = 0;
+        TC.intConfigs['结算空闲门槛'] = 0;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:settle-backoff';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            store.set('session_QQ:settle-backoff:raw:001', JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: '原文' }] }));
+            (session as any).rawSeq = 1;
+            (session as any).settledSeq = 0;
+
+            const t0 = 3_000_000;
+            await session.context.settleWindowIfNeeded(t0);
+            const afterFirst = calls;
+            assert.ok(afterFirst > 0, '首次应尝试');
+            assert.ok((session as any).settleBackoffUntil > t0, '失败后应设置退避截止时间');
+            assert.equal((session as any).settledSeq, 0, '失败时水位不得推进（下次仍要总结这批）');
+
+            // 退避窗口内（1 分钟后）不再尝试
+            await session.context.settleWindowIfNeeded(t0 + 60_000);
+            assert.equal(calls, afterFirst, '退避窗口内不得重复尝试');
+
+            // 退避结束后（6 分钟后 > 5 分钟退避）允许再试
+            await session.context.settleWindowIfNeeded(t0 + 6 * 60_000);
+            assert.ok(calls > afterFirst, '退避结束后应允许重试');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWatermark === undefined) delete TC.intConfigs['结算水位']; else TC.intConfigs['结算水位'] = origWatermark;
+            if (origMin === undefined) delete TC.intConfigs['结算最小门槛']; else TC.intConfigs['结算最小门槛'] = origMin;
+            if (origIdle === undefined) delete TC.intConfigs['结算空闲门槛']; else TC.intConfigs['结算空闲门槛'] = origIdle;
+            resetConfigCache();
+        }
+    },
+
     /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
     testExtractUsageCacheFields(): void {        const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
         assert.ok(a);

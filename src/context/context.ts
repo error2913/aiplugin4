@@ -15,7 +15,7 @@ import { stripInternalTags } from "../utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
 import { TypeDescriptor, withTimeout } from "../utils/utils";
 
-import { ARCHIVE_SHARD_LIMIT, ArchiveShardItem, clearShard, writeShardIfAbsent } from "./archive_store";
+import { ARCHIVE_SHARD_LIMIT, ArchiveShardItem, clearShard, listShardsAsc, writeShardIfAbsent } from "./archive_store";
 import Message from "./message";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 
@@ -37,13 +37,13 @@ export function truncateMiddle(text: string, max: number): string {
     return `${text.slice(0, head)}…${tail > 0 ? text.slice(-tail) : ''}`;
 }
 
-/** Context 的运行时状态（放 WeakMap，不进会话存档）：入库串行化链 + 归档连续失败计数 */
-interface ContextRuntime { ingestChain: Promise<void>; archiveFailCount: number }
+/** Context 的运行时状态（放 WeakMap，不进会话存档）：入库串行化链 + 归档连续失败计数 + 结算失败计数 */
+interface ContextRuntime { ingestChain: Promise<void>; archiveFailCount: number; settleFailCount?: number }
 const contextRuntime = new WeakMap<object, ContextRuntime>();
 function runtimeOf(ctx: object): ContextRuntime {
     let rt = contextRuntime.get(ctx);
     if (!rt) {
-        rt = { ingestChain: Promise.resolve(), archiveFailCount: 0 };
+        rt = { ingestChain: Promise.resolve(), archiveFailCount: 0, settleFailCount: 0 };
         contextRuntime.set(ctx, rt);
     }
     return rt;
@@ -545,6 +545,88 @@ export class Context {
             toolName
         }
         this.messages.push(tcbm);
+    }
+
+    /**
+     * L2 记忆结算（P1-3，docs/17 §3）：把窗口外原文（`raw:`/`arc:` 分片）总结进长期记忆。
+     *
+     * 为什么需要：记忆沉淀原本只在 `archiveByTokenIfNeeded` 触发，而它的门槛是
+     * `上下文最大token`（默认 100 万）→ 实际几乎不触发，待机群历史基本不进长期记忆。
+     *
+     * **触发（三条件同时成立）**：
+     *   ① 待结算积压 ≥ 结算水位；② 上下文总量 ≥ 结算最小门槛；
+     *   ③ 距上次相关活动 ≥ 结算空闲门槛，**或** 状态已转入 COLD（转冷时结算一次）。
+     *
+     * **执行**：从 `raw:` 分片按序号升序读回未结算原文 → `summarizeChunkWithRetry`
+     * 抽 facts 写记忆库；成功后推进 `settledSeq` 水位（天然幂等：只处理 `settledSeq+1 .. rawSeq`）。
+     *
+     * **上限与退避**：单次最多处理 `单次结算调用上限` 个分片；失败按会话指数退避 5/15/60 分钟。
+     *
+     * @returns 本次实际结算的分片数（0 表示未触发/无积压/失败）
+     */
+    async settleWindowIfNeeded(now: number = Date.now()): Promise<number> {
+        const { SETTLE_WATERMARK, SETTLE_MIN_TOKENS, SETTLE_IDLE_SEC, SETTLE_MAX_SHARDS } = Config.context;
+        if (SETTLE_WATERMARK <= 0 || SETTLE_MAX_SHARDS <= 0) return 0;   // 水位 0 = 关闭自动结算
+        const s: any = this.session;
+        if (!s || !s.sessionId) return 0;
+
+        const rawSeq = typeof s.rawSeq === 'number' ? s.rawSeq : 0;
+        const settledSeq = typeof s.settledSeq === 'number' ? s.settledSeq : 0;
+        if (rawSeq <= settledSeq) return 0;   // 没有未结算的分片
+
+        // 退避中：直接跳过，不消耗任何调用
+        if (typeof s.settleBackoffUntil === 'number' && now < s.settleBackoffUntil) return 0;
+
+        // 未结算分片（按序号升序，受单次上限约束）
+        const pending = listShardsAsc(s.sessionId, settledSeq + 1, rawSeq, SETTLE_MAX_SHARDS, 'raw');
+        if (pending.length === 0) {
+            // 分片被清理/读不到：推进水位，避免每次都空转重试
+            s.settledSeq = rawSeq;
+            return 0;
+        }
+
+        // ① 待结算积压（token）：把未结算分片的原文估算成 token
+        const backlogTokens = pending.reduce((sum, shard) =>
+            sum + shard.items.reduce((n, it) => n + estimateMessageTokens({ role: 'user', contentItems: [{ text: it.text }] } as any), 0), 0);
+        if (backlogTokens < SETTLE_WATERMARK) return 0;
+
+        // ② 上下文总量门槛
+        if (estimateContextMessagesTokens(this.messages) < SETTLE_MIN_TOKENS) return 0;
+
+        // ③ 空闲门槛 **或** 已转冷
+        const state = typeof s.stateOf === 'function' ? s.stateOf(now, { touch: false }) : 'HOT';
+        const idleSec = s.lastRelevantAt > 0 ? Math.max(0, now - s.lastRelevantAt) / 1000 : Infinity;
+        if (state !== 'COLD' && SETTLE_IDLE_SEC > 0 && idleSec < SETTLE_IDLE_SEC) return 0;
+
+        // 执行：逐个分片 summarize（各自独立成败，成功一个推进一格水位）
+        let done = 0;
+        for (const shard of pending) {
+            const messages = shard.items.map(it => ({ role: 'user', contentItems: [{ text: it.text, time: it.time, userId: it.userId, messageId: it.messageId }] }));
+            let ok = false;
+            try {
+                ok = await MemoryManager.summarizeChunkWithRetry(this.session, messages);
+            } catch (e) {
+                log.warning('结算总结失败: ' + (e instanceof Error ? e.message : String(e)));
+                ok = false;
+            }
+            if (!ok) {
+                // 指数退避：5 → 15 → 60 分钟（失败次数在运行时，不持久化）
+                const rt = runtimeOf(this);
+                rt.settleFailCount = (rt.settleFailCount || 0) + 1;
+                const backoffMin = rt.settleFailCount <= 1 ? 5 : rt.settleFailCount === 2 ? 15 : 60;
+                s.settleBackoffUntil = now + backoffMin * 60 * 1000;
+                log.warning(`结算失败，${backoffMin} 分钟后重试（已成功 ${done} 个分片）`);
+                return done;
+            }
+            s.settledSeq = Math.max(typeof s.settledSeq === 'number' ? s.settledSeq : 0, shard.seq);
+            done++;
+        }
+        if (done > 0) {
+            runtimeOf(this).settleFailCount = 0;
+            s.settleBackoffUntil = 0;
+            try { s.save(true); } catch { /* 游离/桩会话无 save */ }
+        }
+        return done;
     }
 
     /**

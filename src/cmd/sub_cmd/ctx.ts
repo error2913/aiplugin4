@@ -33,11 +33,14 @@ export function registerCmdCtx() {
             ? `命中 ${cache.read} · 写入 ${cache.write}（全局，token）`
             : '未上报（厂商未返回缓存字段）';
 
+        const rawSeq = (session as any).rawSeq || 0;
+        const settledSeq = (session as any).settledSeq || 0;
         const lines = [
             `[会话 ${sid}] 状态：${state}${idle >= 0 ? `（距上次相关活动 ${idle}m）` : '（尚无相关活动）'}`,
-            `预算：${MAX_CONTEXT_TOKENS} token（未受限）· 冷态窗口：${COLD_WINDOW_CHARS} 字`,
+            `预算：${MAX_CONTEXT_TOKENS} token（未受限）· 冷态窗口：${COLD_WINDOW_CHARS} 字 · 窗口上限：${Config.context.WINDOW_MAX_CHARS} 字`,
             `上下文：${session.context.messages.length} 条消息 / 约 ${estimateContextMessagesTokens(session.context.messages)} token`,
             `归档：分片 ${session.archiveSeq}${session.lastArchivedAt ? ` · 上次 ${fmtDate(session.lastArchivedAt)}` : ''}`,
+            `窗口移出：分片 ${rawSeq}${session.lastRawAt ? ` · 上次 ${fmtDate(session.lastRawAt)}` : ''} · 已结算到 ${settledSeq}/${rawSeq}`,
             `本会话调用：压缩 ${stats.compression} · 归档总结 ${stats.summarization} · 评分 ${stats.judge}`,
             `全局用途用量：${usageLine}`,
             `缓存：${cacheLine}`,

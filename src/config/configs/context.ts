@@ -13,6 +13,10 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "冷态单条截断字数", 500, "待机（冷态）时单条消息超过该字数则留头留尾（原文仍可用 read_raw 查）；0=不截断", "上下文");
         seal.ext.registerBoolConfig(ext, "归档保留原文", true, "开启时：归档时把群聊原文写入归档分片（可用 read_raw kind=user id=arc:序号 回查），并调用总结智能体沉淀记忆；关闭时：归档不留原文、不写分片（省存储），但仍会调用总结智能体沉淀记忆——历史依旧进长期记忆，只是之后无法回查原文", "上下文");
         seal.ext.registerIntConfig(ext, "窗口上限字数", 20000, "上下文里保留的最近内容字数上界：超出部分移出到原文分片（session_<会话ID>:raw:<序号>，可用 read_raw kind=user id=raw:序号 回查），使会话存档体积与消息总量解耦；0=不移出（保持旧行为）", "上下文");
+        seal.ext.registerIntConfig(ext, "结算水位", 3000, "待结算积压达到该 token 数才把窗口外原文总结进长期记忆（0=关闭自动结算）", "上下文");
+        seal.ext.registerIntConfig(ext, "结算最小门槛", 20000, "上下文总量低于该 token 数时不做 LLM 结算，避免短会话也调用总结智能体", "上下文");
+        seal.ext.registerIntConfig(ext, "结算空闲门槛", 600, "距上次相关活动达到该秒数才结算（0=不要求空闲）；会话转入冷态时也会结算一次", "上下文");
+        seal.ext.registerIntConfig(ext, "单次结算调用上限", 2, "每次结算最多处理多少个分片（限制单次 LLM 调用量）", "上下文");
     }
 
     static get() {
@@ -32,7 +36,13 @@ export default class ContextConfig {
             COLD_WINDOW_CHARS: seal.ext.getIntConfig(ext, "冷态窗口字数"),
             COLD_SINGLE_TRUNCATE: seal.ext.getIntConfig(ext, "冷态单条截断字数"),
             ARCHIVE_KEEP_RAW: seal.ext.getBoolConfig(ext, "归档保留原文"),
-            WINDOW_MAX_CHARS: seal.ext.getIntConfig(ext, "窗口上限字数")
+            WINDOW_MAX_CHARS: seal.ext.getIntConfig(ext, "窗口上限字数"),
+            SETTLE_WATERMARK: seal.ext.getIntConfig(ext, "结算水位"),
+            SETTLE_MIN_TOKENS: seal.ext.getIntConfig(ext, "结算最小门槛"),
+            SETTLE_IDLE_SEC: seal.ext.getIntConfig(ext, "结算空闲门槛"),
+            // 上限 <= 0 会静默关闭结算（无任何提示），与「结算水位」的"0=关闭"语义混淆。
+            // 这里统一回退到默认 2，只把"水位=0"作为唯一的关闭开关，避免用户误设后以为坏了。
+            SETTLE_MAX_SHARDS: normalizePositive(seal.ext.getIntConfig(ext, "单次结算调用上限"), 2, "单次结算调用上限")
         }
     }
 }
@@ -48,4 +58,14 @@ function normalizeInsertCount(raw: number, maxRounds: number): number {
         return 0;
     }
     return raw;
+}
+
+/**
+ * 必须为正数的配置项：<= 0 时回退默认并告警。
+ * 用于「单次结算调用上限」这类"设成 0 会静默关闭功能"的项——避免用户误设后无从察觉。
+ */
+function normalizePositive(raw: number, fallback: number, name: string): number {
+    if (raw > 0) return raw;
+    logger.warning(`「${name}」必须为正数，已回退默认值 ${fallback}`);
+    return fallback;
 }

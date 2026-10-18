@@ -104,6 +104,20 @@ export default class Agent {
         return model.isMultimodal;
     }
 
+    /**
+     * L2 记忆结算（P1-3）：把窗口外原文（`raw:` 分片）总结进长期记忆。
+     *
+     * 放在"每轮模型请求前"（与 flushPending/flushNotices 同点），因为此时上下文已稳定；
+     * 结算本身是**有界**的（单次最多 `单次结算调用上限` 个分片）且失败按会话退避，
+     * 因此不会拖住回复；任何异常都只记日志，绝不影响本轮请求。
+     */
+    private async settleBacklog(session: Session): Promise<void> {
+        try {
+            await session.context.settleWindowIfNeeded();
+        } catch (e) {
+            log.warning('[ctx-cost] 记忆结算失败（不影响本轮回复）: ' + (e instanceof Error ? e.message : String(e)));
+        }
+    }
     async chat(prompt: string): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
@@ -231,6 +245,8 @@ export default class Agent {
             await session.flushPending();
             // 子代理结算 notice 入库（后台子代理完成，父下一轮可见）
             await session.flushNotices();
+            // L2 记忆结算（P1-3）：三条件满足时把窗口外原文总结进长期记忆（有界、失败退避、不阻塞回复）
+            await this.settleBacklog(session);
             const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded });
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
@@ -496,6 +512,8 @@ export default class Agent {
         await session.flushPending();
         // 子代理结算 notice 入库（父下一轮可见）
         await session.flushNotices();
+        // L2 记忆结算（P1-3）：与非流式路径同一 hook 点
+        await this.settleBacklog(session);
 
         // 建立流；模型分类错误（上下文超长/余额不足/图片下载失败等）由 handleModelError 自动处理一次后重建重试
         let sys = systemMessage;
