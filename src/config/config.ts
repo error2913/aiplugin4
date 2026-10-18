@@ -18,6 +18,7 @@ import SkillsConfig from "./configs/skills";
 import SubAgentConfig from "./configs/subagent";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
+import WebConfigStore from "./configs/web";
 import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
 
 export const ext: seal.ExtInfo = (() => {
@@ -38,6 +39,7 @@ const configMap = {
     trigger: TriggerConfig,
     reply: ReplyConfig,
     tool: ToolConfig,
+    web: WebConfigStore,
     mcp: McpConfig,
     skills: SkillsConfig,
     subagent: SubAgentConfig,

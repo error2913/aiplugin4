@@ -419,6 +419,14 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 > **协议端自带 AI 语音**（下拉里的小新/猴哥/妲己…等角色，由 NapCat/Lagrange 实现、无需配置模型）——AI 现在直接用 `call_ob11_api` 调 `get_ai_characters`（查角色）/ `send_group_ai_record`、`send_private_ai_record`（发送）/ `get_ai_record`（只取语音 URL）；用法与常见角色名见默认知识库 ob11-api。
 > **插件自建 TTS**（下拉里的「自定义」，已内置）——内置预设里已经带 `{voice}` 占位符，音色改该模型 `request.params.voice` 的 `default` 或生成时传 `--voice`（`.ai tts`）/工具参数 `voice`（AI）即可。
 
+### 联网
+
+| 设置项 | 说明 |
+|:---:|:---|
+| 联网配置 | 联网搜索/抓取配置（v1，一个 JSON）。**留空 = 沿用「后端 → 联网搜索」的 SearXNG**，升级后行为不变。内置方言：DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；`providers` 顺序即尝试顺序（失败自动回退），`routes` 可分别指定搜索/抓取顺序。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)的「联网搜索」页生成后粘贴；修改后需重载 JS 生效。格式见 [docs/18-联网搜索与抓取接入方案](docs/18-联网搜索与抓取接入方案.md) |
+
+> AI 侧工具：`web_search`（搜索，支持 `allowed_domains` / `blocked_domains` / `time_range` / `detail`，失败自动换 provider）与 `web_fetch`（抓取网页正文，按 `start_index` 续读）。模型厂商自带的托管搜索（OpenAI / Anthropic / Gemini / xAI / Qwen）默认不启用，属于模型请求参数，见 docs/18 §6.8。
+
 ### MCP
 
 | 设置项 | 说明 |
@@ -512,7 +520,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/stream-output)，`body.stream = true` 的模型才会走流式 |
 | 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
 | 媒体转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/media-fetch)，让「整个响应体即音频」的语音接口（阿里 CosyVoice、百度、OpenAI 兼容等）可用：海豹的 JS 引擎读不了二进制响应，由该后端代发请求并转成 base64 返回。不启动它时这些接口会明确报错；返回 JSON 的接口（MiniMax、Google Cloud、绝大多数生图）不受影响 |
-| 联网搜索 | [searxng](https://github.com/searxng/searxng)，有能力建议自己搭建，为 AI 提供联网搜索功能 |
+| 联网搜索 | **【已废弃，保留兼容】** [searxng](https://github.com/searxng/searxng) 地址。仅当「联网 → 联网配置」为空或校验失败时作为 legacy provider；新配置请到「联网」页填写 |
 | 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/usage-chart)，token 使用情况图表生成 |
 | 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
 | 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
@@ -729,7 +737,7 @@ platform: []            # 可选：[] / 省略 = 所有平台；例如 [QQ, DISC
 | 原文检索 | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文） |
 | 上下文编辑 | `context_edit_list`（按序号定位任意会话上下文条目，支持 role/keyword/时间过滤）、`context_edit_replace`（按 scope 批量替换正文文本：字面量/正则、空串删除、原文副本同步、持久化；敏感工具，默认开启，详见下方说明） |
 | 黑名单 | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
-| 网页 | `web_search`；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
+| 网页 | `web_search`（多后端、失败回退）、`web_fetch`（抓取正文、`start_index` 续读）；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |
 | 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
 | 子代理 | `subagent`、`subagent_fork`（委派）、`send_message`、`interrupt_agent`、`list_agents`（可续跑子代理控制）、`job_list`、`job_output`、`job_kill`（后台 job 管理）；默认开启，详见上方「子代理」配置小节 |
 | 外部插件 | 其他海豹插件经 `globalThis.aiplugin4.registerTool` 注册的工具 |

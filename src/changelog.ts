@@ -1,6 +1,14 @@
 // 版本更新日志（changelog），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const changelog: { [version: string]: string } = {
+    "4.27.0": `## 联网搜索接入层（10 家 provider + 网页抓取）
+
+- **新增「联网」页与「联网配置」**（v1 JSON）：可接 DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；\`providers\` 顺序即尝试顺序，失败自动回退，\`routes\` 可分别指定搜索/抓取顺序；\`defaults\` 管条数/详细程度/超时/正文截断/回退开关。
+- **\`web_search\` 重写**：参数为 \`query\`（兼容旧 \`q\`）/ \`count\` / \`offset\` / \`detail\` / \`allowed_domains\` / \`blocked_domains\` / \`time_range\` / \`page\`；输出编号摘要；空结果给「换宽泛查询/去掉过滤」建议；某个 provider 失败自动换下一个，400/422 参数错误不换家（直接暴露配置问题）。
+- **新增 \`web_fetch\`**：抓取网页正文（Markdown），支持 \`max_chars\` 与 \`start_index\` 续读。
+- **兼容**：「联网配置」留空时仍用「后端 → 联网搜索」的 SearXNG（该配置项标记为已废弃/legacy），升级后行为不变；校验失败也会回退 legacy，不让插件启动崩。
+- **配置生成器**：\`aiplugin4-config\` 新增「联网搜索」页签，可生成上述 JSON（含 10 家方言与 generic，默认紧凑输出、可格式化）。
+`,
     "4.26.0": `## 待机群上下文成本治理（不再"每条消息都压一次"）
 
 **问题**：待机（standby）群里所有消息会累积进同一条 user 消息块；每来一条新消息都会重新判断"整块是否超过「消息压缩阈值」"，超过就调用一次压缩智能体。于是群里越热闹、压缩调用越多，token 消耗与消息量成正比——哪怕机器人一句话都没说；压缩结果又没有长度约束、失败不重试，超限时还会把整段历史一次性删光。

@@ -16,6 +16,7 @@ const bundles = {
     main: path.join(outDir, 'unit-main.cjs'),
     subagent: path.join(outDir, 'unit-subagent.cjs'),
     v5: path.join(outDir, 'unit-v5.cjs'),
+    web: path.join(outDir, 'unit-web.cjs'),
 };
 
 // 测试可覆盖的配置值（unit-test-entry.ts 通过 globalThis.__TEST_CONFIG__ 读写）
@@ -91,7 +92,8 @@ globalThis.__TEST_CONFIG__ = TC;
     const entries = [
         ['main', path.join(repo, 'scripts/unit-test-entry.ts')],
         ['subagent', path.join(repo, 'scripts/unit-test-subagent.ts')],
-        ['v5', path.join(repo, 'scripts/unit-test-v5.ts')]
+        ['v5', path.join(repo, 'scripts/unit-test-v5.ts')],
+        ['web', path.join(repo, 'scripts/unit-test-web.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {
