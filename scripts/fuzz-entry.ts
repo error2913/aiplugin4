@@ -275,9 +275,9 @@ async function runRound(seed: number, round: number) {
     s.sessionId = sid; s.sessionType = 'group'; s.agentName = 'default';
     (s.context as any).sessionId = sid; (s.context as any).agentName = 'default';
     s.setting.standby = rnd() < 0.7;
-    // 冷热混合：80% 概率"超过 2 天阈值"（冷态），20% 概率刚刚有活动（热态）
+    // 冷热混合：80% 概率"超过 10 分钟阈值"（冷态），20% 概率刚刚有活动（热态）
     s.lastRelevantAt = rnd() < 0.8
-        ? Date.now() - (2 * 24 * 3_600_000 + Math.floor(rnd() * 20 * 60_000))
+        ? Date.now() - (11 * 60_000 + Math.floor(rnd() * 20 * 60_000))
         : Date.now() - Math.floor(rnd() * 60_000);
     sessionStore.set(sid, s);
     const ctx = s.context;

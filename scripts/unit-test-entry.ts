@@ -1849,7 +1849,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
             calls = 0;
             s = mk('很短');
-            const COLD_AFTER = 2 * 24 * 60 * 60 * 1000;   // 冷态阈值：2 天
+            const COLD_AFTER = 10 * 60 * 1000;   // 冷态阈值：10 分钟
             s.lastRelevantAt = 1_000_000;          // 超过冷态阈值 → COLD
             await s.context.settleWindowIfNeeded(1_000_000 + COLD_AFTER + 1_000);
             assert.ok(calls > 0, '转入 COLD 时应结算一次（即使未达空闲门槛）');
@@ -2504,13 +2504,13 @@ export const tests: Record<string, () => void | Promise<void>> = {
             s.sessionType = 'user';
             s.setting.standby = true;
             const t0 = 1_000_000;
-            const TOTAL = 2 * 24 * 60 * 60 * 1000;   // 冷态进入阈值：2 天
+            const TOTAL = 10 * 60 * 1000;   // 冷态进入阈值：10 分钟
             s.lastRelevantAt = t0;
             assert.equal(s.stateOf(t0 + TOTAL - 61_000), 'HOT', '热态保持内应为 HOT');
-            assert.equal(s.stateOf(t0 + TOTAL - 60_000), 'COOLING', '到热态保持（2 天 - 1 分钟）应进入余温');
+            assert.equal(s.stateOf(t0 + TOTAL - 60_000), 'COOLING', '到热态保持（10 分钟 - 1 分钟）应进入余温');
             assert.equal(s.stateOf(t0 + TOTAL - 1), 'COOLING', '转冷前仍是余温');
-            assert.equal(s.stateOf(t0 + TOTAL), 'COLD', '连续 2 天无相关活动应转冷');
-            assert.equal(s.stateOf(t0 + 240_000), 'HOT', '旧的 4 分钟阈值已不再转冷');
+            assert.equal(s.stateOf(t0 + TOTAL), 'COLD', '连续 10 分钟无相关活动应转冷');
+            assert.equal(s.stateOf(t0 + 240_000), 'HOT', '4 分钟仍在热态保持内（阈值已延长）');
 
             // 在途任务冻结衰减：即使已超过 2 天阈值，也应保持 HOT 并刷新活动时间
             s.running = true;
