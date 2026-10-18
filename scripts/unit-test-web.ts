@@ -125,14 +125,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(getByPath({}, 'a.b'), undefined);
     },
 
-    // ---------- 配置页签 / 默认配置（确保开箱不报错）
+    // ---------- 配置页签 / 默认配置（确保开箱可用、不报错）
 
-    testWebConfigEmptyIsEmpty(): void {
+    testWebConfigDefaultUsesSearxng(): void {
         const resolved = resolveWebConfig('');
         assert.equal(resolved.issues.length, 0, '空配置不应产生校验错误');
-        assert.equal(resolved.config.providers.length, 0, '空配置 = 没有 provider');
-        assert.equal(resolved.config.defaults.count, 5);
-        assert.equal(resolved.config.defaults.detail, 'summary');
+        const cfg = resolved.config;
+        assert.equal(cfg.providers.length, 1, '空配置 = 内置默认 SearXNG');
+        assert.equal(cfg.providers[0].id, 'default-searxng');
+        assert.equal(cfg.providers[0].dialect, 'searxng');
+        assert.equal(cfg.providers[0].baseURL, 'https://searxng.fishwhite.top');
+        assert.equal(cfg.defaults.count, 5);
+        assert.equal(cfg.defaults.detail, 'summary');
     },
 
     testWebConfigCustomJson(): void {
@@ -143,24 +147,27 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     testWebConfigInvalidFallsBackNoThrow(): void {
-        // 坏 JSON 不能抛错：返回空配置 + issues 供日志使用
+        // 坏 JSON 不能抛错：回退内置默认 SearXNG + issues 供日志使用
         const resolved = resolveWebConfig('{ not json');
         assert.ok(resolved.issues.length > 0, '应带回校验问题');
-        assert.equal(resolved.config.providers.length, 0, '校验失败 = 空配置，不崩');
+        assert.equal(resolved.config.providers[0].id, 'default-searxng', '校验失败回退默认，不崩');
+        assert.equal(resolved.config.providers[0].baseURL, 'https://searxng.fishwhite.top');
     },
 
-    testWebDefaultConfigSearchGivesActionableError: async () => {
-        // 默认空配置调用 web_search：不抛到会话，而是给可操作的「去联网页配置」提示
+    testWebDefaultConfigSearchWorks: async () => {
+        // 默认空配置直接跑一次搜索：开箱可用、不抛错
         const cfg = resolveWebConfig('').config;
-        let called = false;
-        await assert.rejects(
-            runSearch(cfg, input(), {
-                fetchImpl: (async () => { called = true; return jsonResponse(200, {}); }) as any,
-                sleep: noSleep,
-            }),
-            /没有可用的联网搜索 provider[\s\S]*联网配置/,
-        );
-        assert.equal(called, false, '没有 provider 时不应发任何请求');
+        const calls: string[] = [];
+        const result = await runSearch(cfg, input(), {
+            fetchImpl: (async (url: string) => {
+                calls.push(String(url));
+                return jsonResponse(200, { results: [{ title: 'T', url: 'U', content: 'C' }] });
+            }) as any,
+            sleep: noSleep,
+        });
+        assert.equal(result.provider, 'default-searxng');
+        assert.ok(calls[0].startsWith('https://searxng.fishwhite.top/search?'), calls[0]);
+        assert.equal(result.items.length, 1);
     },
 
     // ---------- 方言：build
