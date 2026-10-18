@@ -2310,6 +2310,116 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /**
+     * P1-2 不变量（非连续工具结果）：工具结果**被别的消息隔开**时（`assistant(tc c1), tool(c1), user, tool(c1)`），
+     * 窗口移出仍不得保留任何无配对的 tool。
+     * 注意：真实请求要求 tool 紧跟在发起的 assistant 之后，这种形态本身就不合法/罕见，
+     * 但**底层数据可能因历史写入而存在**，所以这里只要求"宁可整条移出，也不要留下孤儿"。
+     */
+    testWindowTrimNonContiguousToolsNoOrphan(): void {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWindow = TC.intConfigs['窗口上限字数'];
+        const origAgentGet = Agent.get;
+        try {
+            for (const budget of [20, 40, 60, 80, 100, 150, 200]) {
+                TC.intConfigs['窗口上限字数'] = budget;
+                resetConfigCache();
+                const session = new Session();
+                session.sessionId = `QQ:nc-${budget}`;
+                session.sessionType = 'group';
+                session.setting.standby = true;
+                Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+                const ctx = session.context;
+                ctx.messages = [
+                    { role: 'assistant', contentItems: [{ text: '调用工具'.repeat(3), time: 1, messageId: '' }], toolCalls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }] },
+                    { role: 'tool', tool_call_id: 'c1', contentItems: [{ text: '结果甲'.repeat(3), time: 2, messageId: '' }] },
+                    { role: 'user', contentItems: [{ text: '中间插话'.repeat(3), time: 3, userId: 'QQ:1', messageId: 'u1' }] },
+                    { role: 'tool', tool_call_id: 'c1', contentItems: [{ text: '结果乙', time: 4, messageId: '' }] },
+                    { role: 'user', contentItems: [{ text: '最新消息', time: 5, userId: 'QQ:1', messageId: 'u2' }] },
+                ] as any;
+                ctx.trimToWindow();
+
+                const kept = ctx.messages as any[];
+                const callIds = new Set<string>();
+                for (const m of kept) {
+                    if (m.role !== 'assistant') continue;
+                    for (const tc of (m.toolCalls || m.tool_calls || [])) callIds.add(tc.id);
+                }
+                for (const m of kept) {
+                    if (m.role !== 'tool') continue;
+                    assert.ok(callIds.has(m.tool_call_id),
+                        `budget=${budget}：非连续形态下仍留下孤儿 tool(${m.tool_call_id})。roles=${kept.map(x => x.role).join(',')}`);
+                }
+            }
+        } finally {
+            Agent.get = origAgentGet;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWindow === undefined) delete TC.intConfigs['窗口上限字数']; else TC.intConfigs['窗口上限字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /**
+     * 工具配对不变量（此前**完全没有**配对断言）：请求体里若出现"有 tool 无 assistant(tool_calls)"，
+     * 真实厂商 API 会 400。这里在 **handleMessages** 层断言（而不是 foldContextMessages），
+     * 因为只有在非「提示词工程」路径下才会真正发送 role:'tool'；PE 模式下 tool 结果转成 user 文本，
+     * 无配对的 tool 是合法的、不得被删除。
+     * 覆盖连续、非连续、前导悬空三种形态。
+     */
+    async testHandleMessagesNeverEmitsOrphanTools(): Promise<void> {
+        const origPE = TC.boolConfigs['切换为提示词工程'];
+        const origMax = TC.intConfigs['上下文最大token'];
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        TC.boolConfigs['切换为提示词工程'] = false;   // 非 PE：会真正发送 role:'tool'
+        TC.intConfigs['上下文最大token'] = 0;        // 不限预算，隔离折叠
+        TC.boolConfigs['是否开启全局待机'] = false;
+        resetConfigCache();
+        try {
+            const A = (id: string) => ({ role: 'assistant', contentItems: [{ text: '调用工具', time: 1, messageId: '' }], toolCalls: [{ id, type: 'function', function: { name: 'f', arguments: '{}' } }] });
+            const T = (id: string) => ({ role: 'tool', toolCallId: id, contentItems: [{ text: '结果' + id, time: 2, messageId: '' }] });
+            const U = (t: string) => ({ role: 'user', contentItems: [{ text: t, time: 3, userId: 'QQ:1', messageId: 'm' }] });
+
+            const fixtures: { name: string; msgs: any[] }[] = [
+                { name: '连续', msgs: [U('早'), A('c1'), T('c1'), T('c1'), U('最新')] },
+                { name: '非连续', msgs: [U('早'), A('c1'), T('c1'), U('中间'), T('c1'), U('最新')] },
+                { name: '前导悬空', msgs: [T('c1'), U('早'), U('最新')] },
+                { name: '多组', msgs: [U('早'), A('c1'), T('c1'), A('c2'), T('c2'), U('最新')] },
+            ];
+            const system = { role: 'system', text: '系统' } as any;
+            for (const fx of fixtures) {
+                const session = { context: { messages: fx.msgs.map(m => ({ ...m })) } };
+                const out = await handleMessages(makeCtx(), session as any, false, undefined, system);
+                const callIds = new Set<string>();
+                for (const m of out as any[]) {
+                    for (const tc of (m.tool_calls || [])) if (tc?.id) callIds.add(String(tc.id));
+                }
+                for (const m of out as any[]) {
+                    if (m.role !== 'tool') continue;
+                    assert.ok(m.tool_call_id && callIds.has(String(m.tool_call_id)),
+                        `${fx.name}：请求体出现孤儿 tool(${m.tool_call_id})，roles=${out.map((x: any) => x.role).join(',')}`);
+                }
+            }
+
+            // 反向：PE 模式下无配对的 tool 必须**保留**（转成 user 文本），不得被误删
+            TC.boolConfigs['切换为提示词工程'] = true;
+            resetConfigCache();
+            const peSession = { context: { messages: [T('solo')] } };
+            const peOut = await handleMessages(makeCtx(), peSession as any, false, undefined, system);
+            assert.ok(JSON.stringify(peOut).includes('结果solo'),
+                'PE 模式下无配对的 tool 结果必须保留（转为 user 文本）');
+        } finally {
+            if (origPE === undefined) delete TC.boolConfigs['切换为提示词工程']; else TC.boolConfigs['切换为提示词工程'] = origPE;
+            if (origMax === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origMax;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            resetConfigCache();
+        }
+    },
+
     /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
     testExtractUsageCacheFields(): void {        const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
         assert.ok(a);

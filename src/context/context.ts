@@ -11,7 +11,7 @@ import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
-import { buildContent, estimateMessageTokens } from "../utils/message";
+import { buildContent, estimateMessageTokens, toolResultCallId } from "../utils/message";
 import { callOb11Api } from "../utils/ob11";
 import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, buildUserTruncateMarker, stripRawMarkers } from "../utils/raw_marker";
 import { stripInternalTags } from "../utils/string";
@@ -722,79 +722,95 @@ export class Context {
      * 选出"要保留的窗口尾部"：从新到旧按**条目**粒度累加渲染字数，直到达到预算。
      * 返回 `startIndex`＝messages 中保留区间的起始下标（0 表示全部保留）。
      *
-     * 工具原子组（`assistant(tool_calls)` + 紧随的 tool 结果）作为整体判定：
-     * 要么整组保留，要么整组移出——否则会留下孤儿 tool 结果（请求 400 / 被孤儿清理删掉）。
+     * **工具配对是硬不变量，而不是"扫描顺序的技巧"**（本函数两次修 bug 的教训）：
+     * 一条 `role:'tool'` 必须有发起它的 `assistant(tool_calls)`；反之带 toolCalls 的 assistant
+     * 也必须有对应的 tool 结果。违反即请求 400。
      *
-     * 实现要点（修 BUG：曾经会拆组）：**从后往前扫描时，遇到 `tool` 必须"向上找到它的
-     * assistant(tool_calls) 并把两者一起判定"**，绝不能把 `tool` 当普通消息单独保留。
-     * 旧实现只在遇到 assistant 时向前吞并其后的 tool，而从后往前扫时 `tool` 会先被访问到，
-     * 于是被当作普通消息计入窗口；一旦随后 break（预算不够），就留下"有 tool 无 assistant"的
-     * 孤儿（`roles=tool,user`），真实请求会 400。
+     * 因此分两步，与扫描顺序无关：
+     *   ① 按预算从新到旧**粗选**一个 startIndex（纯长度累加，不关心角色）；
+     *   ② **配对修复** `alignToToolPairing()`：把 startIndex 上移到"保留区间自洽"的位置。
+     * 这样对连续 / 非连续 / 前导悬空 等各种形态都成立。
      */
     private pickWindowTail(budgetChars: number): { startIndex: number } {
         let used = 0;
         let startIndex = this.messages.length;
-        // 已判定过的下标（避免组内成员被重复计入）
-        const settled = new Set<number>();
-
-        const groupLength = (from: number, to: number): number => {
-            let n = 0;
-            for (let k = from; k <= to; k++) n += buildContent(this.messages[k] as any).length;
-            return n;
-        };
-
         for (let i = this.messages.length - 1; i >= 0; i--) {
-            if (settled.has(i)) continue;
-            const m = this.messages[i] as any;
-
-            // 工具结果：向上找配对的 assistant(tool_calls)，把 [assistant .. i] 整段作为一个原子单位。
-            // 找不到配对（历史遗留的异常数据）时，按单条处理——此时没有"配对"可保护。
-            if (m.role === 'tool') {
-                let start = i;
-                while (start - 1 >= 0) {
-                    const prev = this.messages[start - 1] as any;
-                    if (prev.role === 'tool') { start--; continue; }
-                    const prevCalls = prev.toolCalls || prev.tool_calls;
-                    if (prev.role === 'assistant' && Array.isArray(prevCalls) && prevCalls.length > 0) start--;
-                    break;
-                }
-                const owner = this.messages[start] as any;
-                const ownerCalls = owner ? (owner.toolCalls || owner.tool_calls) : undefined;
-                const paired = start < i && owner && owner.role === 'assistant'
-                    && Array.isArray(ownerCalls) && ownerCalls.length > 0;
-                if (paired) {
-                    const len = groupLength(start, i);
-                    if (used + len > budgetChars) break;
-                    used += len;
-                    startIndex = start;
-                    for (let k = start; k <= i; k++) settled.add(k);
-                    i = start;   // for 循环还会 i--，下一轮从 start-1 继续
-                    continue;
-                }
-                // 无配对：按单条处理（防御异常数据）
-            }
-
-            // assistant(tool_calls)：其后的 tool 结果由上面的分支（或本分支）统一处理；
-            // 这里把 [i .. 末尾连续 tool] 作为一组判定，保证"带 toolCalls 的 assistant 不会丢结果"。
-            const toolCalls = m.toolCalls || m.tool_calls;
-            if (m.role === 'assistant' && Array.isArray(toolCalls) && toolCalls.length > 0) {
-                let j = i;
-                while (j + 1 < this.messages.length && (this.messages[j + 1] as any).role === 'tool') j++;
-                const len = groupLength(i, j);
-                if (used + len > budgetChars) break;
-                used += len;
-                startIndex = i;
-                for (let k = i; k <= j; k++) settled.add(k);
-                continue;
-            }
-
-            const len = buildContent(m).length;
+            const len = buildContent(this.messages[i] as any).length;
             if (used + len > budgetChars) break;
             used += len;
             startIndex = i;
-            settled.add(i);
         }
-        return { startIndex };
+        // 配对修复可能上移 startIndex（窗口略超预算），但绝不产生非法请求
+        return { startIndex: this.alignToToolPairing(startIndex) };
+    }
+
+    /**
+     * 把保留区间起点上移到"工具配对自洽"的位置。
+     * 自洽＝区间内没有孤儿 tool、也没有结果被切在区间外的半截 assistant(tool_calls)。
+     *
+     * 修正规则：
+     * - 区间内有孤儿 tool：owner 在区间外 → 上移到 owner；连 owner 都找不到（数据异常）→ 把该 tool 本身排除。
+     * - 区间内有结果缺失的 assistant(tool_calls)：保留"模型看不到工具返回"的半截调用没有意义，
+     *   且它的 tool 随后会变成孤儿 → 把该 assistant 一起移出（上移到它之后）。
+     *
+     * 上移可能引入新的越界关系，故循环到稳定（实际 1~2 轮，上限 O(n) 兜底）。
+     */
+    private alignToToolPairing(startIndex: number): number {
+        let start = startIndex;
+        for (let guard = 0; guard <= this.messages.length; guard++) {
+            if (start >= this.messages.length) return this.messages.length;
+            const resultIds = new Set<string>();
+            for (let k = start; k < this.messages.length; k++) {
+                const m = this.messages[k] as any;
+                if (m?.role === 'tool' && m.tool_call_id) resultIds.add(String(m.tool_call_id));
+            }
+            let bump = -1;
+            for (let k = start; k < this.messages.length; k++) {
+                const m = this.messages[k] as any;
+                if (!m) continue;
+                if (m.role === 'tool') {
+                    const rid = toolResultCallId(m);
+                    const orphan = !rid || !this.hasCallIdBefore(rid, start, k);
+                    if (orphan) {
+                        const owner = this.findToolOwnerBefore(k, start);
+                        bump = Math.max(bump, owner >= 0 ? owner : k + 1);
+                    }
+                } else if (m.role === 'assistant') {
+                    const calls = m.toolCalls || m.tool_calls;
+                    if (!Array.isArray(calls) || calls.length === 0) continue;
+                    const missing = calls.some((tc: any) => tc && tc.id && !resultIds.has(String(tc.id)));
+                    if (missing) bump = Math.max(bump, k + 1);
+                }
+            }
+            if (bump < 0 || bump <= start) return start;
+            start = bump;
+        }
+        return start;
+    }
+
+    /** 区间 `[from, to)` 内是否存在发起 `callId` 的 assistant(tool_calls) */
+    private hasCallIdBefore(callId: string, from: number, to: number): boolean {
+        for (let k = from; k < to; k++) {
+            const m = this.messages[k] as any;
+            if (!m || m.role !== 'assistant') continue;
+            const calls = m.toolCalls || m.tool_calls;
+            if (!Array.isArray(calls)) continue;
+            if (calls.some((tc: any) => tc && tc.id && String(tc.id) === String(callId))) return true;
+        }
+        return false;
+    }
+
+    /** 在 `[limit, toolIdx)` 内找发起 `messages[toolIdx]` 的 assistant（按 tool_call_id 精确匹配） */
+    private findToolOwnerBefore(toolIdx: number, limit = 0): number {
+        const wantId = toolResultCallId(this.messages[toolIdx]);
+        for (let k = toolIdx - 1; k >= limit; k--) {
+            const m = this.messages[k] as any;
+            if (!m || m.role !== 'assistant') continue;
+            const calls = m.toolCalls || m.tool_calls;
+            if (!Array.isArray(calls) || calls.length === 0) continue;
+            if (!wantId || calls.some((tc: any) => tc && tc.id === wantId)) return k;
+        }
+        return -1;
     }
 
     /** 从一批消息里抽取可留档的群聊原文（复用归档分片的条目口径） */

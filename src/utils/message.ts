@@ -250,6 +250,10 @@ const FOLD_MIN_CHARS = 200;
  * @param budgetChars 整包预算字数；<= 0 表示不折叠
  */
 export function foldContextMessages(messages: ContextMessage[], budgetChars: number): ContextMessage[] {
+    // 注意：**不在这里做工具配对校验**。本函数也用于"提示词工程"模式，该模式会把 tool 结果
+    // 转成 user 文本（见 handleMessages 的 PROMPT_ENGINEERING 分支），此时"没有配对 assistant 的
+    // tool 消息"是合法的，删除它会丢工具结果。配对校验只应在**真正发送 role:'tool'** 的路径上做
+    // （handleMessages 末尾的非 PE 路径已有对应处理）。
     if (budgetChars <= 0) return messages;
     const total = messages.reduce((n, m) => n + buildContent(m).length, 0);
     if (total <= budgetChars) return messages;
@@ -309,6 +313,10 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
         }
     }
 
+    // 配对（tool_call_id ↔ tool_calls[].id）由**下方过滤循环**保证：无配对的 tool 会被剔、
+    // 无结果的 tool_calls 会被过滤，全过滤时同步删除其后跟随的 tool 消息。
+    // 这里**刻意不额外做一遍剔除**：本函数也服务 PE 模式（tool 结果转 user 文本，无配对是合法的），
+    // 在那条路径上删 tool 会丢工具结果。详见 handleMessages 的非 PE 分支。
     if (foldedNewestFirst.length === 0) return kept;
     const header = `更早的群聊/工具内容已折叠为摘要（共 ${foldedNewestFirst.length} 条；需要原文时用 read_raw / grep_raw 回查）：`;
     const detail: string[] = [];
@@ -334,6 +342,18 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
     if (first && first.role === 'user' && Array.isArray(first.contentItems)) first.contentItems.unshift(foldItem);
     else kept.unshift({ role: 'user', contentItems: [foldItem] });
     return kept;
+}
+
+/**
+ * 取工具结果消息引用的 tool_call id。
+ * **必须同时认 `toolCallId` 与 `tool_call_id`**：上下文内的 `ToolCallbackMessage` 用 camelCase
+ * `toolCallId`（src/context/types.ts:62），而 `tool_call_id` 只出现在**出站请求体**（RequestMessage）。
+ * 只认其中一个会把合法工具结果误判为孤儿——这个坑在实现窗口移出的配对校验时真实踩到过
+ * （多模态工具结果被误删，testToolMultimodalContentParts 报错）。
+ */
+export function toolResultCallId(m: any): string {
+    const id = m?.toolCallId ?? m?.tool_call_id;
+    return id === undefined || id === null || id === '' ? '' : String(id);
 }
 
 /**
@@ -568,6 +588,10 @@ export async function handleMessages(
         }));
     }
 
+    // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
+    // 与 `handleMessages` 既有逻辑保证：无配对 tool 会被剔、无结果的 tool_calls 会被过滤，
+    // 且全过滤时同步删除其后跟随的 tool 消息。实测（探针）前导悬空/非连续形态均已被覆盖，
+    // 因此这里**不额外加一遍剔除**，避免重复与误删（PE 模式下的合法无配对 tool 更不能删）。
     // 过滤没有对应 tool_call_id 的 tool_calls
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
