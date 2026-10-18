@@ -23,7 +23,7 @@ export function registerWebFetch() {
                     },
                     max_chars: {
                         type: "integer",
-                        description: "本次返回的正文长度上限，默认取配置（4000）",
+                        description: "本次返回的正文长度上限，默认取配置（5000）",
                     },
                     start_index: {
                         type: "integer",
