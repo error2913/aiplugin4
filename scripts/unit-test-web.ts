@@ -5,6 +5,7 @@
 // 运行：npm run test:unit（由 scripts/test-unit.cjs 打包）
 import assert from 'node:assert/strict';
 
+import { resolveWebConfig } from '../src/web/schema';
 import { ADAPTERS, getAdapter } from '../src/web/presets';
 import { legacySearxngProvider, parseWebConfig } from '../src/web/schema';
 import { runSearch, runFetch, renderSearchResult, renderFetchResult, isPlaceholderKey } from '../src/web/service';
@@ -130,6 +131,58 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
         assert.equal(getByPath({ a: { b: [{ c: 'hit' }] } }, 'a.b.0.c'), 'hit');
         assert.equal(getByPath({}, 'a.b'), undefined);
+    },
+
+    // ---------- 配置页签 / 默认配置（确保开箱不报错）
+
+    testWebConfigDefaultUsesLegacy(): void {
+        const resolved = resolveWebConfig('', '');
+        assert.equal(resolved.usedLegacy, true);
+        assert.equal(resolved.issues.length, 0, '空配置不应产生校验错误');
+        const cfg = resolved.config;
+        assert.equal(cfg.providers.length, 1, '默认配置应合成 1 个 legacy provider');
+        assert.equal(cfg.providers[0].id, 'legacy-searxng');
+        assert.equal(cfg.providers[0].dialect, 'searxng');
+        assert.equal(cfg.providers[0].baseURL, 'https://searxng.fishwhite.top');
+        assert.equal(cfg.defaults.count, 5);
+        assert.equal(cfg.defaults.detail, 'summary');
+    },
+
+    testWebConfigLegacyCustomUrl(): void {
+        assert.equal(resolveWebConfig('', 'https://searx.example').config.providers[0].baseURL, 'https://searx.example');
+    },
+
+    testWebConfigCustomJson(): void {
+        const resolved = resolveWebConfig(JSON.stringify({ providers: [{ dialect: 'deepseek', apiKey: 'sk-1' }] }), '');
+        assert.equal(resolved.usedLegacy, false);
+        assert.equal(resolved.issues.length, 0);
+        assert.equal(resolved.config.providers[0].dialect, 'deepseek');
+        assert.equal(resolved.config.providers[0].apiKey, 'sk-1');
+    },
+
+    testWebConfigInvalidFallsBackNoThrow(): void {
+        // 坏 JSON 不能抛错：回退 legacy 并返回 issues 供日志使用
+        const resolved = resolveWebConfig('{ not json', 'https://searx.example');
+        assert.equal(resolved.usedLegacy, true);
+        assert.ok(resolved.issues.length > 0, '应带回校验问题');
+        assert.equal(resolved.config.providers[0].id, 'legacy-searxng');
+        assert.equal(resolved.config.providers[0].baseURL, 'https://searx.example');
+    },
+
+    testWebDefaultConfigSearchWorks: async () => {
+        // 默认配置（空 JSON + legacy SearXNG）直接跑一次搜索：证明开箱可用、不抛错
+        const cfg = resolveWebConfig('', 'https://searx.example').config;
+        const calls: string[] = [];
+        const result = await runSearch(cfg, input(), {
+            fetchImpl: (async (url: string) => {
+                calls.push(String(url));
+                return jsonResponse(200, { results: [{ title: 'T', url: 'U', content: 'C' }] });
+            }) as any,
+            sleep: noSleep,
+        });
+        assert.equal(result.provider, 'legacy-searxng');
+        assert.ok(calls[0].startsWith('https://searx.example/search?'), calls[0]);
+        assert.equal(result.items.length, 1);
     },
 
     // ---------- 方言：build

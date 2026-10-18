@@ -8,7 +8,7 @@
 // 海豹没有配置写入 API，因此不做自动迁移：升级用户的行为由 legacy 合成保证。
 
 import Logger from '../../logger';
-import { defaultWebDefaults, legacySearxngProvider, parseWebConfig } from '../../web/schema';
+import { resolveWebConfig } from '../../web/schema';
 import { WebConfig } from '../../web/types';
 import { ext } from '../config';
 
@@ -32,31 +32,14 @@ function readStringConfig(key: string): string {
     }
 }
 
-function legacyConfig(): WebConfig {
-    const legacyUrl = readStringConfig(LEGACY_KEY);
-    const provider = legacySearxngProvider(legacyUrl);
-    return {
-        version: 1,
-        defaults: defaultWebDefaults(),
-        providers: [provider],
-        routes: { search: [provider.id] },
-    };
-}
-
 function buildConfig(): WebConfig {
-    const text = readStringConfig(CONFIG_KEY);
-    if (!text.trim()) {
-        // 未配置新 JSON：沿用旧「联网搜索」地址，保证升级后 web_search 行为不变
-        return legacyConfig();
+    const resolved = resolveWebConfig(readStringConfig(CONFIG_KEY), readStringConfig(LEGACY_KEY));
+    if (resolved.issues.length > 0) {
+        Logger.error(`「${CONFIG_KEY}」校验失败（共 ${resolved.issues.length} 处），本次不生效，已回退 legacy SearXNG：`);
+        for (const issue of resolved.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
+        Logger.error('提示：可用配置生成器 https://error2913.github.io/aiplugin4-config/ 的「联网搜索」页生成后粘贴。');
     }
-
-    const { config, issues } = parseWebConfig(text);
-    if (config) return config;
-
-    Logger.error(`「${CONFIG_KEY}」校验失败（共 ${issues.length} 处），本次不生效，已回退 legacy SearXNG：`);
-    for (const issue of issues) Logger.error(`  ${issue.path} ${issue.msg}`);
-    Logger.error('提示：可用配置生成器 https://error2913.github.io/aiplugin4-config/ 的「联网搜索」页生成后粘贴。');
-    return legacyConfig();
+    return resolved.config;
 }
 
 export default class WebConfigStore {
