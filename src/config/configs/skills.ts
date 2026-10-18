@@ -1,13 +1,13 @@
 // 技能配置：整份 JSON（v1），AI 通过 use_skill 按需调用。
 //
-// 新键名 `技能配置（JSON）`；旧的 `技能配置` 模板键不再注册/读取（不做迁移）。
+// 新键名 `技能列表`；旧的 `技能配置` 模板键不再注册/读取（不做迁移）。
 import Logger from "../../logger";
 import { ext } from "../config";
 import { DEFAULT_SKILLS, DEFAULT_SKILLS_JSON } from "../domain/defaults";
 import { parseSkillsConfig } from "../domain/parse";
 import { SkillEntry } from "../domain/types";
 
-export const SKILLS_CONFIG_KEY = '技能配置（JSON）';
+export const SKILLS_CONFIG_KEY = '技能列表';
 
 function fallbackSkills(): SkillEntry[] {
     return DEFAULT_SKILLS.map(s => ({ ...s, platforms: [...s.platforms] }));

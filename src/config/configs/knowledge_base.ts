@@ -1,13 +1,13 @@
 // 知识库配置（独立「知识库」页签）：开关 + 整份 JSON（v1）。
 //
-// 新键名 `知识库（JSON）`；旧的模板键 `知识库` 不再注册/读取（不做迁移）。
+// 新键名 `知识库配置`；旧的模板键 `知识库` 不再注册/读取（不做迁移）。
 import Logger from "../../logger";
 import { ext } from "../config";
 import { DEFAULT_KB, DEFAULT_KB_JSON } from "../domain/defaults";
 import { parseKbConfig } from "../domain/parse";
 import { KbEntry } from "../domain/types";
 
-export const KB_CONFIG_KEY = '知识库（JSON）';
+export const KB_CONFIG_KEY = '知识库配置';
 
 function fallbackLibraries(): KbEntry[] {
     return DEFAULT_KB.map(l => ({ ...l, platforms: [...l.platforms] }));

@@ -4,12 +4,13 @@ export const changelog: { [version: string]: string } = {
     "4.27.0": `## 角色 / 技能 / MCP / 知识库配置改为 JSON
 
 - **四个配置项改为单框 String JSON**（新键名，旧模板键不再注册/读取，不做迁移）：
-  「角色设定（JSON）」「技能配置（JSON）」「MCP服务器配置（JSON）」「知识库（JSON）」。
+  「角色设定」「技能列表」「MCP服务器」「知识库配置」。
   格式见 README「配置手册」，推荐用配置生成器 https://error2913.github.io/aiplugin4-config/ 的四个页签生成后粘贴。
 - **MCP 改为标准 \`mcpServers\` JSON**（与 Claude Desktop / Cursor 一致）：\`{"mcpServers":{"服务器名":{"type":"http","url":"…","headers":{…}}}}\`；
   \`platform\` 是可选平台白名单扩展；stdio / SSE 继续跳过；生成器的「启用」开关只控制是否写入，不写 \`enabled\` 字段。
+- **MCP 默认配置改为空**（不再预置三台服务器），保留「是否启用MCP」总开关（默认关闭，避免没配 MCP 时启动/对话报错）；配置生成器「MCP」页仍保留三台示例供按需复制。
 - **技能**保留标准 \`SKILL.md\` 的 frontmatter 仅作为生成器「文件导入」格式；插件运行时只读 JSON，不再解析 frontmatter。
-- **出厂默认**由 \`scripts/gen-domain-default-data.mjs\` 从旧默认值生成，解析后与旧版默认内容一致（角色/录卡/三台 MCP/三个知识库）。
+- **出厂默认**由 \`scripts/gen-domain-default-data.mjs\` 从旧默认值生成：角色/录卡/三个知识库与旧版一致，MCP 为空。
 
 ## 联网搜索默认值调整
 

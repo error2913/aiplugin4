@@ -61,11 +61,14 @@ function maxSessionsPerServer(): number {
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_SESSIONS;
 }
 
-// MCP 服务器配置属于启动解析一次、重载 JS 才生效的复杂配置（JSON 逐行解析）：模块级缓存
+// MCP 服务器配置属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存
 let mcpEnabledCache: boolean | null = null;
 let mcpServersCache: MCPServer[] | null = null;
 
-/** MCP 总开关与服务器列表同一快照：启动读一次，修改后需重载 JS 生效 */
+/**
+ * MCP 总开关：默认关闭，避免没配 MCP / 没装后端时在启动或对话里报错。
+ * 开启后才会解析并连接「MCP服务器」里的服务器。
+ */
 export function isMCPEnabled(): boolean {
     if (mcpEnabledCache === null) mcpEnabledCache = seal.ext.getBoolConfig(ext, "是否启用MCP");
     return mcpEnabledCache;
@@ -83,7 +86,7 @@ function getMCPServers(): MCPServer[] {
         return mcpServersCache;
     }
 
-    // 仅在 MCP 开启时解析/消费配置；解析失败由 config 层回退为空并记日志
+    // 解析失败由 config 层回退为空并记日志
     const servers = Config.mcp.MCP_SERVERS
         .map(s => ({ ...s, platforms: [...s.platforms], headers: { ...s.headers } }))
         .filter(s => s.name && s.url);

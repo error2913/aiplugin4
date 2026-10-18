@@ -17,36 +17,7 @@ export const DEFAULT_SKILLS = [
     }
 ];
 
-export const DEFAULT_MCP = [
-    {
-        "name": "mcp-files-exec",
-        "platforms": [],
-        "type": "http",
-        "url": "http://127.0.0.1:3910/mcp",
-        "token": "",
-        "headers": {
-            "Authorization": "Bearer token"
-        }
-    },
-    {
-        "name": "md-html-render",
-        "platforms": [
-            "QQ"
-        ],
-        "type": "http",
-        "url": "http://127.0.0.1:37632/mcp",
-        "token": "",
-        "headers": {}
-    },
-    {
-        "name": "mcp-browser",
-        "platforms": [],
-        "type": "http",
-        "url": "http://127.0.0.1:8921/mcp",
-        "token": "",
-        "headers": {}
-    }
-];
+export const DEFAULT_MCP = [];
 
 export const DEFAULT_KB = [
     {

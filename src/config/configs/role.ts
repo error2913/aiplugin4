@@ -1,6 +1,6 @@
 // 角色设定配置：独立「角色设定」分组；整份 JSON（v1）。
 //
-// 新键名 `角色设定（JSON）` 与旧模板键 `角色扮演设定` 不同；旧键不再注册/读取（不做迁移）。
+// 新键名 `角色设定` 与旧模板键 `角色扮演设定` 不同；旧键不再注册/读取（不做迁移）。
 import Logger from "../../logger";
 import { ext } from "../config";
 import { DEFAULT_ROLES, DEFAULT_ROLES_JSON } from "../domain/defaults";
@@ -8,7 +8,7 @@ import { parseRolesConfig } from "../domain/parse";
 import { RoleEntry } from "../domain/types";
 
 const ROLE_NAME_MAX_LENGTH = 20;
-export const ROLE_CONFIG_KEY = '角色设定（JSON）';
+export const ROLE_CONFIG_KEY = '角色设定';
 
 interface RoleParseResult {
     entries: RoleEntry[];

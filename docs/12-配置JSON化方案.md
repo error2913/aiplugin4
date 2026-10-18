@@ -28,7 +28,7 @@
 
 - 插件新增四个 String 配置项，分别接收上表四份 JSON。
 - 解析成与当前完全一致的运行时结构，四个消费点（角色、技能、MCP、知识库）行为不变。
-- 出厂默认 JSON 解析后与当前默认行为一致（角色默认、录卡技能、三台 MCP、三个知识库）。
+- 出厂默认 JSON 解析后与当前默认行为一致（角色默认、录卡技能、三个知识库）；MCP 默认空配置（生成器仍保留三台示例）。
 - 生成器的启用开关只在生成器侧生效：停用条目不写入 JSON，插件侧不需要 `enabled` 字段。
 - 校验一次报出全部问题，带 `$.mcpServers.<名>.url` 形式的路径；非法配置整份拒绝。
 - 同步命令帮助、README、`docs/`、`changelog.ts` 与测试。
@@ -48,15 +48,15 @@
 
 | 新键名 | 类型 | 分组 | 对应旧键（不再注册、不再读取） |
 | --- | --- | --- | --- |
-| `角色设定（JSON）` | string | 角色设定 | `角色扮演设定` |
-| `技能配置（JSON）` | string | 技能 | `技能配置` |
-| `MCP服务器配置（JSON）` | string | MCP | `MCP服务器配置` |
-| `知识库（JSON）` | string | 知识库 | `知识库` |
+| `角色设定` | string | 角色设定 | `角色扮演设定` |
+| `技能列表` | string | 技能 | `技能配置` |
+| `MCP服务器` | string | MCP | `MCP服务器配置` |
+| `知识库配置` | string | 知识库 | `知识库` |
 
 注册方式：
 
 ```ts
-seal.ext.registerStringConfig(ext, '技能配置（JSON）', DEFAULT_SKILLS_JSON, DESC, '技能');
+seal.ext.registerStringConfig(ext, '技能列表', DEFAULT_SKILLS_JSON, DESC, '技能');
 ```
 
 旧键不注册即可：配置管理器加载时会把未重新注册的项标记为 `deprecated`，WebUI 不再显示，但旧值仍留在 `config.json` 里（用户可自行清理）。**不读旧值、不转换、不提示迁移**；升级后四项回到出厂默认，用户按生成器重新生成后粘贴。
@@ -205,10 +205,10 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 
 | 文件 | 改法 |
 | --- | --- |
-| `src/config/configs/role.ts` | 注册 `角色设定（JSON）`；读 string → 解析 → `ROLE_NAMES` / `ROLE_SETTINGS` / `INSTRUCTIONS`；删除旧 template 注册 |
-| `src/config/configs/skills.ts` | 注册 `技能配置（JSON）`；`get()` 返回结构化 `SKILLS` |
-| `src/config/configs/mcp.ts` | 注册 `MCP服务器配置（JSON）`；`get()` 返回结构化 `MCP_SERVERS` |
-| `src/config/configs/knowledge_base.ts` | 注册 `知识库（JSON）`；`get()` 返回结构化 `LIBRARIES` |
+| `src/config/configs/role.ts` | 注册 `角色设定`；读 string → 解析 → `ROLE_NAMES` / `ROLE_SETTINGS` / `INSTRUCTIONS`；删除旧 template 注册 |
+| `src/config/configs/skills.ts` | 注册 `技能列表`；`get()` 返回结构化 `SKILLS` |
+| `src/config/configs/mcp.ts` | 注册 `MCP服务器`；`get()` 返回结构化 `MCP_SERVERS` |
+| `src/config/configs/knowledge_base.ts` | 注册 `知识库配置`；`get()` 返回结构化 `LIBRARIES` |
 
 解析缓存仍走 `Config` 的 60s cache；消费侧的模块级缓存（`skillsCache`、`mcpServersCache`、`knowledgeService`）与 refresh 机制不变。
 
@@ -238,7 +238,7 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 日志示例：
 
 ```
-[error] 「技能配置（JSON）」校验失败（共 2 处），本次不生效：
+[error] 「技能列表」校验失败（共 2 处），本次不生效：
         $.skills[0].name name 必填
         $.skills[1].content content 必填
 [error] 提示：可用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/
@@ -250,13 +250,13 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 
 - 角色：测试机器人 + 当前默认 prompt；
 - 技能：`SEALDICE_COMMAND_SKILLS`（录卡）转换后的对象；
-- MCP：当前三台默认服务器（mcp-files-exec / md-html-render[QQ] / mcp-browser）；
+- MCP：**空配置**（不预置服务器，避免没配置时启动/对话报错）；生成器侧保留三台示例（mcp-files-exec / md-html-render[QQ] / mcp-browser）；
 - 知识库：`KNOWLEDGE_BASE_DEFAULTS`（核心指令 / 扩展指令 / ob11-api[QQ]）转换后的对象。
 
 要求：**默认 JSON 解析后的运行时结构 = 当前版本的默认运行时结构**。用单测逐项对比：
 - 角色名称/prompt 与旧默认字符串一致；
 - 技能名称/描述/正文与 `SEALDICE_COMMAND_SKILLS` 解析结果一致；
-- MCP 三台的键名 / platform / url / headers 与旧默认一致（输出为标准 `mcpServers` 对象）；
+- MCP 默认 `mcpServers` 为空；生成器示例三台的键名 / platform / url / headers 可被插件解析；
 - 知识库三库的 name/description/platform/content 与旧 `KNOWLEDGE_BASE_DEFAULTS` 解析结果一致。
 
 生成器侧的 `js/domains/default-data.js` 由 `tools/sync-default-data.mjs` 从同一批插件源码生成，两边默认值保持一致。
@@ -347,8 +347,8 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 - 单测：配置项默认值/越界回退；`defaults` 不再出现在联网 JSON；service/tool 读取 `config.defaults` 仍工作。
 - 跨仓库联测：生成器联网输出不再含 `defaults`，插件解析结果一致。
 
-## 10. 待确认
+## 10. 已确定
 
-- 新键名是否就用上表四个（`角色设定（JSON）` 等）。
-- 是否需要在配置描述里直接内嵌一份最小 JSON 示例（描述会变长，建议只写“见生成器”）。
-- 联网默认项 5 个配置键名是否按上表命名（尤其 `联网搜索详细程度` 用 option）。
+- 新键名（不使用 `（JSON）` 后缀，且不与旧键重名）：`角色设定` / `技能列表` / `MCP服务器` / `知识库配置`。
+- 配置描述不内嵌完整 JSON 示例，只给格式摘要与生成器链接。
+- 联网默认项配置键名：`联网搜索返回条数` / `联网搜索详细程度` / `联网搜索超时` / `联网搜索正文截断` / `联网搜索失败回退`。

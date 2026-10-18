@@ -99,32 +99,8 @@ const DEFAULT_ROLES = [
     },
 ];
 
-const DEFAULT_MCP = [
-    {
-        name: 'mcp-files-exec',
-        platforms: [],
-        type: 'http',
-        url: 'http://127.0.0.1:3910/mcp',
-        token: '',
-        headers: { Authorization: 'Bearer token' },
-    },
-    {
-        name: 'md-html-render',
-        platforms: ['QQ'],
-        type: 'http',
-        url: 'http://127.0.0.1:37632/mcp',
-        token: '',
-        headers: {},
-    },
-    {
-        name: 'mcp-browser',
-        platforms: [],
-        type: 'http',
-        url: 'http://127.0.0.1:8921/mcp',
-        token: '',
-        headers: {},
-    },
-];
+// 插件侧 MCP 默认配置为空（不预置服务器）；配置生成器那边仍保留三台示例，便于用户按需添加。
+const DEFAULT_MCP = [];
 
 const DEFAULT_SKILLS = mod.SEALDICE_COMMAND_SKILLS.map(skillFromRaw);
 const DEFAULT_KB = mod.KNOWLEDGE_BASE_DEFAULTS.map(kbFromRaw);

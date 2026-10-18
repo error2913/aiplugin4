@@ -9059,7 +9059,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** .ai skill refresh 必须绕过 Config 的 60s 缓存，读到新 JSON */
     async testDomainRefreshPicksUpNewJson(): Promise<void> {
-        const key = '技能配置（JSON）';
+        const key = '技能列表';
         const prior = TC.stringConfigs[key];
         try {
             TC.stringConfigs[key] = JSON.stringify({ version: 1, skills: [{ name: 'refresh-old', content: 'x' }] });
@@ -9158,8 +9158,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parseRolesConfig(DEFAULT_ROLES_JSON).config!.roles[0].name, '测试机器人');
         assert.equal(parseSkillsConfig(DEFAULT_SKILLS_JSON).config!.skills[0].name, '录卡');
         const defaultMcp = parseMcpConfig(DEFAULT_MCP_JSON).config!;
-        assert.deepEqual(defaultMcp.servers.map(s => s.name), ['mcp-files-exec', 'md-html-render', 'mcp-browser']);
-        assert.deepEqual(defaultMcp.servers[1].platforms, ['QQ']);
+        assert.equal(defaultMcp.servers.length, 0, '插件侧 MCP 默认配置为空（生成器仍保留示例）');
         const defaultKb = parseKbConfig(DEFAULT_KB_JSON).config!;
         assert.deepEqual(defaultKb.libraries.map(l => l.name), ['核心指令', '扩展指令', 'ob11-api']);
         assert.deepEqual(defaultKb.libraries[2].platforms, ['QQ']);
@@ -9167,8 +9166,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 技能：platform 平台过滤 + 会话级开关（use_skill 守卫 + .ai skill on/off） */
     async testSkillPlatformAndSessionToggle(): Promise<void> {
-        const prior = TC.stringConfigs['技能配置（JSON）'];
-        TC.stringConfigs['技能配置（JSON）'] = JSON.stringify({
+        const prior = TC.stringConfigs['技能列表'];
+        TC.stringConfigs['技能列表'] = JSON.stringify({
             version: 1,
             skills: [
                 { name: 'qq-skill', platform: ['QQ'], content: '# QQ技能正文\nQQ 独有内容' },
@@ -9205,7 +9204,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(listed.includes('qq-skill'), `list 应含 qq-skill: ${listed.slice(0, 300)}`);
             assert.ok(!listed.includes('dc-skill'), 'list 不应含 dc-skill');
         } finally {
-            if (prior === undefined) delete TC.stringConfigs['技能配置（JSON）']; else TC.stringConfigs['技能配置（JSON）'] = prior;
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
             resetConfigCache();
             refreshSkills();
         }
@@ -9213,8 +9212,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 知识库：platform 平台过滤 + 会话级开关（knowledge_* 守卫 + .ai kb on/off） */
     async testKnowledgePlatformAndSessionToggle(): Promise<void> {
-        const prior = TC.stringConfigs['知识库（JSON）'];
-        TC.stringConfigs['知识库（JSON）'] = JSON.stringify({
+        const prior = TC.stringConfigs['知识库配置'];
+        TC.stringConfigs['知识库配置'] = JSON.stringify({
             version: 1,
             libraries: [
                 { name: '库Q', platform: ['QQ'], content: '# 咖啡文档\n咖啡因含量' },
@@ -9256,7 +9255,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(on.includes('已开启知识库'), `kb on 应提示: ${on}`);
             assert.equal(s2.kbState[qLib.id], undefined, 'on 后应清除关闭标记');
         } finally {
-            if (prior === undefined) delete TC.stringConfigs['知识库（JSON）']; else TC.stringConfigs['知识库（JSON）'] = prior;
+            if (prior === undefined) delete TC.stringConfigs['知识库配置']; else TC.stringConfigs['知识库配置'] = prior;
             resetConfigCache();
             await knowledgeService.refresh();
         }
@@ -9308,7 +9307,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** .ai mcp：按服务器批量开关工具（会话级）+ list 视图 */
     async testAiMcpCommandBatchToggle(): Promise<void> {
-        TC.stringConfigs['MCP服务器配置（JSON）'] = JSON.stringify({
+        TC.stringConfigs['MCP服务器'] = JSON.stringify({
             mcpServers: {
                 'mcp-files-exec': { type: 'http', url: 'http://127.0.0.1:9/mcp' },
             },
@@ -9334,7 +9333,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(session.tool.state['zz_mcp_tool_a'], false, 'off 后工具应为关');
         } finally {
             delete toolMap['zz_mcp_tool_a'];
-            delete TC.stringConfigs['MCP服务器配置（JSON）'];
+            delete TC.stringConfigs['MCP服务器'];
             resetMCPCacheForTest();
         }
     },
@@ -10772,19 +10771,19 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
 
         // 2.1) 四个新 String 配置存在，且出厂 JSON 可被解析
-        for (const key of ['角色设定（JSON）', '技能配置（JSON）', 'MCP服务器配置（JSON）', '知识库（JSON）']) {
+        for (const key of ['角色设定', '技能列表', 'MCP服务器', '知识库配置']) {
             assert.ok(typeof factoryStr[key] === 'string' && factoryStr[key].trim() !== '', `「${key}」应登记出厂 JSON`);
         }
-        assert.ok(parseRolesConfig(factoryStr['角色设定（JSON）']).config);
-        assert.ok(parseSkillsConfig(factoryStr['技能配置（JSON）']).config);
-        assert.ok(parseMcpConfig(factoryStr['MCP服务器配置（JSON）']).config);
-        assert.ok(parseKbConfig(factoryStr['知识库（JSON）']).config);
+        assert.ok(parseRolesConfig(factoryStr['角色设定']).config);
+        assert.ok(parseSkillsConfig(factoryStr['技能列表']).config);
+        assert.ok(parseMcpConfig(factoryStr['MCP服务器']).config);
+        assert.ok(parseKbConfig(factoryStr['知识库配置']).config);
 
         // 2.2) 默认运行时结构与旧默认一致
         resetConfigCache();
         assert.equal((Config as any).role.ROLE_NAMES[0], '测试机器人');
         assert.ok((Config as any).skills.SKILLS.some((s: any) => s.name === '录卡'));
-        assert.deepEqual((Config as any).mcp.MCP_SERVERS.map((s: any) => s.name), ['mcp-files-exec', 'md-html-render', 'mcp-browser']);
+        assert.equal((Config as any).mcp.MCP_SERVERS.length, 0, 'MCP 默认配置应为空');
         assert.deepEqual((Config as any).knowledgeBase.LIBRARIES.map((l: any) => l.name), ['核心指令', '扩展指令', 'ob11-api']);
 
         // 3) 真跑一遍出厂默认：只有 deepseek 会去请求，且不产出媒体/嵌入候选

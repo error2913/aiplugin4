@@ -1,18 +1,14 @@
 // MCP 配置：总开关 / 标准 mcpServers JSON / 会话回收策略。
 //
-// 新键名 `MCP服务器配置（JSON）`；旧的模板键 `MCP服务器配置` 不再注册/读取（不做迁移）。
+// 新键名 `MCP服务器`；旧的模板键 `MCP服务器配置` 不再注册/读取（不做迁移）。
 // JSON 使用标准结构：{ "mcpServers": { "<服务器名>": { "type": "http", "url": "...", "headers": {...} } } }
 import Logger from "../../logger";
 import { ext } from "../config";
-import { DEFAULT_MCP, DEFAULT_MCP_JSON } from "../domain/defaults";
+import { DEFAULT_MCP_JSON } from "../domain/defaults";
 import { parseMcpConfig } from "../domain/parse";
 import { McpServerEntry } from "../domain/types";
 
-export const MCP_SERVER_CONFIG_KEY = 'MCP服务器配置（JSON）';
-
-function fallbackServers(): McpServerEntry[] {
-    return DEFAULT_MCP.map(s => ({ ...s, platforms: [...s.platforms], headers: { ...s.headers } }));
-}
+export const MCP_SERVER_CONFIG_KEY = 'MCP服务器';
 
 function readServers(): McpServerEntry[] {
     let text = '';
@@ -22,8 +18,8 @@ function readServers(): McpServerEntry[] {
         Logger.error(`读取配置项「${MCP_SERVER_CONFIG_KEY}」失败: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (!text.trim()) {
-        Logger.warning(`「${MCP_SERVER_CONFIG_KEY}」为空，已载入出厂 MCP 服务器。`);
-        return fallbackServers();
+        Logger.info(`「${MCP_SERVER_CONFIG_KEY}」为空：未配置 MCP 服务器（需要时用配置生成器生成后粘贴）。`);
+        return [];
     }
     const result = parseMcpConfig(text);
     for (const issue of result.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
@@ -45,6 +41,7 @@ export default class McpConfig {
             DEFAULT_MCP_JSON,
             '整份 MCP 服务器配置（标准 JSON，一个对象）：{"mcpServers":{"服务器名":{"type":"http","url":"http://127.0.0.1:3910/mcp","headers":{"Authorization":"Bearer token"}}}}。'
             + '键 = 服务器名；type 仅支持 http / streamable-http；platform 是 aiplugin4 扩展字段（可选）。'
+            + '默认空配置（不预置服务器）；开启上方「是否启用MCP」后才会连接/注册。'
             + 'stdio（command）与 SSE 不支持，解析时跳过并记日志。'
             + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「MCP」页）。'
             + '修改后用 .ai mcp refresh 生效（或重载 JS）。',
