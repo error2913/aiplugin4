@@ -606,12 +606,16 @@ export class Context {
 
     private async archivePrefix(toArchive: MessageType[]): Promise<boolean> {
         const chunks = splitMessagesByToken(toArchive, ARCHIVE_CHUNK_TOKENS);
+        // 「归档保留原文」关闭时：归档＝**直接丢弃**（不调用总结智能体、不写分片），只把消息移出上下文
+        const keepRaw = Config.context.ARCHIVE_KEEP_RAW;
 
         for (const chunk of chunks) {
-            const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
-            if (!ok) return false;
-            // 原文必须先安全落进归档分片（幂等），才允许从上下文移除
-            if (this.writeArchiveShard(chunk) === 'failed') return false;
+            if (keepRaw) {
+                const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
+                if (!ok) return false;
+                // 原文必须先安全落进归档分片（幂等），才允许从上下文移除
+                if (this.writeArchiveShard(chunk) === 'failed') return false;
+            }
             // chunk 始终是当前消息数组最前的一段（前面的块成功后已移除）
             this.messages.splice(0, chunk.length);
             try { this.session.save(); } catch { /* 无宿主会话时跳过保存（测试/游离 Context） */ }
@@ -642,10 +646,12 @@ export class Context {
         }
         if (picked.length === 0) return false;
 
-        const ok = await MemoryManager.summarizeChunkWithRetry(this.session, picked);
-        if (!ok) return false;
-
-        if (this.writeArchiveShard(picked) === 'failed') return false;   // 未留档成功则不移除
+        // 「归档保留原文」关闭时：直接丢弃（不总结、不留档），只把条目移出上下文
+        if (Config.context.ARCHIVE_KEEP_RAW) {
+            const ok = await MemoryManager.summarizeChunkWithRetry(this.session, picked);
+            if (!ok) return false;
+            if (this.writeArchiveShard(picked) === 'failed') return false;   // 未留档成功则不移除
+        }
         this.removeArchivedItems(picked);
         try { this.session.save(); } catch { /* 游离 Context */ }
         return true;

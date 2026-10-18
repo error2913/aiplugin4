@@ -1455,6 +1455,53 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** 「归档保留原文」关闭：归档＝直接丢弃（不写分片、不调用总结智能体），只把消息移出上下文 */
+    async testArchiveDiscardWhenKeepRawOff(): Promise<void> {
+        const store = new Map<string, string>();
+        const origStorageSet = (ext as any).storageSet;
+        const origStorageGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const old = MemoryManager.summarizeChunkWithRetry;
+        let summarizeCalls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { summarizeCalls++; return true; };
+        const origKeep = TC.boolConfigs['归档保留原文'];
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.boolConfigs['归档保留原文'] = false;
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 20;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:996';
+            session.sessionType = 'user';
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: 'u1', time: 0, userId: '1', messageId: 'm1' }] },
+                { role: 'assistant', contentItems: [{ text: 'a1', time: 0, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 0, userId: '1', messageId: 'm2' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
+            ] as any;
+            const ok = await session.context.archiveByTokenIfNeeded();
+            assert.equal(ok, 'converged', '直接丢弃路径也应能收敛');
+            assert.equal(summarizeCalls, 0, '关闭「归档保留原文」时不应调用总结智能体');
+            assert.equal(session.archiveSeq, 0, '关闭时不应推进归档分片序号');
+            assert.equal(Array.from(store.keys()).filter(k => k.includes(':arc:')).length, 0, '关闭时不应产生分片键');
+            assert.ok(session.context.messages.length < 4, '消息仍应被移出上下文（不是保留全部）');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origStorageSet;
+            (ext as any).storageGet = origStorageGet;
+            if (origKeep === undefined) delete TC.boolConfigs['归档保留原文']; else TC.boolConfigs['归档保留原文'] = origKeep;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
     /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
     testExtractUsageCacheFields(): void {
         const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
