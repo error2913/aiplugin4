@@ -27,11 +27,11 @@ import User from "./user";
 
 const log = logger.withTag('session');
 
-/** 保存节流：合并写的最小间隔与批量上限（海豹 storage 为叠加式，重复写会持续占空间；见 docs/14 §5.11） */
+/** 保存节流：合并写的最小间隔与批量上限（海豹 storage 为叠加式，重复写会持续占空间；见 docs/03 上下文模块） */
 export const SAVE_MIN_INTERVAL_MS = 5000;
 export const SAVE_BATCH = 20;
 
-/** 冷热状态的时间窗（内置常量，见 docs/14 §3）：待机且连续 **10 分钟**无相关活动才转冷 */
+/** 冷热状态的时间窗（内置常量，见 docs/03 上下文模块）：待机且连续 **10 分钟**无相关活动才转冷 */
 export const COLD_AFTER_MS = 10 * 60 * 1000;               // 冷态进入阈值：10 分钟
 export const COOL_DOWN_MS = 60_000;                        // 转冷前的余温过渡带（1 分钟）
 export const HOT_HOLD_MS = COLD_AFTER_MS - COOL_DOWN_MS;   // 热态保持 = 9 分钟
@@ -178,20 +178,20 @@ export class Session {
     }
     /**
      * 已写入的归档分片数（**持久化**）：归档内容写在 `session_<id>:arc:<seq>` 独立键里（只写一次、不重写），
-     * session 只多这一个数字，避免每次归档都重写整份会话存档（见 docs/14 §5.4）。
+     * session 只多这一个数字，避免每次归档都重写整份会话存档（见 docs/03 上下文模块）。
      */
     archiveSeq = 0;
     /** 最近一次归档时间（秒；持久化，仅审计与 `.ai ctx` 展示用） */
     lastArchivedAt = 0;
     /**
      * 已写入的**窗口移出**分片数（**持久化**）：窗口外原文写在 `session_<id>:raw:<seq>` 独立键里
-     * （只写一次、不重写），session 只多这一个数字，使 `session_<id>` 体积与消息总量解耦（docs/17 §2）。
+     * （只写一次、不重写），session 只多这一个数字，使 `session_<id>` 体积与消息总量解耦（docs/03 上下文/分片模块）。
      */
     rawSeq = 0;
     /** 最近一次窗口移出时间（秒；持久化，仅审计与 `.ai ctx` 展示用） */
     lastRawAt = 0;
     /**
-     * 已**结算**（summarize 沉淀进记忆）到的分片序号（**持久化**，docs/17 §3）：
+     * 已**结算**（summarize 沉淀进记忆）到的分片序号（**持久化**，docs/03 上下文/分片模块）：
      * 结算只处理 `settledSeq+1 .. rawSeq`，天然幂等——同一批分片跑两次不会重复总结。
      */
     settledSeq = 0;

@@ -1,5 +1,5 @@
 // child system 提示词构建（纯函数，不依赖 seal/Config，可单测）。
-// 语义引导与委派指引对齐 docs/12 §3.8：工具全量继承、仅任务需要时用对外动作工具、只回结论。
+// 语义引导与委派指引对齐 docs/03 子代理框架：工具全量继承、仅任务需要时用对外动作工具、只回结论。
 export interface ChildSystemOptions {
     /** child persona / 模板 Agent instruction（必填） */
     instruction: string;

@@ -1,4 +1,4 @@
-// 子代理核心类型定义（DSH 对齐，v4 定稿 docs/12）
+// 子代理核心类型定义（DSH 对齐，v4 定稿，见 docs/03）
 // 本模块只含类型与结构，不依赖 seal/Config，可独立单测。
 export type SubAgentStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal' | 'timeout';
 

@@ -49,7 +49,7 @@ export interface ModelRuleTemplate {
      *   - 不设（默认）：有规则 body 即**整体替换**预设 —— v4 既有语义
      *   - 'replace'    ：显式声明整体替换
      *   - 'merge'      ：与预设**逐键合并**（保留预设里未覆盖的字段）
-     * v4 靠"是不是媒体用途"隐式决定替换；v5 允许显式声明（见 docs/13-模型配置v5方案.md 2.4）。
+     * v4 靠"是不是媒体用途"隐式决定替换；v5 允许显式声明（见 docs/05 模型配置）。
      */
     bodyMode?: 'merge' | 'replace';
     /** AI 可覆写参数的元信息 */

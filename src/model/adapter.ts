@@ -61,7 +61,7 @@ export function parseProviderResponse(provider: string, data: any, api?: string)
  * 提取统一格式的用量（兼容 anthropic 的 input/output_tokens 与 OpenAI 的 prompt/completion_tokens）。
  *
  * 缓存字段：Anthropic 方言的 `input_tokens` **不含**缓存读/写，必须补回；否则 prompt_tokens 少算，
- * 会让 TokenCalibration 的校准比值偏小、系数向 0.5 漂移，进而把本地预算放大到约 2 倍（见 docs/14 §5.6）。
+ * 会让 TokenCalibration 的校准比值偏小、系数向 0.5 漂移，进而把本地预算放大到约 2 倍（见 docs/03 上下文模块）。
  */
 export function extractUsage(data: any): NormalizedUsage | undefined {
     if (!data || !data.usage) return undefined;

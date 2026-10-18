@@ -1,6 +1,6 @@
 // 联网配置（v1）解析与校验。纯函数，不依赖 seal / Config，便于单元测试。
 //
-// 规范见 docs/18-联网搜索与抓取接入方案.md §6.2 / §14。
+// 规范见 docs/04 联网工具与 docs/05（联网配置）。
 // 校验失败返回全部问题（path 用 $.providers[0].baseURL 形式），调用方整体拒绝。
 
 import { defaultBaseURL, DIALECT_IDS } from './presets';

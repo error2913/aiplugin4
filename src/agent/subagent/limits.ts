@@ -26,7 +26,7 @@ export function effectiveDeny(denyTools: readonly string[]): string[] | null {
     return seen.size > 0 ? Array.from(seen) : null;
 }
 
-/** 委派指引文本（对齐 docs/12 §3.8） */
+/** 委派指引文本（对齐 docs/03 子代理框架） */
 export const DELEGATION_GUIDE = [
     '## 子代理委派',
     '- 较长独立工作（调研/归纳/重写/把大段内容读薄）可委派给子代理；',

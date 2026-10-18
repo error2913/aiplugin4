@@ -1,6 +1,6 @@
 // vendor（供应商标识）解析：baseURL → vendor 反查。
 //
-// 为什么需要（见 docs/13-模型配置v5方案.md 2.3.2）：
+// 为什么需要（见 docs/05 模型配置）：
 //   media_presets（媒体请求 body 结构）与 balance（内置余额端点）都按 **vendor** 索引，
 //   而 vendor 不该让用户手填。所以从 baseURL 反查 —— 这与 balance.ts 既有的
 //   `host.includes('api.deepseek.com')` 是同一思路，只是做成了一张表。

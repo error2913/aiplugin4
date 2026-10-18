@@ -4258,7 +4258,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /**
-     * 只压一次（docs/14 §5.3）：已单条压缩过的条目不再进入后续合并压缩输入，避免对同一批内容反复付费。
+     * 只压一次（见 docs/03 上下文模块）：已单条压缩过的条目不再进入后续合并压缩输入，避免对同一批内容反复付费。
      * 旧行为是"把已压缩条目的 rawText 原文再拼进来重压"，那正是被修掉的"每条消息重压整块"。
      */
     async testUserMessageBlockSkipsAlreadyCompressed(): Promise<void> {

@@ -1,6 +1,6 @@
 // 内置方言适配器（10 家）+ generic 工厂
 //
-// 各家格式见 docs/18 §6.7。适配器只负责「构造请求」与「把响应归一化」，
+// 各家格式见 docs/04 联网工具。适配器只负责「构造请求」与「把响应归一化」，
 // HTTP、超时、重试、路由回退在 client.ts / service.ts。
 
 import { asText, getByPath, renderTemplate, renderText } from './template';

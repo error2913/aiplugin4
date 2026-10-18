@@ -31,7 +31,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 - `src/tool/`：工具系统（注册表、MCP、skills、按需加载；内置工具在 `src/tool/tools/`，新增分组工具在 `pub/`、`subagent/` 子目录）。
 - `src/config/`：配置注册/读取与静态常量；`src/model/`：模型注册表/api连接列表拉取与分类/模型规则请求模板/余额查询。
 - `src/cmd/`：`.ai` 命令系统与权限；`src/pub/`：公开会话目录（`.ai pub` + `pub_read`/`pub_send` 工具）；`src/memory/`：记忆与知识库；`src/resource/`：资源；`src/utils/`：通用工具。
-- `docs/`：项目知识库（01 概览 / 02 架构 / 04 工具系统 / 05 命令配置 / 07 开发指南 / 09 常见问题；12 子代理方案设计）。
+- `docs/`：项目知识库（01 概览 / 02 架构 / 03 模块 / 04 工具 / 05 命令配置 / 06 存储 / 07 开发指南 / 09 常见问题 / 16 图床设计稿（未实现））；已实现方案（子代理、模型配置 v5、上下文成本治理、联网搜索）的注意事项已并入 03/04/05/06/09。
 - `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）。
 - `examples/use-aiplugin4.js`：演示外部插件调用对外 API 的可加载示例。
 

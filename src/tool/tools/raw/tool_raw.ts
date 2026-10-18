@@ -135,7 +135,7 @@ export function collectUserRawEntries(session: Session): UserRawEntry[] {
     }
     // 归档/窗口移出分片：已移出上下文的群聊原文（写一次、不重写）。目录只列最近若干片，避免每次调用
     // 都解析全部历史；更早的分片仍可用 read_raw kind=user id=arc:<seq> / id=raw:<seq> 直接按 id 读取。
-    // 语义区分（docs/17 §2.7）：arc=归档（token 超限），raw=窗口移出（窗口上限）。
+    // 语义区分（docs/03 上下文/分片模块）：arc=归档（token 超限），raw=窗口移出（窗口上限）。
     const maxArc = (session as any).archiveSeq || 0;
     for (const shard of listShardsDesc(session.sessionId, maxArc, ARCHIVE_DIR_LIST_MAX_SHARDS, 'arc').reverse()) {
         out.push({

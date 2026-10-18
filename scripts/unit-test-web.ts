@@ -1,6 +1,6 @@
 // 联网搜索（web）单元测试：纯逻辑，不联网。
 //
-// 覆盖 docs/18 §6.2/§6.7/§14：配置校验、占位符、10 家方言的请求构造/响应取数、
+// 覆盖联网工具（docs/04）：配置校验、占位符、10 家方言的请求构造/响应取数、
 // 路由回退、渲染与截断。
 // 运行：npm run test:unit（由 scripts/test-unit.cjs 打包）
 import assert from 'node:assert/strict';

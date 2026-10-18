@@ -7,7 +7,7 @@
 //   删除用 storageSet(key, '') 置空（海豹没有 delete/list API，types/seal.d.ts:502-504）。
 //
 // 键名：session_<会话ID>:<kind>:<三位序号>（如 session_QQ-Group:123:arc:001）
-// 两种 kind 的语义区分（docs/17 §2.7）：
+// 两种 kind 的语义区分（docs/03 上下文/分片模块）：
 //   - `arc` = **归档**（token 超限触发，`archiveSeq` 水位）
 //   - `raw` = **窗口移出**（窗口上限触发，`rawSeq` 水位）
 // 二者都只是"原文留档"，对模型不可见，共用同一套读写函数（键前缀参数化）。
@@ -33,7 +33,7 @@ export interface ArchiveShard {
     items: ArchiveShardItem[];
     /** 本批 summarize 抽出的事实（可选，便于只读回查） */
     facts?: string[];
-    /** 本批是否已完成记忆结算（raw 分片用；docs/17 §3 的水位幂等辅助标记） */
+    /** 本批是否已完成记忆结算（raw 分片用；docs/03 上下文/分片模块 的水位幂等辅助标记） */
     settled?: boolean;
 }
 
@@ -138,7 +138,7 @@ export function listShardsDesc(sessionId: string, maxSeq: number, limit: number,
     return out;
 }
 
-/** 从旧到新列出分片（结算按 `settledSeq+1 .. rawSeq` 顺序处理，docs/17 §3） */
+/** 从旧到新列出分片（结算按 `settledSeq+1 .. rawSeq` 顺序处理，docs/03 上下文/分片模块） */
 export function listShardsAsc(sessionId: string, fromSeq: number, toSeq: number, limit: number, kind: ShardKind = 'raw'): ArchiveShard[] {
     const out: ArchiveShard[] = [];
     if (!sessionId || toSeq <= 0 || limit <= 0) return out;
@@ -151,7 +151,7 @@ export function listShardsAsc(sessionId: string, fromSeq: number, toSeq: number,
 }
 
 /**
- * 惰性 TTL 淘汰：把 `from` 早于 `now - ttlDays` 的分片置空（docs/17 §4）。
+ * 惰性 TTL 淘汰：把 `from` 早于 `now - ttlDays` 的分片置空（docs/03 上下文/分片模块）。
  * 惰性＝不额外起定时器，只在"访问某会话分片"时顺带做一次，避免后台任务与重载后状态丢失。
  * @returns 实际淘汰的分片数
  */

@@ -4,7 +4,7 @@
 // 而下游 `Model.bootstrap` 沿用既有的 `ConnConfigLike[] + ModelRuleTemplate[]`。
 // 适配层负责把前者翻成后者，好处是运行时改动面被限制在少数几个字段上。
 //
-// 规范见 docs/13-模型配置v5方案.md 第 2、6 节。
+// 规范见 docs/05 模型配置。
 
 import { DeclarableModelTag } from "../../model/catalog";
 import type { ConnConfigLike } from "../../model/model";

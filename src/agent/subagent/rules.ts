@@ -103,7 +103,7 @@ export interface MsgLike {
 /**
  * fork seed 切点：最近一条含 toolCalls 的 assistant 消息之前的连续前缀长度。
  * 无工具轮 → 全量（返回 msgs.length）；当前在飞工具链必在切点后，不参与回放。
- * 与 DSH“最近 turn/end 前缀”等价（docs/12 §4.2）。
+ * 与 DSH“最近 turn/end 前缀”等价（对子代理框架的等价实现，见 docs/03）。
  */
 export function completedTurnPrefixCount(msgs: readonly MsgLike[]): number {
     for (let i = msgs.length - 1; i >= 0; i--) {

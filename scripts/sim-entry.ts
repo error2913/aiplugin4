@@ -1,5 +1,5 @@
 /**
- * 模拟验收入口：驱动真实 Context/Session/handleMessages，测量 docs/14 §6 的验收数字。
+ * 模拟验收入口：驱动真实 Context/Session/handleMessages，测量 docs/03 上下文模块的验收数字。
  * 由 scripts/sim.cjs 打包后执行（esbuild → CJS）。
  */
 import Config from "../src/config/config";

@@ -237,7 +237,7 @@ export class Context {
 
     /**
      * 文本超过压缩阈值时交给压缩智能体，返回 {display, original, changed, called}。
-     * 采纳条件（docs/14 §5.3）：结果必须**比原文更短**，否则保留原文（不更短就不采纳）；
+     * 采纳条件（docs/03 上下文模块）：结果必须**比原文更短**，否则保留原文（不更短就不采纳）；
      * `called` 表示这次是否真的调用了压缩智能体（未超阈值时为 false，供账本计数用）。
      */
     static async compressPreserveIfLong(text: string): Promise<{ display: string; original: string; changed: boolean; called: boolean }> {
@@ -578,7 +578,7 @@ export class Context {
     }
 
     /**
-     * L2 记忆结算（P1-3，docs/17 §3）：把窗口外原文（`raw:`/`arc:` 分片）总结进长期记忆。
+     * L2 记忆结算（P1-3，docs/03 上下文/分片模块）：把窗口外原文（`raw:`/`arc:` 分片）总结进长期记忆。
      *
      * 为什么需要：记忆沉淀原本只在 `archiveByTokenIfNeeded` 触发，而它的门槛是
      * `上下文最大token`（默认 100 万）→ 实际几乎不触发，待机群历史基本不进长期记忆。
@@ -664,7 +664,7 @@ export class Context {
     }
 
     /**
-     * L1 窗口移出（P1-2，docs/17 §2.3）：纯代码、零 LLM，让 `session_<id>` 的体积**有上界**。
+     * L1 窗口移出（P1-2，docs/03 上下文/分片模块）：纯代码、零 LLM，让 `session_<id>` 的体积**有上界**。
      *
      * 与 L2（`archiveByTokenIfNeeded` 的 summarize 结算）解耦：这里只做"搬走原文"，
      * 不调用任何模型。窗口外的条目写进 `session_<id>:raw:<seq>` 分片（只写一次、幂等），
