@@ -4667,6 +4667,89 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!h.text.includes('第一条'), '超出条数限制的历史不应注入');
     },
 
+    /**
+     * P1-1：judge 历史**体积有上界**——待机群里所有消息在同一条 user 块内时，
+     * 旧实现按"最近 N 条消息"整条渲染会把整个待机块塞进打分 prompt。
+     */
+    testJudgeHistoryBounded(): void {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['冷态窗口字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['冷态窗口字数'] = 5000;
+        resetConfigCache();
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:judge-bounded';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            // 单条 user 块内含 100 条群消息（>20000 字）：待机群的典型形态
+            const items = [];
+            for (let i = 0; i < 100; i++) {
+                items.push({ text: `第${i}条群消息内容${'填充'.repeat(40)}`, time: 1000 + i, userId: 'QQ:1', messageId: `j${i}` });
+            }
+            session.context.messages = [{ role: 'user', contentItems: items }] as any;
+
+            const h = (JudgeManager as any).buildHistory(session, 10, '当前待评判消息');
+            const limit = 5000 * 1.1;
+            assert.ok(h.text.length <= limit, `judge 历史应受窗口字数限制：实际 ${h.text.length} > ${limit}`);
+            assert.ok(h.text.includes('当前待评判消息'), '当前待评判消息必须保留（最后一条）');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-1 兜底：即使折叠被绕过（超大单条被"窗口优先"保留），head 硬截断仍保证上界 */
+    testJudgeHistoryHardTruncated(): void {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origWindow = TC.intConfigs['冷态窗口字数'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        TC.intConfigs['冷态窗口字数'] = 1000;
+        resetConfigCache();
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:judge-trunc';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: '巨'.repeat(50000), time: 1, userId: 'QQ:1', messageId: 'big' }] },
+            ] as any;
+            const h = (JudgeManager as any).buildHistory(session, 10, '');
+            assert.ok(h.text.length <= 1000 * 1.1, `超大单条也必须被硬截断：实际 ${h.text.length}`);
+            assert.ok(h.text.includes('更早内容已省略'), '硬截断应留下省略标记');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
+            resetConfigCache();
+        }
+    },
+
+    /** P1-1：非待机会话不折叠（行为与旧实现一致），短上下文原样渲染 */
+    testJudgeHistoryNonStandbyUnchanged(): void {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        resetConfigCache();
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:judge-hot';
+            session.sessionType = 'user';
+            session.setting.standby = false;   // 非待机
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: '热态消息一', time: 1, userId: 'QQ:1', messageId: 'h1' }] },
+                { role: 'assistant', contentItems: [{ text: '热态回复', time: 2, messageId: '' }] },
+            ] as any;
+            const h = (JudgeManager as any).buildHistory(session, 10, '新消息');
+            assert.ok(h.text.includes('热态消息一'), '非待机会话应正常包含历史');
+            assert.ok(h.text.includes('[bot] 热态回复'), 'assistant 应标记 [bot]');
+            assert.ok(h.text.includes('新消息'), '当前消息应补入');
+            assert.ok(!h.text.includes('折叠摘要'), '非待机会话不应产生折叠摘要');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            resetConfigCache();
+        }
+    },
+
     /** 评分触发配置（TOML 分段）：默认值、单段/单键部分覆盖并入默认与非法 TOML 回退默认 */
     testJudgeConfigDefaults(): void {
         const key = '评分触发配置';

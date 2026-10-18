@@ -6,7 +6,7 @@ import { JudgeConfig } from "../config/configs/trigger";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
 import { TimerManager } from "../timer";
-import { buildContent, getRoleSetting } from "../utils/message";
+import { buildContent, getRoleSetting, renderWindowedHistory } from "../utils/message";
 import { fmtDate } from "../utils/string";
 import { withTimeout } from "../utils/utils";
 
@@ -386,27 +386,27 @@ ${history.text}
         return '';
     }
 
-    /** 最近上下文（含当前消息）：收集最近 count 条有内容的 user/assistant 消息，当前消息兜底补入 */
+    /**
+     * 最近上下文（含当前消息）：**体积有上界**（P1-1）。
+     *
+     * 原实现按"最近 `count` 条**消息**"整条 `buildContent` 渲染，而待机群里所有群聊消息都在
+     * **同一条** user 消息内 → "最近 10 条"就是那一条 → 打分 prompt 可能塞进整个待机块。
+     * 现改为复用主对话的折叠窗口（`renderWindowedHistory`，零 LLM），并保留 head 硬截断兜底；
+     * `count` 仍作为"最多几条消息/摘要行"的上限语义使用。非待机会话不折叠（`renderFoldBudget` 返回 0
+     * 时退化为「冷态窗口字数」），因此普通对话的 judge 行为基本不变。
+     */
     private static buildHistory(session: Session, count: number, currentText: string): { text: string; count: number } {
-        const collected: { text: string; role: string }[] = [];
-        const msgs = session.context.messages;
-        for (let i = msgs.length - 1; i >= 0 && collected.length < count; i--) {
-            const m = msgs[i] as any;
-            if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
-            const text = buildContent(m).replace(/\f/g, '\n').trim();
-            if (!text) continue;
-            collected.push({ text, role: m.role });
-        }
-        collected.reverse();
-        const items = count > 0 ? collected.slice(-count) : [];
+        const msgs = session.context.messages as any[];
+        const windowed = renderWindowedHistory(session, msgs);
+        const lines = windowed ? windowed.split('\n').filter(Boolean) : [];
+        const items = count > 0 ? lines.slice(-count) : [];
         const current = currentText.trim();
         if (current) {
             const last = items[items.length - 1];
-            if (!last || !last.text.includes(current)) {
-                items.push({ text: current, role: 'user' });
+            if (!last || !last.includes(current)) {
+                items.push(`[用户] ${current}`);
             }
         }
-        const lines = items.map(item => `${item.role === 'assistant' ? '[bot]' : '[用户]'} ${item.text}`);
-        return { text: lines.join('\n'), count: lines.length };
+        return { text: items.join('\n'), count: items.length };
     }
 }

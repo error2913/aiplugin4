@@ -361,6 +361,53 @@ export function renderFoldBudget(session: Session, messages: ContextMessage[]): 
     return windowCharsForTier(pickTier(newestText), base);
 }
 
+/**
+ * 给**辅助请求**（打分 judge 等）用的"窗口化历史"：与主对话复用同一套折叠规则，
+ * 保证辅助请求的单次 prompt 体积也有上界（P1-1）。
+ *
+ * 为什么需要：`JudgeManager.buildHistory` 原按"最近 N **条消息**"整条渲染，而待机群里所有
+ * 群聊消息都追加进**同一条** user 消息 → "最近 10 条消息"实际就是那一条 → 打分 prompt
+ * 可能包含整个待机块（几万字）。gate 只限调用**次数**，不限单次**体积**。
+ *
+ * 预算取 `renderFoldBudget`（非待机会话为 0＝不折叠）；为 0 时退化为「冷态窗口字数」，
+ * 仍为 0 时用内置常量兜底。**无论折叠是否生效都有 head 硬截断兜底**。
+ *
+ * @param maxCharsOverride 显式预算；不传则自动按会话推导
+ */
+export const AUX_HISTORY_FALLBACK_CHARS = 5000;
+export const AUX_HISTORY_OMIT_MARK = '…（更早内容已省略）';
+
+export function renderWindowedHistory(
+    session: Session,
+    messages: ContextMessage[],
+    maxCharsOverride?: number,
+): string {
+    let budget = maxCharsOverride;
+    if (budget === undefined) {
+        budget = renderFoldBudget(session, messages);
+        if (budget <= 0) {
+            const base = Config.context.COLD_WINDOW_CHARS;
+            budget = base > 0 ? base : AUX_HISTORY_FALLBACK_CHARS;
+        }
+    }
+    const folded = budget > 0 ? foldContextMessages(messages.slice(), budget) : messages.slice();
+
+    const lines: string[] = [];
+    for (const m of folded) {
+        if (m.role !== 'user' && m.role !== 'assistant') continue;
+        const text = buildContent(m).replace(/\f/g, '\n').trim();
+        if (!text) continue;
+        lines.push(`${m.role === 'assistant' ? '[bot]' : '[用户]'} ${text}`);
+    }
+
+    let out = lines.join('\n');
+    // 兜底硬截断：折叠也放不下时（如单条超大且被"窗口优先"保留）仍保证有上界
+    if (budget > 0 && out.length > budget) {
+        out = out.slice(0, Math.max(0, budget - AUX_HISTORY_OMIT_MARK.length)) + AUX_HISTORY_OMIT_MARK;
+    }
+    return out;
+}
+
 function buildContextMessages(messages: ContextMessage[], foldBudget: number): ContextMessage[] {
     const { INSERT_COUNT } = Config.context;
 
