@@ -10,7 +10,7 @@
 | CTX-01 | `.ai ctx` | U | `状态：`、`预算：`、`本会话调用：` | 输出含状态/预算/本会话调用；状态应为 `HOT`/`COOLING`/`COLD` 之一 |
 | CTX-02 | 待机群灌消息后 `.ai ctx` | U | `压缩 0` | 冷态入库零 LLM（见下"灌消息"步骤） |
 | CTX-03 | 关闭「归档保留原文」后触发归档 | — | （无分片、仍有总结） | 见下"开关关闭"步骤；需改配置 + 真机触发超限 |
-| CTX-04 | `.ai forget --all` | I | `已清除` | **P1-4 尚未实现**，当前应回落到"未知子命令"或常规 `forget` 行为——此用例待 P1-4 落地后启用 |
+| CTX-04 | `.ai forget --all` | I | `已清除` | 清空本会话 arc/raw 分片并重置水位；**不影响长期记忆**（`memv2:*`）。执行后 `read_raw kind=user id=raw:001` 应返回"未找到" |
 | CTX-05 | 待机群转热（`@` 一次）后查 `.ai ctx` | U | 状态 `HOT` | 首轮整包 ≤ `冷态窗口字数`（需看日志/请求体，或临时调小窗口字数放大差异） |
 
 ## 灌消息步骤（CTX-02 / CTX-05）
@@ -38,4 +38,5 @@
 - **CRITICAL（配置依赖）**：`getBoolConfig` 测试桩默认返回 `true`。任何"待机/冷态"用例都必须**显式**设 `TC.boolConfigs['是否开启全局待机'] = false`，否则会话恒为待机，热态路径测不到。
 - **CRITICAL（会话桩）**：`Context.session` 经 `Agent.get(agentName).sessionService.getSession(sessionId)` 获取；单测里要 `Agent.get = () => ({ sessionService: { getSession: () => session } })` 指回自己的 session，否则 `archiveSeq`/`stateOf` 落到别的会话实例上。
 - **分片存储**：海豹 `storageGet` 对**不存在的 key 也抛异常**（`types/seal.d.ts:504`），因此"读异常"不能当作存在性结论；分片存在性由持久化的 `archiveSeq` 水位判定（见 `src/context/archive_store.ts` 的 `writeShardIfAbsent`）。
-- CTX-04 依赖 P1-4（`.ai forget --all` + TTL + 上限），P1-4 未实现前**不要**把该条记为 FAIL。
+- CTX-04 已验证可用（P1-4 已实现：`.ai forget --all` + TTL + 上限配置）。
+- 新增命令 `.ai ctxset`（权限 I）：`window=` / `cold=` / `truncate=` 按会话覆盖上下文参数，`clr` 清除。

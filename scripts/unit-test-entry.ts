@@ -2420,6 +2420,57 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /**
+     * 复核探针：积压很大但分散在多个"小分片"里时，水位判定是否仍能触发？
+     * 现状实现只把 `SETTLE_MAX_SHARDS` 个分片的 token 计入积压，可能导致"总量远超水位却永不结算"。
+     */
+    async testSettleBacklogAcrossManySmallShards(): Promise<void> {
+        const store = new Map<string, string>();
+        const origSet = (ext as any).storageSet;
+        const origGet = (ext as any).storageGet;
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
+        const origWatermark = TC.intConfigs['结算水位'];
+        const origMin = TC.intConfigs['结算最小门槛'];
+        const origIdle = TC.intConfigs['结算空闲门槛'];
+        const origMax = TC.intConfigs['单次结算调用上限'];
+        const old = MemoryManager.summarizeChunkWithRetry;
+        let calls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { calls++; return true; };
+        TC.intConfigs['结算水位'] = 3000;
+        TC.intConfigs['结算最小门槛'] = 0;
+        TC.intConfigs['结算空闲门槛'] = 0;
+        TC.intConfigs['单次结算调用上限'] = 2;   // 每片很小 × 上限 2 → 单次看到的积压远低于 3000
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:many-small';
+            session.sessionType = 'group';
+            session.setting.standby = true;
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            // 50 个小分片，每片约 150 字 → 总量远超水位 3000 token；但单次只看前 2 片时每片都不够
+            for (let i = 1; i <= 50; i++) {
+                store.set(`session_QQ:many-small:raw:${String(i).padStart(3, '0')}`,
+                    JSON.stringify({ seq: i, from: i, to: i, items: [{ messageId: `m${i}`, userId: 'QQ:1', time: i, text: '小片内容'.repeat(40) }] }));
+            }
+            (session as any).rawSeq = 50;
+            (session as any).settledSeq = 0;
+            const n = await session.context.settleWindowIfNeeded(5_000_000);
+            assert.ok(n > 0, `总量远超水位的分散积压也应触发结算（实际 settled=${n}）`);
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origSet;
+            (ext as any).storageGet = origGet;
+            if (origWatermark === undefined) delete TC.intConfigs['结算水位']; else TC.intConfigs['结算水位'] = origWatermark;
+            if (origMin === undefined) delete TC.intConfigs['结算最小门槛']; else TC.intConfigs['结算最小门槛'] = origMin;
+            if (origIdle === undefined) delete TC.intConfigs['结算空闲门槛']; else TC.intConfigs['结算空闲门槛'] = origIdle;
+            if (origMax === undefined) delete TC.intConfigs['单次结算调用上限']; else TC.intConfigs['单次结算调用上限'] = origMax;
+            resetConfigCache();
+        }
+    },
+
     /** 用量提取：三家方言的缓存字段都应带出；Anthropic 的 input_tokens 必须补回缓存读写 */
     testExtractUsageCacheFields(): void {        const a = extractUsage({ usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } });
         assert.ok(a);

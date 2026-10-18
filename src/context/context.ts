@@ -607,18 +607,22 @@ export class Context {
         // 退避中：直接跳过，不消耗任何调用
         if (typeof s.settleBackoffUntil === 'number' && now < s.settleBackoffUntil) return 0;
 
-        // 未结算分片（按序号升序，受单次上限约束）
-        const pending = listShardsAsc(s.sessionId, settledSeq + 1, rawSeq, SETTLE_MAX_SHARDS, 'raw');
-        if (pending.length === 0) {
+        // ① 待结算积压（token）：**必须按"全部未结算分片"计，而不是按本次要处理的那几个**。
+        // 反例（真实缺陷，已被 testSettleBacklogAcrossManySmallShards 固化）：积压分散在 50 个小分片里，
+        // 总量远超水位，但单次只看前 2 片 → 每片都不够水位 → **永不结算**，历史永远进不了长期记忆。
+        // 「单次结算调用上限」限制的是**本次处理几个**，不是"积压怎么算"。
+        const allPending = listShardsAsc(s.sessionId, settledSeq + 1, rawSeq, Number.MAX_SAFE_INTEGER, 'raw');
+        if (allPending.length === 0) {
             // 分片被清理/读不到：推进水位，避免每次都空转重试
             s.settledSeq = rawSeq;
             return 0;
         }
-
-        // ① 待结算积压（token）：把未结算分片的原文估算成 token
-        const backlogTokens = pending.reduce((sum, shard) =>
+        const tokensOf = (shards: typeof allPending) => shards.reduce((sum, shard) =>
             sum + shard.items.reduce((n, it) => n + estimateMessageTokens({ role: 'user', contentItems: [{ text: it.text }] } as any), 0), 0);
-        if (backlogTokens < SETTLE_WATERMARK) return 0;
+        if (tokensOf(allPending) < SETTLE_WATERMARK) return 0;
+
+        // 本次实际处理的分片（按序号升序，受单次上限约束）
+        const pending = allPending.slice(0, SETTLE_MAX_SHARDS);
 
         // ② 上下文总量门槛
         if (estimateContextMessagesTokens(this.messages) < SETTLE_MIN_TOKENS) return 0;
