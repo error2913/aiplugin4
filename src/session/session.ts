@@ -31,9 +31,10 @@ const log = logger.withTag('session');
 export const SAVE_MIN_INTERVAL_MS = 5000;
 export const SAVE_BATCH = 20;
 
-/** 冷热状态的两个时间窗（内置常量，见 docs/14 §3） */
-export const HOT_HOLD_MS = 180_000;
-export const COOL_DOWN_MS = 60_000;
+/** 冷热状态的时间窗（内置常量，见 docs/14 §3）：待机且连续 **2 天**无相关活动才转冷 */
+export const COLD_AFTER_MS = 2 * 24 * 60 * 60 * 1000;      // 冷态进入阈值：2 天
+export const COOL_DOWN_MS = 60_000;                        // 转冷前的余温过渡带（1 分钟）
+export const HOT_HOLD_MS = COLD_AFTER_MS - COOL_DOWN_MS;   // 热态保持 = 2 天 - 1 分钟
 
 /** 持久化时排除的运行时字段（监听器/运行状态/挂起队列/节流状态等），不写入存储、不参与 revive 恢复 */
 export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats', 'settleBackoffUntil']);

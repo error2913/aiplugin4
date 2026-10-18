@@ -116,7 +116,7 @@ function makeStandbyGroup(sid: string): Session {
     s.sessionType = 'group';
     s.agentName = 'default';
     s.setting.standby = true;
-    s.lastRelevantAt = Date.now() - 3_600_000;   // 1 小时前有过活动 → 冷态
+    s.lastRelevantAt = Date.now() - (2 * 24 * 3_600_000 + 3_600_000);   // 超过 2 天阈值 → 冷态
     // 关键：Context.session 是经 agent.sessionService.getSession(context.sessionId) 取的，
     // 必须让 context 知道自己的 sessionId，否则 isColdSession() 会落到别的会话上（真实踩过的坑）。
     (s.context as any).sessionId = sid;

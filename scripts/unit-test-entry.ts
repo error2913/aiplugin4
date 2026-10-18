@@ -1849,8 +1849,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
             calls = 0;
             s = mk('很短');
-            s.lastRelevantAt = 1_000_000;          // 远超冷静止期 → COLD
-            await s.context.settleWindowIfNeeded(1_000_000 + 10_000_000);
+            const COLD_AFTER = 2 * 24 * 60 * 60 * 1000;   // 冷态阈值：2 天
+            s.lastRelevantAt = 1_000_000;          // 超过冷态阈值 → COLD
+            await s.context.settleWindowIfNeeded(1_000_000 + COLD_AFTER + 1_000);
             assert.ok(calls > 0, '转入 COLD 时应结算一次（即使未达空闲门槛）');
         } finally {
             Agent.get = origAgentGet0;   // 必须还原全局桩，避免泄漏到后续用例
@@ -2492,7 +2493,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(extractUsage({}), undefined, '无 usage 返回 undefined');
     },
 
-    /** 冷热状态（假时钟）：两个时间窗的边界、在途任务冻结衰减、时钟回拨、非待机恒为 HOT */
+    /** 冷热状态（假时钟）：2 天阈值的边界、在途任务冻结衰减、时钟回拨、非待机恒为 HOT */
     testSessionStateOf(): void {
         const origGlobal = TC.boolConfigs['是否开启全局待机'];
         TC.boolConfigs['是否开启全局待机'] = false;
@@ -2503,16 +2504,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
             s.sessionType = 'user';
             s.setting.standby = true;
             const t0 = 1_000_000;
+            const TOTAL = 2 * 24 * 60 * 60 * 1000;   // 冷态进入阈值：2 天
             s.lastRelevantAt = t0;
-            assert.equal(s.stateOf(t0 + 179_000), 'HOT', '热态保持内应为 HOT');
-            assert.equal(s.stateOf(t0 + 180_000), 'COOLING', '到热态保持应进入余温');
-            assert.equal(s.stateOf(t0 + 239_000), 'COOLING', '冷态回落前仍是余温');
-            assert.equal(s.stateOf(t0 + 240_000), 'COLD', '两级衰减后应转冷');
+            assert.equal(s.stateOf(t0 + TOTAL - 61_000), 'HOT', '热态保持内应为 HOT');
+            assert.equal(s.stateOf(t0 + TOTAL - 60_000), 'COOLING', '到热态保持（2 天 - 1 分钟）应进入余温');
+            assert.equal(s.stateOf(t0 + TOTAL - 1), 'COOLING', '转冷前仍是余温');
+            assert.equal(s.stateOf(t0 + TOTAL), 'COLD', '连续 2 天无相关活动应转冷');
+            assert.equal(s.stateOf(t0 + 240_000), 'HOT', '旧的 4 分钟阈值已不再转冷');
 
-            // 在途任务冻结衰减
+            // 在途任务冻结衰减：即使已超过 2 天阈值，也应保持 HOT 并刷新活动时间
             s.running = true;
-            assert.equal(s.stateOf(t0 + 10_000_000), 'HOT', '有在途任务时应保持 HOT');
-            assert.equal(s.lastRelevantAt, t0 + 10_000_000, '在途任务应刷新相关活动时间');
+            assert.equal(s.stateOf(t0 + TOTAL + 10_000_000), 'HOT', '有在途任务时应保持 HOT');
+            assert.equal(s.lastRelevantAt, t0 + TOTAL + 10_000_000, '在途任务应刷新相关活动时间');
             s.running = false;
 
             // 时钟回拨：不推进状态
@@ -2521,7 +2524,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             // 非待机＝正常对话模式：永远 HOT
             s.setting.standby = false;
-            assert.equal(s.stateOf(t0 + 10_000_000), 'HOT', '非待机模式恒为 HOT');
+            assert.equal(s.stateOf(t0 + TOTAL + 10_000_000), 'HOT', '非待机模式恒为 HOT');
         } finally {
             if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
             resetConfigCache();

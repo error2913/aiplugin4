@@ -90,7 +90,7 @@ function makeSession(sid: string, standby = true): Session {
     s.sessionType = 'group';
     s.agentName = 'default';
     s.setting.standby = standby;
-    s.lastRelevantAt = Date.now() - 3_600_000;
+    s.lastRelevantAt = Date.now() - (2 * 24 * 3_600_000 + 3_600_000);   // 超过 2 天阈值 → 冷态
     (s.context as any).sessionId = sid;
     (s.context as any).agentName = 'default';
     sessionStore.set(sid, s);
@@ -342,7 +342,7 @@ async function scenarioStateTransitions() {
     {
         const sid = 'QQ-Group:st-busy';
         const s = makeSession(sid);
-        s.lastRelevantAt = Date.now() - 10 * 60_000;
+        s.lastRelevantAt = Date.now() - (2 * 24 * 60 * 60 * 1000 + 60_000);   // 超过 2 天冷态阈值
         s.running = true;
         const st = s.stateOf(Date.now(), { touch: false });
         check(st === 'HOT', `C2 在途任务时应为 HOT（实际 ${st}）`);
