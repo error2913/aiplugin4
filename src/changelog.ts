@@ -6,7 +6,7 @@ export const changelog: { [version: string]: string } = {
 - **新增「联网」页与「联网配置」**（v1 JSON）：可接 DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；\`providers\` 顺序即尝试顺序，失败自动回退，\`routes\` 可分别指定搜索/抓取顺序；\`defaults\` 管条数/详细程度/超时/正文截断/回退开关。
 - **\`web_search\` 重写**：参数为 \`query\`（兼容旧 \`q\`）/ \`count\` / \`offset\` / \`detail\` / \`allowed_domains\` / \`blocked_domains\` / \`time_range\` / \`page\`；输出编号摘要；空结果给「换宽泛查询/去掉过滤」建议；某个 provider 失败自动换下一个，400/422 参数错误不换家（直接暴露配置问题）。
 - **新增 \`web_fetch\`**：抓取网页正文（Markdown），支持 \`max_chars\` 与 \`start_index\` 续读。
-- **兼容**：删除旧「后端 → 联网搜索」配置项（不再读取）；「联网配置」留空时使用内置默认 SearXNG（https://searxng.fishwhite.top），开箱可用；坏 JSON/校验失败只记日志并回退默认，不抛异常。
+- **兼容**：删除旧「后端 → 联网搜索」配置项（不再读取）；「联网配置」留空时使用内置默认 SearXNG（https://searxng.fishwhite.top），开箱可用；坏 JSON/校验失败只记日志、本次不生效（不回退默认），不抛异常。
 - **配置生成器**：\`aiplugin4-config\` 新增「联网搜索」页签，可生成上述 JSON（含 10 家方言与 generic，默认紧凑输出、可格式化）。
 - **上下文冷态阈值延长**：待机会话的冷态进入条件由「3 分钟热态保持 + 1 分钟余温」改为**连续 2 天无相关活动**才转冷（内置常量 \`HOT_HOLD_MS\`/\`COLD_AFTER_MS\`）。含义：最后一次 @/触发命中后 **2 天内都算热态**（全量渲染、入库走热态压缩规则），超过 2 天才折叠到「冷态窗口字数」。相关活动仍只认 \`session.chat()\`（普通消息入库不算）。
 `,

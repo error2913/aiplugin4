@@ -28,8 +28,20 @@ export function defaultWebDefaults(): WebDefaults {
 const DETAILS: WebDetail[] = ['snippet', 'summary', 'content'];
 
 /**
- * 默认配置：内置 SearXNG（公共实例 https://searxng.fishwhite.top），保证开箱可用。
- * 「联网配置」留空或校验失败时使用。
+ * 空配置：没有任何 provider（校验失败时使用；工具层会提示无可用 provider）
+ */
+export function emptyWebConfig(): WebConfig {
+    return {
+        version: WEB_CONFIG_VERSION,
+        defaults: defaultWebDefaults(),
+        providers: [],
+        routes: {},
+    };
+}
+
+/**
+ * 默认配置：内置 SearXNG（公共实例 https://searxng.fishwhite.top）。
+ * 仅在「联网配置」**留空**时使用；校验失败不会回退到这里。
  */
 export function defaultWebConfig(): WebConfig {
     const provider: WebProviderRuntime = {
@@ -262,7 +274,7 @@ export function parseWebConfig(text: string): { config: WebConfig | null; issues
 /**
  * 配置页取配置的纯逻辑：
  * - 文本为空 → 内置默认 SearXNG（fishwhite 公共实例）
- * - 校验失败 → 同样回退默认配置（不抛错），issues 供调用方记录日志
+ * - 校验失败 → 整体拒绝（空配置 + issues，供调用方记录日志）；不抛错、不回退默认
  */
 export function resolveWebConfig(text: string): {
     config: WebConfig;
@@ -272,5 +284,5 @@ export function resolveWebConfig(text: string): {
     if (!raw) return { config: defaultWebConfig(), issues: [] };
     const parsed = parseWebConfig(raw);
     if (parsed.config) return { config: parsed.config, issues: [] };
-    return { config: defaultWebConfig(), issues: parsed.issues };
+    return { config: emptyWebConfig(), issues: parsed.issues };
 }

@@ -32,7 +32,7 @@ function readStringConfig(key: string): string {
 function buildConfig(): WebConfig {
     const resolved = resolveWebConfig(readStringConfig(CONFIG_KEY));
     if (resolved.issues.length > 0) {
-        Logger.error(`「${CONFIG_KEY}」校验失败（共 ${resolved.issues.length} 处），本次不生效，已回退内置默认 SearXNG：`);
+        Logger.error(`「${CONFIG_KEY}」校验失败（共 ${resolved.issues.length} 处），本次不生效：`);
         for (const issue of resolved.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
         Logger.error('提示：可用配置生成器 https://error2913.github.io/aiplugin4-config/ 的「联网搜索」页生成后粘贴。');
     }

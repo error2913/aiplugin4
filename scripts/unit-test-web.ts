@@ -146,12 +146,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(resolved.config.providers[0].apiKey, 'sk-1');
     },
 
-    testWebConfigInvalidFallsBackNoThrow(): void {
-        // 坏 JSON 不能抛错：回退内置默认 SearXNG + issues 供日志使用
+    testWebConfigInvalidRejectedNoThrow(): void {
+        // 坏 JSON 不抛错，也不回退默认：整体拒绝（providers=[]）+ issues 供日志使用
         const resolved = resolveWebConfig('{ not json');
         assert.ok(resolved.issues.length > 0, '应带回校验问题');
-        assert.equal(resolved.config.providers[0].id, 'default-searxng', '校验失败回退默认，不崩');
-        assert.equal(resolved.config.providers[0].baseURL, 'https://searxng.fishwhite.top');
+        assert.equal(resolved.config.providers.length, 0, '校验失败 = 配置不生效，不回退默认');
     },
 
     testWebDefaultConfigSearchWorks: async () => {
