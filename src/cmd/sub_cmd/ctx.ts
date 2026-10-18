@@ -15,7 +15,8 @@ export function registerCmdCtx() {
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, sid, session, ret } = scc;
         const now = Date.now();
-        const state = session.stateOf(now);
+        // touch: false —— 这是只读查询：不能让查看命令把会话"续命"成 HOT（否则 COLD 永远观察不到）
+        const state = session.stateOf(now, { touch: false });
         const idle = session.lastRelevantAt > 0 ? Math.floor(Math.max(0, now - session.lastRelevantAt) / 60000) : -1;
         const stats = session.ctxStats || { compression: 0, summarization: 0, judge: 0 };
         const { COLD_WINDOW_CHARS, MAX_CONTEXT_TOKENS } = Config.context;

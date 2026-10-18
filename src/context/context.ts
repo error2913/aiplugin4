@@ -606,13 +606,14 @@ export class Context {
 
     private async archivePrefix(toArchive: MessageType[]): Promise<boolean> {
         const chunks = splitMessagesByToken(toArchive, ARCHIVE_CHUNK_TOKENS);
-        // 「归档保留原文」关闭时：归档＝**直接丢弃**（不调用总结智能体、不写分片），只把消息移出上下文
+        // 「归档保留原文」关闭时：**仍然 summarize 沉淀记忆，只是不写归档分片**（不留原文，省存储）。
+        // 语义区分：开关只控制"原文档留"，不控制"记忆沉淀"——否则关掉开关会让历史既不进记忆也查不到，等于白丢。
         const keepRaw = Config.context.ARCHIVE_KEEP_RAW;
 
         for (const chunk of chunks) {
+            const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
+            if (!ok) return false;
             if (keepRaw) {
-                const ok = await MemoryManager.summarizeChunkWithRetry(this.session, chunk);
-                if (!ok) return false;
                 // 原文必须先安全落进归档分片（幂等），才允许从上下文移除
                 if (this.writeArchiveShard(chunk) === 'failed') return false;
             }
@@ -646,10 +647,10 @@ export class Context {
         }
         if (picked.length === 0) return false;
 
-        // 「归档保留原文」关闭时：直接丢弃（不总结、不留档），只把条目移出上下文
+        // 「归档保留原文」关闭时：**仍然 summarize 沉淀记忆，只是不写归档分片**（不留原文，省存储）
+        const ok = await MemoryManager.summarizeChunkWithRetry(this.session, picked);
+        if (!ok) return false;
         if (Config.context.ARCHIVE_KEEP_RAW) {
-            const ok = await MemoryManager.summarizeChunkWithRetry(this.session, picked);
-            if (!ok) return false;
             if (this.writeArchiveShard(picked) === 'failed') return false;   // 未留档成功则不移除
         }
         this.removeArchivedItems(picked);
@@ -688,12 +689,15 @@ export class Context {
         }
         if (items.length === 0) return 'nothing';   // 这批里没有群聊原文，无需留档即可移除
         const seq = s.archiveSeq + 1;
+        // B1：存在性由持久化水位（archiveSeq）判定，**不靠读分片本体**——storageGet 对不存在的 key
+        // 也抛异常，"不存在"与"读失败"不可区分，读异常不能当作存在性结论（详见 archive_store.ts）。
+        const knownExists = seq <= s.archiveSeq;
         const outcome = writeShardIfAbsent(s.sessionId, seq, {
             seq,
             from: items[0].time,
             to: items[items.length - 1].time,
             items,
-        });
+        }, knownExists);
         if (outcome === 'failed') return 'failed';
         // 'exists' 也必须把序号推进到该 seq：否则一旦出现"分片已写、archiveSeq 未落盘"的错位
         // （崩溃/存档写失败），后续每批都会撞上同一个 seq（永远 exists）→ 原文再也不会写进分片。

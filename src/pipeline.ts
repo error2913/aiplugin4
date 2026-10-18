@@ -806,7 +806,9 @@ export class MessagePipeline {
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
-            if (setting.standby) {
+            // 待机判定必须同时看全局待机（B3）：只判 setting.standby 会让"全局待机"下指令消息不入库，
+            // 与会话待机行为不一致（其余入库点如 handleGroupMessage 已是 `standby || GLOBAL_STANDBY`）。
+            if (setting.standby || Config.base.GLOBAL_STANDBY) {
                 session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
                     log.exception('指令消息入库出错', e);
                 });
@@ -848,7 +850,8 @@ export class MessagePipeline {
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
-            if (setting.standby) {
+            // 同上（B3）：全局待机下机器人自身消息也应入库
+            if (setting.standby || Config.base.GLOBAL_STANDBY) {
                 session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
                     log.exception('机器人消息入库出错', e);
                 });

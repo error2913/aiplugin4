@@ -11,7 +11,7 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "消息压缩阈值", 2000, "用户消息（含连续多条合并后）超过该字符数时，使用压缩智能体压缩后存入上下文；压缩前原文自动保留，AI 可用 read_raw kind=user 按 msg_id/blk:id 查看原文", "上下文");
         seal.ext.registerIntConfig(ext, "冷态窗口字数", 5000, "待机（冷态）下模型可见的最近内容字数：超过则把更早内容折叠为纯代码摘要（不调用模型）；0=不折叠", "上下文");
         seal.ext.registerIntConfig(ext, "冷态单条截断字数", 500, "待机（冷态）时单条消息超过该字数则留头留尾（原文仍可用 read_raw 查）；0=不截断", "上下文");
-        seal.ext.registerBoolConfig(ext, "归档保留原文", true, "开启时：归档时把群聊原文写入归档分片（可用 read_raw kind=user id=arc:序号 回查），并调用总结智能体沉淀记忆；关闭时：归档＝直接丢弃（不写分片、不调用总结智能体），只把消息移出上下文", "上下文");
+        seal.ext.registerBoolConfig(ext, "归档保留原文", true, "开启时：归档时把群聊原文写入归档分片（可用 read_raw kind=user id=arc:序号 回查），并调用总结智能体沉淀记忆；关闭时：归档不留原文、不写分片（省存储），但仍会调用总结智能体沉淀记忆——历史依旧进长期记忆，只是之后无法回查原文", "上下文");
     }
 
     static get() {

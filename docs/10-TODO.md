@@ -20,3 +20,11 @@
 | 会话管理 | 每个服务器内存缓存一个 sessionId,失效时重初始化一次 | 支持无状态模式(服务器声明 `stateless` 时不再发送/依赖会话头)、session TTL 清理、插件重载后的会话回收 |
 | 工具列表同步 | `tools/list` 结果缓存 60s,只注册新增、不清理已下线 | 刷新时对比新旧工具列表,移除已下线的工具注册;服务器重启后自动重新同步 |
 | Resources/Prompts | 只注册 `tools/list` 返回的工具 | 按需暴露 `resources/list`、`prompts/list`,注册为只读工具或注入上下文 |
+
+## 未接线的配置(已注册但无消费点)
+
+| 配置 | 现状 | 待办 |
+| --- | --- | --- |
+| `心智模型定时刷新间隔` | 已在配置面板注册,`src/config/configs/memory.ts:42` 也读进了 `MEMORY_MM_TICK_INTERVAL`,但该常量在 `src/` 内**没有任何消费点**(全仓仅此一处出现)——设了不生效 | 接线:按该间隔定时触发心智模型重建/刷新(仅当有新记忆时实际刷新);或若确定不做,从配置面板注销以免误导用户 |
+
+> 排查方法:`grep -rn "MEMORY_MM_TICK_INTERVAL" src/` —— 只在 `src/config/configs/memory.ts` 出现(注册 + 赋值)即说明未接线。

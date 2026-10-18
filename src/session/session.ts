@@ -326,12 +326,17 @@ export class Session {
      * - COOLING：距上次相关活动 ≥ 热态保持且 < 热态保持 + 冷态回落
      * - COLD：再往后（入库零 LLM、窗口按冷态窗口字数折叠）
      * "相关活动"＝任何一次 `session.chat()`（@/触发命中/结果送达/定时任务都走它）；普通群消息入库不算。
+     *
+     * @param touch 有在途任务时是否刷新 `lastRelevantAt`（默认 true）。
+     *   **只读查询（如 `.ai ctx`）必须传 false**：否则命令本身会把会话"续命"成 HOT，
+     *   使 COLD 永远无法被观察到（命令副作用）。
      */
-    stateOf(now: number = Date.now()): 'HOT' | 'COOLING' | 'COLD' {
+    stateOf(now: number = Date.now(), opts?: { touch?: boolean }): 'HOT' | 'COOLING' | 'COLD' {
+        const touch = opts?.touch !== false;
         if (!(this.setting.standby || Config.base.GLOBAL_STANDBY)) return 'HOT';
         const busy = this.running || this.starting || this.activeRuns > 0;
         if (busy) {
-            this.lastRelevantAt = now;   // 在途任务冻结衰减
+            if (touch) this.lastRelevantAt = now;   // 在途任务冻结衰减
             return 'HOT';
         }
         const idle = Math.max(0, now - this.lastRelevantAt);   // 防时钟回拨

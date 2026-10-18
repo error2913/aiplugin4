@@ -1455,7 +1455,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 「归档保留原文」关闭：归档＝直接丢弃（不写分片、不调用总结智能体），只把消息移出上下文 */
+    /**
+     * 「归档保留原文」关闭：**仍然 summarize 沉淀记忆，只是不写分片**（不留原文、省存储），消息仍被移出上下文。
+     * 语义要点：开关只控制"原文档留"，不控制"记忆沉淀"——关掉开关不能让历史既不进记忆又查不到。
+     */
     async testArchiveDiscardWhenKeepRawOff(): Promise<void> {
         const store = new Map<string, string>();
         const origStorageSet = (ext as any).storageSet;
@@ -1485,8 +1488,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
             ] as any;
             const ok = await session.context.archiveByTokenIfNeeded();
-            assert.equal(ok, 'converged', '直接丢弃路径也应能收敛');
-            assert.equal(summarizeCalls, 0, '关闭「归档保留原文」时不应调用总结智能体');
+            assert.equal(ok, 'converged', '关闭「归档保留原文」时归档也应能收敛');
+            assert.ok(summarizeCalls > 0, '关闭时**仍应调用总结智能体**沉淀记忆（只是不留原文）');
             assert.equal(session.archiveSeq, 0, '关闭时不应推进归档分片序号');
             assert.equal(Array.from(store.keys()).filter(k => k.includes(':arc:')).length, 0, '关闭时不应产生分片键');
             assert.ok(session.context.messages.length < 4, '消息仍应被移出上下文（不是保留全部）');
@@ -1556,6 +1559,163 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(s.stateOf(t0 + 10_000_000), 'HOT', '非待机模式恒为 HOT');
         } finally {
             if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            resetConfigCache();
+        }
+    },
+
+    /**
+     * B2：`stateOf(now, { touch: false })` 是**只读**的，不得刷新 `lastRelevantAt`。
+     * 否则 `.ai ctx` 这类查看命令自己会把会话"续命"成 HOT，COLD 永远观察不到（命令副作用）。
+     */
+    testStateOfReadOnly(): void {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        resetConfigCache();
+        try {
+            const s = new Session();
+            s.sessionId = 'QQ:state-ro';
+            s.sessionType = 'user';
+            s.setting.standby = true;
+            const t0 = 2_000_000;
+            s.lastRelevantAt = t0;
+            s.running = true;                       // 在途任务：默认会刷新 lastRelevantAt
+
+            const before = s.lastRelevantAt;
+            assert.equal(s.stateOf(t0 + 10_000, { touch: false }), 'HOT', '只读查询仍应报告 HOT');
+            assert.equal(s.lastRelevantAt, before, '只读查询不得刷新 lastRelevantAt');
+
+            assert.equal(s.stateOf(t0 + 10_000), 'HOT', '默认（touch 省略）仍应报告 HOT');
+            assert.equal(s.lastRelevantAt, t0 + 10_000, '默认行为仍应刷新 lastRelevantAt（入库路径依赖它冻结衰减）');
+            s.running = false;
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            resetConfigCache();
+        }
+    },
+
+    /**
+     * B1：海豹 `storageGet` 对**不存在的 key 也抛异常**（types/seal.d.ts:504），
+     * 因此"读异常"不能作为存在性结论——否则新分片首次写入会永远失败（归档卡死）。
+     * 本用例用"不存在即抛异常"的桩复现真实语义，断言首个分片仍能写入，
+     * 且已有分片不会被后续写入覆盖。
+     */
+    async testShardWriteFailsOnReadError(): Promise<void> {
+        const store = new Map<string, string>();
+        const origStorageSet = (ext as any).storageSet;
+        const origStorageGet = (ext as any).storageGet;
+        // 真实海豹语义：key 不存在 → 抛异常；存在 → 返回值
+        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
+        (ext as any).storageGet = (k: string) => {
+            if (!store.has(k)) throw new Error('key not found（海豹：key 不存在时抛异常）');
+            return store.get(k)!;
+        };
+        const old = MemoryManager.summarizeChunkWithRetry;
+        MemoryManager.summarizeChunkWithRetry = async () => true;
+        const origRounds = TC.intConfigs['对话保存轮数'];
+        const origTokens = TC.intConfigs['上下文最大token'];
+        TC.intConfigs['对话保存轮数'] = 1;
+        TC.intConfigs['上下文最大token'] = 20;
+        resetConfigCache();
+        const origAgentGet = Agent.get;
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:997';
+            session.sessionType = 'user';
+            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
+            session.context.messages = [
+                { role: 'user', contentItems: [{ text: 'u1 原文', time: 10, userId: '1', messageId: 'm1' }] },
+                { role: 'assistant', contentItems: [{ text: 'a1', time: 11, messageId: '' }] },
+                { role: 'user', contentItems: [{ text: 'u2', time: 12, userId: '1', messageId: 'm2' }] },
+                { role: 'assistant', contentItems: [{ text: 'a2', time: 13, messageId: '' }] },
+            ] as any;
+
+            // 核心回归点：分片本体读必然抛异常（不存在），仍必须写入成功
+            const ok = await session.context.archiveByTokenIfNeeded();
+            assert.equal(ok, 'converged', '分片不存在（读抛异常）时归档仍应成功，不得卡死');
+            assert.ok(session.archiveSeq >= 1, '首个分片应被写入并推进 archiveSeq');
+            const first = store.get('session_QQ:997:arc:001');
+            assert.ok(first && first.length > 0, '分片应已落盘（读异常不得阻止首次写入）');
+            assert.ok(JSON.parse(first!).items.some((i: any) => i.text === 'u1 原文'), '分片应保留原文');
+
+            // 幂等：同一 seq 再写不得覆盖既有内容
+            const second = writeShardIfAbsent('QQ:997', 1, { seq: 1, from: 0, to: 0, items: [{ messageId: 'zz', userId: '1', time: 0, text: '覆盖尝试' }] });
+            assert.equal(store.get('session_QQ:997:arc:001'), first, '已存在的分片不得被覆盖');
+            assert.ok(second === 'exists' || second === 'written', `重复写入应被识别（实际 ${second}）`);
+
+            // 水位判定：knownExists=true 时直接判 exists，完全不读分片本体（读异常也不影响）
+            const third = writeShardIfAbsent('QQ:997', 1, { seq: 1, from: 0, to: 0, items: [] }, true);
+            assert.equal(third, 'exists', '水位命中时应直接判 exists（不依赖读分片本体）');
+            assert.equal(store.get('session_QQ:997:arc:001'), first, '水位判定路径同样不得覆盖');
+        } finally {
+            Agent.get = origAgentGet;
+            MemoryManager.summarizeChunkWithRetry = old;
+            (ext as any).storageSet = origStorageSet;
+            (ext as any).storageGet = origStorageGet;
+            if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
+            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
+    /**
+     * B5：并发入库**两条都必须在**（每会话串行化的固化用例）。
+     *
+     * 诚实说明（重要，勿误读为"已验证修复了竞态"）：本用例**不能**区分"有串行化"与"无串行化"——
+     * 实测把 `addUserMessage` 的 ingestChain 去掉后本用例依旧通过：因为热态路径是"追加"语义
+     * （appendUserItem / contentItems.push），且 `compressPendingTail` 每次重新读取尾部，
+     * 两条消息各自命中自己的尾部条目，实测不会互相覆盖（与交付单"复核未稳定复现"一致）。
+     * 因此本用例的价值是**回归护栏**：锁住"并发两条消息都在"这一可观测不变式，
+     * 防止将来改成分片重建/整体替换 contentItems 时真的丢条而无人发现。
+     * 触发条件：热态（冷态无 await）+ 已存在同一 user 块 + 压缩采纳（走重建分支）。
+     */
+    async testConcurrentIngestKeepsBoth(): Promise<void> {
+        const origGet = Agent.get;
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        const origThreshold = TC.intConfigs['消息压缩阈值'];
+        TC.boolConfigs['是否开启全局待机'] = false;   // 桩默认为 true → 会让会话恒为待机（冷态不 await，测不出竞态）
+        TC.intConfigs['消息压缩阈值'] = 10;
+        resetConfigCache();
+        try {
+            const session = new Session();
+            session.sessionId = 'QQ:998';
+            session.sessionType = 'user';
+            session.setting.standby = false;
+            Agent.get = (name: any) => name === 'compress_agent'
+                ? {
+                    chat: async () => {
+                        await new Promise(r => setTimeout(r, 5));   // 制造真实交错窗口（等价网络往返）
+                        return '压';                                  // 比原文短 → 走"采纳/重建"分支
+                    }
+                }
+                : ({ sessionService: { getSession: () => session } } as any);
+
+            const ctx = session.context;
+            // 先放一个已存在的 user 块（两条消息并发时都会命中它的 compressPendingTail）
+            ctx.messages = [
+                { role: 'user', contentItems: [{ text: '既有条目', time: 0, userId: 'QQ:0', messageId: 'm0' }] },
+            ] as any;
+
+            await Promise.all([
+                ctx.addUserMessage(makeCtx(), '并发消息A'.repeat(6), 'QQ:1', 'ma'),
+                ctx.addUserMessage(makeCtx(), '并发消息B'.repeat(6), 'QQ:2', 'mb'),
+            ]);
+
+            // 原文可能在 text / rawText / rawItems 里（压缩采纳后原文进 rawItems）
+            const texts: string[] = [];
+            for (const m of ctx.messages as any[]) {
+                for (const it of (m.contentItems || [])) {
+                    if (typeof it.text === 'string') texts.push(it.text);
+                    if (typeof it.rawText === 'string') texts.push(it.rawText);
+                    for (const ri of (it.rawItems || [])) if (typeof ri.text === 'string') texts.push(ri.text);
+                }
+            }
+            const joined = texts.join('\n');
+            assert.ok(joined.includes('并发消息A'), `并发入库不得丢 A（实际：${joined}）`);
+            assert.ok(joined.includes('并发消息B'), `并发入库不得丢 B（实际：${joined}）`);
+        } finally {
+            Agent.get = origGet;
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            if (origThreshold === undefined) delete TC.intConfigs['消息压缩阈值']; else TC.intConfigs['消息压缩阈值'] = origThreshold;
             resetConfigCache();
         }
     },

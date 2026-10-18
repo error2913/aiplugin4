@@ -21,7 +21,7 @@ description: aiplugin4 插件综合测试与调试技能：通过 qqmcp 对测�
 
 1. 预检：`qq_get_bot_status` → `qq_list_groups` → `qq_get_group_members` → 发一条 `.ai status` 找到回复者（待测机器人）。
 2. 只读快照：`.ai status`、`.ai model`、`.ai ctxn status`、`.ai memo status`、`.ai tool`、`.ai timer lst`、`.ai tk sum`、`.ai ign list`、`.ai role`。
-3. 逐域执行用例（发送 → 轮询 → 关键字断言）：control.md / memory.md / tool.md / admin.md / image.md / media.md。
+3. 逐域执行用例（发送 → 轮询 → 关键字断言）：control.md / memory.md / tool.md / admin.md / image.md / media.md / context.md。
 4. 有用例异常（执行失败/无回复/权限异常）：读取海豹日志，摘录相关日志到报告并给出诊断。
 5. 重载 JS 测试：确认距上次重载 ≥ 1 分钟 → 上传 `dist/aiplugin4.js` 并重载 → 重载完成后等待数秒 → 查看重载日志确认无报错（日志摘要写入报告）→ 向群里发 `.ai status` 验证插件仍响应。
 6. 恢复现场（按快照还原）→ 向群里发总结（PASS/FAIL/SKIP 计数 + 失败项）→ 写 `test-reports/aiplugin4-e2e-<yyyyMMdd-HHmm>.md`。
@@ -36,6 +36,7 @@ description: aiplugin4 插件综合测试与调试技能：通过 qqmcp 对测�
 | `priv/privilege` `prompt` `tk/token` `timer` | [admin.md](references/admin.md) |
 | `img/image` | [image.md](references/image.md) |
 | `tts` `tti` `media`（语音合成/文生图/生成任务队列，4.24.0 起内置） | [media.md](references/media.md) |
+| `ctx`（冷/热状态、上下文成本） | [context.md](references/context.md) |
 
 只跑用户点名指令对应的行；快照与恢复仅限该域；执行完后群里发总结（含被测指令与 PASS/FAIL/SKIP）。
 
@@ -58,4 +59,4 @@ description: aiplugin4 插件综合测试与调试技能：通过 qqmcp 对测�
 
 ## 参考文件
 
-- 测试用例：control.md / memory.md / tool.md / admin.md / image.md / media.md。
+- 测试用例：control.md / memory.md / tool.md / admin.md / image.md / media.md / context.md。
