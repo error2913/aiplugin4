@@ -17,6 +17,7 @@
     "pack:sealpack": "node scripts/prepare-sealpack.js && sealpack pack sealpack --out dist/aiplugin4.sealpack",
     "pack:release": "node scripts/build-release.js",
     "test:unit": "node scripts/test-unit.cjs",
+    "sim": "node scripts/sim.cjs",
     "test:integration": "node scripts/integration-config-generator.mjs",
     "docs:build": "node docs-site/build.js",
     "docs:serve": "node docs-site/build.js --serve"
