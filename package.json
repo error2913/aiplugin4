@@ -19,6 +19,7 @@
     "test:unit": "node scripts/test-unit.cjs",
     "sim": "node scripts/sim.cjs",
     "sim:matrix": "node scripts/sim-matrix.cjs",
+    "fuzz": "node scripts/fuzz.cjs",
     "test:integration": "node scripts/integration-config-generator.mjs",
     "docs:build": "node docs-site/build.js",
     "docs:serve": "node docs-site/build.js --serve"

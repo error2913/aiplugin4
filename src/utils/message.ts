@@ -622,8 +622,15 @@ export async function handleMessages(
         }
     }
 
-    // 清理孤立 tool 消息：前面不存在对应 assistant tool_calls 的 tool 结果直接丢弃，
-    // 避免发送给 API 时出现 "role 'tool' 必须跟在对应 tool_calls 之后" 报错（如上下文被裁剪后残留）
+    // 清理孤立/失配的 tool 消息，避免发给 API 时出现
+    // "role 'tool' 必须跟在对应 tool_calls 之后" 报错（如上下文被裁剪后残留）。
+    //
+    // **两层判据**（fuzz 发现第二层原先缺失）：
+    //   (1) tool 的 id 在整份消息里找不到对应的 assistant(tool_calls) → 丢弃；
+    //   (2) 找到了，但两者**不相邻**（中间夹了别的非 tool 消息）→ 同样丢弃。
+    //       OpenAI 兼容接口要求 tool 结果**紧跟**在发起它的 assistant 之后（中间只能有其他 tool），
+    //       仅"存在同 id 的 assistant"并不够 —— 例如 [assistant(tc), tool, user, tool] 里
+    //       第二个 tool 会被真实接口拒绝。原先只查了 (1)，故此类请求体漏了出去。
     const toolCallIdSet = new Set<string>();
     for (const message of messages) {
         const toolCalls = message.toolCalls || message.tool_calls;
@@ -635,7 +642,15 @@ export async function handleMessages(
         const message = messages[i];
         if (message.role !== 'tool') continue;
         const id = message.toolCallId || message.tool_call_id || '';
-        if (!toolCallIdSet.has(id)) messages.splice(i, 1);
+        if (!toolCallIdSet.has(id)) { messages.splice(i, 1); continue; }
+        // (2) 相邻性：向上跳过连续的 tool，必须落到一个"发起了该 id"的 assistant
+        let j = i - 1;
+        while (j >= 0 && messages[j].role === 'tool') j--;
+        const owner = j >= 0 ? messages[j] : null;
+        const ownerCalls = owner ? (owner.toolCalls || owner.tool_calls) : null;
+        const adjacent = !!owner && owner.role === 'assistant' && Array.isArray(ownerCalls)
+            && ownerCalls.some((tc: any) => tc && String(tc.id) === String(id));
+        if (!adjacent) messages.splice(i, 1);
     }
 
     return await Promise.all(messages.map(async message => {
