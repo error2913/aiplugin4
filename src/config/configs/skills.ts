@@ -7,6 +7,8 @@ import { DEFAULT_SKILLS, DEFAULT_SKILLS_JSON } from "../domain/defaults";
 import { parseSkillsConfig } from "../domain/parse";
 import { SkillEntry } from "../domain/types";
 
+import { GENERATOR_CONFIG_HINT } from "./generator_hint";
+
 export const SKILLS_CONFIG_KEY = '技能列表';
 
 function fallbackSkills(): SkillEntry[] {
@@ -41,10 +43,7 @@ export default class SkillsConfig {
             ext,
             SKILLS_CONFIG_KEY,
             DEFAULT_SKILLS_JSON,
-            '整份技能配置（JSON v1）：{"version":1,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"SKILL.md 正文"}]}。'
-            + 'platform 省略或 [] = 所有平台；name 唯一。'
-            + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「技能」页）。'
-            + '修改后可用 .ai skill refresh 生效（或重载 JS）。',
+            GENERATOR_CONFIG_HINT,
             '技能',
         );
     }

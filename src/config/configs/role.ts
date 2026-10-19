@@ -7,6 +7,8 @@ import { DEFAULT_ROLES, DEFAULT_ROLES_JSON } from "../domain/defaults";
 import { parseRolesConfig } from "../domain/parse";
 import { RoleEntry } from "../domain/types";
 
+import { GENERATOR_CONFIG_HINT } from "./generator_hint";
+
 const ROLE_NAME_MAX_LENGTH = 20;
 export const ROLE_CONFIG_KEY = '角色设定';
 
@@ -63,10 +65,7 @@ export default class RoleConfig {
             ext,
             ROLE_CONFIG_KEY,
             DEFAULT_ROLES_JSON,
-            '整份角色设定配置（JSON v1）：{"version":1,"roles":[{"name":"角色名","prompt":"设定内容"}]}。'
-            + 'name 超过 20 字符会自动截断；.ai role 可切换角色。'
-            + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「角色设定」页）。'
-            + '修改后需重载 JS 生效。',
+            GENERATOR_CONFIG_HINT,
             '角色设定',
         );
     }

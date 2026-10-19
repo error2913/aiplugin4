@@ -12,6 +12,8 @@ import { normalizeWebDefaults, resolveWebConfig } from '../../web/schema';
 import { WebConfig, WebDefaults } from '../../web/types';
 import { ext } from '../config';
 
+import { GENERATOR_CONFIG_HINT } from './generator_hint';
+
 const CONFIG_KEY = '联网配置';
 const CONFIG_GROUP = '联网';
 
@@ -67,10 +69,7 @@ export default class WebConfigStore {
             ext,
             CONFIG_KEY,
             '',
-            '联网搜索/抓取配置（v1，一个 JSON）。留空 = 使用内置 SearXNG（https://searxng.fishwhite.top）。'
-            + '可配置 DeepSeek / SearXNG / Kimi / Brave / Tavily / Serper / 博查 / 智谱 / Exa / Firecrawl / 自定义 generic；'
-            + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「联网搜索」页）。修改后需重载 JS 生效。'
-            + '返回条数 / 详细程度 / 超时 / 正文截断 / 失败回退在下方独立配置项里设置，不写进 JSON。',
+            GENERATOR_CONFIG_HINT,
             CONFIG_GROUP,
         );
         seal.ext.registerIntConfig(ext, WEB_DEFAULTS_KEYS.count, 10, '联网搜索默认返回条数（1~50）；工具调用未指定 count 时使用', CONFIG_GROUP);

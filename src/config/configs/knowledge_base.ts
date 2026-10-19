@@ -7,6 +7,8 @@ import { DEFAULT_KB, DEFAULT_KB_JSON } from "../domain/defaults";
 import { parseKbConfig } from "../domain/parse";
 import { KbEntry } from "../domain/types";
 
+import { GENERATOR_CONFIG_HINT } from "./generator_hint";
+
 export const KB_CONFIG_KEY = '知识库配置';
 
 function fallbackLibraries(): KbEntry[] {
@@ -42,11 +44,7 @@ export default class KnowledgeBaseConfig {
             ext,
             KB_CONFIG_KEY,
             DEFAULT_KB_JSON,
-            '整份知识库配置（JSON v1）：{"version":1,"libraries":[{"name":"库名","description":"描述","platform":["QQ"],"content":"Markdown 正文"}]}。'
-            + 'platform 省略或 [] = 所有平台；name 唯一。# 一级标题为条目、##/### 为小节，超长文档自动分块。'
-            + '知识库为只读数据，AI 只能用 knowledge_search / knowledge_read / knowledge_list / knowledge_docs 检索。'
-            + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「知识库」页）。'
-            + '修改后用 .ai kb refresh 生效（或重载 JS）。',
+            GENERATOR_CONFIG_HINT,
             '知识库',
         );
     }

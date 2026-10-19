@@ -18,6 +18,8 @@ import { adaptV5 } from "../v5/adapt";
 import { DEFAULT_V5_CONFIG } from "../v5/default";
 import { formatIssues, normalizePurposeList, parseV5Config, V5Config, V5Issue } from "../v5/schema";
 
+import { GENERATOR_CONFIG_HINT } from "./generator_hint";
+
 export const MODEL_PURPOSE_OVERRIDES_KEY = 'modelPurposeOverrides';
 
 /** v5 配置项名 */
@@ -151,7 +153,7 @@ function buildModelConfig(): ModelConfigData {
 export default class ModelConfig {
 
     static register() {
-        seal.ext.registerStringConfig(ext, MODEL_CONFIG_KEY, DEFAULT_V5_CONFIG, '整份模型配置（v5，一个 JSON）。推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/　修改后需重载 JS 生效。', CONFIG_GROUP);
+        seal.ext.registerStringConfig(ext, MODEL_CONFIG_KEY, DEFAULT_V5_CONFIG, GENERATOR_CONFIG_HINT, CONFIG_GROUP);
     }
 
     static get(): ModelConfigData {

@@ -8,6 +8,8 @@ import { DEFAULT_MCP_JSON } from "../domain/defaults";
 import { parseMcpConfig } from "../domain/parse";
 import { McpServerEntry } from "../domain/types";
 
+import { GENERATOR_CONFIG_HINT } from "./generator_hint";
+
 export const MCP_SERVER_CONFIG_KEY = 'MCP服务器';
 
 function readServers(): McpServerEntry[] {
@@ -39,12 +41,7 @@ export default class McpConfig {
             ext,
             MCP_SERVER_CONFIG_KEY,
             DEFAULT_MCP_JSON,
-            '整份 MCP 服务器配置（标准 JSON，一个对象）：{"mcpServers":{"服务器名":{"type":"http","url":"http://127.0.0.1:3910/mcp","headers":{"Authorization":"Bearer token"}}}}。'
-            + '键 = 服务器名；type 仅支持 http / streamable-http；platform 是 aiplugin4 扩展字段（可选）。'
-            + '默认空配置（不预置服务器）；开启上方「是否启用MCP」后才会连接/注册。'
-            + 'stdio（command）与 SSE 不支持，解析时跳过并记日志。'
-            + '推荐用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「MCP」页）。'
-            + '修改后用 .ai mcp refresh 生效（或重载 JS）。',
+            GENERATOR_CONFIG_HINT,
             'MCP',
         );
         seal.ext.registerIntConfig(ext, "MCP会话空闲回收分钟", 10, "MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 表示不回收", "MCP");
