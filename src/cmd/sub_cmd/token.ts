@@ -1,6 +1,5 @@
 // .ai token：查看/清除 token 用量记录
-import { UsageManager } from "../../usage";
-import { get_chart_url } from "../../usage";
+import { chartImageCQ, get_chart_url, UsageManager } from "../../usage";
 import { aliasToCmd } from "../../utils/utils";
 import { S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -129,8 +128,8 @@ export function registerCmdToken() {
 
                 const val3 = cmdArgs.getArgN(3);
                 if (val3 === 'chart') {
-                    const url = await get_chart_url('year', obj);
-                    seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败');
+                    const chart = await get_chart_url('year', obj);
+                    seal.replyToSender(ctx, msg, chartImageCQ(chart) || `图表生成失败${chart.error ? `：${chart.error}` : ''}`);
                     return ret;
                 }
 
@@ -196,8 +195,8 @@ export function registerCmdToken() {
 
                 const val3 = cmdArgs.getArgN(3);
                 if (val3 === 'chart') {
-                    const url = await get_chart_url('month', obj);
-                    seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败');
+                    const chart = await get_chart_url('month', obj);
+                    seal.replyToSender(ctx, msg, chartImageCQ(chart) || `图表生成失败${chart.error ? `：${chart.error}` : ''}`);
                     return ret;
                 }
 
@@ -317,8 +316,8 @@ export function registerCmdToken() {
 
                         const val4 = cmdArgs.getArgN(4);
                         if (val4 === 'chart') {
-                            const url = await get_chart_url('year', obj);
-                            seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败');
+                            const chart = await get_chart_url('year', obj);
+                            seal.replyToSender(ctx, msg, chartImageCQ(chart) || `图表生成失败${chart.error ? `：${chart.error}` : ''}`);
                             return ret;
                         }
 
@@ -384,8 +383,8 @@ export function registerCmdToken() {
 
                         const val4 = cmdArgs.getArgN(4);
                         if (val4 === 'chart') {
-                            const url = await get_chart_url('month', obj);
-                            seal.replyToSender(ctx, msg, url ? `[CQ:image,file=${url}]` : '图表生成失败');
+                            const chart = await get_chart_url('month', obj);
+                            seal.replyToSender(ctx, msg, chartImageCQ(chart) || `图表生成失败${chart.error ? `：${chart.error}` : ''}`);
                             return ret;
                         }
 

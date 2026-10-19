@@ -456,14 +456,14 @@ export class Session {
 
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
         this.lastCtx = ctx;
-        const { content } = await transformArrayToContent(ctx, messageArray);
+        const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
         await this.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
     }
 
     /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
     async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string) {
         this.lastCtx = ctx;
-        const { content } = await transformArrayToContent(ctx, messageArray);
+        const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
         this.pendingQueue.push({
             ctx,
             msg,

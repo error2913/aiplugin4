@@ -1,31 +1,62 @@
-// 后端服务配置：流式/图片转base64/搜索/用量图/论坛等 URL
-// md/html 渲染（md-html-render）为 MCP 服务，已移入「MCP → MCP服务器配置」
+// 后端服务地址：单一 JSON（v1），在 aiplugin4-backends 的 WebUI 点「复制后端配置」后粘贴。
+//
+// 不迁移、不兼容：旧的 8 个独立键（流式输出/图片转base64/图床/图床Token/媒体转base64/
+// 用量图表/核心桥WS地址/核心桥Token）不再注册、也不再读取。
+// 空文本 = 全部使用出厂默认地址（不报错）；校验失败整份拒绝并回退出厂默认。
+import Logger from "../../logger";
 import { ext } from "../config";
+import { parseBackendConfig, resolveBackendEndpoints } from "../domain/backend";
+
+import { BACKEND_CONFIG_HINT } from "./generator_hint";
+
+export const BACKEND_CONFIG_KEY = '后端配置';
+
+function readText(): string {
+    try {
+        return seal.ext.getStringConfig(ext, BACKEND_CONFIG_KEY) ?? '';
+    } catch (e) {
+        Logger.error(`读取配置项「${BACKEND_CONFIG_KEY}」失败: ${e instanceof Error ? e.message : String(e)}`);
+        return '';
+    }
+}
+
+function readEndpoints() {
+    const text = readText();
+    // 空文本：什么都不做，直接使用出厂默认地址（不报错）
+    if (!text.trim()) return resolveBackendEndpoints(null);
+
+    const result = parseBackendConfig(text);
+    for (const warning of result.warnings) Logger.warning(`  ${warning.path} ${warning.msg}`);
+    if (!result.config) {
+        Logger.error(`「${BACKEND_CONFIG_KEY}」校验失败（共 ${result.issues.length} 处），本次按出厂默认地址处理：`);
+        for (const item of result.issues) Logger.error(`  ${item.path} ${item.msg}`);
+        Logger.error('提示：在 aiplugin4-backends 的 WebUI 点「复制后端配置」后整段粘贴。');
+        return resolveBackendEndpoints(null);
+    }
+    return resolveBackendEndpoints(result.config);
+}
+
 export default class BackendConfig {
     static register() {
-        seal.ext.registerStringConfig(ext, "流式输出", "http://localhost:3010", '流式输出后端地址（aiplugin4-backends 的 stream-output）。\n模型 body.stream=true 且非 anthropic 提供商时走流式，经该地址对接后端', "后端");
-        seal.ext.registerStringConfig(ext, "图片转base64", "http://127.0.0.1:46678", '图片转 base64 后端地址（aiplugin4-backends 的 image-url-to-base64），用于把图片 URL 转成 base64 供模型读取', "后端");
-        seal.ext.registerStringConfig(ext, "媒体转base64", "http://127.0.0.1:46679", '媒体接口中转后端地址（aiplugin4-backends 的 media-fetch）。\n海豹的 JS 引擎（goja）读不了二进制响应（fetch 只有 text/json；text 会按 UTF-8 解码损坏原始字节），\n因此「整个响应体即音频/图片」的语音/生图接口（阿里 CosyVoice、百度、OpenAI 兼容等）需要该后端代发请求并把二进制转成 base64 返回。\n留空 = 禁用中转，这类接口会明确报错。', "后端");
-        seal.ext.registerStringConfig(ext, "用量图表", "http://127.0.0.1:3009", '用量统计图表后端地址（aiplugin4-backends 的 usage-chart），供 .ai token 用量图表使用', "后端");
-        seal.ext.registerStringConfig(ext, "论坛地址", "https://aiplugin-forum.fishwhite.top", 'aiplugin4 专用论坛地址，用于论坛工具；一般保持默认', "后端");
-        seal.ext.registerStringConfig(ext, "论坛API Token", "", '论坛注册后获取的 api_token，用于发帖等写操作的鉴权；不填则只能使用只读功能', "后端");
-        seal.ext.registerStringConfig(ext, "论坛签名密钥", "", '论坛注册后获取的 secret_key，用于请求签名；与「论坛API Token」配套填写', "后端");
-        seal.ext.registerStringConfig(ext, "核心桥WS地址", "ws://127.0.0.1:46880/plugin", "aiplugin4 连接 ob11-core-bridge 的 WebSocket 地址", "后端");
-        seal.ext.registerStringConfig(ext, "核心桥Token", "", "可选；对应后端 AIPLUGIN4_BRIDGE_PLUGIN_TOKEN", "后端");
-
+        seal.ext.registerStringConfig(ext, BACKEND_CONFIG_KEY, '', BACKEND_CONFIG_HINT, "后端");
     }
 
     static get() {
+        const endpoints = readEndpoints();
         return {
-            STREAM: seal.ext.getStringConfig(ext, "流式输出"),
-            IMAGE_TO_BASE64: seal.ext.getStringConfig(ext, "图片转base64"),
-            MEDIA_FETCH: seal.ext.getStringConfig(ext, "媒体转base64"),
-            USAGE_CHART: seal.ext.getStringConfig(ext, "用量图表"),
-            FORUM_URL: seal.ext.getStringConfig(ext, "论坛地址"),
-            FORUM_API_TOKEN: seal.ext.getStringConfig(ext, "论坛API Token"),
-            FORUM_SECRET_KEY: seal.ext.getStringConfig(ext, "论坛签名密钥"),
-            CORE_BRIDGE_WS_URL: seal.ext.getStringConfig(ext, "核心桥WS地址"),
-            CORE_BRIDGE_TOKEN: seal.ext.getStringConfig(ext, "核心桥Token"),
+            STREAM: endpoints['stream-output'].url,
+            STREAM_TOKEN: endpoints['stream-output'].token,
+            IMAGE_TO_BASE64: endpoints['image-url-to-base64'].url,
+            IMAGE_TO_BASE64_TOKEN: endpoints['image-url-to-base64'].token,
+            IMAGE_HOST: endpoints['image-host'].url,
+            IMAGE_HOST_PUBLIC_URL: endpoints['image-host'].publicUrl || '',
+            IMAGE_HOST_TOKEN: endpoints['image-host'].token,
+            MEDIA_FETCH: endpoints['media-fetch'].url,
+            MEDIA_FETCH_TOKEN: endpoints['media-fetch'].token,
+            USAGE_CHART: endpoints['usage-chart'].url,
+            USAGE_CHART_TOKEN: endpoints['usage-chart'].token,
+            CORE_BRIDGE_WS_URL: endpoints['ob11-core-bridge'].url,
+            CORE_BRIDGE_TOKEN: endpoints['ob11-core-bridge'].token,
         }
     }
 }

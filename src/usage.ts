@@ -2,6 +2,7 @@
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { logger } from "./logger";
+import { backendAuthHeaders, backendAuthHint } from "./utils/backend";
 
 /** 用量计数（输入/输出；缓存字段按厂商提供时累加，用于观察缓存命中） */
 interface UsageCount { prompt_tokens: number; completion_tokens: number; cache_read_tokens?: number; cache_write_tokens?: number }
@@ -174,19 +175,29 @@ export class UsageManager {
     }
 }
 
+export interface ChartResult {
+    /** 后端临时图片 URL（旧版后端只有它；协议端能访问后端时可用） */
+    url: string;
+    /** 图表 PNG 的 base64（新版后端）：落本地文件发送，token 不进 URL、不依赖后端地址可达 */
+    base64?: string;
+    /** 失败原因（命令层展示用；成功时为空） */
+    error?: string;
+}
+
 export async function get_chart_url(chart_type: string, usage_data: {
     [key: string]: {
         prompt_tokens: number;
         completion_tokens: number;
     }
-}) {
-    const { USAGE_CHART: usageChartUrl } = Config.backend;
+}): Promise<ChartResult> {
+    const { USAGE_CHART: usageChartUrl, USAGE_CHART_TOKEN: usageChartToken } = Config.backend;
     try {
         const response = await fetch(`${usageChartUrl}/chart`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                ...backendAuthHeaders(usageChartToken),
             },
             body: JSON.stringify({
                 chart_type: chart_type,
@@ -196,23 +207,41 @@ export async function get_chart_url(chart_type: string, usage_data: {
 
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`请求失败! 状态码: ${response.status}\n响应体: ${text}`);
+            const hint = response.status === 401 ? `\n${backendAuthHint('usage-chart')}` : '';
+            throw new Error(`请求失败! 状态码: ${response.status}${hint}\n响应体: ${text}`);
         }
         if (!text) {
             throw new Error("响应体为空");
         }
 
+        let data: any;
         try {
-            const data = JSON.parse(text);
-            if (data.error) {
-                throw new Error(`请求失败! 错误信息: ${data.error.message}`);
-            }
-            return data.image_url;
+            data = JSON.parse(text);
         } catch (e) {
             throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
         }
+        if (data.error) {
+            throw new Error(`请求失败! 错误信息: ${data.error.message}`);
+        }
+        return {
+            url: typeof data.image_url === 'string' ? data.image_url : '',
+            base64: typeof data.base64 === 'string' && data.base64 ? data.base64 : undefined,
+        };
     } catch (e) {
-        logger.error("在get_chart_url中请求出错:", e instanceof Error ? e.message : String(e));
-        return '';
+        const message = e instanceof Error ? e.message : String(e);
+        logger.error("在get_chart_url中请求出错:", message);
+        return { url: '', error: message };
     }
+}
+
+/**
+ * 图表 → CQ 图片段。
+ * 优先用后端返回的 base64 落本地文件（token 不进图片 URL、也不要求协议端能访问后端地址）；
+ * 旧版后端没有 base64 时回退 `image_url`。
+ */
+export function chartImageCQ(chart: ChartResult | null): string {
+    if (!chart) return '';
+    if (chart.base64) return `[CQ:image,file=${seal.base64ToImage(chart.base64)}]`;
+    if (chart.url) return `[CQ:image,file=${chart.url}]`;
+    return '';
 }

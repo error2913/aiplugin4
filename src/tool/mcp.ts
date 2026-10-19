@@ -142,9 +142,13 @@ async function mcpRequest(server: MCPServer, payload: object, sessionId?: string
     return { status: response.status, body, sessionId: response.headers.get('mcp-session-id') || sessionId };
 }
 
-/** JSON-RPC 错误码 → 可读错误信息 */
-function formatError(status: number, body: any): string {
+/** 把 MCP HTTP 状态 + JSON-RPC 错误转成可读信息；401/403 优先按鉴权失败提示 */
+export function formatMcpError(status: number, body: any): string {
     const err = body && body.error;
+    if (status === 401 || status === 403) {
+        const detail = err && typeof err === 'object' && err.message ? `：${err.message}` : '';
+        return `鉴权失败（HTTP ${status}）${detail}；请检查该 MCP 服务器的 Authorization / token 是否与后端一致`;
+    }
     if (err && typeof err === 'object') {
         const codeMsg: { [code: number]: string } = {
             [-32700]: '解析错误（请求不是合法 JSON）',
@@ -174,7 +178,7 @@ async function initialize(server: MCPServer): Promise<string | undefined> {
         }
     });
     if (!res.body || !res.body.result) {
-        throw new Error(`MCP initialize 失败: ${formatError(res.status, res.body)}`);
+        throw new Error(`MCP initialize 失败: ${formatMcpError(res.status, res.body)}`);
     }
     const sessionId = res.sessionId;
     await mcpRequest(server, { jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
@@ -194,7 +198,7 @@ async function listTools(server: MCPServer, sessionId: string): Promise<MCPToolD
             params: cursor ? { cursor } : {}
         }, sessionId);
         if (res.body && res.body.error) {
-            throw new Error(`MCP tools/list 失败: ${formatError(res.status, res.body)}`);
+            throw new Error(`MCP tools/list 失败: ${formatMcpError(res.status, res.body)}`);
         }
         const result = res.body && res.body.result;
         if (result && Array.isArray(result.tools)) tools.push(...result.tools);
@@ -217,10 +221,10 @@ async function doCallTool(server: MCPServer, sessionId: string, name: string, ar
     }, sessionId, sessionKey);
     const result = res.body && res.body.result;
     if (res.body && res.body.error) {
-        throw new Error(`MCP 工具 ${name} 调用失败: ${formatError(res.status, res.body)}`);
+        throw new Error(`MCP 工具 ${name} 调用失败: ${formatMcpError(res.status, res.body)}`);
     }
     if (!result) {
-        throw new Error(`MCP tools/call 失败: ${formatError(res.status, res.body)}`);
+        throw new Error(`MCP tools/call 失败: ${formatMcpError(res.status, res.body)}`);
     }
     const text = Array.isArray(result.content) ? result.content.map((b: any) => b.text || '').join('\n') : JSON.stringify(result);
     if (result.isError) {

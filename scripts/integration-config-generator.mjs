@@ -1227,9 +1227,10 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
         ok(`${id}：默认条数一致`, list.length === spec.defaults.length,
             `生成器 ${spec.defaults.length} / 插件 ${list.length}`);
         if (id === 'mcp') {
-            // 刻意不一致：插件默认空配置（避免没配 MCP 时启动/对话报错），生成器仍保留三台示例
+            // 刻意不一致：插件默认空配置（避免没配 MCP 时启动/对话报错），生成器保留示例供按需复制。
+            // 只断言「插件为空 / 生成器非空」，不锁台数——生成器增删示例时不用改联测。
             ok('mcp：插件默认配置为空', pluginDefaults.mcp.length === 0, JSON.stringify(pluginDefaults.mcp));
-            ok('mcp：生成器默认仍保留示例', spec.defaults.length === 3, String(spec.defaults.length));
+            ok('mcp：生成器默认保留示例', spec.defaults.length > 0, String(spec.defaults.length));
         } else {
             ok(`${id}：两边默认数据一致`,
                 isDeepStrictEqual(genItems.map(toPluginShape), pluginDefaults[id].map(stripEnabled)),

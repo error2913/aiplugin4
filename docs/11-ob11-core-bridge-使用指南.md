@@ -82,14 +82,14 @@ ws://127.0.0.1:46880/core
 
 ## 插件侧接入（aiplugin4）
 
-1. 在 aiplugin4「后端」配置分组中填写：
-   - **核心桥WS地址**：默认 `ws://127.0.0.1:46880/plugin`（对应后端 `AIPLUGIN4_BRIDGE_PLUGIN_PATH`，按实际地址/路径填写）
-   - **核心桥Token**（可选）：对应后端 `AIPLUGIN4_BRIDGE_PLUGIN_TOKEN`，中间件要求鉴权时填写（插件以 `access_token` 查询参数传入）
+1. 在 aiplugin4「后端 → 后端配置」的 `backends.ob11-core-bridge` 中填写（也可直接点 aiplugin4-backends WebUI 的「📋 复制后端配置」整段粘贴）：
+   - **url**：默认 `ws://127.0.0.1:46880/plugin`（对应后端 `AIPLUGIN4_BRIDGE_PLUGIN_PATH`，按实际地址/路径填写）
+   - **token**（可选）：对应后端 `AIPLUGIN4_BRIDGE_PLUGIN_TOKEN`，中间件要求鉴权时填写（插件以 `access_token` 查询参数传入）
 2. 按需配置「可调用指令白名单」与「指令前缀」。`run_core_command` 由插件本地注册为 AI 工具（不再依赖 MCP，也无需打开「是否启用MCP」总开关）；`run_ext_command` 在插件内**本地直接执行扩展指令**，无需中间件。
 
 ## 工具与参数
 
-`run_ext_command` 与 `run_core_command` 均由插件本地注册为 AI 工具（敏感工具，执行会显著记录）。`run_ext_command` 在插件内直调扩展 `solve`，不依赖中间件；`run_core_command` 通过 `/plugin` WebSocket 直连 `ob11-core-bridge` 注入假消息执行核心指令，需启动 `ob11-core-bridge` 并在「后端」配置「核心桥WS地址」。
+`run_ext_command` 与 `run_core_command` 均由插件本地注册为 AI 工具（敏感工具，执行会显著记录）。`run_ext_command` 在插件内直调扩展 `solve`，不依赖中间件；`run_core_command` 通过 `/plugin` WebSocket 直连 `ob11-core-bridge` 注入假消息执行核心指令，需启动 `ob11-core-bridge` 并在「后端 → 后端配置」的 `backends.ob11-core-bridge` 填地址。
 
 ### run_ext_command — 扩展指令
 
@@ -177,7 +177,7 @@ ws://127.0.0.1:46880/core
 
 | 现象 | 检查 |
 | --- | --- |
-| `run_core_command` 不可用 / 报核心桥未连接 | 「后端 → 核心桥WS地址」是否正确（默认 `ws://127.0.0.1:46880/plugin`）、`ob11-core-bridge` 是否已启动、核心是否已连上 `/core` |
+| `run_core_command` 不可用 / 报核心桥未连接 | 「后端 → 后端配置」的 `backends.ob11-core-bridge.url` 是否正确（默认 `ws://127.0.0.1:46880/plugin`）、`ob11-core-bridge` 是否已启动、核心是否已连上 `/core` |
 | `run_ext_command` 执行失败 / 无响应 | 扩展是否已安装、指令名是否正确（`扩展名|指令名`）、是否在白名单、指令本身是否抛异常；与中间件无关 |
 | 执行无响应 / 超时 | SealDice 是否已连上 `/core`（看中间件日志）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
 | 返回 `ambiguous=true` | 同 lane 并发或缺少 reply 引用；调整 `captureMode` / `settleMs` |

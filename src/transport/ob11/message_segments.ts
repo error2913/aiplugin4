@@ -132,6 +132,29 @@ export async function resolveSendMessage(
     return result;
 }
 
+/**
+ * 发送给协议端的图片值：统一走 Image.getSendFile()。
+ * 图床配成 IP/域名时用稳定地址；回环地址协议端访问不到，会自动取字节落成本地文件。
+ */
+async function imageFile(image: Image): Promise<string> {
+    return image.getSendFile();
+}
+
+async function pushImage(
+    out: MessageSegment[],
+    flush: () => void,
+    image: Image,
+    missingWarning: string,
+): Promise<void> {
+    const file = await imageFile(image);
+    if (!file) {
+        log.warning(missingWarning);
+        return;
+    }
+    flush();
+    out.push({ type: "image", data: { file } });
+}
+
 async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, text: string): Promise<MessageSegment[]> {
     const tokens = parseSpecialTokens(text);
     const out: MessageSegment[] = [];
@@ -155,8 +178,7 @@ async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, te
                 const image = await session.context.findImage(ctx, id)
                     || (id.includes(":") ? await session.context.findImage(ctx, id.split(":")[0]) : null);
                 if (image) {
-                    flush();
-                    out.push({ type: "image", data: { file: image.type === "base64" ? seal.base64ToImage(image.base64) : (image.url || image.path) } });
+                    await pushImage(out, flush, image, `发送消息时图片不可用（取不到可发送的本地文件/地址）：${id}`);
                 } else {
                     log.warning(`发送消息时无法找到图片：${id}`);
                 }
@@ -165,16 +187,14 @@ async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, te
             case "avatar": {
                 const image = await session.context.findImage(ctx, `user_avatar:${token.content}`);
                 if (image) {
-                    flush();
-                    out.push({ type: "image", data: { file: image.type === "base64" ? seal.base64ToImage(image.base64) : (image.url || image.path) } });
+                    await pushImage(out, flush, image, `发送消息时用户头像不可用：${token.content}`);
                 } else log.warning(`发送消息时无法找到用户头像：${token.content}`);
                 break;
             }
             case "group_avatar": {
                 const image = await session.context.findImage(ctx, `group_avatar:${token.content}`);
                 if (image) {
-                    flush();
-                    out.push({ type: "image", data: { file: image.type === "base64" ? seal.base64ToImage(image.base64) : (image.url || image.path) } });
+                    await pushImage(out, flush, image, `发送消息时群头像不可用：${token.content}`);
                 } else log.warning(`发送消息时无法找到群头像：${token.content}`);
                 break;
             }

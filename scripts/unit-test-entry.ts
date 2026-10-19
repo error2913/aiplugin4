@@ -14,6 +14,7 @@ import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "
 import { stripRawMarkers } from "../src/utils/raw_marker";
 import { createCtx } from "../src/utils/seal";
 import { fetchData } from "../src/utils/web";
+import { backendAuthHeaders, backendAuthHint, backendStatusHint } from "../src/utils/backend";
 import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerRawToolSet } from "../src/tool/tools/raw/init";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
@@ -54,7 +55,7 @@ import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, est
 import { evictExpiredShards, readShard, writeShardIfAbsent } from "../src/context/archive_store";
 import { registerCmdForget } from "../src/cmd/sub_cmd/forget";
 import { registerCmdToken } from "../src/cmd/sub_cmd/token";
-import { UsageManager } from "../src/usage";
+import { UsageManager, chartImageCQ, get_chart_url } from "../src/usage";
 import { resolveEffectiveMaxTokens } from "../src/model/api_error";
 import { getProbedContextWindow, rememberProbedContextWindow } from "../src/model/window_cache";
 import Agent from "../src/agent/agent";
@@ -88,7 +89,7 @@ import { renderPubSnapshot } from "../src/pub/snapshot";
 import { registerCmdPub } from "../src/cmd/sub_cmd/pub";
 import { registerPubRead, registerPubSend, setPubSessionLoaderForTest } from "../src/tool/tools/pub/tool_pub";
 import { matchesPlatform } from "../src/utils/target_id";
-import { getConfiguredMCPServers, resetMCPCacheForTest } from "../src/tool/mcp";
+import { formatMcpError, getConfiguredMCPServers, resetMCPCacheForTest } from "../src/tool/mcp";
 import {
     parseKbConfig, parseMcpConfig, parseRolesConfig, parseSkillsConfig,
 } from "../src/config/domain/parse";
@@ -165,12 +166,15 @@ function makeCtx(): any {
 /** Image 转 base64 测试：静默 error 日志并指向测试后端，结束后还原 */
 function setupImageTestConfig() {
     TC.optionConfigs['日志级别'] = '从不';
-    TC.stringConfigs['图片转base64'] = 'http://test-backend';
+    TC.stringConfigs['后端配置'] = JSON.stringify({
+        version: 1,
+        backends: { 'image-url-to-base64': { url: 'http://test-backend' } },
+    });
     resetConfigCache();
 }
 function restoreImageTestConfig() {
     delete TC.optionConfigs['日志级别'];
-    delete TC.stringConfigs['图片转base64'];
+    delete TC.stringConfigs['后端配置'];
     resetConfigCache();
 }
 
@@ -386,10 +390,19 @@ function seedMediaModelAndStubFetch(opts: {
     contentType?: string;
 }): { restore: () => void; calls: () => number } {
     const origFetch = (globalThis as any).fetch;
+    const origBackend = TC.stringConfigs['后端配置'];
     let calls = 0;
     const model = opts.modelName;
     const provider = opts.provider ?? (opts.kind === 'tti' ? 'custom' : 'openai');
     const types = opts.kind === 'tti' ? { [model]: 'gen' } : { [model]: 'tts' };
+    // 这些用例验证的是「直连上游」的媒体链路；出厂默认 backends.media-fetch.url 非空，
+    // 二进制取数会直接走 media-fetch 后端（生产 goja 行为），而这里的 mock fetch 没有模拟
+    // 后端协议，故显式禁用中转。
+    TC.stringConfigs['后端配置'] = JSON.stringify({
+        version: 1,
+        backends: { 'media-fetch': { url: '' } },
+    });
+    resetConfigCache();
     Model.bootstrap([
         {
             provider, apiKey: 'k', baseUrl: 'https://media.test/v1',
@@ -414,7 +427,12 @@ function seedMediaModelAndStubFetch(opts: {
     };
 
     return {
-        restore: () => { (globalThis as any).fetch = origFetch; },
+        restore: () => {
+            (globalThis as any).fetch = origFetch;
+            if (origBackend === undefined) delete TC.stringConfigs['后端配置'];
+            else TC.stringConfigs['后端配置'] = origBackend;
+            resetConfigCache();
+        },
         calls: () => calls,
     };
 }
@@ -660,6 +678,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
             estimateMessageTokens(withReasoning as any) > estimateMessageTokens(withoutReasoning as any),
             'reasoning_content 应使单条消息估算增加'
         );
+    },
+
+    /** MCP 错误格式化：401/403 必须提示鉴权失败，而不是容易误解的「服务器未初始化」 */
+    testFormatMcpErrorAuth(): void {
+        const auth = formatMcpError(401, { error: { code: -32001, message: 'unauthorized' } });
+        assert.match(auth, /鉴权失败/);
+        assert.match(auth, /401/);
+        assert.match(auth, /unauthorized/);
+        assert.match(auth, /Authorization/);
+        assert.match(formatMcpError(403, {}), /鉴权失败/);
+        assert.match(formatMcpError(500, { error: { code: -32603 } }), /服务器内部错误/);
     },
 
     /** MCP 结果归一化：text/image/resource 转成文本引用 + 多模态 contentParts */
@@ -5426,7 +5455,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         setupImageTestConfig();
         const origSet = (ext as any).storageSet;
         const writes = new Map<string, string>();
-        (ext as any).storageSet = (_k: string, v: string) => { writes.set(`k${writes.size}`, v); };
+        (ext as any).storageSet = (k: string, v: string) => { writes.set(k, v); };
         const origFetch = (globalThis as any).fetch;
         let fetchCount = 0;
         (globalThis as any).fetch = async () => { fetchCount++; return { ok: false, status: 500, text: async () => '{"error":"x"}' }; };
@@ -5444,7 +5473,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(marked, 1, '只应标记未转 base64 且 URL 匹配的图片');
             assert.equal(img.urlBroken, true);
             assert.equal(done.urlBroken, false, '已有 base64 的图片不受影响');
-            assert.equal(writes.size, 1, '标记应落盘持久化');
+            assert.equal(writes.has('image_img_mark'), true, '标记应落盘持久化');
+            assert.equal(writes.has('image_img_mark_done'), false, '未标记的图片不应被写入');
             assert.equal(img.isUrlUnusable(), true);
             assert.equal(done.isUrlUnusable(), false);
             // 标记后不再请求后端（isBase64RetryBlocked 亦为 true）
@@ -10382,6 +10412,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(await MediaTaskManager.waitForSettle(slowTask, 0), null, '窗口 0 应直接返回 null（不等待）');
             assert.equal(await MediaTaskManager.waitForSettle(slowTask, -1), null, '负数窗口同 0（不等待）');
 
+            // 先还原 slow 的 fetch 桩：否则下一次 seed 会把 slow 的桩当成"原始 fetch"记下来，
+            // 最终 finally 又还原回桩，把 mock 泄漏给后续测试（曾导致图床真后端用例拿不到网络）。
+            slow.restore();
+
             // ---- 4) 失败任务在窗口内也应被识别为"已结算" ----
             MediaTaskManager.reset();
             const fail = seedMediaModelAndStubFetch({
@@ -10618,78 +10652,139 @@ export const tests: Record<string, () => void | Promise<void>> = {
      */
     async testBinaryFetchViaBackend(): Promise<void> {
         const origFetch = (globalThis as any).fetch;
-        const origBackend = TC.stringConfigs['媒体转base64'];
+        const origBackend = TC.stringConfigs['后端配置'];
+        const setMediaFetch = (url: string, token = '') => {
+            TC.stringConfigs['后端配置'] = JSON.stringify({
+                version: 1,
+                backends: { 'media-fetch': { url, token } },
+            });
+            resetConfigCache();
+        };
+        const backendResponse = (payload: any, status = 200) => ({
+            ok: status >= 200 && status < 300,
+            status,
+            headers: { get: () => 'application/json' },
+            text: async () => JSON.stringify(payload),
+        });
         try {
-            // ---- ① 有 arrayBuffer（Node/浏览器）：直连，不碰后端 ----
-            let calls: string[] = [];
-            (globalThis as any).fetch = async (url: string) => {
-                calls.push(String(url));
+            // ---- ① 未配后端 + 有 arrayBuffer（Node/浏览器）：直连，不碰后端 ----
+            let calls: Array<{ url: string; init: any }> = [];
+            setMediaFetch('');
+            (globalThis as any).fetch = async (url: string, init: any) => {
+                calls.push({ url: String(url), init });
                 return {
                     ok: true, status: 200,
                     headers: { get: () => 'audio/mp3' },
                     arrayBuffer: async () => new Uint8Array([0xff, 0xfb, 0x90, 0x00]).buffer,
+                    text: async () => '',
                 };
             };
             const direct = await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
             assert.ok(direct.length > 0, '有 arrayBuffer 时应直接转出 base64');
-            assert.equal(calls.length, 1, '有 arrayBuffer 时应直连上游一次');
-            assert.equal(calls[0], 'https://up.example/tts', '不应绕后端');
+            assert.equal(calls.length, 1, '未配后端时应直连上游一次');
+            assert.equal(calls[0].url, 'https://up.example/tts', '不应绕后端');
 
-            // ---- ② 无 arrayBuffer（goja）：转由后端取 base64 ----
-            TC.stringConfigs['媒体转base64'] = 'http://127.0.0.1:46679';
-            resetConfigCache();
+            // ---- ② 配了后端：只打后端一次（不再先直连），method/headers/body 透传 ----
+            setMediaFetch('http://127.0.0.1:46679');
             calls = [];
             let proxyBody: any = null;
+            let proxyAuth = '';
             (globalThis as any).fetch = async (url: string, init: any) => {
-                calls.push(String(url));
+                calls.push({ url: String(url), init });
                 if (String(url).includes('46679')) {
                     proxyBody = JSON.parse(init.body);
-                    // 后端：上游为二进制 → 返回 base64
-                    return {
-                        ok: true, status: 200,
-                        headers: { get: () => 'application/json' },
-                        text: async () => JSON.stringify({
-                            base64: '//uQAA==', contentType: 'audio/mp3', upstreamStatus: 200, bytes: 4,
-                        }),
-                    };
+                    proxyAuth = init.headers.Authorization || '';
+                    return backendResponse({ base64: '//uQAA==', contentType: 'audio/mp3', upstreamStatus: 200, bytes: 4 });
                 }
-                // goja 的上游 Response：只有 text/json，没有 arrayBuffer
-                return {
-                    ok: true, status: 200,
-                    headers: { get: () => 'audio/mp3' },
-                    text: async () => '\uFFFD\uFFFD',
-                };
+                throw new Error(`配置了 media-fetch 后不应再直连上游：${url}`);
             };
             const viaBackend = await fetchData('https://up.example/tts', 'k', { tex: '你好' }, 'baidu', {
                 dataType: 'binary',
+                method: 'GET',
                 contentType: 'application/x-www-form-urlencoded',
                 headers: { 'X-Custom': 'v' },
             });
-            assert.equal(viaBackend, '//uQAA==', '无 arrayBuffer 时应返回后端给的 base64');
-            assert.equal(calls.length, 2, '应先试上游、再走后端');
-            assert.ok(calls[1].includes('46679'), `第二次应打后端: ${JSON.stringify(calls)}`);
+            assert.equal(viaBackend, '//uQAA==', '应返回后端给的 base64');
+            assert.equal(calls.length, 1, '配了 media-fetch 时应只打后端一次（否则上游被打两次）');
+            assert.ok(calls[0].url.includes('46679'), `只应请求后端: ${JSON.stringify(calls.map(c => c.url))}`);
             assert.equal(proxyBody.url, 'https://up.example/tts', '后端应收到原始上游地址');
-            assert.equal(proxyBody.method, 'POST', '应透传 method');
+            assert.equal(proxyBody.method, 'GET', '应透传 overrides.method（不再硬编码 POST）');
             assert.equal(proxyBody.body, `tex=${encodeURIComponent('你好')}`, '应透传已编码的请求体');
             assert.equal(proxyBody.headers['Content-Type'], 'application/x-www-form-urlencoded', '应透传 Content-Type');
             assert.equal(proxyBody.headers['X-Custom'], 'v', '应透传自定义头');
+            assert.equal(proxyAuth, '', 'token 为空时不发 Authorization');
 
-            // 上游本身是 JSON（如失败 err_msg）时，后端交回 json，上层按 JSON 处理
-            (globalThis as any).fetch = async (url: string) => {
-                if (String(url).includes('46679')) {
-                    return {
-                        ok: true, status: 200, headers: { get: () => 'application/json' },
-                        text: async () => JSON.stringify({ json: { err_msg: '110: token 无效' }, upstreamStatus: 200 }),
-                    };
-                }
-                return { ok: true, status: 200, headers: { get: () => 'audio/mp3' }, text: async () => 'x' };
+            // ---- ③ token：外发头带 Bearer ----
+            setMediaFetch('http://127.0.0.1:46679', ' media-token ');
+            (globalThis as any).fetch = async (_url: string, init: any) => {
+                proxyAuth = init.headers.Authorization || '';
+                return backendResponse({ base64: 'AA==', upstreamStatus: 200 });
             };
+            await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
+            assert.equal(proxyAuth, 'Bearer media-token', 'token 应 trim 后作为 Bearer 发送');
+
+            // ---- ④ 上游 JSON（2xx）：原样交回上层按 data_path 取数 ----
+            (globalThis as any).fetch = async () => backendResponse({ json: { err_msg: '110: token 无效' }, upstreamStatus: 200 });
             const errJson = await fetchData('https://up.example/tts', 'k', {}, 'baidu', { dataType: 'binary' });
             assert.equal(errJson.err_msg, '110: token 无效', '上游 JSON 应原样交回上层');
 
-            // ---- ③ 后端未配置：可读 + 不重试 ----
-            TC.stringConfigs['媒体转base64'] = '';
-            resetConfigCache();
+            // ---- ⑤ 上游 4xx JSON：还原成 ApiError（鉴权分类，不能再被当成功 JSON 吞掉） ----
+            (globalThis as any).fetch = async () => backendResponse({ json: { error: 'invalid key' }, upstreamStatus: 401 });
+            let upErr: any = null;
+            try {
+                await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
+            } catch (e) { upErr = e; }
+            assert.ok(upErr instanceof ApiError, '上游 4xx JSON 应抛 ApiError');
+            assert.equal(upErr.status, 401);
+            assert.equal(upErr.kind, 'auth');
+            assert.ok(String(upErr.message).includes('invalid key'), '错误体应带上游 JSON');
+
+            // ---- ⑥ 上游 4xx 非 JSON：后端带 bodyText，错误应包含上游原文 ----
+            (globalThis as any).fetch = async () => backendResponse({
+                base64: 'ZXJyb3I=', contentType: 'text/plain', upstreamStatus: 403,
+                bodyText: 'permission denied by upstream',
+            });
+            let bodyErr: any = null;
+            try {
+                await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
+            } catch (e) { bodyErr = e; }
+            assert.ok(bodyErr instanceof ApiError);
+            assert.equal(bodyErr.status, 403);
+            assert.ok(String(bodyErr.message).includes('permission denied by upstream'), '应带上游报文（bodyText）');
+
+            // ---- ⑦ 后端 401：明确提示 token + 不可重试 ----
+            setMediaFetch('http://127.0.0.1:46679', 'wrong-token');
+            (globalThis as any).fetch = async () => backendResponse({ error: 'unauthorized' }, 401);
+            let authErr: any = null;
+            try {
+                await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
+            } catch (e) { authErr = e; }
+            assert.ok(authErr, '后端 401 应抛错');
+            assert.equal(authErr.noRetry, true, '后端鉴权失败不应重试');
+            assert.ok(String(authErr.message).includes('media-fetch'), `应提示 media-fetch token: ${authErr.message}`);
+
+            // ---- ⑧ 后端不可达：可读 + 不可重试 ----
+            setMediaFetch('http://127.0.0.1:46679');
+            (globalThis as any).fetch = async () => { throw new Error('connect ECONNREFUSED'); };
+            let connErr: any = null;
+            try {
+                await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
+            } catch (e) { connErr = e; }
+            assert.ok(connErr, '后端不可达应抛错');
+            assert.equal(connErr.noRetry, true, '连不上后端不应重试');
+            assert.ok(String(connErr.message).includes('media-fetch'), '提示应指出 media-fetch');
+
+            // ---- ⑨ 后端 5xx：ApiError 保留状态码（交给上层按服务端错误重试） ----
+            (globalThis as any).fetch = async () => backendResponse({ error: 'upstream down' }, 502);
+            let proxyErr: any = null;
+            try {
+                await fetchData('https://up.example/tts', 'k', {}, 'p', { dataType: 'binary' });
+            } catch (e) { proxyErr = e; }
+            assert.ok(proxyErr instanceof ApiError);
+            assert.equal(proxyErr.status, 502);
+
+            // ---- ⑩ 未配后端 + 无 arrayBuffer（goja）：可读报错，不重试 ----
+            setMediaFetch('');
             (globalThis as any).fetch = async () => ({
                 ok: true, status: 200,
                 headers: { get: () => 'audio/mp3' },
@@ -10704,23 +10799,184 @@ export const tests: Record<string, () => void | Promise<void>> = {
             }
             console.log('未配置中转时的提示:', msg);
             assert.ok(msg.includes('media-fetch'), `提示应指出启动哪个后端: ${msg}`);
-            assert.ok(msg.includes('媒体转base64'), `提示应指出配置项名: ${msg}`);
+            assert.ok(msg.includes('后端配置'), `提示应指出配置项名: ${msg}`);
             assert.ok(!/has no member/.test(msg), '不应暴露运行时原始报错');
 
-            // JSON 响应仍然正常（不受影响）：content-type 含 json 时走 JSON 分支
-            TC.stringConfigs['媒体转base64'] = 'http://127.0.0.1:46679';
-            resetConfigCache();
+            // ---- ⑪ 未配后端 + JSON 响应（2xx）：仍按 JSON 返回（百度错误路径） ----
+            setMediaFetch('');
             (globalThis as any).fetch = async () => ({
                 ok: true, status: 200,
                 headers: { get: () => 'application/json' },
                 text: async () => JSON.stringify({ err_no: 502, err_msg: '参数错误' }),
             });
             const json = await fetchData('https://x/y', 'k', {}, 'p', { dataType: 'binary' });
-            assert.equal(json.err_msg, '参数错误', '二进制取数遇到 JSON 响应时仍应按 JSON 返回（百度错误路径依赖它）');
+            assert.equal(json.err_msg, '参数错误', '二进制取数遇到 JSON 响应时仍应按 JSON 返回');
         } finally {
             (globalThis as any).fetch = origFetch;
-            if (origBackend === undefined) delete TC.stringConfigs['媒体转base64'];
-            else TC.stringConfigs['媒体转base64'] = origBackend;
+            if (origBackend === undefined) delete TC.stringConfigs['后端配置'];
+            else TC.stringConfigs['后端配置'] = origBackend;
+            resetConfigCache();
+        }
+    },
+
+    /** 后端 token 公共 helper：空 token 不带 Authorization；401 提示指向 backends.<名>.token */
+    testBackendAuthHelpers(): void {
+        assert.deepEqual(backendAuthHeaders(''), {});
+        assert.deepEqual(backendAuthHeaders('   '), {});
+        assert.deepEqual(backendAuthHeaders(null), {});
+        assert.deepEqual(backendAuthHeaders(' t '), { Authorization: 'Bearer t' });
+        assert.ok(backendAuthHint('media-fetch').includes('backends.media-fetch.token'), '401 提示应指向 JSON 字段');
+        assert.equal(backendStatusHint(401, 'stream-output'), `\n${backendAuthHint('stream-output')}`);
+        assert.equal(backendStatusHint(500, 'stream-output'), '', '非 401 不追加提示');
+    },
+
+    /** 流式输出后端：/start、/poll、/end 都带 token；token 为空不带 */
+    async testStreamBackendTokenHeader(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        const origBackend = TC.stringConfigs['后端配置'];
+        const origTimeout = TC.intConfigs['请求超时时限'];
+        TC.intConfigs['请求超时时限'] = 5000;
+        const setStream = (token: string) => {
+            TC.stringConfigs['后端配置'] = JSON.stringify({
+                version: 1,
+                backends: { 'stream-output': { url: 'http://stream.test:3010', token } },
+            });
+            resetConfigCache();
+        };
+        const seen: Array<{ url: string; auth: string }> = [];
+        try {
+            // 先设配置再播种模型：setStream 内部的 resetConfigCache 会 Model.reset()，顺序反了会把模型清掉
+            setStream('stream-token');
+            Model.bootstrap([
+                {
+                    provider: 'deepseek', apiKey: 'k', baseUrl: 'https://stream.test/v1',
+                    ignore: false, request: {}, models: ['stream-test-model'],
+                    modelTypes: { 'stream-test-model': 'text' },
+                },
+            ], [], { fetch: async () => [] });
+            (globalThis as any).fetch = async (url: string, init: any) => {
+                seen.push({ url: String(url), auth: init?.headers?.Authorization || '' });
+                return {
+                    ok: true, status: 200,
+                    headers: { get: () => 'application/json' },
+                    text: async () => JSON.stringify({
+                        id: 's1', status: 'success', results: ['x'], next_after: 1,
+                        model: 'stream-test-model', usage: { prompt_tokens: 1, completion_tokens: 1 },
+                    }),
+                };
+            };
+            await streamService.startStream([{ role: 'user', content: 'hi' }], 'run-1');
+            await streamService.pollStream('s1', 0);
+            await streamService.endStream('s1');
+            assert.equal(seen.length, 3, 'start/poll/end 三次请求');
+            assert.ok(seen[0].url.endsWith('/start'));
+            assert.ok(seen[1].url.includes('/poll'));
+            assert.ok(seen[2].url.includes('/end'));
+            for (const s of seen) assert.equal(s.auth, 'Bearer stream-token', `${s.url} 应带 token`);
+
+            // 空 token：不带 Authorization
+            setStream('');
+            seen.length = 0;
+            await streamService.pollStream('s1', 0);
+            assert.equal(seen[0].auth, '', 'token 为空时不应发 Authorization');
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            Model.reset();
+            if (origBackend === undefined) delete TC.stringConfigs['后端配置']; else TC.stringConfigs['后端配置'] = origBackend;
+            if (origTimeout === undefined) delete TC.intConfigs['请求超时时限']; else TC.intConfigs['请求超时时限'] = origTimeout;
+            resetConfigCache();
+        }
+    },
+
+    /** 图片 URL→base64 回退后端（未配图床时）：应带 token */
+    async testImageBackendTokenHeader(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        const origBackend = TC.stringConfigs['后端配置'];
+        const origLog = TC.optionConfigs['日志级别'];
+        TC.optionConfigs['日志级别'] = '从不';
+        const seen: Array<{ url: string; auth: string }> = [];
+        try {
+            TC.stringConfigs['后端配置'] = JSON.stringify({
+                version: 1,
+                backends: { 'image-url-to-base64': { url: 'http://i2b64.test:46678', token: 'i2b64-token' } },
+            });
+            resetConfigCache();
+            (globalThis as any).fetch = async (url: string, init: any) => {
+                seen.push({ url: String(url), auth: init?.headers?.Authorization || '' });
+                return {
+                    ok: true, status: 200,
+                    headers: { get: () => 'application/json' },
+                    text: async () => JSON.stringify({ base64: 'AAAA', format: 'png' }),
+                };
+            };
+            const img = new Image();
+            img.url = 'https://qq.example/a.png';
+            await img.urlToBase64();
+            assert.equal(seen.length, 1, '应请求一次图片转 base64 后端');
+            assert.ok(seen[0].url.includes('/image-to-base64'));
+            assert.equal(seen[0].auth, 'Bearer i2b64-token', '图片转 base64 应带 token');
+            assert.equal(img.base64, 'AAAA');
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            if (origBackend === undefined) delete TC.stringConfigs['后端配置']; else TC.stringConfigs['后端配置'] = origBackend;
+            if (origLog === undefined) delete TC.optionConfigs['日志级别']; else TC.optionConfigs['日志级别'] = origLog;
+            resetConfigCache();
+        }
+    },
+
+    /** 用量图表：/chart 带 token；新后端 base64 优先落本地，旧后端回退 image_url；401 带提示 */
+    async testUsageChartTokenAndBase64(): Promise<void> {
+        const origFetch = (globalThis as any).fetch;
+        const origBackend = TC.stringConfigs['后端配置'];
+        const seen: Array<{ url: string; auth: string }> = [];
+        try {
+            TC.stringConfigs['后端配置'] = JSON.stringify({
+                version: 1,
+                backends: { 'usage-chart': { url: 'http://chart.test:3009', token: 'chart-token' } },
+            });
+            resetConfigCache();
+            (globalThis as any).fetch = async (url: string, init: any) => {
+                seen.push({ url: String(url), auth: init?.headers?.Authorization || '' });
+                return {
+                    ok: true, status: 200,
+                    headers: { get: () => 'application/json' },
+                    text: async () => JSON.stringify({
+                        image_url: 'http://chart.test:3009/temp_images/a.png',
+                        base64: 'iVBORw0KGgo=',
+                        content_type: 'image/png',
+                    }),
+                };
+            };
+            const chart = await get_chart_url('year', { '2026-1': { prompt_tokens: 1, completion_tokens: 2 } });
+            assert.equal(seen[0].auth, 'Bearer chart-token', '/chart 应带 token');
+            assert.ok(seen[0].url.endsWith('/chart'));
+            assert.equal(chart.base64, 'iVBORw0KGgo=');
+            assert.equal(chart.url, 'http://chart.test:3009/temp_images/a.png');
+            assert.ok(chartImageCQ(chart).includes('/tmp/aiplugin4-test-media-'), '有 base64 时应落本地图');
+
+            // 旧后端（无 base64）：回退 image_url
+            (globalThis as any).fetch = async () => ({
+                ok: true, status: 200,
+                headers: { get: () => 'application/json' },
+                text: async () => JSON.stringify({ image_url: 'http://chart.test:3009/temp_images/b.png' }),
+            });
+            const legacy = await get_chart_url('month', {});
+            assert.equal(legacy.base64, undefined);
+            assert.equal(chartImageCQ(legacy), '[CQ:image,file=http://chart.test:3009/temp_images/b.png]');
+
+            // 401：错误里带可操作提示，命令层可展示
+            (globalThis as any).fetch = async () => ({
+                ok: false, status: 401,
+                headers: { get: () => 'application/json' },
+                text: async () => '{"error":"unauthorized"}',
+            });
+            const bad = await get_chart_url('year', {});
+            assert.equal(bad.url, '');
+            assert.ok(String(bad.error).includes('usage-chart'), `401 应提示 usage-chart token: ${bad.error}`);
+        } finally {
+            (globalThis as any).fetch = origFetch;
+            if (origBackend === undefined) delete TC.stringConfigs['后端配置']; else TC.stringConfigs['后端配置'] = origBackend;
+            resetConfigCache();
         }
     },
 

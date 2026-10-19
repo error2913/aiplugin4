@@ -5,6 +5,7 @@ import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
+import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
@@ -764,18 +765,23 @@ export async function textToMultimodalContent(text: string, opts?: MultimodalBui
         } else {
             image = resolveImageById(value);
         }
-        // URL 图片优先转成 base64（模型常无法直接访问 QQ 临时链接）；转换失败保留原 URL，
-        // 失败后进入 1 小时冷却期（isBase64RetryBlocked），期间不再重复请求转换
-        if (image && image.type === 'url' && !image.base64 && !image.isBase64RetryBlocked()) {
+        // 图床统一配成「协议端与模型都能访问的 IP 或域名」：已入图床的图片直接把稳定地址交给模型，
+        // 不再转 base64；只有回环地址（127.0.0.1/localhost）模型够不到，才回退取内联字节。
+        // 非图床的 URL 图片仍先转 base64（QQ 临时直链模型常取不到），失败后进入 1 小时冷却期。
+        // 头像（qlogo）是稳定公网地址，模型能直接下载，不转 base64。
+        const hostUrlUsable = ImageHost.enabled && !!image?.hosted && ImageHost.externalEnabled;
+        if (image && image.type === 'url' && !image.base64 && !image.isAvatarImage && !hostUrlUsable && !image.isBase64RetryBlocked()) {
             try {
-                await withTimeout(() => image.urlToBase64(), 10000);
+                await withTimeout(() => image.ensureBytes(), 10000);
             } catch (e) {
                 logger.warning(`多模态图片转 base64 失败，改用原 URL: ${image.imageId}（${e instanceof Error ? e.message : String(e)}）`);
             }
         }
+        // 回环图床地址模型访问不到：取不到字节就只留文本标签，绝不把回环地址交给模型
+        const hostMissingBytes = ImageHost.enabled && !hostUrlUsable && !image?.base64 && !image?.isAvatarImage;
         // 不可用图片（URL 已确认失效，或 QQ 临时直链转换失败后进入冷却）与「本轮已降级」一律只留文本标签
-        const unusable = !!image && (image.isUrlUnusable() || (!!opts?.imagesAsText && image.type === 'url' && !image.base64));
-        const src = image && !unusable ? image.src : '';
+        const unusable = !!image && (image.isUrlUnusable() || hostMissingBytes || (!!opts?.imagesAsText && image.type === 'url' && !image.base64));
+        const src = image && !unusable ? (hostUrlUsable ? image.remoteUrl : image.src) : '';
         if (src) parts.push({ type: 'image_url', image_url: { url: src } });
         else parts.push({ type: 'text', text: seg });
     }
