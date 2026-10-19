@@ -1,6 +1,7 @@
 // 表情包工具：列表/信息/制作（meme 服务）
 import { logger } from "../../../logger";
 import Image from "../../../resource/image";
+import { ImageHost } from "../../../resource/image_host";
 import { GroupInfo, UserInfo } from "../../../session/types";
 import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
 import { generateId } from "../../../utils/utils";
@@ -213,6 +214,12 @@ export function registerMeme() {
                 img.description = `表情包[img:${img.imageId}]
 ${textText ? `文字：${textText}` : ''}
 ${imageText ? `图片：${imageText}` : ''}`;
+
+                // 配了图床：转存后清掉 base64（失败则保留本地 base64 兜底）
+                if (ImageHost.enabled) await img.adoptBase64ToHost();
+                // 落库：否则 Image.get(imageId) 取不到，AI 回复里的 [img:ID] 无法解析
+                Image.imageMap[img.imageId] = img;
+                Image.save(img);
 
                 if (save) session.memory.addMemory(ctx, session, uiList, giList, kws, [img, ...images], img.description);
 

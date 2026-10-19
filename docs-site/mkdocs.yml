@@ -99,7 +99,7 @@ nav:
       - 09 注意事项与常见问题: kb/09-注意事项与常见问题.md
       - 10 待办与后续计划: kb/10-TODO.md
       - 11 ob11-core-bridge 使用指南: kb/11-ob11-core-bridge-使用指南.md
-      - "16 图片生命周期与图床（设计稿·未实现）": kb/16-图片生命周期与图床方案.md
+      - "16 图片生命周期与图床（已实现）": kb/16-图片生命周期与图床方案.md
   - 第三方参考（Claude Code）:
       - reference/index.md
       - Amazon Bedrock: reference/amazon-bedrock.md

@@ -3,6 +3,7 @@ import Config from "../../../config/config";
 import { logger } from "../../../logger";
 import { MediaTaskManager } from "../../../media/task_queue";
 import Model from "../../../model/model";
+import { ImageHost } from "../../../resource/image_host";
 import Tool from "../../tool";
 import { buildMediaSubmitReply, buildMediaToolInfo, resolveMediaEntry } from "../media/shared";
 
@@ -27,10 +28,13 @@ async function resolveTtiImage(ctx: seal.MsgContext, session: any, raw: string):
     if (image.type === 'local') return null;
 
     if (image.type === 'url') {
+        // 图床配成 IP/域名：参考图直接给图床稳定地址（模型/上游可访问，省一次 base64 过路费）；
+        // 回环地址模型访问不到，才回退取内联字节。
+        if (image.hosted && ImageHost.externalEnabled) return image.remoteUrl;
         try {
-            await image.urlToBase64();
+            await image.ensureBytes();
         } catch (e) {
-            log.warning(`参考图URL转base64失败: ${e}`);
+            log.warning(`参考图取字节失败: ${e}`);
         }
         return image.base64 ? image.base64Url : image.src;
     }

@@ -13,6 +13,7 @@ import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
+import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import Tool from "./tool/tool";
 import { createMsg } from "./utils/seal";
@@ -35,6 +36,7 @@ function main() {
   Tool.registerTool();
   TimerManager.init();
   MediaTaskManager.init();
+  ImageGC.init();
   knowledgeService.init();
   BlockManager.initBlockList();
 

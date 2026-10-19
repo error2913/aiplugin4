@@ -10,6 +10,7 @@ import { getProbedContextWindow } from "../model/window_cache";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
+import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
 import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
 import { StopError, StopEvent, withTimeout } from "../utils/utils";
 
@@ -93,7 +94,7 @@ export class streamService {
     private static streamMeta = new Map<string, { modelName: string; rawEstimate: number; use: ChatModelUse }>();
     static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean }): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
-        const { STREAM: streamUrl } = Config.backend;
+        const { STREAM: streamUrl, STREAM_TOKEN: streamToken } = Config.backend;
         const model = Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -114,7 +115,8 @@ export class streamService {
                 method: 'POST',
                 headers: {
                     "Content-Type": "application/json",
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    ...backendAuthHeaders(streamToken),
                 },
                 body: JSON.stringify({
                     url: model.url,
@@ -127,7 +129,7 @@ export class streamService {
 
             const text = await response.text();
             if (!response.ok) {
-                throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
+                throw new Error(`请求失败! 状态码: ${response.status}${backendStatusHint(response.status, 'stream-output')}\n响应体:${text}`);
             }
             if (!text) {
                 throw new Error("响应体为空");
@@ -216,7 +218,7 @@ export class streamService {
     }
 
     static async pollStream(streamId: string, after: number, stopEvent?: StopEvent): Promise<{ status: string, reply: string, nextAfter: number }> {
-        const { STREAM: streamUrl } = Config.backend;
+        const { STREAM: streamUrl, STREAM_TOKEN: streamToken } = Config.backend;
         const { TIMEOUT } = Config.base;
 
         try {
@@ -227,7 +229,8 @@ export class streamService {
             const response = await withTimeout(() => fetch(`${streamUrl}/poll?id=${streamId}&after=${after}`, {
                 method: 'GET',
                 headers: {
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    ...backendAuthHeaders(streamToken),
                 }
             }), TIMEOUT, { stopEvent });
 
@@ -235,7 +238,7 @@ export class streamService {
 
             const text = await response.text();
             if (!response.ok) {
-                throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
+                throw new Error(`请求失败! 状态码: ${response.status}${backendStatusHint(response.status, 'stream-output')}\n响应体:${text}`);
             }
             if (!text) {
                 throw new Error("响应体为空");
@@ -265,13 +268,14 @@ export class streamService {
     }
 
     static async endStream(streamId: string): Promise<string> {
-        const { STREAM: streamUrl } = Config.backend;
+        const { STREAM: streamUrl, STREAM_TOKEN: streamToken } = Config.backend;
 
         try {
             const response = await fetch(`${streamUrl}/end?id=${streamId}`, {
                 method: 'GET',
                 headers: {
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    ...backendAuthHeaders(streamToken),
                 }
             });
 
@@ -279,7 +283,7 @@ export class streamService {
 
             const text = await response.text();
             if (!response.ok) {
-                throw new Error(`请求失败! 状态码: ${response.status}\n响应体:${text}`);
+                throw new Error(`请求失败! 状态码: ${response.status}${backendStatusHint(response.status, 'stream-output')}\n响应体:${text}`);
             }
             if (!text) {
                 throw new Error("响应体为空");

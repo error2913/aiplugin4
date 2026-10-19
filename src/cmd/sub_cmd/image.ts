@@ -53,7 +53,9 @@ export function registerCmdImage() {
                 const img = images[0];
                 if (!img) return ret;
                 await img.imageToText(cmdArgs.getRestArgsFrom(4))
-                seal.replyToSender(ctx, msg, img.CQCode + `\n` + img.description);
+                const file = await img.getSendFile();
+                const cq = file ? `[CQ:image,file=${file}]\n` : '（图片不可用）\n';
+                seal.replyToSender(ctx, msg, cq + img.description);
                 return ret;
             }
             case 'find': {
@@ -63,7 +65,12 @@ export function registerCmdImage() {
                     return ret;
                 }
                 const img = await session.context.findImage(ctx, id);
-                seal.replyToSender(ctx, msg, img ? img.CQCode : '未找到该图片');
+                if (!img) {
+                    seal.replyToSender(ctx, msg, '未找到该图片');
+                    return ret;
+                }
+                const file = await img.getSendFile();
+                seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '图片不可用（取不到可发送的本地文件/地址）');
                 return ret;
             }
             default: {

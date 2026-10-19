@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.26.1-green)
+![Version](https://img.shields.io/badge/Version-4.27.0-green)
 ![Docs](https://img.shields.io/badge/docs-文档站-blue)
 
 > 📖 **文档站**：<https://error2913.github.io/aiplugin4/> —— 在线阅读体验更好（全文搜索、深色模式、目录导航）。
@@ -456,7 +456,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 > MCP 配置修改后用 `.ai mcp refresh` 立即重新解析并强制重同步工具列表（refresh 需骰主，或重载 JS）；`.ai mcp list` 查看当前平台可用服务器及工具开关状态；`.ai mcp on/off [<服务器>]` 按会话批量开启/关闭某服务器（或缺省全部当前平台服务器）下的工具（on 时跳过「禁止调用的函数」）。
 >
-> `run_core_command` 由插件本地注册，通过「后端 → 核心桥WS地址」直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）；`run_ext_command` 仅由插件本地实现。二者不由 MCP 提供。
+> `run_core_command` 由插件本地注册，通过「后端 → 后端配置」的 `backends.ob11-core-bridge` 直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）；`run_ext_command` 仅由插件本地实现。二者不由 MCP 提供。
 
 ### 技能
 
@@ -523,17 +523,19 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 流式输出 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/stream-output)，`body.stream = true` 的模型才会走流式 |
-| 图片转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/image-url-to-base64)，解决 QQ 图床图片无法被大模型访问的问题 |
-| 媒体转base64 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/media-fetch)，让「整个响应体即音频」的语音接口（阿里 CosyVoice、百度、OpenAI 兼容等）可用：海豹的 JS 引擎读不了二进制响应，由该后端代发请求并转成 base64 返回。不启动它时这些接口会明确报错；返回 JSON 的接口（MiniMax、Google Cloud、绝大多数生图）不受影响 |
-| 用量图表 | [后端源码](https://github.com/error2913/aiplugin4-backends/tree/main/backends/usage-chart)，token 使用情况图表生成 |
-| 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
-| 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
-| 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |
+| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图片转base64、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
 后端服务已迁移到独立仓库 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends)：自带 `launcher.py` 一键管理（Windows / Linux 通用，默认不启动任何后端，首次启动某后端时才自动创建 venv 并安装依赖，异常退出自动拉起；`webui` 提供管理界面，可改端口/看日志，主题跟随系统）。后端清单与接口详见其仓库的 [docs/后端.md](https://github.com/error2913/aiplugin4-backends/blob/main/docs/后端.md)，插件侧配置文档见 [docs/08-相关后端项目](docs/08-相关后端项目.md)。
+
+### 论坛
+
+| 设置项 | 说明 |
+|:---:|:---|
+| 论坛地址 | 默认：`https://aiplugin-forum.fishwhite.top`，aiplugin4 专用论坛地址 |
+| 论坛API Token | 论坛注册后获取的 api_token，用于发帖等写操作的鉴权 |
+| 论坛签名密钥 | 论坛注册后获取的 secret_key，用于请求签名验证 |
 
 ### 公开会话
 
@@ -760,15 +762,15 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 > 语音/图片生成说明（4.24.0 起内置）：`generate_audio` / `text_to_image` 是**异步任务**——提交后**先等一段同步窗口**（「工具 → 媒体生成同步等待秒数」，默认 5 秒），窗口内就生成完则**当场把结果返回给 AI**（图片直接给 `[img:图片ID]`、语音给 record 段指引），不再走异步通知；窗口内没完成则立即返回任务号，生成完成后写入会话通知并**尽力唤醒 AI**投递（该送达**免触发令牌桶**，桶空也送达；**待机中同样唤醒**，因为这是用户请求的结果而不是主动搭话；会话忙则通知留在队列，由**本轮结束时的补触发**接手，不会丢；端点离线时通知保留、下一轮呈现）。命令 `.ai tts` / `.ai tti` 发起的由插件直接投递。AI 收到完成通知后：**语音走 `call_ob11_api` 的 record 段**（`[audio:xxx]` 只认「资源」页配置的本地语音资源名，不接受生成结果的路径/URL），**图片优先直接在回复里写 `[img:图片ID]`**（系统会自动发送，**非必要不要为此调用 `call_ob11_api`**）。任务队列可用 `media_tasks` 工具或 `.ai media` 查看与取消。请求结构默认由内置供应商预设提供（见「模型」页说明），参数（音色/语速/尺寸等）由「模型规则」`[params]` 与模板里的 `{占位符}` 决定。
 
-> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「后端」配置「核心桥WS地址」，默认 `ws://127.0.0.1:46880/plugin`）。
+> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「后端 → 后端配置」的 `backends.ob11-core-bridge` 填地址，默认 `ws://127.0.0.1:46880/plugin`）。
 
 ---
 
 ## 🚨 注意事项
 
-- 简单配置（开关/数值/单行字符串/纯字符串数组）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、「角色设定」、「MCP服务器」、「技能列表」、「知识库配置」、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器」「技能列表」「知识库配置」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）；
+- 简单配置（开关/数值/单行字符串/纯字符串数组/「后端配置」JSON）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、「角色设定」、「MCP服务器」、「技能列表」、「知识库配置」、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器」「技能列表」「知识库配置」也可用 `.ai mcp refresh` / `.ai skill refresh` / `.ai kb refresh` 立即生效）；
 - 嵌入输出维度取该模型 `request.body` 里的 `dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
-- 流式输出需要自建或使用公共后端，并在「后端 → 流式输出」配置 URL；在 chat 用途组 `groups[].body` 里设 `stream = true` 的模型才会走流式（`anthropic-messages` 协议不支持，会自动回退非流式）；
+- 流式输出需要自建或使用公共后端，并在「后端 → 后端配置」里配置 stream-output 地址；在 chat 用途组 `groups[].body` 里设 `stream = true` 的模型才会走流式（`anthropic-messages` 协议不支持，会自动回退非流式）；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
 - CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）；卡片/视频/文件/语音/合并转发等段经 ob11 事件分发接收，不受该白名单限制。
 

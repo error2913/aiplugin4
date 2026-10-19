@@ -18,6 +18,19 @@ export function truncateText(text: string, maxLength: number): string {
     return text.slice(0, maxLength) + '...';
 }
 
+/** 还原 URL 中 HTML 转义的 &（QQ 官方 bot 图片常见 &amp;）。只处理 http(s)，最多解 3 轮。 */
+export function decodeUrlHtmlEntities(url: string): string {
+    let text = String(url ?? '').trim();
+    if (!/^https?:\/\//i.test(text)) return text;
+    const re = /&(?:amp|#0*38|#x0*26);/gi;
+    for (let i = 0; i < 3; i++) {
+        const next = text.replace(re, '&');
+        if (next === text) break;
+        text = next;
+    }
+    return text;
+}
+
 /** 字符 n-gram 集合（默认 2~4 元）：用于中文关键词匹配/相似度近似。
  *  只取尾部最多 300 字符，控制超长查询下的 gram 数量与匹配开销。 */
 export function buildCharNGrams(s: string, min = 2, max = 4): Set<string> {
@@ -380,7 +393,7 @@ export function transformArrayToText(messageArray: { type: string, data: { [key:
     return text;
 }
 
-export async function transformArrayToContent(ctx: seal.MsgContext, messageArray: MessageSegment[]): Promise<{ content: string, images: Image[] }> {
+export async function transformArrayToContent(ctx: seal.MsgContext, messageArray: MessageSegment[], messageId = ''): Promise<{ content: string, images: Image[] }> {
     let content = '';
     const images: Image[] = [];
     for (const seg of messageArray) {
@@ -411,7 +424,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 break;
             }
             case 'image': {
-                const result = await Image.handleImageMessageSegment(ctx, seg);
+                const result = await Image.handleImageMessageSegment(ctx, seg, messageId);
                 content += result.content;
                 images.push(...result.images);
                 break;
@@ -476,7 +489,10 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
 
                 if (image) {
                     images.push(image);
-                    text += image.CQCode;
+                    // 统一走 getSendFile：图床配 IP/域名时用稳定地址；回环地址取本地文件，外发不回环地址
+                    const file = await image.getSendFile();
+                    if (file) text += `[CQ:image,file=${file}]`;
+                    else log.warning(`图片不可用，无法生成发送用 CQ：${id}`);
                 } else {
                     log.warning(`无法找到图片：${id}`);
                 }
@@ -487,7 +503,8 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 if (userId) {
                     const image = Image.getUserAvatar(userId);
                     images.push(image);
-                    text += image.CQCode;
+                    const file = await image.getSendFile();
+                    if (file) text += `[CQ:image,file=${file}]`;
                 } else log.warning(`用户ID格式无效：${seg.content}`);
                 break;
             }
@@ -496,7 +513,8 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
                 if (groupId) {
                     const image = Image.getGroupAvatar(groupId);
                     images.push(image);
-                    text += image.CQCode;
+                    const file = await image.getSendFile();
+                    if (file) text += `[CQ:image,file=${file}]`;
                 } else log.warning(`群ID格式无效：${seg.content}`);
                 break;
             }

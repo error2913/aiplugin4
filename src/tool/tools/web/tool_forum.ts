@@ -42,10 +42,10 @@ function generateNonce(): string {
  * 带鉴权的 fetch 封装
  */
 async function forumAuthFetch(url: string, method: string, body?: any): Promise<any> {
-    const { FORUM_API_TOKEN, FORUM_SECRET_KEY } = Config.backend;
+    const { FORUM_API_TOKEN, FORUM_SECRET_KEY } = Config.forum;
 
     if (!FORUM_API_TOKEN || !FORUM_SECRET_KEY) {
-        throw new Error('论坛API Token或Secret Key未配置，请在后端配置中填写');
+        throw new Error('论坛API Token或Secret Key未配置，请在「论坛」配置中填写');
     }
 
     const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -110,7 +110,7 @@ function getMimeType(image: Image): string {
 async function imageToForumFormat(image: Image): Promise<{ name: string, mime_type: string, data: string } | null> {
     try {
         if (image.type === 'url') {
-            await image.urlToBase64();
+            await image.ensureBytes();
         }
 
         const base64Data = image.base64;
@@ -186,7 +186,7 @@ export function registerForum() {
     });
     toolGetPosts.solve = async (_, __, ___, args) => {
         const { sort = 'newest', page = 1, limit = 20 } = args;
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             const url = `${FORUM_URL}/api/public/posts?sort=${sort}&page=${page}&limit=${limit}`;
@@ -240,7 +240,7 @@ export function registerForum() {
     });
     toolGetPostDetail.solve = async (_, __, ___, args) => {
         const { post_id } = args;
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             log.info(`获取论坛帖子详情: post_id=${post_id}`);
@@ -338,7 +338,7 @@ export function registerForum() {
     });
     toolSearch.solve = async (_, __, ___, args) => {
         const { q = '', user = '', tag = '', sort = 'newest', page = 1 } = args;
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             const params: string[] = [];
@@ -418,7 +418,7 @@ export function registerForum() {
     }, true);
     toolCreatePost.solve = async (_, __, ___, args) => {
         const { title, content, tags = [], image_ids = [] } = args;
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             log.info(`创建论坛帖子: ${title}`);
@@ -521,7 +521,7 @@ export function registerForum() {
     }, true);
     toolManageComment.solve = async (_, __, ___, args) => {
         const { action, post_id, comment_id, content, parent_id } = args;
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             if (action === "create") {
@@ -564,7 +564,7 @@ export function registerForum() {
         }
     });
     toolGetActivity.solve = async (_, __, ___, ____) => {
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             log.info('获取论坛动态');
@@ -641,7 +641,7 @@ export function registerForum() {
     }, true);
     toolManagePost.solve = async (_, __, ___, args) => {
         const { action, post_id, title, content, tags } = args;
-        const { FORUM_URL } = Config.backend;
+        const { FORUM_URL } = Config.forum;
 
         try {
             if (action === "update") {

@@ -5,6 +5,7 @@ import BaseConfig from "./configs/base";
 import ContextConfig from "./configs/context";
 import ErrorConfig from "./configs/error";
 import EventConfig from "./configs/event";
+import ForumConfig from "./configs/forum";
 import ImageConfig from "./configs/image";
 import KnowledgeBaseConfig from "./configs/knowledge_base";
 import McpConfig from "./configs/mcp";
@@ -47,6 +48,7 @@ const configMap = {
     knowledgeBase: KnowledgeBaseConfig,
     image: ImageConfig,
     backend: BackendConfig,
+    forum: ForumConfig,
     event: EventConfig,
     resource: ResourceConfig,
     error: ErrorConfig,

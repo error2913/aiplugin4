@@ -1,6 +1,8 @@
 // 网络请求封装（fetch）
 import { ApiError, parseRetryAfterSeconds } from "../model/api_error";
 
+import { backendAuthHeaders, backendAuthHint } from "./backend";
+
 /** request 覆盖（由「模型规则」[request] 模板解析而来；未命中时为空） */
 export interface FetchDataOverrides {
     headers?: Record<string, string>;
@@ -16,6 +18,8 @@ export interface FetchDataOverrides {
  *   binary —— 响应体即二进制（如 TTS 音频流），读 arrayBuffer 后转 base64
  *   text   —— 响应体即纯文本
  * 由「模型规则」[response].data_type = "base64" 且未写 data_path 时判定为 binary（见 model/media.ts）。
+ * binary 取数在配置了 media-fetch 后端时**直接由后端代发**（goja 读不了二进制体；不先直连，
+ * 避免同一上游被打两次）；后端 url 留空 = 禁用中转，退回直连（有 arrayBuffer 的运行时可用）。
  */
 export type FetchDataType = 'json' | 'binary' | 'text';
 
@@ -95,45 +99,81 @@ export function encodeRequestBody(body: any, contentType: string): { body: strin
     return { body: JSON.stringify(body) };
 }
 
+/** media-fetch 后端配置（url 为空 = 禁用中转） */
+interface MediaFetchConfig {
+    url: string;
+    token: string;
+}
+
+/** 延迟读取配置：web.ts 处于底层，顶层 import Config 会形成循环依赖 */
+async function mediaFetchConfig(): Promise<MediaFetchConfig> {
+    const { default: Config } = await import('../config/config');
+    return {
+        url: String(Config.backend?.MEDIA_FETCH ?? '').trim(),
+        token: String(Config.backend?.MEDIA_FETCH_TOKEN ?? '').trim(),
+    };
+}
+
+/** 「没有可用的二进制读取能力」的可读错误：goja 没有 arrayBuffer，这类接口必须由后端代读 */
+function mediaReadUnsupportedError(contentType: string): any {
+    const hint = '可在 aiplugin4-backends 安装并启动 media-fetch 后端，并在「后端配置」里确认 backends.media-fetch.url'
+        + '（不需要中转时把该 url 设为空字符串）';
+    const err: any = new Error(
+        `当前运行时无法读取二进制响应体（海豹 goja 的 fetch 没有 arrayBuffer），且未配置媒体中转后端；${hint}。`
+        + `当前响应 Content-Type=${contentType || '(空)'}。`,
+    );
+    err.noRetry = true;
+    return err;
+}
+
 /**
  * 经 media-fetch 后端取回二进制响应（转成 base64 返回）。
  *
  * 请求的 method/headers/body 原样透传，后端不掺和业务语义；上游若是 JSON（如带 url 字段）
  * 则原样交回，让上层的 data_path 取数逻辑照常工作 —— 与直连行为一致。
  *
- * @param contentType 上游响应的 Content-Type（仅用于报错信息，便于排查）
+ * 注意：配置了 media-fetch 时调用方应**直接**走这里；goja 读不了二进制体，
+ * 若先直连一次再让后端重发，上游会被打两次（TTS 等于双倍合成/计费）。
  */
 async function fetchBinaryViaBackend(
     url: string,
     headers: Record<string, string>,
     body: string,
-    contentType: string,
+    method: string,
     provider: string,
+    cfg: MediaFetchConfig,
 ): Promise<any> {
-    // 延迟读取配置：web.ts 处于底层，顶层 import Config 会形成循环依赖
-    const { default: Config } = await import('../config/config');
-    const backend = String(Config.backend?.MEDIA_FETCH ?? '').trim();
-    const hint = '可在 aiplugin4-backends 启动 media-fetch 后端，并在「后端 → 媒体转base64」填入地址';
-    if (!backend) {
+    const hint = '可在 aiplugin4-backends 安装并启动 media-fetch 后端，并在「后端配置」里确认 backends.media-fetch.url';
+    const endpoint = `${cfg.url.replace(/\/+$/, '')}/fetch-as-base64`;
+    let proxyResp: any;
+    try {
+        proxyResp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...backendAuthHeaders(cfg.token),
+            },
+            // method 由调用方透传（模型规则可覆盖），不再硬编码 POST
+            body: JSON.stringify({ url, method, headers, body }),
+        });
+    } catch (e) {
         const err: any = new Error(
-            `当前运行时无法读取二进制响应体（海豹 goja 的 fetch 没有 arrayBuffer），且未配置媒体中转后端；${hint}。`
-            + `当前响应 Content-Type=${contentType || '(空)'}。`,
+            `无法连接媒体中转后端 ${cfg.url}：${e instanceof Error ? e.message : String(e)}；${hint}`,
         );
         err.noRetry = true;
         throw err;
     }
-
-    const endpoint = `${backend.replace(/\/+$/, '')}/fetch-as-base64`;
-    const proxyResp = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ url, method: 'POST', headers, body }),
-    });
-    if (!proxyResp.ok) {
-        const detail = await proxyResp.text();
-        throw new Error(`媒体中转后端请求失败（HTTP ${proxyResp.status}）：${String(detail).slice(0, 300)}；${hint}`);
-    }
     const text = await proxyResp.text();
+    if (proxyResp.status === 401) {
+        const err: any = new Error(`媒体中转后端鉴权失败（401）：${backendAuthHint('media-fetch')}`);
+        err.noRetry = true;
+        throw err;
+    }
+    if (!proxyResp.ok) {
+        // 后端 4xx/5xx：保留状态码交给上层的错误分类与重试逻辑
+        throw ApiError.fromResponse(proxyResp.status, provider, String(text || '').slice(0, 500));
+    }
     if (!text) throw new Error('媒体中转后端返回空响应');
     let data: any;
     try {
@@ -144,14 +184,23 @@ async function fetchBinaryViaBackend(
     if (data.error) throw new Error(`媒体中转后端出错：${data.error}`);
 
     // 上游本身是 JSON（例如失败时的 err_msg，或本来就返回 url 的接口）：原样交给上层按 data_path 取数
-    if (data.json !== undefined && data.base64 === undefined) return data.json;
+    if (data.json !== undefined && data.base64 === undefined) {
+        const upstream = Number(data.upstreamStatus);
+        if (Number.isFinite(upstream) && upstream >= 400) {
+            // 以前由直连的 !response.ok 抛 ApiError；改为直接走后端后必须在这里补回，
+            // 否则 401/402/429 不再走鉴权/余额/限流分类
+            throw ApiError.fromResponse(upstream, provider, JSON.stringify(data.json));
+        }
+        return data.json;
+    }
+
     if (typeof data.base64 !== 'string' || !data.base64) {
         throw new Error(`媒体中转后端未返回音频/图片数据（响应：${JSON.stringify(data).slice(0, 200)}）`);
     }
     // 上游 4xx/5xx 时后端也会带上状态码：交给上层的错误分类逻辑（鉴权/余额/限流）
     const upstream = Number(data.upstreamStatus);
     if (Number.isFinite(upstream) && upstream >= 400) {
-        throw ApiError.fromResponse(upstream, provider, JSON.stringify({ contentType: data.contentType }), undefined);
+        throw ApiError.fromResponse(upstream, provider, String(data.bodyText ?? ''), undefined);
     }
     // 与直连的 arrayBuffer 分支保持同一返回形态：**裸 base64 字符串**，
     // 这样上层的 extractMediaData / normalizeMediaData 无需为「走后端」单独分支。
@@ -171,9 +220,21 @@ export async function fetchData(
     const encoded = encodeRequestBody(body, String(overrides?.contentType || 'application/json'));
     // multipart 需要回填带 boundary 的 Content-Type
     if (encoded.contentType) headers['Content-Type'] = encoded.contentType;
+    const method = overrides?.method || 'POST';
+
+    if (dataType === 'binary') {
+        // 配了 media-fetch：直接交给后端代发。goja 读不了二进制体，先直连一次再让后端重发
+        // 会让上游被打两次（TTS 等于双倍合成/计费），所以这里不做「先探测 Content-Type 再重发」。
+        const mediaCfg = await mediaFetchConfig();
+        if (mediaCfg.url) {
+            return fetchBinaryViaBackend(url, headers, encoded.body, method, provider, mediaCfg);
+        }
+        // 未配置 media-fetch（后端配置里 url 留空 = 禁用中转）：保留原直连逻辑——
+        // 有 arrayBuffer 的运行时（Node/浏览器/测试）仍可用；goja 下会在下面给出可读报错。
+    }
 
     const response = await fetch(url, {
-        method: overrides?.method || 'POST',
+        method,
         headers,
         body: encoded.body
     });
@@ -198,10 +259,10 @@ export async function fetchData(
             }
         }
         // 海豹 goja 的 fetch（gojax）只给 Response 实现了 text()/json()，**没有 arrayBuffer/bytes/blob**，
-        // 且 text() 走 UTF-8 解码会破坏二进制字节。因此没有 arrayBuffer 时改走后端中转：
-        // 由 media-fetch 代发同一个请求，把二进制转成 base64 用 JSON 返回（见 aiplugin4-backends）。
+        // 且 text() 走 UTF-8 解码会破坏二进制字节。走到这里说明后端地址为空（显式禁用中转），
+        // 只能给出可读报错。
         if (typeof (response as any).arrayBuffer !== 'function') {
-            return fetchBinaryViaBackend(url, headers, encoded.body, ct, provider);
+            throw mediaReadUnsupportedError(ct);
         }
         const buffer = await response.arrayBuffer();
         return bytesToBase64(new Uint8Array(buffer));

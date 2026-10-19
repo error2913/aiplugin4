@@ -15,6 +15,7 @@ import { logger } from "../logger";
 import { MediaResult } from "../model/media";
 import Model, { ModelEntry } from "../model/model";
 import Image from "../resource/image";
+import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import { getSession } from "../session/session_service";
 import { getSessionCtxAndMsg } from "../utils/seal";
@@ -31,7 +32,7 @@ export interface MediaTaskResult {
     kind: 'record' | 'image';
     /**
      * **可直接交给 `replyToSender` / 消息段发送的 CQ 文本**。
-     * 图片必须是真实文件路径或 URL（`Image.CQCode` 解析结果），不能是插件内部 imageId ——
+     * 图片必须是真实文件路径或 URL（`Image.getSendFile()` 解析结果），不能是插件内部 imageId ——
      * 协议端不认识 imageId，直接发 `[CQ:image,file=<imageId>]` 会发不出去。
      */
     send: string;
@@ -387,10 +388,17 @@ export class MediaTaskManager {
                     } catch (e) {
                         log.warning(`媒体任务 #${task.id} 图片 URL 转 base64 失败：${e instanceof Error ? e.message : String(e)}`);
                     }
+                    // 图床已接：字节在图床，内存里的 base64 不必留
+                    img.dropBase64IfHosted();
                 } else {
                     img.base64 = /^data:/i.test(result.data) && result.data.indexOf(',') >= 0
                         ? result.data.slice(result.data.indexOf(',') + 1)
                         : result.data;
+                    // 生图返回的 base64 先转存图床；成功则清空 base64，失败保留本地 base64 兜底
+                    if (ImageHost.enabled) {
+                        const adopted = await img.adoptBase64ToHost();
+                        if (!adopted) log.warning(`媒体任务 #${task.id} 生图结果转存图床失败，保留本地 base64`);
+                    }
                 }
                 img.format = img.format || 'unknown';
                 img.description = `AI绘图[img:${img.imageId}]\n描述: ${task.request.prompt ?? ''}`;
@@ -402,9 +410,11 @@ export class MediaTaskManager {
 
                 // 命令侧直接投递需要真实文件/URL（CQ 不认识 imageId）。
                 // 拿不到 CQ 时**不要**退化成 [img:imageId]：命令回复是纯文本外发，协议端只会把它当字面量显示。
+                // getSendFile：图床配成 IP/域名时用稳定地址；回环地址取本地文件（绝不把回环地址发给协议端）。
                 let send = '';
                 try {
-                    send = img.CQCode;
+                    const file = await img.getSendFile();
+                    if (file) send = `[CQ:image,file=${file}]`;
                 } catch (e) {
                     log.warning(`媒体任务 #${task.id} 生成发送用 CQ 失败：${e instanceof Error ? e.message : String(e)}`);
                 }
@@ -463,7 +473,7 @@ export class MediaTaskManager {
         if (!task.result) return '无结果';
         if (task.result.send) return task.result.send;
         const id = task.result.imageId ?? task.result.data;
-        return `（已生成但未能转换为可发送格式，ID：${id}；请检查「后端 → 图片转base64」配置或改用 media_tasks 查看）`;
+        return `（已生成但未能转换为可发送格式，ID：${id}；请检查「后端配置」里 backends.image-host / backends.image-url-to-base64 的地址与 token，或改用 media_tasks 查看）`;
     }
 
     private static deliver(task: MediaTask): void {

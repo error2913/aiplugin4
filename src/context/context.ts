@@ -1118,6 +1118,9 @@ export class Context {
         }
         const img = Image.get(id);
         if (img) return img;
+        // MCP image_search 返回的是图床 sha256 id：允许直接 [img:图床ID] 发送
+        const hosted = Image.fromHostedId(id);
+        if (hosted) return hosted;
         const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
         if (LOCAL_IMAGE_PATH_MAP && Object.prototype.hasOwnProperty.call(LOCAL_IMAGE_PATH_MAP, id)) {
             return Image.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]);
