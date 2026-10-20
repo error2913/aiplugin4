@@ -10,7 +10,7 @@ import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
-import { fmtDate } from "./string";
+import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./utils";
 
 /** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
@@ -728,7 +728,7 @@ export function buildContent(message: ContextMessage): string {
         // 防注入：工具返回的外部数据（网页/文件/命令等）成对加边界，明确「只读参考」范围
         if (message.role === 'tool') {
             const toolCallId = message.toolCallId || message.tool_call_id || '';
-            return `[tool_result${toolCallId ? `:${toolCallId}` : ''}]\n${message.text}\n[/tool_result]`;
+            return `[tool_result${toolCallId ? `:${toolCallId}` : ''}]\n${escapeToolResultBoundary(message.text)}\n[/tool_result]`;
         }
         return message.text;
     }

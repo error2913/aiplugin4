@@ -11,7 +11,7 @@ import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { getSkillsSignature, getSkillSummaries, SKILL_INJECT_MAX_ITEMS } from "../tool/skills";
+import { formatSkillSummaryBlock, getSkillsSignature, getSkillSummariesBudgeted, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 import { matchesPlatform, platformOf } from "../utils/target_id";
@@ -50,17 +50,10 @@ function flagStateSignature(state: { [key: string]: boolean } | undefined): stri
 
 /** 技能摘要块：只列当前平台可用且本会话未关闭的技能 */
 function buildSkillSummaryBlock(session: Session, platform: string): string {
-    const r = getSkillSummaries(SKILL_INJECT_MAX_ITEMS, s =>
+    const r = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS, s =>
         matchesPlatform(s.platforms, platform) && session.skillState?.[s.name] !== false
     );
-    if (r.summaries.length === 0) return '';
-    const lines = ['## 可用技能'];
-    for (const s of r.summaries) lines.push(`- ${s}`);
-    if (r.truncated) {
-        lines.push(`（共 ${r.total} 个技能，最多显示 ${SKILL_INJECT_MAX_ITEMS} 个）`);
-    }
-    lines.push('需要完整列表：skill_list；需要技能内容：use_skill。');
-    return lines.join('\n');
+    return formatSkillSummaryBlock(r);
 }
 
 /**

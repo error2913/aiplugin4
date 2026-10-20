@@ -3,6 +3,7 @@ import Config from "../config/config";
 import { KbEntry } from "../config/domain/types";
 import Logger from "../logger";
 import Model from "../model/model";
+import { extractFirstParagraph } from "../utils/markdown";
 import { buildCharNGrams } from "../utils/string";
 import { matchesPlatform } from "../utils/target_id";
 import { cosineSimilarity } from "../utils/utils";
@@ -20,29 +21,6 @@ export const KB_INJECT_MAX_LIBRARIES = 100;
 /** 知识库列表工具单页最大条数 */
 export const KB_PAGE_SIZE_LIMIT = 100;
 
-function extractFirstParagraph(markdown: string): string {
-    const lines = (markdown || '').replace(/\r\n/g, '\n').split('\n');
-    let started = false;
-    const buffer: string[] = [];
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (!started) {
-            if (/^#\s+/.test(trimmed)) {
-                started = true;
-            }
-            continue;
-        }
-        if (/^#{1,6}\s+/.test(trimmed)) break;
-        if (!trimmed) {
-            if (buffer.length > 0) break;
-            continue;
-        }
-        buffer.push(trimmed);
-        if (buffer.join(' ').length >= 200) break;
-    }
-    return buffer.join(' ').slice(0, 200);
-}
-
 /** 解析单个知识库配置项为一个库 */
 export function parseKnowledgeLibrary(entry: KbEntry, index: number): KnowledgeLibrary {
     const body = String(entry.content || '').replace(/\r\n/g, '\n').trim();
@@ -54,7 +32,7 @@ export function parseKnowledgeLibrary(entry: KbEntry, index: number): KnowledgeL
     const headingTitle = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || '';
     if (!name) name = headingTitle || `库${index + 1}`;
     const firstTitle = headingTitle || name;
-    if (!description) description = extractFirstParagraph(body);
+    if (!description) description = extractFirstParagraph(body, 200, true);
 
     const canonical = `${name}\n${description}\n${(platforms || []).join(',')}\n${body}`;
     const libraryId = `kb_lib_${hashString(canonical)}`;

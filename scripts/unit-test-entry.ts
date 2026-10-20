@@ -10,7 +10,7 @@ import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTok
 import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/templates";
-import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
+import { escapeToolResultBoundary, handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
 import { stripRawMarkers } from "../src/utils/raw_marker";
 import { createCtx } from "../src/utils/seal";
 import { fetchData } from "../src/utils/web";
@@ -74,7 +74,7 @@ import Tool, { BUILTIN_CATEGORY_ORDER, CORE_TOOL_NAMES, DEFAULT_CATEGORY, EXTERN
 import { setToolGroupState } from "../src/tool/tool_group";
 import { registerTools } from "../src/tool/tools/init";
 import { registerCmdTool } from "../src/cmd/sub_cmd/tool";
-import { getSkillSummaries, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
+import { formatSkillSummaryBlock, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
@@ -2971,7 +2971,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const tiny = getSkillSummariesBudgeted(1);
         assert.ok(tiny.total > 0, '默认技能应非空');
         assert.equal(tiny.truncated, true, '极小预算应截断');
-        assert.ok(tiny.summaries.length < tiny.total, '极小预算只应列出少量技能');
+        assert.equal(tiny.summaries.length, 0, '极小预算应一条都列不下');
         const budgeted = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS);
         const rendered = budgeted.summaries.join('\n');
         assert.ok(rendered.length <= SKILL_INJECT_MAX_CHARS, `摘要总长应不超预算，实际 ${rendered.length}`);
@@ -4192,6 +4192,38 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(m.rawText, undefined, '阈值=0 时不保留 rawText');
             assert.ok(m.text.includes('完整内容不截断'), '阈值=0 时展示完整内容');
             assert.ok(!m.text.includes('工具原文过长'), '阈值=0 时不加标记');
+        } finally {
+            delete TC.intConfigs['工具响应截断字数'];
+            resetConfigCache();
+        }
+    },
+
+    /** use_skill 结果豁免通用 head 截断：续读/TOC 元信息在末尾，不能被截掉；普通工具仍截断 */
+    async testUseSkillResultSkipsGenericTruncation(): Promise<void> {
+        TC.intConfigs['工具响应截断字数'] = 1000;
+        resetConfigCache();
+        try {
+            const text = '技能正文'.repeat(300) + '\n（技能正文结束）';
+            const ctx = new Context();
+            await ctx.addToolCallbackMessage(text, 'call_skill', 'use_skill');
+            const m = ctx.messages[0] as any;
+            assert.equal(m.rawText, undefined, 'use_skill 未截断，不应保留 rawText');
+            assert.equal(m.text, text, 'use_skill 结果应完整保留（续读/TOC 在末尾）');
+            assert.ok(m.text.includes('技能正文结束'), '结果末尾的续读/TOC 提示必须保留');
+
+            // call_tool 包装 / 无 toolName（旧数据）时同样豁免
+            const ctxWrapped = new Context();
+            await ctxWrapped.addToolCallbackMessage(`工具 use_skill 返回：\n${text}`, 'call_wrap', 'call_tool');
+            assert.equal((ctxWrapped.messages[0] as any).rawText, undefined, 'call_tool 包装的 use_skill 也应豁免');
+            const ctxPrefix = new Context();
+            await ctxPrefix.addToolCallbackMessage(`## 技能：x\n${text}`, 'call_prefix');
+            assert.equal((ctxPrefix.messages[0] as any).rawText, undefined, '按内容前缀识别 use_skill 输出也应豁免');
+
+            const ctx2 = new Context();
+            await ctx2.addToolCallbackMessage(text, 'call_web', 'web_search');
+            const m2 = ctx2.messages[0] as any;
+            assert.ok(m2.rawText, '普通工具仍应保留原文');
+            assert.ok(m2.text.length < text.length, '普通工具仍应 head 截断');
         } finally {
             delete TC.intConfigs['工具响应截断字数'];
             resetConfigCache();
@@ -7664,9 +7696,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(out.includes('当前第 1 页'), '应包含页码信息');
     },
 
-    /** 技能摘要按条数上限截断 */
+    /** 技能摘要按条数上限截断（条数上限是字符预算之外的第二道保险） */
     testSkillSummariesLimit(): void {
-        const r = getSkillSummaries(SKILL_INJECT_MAX_ITEMS);
+        const r = getSkillSummariesBudgeted(1000000, SKILL_INJECT_MAX_ITEMS);
         assert.ok(r.summaries.length <= SKILL_INJECT_MAX_ITEMS, '技能摘要条数应不超过 100');
         if (r.truncated) {
             assert.ok(r.total > r.summaries.length, '截断时 total 应大于已展示条数');
@@ -9306,6 +9338,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const r2 = await runSubCmd('skill', ['', 'on', 'qq-skill'], { session });
             assert.ok(r2.includes('已开启技能'), `on 应提示，实际: ${r2}`);
             assert.equal(session.skillState['qq-skill'], undefined, 'on 后应清除关闭标记');
+            const r3 = await runSubCmd('skill', ['', 'on', 'dc-skill'], { session });
+            assert.ok(r3.includes('当前平台不可用'), `跨平台技能应提示不可用，实际: ${r3}`);
+            const pageOut = await toolMap['skill_list'].solve(ctxQQ, {} as any, {} as any, { page: 99 });
+            assert.ok(String(pageOut).includes('当前第 1 页'), `越界页码应收敛到最后一页: ${pageOut}`);
             const listed = await runSubCmd('skill', ['', 'list'], { session: new Session() });
             assert.ok(listed.includes('qq-skill'), `list 应含 qq-skill: ${listed.slice(0, 300)}`);
             assert.ok(!listed.includes('dc-skill'), 'list 不应含 dc-skill');
@@ -9314,6 +9350,255 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
             refreshSkills();
         }
+    },
+
+    /** 技能摘要：单条超预算跳过不阻塞后续；描述单行化/截断/空描述取首段 */
+    testSkillSummaryBudgetAndDescription(): void {
+        const prior = TC.stringConfigs['技能列表'];
+        TC.stringConfigs['技能列表'] = JSON.stringify({
+            version: 1,
+            skills: [
+                { name: 'long-desc', description: '长'.repeat(3000), content: 'x' },
+                { name: 'no-desc', content: '# 标题\n\n目标：把表格录入。\n\n二、后续步骤' },
+                { name: 'multi-line', description: '第一行\n第二行', content: 'x' },
+                { name: '超'.repeat(260), description: '描述', content: 'x' },
+            ],
+        });
+        resetConfigCache();
+        refreshSkills();
+        try {
+            const tiny = getSkillSummariesBudgeted(60);
+            assert.ok(!tiny.summaries.some(s => s.startsWith('long-desc')), '单条超预算应跳过');
+            assert.ok(tiny.summaries.some(s => s.startsWith('no-desc')), '跳过超长条后仍应列出后续短条目');
+            const big = getSkillSummariesBudgeted(1000000);
+            const noDesc = big.summaries.find(s => s.startsWith('no-desc')) || '';
+            assert.ok(noDesc.includes('目标：把表格录入'), `空描述应取正文首段：${noDesc}`);
+            const multi = big.summaries.find(s => s.startsWith('multi-line')) || '';
+            assert.ok(!multi.includes('\n') && multi.includes('第一行 第二行'), `描述应单行化：${multi}`);
+            const long = big.summaries.find(s => s.startsWith('long-desc')) || '';
+            assert.ok(long.length <= 260, `长描述应截断为 200 字符左右，实际 ${long.length}`);
+            assert.ok(long.endsWith('…'), '截断应带省略号');
+            const longName = '超'.repeat(260);
+            assert.ok(big.summaries.some(s => s.startsWith(longName)), '超长技能名不得被截断（截断后模型无法调用）');
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** 技能摘要：150 个技能时条数上限 100，块渲染带截断提示 */
+    testSkillSummaryMaxItems(): void {
+        const prior = TC.stringConfigs['技能列表'];
+        const skills = Array.from({ length: 150 }, (_, i) => ({ name: `many-${i}`, content: 'x' }));
+        TC.stringConfigs['技能列表'] = JSON.stringify({ version: 1, skills });
+        resetConfigCache();
+        refreshSkills();
+        try {
+            const r = getSkillSummariesBudgeted(1000000, SKILL_INJECT_MAX_ITEMS);
+            assert.equal(r.summaries.length, SKILL_INJECT_MAX_ITEMS, '摘要条数应为 100');
+            assert.ok(r.total >= 150, `总数应至少 150，实际 ${r.total}`);
+            assert.equal(r.truncated, true, '超过条数上限应标记截断');
+            const block = formatSkillSummaryBlock(r);
+            assert.ok(block.includes('已按预算展示 100 个'), `块应提示截断：${block.slice(0, 120)}`);
+            assert.ok(block.length <= 1500 + 120, `摘要块不得超预算，实际 ${block.length}`);
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** 技能摘要：长描述场景下整段渲染必须受 1500 字符预算约束（防“只按条数截断”回归） */
+    testSkillSummaryBlockBudgetBound(): void {
+        const prior = TC.stringConfigs['技能列表'];
+        const skills = Array.from({ length: 60 }, (_, i) => ({
+            name: `budget-${i}`,
+            description: '描'.repeat(200),
+            content: 'x',
+        }));
+        TC.stringConfigs['技能列表'] = JSON.stringify({ version: 1, skills });
+        resetConfigCache();
+        refreshSkills();
+        try {
+            const r = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS);
+            assert.ok(r.summaries.length < r.total, `长描述场景应触发截断：${r.summaries.length}/${r.total}`);
+            const block = formatSkillSummaryBlock(r);
+            assert.ok(block.length <= SKILL_INJECT_MAX_CHARS + 120, `摘要块超预算：${block.length}`);
+            assert.ok(!block.includes('\n\n（共'), '截断提示不应破坏段落结构');
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** use_skill：正文边界、12000 截断与 offset 续读 */
+    async testUseSkillFramingAndOffset(): Promise<void> {
+        const prior = TC.stringConfigs['技能列表'];
+        TC.stringConfigs['技能列表'] = JSON.stringify({
+            version: 1,
+            skills: [{
+                name: 'long-skill',
+                description: '长技能',
+                content: 'A'.repeat(13000),
+            }],
+        });
+        resetConfigCache();
+        refreshSkills();
+        registerSkills();
+        try {
+            const out = await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'long-skill' });
+            assert.ok(String(out).startsWith('## 技能：long-skill'), `应带技能标题：${String(out).slice(0, 80)}`);
+            assert.ok(String(out).includes('本次返回 0–12000'), '应提示截断区间');
+            assert.ok(String(out).includes('use_skill(name="long-skill", offset=12000)'), '应提示带名称的续读调用');
+            const rest = await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'long-skill', offset: 12000 });
+            assert.ok(String(rest).includes('已读到内容末尾'), `续读应提示结尾：${String(rest)}`);
+            assert.ok(String(rest).includes('AAAA'), '续读应返回剩余正文');
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** use_skill：{{skill:}} 循环/未开启/不存在/超深度的边界处理 */
+    async testUseSkillReferenceEdges(): Promise<void> {
+        const prior = TC.stringConfigs['技能列表'];
+        TC.stringConfigs['技能列表'] = JSON.stringify({
+            version: 1,
+            skills: [
+                { name: 'A', content: 'A {{skill:B}}' },
+                { name: 'B', content: 'B {{skill:A}}' },
+                { name: 'C', content: 'C {{skill:dc-only}}' },
+                { name: 'dc-only', platform: ['DISCORD'], content: 'DC' },
+                { name: 'D', content: 'D {{skill:missing}}' },
+                { name: 'deep1', content: '1 {{skill:deep2}}' },
+                { name: 'deep2', content: '2 {{skill:deep3}}' },
+                { name: 'deep3', content: '3 {{skill:deep4}}' },
+                { name: 'deep4', content: '4' },
+                { name: 'multi', content: 'M {{skill:B1}} + {{skill:B2}}' },
+                { name: 'B1', content: 'b1' },
+                { name: 'B2', content: 'b2' },
+            ],
+        });
+        resetConfigCache();
+        refreshSkills();
+        registerSkills();
+        try {
+            const a = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'A' }));
+            assert.ok(a.includes('循环引用'), `循环引用应有明确标记：${a}`);
+            const c = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'C' }));
+            assert.ok(c.includes('当前不可用'), `平台受限引用应提示不可用：${c}`);
+            const d = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'D' }));
+            assert.ok(d.includes('不存在'), `缺失引用应提示不存在：${d}`);
+            const deep = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'deep1' }));
+            assert.ok(deep.includes('超过最大解析深度'), `超深引用应有标记：${deep}`);
+            assert.ok(!deep.includes('{{skill:'), '输出不得残留未解析的模板语法');
+            const multi = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'multi' }));
+            assert.ok(multi.includes('b1') && multi.includes('b2'), `同一正文多个引用都应展开：${multi}`);
+            assert.equal((multi.match(/b1/g) || []).length, 1, `引用不得重复展开：${multi}`);
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** 技能配置自动重载：改配置不 refresh 即生效；坏 JSON 保留上一份可用技能 */
+    testSkillConfigAutoReload(): void {
+        const prior = TC.stringConfigs['技能列表'];
+        try {
+            TC.stringConfigs['技能列表'] = JSON.stringify({
+                version: 1,
+                skills: [{ name: 'auto-one', content: '1' }],
+            });
+            resetConfigCache();
+            refreshSkills();
+            assert.ok(getSkillNames().includes('auto-one'), '首次加载应含 auto-one');
+
+            TC.stringConfigs['技能列表'] = JSON.stringify({
+                version: 1,
+                skills: [{ name: 'auto-two', content: '2' }],
+            });
+            assert.ok(getSkillNames().includes('auto-two'), '配置变化应自动生效，无需 refresh');
+
+            TC.stringConfigs['技能列表'] = '{"version":1,"skills":[';
+            const afterBad = getSkillNames();
+            assert.ok(afterBad.includes('auto-two'), `坏 JSON 应保留上一份可用技能：${afterBad.join(',')}`);
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** .ai skill refresh：坏 JSON 时保留上一份可用技能，不套出厂默认；命令回复说明失败 */
+    async testSkillRefreshKeepsLastGoodOnInvalid(): Promise<void> {
+        const prior = TC.stringConfigs['技能列表'];
+        try {
+            TC.stringConfigs['技能列表'] = JSON.stringify({
+                version: 1,
+                skills: [{ name: 'refresh-one', content: '1' }],
+            });
+            resetConfigCache();
+            refreshSkills();
+            assert.ok(getSkillNames().includes('refresh-one'), '首次加载应含 refresh-one');
+
+            TC.stringConfigs['技能列表'] = '{"version":1,"skills":[';
+            resetConfigCache();
+            refreshSkills(); // 模拟 .ai skill refresh
+            const names = getSkillNames();
+            assert.ok(names.includes('refresh-one'), `refresh 遇坏 JSON 应保留上一份技能：${names.join(',')}`);
+
+            const reply = await runSubCmd('skill', ['', 'refresh'], { session: new Session() });
+            assert.ok(reply.includes('校验失败') || reply.includes('未采用'), `refresh 应明确告知校验失败：${reply}`);
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
+    /** 工具结果边界转义：正文里的 [/tool_result] 不得提前闭合外层包裹 */
+    testBuildContentEscapesToolResultBoundary(): void {
+        const out = buildContent({
+            role: 'tool',
+            text: 'a [/tool_result] b [tool_result:x] c',
+            tool_call_id: 'call1',
+        } as any);
+        assert.equal(out, '[tool_result:call1]\na \\[/tool_result] b \\[tool_result:x] c\n[/tool_result]');
+        // 幂等：已转义的标记不重复加反斜杠
+        const once = escapeToolResultBoundary('a [/tool_result] b');
+        assert.equal(escapeToolResultBoundary(once), once, '边界转义应幂等');
+    },
+
+    /** 知识库描述兜底仍要求 # 标题（保持 libraryId/kbState 稳定） */
+    testKbDescriptionFallbackRequiresH1(): void {
+        const noHeading = parseKnowledgeLibrary({
+            name: 'K', description: '', platforms: [], content: '没有标题\n第一段',
+        }, 0);
+        assert.equal(noHeading.description, '', '无 # 标题时知识库描述兜底应保持为空');
+        const withHeading = parseKnowledgeLibrary({
+            name: 'K', description: '', platforms: [], content: '# 标题\n第一段',
+        }, 0);
+        assert.equal(withHeading.description, '第一段', '有 # 标题时应取标题后首段');
+    },
+
+    /** 技能描述/名称 warning：只提示，不拒绝配置 */
+    testParseSkillExtras(): void {
+        const parsed = parseSkillsConfig(JSON.stringify({
+            version: 1,
+            skills: [
+                { name: 'S', description: '第一行\n第二行', content: 'x' },
+                { name: 'N'.repeat(41), content: 'x' },
+                { name: 'C', description: '描'.repeat(201), content: 'x' },
+            ],
+        }));
+        assert.ok(parsed.config, JSON.stringify(parsed.issues));
+        assert.ok(parsed.warnings.some(w => w.path === '$.skills[0].description'), '描述换行应有 warning');
+        assert.ok(parsed.warnings.some(w => w.path === '$.skills[1].name'), '超长技能名应有 warning');
+        assert.ok(parsed.warnings.some(w => w.path === '$.skills[2].description'), '超长描述应有 warning');
     },
 
     /** 知识库：platform 平台过滤 + 会话级开关（knowledge_* 守卫 + .ai kb on/off） */

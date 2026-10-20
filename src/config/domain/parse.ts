@@ -13,6 +13,10 @@ import {
 
 const MCP_TYPES = ['http', 'streamable-http'];
 const MAX_ROLE_NAME = 20;
+/** 技能描述超过该长度给 warning（注入摘要时按 SKILL_SUMMARY_DESC_MAX 截断） */
+const MAX_SKILL_DESC_WARN = 200;
+/** 技能名超过该长度给 warning（不截断，名称是 use_skill / .ai skill 的键） */
+const MAX_SKILL_NAME_WARN = 40;
 
 function isPlainObject(v: unknown): v is Record<string, any> {
     return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -128,6 +132,15 @@ export function parseRolesConfig(text: string): DomainParseResult<RolesConfig> {
     return { config: issues.length > 0 ? null : { version: DOMAIN_VERSION, roles }, issues, warnings };
 }
 
+/** 是否含控制字符（换行/制表/空字符等） */
+function hasControlChar(s: string): boolean {
+    for (let i = 0; i < s.length; i++) {
+        const code = s.charCodeAt(i);
+        if (code < 0x20 || code === 0x7f) return true;
+    }
+    return false;
+}
+
 /** 技能配置 → {version, skills:[{name,description,platform,content}]} */
 export function parseSkillsConfig(text: string): DomainParseResult<SkillsConfig> {
     const { value, issues, empty } = parseJson(text);
@@ -151,20 +164,36 @@ export function parseSkillsConfig(text: string): DomainParseResult<SkillsConfig>
             return;
         }
         const name = readName(item.name, `${path}.name`, issues);
+        if (name.length > MAX_SKILL_NAME_WARN) {
+            warnings.push(issue(`${path}.name`, `技能名超过 ${MAX_SKILL_NAME_WARN} 字符，建议缩短`));
+        }
+        if (hasControlChar(name)) {
+            warnings.push(issue(`${path}.name`, '技能名含换行/控制字符：展示时会被清理，但请避免'));
+        }
         if (item.description !== undefined && item.description !== null && typeof item.description !== 'string') {
             issues.push(issue(`${path}.description`, 'description 必须是字符串'));
         }
         const description = typeof item.description === 'string' ? item.description : '';
+        if (/[\r\n]/.test(description)) {
+            warnings.push(issue(`${path}.description`, '描述中的换行会在注入摘要时合并为空格'));
+        }
+        if (description.length > MAX_SKILL_DESC_WARN) {
+            warnings.push(issue(`${path}.description`, `描述超过 ${MAX_SKILL_DESC_WARN} 字符：注入摘要时会截断`));
+        }
         const platforms = readPlatform(item.platform, `${path}.platform`, issues);
         const content = readContent(item.content, `${path}.content`, issues, 'content');
         if (content.length > 12000) {
-            warnings.push(issue(`${path}.content`, '内容超过 12000 字符：use_skill 返回时会截断（配置仍完整保存）'));
+            warnings.push(issue(`${path}.content`, `内容超过 12000 字符：use_skill 返回时会截断（配置仍完整保存）`));
         }
         names.push(name);
         skills.push({ name, description, platforms, content });
     });
     for (const dup of findDuplicates(names)) issues.push(issue('$.skills', `技能名重复：${dup}`));
-    return { config: issues.length > 0 ? null : { version: DOMAIN_VERSION, skills }, issues, warnings };
+    return {
+        config: issues.length > 0 ? null : { version: DOMAIN_VERSION, skills },
+        issues,
+        warnings,
+    };
 }
 
 /**

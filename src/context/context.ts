@@ -553,9 +553,16 @@ export class Context {
     // 完整原文以 rawText 保留（不参与渲染/预算），供 read_raw/grep_raw(kind=tool) 按 tool_call_id 按需读取。
     async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, contentParts?: ToolContentPart[]) {
         const { TOOL_RESPONSE_TRUNCATE_CHARS } = Config.tool;
+        // use_skill 自己已做 12000 字符分页，且「续读 offset」在结果末尾：
+        // 再套通用 head 截断会把续读提示一起截掉，导致模型无法续读，故豁免。
+        // 直接调用（toolName=use_skill）与 call_tool 包装（工具 use_skill 返回：…）都要识别。
+        // 内容长度上限仍由 use_skill 的 MAX_SKILL_CONTENT_LENGTH 保证。
+        const skipTruncate = toolName === 'use_skill'
+            || /^## 技能：/.test(text)
+            || /^工具 use_skill 返回：\n/.test(text);
         // 截断前原文：仅当文本确实被截断后保留，供只读工具按需读取（不参与渲染/预算）
         let rawText: string | undefined;
-        if (TOOL_RESPONSE_TRUNCATE_CHARS > 0 && text.length > TOOL_RESPONSE_TRUNCATE_CHARS) {
+        if (!skipTruncate && TOOL_RESPONSE_TRUNCATE_CHARS > 0 && text.length > TOOL_RESPONSE_TRUNCATE_CHARS) {
             rawText = text;
             text = text.slice(0, TOOL_RESPONSE_TRUNCATE_CHARS);
         }
