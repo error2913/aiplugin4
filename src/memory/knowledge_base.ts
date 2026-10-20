@@ -32,7 +32,7 @@ export function parseKnowledgeLibrary(entry: KbEntry, index: number): KnowledgeL
     const headingTitle = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || '';
     if (!name) name = headingTitle || `库${index + 1}`;
     const firstTitle = headingTitle || name;
-    if (!description) description = extractFirstParagraph(body);
+    if (!description) description = extractFirstParagraph(body, 200, true);
 
     const canonical = `${name}\n${description}\n${(platforms || []).join(',')}\n${body}`;
     const libraryId = `kb_lib_${hashString(canonical)}`;

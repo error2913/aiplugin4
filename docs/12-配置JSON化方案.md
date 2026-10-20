@@ -1,6 +1,6 @@
 # 12 - 角色 / 技能 / MCP / 知识库配置 JSON 化方案
 
-> 状态：**已实现**（插件分支 `feat/config-json`；生成器分支 `feat/domain-tabs`）。本文件从方案保留为格式与实现说明。
+> 状态：**已实现**（插件 4.26+；生成器 `aiplugin4-config` main）。本文件从方案保留为格式与实现说明。
 >
 > 已确认的产品决策：
 > - **不做迁移、不做兼容**：新配置用**新键名**，旧键名不再读取，旧值留在配置文件里但界面上隐藏。
@@ -121,7 +121,7 @@ seal.ext.registerStringConfig(ext, '技能列表', DEFAULT_SKILLS_JSON, DESC, '�
 | `resources` | 否 | 只读参考文件（相对路径 → 文本，如 `references/forms.md`）；插件只读取展示，不执行；非法路径按 warning 跳过 |
 | `includeDefaults`（顶层） | 否 | 是否补入缺失的出厂默认技能；缺省 `true`，设 `false` 后完全按配置来 |
 
-行为：**默认补入缺失的出厂默认技能**（用户配置里没有同名“录卡”时自动补，避免升级后新默认技能不可用；可用 `includeDefaults: false` 关闭该行为）。注入预算 `SKILL_INJECT_MAX_CHARS=1500`、`SKILL_LIST_LIMIT=100`、单条描述 200 字符、单次返回 12000 字符；技能配置变化自动重新解析（解析失败保留上一份可用技能），也可用 `.ai skill refresh` 强制重解析。
+行为：**默认补入缺失的出厂默认技能**（用户配置里没有同名“录卡”时自动补，避免升级后新默认技能不可用；可用 `includeDefaults: false` 关闭该行为）。「技能列表」留空 = 载入出厂技能（含「录卡」）；坏 JSON 则保留上一份可用技能。注入预算 `SKILL_INJECT_MAX_CHARS=1500`（列表行）、`SKILL_LIST_LIMIT=100`、单条描述 200 字符、单次返回 12000 字符；技能配置变化自动重新解析，也可用 `.ai skill refresh` 强制重解析（失败同样保留上一份）。
 
 ### 4.3 MCP（标准 mcpServers 格式）
 
@@ -224,7 +224,7 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 | --- | --- |
 | `src/utils/message.ts` | 直接用 `ROLE_SETTINGS[roleIndex]`，不再 `parseRoleEntry` |
 | `src/cmd/sub_cmd/role.ts` | 不改逻辑；名称列表来源不变 |
-| `src/tool/skills.ts` | `compileSkills()` 改为消费 `Config.skills.SKILLS` 结构化数组；保留“补默认技能” |
+| `src/tool/skills.ts` | `compileSkills()` 消费 `Config.skills.SKILLS` + `INCLUDE_DEFAULTS`；`resources` 随条目加载；配置变化自动重解析，`.ai skill refresh` 可强制 |
 | `src/tool/mcp.ts` | `getMCPServers()` 改为消费 `Config.mcp.MCP_SERVERS`；旧 `parseMCPServerElement` 不再被运行时使用 |
 | `src/memory/knowledge_base.ts` | `reload()` / `refresh()` 改为消费 `Config.knowledgeBase.LIBRARIES`；签名改用“库名+描述+内容+平台”的稳定拼接 |
 | `src/cmd/sub_cmd/{skill,mcp,kb}.ts` | 帮助文案里的“frontmatter 的 platform”改成“JSON 的 platform 字段” |
@@ -233,18 +233,19 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 
 | 情况 | 行为 |
 | --- | --- |
-| JSON 语法错误 / version ≠ 1（MCP 无 version）/ 顶层集合结构不对 | ERROR 日志列出全部问题 + 生成器提示；该分区按空处理 |
-| 条目缺 `name` / `content` / `url`，类型错误，名称重复 | 同上 |
+| JSON 语法错误 / version ≠ 1（MCP 无 version）/ 顶层集合结构不对 | ERROR 日志列出全部问题 + 生成器提示；非技能分区按空处理（技能见下） |
+| 条目缺 `name` / `content` / `url`，类型错误，名称重复 | 同上（技能见下） |
 | 未知字段 | 忽略 + warning |
 | 角色名 > 20 字符 | 截断 + warning |
 | 技能正文 > 12000 字符 | warning（仍完整保存，`use_skill` 返回时截断） |
 | 角色配置非法 | 回退到出厂角色，避免 system prompt 空掉 |
-| 技能 / MCP / 知识库配置非法 | 按空处理（不静默套出厂内容） |
+| 技能配置非法 | ERROR + 生成器提示；有上一份可用技能时保留（refresh 也一样），首次启动无上一份时回退出厂技能（日志注明） |
+| MCP / 知识库配置非法 | 按空处理（不静默套出厂内容） |
 
 日志示例：
 
 ```
-[error] 「技能列表」校验失败（共 2 处），本次不生效：
+[error] 「技能列表」校验失败（共 2 处），本次不采用该配置（有上一份时保留）：
         $.skills[0].name name 必填
         $.skills[1].content content 必填
 [error] 提示：可用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/
@@ -290,12 +291,12 @@ export function parseKbConfig(text: string): ParseResult<KbConfig>
 
 ## 6. 生成器侧对应关系（已完成）
 
-生成器仓库 `aiplugin4-config` 的 `feat/domain-tabs` 分支：
+生成器仓库 `aiplugin4-config`（main）：
 
 - 四个页签 + 通用交互层：`js/domain-app.js`、`js/domains/*.js`；
-- 文件导入：SKILL.md / Markdown / 文本 / 标准 MCP JSON（`mcpServers`）；
+- 文件导入：SKILL.md / 技能目录（SKILL.md + 同目录文本 resources）/ Markdown / 文本 / 标准 MCP JSON（`mcpServers`）；
 - 默认值同步：`tools/sync-default-data.mjs` → `js/domains/default-data.js`；
-- 测试：`tests/domains-run.mjs`（101 项）、`tests/domain-e2e-check.html`（42 项）、`tests/web-e2e-check.html`（12 项，联网统一编辑/启用/导入）。
+- 测试：`tests/domains-run.mjs`（187 项）、`tests/domain-e2e-check.html`（42 项）、`tests/web-e2e-check.html`（12 项，联网统一编辑/启用/导入）。
 
 插件侧实现时，两边 schema 字段名、`platform` 缺省语义、默认值必须完全一致；跨仓库联测是唯一防线。
 

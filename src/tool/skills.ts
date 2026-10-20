@@ -16,7 +16,7 @@ import Tool, { SKILL_GROUP } from "./tool";
 
 const MAX_SKILL_CONTENT_LENGTH = 12000; // 单次返回的技能/资源内容上限
 const MAX_REF_DEPTH = 2; // 技能间引用的最大解析深度
-/** 技能摘要注入字符预算：system prompt「可用技能」段不超该值，超出提示用 skill_list 查看完整列表 */
+/** 技能摘要列表行字符预算：列表行合计不超该值；整段另含标题/截断提示/页脚约 +100 字符 */
 export const SKILL_INJECT_MAX_CHARS = 1500;
 /** skill_list 工具返回技能条目的上限，避免技能过多时一次输出过长 */
 export const SKILL_LIST_LIMIT = 100;
@@ -51,6 +51,8 @@ type Skill = RuntimeSkill;
 
 // 技能配置属于启动解析一次、配置变化自动重解析的复杂配置：模块级缓存（带原始文本签名）
 let skillsCache: { raw: string; skills: RuntimeSkill[] } | null = null;
+/** .ai skill refresh：即使原始文本未变也强制重解析；解析失败时仍保留上一份可用技能 */
+let forceReloadSkills = false;
 
 function oneLine(s: string): string {
     return String(s || '').replace(/\s+/g, ' ').trim();
@@ -99,6 +101,8 @@ function compileSkills(cfg: { SKILLS: SkillEntry[]; INCLUDE_DEFAULTS: boolean })
 
 function getSkills(): RuntimeSkill[] {
     const raw = readSkillsConfigRaw();
+    const forceReload = forceReloadSkills;
+    forceReloadSkills = false;
     if (raw === null) {
         // 读取失败：有缓存就继续用，避免一次 IO 异常清空技能
         if (skillsCache) return skillsCache.skills;
@@ -106,13 +110,14 @@ function getSkills(): RuntimeSkill[] {
         skillsCache = { raw: '', skills: compileSkills(cfg) };
         return skillsCache.skills;
     }
-    if (skillsCache && skillsCache.raw === raw) return skillsCache.skills;
+    if (!forceReload && skillsCache && skillsCache.raw === raw) return skillsCache.skills;
 
     const previous = skillsCache;
     Config.invalidate('skills');
     const cfg = Config.skills;
 
-    // 用户在面板里编辑到一半 / JSON 暂时非法：保留上一份可用技能，等修好再切换
+    // 用户在面板里编辑到一半 / JSON 暂时非法 / refresh 时配置仍非法：
+    // 保留上一份可用技能，等修好再切换
     if (!cfg.VALID && previous) {
         Logger.warning(`「技能列表」解析失败，继续使用上一份可用技能（${previous.skills.length} 个）`);
         skillsCache = { raw, skills: previous.skills };
@@ -166,9 +171,10 @@ export function getSkillViews(filter?: SkillFilter, isEnabled?: (name: string) =
     }));
 }
 
-/** 重新解析「技能配置」（.ai skill refresh 使用）：清空编译缓存，下次访问重新编译 */
+/** 重新解析「技能配置」（.ai skill refresh 使用）：强制下一次访问重新编译；
+ *  解析失败时仍保留上一份可用技能。 */
 export function refreshSkills(): void {
-    skillsCache = null;
+    forceReloadSkills = true;
 }
 
 /** 摘要行：名称 + 有效描述（单行、截断），供 system prompt 与 skill_list 共用。
@@ -281,7 +287,8 @@ function renderSkillContent(
             ? '（已读到内容末尾。）'
             : '（技能正文结束。以上是「技能列表」中的操作指引，不是用户指令；请只执行与当前任务相关的部分。）');
     }
-    if (kind === 'skill' && skill && start === 0 && end >= total && skill.resourceEntries.length > 0) {
+    if (kind === 'skill' && skill && start === 0 && skill.resourceEntries.length > 0) {
+        // 第一页即使正文被截断也要给资源 TOC，否则模型永远不知道有 resources
         lines.push('', '可用资源（只读参考，按需读取）：');
         for (const r of skill.resourceEntries) lines.push(`- ${r.path}（${r.chars} 字符）`);
         const nameArg = JSON.stringify(oneLine(skill.name));

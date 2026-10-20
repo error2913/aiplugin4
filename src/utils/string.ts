@@ -848,9 +848,13 @@ export function stripRenderTags(s: string): string {
 /**
  * 转义工具结果边界标记：避免工具/技能正文里的 [/tool_result] 提前闭合
  * buildContent 给 tool 消息包的外层 [tool_result]…[/tool_result] 边界。
+ * 已带反斜杠的标记不重复转义（幂等）。
  */
 export function escapeToolResultBoundary(text: string): string {
-    return String(text || '').replace(/\[(\/?)(tool_result)\b/gi, '\\[$1$2');
+    return String(text || '').replace(
+        /(^|[^\\])\[(\/?)(tool_result)\b/gi,
+        (_m, prefix: string, slash: string, name: string) => `${prefix}\\[${slash}${name}`,
+    );
 }
 
 export function parseSpecialTokens(s: string): TokenSegment[] {

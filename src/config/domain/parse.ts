@@ -14,7 +14,7 @@ import {
 const MCP_TYPES = ['http', 'streamable-http'];
 const MAX_ROLE_NAME = 20;
 /** 技能描述超过该长度给 warning（注入摘要时按 SKILL_SUMMARY_DESC_MAX 截断） */
-const MAX_SKILL_DESC_WARN = 300;
+const MAX_SKILL_DESC_WARN = 200;
 /** 技能名超过该长度给 warning（不截断，名称是 use_skill / .ai skill 的键） */
 const MAX_SKILL_NAME_WARN = 40;
 /** 单个技能资源的字符上限（use_skill 返回时截断） */

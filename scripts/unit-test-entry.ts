@@ -10,7 +10,7 @@ import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTok
 import { TokenCalibration } from "../src/token_calibration";
 import { buildContentParts, normalizeMCPResult } from "../src/tool/mcp/result";
 import { SUMMARY_PROMPT_TEMPLATE, SYSTEM_MESSAGE_TEMPLATE } from "../src/prompt/templates";
-import { handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
+import { escapeToolResultBoundary, handleReply, stripInternalTags, stripRenderTags, stripUserTags } from "../src/utils/string";
 import { stripRawMarkers } from "../src/utils/raw_marker";
 import { createCtx } from "../src/utils/seal";
 import { fetchData } from "../src/utils/web";
@@ -4120,6 +4120,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(m.rawText, undefined, '阈值=0 时不保留 rawText');
             assert.ok(m.text.includes('完整内容不截断'), '阈值=0 时展示完整内容');
             assert.ok(!m.text.includes('工具原文过长'), '阈值=0 时不加标记');
+        } finally {
+            delete TC.intConfigs['工具响应截断字数'];
+            resetConfigCache();
+        }
+    },
+
+    /** use_skill 结果豁免通用 head 截断：续读/TOC 元信息在末尾，不能被截掉；普通工具仍截断 */
+    async testUseSkillResultSkipsGenericTruncation(): Promise<void> {
+        TC.intConfigs['工具响应截断字数'] = 1000;
+        resetConfigCache();
+        try {
+            const text = '技能正文'.repeat(300) + '\n（技能正文结束）';
+            const ctx = new Context();
+            await ctx.addToolCallbackMessage(text, 'call_skill', 'use_skill');
+            const m = ctx.messages[0] as any;
+            assert.equal(m.rawText, undefined, 'use_skill 未截断，不应保留 rawText');
+            assert.equal(m.text, text, 'use_skill 结果应完整保留（续读/TOC 在末尾）');
+            assert.ok(m.text.includes('技能正文结束'), '结果末尾的续读/TOC 提示必须保留');
+
+            const ctx2 = new Context();
+            await ctx2.addToolCallbackMessage(text, 'call_web', 'web_search');
+            const m2 = ctx2.messages[0] as any;
+            assert.ok(m2.rawText, '普通工具仍应保留原文');
+            assert.ok(m2.text.length < text.length, '普通工具仍应 head 截断');
         } finally {
             delete TC.intConfigs['工具响应截断字数'];
             resetConfigCache();
@@ -9330,7 +9354,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const prior = TC.stringConfigs['技能列表'];
         TC.stringConfigs['技能列表'] = JSON.stringify({
             version: 1,
-            skills: [{ name: 'long-skill', description: '长技能', content: 'A'.repeat(13000) }],
+            skills: [{
+                name: 'long-skill',
+                description: '长技能',
+                content: 'A'.repeat(13000),
+                resources: { 'references/a.md': '资源A' },
+            }],
         });
         resetConfigCache();
         refreshSkills();
@@ -9340,6 +9369,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(String(out).startsWith('## 技能：long-skill'), `应带技能标题：${String(out).slice(0, 80)}`);
             assert.ok(String(out).includes('本次返回 0–12000'), '应提示截断区间');
             assert.ok(String(out).includes('use_skill(name="long-skill", offset=12000)'), '应提示带名称的续读调用');
+            assert.ok(String(out).includes('references/a.md'), '正文被截断时首屏仍应列出资源 TOC');
             const rest = await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'long-skill', offset: 12000 });
             assert.ok(String(rest).includes('已读到内容末尾'), `续读应提示结尾：${String(rest)}`);
             assert.ok(String(rest).includes('AAAA'), '续读应返回剩余正文');
@@ -9461,6 +9491,34 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** .ai skill refresh：坏 JSON 时保留上一份可用技能，不套出厂默认；命令回复说明失败 */
+    async testSkillRefreshKeepsLastGoodOnInvalid(): Promise<void> {
+        const prior = TC.stringConfigs['技能列表'];
+        try {
+            TC.stringConfigs['技能列表'] = JSON.stringify({
+                version: 1, includeDefaults: false,
+                skills: [{ name: 'refresh-one', content: '1' }],
+            });
+            resetConfigCache();
+            refreshSkills();
+            assert.ok(getSkillNames().includes('refresh-one'), '首次加载应含 refresh-one');
+
+            TC.stringConfigs['技能列表'] = '{"version":1,"skills":[';
+            resetConfigCache();
+            refreshSkills(); // 模拟 .ai skill refresh
+            const names = getSkillNames();
+            assert.ok(names.includes('refresh-one'), `refresh 遇坏 JSON 应保留上一份技能：${names.join(',')}`);
+            assert.ok(!names.includes('录卡'), '不应因 refresh 失败回退出厂默认技能');
+
+            const reply = await runSubCmd('skill', ['', 'refresh'], { session: new Session() });
+            assert.ok(reply.includes('校验失败') || reply.includes('未采用'), `refresh 应明确告知校验失败：${reply}`);
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
     /** 工具结果边界转义：正文里的 [/tool_result] 不得提前闭合外层包裹 */
     testBuildContentEscapesToolResultBoundary(): void {
         const out = buildContent({
@@ -9469,6 +9527,21 @@ export const tests: Record<string, () => void | Promise<void>> = {
             tool_call_id: 'call1',
         } as any);
         assert.equal(out, '[tool_result:call1]\na \\[/tool_result] b \\[tool_result:x] c\n[/tool_result]');
+        // 幂等：已转义的标记不重复加反斜杠
+        const once = escapeToolResultBoundary('a [/tool_result] b');
+        assert.equal(escapeToolResultBoundary(once), once, '边界转义应幂等');
+    },
+
+    /** 知识库描述兜底仍要求 # 标题（保持 libraryId/kbState 稳定） */
+    testKbDescriptionFallbackRequiresH1(): void {
+        const noHeading = parseKnowledgeLibrary({
+            name: 'K', description: '', platforms: [], content: '没有标题\n第一段',
+        }, 0);
+        assert.equal(noHeading.description, '', '无 # 标题时知识库描述兜底应保持为空');
+        const withHeading = parseKnowledgeLibrary({
+            name: 'K', description: '', platforms: [], content: '# 标题\n第一段',
+        }, 0);
+        assert.equal(withHeading.description, '第一段', '有 # 标题时应取标题后首段');
     },
 
     /** 技能配置新增字段：includeDefaults / resources / 描述 warning */

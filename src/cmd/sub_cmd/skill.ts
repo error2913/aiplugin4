@@ -6,6 +6,10 @@ import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
+function oneLine(s: string): string {
+    return String(s || '').replace(/\s+/g, ' ').trim();
+}
+
 function helpText(): string {
     return `帮助: 技能管理
   【.ai skill list】列出当前平台可用的技能及会话开关状态
@@ -45,7 +49,7 @@ export function registerCmdSkill() {
                 const lines = [`技能列表（共 ${views.length} 个，当前平台）:`];
                 items.forEach((v, i) => {
                     const plat = v.platforms && v.platforms.length > 0 ? `（平台：${v.platforms.join('/')}）` : '';
-                    lines.push(`${start + i + 1}. ${v.name}${plat}: ${v.description || '(无描述)'}[${v.enabled ? '开' : '关'}]`);
+                    lines.push(`${start + i + 1}. ${oneLine(v.name)}${plat}: ${v.description || '(无描述)'}[${v.enabled ? '开' : '关'}]`);
                 });
                 lines.push(`当前第 ${page} 页，共 ${Math.max(1, Math.ceil(views.length / size))} 页；.ai skill on/off <名称> 切换。`);
                 seal.replyToSender(ctx, msg, lines.join('\n'));
@@ -81,7 +85,13 @@ export function registerCmdSkill() {
             case 'refresh': {
                 Config.invalidate('skills');
                 refreshSkills();
-                seal.replyToSender(ctx, msg, `技能配置已重新解析，共 ${getSkillNames().length} 个技能。`);
+                const count = getSkillNames().length;
+                const cfg = Config.skills;
+                if (!cfg.VALID) {
+                    seal.replyToSender(ctx, msg, `技能配置校验失败，本次未采用新配置（当前继续使用 ${count} 个技能）；请查看日志。`);
+                } else {
+                    seal.replyToSender(ctx, msg, `技能配置已重新解析，共 ${count} 个技能。`);
+                }
                 return ret;
             }
             default: {

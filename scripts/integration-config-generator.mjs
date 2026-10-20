@@ -1240,6 +1240,24 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
                 JSON.stringify(genItems.map(toPluginShape)).slice(0, 200));
         }
 
+        if (id === 'skills') {
+            const rich = spec.build([{
+                name: 'Rich', description: 'd', platform: ['QQ'], content: '# c',
+                resources: { 'references/a.md': 'A' },
+            }], { includeDefaults: false });
+            const richParsed = parseSkillsConfig(JSON.stringify(rich));
+            ok('skills：resources/includeDefaults 生成器→插件',
+                !!richParsed.config
+                && richParsed.config.includeDefaults === false
+                && richParsed.config.skills[0].resources?.['references/a.md'] === 'A',
+                JSON.stringify(richParsed.issues));
+            const badPath = spec.parseImport(JSON.stringify({
+                version: 1,
+                skills: [{ name: 'S', content: 'C', resources: { './a.md': 'x' } }],
+            }));
+            ok('skills：生成器拒绝非法资源路径', !badPath.ok);
+        }
+
         const disabled = spec.build(genItems.map(item => ({ ...item, enabled: false })));
         const disabledList = id === 'mcp' ? Object.keys(disabled.mcpServers) : disabled[collections[id]];
         ok(`${id}：停用后不写进生成配置`, disabledList.length === 0, JSON.stringify(disabledList));

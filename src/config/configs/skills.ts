@@ -48,7 +48,7 @@ function readSkills(): SkillsConfigData {
     for (const issue of result.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
     for (const warning of result.warnings) Logger.warning(`  ${warning.path} ${warning.msg}`);
     if (!result.config) {
-        Logger.error(`「${SKILLS_CONFIG_KEY}」校验失败（共 ${result.issues.length} 处），本次按空技能处理。`);
+        Logger.error(`「${SKILLS_CONFIG_KEY}」校验失败（共 ${result.issues.length} 处），本次不采用该配置（有上一份时保留）。`);
         Logger.error('提示：可用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「技能」页）。');
         return { SKILLS: [], INCLUDE_DEFAULTS: true, RAW: text, VALID: false };
     }
