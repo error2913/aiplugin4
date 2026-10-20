@@ -462,9 +462,9 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 技能列表 | 整份技能配置（JSON v1）：`{"version":1,"includeDefaults":true,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"技能正文","resources":{"references/forms.md":"只读参考文本"}}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；`description` 省略/为空时自动取正文首段；`resources` 是可选只读参考文件（相对路径 → 文本，插件只读取展示、不执行）。`includeDefaults` 缺省 `true`（自动补入缺失的出厂默认技能），设为 `false` 后完全按配置来。生成器「技能」页支持导入标准 `SKILL.md` 或整个技能目录（`SKILL.md` + `references/**`）转成 JSON，推荐生成后粘贴。默认只含「录卡」技能（Excel 角色卡录入）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：核心指令 / 扩展指令 / ob11-api）。配置修改后自动生效（也可用 `.ai skill refresh` 强制重解析） |
+| 技能列表 | 整份技能配置（JSON v1）：`{"version":1,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"技能正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；`description` 省略/为空时自动取正文首段。生成器「技能」页支持直接拖入标准 `SKILL.md`（`---` frontmatter + 正文）转成 JSON，推荐生成后粘贴。默认只含「录卡」技能（Excel 角色卡录入）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：核心指令 / 扩展指令 / ob11-api）。配置修改后下一条消息自动生效（也可用 `.ai skill refresh` 强制重解析） |
 
-> system prompt 的「可用技能」段只列「当前平台可用且本会话未关闭」的技能摘要（名称 + 描述，1500 字符预算内尽可能多列，单条描述超过 200 字符截断；描述为空自动取正文首段）；技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文（支持 `offset` 续读超长正文、`resource` 读取附带资源）。`.ai skill list` 可查看当前平台技能与开关状态，`.ai skill on/off <名称>` 按会话开关。配置修改后下一条消息自动生效。
+> system prompt 的「可用技能」段只列「当前平台可用且本会话未关闭」的技能摘要（名称 + 描述，1500 字符预算内尽可能多列，单条描述超过 200 字符截断；描述为空自动取正文首段）；技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文（支持 `offset` 续读超长正文）。`.ai skill list` 可查看当前平台技能与开关状态，`.ai skill on/off <名称>` 按会话开关。配置修改后下一条消息自动生效。
 
 ### 子代理
 
@@ -750,7 +750,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 公开会话 | `pub_read`（分级浏览公开会话目录 / 读取其他会话上下文只读快照）、`pub_send`（以目标会话自己的机器人账号身份外发：QQ 系富媒体 / 其他平台纯文本） |
 | 子代理 | `subagent`、`subagent_fork`（委派）、`send_message`、`interrupt_agent`、`list_agents`（可续跑子代理控制）、`job_list`、`job_output`、`job_kill`（后台 job 管理）；默认开启，详见上方「子代理」配置小节 |
 | 外部插件 | 其他海豹插件经 `globalThis.aiplugin4.registerTool` 注册的工具 |
-| 技能（来源分组，不参与工具组开关） | `use_skill`（按需获取正文，支持 `offset` 续读、`resource` 读取附带资源）、`skill_list`（平台受限或本会话已关闭时明确返回不可用提示） |
+| 技能（来源分组，不参与工具组开关） | `use_skill`（按需获取正文，支持 `offset` 续读）、`skill_list`（平台受限或本会话已关闭时明确返回不可用提示） |
 | 知识库（来源分组，不参与工具组开关） | `knowledge_search`、`knowledge_read`、`knowledge_list`、`knowledge_docs`（只读检索，范围 = 当前平台可用 + 本会话开启的库；内容由配置维护） |
 | MCP（来源分组 = 服务器名，可整组开关） | 远端工具名（同名冲突时跳过，仅当前平台可见）；`render_markdown` / `render_html` 由默认服务器 `md-html-render` 提供 |
 

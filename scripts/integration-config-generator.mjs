@@ -1203,15 +1203,12 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
         delete copy.enabled;
         return copy;
     };
-    /** 生成器内部字段是 platform，插件运行时字段是 platforms；空的 resources 两边语义相同，比较时省略 */
+    /** 生成器内部字段是 platform，插件运行时字段是 platforms */
     const toPluginShape = (item) => {
         const copy = stripEnabled(item);
         if (copy.platform !== undefined) {
             copy.platforms = copy.platform;
             delete copy.platform;
-        }
-        if (copy.resources && typeof copy.resources === 'object' && Object.keys(copy.resources).length === 0) {
-            delete copy.resources;
         }
         return copy;
     };
@@ -1238,24 +1235,6 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
             ok(`${id}：两边默认数据一致`,
                 isDeepStrictEqual(genItems.map(toPluginShape), pluginDefaults[id].map(stripEnabled)),
                 JSON.stringify(genItems.map(toPluginShape)).slice(0, 200));
-        }
-
-        if (id === 'skills') {
-            const rich = spec.build([{
-                name: 'Rich', description: 'd', platform: ['QQ'], content: '# c',
-                resources: { 'references/a.md': 'A' },
-            }], { includeDefaults: false });
-            const richParsed = parseSkillsConfig(JSON.stringify(rich));
-            ok('skills：resources/includeDefaults 生成器→插件',
-                !!richParsed.config
-                && richParsed.config.includeDefaults === false
-                && richParsed.config.skills[0].resources?.['references/a.md'] === 'A',
-                JSON.stringify(richParsed.issues));
-            const badPath = spec.parseImport(JSON.stringify({
-                version: 1,
-                skills: [{ name: 'S', content: 'C', resources: { './a.md': 'x' } }],
-            }));
-            ok('skills：生成器拒绝非法资源路径', !badPath.ok);
         }
 
         const disabled = spec.build(genItems.map(item => ({ ...item, enabled: false })));

@@ -13,8 +13,6 @@ export const SKILLS_CONFIG_KEY = '技能列表';
 
 export interface SkillsConfigData {
     SKILLS: SkillEntry[];
-    /** 是否自动补入缺失的出厂默认技能（JSON 字段 includeDefaults，缺省 true） */
-    INCLUDE_DEFAULTS: boolean;
     /** 原始配置文本，供技能缓存做变化检测 */
     RAW: string;
     /** 本次原始文本是否解析成功（false = 保留上一份可用技能） */
@@ -38,11 +36,11 @@ export function readSkillsConfigRaw(): string | null {
 function readSkills(): SkillsConfigData {
     const text = readSkillsConfigRaw();
     if (text === null) {
-        return { SKILLS: [], INCLUDE_DEFAULTS: true, RAW: '', VALID: false };
+        return { SKILLS: [], RAW: '', VALID: false };
     }
     if (!text.trim()) {
         Logger.warning(`「${SKILLS_CONFIG_KEY}」为空，已载入出厂技能。`);
-        return { SKILLS: fallbackSkills(), INCLUDE_DEFAULTS: true, RAW: '', VALID: true };
+        return { SKILLS: fallbackSkills(), RAW: '', VALID: true };
     }
     const result = parseSkillsConfig(text);
     for (const issue of result.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
@@ -50,11 +48,10 @@ function readSkills(): SkillsConfigData {
     if (!result.config) {
         Logger.error(`「${SKILLS_CONFIG_KEY}」校验失败（共 ${result.issues.length} 处），本次不采用该配置（有上一份时保留）。`);
         Logger.error('提示：可用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「技能」页）。');
-        return { SKILLS: [], INCLUDE_DEFAULTS: true, RAW: text, VALID: false };
+        return { SKILLS: [], RAW: text, VALID: false };
     }
     return {
         SKILLS: result.config.skills,
-        INCLUDE_DEFAULTS: result.config.includeDefaults,
         RAW: text,
         VALID: true,
     };

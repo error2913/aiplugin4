@@ -9341,7 +9341,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             description: '描'.repeat(200),
             content: 'x',
         }));
-        TC.stringConfigs['技能列表'] = JSON.stringify({ version: 1, includeDefaults: false, skills });
+        TC.stringConfigs['技能列表'] = JSON.stringify({ version: 1, skills });
         resetConfigCache();
         refreshSkills();
         try {
@@ -9366,7 +9366,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 name: 'long-skill',
                 description: '长技能',
                 content: 'A'.repeat(13000),
-                resources: { 'references/a.md': '资源A' },
             }],
         });
         resetConfigCache();
@@ -9377,7 +9376,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(String(out).startsWith('## 技能：long-skill'), `应带技能标题：${String(out).slice(0, 80)}`);
             assert.ok(String(out).includes('本次返回 0–12000'), '应提示截断区间');
             assert.ok(String(out).includes('use_skill(name="long-skill", offset=12000)'), '应提示带名称的续读调用');
-            assert.ok(String(out).includes('references/a.md'), '正文被截断时首屏仍应列出资源 TOC');
             const rest = await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'long-skill', offset: 12000 });
             assert.ok(String(rest).includes('已读到内容末尾'), `续读应提示结尾：${String(rest)}`);
             assert.ok(String(rest).includes('AAAA'), '续读应返回剩余正文');
@@ -9393,7 +9391,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const prior = TC.stringConfigs['技能列表'];
         TC.stringConfigs['技能列表'] = JSON.stringify({
             version: 1,
-            includeDefaults: false,
             skills: [
                 { name: 'A', content: 'A {{skill:B}}' },
                 { name: 'B', content: 'B {{skill:A}}' },
@@ -9432,51 +9429,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** use_skill：resources TOC / 按路径读取 / 缺失提示；includeDefaults:false 不补录卡 */
-    async testUseSkillResourcesAndIncludeDefaults(): Promise<void> {
-        const prior = TC.stringConfigs['技能列表'];
-        TC.stringConfigs['技能列表'] = JSON.stringify({
-            version: 1,
-            includeDefaults: false,
-            skills: [
-                {
-                    name: 'doc',
-                    description: '带资源的技能',
-                    content: '正文',
-                    resources: { 'references/a.md': '资源A', 'references/b.md': '资源B' },
-                },
-                { name: 'plain', description: '无资源', content: '正文' },
-            ],
-        });
-        resetConfigCache();
-        refreshSkills();
-        registerSkills();
-        try {
-            const names = getSkillNames();
-            assert.ok(!names.includes('录卡'), `includeDefaults:false 不应补默认技能：${names.join(',')}`);
-            const out = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'doc' }));
-            assert.ok(out.includes('可用资源'), `应列出资源 TOC：${out}`);
-            assert.ok(out.includes('references/a.md'), 'TOC 应含资源路径');
-            const res = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'doc', resource: 'references/a.md' }));
-            assert.ok(res.includes('## 技能资源：doc / references/a.md'), `资源标题不对：${res.slice(0, 100)}`);
-            assert.ok(res.includes('资源A'), '应返回资源正文');
-            const miss = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'doc', resource: 'references/none.md' }));
-            assert.ok(miss.includes('可用资源：references/a.md、references/b.md'), `缺失资源应列出可用路径：${miss}`);
-            const plain = String(await toolMap['use_skill'].solve(makeCtx(), {} as any, {} as any, { name: 'plain', resource: 'x' }));
-            assert.ok(plain.includes('没有附带资源'), `无资源技能应明确提示：${plain}`);
-        } finally {
-            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
-            resetConfigCache();
-            refreshSkills();
-        }
-    },
-
     /** 技能配置自动重载：改配置不 refresh 即生效；坏 JSON 保留上一份可用技能 */
     testSkillConfigAutoReload(): void {
         const prior = TC.stringConfigs['技能列表'];
         try {
             TC.stringConfigs['技能列表'] = JSON.stringify({
-                version: 1, includeDefaults: false,
+                version: 1,
                 skills: [{ name: 'auto-one', content: '1' }],
             });
             resetConfigCache();
@@ -9484,7 +9442,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(getSkillNames().includes('auto-one'), '首次加载应含 auto-one');
 
             TC.stringConfigs['技能列表'] = JSON.stringify({
-                version: 1, includeDefaults: false,
+                version: 1,
                 skills: [{ name: 'auto-two', content: '2' }],
             });
             assert.ok(getSkillNames().includes('auto-two'), '配置变化应自动生效，无需 refresh');
@@ -9504,7 +9462,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const prior = TC.stringConfigs['技能列表'];
         try {
             TC.stringConfigs['技能列表'] = JSON.stringify({
-                version: 1, includeDefaults: false,
+                version: 1,
                 skills: [{ name: 'refresh-one', content: '1' }],
             });
             resetConfigCache();
@@ -9516,7 +9474,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             refreshSkills(); // 模拟 .ai skill refresh
             const names = getSkillNames();
             assert.ok(names.includes('refresh-one'), `refresh 遇坏 JSON 应保留上一份技能：${names.join(',')}`);
-            assert.ok(!names.includes('录卡'), '不应因 refresh 失败回退出厂默认技能');
 
             const reply = await runSubCmd('skill', ['', 'refresh'], { session: new Session() });
             assert.ok(reply.includes('校验失败') || reply.includes('未采用'), `refresh 应明确告知校验失败：${reply}`);
@@ -9552,48 +9509,20 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(withHeading.description, '第一段', '有 # 标题时应取标题后首段');
     },
 
-    /** 技能配置新增字段：includeDefaults / resources / 描述 warning */
+    /** 技能描述/名称 warning：只提示，不拒绝配置 */
     testParseSkillExtras(): void {
         const parsed = parseSkillsConfig(JSON.stringify({
             version: 1,
-            includeDefaults: false,
-            skills: [{
-                name: 'S',
-                description: '第一行\n第二行',
-                content: 'x',
-                resources: { 'references/a.md': 'A' },
-            }],
+            skills: [
+                { name: 'S', description: '第一行\n第二行', content: 'x' },
+                { name: 'N'.repeat(41), content: 'x' },
+                { name: 'C', description: '描'.repeat(201), content: 'x' },
+            ],
         }));
         assert.ok(parsed.config, JSON.stringify(parsed.issues));
-        assert.equal(parsed.config!.includeDefaults, false, 'includeDefaults:false 应保留');
-        assert.equal(parsed.config!.skills[0].resources!['references/a.md'], 'A');
-        assert.ok(parsed.warnings.some(w => w.path.endsWith('.description')), '描述换行应有 warning');
-
-        const badType = parseSkillsConfig(JSON.stringify({
-            version: 1, includeDefaults: 'no', skills: [],
-        }));
-        assert.ok(badType.config, 'includeDefaults 类型错误不应整份拒绝');
-        assert.equal(badType.config!.includeDefaults, true, '类型错误回退 true');
-        assert.ok(badType.warnings.some(w => w.path === '$.includeDefaults'), '应有 warning');
-
-        const unsafe = parseSkillsConfig(JSON.stringify({
-            version: 1,
-            skills: [{
-                name: 'S',
-                content: 'x',
-                resources: { '../evil.md': 'x', '/abs.md': 'y', 'ok.md': 'z', 'empty.md': '' },
-            }],
-        }));
-        assert.ok(unsafe.config, JSON.stringify(unsafe.issues));
-        assert.deepEqual(Object.keys(unsafe.config!.skills[0].resources!), ['ok.md'], '非法资源路径/空值应跳过');
-        assert.ok(unsafe.warnings.length >= 3, '非法资源应有 warning');
-
-        const huge = parseSkillsConfig(JSON.stringify({
-            version: 1,
-            skills: [{ name: 'S', content: 'x', resources: { 'big.md': 'x'.repeat(13000) } }],
-        }));
-        assert.ok(huge.config, '超长资源不应整份拒绝');
-        assert.ok(huge.warnings.some(w => w.msg.includes('12000')), '超长资源应有截断 warning');
+        assert.ok(parsed.warnings.some(w => w.path === '$.skills[0].description'), '描述换行应有 warning');
+        assert.ok(parsed.warnings.some(w => w.path === '$.skills[1].name'), '超长技能名应有 warning');
+        assert.ok(parsed.warnings.some(w => w.path === '$.skills[2].description'), '超长描述应有 warning');
     },
 
     /** 知识库：platform 平台过滤 + 会话级开关（knowledge_* 守卫 + .ai kb on/off） */
