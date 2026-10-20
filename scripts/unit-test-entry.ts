@@ -4139,6 +4139,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(m.text, text, 'use_skill 结果应完整保留（续读/TOC 在末尾）');
             assert.ok(m.text.includes('技能正文结束'), '结果末尾的续读/TOC 提示必须保留');
 
+            // call_tool 包装 / 无 toolName（旧数据）时同样豁免
+            const ctxWrapped = new Context();
+            await ctxWrapped.addToolCallbackMessage(`工具 use_skill 返回：\n${text}`, 'call_wrap', 'call_tool');
+            assert.equal((ctxWrapped.messages[0] as any).rawText, undefined, 'call_tool 包装的 use_skill 也应豁免');
+            const ctxPrefix = new Context();
+            await ctxPrefix.addToolCallbackMessage(`## 技能：x\n${text}`, 'call_prefix');
+            assert.equal((ctxPrefix.messages[0] as any).rawText, undefined, '按内容前缀识别 use_skill 输出也应豁免');
+
             const ctx2 = new Context();
             await ctx2.addToolCallbackMessage(text, 'call_web', 'web_search');
             const m2 = ctx2.messages[0] as any;
