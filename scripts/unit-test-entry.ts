@@ -9301,6 +9301,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** 技能摘要：长描述场景下整段渲染必须受 1500 字符预算约束（防“只按条数截断”回归） */
+    testSkillSummaryBlockBudgetBound(): void {
+        const prior = TC.stringConfigs['技能列表'];
+        const skills = Array.from({ length: 60 }, (_, i) => ({
+            name: `budget-${i}`,
+            description: '描'.repeat(200),
+            content: 'x',
+        }));
+        TC.stringConfigs['技能列表'] = JSON.stringify({ version: 1, includeDefaults: false, skills });
+        resetConfigCache();
+        refreshSkills();
+        try {
+            const r = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS);
+            assert.ok(r.summaries.length < r.total, `长描述场景应触发截断：${r.summaries.length}/${r.total}`);
+            const block = formatSkillSummaryBlock(r);
+            assert.ok(block.length <= SKILL_INJECT_MAX_CHARS + 120, `摘要块超预算：${block.length}`);
+            assert.ok(!block.includes('\n\n（共'), '截断提示不应破坏段落结构');
+        } finally {
+            if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
+            resetConfigCache();
+            refreshSkills();
+        }
+    },
+
     /** use_skill：正文边界、12000 截断与 offset 续读 */
     async testUseSkillFramingAndOffset(): Promise<void> {
         const prior = TC.stringConfigs['技能列表'];
