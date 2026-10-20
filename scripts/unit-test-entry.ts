@@ -9253,6 +9253,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { name: 'long-desc', description: '长'.repeat(3000), content: 'x' },
                 { name: 'no-desc', content: '# 标题\n\n目标：把表格录入。\n\n二、后续步骤' },
                 { name: 'multi-line', description: '第一行\n第二行', content: 'x' },
+                { name: '超'.repeat(260), description: '描述', content: 'x' },
             ],
         });
         resetConfigCache();
@@ -9269,6 +9270,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const long = big.summaries.find(s => s.startsWith('long-desc')) || '';
             assert.ok(long.length <= 260, `长描述应截断为 200 字符左右，实际 ${long.length}`);
             assert.ok(long.endsWith('…'), '截断应带省略号');
+            const longName = '超'.repeat(260);
+            assert.ok(big.summaries.some(s => s.startsWith(longName)), '超长技能名不得被截断（截断后模型无法调用）');
         } finally {
             if (prior === undefined) delete TC.stringConfigs['技能列表']; else TC.stringConfigs['技能列表'] = prior;
             resetConfigCache();

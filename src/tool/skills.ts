@@ -171,11 +171,17 @@ export function refreshSkills(): void {
     skillsCache = null;
 }
 
-/** 摘要行：名称 + 有效描述（单行、截断），供 system prompt 与 skill_list 共用 */
+/** 摘要行：名称 + 有效描述（单行、截断），供 system prompt 与 skill_list 共用。
+ *  超长时只截描述、不截名称——名称是 use_skill 的键，截断后模型会调不到。 */
 function formatSkillLine(s: RuntimeSkill): string {
     const name = oneLine(s.name);
-    const line = s.summaryDescription ? `${name}：${s.summaryDescription}` : name;
-    return line.length > SKILL_SUMMARY_LINE_MAX ? line.slice(0, SKILL_SUMMARY_LINE_MAX) + '…' : line;
+    const desc = s.summaryDescription;
+    if (!desc) return name;
+    const line = `${name}：${desc}`;
+    if (line.length <= SKILL_SUMMARY_LINE_MAX) return line;
+    if (name.length >= SKILL_SUMMARY_LINE_MAX) return name;
+    const room = SKILL_SUMMARY_LINE_MAX - name.length - 2; // 全角冒号 + 省略号
+    return `${name}：${desc.slice(0, Math.max(0, room))}…`;
 }
 
 /**
