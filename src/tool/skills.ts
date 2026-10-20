@@ -200,7 +200,8 @@ export function getSkillSummariesBudgeted(
     for (const s of skills) {
         if (summaries.length >= maxItems) break;
         const line = formatSkillLine(s);
-        const cost = line.length + 2; // "- " + "\n"
+        // 预算按渲染后的每行 "- " + 行 + "\n" 计，保证列表段本身 ≤ maxChars
+        const cost = line.length + 3;
         if (cost > maxChars) continue; // 单条超预算：跳过，不阻塞后续
         if (total + cost > maxChars) continue; // 预算不足：继续尝试更短的后续条目
         summaries.push(line);
