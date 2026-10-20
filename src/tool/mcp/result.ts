@@ -2,11 +2,23 @@
 // 不针对任何具体工具名做特化，保持通用 MCP 客户端纯净。
 import Logger from "../../logger";
 import Image from "../../resource/image";
+import { ImageHost } from "../../resource/image_host";
+import type { ImageSource } from "../../resource/image_host";
 import { ToolContentPart } from "../types";
 
 import { MCPCallResult, MCPImageReference, MCPNormalizedResult, MCPResourceReference } from "./types";
 
 const log = Logger.withTag('mcp');
+
+/** 结果归一化选项：文件/图片产出时的来源元数据（元数据，不是标签） */
+export interface MCPNormalizeOptions {
+    /** 工具调用所在的会话上下文（平台/群/用户/会话/时间） */
+    source?: ImageSource;
+    /** MCP 工具名（tools/call 的 name） */
+    tool?: string;
+    /** MCP 服务器名 */
+    server?: string;
+}
 
 function normalizeBase64(text: string): string {
     const value = String(text || '').trim();
@@ -28,13 +40,44 @@ function inferFormat(mimeType?: string): string | undefined {
     return undefined;
 }
 
-function saveMCPImage(data: string, mimeType?: string): MCPImageReference {
+/**
+ * 保存 MCP image block 为插件图片：
+ * - 来源元数据（platform/group/user/session/at/tool=server/via）写入 sourceMeta，用于图床入库与类型标签；
+ * - 配了图床时异步入库（成功后清空内存 base64，文件由图床保存）。
+ */
+function saveMCPImage(data: string, mimeType?: string, opts?: MCPNormalizeOptions): MCPImageReference {
     const img = new Image();
     img.imageId = `mcp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     img.base64 = normalizeBase64(data);
     img.format = inferFormat(mimeType) || 'png';
     img.description = `MCP 图片[img:${img.imageId}]`;
-    Image.save(img);
+    // 来源元数据：工具调用所在的群/会话；MCP 图片 tool=实际工具名、server=服务器名（都是元数据，不写标签）
+    const source: Record<string, unknown> = {
+        platform: opts?.source?.platform,
+        group_id: opts?.source?.group_id,
+        user_id: opts?.source?.user_id,
+        session_id: opts?.source?.session_id,
+        message_id: opts?.source?.message_id,
+        at: opts?.source?.at || Date.now(),
+        tool: opts?.tool || 'mcp',
+        server: opts?.server,
+        via: 'tool',
+    };
+    for (const key of Object.keys(source)) {
+        if (source[key] === undefined || source[key] === null || source[key] === '') delete source[key];
+    }
+    if (opts?.source?.session_id) img.sourceSessionId = opts.source.session_id;
+    try { img.sourceMeta = JSON.stringify(source); } catch (_e) { img.sourceMeta = ''; }
+    // 先登记内存：工具结果本轮就能通过 Image.resolveRef 找到；不先写 storage，避免 base64 短暂落盘
+    Image.imageMap[img.imageId] = img;
+    if (!ImageHost.enabled) {
+        Image.save(img);
+    } else {
+        // 配了图床：异步入库；成功/失败后再落盘（成功的落盘不含 base64）
+        void img.adoptBase64ToHost()
+            .then(() => { Image.save(img); })
+            .catch(() => { Image.save(img); });
+    }
     return { imageId: img.imageId, src: img.src, mimeType };
 }
 
@@ -84,8 +127,9 @@ export function extractMCPImage(result: MCPCallResult | null | undefined, treatT
  * 将 MCP tools/call 原始结果归一化为通用文本 + 图片引用 + 资源引用。
  * 文本中会保留 [img:xxx] / [mcp://...] 引用，供非多模态模型理解；
  * 图片引用额外保留 src，供多模态模型直接注入 image_url。
+ * opts 提供工具调用来源（群/会话/工具名/服务器名），用于图片入库的来源元数据。
  */
-export function normalizeMCPResult(result: MCPCallResult | null | undefined): MCPNormalizedResult {
+export function normalizeMCPResult(result: MCPCallResult | null | undefined, opts?: MCPNormalizeOptions): MCPNormalizedResult {
     if (!result) return { text: '', images: [], resources: [] };
 
     const blocks = Array.isArray(result.content) ? result.content : [];
@@ -102,7 +146,7 @@ export function normalizeMCPResult(result: MCPCallResult | null | undefined): MC
         }
 
         if (block.type === 'image' && typeof block.data === 'string' && block.data) {
-            const ref = saveMCPImage(block.data, block.mimeType);
+            const ref = saveMCPImage(block.data, block.mimeType, opts);
             images.push(ref);
             textParts.push(`图片[img:${ref.imageId}]`);
             continue;

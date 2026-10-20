@@ -53,6 +53,11 @@ export interface McpServerEntry {
     url: string;
     token: string;
     headers: { [key: string]: string };
+    /**
+     * 该服务器的工具结果是否为“图片引用生产者”：为 true 时把文本里的 [img:<sha256>]
+     * 规范化为 [img:h<sha256>] 并注册虚拟图。image-host 按服务器名自动视为 true。
+     */
+    imageRefs?: boolean;
 }
 
 export interface McpConfig {

@@ -1,6 +1,16 @@
 // 版本更新日志（changelog），供启动时展示更新说明
 // 版本更新日志，格式为 "版本号": "更新内容"，版本号格式为 "x.y.z"，按照时间顺序从新到旧排列。
 export const changelog: { [version: string]: string } = {
+    "4.27.1": `## 图片引用标准与 AI 图库交互（CIR v1 / image_view / 工具图类型标签）
+
+- **CIR v1**：\`[img:<ref>]\` 统一支持 图床 \`h<sha256>\` / 裸 sha256 / 插件图片 ID / 头像；工具结果里的图床引用自动规范化为 \`[img:h<sha>]\` 并注册内存虚拟图（不落插件 storage、不进索引、不重复上传）。
+- **看图**：新增 \`image_view\`（多模态聊天模型直接看，支持 \`ids[]\`≤4；不支持视觉/取图失败自动降级文字描述）；\`image_to_text\` 支持 \`ids[]\`≤3。提示词工程模式下工具返回的 image contentParts 不再被丢弃。
+- **工具图片**：生图/表情包/MCP image block 入库时记录来源元数据（群/用户/会话/工具/服务器，不写“未知”），并按产出者自动打英文类型标签（\`ai-generated\` / \`meme\` / \`mcp-image\` / \`tool-image\`）；类型标签是确定性映射，不调用识图模型；来源/群/工具只写元数据，不再写成标签。
+- **模型可达性**：图床对外地址是内网/回环而模型端点是公网时，模型侧自动改用内联 base64；模型报图片下载失败时先探测 404，图片仍存在则用 b64 重试，不再永久标坏；回退链恢复为 URL → b64 → 稳定原始 URL → 文本标签。
+- **引用管理**：\`resolve_special_id(type=image)\` 返回 \`hosted_id\`/\`hosted_url\`；\`get_image\` 对图床引用明确提示“没有协议端缓存文件，请用 URL 或 \`[img:]\` 发送”（不下载落盘）。
+- **MCP**：支持 \`imageRefs\` 配置（image-host 自动/生成器写入）；后端 image-host 1.0.15 提供 6 个工具（search/keep/unkeep/rename/tag/tags），搜索支持 tool/server/platform/group_id/since/tags 过滤；keep/unkeep/tag 单次 ≤50；工具元数据标签（\`来源:\`/\`群:\`/\`工具:\` 等）会被拒绝。
+- 批量：\`image_view\`≤4 张、\`image_to_text\`≤3 张、keep/unkeep/tag≤50 个 id；不提供 AI 删除。
+`,
     "4.27.0": `## 后端配置整合为单 JSON / 论坛独立页签 / 图片 URL 解码
 
 - **「后端配置」**（v1 JSON）取代「后端」页签的 8 个独立地址项：\`{"version":1,"backends":{"image-host":{"url":"…","token":"…"}}}\`。

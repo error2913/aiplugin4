@@ -73,11 +73,12 @@ export function registerAgentApi(): void {
         chatMessages: async (messages: { role: string, content: string }[], agentName?: string) => Agent.get(agentName || '*').chatMessages(messages),
         imageToText: async (source: string, prompt?: string) => {
             if (!Model.getMultimodalModel('image-understanding')) return '未找到支持 image-understanding 的多模态模型';
-            let img = Image.get(source);
+            // CIR：插件图片 ID / 图床 h<sha256> / 裸 sha256 / [img:<ref>] / 头像别名
+            let img = Image.resolveRef(source);
             if (!img && /^https?:\/\//i.test(source)) {
                 img = Image.createUrlImage('', source);
             }
-            if (!img) return `未找到图片 ${source}（支持图片 id 或 http(s) 图片地址）`;
+            if (!img) return `未找到图片 ${source}（支持标准图片引用 [img:<ref>] / 图床托管 ID / 插件图片 ID / http(s) 图片地址）`;
             await img.imageToText(prompt);
             return img.description || `图片 ${source} 识别失败`;
         },

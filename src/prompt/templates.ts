@@ -30,6 +30,19 @@ const TEMPLATES: { [key: string]: string } = {
 - [avatar:用户ID] 头像；[group_avatar:群ID] 群头像
 {{/if}}
 - [msg_id:ID]/[quote:ID]/[img:图片ID] 是短 ID；语音/视频/文件是闭合标签 [record:句柄]摘要[/record]、[video:句柄]摘要[/video]、[file:句柄]摘要[/file]，句柄在开标签参数里：需要对接协议 API 或读取原始 url/path/file/file_id 时，先用 resolve_special_id 还原；已有完整 url 时直接用，不要调 get_image/get_record
+{{#if IMAGE_LIBRARY}}
+
+## 图片与图库
+- 图片统一用 [img:<ref>] 引用（插件图片 ID、图床托管 ID h<sha256>、user_avatar:<ID>、group_avatar:<ID>）；图床图片的不透明 ID 就是 h<sha256>。
+- 长期图库（image_search 默认 scope=gallery）的图片由人上传或确认收藏，来源可信、不会被自动清理，可直接用于回复/发送/以图生图。
+- 插件自动抓取的图（origin=plugin）来源混杂（群聊/私聊/来源可能未记录），未经确认；使用、发送或收藏前必须核对来源、名称与标签；涉及他人隐私或用途不明确时先询问用户，不要擅自传播或收藏。
+- 上下文里由用户/群消息带来的图片（[img:插件ID]）属于插件抓取，转发、外发或收藏前按同样规则处理。
+- 工具返回图片的来源/群/工具/服务器是元数据，不是标签；检索来源时用 scope / group_id / tool / server 过滤，不要指望标签里出现群号或工具名。
+- 工具产出的图片会自动打英文类型标签（ai-generated / meme / mcp-image / tool-image，按产出者映射，不调识图）；标签只用于类型/内容检索，不要把来源、群号、工具名、时间写进标签。
+- 想把抓取的图升级为可信资产：确认后调用 image_keep 收进长期图库；移出用 image_unkeep。
+- 在最终回复里写 [img:<ref>] 是发给用户；要自己查看图片内容，调用 image_view（多模态模型直接看，单次 ≤4 张）或 image_to_text（返回文字描述，单次 ≤3 张）。
+- 批量处理：keep/unkeep/tag 单次 ≤50 张，超过 10 张先向用户确认；不要尝试删除图片（没有删除工具）。
+{{/if}}
 
 ## 回复方式
 - 当前会话的回复直接输出文本即可，系统会自动把最终回复发送到当前会话，不要为回复当前会话调用 call_ob11_api

@@ -3,7 +3,7 @@ import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { ImageHost } from "../../../resource/image_host";
 import { GroupInfo, UserInfo } from "../../../session/types";
-import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
+import { getPlatform, normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
 import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
@@ -186,12 +186,15 @@ export function registerMeme() {
         }
 
         try {
+            // 上游 meme 服务需要可访问的图片地址：图床按模型/上游可达性给 URL 或 b64，失败回退原始地址
+            const imageSources = await Promise.all(images.map(async img =>
+                (await img.getModelSrc()) || img.url || img.path));
             const res = await fetch(baseurl + "meme_generate", {
                 method: "POST",
                 body: JSON.stringify({
                     key,
                     text,
-                    image: images.map(img => img.url || img.path),
+                    image: imageSources,
                     args: {}
                 }),
             });
@@ -211,6 +214,19 @@ export function registerMeme() {
                 img.imageId = `${name}_${generateId()}`;
                 img.base64 = base64;
                 img.format = 'unknown';
+                const sid = ctx.isPrivate ? (ctx.player?.userId ?? '') : (ctx.group?.groupId ?? '');
+                img.sourceSessionId = sid;
+                try {
+                    img.sourceMeta = JSON.stringify({
+                        platform: getPlatform(sid),
+                        group_id: ctx.isPrivate ? '' : sid,
+                        user_id: ctx.player?.userId ?? '',
+                        session_id: sid,
+                        at: Date.now(),
+                        tool: 'meme_generator',
+                        via: 'tool',
+                    });
+                } catch (_e) { /* 忽略 */ }
                 img.description = `表情包[img:${img.imageId}]
 ${textText ? `文字：${textText}` : ''}
 ${imageText ? `图片：${imageText}` : ''}`;

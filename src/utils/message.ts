@@ -5,7 +5,6 @@ import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
 import { buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
-import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
@@ -30,6 +29,8 @@ export interface RequestMessage {
 /** 多模态请求构建选项：imagesAsText=本轮把 URL 型图片降级为文本标签（模型报「图片下载失败」后重发用） */
 export interface MultimodalBuildOptions {
     imagesAsText?: boolean;
+    /** 本次请求实际使用的模型（用于判断模型端点是否可达图床公网/内网地址） */
+    model?: { baseUrl?: string };
 }
 
 interface MessageItem {
@@ -573,10 +574,22 @@ export async function handleMessages(
             if (message.role === 'tool') {
                 // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记
                 const toolName = (message as ContextMessage).toolName;
-                return {
-                    role: 'user',
-                    content: toolName ? `【工具返回:${toolName}】${buildContent(message)}` : `【工具返回】${buildContent(message)}`
-                };
+                const prefix = toolName ? `【工具返回:${toolName}】` : `【工具返回】`;
+                // PE 模式下工具结果是 user 文本；若工具返回了图片内容块（image_view / MCP image），
+                // 必须把 image_url 一起带上，否则多模态模型看不到图
+                const imageParts = multimodal && Array.isArray(message.contentParts)
+                    ? message.contentParts.filter(p => p && p.type === 'image_url')
+                    : [];
+                if (imageParts.length > 0) {
+                    return {
+                        role: 'user',
+                        content: [
+                            { type: 'text' as const, text: prefix + buildContent(message) },
+                            ...imageParts,
+                        ],
+                    };
+                }
+                return { role: 'user', content: prefix + buildContent(message) };
             }
             const out: RequestMessage = {
                 role: message.role,
@@ -729,14 +742,9 @@ function formatFromPrefix(uid: string): string {
     return name ? `[from:${name}(${number})]` : `[from:${number}]`;
 }
 
-/** 解析 [img:...] 标签里的图片 id（兼容 user_avatar/group_avatar 前缀与「id:描述」形式） */
+/** 解析 [img:...] 标签里的图片引用（CIR v1：插件 ID / h<sha> / 裸 sha / 头像别名） */
 function resolveImageById(id: string): Image | null {
-    if (/^user_avatar[:?]/.test(id)) return Image.getUserAvatar(id.replace(/^user_avatar[:?]/, ''));
-    if (/^group_avatar[:?]/.test(id)) return Image.getGroupAvatar(id.replace(/^group_avatar[:?]/, ''));
-    const img = Image.get(id);
-    if (img) return img;
-    // 兼容 [img:imageId:描述]：描述部分可能带冒号，取首个冒号前作为图片 id
-    return Image.get(id.split(':')[0]);
+    return Image.resolveRef(id);
 }
 
 /**
@@ -757,31 +765,23 @@ export async function textToMultimodalContent(text: string, opts?: MultimodalBui
         }
         const type = match[1].toLowerCase();
         const value = match[2].trim();
-        let image: Image | null = null;
-        if (type === 'avatar') {
-            image = Image.getUserAvatar(value);
-        } else if (type === 'group_avatar') {
-            image = Image.getGroupAvatar(value);
-        } else {
-            image = resolveImageById(value);
+        const image: Image | null = type === 'avatar'
+            ? Image.getUserAvatar(value)
+            : type === 'group_avatar'
+                ? Image.getGroupAvatar(value)
+                : resolveImageById(value);
+        // 统一走 CIR 取图：图床按“模型可达性”选 URL/b64；非图床 URL 优先转 b64，失败回退稳定 URL。
+        // 头像（qlogo）是稳定公网地址，直接给 URL；死链/临时直链转换失败只留文本标签。
+        if (!image || image.isUrlUnusable() || (!!opts?.imagesAsText && image.type === 'url' && !image.base64)) {
+            parts.push({ type: 'text', text: seg });
+            continue;
         }
-        // 图床统一配成「协议端与模型都能访问的 IP 或域名」：已入图床的图片直接把稳定地址交给模型，
-        // 不再转 base64；只有回环地址（127.0.0.1/localhost）模型够不到，才回退取内联字节。
-        // 非图床的 URL 图片仍先转 base64（QQ 临时直链模型常取不到），失败后进入 1 小时冷却期。
-        // 头像（qlogo）是稳定公网地址，模型能直接下载，不转 base64。
-        const hostUrlUsable = ImageHost.enabled && !!image?.hosted && ImageHost.externalEnabled;
-        if (image && image.type === 'url' && !image.base64 && !image.isAvatarImage && !hostUrlUsable && !image.isBase64RetryBlocked()) {
-            try {
-                await withTimeout(() => image.ensureBytes(), 10000);
-            } catch (e) {
-                logger.warning(`多模态图片转 base64 失败，改用原 URL: ${image.imageId}（${e instanceof Error ? e.message : String(e)}）`);
-            }
+        let src = '';
+        try {
+            src = await withTimeout(() => image.getModelSrc(opts?.model), 10000);
+        } catch (e) {
+            logger.warning(`多模态图片取图失败，改用文本标签: ${image.imageId}（${e instanceof Error ? e.message : String(e)}）`);
         }
-        // 回环图床地址模型访问不到：取不到字节就只留文本标签，绝不把回环地址交给模型
-        const hostMissingBytes = ImageHost.enabled && !hostUrlUsable && !image?.base64 && !image?.isAvatarImage;
-        // 不可用图片（URL 已确认失效，或 QQ 临时直链转换失败后进入冷却）与「本轮已降级」一律只留文本标签
-        const unusable = !!image && (image.isUrlUnusable() || hostMissingBytes || (!!opts?.imagesAsText && image.type === 'url' && !image.base64));
-        const src = image && !unusable ? (hostUrlUsable ? image.remoteUrl : image.src) : '';
         if (src) parts.push({ type: 'image_url', image_url: { url: src } });
         else parts.push({ type: 'text', text: seg });
     }

@@ -12,10 +12,14 @@ import { ImageIndex } from "../src/resource/image_index";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { textToMultimodalContent } from "../src/utils/message";
 import { decodeUrlHtmlEntities } from "../src/utils/string";
+import { parseImageRef } from "../src/resource/image_ref";
+import { normalizeMCPResult } from "../src/tool/mcp/result";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
 const BACKEND = 'http://test-host:46680';
 const I2B64 = 'http://test-i2b64';
+const SHA64 = 'a'.repeat(64);
+const SHA64_B = 'b'.repeat(64);
 // 真后端用例专用：模块加载时记住 Node 原生 fetch。其它用例会临时替换 globalThis.fetch，
 // 若某个用例异常退出没还原，真后端用例不能被带崩。
 const NODE_FETCH = (globalThis as any).fetch;
@@ -413,21 +417,50 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 模型报图床地址加载失败时，能按 remoteUrl 命中 */
+    /** 模型报图床地址加载失败但图片仍存在：改用内联 b64 重试，不永久标坏 */
     async testMarkUrlBrokenMatchesHostedUrl(): Promise<void> {
         useHost();
         captureStorage();
+        mockFetch();
+        routes = [b64Route()];
         try {
             const img = new Image();
             img.imageId = 'img_broken';
             img.hostedId = 'abc123';
             img.hostedUrl = '/i/abc123';
             Image.imageMap['img_broken'] = img;
-            const n = Image.markUrlBrokenByUrls([`${BACKEND}/i/abc123`]);
-            assert.equal(n, 1);
-            assert.equal(img.urlBroken, true);
+            const res = await Image.markModelDownloadFailures([`${BACKEND}/i/abc123`]);
+            assert.equal(res.retryInline, true);
+            assert.equal(res.marked, 0);
+            assert.equal(img.urlBroken, false, '图片仍存在时不能永久标坏');
+            assert.equal(img.base64, 'QUJD');
+            assert.equal(img.src, 'data:image/png;base64,QUJD');
         } finally {
             delete Image.imageMap['img_broken'];
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 图床 404：图片真被删了才标 urlBroken */
+    async testHostedModelDownload404MarksBroken(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        routes = [{ match: (url: string) => url.endsWith('/i/abc123/b64'), status: 404, text: '{"error":"not_found"}' }];
+        try {
+            const img = new Image();
+            img.imageId = 'img_gone';
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            Image.imageMap['img_gone'] = img;
+            const res = await Image.markModelDownloadFailures([`${BACKEND}/i/abc123`]);
+            assert.equal(res.marked, 1);
+            assert.equal(img.urlBroken, true);
+            assert.equal(img.hostedId, '', '404 后应清掉图床 id，避免继续发送死链');
+        } finally {
+            delete Image.imageMap['img_gone'];
+            restoreFetch();
             restoreHost();
         }
     },
@@ -609,11 +642,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 图床 url 是回环，但配了 publicUrl（IP/域名）：发送与模型都用 publicUrl，不降级 */
+    /** 图床 url 是回环，但配了内网 publicUrl：发送用 publicUrl；模型端未知（按云模型）走内联 b64 */
     async testPublicUrlOverridesLoopbackForSendAndModel(): Promise<void> {
         useHost(true, 'tok-123', 'http://127.0.0.1:46680', 'http://192.168.1.10:46680');
         captureStorage();
         mockFetch();
+        routes = [b64Route()];
         try {
             const img = new Image();
             img.imageId = 'img_pub';
@@ -625,11 +659,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             const file = await img.getSendFile();
             assert.equal(file, 'http://192.168.1.10:46680/i/abc123', '发送应用 publicUrl');
-            assert.equal(calls.length, 0, '对外地址可用时不应取 b64');
 
             const out = await textToMultimodalContent('[img:img_pub]');
             const part = (out as any[])[0];
-            assert.equal(part.image_url.url, 'http://192.168.1.10:46680/i/abc123', '模型也应用 publicUrl');
+            assert.equal(part.image_url.url, 'data:image/png;base64,QUJD',
+                '内网 publicUrl + 云模型（模型信息未知）应改用内联 b64');
         } finally {
             delete Image.imageMap['img_pub'];
             restoreFetch();
@@ -1074,6 +1108,222 @@ export const tests: Record<string, () => void | Promise<void>> = {
             delete TC.stringConfigs['后端配置'];
             resetConfigCache();
             useGcDays(0);
+        }
+    },
+
+    // ---------- CIR v1 / 虚拟图 / 模型取图 / 自动类型标签 ----------
+
+    /** CIR 解析矩阵：sha / h<sha> / 描述 / URL / 插件 ID / 头像 / 非法 */
+    testParseImageRefMatrix(): void {
+        assert.equal(parseImageRef(`[img:${SHA64}]`)!.kind, 'hosted');
+        assert.equal(parseImageRef(`[img:h${SHA64}]`)!.id, SHA64);
+        assert.equal(parseImageRef(`[img:${SHA64}:群友的猫]`)!.description, '群友的猫');
+        assert.equal(parseImageRef(`［img：h${SHA64}］`)!.kind, 'hosted');
+        assert.equal(parseImageRef(`https://img.example.com/i/${SHA64}`)!.id, SHA64);
+        assert.equal(parseImageRef(`/i/${SHA64}`)!.id, SHA64);
+        assert.equal(parseImageRef('abc123')!.kind, 'plugin');
+        assert.equal(parseImageRef('[img:abc123:描述]')!.kind, 'plugin');
+        assert.equal(parseImageRef('[avatar:123456]')!.kind, 'user_avatar');
+        assert.equal(parseImageRef('[group_avatar:789]')!.kind, 'group_avatar');
+        assert.equal(parseImageRef('[img:user_avatar:123]')!.kind, 'user_avatar');
+        assert.equal(parseImageRef(''), null);
+        assert.equal(parseImageRef('[img:abc123'), null);
+    },
+
+    /** [img:<sha>] / h<sha> / /i/<sha> 都能解析成同一个虚拟图，且不落 storage / 索引 */
+    testResolveRefHostedVirtualImage(): void {
+        useHost();
+        captureStorage();
+        try {
+            Image.resetHostedRefsForTest();
+            const a = Image.resolveRef(`[img:${SHA64}]`)!;
+            assert.equal(a.hostedId, SHA64);
+            assert.equal(a.imageId, `h${SHA64}`);
+            assert.equal(a.virtualHosted, true);
+            const b = Image.resolveRef(`[img:h${SHA64}]`)!;
+            assert.equal(a, b, '同一 sha 应复用同一虚拟图实例');
+            const c = Image.resolveRef(`/i/${SHA64}`)!;
+            assert.equal(c, a);
+            Image.save(a);
+            assert.equal(stored[`image_h${SHA64}`], undefined, '虚拟图不能写 storage');
+        } finally {
+            Image.resetHostedRefsForTest();
+            restoreHost();
+        }
+    },
+
+    /** 工具结果里的图床引用规范化为 [img:h<sha>]；插件 ID / 头像标签保持不动 */
+    testNormalizeToolText(): void {
+        useHost();
+        try {
+            Image.resetHostedRefsForTest();
+            const out = Image.normalizeToolText(
+                `A[img:${SHA64}]B[img:${SHA64}:猫]C[img:abc123]D[avatar:1]E`,
+            );
+            assert.ok(out.includes(`A[img:h${SHA64}]B`), out);
+            assert.ok(out.includes(`[img:h${SHA64}:猫]`), out);
+            assert.ok(out.includes('[img:abc123]'), out);
+            assert.ok(out.includes('[avatar:1]'), out);
+            assert.equal(Image.hostedRefCountForTest(), 1);
+        } finally {
+            Image.resetHostedRefsForTest();
+            restoreHost();
+        }
+        // 图床未配置：不翻译
+        delete TC.stringConfigs['后端配置'];
+        resetConfigCache();
+        const raw = `[img:${SHA64}]`;
+        assert.equal(Image.normalizeToolText(raw), raw);
+    },
+
+    /** 模型可达性：公网对外地址给 URL；内网对外地址 + 云模型用 b64；本机模型可用 URL */
+    testUrlForModelReachability(): void {
+        // 公网对外地址
+        useHost(true, 'tok', 'http://127.0.0.1:46680', 'https://img.example.com');
+        assert.equal(ImageHost.urlForModel(SHA64, 'https://api.openai.com'), `https://img.example.com/i/${SHA64}`);
+        // 内网对外地址 + 云模型 → 不可用
+        useHost(true, 'tok', 'http://127.0.0.1:46680', 'http://192.168.1.10:46680');
+        assert.equal(ImageHost.urlForModel(SHA64, 'https://api.openai.com'), '');
+        // 内网对外地址 + 本机模型 → 可用
+        assert.equal(ImageHost.urlForModel(SHA64, 'http://127.0.0.1:11434'),
+            `http://192.168.1.10:46680/i/${SHA64}`);
+        // 回环且无 publicUrl → 不可用
+        useLoopbackHost();
+        assert.equal(ImageHost.urlForModel(SHA64, 'http://127.0.0.1:11434'), '');
+        restoreHost();
+    },
+
+    /** getModelSrc：内网图床 + 云模型直接走 b64 出口（不发 URL） */
+    async testGetModelSrcInlineForPrivateHost(): Promise<void> {
+        useHost(true, 'tok', 'http://127.0.0.1:46680', 'http://192.168.1.10:46680');
+        captureStorage();
+        mockFetch();
+        routes = [{
+            match: (url: string) => url.endsWith(`/i/${SHA64}/b64`),
+            data: { base64: 'QUJD', format: 'png' },
+        }];
+        try {
+            Image.resetHostedRefsForTest();
+            const img = Image.resolveRef(`[img:${SHA64}]`)!;
+            const src = await img.getModelSrc({ baseUrl: 'https://api.openai.com' });
+            assert.equal(src, 'data:image/png;base64,QUJD');
+            assert.equal(calls.length, 1);
+            assert.ok(calls[0].url.endsWith(`/i/${SHA64}/b64`));
+        } finally {
+            Image.resetHostedRefsForTest();
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 工具产出图片自动类型标签：text_to_image→ai-generated / meme→meme / mcp→mcp-image；非工具图不打 */
+    async testAutoTypeTagsOnUpload(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        routes = [uploadRoute(), b64Route()];
+        try {
+            const cases: Array<{ source: any; expected?: string[] }> = [
+                { source: { tool: 'text_to_image' }, expected: ['ai-generated'] },
+                { source: { tool: 'meme_generator' }, expected: ['meme'] },
+                { source: { tool: 'mcp', server: 'image-host' }, expected: ['mcp-image'] },
+                { source: { tool: 'other_tool' }, expected: ['tool-image'] },
+                { source: {}, expected: undefined },
+            ];
+            for (let i = 0; i < cases.length; i++) {
+                calls = [];
+                const img = new Image();
+                img.imageId = `gen_${i}`;
+                img.url = `https://example.com/${i}.png`;
+                img.sourceMeta = JSON.stringify(cases[i].source);
+                await img.urlToBase64();
+                const upload = calls.find(c => c.url === `${BACKEND}/api/upload`);
+                assert.ok(upload, `case ${i} 应上传`);
+                const body = JSON.parse(upload!.init.body);
+                assert.deepEqual(body.tags, cases[i].expected, `case ${i} tags`);
+                delete Image.imageMap[`gen_${i}`];
+            }
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 用户消息里的 [img:h<sha>] 也能转成多模态 image_url */
+    async testMultimodalHostedRefFromUserTag(): Promise<void> {
+        useHost(true, 'tok', 'http://127.0.0.1:46680', 'https://img.example.com');
+        captureStorage();
+        try {
+            Image.resetHostedRefsForTest();
+            const out = await textToMultimodalContent(`[img:${SHA64}]`);
+            assert.ok(Array.isArray(out));
+            assert.deepEqual((out as any[])[0], {
+                type: 'image_url',
+                image_url: { url: `https://img.example.com/i/${SHA64}` },
+            });
+        } finally {
+            Image.resetHostedRefsForTest();
+            restoreHost();
+        }
+    },
+
+    /** MCP image block：source 元数据（实际工具名/服务器/群）写对，入库自动标签 mcp-image */
+    async testMcpImageBlockTagsAndSource(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        routes = [uploadRoute()];
+        try {
+            const normalized = normalizeMCPResult({
+                content: [{ type: 'image', data: 'QUJD', mimeType: 'image/png' } as any],
+            }, {
+                source: { platform: 'QQ', group_id: '123', user_id: '456', session_id: 'QQ-Group:123', at: 1 },
+                tool: 'browser_take_screenshot',
+                server: 'mcp-browser',
+            });
+            const id = normalized.images[0].imageId;
+            const img = Image.imageMap[id];
+            assert.ok(img, 'MCP 图片应先登记到内存');
+            const meta = JSON.parse(img!.sourceMeta);
+            assert.equal(meta.tool, 'browser_take_screenshot', '应记录实际工具名（元数据）');
+            assert.equal(meta.server, 'mcp-browser');
+            assert.equal(meta.group_id, '123');
+
+            for (let i = 0; i < 50; i++) {
+                if (calls.some(c => c.url === `${BACKEND}/api/upload`)) break;
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            const upload = calls.find(c => c.url === `${BACKEND}/api/upload`);
+            assert.ok(upload, 'MCP image block 应异步上传图床');
+            const body = JSON.parse(upload!.init.body);
+            assert.deepEqual(body.tags, ['mcp-image'], 'MCP 图片应自动打 mcp-image 类型标签');
+            assert.equal(body.source.tool, 'browser_take_screenshot');
+            assert.equal(body.source.server, 'mcp-browser');
+            assert.equal(body.source.group_id, '123');
+            delete Image.imageMap[id];
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 未登记的临时直链图片：仍只留文本标签（不会把死链交给模型） */
+    async testMultimodalTemporaryUrlStillDegrades(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        routes = [{
+            match: (url: string) => url === `${BACKEND}/api/upload`,
+            status: 400,
+            text: '{"error":"fetch_failed","upstream_status":400}',
+        }];
+        try {
+            const out = await textToMultimodalContent(`[img:img_temp]`);
+            assert.ok(Array.isArray(out));
+            assert.deepEqual((out as any[])[0], { type: 'text', text: '[img:img_temp]' });
+        } finally {
+            restoreFetch();
+            restoreHost();
         }
     },
 };

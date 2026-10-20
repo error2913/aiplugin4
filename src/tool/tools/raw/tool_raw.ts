@@ -224,7 +224,8 @@ export function collectImageRawEntries(session: Session): ImageRawEntry[] {
     }
     const out: ImageRawEntry[] = [];
     for (const id of ids) {
-        const img = Image.get(id);
+        // CIR：插件图片 ID / 图床 h<sha> / 裸 sha / 头像别名都能解析
+        const img = Image.resolveRef(id);
         if (!img || !img.rawDescription) continue;
         out.push({
             imageId: id,
@@ -538,9 +539,15 @@ function readUserById(session: Session, id: string, opts: { msgId?: unknown; sta
 }
 
 function readImageById(id: string, opts: { startLine?: unknown; maxLines?: unknown; maxChars?: unknown }): string {
-    const img = Image.get(id);
+    const img = Image.resolveRef(id);
     if (!img) return `未找到图片 <${id}>（上下文里应通过 [img:${id}:…] 引用，或用 grep_raw kind=image 查看目录）`;
-    if (!img.rawDescription) return `图片 <${id}> 未保留完整识别原文（识别文本未超过「图片识别展示截断字数」时展示即全文）`;
+    if (!img.rawDescription) {
+        // 图床图片不进插件存储、不保留识别原文：引导先用识图工具
+        if (img.hostedId) {
+            return `图片 <${id}> 没有已保存的识别原文（图床图片不落插件存储）：需要内容请先调用 image_to_text（或 image_view）查看`;
+        }
+        return `图片 <${id}> 未保留完整识别原文（识别文本未超过「图片识别展示截断字数」时展示即全文）`;
+    }
     return renderWindowed(
         ['图片识别', `image_id=${id} | 共${img.rawDescription.length}字`],
         img.rawDescription,

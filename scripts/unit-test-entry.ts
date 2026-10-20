@@ -17,6 +17,7 @@ import { fetchData } from "../src/utils/web";
 import { backendAuthHeaders, backendAuthHint, backendStatusHint } from "../src/utils/backend";
 import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerRawToolSet } from "../src/tool/tools/raw/init";
+import { registerImageTools } from "../src/tool/tools/image/init";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { getSession, SessionService } from "../src/session/session_service";
@@ -740,7 +741,78 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(toolText.content, '[tool_result:call_1]\n图[img:mcp_1]\n[/tool_result]', '非多模态应退化为带边界标签的文本');
     },
 
-    /** call_tool 必须透传 ToolSolveContent，不能把对象 toString 成 [object Object] */
+    /** 提示词工程模式：工具结果里的 image contentParts 不能被丢弃（image_view / MCP 图片） */
+    async testPEKeepsToolImageParts(): Promise<void> {
+        TC.intConfigs['上下文最大token'] = 0;
+        TC.boolConfigs['切换为提示词工程'] = true;
+        resetConfigCache();
+        const system = { role: 'system', text: '系统' };
+        const session = {
+            context: {
+                messages: [
+                    { role: 'assistant', toolCalls: [{ id: 'call_pe', type: 'function', function: { name: 'image_view', arguments: '{}' } }] },
+                    { role: 'tool', text: '图片[img:mcp_pe]', contentParts: [
+                        { type: 'text', text: '图片[img:mcp_pe]' },
+                        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }
+                    ], toolCallId: 'call_pe', toolName: 'image_view' }
+                ]
+            }
+        };
+        try {
+            const out = await handleMessages(makeCtx(), session as any, true, undefined, system as any);
+            const msg = out.find(m => m.role === 'user' && Array.isArray(m.content));
+            assert.ok(msg, 'PE 模式下工具结果应转成 user 多模态内容');
+            assert.ok((msg!.content as any[]).some((p: any) => p.type === 'image_url'), 'PE 模式也必须保留 image_url');
+        } finally {
+            TC.boolConfigs['切换为提示词工程'] = false;
+            resetConfigCache();
+        }
+    },
+
+    /** image_view / image_to_text：批量上限、CIR 解析、无模型时降级/失败文案 */
+    async testImageViewAndTextBatchLimits(): Promise<void> {
+        // 工具可能已在别的用例注册；这里单独注册图片工具，避免依赖执行顺序
+        registerImageTools();
+        TC.stringConfigs['后端配置'] = JSON.stringify({ version: 1, backends: { 'image-host': { url: '' } } });
+        resetConfigCache();
+        const img = new Image();
+        img.imageId = 'view_test_a';
+        img.base64 = 'QUJD';
+        img.format = 'png';
+        Image.imageMap['view_test_a'] = img;
+        try {
+            const view = toolMap['image_view'];
+            const itt = toolMap['image_to_text'];
+            assert.ok(view && itt, 'image_view / image_to_text 应已注册');
+            const over = await view.solve(makeCtx(), {} as any, {} as any, { ids: ['1', '2', '3', '4', '5'] });
+            assert.ok(String(over).includes('最多 4'), 'image_view 超过 4 张应拒绝');
+            const both = await view.solve(makeCtx(), {} as any, {} as any, { id: 'a', ids: ['b'] });
+            assert.ok(String(both).includes('二选一'));
+            const one = await view.solve(makeCtx(), {} as any, {} as any, { id: '[img:view_test_a]' });
+            const oneText = typeof one === 'string' ? one : (one as any).text;
+            assert.ok(String(oneText).includes('view_test_a'), '应解析 CIR 并返回摘要');
+            // 多模态 chat 模型：应返回 image contentParts（base64 图片直接内联）
+            const origGetChat = (Model as any).getChatModel;
+            try {
+                (Model as any).getChatModel = () => ({ isMultimodal: true, baseUrl: '', name: 'fake-vl' });
+                const multi = await view.solve(makeCtx(), {} as any, {} as any, { id: '[img:view_test_a]' });
+                assert.equal(typeof multi, 'object');
+                const parts = (multi as any).contentParts || [];
+                assert.ok(parts.some((p: any) => p.type === 'image_url'), '多模态模型应拿到 image_url');
+            } finally {
+                (Model as any).getChatModel = origGetChat;
+            }
+            const overItt = await itt.solve(makeCtx(), {} as any, {} as any, { ids: ['1', '2', '3', '4'] });
+            assert.ok(String(overItt).includes('最多 3'), 'image_to_text 超过 3 张应拒绝');
+            const missing = await itt.solve(makeCtx(), {} as any, {} as any, { id: '[img:h' + 'a'.repeat(64) + ']' });
+            assert.ok(String(missing).includes('未找到'), '未配置图床时 hosted 引用应明确未找到');
+        } finally {
+            delete Image.imageMap['view_test_a'];
+            delete TC.stringConfigs['后端配置'];
+            resetConfigCache();
+        }
+    },
+
     async testCallToolPropagatesContentParts(): Promise<void> {
         registerDispatchTools();
         const inner = new Tool({
@@ -9173,6 +9245,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const onlySse = parseMcpConfig('{"mcpServers":{"a":{"type":"sse","url":"http://x"}}}');
         assert.equal(onlySse.config!.servers.length, 0, 'SSE 服务器应被跳过');
         assert.ok(onlySse.warnings.some(w => /SSE/.test(w.msg)), 'SSE 应有 warning');
+        // imageRefs：图片引用生产者（image-host）
+        const withImageRefs = parseMcpConfig('{"mcpServers":{"image-host":{"url":"http://x/mcp","imageRefs":true}}}');
+        assert.equal(withImageRefs.config!.servers[0].imageRefs, true, 'imageRefs=true 应保留');
+        assert.equal(parseMcpConfig('{"mcpServers":{"a":{"url":"http://x","imageRefs":"yes"}}}').config, null, 'imageRefs 非布尔应拒绝');
 
         // ---- 知识库
         const kb = parseKbConfig(JSON.stringify({
@@ -9378,7 +9454,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const builtin = Object.keys(toolMap).filter(n => !toolMap[n].group);
         const missing = builtin.filter(n => !toolMap[n].category);
         assert.deepEqual(missing, [], `内置工具必须打上分类（缺: ${missing.join('、')}）`);
-        assert.equal(builtin.length, 62, `内置工具数应为 62，实际 ${builtin.length}`);
+        assert.equal(builtin.length, 63, `内置工具数应为 63，实际 ${builtin.length}`);
 
         const byCategory: { [k: string]: string[] } = {};
         for (const n of builtin) (byCategory[Tool.categoryOf(toolMap[n])] = byCategory[Tool.categoryOf(toolMap[n])] || []).push(n);
@@ -12684,6 +12760,70 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(noTti.includes('未配置生图模型'), `无模型应给可读提示: ${noTti}`);
         } finally {
             Model.reset();
+        }
+    },
+
+    /** MCP image block：来源元数据写入 sourceMeta（tool=实际工具名/server/群），且先进内存 */
+    async testMCPImageSourceMeta(): Promise<void> {
+        TC.stringConfigs['后端配置'] = JSON.stringify({ version: 1, backends: { 'image-host': { url: '' } } });
+        resetConfigCache();
+        try {
+            const normalized = normalizeMCPResult({
+                content: [{ type: 'image', data: 'QUJD', mimeType: 'image/png' } as any]
+            }, {
+                source: { platform: 'QQ', group_id: '123', user_id: '456', session_id: 'QQ-Group:123', at: 1 },
+                tool: 'image_search',
+                server: 'image-host',
+            });
+            assert.equal(normalized.images.length, 1);
+            const id = normalized.images[0].imageId;
+            const img = Image.imageMap[id];
+            assert.ok(img, 'MCP 图片应先登记到内存 imageMap');
+            const meta = JSON.parse(img!.sourceMeta);
+            assert.equal(meta.tool, 'image_search', 'tool 应记录实际工具名（元数据）');
+            assert.equal(meta.server, 'image-host');
+            assert.equal(meta.group_id, '123');
+            assert.equal(meta.via, 'tool');
+            delete Image.imageMap[id];
+        } finally {
+            delete TC.stringConfigs['后端配置'];
+            resetConfigCache();
+        }
+    },
+
+    /** get_image 对图床引用明确报错（决策 A），不下载/不落盘 */
+    testGetImageRejectsHostedRef(): void {
+        const sha = 'c'.repeat(64);
+        const tagged = validateSpecialIdParams('get_image', { file: `[img:h${sha}]` });
+        assert.equal(tagged.ok, false);
+        assert.ok((tagged as any).message.includes('图床图片没有协议端缓存文件'), JSON.stringify(tagged));
+        const bare = validateSpecialIdParams('get_image', { file: sha });
+        assert.equal(bare.ok, false);
+        assert.ok((bare as any).message.includes('图床图片没有协议端缓存文件'));
+    },
+
+    /** resolve_special_id 对 [img:h<sha>] 返回 hosted_id / hosted_url，供 AI 收藏/管理 */
+    async testResolveSpecialIdHostedRef(): Promise<void> {
+        TC.stringConfigs['后端配置'] = JSON.stringify({
+            version: 1,
+            backends: { 'image-host': { url: 'http://test-host:46680', token: 't' } },
+        });
+        resetConfigCache();
+        registerResolveSpecialId();
+        const tool = toolMap['resolve_special_id'];
+        assert.ok(tool, 'resolve_special_id 应已注册');
+        const sha = 'd'.repeat(64);
+        try {
+            const out = await tool.solve(makeCtx(), {} as any, {} as any, { type: 'image', id: `[img:h${sha}]` });
+            const data = JSON.parse(String(out));
+            assert.equal(data.ok, true);
+            assert.equal(data.image_id, `h${sha}`);
+            assert.equal(data.hosted_id, sha);
+            assert.equal(data.hosted_url, `/i/${sha}`);
+        } finally {
+            Image.resetHostedRefsForTest();
+            delete TC.stringConfigs['后端配置'];
+            resetConfigCache();
         }
     },
 };

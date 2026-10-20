@@ -1106,21 +1106,8 @@ export class Context {
         return Group.get(normalizedId);
     }
     async findImage(_ctx: seal.MsgContext, id: string): Promise<Image | null> {
-        if (/^user_avatar[:：?]/.test(id)) {
-            const userId = normalizeUserId(id.replace(/^user_avatar[:：?]/, ''), getPlatform(this.sessionId));
-            if (userId) return Image.getUserAvatar(userId);
-            return null;
-        }
-        if (/^group_avatar[:：?]/.test(id)) {
-            const groupId = normalizeGroupId(id.replace(/^group_avatar[:：?]/, ''), getPlatform(this.sessionId));
-            if (groupId) return Image.getGroupAvatar(groupId);
-            return null;
-        }
-        const img = Image.get(id);
+        const img = Image.resolveRef(id);
         if (img) return img;
-        // MCP image_search 返回的是图床 sha256 id：允许直接 [img:图床ID] 发送
-        const hosted = Image.fromHostedId(id);
-        if (hosted) return hosted;
         const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
         if (LOCAL_IMAGE_PATH_MAP && Object.prototype.hasOwnProperty.call(LOCAL_IMAGE_PATH_MAP, id)) {
             return Image.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]);

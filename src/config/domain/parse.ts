@@ -242,7 +242,19 @@ export function parseMcpConfig(text: string): DomainParseResult<McpConfig> {
         const auth = headers.Authorization || '';
         if (!token && auth.startsWith('Bearer ')) token = auth.slice(7).trim();
         const platforms = readPlatform(rawCfg.platform, `${path}.platform`, issues);
-        servers.push({ name, platforms, type, url, token, headers });
+        // imageRefs：该服务器输出标准图片引用（[img:<sha>]），进入上下文前规范化并注册虚拟图
+        let imageRefs = false;
+        if (rawCfg.imageRefs !== undefined && rawCfg.imageRefs !== null) {
+            if (typeof rawCfg.imageRefs !== 'boolean') {
+                issues.push(issue(`${path}.imageRefs`, 'imageRefs 必须是布尔值（true / false）'));
+            } else {
+                imageRefs = rawCfg.imageRefs;
+            }
+        }
+        servers.push({
+            name, platforms, type, url, token, headers,
+            ...(imageRefs ? { imageRefs: true } : {}),
+        });
     }
 
     return { config: issues.length > 0 ? null : { servers }, issues, warnings };

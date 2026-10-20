@@ -14,6 +14,7 @@ import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/u
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
 import { ImageIndex } from "./image_index";
+import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
 
 const log = logger.withTag('image');
 
@@ -88,6 +89,8 @@ export default class Image {
     lastUsedAt: number;
     /** 来源信息（JSON：platform/group_id/user_id/message_id/at），入库时上报图床 */
     sourceMeta: string;
+    /** 图床虚拟引用图：只存在内存，绝不落 storage / 索引 */
+    virtualHosted: boolean;
 
     constructor() {
         this.imageId = '';
@@ -108,6 +111,7 @@ export default class Image {
         this.hostedAt = 0;
         this.lastUsedAt = 0;
         this.sourceMeta = '';
+        this.virtualHosted = false;
     }
 
     get type(): 'url' | 'local' | 'base64' {
@@ -249,14 +253,14 @@ export default class Image {
         return this.isBase64RetryBlocked() && Image.isTemporaryUrl(this.url);
     }
 
-    /** 模型侧报告无法下载这些 URL 时调用：把对应图片标记为不可用并落盘，后续请求降级为文本标签；返回标记数量 */
+    /** 模型侧报告无法下载这些 URL 时调用：只处理非图床 URL（图床走 markModelDownloadFailures 探测） */
     static markUrlBrokenByUrls(urls: string[]): number {
         const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
         if (targets.size === 0) return 0;
         let marked = 0;
         for (const img of Object.values(this.imageMap)) {
             if (!img || img.base64 || img.urlBroken) continue;
-            // 图床地址也可能被模型报错（未配图床/直连场景）；命中 remoteUrl 同样算不可用
+            if (img.hostedId) continue;   // 图床图不能凭模型报错就永久标坏
             const candidate = img.remoteUrl || img.url;
             if (!candidate || !targets.has(candidate)) continue;
             img.urlBroken = true;
@@ -264,6 +268,61 @@ export default class Image {
             marked++;
         }
         return marked;
+    }
+
+    /**
+     * 模型报“无法下载图片”时：图床 URL 先探测 404/可达性。
+     * - 图床返回 200：图片存在，标记本轮改用内联 b64（不标坏），返回 retryInline=true；
+     * - 404：真正已删，标 urlBroken；
+     * - 网络错误/不可达：不标坏，留待下轮。
+     * 非图床 URL 仍按旧规则标坏。
+     */
+    static async markModelDownloadFailures(urls: string[]): Promise<{ marked: number; retryInline: boolean }> {
+        const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
+        if (targets.size === 0) return { marked: 0, retryInline: false };
+        let marked = 0;
+        let retryInline = false;
+        const hostedImages: Image[] = [];
+        for (const img of Object.values(this.imageMap)) {
+            if (!img || img.base64 || img.urlBroken) continue;
+            const candidate = img.remoteUrl || img.url;
+            if (!candidate || !targets.has(candidate)) continue;
+            if (img.hostedId) hostedImages.push(img);
+            else {
+                img.urlBroken = true;
+                this.save(img);
+                marked++;
+            }
+        }
+        for (const entry of this.hostedRefs.values()) {
+            const img = entry.img;
+            if (!img || img.base64 || img.urlBroken) continue;
+            const candidate = img.remoteUrl || img.url;
+            if (candidate && targets.has(candidate)) hostedImages.push(img);
+        }
+        for (const img of hostedImages) {
+            if (!img.hostedId) continue;
+            const data = await ImageHost.fetchBase64(img.hostedId);
+            if (data) {
+                // 图片还在：本轮改用内联 b64 重发，不标 urlBroken（之后修好 publicUrl 仍可恢复 URL）
+                this.preferInlineForModel(img.imageId);
+                img.base64 = data.base64;
+                img.format = data.format || img.format || 'png';
+                img.urlBroken = false;
+                retryInline = true;
+            } else if (ImageHost.lastStatus === 404) {
+                // 图床已彻底删除：与 GC 对账一致，清掉 hosted 字段，发送时不再指向死链
+                img.urlBroken = true;
+                img.hostedId = '';
+                img.hostedUrl = '';
+                img.hostedAt = 0;
+                img.base64 = '';
+                this.save(img);
+                marked++;
+            }
+            // 其它错误（网络/5xx/超时）：不标坏，下一轮再试
+        }
+        return { marked, retryInline };
     }
 
     /**
@@ -349,7 +408,7 @@ export default class Image {
         try {
             if (!this.hostedId) {
                 if (!this.url || !/^https?:/i.test(this.url)) throw new Error('该图片没有可上传的 URL');
-                const item = await ImageHost.uploadByUrl(this.url, this.imageId, this.sourceInfo());
+                const item = await ImageHost.uploadByUrl(this.url, this.imageId, this.sourceInfo(), this.autoTypeTags());
                 if (!item) throw new Error('上传图床失败' + (ImageHost.lastError ? `：${ImageHost.lastError}` : ''));
                 this.applyHostItem(item);
             }
@@ -416,10 +475,60 @@ export default class Image {
         return this.base64;
     }
 
+    /**
+     * 模型/上游取图地址：URL 或 data URL。
+     * - 图床：模型可达则给 remoteUrl；内网/云模型或本轮已被模型报下载失败则走 b64 出口；
+     * - 非图床 URL：优先转 b64（与旧行为一致），失败再回退稳定原始 URL；
+     * - 头像：公开 qlogo URL。
+     */
+    async getModelSrc(model?: { baseUrl?: string }): Promise<string> {
+        if (this.base64) return this.base64Url;
+        if (this.urlBroken) return '';
+        if (this.isAvatarImage) return this.url || '';
+        if (this.hostedId && ImageHost.enabled) {
+            if (!this.urlBroken && !Image.inlineModelIds.has(this.imageId)) {
+                const url = ImageHost.urlForModel(this.hostedId, model?.baseUrl);
+                if (url) return url;
+            }
+            const data = await ImageHost.fetchBase64(this.hostedId);
+            if (data) {
+                this.base64 = data.base64;
+                this.format = data.format || this.format || 'png';
+                this.urlBroken = false;
+                return this.base64Url;
+            }
+            if (ImageHost.lastStatus === 404) this.urlBroken = true;
+            // 图床取不到时，最后回退稳定原始 URL（QQ 临时直链不赌）
+            if (this.url && !Image.isTemporaryUrl(this.url) && !this.urlBroken) return this.url;
+            return '';
+        }
+        if (this.type === 'url' && this.url && !this.isBase64RetryBlocked()) {
+            await this.urlToBase64();
+        }
+        if (this.base64) return this.base64Url;
+        if (this.url && !Image.isTemporaryUrl(this.url)) return this.url;
+        return '';
+    }
+
+    /** 工具产出图片的自动类型标签（确定性映射，不调模型） */
+    private autoTypeTags(): string[] {
+        const { AUTO_TYPE_TAGS, AUTO_TYPE_TAG_MAX } = Config.image;
+        if (!AUTO_TYPE_TAGS) return [];
+        const tool = String(this.sourceInfo().tool || '').toLowerCase();
+        const server = String(this.sourceInfo().server || '').toLowerCase();
+        let tags: string[] = [];
+        if (tool === 'text_to_image' || tool === 'image-generation') tags = ['ai-generated'];
+        else if (tool === 'meme_generator' || tool === 'meme') tags = ['meme'];
+        else if (tool === 'mcp' || server) tags = ['mcp-image'];
+        else if (tool) tags = ['tool-image'];
+        const max = Math.max(1, Math.min(4, Number(AUTO_TYPE_TAG_MAX) || 2));
+        return Array.from(new Set(tags)).slice(0, max);
+    }
+
     /** 把手里已有的 base64 转存图床；成功返回 true（base64 被清空，字节由图床保存） */
     async adoptBase64ToHost(): Promise<boolean> {
         if (!ImageHost.enabled || !this.base64) return false;
-        const item = await ImageHost.uploadBase64(this.base64, this.format, this.imageId, this.sourceInfo());
+        const item = await ImageHost.uploadBase64(this.base64, this.format, this.imageId, this.sourceInfo(), this.autoTypeTags());
         if (!item) return false;
         this.applyHostItem(item);
         return true;
@@ -434,7 +543,7 @@ export default class Image {
     static async captureToHost(img: Image): Promise<boolean> {
         if (!ImageHost.enabled || !img || img.hostedId) return false;
         if (!img.url || !/^https?:\/\//i.test(img.url)) return false;
-        const item = await ImageHost.uploadByUrl(img.url, img.imageId, img.sourceInfo());
+        const item = await ImageHost.uploadByUrl(img.url, img.imageId, img.sourceInfo(), img.autoTypeTags());
         if (!item) return false;
         img.applyHostItem(item);
         Image.save(img);
@@ -445,16 +554,9 @@ export default class Image {
         const { URL_TO_BASE64 } = Config.image;
         const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
 
-        // 图床配了对外地址（IP/域名）：协议端与模型都能访问，直接把稳定地址喂给模型（不转 base64）；
-        // 对外地址不可用（回环且没配 publicUrl）时模型够不到，仍只能取内联字节，取不到就跳过识图。
-        const hostedUrlUsable = this.hosted && ImageHost.externalEnabled;
-
-        if (!hostedUrlUsable && URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
-
-        if (!hostedUrlUsable && ImageHost.enabled && this.type === 'url' && !this.base64) await this.urlToBase64();
-        if (!hostedUrlUsable && ImageHost.enabled && !this.base64) {
-            log.warning(`图片${this.imageId}取不到图床字节，跳过识图（图床地址是回环地址，模型访问不到；建议改成 IP 或域名）`);
-            Image.save(this);
+        const model = Model.getMultimodalModel('image-understanding');
+        if (!model) {
+            log.error(`未找到支持image-understanding的模型`);
             return;
         }
 
@@ -465,18 +567,41 @@ export default class Image {
             return;
         }
 
-        const model = Model.getMultimodalModel('image-understanding');
-        if (!model) {
-            log.error(`未找到支持image-understanding的模型`);
+        // 图床/头像：交给 getModelSrc 统一选择 URL 或 b64（模型可达性判断）
+        // 非图床 URL：保持旧行为（“总是”先转 b64；配了图床时先入库再取 b64）
+        let src = '';
+        if (this.hosted || this.isAvatarImage) {
+            src = await this.getModelSrc(model);
+        } else {
+            if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
+            if (ImageHost.enabled && this.type === 'url' && !this.base64) await this.urlToBase64();
+            // 取不到 b64 时保留旧行为：把原始/稳定 URL 交给识图模型（图床失败不阻断识图）
+            src = this.base64 ? this.base64Url : this.src;
+        }
+        if (!src) {
+            log.warning(`图片${this.imageId}取不到可用的识图地址（图床不可达/图片已删），跳过识图`);
+            Image.save(this);
             return;
         }
 
-        this.description = this.truncateIfLong(await model.callITT(hostedUrlUsable ? this.remoteUrl : this.src, prompt ? prompt : defaultPrompt));
+        this.description = this.truncateIfLong(await model.callITT(src, prompt ? prompt : defaultPrompt));
+
+        // 图床：首次给了 URL 但模型没识别出来 → 用 b64 再试一次（不依赖“自动”配置；宁可多一次本地请求）
+        if (!this.description && this.hosted && this.hostedId) {
+            const data = await ImageHost.fetchBase64(this.hostedId);
+            if (data) {
+                this.base64 = data.base64;
+                this.format = data.format || this.format || 'png';
+                this.description = this.truncateIfLong(await model.callITT(this.base64Url, prompt ? prompt : defaultPrompt));
+            }
+        }
 
         if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url' && !this.isBase64RetryBlocked()) {
             log.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
             await this.urlToBase64();
-            this.description = this.truncateIfLong(await model.callITT(this.src, prompt ? prompt : defaultPrompt));
+            if (this.base64) {
+                this.description = this.truncateIfLong(await model.callITT(this.base64Url, prompt ? prompt : defaultPrompt));
+            }
         }
 
         if (!this.description) log.error(`图片${this.imageId}识别失败`);
@@ -496,6 +621,48 @@ export default class Image {
 
 
     static imageMap: { [key: string]: Image } = {};
+
+    // ---- CIR 虚拟图注册表：图床 sha256 → 内存 Image（不落 storage / 索引） ----
+    private static readonly HOSTED_REF_MAX = 256;
+    private static readonly HOSTED_REF_TTL = 60 * 60 * 1000;
+    private static hostedRefs = new Map<string, { img: Image; at: number }>();
+    /** 本轮模型取图失败、要求改用内联 b64 的图片（imageId） */
+    private static inlineModelIds = new Set<string>();
+
+    static resetHostedRefsForTest(): void {
+        this.hostedRefs.clear();
+        this.inlineModelIds.clear();
+    }
+
+    static hostedRefCountForTest(): number {
+        return this.hostedRefs.size;
+    }
+
+    private static trimHostedRefs(): void {
+        const now = Date.now();
+        for (const [id, entry] of this.hostedRefs) {
+            if (now - entry.at > this.HOSTED_REF_TTL) this.hostedRefs.delete(id);
+        }
+        while (this.hostedRefs.size > this.HOSTED_REF_MAX) {
+            let oldestKey = '';
+            let oldestAt = Number.MAX_SAFE_INTEGER;
+            for (const [id, entry] of this.hostedRefs) {
+                if (entry.at < oldestAt) { oldestAt = entry.at; oldestKey = id; }
+            }
+            if (!oldestKey) break;
+            this.hostedRefs.delete(oldestKey);
+        }
+    }
+
+    /** 标记该图本轮改用内联 b64（模型 URL 取图失败时使用） */
+    static preferInlineForModel(imageId: string): void {
+        if (imageId) this.inlineModelIds.add(imageId);
+    }
+
+    static resetInlineModelForTest(): void {
+        this.inlineModelIds.clear();
+    }
+
 
     static generateImageId(): string {
         let id = generateId(), a = 0;
@@ -538,17 +705,60 @@ export default class Image {
 
     /**
      * 图床已入库的 id（MCP image_search 返回的 sha256）→ 虚拟 Image：
-     * 不落 storage、不重复上传，发送时直接用图床稳定地址（[img:图床ID] 可用）。
+     * 不落 storage、不重复上传，发送时直接用图床稳定地址（[img:h<sha>] 可用）。
+     * 虚拟图进内存 LRU，重复引用复用同一实例。
      */
     static fromHostedId(hostedId: string): Image | null {
-        const id = String(hostedId || '').trim();
-        if (!/^[a-f0-9]{64}$/i.test(id) || !ImageHost.enabled) return null;
+        const id = String(hostedId || '').trim().toLowerCase();
+        if (!/^[a-f0-9]{64}$/.test(id) || !ImageHost.enabled) return null;
+        const now = Date.now();
+        const hit = this.hostedRefs.get(id);
+        if (hit) {
+            hit.at = now;
+            return hit.img;
+        }
         const img = new Image();
-        img.imageId = id;
+        img.imageId = `h${id}`;
         img.hostedId = id;
         img.hostedUrl = `/i/${id}`;
-        img.lastUsedAt = Date.now();
+        img.lastUsedAt = now;
+        img.virtualHosted = true;
+        this.hostedRefs.set(id, { img, at: now });
+        this.trimHostedRefs();
         return img;
+    }
+
+    /**
+     * CIR v1 统一解析入口：接受 [img:<ref>]、裸 ref、/:描述、/i/<sha>、头像别名。
+     * 所有“从标签/id 找图片”的路径都应走这里，不再各自 Image.get(id.split(':')[0])。
+     */
+    static resolveRef(raw: unknown): Image | null {
+        const parsed = parseImageRef(raw);
+        if (!parsed) return null;
+        if (parsed.kind === 'hosted') return this.fromHostedId(parsed.id);
+        if (parsed.kind === 'user_avatar') return this.getUserAvatar(parsed.id);
+        if (parsed.kind === 'group_avatar') return this.getGroupAvatar(parsed.id);
+        const img = this.get(parsed.id);
+        if (img) return img;
+        // 兼容旧行为：整体找不到时取首个冒号前（如 [img:id:描述] 的 id 已由 parse 处理）
+        if (parsed.id.includes(':')) return this.get(parsed.id.split(':')[0]);
+        return null;
+    }
+
+    /** 把工具输出里的图床引用改写为 [img:h<sha>] 并注册虚拟图；其它标签原样保留 */
+    static normalizeToolText(text: string): string {
+        // 图床未配置时不做翻译：避免把 [img:sha] 变成无法解析的 h 引用
+        if (!ImageHost.enabled) return text;
+        return rewriteHostedImageRefs(text, sha => { this.fromHostedId(sha); }).text;
+    }
+
+    /** 把 Image 转成 OpenAI 兼容的 image_url 内容块；取不到返回 null */
+    static async toModelPart(
+        image: Image,
+        model?: { baseUrl?: string },
+    ): Promise<{ type: 'image_url'; image_url: { url: string } } | null> {
+        const src = await image.getModelSrc(model);
+        return src ? { type: 'image_url', image_url: { url: src } } : null;
     }
 
     static get(imageId: string): Image | null {
@@ -577,6 +787,8 @@ export default class Image {
         return img || null;
     }
     static save(img: Image) {
+        // 图床虚拟引用：只存在内存，不落 storage、不进索引
+        if (img.virtualHosted) return;
         // 索引：清理任务靠它枚举图片（海豹 storage 没有遍历能力）
         if (img.imageId) {
             if (!img.lastUsedAt) img.lastUsedAt = Date.now();

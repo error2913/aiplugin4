@@ -19,6 +19,7 @@ import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import { getSession } from "../session/session_service";
 import { getSessionCtxAndMsg } from "../utils/seal";
+import { getPlatform } from "../utils/target_id";
 import { generateId } from "../utils/utils";
 
 const log = logger.withTag('media');
@@ -45,7 +46,7 @@ export interface MediaTaskResult {
 export class MediaTask {
     static validKeys: (keyof MediaTask)[] = [
         'id', 'sid', 'isPrivate', 'epId', 'kind', 'origin', 'status',
-        'createdAt', 'updatedAt', 'request', 'result', 'error', 'notified', 'requester', 'save', 'name',
+        'createdAt', 'updatedAt', 'request', 'result', 'error', 'notified', 'requester', 'save', 'name', 'sourceMeta',
     ];
     id: string;
     sid: string;
@@ -75,6 +76,8 @@ export class MediaTask {
     save: boolean;
     /** 文生图：保存名称 */
     name: string;
+    /** 工具调用来源元数据（JSON，用于图床 source / 类型标签；不是标签） */
+    sourceMeta: string;
 
     constructor() {
         this.id = '';
@@ -91,6 +94,7 @@ export class MediaTask {
         this.requester = '';
         this.save = false;
         this.name = '';
+        this.sourceMeta = '';
     }
 }
 
@@ -256,6 +260,22 @@ export class MediaTaskManager {
         task.request = kind === 'tts'
             ? { text, model: opts.modelLabel ?? entry.name, params: opts.params }
             : { prompt: text, model: opts.modelLabel ?? entry.name, params: opts.params };
+        if (kind === 'tti') {
+            // 工具产出图片的来源元数据：组包时写入 Image.sourceMeta，入库时随 source 上报图床
+            try {
+                task.sourceMeta = JSON.stringify({
+                    platform: getPlatform(sid),
+                    group_id: isPrivate ? '' : sid,
+                    user_id: task.requester || '',
+                    session_id: sid,
+                    at: task.createdAt,
+                    tool: 'text_to_image',
+                    via: 'tool',
+                });
+            } catch (_e) {
+                task.sourceMeta = '';
+            }
+        }
         if (opts.image) task.request.image = '（提交时已提供参考图）';
 
         // 参考图 base64 只进内存，不落盘
@@ -380,6 +400,7 @@ export class MediaTaskManager {
                 const baseName = sanitizeImageName(task.name);
                 img.imageId = `${baseName}_${generateId()}`;
                 img.sourceSessionId = task.sid;
+                if (task.sourceMeta) img.sourceMeta = task.sourceMeta;
                 if (result.dataType === 'url') {
                     img.url = result.data;
                     try {

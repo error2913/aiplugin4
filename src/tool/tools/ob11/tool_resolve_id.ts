@@ -31,10 +31,10 @@ export function registerResolveSpecialId() {
         function: {
             name: "resolve_special_id",
             description: "解析上下文里出现的特殊短 ID/句柄，返回其原始字段，用于对接协议 API。\n" +
-                "上下文中的消息 ID 是 base36 短 ID（[msg_id:xxx]/[quote:xxx]），图片是 6 位图片 ID（[img:xxx]），" +
+                "上下文中的消息 ID 是 base36 短 ID（[msg_id:xxx]/[quote:xxx]），图片是插件图片 ID 或标准图片引用 [img:<ref>]（含图床 h<sha256>、裸 sha256、头像），" +
                 "语音/视频/文件消息是闭合标签（[record:句柄]摘要[/record]、[video:句柄]...[/video]、[file:句柄]...[/file]）。" +
                 "需要把短 ID 交给 get_msg/delete_msg/get_image/get_record/文件下载等协议能力，或读取原始 " +
-                "url/path/file/file_id/file_unique 等字段时，先调用本工具还原。",
+                "url/path/file/file_id/file_unique 等字段时，先调用本工具还原；图床图片额外返回 hosted_id/hosted_url，且没有协议端缓存文件、不要再用 get_image。",
             parameters: {
                 type: "object",
                 properties: {
@@ -70,8 +70,9 @@ export function registerResolveSpecialId() {
                 return JSON.stringify({ ok: true, type, id: rawId, message_id: String(backId) });
             }
             case "image": {
-                const image = Image.get(id) || (id.includes(":") ? Image.get(id.split(":")[0]) : null);
-                if (!image) return fail("NOT_FOUND", `未找到图片 ID：${rawId}`);
+                // CIR：插件图片 ID / 图床 h<sha256> / 裸 sha256 / user_avatar: / group_avatar:
+                const image = Image.resolveRef(id);
+                if (!image) return fail("NOT_FOUND", `未找到图片引用：${rawId}`);
                 let raw: any = null;
                 if (image.raw) {
                     try { raw = JSON.parse(image.raw); } catch { raw = null; }
@@ -82,6 +83,8 @@ export function registerResolveSpecialId() {
                     id: rawId,
                     image_id: image.imageId,
                     ...(raw || {}),
+                    hosted_id: image.hostedId || undefined,
+                    hosted_url: image.hostedUrl || undefined,
                     url: (raw && raw.url) || image.url || undefined,
                     path: (raw && raw.path) || image.path || undefined,
                     base64: image.base64 || undefined,

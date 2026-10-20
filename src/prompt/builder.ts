@@ -7,6 +7,7 @@ import { knowledgeService } from "../memory/knowledge";
 import { MemoryManager } from "../memory/manager";
 import { getMemoryRevision, getSummaryRevision } from "../memory/revision";
 import Model from "../model/model";
+import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
@@ -105,6 +106,8 @@ export async function buildSystemPromptContent(
 
     // 静态壳：角色/平台/会话/BotID/工具/技能/知识库，连续对话可复用 30 秒。
     const platform = platformOf(ctx);
+    // 图片与图库提示段：仅在图床或 MCP 启用时注入（无图床/MCP 时保持旧提示词不变）
+    const IMAGE_LIBRARY = ImageHost.enabled || Config.mcp.MCP_ENABLED;
     const toolState = STATUS ? toolStateSignature(session) : '';
     const skillConfigSignature = STATUS ? getSkillsSignature() : '';
     const knowledgeSignature = Config.knowledgeBase.KNOWLEDGE ? knowledgeService.getLibrariesSignature() : '';
@@ -119,6 +122,7 @@ export async function buildSystemPromptContent(
         ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
         ctx.endPoint.userId,
         RECEIVE_IMAGE,
+        IMAGE_LIBRARY,
         STATUS,
         PROMPT_ENGINEERING,
         DIRECTION_PROMPT,
@@ -158,6 +162,7 @@ export async function buildSystemPromptContent(
             sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
             botId: ctx.endPoint.userId,
             RECEIVE_IMAGE,
+            IMAGE_LIBRARY,
             DIRECTION_PROMPT,
             toolBlock: blocksWithGuide
         });

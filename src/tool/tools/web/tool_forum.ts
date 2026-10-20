@@ -136,20 +136,19 @@ async function imageToForumFormat(image: Image): Promise<{ name: string, mime_ty
 }
 
 /**
- * 从内容中提取 [img:xxx] 引用的图片 ID，通过 Image.get 查找
+ * 从内容中提取 [img:xxx] 引用的图片，统一走 CIR（Image.resolveRef）：
+ * 支持 [img:<ref>]、图床 h<sha256>、裸 sha256、插件图片 ID、头像别名。
  */
 function extractImagesFromContent(content: string): Image[] {
     const segs = parseSpecialTokens(content);
     const images: Image[] = [];
     for (const seg of segs) {
         if (seg.type === 'img') {
-            const id = seg.content;
-            // 兼容 [img:imageId:描述]：整体找不到时取首个冒号前作为图片 id
-            const image = Image.get(id) || (id.includes(':') ? Image.get(id.split(':')[0]) : null);
+            const image = Image.resolveRef(seg.content);
             if (image) {
                 images.push(image);
             } else {
-                log.warning(`论坛发帖：无法找到图片 ${id}`);
+                log.warning(`论坛发帖：无法找到图片 ${seg.content}`);
             }
         }
     }
@@ -385,7 +384,7 @@ export function registerForum() {
         function: {
             name: "forum_create_post",
             description: "在论坛创建新帖子。" +
-                "图片可通过 image_ids 参数传入图片ID列表，也可在 content 中使用 [img:图片ID] 引用。",
+                "图片可通过 image_ids 参数传入图片引用列表（[img:<ref>] / 图床托管 ID / 插件图片 ID），也可在 content 中使用 [img:图片ID] 引用。",
             parameters: {
                 type: "object",
                 properties: {
@@ -406,7 +405,7 @@ export function registerForum() {
                     },
                     image_ids: {
                         type: "array",
-                        description: "要附带的图片ID列表，图片会自动转换为base64上传",
+                        description: "要附带的图片引用列表（标准 [img:<ref>] / 图床托管 ID h<sha> / 裸 sha / 插件图片 ID / 头像），图片会自动转换为base64上传",
                         items: {
                             type: "string"
                         }
@@ -425,10 +424,10 @@ export function registerForum() {
 
             const allImages: Image[] = [];
 
-            // 通过 image_ids 参数查找图片
+            // 通过 image_ids 参数查找图片（支持 CIR：[img:<ref>] / h<sha> / 裸 sha / 插件 ID）
             if (image_ids && image_ids.length > 0) {
                 for (const imgId of image_ids) {
-                    const image = Image.get(imgId);
+                    const image = Image.resolveRef(imgId);
                     if (image) {
                         allImages.push(image);
                         log.info(`论坛发帖：通过 image_ids 找到图片 ${imgId}`);

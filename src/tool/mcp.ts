@@ -4,6 +4,8 @@
 import Config, { ext } from "../config/config";
 import { McpServerEntry } from "../config/domain/types";
 import Logger from "../logger";
+import Image from "../resource/image";
+import type { ImageSource } from "../resource/image_host";
 import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { buildContentParts, normalizeMCPResult } from "./mcp/result";
@@ -415,9 +417,28 @@ async function syncTools(server: MCPServer, force = false): Promise<MCPToolDef[]
             }
             const key = session && session.sessionId ? session.sessionId : '';
             const result = await callTool(current, key, t.name, args || {});
-            const normalized = normalizeMCPResult(result);
+            // 工具调用来源（元数据）：平台/群/用户/会话/时间，供 MCP 图片入库时上报图床（不写标签）
+            const source: ImageSource = {
+                platform: platformOf(ctx),
+                session_id: key,
+                at: Date.now(),
+            };
+            if (ctx && ctx.group) source.group_id = String(ctx.group.groupId);
+            if (ctx && ctx.player) source.user_id = String(ctx.player.userId);
+            const normalized = normalizeMCPResult(result, { source, tool: t.name, server: server.name });
+            // 图片引用生产者（image-host / imageRefs:true）：把 [img:<sha>] 规范化为 [img:h<sha>] 并注册虚拟图；
+            // 其它服务器文本原样保留，不扩大提示注入面。
+            if (current.imageRefs === true || current.name === 'image-host') {
+                normalized.text = Image.normalizeToolText(normalized.text);
+                // 本次工具调用所在的群/会话（元数据展示，不写成图片标签）；让 AI 知道图是在哪个群被拿到的
+                if (/\[img[:：]/.test(normalized.text)) {
+                    const where = ctx
+                        ? (ctx.isPrivate ? '私聊' : (ctx.group ? `群${ctx.group.groupId}` : '当前会话'))
+                        : '当前会话';
+                    normalized.text += `\n（本次调用：${where} · 工具：${t.name}）`;
+                }
+            }
             return { text: normalized.text, contentParts: buildContentParts(normalized) };
-
         };
         mcpToolKeys.set(t.name, server.name);
         log.debug(`已注册 MCP 工具 ${t.name}`);

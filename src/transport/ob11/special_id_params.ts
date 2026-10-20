@@ -3,6 +3,7 @@
 // - 图片：get_image 的 file 传 [img:图片ID:描述] 或 6 位图片 ID → 还原为接收时的原始 file/url/path
 // - 语音：get_record 的 file 传 [record:句柄] 或 6 位句柄 → 还原为登记时的原始 file/url/path
 import Image from "../../resource/image";
+import { parseImageRef } from "../../resource/image_ref";
 import { resolveSpecialResourceByType } from "../../utils/special_id";
 import { transformMsgIdBack } from "../../utils/utils";
 
@@ -40,21 +41,18 @@ function normalizeMessageId(value: any): any {
     return String(backId);
 }
 
-/** 尝试把图片 ID（含 [img:图片ID:描述] 包裹）解析为协议端可用的 file/url；失败原样返回 */
+/**
+ * 尝试把图片引用（CIR：插件图片 ID / [img:<ref>] / 图床 h<sha> / 裸 sha / 头像）解析为协议端可用的 file/url；
+ * 图床引用没有协议端缓存文件，原样返回（由 validateSpecialIdParams 拦截并给出明确指引）。
+ */
 function resolveImageFile(value: any): any {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
-    let id = "";
-    const tagMatch = /^\[img:([^\]]+)\]$/i.exec(trimmed);
-    if (tagMatch) {
-        const content = tagMatch[1];
-        id = Image.get(content) ? content : (content.includes(":") && Image.get(content.split(":")[0]) ? content.split(":")[0] : "");
-    } else if (HANDLE_PATTERN.test(trimmed) && Image.get(trimmed)) {
-        id = trimmed;
-    }
-    if (!id) return value;
-    const image = Image.get(id);
+    if (!trimmed) return value;
+    const image = Image.resolveRef(trimmed);
     if (!image) return value;
+    // 图床/头像没有协议端缓存文件，也不是「file」可用值
+    if (image.hostedId || image.isAvatarImage) return value;
     let raw: any = null;
     if (image.raw) {
         try { raw = JSON.parse(image.raw); } catch { raw = null; }
@@ -101,6 +99,38 @@ export function validateSpecialIdParams(action: string, params: Record<string, a
             code: "INVALID_FILE",
             message: `${action} 的 file 不接受 URL：已有 url 直接用，不要调 ${action}；只有缓存文件名（如 xxx.image/voice.amr）或上下文短 ID/句柄才需要调用本接口`
         };
+    }
+
+    // get_image：先按 CIR 解析（[img:<ref>] / 图床 h<sha> / 裸 sha / 插件图片 ID / 头像）。
+    // 决策 A：图床/头像没有协议端缓存文件 → 明确报错，不下载、不落本地文件。
+    if (action === "get_image") {
+        // 图床引用即使未启用图床也按 CIR 识别（避免把 sha 当协议端缓存文件名外发）
+        const parsed = parseImageRef(trimmed);
+        if (parsed && parsed.kind === 'hosted') {
+            return {
+                ok: false,
+                code: "INVALID_FILE",
+                message: `图床图片没有协议端缓存文件（${trimmed}）：请直接用 URL 或回复 [img:<ref>] 发送；需要字节请用 image_view / image_to_text`
+            };
+        }
+        const cir = Image.resolveRef(trimmed);
+        if (cir) {
+            if (cir.hostedId) {
+                return {
+                    ok: false,
+                    code: "INVALID_FILE",
+                    message: `图床图片没有协议端缓存文件（${trimmed}）：请直接用 URL 或回复 [img:<ref>] 发送；需要字节请用 image_view / image_to_text`
+                };
+            }
+            if (cir.isAvatarImage) {
+                return {
+                    ok: false,
+                    code: "INVALID_FILE",
+                    message: `头像是公开 URL（${trimmed}）：请直接用 URL 或回复 [img:<ref>] 发送，没有协议端缓存文件`
+                };
+            }
+            return { ok: true };
+        }
     }
 
     // 上下文标签/短 ID/句柄 → 提取候选 ID；get_image 只认图片，get_record 只认语音

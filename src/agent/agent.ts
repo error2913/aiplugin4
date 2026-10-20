@@ -130,7 +130,7 @@ export default class Agent {
                 content: typeof this.instruction === 'function' ? this.instruction(this.sessionService) : this.instruction
             });
         }
-        messages.push({ role: 'user', content: model.isMultimodal ? await textToMultimodalContent(prompt) : prompt });
+        messages.push({ role: 'user', content: model.isMultimodal ? await textToMultimodalContent(prompt, { model }) : prompt });
         const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model, undefined, { use: this.use });
         return content;
     }
@@ -143,7 +143,7 @@ export default class Agent {
         const requestMessages: RequestMessage[] = model.isMultimodal
             ? await Promise.all(messages.map(async m => ({
                 role: m.role,
-                content: m.role === 'user' ? await textToMultimodalContent(m.content) : m.content
+                content: m.role === 'user' ? await textToMultimodalContent(m.content, { model }) : m.content
             })))
             : messages;
         const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model, undefined, { use: this.use });
@@ -248,7 +248,7 @@ export default class Agent {
             await session.flushNotices();
             // L2 记忆结算（P1-3）：三条件满足时把窗口外原文总结进长期记忆（有界、失败退避、不阻塞回复）
             await this.settleBacklog(session);
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded });
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded, model: Model.getChatModel('chat') || undefined });
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
             try {
@@ -419,9 +419,16 @@ export default class Agent {
         if (isImageDownloadFailure(e.message) && !handled.imageDegraded) {
             if (!ENABLED || imageUrls.length === 0) return 'giveup';
             handled.imageDegraded = true;
-            const marked = Image.markUrlBrokenByUrls(imageUrls);
-            log.warning(`[model-error] 模型无法下载上下文图片：已标记 ${marked}/${imageUrls.length} 张不可用，本轮改为文本标签重发`);
-            return 'retry';
+            const res = await Image.markModelDownloadFailures(imageUrls);
+            if (res.retryInline) {
+                log.warning(`[model-error] 模型无法下载图床图片：图片仍存在，已改用内联 base64 重发本轮（不影响后续 URL 恢复）`);
+                return 'retry';
+            }
+            if (res.marked > 0) {
+                log.warning(`[model-error] 模型无法下载上下文图片：已标记 ${res.marked}/${imageUrls.length} 张不可用，本轮改为文本标签重发`);
+                return 'retry';
+            }
+            return 'giveup';
         }
 
         // 动作三：余额不足/权限不足等（按「自动切换触发错误」配置）→ 切备用 chat 模型 → 自动重发
@@ -526,7 +533,7 @@ export default class Agent {
         for (let attempt = 0; attempt <= 1; attempt++) {
             try {
                 sys = sys ?? await buildSystemMessage(ctx, session);
-                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName, { imagesAsText: h.imageDegraded });
+                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName, { imagesAsText: h.imageDegraded, model: Model.getChatModel('chat') || undefined });
                 requestImages = collectImageUrls(messages);
                 const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
                 if (!newId) return;

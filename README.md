@@ -391,6 +391,8 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 图片全局识别豹语条件 | 填 `'1'` 开启所有图片自动识别转文字；或填豹语表达式限制群/用户范围 |
 | 识别图片时将url转换为base64 | 永不 / 自动 / 总是，解决大模型无法正常获取 QQ 图床图片的问题 |
 | 图片识别展示截断字数 | 图片识别转文字结果超过该字数时不再压缩，改为仅展示开头部分；完整识别原文保留，可用 `read_raw kind=image` 按图片 ID 阅读（0 为不截断不保留，默认 5000） |
+| 工具产出图片自动类型标签 | 生图/表情包/MCP 图片等工具产出的新图片入库时，按产出者自动打英文类型标签（`ai-generated` / `meme` / `mcp-image` / `tool-image`）；不调用识图模型（默认开） |
+| 自动类型标签每图上限 | 每张工具产出图片最多自动打几个类型标签（1~4，默认 2） |
 
 ### 工具
 
@@ -738,7 +740,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
 | 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
-| 图片 | `image_to_text`、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |
+| 图片 | `image_to_text`（文字描述，`ids[]`≤3）、`image_view`（多模态直接看，`ids[]`≤4；不支持视觉时降级）、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |
 | 多媒体 | `media_tasks`（查看/取消本会话的语音与图片生成任务队列） |
 | OB11 | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API；群资料、精华消息等均传入对应 action）、`resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |
 | 资源 | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（提交语音生成任务，立即返回任务号，完成后自动通知；传 `path` 时同步解析本地/MCP 音频资源）、`search_music`（返回 music 消息段，不直接发送） |

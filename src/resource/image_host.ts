@@ -13,6 +13,8 @@ import { logger } from "../logger";
 import { backendAuthHeaders } from "../utils/backend";
 import { isLoopbackUrl } from "../utils/url";
 
+import { isPrivateOrLoopbackUrl } from "./image_ref";
+
 export { isLoopbackUrl };
 
 const log = logger.withTag('image-host');
@@ -30,6 +32,12 @@ export interface ImageSource {
     session_id?: string;
     at?: number;
     raw_url?: string;
+    /** 产出工具（text_to_image / meme_generator / mcp ...）；元数据，不是标签 */
+    tool?: string;
+    /** MCP 服务器名；元数据，不是标签 */
+    server?: string;
+    /** 调用来源（tool / webui / plugin）；元数据 */
+    via?: string;
 }
 
 export interface HostItem {
@@ -89,6 +97,8 @@ function pickItem(data: any): HostItem | null {
 class _ImageHost {
     /** 最近一次请求失败原因（供上层区分永久性 4xx 与普通失败） */
     static lastError = '';
+    /** 最近一次请求的 HTTP 状态码（0 = 网络错误/超时）；用于区分 404 与“够不到” */
+    static lastStatus = 0;
     /** 上传并发上限：合并转发几十张图时不要一次打爆后端 */
     private static readonly MAX_UPLOAD_CONCURRENCY = 4;
     private static activeUploads = 0;
@@ -168,6 +178,30 @@ class _ImageHost {
         return hostedId ? this.absolute(`/i/${hostedId}/b64`) : '';
     }
 
+    /**
+     * 模型/上游是否可以直接用「图床对外地址」取图：
+     * - 对外地址为空（回环且无 publicUrl）→ 不可用，用 b64；
+     * - 对外地址是内网/回环，而模型端点是公网（云模型）→ 不可用，用 b64；
+     * - 对外地址是内网、模型端点也是内网/本机 → 可用；
+     * - 对外地址是公网域名/IP → 可用。
+     * 只做字面量判断，不做 DNS；域名按公网处理。
+     */
+    static canModelFetch(hostedId: string, modelBaseUrl?: string): string {
+        const base = this.externalBase;
+        if (!base || !hostedId) return '';
+        const publicHosted = !isPrivateOrLoopbackUrl(base);
+        if (!publicHosted) {
+            // 内网图床：只有模型端点也明确是内网/本机时才发 URL；端点未知按云模型处理（保守用 b64）
+            if (!modelBaseUrl || !isPrivateOrLoopbackUrl(modelBaseUrl)) return '';
+        }
+        return this.externalUrl(`/i/${hostedId}`);
+    }
+
+    /** 兼容旧命名：模型取图 URL（不可达返回空串） */
+    static urlForModel(hostedId: string, modelBaseUrl?: string): string {
+        return this.canModelFetch(hostedId, modelBaseUrl);
+    }
+
     private static headers(): Record<string, string> {
         return {
             'Content-Type': 'application/json',
@@ -180,6 +214,7 @@ class _ImageHost {
         const url = this.absolute(path);
         try {
             const response = await withDeadline(() => fetch(url, init), timeoutMs);
+            this.lastStatus = Number(response.status) || 0;
             const text = await response.text();
             if (!response.ok) {
                 const snippet = text.length > 160 ? `${text.slice(0, 160)}…` : text;
@@ -191,6 +226,7 @@ class _ImageHost {
             if (!text) return null;
             return JSON.parse(text);
         } catch (error) {
+            this.lastStatus = 0;
             const message = error instanceof Error ? error.message : String(error);
             this.lastError = message;
             log.warning(`${tag}请求出错：${message}`);
@@ -212,11 +248,12 @@ class _ImageHost {
         return ok;
     }
 
-    /** 按 URL 抓取入库 */
-    static async uploadByUrl(url: string, ref: string, source?: ImageSource): Promise<HostItem | null> {
+    /** 按 URL 抓取入库；tags 只放类型/内容标签（元数据走 source） */
+    static async uploadByUrl(url: string, ref: string, source?: ImageSource, tags?: string[]): Promise<HostItem | null> {
         if (!this.enabled || !url) return null;
         const body: any = { url, ref };
         if (source) body.source = source;
+        if (tags && tags.length) body.tags = tags;
         await this.acquireUploadSlot();
         try {
             const data = await this.requestJson('/api/upload',
@@ -228,11 +265,12 @@ class _ImageHost {
         }
     }
 
-    /** 直接上传 base64（生图结果等插件已经拿到字节的场景） */
-    static async uploadBase64(base64: string, format: string, ref: string, source?: ImageSource): Promise<HostItem | null> {
+    /** 直接上传 base64（生图结果等插件已经拿到字节的场景）；tags 只放类型/内容标签 */
+    static async uploadBase64(base64: string, format: string, ref: string, source?: ImageSource, tags?: string[]): Promise<HostItem | null> {
         if (!this.enabled || !base64) return null;
         const body: any = { base64, format: format || 'png', ref };
         if (source) body.source = source;
+        if (tags && tags.length) body.tags = tags;
         await this.acquireUploadSlot();
         try {
             const data = await this.requestJson('/api/upload',
