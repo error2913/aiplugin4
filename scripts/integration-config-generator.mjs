@@ -1203,12 +1203,15 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
         delete copy.enabled;
         return copy;
     };
-    /** 生成器内部字段是 platform，插件运行时字段是 platforms */
+    /** 生成器内部字段是 platform，插件运行时字段是 platforms；空的 resources 两边语义相同，比较时省略 */
     const toPluginShape = (item) => {
         const copy = stripEnabled(item);
         if (copy.platform !== undefined) {
             copy.platforms = copy.platform;
             delete copy.platform;
+        }
+        if (copy.resources && typeof copy.resources === 'object' && Object.keys(copy.resources).length === 0) {
+            delete copy.resources;
         }
         return copy;
     };

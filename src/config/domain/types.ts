@@ -30,17 +30,21 @@ export interface RolesConfig {
     roles: RoleEntry[];
 }
 
-/** 技能配置条目（JSON 字段：name / description / platform / content） */
+/** 技能配置条目（JSON 字段：name / description / platform / content / resources） */
 export interface SkillEntry {
     name: string;
     description: string;
     /** 平台白名单；空数组 = 所有平台 */
     platforms: string[];
     content: string;
+    /** 可选：附带的只读参考文件（相对路径 → 文本）；插件只读取展示，不执行 */
+    resources?: { [path: string]: string };
 }
 
 export interface SkillsConfig {
     version: number;
+    /** 是否自动补入缺失的出厂默认技能；缺省 true（JSON 字段 includeDefaults） */
+    includeDefaults: boolean;
     skills: SkillEntry[];
 }
 

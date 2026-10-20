@@ -845,6 +845,14 @@ export function stripRenderTags(s: string): string {
         .replace(new RegExp(`[[［][/／]?(?:${ALL_TAG_NAMES.join('|')}|user_avatar)[:：]?\\s?[^\\]］]*[\\]］]`, 'gi'), '')
         .trim();
 }
+/**
+ * 转义工具结果边界标记：避免工具/技能正文里的 [/tool_result] 提前闭合
+ * buildContent 给 tool 消息包的外层 [tool_result]…[/tool_result] 边界。
+ */
+export function escapeToolResultBoundary(text: string): string {
+    return String(text || '').replace(/\[(\/?)(tool_result)\b/gi, '\\[$1$2');
+}
+
 export function parseSpecialTokens(s: string): TokenSegment[] {
     const result: TokenSegment[] = [];
     // 转义感知：stripUserTags 转义的字面标签（\\[at:all]）不再当标签解析，按文本保留

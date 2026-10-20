@@ -11,20 +11,38 @@ import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 
 export const SKILLS_CONFIG_KEY = '技能列表';
 
+export interface SkillsConfigData {
+    SKILLS: SkillEntry[];
+    /** 是否自动补入缺失的出厂默认技能（JSON 字段 includeDefaults，缺省 true） */
+    INCLUDE_DEFAULTS: boolean;
+    /** 原始配置文本，供技能缓存做变化检测 */
+    RAW: string;
+    /** 本次原始文本是否解析成功（false = 保留上一份可用技能） */
+    VALID: boolean;
+}
+
 function fallbackSkills(): SkillEntry[] {
     return DEFAULT_SKILLS.map(s => ({ ...s, platforms: [...s.platforms] }));
 }
 
-function readSkills(): SkillEntry[] {
-    let text = '';
+/** 直接读取原始配置文本：绕过 60 秒 Config 缓存，供技能配置自动重载比对用 */
+export function readSkillsConfigRaw(): string | null {
     try {
-        text = seal.ext.getStringConfig(ext, SKILLS_CONFIG_KEY) ?? '';
+        return seal.ext.getStringConfig(ext, SKILLS_CONFIG_KEY) ?? '';
     } catch (e) {
         Logger.error(`读取配置项「${SKILLS_CONFIG_KEY}」失败: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
+    }
+}
+
+function readSkills(): SkillsConfigData {
+    const text = readSkillsConfigRaw();
+    if (text === null) {
+        return { SKILLS: [], INCLUDE_DEFAULTS: true, RAW: '', VALID: false };
     }
     if (!text.trim()) {
         Logger.warning(`「${SKILLS_CONFIG_KEY}」为空，已载入出厂技能。`);
-        return fallbackSkills();
+        return { SKILLS: fallbackSkills(), INCLUDE_DEFAULTS: true, RAW: '', VALID: true };
     }
     const result = parseSkillsConfig(text);
     for (const issue of result.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
@@ -32,9 +50,14 @@ function readSkills(): SkillEntry[] {
     if (!result.config) {
         Logger.error(`「${SKILLS_CONFIG_KEY}」校验失败（共 ${result.issues.length} 处），本次按空技能处理。`);
         Logger.error('提示：可用配置生成器生成后粘贴：https://error2913.github.io/aiplugin4-config/（「技能」页）。');
-        return [];
+        return { SKILLS: [], INCLUDE_DEFAULTS: true, RAW: text, VALID: false };
     }
-    return result.config.skills;
+    return {
+        SKILLS: result.config.skills,
+        INCLUDE_DEFAULTS: result.config.includeDefaults,
+        RAW: text,
+        VALID: true,
+    };
 }
 
 export default class SkillsConfig {
@@ -48,10 +71,7 @@ export default class SkillsConfig {
         );
     }
 
-    static get() {
-        return {
-            SKILLS: readSkills(),
-        };
+    static get(): SkillsConfigData {
+        return readSkills();
     }
 }
-

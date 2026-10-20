@@ -13,6 +13,15 @@ import {
 
 const MCP_TYPES = ['http', 'streamable-http'];
 const MAX_ROLE_NAME = 20;
+/** 技能描述超过该长度给 warning（注入摘要时按 SKILL_SUMMARY_DESC_MAX 截断） */
+const MAX_SKILL_DESC_WARN = 300;
+/** 技能名超过该长度给 warning（不截断，名称是 use_skill / .ai skill 的键） */
+const MAX_SKILL_NAME_WARN = 40;
+/** 单个技能资源的字符上限（use_skill 返回时截断） */
+const MAX_SKILL_RESOURCE_CHARS = 12000;
+/** 单个技能的资源数量警告阈值 */
+const MAX_SKILL_RESOURCES = 50;
+const MAX_SKILL_RESOURCE_KEY = 120;
 
 function isPlainObject(v: unknown): v is Record<string, any> {
     return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -128,7 +137,77 @@ export function parseRolesConfig(text: string): DomainParseResult<RolesConfig> {
     return { config: issues.length > 0 ? null : { version: DOMAIN_VERSION, roles }, issues, warnings };
 }
 
-/** 技能配置 → {version, skills:[{name,description,platform,content}]} */
+/** 是否含控制字符（换行/制表/空字符等） */
+function hasControlChar(s: string): boolean {
+    for (let i = 0; i < s.length; i++) {
+        const code = s.charCodeAt(i);
+        if (code < 0x20 || code === 0x7f) return true;
+    }
+    return false;
+}
+
+/** 归一化资源路径：统一用 /，去掉首尾空白 */
+function normalizeResourceKey(raw: string): string {
+    return String(raw ?? '').trim().replace(/\\/g, '/');
+}
+
+/** 校验资源相对路径；返回错误文案，合法返回 null */
+function resourceKeyProblem(key: string): string | null {
+    if (!key) return '资源路径不能为空';
+    if (key.length > MAX_SKILL_RESOURCE_KEY) return `资源路径超过 ${MAX_SKILL_RESOURCE_KEY} 字符`;
+    if (hasControlChar(key)) return '资源路径含控制字符';
+    if (key.startsWith('/') || /^[A-Za-z]:/.test(key)) return '资源路径必须是相对路径';
+    const parts = key.split('/');
+    if (parts.some(part => part === '' || part === '.' || part === '..')) {
+        return '资源路径不能包含空段 / . / ..';
+    }
+    return null;
+}
+
+/** 技能 resources：只读参考文件（相对路径 → 文本）；非法项按 warning 跳过，不整份拒绝 */
+function readSkillResources(
+    value: unknown,
+    path: string,
+    warnings: DomainIssue[],
+): { [path: string]: string } {
+    if (value === undefined || value === null) return {};
+    if (!isPlainObject(value)) {
+        warnings.push(issue(path, 'resources 必须是对象（相对路径 → 文本），已忽略'));
+        return {};
+    }
+    const out: { [path: string]: string } = {};
+    const keys = Object.keys(value);
+    if (keys.length > MAX_SKILL_RESOURCES) {
+        warnings.push(issue(path, `资源数量超过 ${MAX_SKILL_RESOURCES} 个：use_skill 只列前 ${MAX_SKILL_RESOURCES} 个`));
+    }
+    for (const rawKey of keys) {
+        const key = normalizeResourceKey(rawKey);
+        const problem = resourceKeyProblem(key);
+        if (problem) {
+            warnings.push(issue(`${path}.${rawKey}`, `${problem}，已跳过`));
+            continue;
+        }
+        const raw = value[rawKey];
+        if (typeof raw !== 'string' || !raw.trim()) {
+            warnings.push(issue(`${path}.${rawKey}`, '资源内容必须是非空字符串，已跳过'));
+            continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(out, key)) {
+            warnings.push(issue(`${path}.${rawKey}`, '资源路径归一化后重复，已跳过'));
+            continue;
+        }
+        if (raw.length > MAX_SKILL_RESOURCE_CHARS) {
+            warnings.push(issue(`${path}.${rawKey}`, `资源超过 ${MAX_SKILL_RESOURCE_CHARS} 字符：use_skill 返回时会截断`));
+        }
+        // 用 defineProperty 而不是 out[key]：资源名可能是 __proto__ 这类特殊键
+        Object.defineProperty(out, key, {
+            value: raw, enumerable: true, configurable: true, writable: true,
+        });
+    }
+    return out;
+}
+
+/** 技能配置 → {version, includeDefaults, skills:[{name,description,platform,content,resources}]} */
 export function parseSkillsConfig(text: string): DomainParseResult<SkillsConfig> {
     const { value, issues, empty } = parseJson(text);
     if (empty) return { config: null, issues: [], warnings: [] };
@@ -141,6 +220,14 @@ export function parseSkillsConfig(text: string): DomainParseResult<SkillsConfig>
     if (!Array.isArray(value.skills)) {
         return { config: null, issues: [issue('$.skills', 'skills 必须是数组')], warnings: [] };
     }
+    let includeDefaults = true;
+    if (value.includeDefaults !== undefined && value.includeDefaults !== null) {
+        if (typeof value.includeDefaults !== 'boolean') {
+            warnings.push(issue('$.includeDefaults', 'includeDefaults 必须是布尔值，已按 true 处理'));
+        } else {
+            includeDefaults = value.includeDefaults;
+        }
+    }
 
     const skills: SkillEntry[] = [];
     const names: string[] = [];
@@ -151,20 +238,37 @@ export function parseSkillsConfig(text: string): DomainParseResult<SkillsConfig>
             return;
         }
         const name = readName(item.name, `${path}.name`, issues);
+        if (name.length > MAX_SKILL_NAME_WARN) {
+            warnings.push(issue(`${path}.name`, `技能名超过 ${MAX_SKILL_NAME_WARN} 字符，建议缩短`));
+        }
+        if (hasControlChar(name)) {
+            warnings.push(issue(`${path}.name`, '技能名含换行/控制字符：展示时会被清理，但请避免'));
+        }
         if (item.description !== undefined && item.description !== null && typeof item.description !== 'string') {
             issues.push(issue(`${path}.description`, 'description 必须是字符串'));
         }
         const description = typeof item.description === 'string' ? item.description : '';
+        if (/[\r\n]/.test(description)) {
+            warnings.push(issue(`${path}.description`, '描述中的换行会在注入摘要时合并为空格'));
+        }
+        if (description.length > MAX_SKILL_DESC_WARN) {
+            warnings.push(issue(`${path}.description`, `描述超过 ${MAX_SKILL_DESC_WARN} 字符：注入摘要时会截断`));
+        }
         const platforms = readPlatform(item.platform, `${path}.platform`, issues);
         const content = readContent(item.content, `${path}.content`, issues, 'content');
         if (content.length > 12000) {
-            warnings.push(issue(`${path}.content`, '内容超过 12000 字符：use_skill 返回时会截断（配置仍完整保存）'));
+            warnings.push(issue(`${path}.content`, `内容超过 12000 字符：use_skill 返回时会截断（配置仍完整保存）`));
         }
+        const resources = readSkillResources(item.resources, `${path}.resources`, warnings);
         names.push(name);
-        skills.push({ name, description, platforms, content });
+        skills.push({ name, description, platforms, content, resources });
     });
     for (const dup of findDuplicates(names)) issues.push(issue('$.skills', `技能名重复：${dup}`));
-    return { config: issues.length > 0 ? null : { version: DOMAIN_VERSION, skills }, issues, warnings };
+    return {
+        config: issues.length > 0 ? null : { version: DOMAIN_VERSION, includeDefaults, skills },
+        issues,
+        warnings,
+    };
 }
 
 /**

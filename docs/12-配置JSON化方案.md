@@ -97,12 +97,16 @@ seal.ext.registerStringConfig(ext, '技能列表', DEFAULT_SKILLS_JSON, DESC, '�
 ```json
 {
   "version": 1,
+  "includeDefaults": true,
   "skills": [
     {
       "name": "录卡",
       "description": "把角色卡表格录入 SeaDice……",
       "platform": [],
-      "content": "# 录卡流程\n……"
+      "content": "# 录卡流程\n……",
+      "resources": {
+        "references/forms.md": "# 表单字段说明\n……"
+      }
     }
   ]
 }
@@ -111,11 +115,13 @@ seal.ext.registerStringConfig(ext, '技能列表', DEFAULT_SKILLS_JSON, DESC, '�
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `name` | 是 | 技能名，唯一；`use_skill` 按名称引用 |
-| `description` | 否 | 摘要；省略/空串 = 无描述 |
+| `description` | 否 | 摘要；省略/空串时由插件取正文首段作为注入摘要 |
 | `platform` | 否 | 平台白名单 |
 | `content` | 是 | SKILL.md 正文（不含 frontmatter） |
+| `resources` | 否 | 只读参考文件（相对路径 → 文本，如 `references/forms.md`）；插件只读取展示，不执行；非法路径按 warning 跳过 |
+| `includeDefaults`（顶层） | 否 | 是否补入缺失的出厂默认技能；缺省 `true`，设 `false` 后完全按配置来 |
 
-保留现有行为：**补入缺失的出厂默认技能**（用户配置里没有同名“录卡”时自动补，避免升级后新默认技能不可用）。`SKILL_INJECT_MAX_CHARS`、`SKILL_LIST_LIMIT` 等常量不变。
+行为：**默认补入缺失的出厂默认技能**（用户配置里没有同名“录卡”时自动补，避免升级后新默认技能不可用；可用 `includeDefaults: false` 关闭该行为）。注入预算 `SKILL_INJECT_MAX_CHARS=1500`、`SKILL_LIST_LIMIT=100`、单条描述 200 字符、单次返回 12000 字符；技能配置变化自动重新解析（解析失败保留上一份可用技能），也可用 `.ai skill refresh` 强制重解析。
 
 ### 4.3 MCP（标准 mcpServers 格式）
 

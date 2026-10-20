@@ -10,8 +10,8 @@ function helpText(): string {
     return `帮助: 技能管理
   【.ai skill list】列出当前平台可用的技能及会话开关状态
   【.ai skill on/off <技能名>】开启/关闭指定技能（按会话）
-  【.ai skill refresh】重新解析「技能配置」（骰主）
-  说明：技能开关按会话保存；平台限制来自技能 frontmatter 的 platform 字段`;
+  【.ai skill refresh】重新解析「技能列表」配置（骰主；平时配置变化也会自动生效）
+  说明：技能开关按会话保存；平台限制来自技能配置中的 platform 字段（JSON）`;
 }
 
 export function registerCmdSkill() {
@@ -62,6 +62,10 @@ export function registerCmdSkill() {
                 const known = getSkillNames();
                 if (!known.includes(name)) {
                     seal.replyToSender(ctx, msg, `技能 ${name} 不存在；用 .ai skill list 查看`);
+                    return ret;
+                }
+                if (!getSkillNames(platform).includes(name)) {
+                    seal.replyToSender(ctx, msg, `技能 ${name} 在当前平台不可用（platform 限制），无需开关`);
                     return ret;
                 }
                 if (op === 'on') {
