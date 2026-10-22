@@ -36,6 +36,11 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      # 依赖边界 ratchet：只拦"新增环 / 新增跨层依赖"，基线见 scripts/deps-baseline.json。
+      # 重构期间改善后可用 npm run deps:update 收紧基线（需在 PR 说明原因）。
+      - name: Dependency boundaries
+        run: npm run deps:check
+
       - name: Build and validate package
         run: npm run package:check
 

@@ -21,6 +21,9 @@
     "sim:matrix": "node scripts/sim-matrix.cjs",
     "fuzz": "node scripts/fuzz.cjs",
     "test:integration": "node scripts/integration-config-generator.mjs",
+    "deps:graph": "node scripts/deps-graph.mjs",
+    "deps:check": "node scripts/check-deps.mjs",
+    "deps:update": "node scripts/check-deps.mjs --update",
     "docs:build": "node docs-site/build.js",
     "docs:serve": "node docs-site/build.js --serve"
   },

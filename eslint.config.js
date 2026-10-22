@@ -77,5 +77,20 @@ module.exports = [
       'sort-imports': ['error', { ignoreDeclarationSort: true, ignoreCase: true }],
       'import/order': ['error', { 'newlines-between': 'always', alphabetize: { order: 'asc' } }]
     }
+  },
+
+  // 依赖边界（与 scripts/check-deps.mjs 的 ratchet 互补：这里给编辑器即时反馈）
+  // 基础层只允许同目录相对导入；需要宿主能力时走 src/core/host.ts 注入。
+  {
+    name: 'dependency-boundaries',
+    files: ['src/config/static_config/**/*.ts', 'src/core/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['../*', '../../*'],
+          message: '基础层（config/static_config、core）不得 import 上层模块；宿主能力请通过 src/core/host 注入。'
+        }]
+      }]
+    }
   }
 ];
