@@ -3,7 +3,7 @@
 // 条目由骰主用 .ai pub 维护，pub_read/pub_send 两个 AI 工具按目录读写。
 // 存储 key：pubSessions（JSON）。ID 不做格式假设：通常为平台前缀形态（如 QQ:xxx / QQ-Group:xxx），
 // 也接受非严格 UNI-ID 的字符串，按原样匹配与存储。
-import { ext } from "../config/config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
 import { getPlatform } from "../utils/target_id";
 import { generateId } from "../utils/utils";
@@ -61,7 +61,7 @@ function listEndpoints(): EndpointLike[] {
 function load(): { version: number; entries: PubSessionEntry[] } {
     if (cached) return cached;
     try {
-        const raw = ext.storageGet(STORAGE_KEY);
+        const raw = getHost().storage.get(STORAGE_KEY);
         if (raw) {
             const data = JSON.parse(raw);
             if (Array.isArray(data.entries)) {
@@ -79,7 +79,7 @@ function load(): { version: number; entries: PubSessionEntry[] } {
 function save() {
     if (!cached) return;
     try {
-        ext.storageSet(STORAGE_KEY, JSON.stringify(cached));
+        getHost().storage.set(STORAGE_KEY, JSON.stringify(cached));
     } catch (e) {
         log.exception('公开会话目录保存失败', e);
     }

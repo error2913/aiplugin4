@@ -1,6 +1,6 @@
 // 黑名单管理：按统一 ID（QQ:xxx / QQ-Group:xxx）拉黑用户或群，
 // 命中时忽略其消息/指令/戳一戳，使其无法触发 AI
-import { ext } from "./config/config";
+import { getHost } from "./core/host";
 import Logger from "./logger";
 import { fmtDate } from "./utils/string";
 import { revive, TypeDescriptor } from "./utils/utils";
@@ -24,7 +24,7 @@ export class BlockManager {
 
     static initBlockList() {
         try {
-            const data = JSON.parse(ext.storageGet('blacklist') || '{}');
+            const data = JSON.parse(getHost().storage.get('blacklist') || '{}');
             if (typeof data !== 'object' || Array.isArray(data)) throw new Error('blacklist不是对象');
 
             for (const key in data) {
@@ -38,7 +38,7 @@ export class BlockManager {
     }
 
     static saveBlockList() {
-        ext.storageSet('blacklist', JSON.stringify(this.blockList));
+        getHost().storage.set('blacklist', JSON.stringify(this.blockList));
     }
 
     static addBlock(id: string, reason: string) {

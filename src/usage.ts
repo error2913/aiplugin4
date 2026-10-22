@@ -1,6 +1,6 @@
 // token 用量统计：按模型按天记录，支持过期归并/汇总/图表
-import { ext } from "./config/config";
 import Config from "./config/config";
+import { getHost } from "./core/host";
 import { logger } from "./logger";
 import { backendAuthHeaders, backendAuthHint } from "./utils/backend";
 
@@ -19,7 +19,7 @@ export class UsageManager {
         if (!this.storeCache) {
             let parsed: any = {};
             try {
-                parsed = JSON.parse(ext.storageGet('usageMap') || '{}');
+                parsed = JSON.parse(getHost().storage.get('usageMap') || '{}');
             } catch (error) {
                 logger.error('从存储中获取 usageMap 失败:', error);
             }
@@ -167,7 +167,7 @@ export class UsageManager {
     }
 
     static saveUsageMap() {
-        ext.storageSet('usageMap', JSON.stringify(this.store));
+        getHost().storage.set('usageMap', JSON.stringify(this.store));
     }
 
     static clearUsageMap() {

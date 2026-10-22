@@ -2,6 +2,8 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 
+import "./test-host";
+
 import Config, { ext } from "../src/config/config";
 Config.registerConfig();
 

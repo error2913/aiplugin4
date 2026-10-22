@@ -1,5 +1,5 @@
 // token 估算自适应校准：用 API 返回的真实 prompt_tokens 对启发式估算做 EMA 修正。
-import { ext } from "./config/config";
+import { getHost } from "./core/host";
 import { logger } from "./logger";
 
 export interface TokenCalibrationState {
@@ -22,7 +22,7 @@ export class TokenCalibration {
     static getMap(): TokenCalibrationMap {
         if (!this.cache) {
             try {
-                this.cache = JSON.parse(ext.storageGet(STORAGE_KEY) || '{}') as TokenCalibrationMap;
+                this.cache = JSON.parse(getHost().storage.get(STORAGE_KEY) || '{}') as TokenCalibrationMap;
             } catch (error) {
                 logger.error('读取 tokenCalibration 失败，已重置:', error);
                 this.cache = {};
@@ -33,7 +33,7 @@ export class TokenCalibration {
     }
 
     static save() {
-        ext.storageSet(STORAGE_KEY, JSON.stringify(this.cache || {}));
+        getHost().storage.set(STORAGE_KEY, JSON.stringify(this.cache || {}));
     }
 
     /** 当前模型的校准系数；没有样本时默认 1 */
@@ -76,7 +76,7 @@ export class TokenCalibration {
         map[modelName] = {
             factor,
             sampleCount: current.sampleCount + 1,
-            updatedAt: Date.now()
+            updatedAt: getHost().clock.now()
         };
         this.save();
     }

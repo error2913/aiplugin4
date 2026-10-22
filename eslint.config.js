@@ -83,7 +83,8 @@ module.exports = [
   // 基础层只允许同目录相对导入；需要宿主能力时走 src/core/host.ts 注入。
   {
     name: 'dependency-boundaries',
-    files: ['src/config/static_config/**/*.ts', 'src/config/ext.ts', 'src/core/**/*.ts'],
+    // host.ts 是纯接口层，禁止 import 上层；seal_host.ts 是受控适配器（唯一允许读 ext 的宿主实现）。
+    files: ['src/config/static_config/**/*.ts', 'src/config/ext.ts', 'src/core/host.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{

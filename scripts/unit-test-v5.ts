@@ -7,6 +7,8 @@
 // "读旧→转换→写新"的第三步永远做不到），因此本文件没有迁移相关用例。
 import assert from 'node:assert/strict';
 
+import './test-host';
+
 import { PROVIDER_MAP } from '../src/config/static_config/providers';
 import { adaptV5 } from '../src/config/v5/adapt';
 import {

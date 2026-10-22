@@ -2,6 +2,8 @@
 // 运行：npm run test:unit（由 scripts/test-unit.cjs 打包）
 import assert from 'node:assert/strict';
 
+import './test-host';
+
 import Config from '../src/config/config';
 import { BACKEND_NAMES, DEFAULT_BACKENDS, parseBackendConfig, resolveBackendEndpoints } from '../src/config/domain/backend';
 

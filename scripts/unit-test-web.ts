@@ -5,6 +5,8 @@
 // 运行：npm run test:unit（由 scripts/test-unit.cjs 打包）
 import assert from 'node:assert/strict';
 
+import './test-host';
+
 import { resolveWebConfig } from '../src/web/schema';
 import { ADAPTERS, getAdapter } from '../src/web/presets';
 import { normalizeWebDefaults, parseWebConfig } from '../src/web/schema';

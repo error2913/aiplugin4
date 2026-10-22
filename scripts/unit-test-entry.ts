@@ -2,6 +2,8 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 
+import { installTestHost } from "./test-host";
+
 import Config, { ext } from "../src/config/config";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
@@ -25,6 +27,7 @@ import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { getSession, SessionService } from "../src/session/session_service";
 import { registerSubCommands, registerAllCmds } from "../src/cmd/bootstrap";
+import { setHost } from "../src/core/host";
 import { SubCmd } from "../src/cmd/root_cmd";
 import { defaultCmdPriv, U } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
@@ -13214,6 +13217,35 @@ Object.assign(tests, {
         } finally {
             delete TC.templateConfigs['__probe_regex'];
             console.error = origError;
+        }
+    },
+
+    /** HostSeam：注入内存存储 + 固定时钟后，TokenCalibration 的读写与时间戳都走注入实现 */
+    testHostStorageInjectionAndClock(): void {
+        const store = new Map<string, string>();
+        setHost({
+            storage: {
+                get: (key) => store.get(key) ?? null,
+                set: (key, value) => { store.set(key, value); },
+            },
+            clock: { now: () => 1_000_000 },
+            fetch: (url, init) => fetch(url, init),
+            ext,
+        });
+        try {
+            TokenCalibration.resetForTest();
+            TokenCalibration.record('host-probe', 100, 150);
+            const raw = store.get('tokenCalibration');
+            assert.ok(raw, '校准数据应写入注入的存储');
+            const saved = JSON.parse(raw as string);
+            assert.ok(saved['host-probe'].factor > 1, '首次样本应按真实比例校准');
+            assert.strictEqual(saved['host-probe'].updatedAt, 1_000_000, 'updatedAt 应使用注入时钟');
+
+            TokenCalibration.resetForTest();
+            assert.ok(TokenCalibration.getFactor('host-probe') > 1, '应能从注入存储重新读取校准系数');
+        } finally {
+            TokenCalibration.resetForTest();
+            installTestHost();
         }
     },
 });

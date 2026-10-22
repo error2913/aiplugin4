@@ -9,6 +9,8 @@ import { PrivilegeManager } from "./cmd/privilege";
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
+import { setHost } from "./core/host";
+import { createSealHost } from "./core/seal_host";
 import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
@@ -25,6 +27,9 @@ import { normalizeMsgId } from "./utils/utils";
 const log = logger.withTag('main');
 
 function main() {
+  // HostSeam 必须先装配：后续所有模块的存储/时钟/网络都经宿主端口
+  setHost(createSealHost());
+
   Handlebars.registerHelper('index', (index: number) => index + 1);
   Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));
   Handlebars.registerHelper('time', (t: number) => fmtDate(t));

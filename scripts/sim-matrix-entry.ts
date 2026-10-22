@@ -16,6 +16,7 @@
  *   INV-3 消息相对顺序不得乱（按 messageId/time 单调）
  *   INV-4 messages 里的条目不得凭空消失或重复（除非被显式移出且已留档）
  */
+import "./test-host";
 import Config from "../src/config/config";
 import { ext } from "../src/config/config";
 import { Context } from "../src/context/context";

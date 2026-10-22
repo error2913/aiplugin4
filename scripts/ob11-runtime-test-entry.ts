@@ -1,3 +1,4 @@
+import "./test-host";
 import Config from "../src/config/config";
 Config.registerConfig();
 export { dispatchOb11Api } from "../src/transport/ob11/dispatcher";
