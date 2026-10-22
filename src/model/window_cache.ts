@@ -6,14 +6,14 @@
 //   海豹 storage 是叠加式，分多键反而多占空间，且这份数据整体很小。
 // - **纯缓存**：读写失败一律按"没有"处理，绝不抛给调用方、绝不影响主流程。
 // - 读写函数与纯计算（resolveEffectiveMaxTokens）分离在 api_error.ts，便于单元测试。
-import { ext } from "../config/config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
 
 const MODEL_WINDOW_KEY = 'modelContextWindows';
 
 function loadWindowCache(): { [model: string]: number } {
     try {
-        const raw = ext.storageGet(MODEL_WINDOW_KEY);
+        const raw = getHost().storage.get(MODEL_WINDOW_KEY);
         const parsed = raw ? JSON.parse(raw) : {};
         return parsed && typeof parsed === 'object' ? parsed as { [model: string]: number } : {};
     } catch {
@@ -36,7 +36,7 @@ export function rememberProbedContextWindow(modelName: string, windowTokens: num
         const cache = loadWindowCache();
         if (cache[modelName] === windowTokens) return;
         cache[modelName] = windowTokens;
-        ext.storageSet(MODEL_WINDOW_KEY, JSON.stringify(cache));
+        getHost().storage.set(MODEL_WINDOW_KEY, JSON.stringify(cache));
     } catch (e) {
         // 缓存写失败不影响主流程
         logger.warning('记录模型窗口缓存失败: ' + (e instanceof Error ? e.message : String(e)));

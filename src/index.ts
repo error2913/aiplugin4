@@ -9,7 +9,7 @@ import { PrivilegeManager } from "./cmd/privilege";
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
-import { setHost } from "./core/host";
+import { getHost, setHost } from "./core/host";
 import { createSealHost } from "./core/seal_host";
 import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
@@ -51,9 +51,9 @@ function main() {
   MessagePipeline.subscribeOb11Receive();
 
   // 存储版本标记：结构变更时递增，供后续迁移使用
-  const storedVersion = parseInt(ext.storageGet('storage_version') || '0');
+  const storedVersion = parseInt(getHost().storage.get('storage_version') || '0');
   if (storedVersion < STORAGE_VERSION) {
-    ext.storageSet('storage_version', String(STORAGE_VERSION));
+    getHost().storage.set('storage_version', String(STORAGE_VERSION));
     log.info(`存储版本升级: ${storedVersion} -> ${STORAGE_VERSION}`);
   }
 

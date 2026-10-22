@@ -1,3 +1,5 @@
+import Config from "../config/config";
+import { getHost } from "../core/host";
 // 图片清理与图床对账：
 //   1. trim：删除超过「图片清理天数」未使用的图片记录（内存里正在用的跳过），并通知图床释放 ref
 //   2. flushPending：图床暂时不可用时，释放失败的 ref 存待补发队列，下次再试
@@ -5,7 +7,6 @@
 //
 // 交叉清理的前提：插件的「删除」只发生在自己这条时间线上；图床侧的删除永远先看引用计数，
 // 一条 ref 被释放不会带走还有别的 ref 的字节。两边都按 ref 幂等处理，重复释放只是 released=0。
-import Config, { ext } from "../config/config";
 import { logger } from "../logger";
 
 import Image from "./image";
@@ -44,7 +45,7 @@ function isTransientId(imageId: string): boolean {
 
 function readPending(): string[] {
     try {
-        const raw = ext.storageGet(PENDING_KEY);
+        const raw = getHost().storage.get(PENDING_KEY);
         if (!raw) return [];
         const data = JSON.parse(raw);
         return Array.isArray(data) ? data.filter((x: any) => typeof x === 'string' && x) : [];
@@ -54,7 +55,7 @@ function readPending(): string[] {
 }
 
 function writePending(refs: string[]): void {
-    ext.storageSet(PENDING_KEY, JSON.stringify(Array.from(new Set(refs)).slice(0, MAX_PENDING)));
+    getHost().storage.set(PENDING_KEY, JSON.stringify(Array.from(new Set(refs)).slice(0, MAX_PENDING)));
 }
 
 function chunk<T>(list: T[], size: number): T[][] {
@@ -87,7 +88,7 @@ class _ImageGC {
         const stale = this.collectStale(Number(days) || 0);
         if (!stale.length) return 0;
         for (const id of stale) {
-            ext.storageSet(`image_${id}`, '');
+            getHost().storage.set(`image_${id}`, '');
             ImageIndex.remove(id);
             delete Image.imageMap[id];
         }
@@ -159,19 +160,19 @@ class _ImageGC {
     /** 消费图床变更日志；返回标记失效的图片数 */
     static async syncChanges(): Promise<number> {
         if (!ImageHost.enabled) return 0;
-        let cursor = parseInt(ext.storageGet(CURSOR_KEY) || '0') || 0;
+        let cursor = parseInt(getHost().storage.get(CURSOR_KEY) || '0') || 0;
         let marked = 0;
         for (let round = 0; round < 20; round++) {
             const data = await ImageHost.fetchChanges(cursor, 500);
             if (!data) return marked;
             if (data.reset) {
                 // 日志已被裁掉：这一轮没法补，接受当前 head，下轮从新事件开始
-                ext.storageSet(CURSOR_KEY, String(data.cursor));
+                getHost().storage.set(CURSOR_KEY, String(data.cursor));
                 return marked;
             }
             for (const ev of data.events) marked += this.handleEvent(ev);
             cursor = data.cursor;
-            ext.storageSet(CURSOR_KEY, String(cursor));
+            getHost().storage.set(CURSOR_KEY, String(cursor));
             if (data.events.length < 500) break;
         }
         if (marked) log.info(`图床删除对账：标记 ${marked} 张图片不可用`);

@@ -1,7 +1,7 @@
 // 版本校验与更新日志展示
 import { changelog } from "../changelog";
-import { ext } from "../config/config";
 import { VERSION } from "../config/static_config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
 
 /**
@@ -32,11 +32,11 @@ export function compareVersions(version1: string, version2: string): number {
 }
 
 export function checkUpdate() {
-    const oldVersion = ext.storageGet("version") || "0.0.0";
+    const oldVersion = getHost().storage.get("version") || "0.0.0";
 
     try {
         if (compareVersions(oldVersion, VERSION) < 0) {
-            ext.storageSet("version", VERSION);
+            getHost().storage.set("version", VERSION);
             const info = [];
             for (const v in changelog) {
                 if (compareVersions(oldVersion, v) >= 0) {

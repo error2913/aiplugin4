@@ -1,6 +1,7 @@
+import Config from '../../config/config';
+import { getHost } from "../../core/host";
 // 子代理运行时接线（对接层）：ext 存储 KV + spawn/fork executor + notice 投递 + 唤醒决策 + jobs 单例。
 // 工具层调用 getSubAgentService()/getSubAgentJobs()；本文件引入运行时模块，不参与机制层纯单测。
-import Config, { ext } from '../../config/config';
 import Logger from '../../logger';
 import type { Session } from '../../session/session';
 import { getSession } from '../../session/session_service';
@@ -49,10 +50,10 @@ let wireOptions: SubAgentWireOptions = {};
 function extKv(): KvLike {
     return {
         get: key => {
-            const v = ext.storageGet(key);
+            const v = getHost().storage.get(key);
             return v === null || v === '' ? null : v;
         },
-        set: (key, value) => ext.storageSet(key, value),
+        set: (key, value) => getHost().storage.set(key, value),
     };
 }
 
@@ -118,7 +119,7 @@ function noticeSink(parentSessionId: string, text: string, childId?: string): vo
 function contextNoticeChildIds(parentSessionId: string): Set<string> {
     const ids = new Set<string>();
     try {
-        const raw = ext.storageGet(`session_${parentSessionId}`);
+        const raw = getHost().storage.get(`session_${parentSessionId}`);
         if (raw === null || raw === '') return ids;
         const data = JSON.parse(raw);
         const messages = Array.isArray(data?.context?.messages) ? data.context.messages

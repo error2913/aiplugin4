@@ -1,9 +1,9 @@
 // 会话：聊天编排（chat/chatStream/回复/接收）、设定、工具状态与活跃时间
 import Agent from "../agent/agent";
 import { streamService } from "../agent/stream";
-import { ext } from "../config/config";
 import Config from "../config/config";
 import { Context } from "../context/context";
+import { getHost } from "../core/host";
 import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
@@ -354,7 +354,7 @@ export class Session {
             clearTimeout(this.saveTimer);
             this.saveTimer = null;
         }
-        ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
+        getHost().storage.set(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
         this.lastSaveAt = now;
         this.saveDeferCount = 0;
     }
@@ -399,12 +399,12 @@ export class Session {
             epId: p.epId,
             isPrivate: p.isPrivate,
         }));
-        ext.storageSet(Session.pendingKey(this.sessionId), JSON.stringify(light));
+        getHost().storage.set(Session.pendingKey(this.sessionId), JSON.stringify(light));
     }
 
     /** 清空挂起队列分片：空队列即清空存档，避免重载后残留脏数据复活 */
     clearPending() {
-        ext.storageSet(Session.pendingKey(this.sessionId), '');
+        getHost().storage.set(Session.pendingKey(this.sessionId), '');
     }
 
     get curActiveTimeSegIndex(): number {

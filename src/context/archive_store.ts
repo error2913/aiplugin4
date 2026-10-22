@@ -1,3 +1,5 @@
+
+import { getHost } from "../core/host";
 // 归档/原文分片存储：把"移出上下文"的群聊原文按批写进独立 key，供 read_raw / grep_raw 按需回查。
 //
 // 为什么是分片而不是塞回 session：
@@ -11,7 +13,6 @@
 //   - `arc` = **归档**（token 超限触发，`archiveSeq` 水位）
 //   - `raw` = **窗口移出**（窗口上限触发，`rawSeq` 水位）
 // 二者都只是"原文留档"，对模型不可见，共用同一套读写函数（键前缀参数化）。
-import { ext } from "../config/config";
 
 /** 分片种类：arc=归档（token 超限）/ raw=窗口移出（窗口上限） */
 export type ShardKind = 'arc' | 'raw';
@@ -48,7 +49,7 @@ export function shardKey(sessionId: string, seq: number, kind: ShardKind = 'arc'
 export function readShard(sessionId: string, seq: number, kind: ShardKind = 'arc'): ArchiveShard | null {
     if (!sessionId || seq <= 0) return null;
     try {
-        const raw = ext.storageGet(shardKey(sessionId, seq, kind));
+        const raw = getHost().storage.get(shardKey(sessionId, seq, kind));
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed || !Array.isArray(parsed.items)) return null;
@@ -87,12 +88,12 @@ export function writeShardIfAbsent(
     // 抛异常 → 无法区分"不存在"与"读失败"，**按不存在继续写入**（否则新分片永远写不进去）。
     // 真正的覆盖防护由 knownExists 水位承担；此处只处理"水位落后于实际分片"的窄缝。
     try {
-        if (ext.storageGet(key)) return 'exists';
+        if (getHost().storage.get(key)) return 'exists';
     } catch {
         // 见上：不存在是常态（必然抛异常），继续写入
     }
     try {
-        ext.storageSet(key, JSON.stringify(shard));
+        getHost().storage.set(key, JSON.stringify(shard));
         return 'written';
     } catch {
         return 'failed';
@@ -103,7 +104,7 @@ export function writeShardIfAbsent(
 export function clearShard(sessionId: string, seq: number, kind: ShardKind = 'arc'): void {
     if (!sessionId || seq <= 0) return;
     try {
-        ext.storageSet(shardKey(sessionId, seq, kind), '');
+        getHost().storage.set(shardKey(sessionId, seq, kind), '');
     } catch {
         // 清理失败不影响主流程
     }

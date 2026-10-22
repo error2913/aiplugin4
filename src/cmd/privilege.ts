@@ -1,6 +1,6 @@
 // 命令权限系统：命令权限定义、存储与校验
-import { ext } from "../config/config";
 import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
 import { Session } from "../session/session";
 import { aliasToCmd } from "../utils/utils";
@@ -25,7 +25,7 @@ export class PrivilegeManager {
 
     static reviveCmdPriv() {
         try {
-            const cmdPriv = JSON.parse(ext.storageGet('cmdPriv') || '{}');
+            const cmdPriv = JSON.parse(getHost().storage.get('cmdPriv') || '{}');
             if (typeof cmdPriv === 'object' && !Array.isArray(cmdPriv)) {
                 this.cmdPriv = this.updateCmdPriv(cmdPriv, JSON.parse(JSON.stringify(defaultCmdPriv)));
                 this.saveCmdPriv();
@@ -38,7 +38,7 @@ export class PrivilegeManager {
     }
 
     static saveCmdPriv() {
-        ext.storageSet('cmdPriv', JSON.stringify(this.cmdPriv));
+        getHost().storage.set('cmdPriv', JSON.stringify(this.cmdPriv));
     }
 
     static updateCmdPriv(cp: CmdPriv, defaultCp: CmdPriv): CmdPriv {

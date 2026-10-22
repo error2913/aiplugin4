@@ -10,7 +10,7 @@
 // 落盘策略：队列里只存句柄/短摘要（本地文件路径、Image imageId、url），绝不存 base64，
 // 避免 ext.storageSet 与会话存档被撑爆；原始 base64 在 run() 作用域内落地后即弃。
 import Config from "../config/config";
-import { ext } from "../config/config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
 import { MediaResult } from "../model/media";
 import Model, { ModelEntry } from "../model/model";
@@ -149,7 +149,7 @@ export class MediaTaskManager {
         if (this.loaded) return;
         this.loaded = true;
         try {
-            const raw = ext.storageGet('mediaTaskQueue');
+            const raw = getHost().storage.get('mediaTaskQueue');
             const data = raw ? JSON.parse(raw) : [];
             if (Array.isArray(data)) {
                 for (const item of data) {
@@ -185,7 +185,7 @@ export class MediaTaskManager {
 
     private static save(): void {
         try {
-            ext.storageSet('mediaTaskQueue', JSON.stringify(this.tasks));
+            getHost().storage.set('mediaTaskQueue', JSON.stringify(this.tasks));
         } catch (e) {
             log.error(`保存媒体任务队列失败：${e instanceof Error ? e.message : String(e)}`);
         }

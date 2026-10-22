@@ -1,6 +1,7 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
-import Config, { ext } from "../config/config";
+import Config from "../config/config";
 import { savePurposeModelOverrides } from "../config/configs/model";
+import { getHost } from "../core/host";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
 import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL, parseMaxContextTokens } from "../model/api_error";
@@ -659,7 +660,7 @@ export default class Agent {
         if (!Object.prototype.hasOwnProperty.call(this.agentMap, name)) {
             let agent = new Agent();
             try {
-                const data = JSON.parse(ext.storageGet(`agent_${name}`) || '{}');
+                const data = JSON.parse(getHost().storage.get(`agent_${name}`) || '{}');
                 agent = revive(Agent, data);
             } catch (error) {
                 log.exception('加载智能体' + name, error);
@@ -672,7 +673,7 @@ export default class Agent {
     }
 
     static save(agent: Agent) {
-        ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
+        getHost().storage.set(`agent_${agent.name}`, JSON.stringify(agent));
     }
 
     /** 枚举全部已加载的智能体实例（供 .ai live all 汇总全局活跃会话） */

@@ -1,6 +1,6 @@
 // 图片资源：URL/base64/本地路径图片，图片识别与存储
-import { ext } from "../config/config";
 import Config from "../config/config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
 import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
@@ -765,7 +765,7 @@ export default class Image {
         if (!Object.prototype.hasOwnProperty.call(this.imageMap, imageId)) {
             let img = new Image();
             try {
-                const text = ext.storageGet(`image_${imageId}`);
+                const text = getHost().storage.get(`image_${imageId}`);
                 if (!text) return null;
                 const data = JSON.parse(text || '{}');
                 img = revive(Image, data);
@@ -796,10 +796,10 @@ export default class Image {
         }
         // 有图床时不再持久化 base64（内存里可留一份给本轮请求用）：字节在图床，模型按需从 b64 出口取
         if (ImageHost.enabled && img.hostedId) {
-            ext.storageSet(`image_${img.imageId}`, JSON.stringify({ ...img, base64: '' }));
+            getHost().storage.set(`image_${img.imageId}`, JSON.stringify({ ...img, base64: '' }));
             return;
         }
-        ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
+        getHost().storage.set(`image_${img.imageId}`, JSON.stringify(img));
     }
 
     static getUserAvatar(uid: string): Image {

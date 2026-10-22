@@ -1,3 +1,4 @@
+import { getHost } from "../../core/host";
 // 模型配置（v5）：单个 JSON 框承载全部模型配置。
 //
 // 规范见 docs/05 模型配置。**取代**（而非兼容）v4 的「api连接」+「模型规则」两个 TOML 框：
@@ -72,7 +73,7 @@ export function setModelListDepsForTest(opts?: { fetch?: ListFetchFn }): void {
 
 export function loadPurposeModelOverrides(): Partial<Record<ModelUse, string>> {
     try {
-        const raw = ext.storageGet(MODEL_PURPOSE_OVERRIDES_KEY);
+        const raw = getHost().storage.get(MODEL_PURPOSE_OVERRIDES_KEY);
         if (!raw) return {};
         const data = JSON.parse(raw);
         return data && typeof data === 'object' ? data : {};
@@ -83,7 +84,7 @@ export function loadPurposeModelOverrides(): Partial<Record<ModelUse, string>> {
 }
 
 export function savePurposeModelOverrides(): void {
-    ext.storageSet(MODEL_PURPOSE_OVERRIDES_KEY, JSON.stringify(Model.purposeModelOverrides));
+    getHost().storage.set(MODEL_PURPOSE_OVERRIDES_KEY, JSON.stringify(Model.purposeModelOverrides));
 }
 
 /** 安全读字符串配置：未注册/类型不符时返回 ''，不让插件启动崩掉 */

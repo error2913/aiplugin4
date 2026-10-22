@@ -1,5 +1,5 @@
 // 定时器模块：目标/间隔/活跃时间段/WAIT轮末 四类定时任务的调度与持久化
-import { ext } from "./config/config";
+import { getHost } from "./core/host";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { Session } from "./session/session";
@@ -53,7 +53,7 @@ export class TimerManager {
 
     static getTimerQueue() {
         try {
-            const data = JSON.parse(ext.storageGet(`timerQueue`) || '[]')
+            const data = JSON.parse(getHost().storage.get(`timerQueue`) || '[]')
             if (!Array.isArray(data)) throw new Error('timerQueue不是数组');
             data.forEach((item: any) => {
                 // 旧实现的过滤条件用 sessionId/sessionType 字段名，与 TimerInfo 的 sid/isPrivate 不一致，导致重载后队列恒空；改为校验实际存档字段 sid
@@ -66,7 +66,7 @@ export class TimerManager {
     }
 
     static saveTimerQueue() {
-        ext.storageSet(`timerQueue`, JSON.stringify(this.timerQueue));
+        getHost().storage.set(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
     static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string) {
