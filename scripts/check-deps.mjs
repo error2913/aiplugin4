@@ -62,11 +62,15 @@ function regressionsOf(previous, state) {
 if (update) {
     const previous = fs.existsSync(BASELINE_FILE) ? JSON.parse(fs.readFileSync(BASELINE_FILE, 'utf8')) : null;
     const state = currentState();
-    // retiredEdges 只增不减：上一版存在、现在消失的边全部并入冻结名单
+    // retiredEdges 只增不减；但"当前真实存在"的边必须剔除——
+    // 否则 --allow-grow 有意恢复某条边后，基线会同时把它列进 edges 与 retiredEdges，
+    // 导致之后每次 deps:check 都报"恢复已删除依赖"（死循环）。
     const prevRetired = previous?.retiredEdges ?? [];
     const prevEdges = previous?.edges ?? [];
     const newlyRetired = prevEdges.filter((e) => !currentEdgeSet.has(e));
-    state.retiredEdges = [...new Set([...prevRetired, ...newlyRetired])].sort();
+    state.retiredEdges = [...new Set([...prevRetired, ...newlyRetired])]
+        .filter((e) => !currentEdgeSet.has(e))
+        .sort();
 
     const regressions = regressionsOf(previous, state);
     if (regressions.length && !allowGrow) {
