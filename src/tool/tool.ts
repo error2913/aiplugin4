@@ -8,7 +8,7 @@ import { fixJsonString } from "../utils/string";
 import { matchesPlatform } from "../utils/target_id";
 import { StopError, withTimeout } from "../utils/utils";
 
-import { toolMap } from "./registry";
+import { clearToolMap, toolMap } from "./registry";
 import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolSolveContent } from "./types";
 
 // 兼容旧引用：toolMap 已迁至 ./registry（实现侧请直接 import ./registry）
@@ -155,7 +155,7 @@ export default class Tool {
 
     /** 清空工具注册表（用于测试/热重载） */
     static reset() {
-        for (const key of Object.keys(toolMap)) delete toolMap[key];
+        clearToolMap();
     }
 
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {

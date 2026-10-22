@@ -6,22 +6,7 @@ import type Tool from "./tool";
 
 export const toolMap: { [key: string]: Tool } = {};
 
-/** 工具是否已注册（避免直接碰 toolMap 的 hasOwnProperty 样板） */
-export function hasTool(name: string): boolean {
-    return Object.prototype.hasOwnProperty.call(toolMap, name);
-}
-
-/** 取工具实例；未注册返回 undefined */
-export function getTool(name: string): Tool | undefined {
-    return toolMap[name];
-}
-
-/** 已注册工具名列表 */
-export function toolNames(): string[] {
-    return Object.keys(toolMap);
-}
-
-/** 清空注册表（用于测试/热重载） */
+/** 清空注册表（用于测试/热重载；替代直接遍历 toolMap 的样板） */
 export function clearToolMap(): void {
     for (const key of Object.keys(toolMap)) delete toolMap[key];
 }

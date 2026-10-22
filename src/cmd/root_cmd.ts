@@ -40,6 +40,11 @@ export class SubCmd {
     static map: { [key: string]: SubCmd } = {};
 }
 
+/**
+ * 注册根命令 .ai，并把命令对象写入 ext.cmdMap。
+ * 仅供 src/cmd/bootstrap.ts 的 registerAllCmds() 调用：它负责先注册全部子命令、
+ * 汇总 defaultCmdPriv.ai.args；单独调用本函数会得到空 help 与空的子命令权限表。
+ */
 export function registerCmd() {
     const cmd = seal.ext.newCmdItemInfo();
     cmd.name = 'ai';

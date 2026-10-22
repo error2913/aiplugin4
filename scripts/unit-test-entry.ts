@@ -18,10 +18,13 @@ import { backendAuthHeaders, backendAuthHint, backendStatusHint } from "../src/u
 import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerRawToolSet } from "../src/tool/tools/raw/init";
 import { registerImageTools } from "../src/tool/tools/image/init";
+import { registerAllTools } from "../src/tool/bootstrap";
+import { getRegexConfig } from "../src/config/regex";
+import { ext } from "../src/config/ext";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { getSession, SessionService } from "../src/session/session_service";
-import { registerSubCommands } from "../src/cmd/bootstrap";
+import { registerSubCommands, registerAllCmds } from "../src/cmd/bootstrap";
 import { SubCmd } from "../src/cmd/root_cmd";
 import { defaultCmdPriv, U } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
@@ -63,7 +66,7 @@ import { getProbedContextWindow, rememberProbedContextWindow } from "../src/mode
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
-import Logger from "../src/logger";
+import Logger, { setLoggerConfigProvider } from "../src/logger";
 import { fetchModelList, ModelListResult } from "../src/model/list";
 import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
 import { isIgnoredConfig } from "../src/model/model";
@@ -13128,3 +13131,89 @@ async function runSubCmd(name: string, args: string[], sccOver: any = {}, kwargs
     }
     return replied;
 }
+
+// ===== 解耦改造回归用例：装配入口完整性 / 幂等 / logger provider / 正则回退 =====
+Object.assign(tests, {
+    /** registerAllTools：核心工具齐备，重复装配不累积 */
+    testRegisterAllToolsIdempotent(): void {
+        registerAllTools();
+        for (const name of ['list_tools', 'search_tools', 'call_tool', 'use_skill']) {
+            assert.ok(toolMap[name], `${name} 应已注册`);
+        }
+        const snapshot = Object.keys(toolMap).sort();
+        registerAllTools();
+        assert.deepStrictEqual(Object.keys(toolMap).sort(), snapshot, '重复装配不应累积工具');
+    },
+
+    /** registerAllCmds：根命令写入 ext.cmdMap、help 覆盖全部子命令、权限表键数一致，重复装配不累积 */
+    testRegisterAllCmdsRegistersRootCommand(): void {
+        const beforeMap = { ...SubCmd.map };
+        const beforeAiArgs = defaultCmdPriv.ai.args;
+        const beforeCmdMap = { ...((ext as any).cmdMap ?? {}) };
+        try {
+            registerAllCmds();
+            const cmd = (ext as any).cmdMap?.ai;
+            assert.ok(cmd, '根命令 .ai 应写入 ext.cmdMap');
+            const help = String(cmd.help ?? '');
+            for (const name of Object.keys(SubCmd.map)) {
+                assert.ok(help.includes(name), `.ai help 应包含子命令 ${name}`);
+            }
+            assert.strictEqual(
+                Object.keys(defaultCmdPriv.ai.args ?? {}).length,
+                Object.keys(SubCmd.map).length,
+                '子命令权限表键数应等于已注册子命令数'
+            );
+            const count = Object.keys(SubCmd.map).length;
+            registerAllCmds();
+            assert.strictEqual(Object.keys(SubCmd.map).length, count, '重复装配不应累积子命令');
+        } finally {
+            for (const key of Object.keys(SubCmd.map)) {
+                if (!Object.prototype.hasOwnProperty.call(beforeMap, key)) delete SubCmd.map[key];
+            }
+            defaultCmdPriv.ai.args = beforeAiArgs;
+            (ext as any).cmdMap = beforeCmdMap;
+        }
+    },
+
+    /** logger provider：级别「从不」抑制 info；provider 抛错回退默认且不抛异常 */
+    testLoggerProviderLevelAndFallback(): void {
+        const logs: string[] = [];
+        const origInfo = console.info;
+        const origError = console.error;
+        console.info = (...args: any[]) => { logs.push(args.map(String).join(' ')); };
+        console.error = () => undefined;
+        try {
+            setLoggerConfigProvider(() => ({ level: '从不' }));
+            Logger.info('should-not-appear-xyz');
+            setLoggerConfigProvider(() => ({ level: '信息' }));
+            Logger.info('should-appear-xyz');
+            assert.ok(!logs.some(l => l.includes('should-not-appear-xyz')), '级别「从不」应抑制 info');
+            assert.ok(logs.some(l => l.includes('should-appear-xyz')), '级别「信息」应输出 info');
+
+            setLoggerConfigProvider(() => { throw new Error('provider boom'); });
+            Logger.info('fallback-xyz');
+            assert.ok(logs.some(l => l.includes('fallback-xyz')), 'provider 抛错应回退默认级别并继续输出');
+        } finally {
+            setLoggerConfigProvider(null);
+            console.info = origInfo;
+            console.error = origError;
+        }
+    },
+
+    /** getRegexConfig：非法正则回退为永不匹配，命中缓存后不再读配置 */
+    testGetRegexConfigInvalidFallbackAndCache(): void {
+        const TC = (globalThis as any).__TEST_CONFIG__;
+        const origError = console.error;
+        console.error = () => undefined;
+        try {
+            TC.templateConfigs['__probe_regex'] = ['(']; // 非法正则
+            const first = getRegexConfig({} as any, '__probe_regex');
+            assert.strictEqual(first.source, '(?!)', '非法正则应回退为永不匹配');
+            TC.templateConfigs['__probe_regex'] = ['abc'];
+            assert.strictEqual(getRegexConfig({} as any, '__probe_regex'), first, '命中缓存应返回同一实例');
+        } finally {
+            delete TC.templateConfigs['__probe_regex'];
+            console.error = origError;
+        }
+    },
+});

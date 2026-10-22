@@ -21,6 +21,7 @@ export interface LoggerConfig {
 }
 
 let logConfigProvider: (() => LoggerConfig) | null = null;
+let providerErrorLogged = false;
 
 /** 由 config 层调用：注入/清除日志开关来源（provider 应读取带 TTL 缓存的配置访问器） */
 export function setLoggerConfigProvider(provider: (() => LoggerConfig) | null): void {
@@ -32,7 +33,12 @@ function resolveLogConfig(): Required<LoggerConfig> {
     if (!logConfigProvider) return DEFAULT_LOG_CONFIG;
     try {
         return { ...DEFAULT_LOG_CONFIG, ...logConfigProvider() };
-    } catch (_e) {
+    } catch (e) {
+        // 只报一次，避免日志风暴；同时不让配置读取异常变成静默降级（排障需要线索）
+        if (!providerErrorLogged) {
+            providerErrorLogged = true;
+            console.error(`【${NAME}】[WARN] 读取日志配置失败，已回退出厂默认值:`, e);
+        }
         return DEFAULT_LOG_CONFIG;
     }
 }

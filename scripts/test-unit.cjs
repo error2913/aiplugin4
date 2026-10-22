@@ -50,8 +50,12 @@ const TEMPLATE_DEFAULTS = {
 globalThis.seal = {
     ext: {
         find: () => undefined,
-        new: () => ({ storageGet: () => '', storageSet: () => undefined }),
+        new: () => ({ storageGet: () => '', storageSet: () => undefined, cmdMap: {} }),
         register: () => undefined,
+        // 根命令注册链路（registerAllCmds → registerCmd）需要的最小表面：
+        // newCmdItemInfo 造命令对象，registerCmd 把结果写进 ext.cmdMap
+        newCmdItemInfo: () => ({ name: '', help: '', allowDelegate: false, solve: () => undefined }),
+        newCmdExecuteResult: (success) => ({ success: !!success, showHelp: false }),
         registerBoolConfig: () => undefined,
         registerIntConfig: () => undefined,
         registerFloatConfig: () => undefined,
