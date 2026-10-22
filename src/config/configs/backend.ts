@@ -4,8 +4,8 @@
 // 用量图表/核心桥WS地址/核心桥Token）不再注册、也不再读取。
 // 空文本 = 全部使用出厂默认地址（不报错）；校验失败整份拒绝并回退出厂默认。
 import Logger from "../../logger";
-import { ext } from "../config";
 import { parseBackendConfig, resolveBackendEndpoints } from "../domain/backend";
+import { ext } from "../ext";
 
 import { BACKEND_CONFIG_HINT } from "./generator_hint";
 

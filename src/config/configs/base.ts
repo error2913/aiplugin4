@@ -1,5 +1,5 @@
 // 基础配置：日志级别/超时/SealDice 路径/全局待机
-import { ext } from "../config";
+import { ext } from "../ext";
 export default class BaseConfig {
     static register() {
         seal.ext.registerOptionConfig(ext, "日志级别", "信息", ["从不", "错误", "警告", "信息", "调试"], "控制台日志详细程度；日常建议「信息」，排查问题时切「调试」可看到更多细节", "基础");

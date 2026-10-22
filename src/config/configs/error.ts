@@ -1,7 +1,7 @@
 // 报错自动处理配置：分类错误的总开关/动作开关/自动切换参数
 import Logger from "../../logger";
 import { ApiErrorKind, isApiErrorKind } from "../../model/api_error";
-import { ext } from "../config";
+import { ext } from "../ext";
 
 export interface ErrorAutoConfig {
     /** 启用报错自动处理总开关 */

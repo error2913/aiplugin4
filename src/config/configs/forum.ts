@@ -1,5 +1,5 @@
 // 论坛配置：论坛工具使用的地址与鉴权信息（与后端项目无关，独立页签）。
-import { ext } from "../config";
+import { ext } from "../ext";
 
 export default class ForumConfig {
     static register() {

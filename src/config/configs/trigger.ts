@@ -3,8 +3,8 @@ import { load } from 'js-toml'
 
 import Logger from "../../logger";
 import { revive, TypeDescriptor } from "../../utils/utils";
-import { ext } from "../config";
-import { getRegexConfig } from "../config";
+import { ext } from "../ext";
+import { getRegexConfig } from "../regex";
 
 /** 评分触发配置（TOML 分段解析，缺省段/字段并入默认值） */
 export interface JudgeConfig {

@@ -2,7 +2,7 @@
 // 供 list_resources 查询资源 ID、get_resource_path 查询实际路径/URI
 import Logger from "../../logger";
 import Image from "../../resource/image";
-import { ext } from "../config";
+import { ext } from "../ext";
 export default class ResourceConfig {
     static register() {
         seal.ext.registerTemplateConfig(ext, "本地图片路径", [''], "如不需要可以不填写；每框一个本地图片路径，示例：data/images/sealdice.png；修改后需重载 JS 生效", "资源");

@@ -2,10 +2,10 @@
 //
 // 新键名 `知识库配置`；旧的模板键 `知识库` 不再注册/读取（不做迁移）。
 import Logger from "../../logger";
-import { ext } from "../config";
 import { DEFAULT_KB, DEFAULT_KB_JSON } from "../domain/defaults";
 import { parseKbConfig } from "../domain/parse";
 import { KbEntry } from "../domain/types";
+import { ext } from "../ext";
 
 import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 

@@ -1,4 +1,4 @@
-import Logger, { setLoggerConfigProvider } from "../logger";
+import { setLoggerConfigProvider } from "../logger";
 
 import BackendConfig from "./configs/backend";
 import BaseConfig from "./configs/base";
@@ -20,16 +20,12 @@ import SubAgentConfig from "./configs/subagent";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
 import WebConfigStore from "./configs/web";
-import { AUTHOR, CONFIG_CACHE_TTL, NAME, VERSION } from "./static_config";
+import { CONFIG_CACHE_TTL } from "./static_config";
 
-export const ext: seal.ExtInfo = (() => {
-    let e = seal.ext.find(NAME);
-    if (!e) {
-        e = seal.ext.new(NAME, AUTHOR, VERSION);
-        seal.ext.register(e);
-    }
-    return e;
-})();
+// 宿主句柄与正则配置已下沉到叶子模块，configs/* 直接引用它们，不再经本文件（拆掉 config ↔ configs 环）。
+// 这里保留 re-export，兼容既有 import { ext } from "config/config" 的调用方。
+export { ext } from "./ext";
+export { getRegexConfig } from "./regex";
 // 注册顺序 = 配置页签顺序；「错误处理」固定放到最后（模型新配置紧随基础）
 const configMap = {
     base: BaseConfig,
@@ -114,23 +110,3 @@ setLoggerConfigProvider(() => {
     };
 });
 
-// 正则配置属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存，重载 JS 后重新解析
-const regexConfigCache: { [key: string]: RegExp } = {};
-export function getRegexConfig(ext: seal.ExtInfo, key: string): RegExp {
-    if (regexConfigCache[key]) return regexConfigCache[key];
-    const patterns = seal.ext.getTemplateConfig(ext, key).filter(x => x);
-    const pattern = patterns.join('|');
-    let regex: RegExp;
-    if (pattern) {
-        try {
-            regex = new RegExp(pattern);
-        } catch (e) {
-            Logger.error(`正则表达式错误，内容:${pattern}，错误信息:${e instanceof Error ? e.message : String(e)}`);
-            regex = /(?!)/;
-        }
-    } else {
-        regex = /(?!)/;
-    }
-    regexConfigCache[key] = regex;
-    return regex;
-}

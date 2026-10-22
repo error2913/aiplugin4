@@ -1,5 +1,5 @@
 // 工具配置：函数调用开关/提示词工程/上限/禁用与默认关闭
-import { ext } from "../config";
+import { ext } from "../ext";
 import { SEALDICE_COMMAND_WHITELIST } from "../static_config/sealdice_command_defaults";
 // 音乐服务配置属于启动解析一次、重载 JS 才生效的复杂配置（JSON 逐行解析）：模块级缓存
 let musicConfigCache: string[] | null = null;

@@ -13,7 +13,7 @@ import { fetchModelList, ListFetchFn } from "../../model/list";
 import Model, { ConnConfigLike } from "../../model/model";
 import { ModelRuleTemplate, resetRuleRowsForTest } from "../../model/request_rules";
 import { ModelUse } from "../../model/types";
-import { ext } from "../config";
+import { ext } from "../ext";
 import { adaptV5 } from "../v5/adapt";
 import { DEFAULT_V5_CONFIG } from "../v5/default";
 import { formatIssues, normalizePurposeList, parseV5Config, V5Config, V5Issue } from "../v5/schema";

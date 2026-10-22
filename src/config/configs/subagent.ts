@@ -1,5 +1,5 @@
 // 子代理配置（分组「子代理」，紧随「技能」）。极简三旋钮：总开关 / 委派深度 / 禁调工具。
-import { ext } from "../config";
+import { ext } from "../ext";
 
 export default class SubAgentConfig {
     static register() {
