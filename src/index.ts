@@ -4,8 +4,8 @@ import Handlebars from "handlebars";
 import { initAgents } from "./agent/agents";
 import { registerAgentApi } from "./agent/api";
 import { BlockManager } from "./block";
+import { registerAllCmds } from "./cmd/bootstrap";
 import { PrivilegeManager } from "./cmd/privilege";
-import { registerCmd } from "./cmd/root_cmd";
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
@@ -15,7 +15,7 @@ import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
-import Tool from "./tool/tool";
+import { registerAllTools } from "./tool/bootstrap";
 import { createMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "./utils/target_id";
@@ -33,14 +33,14 @@ function main() {
   initAgents();
   registerAgentApi();
   checkUpdate();
-  Tool.registerTool();
+  registerAllTools();
   TimerManager.init();
   MediaTaskManager.init();
   ImageGC.init();
   knowledgeService.init();
   BlockManager.initBlockList();
 
-  registerCmd();
+  registerAllCmds();
   PrivilegeManager.reviveCmdPriv();
   // ob11 依赖存在时订阅其事件分发，接收核心原生 milky 路径过滤掉的卡片/视频/文件/合并转发等段
   MessagePipeline.subscribeOb11Receive();

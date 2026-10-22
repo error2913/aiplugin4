@@ -8,7 +8,8 @@ import { Session } from "../../../session/session";
 import { matchesPlatform, platformOf } from "../../../utils/target_id";
 import { StopError, withTimeout } from "../../../utils/utils";
 import { getConfiguredMCPServers } from "../../mcp";
-import Tool, { toolMap } from "../../tool";
+import { toolMap } from "../../registry";
+import Tool from "../../tool";
 import { ToolInfo } from "../../types";
 
 const MAX_SEARCH_RESULTS = 8; // search_tools 单次返回工具数上限

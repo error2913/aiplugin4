@@ -10,7 +10,8 @@ import { matchesPlatform, platformOf } from "../utils/target_id";
 
 import { buildContentParts, normalizeMCPResult } from "./mcp/result";
 import { MCPCallResult } from "./mcp/types";
-import Tool, { toolMap } from "./tool";
+import { toolMap } from "./registry";
+import Tool from "./tool";
 
 const log = Logger.withTag('mcp');
 

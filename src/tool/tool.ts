@@ -1,4 +1,4 @@
-// 工具系统：Tool 注册表、工具调用（含扩展指令/提示词工程）与注册
+// 工具系统：Tool 类（调用校验/提示词渲染/分组）；注册表见 registry.ts，注册装配见 bootstrap.ts
 import Config from "../config/config"
 import Logger from "../logger"
 import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
@@ -8,14 +8,13 @@ import { fixJsonString } from "../utils/string";
 import { matchesPlatform } from "../utils/target_id";
 import { StopError, withTimeout } from "../utils/utils";
 
-import { registerMCPTools } from "./mcp";
-import { registerSkills } from "./skills";
-import { registerTools } from "./tools/init";
+import { toolMap } from "./registry";
 import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolSolveContent } from "./types";
 
-const log = Logger.withTag('tool');
+// 兼容旧引用：toolMap 已迁至 ./registry（实现侧请直接 import ./registry）
+export { toolMap };
 
-export const toolMap: { [key: string]: Tool } = {};
+const log = Logger.withTag('tool');
 
 export type ToolName = string;
 export type ToolState = { [key: string]: boolean };
@@ -158,14 +157,6 @@ export default class Tool {
     static reset() {
         for (const key of Object.keys(toolMap)) delete toolMap[key];
     }
-
-    static registerTool() {
-        registerTools();
-        registerSkills();
-        registerMCPTools().catch(e => log.exception('注册MCP工具失败', e));
-    }
-
-
 
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;

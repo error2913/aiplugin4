@@ -3,7 +3,8 @@
 import Config from "../../config/config";
 import { logger } from "../../logger";
 import { getConfiguredMCPServers, isMCPEnabled } from "../../tool/mcp";
-import Tool, { ToolGroupInfo, toolMap } from "../../tool/tool";
+import { toolMap } from "../../tool/registry";
+import Tool, { ToolGroupInfo } from "../../tool/tool";
 import { formatGroupToggleReply, setToolGroupState } from "../../tool/tool_group";
 import { matchesPlatform, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
