@@ -21,6 +21,7 @@ import { registerImageTools } from "../src/tool/tools/image/init";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { getSession, SessionService } from "../src/session/session_service";
+import { registerSubCommands } from "../src/cmd/bootstrap";
 import { SubCmd } from "../src/cmd/root_cmd";
 import { defaultCmdPriv, U } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
@@ -7955,7 +7956,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const beforeMap = { ...SubCmd.map };
         const beforeAiArgs = defaultCmdPriv.ai.args;
         try {
-            SubCmd.register();
+            registerSubCommands();
             assert.ok(SubCmd.map['kb'] && SubCmd.map['kb'].desc.includes('知识库'), '.ai kb 子命令应注册（知识库管理）');
             assert.ok(SubCmd.map['skill'] && SubCmd.map['skill'].desc.includes('技能'), '.ai skill 子命令应注册');
             assert.ok(SubCmd.map['mcp'] && SubCmd.map['mcp'].desc.includes('MCP'), '.ai mcp 子命令应注册');

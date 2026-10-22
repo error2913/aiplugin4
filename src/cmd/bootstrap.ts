@@ -35,10 +35,10 @@ import { registerCmdTti } from "./sub_cmd/tti";
 import { registerCmdTts } from "./sub_cmd/tts";
 
 /**
- * 注册全部 .ai 子命令 → 汇总子命令权限 → 注册根命令 .ai。
+ * 注册全部 .ai 子命令并汇总子命令权限（供入口装配与单测直接调用；原 SubCmd.register() 的替代）。
  * 顺序不可调换：根命令的 help 与 defaultCmdPriv.ai.args 都依赖 SubCmd.map 已填满。
  */
-export function registerAllCmds(): void {
+export function registerSubCommands(): void {
     registerCmdPrivilege();
     registerCmdPrompt();
     registerCmdPub();
@@ -74,6 +74,10 @@ export function registerAllCmds(): void {
         acc[sc.name] = sc.priv;
         return acc;
     }, {});
+}
 
+/** 注册全部 .ai 子命令 → 汇总权限 → 注册根命令 .ai（唯一装配入口，由 src/index.ts 调用） */
+export function registerAllCmds(): void {
+    registerSubCommands();
     registerCmd();
 }
