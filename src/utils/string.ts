@@ -26,19 +26,6 @@ export function truncateText(text: string, maxLength: number): string {
     return text.slice(0, maxLength) + '...';
 }
 
-/** 还原 URL 中 HTML 转义的 &（QQ 官方 bot 图片常见 &amp;）。只处理 http(s)，最多解 3 轮。 */
-export function decodeUrlHtmlEntities(url: string): string {
-    let text = String(url ?? '').trim();
-    if (!/^https?:\/\//i.test(text)) return text;
-    const re = /&(?:amp|#0*38|#x0*26);/gi;
-    for (let i = 0; i < 3; i++) {
-        const next = text.replace(re, '&');
-        if (next === text) break;
-        text = next;
-    }
-    return text;
-}
-
 /** 字符 n-gram 集合（默认 2~4 元）：用于中文关键词匹配/相似度近似。
  *  只取尾部最多 300 字符，控制超长查询下的 gram 数量与匹配开销。 */
 export function buildCharNGrams(s: string, min = 2, max = 4): Set<string> {

@@ -13,7 +13,7 @@ import { ImageHost, isLoopbackUrl } from "../src/resource/image_host";
 import { ImageIndex } from "../src/resource/image_index";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { textToMultimodalContent } from "../src/utils/message";
-import { decodeUrlHtmlEntities } from "../src/utils/string";
+import { decodeUrlHtmlEntities } from "../src/utils/url";
 import { parseImageRef } from "../src/resource/image_ref";
 import { normalizeMCPResult } from "../src/tool/mcp/result";
 

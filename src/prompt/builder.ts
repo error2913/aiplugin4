@@ -3,9 +3,6 @@ import { buildDelegationGuide } from "../agent/subagent/limits";
 import Config from "../config/config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
-import { knowledgeService } from "../memory/knowledge";
-import { MemoryManager } from "../memory/manager";
-import { getMemoryRevision, getSummaryRevision } from "../memory/revision";
 import Model from "../model/model";
 import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
@@ -16,6 +13,7 @@ import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";
 import { matchesPlatform, platformOf } from "../utils/target_id";
 
+import { getPromptMemorySource } from "./memory_source";
 import { getCachedString } from "./prompt_cache";
 import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
 
@@ -69,8 +67,10 @@ export async function buildSystemPromptContent(
 ): Promise<string> {
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
+    // 记忆/知识库数据经端口取（实现由组合根注入，builder 不直接依赖 memory 模块）
+    const memorySource = getPromptMemorySource();
 
-    if (Config.knowledgeBase.KNOWLEDGE) await knowledgeService.init();
+    if (Config.knowledgeBase.KNOWLEDGE) await memorySource.initKnowledge();
 
     // 取最近 2~3 条用户消息拼接，作为记忆检索的上下文（剥离内部标签）；
     // 同时收集全部发言者：群聊多人在线时，记忆检索不再只按最后一位发言者过滤
@@ -103,7 +103,7 @@ export async function buildSystemPromptContent(
     const IMAGE_LIBRARY = ImageHost.enabled || Config.mcp.MCP_ENABLED;
     const toolState = STATUS ? toolStateSignature(session) : '';
     const skillConfigSignature = STATUS ? getSkillsSignature() : '';
-    const knowledgeSignature = Config.knowledgeBase.KNOWLEDGE ? knowledgeService.getLibrariesSignature() : '';
+    const knowledgeSignature = Config.knowledgeBase.KNOWLEDGE ? memorySource.knowledgeSignature() : '';
     const skillStateSig = STATUS ? flagStateSignature(session.skillState) : '';
     const kbStateSig = STATUS && Config.knowledgeBase.KNOWLEDGE ? flagStateSignature(session.kbState) : '';
     const staticKey = signature([
@@ -135,10 +135,10 @@ export async function buildSystemPromptContent(
         let knowledgeBlock = '';
         if (STATUS && Config.knowledgeBase.KNOWLEDGE) {
             const enabledIds = new Set<string>();
-            for (const lib of knowledgeService.getLibraries()) {
-                if (session.kbState?.[lib.id] !== false) enabledIds.add(lib.id);
+            for (const id of memorySource.knowledgeIds()) {
+                if (session.kbState?.[id] !== false) enabledIds.add(id);
             }
-            knowledgeBlock = knowledgeService.formatLibrariesFor(platform, enabledIds);
+            knowledgeBlock = memorySource.formatKnowledgeFor(platform, enabledIds);
         }
         const staticBlocks = [toolBlock, skillBlock, knowledgeBlock].filter(Boolean).join('\n\n');
         // 子代理委派指引：仅当本会话开启了委派工具时注入
@@ -166,7 +166,7 @@ export async function buildSystemPromptContent(
     const memoryKey = signature([
         'prompt:memory',
         session.sessionId,
-        getMemoryRevision(),
+        memorySource.memoryRevision(),
         Config.memory.MEMORY,
         Model.getEmbeddingDimension(),
         embeddingModelName,
@@ -182,14 +182,13 @@ export async function buildSystemPromptContent(
     const summaryKey = signature([
         'prompt:summary',
         session.sessionId,
-        getSummaryRevision(),
-        Config.memory.SUMMARY
+        memorySource.summaryRevision(),        Config.memory.SUMMARY
     ]);
     const memoryTask = Config.memory.MEMORY
-        ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi || null))
+        ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => memorySource.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');
     const summaryTask = Config.memory.SUMMARY
-        ? getCachedString(summaryKey, SUMMARY_TTL, () => MemoryManager.buildObservationPrompt(session))
+        ? getCachedString(summaryKey, SUMMARY_TTL, () => memorySource.buildObservationPrompt(session))
         : Promise.resolve('');
 
     const [memoryPrompt, summaryPrompt] = await Promise.all([memoryTask, summaryTask]);

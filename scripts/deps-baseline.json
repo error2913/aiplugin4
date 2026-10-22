@@ -1,8 +1,8 @@
 {
   "version": 3,
-  "generatedAt": "2026-10-22T20:21:37.090Z",
-  "modules": 256,
-  "edgeCount": 954,
+  "generatedAt": "2026-10-22T20:30:02.809Z",
+  "modules": 258,
+  "edgeCount": 957,
   "edges": [
     "src/agent/agent.ts -> src/agent/run_context.ts",
     "src/agent/agent.ts -> src/agent/stream.ts",
@@ -423,6 +423,7 @@
     "src/index.ts -> src/media/task_queue.ts",
     "src/index.ts -> src/memory/knowledge.ts",
     "src/index.ts -> src/pipeline.ts",
+    "src/index.ts -> src/prompt/memory_source_impl.ts",
     "src/index.ts -> src/resource/image_gc.ts",
     "src/index.ts -> src/timer.ts",
     "src/index.ts -> src/tool/bootstrap.ts",
@@ -558,10 +559,8 @@
     "src/prompt/builder.ts -> src/agent/subagent/limits.ts",
     "src/prompt/builder.ts -> src/config/config.ts",
     "src/prompt/builder.ts -> src/context/message.ts",
-    "src/prompt/builder.ts -> src/memory/knowledge.ts",
-    "src/prompt/builder.ts -> src/memory/manager.ts",
-    "src/prompt/builder.ts -> src/memory/revision.ts",
     "src/prompt/builder.ts -> src/model/model.ts",
+    "src/prompt/builder.ts -> src/prompt/memory_source.ts",
     "src/prompt/builder.ts -> src/prompt/prompt_cache.ts",
     "src/prompt/builder.ts -> src/prompt/templates.ts",
     "src/prompt/builder.ts -> src/resource/image_host.ts",
@@ -570,6 +569,10 @@
     "src/prompt/builder.ts -> src/tool/tool.ts",
     "src/prompt/builder.ts -> src/utils/string.ts",
     "src/prompt/builder.ts -> src/utils/target_id.ts",
+    "src/prompt/memory_source_impl.ts -> src/memory/knowledge.ts",
+    "src/prompt/memory_source_impl.ts -> src/memory/manager.ts",
+    "src/prompt/memory_source_impl.ts -> src/memory/revision.ts",
+    "src/prompt/memory_source_impl.ts -> src/prompt/memory_source.ts",
     "src/prompt/templates.ts -> src/logger.ts",
     "src/pub/registry.ts -> src/core/host.ts",
     "src/pub/registry.ts -> src/logger.ts",
@@ -591,8 +594,8 @@
     "src/resource/image.ts -> src/utils/raw_marker.ts",
     "src/resource/image.ts -> src/utils/revive.ts",
     "src/resource/image.ts -> src/utils/seal.ts",
-    "src/resource/image.ts -> src/utils/string.ts",
     "src/resource/image.ts -> src/utils/target_id.ts",
+    "src/resource/image.ts -> src/utils/url.ts",
     "src/resource/image_gc.ts -> src/config/config.ts",
     "src/resource/image_gc.ts -> src/core/host.ts",
     "src/resource/image_gc.ts -> src/logger.ts",
@@ -960,7 +963,7 @@
     "src/web/service.ts -> src/web/presets.ts"
   ],
   "maxCycle": 5,
-  "inCycle": 10,
+  "inCycle": 5,
   "cycles": [
     [
       "src/judge/judge_manager.ts",
@@ -968,15 +971,6 @@
       "src/session/session.ts",
       "src/session/session_service.ts",
       "src/timer.ts"
-    ],
-    [
-      "src/memory/manager.ts",
-      "src/prompt/builder.ts",
-      "src/utils/message.ts"
-    ],
-    [
-      "src/resource/image.ts",
-      "src/utils/string.ts"
     ]
   ],
   "violations": [
@@ -1105,8 +1099,12 @@
     "src/model/provider.ts -> src/utils/utils.ts",
     "src/model/window_cache.ts -> src/config/config.ts",
     "src/pipeline.ts -> src/utils/utils.ts",
+    "src/prompt/builder.ts -> src/memory/knowledge.ts",
+    "src/prompt/builder.ts -> src/memory/manager.ts",
+    "src/prompt/builder.ts -> src/memory/revision.ts",
     "src/pub/registry.ts -> src/config/config.ts",
     "src/pub/registry.ts -> src/utils/utils.ts",
+    "src/resource/image.ts -> src/utils/string.ts",
     "src/resource/image.ts -> src/utils/utils.ts",
     "src/resource/image_index.ts -> src/config/config.ts",
     "src/session/group.ts -> src/config/config.ts",

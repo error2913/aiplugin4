@@ -17,6 +17,7 @@ import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
+import { installPromptMemorySource } from "./prompt/memory_source_impl";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import { registerAllTools } from "./tool/bootstrap";
@@ -41,6 +42,7 @@ function main() {
   Config.registerConfig();
   initAgents();
   installAuxLlm();
+  installPromptMemorySource();
   registerAgentApi();
   checkUpdate();
   registerAllTools();

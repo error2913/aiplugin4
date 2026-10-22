@@ -5,6 +5,7 @@ import { installAuxLlm } from "../src/agent/aux_llm_impl";
 import { registerConfigAppliers } from "../src/config/apply";
 import { ext } from "../src/config/ext";
 import { setHost } from "../src/core/host";
+import { installPromptMemorySource } from "../src/prompt/memory_source_impl";
 
 export function installTestHost(): void {
     setHost({
@@ -18,6 +19,7 @@ export function installTestHost(): void {
     });
     registerConfigAppliers();
     installAuxLlm();
+    installPromptMemorySource();
 }
 
 installTestHost();

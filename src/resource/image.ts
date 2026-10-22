@@ -10,8 +10,9 @@ import { resolveLocalPath } from "../utils/path";
 import { buildImageTruncateMarker } from "../utils/raw_marker";
 import { revive, TypeDescriptor } from "../utils/revive";
 import { getSessionId } from "../utils/seal";
-import { decodeUrlHtmlEntities, MessageSegment } from "../utils/string";
+import type { MessageSegment } from "../utils/string";
 import { getPlatform } from "../utils/target_id";
+import { decodeUrlHtmlEntities } from "../utils/url";
 
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
