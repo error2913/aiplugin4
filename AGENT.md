@@ -18,6 +18,9 @@ npm run smoke               # 冒烟：Node 中用 seal 桩加载产物，提前
 npm run package:check       # 构建 + 同步 sealpack 源 + 校验包格式与体积
 npm run pack:sealpack       # 打包 → dist/aiplugin4.sealpack
 npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整豹包
+npm run deps:check          # 依赖边界守卫（当前基线：scripts/deps-baseline.json）
+npm run version:check       # 版本号单一事实源校验（meta.ts VERSION ↔ header/package/changelog/sealpack）
+npm run version:sync        # 按 meta.ts VERSION 回写其余版本位置
 ```
 
 改完核心逻辑建议执行 `npm run build && npm run smoke`。
