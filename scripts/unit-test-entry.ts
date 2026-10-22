@@ -72,6 +72,7 @@ import Model from "../src/model/model";
 import Logger, { setLoggerConfigProvider } from "../src/logger";
 import { fetchModelList, ModelListResult } from "../src/model/list";
 import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/apply/model";
+import { getAuxLlm, hasAuxLlm } from "../src/core/ports/aux_llm";
 import { hasConfigHook, registerConfigHook, runConfigHook } from "../src/config/hooks";
 import { isIgnoredConfig } from "../src/model/model";
 import { Session } from "../src/session/session";
@@ -13240,6 +13241,24 @@ Object.assign(tests, {
         assert.ok(called, '钩子应被调用');
         assert.strictEqual((out as any).extra, true, '钩子返回的替换数据应生效');
         assert.ok(!('extra' in original), '原数据不应被修改');
+    },
+
+    /** AuxLlm 端口：组合根已注入，且调用经 Agent.get 路由（既有测试桩语义保持） */
+    async testAuxLlmPortRoutesToAgent(): Promise<void> {
+        const origGet = Agent.get;
+        const calls: string[] = [];
+        (Agent as any).get = (name: string) => ({
+            chat: async (p: string) => { calls.push(`chat:${name}:${p}`); return 'aux-ok'; },
+            chatMessages: async () => 'aux-msgs',
+        });
+        try {
+            assert.ok(hasAuxLlm(), '测试宿主应已安装 AuxLlm');
+            const reply = await getAuxLlm().chat('probe_agent', 'hello');
+            assert.strictEqual(reply, 'aux-ok');
+            assert.deepStrictEqual(calls, ['chat:probe_agent:hello'], 'AuxLlm 应把用途名与 prompt 传给 Agent');
+        } finally {
+            (Agent as any).get = origGet;
+        }
     },
 
     /** 工具统一执行器：未注册/未开启/缺参/类型错误/JSON 解析失败/成功/StopError 传播 */

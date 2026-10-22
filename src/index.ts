@@ -3,6 +3,7 @@ import Handlebars from "handlebars";
 
 import { initAgents } from "./agent/agents";
 import { registerAgentApi } from "./agent/api";
+import { installAuxLlm } from "./agent/aux_llm_impl";
 import { BlockManager } from "./block";
 import { registerAllCmds } from "./cmd/bootstrap";
 import { PrivilegeManager } from "./cmd/privilege";
@@ -39,6 +40,7 @@ function main() {
 
   Config.registerConfig();
   initAgents();
+  installAuxLlm();
   registerAgentApi();
   checkUpdate();
   registerAllTools();

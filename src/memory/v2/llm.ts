@@ -1,5 +1,5 @@
 // 默认 LLM 回调：把 Hindsight-like 引擎的可插拔接口接到现有 summarize_agent / chat 模型。
-import Agent from "../../agent/agent";
+import { getAuxLlm } from "../../core/ports/aux_llm";
 
 import type {
     ExtractedFact,
@@ -91,7 +91,7 @@ function fallbackExtract(input: RetainInput): ExtractedFact[] {
 
 export const defaultFactExtractor: FactExtractor = async (input) => {
     try {
-        const reply = await Agent.get('summarize_agent').chat(
+        const reply = await getAuxLlm().chat('summarize_agent', 
             `${EXTRACT_PROMPT}\n\n输入内容：\n${input.content}`
         );
         const data = parseLooseJson(reply);
@@ -112,7 +112,7 @@ export const defaultFactExtractor: FactExtractor = async (input) => {
 export const defaultReranker: Reranker = async (query, candidates) => {
     try {
         const list = candidates.map((c, i) => `${i + 1}. [${c.id}] ${c.text}`).join('\n');
-        const reply = await Agent.get('summarize_agent').chat(
+        const reply = await getAuxLlm().chat('summarize_agent', 
             `${RERANK_PROMPT}\n\n查询：${query}\n候选记忆：\n${list}`
         );
         const data = parseLooseJson(reply);
@@ -128,7 +128,7 @@ export const defaultReranker: Reranker = async (query, candidates) => {
 export const defaultObservationSynthesizer: ObservationSynthesizer = async (quotes) => {
     try {
         const evidence = quotes.map((q, i) => `${i + 1}. ${q}`).join('\n');
-        const reply = await Agent.get('summarize_agent').chat(
+        const reply = await getAuxLlm().chat('summarize_agent', 
             `${OBSERVATION_PROMPT}\n\n支持证据：\n${evidence}`
         );
         const data = parseLooseJson(reply);
@@ -161,7 +161,7 @@ export const defaultReflectSynthesizer: ReflectSynthesizer = async (query, conte
         const input = isDelta
             ? `当前答案：\n${context.existingAnswer}\n\n最近新增的相关记忆：\n${parts.join('\n\n') || '（无）'}`
             : `问题：${query}\n相关记忆：\n${parts.join('\n\n') || '（无）'}`;
-        const reply = await Agent.get('summarize_agent').chat(
+        const reply = await getAuxLlm().chat('summarize_agent', 
             `${scopeLine}${prompt}\n\n${input}`
         );
         return (reply || '').trim();

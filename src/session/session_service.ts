@@ -1,7 +1,7 @@
 // 会话服务：会话的创建/复活/保存与 getSession 入口
-import Agent from "../agent/agent";
 import { Context } from "../context/context";
 import { getHost } from "../core/host";
+import { getAgent } from "../core/ports/agent_registry";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/revive";
 
@@ -13,7 +13,7 @@ import { createToolListen } from "./tool_listen";
  * 获取默认 Agent 下某个会话（旧 AIManager.getAI 的替代）
  */
 export function getSession(sessionId: string): Session {
-    return Agent.get('*').sessionService.getSession(sessionId);
+    return getAgent('*').sessionService.getSession(sessionId);
 }
 
 export class SessionService {

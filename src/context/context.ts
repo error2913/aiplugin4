@@ -1,6 +1,8 @@
 // 会话上下文：消息增删/忽略名单/压缩与总结触发/按 ID 获取目标/图片查找
-import Agent from "../agent/agent";
+import type Agent from "../agent/agent";
 import Config from "../config/config";
+import { getAgent } from "../core/ports/agent_registry";
+import { getAuxLlm } from "../core/ports/aux_llm";
 import Logger from "../logger";
 import { MemoryManager } from "../memory/manager";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
@@ -194,7 +196,7 @@ export class Context {
         this.autoNameMod = 0;
     }
 
-    get agent(): Agent { return Agent.get(this.agentName); }
+    get agent(): Agent { return getAgent(this.agentName); }
     get session(): Session { return this.agent.sessionService.getSession(this.sessionId); }
     get users(): string[] {
         const userSet = new Set<string>();
@@ -245,7 +247,7 @@ export class Context {
         const { COMPRESS_THRESHOLD } = Config.context;
         if (text.length <= COMPRESS_THRESHOLD) return { display: text, original: text, changed: false, called: false };
         try {
-            const compressed = await Agent.get('compress_agent').chat(text);
+            const compressed = await getAuxLlm().chat('compress_agent', text);
             if (compressed && compressed !== text && compressed.length < text.length) {
                 return { display: compressed, original: text, changed: true, called: true };
             }

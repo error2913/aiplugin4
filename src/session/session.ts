@@ -1,9 +1,10 @@
 // 会话：聊天编排（chat/chatStream/回复/接收）、设定、工具状态与活跃时间
-import Agent from "../agent/agent";
+import type Agent from "../agent/agent";
 import { streamService } from "../agent/stream";
 import Config from "../config/config";
 import { Context } from "../context/context";
 import { getHost } from "../core/host";
+import { getAgent } from "../core/ports/agent_registry";
 import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
@@ -285,7 +286,7 @@ export class Session {
     }
 
     get agent(): Agent {
-        return Agent.get(this.agentName);
+        return getAgent(this.agentName);
     }
     get user(): User | null {
         return this.sessionType === 'user' ? User.get(this.sessionId) : null;

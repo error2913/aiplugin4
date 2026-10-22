@@ -2,6 +2,7 @@
 import { savePurposeModelOverrides } from "../config/apply/model";
 import Config from "../config/config";
 import { getHost } from "../core/host";
+import { setAgentResolver } from "../core/ports/agent_registry";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
 import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL, parseMaxContextTokens } from "../model/api_error";
@@ -683,4 +684,8 @@ export default class Agent {
     }
 
 }
+
+// 把 Agent 解析能力注册到 core/ports/agent_registry：context/session/memory 只依赖该端口，
+// 端口再把名字委派回 Agent.get（懒加载语义与既有测试桩都保持不变）。
+setAgentResolver((name: string) => Agent.get(name));
 

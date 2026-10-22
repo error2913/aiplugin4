@@ -1,8 +1,8 @@
 // 评分触发管理：gate 门禁（零 LLM）→ 评分小模型 → SPEAK/WAIT 两级；
 // 其他方式触发会话 = 起一轮 WAIT（bot 刚发言/刚被触发即冷却）；WAIT 轮内新消息不评分、挂起轮末最新一条重新过 gate，由内置定时器兜底触发。
-import Agent from "../agent/agent";
 import Config from "../config/config";
 import { JudgeConfig } from "../config/configs/trigger";
+import { getAuxLlm } from "../core/ports/aux_llm";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
 import { TimerManager } from "../timer";
@@ -281,11 +281,10 @@ export class JudgeManager {
 
     /** 调用评分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */
     private static async requestScore(messages: { role: string; content: string }[], cfg: JudgeConfig): Promise<JudgeResult> {
-        const agent = Agent.get('judge_agent');
         let lastError = '';
         for (let i = 0; i <= cfg.MODEL.retries; i++) {
             try {
-                const raw = await withTimeout(() => agent.chatMessages(messages), cfg.MODEL.timeout_sec * 1000);
+                const raw = await withTimeout(() => getAuxLlm().chatMessages('judge_agent', messages), cfg.MODEL.timeout_sec * 1000);
                 const parsed = this.parseScore(raw);
                 if (parsed) {
                     if (i > 0) log.info(`JSON解析失败×${i}，重试成功`);
