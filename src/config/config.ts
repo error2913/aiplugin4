@@ -1,4 +1,4 @@
-import Logger from "../logger";
+import Logger, { setLoggerConfigProvider } from "../logger";
 
 import BackendConfig from "./configs/backend";
 import BaseConfig from "./configs/base";
@@ -100,6 +100,19 @@ class _Config {
 
 const Config = _Config as typeof _Config & ConfigProps;
 export default Config;
+
+// 日志开关提供者：logger 不 import config（拆掉 config ↔ logger 循环依赖），改由这里注入。
+// provider 读 Config.base（带 60s TTL 缓存），保持「面板改日志级别后在缓存周期内生效」的原语义；
+// 配置尚未注册时返回空对象，logger 会回退出厂默认值。
+setLoggerConfigProvider(() => {
+    const base = (Config as any).base;
+    if (!base) return {};
+    return {
+        level: base.LOG_LEVEL,
+        shortPrint: base.LOG_SHORT_PRINT,
+        messageContent: base.LOG_MESSAGE_CONTENT,
+    };
+});
 
 // 正则配置属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存，重载 JS 后重新解析
 const regexConfigCache: { [key: string]: RegExp } = {};
