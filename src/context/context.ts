@@ -14,9 +14,10 @@ import { ToolCall, ToolContentPart } from "../tool/types";
 import { buildContent, estimateMessageTokens, toolResultCallId } from "../utils/message";
 import { callOb11Api } from "../utils/ob11";
 import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, buildUserTruncateMarker, stripRawMarkers } from "../utils/raw_marker";
+import { TypeDescriptor } from "../utils/revive";
 import { stripInternalTags } from "../utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
-import { TypeDescriptor, withTimeout } from "../utils/utils";
+import { withTimeout } from "../utils/timeout";
 
 import { ArchiveShardItem, clearShard, evictExpiredShards, listShardsAsc, writeShardIfAbsent } from "./archive_store";
 import Message from "./message";

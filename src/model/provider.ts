@@ -3,7 +3,7 @@ import Config from "../config/config";
 import { logger } from "../logger";
 import { TokenCalibration } from "../token_calibration";
 import { UsageManager } from "../usage";
-import { StopError, StopEvent, withTimeout } from "../utils/utils";
+import { StopError, StopEvent, withTimeout } from "../utils/timeout";
 import { fetchData, FetchDataType } from "../utils/web";
 
 import { extractUsage } from "./adapter";

@@ -18,9 +18,9 @@ import Image from "../resource/image";
 import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import { getSession } from "../session/session_service";
+import { generateId } from "../utils/id";
 import { getSessionCtxAndMsg } from "../utils/seal";
 import { getPlatform } from "../utils/target_id";
-import { generateId } from "../utils/utils";
 
 const log = logger.withTag('media');
 

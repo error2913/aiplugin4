@@ -2,7 +2,7 @@
 // 复用模型层的 ApiError（状态码/错误类别/Retry-After），不掺业务语义。
 
 import { ApiError, parseRetryAfterSeconds } from '../model/api_error';
-import { withTimeout } from '../utils/utils';
+import { withTimeout } from "../utils/timeout";
 
 import { BuiltRequest } from './types';
 

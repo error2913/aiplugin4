@@ -4,8 +4,8 @@
 // - 语音：get_record 的 file 传 [record:句柄] 或 6 位句柄 → 还原为登记时的原始 file/url/path
 import Image from "../../resource/image";
 import { parseImageRef } from "../../resource/image_ref";
+import { transformMsgIdBack } from "../../utils/message_id";
 import { resolveSpecialResourceByType } from "../../utils/special_id";
-import { transformMsgIdBack } from "../../utils/utils";
 
 /** 消息 ID 类参数：值可能是上下文 base36 短 ID，调用前还原为十进制（对所有 action 生效，纯十进制不会被误转） */
 const MESSAGE_ID_PARAMS = new Set(["message_id", "message_seq"]);

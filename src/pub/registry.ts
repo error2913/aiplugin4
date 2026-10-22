@@ -5,8 +5,8 @@
 // 也接受非严格 UNI-ID 的字符串，按原样匹配与存储。
 import { getHost } from "../core/host";
 import { logger } from "../logger";
+import { generateId } from "../utils/id";
 import { getPlatform } from "../utils/target_id";
-import { generateId } from "../utils/utils";
 
 const log = logger.withTag('pub');
 

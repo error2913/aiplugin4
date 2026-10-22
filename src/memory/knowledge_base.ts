@@ -4,9 +4,9 @@ import { KbEntry } from "../config/domain/types";
 import Logger from "../logger";
 import Model from "../model/model";
 import { extractFirstParagraph } from "../utils/markdown";
+import { cosineSimilarity } from "../utils/similarity";
 import { buildCharNGrams } from "../utils/string";
 import { matchesPlatform } from "../utils/target_id";
-import { cosineSimilarity } from "../utils/utils";
 
 import { hashString, KnowledgeChunk, KnowledgeLibrary, splitMarkdownIntoChunks } from "./knowledge_chunk";
 

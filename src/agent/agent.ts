@@ -17,10 +17,11 @@ import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
 import { buildSystemMessage, collectImageUrls, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { revive, TypeDescriptor } from "../utils/revive";
 import { getSessionCtxAndMsg } from "../utils/seal";
 import { checkRepeat, handleReply } from "../utils/string";
-import { revive, StopError, TypeDescriptor } from "../utils/utils";
-import { resetStopEvent } from "../utils/utils";
+import { StopError } from "../utils/timeout";
+import { resetStopEvent } from "../utils/timeout";
 
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";

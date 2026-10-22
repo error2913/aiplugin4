@@ -3,8 +3,8 @@
 import Config from "../../../config/config";
 import { getLocalImages } from "../../../resource/local_images";
 import { getLocalAudios, getLocalFiles, getLocalVideos } from "../../../resource/local_paths";
+import { resolveLocalPath } from "../../../utils/path";
 import { parseMCPReference, resolveResourceReference } from "../../../utils/resource";
-import { resolveLocalPath } from "../../../utils/utils";
 import Tool from "../../tool";
 
 const RESOURCE_TYPES = ["image", "audio", "file", "video"] as const;

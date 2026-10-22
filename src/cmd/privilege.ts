@@ -3,7 +3,7 @@ import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
 import { getHost } from "../core/host";
 import { logger } from "../logger";
 import { Session } from "../session/session";
-import { aliasToCmd } from "../utils/utils";
+import { aliasToCmd } from "../utils/alias";
 
 
 export interface CmdPrivInfo {

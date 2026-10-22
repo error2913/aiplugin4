@@ -2,8 +2,8 @@
 import { getConfiguredMCPServers, isMCPEnabled, refreshMCP } from "../../tool/mcp";
 import { toolMap } from "../../tool/registry";
 import { setToolGroupState } from "../../tool/tool_group";
+import { aliasToCmd } from "../../utils/alias";
 import { matchesPlatform, platformOf } from "../../utils/target_id";
-import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

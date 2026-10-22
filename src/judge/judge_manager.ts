@@ -8,7 +8,7 @@ import type { Session } from "../session/session";
 import { TimerManager } from "../timer";
 import { buildContent, getRoleSetting, renderWindowedHistory } from "../utils/message";
 import { fmtDate } from "../utils/string";
-import { withTimeout } from "../utils/utils";
+import { withTimeout } from "../utils/timeout";
 
 const log = logger.withTag('judge');
 

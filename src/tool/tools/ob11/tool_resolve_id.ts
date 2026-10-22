@@ -4,8 +4,8 @@
 // - record/video/file：媒体消息里的 handle=句柄 → 登记时的原始字段（file/url/path/file_id/file_unique 等）
 // 供 AI 对接 get_msg/delete_msg/get_image/get_record/文件下载等协议能力，避免把短 ID 原样外发。
 import Image from "../../../resource/image";
+import { transformMsgIdBack } from "../../../utils/message_id";
 import { resolveSpecialResourceByType } from "../../../utils/special_id";
-import { transformMsgIdBack } from "../../../utils/utils";
 import Tool from "../../tool";
 
 const RESOLVE_TYPES = ["message", "image", "record", "video", "file"] as const;

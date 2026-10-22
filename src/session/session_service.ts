@@ -3,7 +3,7 @@ import Agent from "../agent/agent";
 import { Context } from "../context/context";
 import { getHost } from "../core/host";
 import { logger } from "../logger";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { revive, TypeDescriptor } from "../utils/revive";
 
 import { Session, SESSION_RUNTIME_KEYS, Setting } from "./session";
 import { createToolListen } from "./tool_listen";

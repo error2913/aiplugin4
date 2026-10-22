@@ -1,5 +1,5 @@
 // 可观测性：一次 Agent.run 的观测上下文（runId/轮次/工具调用/耗时）
-import { generateId } from "../utils/utils";
+import { generateId } from "../utils/id";
 
 export interface ToolCallEvent {
     name: string;

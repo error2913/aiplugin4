@@ -4,9 +4,9 @@ import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { Session } from "./session/session";
 import { getSession } from "./session/session_service";
+import { revive, TypeDescriptor } from "./utils/revive";
 import { getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
-import { revive, TypeDescriptor } from "./utils/utils";
 
 const log = logger.withTag('timer');
 

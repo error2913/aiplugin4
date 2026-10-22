@@ -1,6 +1,6 @@
 // .ai forget：遗忘（清除）上下文 / 清除原文分片
 import { clearShardsFor } from "../../context/archive_store";
-import { aliasToCmd } from "../../utils/utils";
+import { aliasToCmd } from "../../utils/alias";
 import { I, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

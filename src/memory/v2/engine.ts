@@ -1,7 +1,8 @@
 // Hindsight-like 记忆引擎：Retain / Recall / Consolidation / Reflect 的纯 TS 实现。
 // 设计参考 Hindsight：MemoryUnit + Entity + MemoryLink + Observation + MentalModel。
+import { generateId } from "../../utils/id";
+import { cosineSimilarity } from "../../utils/similarity";
 import { buildCharNGrams } from "../../utils/string";
-import { cosineSimilarity, generateId } from "../../utils/utils";
 
 import { OBSERVATION_STALE_DAYS } from "./prompt";
 import { MemoryRepository, normalizeName } from "./repository";

@@ -1,7 +1,7 @@
 // .ai block：黑名单管理（拉黑用户/群，命中时忽略其消息/指令/戳一戳）
 import { BlockManager } from "../../block";
+import { aliasToCmd } from "../../utils/alias";
 import { normalizeTargetId, platformOf } from "../../utils/target_id";
-import { aliasToCmd } from "../../utils/utils";
 import { M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

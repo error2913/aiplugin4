@@ -1,7 +1,7 @@
 // 群档案：存储与读取
 import { getHost } from "../core/host";
 import Logger from "../logger";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { revive, TypeDescriptor } from "../utils/revive";
 export default class Group {
     static validKeysMap: { [key in keyof Group]?: TypeDescriptor<Group[key]> } = {
         groupId: 'string',

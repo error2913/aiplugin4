@@ -2,10 +2,12 @@ import { FACE_MAP } from "../../config/static_config";
 import { logger } from "../../logger";
 import Image from "../../resource/image";
 import { getLocalAudios, getLocalFiles, getLocalImageEntries, getLocalVideos } from "../../resource/local_paths";
+import { transformMsgIdBack } from "../../utils/message_id";
+import { resolveLocalPath } from "../../utils/path";
+import { parseSpecialTokens, stripInternalTags } from "../../utils/render_tags";
 import { resolveResourceReference } from "../../utils/resource";
-import { MessageSegment, parseSpecialTokens, stripInternalTags } from "../../utils/string";
+import type { MessageSegment } from "../../utils/string";
 import { getRawId, normalizeUserId, platformOf } from "../../utils/target_id";
-import { resolveLocalPath, transformMsgIdBack } from "../../utils/utils";
 
 const log = logger.withTag('ob11-send');
 

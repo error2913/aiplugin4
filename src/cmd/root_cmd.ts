@@ -3,7 +3,7 @@ import { ext } from "../config/config";
 import { logger } from "../logger";
 import { Session } from "../session/session";
 import { getSession } from "../session/session_service";
-import { aliasToCmd } from "../utils/utils";
+import { aliasToCmd } from "../utils/alias";
 
 import { CmdPrivInfo, PrivilegeManager, U } from "./privilege";
 

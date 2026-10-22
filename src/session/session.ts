@@ -16,9 +16,11 @@ import { toolMap } from "../tool/registry";
 import { ToolState } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
+import { getRecordMessageId } from "../utils/message_id";
+import { TypeDescriptor } from "../utils/revive";
 import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
-import { createStopEvent, fireStopEvent, StopEvent, TypeDescriptor } from "../utils/utils";
-import { getRecordMessageId, replyToSender } from "../utils/utils";
+import { createStopEvent, fireStopEvent, StopEvent } from "../utils/timeout";
+import { replyToSender } from "../utils/utils";
 
 import Group from "./group";
 import { createToolListen } from "./tool_listen";

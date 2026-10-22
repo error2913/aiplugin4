@@ -5,11 +5,13 @@ import { logger } from "../logger";
 import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
+import { generateId } from "../utils/id";
+import { resolveLocalPath } from "../utils/path";
 import { buildImageTruncateMarker } from "../utils/raw_marker";
+import { revive, TypeDescriptor } from "../utils/revive";
 import { getSessionId } from "../utils/seal";
 import { decodeUrlHtmlEntities, MessageSegment } from "../utils/string";
 import { getPlatform } from "../utils/target_id";
-import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
 
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";

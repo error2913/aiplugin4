@@ -2,8 +2,8 @@
 // 命中时忽略其消息/指令/戳一戳，使其无法触发 AI
 import { getHost } from "./core/host";
 import Logger from "./logger";
+import { revive, TypeDescriptor } from "./utils/revive";
 import { fmtDate } from "./utils/string";
-import { revive, TypeDescriptor } from "./utils/utils";
 
 export class BlockInfo {
     static validKeysMap: { [key in keyof BlockInfo]?: TypeDescriptor<BlockInfo[key]> } = {

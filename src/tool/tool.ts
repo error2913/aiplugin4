@@ -5,7 +5,7 @@ import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { matchesPlatform } from "../utils/target_id";
-import { StopError } from "../utils/utils";
+import { StopError } from "../utils/timeout";
 
 import { executeTool, type ToolFailure, validateToolArgs } from "./executor";
 import { clearToolMap, toolMap } from "./registry";

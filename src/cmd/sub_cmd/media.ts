@@ -1,7 +1,7 @@
 // .ai media：查看/取消本会话的生成任务队列（异步任务的可见入口）
 import { MediaTaskManager } from "../../media/task_queue";
 import { formatTaskLine } from "../../tool/tools/media/tool_media_tasks";
-import { aliasToCmd } from "../../utils/utils";
+import { aliasToCmd } from "../../utils/alias";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

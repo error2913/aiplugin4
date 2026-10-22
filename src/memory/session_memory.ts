@@ -5,8 +5,8 @@ import { SUMMARY_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
+import { TypeDescriptor } from "../utils/revive";
 import { truncateText } from "../utils/string";
-import { TypeDescriptor } from "../utils/utils";
 
 import { bumpMemoryRevision } from "./revision";
 import { resolveBankId } from "./v2/bank_resolver";

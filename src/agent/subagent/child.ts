@@ -13,7 +13,7 @@ import { ToolRunner } from '../../tool/runner';
 import Tool from '../../tool/tool';
 import type { RequestMessage } from '../../utils/message';
 import { buildContent } from '../../utils/message';
-import { StopError } from '../../utils/utils';
+import { StopError } from "../../utils/timeout";
 
 import { completedTurnPrefixCount } from './rules';
 import type { ToolFilter } from './types';

@@ -1,6 +1,6 @@
 // .ai ignore：群内忽略名单管理
+import { aliasToCmd } from "../../utils/alias";
 import { normalizeUserId, platformOf } from "../../utils/target_id";
-import { aliasToCmd } from "../../utils/utils";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

@@ -6,7 +6,7 @@ import Logger from '../../logger';
 import type { Session } from '../../session/session';
 import { getSession } from '../../session/session_service';
 import { getSessionCtxAndMsg } from '../../utils/seal';
-import { fireStopEvent } from '../../utils/utils';
+import { fireStopEvent } from "../../utils/timeout";
 
 import { buildForkSeed, createChildSession, decodeCheckpoint, encodeCheckpoint, runHeadlessActivation } from './child';
 import type { CheckpointMessage } from './child';

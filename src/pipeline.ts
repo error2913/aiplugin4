@@ -9,12 +9,12 @@ import { logger } from "./logger";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
+import { getRecordMessageId, normalizeMsgId, transformMsgId } from "./utils/message_id";
 import { expandForwardMessage } from "./utils/ob11";
 import { createCtx, createMsg } from "./utils/seal";
 import { registerSpecialResource } from "./utils/special_id";
 import { expandMilkySegments, formatMediaSegmentText, formatMessageSegmentsForMatching, MessageSegment, parseCardToText, parseMusicToText, transformTextToArray, truncateText } from "./utils/string";
 import { getPlatform } from "./utils/target_id";
-import { getRecordMessageId, normalizeMsgId, transformMsgId } from "./utils/utils";
 
 const log = logger.withTag('pipeline');
 

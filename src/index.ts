@@ -19,11 +19,11 @@ import { MessagePipeline } from "./pipeline";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import { registerAllTools } from "./tool/bootstrap";
+import { normalizeMsgId } from "./utils/message_id";
 import { createMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "./utils/target_id";
 import { checkUpdate } from "./utils/update";
-import { normalizeMsgId } from "./utils/utils";
 
 const log = logger.withTag('main');
 

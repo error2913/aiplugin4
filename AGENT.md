@@ -31,7 +31,7 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 - `src/context/`、`src/session/`：会话与上下文管理；`src/prompt/`：提示词组装。
 - `src/tool/`：工具系统（`registry.ts` 注册表 / `bootstrap.ts` 装配入口 / **`executor.ts` 统一执行器**——function calling、call_tool、`.ai tool call` 共用同一份校验、超时与审计；MCP、skills、按需加载；内置工具在 `src/tool/tools/`，新增分组工具在 `pub/`、`subagent/` 子目录）。
 - `src/config/`：配置注册/读取与静态常量；`src/config/ext.ts` 宿主句柄叶子模块（configs 直接引用它，不反向依赖配置总线）；**`src/config/hooks.ts` + `src/config/apply/`：配置「解析」与「应用」的分离点**——configs/* 只解析数据，把数据落到 Model 等实现上的副作用由 apply/* 通过钩子完成（组合根 `src/index.ts` 与 `scripts/test-host.ts` 注册，避免 config ↔ 实现 环）；`src/config/domain/`：角色 / 技能 / MCP / 知识库四类 JSON 配置的解析、校验与出厂默认（MCP 为标准 `mcpServers`）；`src/model/`：模型注册表/api连接列表拉取与分类/模型规则请求模板/余额查询。
-- `src/cmd/`：`.ai` 命令系统与权限（子命令装配入口 `src/cmd/bootstrap.ts`）；`src/pub/`：公开会话目录（`.ai pub` + `pub_read`/`pub_send` 工具）；`src/memory/`：记忆与知识库；`src/resource/`：资源（本地资源路径解析在 `local_paths.ts`，图片实体工厂在 `local_images.ts`）；`src/utils/`：通用工具（`revive.ts` 是持久化反序列化叶子模块）。
+- `src/cmd/`：`.ai` 命令系统与权限（子命令装配入口 `src/cmd/bootstrap.ts`）；`src/pub/`：公开会话目录（`.ai pub` + `pub_read`/`pub_send` 工具）；`src/memory/`：记忆与知识库；`src/resource/`：资源（本地资源路径解析在 `local_paths.ts`，图片实体工厂在 `local_images.ts`）；`src/utils/`：通用工具（已按职责拆叶子模块：`message_id` / `path` / `alias` / `similarity` / `id` / `revive` / `timeout` / `json` / `render_tags`；`utils.ts` 现在只剩 `replyToSender`，新代码请直接 import 对应叶子）。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 03 模块 / 04 工具 / 05 命令配置 / 06 存储 / 07 开发指南 / 09 常见问题 / 16 图片生命周期与图床（已实现：image-host + 插件 4.27.0））；已实现方案（子代理、模型配置 v5、上下文成本治理、联网搜索）的注意事项已并入 03/04/05/06/09。
 - `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）。
 - `examples/use-aiplugin4.js`：演示外部插件调用对外 API 的可加载示例。
