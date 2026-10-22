@@ -71,8 +71,16 @@ class _Config {
                 get: () => this.getCache(k, configMap[k].get)
             })
         }
-        // 预热模型配置，填充 Model 静态列表（Model.getChatModel 依赖）
-        ModelConfig.get();
+        this.warmup();
+    }
+
+    /**
+     * 启动预热（目前是模型配置）：必须走 getCache 访问器而不是直接调 configs/model.get()，
+     * 否则分区钩子（runConfigHook → 如 Model.bootstrap）不会执行，Model 注册表为空。
+     * 这也是「配置解析（configs）与配置应用（apply）分离」后唯一保证应用时机的入口。
+     */
+    static warmup() {
+        this.getCache('model', ModelConfig.get);
     }
 
     /** 让指定分区的配置缓存失效（.ai xxx refresh 使用） */

@@ -182,7 +182,8 @@ export async function buildSystemPromptContent(
     const summaryKey = signature([
         'prompt:summary',
         session.sessionId,
-        memorySource.summaryRevision(),        Config.memory.SUMMARY
+        memorySource.summaryRevision(),
+        Config.memory.SUMMARY
     ]);
     const memoryTask = Config.memory.MEMORY
         ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => memorySource.buildLongTermPrompt(ctx, session, text, uis, gi || null))

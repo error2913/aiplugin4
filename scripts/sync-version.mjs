@@ -47,7 +47,11 @@ function sync(rel, regex, replacement) {
     }
     const m = text.match(regex);
     record(rel, m ? m[1] : undefined);
-    if (write && m && m[1] !== version) {
+    if (write && !m) {
+        fatal.push(`${rel}: 未找到版本字段，无法自动回写`);
+        return;
+    }
+    if (write && m[1] !== version) {
         fs.writeFileSync(path.join(ROOT, rel), text.replace(regex, replacement(version)), 'utf8');
         updated.push(rel);
     }

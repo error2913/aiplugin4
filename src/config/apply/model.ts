@@ -30,8 +30,15 @@ export function savePurposeModelOverrides(): void {
     getHost().storage.set(MODEL_PURPOSE_OVERRIDES_KEY, JSON.stringify(Model.purposeModelOverrides));
 }
 
+// 已应用过的解析结果（按对象引用判断）：Config 的 60s TTL 会让 getCache 再次执行钩子，
+// 但 configs/model 的解析缓存未清时数据还是同一个对象——此时不应重复 Model.bootstrap
+// （否则会重置连接状态并周期性重新拉取模型列表）。
+let appliedConfig: ModelConfigData | null = null;
+
 /** 配置读取钩子：把解析好的模型配置应用到 Model 注册表；返回原数据供 Config.model 使用 */
 export function applyModelConfig(data: ModelConfigData): ModelConfigData {
+    if (appliedConfig === data) return data;
+    appliedConfig = data;
     // 运行时覆盖优先于配置里的持久默认
     Model.purposeModelOverrides = loadPurposeModelOverrides();
     Model.configPurposes = { ...data.purposes };
@@ -41,6 +48,7 @@ export function applyModelConfig(data: ModelConfigData): ModelConfigData {
 
 /** 仅供单元测试：清空配置缓存 + 规则表 + 模型注册表；下次读 Config.model 会重新解析并应用 */
 export function resetModelConfigCacheForTest(): void {
+    appliedConfig = null;
     clearModelConfigCacheForTest();
     testFetch = null;
     resetRuleRowsForTest();

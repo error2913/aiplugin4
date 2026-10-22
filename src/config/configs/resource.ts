@@ -1,6 +1,6 @@
 // 资源配置：本地图片/语音/文件/视频路径（本文件只注册配置项）。
-// 路径解析与 Image 实体构造在 src/resource/local_resources.ts：配置层不 import 资源实现，
-// 否则会形成 config → resource → config 环；消费方用 getLocalImages()/getLocalAudios()/… 读取。
+// 路径解析与 Image 实体构造在 src/resource/local_paths.ts（纯路径）与 local_images.ts（Image 实体）：
+// 配置层不 import 资源实现，否则会形成 config → resource → config 环；消费方用 getLocalImages()/getLocalAudios()/… 读取。
 import { ext } from "../ext";
 
 export default class ResourceConfig {

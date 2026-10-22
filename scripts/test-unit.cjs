@@ -19,6 +19,7 @@ const bundles = {
     web: path.join(outDir, 'unit-web.cjs'),
     imageHost: path.join(outDir, 'unit-image-host.cjs'),
     backendConfig: path.join(outDir, 'unit-backend-config.cjs'),
+    boot: path.join(outDir, 'unit-boot.cjs'),
 };
 
 // 测试可覆盖的配置值（unit-test-entry.ts 通过 globalThis.__TEST_CONFIG__ 读写）
@@ -98,7 +99,9 @@ globalThis.__TEST_CONFIG__ = TC;
         ['v5', path.join(repo, 'scripts/unit-test-v5.ts')],
         ['web', path.join(repo, 'scripts/unit-test-web.ts')],
         ['imageHost', path.join(repo, 'scripts/unit-test-image-host.ts')],
-        ['backendConfig', path.join(repo, 'scripts/unit-test-backend-config.ts')]
+        ['backendConfig', path.join(repo, 'scripts/unit-test-backend-config.ts')],
+        // 独立启动装配回归入口（首次 Config.registerConfig()，验证配置应用时机）
+        ['boot', path.join(repo, 'scripts/unit-test-boot.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

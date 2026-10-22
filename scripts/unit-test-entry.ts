@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 
 import { installTestHost } from "./test-host";
 
-import Config, { ext } from "../src/config/config";
+import Config from "../src/config/config";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
