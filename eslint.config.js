@@ -83,7 +83,7 @@ module.exports = [
   // 基础层只允许同目录相对导入；需要宿主能力时走 src/core/host.ts 注入。
   {
     name: 'dependency-boundaries',
-    files: ['src/config/static_config/**/*.ts', 'src/core/**/*.ts'],
+    files: ['src/config/static_config/**/*.ts', 'src/config/ext.ts', 'src/core/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{

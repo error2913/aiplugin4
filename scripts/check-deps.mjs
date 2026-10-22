@@ -1,34 +1,39 @@
 #!/usr/bin/env node
-// 依赖边界守卫（ratchet）：冻结基线，只拦"结构退化"与"新增跨层依赖"。
+// 依赖边界守卫（ratchet）：冻结基线，只拦"结构退化"。
 // 用法：
 //   npm run deps:check                      # 检查（CI 用）
-//   npm run deps:update                     # 接受当前状态为新基线（需在 PR 说明原因）
-//   npm run deps:update -- --allow-grow     # 环反而变大时显式放行（默认拒绝）
+//   npm run deps:update                     # 接受当前状态为新基线（检测到恶化会拒绝）
+//   npm run deps:update -- --allow-grow     # 确有架构调整导致指标恶化时显式放行
 //
-// 判定项（任一新增即失败）：
+// 判定项（任一命中即失败）：
 //   1) 最大强连通分量变大（maxCycle）
 //   2) 环内模块总数变多（inCycle）
-//   3) 基线中不在任何环里的文件新进入环
-//   4) 新增跨层依赖（低层 import 高层，且跨顶层模块）
+//   3) 基线中不在环里的文件新进入环
+//   4) 新增跨层依赖（低层 import 高层；不再豁免同顶层模块）
 //   5) 新增动态 import（禁止用 await import() 掩盖循环依赖）
+//   6) 复活本分支已删除的依赖边（retiredEdges，防止把拆掉的耦合加回去）
+//   7) 新增未分类文件（分层规则漏配，默认 L2 会掩盖问题）
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ROOT, analyze } from './lib/deps.mjs';
+import { ROOT, analyze, edgeKey } from './lib/deps.mjs';
 
 const BASELINE_FILE = path.resolve(ROOT, 'scripts/deps-baseline.json');
-const BASELINE_VERSION = 2;
+const BASELINE_VERSION = 3;
 const update = process.argv.includes('--update');
 const allowGrow = process.argv.includes('--allow-grow');
 
 const r = await analyze();
+const currentEdges = [...new Set(r.edges.map(edgeKey))].sort();
+const currentEdgeSet = new Set(currentEdges);
 
 function currentState() {
     return {
         version: BASELINE_VERSION,
         generatedAt: new Date().toISOString(),
         modules: r.files.length,
-        edges: r.edges.length,
+        edgeCount: currentEdges.length,
+        edges: currentEdges,
         maxCycle: r.maxCycle,
         inCycle: r.inCycle.size,
         cycles: r.cycles.map((c) => [...c].sort()),
@@ -38,21 +43,41 @@ function currentState() {
     };
 }
 
+/** 相对上一版基线的所有「恶化」项；非空时 update 需 --allow-grow */
+function regressionsOf(previous, state) {
+    if (!previous || previous.version !== BASELINE_VERSION) return [];
+    const out = [];
+    if (state.maxCycle > previous.maxCycle) out.push(`最大环 ${previous.maxCycle} → ${state.maxCycle}`);
+    if (state.inCycle > previous.inCycle) out.push(`环内模块 ${previous.inCycle} → ${state.inCycle}`);
+    const pv = new Set(previous.violations ?? []);
+    for (const v of state.violations) if (!pv.has(v)) out.push(`新增跨层依赖 ${v}`);
+    const pd = new Set(previous.dynamicEdges ?? []);
+    for (const d of state.dynamicEdges) if (!pd.has(d)) out.push(`新增动态 import ${d}`);
+    const pu = new Set(previous.unclassified ?? []);
+    for (const u of state.unclassified) if (!pu.has(u)) out.push(`新增未分类文件 ${u}`);
+    for (const e of previous.retiredEdges ?? []) if (currentEdgeSet.has(e)) out.push(`复活已删除依赖 ${e}`);
+    return out;
+}
+
 if (update) {
     const previous = fs.existsSync(BASELINE_FILE) ? JSON.parse(fs.readFileSync(BASELINE_FILE, 'utf8')) : null;
     const state = currentState();
-    if (previous && previous.version === BASELINE_VERSION && state.maxCycle > previous.maxCycle && !allowGrow) {
-        console.error(`拒绝更新基线：最大环 ${previous.maxCycle} → ${state.maxCycle}（变大了）。`);
-        console.error('如果确属架构调整（例如两个环合并但总数下降），请加 --allow-grow 并在 PR 说明原因。');
+    // retiredEdges 只增不减：上一版存在、现在消失的边全部并入冻结名单
+    const prevRetired = previous?.retiredEdges ?? [];
+    const prevEdges = previous?.edges ?? [];
+    const newlyRetired = prevEdges.filter((e) => !currentEdgeSet.has(e));
+    state.retiredEdges = [...new Set([...prevRetired, ...newlyRetired])].sort();
+
+    const regressions = regressionsOf(previous, state);
+    if (regressions.length && !allowGrow) {
+        console.error('拒绝更新基线：检测到边界退化，需 --allow-grow 显式放行并在 PR 说明原因：');
+        for (const item of regressions) console.error(`  ✗ ${item}`);
         process.exit(2);
     }
     fs.writeFileSync(BASELINE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
     console.log(`已更新基线：${path.relative(ROOT, BASELINE_FILE)}`);
-    console.log(`  模块 ${state.modules} / 边 ${state.edges} / 最大环 ${state.maxCycle} / 环内 ${state.inCycle} / 跨层违规 ${state.violations.length} / 动态 import ${state.dynamicEdges.length}`);
-    if (state.unclassified.length) {
-        console.log(`  ⚠ 未分类文件 ${state.unclassified.length} 个（layerOf 回退到 L2，建议补 scripts/lib/deps.mjs 规则）：`);
-        for (const f of state.unclassified) console.log(`    - ${f}`);
-    }
+    console.log(`  模块 ${state.modules} / 边 ${state.edgeCount} / 最大环 ${state.maxCycle} / 环内 ${state.inCycle}`);
+    console.log(`  跨层违规 ${state.violations.length} / 动态 import ${state.dynamicEdges.length} / 已冻结删除边 ${state.retiredEdges.length}`);
     process.exit(0);
 }
 
@@ -68,45 +93,39 @@ if (baseline.version !== BASELINE_VERSION) {
 }
 
 const failures = [];
-const warnings = [];
 
-// ---- 1) 规模 ratchet ----
-if (r.maxCycle > baseline.maxCycle) {
-    failures.push(`最大环变大：${baseline.maxCycle} → ${r.maxCycle}`);
-}
-if (r.inCycle.size > baseline.inCycle) {
-    failures.push(`环内模块变多：${baseline.inCycle} → ${r.inCycle.size}`);
-}
+// ---- 1/2) 规模 ratchet ----
+if (r.maxCycle > baseline.maxCycle) failures.push(`最大环变大：${baseline.maxCycle} → ${r.maxCycle}`);
+if (r.inCycle.size > baseline.inCycle) failures.push(`环内模块变多：${baseline.inCycle} → ${r.inCycle.size}`);
 
-// ---- 2) 新文件进入环 ----
+// ---- 3) 新文件进入环 ----
 const baselineCycleMembers = new Set(baseline.cycles.flat());
 for (const file of r.inCycle) {
     if (!baselineCycleMembers.has(file)) failures.push(`新文件进入环：${file}`);
 }
 
-// ---- 3) 跨层依赖 ----
+// ---- 4) 跨层依赖 ----
 const baseViolations = new Set(baseline.violations);
-for (const v of r.violations) {
-    if (!baseViolations.has(v)) failures.push(`新增跨层依赖：${v}`);
-}
+for (const v of r.violations) if (!baseViolations.has(v)) failures.push(`新增跨层依赖：${v}`);
 
-// ---- 4) 动态 import ----
+// ---- 5) 动态 import ----
 const baseDynamic = new Set(baseline.dynamicEdges);
-for (const d of r.dynamicEdges) {
-    if (!baseDynamic.has(d)) failures.push(`新增动态 import（会掩盖循环依赖）：${d}`);
+for (const d of r.dynamicEdges) if (!baseDynamic.has(d)) failures.push(`新增动态 import（会掩盖循环依赖）：${d}`);
+
+// ---- 6) 已删除依赖复活 ----
+for (const e of baseline.retiredEdges ?? []) {
+    if (currentEdgeSet.has(e)) failures.push(`恢复已删除依赖：${e}`);
 }
 
-// ---- 5) 未分类提醒 ----
-const baseUnclassified = new Set(baseline.unclassified);
-for (const f of r.unclassified) {
-    if (!baseUnclassified.has(f)) warnings.push(`新增未分类文件（已按 L2 计）：${f}`);
-}
+// ---- 7) 新增未分类文件 ----
+const baseUnclassified = new Set(baseline.unclassified ?? []);
+for (const f of r.unclassified) if (!baseUnclassified.has(f)) failures.push(`新增未分类文件（分层规则漏配）：${f}`);
 
 // ---- 汇报 ----
 console.log('== aiplugin4 依赖边界检查 ==');
-console.log(`模块 ${r.files.length}（基线 ${baseline.modules}）/ 依赖边 ${r.edges.length}（基线 ${baseline.edges}）`);
+console.log(`模块 ${r.files.length}（基线 ${baseline.modules}）/ 依赖边 ${currentEdges.length}（基线 ${baseline.edgeCount}）`);
 console.log(`最大环 ${r.maxCycle}（基线 ${baseline.maxCycle}）/ 环内 ${r.inCycle.size}（基线 ${baseline.inCycle}）/ 环数 ${r.cycles.length}（基线 ${baseline.cycles.length}）`);
-console.log(`跨层违规 ${r.violations.length}（基线 ${baseline.violations.length}）/ 动态 import ${r.dynamicEdges.length}（基线 ${baseline.dynamicEdges.length}）`);
+console.log(`跨层违规 ${r.violations.length}（基线 ${baseline.violations.length}）/ 动态 import ${r.dynamicEdges.length}（基线 ${baseline.dynamicEdges.length}）/ 已冻结删除边 ${(baseline.retiredEdges ?? []).length}`);
 
 const fixedViolations = [...baseViolations].filter((v) => !r.violations.includes(v));
 if (fixedViolations.length) {
@@ -119,11 +138,10 @@ if (r.maxCycle < baseline.maxCycle || r.inCycle.size < baseline.inCycle) {
     console.log('可运行 `npm run deps:update` 收紧基线。');
 }
 
-for (const w of warnings) console.warn(`[WARN] ${w}`);
 if (failures.length) {
     console.error(`\n[FAIL] 发现 ${failures.length} 处边界退化：`);
     for (const f of failures) console.error(`  ✗ ${f}`);
-    console.error('\n修复方式：拆掉该 import，或改为注入/端口；确属有意的架构调整请运行 `npm run deps:update` 并在 PR 说明原因。');
+    console.error('\n修复方式：拆掉该 import，或改为注入/端口；确属有意的架构调整请编辑 scripts/deps-baseline.json 并在 PR 说明原因。');
     process.exit(1);
 }
-console.log('\n[OK] 无结构退化、无新增跨层依赖、无新增动态 import。');
+console.log('\n[OK] 无结构退化、无新增跨层依赖、无新增动态 import、无复活已删依赖。');

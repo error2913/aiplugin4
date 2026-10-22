@@ -146,12 +146,21 @@ export function layerOf(file) {
     return 2; // 未分类默认按能力层，并在报告里提示补规则
 }
 
-/** 计算跨层违规边（低层 → 高层），返回 "from -> to" 排序数组 */
+/** 边 → "from -> to" 字符串 */
+export function edgeKey([from, to]) {
+    return `${from} -> ${to}`;
+}
+
+/**
+ * 计算跨层违规边（低层 → 高层），返回 "from -> to" 排序数组。
+ * 不豁免同顶层模块：`tool/types.ts(L1) → tool/tool.ts(L3)`、`config/ext.ts(L0) → config/domain(L1)`
+ * 这类"包内反向依赖"同样算违规（同层之间的边不会命中，因为要求 layer(to) > layer(from)）。
+ */
 export function findLayerViolations(edges) {
     const out = [];
     for (const [from, to] of edges) {
         if (!from.startsWith('src/') || !to.startsWith('src/')) continue;
-        if (topModuleOf(from) === topModuleOf(to)) continue;
+        if (from === to) continue;
         if (layerOf(to) > layerOf(from)) out.push(`${from} -> ${to}`);
     }
     return [...new Set(out)].sort();
