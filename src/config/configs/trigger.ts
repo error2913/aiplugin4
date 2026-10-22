@@ -2,7 +2,8 @@
 import { load } from 'js-toml'
 
 import Logger from "../../logger";
-import { revive, TypeDescriptor } from "../../utils/utils";
+import { revive } from "../../utils/revive";
+import type { TypeDescriptor } from "../../utils/revive";
 import { ext } from "../ext";
 import { getRegexConfig } from "../regex";
 
