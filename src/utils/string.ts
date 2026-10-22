@@ -994,55 +994,7 @@ export function fmtDate(timestamp: number) {
     const second = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
-
-/**
- * 修复json字符串，将其中缺少前半双引号的字符串添加前半双引号，修复失败返回空字符串
- * @param s
- * @returns
- */
-export function fixJsonString(s: string): string {
-    try {
-        JSON.parse(s);
-        return s;
-    } catch (_err) {
-        const patterns = [
-            // 匹配键缺少前半引号: {key": 或 ,key":
-            /([{,][\s\n]*)([a-zA-Z_$][a-zA-Z0-9_$]*)("[\s\n]*:)/g,
-            // 匹配值缺少前半引号: :value", 或 :value"} 或
-            /(:[\s\n]*)([^"]+)("[\s\n]*[,}])/g,
-            // 匹配数组中的字符串缺少前半引号: [value", 或 [value"] 或 ,value", 或 ,value"]
-            /([\[,][\s\n]*)([^"]+)("[\s\n]*[,\]])/g
-        ];
-
-        let fixed = s;
-        let matched = false;
-
-        for (const pattern of patterns) {
-            fixed = fixed.replace(pattern, (fullMatch, prefix, content, suffix) => {
-                matched = true;
-                const fixedContent = `${prefix}"${content}${suffix}`;
-                log.info(`修复json字符串: ${fullMatch} -> ${fixedContent}`);
-                return fixedContent;
-            });
-
-            if (matched) {
-                try {
-                    JSON.parse(fixed);
-                    return fixed;
-                } catch (_err) {
-                    matched = false;
-                    continue;
-                }
-            }
-        }
-
-        if (!matched) {
-            return "";
-        }
-
-        return fixed;
-    }
-}
+export { fixJsonString } from "./json";
 
 export function parseActivityTime(s: string): [number, number, number] {
     const arr = s.split('-').map((item, index) => {

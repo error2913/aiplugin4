@@ -4,10 +4,10 @@ import Logger from "../logger"
 import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
-import { fixJsonString } from "../utils/string";
 import { matchesPlatform } from "../utils/target_id";
-import { StopError, withTimeout } from "../utils/utils";
+import { StopError } from "../utils/utils";
 
+import { executeTool, type ToolFailure, validateToolArgs } from "./executor";
 import { clearToolMap, toolMap } from "./registry";
 import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolSolveContent } from "./types";
 
@@ -15,6 +15,19 @@ import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolSolveContent } 
 export { toolMap };
 
 const log = Logger.withTag('tool');
+
+/** function calling 路径的错误文案：保持与改造前逐字一致（模型侧提示词经验依赖这些措辞） */
+function functionCallErrorText(name: string, rawArgs: string, failure?: ToolFailure): string {
+    switch (failure?.code) {
+        case 'not_found': return `调用函数失败:未注册的函数:${name}`;
+        case 'not_enabled': return `调用函数失败:未经许可的函数:${name}`;
+        case 'session_type': return `调用函数失败:函数${name}可使用的场景类型为${failure.expected}，当前场景类型为${failure.actual}`;
+        case 'missing_required': return `调用函数失败:缺少必需参数 ${failure.param}`;
+        case 'invalid_arg': return `调用函数失败:${failure.message}`;
+        case 'bad_args': return `调用函数 (${name}:${rawArgs}) 失败:${failure.message}`;
+        default: return `调用函数 (${name}:${rawArgs}) 失败:${failure?.message ?? '未知错误'}`;
+    }
+}
 
 export type ToolName = string;
 export type ToolState = { [key: string]: boolean };
@@ -158,91 +171,25 @@ export default class Tool {
         clearToolMap();
     }
 
+    /**
+     * 模型 function calling 入口：解析参数（含 JSON 修复）→ 统一执行器。
+     * 校验/超时/审计/错误归一化都在 src/tool/executor.ts，本方法只负责包装回 ToolCallResult 文案。
+     */
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
-        if (!Object.prototype.hasOwnProperty.call(toolMap, name)) {
-            log.warning(`调用函数失败:未注册的函数:${name}`);
-            return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未注册的函数:${name}` }, callBack: true };
+        const rawArgs = tool_call.function.arguments;
+        const execution = await executeTool(name, ctx, msg, session, { source: 'function', args: rawArgs, repairJson: true });
+        if (!execution.ok) {
+            return { result: { tool_call_id: tool_call.id, content: functionCallErrorText(name, rawArgs, execution.failure) }, callBack: true };
         }
-        if (!session.toolState?.[name]) {
-            log.warning(`调用函数失败:未经许可的函数:${name}`);
-            return { result: { tool_call_id: tool_call.id, content: `调用函数失败:未经许可的函数:${name}` }, callBack: true };
-        }
-
-        const tool = toolMap[name];
-        const msgType = msg.messageType === 'private' ? 'user' : 'group';
-        if (tool.sessionType !== "any" && tool.sessionType !== msgType) {
-            log.warning(`调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}`);
-            return { result: { tool_call_id: tool_call.id, content: `调用函数失败:函数${name}可使用的场景类型为${tool.sessionType}，当前场景类型为${msgType}` }, callBack: true };
-        }
-
-        let args = null;
-        try {
-            args = JSON.parse(tool_call.function.arguments);
-        } catch (e) {
-            const fixedStr = fixJsonString(tool_call.function.arguments);
-            if (fixedStr === '') {
-                log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
-                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
-            }
-            try {
-                args = JSON.parse(fixedStr);
-            } catch (e) {
-                log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
-                return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
-            }
-
-        }
-
-        try {
-            if (args !== null && typeof args !== 'object') {
-                log.warning(`调用函数失败:arguement不是一个object`);
-                return { result: { tool_call_id: tool_call.id, content: `调用函数失败:arguement不是一个object` }, callBack: true };
-            }
-            for (const key of (tool.toolInfo.function.parameters.required || [])) {
-                if (!Object.prototype.hasOwnProperty.call(args, key)) {
-                    log.warning(`调用函数失败:缺少必需参数 ${key}`);
-                    return { result: { tool_call_id: tool_call.id, content: `调用函数失败:缺少必需参数 ${key}` }, callBack: true };
-                }
-            }
-
-            const validateError = Tool.validateArgs(tool, args);
-            if (validateError) {
-                log.warning(`调用函数失败:${validateError}`);
-                return { result: { tool_call_id: tool_call.id, content: `调用函数失败:${validateError}` }, callBack: true };
-            }
-
-            const { TIMEOUT } = Config.base;
-            const time = Date.now();
-            const solved = await withTimeout(() => tool.solve(ctx, msg, session, args), TIMEOUT, { stopEvent: session.stopEvent });
-            const content = typeof solved === 'string' ? solved : solved.text;
-            log.info(`${name} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
-            const result: ToolCallResult = { tool_call_id: tool_call.id, content };
-            if (typeof solved !== 'string' && solved.contentParts && solved.contentParts.length > 0) {
-                result.contentParts = solved.contentParts;
-            }
-            return { result, callBack: tool.callBack };
-        } catch (e) {
-            // stop 中断工具执行：向上抛出让工具链立即中止（不把 StopError 当工具失败回填给模型）
-            if (e instanceof StopError) throw e;
-            log.exception(`调用函数 (${name}:${tool_call.function.arguments}) 失败`, e);
-            return { result: { tool_call_id: tool_call.id, content: `调用函数 (${name}:${tool_call.function.arguments}) 失败:${e instanceof Error ? e.message : String(e)}` }, callBack: true };
-        }
+        const result: ToolCallResult = { tool_call_id: tool_call.id, content: execution.content ?? '' };
+        if (execution.contentParts && execution.contentParts.length > 0) result.contentParts = execution.contentParts;
+        return { result, callBack: execution.callBack ?? true };
     }
 
-    /** 轻量参数校验：按 parameters.properties 的 type 检查 */
+    /** 兼容旧调用点：参数校验实现已统一到 executor.validateToolArgs */
     static validateArgs(tool: Tool, args: any): string | null {
-        const props = (tool.toolInfo.function.parameters && tool.toolInfo.function.parameters.properties) || {};
-        for (const key of Object.keys(props)) {
-            if (args[key] === undefined) continue;
-            const expected = props[key].type;
-            if (expected === 'string' && typeof args[key] !== 'string') return `参数 ${key} 应为字符串`;
-            if (expected === 'number' && typeof args[key] !== 'number') return `参数 ${key} 应为数字`;
-            if (expected === 'boolean' && typeof args[key] !== 'boolean') return `参数 ${key} 应为布尔值`;
-            if (expected === 'array' && !Array.isArray(args[key])) return `参数 ${key} 应为数组`;
-            if (expected === 'object' && (typeof args[key] !== 'object' || args[key] === null)) return `参数 ${key} 应为对象`;
-        }
-        return null;
+        return validateToolArgs(tool, args);
     }
     static async handleToolCalls(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_calls: ToolCall[]): Promise<{ result: ToolCallResult[], callBack: boolean }> {
         const { MAX_CALL_COUNT } = Config.tool;

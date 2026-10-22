@@ -84,6 +84,7 @@ import { registerTools } from "../src/tool/tools/init";
 import { registerCmdTool } from "../src/cmd/sub_cmd/tool";
 import { formatSkillSummaryBlock, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
+import { executeTool } from "../src/tool/executor";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
 import { resetResourceConfigCacheForTest } from "../src/resource/local_paths";
@@ -13239,8 +13240,63 @@ Object.assign(tests, {
         assert.ok(!('extra' in original), '原数据不应被修改');
     },
 
+    /** 工具统一执行器：未注册/未开启/缺参/类型错误/JSON 解析失败/成功/StopError 传播 */
+    async testToolExecutorValidation(): Promise<void> {
+        const name = '__probe_exec_tool';
+        const probe = new Tool({
+            type: 'function',
+            function: {
+                name,
+                description: 'probe',
+                parameters: { type: 'object', properties: { x: { type: 'string' } }, required: ['x'] },
+            },
+        });
+        probe.solve = async (_c, _m, _s, args) => `ok:${args.x}`;
+        const ctx: any = { endPoint: { platform: 'qq', userId: 'QQ:1' } };
+        const msg: any = { messageType: 'group' };
+        const enabled: any = { toolState: { [name]: true } };
+        const disabled: any = { toolState: {} };
+        const base = { source: 'function' as const, repairJson: true };
+        try {
+            const notFound = await executeTool('__no_such_tool', ctx, msg, enabled, { ...base, args: {} });
+            assert.strictEqual(notFound.ok, false);
+            assert.strictEqual(notFound.failure?.code, 'not_found');
+
+            const notEnabled = await executeTool(name, ctx, msg, disabled, { ...base, args: { x: 'v' } });
+            assert.strictEqual(notEnabled.failure?.code, 'not_enabled');
+
+            const missing = await executeTool(name, ctx, msg, enabled, { ...base, args: {} });
+            assert.strictEqual(missing.failure?.code, 'missing_required');
+            assert.strictEqual(missing.failure?.param, 'x');
+
+            const invalid = await executeTool(name, ctx, msg, enabled, { ...base, args: { x: 1 } });
+            assert.strictEqual(invalid.failure?.code, 'invalid_arg');
+
+            const badJson = await executeTool(name, ctx, msg, enabled, { ...base, args: '{oops' });
+            assert.strictEqual(badJson.failure?.code, 'bad_args');
+
+            const ok = await executeTool(name, ctx, msg, enabled, { ...base, args: '{"x":"v"}' });
+            assert.strictEqual(ok.ok, true);
+            assert.strictEqual(ok.content, 'ok:v');
+            assert.strictEqual(ok.callBack, true);
+
+            // StopError 必须继续向上抛（由对话链中止），不能变成工具失败回填
+            probe.solve = async () => { throw new StopError('stop'); };
+            let thrown: any = null;
+            try {
+                await executeTool(name, ctx, msg, enabled, { ...base, args: { x: 'v' } });
+            } catch (e) {
+                thrown = e;
+            }
+            assert.ok(thrown instanceof StopError, 'StopError 应向上传播');
+        } finally {
+            delete toolMap[name];
+        }
+    },
+
     /** HostSeam：注入内存存储 + 固定时钟后，TokenCalibration 的读写与时间戳都走注入实现 */
-    testHostStorageInjectionAndClock(): void {        const store = new Map<string, string>();
+    testHostStorageInjectionAndClock(): void {
+        const store = new Map<string, string>();
         setHost({
             storage: {
                 get: (key) => store.get(key) ?? null,

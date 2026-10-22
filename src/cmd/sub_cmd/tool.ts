@@ -2,6 +2,7 @@
 // 组维度 = 内置工具分类（category）+ MCP 服务器（group）；技能/知识库由 .ai skill / .ai kb 管理，不参与组维度。
 import Config from "../../config/config";
 import { logger } from "../../logger";
+import { executeTool, type ToolFailure } from "../../tool/executor";
 import { getConfiguredMCPServers, isMCPEnabled } from "../../tool/mcp";
 import { toolMap } from "../../tool/registry";
 import Tool, { ToolGroupInfo } from "../../tool/tool";
@@ -10,6 +11,18 @@ import { matchesPlatform, platformOf } from "../../utils/target_id";
 import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
+
+/** `.ai tool call` 路径的错误文案（与改造前逐字一致；新增参数类型错误的独立措辞） */
+function commandCallErrorText(name: string, failure?: ToolFailure): string {
+    switch (failure?.code) {
+        case 'not_found': return `调用函数失败:未注册的函数:${name}`;
+        case 'not_enabled': return `调用函数失败:未经许可的函数:${name}`;
+        case 'missing_required': return `调用函数失败:缺少必需参数 ${failure.param}`;
+        case 'invalid_arg': return `参数错误:${failure.message}`;
+        case 'bad_args': return `参数错误:${failure.message}`;
+        default: return `调用函数 (${name}) 失败:${failure?.message ?? '未知错误'}`;
+    }
+}
 
 function helpText(): string {
     return `帮助:
@@ -227,7 +240,6 @@ export function registerCmdTool() {
                     reply(`调用函数失败:未注册的函数:${val3}`);
                     return ret;
                 }
-                const tool = toolMap[val3];
                 try {
                     const args = cmdArgs.kwargs.reduce((acc: { [key: string]: any }, kwarg) => {
                         const valueString = kwarg.value;
@@ -239,16 +251,19 @@ export function registerCmdTool() {
                         return acc;
                     }, {} as { [key: string]: any });
 
-                    for (const key of (tool.toolInfo.function.parameters.required || [])) {
-                        if (!Object.prototype.hasOwnProperty.call(args, key)) {
-                            logger.warning(`调用函数失败:缺少必需参数 ${key}`);
-                            reply(`调用函数失败:缺少必需参数 ${key}`);
-                            return ret;
-                        }
+                    // 管理员试用：不拦会话开关/平台/会话类型，但补齐超时与参数类型校验（统一执行器）
+                    const execution = await executeTool(val3, ctx, msg, session, {
+                        source: 'command',
+                        args,
+                        checkPlatform: false,
+                        checkSessionType: false,
+                        checkEnabled: false,
+                    });
+                    if (!execution.ok) {
+                        reply(commandCallErrorText(val3, execution.failure));
+                        return ret;
                     }
-
-                    const solved = await tool.solve(ctx, msg, session, args);
-                    const content = typeof solved === 'string' ? solved : solved.text;
+                    const content = execution.content ?? '';
                     logger.info(`[tool] 指令调用 session=${session.sessionId} tool=${val3}`);
                     const MAX_TOOL_CALL_OUTPUT_LENGTH = 500;
                     if (content.length > MAX_TOOL_CALL_OUTPUT_LENGTH) {
