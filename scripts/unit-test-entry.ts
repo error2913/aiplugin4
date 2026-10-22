@@ -71,7 +71,8 @@ import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
 import Logger, { setLoggerConfigProvider } from "../src/logger";
 import { fetchModelList, ModelListResult } from "../src/model/list";
-import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
+import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/apply/model";
+import { hasConfigHook, registerConfigHook, runConfigHook } from "../src/config/hooks";
 import { isIgnoredConfig } from "../src/model/model";
 import { Session } from "../src/session/session";
 import { JudgeManager } from "../src/judge/judge_manager";
@@ -85,7 +86,7 @@ import { formatSkillSummaryBlock, getSkillSummariesBudgeted, registerSkills, SKI
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
 import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
-import { resetResourceConfigCacheForTest } from "../src/config/configs/resource";
+import { resetResourceConfigCacheForTest } from "../src/resource/local_paths";
 import { resetImageConfigCacheForTest } from "../src/config/configs/image";
 import { resetWebConfigCacheForTest } from "../src/config/configs/web";
 import { registerResourcePathTool } from "../src/tool/tools/resource/tool_resource_path";
@@ -13220,9 +13221,26 @@ Object.assign(tests, {
         }
     },
 
+    /** 配置钩子：组合根已注册 model 钩子；钩子可替换数据、抛错时回退原数据 */
+    testConfigHookRegisteredAndFailsSoft(): void {
+        assert.ok(hasConfigHook('model'), '组合根测试宿主应已注册 model 配置钩子');
+        const original = { a: 1 } as any;
+        registerConfigHook('__probe_throw', () => { throw new Error('probe boom'); });
+        assert.strictEqual(runConfigHook('__probe_throw', original), original, '钩子抛错应回退原数据');
+
+        let called = false;
+        registerConfigHook('__probe_ok', (_key: string, data: any) => {
+            called = true;
+            return { ...data, extra: true };
+        });
+        const out = runConfigHook('__probe_ok', original);
+        assert.ok(called, '钩子应被调用');
+        assert.strictEqual((out as any).extra, true, '钩子返回的替换数据应生效');
+        assert.ok(!('extra' in original), '原数据不应被修改');
+    },
+
     /** HostSeam：注入内存存储 + 固定时钟后，TokenCalibration 的读写与时间戳都走注入实现 */
-    testHostStorageInjectionAndClock(): void {
-        const store = new Map<string, string>();
+    testHostStorageInjectionAndClock(): void {        const store = new Map<string, string>();
         setHost({
             storage: {
                 get: (key) => store.get(key) ?? null,

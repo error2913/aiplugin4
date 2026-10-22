@@ -1,6 +1,6 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
+import { savePurposeModelOverrides } from "../config/apply/model";
 import Config from "../config/config";
-import { savePurposeModelOverrides } from "../config/configs/model";
 import { getHost } from "../core/host";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";

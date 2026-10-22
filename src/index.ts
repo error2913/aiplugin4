@@ -6,6 +6,7 @@ import { registerAgentApi } from "./agent/api";
 import { BlockManager } from "./block";
 import { registerAllCmds } from "./cmd/bootstrap";
 import { PrivilegeManager } from "./cmd/privilege";
+import { registerConfigAppliers } from "./config/apply";
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
@@ -29,6 +30,8 @@ const log = logger.withTag('main');
 function main() {
   // HostSeam 必须先装配：后续所有模块的存储/时钟/网络都经宿主端口
   setHost(createSealHost());
+  // 配置应用钩子必须在 Config.registerConfig()（会预热模型配置）之前注册
+  registerConfigAppliers();
 
   Handlebars.registerHelper('index', (index: number) => index + 1);
   Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));

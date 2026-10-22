@@ -1,13 +1,14 @@
 // 资源查询工具：只负责列出可用资源，不直接发送消息。
-import Config from "../../../config/config";
+import { getLocalImages } from "../../../resource/local_images";
+import { getLocalAudios, getLocalFiles, getLocalVideos } from "../../../resource/local_paths";
 import Tool from "../../tool";
 
 function buildResourceList(type: string): string {
     const sections: Array<[string, string[]]> = [];
-    if (type === "all" || type === "image") sections.push(["本地图片", (Config.resource.LOCAL_IMAGES || []).map(item => item.imageId)]);
-    if (type === "all" || type === "audio") sections.push(["本地音频", (Config.resource.LOCAL_AUDIOS || []).map(item => item.audioId)]);
-    if (type === "all" || type === "file") sections.push(["本地文件", (Config.resource.LOCAL_FILES || []).map(item => item.fileId)]);
-    if (type === "all" || type === "video") sections.push(["本地视频", (Config.resource.LOCAL_VIDEOS || []).map(item => item.videoId)]);
+    if (type === "all" || type === "image") sections.push(["本地图片", getLocalImages().map(item => item.imageId)]);
+    if (type === "all" || type === "audio") sections.push(["本地音频", getLocalAudios().map(item => item.audioId)]);
+    if (type === "all" || type === "file") sections.push(["本地文件", getLocalFiles().map(item => item.fileId)]);
+    if (type === "all" || type === "video") sections.push(["本地视频", getLocalVideos().map(item => item.videoId)]);
     return sections.map(([label, names]) => `${label}:${names.length > 0 ? names.join("、") : "暂无"}`).join("\n");
 }
 

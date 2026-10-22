@@ -1,5 +1,5 @@
 // .ai model：查看/绑定全局分用途模型 + 模型列表（加载快照 / 立即拉取）
-import { savePurposeModelOverrides } from "../../config/configs/model";
+import { savePurposeModelOverrides } from "../../config/apply/model";
 import Model, { ConnState, ModelEntry } from "../../model/model";
 import { ModelUse } from "../../model/types";
 import { M } from "../privilege";

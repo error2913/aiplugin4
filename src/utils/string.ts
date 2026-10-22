@@ -6,6 +6,7 @@ import { FACE_MAP } from "../config/static_config";
 import { Context } from "../context/context";
 import { logger } from "../logger";
 import Image from "../resource/image";
+import { getLocalAudios } from "../resource/local_paths";
 
 import { registerSpecialResource } from "./special_id";
 import { getRawId, normalizeGroupId, normalizeUserId, platformOf } from "./target_id";
@@ -520,7 +521,7 @@ async function transformContentToText(ctx: seal.MsgContext, session: { context: 
             }
             case 'audio': {
                 const id = seg.content;
-                const audios: { audioId: string, path: string }[] = Config.resource.LOCAL_AUDIOS || [];
+                const audios: { audioId: string, path: string }[] = getLocalAudios();
                 const audio = audios.find(a => a.audioId === id);
 
                 if (audio) {

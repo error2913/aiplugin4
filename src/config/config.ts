@@ -20,6 +20,7 @@ import SubAgentConfig from "./configs/subagent";
 import ToolConfig from "./configs/tool";
 import TriggerConfig from "./configs/trigger";
 import WebConfigStore from "./configs/web";
+import { runConfigHook } from "./hooks";
 import { CONFIG_CACHE_TTL } from "./static_config";
 
 // 宿主句柄与正则配置已下沉到叶子模块，configs/* 直接引用它们，不再经本文件（拆掉 config ↔ configs 环）。
@@ -84,7 +85,8 @@ class _Config {
         if (this.cache?.[key] && timestamp - this.cache[key].timestamp < CONFIG_CACHE_TTL) {
             return this.cache[key].data;
         }
-        const data = getFunc();
+        // 配置段只负责解析；依赖实现的「应用/派生」由组合根注册的钩子完成（拆掉 config ↔ 实现环）
+        const data = runConfigHook(key, getFunc());
         this.cache[key] = {
             timestamp: timestamp,
             data: data

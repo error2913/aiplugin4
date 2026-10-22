@@ -1,6 +1,8 @@
 // 资源路径查询工具：把 list_resources 查到的资源 ID 解析为实际路径/URI。
 // 不直接发送消息；mcp:// 默认只做结构解析，不触发 MCP 导出，避免产生短时副作用。
 import Config from "../../../config/config";
+import { getLocalImages } from "../../../resource/local_images";
+import { getLocalAudios, getLocalFiles, getLocalVideos } from "../../../resource/local_paths";
 import { parseMCPReference, resolveResourceReference } from "../../../utils/resource";
 import { resolveLocalPath } from "../../../utils/utils";
 import Tool from "../../tool";
@@ -29,7 +31,7 @@ function getResourceRaw(type: ResourceType, id: string): { id: string; raw: stri
     const targetId = normalizeResourceId(type, id);
     if (!targetId) return null;
     if (type === "image") {
-        const items = Config.resource.LOCAL_IMAGES || [];
+        const items = getLocalImages();
         const item = items.find(x => x.imageId === targetId);
         if (!item) return null;
         // 图片配置对象里保存的是已解析 path；原样配置值从 image 配置的 pathMap 取。
@@ -37,10 +39,10 @@ function getResourceRaw(type: ResourceType, id: string): { id: string; raw: stri
         return { id: targetId, raw: Object.prototype.hasOwnProperty.call(rawMap, targetId) ? rawMap[targetId] : item.path };
     }
     const items = type === "audio"
-        ? (Config.resource.LOCAL_AUDIOS || [])
+        ? getLocalAudios()
         : type === "file"
-            ? (Config.resource.LOCAL_FILES || [])
-            : (Config.resource.LOCAL_VIDEOS || []);
+            ? getLocalFiles()
+            : getLocalVideos();
     const item = items.find(x => (x as any)[`${type}Id`] === targetId);
     if (!item) return null;
     return { id: targetId, raw: item.path };
