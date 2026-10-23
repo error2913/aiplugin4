@@ -8,6 +8,7 @@ import { classifyModel, DeclarableModelTag } from "./catalog";
 import { ModelEntry } from "./entry";
 import type { ConnStatus, ListSource } from "./entry";
 import { describeListError, fetchModelList, ListFetchFn, ModelCapabilityHints, normalizeModelListResult } from "./list";
+import { findModelByRef, listModelsForUse, resolveForUse, resolveSourceForUse } from "./registry_ops";
 import {
     bodyDefaultsFor,
     ModelRuleTemplate,
@@ -280,124 +281,46 @@ export default class Model {
 
     // ---- 用途候选 / 默认解析 ----
 
-    private static isEligible(e: ModelEntry, use: ModelUse): boolean {
-        if (use === 'text-embedding') return e.tags.includes('embed');
-        if (use === 'image-understanding') return e.tags.includes('vision');
-        if (use === 'image-generation') return e.tags.includes('gen');
-        if (use === 'tts') return e.tags.includes('tts');
-        // chat / compression / summarization / judge：排除嵌入、生图与语音
-        return !e.tags.includes('embed') && !e.tags.includes('gen') && !e.tags.includes('tts');
-    }
+    // ---- 用途候选 / 默认解析（实现见 ./registry_ops，Model 静态方法保留委派） ----
 
-    /**
-     * 某用途的候选列表，**按用户的优先顺序排**（purposes 里列出的在前，下标越小越优先；
-     * 未列出的排在其后，保持连接顺序 + 列表顺序）。
-     *
-     * 这是"按顺序取用"的唯一实现点：`resolveForUse` 取 pool[0]，
-     * `pickFallbackModel` 顺着 pool 往后切 —— 两处都自动服从用户排序，不必各自改。
-     * sort 是稳定的，所以未列出那批的相对顺序不变。
-     */
     static listModelsForUse(use: ModelUse): ModelEntry[] {
-        const pool = Model.entries.filter(e => Model.isEligible(e, use));
-        const pref = Model.configPurposes[use];
-        if (!pref || pref.length === 0) return pool;
-        const rank = new Map<string, number>();
-        pref.forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
-        const unlisted = pref.length;
-        return pool.slice().sort((a, b) => {
-            const ra = rank.has(a.ref) ? rank.get(a.ref)! : unlisted;
-            const rb = rank.has(b.ref) ? rank.get(b.ref)! : unlisted;
-            return ra - rb;
-        });
+        return listModelsForUse(Model, use);
     }
 
-    /**
-     * 解析 use 当前生效模型，分三层（方案 6.3）：
-     *   1. storage 运行时覆盖（.ai model 写的）—— 优先级最高，**单个** ref
-     *   2. 配置里的 purposes —— **有序数组**，取第一个有效的
-     *   3. 该用途候选中的第一个（已按用户顺序排过）
-     * 任一层引用失效（模型退役/改名/用途不符）时**保留现场并记日志**，回退下一层。
-     */
-    private static resolveForUse(use: ModelUse): ModelEntry | null {
-        const overrideRef = Model.purposeModelOverrides[use];
-        if (overrideRef) {
-            const e = Model.findModelByRef(overrideRef, use);
-            if (e) return e;
-            log.warning(`运行时覆盖 ${overrideRef}（${use}）已失效，回退配置默认`);
-        }
-
-        const configList = Model.configPurposes[use];
-        if (configList && configList.length > 0) {
-            // 依次试用户排的顺序，取第一个**仍然有效**的（前面几个可能已退役/改名）
-            for (const id of configList) {
-                const e = Model.findModelByRef(id, use);
-                if (e) return e;
-            }
-            log.warning(`配置绑定的 ${configList.join(' / ')}（${use}）均已失效，回退首个可用模型`);
-        }
-
-        const pool = Model.listModelsForUse(use);
-        return pool.length > 0 ? pool[0] : null;
-    }
-
-    /** 当前 use 的解析来源（供 .ai model 标注"这个绑定来自哪一层"） */
     static resolveSourceForUse(use: ModelUse): 'override' | 'config' | 'auto' | 'none' {
-        const ov = Model.purposeModelOverrides[use];
-        if (ov && Model.findModelByRef(ov, use)) return 'override';
-        const cf = Model.configPurposes[use];
-        if (cf && cf.some(id => Model.findModelByRef(id, use))) return 'config';
-        return Model.listModelsForUse(use).length > 0 ? 'auto' : 'none';
+        return resolveSourceForUse(Model, use);
     }
 
     static getChatModel(use: ChatModelUse): ModelEntry | null {
-        return Model.resolveForUse(use);
+        return resolveForUse(Model, use);
     }
 
     static getMultimodalModel(use: MultimodalModelUse): ModelEntry | null {
-        return Model.resolveForUse(use);
+        return resolveForUse(Model, use);
     }
 
     static getEmbeddingModel(use: EmbeddingModelUse): ModelEntry | null {
-        return Model.resolveForUse(use);
+        return resolveForUse(Model, use);
     }
 
     /** 语音合成用途当前生效模型 */
     static getTTSModel(): ModelEntry | null {
-        return Model.resolveForUse('tts');
+        return resolveForUse(Model, 'tts');
     }
 
     /** 文生图用途当前生效模型 */
     static getImageModel(): ModelEntry | null {
-        return Model.resolveForUse('image-generation');
+        return resolveForUse(Model, 'image-generation');
     }
 
     /** 某用途的全部候选（对外只读透出，供工具描述生成） */
     static listForUse(use: ModelUse): ModelEntry[] {
-        return Model.listModelsForUse(use);
+        return listModelsForUse(Model, use);
     }
 
     /** 按 ref 查找模型实例（可选 use 时校验用途资格），供 .ai model / 自动切换复用 */
     static findModelByRef(ref: string, use?: ModelUse): ModelEntry | null {
-        if (!ref) return null;
-        let entry: ModelEntry | null = null;
-        const idxMatch = ref.match(/^\[(\d+)\]:\s*(.+)$/);
-        if (idxMatch) {
-            const connIndex = parseInt(idxMatch[1], 10);
-            const name = idxMatch[2].trim();
-            entry = Model.entries.find(e => e.connIndex === connIndex && e.name === name) || null;
-        } else {
-            // 1) 精确匹配 ref：v5 是配置里的**模型 id**；v4/唯一名时 ref 就等于模型名
-            entry = Model.entries.find(e => e.ref === ref) || null;
-            // 2) 退回按模型名匹配，但**仅当唯一** —— 重名时必须判为歧义，
-            //    交由上层提示用户使用完整标识（保持 v4 既有语义）
-            if (!entry) {
-                const byName = Model.entries.filter(e => e.name === ref);
-                if (byName.length === 1) entry = byName[0];
-            }
-        }
-        if (!entry) return null;
-        if (use && !Model.isEligible(entry, use)) return null;
-        return entry;
+        return findModelByRef(Model, ref, use);
     }
 
     /** 嵌入模型输出维度：text-embedding 用途模板 body.dimensions（默认 1024），非法返回 0（调用方降级关键词检索） */

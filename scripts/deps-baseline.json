@@ -1,8 +1,8 @@
 {
   "version": 3,
-  "generatedAt": "2026-10-23T18:53:17.041Z",
-  "modules": 325,
-  "edgeCount": 1058,
+  "generatedAt": "2026-10-23T18:58:49.726Z",
+  "modules": 326,
+  "edgeCount": 1060,
   "edges": [
     "src/agent/agent.ts -> src/agent/run_context.ts",
     "src/agent/agent.ts -> src/agent/stream.ts",
@@ -590,6 +590,7 @@
     "src/model/model.ts -> src/model/catalog.ts",
     "src/model/model.ts -> src/model/entry.ts",
     "src/model/model.ts -> src/model/list.ts",
+    "src/model/model.ts -> src/model/registry_ops.ts",
     "src/model/model.ts -> src/model/request_rules.ts",
     "src/model/provider.ts -> src/config/config.ts",
     "src/model/provider.ts -> src/logger.ts",
@@ -603,6 +604,7 @@
     "src/model/provider.ts -> src/usage.ts",
     "src/model/provider.ts -> src/utils/timeout.ts",
     "src/model/provider.ts -> src/utils/web.ts",
+    "src/model/registry_ops.ts -> src/logger.ts",
     "src/model/request_rules.ts -> src/config/static_config/index.ts",
     "src/model/window_cache.ts -> src/core/host.ts",
     "src/model/window_cache.ts -> src/logger.ts",
