@@ -1232,9 +1232,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(session.archiveSeq, 0, '失败时不应写入归档分片');
 
             // 并发归档在飞：返回 busy（调用方可稍后重试），而不是 failed
-            (session.context as any).archiving = true;
+            // 用真实并发模拟：第一次 summarize 挂起时再次调用，锁必须生效
+            let release: (ok: boolean) => void = () => undefined;
+            const gate = new Promise<boolean>((resolve) => { release = resolve; });
+            MemoryManager.summarizeChunkWithRetry = async () => gate;
+            const first = session.context.archiveByTokenIfNeeded();
             assert.equal(await session.context.archiveByTokenIfNeeded(), 'busy', '已有归档在飞应返回 busy');
-            (session.context as any).archiving = false;
+            release(false);
+            assert.equal(await first, 'failed', '挂起的首次归档失败时应如实返回 failed');
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
