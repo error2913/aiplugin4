@@ -6,6 +6,7 @@ import { FACE_MAP } from "../config/static_config";
 import { Context } from "../context/context";
 import { logger } from "../logger";
 import Image from "../resource/image";
+import { handleImageMessageSegment } from "../resource/image_inbound";
 import { getLocalAudios } from "../resource/local_paths";
 
 import { getMilkyReplyQuoteId, transformMsgId, transformMsgIdBack } from "./message_id";
@@ -419,7 +420,7 @@ export async function transformArrayToContent(ctx: seal.MsgContext, messageArray
                 break;
             }
             case 'image': {
-                const result = await Image.handleImageMessageSegment(ctx, seg, messageId);
+                const result = await handleImageMessageSegment(ctx, seg, messageId);
                 content += result.content;
                 images.push(...result.images);
                 break;
