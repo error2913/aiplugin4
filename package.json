@@ -2,7 +2,6 @@
   "name": "aiplugin4",
   "version": "4.28.0",
   "description": "ai plugin for sealdice",
-  "typings": "build/index.d.ts",
   "repository": "https://github.com/error2913/aiplugin4",
   "license": "MIT",
   "keywords": [],
@@ -32,9 +31,6 @@
     "docs:build": "node docs-site/build.js",
     "docs:manifest": "node docs-site/check-manifest.js",
     "docs:serve": "node docs-site/build.js --serve"
-  },
-  "engines": {
-    "node": ">=10"
   },
   "dependencies": {
     "handlebars": "^4.7.8",
