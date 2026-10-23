@@ -76,6 +76,8 @@ import { getAuxLlm, hasAuxLlm } from "../src/core/ports/aux_llm";
 import { hasConfigHook, registerConfigHook, runConfigHook } from "../src/config/hooks";
 import { isIgnoredConfig } from "../src/model/model";
 import { Session } from "../src/session/session";
+import { activeTimeSegmentIndex, computeSessionState, HOT_HOLD_MS } from "../src/session/rhythm";
+import { serializePendingQueue, serializeSession, shouldDeferCoalescedSave } from "../src/session/persistence";
 import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
@@ -2827,6 +2829,52 @@ export const tests: Record<string, () => void | Promise<void>> = {
             if (timer) clearTimeout(timer);
             (ext as any).storageSet = origSet;
         }
+    },
+
+    /** 会话节奏纯函数：冷热状态机与活跃时段段号（从 session.ts 拆出的 rhythm 叶子） */
+    testSessionRhythmPureFunctions(): void {
+        const t0 = 1_000_000;
+        // 非待机恒 HOT；待机+在途=HOT 且 touch 刷新；只读查询不刷新
+        assert.equal(computeSessionState({ standby: false, busy: false, lastRelevantAt: t0, now: t0 + 10 * HOT_HOLD_MS }).state, 'HOT', '非待机恒 HOT');
+        const busy = computeSessionState({ standby: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 });
+        assert.equal(busy.state, 'HOT');
+        assert.equal(busy.lastRelevantAt, t0 + 12345, 'busy + touch 应刷新 lastRelevantAt');
+        const busyReadOnly = computeSessionState({ standby: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 }, false);
+        assert.equal(busyReadOnly.lastRelevantAt, t0, 'touch=false 时 busy 也不得刷新（只读查询无副作用）');
+        assert.equal(computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS - 1 }).state, 'HOT');
+        const cooling = computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS + 1 });
+        assert.equal(cooling.state, 'COOLING');
+        assert.equal(computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 - 5000 }).state, 'HOT', '时钟回拨 idle 取 0');
+        // 活跃时段：09:00-18:00 分 3 段 → 10:00 落在第 0 段，20:00 不在时段
+        const seg = { start: 9 * 60, end: 18 * 60, segs: 3 };
+        assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 10, 0)), 0);
+        assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 14, 0)), 1);
+        assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 20, 0)), -1);
+        assert.equal(activeTimeSegmentIndex({ start: 0, end: 0, segs: 0 }, new Date(2026, 0, 1, 10, 0)), -1, '未配置活跃时段返回 -1');
+    },
+
+    /** 会话持久化契约：运行时字段不落盘、挂起队列只留轻量字段、节流边界 */
+    testSessionPersistenceContract(): void {
+        const session = new Session();
+        session.sessionId = 'QQ:persist';
+        session.setting.standby = true;
+        session.running = true;
+        session.pendingQueue.push({ ctx: {} as any, msg: {} as any, content: '你好', userId: 'QQ:1', messageId: 'm1', kind: 'record', epId: 'ep1', isPrivate: false });
+        const raw = serializeSession(session);
+        const data = JSON.parse(raw);
+        assert.equal(data.setting.standby, true, '持久化字段应保留');
+        assert.equal(data.sessionId, 'QQ:persist');
+        for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
+            assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
+        }
+        const pending = JSON.parse(serializePendingQueue(session.pendingQueue));
+        assert.equal(pending.length, 1);
+        assert.equal(pending[0].content, '你好');
+        assert.ok(!('ctx' in pending[0]) && !('msg' in pending[0]), '挂起队列只落盘轻量字段，不序列化 ctx/msg');
+        // 节流：间隔内且未达批量 => 可延迟；超出间隔或达到批量 => 必须写
+        assert.equal(shouldDeferCoalescedSave(0, 1, 1000), true);
+        assert.equal(shouldDeferCoalescedSave(0, 1, 5001), false, '超过最小间隔必须落盘');
+        assert.equal(shouldDeferCoalescedSave(0, 20, 1000), false, '达到批量上限必须落盘');
     },
 
     /** 转热档位判定与折叠预算 */

@@ -11,6 +11,7 @@
 // 避免 ext.storageSet 与会话存档被撑爆；原始 base64 在 run() 作用域内落地后即弃。
 import Config from "../config/config";
 import { getHost } from "../core/host";
+import { setMediaNotifiedHandler } from "../core/ports/media_notice";
 import { logger } from "../logger";
 import { MediaResult } from "../model/media";
 import Model, { ModelEntry } from "../model/model";
@@ -732,3 +733,7 @@ export class MediaTaskManager {
         return { ok: false, message: `任务 #${task.id} 已结束（${task.status}），无法取消` };
     }
 }
+
+// 把「已送达回置」注册到 L0 端口：会话侧 flushNotices 消费媒体通知后经 port 回调，
+// 避免 session/inbox 反向 import 本模块（会话编排环）。
+setMediaNotifiedHandler((sessionId, taskId) => MediaTaskManager.markNotifiedByNotice(sessionId, taskId));
