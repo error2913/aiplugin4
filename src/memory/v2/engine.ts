@@ -5,6 +5,7 @@ import { cosineSimilarity } from "../../utils/similarity";
 
 import { doConsolidate, pruneBank as pruneBankImpl } from "./consolidation";
 import { MentalModelService } from "./mental_models";
+import { reflect } from "./reflection";
 import { MemoryRepository, normalizeName } from "./repository";
 import { estimateTokens, filterByTags, keywordLimit, keywordScore, matchedStrategies, rrf, SEMANTIC_SIMILARITY_THRESHOLD, semanticLimit, simpleHash, temporalSearch, tokenize } from "./scoring";
 import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
@@ -31,7 +32,6 @@ import type {
 
 const DEFAULT_MAX_TOKENS = 2048;
 const BACKFILL_BATCH_LIMIT = 20;
-const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
 
 export interface MemoryEngineOptions {
     storage?: MemoryStorage;
@@ -577,7 +577,7 @@ export class MemoryEngine {
         this.repository.updateMentalModel(bankId, current);
     }
 
-    // ===== Reflect =====
+    // ===== Reflect（实现见 ./reflection） =====
 
     async reflect(
         bankId: string,
@@ -594,72 +594,11 @@ export class MemoryEngine {
             scopeNote?: string;
         } = {}
     ): Promise<ReflectResult> {
-        const bank = this.repository.getBank(bankId);
-        const exclude = new Set(opts.excludeMentalModelIds || []);
-        const mentalModels = (bank ? bank.mentalModels : [])
-            .filter(m => !exclude.has(m.id) && (m.status === 'ready' || m.status === undefined));
-        const observations = (bank ? bank.observations : [])
-            .filter(o => {
-                if (opts.scopeTags && opts.scopeTags.length) {
-                    const tags = o.scopeTags || [];
-                    if (!tags.some(t => opts.scopeTags!.includes(t))) return false;
-                }
-                if (opts.createdAfter && (o.updatedAt || 0) <= opts.createdAfter) return false;
-                return true;
-            });
-        // 事实类记忆走 recall；observation 由 observations 列表单独提供，避免 unit 与 observation 双重注入
-        const unitTypes = (opts.factTypes || ['world', 'experience', 'observation']).filter(t => t !== 'observation');
-        const memories = (await this.recall(bankId, query, {
-            types: unitTypes.length > 0 ? unitTypes : ['world', 'experience'],
-            tags: opts.scopeTags || [],
-            maxTokens: opts.maxTokens || 4096,
-        }))
-            .map(r => r.unit)
-            .filter(u => !opts.createdAfter || (u.updatedAt || 0) > opts.createdAfter);
-        let text = '';
-        if (this.reflectSynthesizer) {
-            try {
-                text = (await this.reflectSynthesizer(query, {
-                    mentalModels,
-                    observations,
-                    memories,
-                    existingAnswer: opts.existingAnswer,
-                    mode: opts.mode,
-                    scopeNote: opts.scopeNote || this.scopeNoteForBank(bankId),
-                })) || '';
-            } catch {
-                text = '';
-            }
-        }
-        if (!text.trim()) {
-            if (opts.strict) {
-                // 刷新路径：禁止把记忆原文/心智模型 dump 成"答案"（避免把占位文本/记忆清单写进心智模型）
-                text = '';
-            } else {
-                text = [
-                    ...mentalModels.map(m => `【心智模型】${m.question}\n${m.answer}`),
-                    ...observations.map(o => `【观察】${o.text}`),
-                    ...memories.map(m => `【事实】${m.text}`),
-                ].join('\n') || NO_MEMORY_TEXT;
-            }
-        }
-        return {
-            text,
-            basedOn: { mentalModels, observations, memories },
-        };
-    }
-
-    /** 由 bankId（user_/group_ 前缀 + 平台前缀 ID）生成 reflect 范围提示行 */
-    private scopeNoteForBank(bankId: string): string {
-        const sep = bankId.indexOf('_');
-        const prefix = sep > 0 ? bankId.slice(0, sep) : '';
-        const raw = sep > 0 ? bankId.slice(sep + 1) : bankId;
-        const kindLabel = prefix === 'group' ? '群聊' : prefix === 'user' ? '私聊' : '会话';
-        const colon = raw.indexOf(':');
-        const platform = colon > 0 ? raw.slice(0, colon) : '';
-        return platform
-            ? `当前范围：平台=${platform}，会话=${kindLabel} ${raw}`
-            : `当前范围：会话=${kindLabel} ${raw}`;
+        return reflect({
+            repository: this.repository,
+            reflectSynthesizer: this.reflectSynthesizer,
+            recall: (b, q, o) => this.recall(b, q, o as any),
+        }, bankId, query, opts);
     }
 
     // ===== Utility =====

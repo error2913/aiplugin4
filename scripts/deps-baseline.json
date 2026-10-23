@@ -1,8 +1,8 @@
 {
   "version": 3,
-  "generatedAt": "2026-10-23T19:22:01.005Z",
-  "modules": 330,
-  "edgeCount": 1070,
+  "generatedAt": "2026-10-23T19:32:35.327Z",
+  "modules": 331,
+  "edgeCount": 1072,
   "edges": [
     "src/agent/agent.ts -> src/agent/run_context.ts",
     "src/agent/agent.ts -> src/agent/stream.ts",
@@ -549,6 +549,7 @@
     "src/memory/v2/consolidation.ts -> src/utils/id.ts",
     "src/memory/v2/engine.ts -> src/memory/v2/consolidation.ts",
     "src/memory/v2/engine.ts -> src/memory/v2/mental_models.ts",
+    "src/memory/v2/engine.ts -> src/memory/v2/reflection.ts",
     "src/memory/v2/engine.ts -> src/memory/v2/repository.ts",
     "src/memory/v2/engine.ts -> src/memory/v2/scoring.ts",
     "src/memory/v2/engine.ts -> src/memory/v2/storage.ts",
@@ -571,6 +572,7 @@
     "src/memory/v2/scoring.ts -> src/utils/string.ts",
     "src/memory/v2/storage.ts -> src/core/host.ts",
     "src/model/adapter.ts -> src/model/api_dialect.ts",
+    "src/model/api_dialect.ts -> src/config/v5/schema.ts",
     "src/model/baidu_token.ts -> src/logger.ts",
     "src/model/balance.ts -> src/config/static_config/providers.ts",
     "src/model/balance.ts -> src/model/api_error.ts",
