@@ -2,7 +2,6 @@
 import Config from "../config/config";
 import { getHost } from "../core/host";
 import { logger } from "../logger";
-import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
 import { generateId } from "../utils/id";
@@ -17,6 +16,7 @@ import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
 import { ImageIndex } from "./image_index";
 import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
+import { imageToText } from "./image_text";
 import { base64UrlFor, checkImageUrl, cqCodeFor, getSendFile, srcFor } from "./image_transfer";
 import { isPermanentUrlError, isTemporaryUrl } from "./image_url";
 
@@ -431,72 +431,17 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        const { URL_TO_BASE64 } = Config.image;
-        const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
-
-        const model = Model.getMultimodalModel('image-understanding');
-        if (!model) {
-            log.error(`未找到支持image-understanding的模型`);
-            return;
-        }
-
-        // URL 已确认不可用（QQ 直链过期等）：识图模型同样下载不到，不再白花一次请求
-        if (this.urlBroken) {
-            log.warning(`图片${this.imageId}的URL已确认不可用，跳过识图`);
-            Image.save(this);
-            return;
-        }
-
-        // 图床/头像：交给 getModelSrc 统一选择 URL 或 b64（模型可达性判断）
-        // 非图床 URL：保持旧行为（“总是”先转 b64；配了图床时先入库再取 b64）
-        let src = '';
-        if (this.hosted || this.isAvatarImage) {
-            src = await this.getModelSrc(model);
-        } else {
-            if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
-            if (ImageHost.enabled && this.type === 'url' && !this.base64) await this.urlToBase64();
-            // 取不到 b64 时保留旧行为：把原始/稳定 URL 交给识图模型（图床失败不阻断识图）
-            src = this.base64 ? this.base64Url : this.src;
-        }
-        if (!src) {
-            log.warning(`图片${this.imageId}取不到可用的识图地址（图床不可达/图片已删），跳过识图`);
-            Image.save(this);
-            return;
-        }
-
-        this.description = this.truncateIfLong(await model.callITT(src, prompt ? prompt : defaultPrompt));
-
-        // 图床：首次给了 URL 但模型没识别出来 → 用 b64 再试一次（不依赖“自动”配置；宁可多一次本地请求）
-        if (!this.description && this.hosted && this.hostedId) {
-            const data = await ImageHost.fetchBase64(this.hostedId);
-            if (data) {
-                this.base64 = data.base64;
-                this.format = data.format || this.format || 'png';
-                this.description = this.truncateIfLong(await model.callITT(this.base64Url, prompt ? prompt : defaultPrompt));
-            }
-        }
-
-        if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url' && !this.isBase64RetryBlocked()) {
-            log.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
-            await this.urlToBase64();
-            if (this.base64) {
-                this.description = this.truncateIfLong(await model.callITT(this.base64Url, prompt ? prompt : defaultPrompt));
-            }
-        }
-
-        if (!this.description) log.error(`图片${this.imageId}识别失败`);
-        else Image.save(this); // 持久化 description/rawDescription（含截断时保留的完整识别原文）
+        return imageToText(this, prompt);
     }
 
-    /** 图片转文字结果超长时不再交给压缩智能体，改为只展示开头 N 字并把完整原文存入 rawDescription；未超阈值时展示即原文 */
-    private truncateIfLong(text: string): string {
-        const { IMAGE_TEXT_TRUNCATE_CHARS } = Config.image;
-        if (!text) return text;
-        if (IMAGE_TEXT_TRUNCATE_CHARS > 0 && text.length > IMAGE_TEXT_TRUNCATE_CHARS) {
-            this.rawDescription = text;
-            return text.slice(0, IMAGE_TEXT_TRUNCATE_CHARS);
-        }
-        return text;
+    /** 默认识图提示词（识别叶子回调；prompt 模板渲染留在 Image，避免叶子跨层依赖 prompt） */
+    defaultPrompt(): string {
+        return IMAGE_PROMPT_TEMPLATE({});
+    }
+
+    /** 持久化当前图片字段（识别叶子回调，等价 Image.save(this)） */
+    saveSelf(): void {
+        Image.save(this);
     }
 
 
