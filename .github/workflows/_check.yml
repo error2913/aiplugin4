@@ -1,0 +1,61 @@
+# 可复用质量门禁（workflow_call）：PR 检查与 release 共用同一套步骤，避免两处漂移。
+# 调用方：build-check.yml（push/PR）、release.yml（verify 前的 check 任务）。
+name: Check
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 版本号单一事实源：meta.ts 的 VERSION 必须与 header.txt / package(.json|lock) / changelog / sealpack 一致
+      - name: Version single source
+        run: npm run version:check
+
+      # changelog 数据文件 ↔ 聚合索引一致（新增版本后运行 npm run changelog:gen）
+      - name: Changelog index
+        run: npm run changelog:check
+
+      - name: Lint
+        run: npm run lint
+
+      # 必须直跑 tsconfig（npx tsc --noEmit），不要加 --strict：
+      # 命令行 --strict 会覆盖 tsconfig 的严格选项，实测会把「联合类型未收窄」
+      # （Property 'error' does not exist）这类错误静默吞掉 ——
+      # 同一份代码 tsconfig 直跑 exit=2，换成 `--strict` 后 exit=0，类型门禁形同失效。
+      # tsconfig 已启用 noImplicitReturns / noUnusedLocals 等；如需更严，请改 tsconfig 而非命令行覆盖。
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      # 依赖边界 ratchet：只拦"新增环 / 新增跨层依赖"，基线见 scripts/deps-baseline.json。
+      # 重构期间改善后可用 npm run deps:update 收紧基线（需在 PR 说明原因）。
+      - name: Dependency boundaries
+        run: npm run deps:check
+
+      - name: Build and validate package
+        run: npm run package:check
+
+      - name: Smoke test
+        run: npm run smoke
+
+      - name: Check status
+        if: failure()
+        run: |
+          echo "Check failed. Please check the errors above."
+          exit 1

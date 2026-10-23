@@ -18,7 +18,12 @@ env:
   SEALPACK_SERVER: https://repo.sealdice.com/
 
 jobs:
+  # 质量门禁复用 _check.yml（与 build-check 同一份）：lint / tsc / unit / deps / package:check / smoke
+  check:
+    uses: ./.github/workflows/_check.yml
+
   verify:
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -32,22 +37,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      # 与 build-check 一致：直跑 tsconfig，不加 --strict（命令行覆盖会让部分类型错误被静默吞掉）
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Unit tests
-        run: npm run test:unit
-
-      - name: Build and validate package
-        run: npm run package:check
-
-      - name: Smoke test
-        run: npm run smoke
 
       - name: Verify tag, version and changelog
         if: startsWith(github.ref, 'refs/tags/')
@@ -140,7 +129,7 @@ jobs:
         with:
           name: release-assets-${{ github.run_id }}
 
-      - name: Generate release notes from changelog.ts
+      - name: Generate release notes from changelog data file
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
