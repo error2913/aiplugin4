@@ -56,6 +56,10 @@ jobs:
         working-directory: docs-site
         run: python verify_slugify_against_github.py
 
+      # 文档清单单一事实源：docs-site/manifest.js ↔ docs/ ccdocs/ 磁盘 ↔ mkdocs nav 三者一致
+      - name: Verify docs manifest
+        run: npm run docs:manifest
+
       - name: Build site (strict) and check links
         run: npm run docs:build
 

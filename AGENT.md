@@ -25,6 +25,7 @@ npm run changelog:check     # changelog 数据文件（src/changelog/<版本>.ts
 npm run changelog:gen       # 按数据文件重新生成聚合索引 src/changelog.ts
 npm run domain:check        # 默认值生成物（config/domain/default_data.ts）↔ 默认值源一致
 npm run domain:gen          # 从旧版静态默认值重新生成 default_data.ts
+npm run docs:manifest       # 文档清单（docs-site/manifest.js↔docs/ccdocs/磁盘↔mkdocs nav）一致
 ```
 
 改完核心逻辑建议执行 `npm run build && npm run smoke`。

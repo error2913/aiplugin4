@@ -24,36 +24,12 @@ const REF_OUT = path.join(OUT, 'reference');
 /** 源码类链接在站点里指回 GitHub。 */
 const REPO_BLOB = 'https://github.com/error2913/aiplugin4/blob/main';
 
-/** 文档源文件名 → 站内路由。显式列出，避免自动扫描把非文档 md 收进来。 */
-const KB_FILES = [
-  '01-项目概览',
-  '02-架构设计',
-  '03-核心模块详解',
-  '04-工具系统',
-  '05-命令与配置',
-  '06-数据存储',
-  '07-开发指南',
-  '08-相关后端项目',
-  '09-注意事项与常见问题',
-  '10-TODO',
-  '11-ob11-core-bridge-使用指南',
-  '12-配置JSON化方案',
-  '16-图片生命周期与图床方案',
-  '17-图片引用标准与AI图库交互方案',
-];
+/** 文档清单单一事实源见 docs-site/manifest.js（新增文档必须登记，CI 会校验）。 */
+const { KB_FILES, REF_FILES } = require('./manifest');
 
 /** docs/README.md 在站内作为知识库索引页。 */
 const KB_INDEX_SRC = 'docs/README.md';
 const KB_INDEX_OUT = 'kb/index.md';
-
-const REF_FILES = [
-  'amazon-bedrock',
-  'google-vertex-ai',
-  'hooks',
-  'mcp',
-  'settings-reference',
-  'third-party-integrations',
-];
 
 function rmrf(dir) {
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });

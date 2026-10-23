@@ -30,6 +30,7 @@
     "domain:gen": "node scripts/gen-domain-default-data.mjs",
     "version:sync": "node scripts/sync-version.mjs --write",
     "docs:build": "node docs-site/build.js",
+    "docs:manifest": "node docs-site/check-manifest.js",
     "docs:serve": "node docs-site/build.js --serve"
   },
   "engines": {
