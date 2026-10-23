@@ -2,10 +2,10 @@
 import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
-import type { SystemEntryRef } from "./context/context";
-import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, EVENT_DEDUP_WINDOW_MS, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist } from "./event/notice";
+import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist } from "./event/notice";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
+import { consumeDependencyTombstone, deleteCoreMessageState, filterOb11SupplementSegments, getCoreMessageState, getEventEntryRef, getMessageKey, markCoreMessageRecorded, markDependencyFullRecorded, rememberCoreMessageByKey, rememberEventEntryRef, waitForCoreEvent } from "./pipeline/dedup";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
@@ -18,6 +18,9 @@ import { getPlatform } from "./utils/target_id";
 
 const log = logger.withTag('pipeline');
 
+
+// 兼容旧引用：ob11 补收段筛选已拆到 ./pipeline/dedup（内部实现请直接引用叶子）
+export { filterOb11SupplementSegments } from "./pipeline/dedup";
 /** 按机器人自身 ID 反查匹配的通信端点；匹配不到返回空串（调用方跳过）。
  *  双连接冗余下同一 QQ 可能有直连与桥两个端点：优先返回已连接（state=1）的端点，
  *  全部不在线时回退到第一个匹配端点。 */
@@ -34,125 +37,6 @@ export function resolveEndpointId(selfId: string | number): string {
 }
 
 
-/** 核心原生 milky 路径通常过滤掉的段，只由 ob11 依赖补充。 */
-const OB11_SUPPLEMENT_SEGMENT_TYPES = new Set(['record', 'json', 'video', 'file', 'node', 'forward', 'music', 'xml', 'markdown', 'market_face']);
-const CORE_MESSAGE_TTL_MS = 2000;
-const DEPENDENCY_WAIT_MS = 100;
-/** 核心/依赖配对表最大条目数：超限时淘汰最旧一项，防极端洪峰下内存失控 */
-const CORE_STATES_MAX = 5000;
-
-interface CoreMessageState {
-    expiresAt: number;
-    recorded: boolean;
-    /** 该 key 已由依赖路径整条兜底处理（完整入库/可能已触发 AI）：核心回调迟到时应放弃，避免双录/双触发 */
-    depFull?: boolean;
-    types: Set<string>;
-}
-
-const coreMessageStates = new Map<string, CoreMessageState>();
-
-function pruneCoreMessageStates(now: number = Date.now()): void {
-    coreMessageStates.forEach((state, key) => {
-        if (state.expiresAt <= now) coreMessageStates.delete(key);
-    });
-}
-
-/** 尺寸兜底：超限时淘汰最旧一项 */
-function capCoreMessageStates(): void {
-    if (coreMessageStates.size <= CORE_STATES_MAX) return;
-    const oldest = coreMessageStates.keys().next().value;
-    if (oldest !== undefined) coreMessageStates.delete(oldest);
-}
-
-function getMessageKey(ctx: seal.MsgContext, msg: seal.Message): string {
-    const sessionId = ctx.isPrivate ? ctx.player?.userId || '' : ctx.group?.groupId || '';
-    const messageId = getRecordMessageId(ctx, msg) || transformMsgId(msg.rawId);
-    return `${ctx.endPoint.userId}|${sessionId}|${messageId}`;
-}
-
-function rememberCoreMessageByKey(key: string, messageArray: MessageSegment[]): void {
-    pruneCoreMessageStates();
-    coreMessageStates.set(key, {
-        expiresAt: Date.now() + CORE_MESSAGE_TTL_MS,
-        recorded: false,
-        types: new Set(messageArray
-            .filter(item => item.type !== 'text')
-            .map(item => item.type === 'at' && item.data && item.data.qq === 'all' ? 'at:all' : item.type))
-    });
-    capCoreMessageStates();
-}
-
-function markCoreMessageRecorded(key: string): void {
-    const state = coreMessageStates.get(key);
-    if (state) state.recorded = true;
-}
-
-function getCoreMessageState(key: string): CoreMessageState | undefined {
-    pruneCoreMessageStates();
-    return coreMessageStates.get(key);
-}
-
-/** 依赖路径已整条兜底处理（核心没有对应回调）后打墓碑：核心回调迟到时据此放弃，避免双录/双触发 */
-function markDependencyFullRecorded(key: string): void {
-    pruneCoreMessageStates();
-    coreMessageStates.set(key, {
-        expiresAt: Date.now() + CORE_MESSAGE_TTL_MS,
-        recorded: true,
-        depFull: true,
-        types: new Set(),
-    });
-    capCoreMessageStates();
-}
-
-/** 消费墓碑：存在且标记为依赖整条兜底时删除并返回 true（核心应放弃本次处理） */
-function consumeDependencyTombstone(key: string): boolean {
-    pruneCoreMessageStates();
-    const state = coreMessageStates.get(key);
-    if (state && state.depFull) {
-        coreMessageStates.delete(key);
-        return true;
-    }
-    return false;
-}
-
-/** 事件"后到覆盖先到"引用表：去重窗口内同 key 只保留一条上下文事件，
- *  重复到达（echo/双路径/内容无法区分的兜底情况）时用最后到达的副本就地替换，不再简单丢弃。 */
-interface EventEntryRefState {
-    expiresAt: number;
-    ref: SystemEntryRef;
-}
-const eventEntryRefs = new Map<string, EventEntryRefState>();
-const EVENT_ENTRY_REF_MAX = 5000;
-
-function pruneEventEntryRefs(now: number): void {
-    eventEntryRefs.forEach((state, key) => {
-        if (state.expiresAt <= now) eventEntryRefs.delete(key);
-    });
-}
-
-/** 记录某去重 key 当前在上下文中的事件条目位置（与 EVENT_DEDUP_WINDOW_MS 同生命周期） */
-function rememberEventEntryRef(key: string, ref: SystemEntryRef): void {
-    pruneEventEntryRefs(Date.now());
-    eventEntryRefs.set(key, { expiresAt: Date.now() + EVENT_DEDUP_WINDOW_MS, ref });
-    if (eventEntryRefs.size > EVENT_ENTRY_REF_MAX) {
-        const oldest = eventEntryRefs.keys().next().value;
-        if (oldest !== undefined) eventEntryRefs.delete(oldest);
-    }
-}
-
-/** 依赖事件只筛选核心缺失段；face 由核心是否已收到动态决定。 */
-export function filterOb11SupplementSegments(message: any[], coreTypes?: Set<string>): any[] {
-    return message.filter((seg: any) => {
-        if (!seg || typeof seg !== 'object' || !seg.type) return false;
-        if (OB11_SUPPLEMENT_SEGMENT_TYPES.has(seg.type)) return true;
-        if (seg.type === 'at' && seg.data && seg.data.qq === 'all') return !coreTypes?.has('at:all');
-        return seg.type === 'face' && !coreTypes?.has('face');
-    });
-}
-
-function waitForCoreEvent(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, DEPENDENCY_WAIT_MS));
-}
 
 /** 消息节点/合并转发展开的最大嵌套深度，防止恶意或异常嵌套导致无限递归 */
 const MAX_FORWARD_DEPTH = 5;
@@ -573,11 +457,10 @@ export class MessagePipeline {
         if (isDuplicateEvent(dedupKey)) {
             // 去重命中（echo / 双路径 / 指纹无法区分的兜底情况）：不丢弃后到副本，
             // 以"最后到达的事件"作为唯一事件——就地替换先前已入库的旧副本（保留原位置与顺序）。
-            const now = Date.now();
-            const refState = eventEntryRefs.get(dedupKey);
+            const ref = getEventEntryRef(dedupKey);
             let replaced = false;
-            if (refState && refState.expiresAt > now) {
-                replaced = session.context.replaceSystemUserMessage(refState.ref, text, opts.systemName, entryExtra);
+            if (ref) {
+                replaced = session.context.replaceSystemUserMessage(ref, text, opts.systemName, entryExtra);
             }
             if (!replaced) {
                 // 旧条目已被合并压缩/归档改写或引用丢失：改为追加新副本兜底，避免事件内容彻底丢失
@@ -675,13 +558,13 @@ export class MessagePipeline {
 
         // 忽略条件（豹语表达式）命中时直接忽略
         if (parseInt(seal.format(ctx, `{${IGNORE_CONDITION}}`)) === 1) {
-            if (coreMessageKey) coreMessageStates.delete(coreMessageKey);
+            if (coreMessageKey) deleteCoreMessageState(coreMessageKey);
             log.info('忽略消息条件命中，跳过');
             return;
         }
 
         if (ignoreRegex.test(messageText)) {
-            if (coreMessageKey) coreMessageStates.delete(coreMessageKey);
+            if (coreMessageKey) deleteCoreMessageState(coreMessageKey);
             log.info(`非指令消息忽略:${messageText}`);
             return;
         }

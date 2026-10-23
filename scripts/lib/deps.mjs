@@ -106,6 +106,7 @@ const ROOT_FILE_LAYER = {
 
 const LAYER_RULES = [
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/changelog\//.test(f) },
+    { layer: 4, name: 'L4 装配', test: (f) => /^src\/pipeline\//.test(f) },
     { layer: 0, name: 'L0 基础', test: (f) => /^src\/config\/static_config\//.test(f) },
     { layer: 0, name: 'L0 基础', test: (f) => /^src\/config\/ext\.ts$/.test(f) },
     { layer: 0, name: 'L0 基础', test: (f) => /^src\/(core|utils\/(target_id|url|raw_marker|markdown|render_tags)\.ts$)/.test(f) },
