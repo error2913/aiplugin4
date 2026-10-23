@@ -1,121 +1,32 @@
 // MCP 客户端：把外部 MCP 服务器（Streamable HTTP / JSON-RPC）的工具注册为 AI 工具
 // 多会话：按 AI 会话（session.sessionId）分桶维护 MCP 会话，同一 AI 会话的连续调用
 // 复用同一 MCP 会话，保持服务端浏览器/登录状态；空闲或超限的会话按 LRU 回收。
-import Config, { ext } from "../config/config";
-import { McpServerEntry } from "../config/domain/types";
+// 服务器配置解析/缓存与错误映射已拆到 ./mcp/config（本文件只保留会话与工具注册）。
 import Logger from "../logger";
 import Image from "../resource/image";
 import type { ImageSource } from "../resource/image_host";
 import { matchesPlatform, platformOf } from "../utils/target_id";
 
+import { formatMcpError, getLastRefreshAt, getMCPServerByName, getMCPServers, maxSessionsPerServer, refreshMCPConfig, sameServerConfig, sessionTTLMs, setLastRefreshAt, TOOLS_CACHE_TTL } from "./mcp/config";
+import type { MCPServer, MCPServerState, MCPToolDef } from "./mcp/config";
 import { buildContentParts, normalizeMCPResult } from "./mcp/result";
 import { MCPCallResult } from "./mcp/types";
 import { toolMap } from "./registry";
 import Tool from "./tool";
+
+// 兼容旧引用：MCP 配置/错误映射已拆到 ./mcp/config（内部实现请直接引用叶子）
+export { formatMcpError, getConfiguredMCPServers, getMCPServerByName, isMCPEnabled, refreshMCPConfig, resetMCPCacheForTest } from "./mcp/config";
+export type { MCPServer } from "./mcp/config";
 
 const log = Logger.withTag('mcp');
 
 /** tools/call 携带的 AI 会话标识头：mcp-files-exec 等后端按它隔离默认工作区 */
 const SESSION_KEY_HEADER = 'X-Aiplugin4-Session';
 
-export type MCPServer = McpServerEntry;
-
-interface MCPToolDef {
-    name: string;
-    description?: string;
-    inputSchema?: any;
-}
-
-interface MCPServerSession {
-    sessionId: string;
-    lastUsedAt: number;
-}
-
-interface MCPServerState {
-    server: MCPServer;
-    /** 系统级会话：拉取工具列表与无会话上下文的内部桥接调用（callMCPTool）使用，空闲后回收、需要时重建 */
-    defaultSessionId: string;
-    defaultSessionUsedAt: number;
-    tools: MCPToolDef[];
-    toolsFetchedAt: number;
-    /** 按 AI 会话分桶的 MCP 会话 */
-    sessions: Map<string, MCPServerSession>;
-}
-
-const TOOLS_CACHE_TTL = 60 * 1000; // 工具列表缓存 60s
-const DEFAULT_MAX_SESSIONS = 3; // 每服务器最大会话数默认 3（可配置「MCP每服务器最大会话数」）
 const serverStates: { [name: string]: MCPServerState } = {};
 const mcpToolKeys = new Map<string, string>(); // MCP 注册过的工具键 → 所属服务器名，仅清理这些键避免误删普通工具
-let lastRefreshAt = 0; // 全量刷新节流：避免每条消息都重新同步工具列表
 
 /** 服务器配置是否一致：url/token/headers 任一变化都视为新配置，需要重建会话并重新拉取工具列表 */
-function sameServerConfig(a: MCPServer, b: MCPServer): boolean {
-    if (a.url !== b.url || a.token !== b.token) return false;
-    return JSON.stringify(a.headers || {}) === JSON.stringify(b.headers || {});
-}
-
-function sessionTTLMs(): number {
-    const v = seal.ext.getIntConfig(ext, "MCP会话空闲回收分钟");
-    return (Number.isFinite(v) && v > 0 ? v : 10) * 60 * 1000;
-}
-
-function maxSessionsPerServer(): number {
-    const v = seal.ext.getIntConfig(ext, "MCP每服务器最大会话数");
-    return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_SESSIONS;
-}
-
-// MCP 服务器配置属于启动解析一次、重载 JS 才生效的复杂配置：模块级缓存
-let mcpEnabledCache: boolean | null = null;
-let mcpServersCache: MCPServer[] | null = null;
-
-/**
- * MCP 总开关：默认关闭，避免没配 MCP / 没装后端时在启动或对话里报错。
- * 开启后才会解析并连接「MCP服务器」里的服务器。
- */
-export function isMCPEnabled(): boolean {
-    if (mcpEnabledCache === null) mcpEnabledCache = seal.ext.getBoolConfig(ext, "是否启用MCP");
-    return mcpEnabledCache;
-}
-
-export function getMCPServerByName(name: string): MCPServer | null {
-    // 服务器列表为启动解析一次的缓存快照：修改配置后需重载 JS 才生效
-    return getMCPServers().find(s => s.name === name) || null;
-}
-
-function getMCPServers(): MCPServer[] {
-    if (mcpServersCache) return mcpServersCache;
-    if (!isMCPEnabled()) {
-        mcpServersCache = [];
-        return mcpServersCache;
-    }
-
-    // 解析失败由 config 层回退为空并记日志
-    const servers = Config.mcp.MCP_SERVERS
-        .map(s => ({ ...s, platforms: [...s.platforms], headers: { ...s.headers } }))
-        .filter(s => s.name && s.url);
-    mcpServersCache = servers;
-    return mcpServersCache;
-}
-
-/** 返回全部已解析的 MCP 服务器快照（供 list_mcps / .ai mcp list 使用） */
-export function getConfiguredMCPServers(): MCPServer[] {
-    return getMCPServers();
-}
-
-/** 清空服务器缓存并重读配置（.ai mcp refresh 使用，随后强制重同步工具） */
-export function refreshMCPConfig(): void {
-    mcpEnabledCache = null;
-    mcpServersCache = null;
-    Config.invalidate('mcp');
-}
-
-/** 测试用：复位模块级缓存 */
-export function resetMCPCacheForTest(): void {
-    mcpEnabledCache = null;
-    mcpServersCache = null;
-    lastRefreshAt = 0;
-    Config.invalidate('mcp');
-}
 
 async function mcpRequest(server: MCPServer, payload: object, sessionId?: string, sessionKey?: string): Promise<{ status: number, body: any, sessionId?: string }> {
     const headers: { [key: string]: string } = {
@@ -143,30 +54,6 @@ async function mcpRequest(server: MCPServer, payload: object, sessionId?: string
         if (dataLine) body = JSON.parse(dataLine.slice(6));
     }
     return { status: response.status, body, sessionId: response.headers.get('mcp-session-id') || sessionId };
-}
-
-/** 把 MCP HTTP 状态 + JSON-RPC 错误转成可读信息；401/403 优先按鉴权失败提示 */
-export function formatMcpError(status: number, body: any): string {
-    const err = body && body.error;
-    if (status === 401 || status === 403) {
-        const detail = err && typeof err === 'object' && err.message ? `：${err.message}` : '';
-        return `鉴权失败（HTTP ${status}）${detail}；请检查该 MCP 服务器的 Authorization / token 是否与后端一致`;
-    }
-    if (err && typeof err === 'object') {
-        const codeMsg: { [code: number]: string } = {
-            [-32700]: '解析错误（请求不是合法 JSON）',
-            [-32600]: '请求无效',
-            [-32601]: '方法不存在',
-            [-32602]: '参数无效',
-            [-32603]: '服务器内部错误',
-            [-32001]: '服务器未初始化',
-            [-32002]: '会话不存在或已失效',
-            [-32003]: '服务器繁忙'
-        };
-        const readable = codeMsg[err.code] || `错误码 ${err.code}`;
-        return `${readable}${err.message ? `：${err.message}` : ''}`;
-    }
-    return `HTTP ${status} ${JSON.stringify(body)}`;
 }
 
 async function initialize(server: MCPServer): Promise<string | undefined> {
@@ -479,8 +366,8 @@ export async function registerMCPTools(force = false) {
     }
 
     // 工具列表同步按 TTL 节流；force 时跳过（refresh）
-    if (!force && now - lastRefreshAt < TOOLS_CACHE_TTL) return;
-    if (!force) lastRefreshAt = now;
+    if (!force && now - getLastRefreshAt() < TOOLS_CACHE_TTL) return;
+    if (!force) setLastRefreshAt(now);
 
     for (const server of servers) {
         try {
