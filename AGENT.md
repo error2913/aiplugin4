@@ -28,7 +28,7 @@ npm run version:sync        # 按 meta.ts VERSION 回写其余版本位置
 ## 代码导航
 
 - `src/index.ts`：装配入口，只做注册；事件处理统一走 `src/pipeline.ts`。
-- `src/core/`：宿主端口（HostSeam）——`host.ts` 定义 `storage/clock/fetch/ext` 接口与 `setHost/getHost`，`seal_host.ts` 是唯一直接读 `seal` 的适配器；入口先 `setHost(createSealHost())`，新增模块读写存储/时间/网络优先走 `getHost()`（单测由 `scripts/test-host.ts` 注入）。`core/ports/`：跨层端口——`agent_registry`（按名字取 Agent，实现委派回 `Agent.get`）与 `aux_llm`（压缩/摘要/评分等内部推理），避免 context/memory/judge 反向依赖 agent 主链，均由组合根注入。
+- `src/core/`：宿主端口（HostSeam）——`host.ts` 定义 `storage/clock/fetch/ext` 接口与 `setHost/getHost`，`seal_host.ts` 是唯一直接读 `seal` 的适配器；入口先 `setHost(createSealHost())`，新增模块读写存储/时间/网络优先走 `getHost()`（单测由 `scripts/test-host.ts` 注入）。`core/ports/`：跨层/L0 端口——`agent_registry`（按名字取 Agent，实现委派回 `Agent.get`）、`aux_llm`（压缩/摘要/评分等内部推理）、`session_lookup`（按 id 取会话）、`judge_wait`（judge 评分轮末 ↔ timer 定时器双向登记）、`media_notice`（媒体通知已送达回置）。跨层协作优先「各自在模块加载时注册一半到 L0 端口」，避免互相 import；当前依赖图最大 SCC = 1（0 环）。
 - `src/event/`：事件接入与分发（含 ob11 数组消息、文件/卡片/合并转发展开等特殊路径）。
 - `src/agent/`：智能体编排（run/runStream、对外 API `globalThis.aiplugin4`）；`src/agent/subagent/`：DSH 对齐子代理框架（委派/fork、后台 job、可续跑子代理、持久化与唤醒）。
 - `src/context/`、`src/session/`：会话与上下文管理（session 已按职责拆分：`setting` / `rhythm` / `persistence` / `inbox` / `outbox`，`session.ts` 保留公开方法委派）；`src/prompt/`：提示词组装。

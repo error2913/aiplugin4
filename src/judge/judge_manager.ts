@@ -3,9 +3,9 @@
 import Config from "../config/config";
 import { JudgeConfig } from "../config/configs/trigger";
 import { getAuxLlm } from "../core/ports/aux_llm";
+import { cancelJudgeWait, scheduleJudgeWait, setJudgeWaitFinisher } from "../core/ports/judge_wait";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
-import { TimerManager } from "../timer";
 import { buildContent, getRoleSetting, renderWindowedHistory } from "../utils/message";
 import { fmtDate } from "../utils/string";
 import { withTimeout } from "../utils/timeout";
@@ -106,7 +106,7 @@ export class JudgeManager {
     /** 清理会话 judge 状态：移除内存状态与 WAIT 轮末定时器（.ai off / .ai stop / LRU 淘汰时调用，保证会话结束后轮内挂起消息不再重新评分） */
     static clearSession(sid: string): void {
         this.states.delete(sid);
-        TimerManager.removeTimers(sid, "", ["judgeWait"], []);
+        cancelJudgeWait(sid);
     }
 
     /** 主入口：消息已入库后由 pipeline 待机块调用；WAIT 轮内挂起，轮外 gate 通过才调用评分小模型 */
@@ -181,9 +181,9 @@ export class JudgeManager {
         if (Config.trigger.JUDGE.SCORING.wait_cooldown <= 0) return;
         // 同一会话只保留一个 WAIT 轮末兜底定时器：新轮覆盖旧轮，避免轮次频繁时旧定时器堆积
         // （旧定时器会因 waitUntil 被新轮延长而反复“未到点”重试，刷日志并多余执行）
-        TimerManager.removeTimers(session.sessionId, "", ["judgeWait"], []);
+        cancelJudgeWait(session.sessionId);
         const target = Math.floor(Date.now() / 1000) + Config.trigger.JUDGE.SCORING.wait_cooldown;
-        TimerManager.addJudgeWaitTimer(ctx, session, target);
+        scheduleJudgeWait(ctx, session, target);
     }
 
     /** 轮外消息进 gate：任一条件命中 DROP（不触发小模型），通过则评分 */
@@ -409,3 +409,6 @@ ${history.text}
         return { text: items.join('\n'), count: items.length };
     }
 }
+
+// 把 WAIT 轮末收尾注册到 L0 端口：timer 到点后经端口回调（避免 judge ↔ timer 互相 import）
+setJudgeWaitFinisher((sid) => JudgeManager.endWaitRound(sid));

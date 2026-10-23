@@ -1,9 +1,9 @@
 // 定时器模块：目标/间隔/活跃时间段/WAIT轮末 四类定时任务的调度与持久化
 import { getHost } from "./core/host";
-import { JudgeManager } from "./judge/judge_manager";
+import { finishJudgeWaitRound, setJudgeWaitScheduler } from "./core/ports/judge_wait";
+import { getSessionById } from "./core/ports/session_lookup";
 import { logger } from "./logger";
-import { Session } from "./session/session";
-import { getSession } from "./session/session_service";
+import type { Session } from "./session/session";
 import { revive, TypeDescriptor } from "./utils/revive";
 import { getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
@@ -264,7 +264,7 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 
                             const { sid, isPrivate, epId, set, content } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
-                            const session = getSession(sid);
+                            const session = getSessionById(sid);
 
                             const s = `你设置的定时器触发了，请按照以下内容发送回复：
 定时器设定时间：${fmtDate(set)}
@@ -294,7 +294,7 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 
                             const { sid, isPrivate, epId, set, interval, count, content } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
-                            const session = getSession(sid);
+                            const session = getSessionById(sid);
 
                             // 无效次数：不触发，直接移除
                             if (count === 0 || count < -1) {
@@ -334,7 +334,7 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 
                             const { sid, isPrivate, epId, set } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
-                            const session = getSession(sid);
+                            const session = getSessionById(sid);
 
                             const curSegIndex = session.curActiveTimeSegIndex;
                             const nextTimePoint = session.getNextTimePoint(curSegIndex);
@@ -373,7 +373,7 @@ ${lastTimePrompt}
                             }
 
                             // WAIT 轮末兜底：轮内若有挂起消息则重新过 gate 评分；一次性定时器，轮未到点（秒级定时目标与毫秒截止的舍入差）时保留
-                            const ended = await JudgeManager.endWaitRound(timer.sid);
+                            const ended = await finishJudgeWaitRound(timer.sid);
                             if (!ended) {
                                 // 未到点通常意味着 waitUntil 被新一轮 WAIT 延长；若该会话已有更新的 judgeWait 定时器（非当前快照项），
                                 // 说明旧定时器已被覆盖（含 task 快照与新建之间的竞态），直接丢弃避免堆积
@@ -423,3 +423,8 @@ ${lastTimePrompt}
         this.executeTask();
     }
 }
+// 把 judgeWait 定时器操作注册到 L0 端口：judge 评分轮末经端口安排/取消（避免 judge ↔ timer 互相 import）
+setJudgeWaitScheduler({
+    schedule: (ctx, session, target) => TimerManager.addJudgeWaitTimer(ctx, session, target),
+    cancel: (sid) => TimerManager.removeTimers(sid, "", ["judgeWait"], []),
+});
