@@ -2,10 +2,10 @@
 // 设计参考 Hindsight：MemoryUnit + Entity + MemoryLink + Observation + MentalModel。
 import { generateId } from "../../utils/id";
 import { cosineSimilarity } from "../../utils/similarity";
-import { buildCharNGrams } from "../../utils/string";
 
 import { OBSERVATION_STALE_DAYS } from "./prompt";
 import { MemoryRepository, normalizeName } from "./repository";
+import { decayScore, estimateTokens, evictionGroup, filterByTags, keywordLimit, keywordScore, matchedStrategies, rrf, sameCluster, SEMANTIC_SIMILARITY_THRESHOLD, semanticLimit, simpleHash, temporalSearch, tokenize } from "./scoring";
 import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
 import {
     LEGACY_PERSONA_QUESTION,
@@ -36,17 +36,11 @@ import type {
     RetainResult,
 } from "./types";
 
-const RRF_K = 60;
 const DEFAULT_MAX_TOKENS = 2048;
-const SEMANTIC_SIMILARITY_THRESHOLD = 0.8;
 const BACKFILL_BATCH_LIMIT = 20;
 const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
 /** 心智模型占位答案：无答案创建时的 pending 文案（不作为 delta 基线/有效答案） */
 const PENDING_ANSWER = '生成中…';
-/** 遗忘保护：importance 达到该值（或 pinned）的记忆最后淘汰（上限仍是硬约束，超限仍会删） */
-const PROTECT_IMPORTANCE = 0.9;
-/** 衰减分半衰期（天）：decayScore = importance × 2^(−未访问天数/半衰期)，用于超限时排序 */
-const DECAY_HALF_LIFE_DAYS = 60;
 
 export interface MemoryEngineOptions {
     storage?: MemoryStorage;
@@ -316,7 +310,7 @@ export class MemoryEngine {
         };
 
         let units = bank.units.filter(u => u.state === 'valid' && (opts.types ?? ['world', 'experience', 'observation']).includes(u.factType));
-        units = this.filterByTags(units, opts.tags || [], opts.tagsMatch || 'any');
+        units = filterByTags(units, opts.tags || [], opts.tagsMatch || 'any');
 
         if (units.length === 0) return [];
 
@@ -334,16 +328,16 @@ export class MemoryEngine {
                 .filter(u => u.embedding.length > 0)
                 .map(u => ({ id: u.id, sim: cosineSimilarity(queryEmbedding, u.embedding) }))
                 .sort((a, b) => b.sim - a.sim)
-                .slice(0, this.semanticLimit(opts.budget || 'mid'));
+                .slice(0, semanticLimit(opts.budget || 'mid'));
             strategyResults.push({ strategy: 'semantic', ids: ranked.map(r => r.id) });
         }
 
         // 2. Keyword / BM25-like
         const keywordRanked = units
-            .map(u => ({ id: u.id, score: this.keywordScore(u.text, q) }))
+            .map(u => ({ id: u.id, score: keywordScore(u.text, q) }))
             .filter(x => x.score > 0)
             .sort((a, b) => b.score - a.score)
-            .slice(0, this.keywordLimit(opts.budget || 'mid'));
+            .slice(0, keywordLimit(opts.budget || 'mid'));
         strategyResults.push({ strategy: 'keyword', ids: keywordRanked.map(r => r.id) });
 
         // 3. Graph
@@ -351,10 +345,10 @@ export class MemoryEngine {
         if (graphIds.length > 0) strategyResults.push({ strategy: 'graph', ids: graphIds });
 
         // 4. Temporal
-        const temporalIds = this.temporalSearch(units, q);
+        const temporalIds = temporalSearch(units, q);
         if (temporalIds.length > 0) strategyResults.push({ strategy: 'temporal', ids: temporalIds });
 
-        let rrfEntries = this.rrf(strategyResults);
+        let rrfEntries = rrf(strategyResults);
         const results: RecallResult[] = [];
         const usedTokens = new Map<string, number>();
         const unitById = new Map(units.map(u => [u.id, u]));
@@ -404,7 +398,7 @@ export class MemoryEngine {
                     const obsUnit = units.find(u => u.id === obs.id);
                     if (obsUnit && !results.some(r => r.unit.id === obs.id)) {
                         const before = results.length;
-                        this.pushResult(results, usedTokens, { unit: obsUnit, score: rrfScoreValue, matchedStrategies: this.matchedStrategies(strategyResults, id) }, opts.maxTokens || DEFAULT_MAX_TOKENS);
+                        this.pushResult(results, usedTokens, { unit: obsUnit, score: rrfScoreValue, matchedStrategies: matchedStrategies(strategyResults, id) }, opts.maxTokens || DEFAULT_MAX_TOKENS);
                         if (results.length > before) {
                             this.touchUnit(bankId, obsUnit);
                             touched = true;
@@ -416,7 +410,7 @@ export class MemoryEngine {
             const item: RecallResult = {
                 unit,
                 score: rrfScoreValue,
-                matchedStrategies: this.matchedStrategies(strategyResults, id),
+                matchedStrategies: matchedStrategies(strategyResults, id),
             };
             if (opts.includeChunks && unit.documentId) {
                 item.chunks = this.repository.listChunks(bankId, unit.documentId);
@@ -492,7 +486,7 @@ export class MemoryEngine {
             used.add(unit.id);
             for (const other of pending) {
                 if (used.has(other.id)) continue;
-                if (this.sameCluster(unit, other)) {
+                if (sameCluster(unit, other)) {
                     cluster.push(other);
                     used.add(other.id);
                 }
@@ -1013,7 +1007,7 @@ export class MemoryEngine {
             }
             if (q) {
                 // 关键词兜底：无向量或向量未命中时仍可按 question/answer 命中排序
-                score = Math.max(score, this.keywordScore(`${m.question} ${m.answer}`, q) * 0.5);
+                score = Math.max(score, keywordScore(`${m.question} ${m.answer}`, q) * 0.5);
             }
             return { m, score };
         });
@@ -1184,43 +1178,9 @@ export class MemoryEngine {
         return ids;
     }
 
-    private filterByTags(units: MemoryUnit[], tags: string[], match: 'any' | 'all' | 'exact'): MemoryUnit[] {
-        if (!tags.length) return units;
-        return units.filter(u => {
-            if (match === 'exact') {
-                return tags.length === u.tags.length && tags.every(t => u.tags.includes(t));
-            }
-            if (match === 'all') return tags.every(t => u.tags.includes(t));
-            return tags.some(t => u.tags.includes(t));
-        });
-    }
 
-    private semanticLimit(budget: string): number {
-        return budget === 'high' ? 100 : budget === 'low' ? 20 : 50;
-    }
 
-    private keywordLimit(budget: string): number {
-        return budget === 'high' ? 100 : budget === 'low' ? 20 : 50;
-    }
 
-    private keywordScore(text: string, query: string): number {
-        if (!query) return 0;
-        const tokens = tokenize(query);
-        const grams = buildCharNGrams(query);
-        let score = 0;
-        if (tokens.length) {
-            score += tokens.filter(t => text.includes(t)).length / tokens.length;
-        }
-        if (grams.size) {
-            const textGrams = buildCharNGrams(text);
-            if (textGrams.size) {
-                let hit = 0;
-                for (const g of grams) if (textGrams.has(g)) hit++;
-                score += hit / grams.size;
-            }
-        }
-        return score;
-    }
 
     private graphSearch(bankId: string, query: string, budget: string): string[] {
         const bank = this.repository.getBank(bankId);
@@ -1249,32 +1209,8 @@ export class MemoryEngine {
         return Array.from(seen);
     }
 
-    private temporalSearch(units: MemoryUnit[], query: string): string[] {
-        const window = parseTemporalWindow(query);
-        if (!window) return [];
-        const inWindow = units.filter(u => {
-            const start = u.occurredStart ?? u.mentionedAt ?? 0;
-            const end = u.occurredEnd ?? u.occurredStart ?? u.mentionedAt ?? start;
-            return end >= window.start && start <= window.end;
-        });
-        return inWindow.map(u => u.id);
-    }
 
-    private rrf(lists: Array<{ strategy: string; ids: string[] }>): Array<[string, number]> {
-        const scores = new Map<string, number>();
-        for (const list of lists) {
-            list.ids.forEach((id, idx) => {
-                const rank = idx + 1;
-                scores.set(id, (scores.get(id) || 0) + 1 / (RRF_K + rank));
-            });
-        }
-        return Array.from(scores.entries())
-            .sort((a, b) => b[1] - a[1]);
-    }
 
-    private matchedStrategies(lists: Array<{ strategy: string; ids: string[] }>, id: string): string[] {
-        return lists.filter(l => l.ids.includes(id)).map(l => l.strategy);
-    }
 
     private pushResult(results: RecallResult[], usedTokens: Map<string, number>, item: RecallResult, maxTokens: number): void {
         const cost = estimateTokens(item.unit.text);
@@ -1308,11 +1244,11 @@ export class MemoryEngine {
             for (const e of o.evidence) coveredIds.add(e.memoryId);
         }
         const sorted = valid.slice().sort((a, b) => {
-            const ga = this.evictionGroup(a, coveredIds);
-            const gb = this.evictionGroup(b, coveredIds);
+            const ga = evictionGroup(a, coveredIds);
+            const gb = evictionGroup(b, coveredIds);
             if (ga !== gb) return ga - gb;
-            const da = this.decayScore(a, now);
-            const db = this.decayScore(b, now);
+            const da = decayScore(a, now);
+            const db = decayScore(b, now);
             if (da !== db) return da - db;
             return (a.lastAccessedAt || 0) - (b.lastAccessedAt || 0);
         });
@@ -1321,79 +1257,11 @@ export class MemoryEngine {
         return toEvict;
     }
 
-    /** 淘汰分组（越小越先删）：0=已被观察覆盖 1=普通单元 2=observation 沉淀 3=保护项（最后删，但上限硬约束下仍删） */
-    private evictionGroup(u: MemoryUnit, coveredIds: Set<string>): number {
-        if (u.importance >= PROTECT_IMPORTANCE || u.metadata?.pinned === '1' || u.tags.includes('pinned')) return 3;
-        if (u.factType === 'observation') return 2;
-        if (u.consolidationState === 'done' && coveredIds.has(u.id)) return 0;
-        return 1;
-    }
 
-    /** 衰减分：importance × 2^(−未访问天数/半衰期)，越低越先淘汰 */
-    private decayScore(u: MemoryUnit, nowSec: number): number {
-        const last = u.lastAccessedAt || u.updatedAt || u.createdAt || nowSec;
-        const ageDays = Math.max(0, (nowSec - last) / 86400);
-        return u.importance * Math.exp((-Math.LN2 * ageDays) / DECAY_HALF_LIFE_DAYS);
-    }
 
-    private sameCluster(a: MemoryUnit, b: MemoryUnit): boolean {
-        const sharedEntities = a.entityIds.some(id => b.entityIds.includes(id));
-        if (sharedEntities) return true;
-        const sharedTags = a.tags.some(t => b.tags.includes(t) && (t.startsWith('user:') || t.startsWith('group:')));
-        if (sharedTags) return true;
-        return textSimilarity(a.text, b.text) >= 0.6;
-    }
 }
 
-function tokenize(s: string): string[] {
-    return Array.from(new Set(String(s || '').split(/[\s,，。.、;；:：!！?？()（）[\]【】]+/).filter(t => t.length > 0)));
-}
 
-function simpleHash(s: string): string {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) {
-        h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-    }
-    return String(h);
-}
 
-function estimateTokens(text: string): number {
-    let cjk = 0;
-    let other = 0;
-    for (const ch of String(text || '')) {
-        if (/[\u4e00-\u9fff]/.test(ch)) cjk++;
-        else if (ch.trim()) other++;
-    }
-    return cjk + Math.ceil(other / 4);
-}
 
-function textSimilarity(a: string, b: string): number {
-    const ga = buildCharNGrams(a || '');
-    const gb = buildCharNGrams(b || '');
-    if (!ga.size || !gb.size) return 0;
-    let hit = 0;
-    for (const g of ga) if (gb.has(g)) hit++;
-    return hit / Math.min(ga.size, gb.size);
-}
 
-function parseTemporalWindow(query: string): { start: number; end: number } | null {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const day = now.getDate();
-    const startOfDay = new Date(year, month, day).getTime();
-    if (/今年|本年/.test(query)) return { start: new Date(year, 0, 1).getTime(), end: now.getTime() };
-    if (/去年/.test(query)) return { start: new Date(year - 1, 0, 1).getTime(), end: new Date(year - 1, 11, 31, 23, 59, 59).getTime() };
-    if (/上个月|上月/.test(query)) return { start: new Date(year, month - 1, 1).getTime(), end: new Date(year, month, 1).getTime() - 1 };
-    if (/这个月|本月/.test(query)) return { start: new Date(year, month, 1).getTime(), end: now.getTime() };
-    if (/今天|今日/.test(query)) return { start: startOfDay, end: now.getTime() };
-    if (/昨天/.test(query)) return { start: startOfDay - 86400000, end: startOfDay - 1 };
-    if (/前天/.test(query)) return { start: startOfDay - 2 * 86400000, end: startOfDay - 86400000 - 1 };
-    const m = query.match(/(\d{4})年(\d{1,2})月/);
-    if (m) {
-        const y = Number(m[1]);
-        const mo = Number(m[2]);
-        return { start: new Date(y, mo - 1, 1).getTime(), end: new Date(y, mo, 1).getTime() - 1 };
-    }
-    return null;
-}
