@@ -23,6 +23,8 @@ npm run version:check       # 版本号单一事实源校验（meta.ts VERSION �
 npm run version:sync        # 按 meta.ts VERSION 回写其余版本位置
 npm run changelog:check     # changelog 数据文件（src/changelog/<版本>.ts）↔ 聚合索引一致
 npm run changelog:gen       # 按数据文件重新生成聚合索引 src/changelog.ts
+npm run domain:check        # 默认值生成物（config/domain/default_data.ts）↔ 默认值源一致
+npm run domain:gen          # 从旧版静态默认值重新生成 default_data.ts
 ```
 
 改完核心逻辑建议执行 `npm run build && npm run smoke`。

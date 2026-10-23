@@ -26,6 +26,8 @@
     "version:check": "node scripts/sync-version.mjs",
     "changelog:check": "node scripts/gen-changelog.mjs",
     "changelog:gen": "node scripts/gen-changelog.mjs --write",
+    "domain:check": "node scripts/gen-domain-default-data.mjs --check",
+    "domain:gen": "node scripts/gen-domain-default-data.mjs",
     "version:sync": "node scripts/sync-version.mjs --write",
     "docs:build": "node docs-site/build.js",
     "docs:serve": "node docs-site/build.js --serve"
