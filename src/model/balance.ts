@@ -6,6 +6,8 @@
 // 连接 [request] 可配 balance_url/balance_json_path/balance_divisor/balance_currency
 // （配合 auth_header_name/headers）覆盖到 one-api/new-api 等网关；模式与 model/list.ts 一致：
 // 端点推导 → GET → Promise.race 超时（goja 无 AbortController）→ 防呆解析 → 错误短文案。
+import { PROVIDER_MAP } from "../config/static_config/providers";
+
 import { ApiError } from "./api_error";
 
 /** 一条余额结果（deepseek 可能多币种 → 一个条目/币种） */
@@ -47,6 +49,43 @@ function hostOf(baseUrl: string): string {
     return m ? m[1] : s;
 }
 
+/**
+ * 余额仅内置三家供应商（DeepSeek / Moonshot / SiliconFlow）。
+ * 主机→vendor 判定集中在本表：默认主机取自 PROVIDER_MAP（聊天厂商基址的单一事实源，不重复维护 URL），
+ * 另补各家余额接口额外的官方域名（如 Moonshot .ai 国际站 / SiliconFlow .com 国际站）。
+ * 显式 provider 字段优先：允许自建网关域名 + 标注 provider 的组合。
+ */
+type BalanceVendor = 'deepseek' | 'moonshot' | 'siliconflow';
+
+const BALANCE_VENDORS: BalanceVendor[] = ['deepseek', 'moonshot', 'siliconflow'];
+
+const BALANCE_EXTRA_HOSTS: Record<BalanceVendor, string[]> = {
+    deepseek: [],
+    moonshot: ['api.moonshot.ai'],
+    siliconflow: ['api.siliconflow.com'],
+};
+
+/** 判定连接属于哪家余额供应商；非内置三家返回空串 */
+function matchBalanceVendor(provider: string | undefined, baseUrl: string): BalanceVendor | '' {
+    const p = (provider || '').toLowerCase();
+    const host = hostOf(baseUrl).toLowerCase();
+    for (const vendor of BALANCE_VENDORS) {
+        if (p === vendor) return vendor;
+        const hosts = [hostOf(PROVIDER_MAP[vendor] || '').toLowerCase(), ...BALANCE_EXTRA_HOSTS[vendor]];
+        if (hosts.some(h => h && host.includes(h))) return vendor;
+    }
+    return '';
+}
+
+/** 币种与供应商区域相关，集中在此避免多处 host 判断 */
+function moonshotCurrency(baseUrl: string): 'CNY' | 'USD' {
+    return hostOf(baseUrl).toLowerCase().includes('api.moonshot.cn') ? 'CNY' : 'USD';
+}
+
+function siliconFlowCurrency(baseUrl: string): 'CNY' | 'USD' {
+    return hostOf(baseUrl).toLowerCase().includes('api.siliconflow.com') ? 'USD' : 'CNY';
+}
+
 /** 现有列表拉取里 auth_header_name/headers 的语义保持：给了 auth_header_name 则不拼 Bearer、原样放 key */
 function buildHeaders(ctx: BalanceRequestContext, overrides: Record<string, any>): Record<string, string> {
     const headers: Record<string, string> = { 'Accept': 'application/json' };
@@ -62,22 +101,17 @@ function buildHeaders(ctx: BalanceRequestContext, overrides: Record<string, any>
 
 /** 内置端点 URL（无 balance_url 覆盖时按 provider → host 推导） */
 function nativeBalanceUrl(ctx: BalanceRequestContext): string | null {
-    const p = (ctx.provider || '').toLowerCase();
-    const host = hostOf(ctx.baseUrl);
     const base = trimSlash(ctx.baseUrl);
     if (!base) return null;
 
-    if (p === 'deepseek' || host.includes('api.deepseek.com')) {
+    const vendor = matchBalanceVendor(ctx.provider, ctx.baseUrl);
+    if (vendor === 'deepseek') {
         // DeepSeek 官方余额端点在域名根（/user/balance），不带 /v1
         const root = base.replace(/\/v1(?:beta)?$/i, '');
         return root ? `${root}/user/balance` : null;
     }
-    if (p === 'moonshot' || host.includes('api.moonshot.cn') || host.includes('api.moonshot.ai')) {
-        return `${base}/users/me/balance`;
-    }
-    if (p === 'siliconflow' || host.includes('api.siliconflow.cn') || host.includes('api.siliconflow.com')) {
-        return `${base}/user/info`;
-    }
+    if (vendor === 'moonshot') return `${base}/users/me/balance`;
+    if (vendor === 'siliconflow') return `${base}/user/info`;
     return null;
 }
 
@@ -164,7 +198,7 @@ function parseMoonshot(data: any, baseUrl: string): BalanceEntry[] {
     const voucher = fieldNumber(d, 'voucher_balance');
     if (cash !== null && cash !== 0) parts.push({ label: '现金', amount: cash });
     if (voucher !== null && voucher !== 0) parts.push({ label: '券', amount: voucher });
-    const currency = hostOf(baseUrl).includes('api.moonshot.cn') ? 'CNY' : 'USD';
+    const currency = moonshotCurrency(baseUrl);
     return [{ currency, available, parts: parts.length > 0 ? parts : undefined, availableFlag: true }];
 }
 
@@ -189,7 +223,7 @@ function parseSiliconFlow(data: any, baseUrl: string): BalanceEntry[] {
     const total = fieldNumber(d, 'totalBalance');
     if (charge !== null && charge !== 0 && charge !== available) parts.push({ label: '充值', amount: charge });
     if (total !== null && total !== 0 && total !== available) parts.push({ label: '总额', amount: total });
-    const currency = hostOf(baseUrl).includes('api.siliconflow.com') ? 'USD' : 'CNY';
+    const currency = siliconFlowCurrency(baseUrl);
     return [{ currency, available, parts: parts.length > 0 ? parts : undefined, availableFlag: true }];
 }
 
@@ -234,10 +268,10 @@ export function parseBalancePayload(provider: string, data: any, ctx?: { baseUrl
     if (typeof request.balance_url === 'string' && request.balance_url.trim()) {
         return parseCustom(data, request);
     }
-    const p = (provider || '').toLowerCase();
-    if (p === 'deepseek' || hostOf(baseUrl).includes('api.deepseek.com')) return parseDeepSeek(data);
-    if (p === 'moonshot' || hostOf(baseUrl).includes('api.moonshot.cn') || hostOf(baseUrl).includes('api.moonshot.ai')) return parseMoonshot(data, baseUrl);
-    if (p === 'siliconflow' || hostOf(baseUrl).includes('api.siliconflow.cn') || hostOf(baseUrl).includes('api.siliconflow.com')) return parseSiliconFlow(data, baseUrl);
+    const vendor = matchBalanceVendor(provider, baseUrl);
+    if (vendor === 'deepseek') return parseDeepSeek(data);
+    if (vendor === 'moonshot') return parseMoonshot(data, baseUrl);
+    if (vendor === 'siliconflow') return parseSiliconFlow(data, baseUrl);
     // 走到这里说明 resolveBalanceEndpoint 已放行（有 balance_url）但解析未走 custom → 配置不一致
     throw new Error(`该连接未配置余额解析方式（provider=${provider || '(空)'}）`);
 }
