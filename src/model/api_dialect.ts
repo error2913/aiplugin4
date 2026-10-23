@@ -10,7 +10,7 @@
 //   - 既有单测里直接构造的 ConnConfigLike
 // 都能照常工作，不会因为缺少新字段而行为突变。
 
-import { ApiDialect } from "../config/v5/schema";
+import { API_DIALECTS, ApiDialect } from "../config/v5/schema";
 
 /** 已知厂商 → 协议（仅用于 `api` 缺省时的兜底推断） */
 const PROVIDER_DEFAULT_API: Record<string, ApiDialect> = {
@@ -26,7 +26,8 @@ export const DEFAULT_API: ApiDialect = 'openai-completions';
  */
 export function resolveApiDialect(api?: string, provider?: string): ApiDialect {
     const a = String(api ?? '').trim();
-    if (a === 'openai-completions' || a === 'anthropic-messages' || a === 'openai-responses') return a;
+    // 合法方言唯一来源：config/v5/schema.API_DIALECTS（避免本文件再抄一份字符串）
+    if ((API_DIALECTS as string[]).includes(a)) return a as ApiDialect;
     const p = String(provider ?? '').trim().toLowerCase();
     return PROVIDER_DEFAULT_API[p] ?? DEFAULT_API;
 }
