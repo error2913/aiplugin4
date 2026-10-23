@@ -63,7 +63,7 @@ npm run docs:manifest       # 文档清单（docs-site/manifest.js↔docs/ccdocs
 
 每个功能/改动开发完成并验证后，发布前必须同步三处，否则发版说明与用户文档会脱节：
 
-1. `src/changelog.ts`：在 `changelog` 的最新版本条目补充本次改动（`- 描述`），发布工作流读取它生成 GitHub Release 正文。
+1. `src/changelog/<版本>.ts`：在对应版本的数据文件里补充本次改动条目（`- 描述`；聚合索引 `src/changelog.ts` 由 `npm run changelog:gen` 生成，勿手改），发布工作流读取数据文件生成 GitHub Release 正文。
 2. `README.md`：同步配置手册/命令手册/可用工具函数等章节（商店 README 只放用户内容，不要放开发章节）。
 3. 知识库 `docs/`：涉及命令/配置/工具/架构的改动同步对应文档（常用 04/05/03/09）。
 

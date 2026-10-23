@@ -39,10 +39,11 @@ function main() {
   Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));
   Handlebars.registerHelper('time', (t: number) => fmtDate(t));
 
-  Config.registerConfig();
-  initAgents();
+  // 端口实现先于 Config.registerConfig()：预热会触发配置应用钩子，钩子可能依赖 Agent/AuxLlm/记忆数据源端口
   installAuxLlm();
   installPromptMemorySource();
+  Config.registerConfig();
+  initAgents();
   registerAgentApi();
   checkUpdate();
   registerAllTools();

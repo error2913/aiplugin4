@@ -42,6 +42,10 @@ jobs:
         with:
           node-version: '20'
 
+      # docs:manifest / docs:build 由 node 脚本执行，需要安装依赖
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

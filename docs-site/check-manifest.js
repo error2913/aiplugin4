@@ -4,9 +4,10 @@
 //   2. ccdocs/*.md ↔ REF_FILES 双向一致
 //   3. docs-site/mkdocs.yml 的 nav 与清单一致（kb/ 与 reference/ 条目集合）
 // 用法：node docs-site/check-manifest.js [--check-nav]（默认同时检查 nav）
+// 依赖：仅 node 内置模块（不引 js-yaml：mkdocs.yml 含 !!python/name: 标签，
+//       且 nav 段用行级解析足够，避免 CI 额外安装依赖）。
 const fs = require('fs');
 const path = require('path');
-const YAML = require('js-yaml');
 
 const { KB_FILES, REF_FILES } = require('./manifest');
 
@@ -36,27 +37,31 @@ function compare(label, disk, listed) {
 compare('docs/', listMd('docs').filter((n) => n !== 'README'), KB_FILES);
 compare('ccdocs/', listMd('ccdocs'), REF_FILES);
 
-// nav 校验：收集 mkdocs.yml nav 里所有以 .md 结尾的路由
-function collectNavRoutes(node, out) {
-  if (Array.isArray(node)) {
-    for (const item of node) collectNavRoutes(item, out);
-    return out;
+/**
+ * 行级解析 mkdocs.yml 的 nav 段，收集所有 .md 路由。
+ * 从 `nav:` 行开始，到下一个**顶格配置键**（如 `theme:`/`markdown_extensions:`）或文件结束为止；
+ * 这样未来在 nav 之后追加配置不会被误当成 nav（也不依赖整份 YAML 可被解析）。
+ */
+function collectNavRoutesFromText(text) {
+  const lines = text.split(/\r?\n/);
+  const routes = [];
+  let inNav = false;
+  for (const line of lines) {
+    if (!inNav) {
+      if (/^nav:\s*$/.test(line)) inNav = true;
+      continue;
+    }
+    // 顶格非空行 = nav 段结束；- 关键词行属于列表项（缩进），不会命中
+    if (/^[A-Za-z_][\w-]*:/.test(line)) break;
+    const matches = line.match(/[^\s'"\[\]{}:,]+\.md/g);
+    if (matches) routes.push(...matches);
   }
-  if (node && typeof node === 'object') {
-    for (const value of Object.values(node)) collectNavRoutes(value, out);
-    return out;
-  }
-  if (typeof node === 'string' && /\.md$/.test(node)) out.push(node);
-  return out;
+  return routes;
 }
 
 const mkdocsPath = path.join(ROOT, 'docs-site', 'mkdocs.yml');
 if (fs.existsSync(mkdocsPath)) {
-  // 只解析 nav 段：整份 mkdocs.yml 含 MkDocs 专有的 !!python/name: 标签，js-yaml 不支持
-  const ymlText = fs.readFileSync(mkdocsPath, 'utf8');
-  const navMatch = ymlText.match(/^nav:\s*\r?\n([\s\S]*)$/m);
-  const config = navMatch ? YAML.load(`nav:\n${navMatch[1]}`) : { nav: [] };
-  const routes = new Set(collectNavRoutes(config.nav || [], []));
+  const routes = new Set(collectNavRoutesFromText(fs.readFileSync(mkdocsPath, 'utf8')));
   for (const name of KB_FILES) {
     if (!routes.has(`kb/${name}.md`)) problems.push(`mkdocs nav：缺少 kb/${name}.md（清单已登记）`);
   }

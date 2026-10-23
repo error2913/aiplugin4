@@ -29,6 +29,10 @@ jobs:
       - name: Changelog index
         run: npm run changelog:check
 
+      # 默认值生成物（domain/defaults.ts → default_data.ts）与源一致（改动后运行 npm run domain:gen）
+      - name: Domain defaults
+        run: npm run domain:check
+
       - name: Lint
         run: npm run lint
 

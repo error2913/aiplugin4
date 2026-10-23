@@ -99,7 +99,7 @@ export async function settleWindowIfNeeded(host: ArchiveHost, now: number = Date
             }
             if (!ok) {
                 // 指数退避：5 → 15 → 60 分钟（失败次数在运行时，不持久化）
-                const rt = runtimeOf(this);
+                const rt = runtimeOf(host);
                 rt.settleFailCount = (rt.settleFailCount || 0) + 1;
                 const backoffMin = rt.settleFailCount <= 1 ? 5 : rt.settleFailCount === 2 ? 15 : 60;
                 s.settleBackoffUntil = now + backoffMin * 60 * 1000;
@@ -110,7 +110,7 @@ export async function settleWindowIfNeeded(host: ArchiveHost, now: number = Date
             done++;
         }
         if (done > 0) {
-            runtimeOf(this).settleFailCount = 0;
+            runtimeOf(host).settleFailCount = 0;
             s.settleBackoffUntil = 0;
             try { s.save(true); } catch { /* 游离/桩会话无 save */ }
         }
@@ -339,7 +339,7 @@ export async function archiveByTokenIfNeeded(host: ArchiveHost, targetTokens?: n
                 break;
             }
 
-            const rt = runtimeOf(this);
+            const rt = runtimeOf(host);
             if (converged) {
                 rt.archiveFailCount = 0;
                 return 'converged';
