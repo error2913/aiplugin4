@@ -26,6 +26,10 @@ jobs:
       - name: Version single source
         run: npm run version:check
 
+      # changelog 数据文件 ↔ 聚合索引一致（新增版本后运行 npm run changelog:gen）
+      - name: Changelog index
+        run: npm run changelog:check
+
       - name: Lint
         run: npm run lint
 

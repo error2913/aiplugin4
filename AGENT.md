@@ -21,6 +21,8 @@ npm run pack:release        # 发布打包：本体 JS + 本体豹包 + 完整�
 npm run deps:check          # 依赖边界守卫（当前基线：scripts/deps-baseline.json）
 npm run version:check       # 版本号单一事实源校验（meta.ts VERSION ↔ header/package/changelog/sealpack）
 npm run version:sync        # 按 meta.ts VERSION 回写其余版本位置
+npm run changelog:check     # changelog 数据文件（src/changelog/<版本>.ts）↔ 聚合索引一致
+npm run changelog:gen       # 按数据文件重新生成聚合索引 src/changelog.ts
 ```
 
 改完核心逻辑建议执行 `npm run build && npm run smoke`。

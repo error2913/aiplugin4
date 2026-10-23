@@ -81,15 +81,16 @@ sync('package.json', /"version":\s*"([0-9]+\.[0-9]+\.[0-9]+)"/, (v) => `"version
     }
 }
 
-// changelog.ts：必须有该版本条目（发布工作流读取它生成 Release 正文）——只能人工补
+// changelog 数据文件：必须有该版本条目（发布工作流读取它生成 Release 正文）——只能人工补
 {
-    const text = read('src/changelog.ts');
+    const rel = `src/changelog/${version}.ts`;
+    const text = read(rel);
     if (text === null) {
-        fatal.push('src/changelog.ts: 文件不存在');
+        fatal.push(`${rel}: 文件不存在（新版本需先建 changelog 数据文件）`);
     } else {
-        const has = new RegExp(`["']${version.replace(/\./g, '\\.')}["']\\s*:`).test(text);
-        seen.push(`src/changelog.ts 含 ${version} 条目 = ${has}`);
-        if (!has) fatal.push(`src/changelog.ts: 缺少 ${version} 的更新条目（需人工补写）`);
+        const has = /export default `[\s\S]+`/.test(text);
+        seen.push(`${rel} = ${has ? '非空' : '空文件'}`);
+        if (!has) fatal.push(`${rel}: 更新日志正文不能为空`);
     }
 }
 

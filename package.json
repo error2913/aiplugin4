@@ -24,6 +24,8 @@
     "deps:check": "node scripts/check-deps.mjs",
     "deps:update": "node scripts/check-deps.mjs --update",
     "version:check": "node scripts/sync-version.mjs",
+    "changelog:check": "node scripts/gen-changelog.mjs",
+    "changelog:gen": "node scripts/gen-changelog.mjs --write",
     "version:sync": "node scripts/sync-version.mjs --write",
     "docs:build": "node docs-site/build.js",
     "docs:serve": "node docs-site/build.js --serve"
