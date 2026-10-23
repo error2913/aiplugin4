@@ -11,10 +11,13 @@ import { revive, TypeDescriptor } from "../utils/revive";
 import { getPlatform } from "../utils/target_id";
 import { decodeUrlHtmlEntities } from "../utils/url";
 
+import { markModelDownloadFailures, markUrlBrokenByUrls } from "./image_health";
+import type { ImageHealthHost } from "./image_health";
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
 import { ImageIndex } from "./image_index";
 import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
+import { base64UrlFor, checkImageUrl, cqCodeFor, getSendFile, srcFor } from "./image_transfer";
 import { isPermanentUrlError, isTemporaryUrl } from "./image_url";
 
 const log = logger.withTag('image');
@@ -145,71 +148,27 @@ export default class Image {
      * 回环地址不要外发：协议端常在容器/另一台机器，127.0.0.1 指向它自己。
      */
     async getSendFile(): Promise<string> {
-        if (this.base64) return seal.base64ToImage(this.base64);
-        if (this.hosted && ImageHost.externalEnabled) return this.remoteUrl;
-        if (this.hosted) {
-            const data = await ImageHost.fetchBase64(this.hostedId);
-            if (data && data.base64) return seal.base64ToImage(data.base64);
-            log.warning(`图片${this.imageId}从图床取字节失败，无法生成本地文件`
-                + (ImageHost.lastError ? `：${ImageHost.lastError}` : '')
-                + '；请检查图床地址是否可从插件访问');
-            // 兜底：原始 http(s) 链接（可能已过期，但总比回环地址强）
-            if (this.url && /^https?:\/\//i.test(this.url)) return this.url;
-            return '';
-        }
-        return this.url || this.path;
+        return getSendFile(this);
     }
 
     /** 同步版 CQ（只用于本地图展示；外发请用 getSendFile()，hosted 需要异步取字节/判可达性） */
     get CQCode(): string {
-        const file = this.type === 'base64'
-            ? seal.base64ToImage(this.base64)
-            : (this.hosted
-                ? (ImageHost.externalEnabled ? this.remoteUrl : '')
-                : (this.url || this.path));
-        if (!file) return '';
-        return `[CQ:image,file=${file}]`;
+        return cqCodeFor(this);
     }
 
     get base64Url(): string {
-        let format = this.format;
-        if (!format || format === "unknown") format = 'png';
-        return `data:image/${format};base64,${this.base64}`
+        return base64UrlFor(this);
     }
 
     /**
      * 获取图片的URL，若为base64则返回base64Url
      */
     get src(): string {
-        return this.type === 'base64' ? this.base64Url : this.remoteUrl;
+        return srcFor(this);
     }
 
     async checkImageUrl(): Promise<boolean> {
-        if (this.type !== 'url') return true;
-        let isValid = false;
-        try {
-            const response = await fetch(this.url, { method: 'GET' });
-
-            if (response.ok) {
-                const contentType = response.headers.get('Content-Type');
-                if (contentType && contentType.startsWith('image')) {
-                    log.info('URL有效且未过期');
-                    isValid = true;
-                } else {
-                    log.warning(`URL有效但未返回图片 Content-Type: ${contentType}`);
-                }
-            } else {
-                if (response.status === 500) {
-                    log.warning(`URL不知道有没有效 状态码: ${response.status}`);
-                    isValid = true;
-                } else {
-                    log.warning(`URL无效或过期 状态码: ${response.status}`);
-                }
-            }
-        } catch (error) {
-            log.exception('在checkImageUrl中请求出错', error);
-        }
-        return isValid;
+        return checkImageUrl(this);
     }
 
     /** 转换失败是否应跳过请求：URL 已确认不可用，或 1 小时冷却期内，或连续失败达上限后永久阻断 */
@@ -237,82 +196,28 @@ export default class Image {
         return this.isBase64RetryBlocked() && Image.isTemporaryUrl(this.url);
     }
 
-    /** 模型侧报告无法下载这些 URL 时调用：只处理非图床 URL（图床走 markModelDownloadFailures 探测） */
+    /** 模型侧报告无法下载这些 URL 时调用（处置实现见 ./image_health）：只处理非图床 URL */
     static markUrlBrokenByUrls(urls: string[]): number {
-        const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
-        if (targets.size === 0) return 0;
-        let marked = 0;
-        for (const img of Object.values(this.imageMap)) {
-            if (!img || img.base64 || img.urlBroken) continue;
-            if (img.hostedId) continue;   // 图床图不能凭模型报错就永久标坏
-            const candidate = img.remoteUrl || img.url;
-            if (!candidate || !targets.has(candidate)) continue;
-            img.urlBroken = true;
-            this.save(img);
-            marked++;
-        }
-        return marked;
+        return markUrlBrokenByUrls(this.healthHost(), urls);
+    }
+
+    /** 健康处置所需的最小视图（imageMap/hostedRefs + save / 本轮内联偏好回调） */
+    private static healthHost(): ImageHealthHost {
+        return {
+            imageMap: this.imageMap,
+            hostedRefs: this.hostedRefs,
+            save: (img) => this.save(img),
+            preferInlineForModel: (imageId) => this.preferInlineForModel(imageId),
+        };
     }
 
     /**
-     * 模型报“无法下载图片”时：图床 URL 先探测 404/可达性。
-     * - 图床返回 200：图片存在，标记本轮改用内联 b64（不标坏），返回 retryInline=true；
-     * - 404：真正已删，标 urlBroken；
-     * - 网络错误/不可达：不标坏，留待下轮。
-     * 非图床 URL 仍按旧规则标坏。
+     * 模型报“无法下载图片”时处置（实现见 ./image_health）：图床先探测 404/可达性，非图床直接标坏。
+     * 图床 200 → 本轮改内联 b64（retryInline）；404 → 标坏并清 hosted 字段；网络错误 → 留待下轮。
      */
     static async markModelDownloadFailures(urls: string[]): Promise<{ marked: number; retryInline: boolean }> {
-        const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
-        if (targets.size === 0) return { marked: 0, retryInline: false };
-        let marked = 0;
-        let retryInline = false;
-        const hostedImages: Image[] = [];
-        for (const img of Object.values(this.imageMap)) {
-            if (!img || img.base64 || img.urlBroken) continue;
-            const candidate = img.remoteUrl || img.url;
-            if (!candidate || !targets.has(candidate)) continue;
-            if (img.hostedId) hostedImages.push(img);
-            else {
-                img.urlBroken = true;
-                this.save(img);
-                marked++;
-            }
-        }
-        for (const entry of this.hostedRefs.values()) {
-            const img = entry.img;
-            if (!img || img.base64 || img.urlBroken) continue;
-            const candidate = img.remoteUrl || img.url;
-            if (candidate && targets.has(candidate)) hostedImages.push(img);
-        }
-        for (const img of hostedImages) {
-            if (!img.hostedId) continue;
-            const data = await ImageHost.fetchBase64(img.hostedId);
-            if (data) {
-                // 图片还在：本轮改用内联 b64 重发，不标 urlBroken（之后修好 publicUrl 仍可恢复 URL）
-                this.preferInlineForModel(img.imageId);
-                img.base64 = data.base64;
-                img.format = data.format || img.format || 'png';
-                img.urlBroken = false;
-                retryInline = true;
-            } else if (ImageHost.lastStatus === 404) {
-                // 图床已彻底删除：与 GC 对账一致，清掉 hosted 字段，发送时不再指向死链
-                img.urlBroken = true;
-                img.hostedId = '';
-                img.hostedUrl = '';
-                img.hostedAt = 0;
-                img.base64 = '';
-                this.save(img);
-                marked++;
-            }
-            // 其它错误（网络/5xx/超时）：不标坏，下一轮再试
-        }
-        return { marked, retryInline };
+        return markModelDownloadFailures(this.healthHost(), urls);
     }
-
-    /**
-     * 转换失败是否属于「该 URL 已不可用」的永久性失败（判定见 ./image_url.isPermanentUrlError）：
-     * 后端会把上游下载被 4xx 拒绝的原因写进错误正文；429 限速与 5xx 仍按可重试处理。
-     */
 
     /**
      * 获取图片的 base64：URL 图片转 base64 供模型读取。
