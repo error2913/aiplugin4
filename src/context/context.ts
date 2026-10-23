@@ -14,16 +14,18 @@ import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
 import { buildContent, estimateMessageTokens, toolResultCallId } from "../utils/message";
-import { callOb11Api } from "../utils/ob11";
 import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, buildUserTruncateMarker, stripRawMarkers } from "../utils/raw_marker";
 import { TypeDescriptor } from "../utils/revive";
 import { stripInternalTags } from "../utils/string";
-import { getPlatform, normalizeGroupId, normalizeUserId } from "../utils/target_id";
-import { withTimeout } from "../utils/timeout";
 
 import { ArchiveShardItem, clearShard, evictExpiredShards, listShardsAsc, writeShardIfAbsent } from "./archive_store";
 import Message from "./message";
+import { findImage as findImageOf, getGroupById as getGroupByIdOf, getUserById as getUserByIdOf, setName as setNameOf, updateName as updateNameOf, userInfoList as userInfoListOf } from "./roster";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
+import { dropOldestRound, estimateContextMessagesTokens, getKeepStart, splitMessagesByToken, truncateMiddle } from "./window_policy";
+
+// 兼容旧引用：窗口策略纯函数已拆到 ./window_policy（内部实现请直接引用叶子）
+export { buildRoundSegments, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken, truncateMiddle } from "./window_policy";
 
 const log = Logger.withTag('context');
 
@@ -31,18 +33,6 @@ const log = Logger.withTag('context');
 // 避免每条消息都对所有历史发言者全量序列化。当前会话由对话收尾统一保存。 */
 const lastUserMemorySaveAt: { [sessionId: string]: number } = {};
 const USER_MEMORY_SAVE_INTERVAL_MS = 5 * 60 * 1000;
-
-/**
- * 中段截断：保留头 2/3 + 尾 1/3（保留尾部是为了不切断 [img:…] / [record:…] 这类结尾标签）。
- * max ≤ 0 或未超长时原样返回。冷态入库用它做零 LLM 的纯代码截断。
- */
-export function truncateMiddle(text: string, max: number): string {
-    if (max <= 0 || text.length <= max) return text;
-    const head = Math.floor(max * 2 / 3);
-    const tail = max - head;
-    return `${text.slice(0, head)}…${tail > 0 ? text.slice(-tail) : ''}`;
-}
-
 /** Context 的运行时状态（放 WeakMap，不进会话存档）：入库串行化链 + 归档连续失败计数 + 结算失败计数 */
 interface ContextRuntime { ingestChain: Promise<void>; archiveFailCount: number; settleFailCount?: number }
 const contextRuntime = new WeakMap<object, ContextRuntime>();
@@ -78,89 +68,6 @@ function flushGroupUserMemories(session: Session): void {
 
 /** 归档分块 token 预算：避免单次总结上下文过大 */
 export const ARCHIVE_CHUNK_TOKENS = 50000;
-
-/** 真实用户轮：role=user 且包含真实用户消息项；system-only user 不算轮 */
-export function isRealUserMessage(m: MessageType): boolean {
-    if (m.role !== 'user') return false;
-    if (!Array.isArray((m as UserMessage).contentItems)) return false;
-    return (m as UserMessage).contentItems.some(
-        item => typeof (item as UserMessageItem).userId === 'string'
-    );
-}
-
-/** 将消息列表切成“真实 user 轮”段；assistant/tool 不新开轮，system-only 不新开轮 */
-export function buildRoundSegments(messages: MessageType[]): Array<{ start: number; end: number }> {
-    const segments: Array<{ start: number; end: number }> = [];
-    let currentStart: number | null = null;
-    let inUserTurn = false;
-
-    for (let i = 0; i < messages.length; i++) {
-        const m = messages[i];
-
-        if (m.role === 'assistant' || m.role === 'tool') {
-            inUserTurn = false;
-            continue;
-        }
-
-        const realUser = isRealUserMessage(m);
-
-        if (realUser && !inUserTurn) {
-            if (currentStart !== null) segments.push({ start: currentStart, end: i });
-            currentStart = i;
-            inUserTurn = true;
-        }
-    }
-
-    if (currentStart !== null) segments.push({ start: currentStart, end: messages.length });
-    return segments;
-}
-
-/** 返回“保留最近 keepRounds 个真实 user 轮”的起始消息下标；不足时返回 0 */
-export function getKeepStart(messages: MessageType[], keepRounds: number): number {
-    if (keepRounds <= 0) return messages.length;
-    const segments = buildRoundSegments(messages);
-    if (segments.length <= keepRounds) return 0;
-    return segments[segments.length - keepRounds].start;
-}
-
-/** 估算 Context 内持久化消息 token 数 */
-export function estimateContextMessagesTokens(messages: MessageType[]): number {
-    return messages.reduce((sum, m) => sum + estimateMessageTokens(m as any), 0);
-}
-
-/** 将待归档消息按 token 预算切成连续块，保证每条消息都进入且只进入一个块 */
-export function splitMessagesByToken(messages: MessageType[], maxTokens: number): MessageType[][] {
-    const chunks: MessageType[][] = [];
-    let current: MessageType[] = [];
-    let currentTokens = 0;
-
-    for (const m of messages) {
-        const t = estimateMessageTokens(m as any);
-        if (current.length > 0 && currentTokens + t > maxTokens) {
-            chunks.push(current);
-            current = [];
-            currentTokens = 0;
-        }
-        current.push(m);
-        currentTokens += t;
-    }
-
-    if (current.length > 0) chunks.push(current);
-    return chunks;
-}
-
-/** 丢弃最早的一个真实 user 轮（含其 assistant/tool 消息）；无轮时丢弃最早一条消息 */
-export function dropOldestRound(messages: MessageType[]): boolean {
-    const segments = buildRoundSegments(messages);
-    if (segments.length === 0) {
-        if (messages.length === 0) return false;
-        messages.splice(0, 1);
-        return true;
-    }
-    const oldest = segments[0];
-    messages.splice(oldest.start, oldest.end - oldest.start);
-    return true;
-}
 
 /** 上下文条目定位引用：addSystemUserMessageTracked 的返回值，供事件去重"后到覆盖先到"就地替换 */
 export interface SystemEntryRef {
@@ -1051,99 +958,24 @@ export class Context {
     private archiving = false;
 
     getUserById(userId: string | number): User | null {
-        const normalizedId = normalizeUserId(userId, getPlatform(this.sessionId));
-        if (!normalizedId || this.session.checkIgnoredUserId(normalizedId)) return null;
-        return User.get(normalizedId);
+        return getUserByIdOf(this, userId);
     }
     get userInfoList(): { isPrivate: true, id: string, name: string }[] {
-        const userMap: { [key: string]: { isPrivate: true, id: string, name: string } } = {};
-        for (const m of this.messages) {
-            if (m.role !== 'user' || !(m as any).contentItems) continue;
-            for (const item of (m as any).contentItems) {
-                if (!item.userId) continue;
-                if (!userMap[item.userId]) {
-                    const u = User.get(item.userId);
-                    userMap[item.userId] = {
-                        isPrivate: true,
-                        id: item.userId,
-                        name: u.userName || item.userId
-                    };
-                }
-            }
-        }
-        return Object.values(userMap);
+        return userInfoListOf(this);
     }
 
     async setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card') {
-        let name = '';
-        switch (mod) {
-            case 'nickname': {
-                const strangerInfo = await callOb11Api(epId, "get_stranger_info", { user_id: uid.replace(/^.+:/, ""), no_cache: true });
-                if (!strangerInfo || !strangerInfo.nickname) {
-                    log.warning(`未找到用户<${uid}>的昵称`);
-                    break;
-                }
-                name = strangerInfo.nickname;
-                break;
-            }
-            case 'card': {
-                if (!gid) break;
-                const memberInfo = await callOb11Api(epId, "get_group_member_info", { group_id: gid.replace(/^.+:/, ""), user_id: uid.replace(/^.+:/, ""), no_cache: true });
-                if (!memberInfo) {
-                    log.warning(`获取用户<${uid}>的群成员信息失败，尝试使用昵称`);
-                    await this.setName(epId, gid, uid, 'nickname');
-                    return;
-                }
-                name = memberInfo.card || memberInfo.nickname;
-                if (!name) {
-                    await this.setName(epId, gid, uid, 'nickname');
-                    return;
-                }
-                break;
-            }
-        }
-        if (!name) {
-            log.warning(`用户<${uid}>未设置昵称或群名片`);
-            return;
-        }
-        const u = User.get(uid);
-        u.userName = name;
-        User.save(u);
+        await setNameOf(this, epId, gid, uid, mod);
     }
     getGroupById(groupId: string | number): Group | null {
-        const normalizedId = normalizeGroupId(groupId, getPlatform(this.sessionId));
-        if (!normalizedId) return null;
-        return Group.get(normalizedId);
+        return getGroupByIdOf(this, groupId);
     }
     async findImage(_ctx: seal.MsgContext, id: string): Promise<Image | null> {
-        const img = Image.resolveRef(id);
-        if (img) return img;
-        const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
-        if (LOCAL_IMAGE_PATH_MAP && Object.prototype.hasOwnProperty.call(LOCAL_IMAGE_PATH_MAP, id)) {
-            return Image.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]);
-        }
-        return this.session.memory.findImage(id);
+        return findImageOf(this, _ctx, id);
     }
 
     async updateName(epId: string, gid: string, uid: string) {
-        switch (this.autoNameMod) {
-            case 1: {
-                try {
-                    await withTimeout(() => this.setName(epId, gid, uid, 'nickname'), 5000);
-                } catch (e) {
-                    log.warning(`自动改名（昵称）失败: ${e instanceof Error ? e.message : String(e)}`);
-                }
-                break;
-            }
-            case 2: {
-                try {
-                    await withTimeout(() => this.setName(epId, gid, uid, 'card'), 5000);
-                } catch (e) {
-                    log.warning(`自动改名（群名片）失败: ${e instanceof Error ? e.message : String(e)}`);
-                }
-                break;
-            }
-        }
+        await updateNameOf(this, epId, gid, uid);
     }
 
 }
