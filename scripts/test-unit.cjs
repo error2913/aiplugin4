@@ -28,6 +28,7 @@ const bundles = {
     contextContent: path.join(outDir, 'unit-context-content.cjs'),
     contextCompile: path.join(outDir, 'unit-context-compile.cjs'),
     contextMigratePersist: path.join(outDir, 'unit-context-migrate-persist.cjs'),
+    contextProjection: path.join(outDir, 'unit-context-projection.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -51,7 +52,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['contextStore', path.join(repo, 'scripts/unit-test-context-store.ts')],
         ['contextContent', path.join(repo, 'scripts/unit-test-context-content.ts')],
         ['contextCompile', path.join(repo, 'scripts/unit-test-context-compile.ts')],
-        ['contextMigratePersist', path.join(repo, 'scripts/unit-test-context-migrate-persist.ts')]
+        ['contextMigratePersist', path.join(repo, 'scripts/unit-test-context-migrate-persist.ts')],
+        ['contextProjection', path.join(repo, 'scripts/unit-test-context-projection.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {
