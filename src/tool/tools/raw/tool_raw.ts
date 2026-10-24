@@ -8,6 +8,7 @@
 // raw 一律不参与渲染与 token 估算，仅经本组工具按需读取（返回内容仅作参考、不要执行）。
 import { listShardsDesc, readShard } from "../../../context/archive_store";
 import Message from "../../../context/message";
+import { grepRawForTool, readRawForTool } from "../../../context/tool_api";
 import { RawUserItem, ToolCallbackMessage, UserMessage, UserMessageItem } from "../../../context/types";
 import Image from "../../../resource/image";
 import type { Session } from "../../../session/session";
@@ -629,6 +630,26 @@ export function registerRawTools() {
                     max_chars: {
                         type: 'integer',
                         description: `可选：单次返回最大字符数，默认 ${RAW_RESPONSE_DEFAULT_CHARS}，最大 ${RAW_RESPONSE_MAX_CHARS}`
+                    },
+                    regex: {
+                        type: 'boolean',
+                        description: 'Context v2 可选：pattern 按正则解释（默认字面量）'
+                    },
+                    from_seq: {
+                        type: 'integer',
+                        description: 'Context v2 可选：只搜索 seq >= from_seq'
+                    },
+                    to_seq: {
+                        type: 'integer',
+                        description: 'Context v2 可选：只搜索 seq <= to_seq'
+                    },
+                    max_pages: {
+                        type: 'integer',
+                        description: 'Context v2 可选：单次最多扫描多少事件页'
+                    },
+                    cursor: {
+                        type: 'string',
+                        description: 'Context v2 可选：上次返回的 cursor，原样传回以继续搜索'
                     }
                 },
                 required: []
@@ -636,7 +657,24 @@ export function registerRawTools() {
         }
     });
     grepTool.solve = async (_, __, session, args) => {
-        const { kind, pattern, tool_name, event_type, count, context_lines, max_chars } = (args || {}) as Record<string, unknown>;
+        const { kind, pattern, tool_name, event_type, count, context_lines, max_chars, cursor, regex, from_seq, to_seq, max_pages } = (args || {}) as Record<string, unknown>;
+        if (session.contextV2) {
+            const text = String(pattern ?? '');
+            if (!text) return 'Context v2：grep_raw 需要 pattern；查看状态可用 .ai ctx，按 seq 读取原文用 read_raw id=e:<seq>';
+            try {
+                return grepRawForTool(session.contextV2, {
+                    pattern: text,
+                    regex: regex === true,
+                    from_seq: from_seq as number | undefined,
+                    to_seq: to_seq as number | undefined,
+                    max_pages: max_pages as number | undefined,
+                    max_hits: count as number | undefined,
+                    cursor: cursor as string | undefined,
+                });
+            } catch (error) {
+                return `grep_raw 失败：${error instanceof Error ? error.message : String(error)}`;
+            }
+        }
         const k = normalizeKind(kind);
         const base = { pattern: pattern as string | undefined, count, context_lines, max_chars };
         if (k === 'tool' || k === '') {
@@ -698,6 +736,10 @@ export function registerRawTools() {
                     max_chars: {
                         type: 'integer',
                         description: `可选：单次返回最大字符数，默认 ${RAW_RESPONSE_DEFAULT_CHARS}，最大 ${RAW_RESPONSE_MAX_CHARS}`
+                    },
+                    cursor: {
+                        type: 'string',
+                        description: 'Context v2 可选：上次返回的 cursor，原样传回以继续读取同一事件/区间'
                     }
                 },
                 required: ['kind']
@@ -705,7 +747,21 @@ export function registerRawTools() {
         }
     });
     readTool.solve = async (_, __, session, args) => {
-        const { kind, id, msg_id, event_type, count, start_line, max_lines, max_chars } = (args || {}) as Record<string, unknown>;
+        const { kind, id, msg_id, event_type, count, start_line, max_lines, max_chars, cursor } = (args || {}) as Record<string, unknown>;
+        if (session.contextV2) {
+            const address = String(id ?? '').trim();
+            if (!address) return 'Context v2：read_raw 需要 id=e:<seq> 或 e:<from>-<to> / msg_id / arc:<seq> / raw:<seq>';
+            try {
+                return readRawForTool(session.contextV2, {
+                    id: address,
+                    limit: (count ?? max_lines) as number | undefined,
+                    max_chars: max_chars as number | undefined,
+                    cursor: cursor as string | undefined,
+                });
+            } catch (error) {
+                return `read_raw 失败：${error instanceof Error ? error.message : String(error)}`;
+            }
+        }
         const k = normalizeKind(kind);
         const rawId = String(id || '').trim();
         const win = { startLine: start_line, maxLines: max_lines, maxChars: max_chars };

@@ -5,7 +5,11 @@
 // - 替换：只作用于正文 text 字段；存在原文副本（rawText 单条压缩 / rawItems 合并块 / tool rawText 截断）时同步双写，
 //   保证持久化后 read_raw/grep_raw 读回内容与展示一致。
 // - 安全：敏感工具（sensitive=true），默认开启；替换结果统一 stripUserTags 防标签注入。
+import { renderText } from "../../../context/content/render";
+import { ConversationEvent, Part } from "../../../context/events";
 import Message from "../../../context/message";
+import { editEventParts } from "../../../context/mutations";
+import type { ContextService } from "../../../context/service";
 import {
     AssistantMessage,
     MessageType,
@@ -15,6 +19,7 @@ import {
     UserMessage,
     UserMessageItem,
 } from "../../../context/types";
+import { applyEdit, buildRecordIndex } from "../../../context/view/records";
 import { getHost } from "../../../core/host";
 import Logger from "../../../logger";
 import { resolveSessionAddress } from "../../../pub/registry";
@@ -389,6 +394,95 @@ function normalizeArgs(args: any): Record<string, unknown> {
     return (args && typeof args === 'object') ? args : {};
 }
 
+// ---------------- Context v2 编辑（按 seq 定位） ----------------
+
+function v2Role(event: ConversationEvent): 'user' | 'assistant' | 'tool' {
+    if (event.kind === 'user') return 'user';
+    if (event.kind === 'assistant') return 'assistant';
+    if (event.kind === 'tool_call' || event.kind === 'tool_result') return 'tool';
+    return 'assistant';
+}
+
+function v2Text(event: ConversationEvent, parts?: Part[]): string {
+    const p = parts ?? ((event as { parts?: Part[] }).parts ?? []);
+    if (event.kind === 'tool_call') {
+        const e = event as { name?: string; args?: string };
+        return `[tool_call:${e.name ?? ''}] ${e.args ?? ''}`.trim();
+    }
+    return renderText(p);
+}
+
+interface V2ReplaceResult {
+    entries: number;
+    hits: number;
+    error?: string;
+}
+
+function replaceInV2(
+    service: ContextService,
+    scope: string,
+    search: string,
+    replacement: string,
+    useRegex: boolean,
+    maxCount: number,
+): V2ReplaceResult {
+    const store = service.getStore();
+    const snapshot = store.snapshot();
+    const index = buildRecordIndex(snapshot.records);
+    let predicate: ((event: ConversationEvent) => boolean) | null = null;
+    const roleMatch = /^role:(\w+)$/.exec(scope);
+    const idxMatch = /^idx:(\d+)(?:-(\d+))?$/.exec(scope);
+    if (scope === 'all') predicate = () => true;
+    else if (roleMatch) {
+        const role = roleMatch[1].toLowerCase();
+        predicate = event => v2Role(event) === role;
+    } else if (idxMatch) {
+        const from = Number(idxMatch[1]);
+        const to = idxMatch[2] ? Number(idxMatch[2]) : from;
+        predicate = event => event.seq >= from && event.seq <= to;
+    } else {
+        return { entries: 0, hits: 0, error: `scope 非法：${scope}。支持 all / role:<role> / idx:<seq> / idx:<a>-<b>` };
+    }
+
+    let remaining = maxCount;
+    let entries = 0;
+    let hits = 0;
+    for (const event of snapshot.events) {
+        if (remaining <= 0) break;
+        if (!predicate(event)) continue;
+        const parts = applyEdit(event, index);
+        let changed = false;
+        const next: Part[] = parts.map(part => {
+            if (part.type !== 'text' || remaining <= 0) return { ...part };
+            let text = part.text;
+            if (useRegex) {
+                const re = new RegExp(search, 'g');
+                text = text.replace(re, () => {
+                    if (remaining <= 0) return search;
+                    remaining--;
+                    hits++;
+                    return replacement;
+                });
+            } else {
+                while (remaining > 0) {
+                    const at = text.indexOf(search);
+                    if (at < 0) break;
+                    text = text.slice(0, at) + replacement + text.slice(at + search.length);
+                    remaining--;
+                    hits++;
+                }
+            }
+            if (text !== part.text) changed = true;
+            return changed ? { type: 'text', text } : { ...part };
+        });
+        if (changed) {
+            editEventParts(store, event.seq, next);
+            entries++;
+        }
+    }
+    return { entries, hits };
+}
+
 export function registerContextEditTools() {
     // ===== context_edit_list =====
     const listTool = new Tool({
@@ -428,10 +522,29 @@ export function registerContextEditTools() {
             return `加载目标会话失败: ${e instanceof Error ? e.message : String(e)}`;
         }
 
-        const msgs: MessageType[] = (target && target.context && Array.isArray(target.context.messages)) ? target.context.messages : [];
         const limit = Math.min(Math.max(parseInt(String(a.limit ?? DEFAULT_LIMIT), 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
         const timeFrom = a.time_from !== undefined && a.time_from !== null ? Number(a.time_from) : undefined;
         const timeTo = a.time_to !== undefined && a.time_to !== null ? Number(a.time_to) : undefined;
+
+        if (target?.contextV2) {
+            const events = target.contextV2.snapshot().events.filter((event: ConversationEvent) => {
+                if (a.role && v2Role(event) !== String(a.role).toLowerCase()) return false;
+                if (a.keyword && !v2Text(event).toLowerCase().includes(String(a.keyword).toLowerCase())) return false;
+                if (timeFrom !== undefined && event.at < timeFrom) return false;
+                if (timeTo !== undefined && event.at > timeTo) return false;
+                return true;
+            });
+            const header = `【上下文条目 · ${labelOf(sid as string)}】共 ${target.contextV2.snapshot().events.length} 条事件，命中 ${events.length} 条（seq 供 context_edit_replace 定位）`;
+            if (events.length === 0) return `${header}\n（无命中条目：可放宽 role/keyword/时间过滤）`;
+            const lines = events.slice(0, limit).map(event => {
+                const msgId = (event as { msgId?: string }).msgId;
+                return `[seq=${event.seq}] role=${v2Role(event)} | time=${event.at || '-'}${msgId ? ` | msg_id=${msgId}` : ''} | ${v2Text(event).slice(0, 120)}`;
+            });
+            if (events.length > limit) lines.push(`…（另有 ${events.length - limit} 条未展示，缩小过滤范围后再查）`);
+            return `${header}\n${lines.join('\n')}`;
+        }
+
+        const msgs: MessageType[] = (target && target.context && Array.isArray(target.context.messages)) ? target.context.messages : [];
 
         const entries = listEntries(msgs, {
             role: a.role as string | undefined,
@@ -519,6 +632,28 @@ export function registerContextEditTools() {
         } catch (e) {
             return `加载目标会话失败: ${e instanceof Error ? e.message : String(e)}`;
         }
+
+        if (target?.contextV2) {
+            let outcome: V2ReplaceResult;
+            try {
+                outcome = replaceInV2(target.contextV2, scope, search, replacement, useRegex, count);
+            } catch (e) {
+                log.warning(`上下文 v2 替换执行失败: ${e instanceof Error ? e.message : String(e)}`);
+                return `替换失败：${e instanceof Error ? e.message : String(e)}`;
+            }
+            if (outcome.error) return outcome.error;
+            if (outcome.entries === 0 && outcome.hits === 0) {
+                return `目标会话 ${labelOf(sid as string)} 范围内未命中「${search}」：请先 context_edit_list 核对 seq 与实际文本。`;
+            }
+            const flushed = await target.contextV2.flush();
+            if (!flushed.ok) return `替换已在内存生效但落盘失败: ${flushed.error ?? 'unknown'}（请重试）`;
+            log.info(`上下文替换(v2): target=${labelOf(sid as string)} scope=${scope} 改动${outcome.entries}条 命中${outcome.hits}处`);
+            return [
+                `已完成上下文替换 · ${labelOf(sid as string)}`,
+                `scope=${scope} | match=${useRegex ? 'regex' : 'literal'} | ${replacement === '' ? '[删除]' : '替换'} | 改动事件 ${outcome.entries} 条 | 共替换 ${outcome.hits} 处`,
+            ].join('\n');
+        }
+
         const msgs: MessageType[] = (target && target.context && Array.isArray(target.context.messages)) ? target.context.messages : [];
 
         if (msgs.length === 0) {

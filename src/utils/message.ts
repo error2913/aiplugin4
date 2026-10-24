@@ -1,7 +1,6 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
 import type { ConversationEvent } from "../context/events";
-import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled, isRequestV2Enabled, recordRequestShadowReport } from "../context/shadow";
 import type { CompiledMessage } from "../context/view/compile";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
@@ -13,6 +12,7 @@ import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
+import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled, isRequestV2Enabled, recordRequestShadowReport } from "./request_shadow";
 import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./timeout";
 
@@ -574,6 +574,31 @@ function maybeShadowCompiledRequest(
             toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
             caps: { vision: multimodal },
+            resolve: {
+                imageUrl: (ref: string) => {
+                    try {
+                        const image = Image.resolveRef(ref);
+                        if (!image || image.isUrlUnusable()) return null;
+                        return image.src || null;
+                    } catch {
+                        return null;
+                    }
+                },
+                avatarUrl: (uid: string) => {
+                    try {
+                        return Image.resolveRef(`user_avatar:${uid}`)?.src || null;
+                    } catch {
+                        return null;
+                    }
+                },
+                groupAvatarUrl: (gid: string) => {
+                    try {
+                        return Image.resolveRef(`group_avatar:${gid}`)?.src || null;
+                    } catch {
+                        return null;
+                    }
+                },
+            },
             resolveUserName: (uid: string) => {
                 const number = uid.replace(/^.+:/, '');
                 try {
