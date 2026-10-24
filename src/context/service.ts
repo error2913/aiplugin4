@@ -222,7 +222,7 @@ export class ContextService {
         return shouldCompact(this.store.getHead(), watermarkTokens);
     }
 
-    async flush(): Promise<ReturnType<ContextStore['flush']>> {
+    async flush(): Promise<Awaited<ReturnType<ContextStore['flush']>>> {
         return this.store.flush();
     }
 
