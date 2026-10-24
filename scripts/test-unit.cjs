@@ -32,6 +32,7 @@ const bundles = {
     contextCompactor: path.join(outDir, 'unit-context-compactor.cjs'),
     contextRecall: path.join(outDir, 'unit-context-recall.cjs'),
     contextService: path.join(outDir, 'unit-context-service.cjs'),
+    contextAdmin: path.join(outDir, 'unit-context-admin.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -59,7 +60,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['contextProjection', path.join(repo, 'scripts/unit-test-context-projection.ts')],
         ['contextCompactor', path.join(repo, 'scripts/unit-test-context-compactor.ts')],
         ['contextRecall', path.join(repo, 'scripts/unit-test-context-recall.ts')],
-        ['contextService', path.join(repo, 'scripts/unit-test-context-service.ts')]
+        ['contextService', path.join(repo, 'scripts/unit-test-context-service.ts')],
+        ['contextAdmin', path.join(repo, 'scripts/unit-test-context-admin.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {
