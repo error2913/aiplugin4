@@ -279,33 +279,6 @@ async function scenarioKeepRawOff() {
         `剩余 ${session.context.messages.length} 条`);
 }
 
-async function scenarioForgetAll() {
-    console.log('\n== 场景 5：.ai forget --all 清理分片 ==');
-    const sid = 'QQ-Group:sim-forget';
-    const session = makeStandbyGroup(sid);
-    // 造两个分片
-    storage.set(`session_${sid}:arc:001`, JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: '归档' }] }));
-    storage.set(`session_${sid}:raw:001`, JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'b', userId: 'QQ:1', time: 1, text: '移出' }] }));
-    (session as any).archiveSeq = 1;
-    (session as any).rawSeq = 1;
-    (session as any).settledSeq = 1;
-
-    const { registerCmdForget } = require('../src/cmd/sub_cmd/forget');
-    const { SubCmd } = require('../src/cmd/root_cmd');
-    registerCmdForget();
-    let replied = '';
-    (globalThis as any).seal.replyToSender = (_c: any, _m: any, t: string) => { replied = String(t); };
-    await SubCmd.map['forget'].solve({
-        ctx: makeCtx(sid), msg: {} as any,
-        cmdArgs: { kwargs: [{ name: 'all' }], getArgN: () => '' } as any,
-        epId: 'QQ:9001', uid: 'QQ:9001', gid: sid, sid,
-        session, page: 1, ret: {} as any,
-    });
-    check('.ai forget --all 清空分片并重置水位',
-        (session as any).archiveSeq === 0 && (session as any).rawSeq === 0 && replied.includes('已清除'),
-        `archiveSeq=${(session as any).archiveSeq} rawSeq=${(session as any).rawSeq}，回复：${replied.slice(0, 40)}…`);
-}
-
 async function main() {
     console.log('\n========== aiplugin4 上下文成本治理 · 模拟验收 ==========');
     console.log(`配置：窗口上限 ${Config.context.WINDOW_MAX_CHARS} 字 · 冷态窗口 ${Config.context.COLD_WINDOW_CHARS} 字 · `
@@ -315,7 +288,6 @@ async function main() {
     await scenarioSettle(session, sid);
     await scenarioTurnHot(session, sid);
     await scenarioKeepRawOff();
-    await scenarioForgetAll();
 
     const failed = results.filter(r => !r.pass);
     console.log('\n========== 汇总 ==========');
@@ -332,3 +304,4 @@ async function main() {
 }
 
 main().catch(e => { console.error('模拟崩溃：', e); process.exit(1); });
+

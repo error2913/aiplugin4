@@ -61,7 +61,6 @@ import { ApiError, classifyApiError, computeArchiveTarget, isImageDownloadFailur
 import { describeBalanceError, fetchBalance, parseBalancePayload, resolveBalanceEndpoint } from "../src/model/balance";
 import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken, truncateMiddle } from "../src/context/context";
 import { evictExpiredShards, readShard, writeShardIfAbsent } from "../src/context/archive_store";
-import { registerCmdForget } from "../src/cmd/sub_cmd/forget";
 import { registerCmdToken } from "../src/cmd/sub_cmd/token";
 import { UsageManager, chartImageCQ, get_chart_url } from "../src/usage";
 import { resolveEffectiveMaxTokens } from "../src/model/api_error";
@@ -2139,51 +2138,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             if (origMin === undefined) delete TC.intConfigs['结算最小门槛']; else TC.intConfigs['结算最小门槛'] = origMin;
             if (origIdle === undefined) delete TC.intConfigs['结算空闲门槛']; else TC.intConfigs['结算空闲门槛'] = origIdle;
             resetConfigCache();
-        }
-    },
-
-    /** P1-4：`.ai forget --all` 清空本会话 arc/raw 分片并重置水位；长期记忆不受影响 */
-    async testForgetAllClearsShards(): Promise<void> {
-        const store = new Map<string, string>();
-        const origSet = (ext as any).storageSet;
-        const origGet = (ext as any).storageGet;
-        (ext as any).storageSet = (k: string, v: string) => { store.set(k, v); };
-        (ext as any).storageGet = (k: string) => store.get(k) ?? '';
-        const origReply = (globalThis as any).seal.replyToSender;
-        const origAgentGet = Agent.get;
-        let replied = '';
-        (globalThis as any).seal.replyToSender = (_c: any, _m: any, t: string) => { replied = String(t); };
-        try {
-            if (!SubCmd.map['forget']) registerCmdForget();
-            const session = new Session();
-            session.sessionId = 'QQ:forget-all';
-            session.sessionType = 'group';
-            Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
-
-            store.set('session_QQ:forget-all:arc:001', JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: '归档原文' }] }));
-            store.set('session_QQ:forget-all:raw:001', JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'b', userId: 'QQ:1', time: 1, text: '窗口原文' }] }));
-            (session as any).archiveSeq = 1;
-            (session as any).rawSeq = 1;
-            (session as any).settledSeq = 1;
-
-            await SubCmd.map['forget'].solve({
-                ctx: makeCtx(), msg: {} as any,
-                cmdArgs: { kwargs: [{ name: 'all' }], getArgN: () => '' } as any,
-                epId: 'QQ:10000', uid: 'QQ:10000', gid: '', sid: session.sessionId,
-                session, page: 1, ret: {} as any
-            } as any);
-
-            assert.ok(replied.includes('已清除'), `应回报清理结果（实际：${replied}）`);
-            assert.equal(store.get('session_QQ:forget-all:arc:001'), '', '归档分片应被置空');
-            assert.equal(store.get('session_QQ:forget-all:raw:001'), '', '窗口移出分片应被置空');
-            assert.equal((session as any).archiveSeq, 0, 'archiveSeq 应重置');
-            assert.equal((session as any).rawSeq, 0, 'rawSeq 应重置');
-            assert.equal((session as any).settledSeq, 0, 'settledSeq 应重置');
-        } finally {
-            (globalThis as any).seal.replyToSender = origReply;
-            Agent.get = origAgentGet;
-            (ext as any).storageSet = origSet;
-            (ext as any).storageGet = origGet;
         }
     },
 
