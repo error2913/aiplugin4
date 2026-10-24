@@ -1,4 +1,5 @@
 // .ai forget：遗忘（清除）上下文 / 清除原文分片
+import { hideEvents, purgeSession } from "../../context/admin";
 import { clearShardsFor } from "../../context/archive_store";
 import { aliasToCmd } from "../../utils/alias";
 import { I, U } from "../privilege";
@@ -18,8 +19,30 @@ export function registerCmdForget() {
             user: { priv: U }
         }
     };
-    cmd.solve = (scc: SubCmdContext) => {
+    cmd.solve = async (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, session, ret  } = scc;
+        const v2 = session.contextV2;
+
+        // Context v2：遗忘 = RedactRecord（可审计），全清除 = purge（物理置空，不可恢复）
+        if (v2) {
+            const arg = aliasToCmd(cmdArgs.getArgN(2));
+            if (arg === 'assistant') {
+                hideEvents(v2.getStore(), 'assistant');
+                await v2.flush();
+                seal.replyToSender(ctx, msg, 'ai 上下文已逻辑遗忘（原文保留，可用 .ai ctx status 查看）');
+                return ret;
+            }
+            if (arg === 'user') {
+                hideEvents(v2.getStore(), 'user');
+                await v2.flush();
+                seal.replyToSender(ctx, msg, '用户上下文已逻辑遗忘（原文保留）');
+                return ret;
+            }
+            const result = purgeSession(session.sessionId, v2.head());
+            session.resetState();
+            seal.replyToSender(ctx, msg, `上下文已清除（事件页 ${result.clearedEventPages} / 记录页 ${result.clearedRecordPages} / 旧分片 ${result.clearedLegacyShards}）；长期记忆不受影响`);
+            return ret;
+        }
 
         // --all（别名 --raw）：清空本会话的 arc/raw 分片并重置水位。
         // 语义区分：分片是"原文留档"，.ai forget（不带 --all）只清上下文、不碰分片；

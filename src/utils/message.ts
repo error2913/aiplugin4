@@ -559,7 +559,7 @@ function maybeShadowCompiledRequest(
     tools: unknown[] | undefined,
 ): CompiledMessage[] | null {
     const shadow = isRequestShadowEnabled();
-    const serveV2 = isRequestV2Enabled();
+    const serveV2 = isRequestV2Enabled() || !!session.contextV2;
     if ((!shadow && !serveV2) || !session.contextV2) return null;
     try {
         const prefix: CompiledMessage[] = [system, ...samples].map(message => ({

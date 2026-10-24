@@ -29,6 +29,8 @@ export interface ProjectionOptions {
     maxUnits?: number;
     /** 最多保留多少字符（按规范文本投影计）；缺省 20000 */
     maxChars?: number;
+    /** 是否深度冻结（默认 true；旧消费者过渡期可传 false 保持可变） */
+    freeze?: boolean;
 }
 
 const DEFAULT_MAX_UNITS = 40;
@@ -206,5 +208,5 @@ export function buildProjection(snapshot: ContextSnapshot, options: ProjectionOp
 
     const messages: MessageType[] = [];
     for (const unit of selected) messages.push(...unitMessages(unit, index));
-    return deepFreeze(messages);
+    return options.freeze === false ? messages : deepFreeze(messages);
 }

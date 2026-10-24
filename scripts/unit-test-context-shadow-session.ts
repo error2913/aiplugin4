@@ -5,11 +5,12 @@ import Agent from '../src/agent/agent';
 import Config from '../src/config/config';
 import { attachV2Mirror, setV2MirrorEnabled } from '../src/context/mirror';
 import { ContextService } from '../src/context/service';
-import { compareRequests, compareShadow, formatShadowReport } from '../src/context/shadow';
-import { clearRequestShadowReport, formatRequestShadowReport, getLastRequestShadowReport, setRequestShadowEnabled, setRequestV2Enabled } from '../src/context/shadow';
+import { compareShadow, formatShadowReport } from '../src/context/shadow';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
-import { setHost } from '../src/core/host';
+import { getHost, setHost } from '../src/core/host';
 import { Session } from '../src/session/session';
+import { sessionStorageKey } from '../src/session/persistence';
+import { SessionService } from '../src/session/session_service';
 import { handleMessages } from '../src/utils/message';
 
 // 本 bundle 独立注册一次配置；重复调用会因 defineProperty 不可重定义而报错
@@ -112,36 +113,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
     },
 
-    async testContextRequestShadowCollect() {
-        await withShadowSession('QQ:request-shadow', async (session, service) => {
-            session.contextV2 = service;
-            await session.context.addUserMessage({} as seal.MsgContext, '请求影子问题', 'QQ:1', 'rm1');
-            session.context.addAssistantMessage('请求影子回答', 'ra1');
-            session.context.addToolCallsMessage([
-                { id: 'rc1', type: 'function', function: { name: 'shadow_tool', arguments: '{}' } },
-            ] as any);
-            await session.context.addToolCallbackMessage('请求影子工具结果', 'rc1', 'shadow_tool');
-            session.context.addSystemUserMessage('请求影子事件', '事件', { eventType: 'group_recall', raw: { id: 3 } });
-            const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
-            setRequestShadowEnabled(true);
-            clearRequestShadowReport();
-            try {
-                const legacyResult = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
-                const report = getLastRequestShadowReport();
-                assert.ok(legacyResult.length > 0);
-                assert.ok(report, '开启后应记录请求影子报告');
-                assert.ok(report!.legacyLines > 0);
-                assert.equal(report!.equal, true, formatRequestShadowReport(report!));
+    async testContextSessionServiceV2Path() {
+        installHost();
+        const service = new SessionService();
+        service.agentName = '*';
+        const sid = 'QQ:session-service-v2';
+        const session = service.getSession(sid);
+        session.sessionType = 'user';
+        (session.context as any).isColdSession = () => false;
+        await session.context.addUserMessage({} as seal.MsgContext, '生产路径你好', 'QQ:1', 'pm1');
+        session.context.addAssistantMessage('生产路径收到', 'pa1');
+        assert.ok(session.contextV2, 'SessionService 应初始化 contextV2');
+        assert.equal(session.contextV2!.snapshot().events.length, 2);
+        assert.ok(session.context.messages.length > 0, '旧消费者通过 projection 读取');
 
-                setRequestV2Enabled(true);
-                const v2Result = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
-                assert.equal(compareRequests(legacyResult, v2Result).equal, true, 'v2 返回应与旧请求体逐行一致');
-                assert.ok(v2Result.length > 0);
-            } finally {
-                setRequestShadowEnabled(false);
-                setRequestV2Enabled(false);
-                clearRequestShadowReport();
-            }
-        });
+        const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
+        const request = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
+        assert.ok(JSON.stringify(request).includes('生产路径你好'));
+        assert.ok(JSON.stringify(request).includes('生产路径收到'));
+
+        SessionService.save(session);
+        const raw = getHost().storage.get(sessionStorageKey(sid));
+        assert.ok(raw);
+        assert.equal(raw.includes('"messages"'), false, 'v2 启用后旧 messages 不再落盘');
+        const reopened = await ContextService.open(sid);
+        assert.equal(reopened.snapshot().events.length, 2, '重开 v2 数据仍在');
     },
 };

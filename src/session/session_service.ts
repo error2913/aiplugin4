@@ -112,6 +112,8 @@ export class SessionService {
             }
             // 受控镜像：默认关闭；开启后旧写入会同步为 v2 事件（切换前校验用）
             attachV2Mirror(session.context, session.contextV2);
+            // P2：接入后写入/读取改走 v2；projection 供旧消费者过渡读取
+            session.context.initV2(session.contextV2);
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];
