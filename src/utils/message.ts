@@ -557,6 +557,7 @@ function maybeShadowCompiledRequest(
     legacy: RequestMessage[],
     multimodal: boolean,
     tools: unknown[] | undefined,
+    modelName: string | undefined,
 ): CompiledMessage[] | null {
     const shadow = isRequestShadowEnabled();
     const serveV2 = isRequestV2Enabled() || !!session.contextV2;
@@ -567,7 +568,7 @@ function maybeShadowCompiledRequest(
             content: buildContent(message),
         }));
         const configured = Config.context.MAX_CONTEXT_TOKENS;
-        const budget = configured > 0 ? configured : 1_000_000;
+        const { tokens: budget } = resolveEffectiveMaxTokens(configured, getProbedContextWindow(modelName || ''));
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
             budgetTokens: budget,
@@ -686,7 +687,7 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
-        const served = maybeShadowCompiledRequest(session, system, samplesMessages, peMessages, multimodal, tools);
+        const served = maybeShadowCompiledRequest(session, system, samplesMessages, peMessages, multimodal, tools, modelName);
         return (served ?? peMessages) as RequestMessage[];
     }
 
@@ -782,7 +783,7 @@ export async function handleMessages(
         }
         return out;
     }));
-    const served = maybeShadowCompiledRequest(session, system, samplesMessages, finalMessages, multimodal, tools);
+    const served = maybeShadowCompiledRequest(session, system, samplesMessages, finalMessages, multimodal, tools, modelName);
     return (served ?? finalMessages) as RequestMessage[];
 }
 
