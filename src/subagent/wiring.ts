@@ -1,16 +1,20 @@
-import Config from '../../config/config';
-import { getHost } from "../../core/host";
+import Config from '../config/config';
+import { getHost } from "../core/host";
+import { getAuxLlm, hasAuxLlm } from '../core/ports/aux_llm';
 // 子代理运行时接线（对接层）：ext 存储 KV + spawn/fork executor + notice 投递 + 唤醒决策 + jobs 单例。
 // 工具层调用 getSubAgentService()/getSubAgentJobs()；本文件引入运行时模块，不参与机制层纯单测。
-import Logger from '../../logger';
-import type { Session } from '../../session/session';
-import { getSession } from '../../session/session_service';
-import { getSessionCtxAndMsg } from '../../utils/seal';
-import { fireStopEvent } from "../../utils/timeout";
+import Logger from '../logger';
+import Model from '../model/model';
+import { getProbedContextWindow } from '../model/window_cache';
+import type { Session } from '../session/session';
+import { getSession } from '../session/session_service';
+import { getSessionCtxAndMsg } from '../utils/seal';
+import { fireStopEvent } from "../utils/timeout";
 
 import { buildForkSeed, createChildSession, decodeCheckpoint, encodeCheckpoint, runHeadlessActivation } from './child';
 import type { CheckpointMessage } from './child';
 import { buildChildSystemContent } from './child_system';
+import type { SubAgentSummaryFn } from './context';
 import { SubAgentJobs } from './jobs';
 import { createForkProvider, createSpawnProvider } from './providers';
 import type { SubAgentExecutor } from './providers';
@@ -28,6 +32,43 @@ const DEFAULT_CHILD_INSTRUCTION =
     '你是一名子代理。请独立完成交付的任务：分步推进、需要信息时自行调用可用工具，'
     + '不确定时明确说明而不编造；完成后给出最终结论。';
 
+/** 子代理上下文默认上限（token）：配置 0 且模型窗口未探测到时的回退值 */
+export const DEFAULT_SUBAGENT_CONTEXT_TOKENS = 32000;
+/** 跟随模型窗口时的安全系数（与主链一致：窗口 × 0.8） */
+const SUBAGENT_WINDOW_SAFETY = 0.8;
+
+/**
+ * 解析子代理上下文上限：「子代理上下文上限」配置 > 0 用它；
+ * 否则跟随模型探测窗口 × 0.8；未探测到回退 32000。
+ */
+export function resolveSubAgentContextTokens(configured: number = Config.subagent.CONTEXT_MAX_TOKENS): number {
+    if (Number.isFinite(configured) && configured > 0) return Math.floor(configured);
+    const modelName = Model.getChatModel('chat')?.name || '';
+    const window = getProbedContextWindow(modelName);
+    if (window !== undefined && Number.isFinite(window) && window > 0) {
+        return Math.max(1, Math.floor(window * SUBAGENT_WINDOW_SAFETY));
+    }
+    return DEFAULT_SUBAGENT_CONTEXT_TOKENS;
+}
+
+/**
+ * 子代理摘要器：走 aux LLM（summarize_agent），用于超上限时压缩更早上下文。
+ * aux LLM 未初始化时返回 undefined → 上下文层走确定性降级（保留最近内容 + 省略标记）。
+ */
+export function createSubAgentSummarizer(): SubAgentSummaryFn | undefined {
+    if (!hasAuxLlm()) return undefined;
+    return async (input: string, opts: { maxTokens: number }) => {
+        const prompt = [
+            `请把下面这段子代理历史对话压缩成一条简洁摘要（不超过 ${opts.maxTokens} token）。`,
+            '必须保留：任务目标、关键事实与数字、已完成的动作/工具调用及其结论、未完成项与约束。',
+            '不要编造，不要输出寒暄，只输出摘要正文。',
+            '',
+            input,
+        ].join('\n');
+        return getAuxLlm().chat('summarize_agent', prompt);
+    };
+}
+
 export interface RuntimeRef {
     ctx: seal.MsgContext;
     msg: seal.Message;
@@ -38,6 +79,8 @@ export interface SubAgentWireOptions {
     defaultInstruction?: string;
     maxTurns?: number;
     budgetMs?: number;
+    /** 子代理上下文 token 上限覆盖（缺省=配置「子代理上下文上限」，0 时跟随模型窗口×0.8） */
+    maxContextTokens?: number;
     /** 后台 child 终态后是否允许唤醒父会话（总闸，默认开；受 decideWake 条件约束） */
     enableWake?: boolean;
 }
@@ -81,6 +124,7 @@ function makeExecutor(fork: boolean, opt: SubAgentWireOptions): SubAgentExecutor
                 toolStateSnapshot: rt.parentSession.toolState,
                 toolFilter: req.toolFilter ?? null,
             });
+            // TODO(P2): fork seed 暂用旧函数（父 Context.messages 投影）；P2 后改从父 compileRequest 取。
             const seed = fork ? buildForkSeed(rt.parentSession.context.messages) : undefined;
             const result: SubAgentResult = await runHeadlessActivation({
                 ctx: rt.ctx,
@@ -91,6 +135,8 @@ function makeExecutor(fork: boolean, opt: SubAgentWireOptions): SubAgentExecutor
                 use: 'chat',
                 maxTurns: opt.maxTurns,
                 budgetMs: opt.budgetMs,
+                maxContextTokens: opt.maxContextTokens ?? resolveSubAgentContextTokens(),
+                summarize: createSubAgentSummarizer(),
                 ...(seed && seed.length > 0 ? { seed } : {}),
             });
             return {
@@ -257,6 +303,7 @@ export async function runContinuableActivation(childId: string, task: string, re
         instruction: rec.agentName && rec.agentName !== '' ? rec.agentName : DEFAULT_CHILD_INSTRUCTION,
     });
     const isFork = !base && rec.provider === 'fork';
+    // TODO(P2): fork seed 暂用旧函数（父 Context.messages 投影）；P2 后改从父 compileRequest 取。
     const seed = isFork ? buildForkSeed(ref.parentSession.context.messages) : undefined;
     svc.markRunning(childId, () => fireStopEvent(child.stopEvent));
     try {
@@ -269,6 +316,8 @@ export async function runContinuableActivation(childId: string, task: string, re
             use: 'chat',
             maxTurns: wireOptions.maxTurns,
             budgetMs: wireOptions.budgetMs,
+            maxContextTokens: wireOptions.maxContextTokens ?? resolveSubAgentContextTokens(),
+            summarize: createSubAgentSummarizer(),
             ...(seed && seed.length > 0 ? { seed } : {}),
             ...(base ? { baseMessages: base } : {}),
             checkpoint: msgs => writeSubagentCheckpoint(childId, rec.parentSessionId, msgs),

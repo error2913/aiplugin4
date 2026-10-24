@@ -1,11 +1,17 @@
 // 子代理工具集注册：委派（subagent/subagent_fork，前台或 one-shot 后台）+ 后台 job + 控制工具。
 // 语义对齐 DSH：委派结果 stopReason 化；后台返回 job id；send_message/interrupt_agent/list_agents 面向 childId。
-import { effectiveDeny, effectiveMaxDepth } from '../../../agent/subagent/limits';
-import { resultErrorText } from '../../../agent/subagent/rules';
-import type { StartRequest } from '../../../agent/subagent/types';
-import { getSubAgentJobs, initSubAgentService, runContinuableActivation, sweepSubagentParent } from '../../../agent/subagent/wiring';
 import Config from '../../../config/config';
 import type { Session } from '../../../session/session';
+import {
+    effectiveDeny,
+    effectiveMaxDepth,
+    getSubAgentJobs,
+    initSubAgentService,
+    resultErrorText,
+    runContinuableActivation,
+    type StartRequest,
+    sweepSubagentParent,
+} from '../../../subagent';
 import Tool from '../../tool';
 
 const DEFAULT_PERSONA =

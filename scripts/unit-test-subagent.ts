@@ -30,11 +30,14 @@ import {
     effectiveDeny,
     DELEGATION_GUIDE,
     buildDelegationGuide,
-} from '../src/agent/subagent/index';
+    runHeadlessActivation,
+    createChildSession,
+    encodeCheckpoint,
+    decodeCheckpoint,
+} from '../src/subagent';
 import Config from '../src/config/config';
 import { Session } from '../src/session/session';
 import Tool, { toolMap } from '../src/tool/tool';
-import { runHeadlessActivation, createChildSession, encodeCheckpoint, decodeCheckpoint } from '../src/agent/subagent/child';
 
 export const tests: Record<string, () => void | Promise<void>> = {};
 
