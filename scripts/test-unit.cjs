@@ -20,6 +20,8 @@ const bundles = {
     imageHost: path.join(outDir, 'unit-image-host.cjs'),
     backendConfig: path.join(outDir, 'unit-backend-config.cjs'),
     boot: path.join(outDir, 'unit-boot.cjs'),
+    contextV2: path.join(outDir, 'unit-context-v2.cjs'),
+    contextMigrate: path.join(outDir, 'unit-context-migrate.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -35,7 +37,9 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['imageHost', path.join(repo, 'scripts/unit-test-image-host.ts')],
         ['backendConfig', path.join(repo, 'scripts/unit-test-backend-config.ts')],
         // 独立启动装配回归入口（首次 Config.registerConfig()，验证配置应用时机）
-        ['boot', path.join(repo, 'scripts/unit-test-boot.ts')]
+        ['boot', path.join(repo, 'scripts/unit-test-boot.ts')],
+        ['contextV2', path.join(repo, 'scripts/unit-test-context-v2.ts')],
+        ['contextMigrate', path.join(repo, 'scripts/unit-test-context-migrate.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {
