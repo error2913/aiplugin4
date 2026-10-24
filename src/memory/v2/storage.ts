@@ -1,5 +1,6 @@
+
+import { getHost } from "../../core/host";
 // 记忆存储抽象：支持 SealDice ext.storage 与测试用内存存储。
-import { ext } from "../../config/config";
 
 import type {
     MemoryBankMeta,
@@ -42,7 +43,7 @@ export class SealMemoryStorage implements MemoryStorage {
     getBank(id: string): PersistedBank | null {
         try {
             // 新版分片：存在 meta 分片即按分片读取，部分分片缺失时容忍为空数组（迁移中断/旧数据兜底）
-            const metaRaw = ext.storageGet(keyOf(id, 'meta'));
+            const metaRaw = getHost().storage.get(keyOf(id, 'meta'));
             if (metaRaw) {
                 const meta = JSON.parse(metaRaw) as MemoryBankMeta;
                 const units = (this.readPart(id, 'units') as MemoryUnit[] | null) ?? [];
@@ -62,11 +63,11 @@ export class SealMemoryStorage implements MemoryStorage {
             }
 
             // 旧版单 key：命中即一次性迁移到分片，并清空旧 key
-            const raw = ext.storageGet(keyOf(id, 'bank'));
+            const raw = getHost().storage.get(keyOf(id, 'bank'));
             if (!raw) return null;
             const bank = JSON.parse(raw) as PersistedBank;
             this.saveBank(bank);
-            ext.storageSet(keyOf(id, 'bank'), '');
+            getHost().storage.set(keyOf(id, 'bank'), '');
             return bank;
         } catch {
             return null;
@@ -74,25 +75,25 @@ export class SealMemoryStorage implements MemoryStorage {
     }
 
     private readPart(id: string, part: string): unknown {
-        const raw = ext.storageGet(keyOf(id, part));
+        const raw = getHost().storage.get(keyOf(id, part));
         if (!raw) return null;
         return JSON.parse(raw);
     }
 
     saveBank(bank: PersistedBank): void {
-        ext.storageSet(keyOf(bank.meta.id, 'meta'), JSON.stringify(bank.meta));
-        ext.storageSet(keyOf(bank.meta.id, 'units'), JSON.stringify(bank.units));
-        ext.storageSet(keyOf(bank.meta.id, 'links'), JSON.stringify(bank.links));
-        ext.storageSet(keyOf(bank.meta.id, 'docs'), JSON.stringify({ documents: bank.documents, chunks: bank.chunks } satisfies DocsPart));
-        ext.storageSet(keyOf(bank.meta.id, 'obs'), JSON.stringify({ observations: bank.observations, entities: bank.entities, mentalModels: bank.mentalModels } satisfies ObsPart));
+        getHost().storage.set(keyOf(bank.meta.id, 'meta'), JSON.stringify(bank.meta));
+        getHost().storage.set(keyOf(bank.meta.id, 'units'), JSON.stringify(bank.units));
+        getHost().storage.set(keyOf(bank.meta.id, 'links'), JSON.stringify(bank.links));
+        getHost().storage.set(keyOf(bank.meta.id, 'docs'), JSON.stringify({ documents: bank.documents, chunks: bank.chunks } satisfies DocsPart));
+        getHost().storage.set(keyOf(bank.meta.id, 'obs'), JSON.stringify({ observations: bank.observations, entities: bank.entities, mentalModels: bank.mentalModels } satisfies ObsPart));
     }
 
     deleteBank(id: string): void {
         for (const part of MEMV2_PARTS) {
-            ext.storageSet(keyOf(id, part), '');
+            getHost().storage.set(keyOf(id, part), '');
         }
         // 兼容清理旧版单 key
-        ext.storageSet(keyOf(id, 'bank'), '');
+        getHost().storage.set(keyOf(id, 'bank'), '');
     }
 }
 

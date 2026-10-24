@@ -1,7 +1,7 @@
 // .ai kb：知识库查看 / 开关 / refresh（按当前平台 + 会话级启用）
 import { knowledgeService } from "../../memory/knowledge";
+import { aliasToCmd } from "../../utils/alias";
 import { matchesPlatform, platformOf } from "../../utils/target_id";
-import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

@@ -1,5 +1,5 @@
 // 回复配置：引用/最大字数/去空白/复读检测（回复过滤规则已内置硬编码，见 src/utils/string.ts filterString）
-import { ext } from "../config";
+import { ext } from "../ext";
 
 export default class ReplyConfig {
     static register() {

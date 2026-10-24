@@ -7,9 +7,9 @@ import { resolveBankId } from "../../memory/v2/bank_resolver";
 import { getMemoryEngine, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../../memory/v2/index";
 import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
+import { aliasToCmd } from "../../utils/alias";
 import { fmtDate, stripInternalTags } from "../../utils/string";
 import { normalizeGroupId, normalizeUserId, platformOf } from "../../utils/target_id";
-import { aliasToCmd } from "../../utils/utils";
 import { S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

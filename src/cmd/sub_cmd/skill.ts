@@ -1,8 +1,8 @@
 // .ai skill：查看 / 开关 / refresh 技能（按当前平台 + 会话级启用）
 import Config from "../../config/config";
 import { getSkillNames, getSkillViews, refreshSkills, SKILL_LIST_LIMIT } from "../../tool/skills";
+import { aliasToCmd } from "../../utils/alias";
 import { matchesPlatform, platformOf } from "../../utils/target_id";
-import { aliasToCmd } from "../../utils/utils";
 import { I, M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

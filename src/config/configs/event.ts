@@ -1,5 +1,5 @@
 // 依赖事件接收配置：ob11 依赖 notice/request 事件转文本提示词录入上下文（仅背景，不触发 AI）
-import { ext } from "../config";
+import { ext } from "../ext";
 
 export default class EventConfig {
     static register() {

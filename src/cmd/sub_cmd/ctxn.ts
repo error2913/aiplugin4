@@ -1,6 +1,6 @@
 // .ai ctxn：上下文内名字自动修改相关
 import { logger } from "../../logger";
-import { aliasToCmd } from "../../utils/utils";
+import { aliasToCmd } from "../../utils/alias";
 import { I, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

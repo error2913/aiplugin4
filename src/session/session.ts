@@ -1,119 +1,44 @@
-// 会话：聊天编排（chat/chatStream/回复/接收）、设定、工具状态与活跃时间
-import Agent from "../agent/agent";
+// 会话：聊天编排（chat/chatStream）、设定、工具状态与活跃时间。
+// 收信/挂起/通知 flush 在 ./inbox，回复投递在 ./outbox，持久化与节流判定在 ./persistence，
+// 冷热状态与活跃时段在 ./rhythm，设定在 ./setting（本文件保留公开方法委派，外部调用点零改动）。
+import type Agent from "../agent/agent";
 import { streamService } from "../agent/stream";
-import { ext } from "../config/config";
 import Config from "../config/config";
 import { Context } from "../context/context";
+import { getAgent } from "../core/ports/agent_registry";
 import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
-import { MediaTaskManager } from "../media/task_queue";
 import SessionMemoryService from "../memory/session_memory";
 import { isAnthropicMessages } from "../model/api_dialect";
 import Model from "../model/model";
-import Image from "../resource/image";
+import type Image from "../resource/image";
 import { TimerManager } from "../timer";
+import { toolMap } from "../tool/registry";
 import { ToolState } from "../tool/tool";
-import { toolMap } from "../tool/tool";
 import { ToolListen } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { MessageSegment, normalizeRenderTags, transformArrayToContent } from "../utils/string";
-import { createStopEvent, fireStopEvent, StopEvent, TypeDescriptor } from "../utils/utils";
-import { getRecordMessageId, replyToSender } from "../utils/utils";
+import { TypeDescriptor } from "../utils/revive";
+import type { MessageSegment } from "../utils/string";
+import { normalizeRenderTags } from "../utils/string";
+import { createStopEvent, fireStopEvent, StopEvent } from "../utils/timeout";
 
 import Group from "./group";
+import { deferReceipt as deferReceiptImpl, drainPending as drainPendingImpl, flushNotices as flushNoticesImpl, flushPending as flushPendingImpl, handleReceipt as handleReceiptImpl } from "./inbox";
+import { deliverReply } from "./outbox";
+import { pendingKey as pendingKeyOf, PendingMessage, SAVE_MIN_INTERVAL_MS, shouldDeferCoalescedSave, writePendingRecord, writeSessionRecord } from "./persistence";
+import { activeTimeSegmentIndex, computeSessionState, nextActiveTimePoint } from "./rhythm";
+import { Setting } from "./setting";
 import { createToolListen } from "./tool_listen";
 import { SessionType, State } from "./types";
 import User from "./user";
 
 const log = logger.withTag('session');
 
-/** 保存节流：合并写的最小间隔与批量上限（海豹 storage 为叠加式，重复写会持续占空间；见 docs/03 上下文模块） */
-export const SAVE_MIN_INTERVAL_MS = 5000;
-export const SAVE_BATCH = 20;
-
-/** 冷热状态的时间窗（内置常量，见 docs/03 上下文模块）：待机且连续 **10 分钟**无相关活动才转冷 */
-export const COLD_AFTER_MS = 10 * 60 * 1000;               // 冷态进入阈值：10 分钟
-export const COOL_DOWN_MS = 60_000;                        // 转冷前的余温过渡带（1 分钟）
-export const HOT_HOLD_MS = COLD_AFTER_MS - COOL_DOWN_MS;   // 热态保持 = 9 分钟
-
-/** 持久化时排除的运行时字段（监听器/运行状态/挂起队列/节流状态等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats', 'settleBackoffUntil']);
-
-/** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
-export interface PendingMessage {
-    ctx: seal.MsgContext;
-    msg: seal.Message;
-    content: string;
-    userId: string;
-    messageId: string;
-    kind: 'trigger' | 'record';
-    systemReason?: string;
-    /** 落盘轻量字段：重载后用于重建 ctx/msg（getSessionCtxAndMsg）与续跑 */
-    epId: string;
-    isPrivate: boolean;
-}
-
-export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'judge', 'overrides'];
-    static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
-        priv: 'number',
-        standby: 'boolean',
-        counter: 'number',
-        timer: 'number',
-        prob: 'number',
-        regexTrigger: 'boolean',
-        judge: 'boolean',
-        activeTimeInfo: { objectValue: 'any' },
-        overrides: { objectValue: 'any' }
-    }
-    priv: number;
-    standby: boolean;
-    counter: number;
-    timer: number;
-    prob: number;
-    regexTrigger: boolean;
-    judge: boolean;
-    activeTimeInfo: {
-        start: number;
-        end: number;
-        segs: number;
-    }
-    /**
-     * 按会话覆盖的上下文参数（P2-1）：未设置时用全局配置。
-     * 0/undefined 一律视为"未覆盖"（与全局配置的 0 语义区分：这里 0 不是"关闭"，而是"没设"）。
-     */
-    overrides: {
-        coldWindowChars?: number;
-        coldTruncate?: number;
-        windowMaxChars?: number;
-    }
-
-    constructor() {
-        this.priv = 0;
-        this.standby = false;
-        this.counter = -1;
-        this.timer = -1;
-        this.prob = -1;
-        this.regexTrigger = true;
-        this.judge = false;
-        this.activeTimeInfo = {
-            start: 0,
-            end: 0,
-            segs: 0
-        }
-        this.overrides = {};
-    }
-
-    /**
-     * 解析"按会话覆盖 → 全局配置"（P2-1）：`key` 在本会话设了正数就用它，否则用 `fallback`。
-     * 只接受正数：0/负数/非数字一律视为"未覆盖"，避免与全局配置里"0=关闭/不限"的语义混淆
-     * （例如 `窗口上限字数=0` 表示"不移出"，但按会话设 0 只应表示"没设过"）。
-     */
-    overrideOr(key: 'coldWindowChars' | 'coldTruncate' | 'windowMaxChars', fallback: number): number {
-        const v = this.overrides ? this.overrides[key] : undefined;
-        return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback;
-    }
-}
+// 兼容旧引用：这些符号从 session.ts 拆到叶子模块后仍可继续从本文件 import（内部实现请直接引用叶子）
+export { Setting } from "./setting";
+export { COLD_AFTER_MS, COOL_DOWN_MS, HOT_HOLD_MS, SessionTemperature } from "./rhythm";
+export { SAVE_BATCH, SAVE_MIN_INTERVAL_MS, SESSION_RUNTIME_KEYS } from "./persistence";
+export type { PendingMessage } from "./persistence";
 
 export class Session {
     static validKeysMap: { [key in keyof Session]?: TypeDescriptor<Session[key]> } = {
@@ -283,7 +208,7 @@ export class Session {
     }
 
     get agent(): Agent {
-        return Agent.get(this.agentName);
+        return getAgent(this.agentName);
     }
     get user(): User | null {
         return this.sessionType === 'user' ? User.get(this.sessionId) : null;
@@ -338,7 +263,7 @@ export class Session {
         const now = Date.now();
         if (coalesce) {
             this.saveDeferCount++;
-            if (now - this.lastSaveAt < SAVE_MIN_INTERVAL_MS && this.saveDeferCount < SAVE_BATCH) {
+            if (shouldDeferCoalescedSave(this.lastSaveAt, this.saveDeferCount, now)) {
                 if (!this.saveTimer) {
                     this.saveTimer = setTimeout(() => {
                         this.saveTimer = null;
@@ -354,7 +279,7 @@ export class Session {
             clearTimeout(this.saveTimer);
             this.saveTimer = null;
         }
-        ext.storageSet(`session_${this.sessionId}`, JSON.stringify(this, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
+        writeSessionRecord(this.sessionId, this);
         this.lastSaveAt = now;
         this.saveDeferCount = 0;
     }
@@ -372,73 +297,36 @@ export class Session {
      */
     stateOf(now: number = Date.now(), opts?: { touch?: boolean }): 'HOT' | 'COOLING' | 'COLD' {
         const touch = opts?.touch !== false;
-        if (!(this.setting.standby || Config.base.GLOBAL_STANDBY)) return 'HOT';
-        const busy = this.running || this.starting || this.activeRuns > 0;
-        if (busy) {
-            if (touch) this.lastRelevantAt = now;   // 在途任务冻结衰减
-            return 'HOT';
-        }
-        const idle = Math.max(0, now - this.lastRelevantAt);   // 防时钟回拨
-        if (idle < HOT_HOLD_MS) return 'HOT';
-        if (idle < HOT_HOLD_MS + COOL_DOWN_MS) return 'COOLING';
-        return 'COLD';
+        const { state, lastRelevantAt } = computeSessionState({
+            standby: this.setting.standby || Config.base.GLOBAL_STANDBY,
+            busy: this.running || this.starting || this.activeRuns > 0,
+            lastRelevantAt: this.lastRelevantAt,
+            now,
+        }, touch);
+        this.lastRelevantAt = lastRelevantAt;
+        return state;
     }
 
-    /** 挂起队列轻量分片 key：ctx/msg 是运行时对象不可序列化，只落盘重建所需字段，变更即写穿 */
+    /** 挂起队列轻量分片 key（兼容旧静态调用；实现见 persistence.pendingKey） */
     static pendingKey(sessionId: string): string {
-        return `session_${sessionId}:pending`;
+        return pendingKeyOf(sessionId);
     }
 
     savePending() {
-        const light = this.pendingQueue.map(p => ({
-            content: p.content,
-            userId: p.userId,
-            messageId: p.messageId,
-            kind: p.kind,
-            systemReason: p.systemReason,
-            epId: p.epId,
-            isPrivate: p.isPrivate,
-        }));
-        ext.storageSet(Session.pendingKey(this.sessionId), JSON.stringify(light));
+        writePendingRecord(this.sessionId, this.pendingQueue);
     }
 
     /** 清空挂起队列分片：空队列即清空存档，避免重载后残留脏数据复活 */
     clearPending() {
-        ext.storageSet(Session.pendingKey(this.sessionId), '');
+        writePendingRecord(this.sessionId, null);
     }
 
     get curActiveTimeSegIndex(): number {
-        const now = new Date();
-        const cur = now.getHours() * 60 + now.getMinutes();
-        const { start, end, segs } = this.setting.activeTimeInfo;
-        const endReal = end >= start ? end : end + 24 * 60;
-        const curReal = cur >= start ? cur : cur + 24 * 60;
-
-        if (curReal >= endReal) return -1;
-
-        const segLen = (endReal - start) / segs;
-        const index = Math.floor((curReal - start) / segLen);
-        return Math.min(index, segs - 1);
+        return activeTimeSegmentIndex(this.setting.activeTimeInfo);
     }
 
     getNextTimePoint(curSegIndex: number): number {
-        const { start, end, segs } = this.setting.activeTimeInfo;
-
-        if (start === 0 && end === 0) return -1;
-
-        const endReal = end >= start ? end : end + 24 * 60;
-        const segLen = (endReal - start) / segs;
-        const nextSegIndex = (curSegIndex + 1) % segs;
-        const todayMin = Math.floor(start + nextSegIndex * segLen + Math.random() * segLen) % (24 * 60);
-
-        const nextTime = new Date();
-        nextTime.setHours(Math.floor(todayMin / 60), todayMin % 60, Math.floor(Math.random() * 60), 0);
-
-        if (nextTime.getTime() <= Date.now()) {
-            nextTime.setDate(nextTime.getDate() + 1);
-        }
-
-        return Math.floor(nextTime.getTime() / 1000);
+        return nextActiveTimePoint(this.setting.activeTimeInfo, curSegIndex, Date.now());
     }
 
     checkActiveTimer(ctx: seal.MsgContext) {
@@ -455,117 +343,31 @@ export class Session {
     }
 
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
-        this.lastCtx = ctx;
-        const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
-        await this.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
+        await handleReceiptImpl(this, ctx, msg, messageArray);
     }
 
     /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
     async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string) {
-        this.lastCtx = ctx;
-        const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
-        this.pendingQueue.push({
-            ctx,
-            msg,
-            content,
-            userId: ctx.player!.userId,
-            messageId: getRecordMessageId(ctx, msg),
-            kind,
-            systemReason,
-            epId: ctx.endPoint.userId,
-            isPrivate: ctx.isPrivate,
-        });
+        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason);
     }
 
     /** 取出并清空挂起队列 */
     drainPending(): PendingMessage[] {
-        const pending = this.pendingQueue;
-        this.pendingQueue = [];
-        return pending;
+        return drainPendingImpl(this);
     }
 
     /** 把挂起队列全部写入上下文（此时上一轮工具回调已入库，位置合法）并保存；返回是否存在触发类消息 */
     async flushPending(): Promise<boolean> {
-        const pending = this.drainPending();
-        if (pending.length === 0) return false;
-        let hasTrigger = false;
-        for (const p of pending) {
-            if (p.kind === 'trigger') hasTrigger = true;
-            await this.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
-            if (p.systemReason) await this.context.addSystemUserMessage(p.systemReason, '触发原因提示');
-        }
-        this.save();
-        this.clearPending();
-        return hasTrigger;
+        return flushPendingImpl(this);
     }
 
-    /**
-     * 把后台完成通知队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数。
-     * 两类来源分开口径：媒体生成任务用 `[system:生成任务]`，子代理结算用 `[system:子代理]`
-     * 并附 `raw: subagent-notice`（供生命周期清扫识别）。
-     */
+    /** 把后台完成通知队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数。 */
     async flushNotices(): Promise<number> {
-        const queue = this.noticeQueue;
-        if (queue.length === 0) return 0;
-        this.noticeQueue = [];
-        for (const n of queue) {
-            if (n.kind === 'media') {
-                await this.context.addSystemUserMessage(n.text, '生成任务');
-                // 真正呈现给 AI 后才回置 notified：这是"结果已送达、不再需要任何补发"的唯一时机。
-                // 放在入队时置位会谎报成功，让重载补发与轮末补触发两条兜底同时失效（原实现的永久等待）。
-                if (n.taskId) {
-                    try {
-                        MediaTaskManager.markNotifiedByNotice(this.sessionId, n.taskId);
-                    } catch (e) {
-                        log.warning(`媒体任务 #${n.taskId} 回置 notified 失败：${e instanceof Error ? e.message : String(e)}`);
-                    }
-                }
-                continue;
-            }
-            const tag = n.from && n.from !== '' ? `子代理 ${n.from} ` : '子代理 ';
-            // raw 标记：子代理生命周期绑定（父上下文淘汰该 notice 时清扫对应记录）
-            await this.context.addSystemUserMessage(tag + n.text, '子代理', {
-                raw: { kind: 'subagent-notice', childId: n.from || '' },
-            });
-        }
-        return queue.length;
+        return flushNoticesImpl(this);
     }
 
     async reply(ctx: seal.MsgContext, msg: seal.Message, contextArray: string[], replyArray: string[], _images: Image[], options: { withSegmentDelay?: boolean } = {}, reasoningContent?: string) {
-        // headless（子代理）：不向聊天发送，仅把回复写入上下文与 transcript
-        if (this.headless) {
-            for (let i = 0; i < contextArray.length; i++) {
-                const content = contextArray[i];
-                const reply = replyArray[i];
-                await this.context.addAssistantMessage(content, `sub:${this.headlessTranscript.length}`, reasoningContent);
-                if (reply !== undefined && reply.trim() !== '') this.headlessTranscript.push(reply);
-            }
-            return;
-        }
-        const { withSegmentDelay = false } = options;
-        const { SEGMENT_DELAY_ENABLED, SEGMENT_DELAY_MS, SEGMENT_IMAGE_EXTRA_DELAY_MS } = Config.reply;
-
-        for (let i = 0; i < contextArray.length; i++) {
-            const content = contextArray[i];
-            const reply = replyArray[i];
-
-            // 分段发送延时（流式/非流式共用）：从第二条起，发送前等待配置的毫秒数，防止乱序
-            if (withSegmentDelay && SEGMENT_DELAY_ENABLED && i > 0) {
-                let delayMs = Math.max(0, SEGMENT_DELAY_MS);
-                if (/\[CQ:image(?:,[^\]]*)?\]/.test(reply)) {
-                    delayMs += Math.max(0, SEGMENT_IMAGE_EXTRA_DELAY_MS);
-                }
-                if (delayMs > 0) {
-                    await new Promise(resolve => setTimeout(resolve, delayMs));
-                }
-            }
-
-            const msgId = await replyToSender(ctx, msg, this, reply);
-            await this.context.addAssistantMessage(content, msgId, reasoningContent);
-        }
-        // 回复与助手消息属于"必须落盘"的关键变更（保存节流只作用于高频入库路径）
-        this.save();
-
+        await deliverReply(this, ctx, msg, contextArray, replyArray, _images, options, reasoningContent);
     }
 
     /**

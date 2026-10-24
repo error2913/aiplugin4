@@ -6,7 +6,7 @@
 import {
     getEntryBySession, listEntries, publishCurrentSession, removeByFilters,
 } from "../../pub/registry";
-import { aliasToCmd } from "../../utils/utils";
+import { aliasToCmd } from "../../utils/alias";
 import { M } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

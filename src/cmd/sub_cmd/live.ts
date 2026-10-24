@@ -2,8 +2,8 @@
 import Agent from "../../agent/agent";
 import { Session } from "../../session/session";
 import { TimerManager } from "../../timer";
+import { aliasToCmd } from "../../utils/alias";
 import { requestLimiter } from "../../utils/concurrency";
-import { aliasToCmd } from "../../utils/utils";
 import { M, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

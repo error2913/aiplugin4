@@ -2,14 +2,30 @@
 // 非核心工具不再全量注入函数 schema；AI 先搜索工具获得参数说明，再通过 call_tool 执行，
 // 大幅降低每轮请求中工具定义占用的 token。工具按工具组分组（内置分类/MCP 服务器/技能/知识库），
 // 且只对当前平台可用（platform 白名单）的工具可见/可调用。
-import Config from "../../../config/config";
-import Logger from "../../../logger";
 import { Session } from "../../../session/session";
 import { matchesPlatform, platformOf } from "../../../utils/target_id";
-import { StopError, withTimeout } from "../../../utils/utils";
+import { executeTool, type ToolFailure } from "../../executor";
 import { getConfiguredMCPServers } from "../../mcp";
-import Tool, { toolMap } from "../../tool";
+import { getTool, toolMap } from "../../registry";
+import Tool from "../../tool";
 import { ToolInfo } from "../../types";
+
+/** call_tool 路径的错误文案（与改造前逐字一致） */
+function callToolErrorText(toolName: string, failure?: ToolFailure): string {
+    switch (failure?.code) {
+        case 'not_found': return `工具 ${toolName} 不存在，可先调用 search_tools 查看可用工具`;
+        case 'not_enabled': return `工具 ${toolName} 未开启，无法调用`;
+        case 'platform': {
+            const tool = getTool(toolName);
+            return `工具 ${toolName} 在当前平台不可用（来源 ${Tool.groupLabel(tool?.group)} 的平台限制）`;
+        }
+        case 'session_type': return `工具 ${toolName} 不适用于当前会话类型`;
+        case 'bad_args': return `call_tool 参数解析失败: ${failure.message}`;
+        case 'missing_required': return `调用工具 ${toolName} 缺少必需参数 ${failure.param}`;
+        case 'invalid_arg': return `调用工具 ${toolName} 参数错误: ${failure.message}`;
+        default: return `工具 ${toolName} 执行失败: ${failure?.message ?? '未知错误'}`;
+    }
+}
 
 const MAX_SEARCH_RESULTS = 8; // search_tools 单次返回工具数上限
 const MCP_PAGE_SIZE_LIMIT = 100;
@@ -255,56 +271,15 @@ export function registerDispatchTools() {
         const { name, arguments: rawArgs } = args || {};
         const toolName = String(name || '').trim();
         if (!toolName) return 'call_tool 缺少工具名 name';
-        if (!Object.prototype.hasOwnProperty.call(toolMap, toolName)) {
-            return `工具 ${toolName} 不存在，可先调用 search_tools 查看可用工具`;
-        }
-        if (!session.toolState?.[toolName]) {
-            return `工具 ${toolName} 未开启，无法调用`;
-        }
-        const tool = toolMap[toolName];
-        // 平台守卫：绕过发现层直接调用平台外工具时拒绝
-        if (!Tool.isAllowedPlatform(tool, platformOf(ctx))) {
-            return `工具 ${toolName} 在当前平台不可用（来源 ${Tool.groupLabel(tool.group)} 的平台限制）`;
-        }
 
-        let toolArgs = rawArgs || {};
-        // 兼容提示词工程模式下 arguments 以 JSON 字符串传入
-        if (typeof toolArgs === 'string') {
-            try {
-                toolArgs = JSON.parse(toolArgs);
-            } catch (e) {
-                return `call_tool 参数解析失败: ${e instanceof Error ? e.message : String(e)}`;
-            }
-        }
+        const execution = await executeTool(toolName, ctx, msg, session, { source: 'call_tool', args: rawArgs ?? {} });
+        if (!execution.ok) return callToolErrorText(toolName, execution.failure);
 
-        if (tool.sessionType !== "any" && tool.sessionType !== session.sessionType) {
-            return `工具 ${toolName} 不适用于当前会话类型`;
+        const content = execution.content ?? '';
+        if (execution.contentParts && execution.contentParts.length > 0) {
+            return { text: `工具 ${toolName} 返回：\n${content}`, contentParts: execution.contentParts };
         }
-        for (const key of (tool.toolInfo.function.parameters.required || [])) {
-            if (!Object.prototype.hasOwnProperty.call(toolArgs, key)) {
-                return `调用工具 ${toolName} 缺少必需参数 ${key}`;
-            }
-        }
-        const validateError = Tool.validateArgs(tool, toolArgs);
-        if (validateError) {
-            return `调用工具 ${toolName} 参数错误: ${validateError}`;
-        }
-
-        const time = Date.now();
-        try {
-            const solved = await withTimeout(() => tool.solve(ctx, msg, session, toolArgs), Config.base.TIMEOUT, { stopEvent: session.stopEvent });
-            Logger.info(`[call_tool] ${toolName} 执行耗时 ${Date.now() - time}ms${tool.sensitive ? ' [敏感]' : ''}`);
-            const content = typeof solved === 'string' ? solved : solved.text;
-            if (typeof solved !== 'string' && solved.contentParts && solved.contentParts.length > 0) {
-                return { text: `工具 ${toolName} 返回：\n${content}`, contentParts: solved.contentParts };
-            }
-            return `工具 ${toolName} 返回：\n${content}`;
-        } catch (e) {
-            // stop 中断工具执行：向上抛出让工具链立即中止
-            if (e instanceof StopError) throw e;
-            Logger.error(`[call_tool] ${toolName} 执行失败: ${e instanceof Error ? e.message : String(e)}`);
-            return `工具 ${toolName} 执行失败: ${e instanceof Error ? e.message : String(e)}`;
-        }
+        return `工具 ${toolName} 返回：\n${content}`;
     };
 }
 

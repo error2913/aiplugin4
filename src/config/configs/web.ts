@@ -10,7 +10,7 @@
 import Logger from '../../logger';
 import { normalizeWebDefaults, resolveWebConfig } from '../../web/schema';
 import { WebConfig, WebDefaults } from '../../web/types';
-import { ext } from '../config';
+import { ext } from '../ext';
 
 import { GENERATOR_CONFIG_HINT } from './generator_hint';
 

@@ -1,6 +1,8 @@
 // 子代理机制层单元测试（DSH 对齐子代理，行为见 docs/03）。
 // 由 scripts/test-unit.cjs 打包运行；不依赖 seal/Config。
 import assert from 'node:assert/strict';
+
+import './test-host';
 import {
     ChildRecord,
     MemoryKv,

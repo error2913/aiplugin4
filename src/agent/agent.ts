@@ -1,6 +1,8 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
-import Config, { ext } from "../config/config";
-import { savePurposeModelOverrides } from "../config/configs/model";
+import { savePurposeModelOverrides } from "../config/apply/model";
+import Config from "../config/config";
+import { getHost } from "../core/host";
+import { setAgentResolver } from "../core/ports/agent_registry";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
 import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL, parseMaxContextTokens } from "../model/api_error";
@@ -16,10 +18,11 @@ import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
 import { buildSystemMessage, collectImageUrls, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { revive, TypeDescriptor } from "../utils/revive";
 import { getSessionCtxAndMsg } from "../utils/seal";
 import { checkRepeat, handleReply } from "../utils/string";
-import { revive, StopError, TypeDescriptor } from "../utils/utils";
-import { resetStopEvent } from "../utils/utils";
+import { StopError } from "../utils/timeout";
+import { resetStopEvent } from "../utils/timeout";
 
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -659,7 +662,7 @@ export default class Agent {
         if (!Object.prototype.hasOwnProperty.call(this.agentMap, name)) {
             let agent = new Agent();
             try {
-                const data = JSON.parse(ext.storageGet(`agent_${name}`) || '{}');
+                const data = JSON.parse(getHost().storage.get(`agent_${name}`) || '{}');
                 agent = revive(Agent, data);
             } catch (error) {
                 log.exception('加载智能体' + name, error);
@@ -672,7 +675,7 @@ export default class Agent {
     }
 
     static save(agent: Agent) {
-        ext.storageSet(`agent_${agent.name}`, JSON.stringify(agent));
+        getHost().storage.set(`agent_${agent.name}`, JSON.stringify(agent));
     }
 
     /** 枚举全部已加载的智能体实例（供 .ai live all 汇总全局活跃会话） */
@@ -681,4 +684,8 @@ export default class Agent {
     }
 
 }
+
+// 把 Agent 解析能力注册到 core/ports/agent_registry：context/session/memory 只依赖该端口，
+// 端口再把名字委派回 Agent.get（懒加载语义与既有测试桩都保持不变）。
+setAgentResolver((name: string) => Agent.get(name));
 

@@ -1,7 +1,7 @@
 // 群档案：存储与读取
-import { ext } from "../config/config";
+import { getHost } from "../core/host";
 import Logger from "../logger";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { revive, TypeDescriptor } from "../utils/revive";
 export default class Group {
     static validKeysMap: { [key in keyof Group]?: TypeDescriptor<Group[key]> } = {
         groupId: 'string',
@@ -35,7 +35,7 @@ export default class Group {
         if (!Object.prototype.hasOwnProperty.call(this.groupMap, groupId)) {
             let group = new Group();
             try {
-                const data = JSON.parse(ext.storageGet(`group_${groupId}`) || '{}');
+                const data = JSON.parse(getHost().storage.get(`group_${groupId}`) || '{}');
                 group = revive(Group, data);
             } catch (error) {
                 Logger.error(`加载群${groupId}失败: ${error}`);
@@ -46,6 +46,6 @@ export default class Group {
         return this.groupMap[groupId];
     }
     static save(group: Group) {
-        ext.storageSet(`group_${group.groupId}`, JSON.stringify(group));
+        getHost().storage.set(`group_${group.groupId}`, JSON.stringify(group));
     }
 }

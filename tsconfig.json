@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "incremental": true,
     "target": "es2017",
     "outDir": "build/main",
     "rootDir": "src",
@@ -19,7 +18,7 @@
     // "strictNullChecks": true /* Enable strict null checks. */,
     // "strictFunctionTypes": true /* Enable strict checking of function types. */,
     // "strictPropertyInitialization": true /* Enable strict checking of property initialization in classes. */,
-    // "noImplicitThis": true /* Raise error on 'this' expressions with an implied 'any' type. */,
+    "noImplicitThis": true /* Raise error on 'this' expressions with an implied 'any' type. */,
     // "alwaysStrict": true /* Parse in strict mode and emit "use strict" for each source file. */,
 
     /* Additional Checks */
@@ -40,9 +39,6 @@
 
     "lib": ["es2017", "DOM"],
     "typeRoots": [
-      "../UnityProject/Assets/Vendors/Puerts/Typing",
-      "../UnityProject/Assets/Gen/Typing",
-      // "../Project/Assets/Resources/FairyGUI-dist/main",
       "./node_modules/@types",
       "types"
     ]

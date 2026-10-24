@@ -5,7 +5,8 @@ import Model from "../model/model";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
-import Tool, { EXTERNAL_CATEGORY, toolMap } from "../tool/tool";
+import { toolMap } from "../tool/registry";
+import Tool, { EXTERNAL_CATEGORY } from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 
 import Agent from "./agent";

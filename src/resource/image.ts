@@ -1,20 +1,24 @@
 // 图片资源：URL/base64/本地路径图片，图片识别与存储
-import { ext } from "../config/config";
 import Config from "../config/config";
+import { getHost } from "../core/host";
 import { logger } from "../logger";
-import Model from "../model/model";
 import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
-import { buildImageTruncateMarker } from "../utils/raw_marker";
-import { getSessionId } from "../utils/seal";
-import { decodeUrlHtmlEntities, MessageSegment } from "../utils/string";
+import { generateId } from "../utils/id";
+import { resolveLocalPath } from "../utils/path";
+import { revive, TypeDescriptor } from "../utils/revive";
 import { getPlatform } from "../utils/target_id";
-import { generateId, resolveLocalPath, revive, TypeDescriptor } from "../utils/utils";
+import { decodeUrlHtmlEntities } from "../utils/url";
 
+import { markModelDownloadFailures, markUrlBrokenByUrls } from "./image_health";
+import type { ImageHealthHost } from "./image_health";
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
 import { ImageIndex } from "./image_index";
 import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
+import { imageToText } from "./image_text";
+import { base64UrlFor, checkImageUrl, cqCodeFor, getSendFile, srcFor } from "./image_transfer";
+import { isPermanentUrlError, isTemporaryUrl } from "./image_url";
 
 const log = logger.withTag('image');
 
@@ -26,15 +30,6 @@ const IMAGE_BASE64_RETRY_MAX = 3;
 
 // Image.get 里刷新「最后使用时间」的最小间隔：避免每次渲染都写 storage
 const IMAGE_LAST_USED_TOUCH_TTL = 60 * 60 * 1000;
-
-// QQ 图床临时直链的域名：带 rkey 且到手后很快失效，服务端下载方（插件后端/模型）常常拿不到
-const TEMPORARY_IMAGE_URL_HOSTS = [
-    'multimedia.nt.qq.com.cn',
-    'multimedia.nt.qq.com',
-    'gchat.qpic.cn',
-    'c2cpicdw.qpic.cn',
-    'c2cpic.qpic.cn',
-];
 
 // 进行中的 URL→base64 请求，按 Image 实例去重（同一实例并发调用共享同一次请求）
 const pendingUrlToBase64 = new WeakMap<Image, Promise<void>>();
@@ -153,71 +148,27 @@ export default class Image {
      * 回环地址不要外发：协议端常在容器/另一台机器，127.0.0.1 指向它自己。
      */
     async getSendFile(): Promise<string> {
-        if (this.base64) return seal.base64ToImage(this.base64);
-        if (this.hosted && ImageHost.externalEnabled) return this.remoteUrl;
-        if (this.hosted) {
-            const data = await ImageHost.fetchBase64(this.hostedId);
-            if (data && data.base64) return seal.base64ToImage(data.base64);
-            log.warning(`图片${this.imageId}从图床取字节失败，无法生成本地文件`
-                + (ImageHost.lastError ? `：${ImageHost.lastError}` : '')
-                + '；请检查图床地址是否可从插件访问');
-            // 兜底：原始 http(s) 链接（可能已过期，但总比回环地址强）
-            if (this.url && /^https?:\/\//i.test(this.url)) return this.url;
-            return '';
-        }
-        return this.url || this.path;
+        return getSendFile(this);
     }
 
     /** 同步版 CQ（只用于本地图展示；外发请用 getSendFile()，hosted 需要异步取字节/判可达性） */
     get CQCode(): string {
-        const file = this.type === 'base64'
-            ? seal.base64ToImage(this.base64)
-            : (this.hosted
-                ? (ImageHost.externalEnabled ? this.remoteUrl : '')
-                : (this.url || this.path));
-        if (!file) return '';
-        return `[CQ:image,file=${file}]`;
+        return cqCodeFor(this);
     }
 
     get base64Url(): string {
-        let format = this.format;
-        if (!format || format === "unknown") format = 'png';
-        return `data:image/${format};base64,${this.base64}`
+        return base64UrlFor(this);
     }
 
     /**
      * 获取图片的URL，若为base64则返回base64Url
      */
     get src(): string {
-        return this.type === 'base64' ? this.base64Url : this.remoteUrl;
+        return srcFor(this);
     }
 
     async checkImageUrl(): Promise<boolean> {
-        if (this.type !== 'url') return true;
-        let isValid = false;
-        try {
-            const response = await fetch(this.url, { method: 'GET' });
-
-            if (response.ok) {
-                const contentType = response.headers.get('Content-Type');
-                if (contentType && contentType.startsWith('image')) {
-                    log.info('URL有效且未过期');
-                    isValid = true;
-                } else {
-                    log.warning(`URL有效但未返回图片 Content-Type: ${contentType}`);
-                }
-            } else {
-                if (response.status === 500) {
-                    log.warning(`URL不知道有没有效 状态码: ${response.status}`);
-                    isValid = true;
-                } else {
-                    log.warning(`URL无效或过期 状态码: ${response.status}`);
-                }
-            }
-        } catch (error) {
-            log.exception('在checkImageUrl中请求出错', error);
-        }
-        return isValid;
+        return checkImageUrl(this);
     }
 
     /** 转换失败是否应跳过请求：URL 已确认不可用，或 1 小时冷却期内，或连续失败达上限后永久阻断 */
@@ -228,17 +179,9 @@ export default class Image {
         return Date.now() - this.base64FailedAt < IMAGE_BASE64_RETRY_TTL;
     }
 
-    /** QQ 图床等带 rkey 的临时直链：到手后很快失效，模型侧往往也下载不到，不宜作为 image_url 交给模型 */
+    /** QQ 图床等带 rkey 的临时直链（判定见 ./image_url） */
     static isTemporaryUrl(url: string): boolean {
-        if (!url) return false;
-        if (/[?&]rkey=/i.test(url)) return true;
-        let host = '';
-        try {
-            host = new URL(url).hostname.toLowerCase();
-        } catch (_e) {
-            return false;
-        }
-        return TEMPORARY_IMAGE_URL_HOSTS.some(h => host === h || host.endsWith(`.${h}`));
+        return isTemporaryUrl(url);
     }
 
     /**
@@ -253,90 +196,27 @@ export default class Image {
         return this.isBase64RetryBlocked() && Image.isTemporaryUrl(this.url);
     }
 
-    /** 模型侧报告无法下载这些 URL 时调用：只处理非图床 URL（图床走 markModelDownloadFailures 探测） */
+    /** 模型侧报告无法下载这些 URL 时调用（处置实现见 ./image_health）：只处理非图床 URL */
     static markUrlBrokenByUrls(urls: string[]): number {
-        const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
-        if (targets.size === 0) return 0;
-        let marked = 0;
-        for (const img of Object.values(this.imageMap)) {
-            if (!img || img.base64 || img.urlBroken) continue;
-            if (img.hostedId) continue;   // 图床图不能凭模型报错就永久标坏
-            const candidate = img.remoteUrl || img.url;
-            if (!candidate || !targets.has(candidate)) continue;
-            img.urlBroken = true;
-            this.save(img);
-            marked++;
-        }
-        return marked;
+        return markUrlBrokenByUrls(this.healthHost(), urls);
+    }
+
+    /** 健康处置所需的最小视图（imageMap/hostedRefs + save / 本轮内联偏好回调） */
+    private static healthHost(): ImageHealthHost {
+        return {
+            imageMap: this.imageMap,
+            hostedRefs: this.hostedRefs,
+            save: (img) => this.save(img),
+            preferInlineForModel: (imageId) => this.preferInlineForModel(imageId),
+        };
     }
 
     /**
-     * 模型报“无法下载图片”时：图床 URL 先探测 404/可达性。
-     * - 图床返回 200：图片存在，标记本轮改用内联 b64（不标坏），返回 retryInline=true；
-     * - 404：真正已删，标 urlBroken；
-     * - 网络错误/不可达：不标坏，留待下轮。
-     * 非图床 URL 仍按旧规则标坏。
+     * 模型报“无法下载图片”时处置（实现见 ./image_health）：图床先探测 404/可达性，非图床直接标坏。
+     * 图床 200 → 本轮改内联 b64（retryInline）；404 → 标坏并清 hosted 字段；网络错误 → 留待下轮。
      */
     static async markModelDownloadFailures(urls: string[]): Promise<{ marked: number; retryInline: boolean }> {
-        const targets = new Set((urls || []).filter(u => u && !u.startsWith('data:')));
-        if (targets.size === 0) return { marked: 0, retryInline: false };
-        let marked = 0;
-        let retryInline = false;
-        const hostedImages: Image[] = [];
-        for (const img of Object.values(this.imageMap)) {
-            if (!img || img.base64 || img.urlBroken) continue;
-            const candidate = img.remoteUrl || img.url;
-            if (!candidate || !targets.has(candidate)) continue;
-            if (img.hostedId) hostedImages.push(img);
-            else {
-                img.urlBroken = true;
-                this.save(img);
-                marked++;
-            }
-        }
-        for (const entry of this.hostedRefs.values()) {
-            const img = entry.img;
-            if (!img || img.base64 || img.urlBroken) continue;
-            const candidate = img.remoteUrl || img.url;
-            if (candidate && targets.has(candidate)) hostedImages.push(img);
-        }
-        for (const img of hostedImages) {
-            if (!img.hostedId) continue;
-            const data = await ImageHost.fetchBase64(img.hostedId);
-            if (data) {
-                // 图片还在：本轮改用内联 b64 重发，不标 urlBroken（之后修好 publicUrl 仍可恢复 URL）
-                this.preferInlineForModel(img.imageId);
-                img.base64 = data.base64;
-                img.format = data.format || img.format || 'png';
-                img.urlBroken = false;
-                retryInline = true;
-            } else if (ImageHost.lastStatus === 404) {
-                // 图床已彻底删除：与 GC 对账一致，清掉 hosted 字段，发送时不再指向死链
-                img.urlBroken = true;
-                img.hostedId = '';
-                img.hostedUrl = '';
-                img.hostedAt = 0;
-                img.base64 = '';
-                this.save(img);
-                marked++;
-            }
-            // 其它错误（网络/5xx/超时）：不标坏，下一轮再试
-        }
-        return { marked, retryInline };
-    }
-
-    /**
-     * 转换失败是否属于「该 URL 已不可用」的永久性失败：后端会把上游下载被 4xx 拒绝的原因写进错误正文
-     * （如 "400 Client Error: Bad Request for url: ..."、QQ 的 download url has expired），重试没有意义；
-     * 429 限速与 5xx 仍按可重试处理。
-     */
-    private isPermanentUrlError(text: string): boolean {
-        if (/url has expired|retcode["'\s:]*-\s*5503007/i.test(text)) return true;
-        const m = text.match(/\b(4\d{2})\s+Client Error\b/i);
-        if (m && m[1] !== '429') return true;
-        // 图床等后端返回结构化错误：{"error":"fetch_failed","upstream_status":400,...}
-        const status = text.match(/upstream_status["'\s:]+(4\d{2})/i);
-        return !!status && status[1] !== '429';
+        return markModelDownloadFailures(this.healthHost(), urls);
     }
 
     /**
@@ -429,7 +309,7 @@ export default class Image {
     /** 统一处理转换失败：永久性失败直接放弃，其余计数 + 冷却 */
     private markBase64Failure(error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
-        const permanent = this.isPermanentUrlError(message);
+        const permanent = isPermanentUrlError(message);
         // 永久性失败直接按「连续失败达上限」处理：不再按冷却期重试，且不再作为 image_url 交给模型
         this.base64FailedCount = permanent ? IMAGE_BASE64_RETRY_MAX : this.base64FailedCount + 1;
         this.base64Failed = true;
@@ -551,72 +431,17 @@ export default class Image {
     }
 
     async imageToText(prompt = '') {
-        const { URL_TO_BASE64 } = Config.image;
-        const defaultPrompt = IMAGE_PROMPT_TEMPLATE({});
-
-        const model = Model.getMultimodalModel('image-understanding');
-        if (!model) {
-            log.error(`未找到支持image-understanding的模型`);
-            return;
-        }
-
-        // URL 已确认不可用（QQ 直链过期等）：识图模型同样下载不到，不再白花一次请求
-        if (this.urlBroken) {
-            log.warning(`图片${this.imageId}的URL已确认不可用，跳过识图`);
-            Image.save(this);
-            return;
-        }
-
-        // 图床/头像：交给 getModelSrc 统一选择 URL 或 b64（模型可达性判断）
-        // 非图床 URL：保持旧行为（“总是”先转 b64；配了图床时先入库再取 b64）
-        let src = '';
-        if (this.hosted || this.isAvatarImage) {
-            src = await this.getModelSrc(model);
-        } else {
-            if (URL_TO_BASE64 == '总是' && this.type === 'url' && !this.isBase64RetryBlocked()) await this.urlToBase64();
-            if (ImageHost.enabled && this.type === 'url' && !this.base64) await this.urlToBase64();
-            // 取不到 b64 时保留旧行为：把原始/稳定 URL 交给识图模型（图床失败不阻断识图）
-            src = this.base64 ? this.base64Url : this.src;
-        }
-        if (!src) {
-            log.warning(`图片${this.imageId}取不到可用的识图地址（图床不可达/图片已删），跳过识图`);
-            Image.save(this);
-            return;
-        }
-
-        this.description = this.truncateIfLong(await model.callITT(src, prompt ? prompt : defaultPrompt));
-
-        // 图床：首次给了 URL 但模型没识别出来 → 用 b64 再试一次（不依赖“自动”配置；宁可多一次本地请求）
-        if (!this.description && this.hosted && this.hostedId) {
-            const data = await ImageHost.fetchBase64(this.hostedId);
-            if (data) {
-                this.base64 = data.base64;
-                this.format = data.format || this.format || 'png';
-                this.description = this.truncateIfLong(await model.callITT(this.base64Url, prompt ? prompt : defaultPrompt));
-            }
-        }
-
-        if (!this.description && URL_TO_BASE64 === '自动' && this.type === 'url' && !this.isBase64RetryBlocked()) {
-            log.info(`图片${this.imageId}第一次识别失败，自动尝试使用转换为base64`);
-            await this.urlToBase64();
-            if (this.base64) {
-                this.description = this.truncateIfLong(await model.callITT(this.base64Url, prompt ? prompt : defaultPrompt));
-            }
-        }
-
-        if (!this.description) log.error(`图片${this.imageId}识别失败`);
-        else Image.save(this); // 持久化 description/rawDescription（含截断时保留的完整识别原文）
+        return imageToText(this, prompt);
     }
 
-    /** 图片转文字结果超长时不再交给压缩智能体，改为只展示开头 N 字并把完整原文存入 rawDescription；未超阈值时展示即原文 */
-    private truncateIfLong(text: string): string {
-        const { IMAGE_TEXT_TRUNCATE_CHARS } = Config.image;
-        if (!text) return text;
-        if (IMAGE_TEXT_TRUNCATE_CHARS > 0 && text.length > IMAGE_TEXT_TRUNCATE_CHARS) {
-            this.rawDescription = text;
-            return text.slice(0, IMAGE_TEXT_TRUNCATE_CHARS);
-        }
-        return text;
+    /** 默认识图提示词（识别叶子回调；prompt 模板渲染留在 Image，避免叶子跨层依赖 prompt） */
+    defaultPrompt(): string {
+        return IMAGE_PROMPT_TEMPLATE({});
+    }
+
+    /** 持久化当前图片字段（识别叶子回调，等价 Image.save(this)） */
+    saveSelf(): void {
+        Image.save(this);
     }
 
 
@@ -765,7 +590,7 @@ export default class Image {
         if (!Object.prototype.hasOwnProperty.call(this.imageMap, imageId)) {
             let img = new Image();
             try {
-                const text = ext.storageGet(`image_${imageId}`);
+                const text = getHost().storage.get(`image_${imageId}`);
                 if (!text) return null;
                 const data = JSON.parse(text || '{}');
                 img = revive(Image, data);
@@ -796,10 +621,10 @@ export default class Image {
         }
         // 有图床时不再持久化 base64（内存里可留一份给本轮请求用）：字节在图床，模型按需从 b64 出口取
         if (ImageHost.enabled && img.hostedId) {
-            ext.storageSet(`image_${img.imageId}`, JSON.stringify({ ...img, base64: '' }));
+            getHost().storage.set(`image_${img.imageId}`, JSON.stringify({ ...img, base64: '' }));
             return;
         }
-        ext.storageSet(`image_${img.imageId}`, JSON.stringify(img));
+        getHost().storage.set(`image_${img.imageId}`, JSON.stringify(img));
     }
 
     static getUserAvatar(uid: string): Image {
@@ -835,62 +660,5 @@ ${img.CQCode}`;
             }).join('\n') + `\n当前页码:${p}/${Math.ceil(images.length / 5)}`;
     }
 
-    /**
-     * 提取并替换CQ码中的图片 wip
-     * @param ctx 
-     * @param message 
-     * @returns 
-     */
-    static async handleImageMessageSegment(ctx: seal.MsgContext, seg: MessageSegment, messageId = ''): Promise<{ content: string, images: Image[] }> {
-        const { RECEIVE_IMAGE } = Config.received;
-        if (!RECEIVE_IMAGE || seg.type !== 'image') return { content: '', images: [] };
-
-        let content = '';
-        const images: Image[] = [];
-        try {
-            const rawFile = seg.data.url || seg.data.file || '';
-            // Milky 原生 image 的 file 是 FileElement 对象，OB11 通常是字符串；
-            // 统一取 URL/本地文件字段，避免把对象写入 Image.url 后在 type getter 中报错。
-            const file = typeof rawFile === 'object' && rawFile !== null
-                ? ((rawFile as any).url || (rawFile as any).file || '')
-                : String(rawFile);
-            if (!file) return { content: '', images: [] };
-
-            const sid = getSessionId(ctx);
-            const source: ImageSource = {
-                platform: getPlatform(sid),
-                group_id: ctx.group ? String(ctx.group.groupId) : '',
-                user_id: ctx.player ? String(ctx.player.userId) : '',
-                message_id: messageId,
-                at: Date.now(),
-            };
-            for (const key of Object.keys(source) as Array<keyof ImageSource>) {
-                if (!source[key]) delete source[key];   // 空字段不占地方
-            }
-            const image = this.createUrlImage(sid, file, undefined, source);
-            // 保留接收到的原始段字段（file/file_unique/md5/subType/url 等），供 resolve_special_id 查询
-            try {
-                image.raw = JSON.stringify(seg.data || {});
-            } catch (_e) {
-                image.raw = '';
-            }
-            const { IMAGE_CONDITION } = Config.image;
-            const fmtCondition = parseInt(seal.format(ctx, `{${IMAGE_CONDITION}}`));
-            if (fmtCondition === 1) await image.imageToText();
-            Image.save(image); // 持久化原始字段
-
-            content += image.description ? `[img:${image.imageId}:${image.description}]` : `[img:${image.imageId}]`;
-            // 展示描述被截断时（rawDescription 存在且长于展示），在 [img] 标签外追加指针标记，
-            // 让纯文本/多模态模型都能看到 image_id 并可 read_raw kind=image 翻完整识别原文
-            if (image.rawDescription && image.description && image.rawDescription.length > image.description.length) {
-                content += buildImageTruncateMarker(image.rawDescription.length, image.description.length, image.imageId);
-            }
-            images.push(image);
-        } catch (error) {
-            log.exception('在handleImageMessage中处理图片时出错', error);
-        }
-
-        return { content, images };
-    }
 
 }

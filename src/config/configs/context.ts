@@ -1,6 +1,6 @@
 // 上下文配置：独立「上下文」分组
 import { logger } from "../../logger";
-import { ext } from "../config";
+import { ext } from "../ext";
 
 export default class ContextConfig {
     static register() {

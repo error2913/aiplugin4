@@ -1,12 +1,13 @@
 // 会话记忆门面：只包装 Hindsight-like 新引擎，不再使用旧 MemoryService / MemoryItem。
-import Agent from "../agent/agent";
+import type Agent from "../agent/agent";
 import Config from "../config/config";
+import { getAgent } from "../core/ports/agent_registry";
 import { SUMMARY_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
+import { TypeDescriptor } from "../utils/revive";
 import { truncateText } from "../utils/string";
-import { TypeDescriptor } from "../utils/utils";
 
 import { bumpMemoryRevision } from "./revision";
 import { resolveBankId } from "./v2/bank_resolver";
@@ -53,7 +54,7 @@ export default class SessionMemoryService {
         this.persona = '无';
     }
 
-    get agent(): Agent { return Agent.get(this.agentName); }
+    get agent(): Agent { return getAgent(this.agentName); }
     get session(): Session { return this.agent.sessionService.getSession(this.sessionId); }
 
     private get bankId(): string {

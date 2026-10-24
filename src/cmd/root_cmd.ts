@@ -3,39 +3,9 @@ import { ext } from "../config/config";
 import { logger } from "../logger";
 import { Session } from "../session/session";
 import { getSession } from "../session/session_service";
-import { aliasToCmd } from "../utils/utils";
+import { aliasToCmd } from "../utils/alias";
 
-import { CmdPriv, CmdPrivInfo, defaultCmdPriv, PrivilegeManager, U } from "./privilege";
-import { registerCmdBalance } from "./sub_cmd/balance";
-import { registerCmdBlock } from "./sub_cmd/block";
-import { registerCmdCtx } from "./sub_cmd/ctx";
-import { registerCmdCtxn } from "./sub_cmd/ctxn";
-import { registerCmdCtxSet } from "./sub_cmd/ctxset";
-import { registerCmdForget } from "./sub_cmd/forget";
-import { registerCmdIgnore } from "./sub_cmd/ignore";
-import { registerCmdImage } from "./sub_cmd/image";
-import { registerCmdKb } from "./sub_cmd/kb";
-import { registerCmdLive } from "./sub_cmd/live";
-import { registerCmdMcp } from "./sub_cmd/mcp";
-import { registerCmdMedia } from "./sub_cmd/media";
-import { registerCmdMemory } from "./sub_cmd/memory";
-import { registerCmdModel } from "./sub_cmd/model";
-import { registerCmdOff } from "./sub_cmd/off";
-import { registerCmdOn } from "./sub_cmd/on";
-import { registerCmdPrivilege } from "./sub_cmd/privilege";
-import { registerCmdPrompt } from "./sub_cmd/prompt";
-import { registerCmdPub } from "./sub_cmd/pub";
-import { registerCmdRole } from "./sub_cmd/role";
-import { registerCmdSkill } from "./sub_cmd/skill";
-import { registerCmdStandby } from "./sub_cmd/standby";
-import { registerCmdStatus } from "./sub_cmd/status";
-import { registerCmdStop } from "./sub_cmd/stop";
-import { registerCmdSubAgent } from "./sub_cmd/subagent";
-import { registerCmdTimer } from "./sub_cmd/timer";
-import { registerCmdToken } from "./sub_cmd/token";
-import { registerCmdTool } from "./sub_cmd/tool";
-import { registerCmdTti } from "./sub_cmd/tti";
-import { registerCmdTts } from "./sub_cmd/tts";
+import { CmdPrivInfo, PrivilegeManager, U } from "./privilege";
 
 export interface SubCmdContext {
     ctx: seal.MsgContext;
@@ -68,48 +38,14 @@ export class SubCmd {
     }
 
     static map: { [key: string]: SubCmd } = {};
-    static register() {
-        registerCmdPrivilege();
-        registerCmdPrompt();
-        registerCmdPub();
-        registerCmdStatus();
-        registerCmdCtx();
-        registerCmdCtxSet();
-        registerCmdLive();
-        registerCmdCtxn();
-        registerCmdTimer();
-        registerCmdOn();
-        registerCmdStandby();
-        registerCmdOff();
-        registerCmdForget();
-        registerCmdRole();
-        registerCmdImage();
-        registerCmdMemory();
-        registerCmdTool();
-        registerCmdSkill();
-        registerCmdKb();
-        registerCmdMcp();
-        registerCmdIgnore();
-        registerCmdToken();
-        registerCmdStop();
-        registerCmdModel();
-        registerCmdBalance();
-        registerCmdBlock();
-        registerCmdSubAgent();
-        registerCmdTts();
-        registerCmdTti();
-        registerCmdMedia();
-
-        defaultCmdPriv.ai.args = Object.values(SubCmd.map).reduce((acc: CmdPriv, sc) => {
-            acc[sc.name] = sc.priv;
-            return acc;
-        }, {});
-    }
 }
 
+/**
+ * 注册根命令 .ai，并把命令对象写入 ext.cmdMap。
+ * 仅供 src/cmd/bootstrap.ts 的 registerAllCmds() 调用：它负责先注册全部子命令、
+ * 汇总 defaultCmdPriv.ai.args；单独调用本函数会得到空 help 与空的子命令权限表。
+ */
 export function registerCmd() {
-    SubCmd.register();
-
     const cmd = seal.ext.newCmdItemInfo();
     cmd.name = 'ai';
     cmd.help = `帮助:\n${Object.values(SubCmd.map).map((sc) => `【.ai ${sc.name}】${sc.desc}`).join('\n')}`;

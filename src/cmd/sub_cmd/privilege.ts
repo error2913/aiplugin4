@@ -1,7 +1,7 @@
 // .ai priv：会话/指令权限修改
 import { HELP_MAP } from "../../config/static_config";
 import { getSession } from "../../session/session_service";
-import { aliasToCmd } from "../../utils/utils";
+import { aliasToCmd } from "../../utils/alias";
 import { M, PrivilegeManager, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

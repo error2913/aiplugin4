@@ -23,6 +23,7 @@
  *   INV-6 水位单调不减，且 settledSeq <= rawSeq
  *   INV-7 任何操作不得抛异常
  */
+import "./test-host";
 import Config from "../src/config/config";
 import { ext } from "../src/config/config";
 import { Context, estimateContextMessagesTokens } from "../src/context/context";

@@ -6,7 +6,7 @@ import { callCoreBridgeCommand } from "../../../integration/core_bridge/ws_clien
 import Logger from "../../../logger";
 import { callOb11ApiDirect } from "../../../transport/ob11/dispatcher";
 import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
-import { withTimeout } from "../../../utils/utils";
+import { withTimeout } from "../../../utils/timeout";
 import { isAllowedCore, splitEntry, whitelistEntries } from "../../command_catalog";
 import { resolveCommandTarget } from "../../command_target";
 import Tool from "../../tool";

@@ -1,5 +1,18 @@
 // URL 工具：不依赖 seal / Config，供配置校验与运行时共用。
 
+/** 还原 URL 中 HTML 转义的 &（QQ 官方 bot 图片常见 &amp;）。只处理 http(s)，最多解 3 轮。 */
+export function decodeUrlHtmlEntities(url: string): string {
+    let text = String(url ?? '').trim();
+    if (!/^https?:\/\//i.test(text)) return text;
+    const re = /&(?:amp|#0*38|#x0*26);/gi;
+    for (let i = 0; i < 3; i++) {
+        const next = text.replace(re, '&');
+        if (next === text) break;
+        text = next;
+    }
+    return text;
+}
+
 /**
  * 是否回环地址（127.0.0.0/8、localhost、::1、0.0.0.0）。
  *

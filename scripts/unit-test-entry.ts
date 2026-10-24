@@ -2,7 +2,9 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 
-import Config, { ext } from "../src/config/config";
+import { installTestHost } from "./test-host";
+
+import Config from "../src/config/config";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
@@ -18,9 +20,14 @@ import { backendAuthHeaders, backendAuthHint, backendStatusHint } from "../src/u
 import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist, resetEventGuards } from "../src/event/notice";
 import { registerRawToolSet } from "../src/tool/tools/raw/init";
 import { registerImageTools } from "../src/tool/tools/image/init";
+import { registerAllTools } from "../src/tool/bootstrap";
+import { getRegexConfig } from "../src/config/regex";
+import { ext } from "../src/config/ext";
 import { resolveSendMessage } from "../src/transport/ob11/message_segments";
 import { resolveEndpointId } from "../src/pipeline";
 import { getSession, SessionService } from "../src/session/session_service";
+import { registerSubCommands, registerAllCmds } from "../src/cmd/bootstrap";
+import { setHost } from "../src/core/host";
 import { SubCmd } from "../src/cmd/root_cmd";
 import { defaultCmdPriv, U } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
@@ -62,11 +69,15 @@ import { getProbedContextWindow, rememberProbedContextWindow } from "../src/mode
 import Agent from "../src/agent/agent";
 import { streamService } from "../src/agent/stream";
 import Model from "../src/model/model";
-import Logger from "../src/logger";
+import Logger, { setLoggerConfigProvider } from "../src/logger";
 import { fetchModelList, ModelListResult } from "../src/model/list";
-import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/configs/model";
+import { resetModelConfigCacheForTest, setModelListDepsForTest } from "../src/config/apply/model";
+import { getAuxLlm, hasAuxLlm } from "../src/core/ports/aux_llm";
+import { hasConfigHook, registerConfigHook, runConfigHook } from "../src/config/hooks";
 import { isIgnoredConfig } from "../src/model/model";
 import { Session } from "../src/session/session";
+import { activeTimeSegmentIndex, computeSessionState, HOT_HOLD_MS } from "../src/session/rhythm";
+import { serializePendingQueue, serializeSession, shouldDeferCoalescedSave } from "../src/session/persistence";
 import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
@@ -76,9 +87,12 @@ import { registerTools } from "../src/tool/tools/init";
 import { registerCmdTool } from "../src/cmd/sub_cmd/tool";
 import { formatSkillSummaryBlock, getSkillSummariesBudgeted, registerSkills, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../src/tool/skills";
 import { registerDispatchTools } from "../src/tool/tools/core/tool_dispatch";
-import { createStopEvent, fireStopEvent, resetStopEvent, revive, StopError, normalizeMsgId, transformMsgId, transformMsgIdBack, withTimeout } from "../src/utils/utils";
+import { executeTool } from "../src/tool/executor";
+import { createStopEvent, fireStopEvent, resetStopEvent, StopError, withTimeout } from "../src/utils/timeout";
+import { revive } from "../src/utils/revive";
+import { normalizeMsgId, transformMsgId, transformMsgIdBack } from "../src/utils/message_id";
 import { registerResolveSpecialId } from "../src/tool/tools/ob11/tool_resolve_id";
-import { resetResourceConfigCacheForTest } from "../src/config/configs/resource";
+import { resetResourceConfigCacheForTest } from "../src/resource/local_paths";
 import { resetImageConfigCacheForTest } from "../src/config/configs/image";
 import { resetWebConfigCacheForTest } from "../src/config/configs/web";
 import { registerResourcePathTool } from "../src/tool/tools/resource/tool_resource_path";
@@ -1218,9 +1232,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(session.archiveSeq, 0, '失败时不应写入归档分片');
 
             // 并发归档在飞：返回 busy（调用方可稍后重试），而不是 failed
-            (session.context as any).archiving = true;
+            // 用真实并发模拟：第一次 summarize 挂起时再次调用，锁必须生效
+            let release: (ok: boolean) => void = () => undefined;
+            const gate = new Promise<boolean>((resolve) => { release = resolve; });
+            MemoryManager.summarizeChunkWithRetry = async () => gate;
+            const first = session.context.archiveByTokenIfNeeded();
             assert.equal(await session.context.archiveByTokenIfNeeded(), 'busy', '已有归档在飞应返回 busy');
-            (session.context as any).archiving = false;
+            release(false);
+            assert.equal(await first, 'failed', '挂起的首次归档失败时应如实返回 failed');
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
@@ -2815,6 +2834,52 @@ export const tests: Record<string, () => void | Promise<void>> = {
             if (timer) clearTimeout(timer);
             (ext as any).storageSet = origSet;
         }
+    },
+
+    /** 会话节奏纯函数：冷热状态机与活跃时段段号（从 session.ts 拆出的 rhythm 叶子） */
+    testSessionRhythmPureFunctions(): void {
+        const t0 = 1_000_000;
+        // 非待机恒 HOT；待机+在途=HOT 且 touch 刷新；只读查询不刷新
+        assert.equal(computeSessionState({ standby: false, busy: false, lastRelevantAt: t0, now: t0 + 10 * HOT_HOLD_MS }).state, 'HOT', '非待机恒 HOT');
+        const busy = computeSessionState({ standby: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 });
+        assert.equal(busy.state, 'HOT');
+        assert.equal(busy.lastRelevantAt, t0 + 12345, 'busy + touch 应刷新 lastRelevantAt');
+        const busyReadOnly = computeSessionState({ standby: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 }, false);
+        assert.equal(busyReadOnly.lastRelevantAt, t0, 'touch=false 时 busy 也不得刷新（只读查询无副作用）');
+        assert.equal(computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS - 1 }).state, 'HOT');
+        const cooling = computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS + 1 });
+        assert.equal(cooling.state, 'COOLING');
+        assert.equal(computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 - 5000 }).state, 'HOT', '时钟回拨 idle 取 0');
+        // 活跃时段：09:00-18:00 分 3 段 → 10:00 落在第 0 段，20:00 不在时段
+        const seg = { start: 9 * 60, end: 18 * 60, segs: 3 };
+        assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 10, 0)), 0);
+        assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 14, 0)), 1);
+        assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 20, 0)), -1);
+        assert.equal(activeTimeSegmentIndex({ start: 0, end: 0, segs: 0 }, new Date(2026, 0, 1, 10, 0)), -1, '未配置活跃时段返回 -1');
+    },
+
+    /** 会话持久化契约：运行时字段不落盘、挂起队列只留轻量字段、节流边界 */
+    testSessionPersistenceContract(): void {
+        const session = new Session();
+        session.sessionId = 'QQ:persist';
+        session.setting.standby = true;
+        session.running = true;
+        session.pendingQueue.push({ ctx: {} as any, msg: {} as any, content: '你好', userId: 'QQ:1', messageId: 'm1', kind: 'record', epId: 'ep1', isPrivate: false });
+        const raw = serializeSession(session);
+        const data = JSON.parse(raw);
+        assert.equal(data.setting.standby, true, '持久化字段应保留');
+        assert.equal(data.sessionId, 'QQ:persist');
+        for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
+            assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
+        }
+        const pending = JSON.parse(serializePendingQueue(session.pendingQueue));
+        assert.equal(pending.length, 1);
+        assert.equal(pending[0].content, '你好');
+        assert.ok(!('ctx' in pending[0]) && !('msg' in pending[0]), '挂起队列只落盘轻量字段，不序列化 ctx/msg');
+        // 节流：间隔内且未达批量 => 可延迟；超出间隔或达到批量 => 必须写
+        assert.equal(shouldDeferCoalescedSave(0, 1, 1000), true);
+        assert.equal(shouldDeferCoalescedSave(0, 1, 5001), false, '超过最小间隔必须落盘');
+        assert.equal(shouldDeferCoalescedSave(0, 20, 1000), false, '达到批量上限必须落盘');
     },
 
     /** 转热档位判定与折叠预算 */
@@ -7955,7 +8020,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const beforeMap = { ...SubCmd.map };
         const beforeAiArgs = defaultCmdPriv.ai.args;
         try {
-            SubCmd.register();
+            registerSubCommands();
             assert.ok(SubCmd.map['kb'] && SubCmd.map['kb'].desc.includes('知识库'), '.ai kb 子命令应注册（知识库管理）');
             assert.ok(SubCmd.map['skill'] && SubCmd.map['skill'].desc.includes('技能'), '.ai skill 子命令应注册');
             assert.ok(SubCmd.map['mcp'] && SubCmd.map['mcp'].desc.includes('MCP'), '.ai mcp 子命令应注册');
@@ -13127,3 +13192,208 @@ async function runSubCmd(name: string, args: string[], sccOver: any = {}, kwargs
     }
     return replied;
 }
+
+// ===== 解耦改造回归用例：装配入口完整性 / 幂等 / logger provider / 正则回退 =====
+Object.assign(tests, {
+    /** registerAllTools：核心工具齐备，重复装配不累积 */
+    testRegisterAllToolsIdempotent(): void {
+        registerAllTools();
+        for (const name of ['list_tools', 'search_tools', 'call_tool', 'use_skill']) {
+            assert.ok(toolMap[name], `${name} 应已注册`);
+        }
+        const snapshot = Object.keys(toolMap).sort();
+        registerAllTools();
+        assert.deepStrictEqual(Object.keys(toolMap).sort(), snapshot, '重复装配不应累积工具');
+    },
+
+    /** registerAllCmds：根命令写入 ext.cmdMap、help 覆盖全部子命令、权限表键数一致，重复装配不累积 */
+    testRegisterAllCmdsRegistersRootCommand(): void {
+        const beforeMap = { ...SubCmd.map };
+        const beforeAiArgs = defaultCmdPriv.ai.args;
+        const beforeCmdMap = { ...((ext as any).cmdMap ?? {}) };
+        try {
+            registerAllCmds();
+            const cmd = (ext as any).cmdMap?.ai;
+            assert.ok(cmd, '根命令 .ai 应写入 ext.cmdMap');
+            const help = String(cmd.help ?? '');
+            for (const name of Object.keys(SubCmd.map)) {
+                assert.ok(help.includes(name), `.ai help 应包含子命令 ${name}`);
+            }
+            assert.strictEqual(
+                Object.keys(defaultCmdPriv.ai.args ?? {}).length,
+                Object.keys(SubCmd.map).length,
+                '子命令权限表键数应等于已注册子命令数'
+            );
+            const count = Object.keys(SubCmd.map).length;
+            registerAllCmds();
+            assert.strictEqual(Object.keys(SubCmd.map).length, count, '重复装配不应累积子命令');
+        } finally {
+            for (const key of Object.keys(SubCmd.map)) {
+                if (!Object.prototype.hasOwnProperty.call(beforeMap, key)) delete SubCmd.map[key];
+            }
+            defaultCmdPriv.ai.args = beforeAiArgs;
+            (ext as any).cmdMap = beforeCmdMap;
+        }
+    },
+
+    /** logger provider：级别「从不」抑制 info；provider 抛错回退默认且不抛异常 */
+    testLoggerProviderLevelAndFallback(): void {
+        const logs: string[] = [];
+        const origInfo = console.info;
+        const origError = console.error;
+        console.info = (...args: any[]) => { logs.push(args.map(String).join(' ')); };
+        console.error = () => undefined;
+        try {
+            setLoggerConfigProvider(() => ({ level: '从不' }));
+            Logger.info('should-not-appear-xyz');
+            setLoggerConfigProvider(() => ({ level: '信息' }));
+            Logger.info('should-appear-xyz');
+            assert.ok(!logs.some(l => l.includes('should-not-appear-xyz')), '级别「从不」应抑制 info');
+            assert.ok(logs.some(l => l.includes('should-appear-xyz')), '级别「信息」应输出 info');
+
+            setLoggerConfigProvider(() => { throw new Error('provider boom'); });
+            Logger.info('fallback-xyz');
+            assert.ok(logs.some(l => l.includes('fallback-xyz')), 'provider 抛错应回退默认级别并继续输出');
+        } finally {
+            setLoggerConfigProvider(null);
+            console.info = origInfo;
+            console.error = origError;
+        }
+    },
+
+    /** getRegexConfig：非法正则回退为永不匹配，命中缓存后不再读配置 */
+    testGetRegexConfigInvalidFallbackAndCache(): void {
+        const TC = (globalThis as any).__TEST_CONFIG__;
+        const origError = console.error;
+        console.error = () => undefined;
+        try {
+            TC.templateConfigs['__probe_regex'] = ['(']; // 非法正则
+            const first = getRegexConfig({} as any, '__probe_regex');
+            assert.strictEqual(first.source, '(?!)', '非法正则应回退为永不匹配');
+            TC.templateConfigs['__probe_regex'] = ['abc'];
+            assert.strictEqual(getRegexConfig({} as any, '__probe_regex'), first, '命中缓存应返回同一实例');
+        } finally {
+            delete TC.templateConfigs['__probe_regex'];
+            console.error = origError;
+        }
+    },
+
+    /** 配置钩子：组合根已注册 model 钩子；钩子可替换数据、抛错时回退原数据 */
+    testConfigHookRegisteredAndFailsSoft(): void {
+        assert.ok(hasConfigHook('model'), '组合根测试宿主应已注册 model 配置钩子');
+        const original = { a: 1 } as any;
+        registerConfigHook('__probe_throw', () => { throw new Error('probe boom'); });
+        assert.strictEqual(runConfigHook('__probe_throw', original), original, '钩子抛错应回退原数据');
+
+        let called = false;
+        registerConfigHook('__probe_ok', (_key: string, data: any) => {
+            called = true;
+            return { ...data, extra: true };
+        });
+        const out = runConfigHook('__probe_ok', original);
+        assert.ok(called, '钩子应被调用');
+        assert.strictEqual((out as any).extra, true, '钩子返回的替换数据应生效');
+        assert.ok(!('extra' in original), '原数据不应被修改');
+    },
+
+    /** AuxLlm 端口：组合根已注入，且调用经 Agent.get 路由（既有测试桩语义保持） */
+    async testAuxLlmPortRoutesToAgent(): Promise<void> {
+        const origGet = Agent.get;
+        const calls: string[] = [];
+        (Agent as any).get = (name: string) => ({
+            chat: async (p: string) => { calls.push(`chat:${name}:${p}`); return 'aux-ok'; },
+            chatMessages: async () => 'aux-msgs',
+        });
+        try {
+            assert.ok(hasAuxLlm(), '测试宿主应已安装 AuxLlm');
+            const reply = await getAuxLlm().chat('probe_agent', 'hello');
+            assert.strictEqual(reply, 'aux-ok');
+            assert.deepStrictEqual(calls, ['chat:probe_agent:hello'], 'AuxLlm 应把用途名与 prompt 传给 Agent');
+        } finally {
+            (Agent as any).get = origGet;
+        }
+    },
+
+    /** 工具统一执行器：未注册/未开启/缺参/类型错误/JSON 解析失败/成功/StopError 传播 */
+    async testToolExecutorValidation(): Promise<void> {
+        const name = '__probe_exec_tool';
+        const probe = new Tool({
+            type: 'function',
+            function: {
+                name,
+                description: 'probe',
+                parameters: { type: 'object', properties: { x: { type: 'string' } }, required: ['x'] },
+            },
+        });
+        probe.solve = async (_c, _m, _s, args) => `ok:${args.x}`;
+        const ctx: any = { endPoint: { platform: 'qq', userId: 'QQ:1' } };
+        const msg: any = { messageType: 'group' };
+        const enabled: any = { toolState: { [name]: true } };
+        const disabled: any = { toolState: {} };
+        const base = { source: 'function' as const, repairJson: true };
+        try {
+            const notFound = await executeTool('__no_such_tool', ctx, msg, enabled, { ...base, args: {} });
+            assert.strictEqual(notFound.ok, false);
+            assert.strictEqual(notFound.failure?.code, 'not_found');
+
+            const notEnabled = await executeTool(name, ctx, msg, disabled, { ...base, args: { x: 'v' } });
+            assert.strictEqual(notEnabled.failure?.code, 'not_enabled');
+
+            const missing = await executeTool(name, ctx, msg, enabled, { ...base, args: {} });
+            assert.strictEqual(missing.failure?.code, 'missing_required');
+            assert.strictEqual(missing.failure?.param, 'x');
+
+            const invalid = await executeTool(name, ctx, msg, enabled, { ...base, args: { x: 1 } });
+            assert.strictEqual(invalid.failure?.code, 'invalid_arg');
+
+            const badJson = await executeTool(name, ctx, msg, enabled, { ...base, args: '{oops' });
+            assert.strictEqual(badJson.failure?.code, 'bad_args');
+
+            const ok = await executeTool(name, ctx, msg, enabled, { ...base, args: '{"x":"v"}' });
+            assert.strictEqual(ok.ok, true);
+            assert.strictEqual(ok.content, 'ok:v');
+            assert.strictEqual(ok.callBack, true);
+
+            // StopError 必须继续向上抛（由对话链中止），不能变成工具失败回填
+            probe.solve = async () => { throw new StopError('stop'); };
+            let thrown: any = null;
+            try {
+                await executeTool(name, ctx, msg, enabled, { ...base, args: { x: 'v' } });
+            } catch (e) {
+                thrown = e;
+            }
+            assert.ok(thrown instanceof StopError, 'StopError 应向上传播');
+        } finally {
+            delete toolMap[name];
+        }
+    },
+
+    /** HostSeam：注入内存存储 + 固定时钟后，TokenCalibration 的读写与时间戳都走注入实现 */
+    testHostStorageInjectionAndClock(): void {
+        const store = new Map<string, string>();
+        setHost({
+            storage: {
+                get: (key) => store.get(key) ?? null,
+                set: (key, value) => { store.set(key, value); },
+            },
+            clock: { now: () => 1_000_000 },
+            fetch: (url, init) => fetch(url, init),
+            ext,
+        });
+        try {
+            TokenCalibration.resetForTest();
+            TokenCalibration.record('host-probe', 100, 150);
+            const raw = store.get('tokenCalibration');
+            assert.ok(raw, '校准数据应写入注入的存储');
+            const saved = JSON.parse(raw as string);
+            assert.ok(saved['host-probe'].factor > 1, '首次样本应按真实比例校准');
+            assert.strictEqual(saved['host-probe'].updatedAt, 1_000_000, 'updatedAt 应使用注入时钟');
+
+            TokenCalibration.resetForTest();
+            assert.ok(TokenCalibration.getFactor('host-probe') > 1, '应能从注入存储重新读取校准系数');
+        } finally {
+            TokenCalibration.resetForTest();
+            installTestHost();
+        }
+    },
+});

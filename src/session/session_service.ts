@@ -1,11 +1,13 @@
 // 会话服务：会话的创建/复活/保存与 getSession 入口
-import Agent from "../agent/agent";
-import { ext } from "../config/config";
 import { Context } from "../context/context";
+import { getHost } from "../core/host";
+import { getAgent } from "../core/ports/agent_registry";
 import { logger } from "../logger";
-import { revive, TypeDescriptor } from "../utils/utils";
+import { revive, TypeDescriptor } from "../utils/revive";
 
-import { Session, SESSION_RUNTIME_KEYS, Setting } from "./session";
+import { pendingKey, sessionStorageKey, writeSessionRecord } from "./persistence";
+import { Session } from "./session";
+import { Setting } from "./setting";
 import { createToolListen } from "./tool_listen";
 
 
@@ -13,12 +15,12 @@ import { createToolListen } from "./tool_listen";
  * 获取默认 Agent 下某个会话（旧 AIManager.getAI 的替代）
  */
 export function getSession(sessionId: string): Session {
-    return Agent.get('*').sessionService.getSession(sessionId);
+    return getAgent('*').sessionService.getSession(sessionId);
 }
 
 export class SessionService {
     static save(session: Session) {
-        ext.storageSet(`session_${session.sessionId}`, JSON.stringify(session, (key, value) => SESSION_RUNTIME_KEYS.has(key) ? undefined : value));
+        writeSessionRecord(session.sessionId, session);
     }
     static validKeysMap: { [key in keyof SessionService]?: TypeDescriptor<SessionService[key]> } = {
         agentName: 'string',
@@ -39,7 +41,7 @@ export class SessionService {
         if (!Object.prototype.hasOwnProperty.call(this.sessionMap, sessionId)) {
             let session = new Session();
             try {
-                const data = JSON.parse(ext.storageGet(`session_${sessionId}`) || '{}');
+                const data = JSON.parse(getHost().storage.get(sessionStorageKey(sessionId)) || '{}');
                 session = revive(Session, data);
             } catch (error) {
                 logger.error(`加载会话${sessionId}失败: ${error}`);
@@ -49,7 +51,7 @@ export class SessionService {
             session.sessionType = sessionId.includes('-Group:') ? 'group' : 'user';
             // 恢复挂起队列轻量分片：ctx/msg 是运行时对象，重载后由续跑时按 epId/isPrivate 重建（失败则只入库不续跑）
             try {
-                const pendingRaw = JSON.parse(ext.storageGet(`session_${sessionId}:pending`) || '[]');
+                const pendingRaw = JSON.parse(getHost().storage.get(pendingKey(sessionId)) || '[]');
                 if (Array.isArray(pendingRaw) && pendingRaw.length > 0) {
                     session.pendingQueue = pendingRaw as any;
                 }

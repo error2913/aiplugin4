@@ -1,11 +1,13 @@
-import Config from "../../config/config";
 import { FACE_MAP } from "../../config/static_config";
 import { logger } from "../../logger";
 import Image from "../../resource/image";
+import { getLocalAudios, getLocalFiles, getLocalImageEntries, getLocalVideos } from "../../resource/local_paths";
+import { transformMsgIdBack } from "../../utils/message_id";
+import { resolveLocalPath } from "../../utils/path";
+import { parseSpecialTokens, stripInternalTags } from "../../utils/render_tags";
 import { resolveResourceReference } from "../../utils/resource";
-import { MessageSegment, parseSpecialTokens, stripInternalTags } from "../../utils/string";
+import type { MessageSegment } from "../../utils/string";
 import { getRawId, normalizeUserId, platformOf } from "../../utils/target_id";
-import { resolveLocalPath, transformMsgIdBack } from "../../utils/utils";
 
 const log = logger.withTag('ob11-send');
 
@@ -19,10 +21,10 @@ export interface SendSessionLike {
 function getResourcePath(id: string): string | null {
     const rawId = id.replace(/^resource:/i, "");
     const groups = [
-        ...(Config.resource.LOCAL_IMAGES || []).map((item: any) => ({ id: item.imageId, path: item.path })),
-        ...(Config.resource.LOCAL_AUDIOS || []).map((item: any) => ({ id: item.audioId, path: item.path })),
-        ...(Config.resource.LOCAL_FILES || []).map((item: any) => ({ id: item.fileId, path: item.path })),
-        ...(Config.resource.LOCAL_VIDEOS || []).map((item: any) => ({ id: item.videoId, path: item.path }))
+        ...getLocalImageEntries().map((item: any) => ({ id: item.imageId, path: item.path })),
+        ...getLocalAudios().map((item: any) => ({ id: item.audioId, path: item.path })),
+        ...getLocalFiles().map((item: any) => ({ id: item.fileId, path: item.path })),
+        ...getLocalVideos().map((item: any) => ({ id: item.videoId, path: item.path }))
     ];
     return groups.find(item => item.id === rawId)?.path || null;
 }
@@ -199,7 +201,7 @@ async function textToSegments(ctx: seal.MsgContext, session: SendSessionLike, te
                 break;
             }
             case "audio": {
-                const audios: { audioId: string, path: string }[] = Config.resource.LOCAL_AUDIOS || [];
+                const audios: { audioId: string, path: string }[] = getLocalAudios();
                 const audio = audios.find(a => a.audioId === token.content);
                 if (audio) {
                     flush();

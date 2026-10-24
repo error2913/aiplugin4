@@ -3,10 +3,10 @@
 // 新键名 `MCP服务器`；旧的模板键 `MCP服务器配置` 不再注册/读取（不做迁移）。
 // JSON 使用标准结构：{ "mcpServers": { "<服务器名>": { "type": "http", "url": "...", "headers": {...} } } }
 import Logger from "../../logger";
-import { ext } from "../config";
 import { DEFAULT_MCP_JSON } from "../domain/defaults";
 import { parseMcpConfig } from "../domain/parse";
 import { McpServerEntry } from "../domain/types";
+import { ext } from "../ext";
 
 import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 

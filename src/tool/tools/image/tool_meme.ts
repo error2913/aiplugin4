@@ -3,8 +3,8 @@ import { logger } from "../../../logger";
 import Image from "../../../resource/image";
 import { ImageHost } from "../../../resource/image_host";
 import { GroupInfo, UserInfo } from "../../../session/types";
+import { generateId } from "../../../utils/id";
 import { getPlatform, normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
-import { generateId } from "../../../utils/utils";
 import Tool from "../../tool";
 
 const baseurl = "http://meme.lovesealdice.online/";

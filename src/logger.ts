@@ -1,9 +1,47 @@
 // 日志模块：统一日志输出（级别控制 / 密钥脱敏 / 截断 / 异常堆栈 / 分类标签）
-import Config from "./config/config";
 import { NAME } from "./config/static_config";
 
 const MAX_ITEM_LENGTH = 2000; // 单个日志项最大长度
 const MAX_MESSAGE_LENGTH = 300; // 请求上下文正文日志截断长度
+
+// 日志开关由 config 层注入 provider，而不是启动时快照：
+// 面板改「日志级别/简短打印/记录消息内容」后，必须沿用 Config.base 的 60s TTL 语义在运行中生效。
+// logger 不 import config，避免 config ↔ logger 循环依赖（provider 内部才读 Config）。
+// 初始值与 configs/base.ts 的出厂默认一致。
+const DEFAULT_LOG_CONFIG: Required<LoggerConfig> = {
+    level: '信息',
+    shortPrint: true,
+    messageContent: true,
+};
+
+export interface LoggerConfig {
+    level?: string;
+    shortPrint?: boolean;
+    messageContent?: boolean;
+}
+
+let logConfigProvider: (() => LoggerConfig) | null = null;
+let providerErrorLogged = false;
+
+/** 由 config 层调用：注入/清除日志开关来源（provider 应读取带 TTL 缓存的配置访问器） */
+export function setLoggerConfigProvider(provider: (() => LoggerConfig) | null): void {
+    logConfigProvider = provider;
+}
+
+/** 解析当前日志开关：provider 未注入（启动早期）或抛错时回退出厂默认值 */
+function resolveLogConfig(): Required<LoggerConfig> {
+    if (!logConfigProvider) return DEFAULT_LOG_CONFIG;
+    try {
+        return { ...DEFAULT_LOG_CONFIG, ...logConfigProvider() };
+    } catch (e) {
+        // 只报一次，避免日志风暴；同时不让配置读取异常变成静默降级（排障需要线索）
+        if (!providerErrorLogged) {
+            providerErrorLogged = true;
+            console.error(`【${NAME}】[WARN] 读取日志配置失败，已回退出厂默认值:`, e);
+        }
+        return DEFAULT_LOG_CONFIG;
+    }
+}
 
 const LEVEL_ORDER: { [key: string]: number } = {
     "从不": 0,
@@ -52,7 +90,7 @@ export default class Logger {
     }
 
     static handleLogData(...data: any[]): string {
-        const { LOG_SHORT_PRINT } = Config.base;
+        const { shortPrint: LOG_SHORT_PRINT } = resolveLogConfig();
         let s = data.map(item => this.formatItem(item)).join(" ");
         // 脱敏：掩盖常见密钥字段、URL query 参数、Bearer token 与 sk- 前缀密钥
         s = s.replace(/(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|authorization|signature|sig|secret|password|app[_-]?secret|appkey)["']?\s*[:=]\s*["']?)([^"'\s,}&]{6,})/gi, '$1***');
@@ -66,7 +104,7 @@ export default class Logger {
     }
 
     private static emit(level: string, ...data: any[]) {
-        const { LOG_LEVEL } = Config.base;
+        const { level: LOG_LEVEL } = resolveLogConfig();
         const current = LEVEL_ORDER[LOG_LEVEL] ?? 3;
         const need = LEVEL_ORDER[level] ?? 3;
         if (current < need) return;
@@ -105,7 +143,7 @@ export default class Logger {
     /** 请求上下文日志：受“日志记录消息内容”开关控制，正文截断，默认不打印 system */
     static printRequestMessages(messages: any[], runId: string = '') {
         if (!messages) return;
-        const { LOG_MESSAGE_CONTENT } = Config.base;
+        const { messageContent: LOG_MESSAGE_CONTENT } = resolveLogConfig();
         const filtered = messages.filter(item => item.role !== "system");
         if (filtered.length === 0) return;
 

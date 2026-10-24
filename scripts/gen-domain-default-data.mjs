@@ -3,7 +3,7 @@
 // 为什么需要：新配置只读 JSON，默认值不能再依赖旧的 template/frontmatter 文本；
 // 但默认内容必须与旧版一致，所以从旧的静态常量转换一次，生成静态对象文件。
 //
-// 运行：node scripts/gen-domain-default-data.mjs
+// 运行：node scripts/gen-domain-default-data.mjs（写入）或 --check（校验生成物与源一致，CI 用）
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -105,6 +105,8 @@ const DEFAULT_MCP = [];
 const DEFAULT_SKILLS = mod.SEALDICE_COMMAND_SKILLS.map(skillFromRaw);
 const DEFAULT_KB = mod.KNOWLEDGE_BASE_DEFAULTS.map(kbFromRaw);
 
+const checkOnly = process.argv.includes('--check');
+
 const out = `// AUTO-GENERATED — 不要手改。
 // 由 scripts/gen-domain-default-data.mjs 从旧版静态默认值生成，供 src/config/domain/defaults.ts 使用。
 // 重新生成：node scripts/gen-domain-default-data.mjs
@@ -117,6 +119,25 @@ export const DEFAULT_MCP = ${JSON.stringify(DEFAULT_MCP, null, 4)};
 export const DEFAULT_KB = ${JSON.stringify(DEFAULT_KB, null, 4)};
 `;
 
-fs.writeFileSync(path.join(repoRoot, 'src/config/domain/default_data.ts'), out, 'utf8');
+const target = path.join(repoRoot, 'src/config/domain/default_data.ts');
+const normalize = (text) => String(text).replace(/\r\n?/g, '\n');
+if (checkOnly) {
+    if (!fs.existsSync(target)) {
+        console.error('[FAIL] src/config/domain/default_data.ts 不存在，请先运行 node scripts/gen-domain-default-data.mjs');
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        process.exit(1);
+    }
+    const actual = normalize(fs.readFileSync(target, 'utf8'));
+    if (actual !== normalize(out)) {
+        console.error('[FAIL] src/config/domain/default_data.ts 与默认值源不一致（生成物过期或被手改）');
+        console.error('修复：node scripts/gen-domain-default-data.mjs');
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        process.exit(1);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    console.log(`[OK] default_data.ts 与默认值源一致：角色 ${DEFAULT_ROLES.length} / 技能 ${DEFAULT_SKILLS.length} / MCP ${DEFAULT_MCP.length} / 知识库 ${DEFAULT_KB.length}`);
+    process.exit(0);
+}
+fs.writeFileSync(target, out, 'utf8');
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log(`已写入 src/config/domain/default_data.ts：角色 ${DEFAULT_ROLES.length} / 技能 ${DEFAULT_SKILLS.length} / MCP ${DEFAULT_MCP.length} / 知识库 ${DEFAULT_KB.length}`);

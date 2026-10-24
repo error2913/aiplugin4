@@ -5,7 +5,6 @@
 // - 替换：只作用于正文 text 字段；存在原文副本（rawText 单条压缩 / rawItems 合并块 / tool rawText 截断）时同步双写，
 //   保证持久化后 read_raw/grep_raw 读回内容与展示一致。
 // - 安全：敏感工具（sensitive=true），默认开启；替换结果统一 stripUserTags 防标签注入。
-import { ext } from "../../../config/config";
 import Message from "../../../context/message";
 import {
     AssistantMessage,
@@ -16,6 +15,7 @@ import {
     UserMessage,
     UserMessageItem,
 } from "../../../context/types";
+import { getHost } from "../../../core/host";
 import Logger from "../../../logger";
 import { resolveSessionAddress } from "../../../pub/registry";
 import { getSession } from "../../../session/session_service";
@@ -74,7 +74,7 @@ function sessionExists(sid: string, currentSid: string): boolean {
     if (!sid) return false;
     if (sid === currentSid) return true;
     try {
-        const raw = ext.storageGet(`session_${sid}`);
+        const raw = getHost().storage.get(`session_${sid}`);
         return !!raw && raw !== '{}';
     } catch (e) {
         log.warning(`检查会话 ${sid} 是否存在失败：${e instanceof Error ? e.message : String(e)}`);

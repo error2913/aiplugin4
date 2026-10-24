@@ -1,6 +1,6 @@
 // 特殊资源句柄：接收侧把语音/视频等原始段字段登记为短句柄并写入上下文文本（[record:句柄]摘要[/record] 等闭合标签），
 // AI 通过 resolve_special_id(type=record/video/file, id=句柄) 查询原始 url/path/file/file_unique 等字段。
-import { generateId } from "./utils";
+import { generateId } from "./id";
 
 export type SpecialResourceType = "record" | "video" | "file";
 

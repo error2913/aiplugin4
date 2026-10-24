@@ -11,7 +11,7 @@ import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
 import { escapeToolResultBoundary, fmtDate } from "./string";
-import { withTimeout } from "./utils";
+import { withTimeout } from "./timeout";
 
 /** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
 export type RequestMessageContent =

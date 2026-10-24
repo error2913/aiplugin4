@@ -1,6 +1,6 @@
 // 图片索引：海豹 storage 没有遍历能力，清理任务靠这里的分片索引找到所有图片记录。
 // 索引只记「存活所需的最少信息」：最后使用时间 + 图床 blob id（用于变更对账）。
-import { ext } from "../config/config";
+import { getHost } from "../core/host";
 
 /** 分片数（索引写入摊到 64 个 key，避免单 key 过大） */
 export const IMAGE_INDEX_SHARDS = 64;
@@ -30,7 +30,7 @@ class _ImageIndex {
         if (cached) return cached;
         let data: Record<string, ImageIndexEntry> = {};
         try {
-            const raw = ext.storageGet(shardKey(n));
+            const raw = getHost().storage.get(shardKey(n));
             if (raw) {
                 const parsed = JSON.parse(raw);
                 if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed;
@@ -43,7 +43,7 @@ class _ImageIndex {
     }
 
     private static save(n: number, shard: Record<string, ImageIndexEntry>): void {
-        ext.storageSet(shardKey(n), JSON.stringify(shard));
+        getHost().storage.set(shardKey(n), JSON.stringify(shard));
     }
 
     /** 记录/刷新一张图片的索引（使用时间 + 图床 id） */

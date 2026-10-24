@@ -1,6 +1,6 @@
 // .ai token：查看/清除 token 用量记录
 import { chartImageCQ, get_chart_url, UsageManager } from "../../usage";
-import { aliasToCmd } from "../../utils/utils";
+import { aliasToCmd } from "../../utils/alias";
 import { S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 

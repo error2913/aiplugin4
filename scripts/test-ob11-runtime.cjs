@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const esbuild = require('esbuild');
+const { installSealEnv } = require('./harness/seal-env.cjs');
 
 const repo = path.resolve(__dirname, '..');
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiplugin4-ob11-'));
@@ -16,35 +17,21 @@ const templateConfig = {
     '本地视频路径': ['clip=/virtual/clip.mp4']
 };
 
-// Minimal SealDice surface used by module initialization and the native fallback.
-globalThis.seal = {
+// 测试环境（seal 桩）单一事实源见 scripts/harness/seal-env.cjs；此处只覆盖 ob11 runtime 用例需要的固定值与发送桩。
+installSealEnv({
+    preset: 'ob11-runtime',
+    replyToSender: (ctx, msg, content) => sent.push({ ctx, msg, content }),
     ext: {
-        find: () => undefined,
         new: () => ({}),
-        register: () => undefined,
-        registerBoolConfig: () => undefined,
-        registerIntConfig: () => undefined,
-        registerFloatConfig: () => undefined,
         registerStringConfig: () => undefined,
-        registerOptionConfig: () => undefined,
-        registerTemplateConfig: () => undefined,
+        getIntConfig: () => 10,
+        getStringConfig: () => '/virtual/sealdice',
         getTemplateConfig: (_ext, key) => {
             if (['纯文本模型', '多模态模型', '嵌入模型'].includes(key)) return [];
             return templateConfig[key] || [''];
         },
-        getBoolConfig: () => true,
-        getIntConfig: () => 10,
-        getFloatConfig: () => 0,
-        getStringConfig: () => '/virtual/sealdice',
-        getOptionConfig: () => '信息',
-        storageGet: () => '',
-        storageSet: () => undefined
     },
-    replyToSender: (ctx, msg, content) => sent.push({ ctx, msg, content }),
-    newMessage: () => ({ sender: {}, messageType: 'group' }),
-    getEndPoints: () => [],
-    createTempCtx: () => ({})
-};
+});
 
 (async () => {
     await esbuild.build({

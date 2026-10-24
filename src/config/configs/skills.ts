@@ -2,10 +2,10 @@
 //
 // 新键名 `技能列表`；旧的 `技能配置` 模板键不再注册/读取（不做迁移）。
 import Logger from "../../logger";
-import { ext } from "../config";
 import { DEFAULT_SKILLS, DEFAULT_SKILLS_JSON } from "../domain/defaults";
 import { parseSkillsConfig } from "../domain/parse";
 import { SkillEntry } from "../domain/types";
+import { ext } from "../ext";
 
 import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 

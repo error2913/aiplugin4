@@ -2,10 +2,10 @@
 //
 // 新键名 `角色设定` 与旧模板键 `角色扮演设定` 不同；旧键不再注册/读取（不做迁移）。
 import Logger from "../../logger";
-import { ext } from "../config";
 import { DEFAULT_ROLES, DEFAULT_ROLES_JSON } from "../domain/defaults";
 import { parseRolesConfig } from "../domain/parse";
 import { RoleEntry } from "../domain/types";
+import { ext } from "../ext";
 
 import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 

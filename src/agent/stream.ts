@@ -12,7 +12,7 @@ import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
 import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
 import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
-import { StopError, StopEvent, withTimeout } from "../utils/utils";
+import { StopError, StopEvent, withTimeout } from "../utils/timeout";
 
 const log = logger.withTag('model');
 

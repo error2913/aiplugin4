@@ -3,52 +3,65 @@ import Handlebars from "handlebars";
 
 import { initAgents } from "./agent/agents";
 import { registerAgentApi } from "./agent/api";
+import { installAuxLlm } from "./agent/aux_llm_impl";
 import { BlockManager } from "./block";
+import { registerAllCmds } from "./cmd/bootstrap";
 import { PrivilegeManager } from "./cmd/privilege";
-import { registerCmd } from "./cmd/root_cmd";
+import { registerConfigAppliers } from "./config/apply";
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
+import { getHost, setHost } from "./core/host";
+import { createSealHost } from "./core/seal_host";
 import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
+import { installPromptMemorySource } from "./prompt/memory_source_impl";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
-import Tool from "./tool/tool";
+import { registerAllTools } from "./tool/bootstrap";
+import { normalizeMsgId } from "./utils/message_id";
 import { createMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
 import { getPlatform, normalizeGroupId, normalizeUserId } from "./utils/target_id";
 import { checkUpdate } from "./utils/update";
-import { normalizeMsgId } from "./utils/utils";
 
 const log = logger.withTag('main');
 
 function main() {
+  // HostSeam 必须先装配：后续所有模块的存储/时钟/网络都经宿主端口
+  setHost(createSealHost());
+  // 配置应用钩子必须在 Config.registerConfig()（会预热模型配置）之前注册
+  registerConfigAppliers();
+
   Handlebars.registerHelper('index', (index: number) => index + 1);
   Handlebars.registerHelper('json_stringify', (obj: any) => JSON.stringify(obj, null, 2));
   Handlebars.registerHelper('time', (t: number) => fmtDate(t));
 
+  // 端口实现先于 Config.registerConfig()：预热会触发配置应用钩子，钩子可能依赖 Agent/AuxLlm/记忆数据源端口
+  installAuxLlm();
+  installPromptMemorySource();
   Config.registerConfig();
   initAgents();
   registerAgentApi();
   checkUpdate();
-  Tool.registerTool();
+  registerAllTools();
   TimerManager.init();
   MediaTaskManager.init();
   ImageGC.init();
   knowledgeService.init();
   BlockManager.initBlockList();
 
-  registerCmd();
+  registerAllCmds();
   PrivilegeManager.reviveCmdPriv();
   // ob11 依赖存在时订阅其事件分发，接收核心原生 milky 路径过滤掉的卡片/视频/文件/合并转发等段
   MessagePipeline.subscribeOb11Receive();
 
   // 存储版本标记：结构变更时递增，供后续迁移使用
-  const storedVersion = parseInt(ext.storageGet('storage_version') || '0');
+  const storedVersion = parseInt(getHost().storage.get('storage_version') || '0');
   if (storedVersion < STORAGE_VERSION) {
-    ext.storageSet('storage_version', String(STORAGE_VERSION));
+    getHost().storage.set('storage_version', String(STORAGE_VERSION));
     log.info(`存储版本升级: ${storedVersion} -> ${STORAGE_VERSION}`);
   }
 

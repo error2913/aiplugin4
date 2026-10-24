@@ -1,6 +1,6 @@
 // 记忆管理器：统一长期/观察/知识库的读取入口，底层只使用 Hindsight-like 新引擎。
-import Agent from "../agent/agent";
 import Config from "../config/config";
+import { getAuxLlm } from "../core/ports/aux_llm";
 import Logger from "../logger";
 import { SUMMARY_PROMPT_TEMPLATE } from "../prompt/templates";
 import Image from "../resource/image";
@@ -352,7 +352,7 @@ export class MemoryManager {
         });
 
         try {
-            const reply = await Agent.get('summarize_agent').chat(prompt);
+            const reply = await getAuxLlm().chat('summarize_agent', prompt);
             // 账本：归档总结的调用次数（`.ai ctx` 展示；游离会话无 ctxStats 时忽略）
             const stats: any = (session as any).ctxStats;
             if (stats && typeof stats.summarization === 'number') stats.summarization += 1;

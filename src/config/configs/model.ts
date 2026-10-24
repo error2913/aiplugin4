@@ -7,13 +7,16 @@
 //   1. 读「模型配置」→ parseV5Config（JSON 语法 + 结构校验，带 $.a.b[0].c 路径报错）
 //   2. 配置为空 → 出厂最小示例（并提示老用户用配置生成器重建）
 // 校验失败一律**整体拒绝**（不做"部分生效"），并给出全部问题。
+//
+// 分层：本文件只做「注册配置项 + 解析出 ModelConfigData」；把数据落到模型注册表
+// （bootstrap / 用途绑定 / 运行时覆盖）由 config/apply/model.ts 的钩子完成，
+// 因此配置段不 import 模型实现（拆掉 config → model → config 大环）。
 import Logger from "../../logger";
-import { DeclarableModelTag } from "../../model/catalog";
-import { fetchModelList, ListFetchFn } from "../../model/list";
-import Model, { ConnConfigLike } from "../../model/model";
-import { ModelRuleTemplate, resetRuleRowsForTest } from "../../model/request_rules";
-import { ModelUse } from "../../model/types";
-import { ext } from "../config";
+import type { DeclarableModelTag } from "../../model/catalog";
+import type { ConnConfigLike } from "../../model/model";
+import type { ModelRuleTemplate } from "../../model/request_rules";
+import type { ModelUse } from "../../model/types";
+import { ext } from "../ext";
 import { adaptV5 } from "../v5/adapt";
 import { DEFAULT_V5_CONFIG } from "../v5/default";
 import { formatIssues, normalizePurposeList, parseV5Config, V5Config, V5Issue } from "../v5/schema";
@@ -54,36 +57,9 @@ export interface ModelConfigData {
 
 let modelConfigCache: ModelConfigData | null = null;
 
-// 单测可注入的拉取实现（默认走真实网络）
-let testFetch: ListFetchFn | null = null;
-
-/** 仅供单元测试使用：清空模块级缓存与规则/注册表 */
-export function resetModelConfigCacheForTest(): void {
+/** 清空模块级解析缓存（测试/刷新用）；把配置应用到模型注册表见 config/apply/model.ts */
+export function clearModelConfigCacheForTest(): void {
     modelConfigCache = null;
-    testFetch = null;
-    resetRuleRowsForTest();
-    Model.reset();
-}
-
-/** 供单元测试注入列表拉取桩 */
-export function setModelListDepsForTest(opts?: { fetch?: ListFetchFn }): void {
-    testFetch = opts?.fetch ?? null;
-}
-
-export function loadPurposeModelOverrides(): Partial<Record<ModelUse, string>> {
-    try {
-        const raw = ext.storageGet(MODEL_PURPOSE_OVERRIDES_KEY);
-        if (!raw) return {};
-        const data = JSON.parse(raw);
-        return data && typeof data === 'object' ? data : {};
-    } catch (e) {
-        Logger.error(`读取全局模型覆盖失败: ${e instanceof Error ? e.message : String(e)}`);
-        return {};
-    }
-}
-
-export function savePurposeModelOverrides(): void {
-    ext.storageSet(MODEL_PURPOSE_OVERRIDES_KEY, JSON.stringify(Model.purposeModelOverrides));
 }
 
 /** 安全读字符串配置：未注册/类型不符时返回 ''，不让插件启动崩掉 */
@@ -157,15 +133,7 @@ export default class ModelConfig {
     }
 
     static get(): ModelConfigData {
-        if (!modelConfigCache) {
-            modelConfigCache = buildModelConfig();
-            // 运行时覆盖（.ai model 写入的）优先于配置里的持久默认
-            Model.purposeModelOverrides = loadPurposeModelOverrides();
-            Model.configPurposes = { ...modelConfigCache.purposes };
-            Model.bootstrap(modelConfigCache.conns, modelConfigCache.rules, {
-                fetch: testFetch ?? fetchModelList,
-            });
-        }
+        if (!modelConfigCache) modelConfigCache = buildModelConfig();
         return modelConfigCache;
     }
 }

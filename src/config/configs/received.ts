@@ -1,6 +1,6 @@
 // 消息接收配置：接收范围/忽略条件与正则
-import { ext } from "../config";
-import { getRegexConfig } from "../config";
+import { ext } from "../ext";
+import { getRegexConfig } from "../regex";
 
 export default class ReceivedConfig {
     static register() {

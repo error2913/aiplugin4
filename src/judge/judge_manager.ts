@@ -1,14 +1,14 @@
 // 评分触发管理：gate 门禁（零 LLM）→ 评分小模型 → SPEAK/WAIT 两级；
 // 其他方式触发会话 = 起一轮 WAIT（bot 刚发言/刚被触发即冷却）；WAIT 轮内新消息不评分、挂起轮末最新一条重新过 gate，由内置定时器兜底触发。
-import Agent from "../agent/agent";
 import Config from "../config/config";
 import { JudgeConfig } from "../config/configs/trigger";
+import { getAuxLlm } from "../core/ports/aux_llm";
+import { cancelJudgeWait, scheduleJudgeWait, setJudgeWaitFinisher } from "../core/ports/judge_wait";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
-import { TimerManager } from "../timer";
 import { buildContent, getRoleSetting, renderWindowedHistory } from "../utils/message";
 import { fmtDate } from "../utils/string";
-import { withTimeout } from "../utils/utils";
+import { withTimeout } from "../utils/timeout";
 
 const log = logger.withTag('judge');
 
@@ -106,7 +106,7 @@ export class JudgeManager {
     /** 清理会话 judge 状态：移除内存状态与 WAIT 轮末定时器（.ai off / .ai stop / LRU 淘汰时调用，保证会话结束后轮内挂起消息不再重新评分） */
     static clearSession(sid: string): void {
         this.states.delete(sid);
-        TimerManager.removeTimers(sid, "", ["judgeWait"], []);
+        cancelJudgeWait(sid);
     }
 
     /** 主入口：消息已入库后由 pipeline 待机块调用；WAIT 轮内挂起，轮外 gate 通过才调用评分小模型 */
@@ -181,9 +181,9 @@ export class JudgeManager {
         if (Config.trigger.JUDGE.SCORING.wait_cooldown <= 0) return;
         // 同一会话只保留一个 WAIT 轮末兜底定时器：新轮覆盖旧轮，避免轮次频繁时旧定时器堆积
         // （旧定时器会因 waitUntil 被新轮延长而反复“未到点”重试，刷日志并多余执行）
-        TimerManager.removeTimers(session.sessionId, "", ["judgeWait"], []);
+        cancelJudgeWait(session.sessionId);
         const target = Math.floor(Date.now() / 1000) + Config.trigger.JUDGE.SCORING.wait_cooldown;
-        TimerManager.addJudgeWaitTimer(ctx, session, target);
+        scheduleJudgeWait(ctx, session, target);
     }
 
     /** 轮外消息进 gate：任一条件命中 DROP（不触发小模型），通过则评分 */
@@ -281,11 +281,10 @@ export class JudgeManager {
 
     /** 调用评分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */
     private static async requestScore(messages: { role: string; content: string }[], cfg: JudgeConfig): Promise<JudgeResult> {
-        const agent = Agent.get('judge_agent');
         let lastError = '';
         for (let i = 0; i <= cfg.MODEL.retries; i++) {
             try {
-                const raw = await withTimeout(() => agent.chatMessages(messages), cfg.MODEL.timeout_sec * 1000);
+                const raw = await withTimeout(() => getAuxLlm().chatMessages('judge_agent', messages), cfg.MODEL.timeout_sec * 1000);
                 const parsed = this.parseScore(raw);
                 if (parsed) {
                     if (i > 0) log.info(`JSON解析失败×${i}，重试成功`);
@@ -410,3 +409,6 @@ ${history.text}
         return { text: items.join('\n'), count: items.length };
     }
 }
+
+// 把 WAIT 轮末收尾注册到 L0 端口：timer 到点后经端口回调（避免 judge ↔ timer 互相 import）
+setJudgeWaitFinisher((sid) => JudgeManager.endWaitRound(sid));

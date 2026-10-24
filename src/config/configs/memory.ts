@@ -1,5 +1,5 @@
 // 记忆配置：长期记忆/观察记忆（知识库配置见 knowledge_base.ts，独立「知识库」页签）
-import { ext } from "../config";
+import { ext } from "../ext";
 
 
 export default class MemoryConfig {

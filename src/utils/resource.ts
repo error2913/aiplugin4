@@ -2,7 +2,7 @@
 import { callMCPTool, getMCPServerByName } from "../tool/mcp";
 import { MCPCallResult } from "../tool/mcp/types";
 
-import { resolveLocalPath } from "./utils";
+import { resolveLocalPath } from "./path";
 
 export interface ResolvedResource {
     path: string;

@@ -2,8 +2,6 @@
   "name": "aiplugin4",
   "version": "4.28.0",
   "description": "ai plugin for sealdice",
-  "main": "build/index.js",
-  "typings": "build/index.d.ts",
   "repository": "https://github.com/error2913/aiplugin4",
   "license": "MIT",
   "keywords": [],
@@ -21,11 +19,18 @@
     "sim:matrix": "node scripts/sim-matrix.cjs",
     "fuzz": "node scripts/fuzz.cjs",
     "test:integration": "node scripts/integration-config-generator.mjs",
+    "deps:graph": "node scripts/deps-graph.mjs",
+    "deps:check": "node scripts/check-deps.mjs",
+    "deps:update": "node scripts/check-deps.mjs --update",
+    "version:check": "node scripts/sync-version.mjs",
+    "changelog:check": "node scripts/gen-changelog.mjs",
+    "changelog:gen": "node scripts/gen-changelog.mjs --write",
+    "domain:check": "node scripts/gen-domain-default-data.mjs --check",
+    "domain:gen": "node scripts/gen-domain-default-data.mjs",
+    "version:sync": "node scripts/sync-version.mjs --write",
     "docs:build": "node docs-site/build.js",
+    "docs:manifest": "node docs-site/check-manifest.js",
     "docs:serve": "node docs-site/build.js --serve"
-  },
-  "engines": {
-    "node": ">=10"
   },
   "dependencies": {
     "handlebars": "^4.7.8",
@@ -47,11 +52,8 @@
     "typescript": "^5.5.4"
   },
   "files": [
-    "build/main",
-    "build/module",
     "!**/*.spec.*",
     "!**/*.json",
-    "CHANGELOG.md",
     "LICENSE",
     "README.md"
   ],
