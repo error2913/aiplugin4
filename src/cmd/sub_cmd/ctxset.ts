@@ -29,6 +29,66 @@ export function registerCmdCtxSet() {
         const setting: any = session.setting;
         if (!setting.overrides || typeof setting.overrides !== 'object') setting.overrides = {};
 
+        // Context v2：会话级覆盖只有 budget / retain（旧的窗口类参数已废弃）
+        if (session.contextV2) {
+            const arg = (cmdArgs.getArgN(2) || '').trim();
+            const sub = arg.toLowerCase();
+            const budgetField = 'ctxBudgetTokens';
+            const retainField = 'ctxRetainPercent';
+            if (!arg) {
+                const budget = setting.overrides[budgetField];
+                const retain = setting.overrides[retainField];
+                seal.replyToSender(ctx, msg, [
+                    '本会话 Context v2 覆盖：',
+                    `【budget】${typeof budget === 'number' ? budget : '（未覆盖）'} · 全局 ${Config.context.MAX_CONTEXT_TOKENS}（0=跟随模型窗口）`,
+                    `【retain】${typeof retain === 'number' ? `${retain}%` : '（未覆盖）'} · 全局 40%`,
+                    '',
+                    '用【.ai ctxset budget=100000】设置，【.ai ctxset clr】清除',
+                ].join('\n'));
+                return ret;
+            }
+            if (sub === 'clr' || sub === 'clear' || sub === 'reset') {
+                delete setting.overrides[budgetField];
+                delete setting.overrides[retainField];
+                session.save();
+                seal.replyToSender(ctx, msg, '已清除本会话的 Context v2 覆盖');
+                return ret;
+            }
+            const eq = arg.indexOf('=');
+            if (eq <= 0) {
+                seal.replyToSender(ctx, msg, '格式：.ai ctxset budget=<token> 或 retain=<百分比>；旧 window/cold/truncate 已废弃');
+                return ret;
+            }
+            const key = arg.slice(0, eq).trim().toLowerCase();
+            const rawVal = arg.slice(eq + 1).trim();
+            if (key === 'window' || key === 'cold' || key === 'truncate') {
+                seal.replyToSender(ctx, msg, '该参数在 Context v2 已废弃；请用 budget / retain');
+                return ret;
+            }
+            if (key !== 'budget' && key !== 'retain') {
+                seal.replyToSender(ctx, msg, `未识别参数 ${key}；可用：budget / retain`);
+                return ret;
+            }
+            if (rawVal === 'clr' || rawVal === 'clear' || rawVal === '') {
+                delete setting.overrides[key === 'budget' ? budgetField : retainField];
+                session.save();
+                seal.replyToSender(ctx, msg, `已清除本会话 ${key} 覆盖`);
+                return ret;
+            }
+            const n = parseInt(rawVal, 10);
+            const min = key === 'retain' ? 1 : 0;
+            const max = key === 'retain' ? 100 : Number.MAX_SAFE_INTEGER;
+            if (!Number.isFinite(n) || n < min || n > max) {
+                seal.replyToSender(ctx, msg, key === 'retain' ? 'retain 必须是 1-100 的整数' : 'budget 必须是非负整数（0=清除覆盖）');
+                return ret;
+            }
+            if (n === 0 && key === 'budget') delete setting.overrides[budgetField];
+            else setting.overrides[key === 'budget' ? budgetField : retainField] = n;
+            session.save();
+            seal.replyToSender(ctx, msg, `已设置本会话 ${key}=${n}`);
+            return ret;
+        }
+
         const arg = (cmdArgs.getArgN(2) || '').trim();
         const sub = arg.toLowerCase();
 

@@ -568,7 +568,9 @@ function maybeShadowCompiledRequest(
             content: buildContent(message),
         }));
         const configured = Config.context.MAX_CONTEXT_TOKENS;
-        const { tokens: budget } = resolveEffectiveMaxTokens(configured, getProbedContextWindow(modelName || ''));
+        const overrideBudget = (session.setting as { overrides?: Record<string, unknown> } | undefined)?.overrides?.ctxBudgetTokens;
+        const baseBudget = typeof overrideBudget === 'number' && overrideBudget > 0 ? overrideBudget : configured;
+        const { tokens: budget } = resolveEffectiveMaxTokens(baseBudget, getProbedContextWindow(modelName || ''));
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
             budgetTokens: budget,
