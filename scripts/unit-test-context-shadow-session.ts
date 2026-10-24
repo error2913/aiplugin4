@@ -6,9 +6,11 @@ import Config from '../src/config/config';
 import { attachV2Mirror, setV2MirrorEnabled } from '../src/context/mirror';
 import { ContextService } from '../src/context/service';
 import { compareShadow, formatShadowReport } from '../src/context/shadow';
+import { clearRequestShadowReport, formatRequestShadowReport, getLastRequestShadowReport, setRequestShadowEnabled } from '../src/context/shadow';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
 import { Session } from '../src/session/session';
+import { handleMessages } from '../src/utils/message';
 
 // 本 bundle 独立注册一次配置；重复调用会因 defineProperty 不可重定义而报错
 Config.registerConfig();
@@ -103,6 +105,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             const report = compareShadow(session.context.messages, service.projection());
             assert.equal(report.equal, true, formatShadowReport(report));
+        });
+    },
+
+    async testContextRequestShadowCollect() {
+        await withShadowSession('QQ:request-shadow', async (session, service) => {
+            session.contextV2 = service;
+            await session.context.addUserMessage({} as seal.MsgContext, '请求影子问题', 'QQ:1', 'rm1');
+            session.context.addAssistantMessage('请求影子回答', 'ra1');
+            session.context.addSystemUserMessage('请求影子事件', '事件', { eventType: 'group_recall', raw: { id: 3 } });
+            const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
+            setRequestShadowEnabled(true);
+            clearRequestShadowReport();
+            try {
+                const result = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
+                const report = getLastRequestShadowReport();
+                assert.ok(result.length > 0);
+                assert.ok(report, '开启后应记录请求影子报告');
+                assert.ok(report!.legacyLines > 0);
+                assert.equal(report!.equal, true, formatRequestShadowReport(report!));
+                console.log('[request-shadow]\n' + formatRequestShadowReport(report!));
+            } finally {
+                setRequestShadowEnabled(false);
+                clearRequestShadowReport();
+            }
         });
     },
 };

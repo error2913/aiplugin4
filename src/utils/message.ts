@@ -1,7 +1,7 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
 import type { ConversationEvent } from "../context/events";
-import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled } from "../context/shadow";
+import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled, recordRequestShadowReport } from "../context/shadow";
 import type { CompiledMessage } from "../context/view/compile";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
@@ -572,6 +572,17 @@ function maybeShadowCompiledRequest(
             toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
             caps: { vision: multimodal },
+            resolveUserName: (uid: string) => {
+                const number = uid.replace(/^.+:/, '');
+                try {
+                    const name = User.get(uid).userName;
+                    return name ? `${name}(${number})` : number;
+                } catch {
+                    return number;
+                }
+            },
+            formatTime: fmtDate,
+            formatMessageId: (id: string) => id,
             estimateTextTokens,
             estimateEventTokens: (event: ConversationEvent) => {
                 const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
@@ -582,6 +593,7 @@ function maybeShadowCompiledRequest(
             },
         });
         const report = compareRequests(legacy, compiled.messages);
+        recordRequestShadowReport(report);
         if (report.equal) {
             logger.info('[context-v2] 请求影子一致');
         } else {

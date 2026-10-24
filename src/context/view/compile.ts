@@ -159,7 +159,9 @@ function fmtMsgId(options: CompileOptions, id: string): string {
 function renderUserEvent(event: ConversationEvent, options: CompileOptions, index: RecordIndex): CompiledMessage {
     const user = event as unknown as { uid?: string; at?: number; msgId?: string };
     const parts = applyEdit(event, index);
-    const prefix = `[from:${userDisplay(options, String(user.uid ?? ''))}][time:${fmtTime(options, Number(user.at ?? 0))}][msg_id:${fmtMsgId(options, String(user.msgId ?? ''))}]`;
+    const msgId = String(user.msgId ?? '');
+    const prefix = `[from:${userDisplay(options, String(user.uid ?? ''))}][time:${fmtTime(options, Number(user.at ?? 0))}]`
+        + (msgId ? `[msg_id:${fmtMsgId(options, msgId)}]` : '');
     const content = toLLM(parts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
     if (typeof content === 'string') return { role: 'user', content: prefix + content };
     return { role: 'user', content: [{ type: 'text', text: prefix }, ...content] };
@@ -167,7 +169,12 @@ function renderUserEvent(event: ConversationEvent, options: CompileOptions, inde
 
 function renderAssistantEvent(event: ConversationEvent, options: CompileOptions, index: RecordIndex): CompiledMessage {
     const parts = applyEdit(event, index);
-    const content = toLLM(parts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
+    const base = toLLM(parts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
+    const msgId = String((event as { msgId?: string }).msgId ?? '');
+    const prefix = msgId ? `[msg_id:${fmtMsgId(options, msgId)}]` : '';
+    const content = prefix
+        ? (typeof base === 'string' ? prefix + base : [{ type: 'text' as const, text: prefix }, ...base])
+        : base;
     const message: CompiledMessage = { role: 'assistant', content };
     const reasoning = (event as { reasoning?: string }).reasoning;
     if (reasoning !== undefined) message.reasoning_content = reasoning;
@@ -175,10 +182,19 @@ function renderAssistantEvent(event: ConversationEvent, options: CompileOptions,
 }
 
 function renderSystemEvent(event: ConversationEvent, options: CompileOptions, index: RecordIndex): CompiledMessage {
-    const e = event as unknown as { systemName?: string; eventType?: string; parts?: Part[]; raw?: unknown };
+    const e = event as unknown as { systemName?: string; eventType?: string; parts?: Part[]; raw?: unknown; at?: number };
     const name = e.systemName || '事件';
     const text = toLLMText(applyEdit(event, index), options.caps ?? {}, options.resolve ?? {});
-    return { role: 'user', content: `[system:${name}]${text}[/system]` };
+    const time = Number(e.at ?? 0) > 0 ? `[time:${fmtTime(options, Number(e.at))}]` : '';
+    return { role: 'user', content: `[system:${name}]${time}${text ? ' ' + text : ''} [/system]` };
+}
+
+/** 工具结果边界：与旧 buildContent 的 [tool_result:id]…[/tool_result] 对齐 */
+function wrapToolResult(callId: string, content: string | ContentBlock[]): string | ContentBlock[] {
+    const head = `[tool_result:${callId}]\n`;
+    const tail = '\n[/tool_result]';
+    if (typeof content === 'string') return head + content + tail;
+    return [{ type: 'text', text: head }, ...content, { type: 'text', text: tail }];
 }
 
 /** 渲染工具组：native=assistant tool_calls + tool 消息；PE=函数块 + 用户文本 */
@@ -198,7 +214,7 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
             const name = calls.find(c => c.id === callId)?.function.name ?? '';
             for (const result of results) {
                 const text = toLLMText(applyEdit(result, index), options.caps ?? {}, options.resolve ?? {});
-                out.push({ role: 'user', content: `【工具返回${name ? `:${name}` : ''}】\n${text}` });
+                out.push({ role: 'user', content: `【工具返回${name ? `:${name}` : ''}】${wrapToolResult(callId, text)}` });
             }
         }
         return out;
@@ -220,7 +236,7 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
         const results = resultByCallId.get(call.id) ?? [];
         for (const result of results) {
             const content = toLLM(applyEdit(result, index), options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
-            out.push({ role: 'tool', tool_call_id: call.id, content });
+            out.push({ role: 'tool', tool_call_id: call.id, content: wrapToolResult(call.id, content) });
         }
     }
     return out;

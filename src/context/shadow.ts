@@ -4,6 +4,9 @@ import type { MessageType } from "./types";
 
 let requestShadowEnabled = false;
 
+/** 最近一次请求影子的对比结果（只保留一份，调试/单测用） */
+let lastRequestShadowReport: ShadowReport | null = null;
+
 /** 请求体影子开关（默认关闭；只对比不改变返回） */
 export function setRequestShadowEnabled(value: boolean): void {
     requestShadowEnabled = value;
@@ -11,6 +14,18 @@ export function setRequestShadowEnabled(value: boolean): void {
 
 export function isRequestShadowEnabled(): boolean {
     return requestShadowEnabled;
+}
+
+export function recordRequestShadowReport(report: ShadowReport): void {
+    lastRequestShadowReport = report;
+}
+
+export function getLastRequestShadowReport(): ShadowReport | null {
+    return lastRequestShadowReport;
+}
+
+export function clearRequestShadowReport(): void {
+    lastRequestShadowReport = null;
 }
 
 export interface ShadowDiff {
