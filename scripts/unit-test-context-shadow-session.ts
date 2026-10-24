@@ -5,8 +5,8 @@ import Agent from '../src/agent/agent';
 import Config from '../src/config/config';
 import { attachV2Mirror, setV2MirrorEnabled } from '../src/context/mirror';
 import { ContextService } from '../src/context/service';
-import { compareShadow, formatShadowReport } from '../src/context/shadow';
-import { clearRequestShadowReport, formatRequestShadowReport, getLastRequestShadowReport, setRequestShadowEnabled } from '../src/context/shadow';
+import { compareRequests, compareShadow, formatShadowReport } from '../src/context/shadow';
+import { clearRequestShadowReport, formatRequestShadowReport, getLastRequestShadowReport, setRequestShadowEnabled, setRequestV2Enabled } from '../src/context/shadow';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
 import { Session } from '../src/session/session';
@@ -14,6 +14,10 @@ import { handleMessages } from '../src/utils/message';
 
 // 本 bundle 独立注册一次配置；重复调用会因 defineProperty 不可重定义而报错
 Config.registerConfig();
+// 请求影子按原生工具模式对比（PE 分支的旧路径会丢弃 tool_calls，另行处理）
+const TEST_CONFIG = (globalThis as any).__TEST_CONFIG__;
+TEST_CONFIG.boolConfigs['切换为提示词工程'] = false;
+(Config as any).cache = {};
 
 class FakeStorage {
     map = new Map<string, string>();
@@ -113,20 +117,29 @@ export const tests: Record<string, () => void | Promise<void>> = {
             session.contextV2 = service;
             await session.context.addUserMessage({} as seal.MsgContext, '请求影子问题', 'QQ:1', 'rm1');
             session.context.addAssistantMessage('请求影子回答', 'ra1');
+            session.context.addToolCallsMessage([
+                { id: 'rc1', type: 'function', function: { name: 'shadow_tool', arguments: '{}' } },
+            ] as any);
+            await session.context.addToolCallbackMessage('请求影子工具结果', 'rc1', 'shadow_tool');
             session.context.addSystemUserMessage('请求影子事件', '事件', { eventType: 'group_recall', raw: { id: 3 } });
             const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
             setRequestShadowEnabled(true);
             clearRequestShadowReport();
             try {
-                const result = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
+                const legacyResult = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
                 const report = getLastRequestShadowReport();
-                assert.ok(result.length > 0);
+                assert.ok(legacyResult.length > 0);
                 assert.ok(report, '开启后应记录请求影子报告');
                 assert.ok(report!.legacyLines > 0);
                 assert.equal(report!.equal, true, formatRequestShadowReport(report!));
-                console.log('[request-shadow]\n' + formatRequestShadowReport(report!));
+
+                setRequestV2Enabled(true);
+                const v2Result = await handleMessages({} as seal.MsgContext, session, false, undefined, system);
+                assert.equal(compareRequests(legacyResult, v2Result).equal, true, 'v2 返回应与旧请求体逐行一致');
+                assert.ok(v2Result.length > 0);
             } finally {
                 setRequestShadowEnabled(false);
+                setRequestV2Enabled(false);
                 clearRequestShadowReport();
             }
         });

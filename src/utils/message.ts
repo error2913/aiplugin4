@@ -1,7 +1,7 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
 import type { ConversationEvent } from "../context/events";
-import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled, recordRequestShadowReport } from "../context/shadow";
+import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled, isRequestV2Enabled, recordRequestShadowReport } from "../context/shadow";
 import type { CompiledMessage } from "../context/view/compile";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
@@ -549,7 +549,7 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     return messages;
 }
 
-/** 影子：把旧请求体与 v2 compileRequest 做只读对比；只记录差异，不改变返回 */
+/** 影子：把旧请求体与 v2 compileRequest 做只读对比；开启 v2 返回时返回 compile 结果 */
 function maybeShadowCompiledRequest(
     session: Session,
     system: ContextMessage,
@@ -557,8 +557,10 @@ function maybeShadowCompiledRequest(
     legacy: RequestMessage[],
     multimodal: boolean,
     tools: unknown[] | undefined,
-): void {
-    if (!isRequestShadowEnabled() || !session.contextV2) return;
+): CompiledMessage[] | null {
+    const shadow = isRequestShadowEnabled();
+    const serveV2 = isRequestV2Enabled();
+    if ((!shadow && !serveV2) || !session.contextV2) return null;
     try {
         const prefix: CompiledMessage[] = [system, ...samples].map(message => ({
             role: message.role as CompiledMessage['role'],
@@ -599,8 +601,10 @@ function maybeShadowCompiledRequest(
         } else {
             logger.warning('[context-v2] 请求影子差异：' + formatRequestShadowReport(report).slice(0, 3000));
         }
+        return serveV2 ? compiled.messages : null;
     } catch (error) {
         logger.warning('[context-v2] 请求影子构建失败: ' + (error instanceof Error ? error.message : String(error)));
+        return null;
     }
 }
 
@@ -657,8 +661,8 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
-        maybeShadowCompiledRequest(session, system, samplesMessages, peMessages, multimodal, tools);
-        return peMessages;
+        const served = maybeShadowCompiledRequest(session, system, samplesMessages, peMessages, multimodal, tools);
+        return (served ?? peMessages) as RequestMessage[];
     }
 
     // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
@@ -753,8 +757,8 @@ export async function handleMessages(
         }
         return out;
     }));
-    maybeShadowCompiledRequest(session, system, samplesMessages, finalMessages, multimodal, tools);
-    return finalMessages;
+    const served = maybeShadowCompiledRequest(session, system, samplesMessages, finalMessages, multimodal, tools);
+    return (served ?? finalMessages) as RequestMessage[];
 }
 
 export function buildContent(message: ContextMessage): string {

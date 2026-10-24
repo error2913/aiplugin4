@@ -3,6 +3,8 @@
 import type { MessageType } from "./types";
 
 let requestShadowEnabled = false;
+/** 请求路径是否直接返回 v2 compile 结果（默认关闭；用于切换演练/发布开关） */
+let requestV2Enabled = false;
 
 /** 最近一次请求影子的对比结果（只保留一份，调试/单测用） */
 let lastRequestShadowReport: ShadowReport | null = null;
@@ -14,6 +16,14 @@ export function setRequestShadowEnabled(value: boolean): void {
 
 export function isRequestShadowEnabled(): boolean {
     return requestShadowEnabled;
+}
+
+export function setRequestV2Enabled(value: boolean): void {
+    requestV2Enabled = value;
+}
+
+export function isRequestV2Enabled(): boolean {
+    return requestV2Enabled;
 }
 
 export function recordRequestShadowReport(report: ShadowReport): void {
