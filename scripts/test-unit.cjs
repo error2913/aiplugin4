@@ -36,6 +36,7 @@ const bundles = {
     contextRuntime: path.join(outDir, 'unit-context-runtime.cjs'),
     contextCommands: path.join(outDir, 'unit-context-commands.cjs'),
     contextConfig: path.join(outDir, 'unit-context-config.cjs'),
+    contextToolApi: path.join(outDir, 'unit-context-tool-api.cjs'),
     subagentContext: path.join(outDir, 'unit-subagent-context.cjs'),
 };
 
@@ -69,6 +70,7 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['contextRuntime', path.join(repo, 'scripts/unit-test-context-runtime.ts')],
         ['contextCommands', path.join(repo, 'scripts/unit-test-context-commands.ts')],
         ['contextConfig', path.join(repo, 'scripts/unit-test-context-config.ts')],
+        ['contextToolApi', path.join(repo, 'scripts/unit-test-context-tool-api.ts')],
         ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')]
     ];
     const all = {};
