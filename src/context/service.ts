@@ -171,6 +171,35 @@ export class ContextService {
         return readRaw(this.store, this.store.snapshot(), address, options);
     }
 
+    /** 最近 N 条事件（记忆桥/调试用；只读） */
+    readRecent(limit = 20): ConversationEvent[] {
+        const n = Math.max(0, Math.floor(limit));
+        return this.store.snapshot().events.slice(-Math.max(0, n));
+    }
+
+    /** 按 seq 区间读原文（记忆桥/审计用；分页参数同 read_raw） */
+    readRange(fromSeq: number, toSeq: number, options: ReadRawOptions = {}): ReadRawResult {
+        return this.readRaw(`e:${Math.max(1, Math.floor(fromSeq))}-${Math.max(1, Math.floor(toSeq))}`, options);
+    }
+
+    /**
+     * 追加通知（上下文与记忆解耦的桥接点）：只通知，不等待、不阻塞写入。
+     * listener 收到 seq > 订阅时水位 的新事件；记忆系统自己维护消费水位。
+     */
+    onAppended(listener: (batch: { events: ConversationEvent[]; cursor: number }) => void): () => void {
+        let cursor = this.store.getHead().nextSeq - 1;
+        return this.store.subscribe(snapshot => {
+            const events = snapshot.events.filter(e => e.seq > cursor).sort((a, b) => a.seq - b.seq);
+            if (events.length === 0) return;
+            cursor = Math.max(...events.map(e => e.seq));
+            try {
+                listener({ events, cursor });
+            } catch {
+                // 订阅者异常不影响上下文写入
+            }
+        });
+    }
+
     grep(pattern: string, options: GrepOptions = {}): GrepRawResult {
         return grepRaw(this.store, this.store.snapshot(), pattern, options);
     }

@@ -122,4 +122,25 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(service.shouldCompact(1), true);
         assert.equal(service.shouldCompact(0), false);
     },
+
+    async testContextServiceMemoryBridge() {
+        const service = await openService('QQ:service-7');
+        service.appendUser('QQ:1', 'm1', [{ type: 'text', text: '一' }]);
+        service.appendAssistant('a1', [{ type: 'text', text: '二' }]);
+        await service.flush();
+        const recent = service.readRecent(1);
+        assert.equal(recent.length, 1);
+        assert.equal(recent[0].kind, 'assistant');
+        const range = service.readRange(1, 2);
+        assert.equal(range.items.length, 2);
+
+        const batches: number[][] = [];
+        const off = service.onAppended(batch => batches.push(batch.events.map(e => e.seq)));
+        service.appendUser('QQ:1', 'm2', [{ type: 'text', text: '三' }]);
+        service.appendUser('QQ:1', 'm3', [{ type: 'text', text: '四' }]);
+        assert.deepEqual(batches, [[3], [4]], '每次追加通知一次，且不重复旧事件');
+        off();
+        service.appendUser('QQ:1', 'm4', [{ type: 'text', text: '五' }]);
+        assert.equal(batches.length, 2, '取消订阅后不再通知');
+    },
 };
