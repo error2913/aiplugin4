@@ -10,6 +10,9 @@ import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
 import { Session } from '../src/session/session';
 
+// 本 bundle 独立注册一次配置；重复调用会因 defineProperty 不可重定义而报错
+Config.registerConfig();
+
 class FakeStorage {
     map = new Map<string, string>();
     get(key: string): string {
@@ -35,29 +38,41 @@ function installHost(): void {
     });
 }
 
+async function withShadowSession(
+    sid: string,
+    fn: (session: Session, service: ContextService) => Promise<void>,
+): Promise<void> {
+    installHost();
+    const originalGet = Agent.get;
+    const session = new Session();
+    session.agentName = '*';
+    session.sessionId = sid;
+    session.sessionType = 'user';
+    session.context.agentName = '*';
+    session.context.sessionId = sid;
+    const fakeAgent = {
+        sessionService: { getSession: () => session },
+        chat: async () => ({ content: '' }),
+    } as any;
+    Agent.get = (() => fakeAgent) as typeof Agent.get;
+    // 强制走热态路径，避免依赖 stateOf/时间
+    (session.context as any).isColdSession = () => false;
+
+    const service = await ContextService.open(sid);
+    attachV2Mirror(session.context, service);
+    setV2MirrorEnabled(true);
+    try {
+        await fn(session, service);
+    } finally {
+        setV2MirrorEnabled(false);
+        attachV2Mirror(session.context, null);
+        Agent.get = originalGet;
+    }
+}
+
 export const tests: Record<string, () => void | Promise<void>> = {
     async testContextShadowRealSession() {
-        installHost();
-        const originalGet = Agent.get;
-        const session = new Session();
-        session.agentName = '*';
-        session.sessionId = 'QQ:shadow-session';
-        session.sessionType = 'user';
-        session.context.agentName = '*';
-        session.context.sessionId = session.sessionId;
-        const fakeAgent = {
-            sessionService: { getSession: () => session },
-            chat: async () => ({ content: '' }),
-        } as any;
-        Agent.get = (() => fakeAgent) as typeof Agent.get;
-        // 强制走热态路径，避免依赖 stateOf/时间
-        (session.context as any).isColdSession = () => false;
-        Config.registerConfig();
-
-        const service = await ContextService.open(session.sessionId);
-        attachV2Mirror(session.context, service);
-        setV2MirrorEnabled(true);
-        try {
+        await withShadowSession('QQ:shadow-session', async (session, service) => {
             await session.context.addUserMessage({} as seal.MsgContext, '你好', 'QQ:1', 'm1');
             session.context.addAssistantMessage('收到', 'a1');
             session.context.addToolCallsMessage([
@@ -68,10 +83,26 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             const report = compareShadow(session.context.messages, service.projection());
             assert.equal(report.equal, true, formatShadowReport(report));
-        } finally {
-            setV2MirrorEnabled(false);
-            attachV2Mirror(session.context, null);
-            Agent.get = originalGet;
-        }
+        });
+    },
+
+    async testContextShadowMultiTurnAndTools() {
+        await withShadowSession('QQ:shadow-multi', async (session, service) => {
+            // 连续 user：旧 Context 合并为一个 user 消息；v2 也合并为同一请求单元
+            await session.context.addUserMessage({} as seal.MsgContext, '第一句', 'QQ:1', 'm1');
+            await session.context.addUserMessage({} as seal.MsgContext, '第二句', 'QQ:2', 'm2');
+            session.context.addAssistantMessage('回复一', 'a1');
+            session.context.addAssistantMessage('回复二', 'a2');
+            session.context.addToolCallsMessage([
+                { id: 'c1', type: 'function', function: { name: 'f', arguments: '{"x":1}' } },
+                { id: 'c2', type: 'function', function: { name: 'g', arguments: '{}' } },
+            ] as any);
+            await session.context.addToolCallbackMessage('结果一', 'c1', 'f');
+            await session.context.addToolCallbackMessage('结果二', 'c2', 'g');
+            session.context.addSystemUserMessageTracked('事件正文', '事件', { eventType: 'group_recall', raw: { id: 2 } });
+
+            const report = compareShadow(session.context.messages, service.projection());
+            assert.equal(report.equal, true, formatShadowReport(report));
+        });
     },
 };
