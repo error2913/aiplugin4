@@ -1,5 +1,8 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
+import type { ConversationEvent } from "../context/events";
+import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled } from "../context/shadow";
+import type { CompiledMessage } from "../context/view/compile";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
@@ -546,6 +549,49 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     return messages;
 }
 
+/** 影子：把旧请求体与 v2 compileRequest 做只读对比；只记录差异，不改变返回 */
+function maybeShadowCompiledRequest(
+    session: Session,
+    system: ContextMessage,
+    samples: ContextMessage[],
+    legacy: RequestMessage[],
+    multimodal: boolean,
+    tools: unknown[] | undefined,
+): void {
+    if (!isRequestShadowEnabled() || !session.contextV2) return;
+    try {
+        const prefix: CompiledMessage[] = [system, ...samples].map(message => ({
+            role: message.role as CompiledMessage['role'],
+            content: buildContent(message),
+        }));
+        const configured = Config.context.MAX_CONTEXT_TOKENS;
+        const budget = configured > 0 ? configured : 1_000_000;
+        const compiled = session.contextV2.compile({
+            prefixMessages: prefix,
+            budgetTokens: budget,
+            toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
+            mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
+            caps: { vision: multimodal },
+            estimateTextTokens,
+            estimateEventTokens: (event: ConversationEvent) => {
+                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
+                let chars = 0;
+                for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
+                if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
+                return Math.max(1, Math.ceil(chars / 3)) + 4;
+            },
+        });
+        const report = compareRequests(legacy, compiled.messages);
+        if (report.equal) {
+            logger.info('[context-v2] 请求影子一致');
+        } else {
+            logger.warning('[context-v2] 请求影子差异：' + formatRequestShadowReport(report).slice(0, 3000));
+        }
+    } catch (error) {
+        logger.warning('[context-v2] 请求影子构建失败: ' + (error instanceof Error ? error.message : String(error)));
+    }
+}
+
 export async function handleMessages(
     ctx: seal.MsgContext,
     session: Session,
@@ -570,7 +616,7 @@ export async function handleMessages(
     // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
     // 工具结果转成 user 文本（带【工具返回】标记），保证模型能看到结果而不会反复调用工具
     if (Config.tool.PROMPT_ENGINEERING) {
-        return await Promise.all(messages.map(async message => {
+        const peMessages = await Promise.all(messages.map(async message => {
             if (message.role === 'tool') {
                 // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记
                 const toolName = (message as ContextMessage).toolName;
@@ -599,6 +645,8 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
+        maybeShadowCompiledRequest(session, system, samplesMessages, peMessages, multimodal, tools);
+        return peMessages;
     }
 
     // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
@@ -666,7 +714,7 @@ export async function handleMessages(
         if (!adjacent) messages.splice(i, 1);
     }
 
-    return await Promise.all(messages.map(async message => {
+    const finalMessages = await Promise.all(messages.map(async message => {
         const out: RequestMessage = {
             role: message.role,
             content: message.role === 'tool'
@@ -693,6 +741,8 @@ export async function handleMessages(
         }
         return out;
     }));
+    maybeShadowCompiledRequest(session, system, samplesMessages, finalMessages, multimodal, tools);
+    return finalMessages;
 }
 
 export function buildContent(message: ContextMessage): string {

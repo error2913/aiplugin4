@@ -2,6 +2,17 @@
 // 只做只读归一/比较，不修改任何数据。
 import type { MessageType } from "./types";
 
+let requestShadowEnabled = false;
+
+/** 请求体影子开关（默认关闭；只对比不改变返回） */
+export function setRequestShadowEnabled(value: boolean): void {
+    requestShadowEnabled = value;
+}
+
+export function isRequestShadowEnabled(): boolean {
+    return requestShadowEnabled;
+}
+
 export interface ShadowDiff {
     index: number;
     legacy: string | null;

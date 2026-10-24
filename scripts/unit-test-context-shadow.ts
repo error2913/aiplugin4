@@ -1,7 +1,7 @@
 // 影子对比单测：旧 messages 与 v2 projection 的规范化行一致/差异报告。
 import assert from 'node:assert/strict';
 
-import { compareRequests, compareShadow, formatRequestShadowReport, formatShadowReport, legacyLines, requestLines } from '../src/context/shadow';
+import { compareRequests, compareShadow, formatRequestShadowReport, formatShadowReport, isRequestShadowEnabled, legacyLines, requestLines, setRequestShadowEnabled } from '../src/context/shadow';
 import { mirrorAssistant, mirrorSystem, mirrorToolCalls, mirrorToolResult, mirrorUser } from '../src/context/mirror';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
@@ -86,6 +86,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(lines[2], 'tool_call:c1:f:{}');
         assert.equal(lines[3], 'tool:c1:结果');
         assert.equal(lines[4], 'system:事件:撤回');
+    },
+
+    testContextShadowRequestFlag() {
+        assert.equal(isRequestShadowEnabled(), false, '默认关闭，不影响生产请求');
+        setRequestShadowEnabled(true);
+        assert.equal(isRequestShadowEnabled(), true);
+        setRequestShadowEnabled(false);
+        assert.equal(isRequestShadowEnabled(), false);
     },
 
     testContextShadowRequestLinesAndCompare() {
