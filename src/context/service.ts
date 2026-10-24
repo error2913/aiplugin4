@@ -46,6 +46,11 @@ export class ContextService {
         return new ContextService(sessionId, store);
     }
 
+    /** 同步打开：Session 恢复路径（存储读取本身是同步的） */
+    static openSync(sessionId: string, options: ContextServiceOptions = {}): ContextService {
+        return new ContextService(sessionId, ContextStore.openSync(sessionId, options));
+    }
+
     getStore(): ContextStore {
         return this.store;
     }

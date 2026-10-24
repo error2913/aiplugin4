@@ -1,5 +1,8 @@
 // 会话服务：会话的创建/复活/保存与 getSession 入口
 import { Context } from "../context/context";
+import { ConversationEvent } from "../context/events";
+import { isMigrated, migrateLegacySession } from "../context/migrate/persist";
+import { ContextService } from "../context/service";
 import { getHost } from "../core/host";
 import { getAgent } from "../core/ports/agent_registry";
 import { logger } from "../logger";
@@ -72,6 +75,39 @@ export class SessionService {
             if (session.memory) {
                 session.memory.agentName = session.agentName;
                 session.memory.sessionId = session.sessionId;
+            }
+            // Context v2：旧会话首次打开时惰性迁移（只写新键，不改旧 messages）；随后挂载只读门面。
+            // 旧 Context 仍是本轮行为的权威；P2 切换后逐步改为直接写 v2。
+            try {
+                if (!session.sessionId) {
+                    session.contextV2 = null;
+                } else {
+                    if (session.context.messages.length > 0 && !isMigrated(session.sessionId)) {
+                        migrateLegacySession(session.sessionId, {
+                            messages: session.context.messages as unknown as import("../context/migrate/v1").LegacyContextLike['messages'],
+                            archiveSeq: (session.context as unknown as { archiveSeq?: number }).archiveSeq,
+                            rawSeq: (session.context as unknown as { rawSeq?: number }).rawSeq,
+                            settledSeq: (session.context as unknown as { settledSeq?: number }).settledSeq,
+                        }, {
+                            parseText: (text) => {
+                                // 迁移期保留标签文本即可；内容解析在 P2 接线时走 content/text_parse
+                                return [{ type: 'text', text }];
+                            },
+                            estimateEventTokens: (event: ConversationEvent) => {
+                                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts;
+                                if (!parts) return 8;
+                                let chars = 0;
+                                for (const part of parts) if (part.type === 'text') chars += String(part.text || '').length;
+                                return Math.max(1, Math.ceil(chars / 3));
+                            },
+                        });
+                        logger.info(`会话${session.sessionId}已迁移到 Context v2（旧 messages 保留）`);
+                    }
+                    session.contextV2 = ContextService.openSync(session.sessionId);
+                }
+            } catch (error) {
+                session.contextV2 = null;
+                logger.error(`初始化会话${session.sessionId}的 Context v2 失败（旧上下文继续可用）: ${error}`);
             }
             this.sessionMap[sessionId] = session;
         }

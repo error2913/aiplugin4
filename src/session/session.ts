@@ -5,6 +5,7 @@ import type Agent from "../agent/agent";
 import { streamService } from "../agent/stream";
 import Config from "../config/config";
 import { Context } from "../context/context";
+import type { ContextService } from "../context/service";
 import { getAgent } from "../core/ports/agent_registry";
 import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
@@ -90,6 +91,8 @@ export class Session {
     sessionType: SessionType;
     state: State;
     context: Context;
+    /** Context v2 只读门面（P2 过渡：旧 context 仍是权威；新代码逐步改用这里） */
+    contextV2: ContextService | null;
     memory: SessionMemoryService;
     setting: Setting;
     stream: {
@@ -179,6 +182,7 @@ export class Session {
             impression: '',
         };
         this.context = new Context();
+        this.contextV2 = null;
         this.setting = new Setting();
         this.stream = {
             id: '',

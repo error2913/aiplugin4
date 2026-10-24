@@ -120,7 +120,7 @@ export class ContextStore {
      * 打开会话：读 head → 采纳 head 之后已写页（崩溃恢复）→ 加载最近事件页与全部记录页。
      * 没有任何 v2 数据时返回空 store（迁移由上层负责，不能在这里自动迁移）。
      */
-    static async open(sessionId: string, opts: ContextStoreOptions = {}): Promise<ContextStore> {
+    static openSync(sessionId: string, opts: ContextStoreOptions = {}): ContextStore {
         const stored = loadHead(sessionId);
         const store = new ContextStore(sessionId, stored ?? createEmptyHead(), opts);
 
@@ -157,6 +157,10 @@ export class ContextStore {
         store.events.sort((a, b) => a.seq - b.seq);
         store.version++;
         return store;
+    }
+
+    static async open(sessionId: string, opts: ContextStoreOptions = {}): Promise<ContextStore> {
+        return ContextStore.openSync(sessionId, opts);
     }
 
     private adoptEvents(events: readonly ConversationEvent[]): void {
