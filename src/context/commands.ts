@@ -1,18 +1,10 @@
-// `.ai ctx` 命令的纯逻辑层：解析参数、执行、返回短文本。
-// 命令注册/权限/回复投递在 cmd 层；这里只依赖 ContextService / admin / runtime，便于单测。
+// `.ai ctx` 命令逻辑：解析、执行、用户可读短文本。
+// 只依赖 ContextService/admin/运行时；权限与回复投递在 cmd 层。
 import { contextStats, hideEvents, HideTarget, purgeSession, repairHead } from "./admin";
 import type { CompactionRuntime } from "./compact/runtime";
 import type { ContextService } from "./service";
 
-export type CtxAction =
-    | 'status'
-    | 'archive'
-    | 'hide'
-    | 'purge'
-    | 'set'
-    | 'name'
-    | 'repair'
-    | 'help';
+export type CtxAction = 'status' | 'archive' | 'hide' | 'purge' | 'set' | 'name' | 'repair' | 'help';
 
 export interface ParsedCtxCommand {
     action: CtxAction;
@@ -21,31 +13,66 @@ export interface ParsedCtxCommand {
     budget?: number;
     retain?: number;
     nameArgs?: string[];
+    helpTopic?: string;
     error?: string;
 }
 
-const HIDE_TARGETS: readonly HideTarget[] = ['user', 'assistant', 'all'];
+export interface CtxSessionLike {
+    setting?: { overrides?: Record<string, unknown> };
+    save?(): void;
+    context: {
+        autoNameMod: number;
+        userInfoList: Array<{ id: string; name: string }>;
+        setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card'): Promise<void>;
+    };
+}
 
-/** 解析 `.ai ctx ...` 的参数（不含 `ctx` 本身）；空=status */
+const HIDE_TARGETS: readonly HideTarget[] = ['user', 'assistant', 'all'];
+const HIDE_LABEL: Record<HideTarget, string> = { user: '用户消息', assistant: 'AI 回复与工具记录', all: '全部消息' };
+
+const HELP = [
+    '用法：.ai ctx [子命令]',
+    '  （无参数）              查看上下文状态',
+    '  archive                 整理更早内容（保留原文，可回查）',
+    '  hide [user|assistant|all]  隐藏消息（原文保留，可审计）',
+    '  purge --yes             清除本会话上下文（不可恢复，仅骰主）',
+    '  set budget=<tokens> retain=<百分比>  本会话预算/保留强度（仅邀请者）',
+    '  name status|set nick|card|mod <0-2>  上下文名字（仅邀请者）',
+    '  repair                  检查并修复上下文索引',
+    '  help [子命令]           查看帮助',
+].join('\n');
+
+export function ctxHelpText(): string {
+    return HELP;
+}
+
+const TOPIC_HELP: Record<string, string> = {
+    status: '【.ai ctx status】查看当前上下文消息数、整理进度与最近一次整理结果。',
+    archive: '【.ai ctx archive】立即整理更早内容；只生成摘要，不删除原文，不写长期记忆。',
+    hide: '【.ai ctx hide [user|assistant|all]】隐藏消息：模型与检索不可见，原文保留供审计。',
+    purge: '【.ai ctx purge --yes】物理清除本会话上下文，不可恢复；需要骰主并显式加 --yes。默认不影响长期记忆。',
+    set: '【.ai ctx set budget=<tokens> retain=<百分比>】本会话覆盖预算/保留强度；budget=0 表示跟随模型窗口。',
+    name: '【.ai ctx name status】查看名字；【.ai ctx name set nick|card】按昵称/群名片更新；【.ai ctx name mod 0|1|2】自动修改规则。',
+    repair: '【.ai ctx repair】检查并修复上下文索引（异常时使用）。',
+};
+
 export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
     const argv = (args || []).map(a => String(a || '').trim()).filter(Boolean);
     if (argv.length === 0) return { action: 'status' };
     const head = argv[0].toLowerCase();
     const rest = argv.slice(1);
+    if (head === 'help' || head === '-h' || head === '--help') return { action: 'help', helpTopic: rest[0]?.toLowerCase() };
+    if (rest[0]?.toLowerCase() === 'help') return { action: 'help', helpTopic: head };
     if (head === 'status') return { action: 'status' };
     if (head === 'archive' || head === 'settle') return { action: 'archive' };
     if (head === 'repair') return { action: 'repair' };
-    if (head === 'help' || head === '-h' || head === '--help') return { action: 'help' };
     if (head === 'hide') {
         const raw = (rest[0] || 'all').toLowerCase();
         const target = (HIDE_TARGETS as readonly string[]).includes(raw) ? raw as HideTarget : null;
-        if (!target) return { action: 'help', error: `hide 目标只能是 ${HIDE_TARGETS.join('/')}` };
+        if (!target) return { action: 'help', error: `hide 只能选择 ${HIDE_TARGETS.join('/')}` };
         return { action: 'hide', target };
     }
-    if (head === 'purge') {
-        const confirmed = rest.includes('--yes') || rest.includes('-y');
-        return { action: 'purge', confirmed };
-    }
+    if (head === 'purge') return { action: 'purge', confirmed: rest.includes('--yes') || rest.includes('-y') };
     if (head === 'set') {
         let budget: number | undefined;
         let retain: number | undefined;
@@ -56,19 +83,20 @@ export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
             if (m[1].toLowerCase() === 'budget') budget = value;
             else retain = value;
         }
-        if (budget === undefined && retain === undefined) {
-            return { action: 'help', error: 'set 需要 budget=<token> 或 retain=<百分比>' };
-        }
+        if (budget === undefined && retain === undefined) return { action: 'help', error: 'set 需要 budget=<tokens> 或 retain=<百分比>' };
         return { action: 'set', budget, retain };
     }
     if (head === 'name') return { action: 'name', nameArgs: rest };
-    return { action: 'help', error: `未知子命令: ${head}` };
+    return { action: 'help', error: `未知子命令：${head}` };
 }
 
 export interface CtxCommandInput {
     sessionId: string;
     service: ContextService;
     args: readonly string[];
+    session?: CtxSessionLike;
+    epId?: string;
+    gid?: string;
     runtime?: CompactionRuntime | null;
     now?: () => number;
 }
@@ -79,97 +107,115 @@ export interface CtxCommandResult {
     needsConfirm?: boolean;
 }
 
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes}B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+function helpText(topic?: string, error?: string): string {
+    const body = topic && TOPIC_HELP[topic] ? TOPIC_HELP[topic] : HELP;
+    return error ? `${error}\n\n${body}` : body;
 }
 
-/** 状态短文本：不输出原文/列表 */
+/** 状态：只给用户需要的信息，不暴露 seq/epoch/页数等内部结构 */
 export function formatCtxStatus(input: CtxCommandInput): string {
     const stats = contextStats(input.service.getStore());
-    const lines = [
-        `上下文 v2：事件 ${stats.events}（seq ${stats.firstSeq}-${stats.lastSeq}，epoch ${stats.epoch}）`,
-        `记录 ${stats.records} · 页 ${stats.pages}+${stats.recordPages} · 体积 ${formatBytes(stats.bytesTotal)}`,
-        `已摘要至 seq ${stats.summarizedThrough} · 未摘要约 ${stats.unsummarizedTokens} token`,
-    ];
-    if (stats.legacy) lines.push('旧版分片：有（只读兼容）');
+    const lines = [`上下文：共 ${stats.events} 条消息`];
+    lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
+    if (stats.unsummarizedTokens > 0) lines.push(`待整理：约 ${stats.unsummarizedTokens} token`);
     const last = input.runtime?.getLastResult();
     if (last) {
-        const when = last.ran ? (last.advanced ? '成功' : `跳过(${last.reason ?? '未知'})`) : `跳过(${last.reason ?? '未知'})`;
-        lines.push(`最近整理：${when}`);
+        lines.push(`最近整理：${last.advanced ? '成功' : '未完成'}`);
     }
+    lines.push('提示：.ai ctx help 查看全部用法');
     return lines.join('\n');
 }
 
-const HELP_TEXT = [
-    '用法：.ai ctx [status|archive|hide|purge|set|name|repair]',
-    '  status                    查看上下文体积/积压（短）',
-    '  archive                   立即生成/刷新摘要（不删原文，不写记忆）',
-    '  hide [user|assistant|all] 逻辑遗忘（原文保留，模型/召回不可见）',
-    '  purge --yes               物理清除本会话上下文（不可恢复）',
-    '  set budget=<tokens> retain=<百分比>  会话级覆盖（待接线）',
-    '  name ...                  上下文名字规则（待接线）',
-    '  repair                    检查并修复 head',
-].join('\n');
+async function setNameForAll(input: CtxCommandInput, mode: 'nickname' | 'card'): Promise<CtxCommandResult> {
+    const session = input.session;
+    if (!session) return { text: '当前会话不支持名字设置' };
+    const names = session.context.userInfoList;
+    await Promise.all(names.map(ui => session.context.setName(input.epId ?? '', input.gid ?? '', ui.id, mode)));
+    const after = session.context.userInfoList.map(ui => `${ui.name}(${ui.id})`).join('\n');
+    return { text: `已按${mode === 'nickname' ? '昵称' : '群名片'}更新上下文名字：\n${after}`, changed: true };
+}
 
-/**
- * 执行 `.ai ctx`。权限（admin）由 cmd 层判断；purge 需要显式 --yes。
- */
+async function runName(input: CtxCommandInput, args: string[]): Promise<CtxCommandResult> {
+    const session = input.session;
+    if (!session) return { text: '当前会话不支持名字设置' };
+    const sub = (args[0] ?? 'status').toLowerCase();
+    if (sub === 'status') {
+        const names = session.context.userInfoList.map(ui => `${ui.name}(${ui.id})`).join('\n') || '（暂无）';
+        const mode = session.context.autoNameMod === 0 ? '不自动修改' : (session.context.autoNameMod === 1 ? '自动改为昵称' : '自动改为群名片');
+        return { text: `上下文名字：\n${names}\n自动修改：${mode}` };
+    }
+    if (sub === 'set') {
+        const mode = (args[1] ?? '').toLowerCase();
+        if (mode !== 'nick' && mode !== 'nickname' && mode !== 'card') return { text: helpText('name') };
+        return setNameForAll(input, mode === 'card' ? 'card' : 'nickname');
+    }
+    if (sub === 'mod') {
+        const mod = Number(args[1]);
+        if (![0, 1, 2].includes(mod)) return { text: helpText('name') };
+        session.context.autoNameMod = mod;
+        session.save?.();
+        return { text: `已设置：${mod === 0 ? '不自动修改' : mod === 1 ? '自动改为昵称' : '自动改为群名片'}`, changed: true };
+    }
+    return { text: helpText('name') };
+}
+
+function runSet(input: CtxCommandInput, parsed: ParsedCtxCommand): CtxCommandResult {
+    const session = input.session;
+    if (!session) return { text: '当前会话不支持设置' };
+    if (!session.setting) session.setting = {};
+    if (!session.setting.overrides) session.setting.overrides = {};
+    if (parsed.budget !== undefined) {
+        if (parsed.budget < 0) return { text: 'budget 必须是非负整数（0=跟随模型窗口）' };
+        if (parsed.budget === 0) delete session.setting.overrides.ctxBudgetTokens;
+        else session.setting.overrides.ctxBudgetTokens = parsed.budget;
+    }
+    if (parsed.retain !== undefined) {
+        if (parsed.retain < 1 || parsed.retain > 100) return { text: 'retain 必须是 1-100 的整数' };
+        session.setting.overrides.ctxRetainPercent = parsed.retain;
+    }
+    session.save?.();
+    return { text: '已更新本会话上下文设置', changed: true };
+}
+
 export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandResult> {
     const parsed = parseCtxCommand(input.args);
     switch (parsed.action) {
         case 'status':
             return { text: formatCtxStatus(input) };
         case 'help':
-            return { text: parsed.error ? `${parsed.error}\n${HELP_TEXT}` : HELP_TEXT };
+            return { text: helpText(parsed.helpTopic, parsed.error) };
         case 'archive': {
-            if (!input.runtime) return { text: '归档不可用：未配置摘要器/运行时' };
+            if (!input.runtime) return { text: '暂时无法整理：摘要服务不可用' };
             const result = await input.runtime.archiveNow();
-            if (!result.advanced) {
-                return { text: `本次未生成摘要：${result.reason ?? '无新增内容'}` };
-            }
-            return {
-                text: `已整理：摘要至 seq ${result.through ?? '?'}（原文保留，可用 read_raw 回查）`,
-                changed: true,
-            };
+            return result.advanced
+                ? { text: '已整理更早内容；原文仍然保留，可随时回查', changed: true }
+                : { text: `本次没有需要整理的内容${result.reason ? `（${result.reason}）` : ''}` };
         }
         case 'hide': {
-            hideEvents(input.service.getStore(), parsed.target ?? 'all', input.now ? input.now() : undefined);
+            const target = parsed.target ?? 'all';
+            hideEvents(input.service.getStore(), target, input.now ? input.now() : undefined);
             const flushed = await input.service.flush();
             return {
-                text: flushed.ok
-                    ? `已逻辑遗忘 ${parsed.target ?? 'all'}：模型与检索不可见，原文仍保留`
-                    : `已记录遗忘，但落盘失败：${flushed.error ?? 'unknown'}`,
+                text: flushed.ok ? `${HIDE_LABEL[target]}已隐藏（原文保留，供审计）` : '已记录隐藏，但保存失败，请稍后重试',
                 changed: true,
             };
         }
         case 'purge': {
             if (!parsed.confirmed) {
-                return {
-                    text: `将物理清除本会话全部上下文（事件/记录/blob/旧分片，不可恢复；默认不动长期记忆）。\n确认请发送：.ai ctx purge --yes`,
-                    needsConfirm: true,
-                };
+                return { text: '将清除本会话全部上下文，且不可恢复（不影响长期记忆）。\n确认请发送：.ai ctx purge --yes', needsConfirm: true };
             }
-            const head = input.service.head();
-            const result = purgeSession(input.sessionId, head);
-            return {
-                text: `已清除：事件页 ${result.clearedEventPages}、记录页 ${result.clearedRecordPages}、blob ${result.clearedBlobs}、旧分片 ${result.clearedLegacyShards}；已切换到 epoch ${result.head.epoch}`,
-                changed: true,
-            };
+            purgeSession(input.sessionId, input.service.head());
+            return { text: '已清除本会话上下文；长期记忆不受影响', changed: true };
         }
         case 'repair': {
             const head = repairHead(input.sessionId);
-            return {
-                text: head ? `head 已检查/修复：epoch ${head.epoch}，页 ${head.nextPageNo}，seq ${head.nextSeq}` : 'head 不存在或无法修复',
-                changed: !!head,
-            };
+            return { text: head ? '上下文索引正常（已检查并修复）' : '上下文索引不存在或无法修复', changed: !!head };
         }
         case 'set':
-            return { text: '会话级覆盖（budget/retain）需等 P2 正式切换后接入；当前未改动。' };
+            return runSet(input, parsed);
         case 'name':
-            return { text: '名字规则（name status/set/mod）需等 P2 正式切换后接入；当前未改动。' };
+            return runName(input, parsed.nameArgs ?? []);
         default:
-            return { text: HELP_TEXT };
+            return { text: HELP };
     }
 }

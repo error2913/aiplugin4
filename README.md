@@ -60,7 +60,7 @@
 ### 4. 设置触发与角色
 
 - 在「消息触发」分组中修改「触发正则表达式」，改为你希望的触发方式（默认示例为 @ 骰娘，可直接替换）；
-- 在「角色设定」分组中修改「角色设定」，决定 AI 扮演的角色（`roles[].name` 为名称，可用 `.ai role <名称>` 切换；`prompt` 为设定内容）。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成后粘贴。「上下文」分组可调整「预设上下文」「上下文预算」「保留强度」「摘要水位」等 Context v2 参数。
+- 在「角色设定」分组中修改「角色设定」，决定 AI 扮演的角色（`roles[].name` 为名称，可用 `.ai role <名称>` 切换；`prompt` 为设定内容）。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成后粘贴。「上下文」分组可调整「预设上下文」「上下文预算」「保留强度」「摘要水位」等上下文参数。
 
 ### 5. 开始对话
 
@@ -336,7 +336,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 上下文
 
-> Context v2：上下文是只追加的事件账本；压缩只生成滚动摘要、不删除原文，模型可用 read_raw 回查。
+> 上下文采用只追加账本；压缩只生成摘要、不删除原文，模型可用 read_raw 回查。
 
 | 设置项 | 说明 |
 |:---:|:---|
@@ -562,7 +562,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ## 💻 完整命令手册
 
-根命令为 `.ai`（`AI` 大写同样注册），子命令支持别名（如 `priv→privilege`、`ses→session`、`st→set`、`ck→check`、`clr→clear`、`sb→standby`、`fgt→forget`、`memo→memory`、`tk→token`、`img→image`、`ign→ignore`），列表类命令支持 `--page=<数字>`（别名 `--p`）翻页。
+根命令为 `.ai`（`AI` 大写同样注册），子命令支持别名（如 `priv→privilege`、`ses→session`、`st→set`、`ck→check`、`clr→clear`、`sb→standby`、`memo→memory`、`tk→token`、`img→image`、`ign→ignore`），列表类命令支持 `--page=<数字>`（别名 `--p`）翻页。
 
 ### 管理员命令
 
@@ -585,22 +585,21 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
 | `.ai status` | - | 查看当前会话设置 |
-| `.ai ctx` | - | 查看 Context v2 短状态：事件数/记录页/体积/已摘要水位/积压/最近整理结果 |
+| `.ai ctx` | - | 查看上下文状态：消息数、整理进度与最近一次整理结果 |
 | `.ai ctx archive` | - | 立即生成/刷新滚动摘要；不删原文、不写长期记忆 |
-| `.ai ctx hide [user\|assistant\|all]` | `.ai ctx hide assistant` | 逻辑遗忘（原文保留，模型/检索不可见；审计走后续 WebUI） |
-| `.ai ctx purge --yes` | - | 物理清除本会话上下文（不可恢复；仅骰主；默认不动长期记忆） |
-| `.ai ctx repair` | - | 检查/修复 ContextHead |
-| `.ai ctxset [budget=<token>\|retain=<百分比>]` / `.ai ctxset clr` | `.ai ctxset budget=100000` | 按会话覆盖上下文预算/保留强度（需邀请者以上）；`clr` 清除；旧 window/cold/truncate 已废弃 |
+| `.ai ctx hide [user\|assistant\|all]` | `.ai ctx hide assistant` | 隐藏消息（原文保留，可审计；不影响长期记忆） |
+| `.ai ctx purge --yes` | - | 清除本会话上下文（不可恢复；仅骰主；不影响长期记忆） |
+| `.ai ctx repair` | - | 检查/修复上下文索引 |
+| `.ai ctx set [budget=<token>\|retain=<百分比>]` | `.ai ctx set budget=100000` | 按会话覆盖上下文预算/保留强度（需邀请者以上）；budget=0 表示跟随模型窗口 |
 | `.ai live` / `.ai live all` | `.ai live` | 查看会话实时运行状态：`.ai live` 查看当前会话(流式/运行/排队/定时器)；`.ai live all` 查看全局活跃会话总览(仅骰主) |
 | `.ai help <子指令>` / `.ai <子指令> help` | `.ai help tool` | 查看子命令帮助；`.ai <子指令> help` 带更多参数时交由子命令自身处理（如 `.ai tool help <函数名>`） |
-| `.ai ctxn status` | - | 查看上下文中的名字与自动修改状态 |
-| `.ai ctxn set [nick/card]` | - | 将上下文中的名字设置为昵称/群名片 |
-| `.ai ctxn mod <0\|1\|2>` | - | 自动修改上下文中的名字：0 不修改，1 昵称，2 群名片 |
+| `.ai ctx name status` | - | 查看上下文中的名字与自动修改状态 |
+| `.ai ctx name set [nick/card]` | - | 将上下文中的名字设置为昵称/群名片 |
+| `.ai ctx name mod <0\|1\|2>` | - | 自动修改上下文中的名字：0 不修改，1 昵称，2 群名片 |
 | `.ai on` / `.ai on --r` | - | 开启 AI：非指令正则触发默认随之开启；`.ai off --r` 仅关闭正则触发，`.ai on` 重新开启 |
 | `.ai on [--r --j --c=<条> --t=<秒> --p=<%> --a=<开始-结束-次数>]` | `.ai on --c=10 --t=60` | 开启 AI：--r 开启非指令正则触发，--j 开启评分触发（评分智能体判断是否插话），--c/--t/--p/--a 开启计数器/计时器/概率/活跃时间段模式，不带参数仅开启非指令正则触发 |
 | `.ai standby [on/off]` | `.ai standby off` | 待机模式：仅录入上下文不主动发言，非指令关键词触发才发言；`off` 仅关闭待机、保留其它触发模式（适合只播报不读群消息） |
 | `.ai off [--r/--j/--c/--t/--p/--a/--sb]` | `.ai off --t` | 关闭 AI（含非指令正则触发），加参数只关闭对应模式（`--sb` 仅关闭待机） |
-| `.ai fgt [assistant/user] [--all]` | `.ai fgt --all` | 遗忘当前上下文（Context v2：assistant/user 为逻辑遗忘，原文保留；不带参数或 `--all` 为物理清除本会话上下文；均不影响已沉淀的长期记忆） |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
 | `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）与连接状态；`.ai model list` 读加载/最近一次拉取到内存的模型列表（不联网，按连接序号分组）；`.ai model pull` 立即重拉全部连接并展示（无视 `models` 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选（按取用顺序编号）；`.ai model <用途> <模型>` 设为该用途的**运行时覆盖**（支持编号 / 模型 id / 模型名，优先级最高、存插件存储）。模型类型在「模型配置」里用 `kind` 声明（text/vision/embed/gen/tts） |
 | `.ai balance` | - | 并发查询全部（非忽略）连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接的 `request` 里配置 `balance_url` + `balance_json_path` 后查询 |
@@ -806,7 +805,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 - 模型不支持 QQ 图床时，把「识别图片时将url转换为base64」设为「总是」或「自动」；
 - 图片转文字依赖视觉模型：先在「模型配置」里给视觉模型显式写 `"kind": "vision"`（⚠️ 视觉**不再**按模型名自动识别），再用 `.ai model image-understanding <模型>` 绑定；
 - **图片直链失效不会再卡死会话**：QQ 直链 rkey 过期时（图床返回 `download url has expired`，后端与模型都拿不到图），插件会把这些图片降级为 `[img:ID]` 文本标签、不再产生 image_url，模型也就不会因「下载图片失败」整轮 400 而静默不回复；日志出现 `图片xxx的URL已确认不可用` 或 `[model-error] 模型无法下载上下文图片` 属正常兜底；
-- 若**历史上下文**里已有坏图片（旧版本遗留）导致该会话一直不回复，执行 `.ai forget` 清上下文即可恢复。
+- 若**历史上下文**里已有坏图片（旧版本遗留）导致该会话一直不回复，执行 `.ai ctx purge --yes` 清除上下文即可恢复。
 
 **HTTP 请求出错**
 
@@ -859,5 +858,6 @@ Permission is hereby granted...
 - QQ交流群: 143412516
 
 > "才、才不是专门给你写的文档呢！只是...只是顺便而已！(///ω///)" —— 正确·改
+
 
 

@@ -2,7 +2,6 @@
 import { Context } from "../context/context";
 import { ConversationEvent } from "../context/events";
 import { isMigrated, migrateLegacySession } from "../context/migrate/persist";
-import { attachV2Mirror } from "../context/mirror";
 import { ContextService } from "../context/service";
 import { getHost } from "../core/host";
 import { getAgent } from "../core/ports/agent_registry";
@@ -110,9 +109,7 @@ export class SessionService {
                 session.contextV2 = null;
                 logger.error(`初始化会话${session.sessionId}的 Context v2 失败（旧上下文继续可用）: ${error}`);
             }
-            // 受控镜像：默认关闭；开启后旧写入会同步为 v2 事件（切换前校验用）
-            attachV2Mirror(session.context, session.contextV2);
-            // P2：接入后写入/读取改走 v2；projection 供旧消费者过渡读取
+            // 接入后写入/读取改走 v2；projection 供旧消费者过渡读取
             session.context.initV2(session.contextV2);
             this.sessionMap[sessionId] = session;
         }

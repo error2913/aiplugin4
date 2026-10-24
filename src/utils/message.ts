@@ -12,7 +12,6 @@ import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
-import { compareRequests, formatRequestShadowReport, isRequestShadowEnabled, isRequestV2Enabled, recordRequestShadowReport } from "./request_shadow";
 import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./timeout";
 
@@ -549,19 +548,16 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     return messages;
 }
 
-/** 影子：把旧请求体与 v2 compileRequest 做只读对比；开启 v2 返回时返回 compile 结果 */
-function maybeShadowCompiledRequest(
+/** 用 Context v2 编译本轮请求；未接入 v2 返回 null（走旧路径） */
+function compileV2Request(
     session: Session,
     system: ContextMessage,
     samples: ContextMessage[],
-    legacy: RequestMessage[],
     multimodal: boolean,
     tools: unknown[] | undefined,
     modelName: string | undefined,
 ): CompiledMessage[] | null {
-    const shadow = isRequestShadowEnabled();
-    const serveV2 = isRequestV2Enabled() || !!session.contextV2;
-    if ((!shadow && !serveV2) || !session.contextV2) return null;
+    if (!session.contextV2) return null;
     try {
         const prefix: CompiledMessage[] = [system, ...samples].map(message => ({
             role: message.role as CompiledMessage['role'],
@@ -622,16 +618,9 @@ function maybeShadowCompiledRequest(
                 return Math.max(1, Math.ceil(chars / 3)) + 4;
             },
         });
-        const report = compareRequests(legacy, compiled.messages);
-        recordRequestShadowReport(report);
-        if (report.equal) {
-            logger.info('[context-v2] 请求影子一致');
-        } else {
-            logger.warning('[context-v2] 请求影子差异：' + formatRequestShadowReport(report).slice(0, 3000));
-        }
-        return serveV2 ? compiled.messages : null;
+        return compiled.messages;
     } catch (error) {
-        logger.warning('[context-v2] 请求影子构建失败: ' + (error instanceof Error ? error.message : String(error)));
+        logger.warning('上下文请求构建失败，回退旧路径: ' + (error instanceof Error ? error.message : String(error)));
         return null;
     }
 }
@@ -689,7 +678,7 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
-        const served = maybeShadowCompiledRequest(session, system, samplesMessages, peMessages, multimodal, tools, modelName);
+        const served = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
         return (served ?? peMessages) as RequestMessage[];
     }
 
@@ -785,7 +774,7 @@ export async function handleMessages(
         }
         return out;
     }));
-    const served = maybeShadowCompiledRequest(session, system, samplesMessages, finalMessages, multimodal, tools, modelName);
+    const served = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
     return (served ?? finalMessages) as RequestMessage[];
 }
 

@@ -38,10 +38,8 @@ const bundles = {
     contextConfig: path.join(outDir, 'unit-context-config.cjs'),
     contextToolApi: path.join(outDir, 'unit-context-tool-api.cjs'),
     contextMutations: path.join(outDir, 'unit-context-mutations.cjs'),
-    contextMirror: path.join(outDir, 'unit-context-mirror.cjs'),
-    contextShadow: path.join(outDir, 'unit-context-shadow.cjs'),
-    contextShadowSession: path.join(outDir, 'unit-context-shadow-session.cjs'),
     contextV2Tools: path.join(outDir, 'unit-context-v2-tools.cjs'),
+    contextSession: path.join(outDir, 'unit-context-session.cjs'),
     contextBridge: path.join(outDir, 'unit-context-bridge.cjs'),
     subagentContext: path.join(outDir, 'unit-subagent-context.cjs'),
 };
@@ -78,10 +76,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['contextConfig', path.join(repo, 'scripts/unit-test-context-config.ts')],
         ['contextToolApi', path.join(repo, 'scripts/unit-test-context-tool-api.ts')],
         ['contextMutations', path.join(repo, 'scripts/unit-test-context-mutations.ts')],
-        ['contextMirror', path.join(repo, 'scripts/unit-test-context-mirror.ts')],
-        ['contextShadow', path.join(repo, 'scripts/unit-test-context-shadow.ts')],
-        ['contextShadowSession', path.join(repo, 'scripts/unit-test-context-shadow-session.ts')],
         ['contextV2Tools', path.join(repo, 'scripts/unit-test-context-v2-tools.ts')],
+        ['contextSession', path.join(repo, 'scripts/unit-test-context-session.ts')],
         ['contextBridge', path.join(repo, 'scripts/unit-test-context-bridge.ts')],
         ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')]
     ];

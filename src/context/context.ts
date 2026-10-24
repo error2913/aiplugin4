@@ -18,7 +18,6 @@ import { parseText } from "./content/text_parse";
 import { normalizeToolResult } from "./content/tool_result";
 import type { Part } from "./events";
 import Message from "./message";
-import { canMirror, mirrorAssistant, mirrorServiceFor, mirrorSystem, mirrorToolCalls, MirrorToolGroups, mirrorToolResult, mirrorUser } from "./mirror";
 import { editEventParts } from "./mutations";
 import { buildProjection } from "./projection";
 import { findImage as findImageOf, getGroupById as getGroupByIdOf, getUserById as getUserByIdOf, setName as setNameOf, updateName as updateNameOf, userInfoList as userInfoListOf } from "./roster";
@@ -34,14 +33,15 @@ export { buildRoundSegments, dropOldestRound, estimateContextMessagesTokens, get
 
 const log = Logger.withTag('context');
 
-/** 镜像用的工具调用配对表：只存在于运行时，不进入持久化字段 */
-const mirrorGroups = new WeakMap<object, MirrorToolGroups>();
+/** v2 工具调用配对表：只存在于运行时，不进入持久化字段 */
+interface V2ToolGroup { turnId: string; groupId: string }
+const v2ToolGroups = new WeakMap<object, { nextTurn: number; map: Map<string, V2ToolGroup> }>();
 
-function mirrorGroupsOf(context: object): MirrorToolGroups {
-    let groups = mirrorGroups.get(context);
+function v2GroupsOf(context: object): { nextTurn: number; map: Map<string, V2ToolGroup> } {
+    let groups = v2ToolGroups.get(context);
     if (!groups) {
-        groups = new MirrorToolGroups();
-        mirrorGroups.set(context, groups);
+        groups = { nextTurn: 0, map: new Map() };
+        v2ToolGroups.set(context, groups);
     }
     return groups;
 }
@@ -388,82 +388,6 @@ export class Context {
         return run;
     }
 
-    // ---------------- Context v2 受控镜像（默认关闭） ----------------
-    private mirrorTarget(): import("./service").ContextService | null {
-        return canMirror(this) ? mirrorServiceFor(this) : null;
-    }
-
-    private flushMirror(service: import("./service").ContextService): void {
-        void service.flush().then(result => {
-            if (!result.ok) log.warning('Context v2 镜像落盘失败: ' + (result.error ?? 'unknown'));
-        }).catch(e => log.warning('Context v2 镜像落盘异常: ' + (e instanceof Error ? e.message : String(e))));
-    }
-
-    private mirrorUserToV2(text: string, userId: string, messageId: string): void {
-        const service = this.mirrorTarget();
-        if (!service) return;
-        try {
-            mirrorUser(service, { uid: userId, msgId: messageId, text });
-            this.flushMirror(service);
-        } catch (e) {
-            log.warning('Context v2 镜像用户消息失败: ' + (e instanceof Error ? e.message : String(e)));
-        }
-    }
-
-    private mirrorAssistantToV2(text: string, messageId: string, reasoningContent?: string): void {
-        const service = this.mirrorTarget();
-        if (!service) return;
-        try {
-            mirrorAssistant(service, { msgId: messageId, text, reasoning: reasoningContent });
-            this.flushMirror(service);
-        } catch (e) {
-            log.warning('Context v2 镜像助手消息失败: ' + (e instanceof Error ? e.message : String(e)));
-        }
-    }
-
-    private mirrorSystemToV2(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }): void {
-        const service = this.mirrorTarget();
-        if (!service) return;
-        try {
-            mirrorSystem(service, { text, systemName, eventType: extra?.eventType, raw: extra?.raw });
-            this.flushMirror(service);
-        } catch (e) {
-            log.warning('Context v2 镜像系统消息失败: ' + (e instanceof Error ? e.message : String(e)));
-        }
-    }
-
-    private mirrorToolCallsToV2(toolCalls: ToolCall[], reasoningContent?: string): void {
-        const service = this.mirrorTarget();
-        if (!service) return;
-        try {
-            const groups = mirrorGroupsOf(this);
-            const turnId = groups.nextTurnId();
-            const mapping = mirrorToolCalls(service, { toolCalls, reasoning: reasoningContent, turnId });
-            groups.register(mapping);
-            this.flushMirror(service);
-        } catch (e) {
-            log.warning('Context v2 镜像工具调用失败: ' + (e instanceof Error ? e.message : String(e)));
-        }
-    }
-
-    private mirrorToolResultToV2(text: string, toolCallId: string, toolName?: string, contentParts?: ToolContentPart[]): void {
-        const service = this.mirrorTarget();
-        if (!service) return;
-        try {
-            const groups = mirrorGroupsOf(this);
-            mirrorToolResult(service, {
-                callId: toolCallId,
-                toolName,
-                text,
-                contentParts,
-                group: groups.get(toolCallId),
-            });
-            this.flushMirror(service);
-        } catch (e) {
-            log.warning('Context v2 镜像工具结果失败: ' + (e instanceof Error ? e.message : String(e)));
-        }
-    }
-
     // 用户消息入库：热态下"单条超长 / 连续多条合并后超阈值"交给压缩智能体；冷态（待机）只做纯代码截断。
     // 压缩前原文保留在条目 rawText/rawItems（不参与渲染与 token 估算），展示文本末尾带标记，
     // AI 可用 read_raw/grep_raw(kind=user) 按 msg_id（单条）/ blk:<末条messageId>（合并块）核对原文
@@ -482,7 +406,6 @@ export class Context {
             // 待机入库配额（P2-2）：极端灌水群防滥用。超出后只计数不入库（不报错、不回复）。
             if (!this.allowColdIngest()) return;
             this.appendUserItem(this.buildColdUserItem(text, userId, messageId));
-            this.mirrorUserToV2(text, userId, messageId);
             // L1 窗口移出（P1-2）：纯代码、零 LLM，让 session 体积有上界。必须在入库之后做，
             // 且**不能**因为移出失败而影响入库本身（尽力而为）。
             try { this.trimToWindow(); } catch (e) {
@@ -523,7 +446,6 @@ export class Context {
                 contentItems: [umi]
             });
         }
-        this.mirrorUserToV2(text, userId, messageId);
         // 群内用户会话的权重更新节流持久化（避免每条消息全量写盘）
         flushGroupUserMemories(this.session);
     }
@@ -547,7 +469,6 @@ export class Context {
             role: 'assistant',
             contentItems: [ami]
         });
-        this.mirrorAssistantToV2(text, messageId, reasoningContent);
         flushGroupUserMemories(this.session);
         // 不再按轮数周期观察：上下文 token 超限后统一由 archiveByTokenIfNeeded 异步归档
         void this.archiveByTokenIfNeeded().catch(e => {
@@ -574,7 +495,6 @@ export class Context {
             role: 'user',
             contentItems: [sumi]
         });
-        this.mirrorSystemToV2(text, systemName, extra);
     }
 
     /** 追加系统用户消息并返回条目定位引用（供事件去重窗口内"后到覆盖先到"的就地替换使用）。与 addSystemUserMessage 同构。 */
@@ -601,7 +521,6 @@ export class Context {
             this.messages.push({ role: 'user', contentItems: [sumi] });
         }
         const container = (this.messages[messageIndex] as UserMessage).contentItems;
-        this.mirrorSystemToV2(text, systemName, extra);
         return { messageIndex, itemIndex: container.length - 1 };
     }
 
@@ -642,13 +561,24 @@ export class Context {
             return;
         }
         if (this.v2Service) {
-            const groups = mirrorGroupsOf(this);
-            const mapping = mirrorToolCalls(this.v2Service, {
-                toolCalls,
-                reasoning: reasoningContent,
-                turnId: groups.nextTurnId(),
+            const groups = v2GroupsOf(this);
+            groups.nextTurn++;
+            const turnId = `t:${groups.nextTurn}`;
+            toolCalls.forEach((call, index) => {
+                const callId = String(call.id ?? '');
+                if (!callId) return;
+                const groupId = `${turnId}:${index}`;
+                const fn = call.function ?? { name: '', arguments: '{}' };
+                this.v2Service!.appendToolCall({
+                    turnId,
+                    groupId,
+                    callId,
+                    name: String(fn.name ?? ''),
+                    args: String(fn.arguments ?? '{}'),
+                    ...(reasoningContent !== undefined ? { reasoning: reasoningContent } : {}),
+                });
+                groups.map.set(callId, { turnId, groupId });
             });
-            groups.register(mapping);
             this.invalidateV2();
             this.flushV2();
             return;
@@ -659,7 +589,6 @@ export class Context {
             ...(reasoningContent !== undefined ? { reasoningContent } : {})
         }
         this.messages.push(tcm);
-        this.mirrorToolCallsToV2(toolCalls, reasoningContent);
     }
 
     // 工具回调消息：过长的结果不再交给压缩智能体，改为只展示开头 N 字（head 截断），
@@ -673,8 +602,8 @@ export class Context {
                 parts = [];
             }
             if (parts.length === 0 && text) parts = [{ type: 'text', text }];
-            const groups = mirrorGroupsOf(this);
-            const group = groups.get(toolCallId);
+            const groups = v2GroupsOf(this);
+            const group = groups.map.get(toolCallId);
             this.v2Service.appendToolResult({
                 turnId: group?.turnId ?? `orphan:${toolCallId}`,
                 groupId: group?.groupId ?? `orphan:${toolCallId}`,
@@ -716,7 +645,6 @@ export class Context {
             toolName
         }
         this.messages.push(tcbm);
-        this.mirrorToolResultToV2(text, toolCallId, toolName, contentParts);
     }
 
     async settleWindowIfNeeded(now: number = Date.now()): Promise<number> {
@@ -756,3 +684,4 @@ export class Context {
     }
 
 }
+

@@ -54,17 +54,19 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parseCtxCommand(['purge', '--yes']).confirmed, true);
         assert.deepEqual(parseCtxCommand(['set', 'budget=1000', 'retain=40']), { action: 'set', budget: 1000, retain: 40 });
         assert.equal(parseCtxCommand(['nope']).action, 'help');
+        assert.equal(parseCtxCommand(['archive', 'help']).helpTopic, 'archive');
+        assert.equal(parseCtxCommand(['help', 'purge']).helpTopic, 'purge');
     },
 
     async testContextCommandsStatus() {
         const sid = 'QQ:cmd-status';
         const service = await seed(sid);
         const result = await runCtxCommand({ sessionId: sid, service, args: [] });
-        assert.ok(result.text.includes('事件 2'));
-        assert.ok(result.text.includes('epoch 1'));
-        assert.ok(result.text.includes('已摘要至'));
+        assert.ok(result.text.includes('上下文：共 2 条消息'));
+        assert.ok(result.text.includes('更早内容'));
         const formatted = formatCtxStatus({ sessionId: sid, service, args: [] });
-        assert.ok(formatted.includes('上下文 v2'));
+        assert.ok(formatted.includes('上下文：'));
+        assert.equal(formatted.includes('v2'), false, '用户可见文本不暴露实现版本');
     },
 
     async testContextCommandsHideAndPurge() {
@@ -72,6 +74,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const service = await seed(sid);
         const hidden = await runCtxCommand({ sessionId: sid, service, args: ['hide', 'all'] });
         assert.equal(hidden.changed, true);
+        assert.ok(hidden.text.includes('已隐藏'));
         assert.equal(service.projection().length, 0);
         await service.flush();
         const reopened = await ContextService.open(sid);
@@ -91,7 +94,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const sid = 'QQ:cmd-archive';
         const service = await seed(sid);
         const noRuntime = await runCtxCommand({ sessionId: sid, service, args: ['archive'] });
-        assert.ok(noRuntime.text.includes('归档不可用'));
+        assert.ok(noRuntime.text.includes('暂时无法整理'));
 
         const runtime = {
             archiveNow: async () => ({ ran: true, advanced: true, through: 2 }),
@@ -99,21 +102,33 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any;
         const archived = await runCtxCommand({ sessionId: sid, service, args: ['archive'], runtime });
         assert.equal(archived.changed, true);
-        assert.ok(archived.text.includes('seq 2'));
+        assert.ok(archived.text.includes('已整理更早内容'));
 
         const repaired = await runCtxCommand({ sessionId: sid, service, args: ['repair'] });
-        assert.ok(repaired.text.includes('head'));
+        assert.ok(repaired.text.includes('上下文索引'));
         const missing = await runCtxCommand({ sessionId: 'QQ:no-head', service, args: ['repair'] });
         assert.ok(missing.text.includes('不存在'));
     },
 
-    async testContextCommandsSetAndNameNotWired() {
+    async testContextCommandsSetAndName() {
         const sid = 'QQ:cmd-set';
         const service = await seed(sid);
-        const set = await runCtxCommand({ sessionId: sid, service, args: ['set', 'budget=100'] });
-        assert.ok(set.text.includes('P2'));
-        const name = await runCtxCommand({ sessionId: sid, service, args: ['name', 'status'] });
-        assert.ok(name.text.includes('P2'));
+        const overrides: Record<string, unknown> = {};
+        const fakeSession = {
+            setting: { overrides },
+            save: () => undefined,
+            context: {
+                autoNameMod: 0,
+                userInfoList: [{ id: 'QQ:1', name: '甲' }],
+                setName: async () => undefined,
+            },
+        } as any;
+        const set = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['set', 'budget=100'] });
+        assert.ok(set.text.includes('已更新'));
+        assert.equal(overrides.ctxBudgetTokens, 100);
+        const name = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['name', 'status'] });
+        assert.ok(name.text.includes('上下文名字'));
+        assert.equal(name.text.includes('v2'), false);
         const help = await runCtxCommand({ sessionId: sid, service, args: ['unknown'] });
         assert.ok(help.text.includes('用法'));
     },

@@ -6,9 +6,6 @@ import "./test-host";
 import Config from "../src/config/config";
 import { ext } from "../src/config/config";
 import { Context, estimateContextMessagesTokens } from "../src/context/context";
-import { attachV2Mirror, setV2MirrorEnabled } from "../src/context/mirror";
-import { ContextService } from "../src/context/service";
-import { compareShadow, formatShadowReport } from "../src/context/shadow";
 import { Session } from "../src/session/session";
 import { SessionService } from "../src/session/session_service";
 import Agent from "../src/agent/agent";
@@ -309,45 +306,6 @@ async function scenarioForgetAll() {
         `archiveSeq=${(session as any).archiveSeq} rawSeq=${(session as any).rawSeq}，回复：${replied.slice(0, 40)}…`);
 }
 
-async function scenarioShadowCompare() {
-    console.log('\n== 场景 7：影子链路（旧写入 → v2 projection 一致） ==');
-    const sid = 'QQ:shadow-sim';
-    // 前面的场景会把「上下文最大token」压到 20；影子场景需要正常预算，避免归档删旧消息
-    const origMaxTokens = TC.intConfigs['上下文最大token'];
-    TC.intConfigs['上下文最大token'] = 1000000;
-    resetConfig();
-    const s = new Session();
-    s.sessionId = sid;
-    s.sessionType = 'user';
-    s.agentName = 'default';
-    s.context.sessionId = sid;
-    s.context.agentName = 'default';
-    (s.context as any).isColdSession = () => false;
-    sessionStore.set(sid, s);
-
-    const service = await ContextService.open(sid);
-    attachV2Mirror(s.context, service);
-    setV2MirrorEnabled(true);
-    try {
-        await s.context.addUserMessage(makeCtx(sid), '影子问题', 'QQ:9001', 'sm1');
-        s.context.addAssistantMessage('影子回答', 'sa1');
-        s.context.addToolCallsMessage([
-            { id: 'sc1', type: 'function', function: { name: 'shadow_tool', arguments: '{}' } },
-        ] as any);
-        await s.context.addToolCallbackMessage('影子工具结果', 'sc1', 'shadow_tool');
-        s.context.addSystemUserMessage('影子事件', '事件', { eventType: 'group_recall', raw: { id: 1 } });
-
-        const report = compareShadow(s.context.messages, service.projection());
-        check('影子写入与 v2 projection 逐行一致', report.equal, formatShadowReport(report));
-    } finally {
-        setV2MirrorEnabled(false);
-        attachV2Mirror(s.context, null);
-        if (origMaxTokens === undefined) delete TC.intConfigs['上下文最大token'];
-        else TC.intConfigs['上下文最大token'] = origMaxTokens;
-        resetConfig();
-    }
-}
-
 async function main() {
     console.log('\n========== aiplugin4 上下文成本治理 · 模拟验收 ==========');
     console.log(`配置：窗口上限 ${Config.context.WINDOW_MAX_CHARS} 字 · 冷态窗口 ${Config.context.COLD_WINDOW_CHARS} 字 · `
@@ -358,7 +316,6 @@ async function main() {
     await scenarioTurnHot(session, sid);
     await scenarioKeepRawOff();
     await scenarioForgetAll();
-    await scenarioShadowCompare();
 
     const failed = results.filter(r => !r.pass);
     console.log('\n========== 汇总 ==========');

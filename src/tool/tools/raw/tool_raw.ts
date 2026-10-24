@@ -633,23 +633,23 @@ export function registerRawTools() {
                     },
                     regex: {
                         type: 'boolean',
-                        description: 'Context v2 可选：pattern 按正则解释（默认字面量）'
+                        description: '可选：pattern 按正则解释（默认字面量）'
                     },
                     from_seq: {
                         type: 'integer',
-                        description: 'Context v2 可选：只搜索 seq >= from_seq'
+                        description: '可选：只搜索 seq >= from_seq'
                     },
                     to_seq: {
                         type: 'integer',
-                        description: 'Context v2 可选：只搜索 seq <= to_seq'
+                        description: '可选：只搜索 seq <= to_seq'
                     },
                     max_pages: {
                         type: 'integer',
-                        description: 'Context v2 可选：单次最多扫描多少事件页'
+                        description: '可选：单次最多扫描多少事件页'
                     },
                     cursor: {
                         type: 'string',
-                        description: 'Context v2 可选：上次返回的 cursor，原样传回以继续搜索'
+                        description: '可选：上次返回的 cursor，原样传回以继续搜索'
                     }
                 },
                 required: []
@@ -660,7 +660,7 @@ export function registerRawTools() {
         const { kind, pattern, tool_name, event_type, count, context_lines, max_chars, cursor, regex, from_seq, to_seq, max_pages } = (args || {}) as Record<string, unknown>;
         if (session.contextV2) {
             const text = String(pattern ?? '');
-            if (!text) return 'Context v2：grep_raw 需要 pattern；查看状态可用 .ai ctx，按 seq 读取原文用 read_raw id=e:<seq>';
+            if (!text) return 'grep_raw 需要 pattern；查看状态可用 .ai ctx，按位置读取原文用 read_raw id=e:<seq>';
             try {
                 return grepRawForTool(session.contextV2, {
                     pattern: text,
@@ -739,7 +739,7 @@ export function registerRawTools() {
                     },
                     cursor: {
                         type: 'string',
-                        description: 'Context v2 可选：上次返回的 cursor，原样传回以继续读取同一事件/区间'
+                        description: '可选：上次返回的 cursor，原样传回以继续读取同一事件/区间'
                     }
                 },
                 required: ['kind']
@@ -750,7 +750,7 @@ export function registerRawTools() {
         const { kind, id, msg_id, event_type, count, start_line, max_lines, max_chars, cursor } = (args || {}) as Record<string, unknown>;
         if (session.contextV2) {
             const address = String(id ?? '').trim();
-            if (!address) return 'Context v2：read_raw 需要 id=e:<seq> 或 e:<from>-<to> / msg_id / arc:<seq> / raw:<seq>';
+            if (!address) return 'read_raw 需要 id=e:<seq> 或 e:<from>-<to> / msg_id / arc:<seq> / raw:<seq>';
             try {
                 return readRawForTool(session.contextV2, {
                     id: address,
@@ -786,3 +786,4 @@ export function registerRawTools() {
         }
     };
 }
+
