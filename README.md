@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.27.0-green)
+![Version](https://img.shields.io/badge/Version-4.28.0-green)
 ![Docs](https://img.shields.io/badge/docs-文档站-blue)
 
 > 📖 **文档站**：<https://error2913.github.io/aiplugin4/> —— 在线阅读体验更好（全文搜索、深色模式、目录导航）。
@@ -184,7 +184,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 模型
 
-模型配置是**一份 JSON**（单个「模型配置」框）。⚠️ **自 5.0 起，旧的「api连接」「模型规则」两个 TOML 框已废弃**——插件不再读取它们，请按下方格式重建（推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)）。
+模型配置是**一份 JSON**（单个「模型配置」框）。⚠️ **自 4.25.0 起，旧的「api连接」「模型规则」两个 TOML 框已废弃**——插件不再读取它们，请按下方格式重建（推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)）。
 
 | 设置项 | 说明 |
 |:---:|:---|
