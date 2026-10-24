@@ -237,9 +237,29 @@ function renderOrphanResult(unit: ConversationUnit, options: CompileOptions, ind
     return out;
 }
 
+function renderUserUnit(unit: ConversationUnit, options: CompileOptions, index: RecordIndex): CompiledMessage[] {
+    const rendered = unit.events.map(event => renderUserEvent(event, options, index));
+    if (rendered.length === 0) return [];
+    if (rendered.length === 1) return rendered;
+    const blocks: ContentBlock[] = [];
+    rendered.forEach((message, i) => {
+        if (i > 0) blocks.push({ type: 'text', text: '\n' });
+        if (typeof message.content === 'string') blocks.push({ type: 'text', text: message.content });
+        else blocks.push(...message.content);
+    });
+    const allText = blocks.every(block => block.type === 'text');
+    return [{
+        role: 'user',
+        content: allText
+            ? blocks.map(block => (block.type === 'text' ? block.text : '')).join('')
+            : blocks,
+    }];
+}
+
 function renderUnit(unit: ConversationUnit, options: CompileOptions, index: RecordIndex): CompiledMessage[] {
     if (unit.kind === 'tool_group') return renderToolGroup(unit, options, index);
     if (unit.kind === 'orphan_result') return renderOrphanResult(unit, options, index);
+    if (unit.kind === 'user') return renderUserUnit(unit, options, index);
     const out: CompiledMessage[] = [];
     for (const event of unit.events) {
         if (event.kind === 'user') out.push(renderUserEvent(event, options, index));
