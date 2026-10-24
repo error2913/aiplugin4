@@ -110,7 +110,7 @@ export class ContextStore {
     private constructor(sessionId: string, head: ContextHead, opts: ContextStoreOptions = {}) {
         this.sessionId = sessionId;
         this.head = head;
-        this.estimate = opts.estimateEventTokens ?? (() => 0);
+        this.estimate = opts.estimateEventTokens ?? ((event: ConversationEvent) => Math.max(1, Math.ceil(JSON.stringify(event).length / 4)));
         this.loadRecentPages = Math.max(1, Math.floor(opts.loadRecentPages ?? DEFAULT_LOAD_RECENT_PAGES));
         this.loadRecordPagesLimit = Math.max(1, Math.floor(opts.loadRecordPages ?? 256));
         this.maxPagesPerFlush = Math.max(1, Math.floor(opts.maxPagesPerFlush ?? DEFAULT_MAX_PAGES_PER_FLUSH));

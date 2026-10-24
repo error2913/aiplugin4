@@ -1,13 +1,65 @@
 // 记忆桥：从 Context v2 事件账本消费原文并沉淀长期记忆（上下文不再直接写记忆）。
 // 消费水位由本桥维护（WeakMap，不进入上下文）；成功后推进，失败下次重试。
 import Config from "../config/config";
+import { CompactionRuntime } from "../context/compact/runtime";
 import type { ConversationEvent } from "../context/events";
 import { readRaw } from "../context/recall";
+import { getAuxLlm } from "../core/ports/aux_llm";
 import { MemoryManager } from "../memory/manager";
 import type { Session } from "../session/session";
 
-
 const cursors = new WeakMap<object, number>();
+const compactions = new WeakMap<object, CompactionRuntime>();
+
+function estimateEventTokens(event: ConversationEvent): number {
+    const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
+    let chars = 0;
+    for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
+    if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
+    return Math.max(1, Math.ceil(chars / 3)) + 4;
+}
+
+function compactionRuntimeFor(session: Session): CompactionRuntime | null {
+    const service = session.contextV2;
+    if (!service) return null;
+    let runtime = compactions.get(session);
+    if (runtime) return runtime;
+    runtime = new CompactionRuntime(
+        {
+            watermarkTokens: Config.context.SETTLE_WATERMARK,
+            batchTokens: 6000,
+            summaryMaxChars: 2000,
+            hourlyCap: 6,
+        },
+        {
+            service,
+            summarize: async (text: string) => {
+                try {
+                    const out = await getAuxLlm().chat('summarize_agent', text);
+                    return typeof out === 'string' && out.trim() ? out : null;
+                } catch {
+                    return null;
+                }
+            },
+            estimateEventTokens,
+        },
+    );
+    compactions.set(session, runtime);
+    return runtime;
+}
+
+/** 后台滚动摘要：run 结束后调用；水位/节流/小时上限/退避由 runtime 控制 */
+export async function compactContextV2(session: Session): Promise<{ advanced: boolean; reason?: string } | null> {
+    const runtime = compactionRuntimeFor(session);
+    if (!runtime) return null;
+    return runtime.maybeRun();
+}
+
+/** 清空运行时状态（测试用） */
+export function resetContextRuntime(session: Session): void {
+    compactions.delete(session);
+    cursors.delete(session);
+}
 
 /** 最近一次消费到的事件 seq（测试/诊断用） */
 export function consumedThrough(session: Session): number {

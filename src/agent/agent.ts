@@ -24,7 +24,7 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { consumeContextV2 } from "./context_bridge";
+import { compactContextV2, consumeContextV2 } from "./context_bridge";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
 
@@ -120,6 +120,7 @@ export default class Agent {
         try {
             if (session.contextV2) {
                 await consumeContextV2(session);
+                await compactContextV2(session);
                 return;
             }
             await session.context.settleWindowIfNeeded();

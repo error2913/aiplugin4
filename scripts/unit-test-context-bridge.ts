@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 
 import Agent from '../src/agent/agent';
+import { compactContextV2, consumeContextV2, consumedThrough, resetContextRuntime, resetContextBridgeCursor } from '../src/agent/context_bridge';
 import Config from '../src/config/config';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
-import { consumeContextV2, consumedThrough, resetContextBridgeCursor } from '../src/agent/context_bridge';
+import { setAuxLlm } from '../src/core/ports/aux_llm';
 import { MemoryManager } from '../src/memory/manager';
 import { SessionService } from '../src/session/session_service';
 
@@ -85,6 +86,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(consumedThrough(session), 0, '失败不推进');
         } finally {
             (MemoryManager as any).summarizeChunkWithRetry = original;
+        }
+    },
+
+    async testContextBridgeCompactsV2() {
+        installHost();
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算水位'] = 1;
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
+        (Config as any).cache = {};
+        setAuxLlm({
+            chat: async () => '这是滚动摘要',
+            chatMessages: async () => '这是滚动摘要',
+        });
+        try {
+            const session = await makeSession('QQ:bridge-compact');
+            resetContextRuntime(session);
+            const result = await compactContextV2(session);
+            assert.ok(result, '应返回压缩结果');
+            assert.equal(result!.advanced, true);
+            await session.contextV2!.flush();
+            const summary = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
+            assert.equal(summary.length, 1);
+            assert.ok(session.contextV2!.head().summarizedThrough >= 1);
+        } finally {
+            setAuxLlm(null);
         }
     },
 };
