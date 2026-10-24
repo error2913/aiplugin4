@@ -238,6 +238,18 @@ export class ContextStore {
         this.emit();
     }
 
+    /**
+     * 提交一次压缩结果：追加 summary 记录并推进 summarizedThrough（由 compactor 调用）。
+     * 只改内存与脏标记；持久化由下一次 flush 完成。
+     */
+    commitSummary(record: RecordEntry, summarizedThrough: number, unsummarizedTokens: number): void {
+        this.appendRecord(record);
+        this.head.summarizedThrough = Math.max(this.head.summarizedThrough, Math.floor(summarizedThrough));
+        this.head.unsummarizedTokens = Math.max(0, Math.floor(unsummarizedTokens));
+        this.version++;
+        this.emit();
+    }
+
     private addRecordToMemory(record: RecordEntry): void {
         this.records.push(record);
     }
