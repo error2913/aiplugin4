@@ -1,7 +1,7 @@
 // 影子对比单测：旧 messages 与 v2 projection 的规范化行一致/差异报告。
 import assert from 'node:assert/strict';
 
-import { compareShadow, formatShadowReport, legacyLines } from '../src/context/shadow';
+import { compareRequests, compareShadow, formatRequestShadowReport, formatShadowReport, legacyLines, requestLines } from '../src/context/shadow';
 import { mirrorAssistant, mirrorSystem, mirrorToolCalls, mirrorToolResult, mirrorUser } from '../src/context/mirror';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
@@ -86,5 +86,41 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(lines[2], 'tool_call:c1:f:{}');
         assert.equal(lines[3], 'tool:c1:结果');
         assert.equal(lines[4], 'system:事件:撤回');
+    },
+
+    testContextShadowRequestLinesAndCompare() {
+        const legacyRequest = [
+            { role: 'system', content: 'sys' },
+            { role: 'user', content: '你好' },
+            {
+                role: 'assistant',
+                content: '',
+                tool_calls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }],
+            },
+            { role: 'tool', tool_call_id: 'c1', content: '结果' },
+        ];
+        const compiled = [
+            { role: 'system', content: [{ type: 'text', text: 'sys' }] },
+            { role: 'user', content: '你好' },
+            {
+                role: 'assistant',
+                content: '',
+                tool_calls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }],
+            },
+            { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: '结果' }] },
+        ];
+        const lines = requestLines(legacyRequest);
+        assert.equal(lines[0], 'system:sys');
+        assert.equal(lines[2], 'assistant:|tool_call:c1:f:{}');
+        assert.equal(lines[3], 'tool:结果|tool_call_id:c1');
+        const report = compareRequests(legacyRequest, compiled);
+        assert.equal(report.equal, true, formatRequestShadowReport(report));
+        assert.equal(report.legacyLines, 4);
+
+        const changed = JSON.parse(JSON.stringify(compiled));
+        changed[1].content = '改过';
+        const diff = compareRequests(legacyRequest, changed);
+        assert.equal(diff.equal, false);
+        assert.equal(diff.diffs[0].index, 1);
     },
 };
