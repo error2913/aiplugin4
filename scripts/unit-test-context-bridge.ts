@@ -53,7 +53,7 @@ async function makeSession(sid: string) {
 export const tests: Record<string, () => void | Promise<void>> = {
     async testContextBridgeConsumesAndAdvances() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['结算水位'] = 1;
+        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         const original = MemoryManager.summarizeChunkWithRetry;
@@ -74,7 +74,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     async testContextBridgeFailureKeepsCursor() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['结算水位'] = 1;
+        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         const original = MemoryManager.summarizeChunkWithRetry;
@@ -91,7 +91,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     async testContextBridgeCompactsV2() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['结算水位'] = 1;
+        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         setAuxLlm({

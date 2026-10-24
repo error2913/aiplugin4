@@ -26,10 +26,10 @@ function compactionRuntimeFor(session: Session): CompactionRuntime | null {
     if (runtime) return runtime;
     runtime = new CompactionRuntime(
         {
-            watermarkTokens: Config.context.SETTLE_WATERMARK,
+            watermarkTokens: Config.context.SUMMARY_WATERMARK,
             batchTokens: 6000,
             summaryMaxChars: 2000,
-            hourlyCap: 6,
+            hourlyCap: Config.context.HOURLY_COMPACT_CAP,
         },
         {
             service,
@@ -92,7 +92,7 @@ function sourceEvent(kind: ConversationEvent['kind']): boolean {
 export async function consumeContextV2(session: Session): Promise<number> {
     const service = session.contextV2;
     if (!service) return 0;
-    if (Config.context.SETTLE_WATERMARK <= 0) return 0;
+    if (Config.context.SUMMARY_WATERMARK <= 0) return 0;
     const head = service.head();
     const toSeq = head.nextSeq - 1;
     let cursor = cursors.get(session) ?? Math.max(0, head.epochStartSeq - 1);
@@ -106,7 +106,7 @@ export async function consumeContextV2(session: Session): Promise<number> {
         return 0;
     }
     const chars = items.reduce((n, item) => n + (item.type === 'event' ? item.text.length : 0), 0);
-    if (Math.ceil(chars / 3) < Config.context.SETTLE_WATERMARK) return 0;
+    if (Math.ceil(chars / 3) < Config.context.SUMMARY_WATERMARK) return 0;
     const state = session.stateOf(Date.now(), { touch: false });
     if (state !== 'COLD' && Config.context.SETTLE_IDLE_SEC > 0
         && Date.now() - session.lastRelevantAt < Config.context.SETTLE_IDLE_SEC * 1000) return 0;

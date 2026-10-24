@@ -40,8 +40,8 @@ export function registerCmdCtxSet() {
                 const retain = setting.overrides[retainField];
                 seal.replyToSender(ctx, msg, [
                     '本会话 Context v2 覆盖：',
-                    `【budget】${typeof budget === 'number' ? budget : '（未覆盖）'} · 全局 ${Config.context.MAX_CONTEXT_TOKENS}（0=跟随模型窗口）`,
-                    `【retain】${typeof retain === 'number' ? `${retain}%` : '（未覆盖）'} · 全局 40%`,
+                    `【budget】${typeof budget === 'number' ? budget : '（未覆盖）'} · 全局 ${Config.context.BUDGET_TOKENS}（0=跟随模型窗口）`,
+                    `【retain】${typeof retain === 'number' ? `${retain}%` : '（未覆盖）'} · 全局 ${Config.context.RETAIN_PERCENT}%`,
                     '',
                     '用【.ai ctxset budget=100000】设置，【.ai ctxset clr】清除',
                 ].join('\n'));

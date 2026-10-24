@@ -80,7 +80,8 @@ function checkRequestBudget(messages: any[], tools: any[], modelName?: string): 
     const rawEstimate = estimateRequestTokens(messages, tools);
     // P2-3：与 applyTokenBudget 同一解析口径（配置为 0 时跟随探测到的模型窗口），
     // 否则"预算告警"会与实际裁剪用的预算不一致（一个按 100 万、一个按真实窗口）。
-    const { tokens: maxTokens } = resolveEffectiveMaxTokens(Config.context.MAX_CONTEXT_TOKENS, getProbedContextWindow(modelName || ''));
+    const budget = Config.context.BUDGET_TOKENS > 0 ? Config.context.BUDGET_TOKENS : Config.context.MAX_CONTEXT_TOKENS;
+    const { tokens: maxTokens } = resolveEffectiveMaxTokens(budget, getProbedContextWindow(modelName || ''));
     if (maxTokens > 0) {
         const predicted = TokenCalibration.predict(modelName || '', rawEstimate);
         if (predicted > maxTokens) {
