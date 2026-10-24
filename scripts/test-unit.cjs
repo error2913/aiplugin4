@@ -39,6 +39,7 @@ const bundles = {
     contextToolApi: path.join(outDir, 'unit-context-tool-api.cjs'),
     contextMutations: path.join(outDir, 'unit-context-mutations.cjs'),
     contextMirror: path.join(outDir, 'unit-context-mirror.cjs'),
+    contextShadow: path.join(outDir, 'unit-context-shadow.cjs'),
     subagentContext: path.join(outDir, 'unit-subagent-context.cjs'),
 };
 
@@ -75,6 +76,7 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['contextToolApi', path.join(repo, 'scripts/unit-test-context-tool-api.ts')],
         ['contextMutations', path.join(repo, 'scripts/unit-test-context-mutations.ts')],
         ['contextMirror', path.join(repo, 'scripts/unit-test-context-mirror.ts')],
+        ['contextShadow', path.join(repo, 'scripts/unit-test-context-shadow.ts')],
         ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')]
     ];
     const all = {};
