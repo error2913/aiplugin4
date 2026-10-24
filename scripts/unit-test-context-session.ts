@@ -2,6 +2,9 @@
 import assert from 'node:assert/strict';
 
 import Config from '../src/config/config';
+import { PRIVILEGE_LEVEL_MAP } from '../src/config/static_config';
+import { registerCmdCtx } from '../src/cmd/sub_cmd/ctx';
+import { SubCmd } from '../src/cmd/root_cmd';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { getHost, setHost } from '../src/core/host';
@@ -62,5 +65,49 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(raw.includes('"messages"'), false, '旧消息数组不再落盘');
         const reopened = await ContextService.open(sid);
         assert.equal(reopened.snapshot().events.length, 2, '重开数据仍在');
+    },
+
+    async testCtxCommandUserFacing() {
+        installHost();
+        const service = new SessionService();
+        service.agentName = '*';
+        const sid = 'QQ:ctx-command';
+        const session = service.getSession(sid);
+        session.sessionType = 'user';
+        (session.context as any).isColdSession = () => false;
+        await session.context.addUserMessage({} as seal.MsgContext, '你好', 'QQ:1', 'cm1');
+        registerCmdCtx();
+        const command = SubCmd.map['ctx'];
+        assert.ok(command);
+        const replied: string[] = [];
+        (seal as any).replyToSender = (_ctx: unknown, _msg: unknown, text: string) => { replied.push(String(text)); };
+        const solve = (args: string[], kwargs: Array<{ name: string }> = []) => command.solve({
+            ctx: { privilegeLevel: PRIVILEGE_LEVEL_MAP.master },
+            msg: {},
+            cmdArgs: { args, kwargs },
+            epId: 'QQ:1',
+            gid: '',
+            sid,
+            session,
+            ret: {},
+        } as any);
+
+        await solve(['ctx']);
+        assert.ok(replied[0].includes('上下文：共 1 条消息'), replied[0]);
+        assert.equal(replied[0].includes('v2'), false);
+
+        await solve(['ctx', 'help']);
+        assert.ok(replied[1].includes('用法：.ai ctx'), replied[1]);
+        assert.ok(replied[1].includes('archive'));
+        assert.ok(replied[1].includes('budget='));
+        assert.ok(replied[1].includes('name'));
+
+        await solve(['ctx', 'archive', 'help']);
+        assert.ok(replied[2].includes('立即整理'), replied[2]);
+
+        await solve(['ctx', 'purge'], [{ name: 'yes' }]);
+        assert.ok(replied[3].includes('已清除'), replied[3]);
+        const reopened = await ContextService.open(sid);
+        assert.equal(reopened.snapshot().events.length, 0);
     },
 };

@@ -147,8 +147,8 @@ export class Context {
         const service = this.v2Service;
         if (!service) return;
         void service.flush().then(result => {
-            if (!result.ok) log.warning('Context v2 落盘失败: ' + (result.error ?? 'unknown'));
-        }).catch(error => log.warning('Context v2 落盘异常: ' + (error instanceof Error ? error.message : String(error))));
+            if (!result.ok) log.warning('上下文落盘失败: ' + (result.error ?? 'unknown'));
+        }).catch(error => log.warning('上下文落盘异常: ' + (error instanceof Error ? error.message : String(error))));
     }
 
     private appendV2User(text: string, userId: string, messageId: string): void {
@@ -201,7 +201,7 @@ export class Context {
     clearMessages(...roles: Array<'user' | 'assistant' | 'tool'>) {
         if (this.v2Service) {
             // v2 的唯一删除路径是显式 purge/hide；这里不静默物理删除
-            log.warning('Context v2 已启用：clearMessages 不再直接删消息，请使用 .ai ctx hide/purge');
+            log.warning('上下文已启用：clearMessages 不再直接删消息，请使用 .ai ctx hide/purge');
             return;
         }
         if (roles.length === 0) {

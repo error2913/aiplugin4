@@ -76,8 +76,8 @@ export class SessionService {
                 session.memory.agentName = session.agentName;
                 session.memory.sessionId = session.sessionId;
             }
-            // Context v2：旧会话首次打开时惰性迁移（只写新键，不改旧 messages）；随后挂载只读门面。
-            // 旧 Context 仍是本轮行为的权威；P2 切换后逐步改为直接写 v2。
+            // 旧会话首次打开时惰性迁移（只写新键，不改旧 messages）。
+
             try {
                 if (!session.sessionId) {
                     session.contextV2 = null;
@@ -101,15 +101,15 @@ export class SessionService {
                                 return Math.max(1, Math.ceil(chars / 3));
                             },
                         });
-                        logger.info(`会话${session.sessionId}已迁移到 Context v2（旧 messages 保留）`);
+                        logger.info(`会话${session.sessionId}上下文已迁移（旧 messages 保留）`);
                     }
                     session.contextV2 = ContextService.openSync(session.sessionId);
                 }
             } catch (error) {
                 session.contextV2 = null;
-                logger.error(`初始化会话${session.sessionId}的 Context v2 失败（旧上下文继续可用）: ${error}`);
+                logger.error(`初始化会话${session.sessionId}的上下文失败（旧上下文继续可用）: ${error}`);
             }
-            // 接入后写入/读取改走 v2；projection 供旧消费者过渡读取
+            // 接入后写入/读取走事件账本；projection 供旧消费者过渡读取
             session.context.initV2(session.contextV2);
             this.sessionMap[sessionId] = session;
         }
@@ -122,5 +122,4 @@ export class SessionService {
     }
 
 }
-
 

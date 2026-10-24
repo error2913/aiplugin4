@@ -12,6 +12,7 @@ export interface ParsedCtxCommand {
     confirmed?: boolean;
     budget?: number;
     retain?: number;
+    clear?: boolean;
     nameArgs?: string[];
     helpTopic?: string;
     error?: string;
@@ -36,7 +37,7 @@ const HELP = [
     '  archive                 整理更早内容（保留原文，可回查）',
     '  hide [user|assistant|all]  隐藏消息（原文保留，可审计）',
     '  purge --yes             清除本会话上下文（不可恢复，仅骰主）',
-    '  set budget=<tokens> retain=<百分比>  本会话预算/保留强度（仅邀请者）',
+    '  set [budget=<tokens> retain=<百分比>|clr]  本会话预算/保留强度（仅邀请者）',
     '  name status|set nick|card|mod <0-2>  上下文名字（仅邀请者）',
     '  repair                  检查并修复上下文索引',
     '  help [子命令]           查看帮助',
@@ -51,7 +52,7 @@ const TOPIC_HELP: Record<string, string> = {
     archive: '【.ai ctx archive】立即整理更早内容；只生成摘要，不删除原文，不写长期记忆。',
     hide: '【.ai ctx hide [user|assistant|all]】隐藏消息：模型与检索不可见，原文保留供审计。',
     purge: '【.ai ctx purge --yes】物理清除本会话上下文，不可恢复；需要骰主并显式加 --yes。默认不影响长期记忆。',
-    set: '【.ai ctx set budget=<tokens> retain=<百分比>】本会话覆盖预算/保留强度；budget=0 表示跟随模型窗口。',
+    set: '【.ai ctx set [budget=<tokens> retain=<百分比>|clr]】本会话覆盖预算/保留强度；budget=0 表示跟随模型窗口，clr 恢复默认。',
     name: '【.ai ctx name status】查看名字；【.ai ctx name set nick|card】按昵称/群名片更新；【.ai ctx name mod 0|1|2】自动修改规则。',
     repair: '【.ai ctx repair】检查并修复上下文索引（异常时使用）。',
 };
@@ -62,7 +63,7 @@ export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
     const head = argv[0].toLowerCase();
     const rest = argv.slice(1);
     if (head === 'help' || head === '-h' || head === '--help') return { action: 'help', helpTopic: rest[0]?.toLowerCase() };
-    if (rest[0]?.toLowerCase() === 'help') return { action: 'help', helpTopic: head };
+    if (rest[0]?.toLowerCase() === 'help' || rest.includes('--help') || rest.includes('-h')) return { action: 'help', helpTopic: head };
     if (head === 'status') return { action: 'status' };
     if (head === 'archive' || head === 'settle') return { action: 'archive' };
     if (head === 'repair') return { action: 'repair' };
@@ -74,6 +75,7 @@ export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
     }
     if (head === 'purge') return { action: 'purge', confirmed: rest.includes('--yes') || rest.includes('-y') };
     if (head === 'set') {
+        if (rest.some(item => ['clr', 'clear', 'reset'].includes(item.toLowerCase()))) return { action: 'set', clear: true };
         let budget: number | undefined;
         let retain: number | undefined;
         for (const item of rest) {
@@ -164,7 +166,12 @@ function runSet(input: CtxCommandInput, parsed: ParsedCtxCommand): CtxCommandRes
     if (!session) return { text: '当前会话不支持设置' };
     if (!session.setting) session.setting = {};
     if (!session.setting.overrides) session.setting.overrides = {};
-    if (parsed.budget !== undefined) {
+    if (parsed.clear) {
+        delete session.setting.overrides.ctxBudgetTokens;
+        delete session.setting.overrides.ctxRetainPercent;
+        session.save?.();
+        return { text: '已恢复本会话默认上下文设置', changed: true };
+    }    if (parsed.budget !== undefined) {
         if (parsed.budget < 0) return { text: 'budget 必须是非负整数（0=跟随模型窗口）' };
         if (parsed.budget === 0) delete session.setting.overrides.ctxBudgetTokens;
         else session.setting.overrides.ctxBudgetTokens = parsed.budget;
@@ -189,7 +196,7 @@ export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandR
             const result = await input.runtime.archiveNow();
             return result.advanced
                 ? { text: '已整理更早内容；原文仍然保留，可随时回查', changed: true }
-                : { text: `本次没有需要整理的内容${result.reason ? `（${result.reason}）` : ''}` };
+                : { text: '本次没有需要整理的内容' };
         }
         case 'hide': {
             const target = parsed.target ?? 'all';

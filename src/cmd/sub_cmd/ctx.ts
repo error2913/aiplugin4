@@ -48,6 +48,7 @@ export function registerCmdCtx() {
         }
 
         const args = cmdArgs.args.slice(1).map(a => String(a || ''));
+        if (cmdArgs.kwargs.some(k => k.name === 'yes' || k.name === 'y')) args.push('--yes');
         const parsed = parseCtxCommand(args);
         const level = ctx.privilegeLevel ?? 0;
         if (parsed.action === 'purge' && level < PRIVILEGE_LEVEL_MAP.master) {

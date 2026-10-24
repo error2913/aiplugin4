@@ -91,7 +91,7 @@ export class Session {
     sessionType: SessionType;
     state: State;
     context: Context;
-    /** Context v2 只读门面（P2 过渡：旧 context 仍是权威；新代码逐步改用这里） */
+    /** 上下文事件账本门面（供写入/投影/召回；旧 context 仅回退） */
     contextV2: ContextService | null;
     memory: SessionMemoryService;
     setting: Setting;
@@ -511,3 +511,4 @@ export class Session {
     }
 
 }
+
