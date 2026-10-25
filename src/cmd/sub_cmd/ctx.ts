@@ -16,8 +16,12 @@ function estimateEventTokens(event: ConversationEvent): number {
     return Math.max(1, Math.ceil(chars / 3)) + 4;
 }
 
-function buildRuntime(service: ContextService): CompactionRuntime {
-    return new CompactionRuntime(
+const runtimes = new WeakMap<object, CompactionRuntime>();
+
+function buildRuntime(service: ContextService, session: object): CompactionRuntime {
+    let runtime = runtimes.get(session);
+    if (runtime) return runtime;
+    runtime = new CompactionRuntime(
         { watermarkTokens: 0, batchTokens: 6000, summaryMaxChars: 2000, hourlyCap: 0 },
         {
             service,
@@ -32,6 +36,8 @@ function buildRuntime(service: ContextService): CompactionRuntime {
             estimateEventTokens,
         },
     );
+    runtimes.set(session, runtime);
+    return runtime;
 }
 
 export function registerCmdCtx() {
@@ -67,13 +73,19 @@ export function registerCmdCtx() {
             session,
             epId,
             gid,
-            runtime: parsed.action === 'archive' ? buildRuntime(service) : null,
+            runtime: buildRuntime(service, session),
         });
         if (result.purged) {
-            const fresh = ContextService.openSync(sid);
-            session.contextV2 = fresh;
-            session.context.initV2(fresh);
-            session.save();
+            try {
+                const fresh = ContextService.openSync(sid);
+                session.contextV2 = fresh;
+                session.context.initV2(fresh);
+                session.save();
+                runtimes.delete(session);
+            } catch {
+                session.contextV2 = null;
+                session.context.initV2(null);
+            }
         }
         seal.replyToSender(ctx, msg, result.text);
         return ret;

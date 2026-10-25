@@ -361,6 +361,21 @@ export function compileRequest(options: CompileOptions): CompileResult {
     }
     selected.reverse();
 
+    // 摘要注入也占预算：有摘要可注入时，从最旧单元开始让位；无摘要的缺口提示不挤占数据。
+    const maxSummaryChars = options.summaryMaxChars ?? DEFAULT_SUMMARY_MAX_CHARS;
+    while (selected.length > 1) {
+        const firstSeq = Math.min(...selected.map(u => u.fromSeq));
+        const gap = summaryGap(index, firstSeq);
+        if (!gap.summary) break;
+        const text = gap.summary.text.length > maxSummaryChars
+            ? gap.summary.text.slice(0, maxSummaryChars) + '…'
+            : gap.summary.text;
+        const summaryTokens = estimateText(`【更早内容摘要】\n${text}\n（原文可用 read_raw id=e:${gap.summary.fromSeq}-${gap.summary.toSeq} 查看）`) + 8;
+        if (used + summaryTokens <= available) break;
+        const removed = selected.shift()!;
+        used = Math.max(0, used - estimateUnitTokens(removed, estimateEvent));
+    }
+
     const stats: CompileStats = {
         unitsTotal: units.length,
         unitsSelected: selected.length,
