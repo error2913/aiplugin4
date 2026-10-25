@@ -566,7 +566,9 @@ function compileV2Request(
         const configured = Config.context.BUDGET_TOKENS;
         const overrideBudget = (session.setting as { overrides?: Record<string, unknown> } | undefined)?.overrides?.ctxBudgetTokens;
         const baseBudget = typeof overrideBudget === 'number' && overrideBudget > 0 ? overrideBudget : configured;
-        const { tokens: budget } = resolveEffectiveMaxTokens(baseBudget, getProbedContextWindow(modelName || ''));
+        const { tokens: resolvedBudget } = resolveEffectiveMaxTokens(baseBudget, getProbedContextWindow(modelName || ''));
+        const cap = session.context.v2BudgetCapValue;
+        const budget = cap !== null && cap > 0 ? Math.min(resolvedBudget, cap) : resolvedBudget;
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
             budgetTokens: budget,

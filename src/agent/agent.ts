@@ -419,7 +419,11 @@ export default class Agent {
                 return 'giveup';
             }
             handled.archived = true;
-            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
+            if (session.contextV2) {
+                log.info(`[model-error] 上下文超长：已按超长报文收紧请求预算至 ${target} tokens（事件账本，自动重发）`);
+            } else {
+                log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
+            }
             return 'retry';
         }
 

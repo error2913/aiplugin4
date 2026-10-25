@@ -96,6 +96,27 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(event.parts.some((part: any) => part.type === 'text' && part.text.includes('看图')));
     },
 
+    async testContextTooLongTightensBudget() {
+        installHost();
+        const service = new SessionService();
+        service.agentName = '*';
+        const sid = 'QQ:context-too-long';
+        const session = service.getSession(sid);
+        session.sessionType = 'user';
+        (session.context as any).isColdSession = () => false;
+        for (let i = 0; i < 5; i++) {
+            await session.context.addUserMessage({} as seal.MsgContext, `${i} `.repeat(500), 'QQ:1', `ct${i}`);
+        }
+        const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
+        const before = JSON.stringify(await handleMessages({} as seal.MsgContext, session, false, undefined, system));
+        await session.context.archiveByTokenIfNeeded(200);
+        assert.equal(session.context.v2BudgetCapValue, 200, '超长错误应设置临时预算上限');
+        const after = JSON.stringify(await handleMessages({} as seal.MsgContext, session, false, undefined, system));
+        assert.ok(after.length < before.length, `收紧预算后请求应缩短（${before.length} → ${after.length}）`);
+        session.context.setV2BudgetCap(null);
+        assert.equal(session.context.v2BudgetCapValue, null);
+    },
+
     async testCtxCommandUserFacing() {
         installHost();
         const service = new SessionService();

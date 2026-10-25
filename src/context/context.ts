@@ -91,6 +91,8 @@ export class Context {
     private legacyMessages: MessageType[] = [];
     private v2Service: ContextService | null = null;
     private v2Projection: MessageType[] | null = null;
+    /** 本轮/本会话因 context_too_long 临时收紧的请求预算上限；用户显式设置或重载时清除 */
+    private v2BudgetCap: number | null = null;
     ignoreList: string[];
     lastReply: string;
     counter: number;
@@ -152,6 +154,18 @@ export class Context {
     initV2(service: ContextService | null): void {
         this.v2Service = service;
         this.v2Projection = null;
+        this.v2BudgetCap = null;
+    }
+
+    /** context_too_long 后的临时预算上限（token）；null=未收紧 */
+    get v2BudgetCapValue(): number | null {
+        return this.v2BudgetCap;
+    }
+
+    setV2BudgetCap(tokens: number | null): void {
+        this.v2BudgetCap = typeof tokens === 'number' && Number.isFinite(tokens) && tokens > 0
+            ? Math.floor(tokens)
+            : null;
     }
 
     get v2Enabled(): boolean {
@@ -691,7 +705,12 @@ export class Context {
     }
 
     async archiveByTokenIfNeeded(targetTokens?: number): Promise<'converged' | 'busy' | 'failed'> {
-        if (this.v2Service) return 'converged';
+        if (this.v2Service) {
+            // v2 不在错误路径物理归档：按报文解析出的目标收紧下一轮编译预算，
+            // 否则重发会完全复现同一请求，形成“归档空转”。
+            if (typeof targetTokens === 'number' && targetTokens > 0) this.v2BudgetCap = Math.floor(targetTokens);
+            return 'converged';
+        }
         return archiveByTokenIfNeededImpl(this, targetTokens);
     }
 

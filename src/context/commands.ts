@@ -28,6 +28,9 @@ export interface CtxSessionLike {
         autoNameMod: number;
         userInfoList: Array<{ id: string; name: string }>;
         setName(epId: string, gid: string, uid: string, mod: 'nickname' | 'card'): Promise<void>;
+        /** context_too_long 后的临时预算上限；用户显式设置时清除 */
+        setV2BudgetCap?(tokens: number | null): void;
+        readonly v2BudgetCapValue?: number | null;
     };
 }
 
@@ -122,8 +125,13 @@ export function formatCtxStatus(input: CtxCommandInput): string {
     const visible = segmentUnits(applyVisibility(snapshot.events, buildRecordIndex(snapshot.records))).length;
     const lines = [`上下文：共 ${visible} 条消息`];
     const override = input.session?.setting?.overrides?.ctxBudgetTokens;
-    const budget = typeof override === 'number' && override > 0 ? override : Config.context.BUDGET_TOKENS;
-    lines.push(budget > 0 ? `预算：约 ${budget} token` : '预算：跟随模型窗口');
+    const cap = input.session?.context.v2BudgetCapValue;
+    const budget = cap && cap > 0
+        ? cap
+        : (typeof override === 'number' && override > 0 ? override : Config.context.BUDGET_TOKENS);
+    lines.push(cap && cap > 0
+        ? `预算：约 ${budget} token（超长回退）`
+        : (budget > 0 ? `预算：约 ${budget} token` : '预算：跟随模型窗口'));
     lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
     if (stats.unsummarizedTokens > 0) lines.push(`待整理：约 ${stats.unsummarizedTokens} token`);
     const last = input.runtime?.getLastResult();
@@ -179,6 +187,7 @@ function runSet(input: CtxCommandInput, parsed: ParsedCtxCommand): CtxCommandRes
     if (parsed.clear) {
         delete session.setting.overrides.ctxBudgetTokens;
         delete session.setting.overrides.ctxRetainPercent;
+        session.context.setV2BudgetCap?.(null);
         session.save?.();
         return { text: '已恢复本会话默认上下文设置', changed: true };
     }
@@ -187,6 +196,7 @@ function runSet(input: CtxCommandInput, parsed: ParsedCtxCommand): CtxCommandRes
         if (parsed.budget === 0) delete session.setting.overrides.ctxBudgetTokens;
         else session.setting.overrides.ctxBudgetTokens = parsed.budget;
     }
+    session.context.setV2BudgetCap?.(null);
     session.save?.();
     return { text: '已更新本会话上下文设置', changed: true };
 }
