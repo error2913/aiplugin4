@@ -178,6 +178,7 @@ function runSet(input: CtxCommandInput, parsed: ParsedCtxCommand): CtxCommandRes
     if (!session.setting.overrides) session.setting.overrides = {};
     if (parsed.clear) {
         delete session.setting.overrides.ctxBudgetTokens;
+        delete session.setting.overrides.ctxRetainPercent;
         session.save?.();
         return { text: '已恢复本会话默认上下文设置', changed: true };
     }

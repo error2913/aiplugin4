@@ -66,15 +66,21 @@ export function registerCmdCtx() {
             return ret;
         }
 
-        const result = await runCtxCommand({
-            sessionId: sid,
-            service,
-            args,
-            session,
-            epId,
-            gid,
-            runtime: buildRuntime(service, session),
-        });
+        let result;
+        try {
+            result = await runCtxCommand({
+                sessionId: sid,
+                service,
+                args,
+                session,
+                epId,
+                gid,
+                runtime: buildRuntime(service, session),
+            });
+        } catch (error) {
+            seal.replyToSender(ctx, msg, `上下文操作失败：${error instanceof Error ? error.message : String(error)}`);
+            return ret;
+        }
         if (result.purged) {
             try {
                 const fresh = ContextService.openSync(sid);
