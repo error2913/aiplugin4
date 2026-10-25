@@ -111,7 +111,7 @@ export function clearShard(sessionId: string, seq: number, kind: ShardKind = 'ar
 }
 
 /**
- * 置空某会话某类分片的 1..maxSeq（`.ai forget --all` 用）。
+ * 置空某会话某类分片的 1..maxSeq（旧清理/测试用）。
  * @returns 实际置空的分片数（按读到的有效分片计，避免把"本来就没有的序号"也算进去）
  */
 export function clearShardsFor(sessionId: string, kind: ShardKind, maxSeq: number): number {

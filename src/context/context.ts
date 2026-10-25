@@ -14,9 +14,15 @@ import { TypeDescriptor } from "../utils/revive";
 import { stripInternalTags } from "../utils/string";
 
 import { archiveByTokenIfNeeded as archiveByTokenIfNeededImpl, settleWindowIfNeeded as settleWindowIfNeededImpl, trimToWindow as trimToWindowImpl } from "./archiver";
+import { parseText } from "./content/text_parse";
+import { normalizeToolResult } from "./content/tool_result";
+import type { Part } from "./events";
 import Message from "./message";
+import { editEventParts } from "./mutations";
+import { buildProjection } from "./projection";
 import { findImage as findImageOf, getGroupById as getGroupByIdOf, getUserById as getUserByIdOf, setName as setNameOf, updateName as updateNameOf, userInfoList as userInfoListOf } from "./roster";
 import { runtimeOf } from "./runtime";
+import type { ContextService } from "./service";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
 import { truncateMiddle } from "./window_policy";
 
@@ -26,6 +32,19 @@ export { ARCHIVE_CHUNK_TOKENS } from "./archiver";
 export { buildRoundSegments, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken, truncateMiddle } from "./window_policy";
 
 const log = Logger.withTag('context');
+
+/** v2 工具调用配对表：只存在于运行时，不进入持久化字段 */
+interface V2ToolGroup { turnId: string; groupId: string }
+const v2ToolGroups = new WeakMap<object, { nextTurn: number; map: Map<string, V2ToolGroup> }>();
+
+function v2GroupsOf(context: object): { nextTurn: number; map: Map<string, V2ToolGroup> } {
+    let groups = v2ToolGroups.get(context);
+    if (!groups) {
+        groups = { nextTurn: 0, map: new Map() };
+        v2ToolGroups.set(context, groups);
+    }
+    return groups;
+}
 
 /** 群内用户会话的记忆权重（accessCount/lastAccessedAt）节流持久化：每会话 5 分钟内最多写一次，
 // 避免每条消息都对所有历史发言者全量序列化。当前会话由对话收尾统一保存。 */
@@ -54,6 +73,8 @@ function flushGroupUserMemories(session: Session): void {
 export interface SystemEntryRef {
     messageIndex: number;
     itemIndex: number;
+    /** Context v2：被追踪事件的 seq（用于后续 EditRecord 替换） */
+    seq?: number;
 }
 
 export class Context {
@@ -66,7 +87,10 @@ export class Context {
     }
     agentName: string;
     sessionId: string;
-    messages: MessageType[];
+    /** 旧数据模型（仅在未接入 v2 时使用；接入后由 v2 projection 派生） */
+    private legacyMessages: MessageType[] = [];
+    private v2Service: ContextService | null = null;
+    private v2Projection: MessageType[] | null = null;
     ignoreList: string[];
     lastReply: string;
     counter: number;
@@ -82,6 +106,100 @@ export class Context {
         this.counter = 0;
         this.timer = null;
         this.autoNameMod = 0;
+    }
+
+    /**
+     * 消息视图：接入 v2 后由 projection 派生（过渡期可变缓存，供旧消费者读；写以 v2 为准）；
+     * 未接入时使用旧数组（迁移前/单测旧路径）。
+     */
+    get messages(): MessageType[] {
+        if (!this.v2Service) return this.legacyMessages;
+        if (!this.v2Projection) {
+            this.v2Projection = buildProjection(this.v2Service.snapshot(), {
+                maxUnits: 200,
+                maxChars: 200_000,
+                freeze: false,
+            });
+        }
+        return this.v2Projection;
+    }
+
+    set messages(value: MessageType[]) {
+        this.legacyMessages = value;
+        this.v2Projection = null;
+    }
+
+    /** 序列化：未接入事件账本时保留旧 messages；接入后只存配置/运行字段，消息由页存储负责 */
+    toJSON(): Record<string, unknown> {
+        const out: Record<string, unknown> = {
+            agentName: this.agentName,
+            sessionId: this.sessionId,
+            ignoreList: this.ignoreList,
+            lastReply: this.lastReply,
+            counter: this.counter,
+            timer: this.timer,
+            autoNameMod: this.autoNameMod,
+        };
+        if (!this.v2Enabled) out.messages = this.messages;
+        const legacy = this as unknown as Record<string, unknown>;
+        for (const key of ['archiveSeq', 'rawSeq', 'settledSeq', 'lastArchivedAt', 'lastRawAt']) {
+            if (legacy[key] !== undefined) out[key] = legacy[key];
+        }
+        return out;
+    }
+
+    /** 由 SessionService 在迁移/打开后调用：此后写入/读取走 v2 */
+    initV2(service: ContextService | null): void {
+        this.v2Service = service;
+        this.v2Projection = null;
+    }
+
+    get v2Enabled(): boolean {
+        return !!this.v2Service;
+    }
+
+    private invalidateV2(): void {
+        this.v2Projection = null;
+    }
+
+    private flushV2(): void {
+        const service = this.v2Service;
+        if (!service) return;
+        void service.flush().then(result => {
+            if (!result.ok) log.warning('上下文落盘失败: ' + (result.error ?? 'unknown'));
+        }).catch(error => log.warning('上下文落盘异常: ' + (error instanceof Error ? error.message : String(error))));
+    }
+
+    private appendV2User(text: string, userId: string, messageId: string): void {
+        const service = this.v2Service;
+        if (!service) return;
+        service.appendUser(userId, messageId, parseText(stripInternalTags(text), 'model-output'));
+        this.invalidateV2();
+        this.flushV2();
+    }
+
+    private appendV2Assistant(text: string, messageId: string, reasoningContent?: string): void {
+        const service = this.v2Service;
+        if (!service) return;
+        service.appendAssistant(messageId, parseText(stripInternalTags(text), 'model-output'), {
+            ...(reasoningContent !== undefined ? { reasoning: reasoningContent } : {}),
+        });
+        this.invalidateV2();
+        this.flushV2();
+    }
+
+    private appendV2System(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }): number | null {
+        const service = this.v2Service;
+        if (!service) return null;
+        const seqs = service.appendSystem({
+            systemName,
+            eventType: extra?.eventType,
+            raw: extra?.raw,
+            parts: parseText(stripInternalTags(text), 'internal'),
+        });
+        this.invalidateV2();
+        this.flushV2();
+        return seqs[0] ?? null;
     }
 
     get agent(): Agent { return getAgent(this.agentName); }
@@ -100,6 +218,11 @@ export class Context {
     }
 
     clearMessages(...roles: Array<'user' | 'assistant' | 'tool'>) {
+        if (this.v2Service) {
+            // v2 的唯一删除路径是显式 purge/hide；这里不静默物理删除
+            log.warning('上下文已启用：clearMessages 不再直接删消息，请使用 .ai ctx hide/purge');
+            return;
+        }
         if (roles.length === 0) {
             this.messages = [];
             return;
@@ -167,7 +290,7 @@ export class Context {
      * @returns 是否允许本次入库
      */
     private allowColdIngest(): boolean {
-        const quota = Config.context.STANDBY_INGEST_QUOTA;
+        const quota = Config.context.STANDBY_QUOTA;
         if (quota <= 0) return true;
         const hour = Math.floor(Date.now() / 3600000);   // 整点分桶
         let q = coldQuota.get(this);
@@ -274,6 +397,11 @@ export class Context {
      * promise 链把入库串行化——运行时状态放模块级 WeakMap，不污染持久化字段。
      */
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string): Promise<void> {
+        if (this.v2Service) {
+            if (this.isColdSession() && !this.allowColdIngest()) return;
+            this.appendV2User(text, userId, messageId);
+            return;
+        }
         const rt = runtimeOf(this);
         const run = rt.ingestChain.then(() => this.addUserMessageInner(ctx, text, userId, messageId));
         rt.ingestChain = run.then(() => undefined, () => undefined);   // 前一次失败不阻塞后续入库
@@ -343,6 +471,10 @@ export class Context {
     }
 
     addAssistantMessage(text: string, messageId: string, reasoningContent?: string) {
+        if (this.v2Service) {
+            this.appendV2Assistant(text, messageId, reasoningContent);
+            return;
+        }
         // 防泄露：兜底剥离内部上下文标签（正常回复在 handleReply 已剥离）
         text = stripInternalTags(text);
         const ami: AssistantMessageItem = {
@@ -365,6 +497,10 @@ export class Context {
     }
 
     addSystemUserMessage(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }) {
+        if (this.v2Service) {
+            this.appendV2System(text, systemName, extra);
+            return;
+        }
         text = stripInternalTags(text);
         const sumi: SystemUserMessageItem = {
             text,
@@ -379,11 +515,14 @@ export class Context {
             role: 'user',
             contentItems: [sumi]
         });
-
     }
 
     /** 追加系统用户消息并返回条目定位引用（供事件去重窗口内"后到覆盖先到"的就地替换使用）。与 addSystemUserMessage 同构。 */
     addSystemUserMessageTracked(text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }): SystemEntryRef | null {
+        if (this.v2Service) {
+            const seq = this.appendV2System(text, systemName, extra);
+            return seq === null ? null : { messageIndex: -1, itemIndex: -1, seq };
+        }
         text = stripInternalTags(text);
         const sumi: SystemUserMessageItem = {
             text,
@@ -411,6 +550,15 @@ export class Context {
      * 失效时返回 false，由调用方自行兜底（如追加新副本）。
      */
     replaceSystemUserMessage(ref: SystemEntryRef, text: string, systemName: string, extra?: { eventType?: string; raw?: unknown }): boolean {
+        if (this.v2Service && ref.seq && ref.seq > 0) {
+            const parts = parseText(stripInternalTags(text), 'internal');
+            const ok = editEventParts(this.v2Service.getStore(), ref.seq, parts);
+            if (ok) {
+                this.invalidateV2();
+                this.flushV2();
+            }
+            return ok;
+        }
         const m = this.messages[ref.messageIndex];
         if (!m || m.role !== 'user' || !Array.isArray(m.contentItems)) return false;
         const item = m.contentItems[ref.itemIndex];
@@ -432,6 +580,29 @@ export class Context {
             log.warning('addToolCallsMessage 收到空数组，已忽略');
             return;
         }
+        if (this.v2Service) {
+            const groups = v2GroupsOf(this);
+            groups.nextTurn++;
+            const turnId = `t:${groups.nextTurn}`;
+            toolCalls.forEach((call, index) => {
+                const callId = String(call.id ?? '');
+                if (!callId) return;
+                const groupId = `${turnId}:${index}`;
+                const fn = call.function ?? { name: '', arguments: '{}' };
+                this.v2Service!.appendToolCall({
+                    turnId,
+                    groupId,
+                    callId,
+                    name: String(fn.name ?? ''),
+                    args: String(fn.arguments ?? '{}'),
+                    ...(reasoningContent !== undefined ? { reasoning: reasoningContent } : {}),
+                });
+                groups.map.set(callId, { turnId, groupId });
+            });
+            this.invalidateV2();
+            this.flushV2();
+            return;
+        }
         const tcm: ToolCallsMessage = {
             role: 'assistant',
             toolCalls,
@@ -443,6 +614,40 @@ export class Context {
     // 工具回调消息：过长的结果不再交给压缩智能体，改为只展示开头 N 字（head 截断），
     // 完整原文以 rawText 保留（不参与渲染/预算），供 read_raw/grep_raw(kind=tool) 按 tool_call_id 按需读取。
     async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, contentParts?: ToolContentPart[]) {
+        if (this.v2Service) {
+            let parts: Part[] = [];
+            try {
+                parts = normalizeToolResult({ text, contentParts }, { allowImageRefs: true, noteUnregisteredMedia: false });
+            } catch {
+                parts = [];
+            }
+            if (parts.length === 0 && text) parts = [{ type: 'text', text }];
+            const groups = v2GroupsOf(this);
+            let group = groups.map.get(toolCallId);
+            if (!group) {
+                // 进程重启/续跑丢失了内存配对表：从账本里找同 callId 的调用补回配对
+                const events = this.v2Service.snapshot().events;
+                let call: (typeof events)[number] | undefined;
+                for (let i = events.length - 1; i >= 0; i--) {
+                    const event = events[i];
+                    if (event.kind === 'tool_call' && String((event as { callId?: unknown }).callId ?? '') === toolCallId) {
+                        call = event;
+                        break;
+                    }
+                }
+                if (call && call.kind === 'tool_call') group = { turnId: call.turnId, groupId: call.groupId };
+            }
+            this.v2Service.appendToolResult({
+                turnId: group?.turnId ?? `orphan:${toolCallId}`,
+                groupId: group?.groupId ?? `orphan:${toolCallId}`,
+                callId: toolCallId,
+                name: toolName,
+                parts,
+            });
+            this.invalidateV2();
+            this.flushV2();
+            return;
+        }
         const { TOOL_RESPONSE_TRUNCATE_CHARS } = Config.tool;
         // use_skill 自己已做 12000 字符分页，且「续读 offset」在结果末尾：
         // 再套通用 head 截断会把续读提示一起截掉，导致模型无法续读，故豁免。
@@ -476,14 +681,17 @@ export class Context {
     }
 
     async settleWindowIfNeeded(now: number = Date.now()): Promise<number> {
+        if (this.v2Service) return 0;
         return settleWindowIfNeededImpl(this, now);
     }
 
     trimToWindow(): number {
+        if (this.v2Service) return 0;
         return trimToWindowImpl(this);
     }
 
     async archiveByTokenIfNeeded(targetTokens?: number): Promise<'converged' | 'busy' | 'failed'> {
+        if (this.v2Service) return 'converged';
         return archiveByTokenIfNeededImpl(this, targetTokens);
     }
 
@@ -509,3 +717,4 @@ export class Context {
     }
 
 }
+

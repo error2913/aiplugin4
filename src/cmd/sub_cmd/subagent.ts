@@ -1,5 +1,5 @@
 // .ai subagent：面向用户的子代理管理（查看/停止/清理）
-import { initSubAgentService, sweepSubagentParent } from "../../agent/subagent/wiring";
+import { initSubAgentService, sweepSubagentParent } from "../../subagent";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
 function text(scc: SubCmdContext, content: string) {

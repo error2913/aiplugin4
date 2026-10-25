@@ -1,5 +1,4 @@
 // prompt 构建：system prompt 分节组装（角色/会话信息/静态能力/动态记忆）
-import { buildDelegationGuide } from "../agent/subagent/limits";
 import Config from "../config/config";
 import Message from "../context/message";
 import { UserMessage, UserMessageItem } from "../context/types";
@@ -8,6 +7,7 @@ import { ImageHost } from "../resource/image_host";
 import { Session } from "../session/session";
 import { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
+import { buildDelegationGuide } from "../subagent/limits";
 import { formatSkillSummaryBlock, getSkillsSignature, getSkillSummariesBudgeted, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../tool/skills";
 import Tool from "../tool/tool";
 import { fmtDate, stripInternalTags } from "../utils/string";

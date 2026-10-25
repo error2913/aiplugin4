@@ -1,5 +1,9 @@
 // 会话服务：会话的创建/复活/保存与 getSession 入口
+import { parseText } from "../context/content/text_parse";
 import { Context } from "../context/context";
+import { ConversationEvent } from "../context/events";
+import { isMigrated, migrateLegacySession } from "../context/migrate/persist";
+import { ContextService } from "../context/service";
 import { getHost } from "../core/host";
 import { getAgent } from "../core/ports/agent_registry";
 import { logger } from "../logger";
@@ -62,7 +66,7 @@ export class SessionService {
             // listen 是运行时对象，函数不会被 JSON 持久化；每次恢复会话都重新创建。
             session.tool.listen = createToolListen();
             // 复活嵌套对象（Context/MemoryItem/Setting）
-            session.context = revive(Context, session.context || {});
+            if (!(session.context instanceof Context)) session.context = revive(Context, session.context || {});
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
             if (session.setting) session.setting = revive(Setting, session.setting);
@@ -73,6 +77,38 @@ export class SessionService {
                 session.memory.agentName = session.agentName;
                 session.memory.sessionId = session.sessionId;
             }
+            // 旧会话首次打开时惰性迁移（只写新键，不改旧 messages）。
+
+            try {
+                if (!session.sessionId) {
+                    session.contextV2 = null;
+                } else {
+                    if (session.context.messages.length > 0 && !isMigrated(session.sessionId)) {
+                        migrateLegacySession(session.sessionId, {
+                            messages: session.context.messages as unknown as import("../context/migrate/v1").LegacyContextLike['messages'],
+                            archiveSeq: (session.context as unknown as { archiveSeq?: number }).archiveSeq,
+                            rawSeq: (session.context as unknown as { rawSeq?: number }).rawSeq,
+                            settledSeq: (session.context as unknown as { settledSeq?: number }).settledSeq,
+                        }, {
+                            parseText: (text) => parseText(text, 'model-output'),
+                            estimateEventTokens: (event: ConversationEvent) => {
+                                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts;
+                                if (!parts) return 8;
+                                let chars = 0;
+                                for (const part of parts) if (part.type === 'text') chars += String(part.text || '').length;
+                                return Math.max(1, Math.ceil(chars / 3));
+                            },
+                        });
+                        logger.info(`会话${session.sessionId}上下文已迁移（旧 messages 保留）`);
+                    }
+                    session.contextV2 = ContextService.openSync(session.sessionId);
+                }
+            } catch (error) {
+                session.contextV2 = null;
+                logger.error(`初始化会话${session.sessionId}的上下文失败（旧上下文继续可用）: ${error}`);
+            }
+            // 接入后写入/读取走事件账本；projection 供旧消费者过渡读取
+            session.context.initV2(session.contextV2);
             this.sessionMap[sessionId] = session;
         }
         return this.sessionMap[sessionId];
@@ -84,5 +120,4 @@ export class SessionService {
     }
 
 }
-
 

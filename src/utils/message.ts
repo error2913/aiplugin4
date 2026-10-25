@@ -1,5 +1,7 @@
 // 消息构建：system prompt 组装与 body 解析
 import Config from "../config/config";
+import type { ConversationEvent } from "../context/events";
+import type { CompiledMessage } from "../context/view/compile";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
@@ -546,6 +548,83 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     return messages;
 }
 
+/** 用 Context v2 编译本轮请求；未接入 v2 返回 null（走旧路径） */
+function compileV2Request(
+    session: Session,
+    system: ContextMessage,
+    samples: ContextMessage[],
+    multimodal: boolean,
+    tools: unknown[] | undefined,
+    modelName: string | undefined,
+): CompiledMessage[] | null {
+    if (!session.contextV2) return null;
+    try {
+        const prefix: CompiledMessage[] = [system, ...samples].map(message => ({
+            role: message.role as CompiledMessage['role'],
+            content: buildContent(message),
+        }));
+        const configured = Config.context.BUDGET_TOKENS;
+        const overrideBudget = (session.setting as { overrides?: Record<string, unknown> } | undefined)?.overrides?.ctxBudgetTokens;
+        const baseBudget = typeof overrideBudget === 'number' && overrideBudget > 0 ? overrideBudget : configured;
+        const { tokens: budget } = resolveEffectiveMaxTokens(baseBudget, getProbedContextWindow(modelName || ''));
+        const compiled = session.contextV2.compile({
+            prefixMessages: prefix,
+            budgetTokens: budget,
+            toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
+            mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
+            caps: { vision: multimodal },
+            resolve: {
+                imageUrl: (ref: string) => {
+                    try {
+                        const image = Image.resolveRef(ref);
+                        if (!image || image.isUrlUnusable()) return null;
+                        return image.src || null;
+                    } catch {
+                        return null;
+                    }
+                },
+                avatarUrl: (uid: string) => {
+                    try {
+                        return Image.resolveRef(`user_avatar:${uid}`)?.src || null;
+                    } catch {
+                        return null;
+                    }
+                },
+                groupAvatarUrl: (gid: string) => {
+                    try {
+                        return Image.resolveRef(`group_avatar:${gid}`)?.src || null;
+                    } catch {
+                        return null;
+                    }
+                },
+            },
+            resolveUserName: (uid: string) => {
+                const number = uid.replace(/^.+:/, '');
+                try {
+                    const name = User.get(uid).userName;
+                    return name ? `${name}(${number})` : number;
+                } catch {
+                    return number;
+                }
+            },
+            formatTime: fmtDate,
+            formatMessageId: (id: string) => id,
+            estimateTextTokens,
+            estimateEventTokens: (event: ConversationEvent) => {
+                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
+                let chars = 0;
+                for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
+                if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
+                return Math.max(1, Math.ceil(chars / 3)) + 4;
+            },
+        });
+        return compiled.messages;
+    } catch (error) {
+        logger.warning('上下文请求构建失败，回退旧路径: ' + (error instanceof Error ? error.message : String(error)));
+        return null;
+    }
+}
+
 export async function handleMessages(
     ctx: seal.MsgContext,
     session: Session,
@@ -570,7 +649,7 @@ export async function handleMessages(
     // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
     // 工具结果转成 user 文本（带【工具返回】标记），保证模型能看到结果而不会反复调用工具
     if (Config.tool.PROMPT_ENGINEERING) {
-        return await Promise.all(messages.map(async message => {
+        const peMessages = await Promise.all(messages.map(async message => {
             if (message.role === 'tool') {
                 // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记
                 const toolName = (message as ContextMessage).toolName;
@@ -599,6 +678,8 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
+        const served = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
+        return (served ?? peMessages) as RequestMessage[];
     }
 
     // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
@@ -666,7 +747,7 @@ export async function handleMessages(
         if (!adjacent) messages.splice(i, 1);
     }
 
-    return await Promise.all(messages.map(async message => {
+    const finalMessages = await Promise.all(messages.map(async message => {
         const out: RequestMessage = {
             role: message.role,
             content: message.role === 'tool'
@@ -693,6 +774,8 @@ export async function handleMessages(
         }
         return out;
     }));
+    const served = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
+    return (served ?? finalMessages) as RequestMessage[];
 }
 
 export function buildContent(message: ContextMessage): string {

@@ -104,6 +104,9 @@ const ROOT_FILE_LAYER = {
     changelog: 4,
 };
 
+// 注意：`src/subagent/**` 与 `src/context/**` 同属 L3，层规则无法表达"子代理不得 import 上下文"；
+// 该边界由 `src/subagent/context.ts`（自管消息叠加，不接主 ContextStore）与
+// `scripts/unit-test-subagent-context.ts` 的静态守卫（扫描 src/subagent 的 import）保障。
 const LAYER_RULES = [
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/changelog\//.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/pipeline\//.test(f) },
@@ -119,7 +122,7 @@ const LAYER_RULES = [
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/config\/(config\.ts|configs\/|apply\/)/.test(f) },
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/(model|resource|transport|memory|utils|web|pub|integration|media|judge|event)\//.test(f) },
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/(usage|block|timer)\.ts$/.test(f) },
-    { layer: 3, name: 'L3 领域', test: (f) => /^src\/(context|session|prompt|tool|agent)\//.test(f) },
+    { layer: 3, name: 'L3 领域', test: (f) => /^src\/(context|session|prompt|tool|agent|subagent)\//.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/(index|pipeline|trigger|changelog)\.ts$/.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/cmd\//.test(f) },
 ];

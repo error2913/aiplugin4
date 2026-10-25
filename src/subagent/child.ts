@@ -2,19 +2,21 @@
 // 语义与主链 runInternal 对齐，但：不 acquire requestLimiter、不向聊天发送、
 // 本地 RequestMessage 数组装配（不复用持久化 Context）、stopEvent=child.stopEvent。
 // 中断（interrupt/.ai stop）由服务层 fireStopEvent(child.stopEvent) 触发 → 循环抛 StopError → aborted。
-import { streamService } from '../../agent/stream';
-import Config from '../../config/config';
-import Logger from '../../logger';
-import type { ApiError } from '../../model/api_error';
-import Model from '../../model/model';
-import type { ChatModelUse } from '../../model/types';
-import { Session } from '../../session/session';
-import { ToolRunner } from '../../tool/runner';
-import Tool from '../../tool/tool';
-import type { RequestMessage } from '../../utils/message';
-import { buildContent } from '../../utils/message';
-import { StopError } from "../../utils/timeout";
+import { streamService } from '../agent/stream';
+import Config from '../config/config';
+import Logger from '../logger';
+import type { ApiError } from '../model/api_error';
+import Model from '../model/model';
+import type { ChatModelUse } from '../model/types';
+import { Session } from '../session/session';
+import { ToolRunner } from '../tool/runner';
+import Tool from '../tool/tool';
+import type { RequestMessage } from '../utils/message';
+import { buildContent } from '../utils/message';
+import { StopError } from "../utils/timeout";
 
+import type { SubAgentSummaryFn } from './context';
+import { SubAgentContext } from './context';
 import { completedTurnPrefixCount } from './rules';
 import type { ToolFilter } from './types';
 import type { SubAgentResult } from './types';
@@ -49,6 +51,12 @@ export interface ActivationInput {
     seed?: RequestMessage[];
     /** 续跑：从中断点 checkpoint 的消息续（提供时跳过默认装配，仅追加本轮新任务） */
     baseMessages?: RequestMessage[];
+    /** 子代理上下文 token 上限（0/缺省=不压缩；调用方负责把配置 0 解析成模型窗口×0.8） */
+    maxContextTokens?: number;
+    /** 超上限时的摘要器（缺省/失败走确定性降级，保留最近内容 + 省略标记） */
+    summarize?: SubAgentSummaryFn;
+    /** 压缩后保留最近内容的预算比例（默认 0.5） */
+    keepRatio?: number;
     /** 落盘回调：每轮开始前保存消息快照（对接层写 checkpoint；不丢内容） */
     checkpoint?: (messages: RequestMessage[]) => void | Promise<void>;
     /** 测试注入：替代 streamService.sendChatRequest（缺省走真实服务） */
@@ -77,7 +85,11 @@ export function createChildSession(o: NewChildSessionOptions): Session {
     return session;
 }
 
-/** 父上下文已完成轮次 → 请求消息前缀（fork seed；深度拷贝文本与配对，由调用方在激活前生成） */
+/**
+ * 父上下文已完成轮次 → 请求消息前缀（fork seed；深度拷贝文本与配对，由调用方在激活前生成）。
+ * TODO(P2): 改从父 `compileRequest`（Context v2 编译器）按子代理预算取 seed；
+ * 本函数仅作迁移期兼容实现保留，子代理模块不读父账本。
+ */
 export function buildForkSeed(parentMessages: readonly unknown[], seedCount?: number): RequestMessage[] {
     const count = seedCount ?? completedTurnPrefixCount(parentMessages as { role: string; toolCalls?: unknown[] | null; tool_calls?: unknown[] | null }[]);
     const out: RequestMessage[] = [];
@@ -146,19 +158,20 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
     child.resetState();
     child.stopEvent.fired = false;
 
-    const messages: RequestMessage[] = [];
-    if (inp.baseMessages && inp.baseMessages.length > 0) {
-        // 续跑：checkpoint 原样回放（含之前全部消息），仅追加本轮新任务
-        messages.push(...inp.baseMessages);
-    } else {
-        messages.push({ role: 'system', content: systemText });
-        if (inp.seed) messages.push(...inp.seed);
-    }
-    messages.push({ role: 'user', content: inp.task });
+    // 子代理独立上下文：本地消息叠加 + 超上限自动压缩（不接主 ContextStore）
+    const context = new SubAgentContext({
+        systemText,
+        seed: inp.seed,
+        task: inp.task,
+        baseMessages: inp.baseMessages,
+        maxTokens: inp.maxContextTokens ?? 0,
+        keepRatio: inp.keepRatio,
+        summarize: inp.summarize,
+    });
 
-    /** 每轮开始前持久化一次快照（对接层写 checkpoint） */
+    /** 每轮开始前持久化一次快照（对接层写 checkpoint；压缩后的形态随快照落盘） */
     const commitCheckpoint = async () => {
-        if (inp.checkpoint) await inp.checkpoint(messages.slice());
+        if (inp.checkpoint) await inp.checkpoint(context.snapshot());
     };
 
     let turns = 0;
@@ -167,12 +180,15 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
     if (!model) return { stopReason: 'error', output: '', diagnostic: '没有可用的对话模型' };
 
     for (;;) {
+        // 每次模型请求前检查预算：超上限才压一次（成功=摘要，失败=确定性降级）
+        await context.maybeCompress();
         await commitCheckpoint();
         if (isStopped(child)) return { stopReason: 'aborted', output: partial, diagnostic: 'interrupted by ancestor' };
         turns++;
         if (turns > maxTurns) return { stopReason: 'timeout', output: partial, diagnostic: `超过最大轮次 ${maxTurns}` };
         if (Date.now() > deadline) return { stopReason: 'timeout', output: partial, diagnostic: '超出预算时间' };
 
+        const messages = context.snapshot();
         // 工具 schema：原生模式只注入引导工具（经 child.toolState 过滤）；提示词工程模式不注入
         const tools = STATUS && !PROMPT_ENGINEERING ? Tool.getNativeRequestTools(child) ?? [] : [];
 
@@ -203,7 +219,7 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
             const idx = contentText.indexOf('```function');
             const pre = idx > 0 ? contentText.slice(0, idx).trim() : '';
             if (pre !== '') partial = partial !== '' ? `${partial}\n${pre}` : pre;
-            messages.push({
+            context.append({
                 role: 'assistant',
                 content: pre !== '' ? `${pre}\n${match[0]}` : match[0],
                 ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}),
@@ -213,13 +229,13 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
                 let callBackAll = true;
                 for (const r of results) {
                     if (r.callBack === false) callBackAll = false;
-                    messages.push({ role: 'user', content: `【工具返回:${r.toolName ?? 'tool'}】${r.content}` });
+                    context.append({ role: 'user', content: `【工具返回:${r.toolName ?? 'tool'}】${r.content}` });
                 }
                 if (!callBackAll) return { stopReason: 'completed', output: partial };
             } catch (e) {
                 if (e instanceof StopError || isStopped(child)) return { stopReason: 'aborted', output: partial };
                 log.exception('child prompt tool error', e);
-                messages.push({ role: 'user', content: `【工具返回】子代理工具执行失败：${errorText(e)}` });
+                context.append({ role: 'user', content: `【工具返回】子代理工具执行失败：${errorText(e)}` });
             }
             continue;
         }
@@ -231,7 +247,7 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
             return { stopReason: 'completed', output: partial };
         }
 
-        messages.push({
+        context.append({
             role: 'assistant',
             content: '',
             tool_calls: toolCalls.map(tc => ({
@@ -252,13 +268,13 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
             let callBackAll = true;
             for (const r of results) {
                 if (r.callBack === false) callBackAll = false;
-                messages.push({ role: 'tool', tool_call_id: r.tool_call_id, content: r.content });
+                context.append({ role: 'tool', tool_call_id: r.tool_call_id, content: r.content });
             }
             if (!callBackAll) return { stopReason: 'completed', output: partial };
         } catch (e) {
             if (e instanceof StopError || isStopped(child)) return { stopReason: 'aborted', output: partial };
             log.exception('child tool error', e);
-            messages.push({ role: 'tool', tool_call_id: toolCalls[0]?.id ?? '', content: `子代理工具执行失败：${errorText(e)}` });
+            context.append({ role: 'tool', tool_call_id: toolCalls[0]?.id ?? '', content: `子代理工具执行失败：${errorText(e)}` });
         }
     }
 }

@@ -20,6 +20,27 @@ const bundles = {
     imageHost: path.join(outDir, 'unit-image-host.cjs'),
     backendConfig: path.join(outDir, 'unit-backend-config.cjs'),
     boot: path.join(outDir, 'unit-boot.cjs'),
+    contextV2: path.join(outDir, 'unit-context-v2.cjs'),
+    contextMigrate: path.join(outDir, 'unit-context-migrate.cjs'),
+    contextView: path.join(outDir, 'unit-context-view.cjs'),
+    contextLog: path.join(outDir, 'unit-context-log.cjs'),
+    contextStore: path.join(outDir, 'unit-context-store.cjs'),
+    contextContent: path.join(outDir, 'unit-context-content.cjs'),
+    contextCompile: path.join(outDir, 'unit-context-compile.cjs'),
+    contextMigratePersist: path.join(outDir, 'unit-context-migrate-persist.cjs'),
+    contextProjection: path.join(outDir, 'unit-context-projection.cjs'),
+    contextCompactor: path.join(outDir, 'unit-context-compactor.cjs'),
+    contextRecall: path.join(outDir, 'unit-context-recall.cjs'),
+    contextService: path.join(outDir, 'unit-context-service.cjs'),
+    contextAdmin: path.join(outDir, 'unit-context-admin.cjs'),
+    contextRuntime: path.join(outDir, 'unit-context-runtime.cjs'),
+    contextCommands: path.join(outDir, 'unit-context-commands.cjs'),
+    contextToolApi: path.join(outDir, 'unit-context-tool-api.cjs'),
+    contextMutations: path.join(outDir, 'unit-context-mutations.cjs'),
+    contextV2Tools: path.join(outDir, 'unit-context-v2-tools.cjs'),
+    contextSession: path.join(outDir, 'unit-context-session.cjs'),
+    contextBridge: path.join(outDir, 'unit-context-bridge.cjs'),
+    subagentContext: path.join(outDir, 'unit-subagent-context.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -35,7 +56,28 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['imageHost', path.join(repo, 'scripts/unit-test-image-host.ts')],
         ['backendConfig', path.join(repo, 'scripts/unit-test-backend-config.ts')],
         // 独立启动装配回归入口（首次 Config.registerConfig()，验证配置应用时机）
-        ['boot', path.join(repo, 'scripts/unit-test-boot.ts')]
+        ['boot', path.join(repo, 'scripts/unit-test-boot.ts')],
+        ['contextV2', path.join(repo, 'scripts/unit-test-context-v2.ts')],
+        ['contextMigrate', path.join(repo, 'scripts/unit-test-context-migrate.ts')],
+        ['contextView', path.join(repo, 'scripts/unit-test-context-view.ts')],
+        ['contextLog', path.join(repo, 'scripts/unit-test-context-log.ts')],
+        ['contextStore', path.join(repo, 'scripts/unit-test-context-store.ts')],
+        ['contextContent', path.join(repo, 'scripts/unit-test-context-content.ts')],
+        ['contextCompile', path.join(repo, 'scripts/unit-test-context-compile.ts')],
+        ['contextMigratePersist', path.join(repo, 'scripts/unit-test-context-migrate-persist.ts')],
+        ['contextProjection', path.join(repo, 'scripts/unit-test-context-projection.ts')],
+        ['contextCompactor', path.join(repo, 'scripts/unit-test-context-compactor.ts')],
+        ['contextRecall', path.join(repo, 'scripts/unit-test-context-recall.ts')],
+        ['contextService', path.join(repo, 'scripts/unit-test-context-service.ts')],
+        ['contextAdmin', path.join(repo, 'scripts/unit-test-context-admin.ts')],
+        ['contextRuntime', path.join(repo, 'scripts/unit-test-context-runtime.ts')],
+        ['contextCommands', path.join(repo, 'scripts/unit-test-context-commands.ts')],
+        ['contextToolApi', path.join(repo, 'scripts/unit-test-context-tool-api.ts')],
+        ['contextMutations', path.join(repo, 'scripts/unit-test-context-mutations.ts')],
+        ['contextV2Tools', path.join(repo, 'scripts/unit-test-context-v2-tools.ts')],
+        ['contextSession', path.join(repo, 'scripts/unit-test-context-session.ts')],
+        ['contextBridge', path.join(repo, 'scripts/unit-test-context-bridge.ts')],
+        ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {
