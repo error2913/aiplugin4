@@ -1,11 +1,14 @@
 // `.ai ctx` 命令逻辑单测：解析/状态/遗忘/清除确认/归档/修复/未接线提示。
 import assert from 'node:assert/strict';
 
+import Config from '../src/config/config';
 import { formatCtxStatus, parseCtxCommand, runCtxCommand } from '../src/context/commands';
 import { eventPageKey } from '../src/context/keys';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
+
+Config.registerConfig();
 
 class FakeStorage {
     map = new Map<string, string>();
@@ -52,7 +55,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parseCtxCommand(['hide', 'bad']).error !== undefined, true);
         assert.equal(parseCtxCommand(['purge']).confirmed, false);
         assert.equal(parseCtxCommand(['purge', '--yes']).confirmed, true);
-        assert.deepEqual(parseCtxCommand(['set', 'budget=1000', 'retain=40']), { action: 'set', budget: 1000, retain: 40 });
+        assert.deepEqual(parseCtxCommand(['set', 'budget=1000']), { action: 'set', budget: 1000 });
         assert.equal(parseCtxCommand(['nope']).action, 'help');
         assert.equal(parseCtxCommand(['archive', 'help']).helpTopic, 'archive');
         assert.equal(parseCtxCommand(['help', 'purge']).helpTopic, 'purge');

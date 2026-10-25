@@ -496,6 +496,7 @@ function readRawEventRange(
 function isMsgIdMatch(event: ConversationEvent, msgId: string): boolean {
     if (event.eventId === msgId) return true;
     if (event.kind === 'user' || event.kind === 'assistant') return event.msgId === msgId;
+    if (event.kind === 'tool_call' || event.kind === 'tool_result') return event.callId === msgId;
     return false;
 }
 

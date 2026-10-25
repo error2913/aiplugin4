@@ -3,7 +3,7 @@ import { PRIVILEGE_LEVEL_MAP } from "../../config/static_config";
 import { ctxHelpText, parseCtxCommand, runCtxCommand } from "../../context/commands";
 import { CompactionRuntime } from "../../context/compact/runtime";
 import type { ConversationEvent } from "../../context/events";
-import type { ContextService } from "../../context/service";
+import { ContextService } from "../../context/service";
 import { getAuxLlm } from "../../core/ports/aux_llm";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -69,6 +69,12 @@ export function registerCmdCtx() {
             gid,
             runtime: parsed.action === 'archive' ? buildRuntime(service) : null,
         });
+        if (result.purged) {
+            const fresh = ContextService.openSync(sid);
+            session.contextV2 = fresh;
+            session.context.initV2(fresh);
+            session.save();
+        }
         seal.replyToSender(ctx, msg, result.text);
         return ret;
     };

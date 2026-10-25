@@ -37,9 +37,6 @@ export function pendingKey(sessionId: string): string {
 /** 序列化会话主体：排除运行时字段（监听器/计时器/在途状态）；v2 已启用时不再写旧 messages 数组 */
 export function serializeSession(session: object): string {
     return JSON.stringify(session, function (key, value) {
-        // Context v2 接管消息后，旧 messages 数组不再落盘（P2 存储拆分）；
-        // 未接入 v2（迁移失败/单测旧路径）时仍保留，保证不丢数据。
-        if (key === 'messages') return (this as { v2Enabled?: boolean } | undefined)?.v2Enabled === false ? value : undefined;
         return SESSION_RUNTIME_KEYS.has(key) ? undefined : value;
     });
 }

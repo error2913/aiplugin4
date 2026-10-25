@@ -13,7 +13,6 @@ export type HideTarget = 'user' | 'assistant' | 'all';
 export interface PurgeResult {
     clearedEventPages: number;
     clearedRecordPages: number;
-    clearedBlobs: number;
     clearedLegacyShards: number;
     head: ContextHead;
 }
@@ -42,7 +41,7 @@ function clearKey(key: string): void {
 }
 
 /**
- * 全清除：枚举 head 记录的页范围并置空，blob/legacy 也清；
+ * 全清除：枚举 head 记录的页范围并置空，legacy 分片也清；
  * 最后写新 head（epoch+1，pageFloor/recFloor 前移，summarizedThrough 归零）。
  * 注意：默认不动长期记忆；记忆由记忆系统自己的清理路径处理。
  */
@@ -74,13 +73,6 @@ export function purgeSession(sessionId: string, head: ContextHead): PurgeResult 
         clearKey(recordPageKey(sessionId, pageNo));
         clearedRecordPages++;
     }
-    let clearedBlobs = 0;
-    for (let seq = 1; seq < head.nextSeq; seq++) {
-        for (let part = 0; part < 8; part++) {
-            clearKey(`blob:${sessionId}:${seq}:${part}`);
-            clearedBlobs++;
-        }
-    }
     let clearedLegacyShards = 0;
     if (head.legacy) {
         for (let seq = 1; seq <= Math.max(head.legacy.archiveSeq, head.legacy.rawSeq); seq++) {
@@ -102,7 +94,7 @@ export function purgeSession(sessionId: string, head: ContextHead): PurgeResult 
     }
 
     getHost().storage.set(headKey(sessionId), serializeHead(nextHead));
-    return { clearedEventPages, clearedRecordPages, clearedBlobs, clearedLegacyShards, head: nextHead };
+    return { clearedEventPages, clearedRecordPages, clearedLegacyShards, head: nextHead };
 }
 
 /** 逻辑遗忘：只追加 RedactRecord；原文保留，审计可查 */

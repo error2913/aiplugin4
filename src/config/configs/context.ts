@@ -5,18 +5,14 @@ import { ext } from "../ext";
 
 export default class ContextConfig {
     static register() {
-        // 预设上下文 / system 插入间隔：提示词构造仍需要，保留
+        // 预设上下文：提示词构造仍需要
         seal.ext.registerTemplateConfig(ext, "预设上下文", [""], "每框一条预设上下文，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "上下文");
-        seal.ext.registerIntConfig(ext, "插入system message间隔轮数", 0, "需要小于限制轮数的二分之一才能生效，为0时不生效，预设上下文不计入轮数", "上下文");
 
         // Context v2 新配置（旧键不再注册）
         seal.ext.registerIntConfig(ext, "上下文预算", 0, "上下文 token 预算；0=跟随报错探测到的模型真实窗口×0.8（未探测到回退 100 万）", "上下文");
-        seal.ext.registerIntConfig(ext, "保留强度", 40, "最近内容至少占预算的百分比（1-100）", "上下文");
         seal.ext.registerIntConfig(ext, "摘要水位", 6000, "后台滚动摘要的积压 token 水位；0=关闭自动摘要", "上下文");
-        seal.ext.registerIntConfig(ext, "原文保留天数", 0, "原文事件保留天数；0=永久保留（默认）", "上下文");
         seal.ext.registerIntConfig(ext, "待机入库配额", 0, "待机会话每小时最多入库多少条普通群消息（0=不限）", "上下文");
         seal.ext.registerIntConfig(ext, "每小时后台压缩上限", 6, "每小时最多自动压缩次数；0=不限", "上下文");
-        seal.ext.registerIntConfig(ext, "原文保留页数上限", 0, "每个会话保留的事件页数上限；0=不限", "上下文");
     }
 
     static get() {
@@ -54,15 +50,11 @@ export default class ContextConfig {
             SETTLE_MAX_SHARDS: normalizePositive(oldInt("单次结算调用上限"), 2, "单次结算调用上限"),
             SHARD_TTL_DAYS: oldInt("原文分片保留天数"),
             SHARD_LIMIT: normalizePositive(oldInt("原文分片上限"), 200, "原文分片上限"),
-            STANDBY_INGEST_QUOTA: oldInt("待机入库配额"),
             // Context v2
             BUDGET_TOKENS: seal.ext.getIntConfig(ext, "上下文预算"),
-            RETAIN_PERCENT: normalizeRetain(seal.ext.getIntConfig(ext, "保留强度")),
             SUMMARY_WATERMARK: Math.max(0, seal.ext.getIntConfig(ext, "摘要水位")),
-            RETAIN_DAYS: Math.max(0, seal.ext.getIntConfig(ext, "原文保留天数")),
             STANDBY_QUOTA: Math.max(0, seal.ext.getIntConfig(ext, "待机入库配额")),
             HOURLY_COMPACT_CAP: Math.max(0, seal.ext.getIntConfig(ext, "每小时后台压缩上限")),
-            MAX_RETAINED_PAGES: Math.max(0, seal.ext.getIntConfig(ext, "原文保留页数上限")),
         };
     }
 }
@@ -73,14 +65,6 @@ function normalizeInsertCount(raw: number, maxRounds: number): number {
     if (maxRounds > 0 && raw * 2 >= maxRounds) {
         logger.warning(`「插入system message间隔轮数」${raw} 未小于「对话保存轮数」${maxRounds} 的二分之一，已按关闭处理`);
         return 0;
-    }
-    return raw;
-}
-
-function normalizeRetain(raw: number): number {
-    if (raw < 1 || raw > 100) {
-        logger.warning(`「保留强度」${raw}% 超出 1-100，已回退 40%`);
-        return 40;
     }
     return raw;
 }

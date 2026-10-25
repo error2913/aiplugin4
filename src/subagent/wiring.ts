@@ -52,6 +52,36 @@ export function resolveSubAgentContextTokens(configured: number = Config.subagen
 }
 
 /**
+ * fork 种子：优先用父上下文编译器按子代理预算取（包含摘要/工具组/最新内容），
+ * 未接入事件账本时退回旧投影函数。
+ */
+function buildContextForkSeed(session: Session, budgetTokens: number): ReturnType<typeof buildForkSeed> {
+    const service = session.contextV2;
+    if (!service) return buildForkSeed(session.context.messages);
+    try {
+        const estimateText = (text: string) => Math.max(1, Math.ceil(text.length / 3));
+        const compiled = service.compile({
+            prefixMessages: [],
+            budgetTokens,
+            toolsReserveTokens: 0,
+            mode: 'native',
+            caps: { vision: false },
+            estimateTextTokens: estimateText,
+            estimateEventTokens: (event) => {
+                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
+                let chars = 0;
+                for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
+                if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
+                return Math.max(1, Math.ceil(chars / 3)) + 4;
+            },
+        });
+        return compiled.messages as unknown as ReturnType<typeof buildForkSeed>;
+    } catch {
+        return buildForkSeed(session.context.messages);
+    }
+}
+
+/**
  * 子代理摘要器：走 aux LLM（summarize_agent），用于超上限时压缩更早上下文。
  * aux LLM 未初始化时返回 undefined → 上下文层走确定性降级（保留最近内容 + 省略标记）。
  */
@@ -124,8 +154,8 @@ function makeExecutor(fork: boolean, opt: SubAgentWireOptions): SubAgentExecutor
                 toolStateSnapshot: rt.parentSession.toolState,
                 toolFilter: req.toolFilter ?? null,
             });
-            // TODO(P2): fork seed 暂用旧函数（父 Context.messages 投影）；P2 后改从父 compileRequest 取。
-            const seed = fork ? buildForkSeed(rt.parentSession.context.messages) : undefined;
+            const maxContextTokens = opt.maxContextTokens ?? resolveSubAgentContextTokens();
+            const seed = fork ? buildContextForkSeed(rt.parentSession, maxContextTokens) : undefined;
             const result: SubAgentResult = await runHeadlessActivation({
                 ctx: rt.ctx,
                 msg: rt.msg,
@@ -135,7 +165,7 @@ function makeExecutor(fork: boolean, opt: SubAgentWireOptions): SubAgentExecutor
                 use: 'chat',
                 maxTurns: opt.maxTurns,
                 budgetMs: opt.budgetMs,
-                maxContextTokens: opt.maxContextTokens ?? resolveSubAgentContextTokens(),
+                maxContextTokens,
                 summarize: createSubAgentSummarizer(),
                 ...(seed && seed.length > 0 ? { seed } : {}),
             });
@@ -303,8 +333,8 @@ export async function runContinuableActivation(childId: string, task: string, re
         instruction: rec.agentName && rec.agentName !== '' ? rec.agentName : DEFAULT_CHILD_INSTRUCTION,
     });
     const isFork = !base && rec.provider === 'fork';
-    // TODO(P2): fork seed 暂用旧函数（父 Context.messages 投影）；P2 后改从父 compileRequest 取。
-    const seed = isFork ? buildForkSeed(ref.parentSession.context.messages) : undefined;
+    const maxContextTokens = wireOptions.maxContextTokens ?? resolveSubAgentContextTokens();
+    const seed = isFork ? buildContextForkSeed(ref.parentSession, maxContextTokens) : undefined;
     svc.markRunning(childId, () => fireStopEvent(child.stopEvent));
     try {
         const result = await runHeadlessActivation({
@@ -316,7 +346,7 @@ export async function runContinuableActivation(childId: string, task: string, re
             use: 'chat',
             maxTurns: wireOptions.maxTurns,
             budgetMs: wireOptions.budgetMs,
-            maxContextTokens: wireOptions.maxContextTokens ?? resolveSubAgentContextTokens(),
+            maxContextTokens,
             summarize: createSubAgentSummarizer(),
             ...(seed && seed.length > 0 ? { seed } : {}),
             ...(base ? { baseMessages: base } : {}),

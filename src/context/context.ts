@@ -129,6 +129,25 @@ export class Context {
         this.v2Projection = null;
     }
 
+    /** 序列化：未接入事件账本时保留旧 messages；接入后只存配置/运行字段，消息由页存储负责 */
+    toJSON(): Record<string, unknown> {
+        const out: Record<string, unknown> = {
+            agentName: this.agentName,
+            sessionId: this.sessionId,
+            ignoreList: this.ignoreList,
+            lastReply: this.lastReply,
+            counter: this.counter,
+            timer: this.timer,
+            autoNameMod: this.autoNameMod,
+        };
+        if (!this.v2Enabled) out.messages = this.messages;
+        const legacy = this as unknown as Record<string, unknown>;
+        for (const key of ['archiveSeq', 'rawSeq', 'settledSeq', 'lastArchivedAt', 'lastRawAt']) {
+            if (legacy[key] !== undefined) out[key] = legacy[key];
+        }
+        return out;
+    }
+
     /** 由 SessionService 在迁移/打开后调用：此后写入/读取走 v2 */
     initV2(service: ContextService | null): void {
         this.v2Service = service;
@@ -154,7 +173,7 @@ export class Context {
     private appendV2User(text: string, userId: string, messageId: string): void {
         const service = this.v2Service;
         if (!service) return;
-        service.appendUser(userId, messageId, parseText(stripInternalTags(text), 'user'));
+        service.appendUser(userId, messageId, parseText(stripInternalTags(text), 'model-output'));
         this.invalidateV2();
         this.flushV2();
     }
@@ -271,7 +290,7 @@ export class Context {
      * @returns 是否允许本次入库
      */
     private allowColdIngest(): boolean {
-        const quota = Config.context.STANDBY_INGEST_QUOTA;
+        const quota = Config.context.STANDBY_QUOTA;
         if (quota <= 0) return true;
         const hour = Math.floor(Date.now() / 3600000);   // 整点分桶
         let q = coldQuota.get(this);
@@ -379,6 +398,7 @@ export class Context {
      */
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string): Promise<void> {
         if (this.v2Service) {
+            if (this.isColdSession() && !this.allowColdIngest()) return;
             this.appendV2User(text, userId, messageId);
             return;
         }
@@ -603,7 +623,20 @@ export class Context {
             }
             if (parts.length === 0 && text) parts = [{ type: 'text', text }];
             const groups = v2GroupsOf(this);
-            const group = groups.map.get(toolCallId);
+            let group = groups.map.get(toolCallId);
+            if (!group) {
+                // 进程重启/续跑丢失了内存配对表：从账本里找同 callId 的调用补回配对
+                const events = this.v2Service.snapshot().events;
+                let call: (typeof events)[number] | undefined;
+                for (let i = events.length - 1; i >= 0; i--) {
+                    const event = events[i];
+                    if (event.kind === 'tool_call' && String((event as { callId?: unknown }).callId ?? '') === toolCallId) {
+                        call = event;
+                        break;
+                    }
+                }
+                if (call && call.kind === 'tool_call') group = { turnId: call.turnId, groupId: call.groupId };
+            }
             this.v2Service.appendToolResult({
                 turnId: group?.turnId ?? `orphan:${toolCallId}`,
                 groupId: group?.groupId ?? `orphan:${toolCallId}`,

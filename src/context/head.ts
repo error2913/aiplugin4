@@ -35,7 +35,7 @@ export interface ContextHead {
     summarizedThrough: number;
     /** 未摘要 token 估算（用于触发阈值；允许近似） */
     unsummarizedTokens: number;
-    /** 事件 + 记录 + blob 的近似总字节数（.ai ctx 展示用） */
+    /** 事件 + 记录的近似总字节数（.ai ctx 展示用） */
     bytesTotal: number;
     /** 旧版兼容索引；无旧数据时缺省 */
     legacy?: LegacyIndex;

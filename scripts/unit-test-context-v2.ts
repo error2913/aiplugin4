@@ -12,7 +12,6 @@ import {
 } from '../src/context/events';
 import { createEmptyHead, normalizeHead, parseHead, serializeHead } from '../src/context/head';
 import {
-    blobKey,
     eventPageKey,
     headKey,
     legacySessionKey,
@@ -81,7 +80,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(headKey('QQ-Group:1'), 'ctx_head:QQ-Group:1');
         assert.equal(eventPageKey('QQ-Group:1', 1), 'evt:QQ-Group:1:000001');
         assert.equal(recordPageKey('QQ-Group:1', 2), 'rec:QQ-Group:1:000002');
-        assert.equal(blobKey('QQ-Group:1', 7, 0), 'blob:QQ-Group:1:7:0');
         assert.equal(legacyShardKey('QQ-Group:1', 'raw', 3), 'session_QQ-Group:1:raw:003');
         assert.equal(legacySessionKey('QQ-Group:1'), 'session_QQ-Group:1');
         // 子代理 sessionId 含冒号也应保持可构造（不做解析）

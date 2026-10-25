@@ -1,4 +1,5 @@
 // 会话服务：会话的创建/复活/保存与 getSession 入口
+import { parseText } from "../context/content/text_parse";
 import { Context } from "../context/context";
 import { ConversationEvent } from "../context/events";
 import { isMigrated, migrateLegacySession } from "../context/migrate/persist";
@@ -65,7 +66,7 @@ export class SessionService {
             // listen 是运行时对象，函数不会被 JSON 持久化；每次恢复会话都重新创建。
             session.tool.listen = createToolListen();
             // 复活嵌套对象（Context/MemoryItem/Setting）
-            session.context = revive(Context, session.context || {});
+            if (!(session.context instanceof Context)) session.context = revive(Context, session.context || {});
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
             if (session.setting) session.setting = revive(Setting, session.setting);
@@ -89,10 +90,7 @@ export class SessionService {
                             rawSeq: (session.context as unknown as { rawSeq?: number }).rawSeq,
                             settledSeq: (session.context as unknown as { settledSeq?: number }).settledSeq,
                         }, {
-                            parseText: (text) => {
-                                // 迁移期保留标签文本即可；内容解析在 P2 接线时走 content/text_parse
-                                return [{ type: 'text', text }];
-                            },
+                            parseText: (text) => parseText(text, 'model-output'),
                             estimateEventTokens: (event: ConversationEvent) => {
                                 const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts;
                                 if (!parts) return 8;

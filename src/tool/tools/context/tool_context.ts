@@ -638,7 +638,7 @@ export function registerContextEditTools() {
             try {
                 outcome = replaceInV2(target.contextV2, scope, search, replacement, useRegex, count);
             } catch (e) {
-                log.warning(`上下文 v2 替换执行失败: ${e instanceof Error ? e.message : String(e)}`);
+                log.warning(`上下文替换执行失败: ${e instanceof Error ? e.message : String(e)}`);
                 return `替换失败：${e instanceof Error ? e.message : String(e)}`;
             }
             if (outcome.error) return outcome.error;

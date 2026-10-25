@@ -9,6 +9,7 @@ import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { getHost, setHost } from '../src/core/host';
 import { SessionService } from '../src/session/session_service';
+import { Session } from '../src/session/session';
 import { sessionStorageKey } from '../src/session/persistence';
 import { handleMessages } from '../src/utils/message';
 
@@ -49,9 +50,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         session.sessionType = 'user';
         (session.context as any).isColdSession = () => false;
         await session.context.addUserMessage({} as seal.MsgContext, '生产路径你好', 'QQ:1', 'pm1');
+        await session.context.addUserMessage({} as seal.MsgContext, '[img:img_user] 图', 'QQ:1', 'pm2');
         session.context.addAssistantMessage('生产路径收到', 'pa1');
         assert.ok(session.contextV2, 'SessionService 应初始化上下文服务');
-        assert.equal(session.contextV2!.snapshot().events.length, 2);
+        assert.equal(session.contextV2!.snapshot().events.length, 3);
+        const imageEvent = session.contextV2!.snapshot().events[1] as any;
+        assert.ok(imageEvent.parts.some((part: any) => part.type === 'image' && part.ref === 'img_user'), '用户消息中的图片应保留 AST');
         assert.ok(session.context.messages.length > 0, '旧消费者通过投影读取');
 
         const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
@@ -64,7 +68,32 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(raw);
         assert.equal(raw.includes('"messages"'), false, '旧消息数组不再落盘');
         const reopened = await ContextService.open(sid);
-        assert.equal(reopened.snapshot().events.length, 2, '重开数据仍在');
+        assert.equal(reopened.snapshot().events.length, 3, '重开数据仍在');
+    },
+
+    async testLegacyMigrationParsesContent() {
+        installHost();
+        const sid = 'QQ:legacy-image';
+        const legacy = new Session();
+        legacy.sessionId = sid;
+        legacy.context.sessionId = sid;
+        legacy.context.agentName = '*';
+        legacy.context.messages = [{
+            role: 'user',
+            contentItems: [{ text: '[img:img_legacy] 看图', time: 1, userId: 'QQ:1', messageId: 'lm1' }],
+        }] as any;
+        SessionService.save(legacy);
+        const saved = getHost().storage.get(sessionStorageKey(sid));
+        assert.ok(saved.includes('lm1'), `旧消息应落盘（实际：${saved.slice(0, 200)}）`);
+        const service = new SessionService();
+        service.agentName = '*';
+        const session = service.getSession(sid);
+        assert.equal(session.context.messages.length, 1, '旧消息应能读回');
+        assert.ok(session.contextV2, '旧会话应迁移到事件账本');
+        const event = session.contextV2!.snapshot().events[0] as any;
+        assert.equal(event.kind, 'user');
+        assert.ok(event.parts.some((part: any) => part.type === 'image' && part.ref === 'img_legacy'), '迁移应保留图片 AST');
+        assert.ok(event.parts.some((part: any) => part.type === 'text' && part.text.includes('看图')));
     },
 
     async testCtxCommandUserFacing() {
@@ -107,7 +136,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
         await solve(['ctx', 'purge'], [{ name: 'yes' }]);
         assert.ok(replied[3].includes('已清除'), replied[3]);
+        assert.equal(session.contextV2!.snapshot().events.length, 0, 'purge 后内存服务应重建为空');
+        await session.context.addUserMessage({} as seal.MsgContext, '清除后的新消息', 'QQ:1', 'cm2');
+        assert.equal(session.contextV2!.snapshot().events.length, 1);
         const reopened = await ContextService.open(sid);
-        assert.equal(reopened.snapshot().events.length, 0);
+        assert.equal(reopened.snapshot().events.length, 1, 'purge 后新写入应持久化');
     },
 };

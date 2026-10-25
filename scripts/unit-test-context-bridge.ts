@@ -67,6 +67,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(calls, 1);
             assert.ok(consumedThrough(session) >= 1);
             assert.equal(await consumeContextV2(session), 0, '水位已推进，无新事件不重复消费');
+            resetContextRuntime(session);
+            assert.equal(await consumeContextV2(session), 0, '重载后从持久化进度继续，不重复沉淀');
+            assert.equal(calls, 1);
         } finally {
             (MemoryManager as any).summarizeChunkWithRetry = original;
         }

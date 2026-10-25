@@ -24,11 +24,6 @@ export function recordPageKey(sessionId: string, pageNo: number): string {
     return `rec:${sessionId}:${padPageNo(pageNo)}`;
 }
 
-/** 大内容分块（base64/超大工具输出），事件里只存引用 */
-export function blobKey(sessionId: string, seq: number, part: number): string {
-    return `blob:${sessionId}:${seq}:${part}`;
-}
-
 /** 旧版归档/窗口分片键（迁移期只读兼容） */
 export function legacyShardKey(sessionId: string, kind: 'arc' | 'raw', seq: number): string {
     return `session_${sessionId}:${kind}:${String(seq).padStart(3, '0')}`;

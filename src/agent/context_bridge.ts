@@ -1,15 +1,71 @@
-// 记忆桥：从 Context v2 事件账本消费原文并沉淀长期记忆（上下文不再直接写记忆）。
-// 消费水位由本桥维护（WeakMap，不进入上下文）；成功后推进，失败下次重试。
+// 记忆桥：从上下文事件账本消费原文并沉淀长期记忆（上下文不直接写记忆）。
+// 消费进度持久化在 mem_cursor:<sid>，重载后不重复沉淀；失败保留待总结文本，下次重试。
 import Config from "../config/config";
 import { CompactionRuntime } from "../context/compact/runtime";
 import type { ConversationEvent } from "../context/events";
-import { readRaw } from "../context/recall";
+import { type ReadCursor, readRaw } from "../context/recall";
+import { getHost } from "../core/host";
 import { getAuxLlm } from "../core/ports/aux_llm";
 import { MemoryManager } from "../memory/manager";
 import type { Session } from "../session/session";
 
-const cursors = new WeakMap<object, number>();
+interface BridgeState {
+    /** 状态所属 epoch 起始 seq；切 epoch（purge）后进度作废 */
+    epochStart: number;
+    /** 已成功沉淀到的事件 seq（持久化） */
+    consumed: number;
+    /** 读取进度：已读到的 seq 与页内偏移（持久化，用于大事件续读） */
+    readSeq: number;
+    offset: number;
+    /** 已读但尚未成功沉淀的原文（持久化，失败/水位不足时保留） */
+    pending: string;
+}
+
+const states = new WeakMap<object, BridgeState>();
 const compactions = new WeakMap<object, CompactionRuntime>();
+
+function cursorKey(sessionId: string): string {
+    return `mem_cursor:${sessionId}`;
+}
+
+function loadState(session: Session, epochStartSeq: number): BridgeState {
+    let state = states.get(session);
+    if (state) return state;
+    state = { epochStart: epochStartSeq, consumed: Math.max(0, epochStartSeq - 1), readSeq: 0, offset: 0, pending: '' };
+    if (session.sessionId) {
+        try {
+            const raw = getHost().storage.get(cursorKey(session.sessionId));
+            if (raw) {
+                const parsed = JSON.parse(raw) as Partial<BridgeState>;
+                if (Number.isFinite(parsed.consumed) && Number.isFinite(parsed.readSeq)) {
+                    state = {
+                        epochStart: Number(parsed.epochStart ?? epochStartSeq),
+                        consumed: Math.max(0, Math.floor(parsed.consumed!)),
+                        readSeq: Math.max(0, Math.floor(parsed.readSeq!)),
+                        offset: Math.max(0, Math.floor(parsed.offset ?? 0)),
+                        pending: typeof parsed.pending === 'string' ? parsed.pending : '',
+                    };
+                }
+            }
+        } catch {
+            // 读取失败按新状态处理，宁可重复沉淀也不丢当前对话
+        }
+    }
+    if (state.epochStart !== epochStartSeq || state.consumed < epochStartSeq - 1) {
+        state = { epochStart: epochStartSeq, consumed: epochStartSeq - 1, readSeq: epochStartSeq - 1, offset: 0, pending: '' };
+    }
+    states.set(session, state);
+    return state;
+}
+
+function saveState(session: Session, state: BridgeState): void {
+    if (!session.sessionId) return;
+    try {
+        getHost().storage.set(cursorKey(session.sessionId), JSON.stringify(state));
+    } catch {
+        // 进度持久化失败只影响重启后的去重，不阻塞回复
+    }
+}
 
 function estimateEventTokens(event: ConversationEvent): number {
     const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
@@ -55,63 +111,69 @@ export async function compactContextV2(session: Session): Promise<{ advanced: bo
     return runtime.maybeRun();
 }
 
-/** 清空运行时状态（测试用） */
-export function resetContextRuntime(session: Session): void {
-    compactions.delete(session);
-    cursors.delete(session);
-}
+/** 记忆沉淀自己的水位；不复用摘要开关（摘要关闭不应让长期记忆停摆） */
+const MEMORY_WATERMARK_TOKENS = 6000;
 
-/** 最近一次消费到的事件 seq（测试/诊断用） */
-export function consumedThrough(session: Session): number {
-    return cursors.get(session) ?? 0;
-}
-
-function toMessages(items: ReturnType<typeof readRaw>['items']): Array<{ role: string; contentItems: Array<Record<string, unknown>> }> {
-    const out: Array<{ role: string; contentItems: Array<Record<string, unknown>> }> = [];
-    for (const item of items) {
-        if (item.type !== 'event') continue;
-        const role = item.kind === 'assistant' ? 'assistant' : item.kind === 'tool_result' ? 'tool' : 'user';
-        out.push({
-            role,
-            contentItems: [{ text: item.text, time: 0, userId: '', messageId: '' }],
-        });
-    }
-    return out;
-}
-
-function sourceEvent(kind: ConversationEvent['kind']): boolean {
-    return kind === 'user' || kind === 'assistant' || kind === 'tool_result';
-}
+const SOURCE_KINDS = new Set<ConversationEvent['kind']>(['user', 'assistant', 'tool_result']);
+const ROLE_LABEL: Record<string, string> = { user: '[用户] ', assistant: '[AI] ', tool_result: '[工具] ' };
+/** 待总结缓冲上限：摘要器持续失败时避免存储无限增长（上下文原文仍完整保留） */
+const MAX_PENDING_CHARS = 120_000;
 
 /**
- * 消费 v2 事件到长期记忆：
- * - 水位 0 = 关闭；积压不足 SETTLE_WATERMARK 不调用；
- * - 读取窗口内未消费事件，交给 MemoryManager.summarizeChunkWithRetry；
- * - 成功才推进 cursors；失败保持原水位（幂等重试）。
+ * 消费事件到长期记忆：
+ * - 水位 0 = 关闭；待总结文本不足水位时只推进读取进度；
+ * - 成功才推进 consumed；失败保留 pending，下次重试；
+ * - 读取/沉淀进度持久化，重载不会重复沉淀。
  */
 export async function consumeContextV2(session: Session): Promise<number> {
     const service = session.contextV2;
     if (!service) return 0;
-    if (Config.context.SUMMARY_WATERMARK <= 0) return 0;
+    const watermark = Config.context.SUMMARY_WATERMARK > 0
+        ? Math.min(Config.context.SUMMARY_WATERMARK, MEMORY_WATERMARK_TOKENS)
+        : MEMORY_WATERMARK_TOKENS;
+    if (watermark <= 0) return 0;
+
     const head = service.head();
     const toSeq = head.nextSeq - 1;
-    let cursor = cursors.get(session) ?? Math.max(0, head.epochStartSeq - 1);
-    if (cursor < head.epochStartSeq - 1) cursor = head.epochStartSeq - 1;
-    if (toSeq <= cursor) return 0;
-
-    const result = readRaw(service.getStore(), service.snapshot(), `e:${cursor + 1}-${toSeq}`, { maxItems: 200, maxChars: 12000 });
-    const items = result.items.filter(item => item.type === 'event' && sourceEvent(item.kind));
-    if (items.length === 0) {
-        if (result.exhausted) cursors.set(session, toSeq);
-        return 0;
+    const state = loadState(session, head.epochStartSeq);
+    if (state.epochStart !== head.epochStartSeq) {
+        state.epochStart = head.epochStartSeq;
+        state.consumed = head.epochStartSeq - 1;
+        state.readSeq = head.epochStartSeq - 1;
+        state.offset = 0;
+        state.pending = '';
     }
-    const chars = items.reduce((n, item) => n + (item.type === 'event' ? item.text.length : 0), 0);
-    if (Math.ceil(chars / 3) < Config.context.SUMMARY_WATERMARK) return 0;
-    const state = session.stateOf(Date.now(), { touch: false });
-    if (state !== 'COLD' && Config.context.SETTLE_IDLE_SEC > 0
-        && Date.now() - session.lastRelevantAt < Config.context.SETTLE_IDLE_SEC * 1000) return 0;
+    if (toSeq < state.consumed) return 0;
 
-    const messages = toMessages(items);
+    const fromSeq = state.offset > 0 && state.readSeq > 0 ? state.readSeq : state.readSeq + 1;
+    const rangeFrom = Math.max(fromSeq, state.consumed + 1);
+    if (rangeFrom <= toSeq && state.pending.length < MAX_PENDING_CHARS) {
+        const cursor: ReadCursor | null = state.offset > 0 && state.readSeq > 0
+            ? { seq: state.readSeq, offset: state.offset }
+            : null;
+        const result = readRaw(service.getStore(), service.snapshot(), `e:${rangeFrom}-${toSeq}`, {
+            maxItems: 200,
+            maxChars: 12000,
+            cursor,
+        });
+        let lastSeq = 0;
+        for (const item of result.items) {
+            if (item.type !== 'event') continue;
+            lastSeq = Math.max(lastSeq, item.seq);
+            if (SOURCE_KINDS.has(item.kind)) state.pending += `${ROLE_LABEL[item.kind] ?? ''}${item.text}\n`;
+        }
+        if (result.cursor) {
+            state.readSeq = result.cursor.seq;
+            state.offset = result.cursor.offset;
+        } else {
+            state.readSeq = result.exhausted ? toSeq : (lastSeq || state.readSeq);
+            state.offset = 0;
+        }
+        saveState(session, state);
+    }
+
+    if (Math.ceil(state.pending.length / 3) < watermark) return 0;
+    const messages = [{ role: 'user', contentItems: [{ text: state.pending }] }];
     let ok = false;
     try {
         ok = await MemoryManager.summarizeChunkWithRetry(session, messages as any);
@@ -119,13 +181,31 @@ export async function consumeContextV2(session: Session): Promise<number> {
         ok = false;
     }
     if (!ok) return 0;
-    const last = items[items.length - 1];
-    const through = last && last.type === 'event' ? last.seq : toSeq;
-    cursors.set(session, through);
-    return items.length;
+    state.consumed = state.offset > 0 ? Math.max(state.consumed, state.readSeq - 1) : Math.max(state.consumed, state.readSeq);
+    state.pending = '';
+    saveState(session, state);
+    return 1;
 }
 
-/** 测试/重置用：清空消费水位 */
+/** 最近一次成功沉淀到的事件 seq（测试/诊断用） */
+export function consumedThrough(session: Session): number {
+    return states.get(session)?.consumed ?? 0;
+}
+
+/** 清空消费进度（测试用） */
 export function resetContextBridgeCursor(session: Session): void {
-    cursors.delete(session);
+    states.delete(session);
+    if (session.sessionId) {
+        try {
+            getHost().storage.set(cursorKey(session.sessionId), '');
+        } catch {
+            // ignore
+        }
+    }
+}
+
+/** 清空运行时状态（测试用） */
+export function resetContextRuntime(session: Session): void {
+    compactions.delete(session);
+    states.delete(session);
 }
