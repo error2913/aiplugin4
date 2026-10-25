@@ -6,6 +6,7 @@ import { contextStats, hideEvents, HideTarget, purgeSession, repairHead } from "
 import type { CompactionRuntime } from "./compact/runtime";
 import type { ContextService } from "./service";
 import { applyVisibility, buildRecordIndex } from "./view/records";
+import { segmentUnits } from "./view/units";
 
 export type CtxAction = 'status' | 'archive' | 'hide' | 'purge' | 'set' | 'name' | 'repair' | 'help';
 
@@ -118,7 +119,7 @@ function helpText(topic?: string, error?: string): string {
 export function formatCtxStatus(input: CtxCommandInput): string {
     const stats = contextStats(input.service.getStore());
     const snapshot = input.service.snapshot();
-    const visible = applyVisibility(snapshot.events, buildRecordIndex(snapshot.records)).length;
+    const visible = segmentUnits(applyVisibility(snapshot.events, buildRecordIndex(snapshot.records))).length;
     const lines = [`上下文：共 ${visible} 条消息`];
     const override = input.session?.setting?.overrides?.ctxBudgetTokens;
     const budget = typeof override === 'number' && override > 0 ? override : Config.context.BUDGET_TOKENS;

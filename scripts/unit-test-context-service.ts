@@ -54,6 +54,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(service.preview(2).length, 2);
     },
 
+    async testContextServiceEmptyMsgIdNotDeduped() {
+        const service = await openService('QQ:service-empty-id');
+        service.appendUser('QQ:1', '', [{ type: 'text', text: '一' }]);
+        service.appendUser('QQ:1', '', [{ type: 'text', text: '二' }]);
+        service.appendAssistant('', [{ type: 'text', text: '答' }]);
+        assert.equal(service.snapshot().events.length, 3, '空 msgId 不能生成相同 eventId');
+    },
+
     async testContextServiceFlushAndReopen() {
         const sid = 'QQ:service-2';
         const service = await openService(sid);
