@@ -17,7 +17,7 @@ npx tsc --noEmit            # 类型检查（直跑 tsconfig，不要加 --stric
 npm run smoke               # 冒烟：Node 中用 seal 桩加载产物
 npm run test:unit           # 单元测试（esbuild 打包 scripts/unit-test-*.ts）
 npm run test:ob11           # OB11 runtime 模拟
-npm run sim                 # 上下文成本治理端到端模拟（15 项）
+npm run sim                 # 上下文成本治理端到端模拟（14 项）
 npm run sim:matrix          # 消息顺序/时序矩阵（76 项）
 npm run fuzz                # 随机化长跑（FUZZ_SEEDS/FUZZ_ROUNDS 可回放）
 npm run package:check       # 构建 + 同步 sealpack 源 + 校验包格式与体积
@@ -43,13 +43,13 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 - `src/core/`：宿主端口（HostSeam）——`host.ts` 定义 `storage/clock/fetch/ext` 接口与 `setHost/getHost`，`seal_host.ts` 是唯一直接读 `seal`/`ext` 的适配器；业务代码一律 `getHost()`（单测/模拟器由 `scripts/test-host.ts` 复用 `scripts/harness/seal-env.cjs` 注入）。`core/ports/`：跨层端口——`agent_registry`、`aux_llm`、`session_lookup`、`judge_wait`、`media_notice`；跨层协作「各自注册一半到端口」，不要互相 import（当前 0 环）。
 - `src/pipeline.ts` + `src/pipeline/`：消息/事件唯一入口；`dedup`（配对/去重状态机）、`events`（事件提示词）、`inbound`（ob11 段渲染）、`endpoint`（端点解析）。
 - `src/agent/`：智能体编排（`run`/`runStream`、错误恢复、`.ai stop`、对外 API `api.ts`、`aux_llm_impl.ts`、`stream.ts`）；`src/subagent/`：独立子代理模块（DSH 对齐：委派/fork、后台 job、可续跑、持久化与唤醒，自管独立上下文、不 import `src/context/**`；公共入口 `src/subagent/index.ts`）。
-- `src/session/`、`src/context/`：会话与上下文（session：`setting`/`rhythm`/`persistence`/`inbox`/`outbox`/`tool_listen`；context：`window_policy`/`archiver`/`archive_store`/`roster`/`runtime`/`message`）；`src/prompt/`：system prompt 组装、模板缓存、记忆数据源端口。
+- `src/session/`、`src/context/`：会话与上下文（session：`setting`/`rhythm`/`persistence`/`inbox`/`outbox`/`tool_listen`；context：`events`/`head`/`keys`、`log/*`、`store`/`service`、`content/*`、`view/*`、`recall`、`compact/*`、`migrate/*`、`commands`/`admin`、`projection`；旧 `archiver`/`window_policy`/`archive_store` 仅迁移/回退使用）；`src/prompt/`：system prompt 组装、模板缓存、记忆数据源端口。
 - `src/tool/`：工具系统——`registry.ts` 注册表 / `bootstrap.ts` 装配 / **`executor.ts` 统一执行器**（函数调用、`call_tool`、`.ai tool call` 共用校验/超时/审计）/ `runner.ts` 两路径薄包装 / `tool_group.ts` 工具组开关 / `mcp*`（config/client/mcp.ts 三层）/ `skills.ts`；内置工具在 `src/tool/tools/<分类>/`。
 - `src/model/`：模型注册表（`model.ts` + `entry.ts` + `registry_ops.ts`）、能力分类 `catalog.ts`、协议方言 `api_dialect.ts`、请求管道 `provider.ts`/`adapter.ts`、规则 `request_rules.ts`、媒体预设/模板/解析 `media_presets.ts`/`media_template.ts`/`media.ts`、列表 `list.ts`、余额 `balance.ts`、错误分类 `api_error.ts`。
 - `src/memory/`：`manager.ts` 门面、知识库 `knowledge_*.ts`、v2 引擎（`engine.ts` + `scoring`/`consolidation`/`mental_models`/`reflection`/`repository`/`storage`/`prompt`/`templates`/`migrate`）。
 - `src/resource/`：`image.ts`（实体/注册表）、`image_url`/`image_inbound`/`image_text`/`image_transfer`/`image_health`（纯逻辑叶子）、`image_host`（图床客户端）、`image_index`/`image_gc`（索引与清理）、`image_ref`（CIR v1）、`local_paths`/`local_images`（本地资源）。
 - `src/config/`：`config.ts` 总线（20 个分组，60s 缓存）、`configs/*` 只解析、`apply/*` + `hooks.ts` 应用、`ext.ts` 宿主句柄叶子、`v5/`（模型配置 schema/adapt/vendor/default）、`domain/`（角色/技能/MCP/知识库 JSON + `default_data.ts` 生成物）、`static_config/`（常量）。
-- `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 30 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
+- `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 27 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
 - `src/utils/`：通用工具已拆叶子——`message_id`/`path`/`alias`/`similarity`/`id`/`revive`/`timeout`/`json`/`render_tags`/`raw_marker`/`special_id`/`target_id`/`url`/`concurrency`/`backend`/`markdown`/`resource` 等；`utils.ts` 只剩 `replyToSender` 等聚合入口，新代码直接 import 对应叶子。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 03 模块 / 04 工具 / 05 命令配置 / 06 存储 / 07 开发指南 / 08 后端 / 09 常见问题 / 10 TODO / 11 核心桥 / 12 配置 JSON 化 / 16、17 图片方案）。
 - `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）；`examples/use-aiplugin4.js`：外部插件调用 API 示例。
