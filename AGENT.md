@@ -72,6 +72,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 14. **tsconfig 启用 `noImplicitThis`**：普通函数里不要用 `this`（需要时显式标注 `this: Host`）；`noUnusedLocals`/`noUnusedParameters`/`noImplicitReturns` 开启。
 15. **大文件按叶子模块拆**：单文件单一职责；拆分后原 API 保留同名委派/`re-export`，外部 import 零改动；每步跑全量验证。
 16. **新增对外 API**（`globalThis.aiplugin4`）同步更新 `docs/07-开发指南.md` 的 API 表格与示例。
+17. **方案/审查/实验/临时分析禁止进入 `docs/`**：放 `.dev/`（gitignore）或 PR 描述；`docs/` 只保留稳定知识库，结构必须与既有编号/插件架构章节一致，不新增插件架构之外的二级章节；实现完成后把最终行为并入对应 02/03/04/05/06/09。
 
 ## 开发完成检查清单
 
@@ -79,7 +80,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 
 1. `src/changelog/<版本>.ts`：在对应版本数据文件补充改动条目（`- 描述`），再 `npm run changelog:gen` 生成聚合索引（勿手改 `src/changelog.ts`）；发布工作流读取数据文件生成 GitHub Release 正文。
 2. `README.md`：同步配置手册/命令手册/可用工具函数等章节（商店 README 只放用户内容，不放开发章节）。
-3. 知识库 `docs/`：涉及命令/配置/工具/架构的改动同步对应文档（常用 03/04/05/09；架构改动同步 02）。
+3. 知识库 `docs/`：涉及命令/配置/工具/架构的改动同步对应文档（常用 03/04/05/09；架构改动同步 02）；方案/审查/实验放 `.dev/`，禁止进入 `docs/`，也不新增插件架构之外的二级章节。
 4. 配置项更改（新增/删除/默认值/弃用）在版本数据文件「配置项更改」小节注明；模板等默认值变更在「重要」小节提醒恢复默认。
 5. 版本号：改 `meta.ts` 的 `VERSION` 后跑 `npm run version:sync`；`sealpack/info.toml` 由 `prepare-sealpack.js` 同步。
 6. 文档清单：新增/删除 `docs/*.md` 后更新 `docs-site/manifest.js` 与 `docs-site/mkdocs.yml`，跑 `npm run docs:manifest`。
