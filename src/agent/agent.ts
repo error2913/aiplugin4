@@ -412,7 +412,7 @@ export default class Agent {
             // P2-3：把报文里解析出的模型窗口**按模型名持久化**，下次不必再撞一次超长报错
             const probed = parseMaxContextTokens(e.rawText);
             if (probed !== undefined) rememberProbedContextWindow(modelLabel, probed);
-            const target = computeArchiveTarget(Config.context.BUDGET_TOKENS > 0 ? Config.context.BUDGET_TOKENS : Config.context.MAX_CONTEXT_TOKENS, e.rawText);
+            const target = computeArchiveTarget(Config.context.BUDGET_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
             // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），
             // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）；

@@ -738,7 +738,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 多模态工具结果：contentParts 直接进入请求体，非多模态退化为文本 */
     async testToolMultimodalContentParts(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 0;
+        TC.intConfigs['上下文预算'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
         const system = { role: 'system', text: '系统' };
@@ -764,7 +764,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 提示词工程模式：工具结果里的 image contentParts 不能被丢弃（image_view / MCP 图片） */
     async testPEKeepsToolImageParts(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 0;
+        TC.intConfigs['上下文预算'] = 0;
         TC.boolConfigs['切换为提示词工程'] = true;
         resetConfigCache();
         const system = { role: 'system', text: '系统' };
@@ -871,7 +871,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 预算裁剪：整条丢弃最早的未保护消息，system 永不丢弃 */
     async testTokenBudgetDropsEarliest(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 220;
+        TC.intConfigs['上下文预算'] = 220;
         TC.intConfigs['插入system message间隔轮数'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
@@ -894,7 +894,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 预算裁剪：单条超大消息不再整条丢弃清空上下文，而是按缺口截断并保留尾部 */
     async testTokenBudgetTruncatesHugeMessage(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 208;
+        TC.intConfigs['上下文预算'] = 208;
         TC.intConfigs['插入system message间隔轮数'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
@@ -935,7 +935,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 预算裁剪应使用模型校准系数：factor > 1 时比默认更早裁剪 */
     async testTokenBudgetUsesCalibrationFactor(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 300;
+        TC.intConfigs['上下文预算'] = 300;
         TC.intConfigs['插入system message间隔轮数'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
@@ -958,7 +958,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** prompt 工程模式：工具结果转 user 时保留工具名来源 */
     async testPromptEngineeringToolName(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 0; // 不限
+        TC.intConfigs['上下文预算'] = 0; // 不限
         TC.boolConfigs['切换为提示词工程'] = true;
         resetConfigCache();
         const system = { role: 'system', text: '系统' };
@@ -1091,7 +1091,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 系统名义消息成对边界：handleMessages 渲染 [system:名称]...[/system]，工具结果渲染 [tool_result]...[/tool_result] */
     async testSystemBoundaryRendering(): Promise<void> {
-        TC.intConfigs['上下文最大token'] = 0;
+        TC.intConfigs['上下文预算'] = 0;
         TC.boolConfigs['切换为提示词工程'] = false;
         resetConfigCache();
         const system = { role: 'system', text: '系统' };
@@ -1184,9 +1184,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const old = MemoryManager.summarizeChunkWithRetry;
         MemoryManager.summarizeChunkWithRetry = async () => true;
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 20;
+        TC.intConfigs['上下文预算'] = 20;
         resetConfigCache();
         try {
             const session = new Session();
@@ -1205,7 +1205,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -1216,9 +1216,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         let called = 0;
         MemoryManager.summarizeChunkWithRetry = async () => { called++; return false; };
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 20;
+        TC.intConfigs['上下文预算'] = 20;
         resetConfigCache();
         try {
             const session = new Session();
@@ -1238,7 +1238,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -1358,9 +1358,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const old = MemoryManager.summarizeChunkWithRetry;
         MemoryManager.summarizeChunkWithRetry = async () => true;
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 20;
+        TC.intConfigs['上下文预算'] = 20;
         resetConfigCache();
         const origAgentGet = Agent.get;
         try {
@@ -1412,7 +1412,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (ext as any).storageSet = origStorageSet;
             (ext as any).storageGet = origStorageGet;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -1508,9 +1508,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const old = MemoryManager.summarizeChunkWithRetry;
         MemoryManager.summarizeChunkWithRetry = async () => true;
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 30;
+        TC.intConfigs['上下文预算'] = 30;
         resetConfigCache();
         const origAgentGet = Agent.get;
         const makeMsgs = (tag: string) => [
@@ -1541,7 +1541,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (ext as any).storageSet = origStorageSet;
             (ext as any).storageGet = origStorageGet;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -1552,9 +1552,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         let summarizeCalls = 0;
         MemoryManager.summarizeChunkWithRetry = async () => { summarizeCalls++; return false; };
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 20;
+        TC.intConfigs['上下文预算'] = 20;
         resetConfigCache();
         try {
             const session = new Session();
@@ -1572,7 +1572,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -1592,10 +1592,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         MemoryManager.summarizeChunkWithRetry = async () => { summarizeCalls++; return true; };
         const origKeep = TC.boolConfigs['归档保留原文'];
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.boolConfigs['归档保留原文'] = false;
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 20;
+        TC.intConfigs['上下文预算'] = 20;
         resetConfigCache();
         const origAgentGet = Agent.get;
         try {
@@ -1622,7 +1622,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (ext as any).storageGet = origStorageGet;
             if (origKeep === undefined) delete TC.boolConfigs['归档保留原文']; else TC.boolConfigs['归档保留原文'] = origKeep;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -2446,10 +2446,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
      */
     async testHandleMessagesNeverEmitsOrphanTools(): Promise<void> {
         const origPE = TC.boolConfigs['切换为提示词工程'];
-        const origMax = TC.intConfigs['上下文最大token'];
+        const origMax = TC.intConfigs['上下文预算'];
         const origGlobal = TC.boolConfigs['是否开启全局待机'];
         TC.boolConfigs['切换为提示词工程'] = false;   // 非 PE：会真正发送 role:'tool'
-        TC.intConfigs['上下文最大token'] = 0;        // 不限预算，隔离折叠
+        TC.intConfigs['上下文预算'] = 0;        // 不限预算，隔离折叠
         TC.boolConfigs['是否开启全局待机'] = false;
         resetConfigCache();
         try {
@@ -2487,7 +2487,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 'PE 模式下无配对的 tool 结果必须保留（转为 user 文本）');
         } finally {
             if (origPE === undefined) delete TC.boolConfigs['切换为提示词工程']; else TC.boolConfigs['切换为提示词工程'] = origPE;
-            if (origMax === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origMax;
+            if (origMax === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origMax;
             if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
             resetConfigCache();
         }
@@ -2652,9 +2652,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const old = MemoryManager.summarizeChunkWithRetry;
         MemoryManager.summarizeChunkWithRetry = async () => true;
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 20;
+        TC.intConfigs['上下文预算'] = 20;
         resetConfigCache();
         const origAgentGet = Agent.get;
         try {
@@ -2692,7 +2692,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (ext as any).storageSet = origStorageSet;
             (ext as any).storageGet = origStorageGet;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -8357,9 +8357,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const old = MemoryManager.summarizeChunkWithRetry;
         MemoryManager.summarizeChunkWithRetry = async () => true;
         const origRounds = TC.intConfigs['对话保存轮数'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.intConfigs['对话保存轮数'] = 1;
-        TC.intConfigs['上下文最大token'] = 1000000; // 配置预算设大：只有显式 target 才会触发归档
+        TC.intConfigs['上下文预算'] = 1000000; // 配置预算设大：只有显式 target 才会触发归档
         resetConfigCache();
         try {
             const longText = '很长很长的历史消息内容。'.repeat(400);
@@ -8379,7 +8379,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },
@@ -8482,10 +8482,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // 配置：上下文归档重试开（默认 true），本地预算经 TC 配置为 1000000 → target = min(1e6, 128000)*0.8
         const origEnabled = TC.boolConfigs['启用报错自动处理'];
         const origArchive = TC.boolConfigs['上下文超长自动归档重试'];
-        const origTokens = TC.intConfigs['上下文最大token'];
+        const origTokens = TC.intConfigs['上下文预算'];
         TC.boolConfigs['启用报错自动处理'] = true;
         TC.boolConfigs['上下文超长自动归档重试'] = true;
-        TC.intConfigs['上下文最大token'] = 1000000;
+        TC.intConfigs['上下文预算'] = 1000000;
         resetConfigCache();
         try {
             assert.equal(err.kind, 'context_too_long');
@@ -8527,7 +8527,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;
             if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;
-            if (origTokens === undefined) delete TC.intConfigs['上下文最大token']; else TC.intConfigs['上下文最大token'] = origTokens;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
             resetConfigCache();
         }
     },

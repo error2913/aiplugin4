@@ -34,7 +34,7 @@ class FakeStorage {
     set(k: string, v: string): void {
         this.setCalls++;
         this.writtenBytes += v.length;
-        this.writeLog.push(k);
+        if (v.length > 0) this.writeLog.push(k);
         this.map.set(k, v);
     }
     /** 当前"活跃"键数（分片数等） */
@@ -117,6 +117,8 @@ function makeStandbyGroup(sid: string): Session {
     s.sessionType = 'group';
     s.agentName = 'default';
     s.setting.standby = true;
+    // Context 旧配置键已移除；模拟器用会话覆盖复现旧窗口/冷态参数
+    s.setting.overrides = { coldWindowChars: 5000, coldTruncate: 500, windowMaxChars: 20000 };
     s.lastRelevantAt = Date.now() - 11 * 60_000;   // 超过 10 分钟阈值 → 冷态
     // 关键：Context.session 是经 agent.sessionService.getSession(context.sessionId) 取的，
     // 必须让 context 知道自己的 sessionId，否则 isColdSession() 会落到别的会话上（真实踩过的坑）。
@@ -194,24 +196,13 @@ async function scenarioColdIngest() {
 }
 
 async function scenarioSettle(session: Session, sid: string) {
-    console.log('\n== 场景 2：记忆结算（三条件） ==');
-    // 放开结算门槛，模拟"积压够了 + 转冷"
-    TC.intConfigs['结算水位'] = 1;
-    TC.intConfigs['结算最小门槛'] = 0;
-    TC.intConfigs['结算空闲门槛'] = 600;
-    TC.intConfigs['单次结算调用上限'] = 100;
-    resetConfig();
-
+    console.log('\n== 场景 2：legacy 结算已停用 ==');
     const beforeCalls = llm.calls;
     const settled = await session.context.settleWindowIfNeeded(Date.now());
     const delta = llm.calls - beforeCalls;
-    check('按水位结算并沉淀记忆', settled > 0, `本次结算 ${settled} 个分片，summarize 调用 ${delta} 次`);
-    check('水位幂等（settledSeq 推进）', (session as any).settledSeq === settled,
-        `settledSeq=${(session as any).settledSeq} / 本次 ${settled}`);
-
-    // 再跑一次应无事可做
+    check('legacy 结算不再写记忆', settled === 0 && delta === 0, `本次结算 ${settled} 个分片，summarize 调用 ${delta} 次`);
     const again = await session.context.settleWindowIfNeeded(Date.now());
-    check('重复调用不重复总结', again === 0, `第二次结算 ${again} 个分片`);
+    check('重复调用仍为空操作', again === 0, `第二次结算 ${again} 个分片`);
 }
 
 async function scenarioTurnHot(session: Session, sid: string) {
@@ -247,7 +238,7 @@ async function scenarioTurnHot(session: Session, sid: string) {
         `tool 消息 ${(built as any[]).filter(m => m.role === 'tool').length} 条，孤儿 ${orphan.length} 条`);
 
     const totalChars = built.reduce((n, m: any) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
-    const budget = Config.context.COLD_WINDOW_CHARS;
+    const budget = (session.setting.overrides as any).coldWindowChars || 0;
     check('首轮整包 ≤ 冷态窗口 × 1.2（含折叠摘要）', totalChars <= budget * 1.2,
         `整包 ${totalChars} 字 / 窗口 ${budget} 字`);
 
@@ -256,11 +247,7 @@ async function scenarioTurnHot(session: Session, sid: string) {
 }
 
 async function scenarioKeepRawOff() {
-    console.log('\n== 场景 4：关闭「归档保留原文」 ==');
-    TC.boolConfigs['归档保留原文'] = false;
-    TC.intConfigs['对话保存轮数'] = 1;
-    TC.intConfigs['上下文最大token'] = 20;
-    resetConfig();
+    console.log('\n== 场景 4：旧「归档保留原文」开关已移除 ==');
     const sid = 'QQ-Group:sim-keepraw';
     const session = makeStandbyGroup(sid);
     session.context.messages = [
@@ -270,9 +257,9 @@ async function scenarioKeepRawOff() {
         { role: 'assistant', contentItems: [{ text: 'a2', time: 13, messageId: '' }] },
     ] as any;
     const beforeSum = llm.byUse['summarization'] || 0;
-    const outcome = await session.context.archiveByTokenIfNeeded();
+    await session.context.archiveByTokenIfNeeded(20);
     const afterSum = llm.byUse['summarization'] || 0;
-    check('关闭后归档不写分片', session.archiveSeq === 0, `archiveSeq=${session.archiveSeq}`);
+    check('归档始终保留原文分片', session.archiveSeq > 0, `archiveSeq=${session.archiveSeq}`);
     check('关闭归档后不再调用旧记忆 summarize（v3 已解耦）', afterSum === beforeSum,
         `summarization 调用 ${beforeSum} → ${afterSum}`);
     check('消息仍被移出上下文', session.context.messages.length < 4,
@@ -281,8 +268,7 @@ async function scenarioKeepRawOff() {
 
 async function main() {
     console.log('\n========== aiplugin4 上下文成本治理 · 模拟验收 ==========');
-    console.log(`配置：窗口上限 ${Config.context.WINDOW_MAX_CHARS} 字 · 冷态窗口 ${Config.context.COLD_WINDOW_CHARS} 字 · `
-        + `归档保留原文 ${Config.context.ARCHIVE_KEEP_RAW}`);
+    console.log(`配置：会话窗口覆盖 ${20000} 字 · 冷态窗口 ${5000} 字`);
 
     const { session, sid } = await scenarioColdIngest();
     await scenarioSettle(session, sid);

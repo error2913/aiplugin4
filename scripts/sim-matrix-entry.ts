@@ -455,6 +455,7 @@ async function scenarioEdgeCases() {
         resetConfig();
         const sid = 'QQ-Group:edge-jump';
         const s = makeSession(sid);
+        s.setting.overrides.windowMaxChars = 200;
         // 预置 1..20 号分片（模拟"曾经写过很多片"），rawSeq 记为 20
         for (let i = 1; i <= 20; i++) {
             storage.set(`session_${sid}:raw:${String(i).padStart(3, '0')}`,
@@ -489,6 +490,7 @@ async function scenarioEdgeCases() {
         TC.boolConfigs['归档保留原文'] = true;
         resetConfig();
         const sessions = Array.from({ length: 5 }, (_, i) => makeSession(`QQ-Group:multi-${i}`));
+        for (const session of sessions) session.setting.overrides.windowMaxChars = 300;
         await Promise.all(sessions.map(async (s, si) => {
             for (let i = 0; i < 50; i++) {
                 await s.context.addUserMessage(makeCtx(s.sessionId), `会话${si}消息${i}${'内'.repeat(10)}`, 'QQ:1', `m${si}_${i}`);

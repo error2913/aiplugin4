@@ -1,7 +1,6 @@
 // 上下文归档与窗口移出：L1 窗口裁剪（trimToWindow）+ L2 记忆结算（archiveByTokenIfNeeded/settleWindowIfNeeded）。
 // 从 context.ts 拆出：只依赖 host.messages / host.session + 分片存储，与消息增删（Context 主体）解耦；
 // 关键不变量集中在本文件：写分片成功才移除、工具配对原子组不拆、归档失败不做硬删（连续失败才降级）。
-import Config from "../config/config";
 import Logger from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import Model from "../model/model";
@@ -48,7 +47,8 @@ const archivingHosts = new WeakSet<object>();
      * @returns 本次实际结算的分片数（0 表示未触发/无积压/失败）
      */
 export async function settleWindowIfNeeded(host: ArchiveHost, now: number = Date.now()): Promise<number> {
-        const { SETTLE_WATERMARK, SETTLE_MIN_TOKENS, SETTLE_IDLE_SEC, SETTLE_MAX_SHARDS } = Config.context;
+        // legacy v1 结算已停用：不再读取旧 settle 配置
+        const SETTLE_WATERMARK = 0, SETTLE_MIN_TOKENS = 0, SETTLE_IDLE_SEC = 0, SETTLE_MAX_SHARDS = 0;
         if (SETTLE_WATERMARK <= 0 || SETTLE_MAX_SHARDS <= 0) return 0;   // 水位 0 = 关闭自动结算
         const s: any = host.session;
         if (!s || !s.sessionId) return 0;
@@ -116,12 +116,10 @@ export async function settleWindowIfNeeded(host: ArchiveHost, now: number = Date
      * @returns 本次移出的条目数（0 表示未超上限或没得移）
      */
 export function trimToWindow(host: ArchiveHost): number {
-        const { ARCHIVE_KEEP_RAW } = Config.context;
         const s: any = host.session;
         if (!s || !s.sessionId) return 0;       // 游离/桩会话：无持久化身份，无处留档
-        // 按会话覆盖优先（P2-1）
-        const WINDOW_MAX_CHARS = s.setting?.overrideOr?.('windowMaxChars', Config.context.WINDOW_MAX_CHARS)
-            ?? Config.context.WINDOW_MAX_CHARS;
+        // 按会话覆盖优先（P2-1）；不再读取旧「窗口上限字数」配置
+        const WINDOW_MAX_CHARS = s.setting?.overrideOr?.('windowMaxChars', 0) ?? 0;
         if (WINDOW_MAX_CHARS <= 0) return 0;   // 0=不移出（保持 P0 行为）
 
         const keep = pickWindowTail(host, WINDOW_MAX_CHARS);
@@ -130,9 +128,8 @@ export function trimToWindow(host: ArchiveHost): number {
         const moved = host.messages.slice(0, keep.startIndex);
         const rawItems = collectRawItems(moved);
 
-        // 留档顺序：**先安全落分片，再从上下文移除**（与归档同一不变量）。
-        // 关掉「归档保留原文」= 不留原文，此时跳过写分片、直接移除（省存储）。
-        if (ARCHIVE_KEEP_RAW && rawItems.length > 0) {
+        // 原文始终保留到归档分片（旧「归档保留原文」配置已移除）
+        if (rawItems.length > 0) {
             const nextSeq = (typeof s.rawSeq === 'number' ? s.rawSeq : 0) + 1;
             const outcome = writeShardIfAbsent(s.sessionId, nextSeq, {
                 seq: nextSeq,
@@ -144,8 +141,8 @@ export function trimToWindow(host: ArchiveHost): number {
             if (outcome === 'failed') return 0;
             s.rawSeq = Math.max(typeof s.rawSeq === 'number' ? s.rawSeq : 0, nextSeq);
             s.lastRawAt = Math.floor(Date.now() / 1000);
-            // 分片上限（可配）与惰性 TTL 淘汰：最旧/过期的置空（海豹无删除 API，置空即项目内先例做法）
-            const { SHARD_LIMIT, SHARD_TTL_DAYS } = Config.context;
+            // 分片上限与 TTL 使用内部固定值（旧配置键已移除）
+            const SHARD_LIMIT = 3, SHARD_TTL_DAYS = 7;
             // **必须清到"所有超出上限的"**，不能只清 `rawSeq - SHARD_LIMIT` 这一个：
             // 只清一个的话，一旦出现"多次写入但只触发部分 trim"（批量灌水、写入失败后重试、
             // 进程重启丢掉未落盘的 rawSeq 等），旧分片会永久滞留 —— 上限形同虚设。
@@ -300,7 +297,8 @@ export async function archiveByTokenIfNeeded(host: ArchiveHost, targetTokens?: n
         archivingHosts.add(host);
 
         try {
-            const { MAX_ROUNDS, MAX_CONTEXT_TOKENS } = Config.context;
+            // 旧轮数/上限键已移除：目标按传入值或模型探测窗口解析
+            const MAX_ROUNDS = 0, MAX_CONTEXT_TOKENS = 0;
             // 未传 target 时回退配置上限；配置为 0（P2-3：跟随探测窗口）时解析为有效预算。
             // 解析仍拿不到（未探测过）时回退默认值——**不再当作"不限制"**，否则归档永远不触发。
             const target = targetTokens && targetTokens > 0
@@ -353,9 +351,8 @@ async function forceFitAsLastResort(host: ArchiveHost, targetTokens: number): Pr
 
 async function archivePrefix(host: ArchiveHost, toArchive: MessageType[]): Promise<boolean> {
         const chunks = splitMessagesByToken(toArchive, ARCHIVE_CHUNK_TOKENS);
-        // 「归档保留原文」关闭时：**仍然 summarize 沉淀记忆，只是不写归档分片**（不留原文，省存储）。
-        // 语义区分：开关只控制"原文档留"，不控制"记忆沉淀"——否则关掉开关会让历史既不进记忆也查不到，等于白丢。
-        const keepRaw = Config.context.ARCHIVE_KEEP_RAW;
+        // 原文始终保留到归档分片（旧「归档保留原文」配置已移除）
+        const keepRaw = true;
 
         for (const chunk of chunks) {
             if (keepRaw) {
@@ -392,10 +389,8 @@ async function archiveOldestItems(host: ArchiveHost): Promise<boolean> {
         }
         if (picked.length === 0) return false;
 
-        // legacy v1：不再写记忆
-        if (Config.context.ARCHIVE_KEEP_RAW) {
-            if (writeArchiveShard(host, picked) === 'failed') return false;   // 未留档成功则不移除
-        }
+        // legacy v1：不再写记忆；原文始终保留到归档分片
+        if (writeArchiveShard(host, picked) === 'failed') return false;   // 未留档成功则不移除
         removeArchivedItems(host, picked);
         try { host.session.save(); } catch { /* 游离 Context */ }
         return true;
@@ -448,7 +443,8 @@ function writeArchiveShard(host: ArchiveHost, chunk: MessageType[]): 'stored' | 
         s.lastArchivedAt = Math.floor(Date.now() / 1000);
         // 分片数量上限（可配）：最旧的置空（海豹没有 delete API，置空即项目内先例做法）
         // 同 raw 分支：必须清到"所有超出上限的"，只清一个会在跳号/重试时让旧分片永久滞留。
-        const { SHARD_LIMIT } = Config.context;
+        // 分片数量上限使用内部固定值（旧配置键已移除）
+        const SHARD_LIMIT = 3;
         if (SHARD_LIMIT > 0) {
             for (let old = s.archiveSeq - SHARD_LIMIT; old >= 1; old--) clearShard(s.sessionId, old, 'arc');
         }

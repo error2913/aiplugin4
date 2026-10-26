@@ -269,7 +269,8 @@ export class Context {
      * `called` 表示这次是否真的调用了压缩智能体（未超阈值时为 false，供账本计数用）。
      */
     static async compressPreserveIfLong(text: string): Promise<{ display: string; original: string; changed: boolean; called: boolean }> {
-        const { COMPRESS_THRESHOLD } = Config.context;
+        // 旧「消息压缩阈值」配置已移除，使用内部固定阈值
+        const COMPRESS_THRESHOLD = 8000;
         if (text.length <= COMPRESS_THRESHOLD) return { display: text, original: text, changed: false, called: false };
         try {
             const compressed = await getAuxLlm().chat('compress_agent', text);
@@ -285,7 +286,13 @@ export class Context {
         return { display: text, original: text, changed: false, called: true };
     }
 
-    /** 冷态判定：待机（会话或全局）且无在途对话。游离 Context / 测试桩没有 stateOf 时按热态处理，保持原行为 */
+    /** 待机判定（配额用；v2 不再使用冷/热状态机） */
+    private isStandbySession(): boolean {
+        const s: any = this.session;
+        return !!(s?.setting?.standby || Config.base.GLOBAL_STANDBY);
+    }
+
+    /** 冷态判定（仅旧回退路径使用） */
     private isColdSession(): boolean {
         const s: any = this.session;
         if (!s || typeof s.stateOf !== 'function') return false;
@@ -324,8 +331,7 @@ export class Context {
     private buildColdUserItem(text: string, userId: string, messageId: string): UserMessageItem {
         // 按会话覆盖优先（P2-1）
         const s: any = this.session;
-        const COLD_SINGLE_TRUNCATE = s?.setting?.overrideOr?.('coldTruncate', Config.context.COLD_SINGLE_TRUNCATE)
-            ?? Config.context.COLD_SINGLE_TRUNCATE;
+        const COLD_SINGLE_TRUNCATE = s?.setting?.overrideOr?.('coldTruncate', 0) ?? 0;
         const original = stripInternalTags(text);
         const item: UserMessageItem = {
             text: original,
@@ -412,7 +418,8 @@ export class Context {
      */
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string): Promise<void> {
         if (this.v2Service) {
-            if (this.isColdSession() && !this.allowColdIngest()) return;
+            // 只有启用配额时才限流；按待机判定，不进入旧冷热状态机
+            if (Config.context.STANDBY_QUOTA > 0 && this.isStandbySession() && !this.allowColdIngest()) return;
             this.appendV2User(text, userId, messageId);
             return;
         }

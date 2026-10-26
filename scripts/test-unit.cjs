@@ -101,7 +101,10 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
     // v3 重写：旧 v2 记忆行为/MemoryManager 语义的测试已被 v3 用例取代（见 unit-test-entry testV3*），
     // 不再作为默认门禁；保留源码便于对照，但默认跳过。
     const LEGACY_MEMORY_SKIP = /^(testSettle|testV2|testMM|testCmdMemo|testBuildLongTermPrompt|testBuildObservationPrompt|testMigrateLegacyPersona|testR2Consolidate|testCreateMemoryEngineDegrade|testSealMemoryStorageShardedAndMigrates)/;
-    const names = Object.keys(all).filter(n => (!filter || n.includes(filter)) && (!skip || !skip.test(n)) && !LEGACY_MEMORY_SKIP.test(n));
+    // Context v3 清理：旧 v1 窗口/结算/压缩阈值/归档开关的配置键已移除，对应旧行为测试退役；
+    // 新 Context v2 行为由 scripts/unit-test-context-*.ts 覆盖。
+    const LEGACY_CONTEXT_SKIP = /^(testArchiveByTokenKeepsRecentRounds|testArchiveByTokenCustomTarget|testArchiveDiscardWhenKeepRawOff|testArchiveWritesShardAndKeepsOriginal|testArchiveShardIdempotent|testArchiveSeqAdvancesOnExistingShard|testArchiveConvergesWithoutMemory|testWindowTrim|testColdIngest|testSessionBlobBounded|testReadRawFromRawShard|testShardWriteFailsOnReadError|testPickTierAndFold|testJudgeHistoryHardTruncated|testCompress|testUserMessage.*Compress)/;
+    const names = Object.keys(all).filter(n => (!filter || n.includes(filter)) && (!skip || !skip.test(n)) && !LEGACY_MEMORY_SKIP.test(n) && !LEGACY_CONTEXT_SKIP.test(n));
     if (names.length === 0) throw new Error('未发现任何单元测试（或 UNIT_FILTER 无匹配）');
     for (const name of names) {
         await all[name]();

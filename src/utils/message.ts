@@ -368,8 +368,7 @@ export function renderFoldBudget(session: Session, messages: ContextMessage[]): 
     const standby = session.setting?.standby === true || Config.base.GLOBAL_STANDBY === true;
     if (!standby) return 0;
     // 按会话覆盖优先（P2-1）：本会话设了「冷态窗口字数」就用它，否则用全局配置
-    const base = session.setting?.overrideOr?.('coldWindowChars', Config.context.COLD_WINDOW_CHARS)
-        ?? Config.context.COLD_WINDOW_CHARS;
+    const base = session.setting?.overrideOr?.('coldWindowChars', 0) ?? 0;
     if (base <= 0) return 0;
     // 档位只看"最新一条**真实用户发言**"：跳过系统条目（事件/触发提示/折叠摘要本身），
     // 否则"继续""总结"这类系统文案会把档位带偏（例如续跑提示含"继续"→ 误升 L1）。
@@ -413,8 +412,7 @@ export function renderWindowedHistory(
     if (budget === undefined) {
         budget = renderFoldBudget(session, messages);
         if (budget <= 0) {
-            const base = Config.context.COLD_WINDOW_CHARS;
-            budget = base > 0 ? base : AUX_HISTORY_FALLBACK_CHARS;
+            budget = AUX_HISTORY_FALLBACK_CHARS;
         }
     }
     const folded = budget > 0 ? foldContextMessages(messages.slice(), budget) : messages.slice();
@@ -436,7 +434,8 @@ export function renderWindowedHistory(
 }
 
 function buildContextMessages(messages: ContextMessage[], foldBudget: number): ContextMessage[] {
-    const { INSERT_COUNT } = Config.context;
+    // 旧「插入system message间隔轮数」配置已移除：不再插入轮数提醒
+    const INSERT_COUNT = 0;
 
     const contextMessages = foldContextMessages(messages.slice(), foldBudget);
     if (INSERT_COUNT <= 0) return contextMessages;
@@ -508,7 +507,7 @@ function truncateMessageText(message: ContextMessage, maxChars: number): number 
  * 而不是让请求体带着超限预算直接发送，也不会把整个会话上下文一次性清空。
  */
 function applyTokenBudget(messages: ContextMessage[], protectedCount: number, tools?: unknown[], modelName?: string): ContextMessage[] {
-    const { MAX_CONTEXT_TOKENS: configuredTokens } = Config.context;
+    const { BUDGET_TOKENS: configuredTokens } = Config.context;
     // P2-3：配置为 0 时跟随"报错探测到的模型真实窗口"（按模型名持久化缓存）。
     // 这里而不是 Config.context 里解析，是因为需要 modelName，且 Config 的组级 getter 有 60s 缓存、不带模型维度。
     const { tokens: maxTokens } = resolveEffectiveMaxTokens(configuredTokens, getProbedContextWindow(modelName || ''));
@@ -638,6 +637,12 @@ export async function handleMessages(
 ): Promise<RequestMessage[]> {
     const system = systemMessage ?? await buildSystemMessage(ctx, session);
     const samplesMessages = buildSamplesMessages(ctx);
+    // 事件账本：请求完全由 compileRequest 决定，不再走下面的旧 messages 折叠/预算/配对路径。
+    // 编译失败才回退旧路径（迁移失败/兼容场景），避免冷热折叠等旧逻辑在 v2 下继续执行。
+    if (session.contextV2) {
+        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
+        if (compiled) return compiled as RequestMessage[];
+    }
     const clonedContext = (session.context.messages as ContextMessage[]).map(cloneContextMessage);
     const contextMessages = buildContextMessages(clonedContext, renderFoldBudget(session, clonedContext));
 
@@ -680,8 +685,7 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
-        const served = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
-        return (served ?? peMessages) as RequestMessage[];
+        return peMessages;
     }
 
     // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
@@ -776,8 +780,7 @@ export async function handleMessages(
         }
         return out;
     }));
-    const served = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
-    return (served ?? finalMessages) as RequestMessage[];
+    return finalMessages as RequestMessage[];
 }
 
 export function buildContent(message: ContextMessage): string {

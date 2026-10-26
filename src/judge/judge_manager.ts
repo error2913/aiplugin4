@@ -6,7 +6,7 @@ import { getAuxLlm } from "../core/ports/aux_llm";
 import { cancelJudgeWait, scheduleJudgeWait, setJudgeWaitFinisher } from "../core/ports/judge_wait";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
-import { buildContent, getRoleSetting, renderWindowedHistory } from "../utils/message";
+import { AUX_HISTORY_FALLBACK_CHARS, buildContent, getRoleSetting, renderWindowedHistory } from "../utils/message";
 import { fmtDate } from "../utils/string";
 import { withTimeout } from "../utils/timeout";
 
@@ -396,7 +396,10 @@ ${history.text}
      */
     private static buildHistory(session: Session, count: number, currentText: string): { text: string; count: number } {
         const msgs = session.context.messages as any[];
-        const windowed = renderWindowedHistory(session, msgs);
+        // 事件账本下不再走旧冷热折叠；judge 只需要有界历史文本
+        const windowed = session.contextV2
+            ? renderWindowedHistory(session, msgs, AUX_HISTORY_FALLBACK_CHARS)
+            : renderWindowedHistory(session, msgs);
         const lines = windowed ? windowed.split('\n').filter(Boolean) : [];
         const items = count > 0 ? lines.slice(-count) : [];
         const current = currentText.trim();
