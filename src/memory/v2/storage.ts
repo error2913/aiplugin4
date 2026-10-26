@@ -81,7 +81,8 @@ export class SealMemoryStorage implements MemoryStorage {
     }
 
     saveBank(bank: PersistedBank, parts: BankPart[] = PARTS): void {
-        if (parts.includes('meta')) this.saveBankMeta(bank.meta);
+        // 数据分片先写、meta 最后写：迁移时 schemaVersion=3 的 meta 不会先于数据出现，
+        // 进程中断后可安全重试（旧 meta 仍在）。
         if (parts.includes('units')) getHost().storage.set(keyOf(bank.meta.id, 'units'), JSON.stringify(bank.units));
         if (parts.includes('links')) getHost().storage.set(keyOf(bank.meta.id, 'links'), JSON.stringify(bank.links));
         if (parts.includes('obs')) {
@@ -92,6 +93,7 @@ export class SealMemoryStorage implements MemoryStorage {
             };
             getHost().storage.set(keyOf(bank.meta.id, 'obs'), JSON.stringify(obs));
         }
+        if (parts.includes('meta')) this.saveBankMeta(bank.meta);
         this.registerBank(bank.meta.id);
     }
 
