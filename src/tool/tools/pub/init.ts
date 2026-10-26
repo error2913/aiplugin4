@@ -4,7 +4,7 @@ import Tool from "../../tool";
 import { registerPubRead, registerPubSend } from "./tool_pub";
 
 export function registerPubToolSet() {
-    Tool.withCategory('公开会话', () => {
+    Tool.withCategory('Public sessions', () => {
         registerPubRead();
         registerPubSend();
     });

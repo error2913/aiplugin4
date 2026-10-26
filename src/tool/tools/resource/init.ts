@@ -8,7 +8,7 @@ import { registerAudioTools } from "./tool_voice";
 
 /** 注册 resource 下全部资源工具（分类：资源） */
 export function registerResourceTools() {
-    Tool.withCategory('资源', () => {
+    Tool.withCategory('Resources', () => {
         registerResourceList();
         registerResourcePathTool();
         registerAudioTools();

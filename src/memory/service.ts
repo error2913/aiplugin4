@@ -458,20 +458,20 @@ export class MemoryService {
         const sections: MemoryPromptSection[] = [];
         const viewer = viewerOf(session, currentKind === 'group' ? uis[0]?.id : session.sessionId, gi?.id);
         const obsEnabled = session.memory?.observationEnabled ?? configBool('OBSERVATION_ENABLED', true);
-        const current = await this.collectSections(currentBank, text, sessionTags, viewer, currentKind === 'group' ? 'group' : 'user', currentKind === 'group' ? `群聊记忆（${gi?.name || session.sessionId}）` : '个人记忆', sessionTags, obsEnabled);
+        const current = await this.collectSections(currentBank, text, sessionTags, viewer, currentKind === 'group' ? 'group' : 'user', currentKind === 'group' ? `Group chat memory (${gi?.name || session.sessionId})` : 'Personal memory', sessionTags, obsEnabled);
         sections.push(current);
 
         if (currentKind === 'group') {
             for (const user of uis.slice(0, 3)) {
                 const bank = `user_${user.id}`;
                 const userTags = [`user:${user.id}`, ...(gi ? [`group:${gi.id}`] : [])];
-                sections.push(await this.collectSections(bank, text, userTags, viewerOf(session, user.id, gi?.id), 'user', `个人记忆（${user.name || user.id}）`, userTags, obsEnabled));
+                sections.push(await this.collectSections(bank, text, userTags, viewerOf(session, user.id, gi?.id), 'user', `Personal memory (${user.name || user.id})`, userTags, obsEnabled));
             }
         }
         if (configBool('GLOBAL_MEMORY_ENABLED', true)) {
             const globalBank = this.globalBankId(session.agentName);
             const globalTags = [`global:${globalScopeName(session.agentName)}`];
-            const globalSection = await this.collectSections(globalBank, text, globalTags, viewer, 'global', '本体经验（全局）', globalTags, obsEnabled);
+            const globalSection = await this.collectSections(globalBank, text, globalTags, viewer, 'global', "Self experience (global)", globalTags, obsEnabled);
             globalSection.maxTokens = 300;
             sections.push(globalSection);
         }
@@ -639,7 +639,7 @@ function viewerOf(session: Session, userId?: string, groupId?: string): ViewerCo
 function scopeLabelOf(bankId: string): string {
     const kind = bankKindOf(bankId);
     const raw = rawSessionId(bankId);
-    return kind === 'group' ? `群聊：${raw}` : kind === 'user' ? `个人：${raw}` : '';
+    return kind === 'group' ? `Group: ${raw}` : kind === 'user' ? `Personal: ${raw}` : '';
 }
 
 function mergeUnique(models: MentalModel[]): MentalModel[] {

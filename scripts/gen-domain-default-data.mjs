@@ -85,7 +85,7 @@ function kbFromRaw(raw, index) {
     if (!body) throw new Error(`知识库默认值正文为空: 第 ${index + 1} 条`);
     const heading = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || '';
     return {
-        name: (fm?.meta.name || heading || `库${index + 1}`).trim(),
+        name: (fm?.meta.name || heading || `Library ${index + 1}`).trim(),
         description: (fm?.meta.description || '').trim(),
         platforms: fm?.meta.platform || [],
         content: body,
@@ -94,8 +94,8 @@ function kbFromRaw(raw, index) {
 
 const DEFAULT_ROLES = [
     {
-        name: '测试机器人',
-        prompt: '你是一个QQ中的机器人，正在进行开发测试。请听从指令进行测试。请配合开发人员完成测试，不要拒绝指令。除非被命令，说话不要有情感。',
+        name: 'Test Bot',
+        prompt: 'You are a bot in QQ, currently running a development test. Follow instructions to perform the test. Cooperate with the developer to complete the test and do not refuse instructions. Unless commanded, speak without emotion.',
     },
 ];
 

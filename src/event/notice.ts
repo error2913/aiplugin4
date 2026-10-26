@@ -164,10 +164,10 @@ function formatFileSize(bytes: any): string {
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
-/** 表情回应 emoji_id → 中文名（QQ 表情表），未知保留原始 id 便于排查 */
+/** 表情回应 emoji_id → 名称（QQ 表情表），未知保留原始 id 便于排查 */
 function formatEmojiId(id: any): string {
     const key = String(id);
-    return FACE_MAP[key] || `表情${key}`;
+    return FACE_MAP[key] || `emoji ${key}`;
 }
 
 /**
@@ -181,64 +181,66 @@ export function buildNoticeText(event: any, prefix: string): string {
     const operator = uniUserId(event.operator_id, prefix);
     switch (noticeType) {
         case 'group_ban': {
-            const target = user || '未知成员';
-            if (subType === 'lift_ban') return `【群事件】${operator || '管理员'} 解除了 ${target} 的禁言`;
-            return `【群事件】${operator || '管理员'} 将 ${target} 禁言 ${event.duration ?? '?'} 秒`;
+            const target = user || 'unknown member';
+            if (subType === 'lift_ban') return `Group event: ${operator || 'admin'} unmuted ${target}.`;
+            return `Group event: ${operator || 'admin'} muted ${target} for ${event.duration ?? '?'} seconds.`;
         }
         case 'group_admin': {
-            const target = user || '未知成员';
-            return subType === 'unset' ? `【群事件】${target} 被取消管理员` : `【群事件】${target} 被设为管理员`;
+            const target = user || 'unknown member';
+            return subType === 'unset' ? `Group event: ${target} was removed as admin.` : `Group event: ${target} was set as admin.`;
         }
         case 'group_upload': {
             const file = event.file || {};
             const size = formatFileSize(file.size);
-            return `【群事件】${user || '群成员'} 上传了文件「${file.name || file.file || '未知文件'}」${size ? `（${size}）` : ''}`;
+            return `Group event: ${user || 'group member'} uploaded file "${file.name || file.file || 'unknown file'}"${size ? ` (${size})` : ''}.`;
         }
         case 'group_card':
-            return `【群事件】${user || '成员'} 的群名片由「${event.card_old || '未知'}」变更为「${event.card_new || '未知'}」`;
+            return `Group event: ${user || 'member'}'s group card changed from "${event.card_old || 'unknown'}" to "${event.card_new || 'unknown'}".`;
         case 'notify': {
-            if (subType === 'lucky_king') return `【群事件】${user || '群成员'} 抢到了运气王红包`;
-            if (subType === 'honor') return `【群事件】${user || '群成员'} 获得群荣誉「${event.honor_type || '未知荣誉'}」`;
+            if (subType === 'lucky_king') return `Group event: ${user || 'group member'} won the lucky king red packet.`;
+            if (subType === 'honor') return `Group event: ${user || 'group member'} received group honor "${event.honor_type || 'unknown honor'}".`;
             if (subType === 'poke') return ''; // poke 由原生 onPoke 处理，不在这里录
-            if (subType === 'group_name') return `【群事件】群名称变更为「${event.name_new || event.group_name || '未知'}」`;
-            if (subType === 'title') return `【群事件】${user || '群成员'} 的头衔变更为「${event.title || '未知'}」`;
+            if (subType === 'group_name') return `Group event: group name changed to "${event.name_new || event.group_name || 'unknown'}".`;
+            if (subType === 'title') return `Group event: ${user || 'group member'}'s title changed to "${event.title || 'unknown'}".`;
             if (subType === 'profile_like') {
                 const liker = uniUserId(event.operator_id, prefix);
-                const times = event.times && Number(event.times) > 1 ? `（×${event.times}）` : '';
-                return `【资料事件】${liker || event.operator_nick || '有人'} 点赞了你的资料${times}`;
+                const times = event.times && Number(event.times) > 1 ? ` (x${event.times})` : '';
+                return `Profile event: ${liker || event.operator_nick || 'someone'} liked your profile${times}.`;
             }
-            if (subType === 'gray_tip') return `【群事件】${user || '成员'} 触发灰条消息（busi_id: ${event.busi_id || '未知'}）`;
+            if (subType === 'gray_tip') return `Group event: ${user || 'member'} triggered a gray tip (busi_id: ${event.busi_id || 'unknown'}).`;
             if (subType === 'input_status') return ''; // 输入状态纯噪音，不收录
-            return `【群事件】${user || '群成员'} 触发通知（${subType}）`;
+            return `Group event: ${user || 'group member'} triggered a notification (${subType}).`;
         }
         case 'group_increase':
-            return `【群事件】${user || '成员'} 加入本群${operator ? `（由 ${operator} ${subType === 'invite' ? '邀请' : '通过'}）` : ''}`;
+            return `Group event: ${user || 'member'} joined this group${operator ? ` (${subType === 'invite' ? 'invited' : 'approved'} by ${operator})` : ''}.`;
         case 'group_decrease': {
-            if (subType === 'disband') return `【群事件】本群已解散`;
-            if (subType === 'kick_me') return `【群事件】本机器人被移出群聊`;
-            if (subType === 'kick') return `【群事件】${operator || '管理员'} 将 ${user || '成员'} 移出本群`;
-            return `【群事件】${user || '成员'} 退出本群`;
+            if (subType === 'disband') return 'Group event: this group was disbanded.';
+            if (subType === 'kick_me') return 'Group event: this bot was removed from the group.';
+            if (subType === 'kick') return `Group event: ${operator || 'admin'} removed ${user || 'member'} from this group.`;
+            return `Group event: ${user || 'member'} left this group.`;
         }
         case 'group_recall':
-            return `【群事件】${operator || user || '成员'} 撤回了一条消息`;
+            return `Group event: ${operator || user || 'member'} recalled a message.`;
         case 'friend_recall':
-            return `【好友事件】${user || '好友'} 撤回了一条消息`;
+            return `Friend event: ${user || 'friend'} recalled a message.`;
         case 'friend_add':
-            return `【好友事件】已与 ${user || '新好友'} 成为好友`;
+            return `Friend event: now friends with ${user || 'new friend'}.`;
         case 'essence': {
             const sender = uniUserId(event.sender_id, prefix);
-            return `【群事件】${operator || '管理员'} 将 ${sender || '成员'} 的消息${event.sub_type === 'delete' ? '取消' : '设为'}精华`;
+            const action = event.sub_type === 'delete' ? 'removed' : 'set';
+            const suffix = event.sub_type === 'delete' ? ' from essence' : ' as essence';
+            return `Group event: ${operator || 'admin'} ${action} ${sender || 'member'}'s message${suffix}.`;
         }
         case 'group_msg_emoji_like': {
             const likes = Array.isArray(event.likes) ? event.likes : [];
             const emojiText = likes
                 .map((l: any) => {
-                    const cnt = l && l.count && Number(l.count) > 1 ? `(×${l.count})` : '';
-                    return `「${l ? formatEmojiId(l.emoji_id) : '未知表情'}」${cnt}`;
+                    const cnt = l && l.count && Number(l.count) > 1 ? `(x${l.count})` : '';
+                    return `"${l ? formatEmojiId(l.emoji_id) : 'unknown emoji'}"${cnt}`;
                 })
-                .join('、');
-            const action = event.is_add === false ? '取消' : '添加';
-            return `【群事件】${user || '有成员'} 对消息${action}了表情${emojiText || '（未知）'}`;
+                .join(', ');
+            const action = event.is_add === false ? 'removed' : 'added';
+            return `Group event: ${user || 'a member'} ${action} emoji reaction ${emojiText || '(unknown)'} on a message.`;
         }
         default:
             return '';
@@ -250,14 +252,14 @@ export function buildRequestText(event: any, prefix: string): string {
     const requestType = event.request_type || '';
     const user = uniUserId(event.user_id, prefix);
     const group = uniGroupId(event.group_id, prefix);
-    const comment = event.comment ? `：${truncateText(String(event.comment), 80)}` : '';
-    const hint = '（完整事件数据可用 read_raw kind=event 查看，处理申请需要）';
+    const comment = event.comment ? `: ${truncateText(String(event.comment), 80)}` : '';
+    const hint = ' (full event data: read_raw kind=event; needed to handle the request)';
     if (requestType === 'friend') {
-        return `【好友请求】${user || '未知用户'} 请求添加好友${comment}${hint}`;
+        return `Friend request: ${user || 'unknown user'} wants to add you as a friend${comment}${hint}`;
     }
     if (requestType === 'group') {
-        const action = event.sub_type === 'invite' ? '邀请加入' : '申请加入';
-        return `【入群请求】${user || '未知用户'} ${action}${group ? '群 ' + group : ''}${comment}${hint}`;
+        const action = event.sub_type === 'invite' ? 'invites you to join' : 'requests to join';
+        return `Group join request: ${user || 'unknown user'} ${action}${group ? ' group ' + group : ''}${comment}${hint}`;
     }
     return '';
 }
@@ -267,19 +269,19 @@ export function buildNativeNoticeText(info: { noticeType: string; subType?: stri
     const { noticeType, subType = '', userId = '', operatorId = '' } = info;
     switch (noticeType) {
         case 'group_joined':
-            return `【群事件】本机器人加入本群`;
+            return 'Group event: this bot joined the group.';
         case 'group_increase':
-            return `【群事件】${userId || '成员'} 加入本群`;
+            return `Group event: ${userId || 'member'} joined this group.`;
         case 'group_decrease':
-            if (subType === 'kick_me') return `【群事件】本机器人被移出群聊`;
-            if (subType === 'kick') return `【群事件】${operatorId || '管理员'} 将 ${userId || '成员'} 移出本群`;
-            return `【群事件】${userId || '成员'} 退出本群`;
+            if (subType === 'kick_me') return 'Group event: this bot was removed from the group.';
+            if (subType === 'kick') return `Group event: ${operatorId || 'admin'} removed ${userId || 'member'} from this group.`;
+            return `Group event: ${userId || 'member'} left this group.`;
         case 'group_recall':
-            return `【群事件】${operatorId || userId || '成员'} 撤回了一条消息`;
+            return `Group event: ${operatorId || userId || 'member'} recalled a message.`;
         case 'friend_recall':
-            return `【好友事件】${userId || '好友'} 撤回了一条消息`;
+            return `Friend event: ${userId || 'friend'} recalled a message.`;
         case 'friend_add':
-            return `【好友事件】已与 ${userId || '新好友'} 成为好友`;
+            return `Friend event: now friends with ${userId || 'new friend'}.`;
         default:
             return '';
     }

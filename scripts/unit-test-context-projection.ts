@@ -30,7 +30,7 @@ function assistantEvent(seq: number, text: string): ConversationEvent {
 }
 
 function systemEvent(seq: number, text: string): ConversationEvent {
-    return { seq, eventId: `e:s${seq}`, at: seq, recvAt: seq, kind: 'event', systemName: '事件', eventType: 'group_recall', raw: { id: seq }, parts: [{ type: 'text', text }] };
+    return { seq, eventId: `e:s${seq}`, at: seq, recvAt: seq, kind: 'event', systemName: 'group-event', eventType: 'group_recall', raw: { id: seq }, parts: [{ type: 'text', text }] };
 }
 
 function toolCall(seq: number, callId: string): ConversationEvent {
@@ -58,7 +58,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(user.contentItems[0].messageId, 'm1');
         const sys = projection[1] as any;
         assert.equal(sys.role, 'user');
-        assert.equal(sys.contentItems[0].systemName, '事件');
+        assert.equal(sys.contentItems[0].systemName, 'group-event');
         assert.equal(sys.contentItems[0].eventType, 'group_recall');
         assert.equal(projection[2].role, 'assistant');
         const calls = projection[3] as any;
@@ -89,7 +89,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const projection = buildProjection(snapshot(events));
         const toolCalls = projection.filter(m => (m as any).toolCalls);
         assert.equal(toolCalls.length, 0, '不完整组不得产生 ToolCallsMessage');
-        assert.ok(JSON.stringify(projection).includes('调用未完成'));
+        assert.ok(JSON.stringify(projection).includes('Tool calls unfinished: f'));
     },
 
     testContextV2ProjectionBoundedKeepsNewest() {

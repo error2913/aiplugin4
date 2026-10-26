@@ -2,6 +2,9 @@
 import { NAME, VERSION } from "../config/static_config";
 import { logger } from "../logger";
 import Model from "../model/model";
+import { onPromptAssemble as registerPromptHook } from "../prompt/assemble";
+import { registerExtensionSection } from "../prompt/registry";
+import type { PromptSection } from "../prompt/types";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
@@ -60,6 +63,10 @@ export interface AgentGlobalApi {
     run(ctx: seal.MsgContext, msg: seal.Message, options?: AgentRunOptions): Promise<void>;
     /** 注册一个工具，供 AI 通过函数调用/提示词工程使用；同名内置工具不可覆盖，成功返回 true */
     registerTool(info: ToolInfo, options?: RegisterToolOptions): boolean;
+    /** 注册一个提示词段（扩展命名空间 ext:*，order ≥10000，单段 ≤2000 字符、合计 ≤4000）；成功返回 true */
+    registerPromptSection(section: PromptSection): boolean;
+    /** 注册提示词组装 hook（可整体改写 system/runtime 文本；按注册顺序执行） */
+    onPromptAssemble(hook: (parts: { system: string; runtime: string }) => { system?: string; runtime?: string } | void): void;
 }
 
 /** 把智能体 API 挂载到 globalThis；JS 重载时直接覆盖为新版本对象，避免外部插件拿到旧 API */
@@ -121,6 +128,14 @@ export function registerAgentApi(): void {
                 log.exception(`注册工具 ${name} 失败`, e);
                 return false;
             }
+        },
+        registerPromptSection: (section: PromptSection) => {
+            const ok = registerExtensionSection(section);
+            if (ok) log.info(`外部插件注册提示词段: ${section?.name || ''}`);
+            return ok;
+        },
+        onPromptAssemble: (hook) => {
+            registerPromptHook(hook);
         }
     };
 

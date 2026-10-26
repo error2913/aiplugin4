@@ -4,6 +4,7 @@ import { finishJudgeWaitRound, setJudgeWaitScheduler } from "./core/ports/judge_
 import { getSessionById } from "./core/ports/session_lookup";
 import { logger } from "./logger";
 import type { Session } from "./session/session";
+import { SYSTEM_NAME } from "./utils/protocol";
 import { revive, TypeDescriptor } from "./utils/revive";
 import { getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
@@ -266,14 +267,14 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const session = getSessionById(sid);
 
-                            const s = `你设置的定时器触发了，请按照以下内容发送回复：
-定时器设定时间：${fmtDate(set)}
-目标时间：${fmtDate(target)}
-当前触发时间：${fmtDate(Math.floor(Date.now() / 1000))}
-提示内容：${content}`;
+                            const s = `Your timer fired. Send this reply:
+Timer set at: ${fmtDate(set)}
+Target time: ${fmtDate(target)}
+Triggered at: ${fmtDate(Math.floor(Date.now() / 1000))}
+Prompt: ${content}`;
 
                             try {
-                                await session.context.addSystemUserMessage(s, "定时器触发提示");
+                                await session.context.addSystemUserMessage(s, SYSTEM_NAME.timer);
                                 await session.chat(ctx, msg, '定时任务');
                                 // 一次性定时器执行成功，从队列移除并立即落盘；执行失败保留（下一轮重试）
                                 removeTimer(timer);
@@ -311,14 +312,14 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                                 removeTimer(timer);
                             }
 
-                            const s = `你设置的定时器触发了，请按照以下内容发送回复：
-定时器设定时间：${fmtDate(set)}
-间隔时间：${fmtDate(interval)}
-剩余触发次数：${count === -1 ? '无限' : count - 1}
-当前触发时间：${fmtDate(Math.floor(Date.now() / 1000))}
-提示内容：${content}`;
+                            const s = `Your timer fired. Send this reply:
+Timer set at: ${fmtDate(set)}
+Interval: ${fmtDate(interval)}
+Remaining triggers: ${count === -1 ? 'unlimited' : count - 1}
+Triggered at: ${fmtDate(Math.floor(Date.now() / 1000))}
+Prompt: ${content}`;
 
-                            await session.context.addSystemUserMessage(s, "定时器触发提示");
+                            await session.context.addSystemUserMessage(s, SYSTEM_NAME.timer);
                             await session.chat(ctx, msg, '定时任务');
                             break;
                         }
@@ -353,12 +354,12 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             const lastMsg = messages[messages.length - 1] as any;
                             const items = lastMsg?.contentItems || [];
                             const lastTime = items[items.length - 1]?.time || 0;
-                            const lastTimePrompt = `最后一条消息时间：${fmtDate(lastTime)}`;
-                            const s = `现在是你的活跃时间：${fmtDate(Math.floor(Date.now() / 1000))}
+                            const lastTimePrompt = `Last message time: ${fmtDate(lastTime)}`;
+                            const s = `It is now your active window: ${fmtDate(Math.floor(Date.now() / 1000))}
 ${lastTimePrompt}
-请说点什么`;
+Say something.`;
 
-                            await session.context.addSystemUserMessage(s, "活跃时间触发提示");
+                            await session.context.addSystemUserMessage(s, SYSTEM_NAME.activeHours);
                             await session.chat(ctx, msg, '活跃时间');
                             break;
                         }

@@ -164,7 +164,7 @@ tests['subagentContext.summaryCompressAndRoll'] = async () => {
     const messages = context.snapshot();
     const system = String((messages[0] as { content?: string }).content ?? '');
     assert.ok(system.includes('你是子代理'), '原 system 提示词必须保留');
-    assert.equal((system.match(/## 更早上下文摘要/g) || []).length, 1, '摘要段只能有一份（滚动合并）');
+    assert.equal((system.match(/## Earlier context summary \(auto-compacted\)/g) || []).length, 1, '摘要段只能有一份（滚动合并）');
     assert.ok(system.includes('摘要1'));
     assert.ok(messages.some(m => String((m as { content?: string }).content ?? '').includes('最终任务：汇总')), '最新任务必须保留');
     assertToolPairing(messages);
@@ -172,8 +172,8 @@ tests['subagentContext.summaryCompressAndRoll'] = async () => {
     const second = await context.maybeCompress();
     if (second.compressed) {
         const system2 = String((context.snapshot()[0] as { content?: string }).content ?? '');
-        assert.equal((system2.match(/## 更早上下文摘要/g) || []).length, 1);
-        assert.ok(inputs.some(text => text.includes('【已有摘要】')), '滚动压缩应带上已有摘要');
+        assert.equal((system2.match(/## Earlier context summary \(auto-compacted\)/g) || []).length, 1);
+        assert.ok(inputs.some(text => text.includes('[existing summary]')), '滚动压缩应带上已有摘要');
     }
 };
 
@@ -243,7 +243,7 @@ tests['subagentContext.fallbackWithoutSummarizer'] = async () => {
     assert.equal(result.mode, 'fallback');
     assert.ok(result.diagnostic);
     const system = String((context.snapshot()[0] as { content?: string }).content ?? '');
-    assert.ok(system.includes('【更早上下文已省略】'), '降级必须有明确省略标记');
+    assert.ok(system.includes('[earlier context omitted]'), '降级必须有明确省略标记');
     assert.ok(context.tokenCount() <= 400, `降级后仍须有界（实际 ${context.tokenCount()}）`);
     assert.ok(context.snapshot().some(m => String((m as { content?: string }).content ?? '').includes('任务')));
 };
@@ -291,7 +291,7 @@ tests['subagentContext.hugeLatestTruncated'] = async () => {
     assert.ok(result.afterTokens <= 200, `截断后应在上限内（实际 ${result.afterTokens}）`);
     const task = String((context.snapshot()[1] as { content?: string }).content ?? '');
     assert.ok(task.length < huge.length);
-    assert.ok(task.includes('原文过长已截断'));
+    assert.ok(task.includes('… (original too long; truncated)'));
 };
 
 tests['subagentContext.preservesReasoningAndToolIds'] = async () => {
@@ -327,7 +327,7 @@ tests['subagentContext.preservesReasoningAndToolIds'] = async () => {
 // ---------- 注入段落工具函数 ----------
 
 tests['subagentContext.injectedSectionHelpers'] = () => {
-    const text = '原始 system\n\n## 更早上下文摘要（子代理内部自动压缩）\n摘要正文\n【更早上下文已省略】 x';
+    const text = '原始 system\n\n## Earlier context summary (auto-compacted)\n摘要正文\n[earlier context omitted] x';
     assert.equal(stripInjectedContextSections(text), '原始 system');
     assert.ok(extractInjectedSummary(text).includes('摘要正文'));
     assert.equal(extractInjectedSummary('无摘要'), '');

@@ -280,9 +280,29 @@ export function parseMcpConfig(text: string): DomainParseResult<McpConfig> {
                 imageRefs = rawCfg.imageRefs;
             }
         }
+        // description：能力地图里的用途描述（可选；非字符串按空处理）
+        let description = '';
+        if (rawCfg.description !== undefined && rawCfg.description !== null) {
+            if (typeof rawCfg.description === 'string') {
+                description = rawCfg.description.trim().slice(0, 200);
+            } else {
+                warnings.push(issue(`${path}.description`, 'description 必须是字符串，已忽略'));
+            }
+        }
+        // exposeInstructions：是否向提示词暴露 initialize 的 instructions（默认关；容错：非布尔值按 false）
+        let exposeInstructions = false;
+        if (rawCfg.exposeInstructions !== undefined && rawCfg.exposeInstructions !== null) {
+            if (typeof rawCfg.exposeInstructions === 'boolean') {
+                exposeInstructions = rawCfg.exposeInstructions;
+            } else {
+                warnings.push(issue(`${path}.exposeInstructions`, 'exposeInstructions 必须是布尔值（true / false），已按 false 处理'));
+            }
+        }
         servers.push({
             name, platforms, type, url, token, headers,
+            ...(description ? { description } : {}),
             ...(imageRefs ? { imageRefs: true } : {}),
+            ...(exposeInstructions ? { exposeInstructions: true } : {}),
         });
     }
 

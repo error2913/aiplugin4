@@ -7,6 +7,7 @@ import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildN
 import { logger } from "../logger";
 import { getSession } from "../session/session_service";
 import { normalizeMsgId } from "../utils/message_id";
+import { SYSTEM_NAME } from "../utils/protocol";
 import { getPlatform } from "../utils/target_id";
 
 import { getEventEntryRef, rememberEventEntryRef } from "./dedup";
@@ -70,7 +71,7 @@ export async function handleOb11NoticeEvent(event: any): Promise<void> {
         await recordEventPrompt({
             sid,
             text,
-            systemName: '群事件提示',
+            systemName: SYSTEM_NAME.groupEvent,
             epId,
             eventType: noticeType,
             userId,
@@ -124,7 +125,7 @@ export async function handleOb11RequestEvent(event: any): Promise<void> {
         await recordEventPrompt({
             sid,
             text,
-            systemName: '请求事件提示',
+            systemName: SYSTEM_NAME.requestEvent,
             epId,
             eventType: `${requestType}_request`,
             userId,
@@ -144,7 +145,7 @@ export async function handleNativeNoticeEvent(epId: string, sid: string, info: {
         await recordEventPrompt({
             sid,
             text,
-            systemName: '群事件提示',
+            systemName: SYSTEM_NAME.groupEvent,
             epId,
             eventType: info.noticeType,
             userId: info.userId || '',

@@ -25,21 +25,21 @@ export function registerKnowledgeTools() {
         type: 'function',
         function: {
             name: 'knowledge_search',
-            description: '在知识库中按关键词搜索相关条目（仅当前平台可用且本会话开启的库），返回匹配的标题与内容；知识库内容由管理员配置，只读',
+            description: 'Search knowledge bases for relevant entries by keyword (only bases available on the current platform and enabled in this session); returns matching titles and content. Knowledge base content is read-only and configured by the administrator',
             parameters: {
                 type: 'object',
                 properties: {
                     query: {
                         type: 'string',
-                        description: '搜索关键词或问题描述'
+                        description: 'Search keyword or question description'
                     },
                     library_id: {
                         type: 'string',
-                        description: '可选，限定搜索某个知识库'
+                        description: 'Optional; restrict the search to one knowledge base'
                     },
                     topK: {
                         type: 'number',
-                        description: '返回条数，默认 5，最大 50'
+                        description: 'Number of results to return; default 5, max 50'
                     }
                 },
                 required: ['query']
@@ -62,13 +62,13 @@ export function registerKnowledgeTools() {
         type: 'function',
         function: {
             name: 'knowledge_read',
-            description: '按 ID 读取知识库中某个条目的完整内容（仅当前平台可用且本会话开启的库），ID 来自 knowledge_list / knowledge_docs / knowledge_search 的结果',
+            description: 'Read the full content of a knowledge base entry by ID (only bases available on the current platform and enabled in this session). IDs come from knowledge_list / knowledge_docs / knowledge_search results',
             parameters: {
                 type: 'object',
                 properties: {
                     id: {
                         type: 'string',
-                        description: '知识库分块 ID（形如 kb_xxxxxxxx）'
+                        description: 'Knowledge base chunk ID (of the form kb_xxxxxxxx)'
                     }
                 },
                 required: ['id']
@@ -89,21 +89,21 @@ export function registerKnowledgeTools() {
         type: 'function',
         function: {
             name: 'knowledge_list',
-            description: '分页列出当前平台可用且本会话开启的知识库的库名与描述；查看某个库的文档结构使用 knowledge_docs',
+            description: 'List the names and descriptions of knowledge bases available on the current platform and enabled in this session, page by page; use knowledge_docs to view one base document structure',
             parameters: {
                 type: 'object',
                 properties: {
                     page: {
                         type: 'integer',
-                        description: '页码，从 1 开始，默认 1'
+                        description: 'Page number, starting at 1; default 1'
                     },
                     page_size: {
                         type: 'integer',
-                        description: '每页数量，默认 20，最大 100'
+                        description: 'Page size; default 20, max 100'
                     },
                     query: {
                         type: 'string',
-                        description: '按库名或描述关键词过滤'
+                        description: 'Filter by base name or description keyword'
                     }
                 },
                 required: []
@@ -140,21 +140,21 @@ export function registerKnowledgeTools() {
         type: 'function',
         function: {
             name: 'knowledge_docs',
-            description: '查看某个知识库下的文档/章节结构，返回分块 ID；详细正文用 knowledge_read 读取',
+            description: 'View the document/section structure of a knowledge base and return chunk IDs; read full content with knowledge_read',
             parameters: {
                 type: 'object',
                 properties: {
                     library_id: {
                         type: 'string',
-                        description: '知识库 ID，来自 knowledge_list'
+                        description: 'Knowledge base ID, from knowledge_list'
                     },
                     page: {
                         type: 'integer',
-                        description: '页码，从 1 开始，默认 1'
+                        description: 'Page number, starting at 1; default 1'
                     },
                     page_size: {
                         type: 'integer',
-                        description: '每页数量，默认 20，最大 100'
+                        description: 'Page size; default 20, max 100'
                     }
                 },
                 required: ['library_id']

@@ -139,10 +139,10 @@ function registeredImagePart(
     }
     const url = sanitizeTagValue(block.url);
     if (url && !url.startsWith('data:')) return [{ type: 'image', ref: url }];
-    const mime = sanitizeTagValue(block.mimeType) || '未知类型';
+    const mime = sanitizeTagValue(block.mimeType) || 'unknown type';
     const bytes = safePercentLength(block.data);
     return note
-        ? [{ type: 'text', text: `[图片: ${mime}，约 ${bytes} 字符（未登记，原文未入账）]` }]
+        ? [{ type: 'text', text: `[image: ${mime}, about ${bytes} chars (not registered; original not stored)]` }]
         : [];
 }
 
@@ -161,10 +161,10 @@ function registeredMediaPart(
     }
     const url = sanitizeTagValue(block.url);
     if (url && !url.startsWith('data:')) return [{ type: kind, handle: url }];
-    const mime = sanitizeTagValue(block.mimeType) || '未知类型';
+    const mime = sanitizeTagValue(block.mimeType) || 'unknown type';
     const bytes = safePercentLength(block.data);
     return note
-        ? [{ type: 'text', text: `[${kind === 'record' ? '语音' : '视频'}: ${mime}，约 ${bytes} 字符（未登记，原文未入账）]` }]
+        ? [{ type: 'text', text: `[${kind === 'record' ? 'voice' : 'video'}: ${mime}, about ${bytes} chars (not registered; original not stored)]` }]
         : [];
 }
 
@@ -237,7 +237,7 @@ function normalizeMcpBlock(block: unknown, index: number, opts: ToolResultNormal
                 parts.push(part);
             } else if (resource.blob) {
                 // 内嵌 blob：不把 base64 写进账本，只保留元数据说明
-                parts.push({ type: 'unknown', tag: 'resource', content: `[blob ${mime || '未知类型'}，约 ${resource.blob.length} 字符]` });
+                parts.push({ type: 'unknown', tag: 'resource', content: `[blob ${mime || 'unknown type'}, about ${resource.blob.length} chars]` });
             } else {
                 parts.push({ type: 'unknown', tag: 'resource', content: jsonOf(value) });
             }

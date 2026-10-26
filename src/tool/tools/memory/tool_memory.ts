@@ -41,15 +41,15 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_recall',
-            description: '检索长期记忆（个人/群聊/本体）。只返回相关事实与观察，不返回注入全文。',
+            description: 'Retrieve long-term memory (personal/group/bot). Returns only relevant facts and observations, not the full injected text.',
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: '检索问题/关键词；留空可列最近重要记忆' },
-                    memory_scope: { type: 'string', enum: ['user', 'group', 'global'], description: '范围；默认当前会话' },
-                    target_id: { type: 'string', description: '目标用户/群 ID；默认当前会话，跨目标仅骰主' },
-                    topK: { type: 'number', description: '最多返回条数，默认 5' },
-                    keywords: { type: 'array', items: { type: 'string' }, description: '标签过滤（可选）' },
+                    query: { type: 'string', description: 'Query/keywords; leave empty to list recent important memories' },
+                    memory_scope: { type: 'string', enum: ['user', 'group', 'global'], description: 'Scope; defaults to the current session' },
+                    target_id: { type: 'string', description: 'Target user/group ID; defaults to the current session; cross-target access is owner-only' },
+                    topK: { type: 'number', description: 'Max number of results; default 5' },
+                    keywords: { type: 'array', items: { type: 'string' }, description: 'Tag filter (optional)' },
                 },
                 required: [],
             },
@@ -73,17 +73,17 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_add',
-            description: '添加一条长期记忆。默认写入当前会话；私聊默认仅本人可见，群聊默认本群可见。',
+            description: 'Add a long-term memory. Writes to the current session by default; private chats default to visible only to the person, group chats default to visible within the group.',
             parameters: {
                 type: 'object',
                 properties: {
-                    text: { type: 'string', description: '原子事实，尽量简短' },
-                    memory_scope: { type: 'string', enum: ['user', 'group', 'global'], description: '归属；默认当前会话' },
-                    target_id: { type: 'string', description: '目标用户/群 ID；默认当前会话' },
-                    keywords: { type: 'array', items: { type: 'string' }, description: '关键词/标签' },
-                    fact_kind: { type: 'string', enum: ['fact', 'rule', 'relation', 'event'], description: '事实类型' },
-                    importance: { type: 'number', description: '重要性 0-1' },
-                    visibility: { type: 'string', enum: ['public', 'origin', 'owner'], description: 'public=可跨群（本人），origin=仅来源，owner=仅本人' },
+                    text: { type: 'string', description: 'Atomic fact; keep it short' },
+                    memory_scope: { type: 'string', enum: ['user', 'group', 'global'], description: 'Owner; defaults to the current session' },
+                    target_id: { type: 'string', description: 'Target user/group ID; defaults to the current session' },
+                    keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords/tags' },
+                    fact_kind: { type: 'string', enum: ['fact', 'rule', 'relation', 'event'], description: 'Fact type' },
+                    importance: { type: 'number', description: 'Importance 0-1' },
+                    visibility: { type: 'string', enum: ['public', 'origin', 'owner'], description: 'public=cross-group (self), origin=source only, owner=self only' },
                 },
                 required: ['text'],
             },
@@ -110,7 +110,7 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_update',
-            description: '更新一条当前会话可见记忆的文本。',
+            description: 'Update the text of a memory visible in the current session.',
             parameters: {
                 type: 'object',
                 properties: { id: { type: 'string' }, text: { type: 'string' }, memory_scope: { type: 'string', enum: ['user', 'group', 'global'] }, target_id: { type: 'string' } },
@@ -134,7 +134,7 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_delete',
-            description: '删除（默认软失效）当前会话可见记忆；hard 仅骰主。',
+            description: 'Delete (soft-invalidate by default) a memory visible in the current session; hard delete is owner-only.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -162,7 +162,7 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_consolidate',
-            description: '立即巩固当前会话记忆（事实→观察）。',
+            description: 'Consolidate memories of the current session immediately (facts -> observations).',
             parameters: { type: 'object', properties: { memory_scope: { type: 'string', enum: ['user', 'group', 'global'] }, target_id: { type: 'string' } }, required: [] },
         },
     });
@@ -178,14 +178,14 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_reflect',
-            description: '基于当前记忆做推理（心智模型优先，必要时下探观察/原始事实）。',
+            description: 'Reason over current memory (mental models first; fall back to observations/raw facts when needed).',
             parameters: {
                 type: 'object',
                 properties: {
                     query: { type: 'string' },
                     memory_scope: { type: 'string', enum: ['user', 'group', 'global'] },
                     target_id: { type: 'string' },
-                    deep: { type: 'boolean', description: '强制下探原始事实' },
+                    deep: { type: 'boolean', description: 'Force drilling down to raw facts' },
                 },
                 required: ['query'],
             },
@@ -202,7 +202,7 @@ export function registerMemory() {
         type: 'function',
         function: {
             name: 'memory_mental_model',
-            description: '管理心智模型：list/view/create/refresh/clear/delete。',
+            description: 'Manage mental models: list/view/create/refresh/clear/delete.',
             parameters: {
                 type: 'object',
                 properties: {

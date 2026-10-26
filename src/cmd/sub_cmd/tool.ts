@@ -37,7 +37,7 @@ function helpText(): string {
             组名与保留字（on/off/help/call/list/all）冲突时用 --group=<组名>`;
 }
 
-/** 读取带值的 kwarg（如 --group=记忆）；缺省/无值返回空串 */
+/** 读取带值的 kwarg（如 --group=Memory）；缺省/无值返回空串 */
 function kwargValue(cmdArgs: seal.CmdArgs, name: string): string {
     const kwarg = cmdArgs.kwargs.find(k => k.name === name);
     if (!kwarg || !kwarg.valueExists) return '';

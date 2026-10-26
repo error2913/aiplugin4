@@ -325,7 +325,7 @@ export class Context {
     }
 
     /**
-     * 冷态入库条目：**零 LLM** —— 只做纯代码截断（留头留尾），原文进 rawText 并带"原文已截断"标记。
+     * 冷态入库条目：**零 LLM** —— 只做纯代码截断（留头留尾），原文进 rawText 并带 `content-truncated` 标记。
      * 标记 compressed=true 表示"永不参与 LLM 压缩"（冷态诞生的内容转热后也不会被回溯压缩）。
      */
     private buildColdUserItem(text: string, userId: string, messageId: string): UserMessageItem {
@@ -672,11 +672,11 @@ export class Context {
         const { TOOL_RESPONSE_TRUNCATE_CHARS } = Config.tool;
         // use_skill 自己已做 12000 字符分页，且「续读 offset」在结果末尾：
         // 再套通用 head 截断会把续读提示一起截掉，导致模型无法续读，故豁免。
-        // 直接调用（toolName=use_skill）与 call_tool 包装（工具 use_skill 返回：…）都要识别。
+        // 直接调用（toolName=use_skill）与 call_tool 包装（工具输出以 `use_skill returned:` 开头）都要识别。
         // 内容长度上限仍由 use_skill 的 MAX_SKILL_CONTENT_LENGTH 保证。
         const skipTruncate = toolName === 'use_skill'
-            || /^## 技能：/.test(text)
-            || /^工具 use_skill 返回：\n/.test(text);
+            || /^## Skill: /.test(text)
+            || /^use_skill returned:\n/.test(text);
         // 截断前原文：仅当文本确实被截断后保留，供只读工具按需读取（不参与渲染/预算）
         let rawText: string | undefined;
         if (!skipTruncate && TOOL_RESPONSE_TRUNCATE_CHARS > 0 && text.length > TOOL_RESPONSE_TRUNCATE_CHARS) {

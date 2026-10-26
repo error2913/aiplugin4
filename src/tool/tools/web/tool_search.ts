@@ -57,49 +57,49 @@ export function registerWebSearch() {
         type: "function",
         function: {
             name: "web_search",
-            description: "联网搜索（支持 DeepSeek / SearXNG / Brave / Tavily / Serper / 博查 / 智谱 / Kimi / Exa / Firecrawl 等后端）",
+            description: "Web search (backends: DeepSeek / SearXNG / Brave / Tavily / Serper / Bocha / Zhipu / Kimi / Exa / Firecrawl, etc.)",
             parameters: {
                 type: "object",
                 properties: {
                     query: {
                         type: "string",
-                        description: "搜索内容（1~128 字）；旧参数名 q 也兼容",
+                        description: "Search query (1-128 characters); the legacy parameter name q is also accepted",
                     },
                     count: {
                         type: "integer",
-                        description: "返回条数（1~50），默认取配置",
+                        description: "Number of results (1-50); defaults to the configured value",
                     },
                     offset: {
                         type: "integer",
-                        description: "结果偏移（分页）；一般不用填",
+                        description: "Result offset (pagination); usually left empty",
                     },
                     detail: {
                         type: "string",
                         enum: ["snippet", "summary", "content"],
-                        description: "详细程度：snippet 短摘要 / summary 长摘要 / content 网页正文；默认 summary",
+                        description: "Detail level: snippet short summary / summary long summary / content full page text; default summary",
                     },
                     allowed_domains: {
                         type: "array",
                         items: { type: "string" },
-                        description: "只保留这些域名，例如 [\"github.com\"]（可选）",
+                        description: "Only keep these domains, e.g. [\"github.com\"] (optional)",
                     },
                     blocked_domains: {
                         type: "array",
                         items: { type: "string" },
-                        description: "排除这些域名（可选）",
+                        description: "Exclude these domains (optional)",
                     },
                     site: {
                         type: "string",
-                        description: "单域快捷方式，等价 allowed_domains:[site]（可选）",
+                        description: "Single-domain shortcut, equivalent to allowed_domains:[site] (optional)",
                     },
                     time_range: {
                         type: "string",
                         enum: ["day", "week", "month", "year"],
-                        description: "时间范围（可选）",
+                        description: "Time range (optional)",
                     },
                     page: {
                         type: "integer",
-                        description: "页码（仅 SearXNG 兼容旧行为，新代码建议用 offset）",
+                        description: "Page number (SearXNG only, for legacy behavior; new code should use offset)",
                     },
                 },
                 required: [],

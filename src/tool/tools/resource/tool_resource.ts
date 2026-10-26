@@ -17,14 +17,14 @@ export function registerResourceTools() {
         type: "function",
         function: {
             name: "list_resources",
-            description: "查询当前已配置的本地资源名称。发送图片时优先在当前回复中使用 [img:图片ID]；发送语音/视频/文件，或通过 call_ob11_api 向指定会话发送资源时，将 file 写成 resource:资源名。如需资源的实际路径/URI，使用 get_resource_path。",
+            description: "List currently configured local resource names. To send an image, prefer [img:image ID] in the current reply; to send voice/video/files, or to send resources to a specific session via call_ob11_api, write file as resource:resource name. For a resource's actual path/URI, use get_resource_path.",
             parameters: {
                 type: "object",
                 properties: {
                     type: {
                         type: "string",
                         enum: ["all", "image", "audio", "file", "video"],
-                        description: "资源类型，默认 all"
+                        description: "Resource type; default all"
                     }
                 },
                 required: []

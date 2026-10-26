@@ -597,57 +597,57 @@ export function registerRawTools() {
         type: 'function',
         function: {
             name: 'grep_raw',
-            description: '在上下文原文中搜索关键词（含已被摘要覆盖的历史）。返回命中项的 seq、片段与可直接用于 read_raw 的 pointer；可用 regex/from_seq/to_seq/max_pages/cursor/count 控制。旧会话的 kind 过滤参数可忽略。',
+            description: 'Search the raw context text for keywords (including history already covered by summaries). Returns hit seq, snippets, and pointers usable directly with read_raw; control with regex/from_seq/to_seq/max_pages/cursor/count. kind filter parameters are legacy-session-only and can be ignored.',
             parameters: {
                 type: 'object',
                 properties: {
                     kind: {
                         type: 'string',
-                        description: '仅旧会话兼容，可忽略'
+                        description: 'Legacy-session compatibility only; can be ignored'
                     },
                     pattern: {
                         type: 'string',
-                        description: '检索关键字（子串匹配，忽略大小写）；不传则返回保留条目的目录元信息'
+                        description: 'Keyword to search (substring match, case-insensitive); omit to return directory metadata of retained entries'
                     },
                     tool_name: {
                         type: 'string',
-                        description: 'kind=tool 时可选：只检索某个工具的原文，如 web_search'
+                        description: 'Optional when kind=tool: search only the raw output of one tool, e.g. web_search'
                     },
                     event_type: {
                         type: 'string',
-                        description: 'kind=event 时可选：按事件类型过滤，如 group_request/group_ban/group_increase 等'
+                        description: 'Optional when kind=event: filter by event type, e.g. group_request/group_ban/group_increase'
                     },
                     count: {
                         type: 'integer',
-                        description: `可选：最多返回的条目数，默认 ${RAW_ENTRY_DEFAULT_COUNT}，最大 ${RAW_ENTRY_MAX_COUNT}，按时间从新到旧`
+                        description: `Optional: max entries to return, default ${RAW_ENTRY_DEFAULT_COUNT}, max ${RAW_ENTRY_MAX_COUNT}, newest first`
                     },
                     context_lines: {
                         type: 'integer',
-                        description: '仅旧会话兼容，可忽略'
+                        description: 'Legacy-session compatibility only; can be ignored'
                     },
                     max_chars: {
                         type: 'integer',
-                        description: '可选：单次返回最大字符数'
+                        description: 'Optional: max characters returned per call'
                     },
                     regex: {
                         type: 'boolean',
-                        description: '可选：pattern 按正则解释（默认字面量）'
+                        description: 'Optional: interpret pattern as a regex (default literal)'
                     },
                     from_seq: {
                         type: 'integer',
-                        description: '可选：只搜索 seq >= from_seq'
+                        description: 'Optional: only search seq >= from_seq'
                     },
                     to_seq: {
                         type: 'integer',
-                        description: '可选：只搜索 seq <= to_seq'
+                        description: 'Optional: only search seq <= to_seq'
                     },
                     max_pages: {
                         type: 'integer',
-                        description: '可选：单次最多扫描多少事件页'
+                        description: 'Optional: max event pages to scan per call'
                     },
                     cursor: {
                         type: 'string',
-                        description: '可选：上次返回的 cursor，原样传回以继续搜索'
+                        description: 'Optional: cursor from the previous response; pass it back unchanged to continue searching'
                     }
                 },
                 required: []
@@ -699,45 +699,45 @@ export function registerRawTools() {
         type: 'function',
         function: {
             name: 'read_raw',
-            description: '读取上下文原文。id=e:<seq> 读单条，id=e:<from>-<to> 读区间；返回带 seq/offset，cursor 原样传回可继续。旧会话也可用 kind/id 旧地址。',
+            description: 'Read raw context text. id=e:<seq> reads one entry, id=e:<from>-<to> reads a range; results carry seq/offset, and the cursor can be passed back to continue. Legacy sessions may also use old kind/id addresses.',
             parameters: {
                 type: 'object',
                 properties: {
                     kind: {
                         type: 'string',
-                        description: '仅旧会话兼容，可忽略'
+                        description: 'Legacy-session compatibility only; can be ignored'
                     },
                     id: {
                         type: 'string',
-                        description: '必填：e:<seq> 或 e:<from>-<to>；旧会话可为 msg_id/blk:/arc:/raw:'
+                        description: 'Required: e:<seq> or e:<from>-<to>; legacy sessions may use msg_id/blk:/arc:/raw:'
                     },
                     msg_id: {
                         type: 'string',
-                        description: '仅旧会话兼容，可忽略'
+                        description: 'Legacy-session compatibility only; can be ignored'
                     },
                     event_type: {
                         type: 'string',
-                        description: '仅旧会话兼容，可忽略'
+                        description: 'Legacy-session compatibility only; can be ignored'
                     },
                     count: {
                         type: 'integer',
-                        description: '可选：单次最多返回事件条数（默认 20）'
+                        description: 'Optional: max events returned per call (default 20)'
                     },
                     start_line: {
                         type: 'integer',
-                        description: '仅旧会话兼容，可忽略'
+                        description: 'Legacy-session compatibility only; can be ignored'
                     },
                     max_lines: {
                         type: 'integer',
-                        description: '可选：单次最多返回事件条数（与 count 同义）'
+                        description: 'Optional: max events returned per call (synonym of count)'
                     },
                     max_chars: {
                         type: 'integer',
-                        description: '可选：单次返回最大字符数'
+                        description: 'Optional: max characters returned per call'
                     },
                     cursor: {
                         type: 'string',
-                        description: '可选：上次返回的 cursor，原样传回以继续读取'
+                        description: 'Optional: cursor from the previous response; pass it back unchanged to continue reading'
                     }
                 },
                 required: []
@@ -769,15 +769,15 @@ export function registerRawTools() {
         const win = { startLine: start_line, maxLines: max_lines, maxChars: max_chars };
         switch (k) {
             case 'tool': {
-                if (!rawId) return '缺少 id（tool_call_id）：请从展示文本标记或 grep_raw 结果中获取';
+                if (!rawId) return '缺少 id（tool_call_id）：请从 tool-output-truncated 标记或 grep_raw 结果中获取';
                 return readToolById(session, rawId, win);
             }
             case 'user': {
-                if (!rawId) return '缺少 id：单条用 msg_id，合并块用 blk:xxx（可从「原文已压缩」标记或 grep_raw kind=user 获取）';
+                if (!rawId) return '缺少 id：单条用 msg_id，合并块用 blk:xxx（可从 content-compressed 标记或 grep_raw kind=user 获取）';
                 return readUserById(session, rawId, { msgId: msg_id, ...win });
             }
             case 'image': {
-                if (!rawId) return '缺少 id（image_id）：请从 [img:图片ID:…] 标签或图片截断标记中获取';
+                if (!rawId) return '缺少 id（image_id）：请从 [img:<id>:…] 标签或 image-text-truncated 标记中获取';
                 return readImageById(rawId, win);
             }
             case 'event': {

@@ -1,7 +1,6 @@
 // 工具系统：Tool 类（调用校验/提示词渲染/分组）；注册表见 registry.ts，注册装配见 bootstrap.ts
 import Config from "../config/config"
 import Logger from "../logger"
-import { TOOLS_PROMPT_TEMPLATE } from "../prompt/templates"
 import { Session } from "../session/session";
 import { SessionType } from "../session/types";
 import { matchesPlatform } from "../utils/target_id";
@@ -9,23 +8,23 @@ import { StopError } from "../utils/timeout";
 
 import { executeTool, type ToolFailure, validateToolArgs } from "./executor";
 import { clearToolMap, toolMap } from "./registry";
-import { ToolCall, ToolCallResult, ToolInfo, ToolInfoObject, ToolSolveContent } from "./types";
+import { ToolCall, ToolCallResult, ToolInfo, ToolSolveContent } from "./types";
 
 // 兼容旧引用：toolMap 已迁至 ./registry（实现侧请直接 import ./registry）
 export { toolMap };
 
 const log = Logger.withTag('tool');
 
-/** function calling 路径的错误文案：保持与改造前逐字一致（模型侧提示词经验依赖这些措辞） */
+/** function calling 路径的错误文案（模型可见，英文） */
 function functionCallErrorText(name: string, rawArgs: string, failure?: ToolFailure): string {
     switch (failure?.code) {
-        case 'not_found': return `调用函数失败:未注册的函数:${name}`;
-        case 'not_enabled': return `调用函数失败:未经许可的函数:${name}`;
-        case 'session_type': return `调用函数失败:函数${name}可使用的场景类型为${failure.expected}，当前场景类型为${failure.actual}`;
-        case 'missing_required': return `调用函数失败:缺少必需参数 ${failure.param}`;
-        case 'invalid_arg': return `调用函数失败:${failure.message}`;
-        case 'bad_args': return `调用函数 (${name}:${rawArgs}) 失败:${failure.message}`;
-        default: return `调用函数 (${name}:${rawArgs}) 失败:${failure?.message ?? '未知错误'}`;
+        case 'not_found': return `Function call failed: unknown function "${name}". Call search_tools to see available tools.`;
+        case 'not_enabled': return `Function call failed: function "${name}" is not enabled in this session.`;
+        case 'session_type': return `Function call failed: function "${name}" supports session type ${failure.expected}, current type is ${failure.actual}.`;
+        case 'missing_required': return `Function call failed: missing required parameter "${failure.param}".`;
+        case 'invalid_arg': return `Function call failed: ${failure.message}`;
+        case 'bad_args': return `Function call (${name}:${rawArgs}) failed: ${failure.message}`;
+        default: return `Function call (${name}:${rawArgs}) failed: ${failure?.message ?? 'unknown error'}`;
     }
 }
 
@@ -49,18 +48,18 @@ export const CORE_TOOL_NAMES: string[] = [
 export const NATIVE_TOOL_NAMES: string[] = ['list_tools', 'search_tools', 'call_tool'];
 
 /** 不参与工具组维度的来源分组：技能/知识库的会话开关由 .ai skill / .ai kb 管理（单工具开关不受影响） */
-export const SKILL_GROUP = '技能';
-export const KNOWLEDGE_GROUP = '知识库';
+export const SKILL_GROUP = 'Skills';
+export const KNOWLEDGE_GROUP = 'Knowledge';
 export const NON_GROUPABLE_GROUPS: string[] = [SKILL_GROUP, KNOWLEDGE_GROUP];
 
 /** 内置工具分类缺省兜底 / 外部插件（globalThis.aiplugin4.registerTool）注册工具的固定分类 */
-export const DEFAULT_CATEGORY = '其他';
-export const EXTERNAL_CATEGORY = '外部插件';
+export const DEFAULT_CATEGORY = 'Other';
+export const EXTERNAL_CATEGORY = 'External plugins';
 
-/** 内置分类的固定展示顺序（未列入的分类按名称追加在末尾，避免依赖中文 localeCompare 排序） */
+/** 内置分类的固定展示顺序（未列入的分类按名称追加在末尾，避免依赖 localeCompare 排序） */
 export const BUILTIN_CATEGORY_ORDER: string[] = [
-    '基础调度', '指令', '定时', '触发', '记忆', '图片', '多媒体', 'OB11', '资源',
-    '属性', '原文检索', '上下文编辑', '黑名单', '网页', '公开会话', '子代理',
+    'Dispatch', 'Commands', 'Timers', 'Triggers', 'Memory', 'Images', 'Media', 'OB11', 'Resources',
+    'Attributes', 'Raw search', 'Context editing', 'Blocks', 'Web', 'Public sessions', 'Subagents', 'MCP',
     DEFAULT_CATEGORY, EXTERNAL_CATEGORY
 ];
 
@@ -68,7 +67,7 @@ export const BUILTIN_CATEGORY_ORDER: string[] = [
 export interface ToolGroupInfo {
     /** 解析键：分类名 / MCP 服务器名 */
     key: string;
-    /** 显示名：内置·记忆 / mcp-files-exec */
+    /** 显示名：builtin · Memory / mcp-files-exec */
     label: string;
     kind: 'builtin' | 'mcp';
     /** 组内工具名（按名称排序、已按当前平台过滤、不含禁止名单中的工具） */
@@ -102,32 +101,12 @@ export const META_TOOL_NAMES: string[] = [
     'job_kill'
 ];
 
-const ON_DEMAND_PROMPT_LIMIT = 20;
-
-function flattenText(text: string, maxLength: number): string {
-    const flattened = String(text || '').replace(/\s+/g, ' ').trim();
-    return flattened.length > maxLength ? flattened.slice(0, maxLength) + '...' : flattened;
-}
-
-function formatParameterText(parameters: ToolInfoObject): string {
-    const properties = parameters && parameters.properties ? parameters.properties : {};
-    const required = Array.isArray(parameters.required) ? parameters.required : [];
-    const lines = Object.keys(properties).map(key => {
-        const prop = properties[key];
-        const type = prop && typeof prop.type === 'string' ? prop.type : 'string';
-        const isRequired = required.indexOf(key) !== -1;
-        const desc = prop && typeof prop.description === 'string' ? flattenText(prop.description, 80) : '';
-        return `${key}:${type}(${isRequired ? '必填' : '可选'})${desc ? ` - ${desc}` : ''}`;
-    });
-    return lines.join('\n');
-}
-
 export default class Tool {
     toolInfo: ToolInfo;
     sessionType: 'any' | SessionType; // 可使用函数的会话类型
     callBack: boolean; // 是否回调智能体
     sensitive: boolean; // 敏感工具（发送消息/封禁/改名等），调用会显著记录
-    /** 来源分组：内置工具为空；技能工具='技能'；知识库工具='知识库'；MCP 工具=所属服务器名 */
+    /** 来源分组：内置工具为空；技能工具='Skills'；知识库工具='Knowledge'；MCP 工具=所属服务器名 */
     group?: string;
     /** 内置工具的细分分类（仅 group 为空时赋值）：用于 .ai tool 组概览与批量开关、AI 侧组头显示 */
     category?: string;
@@ -253,47 +232,47 @@ export default class Tool {
         return matchesPlatform(tool.platforms, platform);
     }
 
-    /** 来源分组显示名：无 group 的内置工具显示「内置」（平台限制等错误文案沿用该口径） */
+    /** 来源分组显示名：无 group 的内置工具显示 builtin（平台限制等错误文案沿用该口径） */
     static groupLabel(group?: string): string {
-        return group || '内置';
+        return group || 'builtin';
     }
 
-    /** 工具的分类名：仅内置工具（group 为空）有分类，缺省兜底「其他」；非内置工具返回空串 */
+    /** 工具的分类名：仅内置工具（group 为空）有分类，缺省兜底 Other；非内置工具返回空串 */
     static categoryOf(tool?: Tool): string {
         if (!tool || tool.group) return '';
         return tool.category || DEFAULT_CATEGORY;
     }
 
-    /** 工具是否属于可切换的工具组（技能/知识库由 .ai skill / .ai kb 管理，不参与组维度） */
+    /** 工具是否属于可切换的工具组（Skills/Knowledge 由 .ai skill / .ai kb 管理，不参与组维度） */
     static isGroupable(tool?: Tool): boolean {
         if (!tool) return false;
         return !(!!tool.group && NON_GROUPABLE_GROUPS.includes(tool.group));
     }
 
-    /** 工具所属组的显示名：内置工具=「内置·分类」，其余=来源分组（技能/知识库/MCP 服务器名） */
+    /** 工具所属组的显示名：内置工具=`builtin · 分类`，其余=来源分组（技能/知识库/MCP 服务器名） */
     static groupDisplay(tool?: Tool): string {
         if (!tool) return DEFAULT_CATEGORY;
         if (tool.group) return tool.group;
-        return `内置·${Tool.categoryOf(tool)}`;
+        return `builtin · ${Tool.categoryOf(tool)}`;
     }
 
-    /** 分组过滤匹配：来源分组（原 mcp= 语义）/ 分类名 / 组显示名 / 「内置」任一命中 */
+    /** 分组过滤匹配：来源分组（原 mcp= 语义）/ 分类名 / 组显示名 / `builtin` 任一命中 */
     static matchesGroupFilter(tool: Tool | undefined, filter: string): boolean {
         const f = String(filter || '').trim();
         if (!f) return true;
         if (!tool) return false;
         if (tool.group === f || Tool.groupDisplay(tool) === f) return true;
-        if (!tool.group && (Tool.categoryOf(tool) === f || f === '内置')) return true;
+        if (!tool.group && (Tool.categoryOf(tool) === f || f === 'builtin')) return true;
         return false;
     }
 
     /**
      * 按组聚合工具名。组内按工具名排序。
      *
-     * 内部聚合键必须带 kind 前缀（`builtin:记忆` / `mcp:记忆`）：分类名与 MCP 服务器名共用一个命名空间，
-     * 而 MCP 服务器名来自 mcpServers 的键、无保留字校验 —— 若直接拿 name 当键，一台名为「记忆」的
-     * MCP 服务器会被并进内置「记忆」组（概览显示成 `内置·记忆`），`.ai tool off 记忆` 会连带关掉 MCP 工具
-     * 且完全看不出来；服务器取名「技能」还会让整个 MCP 组因 isGroupable 判定而从概览消失。
+     * 内部聚合键必须带 kind 前缀（`builtin:Memory` / `mcp:Memory`）：分类名与 MCP 服务器名共用一个命名空间，
+     * 而 MCP 服务器名来自 mcpServers 的键、无保留字校验 —— 若直接拿 name 当键，一台名为 "Memory" 的
+     * MCP 服务器会被并进内置 Memory 组（概览显示成 `builtin · Memory`），`.ai tool off Memory` 会连带关掉 MCP 工具
+     * 且完全看不出来；服务器取名 "Skills" 还会让整个 MCP 组因 isGroupable 判定而从概览消失。
      * 对外的 key/label 保持原样（命令参数与显示都依赖它，且 .ai tool 的 MCP 空服务器提示需要按名字比对）。
      */
     private static groupEntries(entries: { name: string; tool: Tool }[]): { key: string; label: string; kind: 'builtin' | 'mcp'; names: string[] }[] {
@@ -401,7 +380,7 @@ export default class Tool {
     }
 
     /**
-     * 按组返回当前会话可用（已开启、平台匹配）的工具，组头用统一显示名（内置·记忆 / MCP 服务器名 / 技能 / 知识库）。
+     * 按组返回当前会话可用（已开启、平台匹配）的工具，组头用统一显示名（builtin · Memory / MCP 服务器名 / Skills / Knowledge）。
      * 与 .ai tool 共用同一分组实现；此处不排除技能/知识库（AI 侧发现需要看到它们）。
      */
     static getGroupedAvailableTools(session: Session, platform?: string): { group: string; key: string; kind: 'builtin' | 'mcp'; tools: ToolInfo[] }[] {
@@ -415,57 +394,6 @@ export default class Tool {
             kind: g.kind,
             tools: g.names.map(n => toolMap[n].toolInfo)
         }));
-    }
-
-    static getToolsInfoPrompt(session: Session, platform?: string): string {
-        const { PROMPT_ENGINEERING } = Config.tool;
-
-        const tools = this.getToolsInfo(session, platform);
-        let s = '';
-        if (tools && tools.length > 0) {
-            // 模板按扁平结构读取 name/description/parameterText，从 function 字段映射后传入
-            const flatTools = tools.map(t => ({
-                name: t.function.name,
-                description: flattenText(t.function.description, 120),
-                parameterText: formatParameterText(t.function.parameters)
-            }));
-            s = TOOLS_PROMPT_TEMPLATE({
-                "PROMPT_ENGINEERING": PROMPT_ENGINEERING,
-                "tools": flatTools
-            });
-        }
-
-        // 按需工具：只给名称 + 一行描述，详细参数通过 search_tools 获取，控制 token 占用
-        const onDemand = this.getOnDemandTools(session, platform);
-        if (onDemand.length > 0) {
-            const summaries = onDemand.slice(0, ON_DEMAND_PROMPT_LIMIT).map((t, i) => {
-                const desc = flattenText(t.function.description, 120);
-                return `${i + 1}. ${t.function.name}：${desc}`;
-            });
-            s += `\n\n## 其他可用工具（按需加载）\n${summaries.join('\n')}\n需要使用上述工具时，先调用 search_tools 获取参数说明，再通过 call_tool 执行。`;
-            const hiddenCount = onDemand.length - ON_DEMAND_PROMPT_LIMIT;
-            if (hiddenCount > 0) {
-                s += `\n其余 ${hiddenCount} 个工具请通过 search_tools 查询。`;
-            }
-        }
-        return s;
-    }
-
-    /** 返回工具摘要（名称 + 一句话描述），用于 system prompt 静态工具块（平台过滤） */
-    static getToolSummaries(session: Session, limit = 100, platform?: string): { summaries: string[]; total: number; truncated: boolean } {
-        const tools = this.getAvailableTools(session, platform)
-            .sort((a, b) => a.function.name.localeCompare(b.function.name));
-        const summaries = tools.map(t => {
-            const tool = toolMap[t.function.name];
-            const group = Tool.groupDisplay(tool);
-            const desc = flattenText(t.function.description, 120);
-            return `- ${t.function.name}：${desc}（来源：${group}）`;
-        });
-        return {
-            summaries: summaries.slice(0, limit),
-            total: summaries.length,
-            truncated: summaries.length > limit
-        };
     }
 
     /** 原生 function calling 模式：只暴露引导工具 */
@@ -488,46 +416,6 @@ export default class Tool {
             .filter(t => t.sessionType === 'any' || t.sessionType === session.sessionType)
             .filter(t => Tool.isAllowedPlatform(t as Tool, platform))
             .map(t => t.toolInfo);
-    }
-
-    /** 工具获取说明：不列出全部工具，由 AI 通过元工具自行发现 */
-    static getToolDiscoveryBlock(_session: Session): string {
-        return [
-            '## 工具获取',
-            '当前不直接列出全部工具。需要发现工具时：',
-            '- list_tools：分页查看当前可用工具的名称与描述（按工具组分组）',
-            '- search_tools：按名称/关键词/MCP 服务器获取工具的完整参数说明',
-            '- list_mcps：列出当前平台可用的全部 MCP 服务器及其工具',
-            '- call_tool：执行指定工具'
-        ].join('\n');
-    }
-
-    /** 提示词工程模式工具块：调用格式 + 元工具参数 + 工具获取说明 */
-    static getPromptEngineeringToolBlock(session: Session, platform?: string): string {
-        const metaTools = this.getMetaToolInfos(session, platform);
-        const flatTools = metaTools.map(t => ({
-            name: t.function.name,
-            description: flattenText(t.function.description, 120),
-            parameterText: formatParameterText(t.function.parameters)
-        }));
-        const formatPart = TOOLS_PROMPT_TEMPLATE({
-            "PROMPT_ENGINEERING": true,
-            "tools": flatTools
-        });
-        const guidePart = this.getToolDiscoveryBlock(session);
-        return [formatPart, guidePart].filter(Boolean).join('\n\n');
-    }
-
-    /** 原生模式工具块：仅名称 + 描述（按工具组分组） */
-    static getToolSummaryBlock(session: Session, platform?: string): string {
-        const r = this.getToolSummaries(session, 100, platform);
-        if (r.summaries.length === 0) return '';
-        const lines = ['## 可用工具', ...r.summaries];
-        if (r.truncated) {
-            lines.push(`（共 ${r.total} 个工具，最多显示 100 个）`);
-        }
-        lines.push('需要参数详情：search_tools；需要完整列表：list_tools。');
-        return lines.join('\n');
     }
 
 }

@@ -4,6 +4,7 @@ import { registerContextTools } from "./context/init";
 import { registerCoreTools } from "./core/init";
 import { registerImageTools } from "./image/init";
 import { registerManageTools } from "./manage/init";
+import { registerMcpToolSet } from "./mcp/init";
 import { registerMediaTools } from "./media/init";
 import { registerKnowledgeTools, registerMemoryTools } from "./memory/init";
 import { registerOb11Tools } from "./ob11/init";
@@ -29,4 +30,5 @@ export function registerTools() {
     registerPubToolSet();
     registerSubagentTools();
     registerContextTools();
+    registerMcpToolSet();
 }

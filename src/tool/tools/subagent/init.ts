@@ -15,14 +15,14 @@ import {
 import Tool from '../../tool';
 
 const DEFAULT_PERSONA =
-    '你是一名子代理。请独立完成交付的任务：分步推进、需要信息时自行调用可用工具；'
-    + '你拥有与主会话相同的工具能力，仅当任务本身需要时才使用对外发送/管理类工具；'
-    + '不确定时明确说明而不编造；完成后给出最终结论。';
+    'You are a subagent. Complete the assigned task independently: proceed step by step and call available tools when you need information; '
+    + 'you have the same tool capabilities as the main session, and should use external-send/management tools only when the task itself requires them; '
+    + 'state uncertainty explicitly instead of making things up; finish with a final conclusion.';
 
 const FOREGROUND_DESC = (fork: boolean): string => (fork
-    ? '把任务委派给一个继承本会话已完成轮次的子代理（fork）：它能看到已完成对话、看不到当前正在执行的这一轮；结果只回最终文本。'
-    : '把一段独立工作委派给子代理（spawn）：子代理看不到本会话历史，任务必须自包含；结果只回最终文本。'
-    + ' 需要较长检索/归纳/多步分析时可使用。');
+    ? 'Delegate the task to a subagent that inherits this session completed turns (fork): it sees the completed conversation but not the turn currently executing; only the final text is returned.'
+    : 'Delegate an independent piece of work to a subagent (spawn): the subagent does not see this session history, so the task must be self-contained; only the final text is returned.'
+    + ' Use it when longer retrieval/summarization/multi-step analysis is needed.');
 
 interface ToolArgs {
     prompt: string;
@@ -36,7 +36,7 @@ function buildRequest(ctx: seal.MsgContext, msg: seal.Message, session: Session,
     const settings = Config.subagent;
     const deny = effectiveDeny(settings.DENY_TOOLS);
     return {
-        label: ((args.description ?? args.prompt.slice(0, 20)) || '子代理任务').slice(0, 40),
+        label: ((args.description ?? args.prompt.slice(0, 20)) || 'subagent task').slice(0, 40),
         prompt: args.prompt,
         parent: {
             sessionId: session.sessionId,
@@ -62,20 +62,20 @@ function registerDelegate(fork: boolean): void {
         type: 'function',
         function: {
             name,
-            description: FOREGROUND_DESC(fork) + ' run_in_background=true 后台执行返回 job id；continuable=true 建可续跑子代理并立即返回子代理 id（可 send_message/interrupt_agent）。',
+            description: FOREGROUND_DESC(fork) + ' run_in_background=true runs in the background and returns a job id; continuable=true creates a continuable subagent and returns its id immediately (send_message/interrupt_agent available).',
             parameters: {
                 type: 'object',
                 properties: {
                     prompt: {
                         type: 'string',
                         description: fork
-                            ? '要子代理继续做的事（它已看到本会话已完成轮次，只写新增目标即可）'
-                            : '自包含的任务描述：子代理看不到本会话历史，背景/目标/产出格式都要写全',
+                            ? 'What the subagent should continue with (it already sees this session completed turns, so just write the new goal)'
+                            : 'Self-contained task description: the subagent cannot see this session history, so write background/goal/output format in full',
                     },
-                    description: { type: 'string', description: '3-5 词的任务摘要（展示/审计用）' },
-                    persona: { type: 'string', description: '可选的子代理人设（覆盖默认），如"你是资料整理助手"' },
-                    run_in_background: { type: 'boolean', description: '默认前台等待；true=后台执行并返回 job id' },
-                    continuable: { type: 'boolean', description: 'true=建立可续跑子代理并立即返回 id（后续可 send_message 续派 / interrupt_agent 打断）' },
+                    description: { type: 'string', description: 'Task summary in 3-5 words (for display/audit)' },
+                    persona: { type: 'string', description: 'Optional subagent persona (overrides the default), e.g. "you are a research assistant"' },
+                    run_in_background: { type: 'boolean', description: 'Wait in foreground by default; true=run in background and return a job id' },
+                    continuable: { type: 'boolean', description: 'true=create a continuable subagent and return its id immediately (later send_message to continue / interrupt_agent to interrupt)' },
                 },
                 required: ['prompt'],
             },
@@ -117,20 +117,20 @@ function registerJobTools(): void {
     const defs: Array<{ name: string; description: string; params: Record<string, Param> }> = [
         {
             name: 'job_list',
-            description: '列出后台子代理 job（id/用途/状态）。',
+            description: 'List background subagent jobs (id/purpose/status).',
             params: {},
         },
         {
             name: 'job_output',
-            description: '等待一个后台子代理 job 结束并返回结果（completed 回文本，否则回错误与停止原因）。',
-            params: { job_id: { type: 'string', required: true, description: 'job id（如 subagent-job-1）' } },
+            description: 'Wait for a background subagent job to finish and return its result (text on completed, otherwise the error and stop reason).',
+            params: { job_id: { type: 'string', required: true, description: 'job id (e.g. subagent-job-1)' } },
         },
         {
             name: 'job_kill',
-            description: '取消一个仍在运行的后台子代理 job（终态 killed，结果作废）。',
+            description: 'Cancel a running background subagent job (final state killed; result discarded).',
             params: {
                 job_id: { type: 'string', required: true, description: 'job id' },
-                reason: { type: 'string', description: '取消原因' },
+                reason: { type: 'string', description: 'Cancellation reason' },
             },
         },
     ];
@@ -183,17 +183,17 @@ function registerControlTools(): void {
     const defs = [
         {
             name: 'send_message',
-            description: '向一个子代理投递消息：运行中则在下一步前生效（steer），空闲则唤醒再跑一轮。只对直接子代理有效。',
+            description: 'Deliver a message to a subagent: if it is running, applied before its next step (steer); if idle, wake it for another round. Only applies to direct subagents.',
             required: ['agent_id', 'message'],
         },
         {
             name: 'interrupt_agent',
-            description: '请求中断一个子代理的当前轮（只停当前轮，agent 保留可再唤醒）。',
+            description: 'Request interruption of a subagent\'s current turn (only that turn stops; the agent can be woken again).',
             required: ['agent_id'],
         },
         {
             name: 'list_agents',
-            description: '列出本会话子树下的子代理（id/用途/状态/轮次结论摘要）。',
+            description: 'List subagents under this session subtree (id/purpose/status/round conclusion summary).',
             required: [] as string[],
         },
     ];
@@ -206,8 +206,8 @@ function registerControlTools(): void {
                 parameters: {
                     type: 'object',
                     properties: {
-                        agent_id: { type: 'string', description: '子代理 id（sub:<父会话>:<序号>）' },
-                        message: { type: 'string', description: '要投递的消息（send_message）' },
+                        agent_id: { type: 'string', description: 'Subagent id (sub:<parent session>:<sequence>)' },
+                        message: { type: 'string', description: 'Message to deliver (send_message)' },
                     },
                     required: def.required,
                 },
@@ -252,7 +252,7 @@ function registerControlTools(): void {
 }
 
 export function registerSubagentTools(): void {
-    Tool.withCategory('子代理', () => {
+    Tool.withCategory('Subagents', () => {
         registerDelegate(false);
         registerDelegate(true);
         registerJobTools();

@@ -7,31 +7,31 @@ export function registerCallOb11Api() {
         type: "function",
         function: {
             name: "call_ob11_api",
-            description: "调用 OneBot 11 API 或已支持的 NapCat/Milky API。运行时会自动选择 ob11-net 后端或 SealDice 原生后端；不要调用旧的按功能拆分工具。\n" +
-                "回复当前会话请直接输出文本（会自动发送给用户），不要在 call_ob11_api 中发送；本工具仅用于向其他会话主动外发消息、或发送语音/视频/文件等文本标签表达不了的特殊消息段。禁止在回复中伪造已发送动作。\n" +
+            description: "Call OneBot 11 APIs or supported NapCat/Milky APIs. The runtime automatically selects the ob11-net backend or the SealDice native backend; do not call the old feature-split tools.\n" +
+                "To reply to the current conversation, output text directly (it is sent to the user automatically); do not send it through call_ob11_api. This tool is only for actively sending messages to other conversations, or for special message segments that text tags cannot express, such as voice/video/file. Never fake a sent action in your reply.\n" +
                 "\n" +
-                "发送消息格式：\n" +
-                "- 主动向指定私聊/群聊外发消息使用 send_private_msg / send_group_msg，params.message 传文本或消息段数组。\n" +
-                "- 图片/语音/视频/文件分别使用 image/record/video/file 消息段。\n" +
-                "- 当前会话直接回复图片优先使用 [img:图片ID]，不要在 call_ob11_api 中发送。\n" +
-                "- 需要 call_ob11_api 发送本地资源时，将 file 写成 resource:资源ID。\n" +
-                "- 上传文件使用 upload_group_file / upload_private_file，不要把上传动作伪装成普通 file 消息段。\n" +
-                "- 资源路径支持本地绝对路径、file:// URI、HTTP(S) URL、base64://、mcp://服务器名/沙箱相对路径。",
+                "Message sending format:\n" +
+                "- To actively send to a specific private chat/group, use send_private_msg / send_group_msg and pass text or a message segment array in params.message.\n" +
+                "- Use image/record/video/file message segments for images/voice/video/files.\n" +
+                "- To reply with an image in the current conversation, prefer [img:image ID]; do not send it through call_ob11_api.\n" +
+                "- To send a local resource through call_ob11_api, write file as resource:resource ID.\n" +
+                "- To upload files, use upload_group_file / upload_private_file; do not disguise an upload as a regular file message segment.\n" +
+                "- Resource paths support local absolute paths, file:// URIs, HTTP(S) URLs, base64://, and mcp://server-name/sandbox-relative-path.",
             parameters: {
                 type: "object",
                 properties: {
                     action: {
                         type: "string",
-                        description: "API action，例如 send_group_msg、get_group_member_list、set_group_ban"
+                        description: "API action, e.g. send_group_msg, get_group_member_list, set_group_ban"
                     },
                     params: {
                         type: "object",
-                        description: "该 API 的原始参数对象",
+                        description: "Raw parameter object for this API",
                         additionalProperties: true
                     },
                     reason: {
                         type: "string",
-                        description: "发送消息、群管理、撤回等敏感操作的原因"
+                        description: "Reason for sensitive operations such as sending messages, group management, recall"
                     }
                 },
                 required: ["action", "params"]

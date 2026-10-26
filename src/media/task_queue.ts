@@ -160,7 +160,7 @@ export class MediaTaskManager {
                     // 进程重启后无法续跑已发出的 HTTP 请求：running 一律标记失败并补通知
                     if (task.status === 'running') {
                         task.status = 'failed';
-                        task.error = '插件重载中断';
+                        task.error = 'interrupted by plugin reload';
                         task.notified = false;
                         task.updatedAt = Date.now();
                     }
@@ -277,7 +277,7 @@ export class MediaTaskManager {
                 task.sourceMeta = '';
             }
         }
-        if (opts.image) task.request.image = '（提交时已提供参考图）';
+        if (opts.image) task.request.image = '(reference image provided at submit time)';
 
         // 参考图 base64 只进内存，不落盘
         this.runtime.set(this.runtimeKey(task), { image: opts.image, negativePrompt: opts.negativePrompt });
@@ -324,12 +324,12 @@ export class MediaTaskManager {
         try {
             const entry = this.resolveEntry(task);
             if (!entry) {
-                this.fail(task, task.kind === 'tts' ? '未配置语音模型（请在「api连接」添加并声明为 tts）' : '未配置生图模型（请在「api连接」添加并声明为 gen）');
+                this.fail(task, task.kind === 'tts' ? 'no speech model configured (add one under "API connections" and declare it as tts)' : 'no image model configured (add one under "API connections" and declare it as gen)');
                 return;
             }
             if (task.kind === 'tti' && !payload.image && task.request.image) {
                 // 参考图随进程重启丢失（不落盘）：给出可读错误而不是静默忽略
-                this.fail(task, '参考图在插件重载后已失效，请重新提交');
+                this.fail(task, 'reference image expired after plugin reload; please submit again');
                 return;
             }
             // 命令来源的参数是 kwargs 字符串（--rate=1.5），需要按"看起来是数字/布尔"归一；
@@ -344,7 +344,7 @@ export class MediaTaskManager {
                     normOpts,
                 });
             if (!result.ok) {
-                this.fail(task, result.error || '生成失败');
+                this.fail(task, result.error || 'generation failed');
                 return;
             }
             await this.land(task, result);
@@ -423,7 +423,7 @@ export class MediaTaskManager {
                     }
                 }
                 img.format = img.format || 'unknown';
-                img.description = `AI绘图[img:${img.imageId}]\n描述: ${task.request.prompt ?? ''}`;
+                img.description = `AI image [img:${img.imageId}]\nDescription: ${task.request.prompt ?? ''}`;
                 // 关键：注册/持久化，否则 Image.get(imageId) 取不到，AI 回复里的 [img:ID] 无法解析。
                 // 原 tool_image.ts 只在 base64 结果 + save=true 时才间接可查，这里统一补齐。
                 Image.imageMap[img.imageId] = img;
@@ -468,7 +468,7 @@ export class MediaTaskManager {
             log.info(`媒体任务 #${task.id}（${task.kind}）完成`);
             this.deliver(task);
         } catch (e) {
-            this.fail(task, `结果落地失败：${e instanceof Error ? e.message : String(e)}`);
+            this.fail(task, `failed to finalize result: ${e instanceof Error ? e.message : String(e)}`);
             return;
         }
         void this.pump();
@@ -490,12 +490,12 @@ export class MediaTaskManager {
 
     /** 可读的结果文案（命令直接投递用；拿不到可发送格式时如实回报，不伪造标签） */
     static resultText(task: MediaTask): string {
-        if (task.status === 'failed') return `生成失败：${task.error || '未知错误'}`;
-        if (task.status === 'canceled') return '任务已取消';
-        if (!task.result) return '无结果';
+        if (task.status === 'failed') return `Generation failed: ${task.error || 'unknown error'}`;
+        if (task.status === 'canceled') return 'Task canceled';
+        if (!task.result) return 'No result';
         if (task.result.send) return task.result.send;
         const id = task.result.imageId ?? task.result.data;
-        return `（已生成但未能转换为可发送格式，ID：${id}；请检查「后端配置」里 backends.image-host / backends.image-url-to-base64 的地址与 token，或改用 media_tasks 查看）`;
+        return `(generated but could not be converted to a sendable format, ID: ${id}; check the address and token of backends.image-host / backends.image-url-to-base64 under "Backend settings", or use media_tasks to inspect)`;
     }
 
     private static deliver(task: MediaTask): void {
@@ -516,9 +516,9 @@ export class MediaTaskManager {
         try {
             const { ctx, msg } = getSessionCtxAndMsg(task.epId, task.sid, task.isPrivate);
             const head = task.status === 'done'
-                ? `生成任务 #${task.id} 完成：`
-                : `生成任务 #${task.id} 失败：`;
-            const body = task.status === 'done' ? this.resultText(task) : (task.error || '未知错误');
+                ? `Media task #${task.id} finished: `
+                : `Media task #${task.id} failed: `;
+            const body = task.status === 'done' ? this.resultText(task) : (task.error || 'unknown error');
             seal.replyToSender(ctx, msg, `${head}${body}`);
             task.notified = true;
             task.updatedAt = Date.now();
@@ -551,7 +551,7 @@ export class MediaTaskManager {
         let session: ReturnType<typeof getSession>;
         try {
             session = getSession(task.sid);
-            // kind='media'：让 flushNotices 用 [system:生成任务] 而不是子代理口径渲染
+            // kind='media'：让 flushNotices 用 [system:media-task] 而不是子代理口径渲染
             session.noticeQueue.push({
                 text: this.buildNotice(task),
                 from: '',
@@ -694,25 +694,25 @@ export class MediaTaskManager {
 
     /** 给 AI 的可执行通知（含发送方式；只含句柄，不含 base64） */
     private static buildNotice(task: MediaTask): string {
-        const lines: string[] = ['生成任务通知'];
-        lines.push(`任务：#${task.id}（${task.kind === 'tts' ? '语音合成' : '文生图'}）`);
-        if (task.requester) lines.push(`发起者：${task.requester}`);
-        if (task.kind === 'tts') lines.push(`文本：${task.request.text ?? ''}`);
-        else lines.push(`描述：${task.request.prompt ?? ''}`);
-        if (task.request.model) lines.push(`模型：${task.request.model}`);
+        const lines: string[] = ['Media task notice'];
+        lines.push(`Task: #${task.id} (${task.kind === 'tts' ? 'text-to-speech' : 'text-to-image'})`);
+        if (task.requester) lines.push(`Requester: ${task.requester}`);
+        if (task.kind === 'tts') lines.push(`Text: ${task.request.text ?? ''}`);
+        else lines.push(`Prompt: ${task.request.prompt ?? ''}`);
+        if (task.request.model) lines.push(`Model: ${task.request.model}`);
         if (task.status === 'done' && task.result) {
             if (task.result.kind === 'record') {
-                lines.push(`结果：音频已生成（${task.result.dataType === 'url' ? 'URL' : '本地文件'}：${task.result.data}）`);
+                lines.push(`Result: audio generated (${task.result.dataType === 'url' ? 'URL' : 'local file'}: ${task.result.data})`);
                 // 注意：回复里的 [audio:xxx] 只认「资源」页配置的本地语音**资源名**，不认文件路径/URL，
                 // 所以生成结果只能走 call_ob11_api 的 record 段（与旧 tts 依赖链路一致）。
-                lines.push(`发送方式：调用 call_ob11_api，把 {"type":"record","data":{"file":"${task.result.data}"}} 放进 message 段发送（不要用 [audio:…]，该标签只接受已配置的本地语音资源名）`);
+                lines.push(`How to send: call call_ob11_api and put {"type":"record","data":{"file":"${task.result.data}"}} into the message segment (do not use [audio:…]; that tag only accepts configured local audio resource names)`);
             } else {
-                lines.push(`结果：图片已生成（imageId：${task.result.imageId}）`);
-                lines.push(`发送方式：**优先**在回复中直接写 [img:${task.result.imageId}]（系统会自动发送），不要为此调用 call_ob11_api`);
+                lines.push(`Result: image generated (imageId: ${task.result.imageId})`);
+                lines.push(`How to send: **prefer** writing [img:${task.result.imageId}] directly in your reply (the system sends it automatically); do not call call_ob11_api for this`);
             }
         } else {
-            lines.push(`结果：失败——${task.error || '未知错误'}`);
-            lines.push('可以告知用户失败原因，或调整参数后重新提交。');
+            lines.push(`Result: failed — ${task.error || 'unknown error'}`);
+            lines.push('You can tell the user the failure reason, or adjust the parameters and submit again.');
         }
         return lines.join('\n');
     }

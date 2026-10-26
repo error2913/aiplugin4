@@ -8,6 +8,13 @@
 //   绝不静默丢、绝不拆工具调用组；
 // - 本文件不得 import `src/context/**`；token 估算自带轻量实现，摘要器由调用方注入。
 import type { RequestMessage } from '../utils/message';
+import {
+    EXISTING_SUMMARY_HEADER,
+    SUBAGENT_OMIT_HEADER,
+    SUBAGENT_SUMMARY_HEADER,
+    SUBAGENT_TRUNCATE_MARK,
+    subagentOmitLine,
+} from '../utils/protocol';
 
 /** 摘要器：把一段历史文本压成摘要（失败/返回空走降级路径）。maxTokens 为建议输出预算 */
 export type SubAgentSummaryFn = (input: string, opts: { maxTokens: number }) => string | Promise<string>;
@@ -44,9 +51,9 @@ export interface SubAgentCompressResult {
     diagnostic?: string;
 }
 
-/** system 里由本模块注入的段落标记（重复压缩时先剥离，避免摘要层层堆叠） */
-const SUMMARY_HEADER = '## 更早上下文摘要（子代理内部自动压缩）';
-const OMIT_HEADER = '【更早上下文已省略】';
+/** system 里由本模块注入的段落标记（重复压缩时先剥离，避免摘要层层堆叠）；文案在 utils/protocol */
+const SUMMARY_HEADER = SUBAGENT_SUMMARY_HEADER;
+const OMIT_HEADER = SUBAGENT_OMIT_HEADER;
 const SUMMARY_INPUT_LIMIT = 24000;
 const SUMMARY_MESSAGE_LIMIT = 4000;
 const DEFAULT_KEEP_RATIO = 0.5;
@@ -119,17 +126,17 @@ export function renderMessagesForSummary(messages: RequestMessage[]): string {
         if (!message) continue;
         let line: string;
         if (message.role === 'tool') {
-            line = `[工具结果] ${squash((message as { content?: unknown }).content)}`;
+            line = `[tool result] ${squash((message as { content?: unknown }).content)}`;
         } else if (message.role === 'assistant' && Array.isArray((message as { tool_calls?: unknown[] }).tool_calls)) {
             const calls = (message as { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }).tool_calls || [];
-            const describe = calls.map(c => `${c.function?.name ?? 'tool'}(${squash(c.function?.arguments, 300)})`).join('；');
+            const describe = calls.map(c => `${c.function?.name ?? 'tool'}(${squash(c.function?.arguments, 300)})`).join('; ');
             const content = squash((message as { content?: unknown }).content, 600);
-            line = `[助手] ${content}${content ? ' ' : ''}[调用工具] ${describe}`;
+            line = `[assistant] ${content}${content ? ' ' : ''}[tool calls] ${describe}`;
         } else {
-            line = `[${message.role === 'user' ? '用户' : message.role === 'assistant' ? '助手' : '系统'}] ${squash((message as { content?: unknown }).content)}`;
+            line = `[${message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : 'system'}] ${squash((message as { content?: unknown }).content)}`;
         }
         if (used + line.length > SUMMARY_INPUT_LIMIT) {
-            lines.push('…（更早内容超出摘要输入上限，已截断）');
+            lines.push('… (earlier content exceeded the summary input limit; truncated)');
             break;
         }
         lines.push(line);
@@ -177,7 +184,7 @@ export function truncateSubAgentContent(text: string, maxChars: number): string 
     if (maxChars <= 0 || text.length <= maxChars) return text;
     const head = Math.floor(maxChars * 2 / 3);
     const tail = maxChars - head;
-    const marker = '\n…（原文过长已截断）';
+    const marker = '\n' + SUBAGENT_TRUNCATE_MARK;
     return `${text.slice(0, Math.max(0, head - marker.length))}${marker}${tail > 0 ? text.slice(-tail) : ''}`;
 }
 
@@ -261,7 +268,7 @@ export class SubAgentContext {
                 beforeTokens: before,
                 afterTokens: after,
                 droppedMessages: 0,
-                ...(truncated ? { diagnostic: '最新单元自身超过预算，已中段截断' } : {}),
+                ...(truncated ? { diagnostic: 'latest unit alone exceeded the budget; truncated in the middle' } : {}),
             };
         }
 
@@ -272,19 +279,19 @@ export class SubAgentContext {
         if (this.summarize) {
             try {
                 const previous = extractInjectedSummary(String((this.messages[0] as { content?: unknown }).content ?? ''));
-                const input = [previous ? `【已有摘要】\n${previous}` : '', renderMessagesForSummary(dropped)]
+                const input = [previous ? `${EXISTING_SUMMARY_HEADER}\n${previous}` : '', renderMessagesForSummary(dropped)]
                     .filter(Boolean)
                     .join('\n\n');
                 const summaryBudget = Math.max(128, Math.floor(this.maxTokens * 0.25));
                 const output = await this.summarize(input, { maxTokens: summaryBudget });
                 summaryText = String(output ?? '').trim();
                 if (summaryText !== '') mode = 'summary';
-                else diagnostic = '摘要器返回空';
+                else diagnostic = 'summarizer returned empty';
             } catch (e) {
                 diagnostic = e instanceof Error ? e.message : String(e);
             }
         } else {
-            diagnostic = '未配置摘要器';
+            diagnostic = 'no summarizer configured';
         }
 
         const baseSystem = this.systemTextWithoutInjected();
@@ -295,7 +302,7 @@ export class SubAgentContext {
             const bounded = summaryText.length > maxChars ? truncateSubAgentContent(summaryText, maxChars) : summaryText;
             systemText = `${baseSystem}\n\n${SUMMARY_HEADER}\n${bounded}`;
         } else {
-            systemText = `${baseSystem}\n\n${OMIT_HEADER} 更早 ${dropped.length} 条消息已省略（自动压缩失败，保留最近内容）`;
+            systemText = `${baseSystem}\n\n${subagentOmitLine(dropped.length)}`;
         }
         this.messages = [{ role: 'system', content: systemText }, ...retained];
 

@@ -58,6 +58,16 @@ export interface McpServerEntry {
      * 规范化为 [img:h<sha256>] 并注册虚拟图。image-host 按服务器名自动视为 true。
      */
     imageRefs?: boolean;
+    /**
+     * 是否把 initialize 返回的服务器 instructions 提供给提示词（runtime 段，外部数据）。
+     * 缺省 false（主流客户端默认不注入）；非布尔值按 false 处理并记 warning。
+     */
+    exposeInstructions?: boolean;
+    /**
+     * 能力地图里的用途描述（可选，用户可读文本）：缺省用 initialize 的 serverInfo.title，
+     * 再缺省用服务器名。仅用于提示词能力摘要，不进工具 schema。
+     */
+    description?: string;
 }
 
 export interface McpConfig {

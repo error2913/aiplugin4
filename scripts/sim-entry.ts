@@ -242,7 +242,8 @@ async function scenarioTurnHot(session: Session, sid: string) {
     check('首轮整包 ≤ 冷态窗口 × 1.2（含折叠摘要）', totalChars <= budget * 1.2,
         `整包 ${totalChars} 字 / 窗口 ${budget} 字`);
 
-    const hasFold = JSON.stringify(built).includes('折叠摘要');
+    // 折叠摘要头已英文化：Earlier chat/tool content was compacted into a summary ...
+    const hasFold = JSON.stringify(built).includes('compacted into a summary');
     console.log(`  · 是否出现折叠摘要：${hasFold ? '是' : '否'}（窗口装得下时不折叠是正常的）`);
 }
 

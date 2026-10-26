@@ -1,4 +1,4 @@
-// prompt 分层缓存：只缓存 system prompt 的静态壳与短期动态段，避免连续对话重复 embedding。
+// prompt 分层缓存：缓存 system/runtime 段文本，避免连续对话重复做记忆检索/embedding。
 // 仅使用海豹 Goja 可运行的 ES6 能力：Map、Date.now、Promise，不引入 WeakRef/structuredClone 等现代 API。
 
 interface CacheEntry {
@@ -30,10 +30,11 @@ function ensureCapacity(): void {
 }
 
 /**
- * 读取字符串缓存；未命中或已过期时执行 build，并把同一 key 的并发构建复用为同一个 Promise，
+ * 读取字符串缓存，同时返回是否命中。
+ * 未命中或已过期时执行 build，并把同一 key 的并发构建复用为同一个 Promise，
  * 防止多个请求同时重复做昂贵的记忆检索/embedding。
  */
-export function getCachedString(key: string, ttlMs: number, build: () => string | Promise<string>): Promise<string> {
+export function getCachedStringInfo(key: string, ttlMs: number, build: () => string | Promise<string>): Promise<{ value: string; hit: boolean }> {
     const now = Date.now();
     const existing = cache.get(key);
 
@@ -42,9 +43,11 @@ export function getCachedString(key: string, ttlMs: number, build: () => string 
         cache.delete(key);
         cache.set(key, existing);
         if (existing.value !== undefined && now < existing.expiresAt) {
-            return Promise.resolve(existing.value);
+            return Promise.resolve({ value: existing.value, hit: true });
         }
-        if (existing.promise) return existing.promise;
+        if (existing.promise) {
+            return existing.promise.then(value => ({ value, hit: false }));
+        }
     }
 
     const entry: CacheEntry = { expiresAt: 0 };
@@ -61,7 +64,12 @@ export function getCachedString(key: string, ttlMs: number, build: () => string 
         cache.delete(key);
     });
 
-    return promise;
+    return promise.then(value => ({ value, hit: false }));
+}
+
+/** 读取字符串缓存（只取文本，兼容旧调用） */
+export function getCachedString(key: string, ttlMs: number, build: () => string | Promise<string>): Promise<string> {
+    return getCachedStringInfo(key, ttlMs, build).then(result => result.value);
 }
 
 /** 按前缀清理缓存，用于记忆/总结写入后主动失效，保证新写入内容立即可见 */

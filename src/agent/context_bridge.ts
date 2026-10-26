@@ -8,6 +8,7 @@ import { getHost } from "../core/host";
 import { getAuxLlm } from "../core/ports/aux_llm";
 import { MemoryManager } from "../memory/manager";
 import type { Session } from "../session/session";
+import { CONTEXT_BRIDGE_ROLE_LABEL } from "../utils/protocol";
 
 interface BridgeState {
     epochStart: number;
@@ -23,7 +24,6 @@ const MEMORY_WATERMARK_TOKENS = 6000;
 const MAX_PENDING_CHARS = 120_000;
 const MAX_CHUNK_CHARS = 12_000;
 const SOURCE_KINDS = new Set<ConversationEvent['kind']>(['user', 'assistant', 'tool_result']);
-const ROLE_LABEL: Record<string, string> = { user: '[用户] ', assistant: '[AI] ', tool_result: '[工具] ' };
 
 function estimateEventTokens(event: ConversationEvent): number {
     const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
@@ -141,7 +141,7 @@ export function collectContextBacklog(session: Session): { pendingTokens: number
         for (const item of result.items) {
             if (item.type !== 'event') continue;
             lastSeq = Math.max(lastSeq, item.seq);
-            if (SOURCE_KINDS.has(item.kind)) state.pending += `${ROLE_LABEL[item.kind] ?? ''}${item.text}\n`;
+            if (SOURCE_KINDS.has(item.kind)) state.pending += `${CONTEXT_BRIDGE_ROLE_LABEL[item.kind] ?? ''}${item.text}\n`;
         }
         if (result.cursor) {
             state.readSeq = result.cursor.seq;

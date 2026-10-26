@@ -260,14 +260,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(parts.some(p => p.type === 'image' && p.ref === 'h-img'), '登记的图片应变成 CIR 引用');
         assert.ok(parts.some(p => p.type === 'resource' && p.uri === 'res://x'));
         assert.ok(parts.some(p => p.type === 'text' && p.text.includes('资源正文')));
-        assert.ok(parts.some(p => p.type === 'text' && p.text.includes('未登记')), '未登记音频应给出说明而不是静默丢');
+        assert.ok(parts.some(p => p.type === 'text' && p.text.includes('[voice: audio/mpeg, about 12 chars (not registered; original not stored)]')), '未登记音频应给出说明而不是静默丢');
         assert.ok(parts.some(p => p.type === 'unknown' && p.tag === 'unknown_thing'));
         assert.ok(parts.some(p => p.type === 'text' && p.text.includes('"ok":true')));
         // base64 绝不进账本
         assert.equal(JSON.stringify(parts).includes(base64), false, 'base64 不应出现在 Part 中');
         // 无回调的 data:base64 图片同样只保留元数据说明
         const raw = normalizeMcpContent([{ type: 'image', data: base64, mimeType: 'image/png' }]);
-        assert.ok(raw.some(p => p.type === 'text' && p.text.includes('未登记')));
+        assert.ok(raw.some(p => p.type === 'text' && p.text.includes('[image: image/png, about 12 chars (not registered; original not stored)]')));
         assert.equal(JSON.stringify(raw).includes(base64), false);
     },
 
@@ -302,7 +302,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // 纯文本出口
         const plain = renderPlainText(parts);
         assert.ok(plain.includes('看 '));
-        assert.ok(plain.includes('@全体成员'));
+        assert.ok(plain.includes('@all'));
         assert.ok(plain.includes('猫'));
         assert.ok(plain.includes('语音'));
     },

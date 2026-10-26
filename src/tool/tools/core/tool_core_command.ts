@@ -82,21 +82,21 @@ export function registerCoreCommandTool(): Tool {
         type: 'function',
         function: {
             name: 'run_core_command',
-            description: '在 SealDice 本地通过 ob11-core-bridge 的 WebSocket 注入假消息执行核心指令（如 ext、help、roll 等），并收集核心返回的多条消息。可调用指令受「可调用指令白名单」约束，白名单格式为 core|指令名/别名；action=list 可查看当前可调用核心指令。核心指令无法由插件直接调用，必须连接核心桥后端。',
+            description: 'Execute a core command locally in SealDice by injecting a fake message through the ob11-core-bridge WebSocket (e.g. ext, help, roll) and collect the multiple messages the core returns. Callable commands are restricted by the callable-command whitelist, whose format is core|command/alias; action=list shows the currently callable core commands. Core commands cannot be called directly by the plugin and require the core bridge backend.',
             parameters: {
                 type: 'object',
                 properties: {
-                    action: { type: 'string', enum: ['list', 'call'], description: 'list=列出可调用核心指令；call=执行核心指令' },
-                    command: { type: 'string', description: '结构化模式的核心指令名，不含前缀；也支持 core|指令名 写法' },
-                    args: { type: 'array', items: { type: 'string' }, description: '指令参数，按顺序填写' },
-                    raw_message: { type: 'string', description: '原始消息模式；原样注入核心，不得与 command/args 同时使用' },
-                    maxMessages: { type: 'integer', minimum: 1, maximum: 50, description: '最多收集多少条回复消息' },
-                    settleMs: { type: 'integer', minimum: 0, maximum: 10000, description: '收到消息后等待多久没有新消息才结束' },
-                    timeoutMs: { type: 'integer', minimum: 100, maximum: 120000, description: '最长等待时间，单位毫秒' },
-                    captureMode: { type: 'string', enum: ['reply_only', 'lane'], description: '消息捕获范围' },
-                    forward: { type: 'boolean', description: '是否把捕获到的消息继续转发给协议端，默认 true' },
-                    trigger: { type: 'string', description: '可选；指定这条指令消息的发送者/触发对象用户 ID' },
-                    at: { type: 'array', items: { type: 'string' }, description: '可选；让注入的指令消息 @ 这些用户（群聊可用）' }
+                    action: { type: 'string', enum: ['list', 'call'], description: 'list=list callable core commands; call=execute a core command' },
+                    command: { type: 'string', description: 'Core command name for structured mode, without prefix; core|command is also supported' },
+                    args: { type: 'array', items: { type: 'string' }, description: 'Command arguments, in order' },
+                    raw_message: { type: 'string', description: 'Raw-message mode; injected into the core as-is, cannot be combined with command/args' },
+                    maxMessages: { type: 'integer', minimum: 1, maximum: 50, description: 'Max number of reply messages to collect' },
+                    settleMs: { type: 'integer', minimum: 0, maximum: 10000, description: 'How long to wait for silence after receiving a message before finishing' },
+                    timeoutMs: { type: 'integer', minimum: 100, maximum: 120000, description: 'Max wait time in milliseconds' },
+                    captureMode: { type: 'string', enum: ['reply_only', 'lane'], description: 'Message capture scope' },
+                    forward: { type: 'boolean', description: 'Whether to forward captured messages to the protocol side; default true' },
+                    trigger: { type: 'string', description: 'Optional; sender/trigger user ID for the injected command message' },
+                    at: { type: 'array', items: { type: 'string' }, description: 'Optional; @ these users (user IDs) from the injected command message (group chats only)' }
                 },
                 required: ['action']
             }

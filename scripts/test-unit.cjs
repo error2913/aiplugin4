@@ -41,6 +41,9 @@ const bundles = {
     contextSession: path.join(outDir, 'unit-context-session.cjs'),
     contextBridge: path.join(outDir, 'unit-context-bridge.cjs'),
     subagentContext: path.join(outDir, 'unit-subagent-context.cjs'),
+    prompt: path.join(outDir, 'unit-prompt.cjs'),
+    protocol: path.join(outDir, 'unit-protocol.cjs'),
+    mcp: path.join(outDir, 'unit-mcp.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -77,7 +80,10 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['contextV2Tools', path.join(repo, 'scripts/unit-test-context-v2-tools.ts')],
         ['contextSession', path.join(repo, 'scripts/unit-test-context-session.ts')],
         ['contextBridge', path.join(repo, 'scripts/unit-test-context-bridge.ts')],
-        ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')]
+        ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')],
+        ['prompt', path.join(repo, 'scripts/unit-test-prompt.ts')],
+        ['protocol', path.join(repo, 'scripts/unit-test-protocol.ts')],
+        ['mcp', path.join(repo, 'scripts/unit-test-mcp.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

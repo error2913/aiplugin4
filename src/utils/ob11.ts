@@ -25,7 +25,7 @@ async function getForwardMessage(epId: string, id: string): Promise<any[]> {
 }
 
 async function forwardSegmentsToText(epId: string, message: any, depth: number, visited: Set<string>): Promise<string> {
-    if (depth > MAX_FORWARD_DEPTH) return "[消息嵌套过深，已截断]";
+    if (depth > MAX_FORWARD_DEPTH) return "[nested message too deep; truncated]";
     if (typeof message === "string") return message;
     if (!Array.isArray(message)) return "";
 
@@ -36,17 +36,17 @@ async function forwardSegmentsToText(epId: string, message: any, depth: number, 
             case "text": text += (seg.data && seg.data.text) || ""; break;
             case "at": text += `@${(seg.data && (seg.data.qq || seg.data.user_id)) || ""} `; break;
             case "face": text += `[face:${(seg.data && seg.data.id) || ""}]`; break;
-            case "image": text += "[图片]"; break;
-            case "record": text += "[record]语音[/record]"; break;
-            case "video": text += "[video]视频[/video]"; break;
-            case "file": text += `[file]${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || "文件"}[/file]`; break;
+            case "image": text += "[image]"; break;
+            case "record": text += "[record]voice[/record]"; break;
+            case "video": text += "[video]video[/video]"; break;
+            case "file": text += `[file]${(seg.data && (seg.data.name || seg.data.file || seg.data.file_id)) || "file"}[/file]`; break;
             case "json": text += parseCardToText(seg.data && (seg.data.data || seg.data.content)); break;
             case "music": text += parseMusicToText(seg.data || {}); break;
             case "node": text += await forwardMessagesToText(epId, [seg], depth + 1, visited); break;
             case "forward": {
                 const fid = (seg.data && seg.data.id) || "";
                 if (!fid || visited.has(String(fid))) {
-                    text += "[合并转发循环引用，已截断]";
+                    text += "[forward reference loop; truncated]";
                     break;
                 }
                 visited.add(String(fid));
@@ -60,13 +60,13 @@ async function forwardSegmentsToText(epId: string, message: any, depth: number, 
 }
 
 async function forwardMessagesToText(epId: string, messages: any[], depth = 0, visited: Set<string> = new Set()): Promise<string> {
-    if (depth > MAX_FORWARD_DEPTH) return "[消息嵌套过深，已截断]";
+    if (depth > MAX_FORWARD_DEPTH) return "[nested message too deep; truncated]";
     const lines: string[] = [];
     for (const message of messages) {
         if (!message || typeof message !== "object") continue;
         const nodeData = message.type === "node" ? message.data || {} : null;
         const sender = nodeData || message.sender || {};
-        const name = sender.card || sender.nickname || `用户${sender.user_id || ""}`;
+        const name = sender.card || sender.nickname || `user ${sender.user_id || ""}`;
         const content = await forwardSegmentsToText(epId, nodeData ? nodeData.content : message.message, depth + 1, visited);
         lines.push(`${name}: ${content}`);
     }
@@ -74,11 +74,11 @@ async function forwardMessagesToText(epId: string, messages: any[], depth = 0, v
 }
 
 export async function expandForwardMessage(epId: string, id: string, depth = 0): Promise<string> {
-    if (!netExists()) return "[未安装 ob11 网络连接依赖，无法展开合并转发]";
+    if (!netExists()) return "[ob11 network plugin not installed; cannot expand forward message]";
     try {
         return await forwardMessagesToText(epId, await getForwardMessage(epId, id), depth + 1);
     } catch (error) {
         log.exception('展开合并转发 ' + id + ' 失败', error);
-        return "[合并转发展开失败]";
+        return "[forward expansion failed]";
     }
 }

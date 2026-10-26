@@ -532,19 +532,19 @@ export function describeMediaParam(key: string, meta: MediaParamMeta, supports: 
     const bits: string[] = [];
     if (meta.desc) bits.push(meta.desc);
     if (Array.isArray(meta.enum) && meta.enum.length > 0) {
-        bits.push(`可选 ${meta.enum.map(v => JSON.stringify(v)).join('/')}`);
+        bits.push(`optional ${meta.enum.map(v => JSON.stringify(v)).join('/')}`);
     } else if (typeof meta.min === 'number' || typeof meta.max === 'number') {
-        bits.push(`范围 ${meta.min ?? '-∞'}~${meta.max ?? '∞'}`);
+        bits.push(`range ${meta.min ?? '-inf'}~${meta.max ?? 'inf'}`);
     }
     if (meta.default !== undefined && meta.default !== null && meta.default !== '') {
-        bits.push(`默认 ${JSON.stringify(meta.default)}`);
+        bits.push(`default ${JSON.stringify(meta.default)}`);
     }
     // 仅部分模型支持时标注，避免 AI 用错模型
     if (allModels.length > 1 && supports.length < allModels.length) {
         const names = supports.map(ref => (allModels.find(m => m.ref === ref)?.name ?? ref));
-        bits.push(`仅 ${names.join('、')} 支持`);
+        bits.push(`supported only by ${names.join(', ')}`);
     }
-    return bits.length > 0 ? `${key}（${bits.join('，')}）` : key;
+    return bits.length > 0 ? `${key} (${bits.join(', ')})` : key;
 }
 
 /**
@@ -554,22 +554,22 @@ export function describeMediaParam(key: string, meta: MediaParamMeta, supports: 
 export function buildMediaParamHint(use: MediaModelUse, models: MediaModelDesc[], defaultRef?: string): string {
     if (models.length === 0) return '';
     const summary = useParamSummary(use, models);
-    const kindLabel = use === 'tts' ? '语音' : '生图';
+    const kindLabel = use === 'tts' ? 'voice' : 'image';
 
-    const lines: string[] = [`已配置${kindLabel}模型：`];
+    const lines: string[] = [`Configured ${kindLabel} models:`];
     for (const m of models) {
         const composed = composeMediaTemplate(use, m.provider, m.name, m.ref);
         const keys = templateParamKeys(composed);
         const paramText = keys.length > 0
-            ? keys.map(k => describeMediaParam(k, composed.params[k] ?? {}, summary.supportedBy[k] ?? [m.ref], models)).join('、')
-            : '（无可覆写参数）';
-        lines.push(`· ${m.name} — ${paramText}`);
+            ? keys.map(k => describeMediaParam(k, composed.params[k] ?? {}, summary.supportedBy[k] ?? [m.ref], models)).join(', ')
+            : '(no overridable parameters)';
+        lines.push(`- ${m.name} — ${paramText}`);
     }
 
     const defaultModel = defaultRef
         ? (models.find(m => m.ref === defaultRef) ?? models[0])
         : models[0];
-    lines.push(`未指定 model 时使用 ${defaultModel.name}。未传的参数用该模型默认值；模型不支持的参数会被忽略。`);
+    lines.push(`Uses ${defaultModel.name} when model is not specified. Omitted parameters use that model defaults; parameters unsupported by the model are ignored.`);
 
     // [prompt].extra：内容相同的模型合并成一段；各模型各异的用 [模型名] 前缀区分
     const extraGroups = new Map<string, string[]>();

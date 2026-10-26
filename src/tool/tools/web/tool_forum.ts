@@ -161,22 +161,22 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_get_posts",
-            description: "获取aiplugin论坛的帖子列表",
+            description: "Get the list of aiplugin forum posts",
             parameters: {
                 type: "object",
                 properties: {
                     sort: {
                         type: "string",
-                        description: "排序方式",
+                        description: "Sort order",
                         enum: ["newest", "hot", "most_comments", "most_viewed"]
                     },
                     page: {
                         type: "integer",
-                        description: "页码，默认1"
+                        description: "Page number, default 1"
                     },
                     limit: {
                         type: "integer",
-                        description: "每页数量，默认20，最大50"
+                        description: "Page size, default 20, max 50"
                     }
                 },
                 required: []
@@ -224,13 +224,13 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_get_post_detail",
-            description: "获取论坛帖子的详细内容和评论",
+            description: "Get the detailed content and comments of a forum post",
             parameters: {
                 type: "object",
                 properties: {
                     post_id: {
                         type: "integer",
-                        description: "帖子ID"
+                        description: "Post ID"
                     }
                 },
                 required: ["post_id"]
@@ -305,30 +305,30 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_search",
-            description: "搜索论坛帖子",
+            description: "Search forum posts",
             parameters: {
                 type: "object",
                 properties: {
                     q: {
                         type: "string",
-                        description: "搜索关键词"
+                        description: "Search keyword"
                     },
                     user: {
                         type: "string",
-                        description: "按用户名筛选"
+                        description: "Filter by user name"
                     },
                     tag: {
                         type: "string",
-                        description: "按标签筛选"
+                        description: "Filter by tag"
                     },
                     sort: {
                         type: "string",
-                        description: "排序方式",
+                        description: "Sort order",
                         enum: ["newest", "hot", "most_comments"]
                     },
                     page: {
                         type: "integer",
-                        description: "页码"
+                        description: "Page number"
                     }
                 },
                 required: []
@@ -383,29 +383,29 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_create_post",
-            description: "在论坛创建新帖子。" +
-                "图片可通过 image_ids 参数传入图片引用列表（[img:<ref>] / 图床托管 ID / 插件图片 ID），也可在 content 中使用 [img:图片ID] 引用。",
+            description: "Create a new forum post." +
+                "Images can be passed as an image reference list via the image_ids parameter ([img:<ref>] / image-host ID / plugin image ID), or referenced in content with [img:image ID].",
             parameters: {
                 type: "object",
                 properties: {
                     title: {
                         type: "string",
-                        description: "帖子标题，不超过200字符"
+                        description: "Post title, at most 200 characters"
                     },
                     content: {
                         type: "string",
-                        description: "帖子内容，支持Markdown格式。可以在内容中使用[img:图片ID]引用图片，图片会自动上传并嵌入到帖子中"
+                        description: "Post content, Markdown supported. You can reference images with [img:image ID] in the content; images are uploaded and embedded automatically"
                     },
                     tags: {
                         type: "array",
-                        description: "帖子标签列表",
+                        description: "Post tag list",
                         items: {
                             type: "string"
                         }
                     },
                     image_ids: {
                         type: "array",
-                        description: "要附带的图片引用列表（标准 [img:<ref>] / 图床托管 ID h<sha> / 裸 sha / 插件图片 ID / 头像），图片会自动转换为base64上传",
+                        description: "Image reference list to attach (standard [img:<ref>] / image-host ID h<sha> / bare sha / plugin image ID / avatar); images are converted to base64 and uploaded automatically",
                         items: {
                             type: "string"
                         }
@@ -488,30 +488,30 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_manage_comment",
-            description: "管理论坛评论（支持创建、更新或删除操作）",
+            description: "Manage forum comments (create, update or delete)",
             parameters: {
                 type: "object",
                 properties: {
                     action: {
                         type: "string",
-                        description: "操作类型（create、update或delete）",
+                        description: "Operation type (create, update or delete)",
                         enum: ["create", "update", "delete"]
                     },
                     post_id: {
                         type: "integer",
-                        description: "【仅用于create】目标帖子ID"
+                        description: "[create only] Target post ID"
                     },
                     comment_id: {
                         type: "integer",
-                        description: "【仅用于update和delete】目标评论ID"
+                        description: "[update and delete only] Target comment ID"
                     },
                     content: {
                         type: "string",
-                        description: "【仅用于create和update】评论内容，支持Markdown格式"
+                        description: "[create and update only] Comment content, Markdown supported"
                     },
                     parent_id: {
                         type: "integer",
-                        description: "【仅用于create】父评论ID，回复某条具体评论时使用"
+                        description: "[create only] Parent comment ID, used when replying to a specific comment"
                     }
                 },
                 required: ["action"]
@@ -554,7 +554,7 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_get_activity",
-            description: "获取论坛动态通知（新的点赞、评论、回复等）",
+            description: "Get forum activity notifications (new likes, comments, replies, etc.)",
             parameters: {
                 type: "object",
                 properties: {},
@@ -605,30 +605,30 @@ export function registerForum() {
         type: "function",
         function: {
             name: "forum_manage_post",
-            description: "管理自己发布的论坛帖子（支持更新或删除操作，注意只能管理自己发过的帖子）",
+            description: "Manage your own forum posts (update or delete; you can only manage posts you created)",
             parameters: {
                 type: "object",
                 properties: {
                     action: {
                         type: "string",
-                        description: "操作类型（update或delete）",
+                        description: "Operation type (update or delete)",
                         enum: ["update", "delete"]
                     },
                     post_id: {
                         type: "integer",
-                        description: "目标帖子ID"
+                        description: "Target post ID"
                     },
                     title: {
                         type: "string",
-                        description: "【仅用于update】新的标题 (可选)"
+                        description: "[update only] New title (optional)"
                     },
                     content: {
                         type: "string",
-                        description: "【仅用于update】新的内容，支持Markdown格式 (可选)"
+                        description: "[update only] New content, Markdown supported (optional)"
                     },
                     tags: {
                         type: "array",
-                        description: "【仅用于update】新的标签列表 (可选)",
+                        description: "[update only] New tag list (optional)",
                         items: {
                             type: "string"
                         }

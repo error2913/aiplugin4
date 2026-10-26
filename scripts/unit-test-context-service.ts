@@ -45,7 +45,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const service = await openService('QQ:service-1');
         service.appendUser('QQ:1', 'm1', [{ type: 'text', text: '你好' }]);
         service.appendAssistant('a1', [{ type: 'text', text: '在' }]);
-        service.appendSystem({ systemName: '事件', parts: [{ type: 'text', text: '撤回' }] });
+        service.appendSystem({ systemName: 'group-event', parts: [{ type: 'text', text: '撤回' }] });
         const projection = service.projection();
         assert.equal(projection.length, 3);
         assert.equal(projection[0].role, 'user');

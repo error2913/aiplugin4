@@ -1,6 +1,6 @@
 {
   "name": "aiplugin4",
-  "version": "4.28.0",
+  "version": "4.29.0",
   "description": "ai plugin for sealdice",
   "repository": "https://github.com/error2913/aiplugin4",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "pack:sealpack": "node scripts/prepare-sealpack.js && sealpack pack sealpack --out dist/aiplugin4.sealpack",
     "pack:release": "node scripts/build-release.js",
     "test:unit": "node scripts/test-unit.cjs",
+    "prompt:snapshot": "node scripts/prompt-snapshot.cjs",
     "sim": "node scripts/sim.cjs",
     "sim:matrix": "node scripts/sim-matrix.cjs",
     "fuzz": "node scripts/fuzz.cjs",

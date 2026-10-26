@@ -13,6 +13,7 @@ import { ToolRunner } from '../tool/runner';
 import Tool from '../tool/tool';
 import type { RequestMessage } from '../utils/message';
 import { buildContent } from '../utils/message';
+import { wrapToolResultText } from '../utils/protocol';
 import { StopError } from "../utils/timeout";
 
 import type { SubAgentSummaryFn } from './context';
@@ -177,7 +178,7 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
     let turns = 0;
     let partial = '';
     const model = (inp.model as { name?: string } | null | undefined) ?? Model.getChatModel(use);
-    if (!model) return { stopReason: 'error', output: '', diagnostic: '没有可用的对话模型' };
+    if (!model) return { stopReason: 'error', output: '', diagnostic: 'no chat model available' };
 
     for (;;) {
         // 每次模型请求前检查预算：超上限才压一次（成功=摘要，失败=确定性降级）
@@ -185,8 +186,8 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
         await commitCheckpoint();
         if (isStopped(child)) return { stopReason: 'aborted', output: partial, diagnostic: 'interrupted by ancestor' };
         turns++;
-        if (turns > maxTurns) return { stopReason: 'timeout', output: partial, diagnostic: `超过最大轮次 ${maxTurns}` };
-        if (Date.now() > deadline) return { stopReason: 'timeout', output: partial, diagnostic: '超出预算时间' };
+        if (turns > maxTurns) return { stopReason: 'timeout', output: partial, diagnostic: `exceeded max turns (${maxTurns})` };
+        if (Date.now() > deadline) return { stopReason: 'timeout', output: partial, diagnostic: 'time budget exceeded' };
 
         const messages = context.snapshot();
         // 工具 schema：原生模式只注入引导工具（经 child.toolState 过滤）；提示词工程模式不注入
@@ -229,13 +230,13 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
                 let callBackAll = true;
                 for (const r of results) {
                     if (r.callBack === false) callBackAll = false;
-                    context.append({ role: 'user', content: `【工具返回:${r.toolName ?? 'tool'}】${r.content}` });
+                    context.append({ role: 'user', content: wrapToolResultText(r.toolName ?? 'tool', r.content) });
                 }
                 if (!callBackAll) return { stopReason: 'completed', output: partial };
             } catch (e) {
                 if (e instanceof StopError || isStopped(child)) return { stopReason: 'aborted', output: partial };
                 log.exception('child prompt tool error', e);
-                context.append({ role: 'user', content: `【工具返回】子代理工具执行失败：${errorText(e)}` });
+                context.append({ role: 'user', content: wrapToolResultText(undefined, `Sub-agent tool execution failed: ${errorText(e)}`) });
             }
             continue;
         }
@@ -274,7 +275,7 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
         } catch (e) {
             if (e instanceof StopError || isStopped(child)) return { stopReason: 'aborted', output: partial };
             log.exception('child tool error', e);
-            context.append({ role: 'tool', tool_call_id: toolCalls[0]?.id ?? '', content: `子代理工具执行失败：${errorText(e)}` });
+            context.append({ role: 'tool', tool_call_id: toolCalls[0]?.id ?? '', content: `Sub-agent tool execution failed: ${errorText(e)}` });
         }
     }
 }

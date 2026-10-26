@@ -185,14 +185,14 @@ export class KnowledgeBaseService {
     formatLibrariesFor(platform?: string, enabledIds?: Set<string> | null, limit = KB_INJECT_MAX_LIBRARIES): string {
         const libs = this.filterLibraries(platform, enabledIds);
         if (libs.length === 0) return '';
-        const lines = ['## 知识库'];
+        const lines = ['## Knowledge bases'];
         for (const lib of libs.slice(0, limit)) {
-            lines.push(`- ${lib.name}：${lib.description || '无描述'}`);
+            lines.push(`- ${lib.name}: ${lib.description || 'no description'}`);
         }
         if (libs.length > limit) {
-            lines.push(`（共 ${libs.length} 个库，最多显示 ${limit} 个）`);
+            lines.push(`(${libs.length} libraries total, showing at most ${limit})`);
         }
-        lines.push('需要查看结构：knowledge_docs；搜索内容：knowledge_search；读取分块：knowledge_read。');
+        lines.push('Structure: knowledge_docs; search: knowledge_search; read a chunk: knowledge_read.');
         return lines.join('\n');
     }
 
@@ -219,8 +219,8 @@ export class KnowledgeBaseService {
     /** 某个库下的文档/章节树 */
     formatLibraryDocs(libraryId: string, page = 1, pageSize = 20): string {
         const lib = this.libraries.find(x => x.id === libraryId);
-        if (!lib) return `未找到知识库:${libraryId}`;
-        if (lib.chunks.length === 0) return `知识库 ${lib.name} 暂无内容`;
+        if (!lib) return `Knowledge base not found: ${libraryId}`;
+        if (lib.chunks.length === 0) return `Knowledge base ${lib.name} has no content yet`;
 
         const size = Math.min(Math.max(Number(pageSize) || 20, 1), KB_PAGE_SIZE_LIMIT);
         const current = Math.max(Number(page) || 1, 1);
@@ -240,13 +240,13 @@ export class KnowledgeBaseService {
 
         const totalPages = Math.max(1, Math.ceil(groups.length / size));
         const pageGroups = groups.slice((current - 1) * size, current * size);
-        const lines = [`知识库：${lib.name}（${lib.id}）`];
+        const lines = [`Knowledge base: ${lib.name} (${lib.id})`];
         for (const g of pageGroups) {
             lines.push('');
-            lines.push(`文档：${g.docTitle}（${g.docId}）`);
+            lines.push(`Document: ${g.docTitle} (${g.docId})`);
             for (const item of g.items) lines.push(`- ${item}`);
         }
-        lines.push(`当前第 ${current} 页，共 ${totalPages} 页；使用 knowledge_read 读取具体分块，knowledge_search 搜索内容。`);
+        lines.push(`Page ${current} of ${totalPages}; use knowledge_read to read a chunk and knowledge_search to search content.`);
         return lines.join('\n');
     }
 
@@ -361,7 +361,7 @@ export class KnowledgeBaseService {
             return `${i + 1}. [${c.id}] ${c.title}${heading}`;
         }).join('\n');
         if (limit > 0 && chunks.length > limit) {
-            return `${lines}\n…共 ${chunks.length} 条，检索请用 knowledge_search / knowledge_read`;
+            return `${lines}\n…${chunks.length} entries total; search with knowledge_search / knowledge_read`;
         }
         return lines;
     }
@@ -379,7 +379,7 @@ export class KnowledgeBaseService {
 
     /** 注入索引兜底：预算内尽可能多列条目（标题 + 小节），正文按需用 knowledge_read 读取 */
     private buildIndexFallback(): string {
-        const head = `## 知识库\n知识库内容较多（共 ${this.chunks.length} 个分块），以下为条目索引，需要详情时使用 knowledge_read 工具按 ID 读取：\n`;
+        const head = `## Knowledge bases\nKnowledge base content is large (${this.chunks.length} chunks). Below is the entry index; use knowledge_read with an ID when you need details:\n`;
         const lines: string[] = [];
         let total = 0;
         for (let i = 0; i < this.chunks.length && lines.length < KB_INDEX_LIMIT; i++) {
@@ -392,7 +392,7 @@ export class KnowledgeBaseService {
         }
         const index = lines.join('\n');
         const remaining = this.chunks.length > lines.length
-            ? `\n…共 ${this.chunks.length} 条，检索请用 knowledge_search / knowledge_read`
+            ? `\n…${this.chunks.length} entries total; search with knowledge_search / knowledge_read`
             : '';
         return head + index + remaining;
     }

@@ -30,22 +30,22 @@ export function registerResolveSpecialId() {
         type: "function",
         function: {
             name: "resolve_special_id",
-            description: "解析上下文里出现的特殊短 ID/句柄，返回其原始字段，用于对接协议 API。\n" +
-                "上下文中的消息 ID 是 base36 短 ID（[msg_id:xxx]/[quote:xxx]），图片是插件图片 ID 或标准图片引用 [img:<ref>]（含图床 h<sha256>、裸 sha256、头像），" +
-                "语音/视频/文件消息是闭合标签（[record:句柄]摘要[/record]、[video:句柄]...[/video]、[file:句柄]...[/file]）。" +
-                "需要把短 ID 交给 get_msg/delete_msg/get_image/get_record/文件下载等协议能力，或读取原始 " +
-                "url/path/file/file_id/file_unique 等字段时，先调用本工具还原；图床图片额外返回 hosted_id/hosted_url，且没有协议端缓存文件、不要再用 get_image。",
+            description: "Resolve special short IDs/handles found in the context and return their original fields, for calling protocol APIs.\n" +
+                "Message IDs in the context are base36 short IDs ([msg_id:xxx]/[quote:xxx]); images are plugin image IDs or standard image references [img:<ref>] (including image-host h<sha256>, bare sha256, avatars); " +
+                "voice/video/file messages are closing tags ([record:handle]summary[/record], [video:handle]...[/video], [file:handle]...[/file]). " +
+                "When you need to pass a short ID to protocol capabilities such as get_msg/delete_msg/get_image/get_record/file download, or read the original " +
+                "url/path/file/file_id/file_unique fields, resolve it with this tool first; image-host images additionally return hosted_id/hosted_url, have no protocol-side cached file, and should not use get_image again.",
             parameters: {
                 type: "object",
                 properties: {
                     type: {
                         type: "string",
                         enum: [...RESOLVE_TYPES],
-                        description: "短 ID 类型：message=消息ID；image=图片ID；record/video/file=媒体句柄"
+                        description: "Short ID type: message=message ID; image=image ID; record/video/file=media handle"
                     },
                     id: {
                         type: "string",
-                        description: "上下文里的短 ID 或句柄（如 [msg_id:3f]、[img:abc123]、[record:abc123]摘要[/record] 中的 abc123）"
+                        description: "Short ID or handle from the context (e.g. abc123 in [msg_id:3f], [img:abc123], or [record:abc123]summary[/record])"
                     }
                 },
                 required: ["type", "id"]

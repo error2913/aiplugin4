@@ -1,10 +1,17 @@
-// MCP 客户端会话层：JSON-RPC 请求、initialize/tools.list/tools.call、会话分桶与 LRU 回收、失效重试。
+// MCP 客户端会话层：JSON-RPC 请求、initialize/tools/prompts/resources、会话分桶与 LRU 回收、失效重试。
 // 从 tool/mcp.ts 拆出——会话生命周期只依赖 ./mcp/config 与 logger，工具注册（registry）留在 mcp.ts；
 // mcp.ts 仍导出 callMCPTool / registerMCPTools / refreshMCP，外部 API 不变。
+//
+// 传输：请求-响应式 Streamable HTTP（POST + 可选 SSE 单响应），不保持长连接流。
+// 因此无法接收服务器主动推送的 notifications/*/list_changed；见 mcpRequest 末尾的尽力处理说明。
 import Logger from "../../logger";
 
-import { formatMcpError, maxSessionsPerServer, MCPServer, MCPServerState, MCPToolDef, sameServerConfig, sessionTTLMs } from "./config";
-import type { MCPCallResult } from "./types";
+import { extractInstructions, normalizeResourceList, normalizeResourceReadResult } from "./adapter";
+import {
+    formatMcpError, maxSessionsPerServer, MCPServer, MCPServerState, MCPToolDef,
+    sameServerConfig, sessionTTLMs, setLastRefreshAt,
+} from "./config";
+import type { MCPCallResult, MCPPromptDef, MCPPromptGetResult, MCPResourceDef, MCPResourceReadResult } from "./types";
 
 const log = Logger.withTag('mcp');
 /** tools/call 携带的 AI 会话标识头：mcp-files-exec 等后端按它隔离默认工作区 */
@@ -35,8 +42,35 @@ async function mcpRequest(server: MCPServer, payload: object, sessionId?: string
         const dataLine = text.split('\n').find(l => l.startsWith('data: '));
         if (dataLine) body = JSON.parse(dataLine.slice(6));
     }
+    maybeHandleServerNotification(server, text);
     return { status: response.status, body, sessionId: response.headers.get('mcp-session-id') || sessionId };
 }
+
+/**
+ * 变更通知的“尽力”处理：本客户端是请求-响应式 HTTP，没有常驻 SSE 流可接收服务端推送，
+ * 但部分服务器会把 `notifications/*\/list_changed` 夹带在某个 HTTP 响应体（SSE）里。
+ * 这里只做检测：命中 tools/list_changed 时清掉工具列表缓存并放开全局同步节流，
+ * 让下一次注册/`refresh` 重新拉取；prompts/resources 本来就按需实时读取，无缓存可清。
+ * 无法接收真正的服务端主动推送（需要长连接流），因此仍以 TTL/手动 refresh 兜底。
+ */
+function maybeHandleServerNotification(server: MCPServer, rawText: string): void {
+    if (!rawText || rawText.indexOf('list_changed') < 0) return;
+    const methods: string[] = [];
+    const re = /"method"\s*:\s*"(notifications\/(?:tools|prompts|resources)\/list_changed)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(rawText)) !== null) methods.push(match[1]);
+    if (methods.length === 0) return;
+    for (const method of methods) {
+        log.info(`MCP 服务器 ${server.name} 通知 ${method}（响应体内检测）`);
+        if (method.startsWith('notifications/tools/')) {
+            const state = serverStates[server.name];
+            if (state) state.toolsFetchedAt = 0;
+            setLastRefreshAt(0);
+        }
+        // prompts / resources 每次调用都实时请求，无缓存需要失效
+    }
+}
+
 
 async function initialize(server: MCPServer): Promise<string | undefined> {
     const res = await mcpRequest(server, {
@@ -52,28 +86,41 @@ async function initialize(server: MCPServer): Promise<string | undefined> {
     if (!res.body || !res.body.result) {
         throw new Error(`MCP initialize 失败: ${formatMcpError(res.status, res.body)}`);
     }
+    // 服务器 instructions 是运行时数据（不翻译）：只缓存在 server state，供提示词 provider 按配置开关取用；
+    // 未开启 exposeInstructions 时不进入任何提示词。
+    const state = getOrCreateState(server);
+    state.instructions = extractInstructions(res.body.result);
+    // serverInfo.title/name 用作能力地图里的服务器用途标签（服务器运行时数据，不翻译）
+    const serverInfo = res.body.result.serverInfo && typeof res.body.result.serverInfo === 'object'
+        ? res.body.result.serverInfo
+        : {};
+    const serverTitle = typeof serverInfo.title === 'string' && serverInfo.title.trim()
+        ? serverInfo.title.trim().slice(0, 120)
+        : (typeof serverInfo.name === 'string' ? serverInfo.name.trim().slice(0, 120) : '');
+    if (serverTitle) state.serverTitle = serverTitle;
     const sessionId = res.sessionId;
     await mcpRequest(server, { jsonrpc: '2.0', method: 'notifications/initialized' }, sessionId);
     return sessionId;
 }
 
-export async function listTools(server: MCPServer, sessionId: string): Promise<MCPToolDef[]> {
-    const tools: MCPToolDef[] = [];
+/** 分页拉取列表（tools/list、prompts/list、resources/list 共用 cursors 去环保护） */
+async function listPaged<T>(server: MCPServer, sessionId: string, method: string, key: string, requestIdStart = 2): Promise<T[]> {
+    const items: T[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
-    let requestId = 2;
+    let requestId = requestIdStart;
     do {
         const res = await mcpRequest(server, {
             jsonrpc: '2.0',
             id: requestId++,
-            method: 'tools/list',
+            method,
             params: cursor ? { cursor } : {}
         }, sessionId);
         if (res.body && res.body.error) {
-            throw new Error(`MCP tools/list 失败: ${formatMcpError(res.status, res.body)}`);
+            throw new Error(`MCP ${method} 失败: ${formatMcpError(res.status, res.body)}`);
         }
         const result = res.body && res.body.result;
-        if (result && Array.isArray(result.tools)) tools.push(...result.tools);
+        if (result && Array.isArray(result[key])) items.push(...result[key]);
         const nextCursor = result && typeof result.nextCursor === 'string' && result.nextCursor
             ? result.nextCursor
             : undefined;
@@ -81,7 +128,62 @@ export async function listTools(server: MCPServer, sessionId: string): Promise<M
         cursors.add(nextCursor);
         cursor = nextCursor;
     } while (cursor);
-    return tools;
+    return items;
+}
+
+export function listTools(server: MCPServer, sessionId: string): Promise<MCPToolDef[]> {
+    return listPaged<MCPToolDef>(server, sessionId, 'tools/list', 'tools');
+}
+
+/** prompts/list：服务器提供的 prompt 模板（用户显式触发，不自动注入） */
+export async function listPrompts(server: MCPServer, sessionId: string): Promise<MCPPromptDef[]> {
+    const prompts = await listPaged<MCPPromptDef>(server, sessionId, 'prompts/list', 'prompts');
+    return prompts.filter(prompt => !!prompt && typeof prompt.name === 'string' && prompt.name.length > 0);
+}
+
+/** prompts/get：取回模板展开后的消息（role = user / assistant） */
+export async function getPrompt(server: MCPServer, sessionId: string, name: string, args: { [key: string]: string } = {}): Promise<MCPPromptGetResult> {
+    const res = await mcpRequest(server, {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'prompts/get',
+        params: { name, arguments: args }
+    }, sessionId);
+    const result = res.body && res.body.result;
+    if (res.body && res.body.error) {
+        throw new Error(`MCP prompts/get 失败: ${formatMcpError(res.status, res.body)}`);
+    }
+    if (!result) {
+        throw new Error(`MCP prompts/get 失败: ${formatMcpError(res.status, res.body)}`);
+    }
+    return {
+        description: typeof result.description === 'string' ? result.description : undefined,
+        messages: Array.isArray(result.messages) ? result.messages : []
+    };
+}
+
+/** resources/list：服务器提供的资源目录（按需读取，不自动进提示词） */
+export async function listResources(server: MCPServer, sessionId: string): Promise<MCPResourceDef[]> {
+    const resources = await listPaged<any>(server, sessionId, 'resources/list', 'resources');
+    return normalizeResourceList({ resources });
+}
+
+/** resources/read：读取单个资源（text 或 blob），保留 uri/mimeType 元信息 */
+export async function readResource(server: MCPServer, sessionId: string, uri: string): Promise<MCPResourceReadResult> {
+    const res = await mcpRequest(server, {
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'resources/read',
+        params: { uri }
+    }, sessionId);
+    const result = res.body && res.body.result;
+    if (res.body && res.body.error) {
+        throw new Error(`MCP resources/read 失败: ${formatMcpError(res.status, res.body)}`);
+    }
+    if (!result) {
+        throw new Error(`MCP resources/read 失败: ${formatMcpError(res.status, res.body)}`);
+    }
+    return normalizeResourceReadResult(result, uri);
 }
 
 async function doCallTool(server: MCPServer, sessionId: string, name: string, args: any, sessionKey?: string): Promise<MCPCallResult> {

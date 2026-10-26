@@ -11,6 +11,12 @@
 // - 纯函数 + 注入依赖：不 import seal/storage/Config/utils；summarizer/estimator/时钟/记录 id 全部注入。
 // - 本文件**不写 store**：成功时返回 record/through/remaining，调用方用
 //   `store.commitSummary(record, through, remaining)` 落库。
+import {
+    EXISTING_SUMMARY_HEADER,
+    NEW_CONTENT_HEADER,
+    SUMMARY_TRUNCATE_MARK,
+    SYSTEM_NAME,
+} from "../../utils/protocol";
 import { toLLMText } from "../content/llm";
 import type { ConversationEvent, RecordEntry, SummaryRecord } from "../events";
 import type { ContextHead } from "../head";
@@ -19,8 +25,8 @@ import { ConversationUnit, estimateUnitTokens, segmentUnits } from "../view/unit
 
 /** 摘要文本默认硬上限（字符）：超出截断并标记，避免摘要本身撑爆请求预算 */
 export const DEFAULT_SUMMARY_MAX_CHARS = 2000;
-/** 摘要截断标记（截断后的正文以它结尾，且最终长度不超过上限） */
-export const SUMMARY_TRUNCATE_MARK = '…（摘要过长，已截断）';
+/** 摘要截断标记（截断后的正文以它结尾，且最终长度不超过上限）；**会持久化**进 SummaryRecord */
+export { SUMMARY_TRUNCATE_MARK };
 
 export interface CompactInput {
     /** 当前已加载的可见性判断依据（事件可以只是最近窗口） */
@@ -106,15 +112,15 @@ function renderEventText(event: ConversationEvent, index: RecordIndex): string {
     const text = toLLMText(applyEdit(event, index), { vision: false });
     switch (event.kind) {
         case 'user':
-            return `[用户 ${event.uid || '?'} @${event.at}] ${text}`;
+            return `[user ${event.uid || '?'} @${event.at}] ${text}`;
         case 'assistant':
             return `[AI @${event.at}] ${text}`;
         case 'event':
-            return `[事件 ${event.systemName || '事件'}] ${text}`;
+            return `[event ${event.systemName || SYSTEM_NAME.event}] ${text}`;
         case 'tool_call':
-            return `[工具调用 ${event.name || event.callId}] ${event.args || ''}`;
+            return `[tool call ${event.name || event.callId}] ${event.args || ''}`;
         case 'tool_result':
-            return `[工具返回 ${event.name || event.callId}] ${text}`;
+            return `[tool result ${event.name || event.callId}] ${text}`;
         default:
             return text;
     }
@@ -125,7 +131,7 @@ function renderUnitText(unit: ConversationUnit, index: RecordIndex): string {
     const lines: string[] = [];
     for (const event of unit.events) lines.push(renderEventText(event, index));
     if (unit.kind === 'tool_group' && !unit.complete && unit.missingCallIds && unit.missingCallIds.length > 0) {
-        lines.push(`[工具调用未完成：${unit.missingCallIds.join('、')}]`);
+        lines.push(`[unfinished tool calls: ${unit.missingCallIds.join(', ')}]`);
     }
     return lines.join('\n');
 }
@@ -264,7 +270,7 @@ export async function compactOnce(
 
     const segmentText = renderUnitsText(batchUnits, index);
     const summarizeInput = previousText
-        ? `【已有摘要】\n${previousText}\n\n【新增内容】\n${segmentText}`
+        ? `${EXISTING_SUMMARY_HEADER}\n${previousText}\n\n${NEW_CONTENT_HEADER}\n${segmentText}`
         : segmentText;
     if (summarizeInput.trim() === '') {
         return { ...base(), reason: 'empty-segment', batch };

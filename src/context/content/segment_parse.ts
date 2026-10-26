@@ -160,7 +160,7 @@ export function parseSegment(segment: PlatformSegmentInput, ctx: SegmentParseCon
         }
         case 'face': {
             const id = textOf(data.id);
-            const name = textOf(ctx.faceName?.(id)) || (id ? `未知表情${id}` : '');
+            const name = textOf(ctx.faceName?.(id)) || (id ? `unknown sticker ${id}` : '');
             if (!name) {
                 fallbackUnknown(parts, 'face', data);
                 return parts;

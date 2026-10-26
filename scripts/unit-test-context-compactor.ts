@@ -186,7 +186,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(ok.advanced, true);
         assert.equal(ok.batch!.unitCount, 2);
         assert.equal(ok.record!.toSeq, 3);
-        assert.ok(enough.calls[0].includes('工具调用 web_search') && enough.calls[0].includes('工具返回'));
+        assert.ok(enough.calls[0].includes('[tool call web_search]') && enough.calls[0].includes('[tool result c1]'));
 
         // 预算不够：工具组整体推迟，绝不只取调用或只取结果
         const tight = harness(weights({ 1: 10, 2: 20, 3: 20 }));
@@ -206,7 +206,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const head = makeHead({ nextSeq: 3, summarizedThrough: 0, unsummarizedTokens: 20 });
         const result = await runCompact(events, [], head, h);
         assert.equal(result.advanced, true);
-        assert.ok(h.calls[0].includes('工具调用未完成'), '不完整组在摘要输入里显式标记');
+        assert.ok(h.calls[0].includes('[unfinished tool calls: c1]'), '不完整组在摘要输入里显式标记');
         assert.ok(h.calls[0].includes('孤儿结果'), '孤儿结果照常进摘要输入');
     },
 
@@ -315,7 +315,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(limited.advanced, true);
         assert.equal(limited.truncated, true);
         assert.ok(limited.record!.text.length <= 100, `摘要必须 ≤ 上限，实际 ${limited.record!.text.length}`);
-        assert.ok(limited.record!.text.endsWith('…（摘要过长，已截断）'));
+        assert.ok(limited.record!.text.endsWith('… (summary too long; truncated)'));
 
         // summaryMaxChars<=0 = 不截断
         const unlimited = await runCompact(events, [], head, h, { batchTokens: 100, summaryMaxChars: 0 });

@@ -167,7 +167,7 @@ export function formatFileSegmentText(rawData: any): string {
     const file = pickFirstText(typeof data.file === 'string' ? data.file : '', nestedFile.file);
     const url = pickFirstText(data.url, data.file_url, data.download_url, nestedFile.url, nestedFile.file_url);
     const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
-    const label = name || path || file || url || fileId || '未知文件';
+    const label = name || path || file || url || fileId || 'unknown file';
     return `[file]${truncateText(label, 80)}[/file]`;
 }
 
@@ -184,9 +184,9 @@ export function formatMediaSegmentText(label: string, rawData: any, handle: stri
     const url = pickFirstText(data.url, data.file_url, nestedFile.url, nestedFile.file_url);
     const fileId = pickFirstText(data.file_id, data.fileId, nestedFile.file_id, nestedFile.fileId);
     const size = pickFirstText(data.size, data.file_size, nestedFile.size, nestedFile.file_size);
-    const labelName = pickFirstText(name, path, file, url, fileId) || '未知';
-    const tag = label.toLowerCase() === '语音' ? 'record' : label.toLowerCase() === '视频' ? 'video' : 'file';
-    const summary = truncateText([labelName, size ? `大小${size}` : ''].filter(Boolean).join('，'), 80);
+    const labelName = pickFirstText(name, path, file, url, fileId) || 'unknown';
+    const tag = label.toLowerCase() === 'voice' ? 'record' : label.toLowerCase() === 'video' ? 'video' : 'file';
+    const summary = truncateText([labelName, size ? `size ${size}` : ''].filter(Boolean).join(', '), 80);
     return `[${tag}:${handle}]${summary}[/${tag}]`;
 }
 
@@ -220,7 +220,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
             typeValue = Number(seg.type());
         } catch (_e) {
             log.warning('milky 消息段 type() 解析异常，按未知段处理');
-            result.push({ type: 'text', data: { text: '[未知消息段]' } });
+            result.push({ type: 'text', data: { text: '[unknown message segment]' } });
             continue;
         }
         switch (typeValue) {
@@ -237,7 +237,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
             case 2: { // 文件 File
                 // 保留原始文件字段并登记句柄，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
                 const fileHandle = registerSpecialResource('file', seg);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', seg, fileHandle), __system: '1' } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('file', seg, fileHandle), __system: '1' } });
                 break;
             }
             case 3: { // 图片 Image
@@ -274,7 +274,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
                     content_type: fileEl ? fileEl.contentType : ''
                 };
                 const handle = registerSpecialResource('record', rawData);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', rawData, handle), __system: '1' } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('voice', rawData, handle), __system: '1' } });
                 break;
             }
             case 7: { // 表情 Face
@@ -289,7 +289,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
             }
             default: {
                 log.debug(`milky 未知消息段类型: ${typeValue}，按文本占位处理`);
-                result.push({ type: 'text', data: { text: '[未知消息段]' } });
+                result.push({ type: 'text', data: { text: '[unknown message segment]' } });
             }
         }
     }
@@ -298,7 +298,7 @@ export function expandMilkySegments(ctx: seal.MsgContext, segments: seal.Message
 
 /** 解析 QQ 卡片消息（CQ:json / OB11 json 段的 data 字段），提取标题/描述/链接等可读文本，包成上下文专用闭合标签 [card]...[/card] */
 export function parseCardToText(raw: any): string {
-    if (!raw) return '[card]未知卡片[/card]';
+    if (!raw) return '[card]unknown card[/card]';
 
     let obj: any = null;
     try {
@@ -316,7 +316,7 @@ export function parseCardToText(raw: any): string {
     const url = str(view.url) || str(view.jumpUrl) || (view.news && str(view.news.jumpUrl)) || (view.detail && str(view.detail.jumpUrl)) || '';
 
     const parts = [title, desc].filter(Boolean);
-    if (parts.length === 0) return '[card]未知卡片[/card]';
+    if (parts.length === 0) return '[card]unknown card[/card]';
     return `[card]${truncateText(parts.join(' / ') + (url ? ` ${url}` : ''), 300)}[/card]`;
 }
 
@@ -325,7 +325,7 @@ export function parseMusicToText(data: any): string {
     if (data && data.title) return `[music]${truncateText(String(data.title), 80)}[/music]`;
     const type = data && data.type ? String(data.type) : '';
     const id = data && data.id ? String(data.id) : '';
-    return `[music]${type}${id ? ` ${id}` : '未知音乐'}[/music]`;
+    return `[music]${type}${id ? ` ${id}` : 'unknown music'}[/music]`;
 }
 
 export function transformTextToArray(text: string): MessageSegment[] {

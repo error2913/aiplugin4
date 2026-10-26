@@ -8,42 +8,42 @@ export function registerTime() {
         type: 'function',
         function: {
             name: 'set_timer',
-            description: '设置一个定时器，在指定时间后触发',
+            description: 'Set a timer that fires after the specified time',
             parameters: {
                 type: 'object',
                 properties: {
                     types: {
                         type: 'string',
-                        description: '定时器类型，target为目标时间，interval为间隔时间，对应下面的时间参数',
+                        description: 'Timer type: target = fire at a target time, interval = fire every interval; corresponds to the time parameters below',
                         enum: ['target', 'interval']
                     },
                     years: {
                         type: 'integer',
-                        description: '年数'
+                        description: 'Years'
                     },
                     months: {
                         type: 'integer',
-                        description: '月数'
+                        description: 'Months'
                     },
                     days: {
                         type: 'integer',
-                        description: '天数'
+                        description: 'Days'
                     },
                     hours: {
                         type: 'integer',
-                        description: '小时数'
+                        description: 'Hours'
                     },
                     minutes: {
                         type: 'integer',
-                        description: '分钟数'
+                        description: 'Minutes'
                     },
                     count: {
                         type: 'integer',
-                        description: '触发次数，-1为无限次'
+                        description: 'Number of times to fire; -1 = unlimited'
                     },
                     content: {
                         type: 'string',
-                        description: '触发时给自己的的提示词'
+                        description: 'Prompt sent to yourself when the timer fires'
                     }
                 },
                 required: ['types', 'minutes', 'content']
@@ -113,7 +113,7 @@ export function registerTime() {
         type: 'function',
         function: {
             name: 'show_timer_list',
-            description: '查看当前聊天的所有定时器',
+            description: 'View all timers in the current chat',
             parameters: {
                 type: 'object',
                 properties: {
@@ -154,7 +154,7 @@ export function registerTime() {
         type: 'function',
         function: {
             name: 'cancel_timer',
-            description: '取消当前聊天的指定定时器',
+            description: 'Cancel the specified timer in the current chat',
             parameters: {
                 type: 'object',
                 properties: {
@@ -163,7 +163,7 @@ export function registerTime() {
                         items: {
                             type: 'integer'
                         },
-                        description: '要取消的定时器序号列表，序号从1开始'
+                        description: 'Timer sequence numbers to cancel, starting at 1'
                     }
                 },
                 required: ['index_list']

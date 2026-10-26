@@ -9,6 +9,8 @@ import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL, par
 import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
 import { rememberProbedContextWindow } from "../model/window_cache";
+import { buildPromptParts, promptPartsToSystemMessage } from "../prompt/builder";
+import type { PromptParts } from "../prompt/types";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import { SessionService } from "../session/session_service";
@@ -17,7 +19,8 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { buildSystemMessage, collectImageUrls, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { collectImageUrls, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { SYSTEM_NAME } from "../utils/protocol";
 import { revive, TypeDescriptor } from "../utils/revive";
 import { getSessionCtxAndMsg } from "../utils/seal";
 import { checkRepeat, handleReply } from "../utils/string";
@@ -235,9 +238,10 @@ export default class Agent {
         const trace = new AgentRunContext();
         const version = session.stopVersion;
 
-        // system prompt 在同一轮工具循环内复用：避免每轮工具回调后重复做记忆检索/嵌入，
+        // system/runtime 在同一轮工具循环内复用：避免每轮工具回调后重复做记忆检索/嵌入，
         // 只在工具回调后更新 context messages（上下文仍随工具结果增长）。
-        const systemMessage = await buildSystemMessage(ctx, session);
+        const promptParts = await buildPromptParts(ctx, session);
+        const systemMessage = promptPartsToSystemMessage(promptParts);
 
         let result: { contextArray: string[], replyArray: string[], images: Image[] } = { contextArray: [], replyArray: [], images: [] };
         const MaxRetry = 3;
@@ -261,7 +265,7 @@ export default class Agent {
             await session.flushNotices();
             // L2 记忆结算（P1-3）：三条件满足时把窗口外原文总结进长期记忆（有界、失败退避、不阻塞回复）
             await this.settleBacklog(session);
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded, model: Model.getChatModel('chat') || undefined });
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded, model: Model.getChatModel('chat') || undefined, runtimeText: promptParts.runtime });
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
             try {
@@ -370,8 +374,8 @@ export default class Agent {
                 nudgeCount++;
                 lastTurnHadTools = false;
                 session.context.addSystemUserMessage(
-                    '你上一轮只给了文字，没有给出工具调用块。若任务未完成，请直接给出工具调用块继续干活；若已完成，请明确回复“任务完成”。',
-                    '任务续跑提示'
+                    'Your previous turn contained no tool call. If the task is unfinished, emit the tool call now; if it is done, reply "Task complete".',
+                    SYSTEM_NAME.nudge
                 );
                 retry = 0;
                 continue;
@@ -529,7 +533,7 @@ export default class Agent {
         session: Session,
         ctx: seal.MsgContext,
         msg: seal.Message,
-        systemMessage?: Awaited<ReturnType<typeof buildSystemMessage>>,
+        promptParts?: PromptParts,
         handled?: { archived: boolean; switched: boolean; imageDegraded: boolean }
     ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
@@ -547,13 +551,13 @@ export default class Agent {
         await this.settleBacklog(session);
 
         // 建立流；模型分类错误（上下文超长/余额不足/图片下载失败等）由 handleModelError 自动处理一次后重建重试
-        let sys = systemMessage;
+        const parts = promptParts ?? await buildPromptParts(ctx, session);
+        const systemMessage = promptPartsToSystemMessage(parts);
         let id = '';
         let requestImages: string[] = [];
         for (let attempt = 0; attempt <= 1; attempt++) {
             try {
-                sys = sys ?? await buildSystemMessage(ctx, session);
-                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, sys, modelName, { imagesAsText: h.imageDegraded, model: Model.getChatModel('chat') || undefined });
+                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, systemMessage, modelName, { imagesAsText: h.imageDegraded, model: Model.getChatModel('chat') || undefined, runtimeText: parts.runtime });
                 requestImages = collectImageUrls(messages);
                 const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
                 if (!newId) return;
@@ -650,7 +654,7 @@ export default class Agent {
                         }
 
                         if (session.stopVersion !== version) return;
-                        await this.runStreamInner(session, ctx, msg, sys, h);
+                        await this.runStreamInner(session, ctx, msg, parts, h);
                         return;
                     } else {
                         after = result.nextAfter;

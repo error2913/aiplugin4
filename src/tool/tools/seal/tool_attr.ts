@@ -7,17 +7,17 @@ export function registerAttrSeal() {
         type: 'function',
         function: {
             name: 'attr_get',
-            description: '获取指定玩家的指定属性',
+            description: 'Get the specified attribute of the specified player',
             parameters: {
                 type: 'object',
                 properties: {
                     user_id: {
                         type: 'string',
-                        description: '用户ID'
+                        description: 'User ID'
                     },
                     attr: {
                         type: 'string',
-                        description: '属性名称'
+                        description: 'Attribute name'
                     }
                 },
                 required: ['user_id', 'attr']
@@ -40,17 +40,17 @@ export function registerAttrSeal() {
         type: 'function',
         function: {
             name: 'attr_set',
-            description: '修改指定玩家的指定属性',
+            description: 'Set the specified attribute of the specified player',
             parameters: {
                 type: 'object',
                 properties: {
                     user_id: {
                         type: 'string',
-                        description: '用户ID'
+                        description: 'User ID'
                     },
                     expression: {
                         type: 'string',
-                        description: '修改表达式，例如`hp=hp+1d6`就是将hp的值修改为hp+1d6'
+                        description: 'Modification expression, e.g. `hp=hp+1d6` sets hp to hp+1d6'
                     }
                 },
                 required: ['user_id', 'expression']

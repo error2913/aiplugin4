@@ -9,9 +9,9 @@ import { registerSetTrigger } from "./tool_trigger";
 
 /** 注册 core 下全部核心基础工具（按分类批次包装，供 .ai tool 组概览与组开关使用） */
 export function registerCoreTools() {
-    Tool.withCategory('基础调度', registerDispatchTools);
-    Tool.withCategory('指令', registerCmdTool);
-    Tool.withCategory('指令', registerCoreCommandTool);
-    Tool.withCategory('定时', registerTime);
-    Tool.withCategory('触发', registerSetTrigger);
+    Tool.withCategory('Dispatch', registerDispatchTools);
+    Tool.withCategory('Commands', registerCmdTool);
+    Tool.withCategory('Commands', registerCoreCommandTool);
+    Tool.withCategory('Timers', registerTime);
+    Tool.withCategory('Triggers', registerSetTrigger);
 }

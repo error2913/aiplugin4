@@ -1,6 +1,7 @@
 // 旧版会话 → Context v2 事件/记录的纯转换器（不碰 storage）。
 // 迁移只处理当前有界 messages；旧 arc/raw 分片留在 legacy 只读兼容，不导入。
 // 设计：确定性 seq/eventId，中断可重跑；rawText/rawItems 转为"原文事件 + 微摘要记录"。
+import { SYSTEM_NAME } from "../../utils/protocol";
 import { stripRawMarkers } from "../../utils/raw_marker";
 import {
     AssistantEvent,
@@ -168,7 +169,7 @@ export function buildLegacyEvents(ctx: LegacyContextLike, opts: MigrateOptions =
                         at,
                         recvAt: at,
                         kind: 'event',
-                        systemName: item.systemName || '事件',
+                        systemName: item.systemName || SYSTEM_NAME.event,
                         parts: textParts(item.text, 'internal', opts),
                     };
                     if (item.eventType) event.eventType = item.eventType;
@@ -306,7 +307,7 @@ export function buildLegacyEvents(ctx: LegacyContextLike, opts: MigrateOptions =
                 at: now,
                 recvAt: now,
                 kind: 'event',
-                systemName: '迁移保留',
+                systemName: SYSTEM_NAME.preserved,
                 parts: [{ type: 'text', text }],
             });
         }

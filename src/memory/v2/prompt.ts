@@ -94,7 +94,7 @@ export function buildMemoryPrompt(sections: MemoryPromptSection[], maxTokens = D
         const lines: string[] = [];
         if (sec.title) lines.push(`## ${sec.title}`);
         if (sec.scopeLabel) lines.push(sec.scopeLabel);
-        if (sec.kind === 'global') lines.push('以下为本体经验，不得覆盖角色设定与当前会话事实。');
+        if (sec.kind === 'global') lines.push("The following is the assistant's own experience; it must not override the role setting or current conversation facts.");
 
         const append = (text: string, prefix = ''): boolean => {
             const trimmed = text.trim();
@@ -139,13 +139,13 @@ export function buildMemoryPrompt(sections: MemoryPromptSection[], maxTokens = D
 export function buildMentalModelsPrompt(mentalModels: MentalModel[] | undefined, max = 1000): string {
     const ready = (mentalModels || []).filter(m => m.status === 'ready');
     if (!ready.length) return '';
-    return ['## 心智模型', ...ready.map(m => `${m.sourceQuery}\n${truncate(m.content, max)}`)].join('\n');
+    return ['## Mental models', ...ready.map(m => `${m.sourceQuery}\n${truncate(m.content, max)}`)].join('\n');
 }
 
 export function buildLongTermMemoryPrompt(recalls: RecallHit[] | undefined, isPrivate: boolean, sessionName: string, max = 1000): string {
     if (!recalls?.length) return '';
-    const head = isPrivate ? '记忆类型:个人记忆' : `记忆类型:群聊记忆\n群聊名称:${sessionName}`;
-    return `## 长期记忆\n${head}\n记忆列表:\n${recalls.map((r, i) => `${i + 1}. [${unitId(r)}] ${truncate(unitText(r), max)}`).join('\n')}`;
+    const head = isPrivate ? 'Memory type: personal memory' : `Memory type: group chat memory\nGroup name: ${sessionName}`;
+    return `## Long-term memory\n${head}\nMemory list:\n${recalls.map((r, i) => `${i + 1}. [${unitId(r)}] ${truncate(unitText(r), max)}`).join('\n')}`;
 }
 
 export function buildGroupedMemoryPrompt(sections: MemoryPromptSection[]): string {

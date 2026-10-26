@@ -66,7 +66,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 8. **新增消息级能力优先做成工具**（`src/tool/tools/` 下导出 `registerXxx()`，在 `tools/init.ts` 注册）；敏感操作置 `sensitive = true`；工具名不要重复。
 9. **`registerTemplateConfig` 默认值不能是空数组**，至少保留一个元素（占位用 `['']`）。
 10. **配置页签顺序以 `config.ts` 的 `configMap` 为准**（基础/模型/角色/上下文/消息接收/触发/回复/工具/联网/MCP/技能/子代理/记忆/知识库/图片/后端/论坛/事件/资源/错误处理）。
-11. **模板文案放内置模板**（`src/prompt/templates.ts`），不要硬编码在业务逻辑。
+11. **提示词文案进段注册表**（`src/prompt/sections/` + `src/prompt/texts/en.ts`，全英文）；协议标记/包装/系统名统一走 `src/utils/protocol.ts`；不要在业务逻辑里硬编码模型可见文本，也不要用 `--fix` 之外的方式绕过依赖分层。
 12. **日志统一走 `Logger`**（脱敏/截断），不要打明文密钥；网络请求统一 `withTimeout` + `fetchData`/`requestModel`。
 13. **修改持久化类字段后检查 `validKeysMap`**（用 `revive()` 恢复）。
 14. **tsconfig 启用 `noImplicitThis`**：普通函数里不要用 `this`（需要时显式标注 `this: Host`）；`noUnusedLocals`/`noUnusedParameters`/`noImplicitReturns` 开启。

@@ -60,24 +60,24 @@ export function registerResourcePathTool() {
         type: "function",
         function: {
             name: "get_resource_path",
-            description: "查询已配置本地资源的具体路径/URI。先通过 list_resources 获取资源 ID，再调用本工具获取该资源解析后的绝对路径或 URI。" +
-                "适用于需要把 resource:ID 交给文件读取/下载/识图等非 call_ob11_api 发送场景。" +
-                "如果资源是 mcp://，会额外返回 server 和 mcp_path；需要下载 URL 时可传 resolve_mcp=true。",
+            description: "Look up the concrete path/URI of a configured local resource. First get the resource ID via list_resources, then call this tool for the resolved absolute path or URI of that resource." +
+                "Useful when resource:ID must be handed to file reading/downloading/image recognition or other non-call_ob11_api sending scenarios." +
+                "If the resource is mcp://, server and mcp_path are also returned; pass resolve_mcp=true to get a downloadable URL.",
             parameters: {
                 type: "object",
                 properties: {
                     type: {
                         type: "string",
                         enum: [...RESOURCE_TYPES],
-                        description: "资源类型"
+                        description: "Resource type"
                     },
                     id: {
                         type: "string",
-                        description: "资源 ID/名称，支持 resource:资源名 或 [img:图片ID] 前缀"
+                        description: "Resource ID/name; supports the resource:name or [img:image ID] prefix"
                     },
                     resolve_mcp: {
                         type: "boolean",
-                        description: "mcp:// 资源是否解析为可下载 URL，默认 false"
+                        description: "Whether to resolve mcp:// resources to a downloadable URL; default false"
                     }
                 },
                 required: ["type", "id"]

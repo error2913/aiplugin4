@@ -28,11 +28,11 @@ export function effectiveDeny(denyTools: readonly string[]): string[] | null {
 
 /** 委派指引文本（对齐 docs/03 子代理框架） */
 export const DELEGATION_GUIDE = [
-    '## 子代理委派',
-    '- 较长独立工作（调研/归纳/重写/把大段内容读薄）可委派给子代理；',
-    '- spawn 子代理看不到本会话历史：任务必须自包含；fork 子代理能看到已完成轮次，但看不到当前正在执行的这一轮；',
-    '- 相互独立的任务尽量在同一条消息里一起发起；子代理只回最终结论，中间过程不占本会话上下文；',
-    '- 简单问题直接答，避免无谓成本。',
+    '## Sub-agent delegation',
+    '- Long independent work (research, summarization, rewriting, reading large content down to essentials) can be delegated to a sub-agent.',
+    '- A spawn sub-agent cannot see this conversation\'s history: the task must be self-contained. A fork sub-agent sees completed turns but not the turn currently in flight.',
+    '- Start independent tasks together in the same message when possible; a sub-agent returns only the final conclusion, so intermediate work does not consume this conversation\'s context.',
+    '- Answer simple questions directly to avoid needless cost.',
 ].join('\n');
 
 /** 当会话开启了任一委派工具时，指引节才可见 */

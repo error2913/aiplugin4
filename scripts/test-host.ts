@@ -6,6 +6,8 @@ import { registerConfigAppliers } from "../src/config/apply";
 import { ext } from "../src/config/ext";
 import { setHost } from "../src/core/host";
 import { installPromptMemorySource } from "../src/prompt/memory_source_impl";
+import { resetPromptSections } from "../src/prompt/registry";
+import { registerBuiltinSections } from "../src/prompt/sections";
 
 export function installTestHost(): void {
     setHost({
@@ -20,6 +22,9 @@ export function installTestHost(): void {
     registerConfigAppliers();
     installAuxLlm();
     installPromptMemorySource();
+    // 与生产装配对齐：注册内置提示词段（测试里可先 reset 再注册）
+    resetPromptSections();
+    registerBuiltinSections();
 }
 
 installTestHost();

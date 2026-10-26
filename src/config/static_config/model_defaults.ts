@@ -18,10 +18,10 @@ export const DEFAULT_EMBEDDING_MODEL_BODY = {
 // 这里只保留通用占位符的默认值与取值区间（{voice} / {rate} / {size}），
 // 并且仅在模板（内置预设或规则 [body]）里真的出现对应 {占位符} 时才会被采纳。
 export const DEFAULT_TTS_PARAMS = {
-    "voice": { "type": "string", "default": "alloy", "desc": "音色" },
-    "rate": { "type": "number", "default": 1.0, "min": 0.25, "max": 4.0, "desc": "语速" }
+    "voice": { "type": "string", "default": "alloy", "desc": "Voice" },
+    "rate": { "type": "number", "default": 1.0, "min": 0.25, "max": 4.0, "desc": "Speed" }
 }
 
 export const DEFAULT_IMAGE_PARAMS = {
-    "size": { "type": "string", "default": "1024x1024", "desc": "尺寸，如 1024x1024" }
+    "size": { "type": "string", "default": "1024x1024", "desc": "Size, e.g. 1024x1024" }
 }

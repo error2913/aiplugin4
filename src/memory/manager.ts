@@ -6,6 +6,7 @@ import type { Session } from "../session/session";
 import { bumpMemoryRevision, bumpSummaryRevision } from "./revision";
 import { MemoryService, parseOccurredAt } from "./service";
 import { parseLooseJson } from "./session_state";
+import { personaQuestionFor } from "./v2/templates";
 import type { RecallOptions, RetainResult } from "./v2/types";
 
 export class MemoryManager {
@@ -92,8 +93,9 @@ export class MemoryManager {
         const persona = session.memory.persona;
         if (!persona || persona === '无') return;
         const bankId = MemoryService.bankIdForSessionId(session.sessionId, session.agentName);
-        await MemoryService.ensureBank(bankId, /-Group:/.test(session.sessionId) ? 'group' : 'user', session.agentName);
-        const question = /-Group:/.test(session.sessionId) ? '这个群聊的设定是什么？' : '这个用户的设定是什么？';
+        const bankKind = /-Group:/.test(session.sessionId) ? 'group' : 'user';
+        await MemoryService.ensureBank(bankId, bankKind, session.agentName);
+        const question = personaQuestionFor(bankKind);
         await MemoryService.reflect(bankId, question, { fastPath: false, strict: false });
         session.memory.persona = '无';
     }

@@ -100,37 +100,37 @@ export function renderPlainText(parts: Part[]): string {
                 out.push(part.text);
                 break;
             case 'mention':
-                out.push(part.all || part.id.toLowerCase() === 'all' ? '@全体成员' : `@${part.id}`);
+                out.push(part.all || part.id.toLowerCase() === 'all' ? '@all' : `@${part.id}`);
                 break;
             case 'quote':
-                out.push(`[引用:${part.id}]`);
+                out.push(`[quote:${part.id}]`);
                 break;
             case 'image':
                 out.push(part.desc || part.ref);
                 break;
             case 'avatar':
-                out.push(`[头像:${part.uid}]`);
+                out.push(`[avatar:${part.uid}]`);
                 break;
             case 'group_avatar':
-                out.push(`[群头像:${part.gid}]`);
+                out.push(`[group_avatar:${part.gid}]`);
                 break;
             case 'record':
-                out.push(part.summary || '语音');
+                out.push(part.summary || 'voice');
                 break;
             case 'video':
-                out.push(part.summary || '视频');
+                out.push(part.summary || 'video');
                 break;
             case 'file':
-                out.push(part.summary || '文件');
+                out.push(part.summary || 'file');
                 break;
             case 'face':
                 out.push(part.name);
                 break;
             case 'poke':
-                out.push(`[戳一戳:${part.id}]`);
+                out.push(`[poke:${part.id}]`);
                 break;
             case 'forward':
-                out.push(`[合并转发:${part.id}]`);
+                out.push(`[forward:${part.id}]`);
                 break;
             case 'markdown':
                 out.push(part.text);

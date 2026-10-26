@@ -2,12 +2,16 @@
 // 从 tool/mcp.ts 拆出——配置解析与客户端会话生命周期解耦；mcp.ts 保留 re-export，外部 import 零改动。
 import Config, { ext } from "../../config/config";
 import { McpServerEntry } from "../../config/domain/types";
+
+import type { MCPToolAnnotations } from "./types";
 export type MCPServer = McpServerEntry;
 
 export interface MCPToolDef {
     name: string;
     description?: string;
     inputSchema?: any;
+    /** tools/list 的 annotations（安全分组元数据，不是提示词内容） */
+    annotations?: MCPToolAnnotations;
 }
 
 export interface MCPServerSession {
@@ -22,6 +26,10 @@ export interface MCPServerState {
     defaultSessionUsedAt: number;
     tools: MCPToolDef[];
     toolsFetchedAt: number;
+    /** initialize 返回的服务器 instructions（运行时数据；仅 exposeInstructions=true 时进提示词） */
+    instructions?: string;
+    /** initialize 返回的 serverInfo.title（能力地图用途来源之一；服务器运行时数据） */
+    serverTitle?: string;
     /** 按 AI 会话分桶的 MCP 会话 */
     sessions: Map<string, MCPServerSession>;
 }

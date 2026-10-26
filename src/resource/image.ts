@@ -2,7 +2,6 @@
 import Config from "../config/config";
 import { getHost } from "../core/host";
 import { logger } from "../logger";
-import { IMAGE_PROMPT_TEMPLATE } from "../prompt/templates";
 import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
 import { generateId } from "../utils/id";
 import { resolveLocalPath } from "../utils/path";
@@ -15,6 +14,7 @@ import type { ImageHealthHost } from "./image_health";
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
 import { ImageIndex } from "./image_index";
+import { IMAGE_PROMPT_TEMPLATE } from "./image_prompt";
 import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
 import { imageToText } from "./image_text";
 import { base64UrlFor, checkImageUrl, cqCodeFor, getSendFile, srcFor } from "./image_transfer";

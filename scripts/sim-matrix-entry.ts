@@ -162,7 +162,7 @@ async function scenarioOrderings() {
     const A = (id: string, len = 1) => ({ role: 'assistant', contentItems: [{ text: '调用' + id + '内'.repeat(len), time: 1, messageId: '' }], toolCalls: [{ id, type: 'function', function: { name: 'f', arguments: '{}' } }] });
     const T = (id: string, len = 1) => ({ role: 'tool', toolCallId: id, contentItems: [{ text: '结果' + id + '容'.repeat(len), time: 2, messageId: '' }] });
     const U = (t: string, len = 1) => ({ role: 'user', contentItems: [{ text: t + '文'.repeat(len), time: 3, userId: 'QQ:1', messageId: 'm_' + t }] });
-    const SY = (t: string) => ({ role: 'user', contentItems: [{ text: t, time: 4, systemName: '事件' }] });
+    const SY = (t: string) => ({ role: 'user', contentItems: [{ text: t, time: 4, systemName: 'group-event' }] });
 
     // 顺序形态矩阵（每种都会在多档预算下跑）
     const shapes: { name: string; msgs: any[] }[] = [
@@ -252,7 +252,7 @@ async function scenarioTiming() {
         // 交错：一边继续入库，一边插系统消息
         await Promise.all([
             (async () => { for (let i = 30; i < 60; i++) await ctx.addUserMessage(makeCtx(sid), `消息${i}${'内容'.repeat(10)}`, 'QQ:1', `si${i}`); })(),
-            (async () => { for (let i = 0; i < 10; i++) { ctx.addSystemUserMessage(`系统事件${i}`, '事件'); await new Promise(r => setTimeout(r, 0)); } })(),
+            (async () => { for (let i = 0; i < 10; i++) { ctx.addSystemUserMessage(`系统事件${i}`, 'group-event'); await new Promise(r => setTimeout(r, 0)); } })(),
         ]);
         const system = { role: 'system', text: '系统' } as any;
         const built = await handleMessages(makeCtx(sid), s as any, false, undefined, system);

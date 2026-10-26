@@ -1,6 +1,6 @@
 // 「知识库」配置的默认内容（每条配置项一个库）：
-//  1. 核心指令 —— SealDice 核心指令的调用规则与逐条帮助（run_core_command）
-//  2. 扩展指令 —— SealDice 内置扩展（fun/story/coc7/deck/dnd5e/log）逐扩展、逐命令帮助（run_ext_command）
+//  1. Core Commands —— SealDice 核心指令的调用规则与逐条帮助（run_core_command）
+//  2. Extension Commands —— SealDice 内置扩展（fun/story/coc7/deck/dnd5e/log）逐扩展、逐命令帮助（run_ext_command）
 //  3. ob11-api —— OB11 API 调用规范（frontmatter 限定 platform: [QQ]，仅 QQ 平台可见可检索，见 ob11_api_knowledge.ts）
 //
 // 注意：运行时已改为 src/config/domain/default_data.ts 里的 JSON 默认值；这里仅作为
@@ -9,311 +9,311 @@ import { OB11_API_KB } from "./ob11_api_knowledge";
 
 // SealDice 核心指令知识库：原默认技能「SealDice核心指令调用帮助」改写为知识库。
 export const CORE_COMMAND_KB = `---
-name: 核心指令
-description: SealDice 核心指令（含 core 扩展中的 team）的调用规则与逐条具体帮助；AI 用 run_core_command 注入假消息执行，用于掷骰、角色卡、查询与管理
+name: Core Commands
+description: Call rules and per-command help for SealDice core commands (including team from the core extension); the AI executes them by injecting a fake message through run_core_command, for rolling, character cards, queries and administration
 platform: []
 ---
 
-# 核心指令调用帮助
+# Core command call help
 
-本库说明如何用 run_core_command 调用 SealDice 的核心指令，并逐条给出每条核心命令的具体帮助。核心指令没有公开的 JS 调用入口，只能通过 run_core_command 注入假消息执行；扩展指令请用 run_ext_command（见「扩展指令」知识库）。
+This library explains how to invoke SealDice core commands through run_core_command and gives per-command help. Core commands have no public JS entry point and can only be executed by injecting a fake message through run_core_command; for extension commands use run_ext_command (see the "Extension Commands" knowledge base).
 
-## 调用规则
+## Call rules
 
-- 入口唯一：所有核心指令（包括 core 扩展中的 team）一律通过 run_core_command 调用，不要使用 run_ext_command。
-- 结构化模式：{"action":"call","command":"指令名","args":["参数1","参数2"]}。command 不要带前缀点号，也支持 core|指令名 写法。
-- 原始消息模式：{"action":"call","raw_message":"原始指令原文"}，把整条指令原样注入核心，例如 ".st 角色名 力量=70"；raw_message 与 command/args 不能同时传。
-- args 按 SealDice 原始指令的空格分隔顺序逐项传入；需要表达式、@ 或带空格的文本时，作为单独一个字符串传入。
-- 需要让指令替其他用户触发时传 trigger（字符串用户 ID），需要模拟消息中的 @ 时传 at（字符串用户 ID 数组）；不传 trigger 时使用当前对话用户；私聊不支持 at。
-- 不确定某条指令的参数时，先查帮助：{"action":"call","command":"help","args":["指令名"]}；查看当前可调用的核心指令列表用 action=list。
-- 每个小节第一行是同一条指令的别名（用 / 分隔），均已加入白名单，调用时优先使用第一个主名称。
-- 涉及 ban/black、bot、dismiss、master、set、reply、team 等会改变状态的命令，先核对用户意图，不要把自然语言说明直接当作 args。
+- Single entry point: always call every core command (including team from the core extension) through run_core_command, never run_ext_command.
+- Structured form: {"action":"call","command":"<command>","args":["arg1","arg2"]}. Do not prefix the command with a dot; the core|<command> form is also accepted.
+- Raw-message form: {"action":"call","raw_message":"<raw command>"} injects the whole command verbatim, e.g. ".st <character name> STR=70"; raw_message cannot be combined with command/args.
+- Pass args one by one in the space-separated order of the original SealDice command; when an expression, @ or text containing spaces is needed, pass it as a single string.
+- To make a command trigger on behalf of another user, pass trigger (user ID string); to simulate an @ in the message, pass at (array of user ID strings). Without trigger the current conversation user is used; private chats do not support at.
+- When unsure about a command's arguments, look up its help first: {"action":"call","command":"help","args":["<command>"]}; to list the currently callable core commands use action=list.
+- The first line of each section lists the aliases of the same command (separated by /); all of them are whitelisted, so prefer the first main name when calling.
+- For state-changing commands such as ban/black, bot, dismiss, master, set, reply and team, check the user's intent first and never pass natural-language descriptions as args directly.
 
 ## black / ban
 
-黑名单与处罚操作。涉及封禁、拉黑等敏感动作前，先确认目标用户 ID 与参数，得到明确同意后再执行。
+Blacklist and punishment operations. Before sensitive actions such as banning or blocking, confirm the target user ID and arguments and obtain explicit consent.
 
 ## find / 查询 / 査詢
 
-查找扩展、用户或相关信息。参数按原命令帮助传入。
+Look up extensions, users or related information. Pass arguments as documented by the original command help.
 
 ## help
 
-查询命令帮助。参数不确定时先用它确认，例如 {"action":"call","command":"help","args":["roll"]}。
+Look up command help. Use it first when unsure about arguments, e.g. {"action":"call","command":"help","args":["roll"]}.
 
 ## bot
 
-机器人的开关与状态操作。会改变机器人运行状态，执行前确认。
+Enable/disable and inspect the bot. Changes the bot's running state; confirm before executing.
 
 ## dismiss
 
-退群/解散相关操作。执行前确认目标与影响，避免误操作。
+Leave/dissolve related operations. Before executing, confirm the target and impact to avoid mistakes.
 
 ## botlist
 
-查看机器人列表。
+List the bots.
 
 ## master
 
-查看或管理骰主信息。涉及骰主权限的修改先确认用户身份与意图。
+View or manage dice-master information. For changes involving master permissions, verify the user's identity and intent first.
 
 ## roll / r / rd / rh / rhd / rdh / rx / rxh / rhx
 
-骰点表达式，同一实现的不同别名。args 传表达式原文即可，例如 {"action":"call","command":"roll","args":["1d100"]}，支持 2d6+3 这类带运算的表达式。
+Dice expressions; different aliases of the same implementation. Pass the expression text as args, e.g. {"action":"call","command":"roll","args":["1d100"]}; arithmetic expressions such as 2d6+3 are supported.
 
 ## ext
 
-查看当前扩展。core|ext 无需加入白名单也可用；不确定扩展名时先执行它再继续。
+Show current extensions. core|ext works without being whitelisted; when unsure about an extension name, run it first and continue.
 
 ## nn
 
-查看或设置当前角色名。参数按原命令帮助传入。
+View or set the current character name. Pass arguments as documented by the original command help.
 
 ## userid
 
-查看当前账号、用户和群组 ID。需要取得后续调用所需的 ID 时使用。
+Show the current account, user and group IDs. Use it when IDs are needed for subsequent calls.
 
 ## randalgo
 
-查看随机算法。例如 {"action":"call","command":"randalgo","args":["get","100"]}；set 操作仅限 Master。
+Inspect the random algorithm. For example {"action":"call","command":"randalgo","args":["get","100"]}; the set operation is Master-only.
 
 ## set
 
-设置骰子面数或规则，例如 args=["coc"] 或 args=["100"]。会改变后续骰点语义，执行前确认用户意图。
+Set dice faces or rules, e.g. args=["coc"] or args=["100"]. Changes the semantics of later rolls; confirm the user's intent before executing.
 
 ## 角色 / ch / char / character / pc
 
-查看或设置角色卡。录卡时用 pc new 新建角色：{"action":"call","command":"pc","args":["new","角色名"]}；查看已有角色用 pc list。
+View or set the character card. To import a card, create the character with pc new: {"action":"call","command":"pc","args":["new","<character name>"]}; to view existing characters use pc list.
 
 ## st / cst
 
-核心角色属性导入、查看和修改。录卡等导入流程优先用 run_core_command 执行 st：{"action":"call","command":"st","args":["show"]} 查看当前角色属性；写入属性按核心 st 语法逐项传 args。
+Core character attribute import, view and modification. For card import and similar flows prefer run_core_command with st: {"action":"call","command":"st","args":["show"]} views the current character's attributes; set attributes by passing them one by one as args in core st syntax.
 
 ## reply
 
-开启或关闭自定义回复，例如 args=["on"] 或 args=["off"]。
+Enable or disable custom replies, e.g. args=["on"] or args=["off"].
 
 ## team
 
-团队管理，需要群聊环境。例如 args=["list"] 查看团队、args=["团队名","add"] 添加成员，其余参数按原命令帮助传入。`;
+Team management; requires a group chat. For example args=["list"] lists teams and args=["<team name>","add"] adds a member; pass other arguments as documented by the original command help.`;
 
 // SealDice 扩展指令知识库：原默认技能「SealDice xxx扩展调用帮助」改写为知识库。
-// 结构：库「扩展指令」→ 每个扩展一个 # 子条目 → 扩展下每条命令一个 ## 小节（具体帮助）。
+// 结构：库「Extension Commands」→ 每个扩展一个 # 子条目 → 扩展下每条命令一个 ## 小节（具体帮助）。
 export const EXT_COMMAND_KB = `---
-name: 扩展指令
-description: SealDice 内置扩展（fun/story/coc7/deck/dnd5e/log）指令的调用帮助：每个扩展一个子条目，扩展下逐条列出各命令的具体用法；AI 用 run_ext_command 本地调用
+name: Extension Commands
+description: Call help for SealDice built-in extension commands (fun/story/coc7/deck/dnd5e/log); each extension is a sub-entry with per-command usage; the AI calls them locally through run_ext_command
 platform: []
 ---
 
-# 扩展指令调用帮助
+# Extension command call help
 
-本库按「扩展 → 命令」两级给出 SealDice 内置扩展指令的调用帮助：每个扩展用 # 作为一个子条目，扩展内每条命令用 ## 小节说明具体用法。扩展指令由 run_ext_command 在插件内本地执行扩展的 solve，不依赖核心桥与 MCP；核心指令请见「核心指令」知识库（run_core_command）。
+This library gives call help for SealDice built-in extension commands in two levels, "extension → command": each extension is a # sub-entry, and each command inside an extension is a ## section explaining its usage. Extension commands are executed locally by run_ext_command through the extension's solve inside the plugin, without the core bridge or MCP; for core commands see the "Core Commands" knowledge base (run_core_command).
 
-## 通用调用规则
+## General call rules
 
-- 入口唯一：所有扩展指令用 run_ext_command 调用：{"action":"call","extension":"扩展名","command":"指令名","args":["参数1","参数2"]}。command 不要带前缀点号，extension 也不要写 core。
-- command 也支持直接写 扩展名|指令名（如 fun|jrrp）；当指令在多个扩展中重名时，必须写清楚 extension。
-- args 按 SealDice 原始指令的空格分隔顺序逐项传入；需要表达式、@ 或带空格的文本时，作为单独一个字符串传入。
-- 需要让指令替其他用户触发时传 trigger（字符串用户 ID），需要模拟消息中的 @ 时传 at（字符串用户 ID 数组）；不传 trigger 时使用当前对话用户；私聊不支持 at。
-- 扩展指令受「可调用指令白名单」约束（白名单格式：扩展名|指令名/别名）；查看当前可调用扩展指令用 action=list，可加 kind 过滤（builtin / non_builtin / all）。不在白名单或不存在的指令会返回错误，不要臆造命令。
-- 每个小节第一行是同一条命令的别名（用 / 分隔），调用时优先使用第一个主名称；命令参数以对应小节说明为准。
-- 默认白名单覆盖 fun、story、coc7、deck、dnd5e、log 六个内置扩展，下方逐一说明；SealDice 还有 exp、reply 等其它内置扩展及第三方扩展，能否调用以 action=list 与白名单为准。
+- Single entry point: call every extension command through run_ext_command: {"action":"call","extension":"<extension>","command":"<command>","args":["arg1","arg2"]}. Do not prefix the command with a dot, and do not write core as the extension.
+- command also accepts the <extension>|<command> form (e.g. fun|jrrp); when a command name exists in multiple extensions, extension must be explicit.
+- Pass args one by one in the space-separated order of the original SealDice command; when an expression, @ or text containing spaces is needed, pass it as a single string.
+- To make a command trigger on behalf of another user, pass trigger (user ID string); to simulate an @ in the message, pass at (array of user ID strings). Without trigger the current conversation user is used; private chats do not support at.
+- Extension commands are bounded by the "callable command whitelist" (format: extension|command/alias); to list currently callable extension commands use action=list, optionally filtering with kind (builtin / non_builtin / all). Commands that are not whitelisted or do not exist return an error; never invent commands.
+- The first line of each section lists the aliases of the same command (separated by /); prefer the first main name when calling, and take arguments from the corresponding section.
+- The default whitelist covers the six built-in extensions fun, story, coc7, deck, dnd5e and log, described one by one below; SealDice also has other built-in extensions such as exp and reply plus third-party extensions, so what is callable depends on action=list and the whitelist.
 
-# fun 扩展
+# fun extension
 
-调用时 extension 固定为 "fun"。该扩展提供娱乐、快捷指令、骰池等常用功能。
+extension is always "fun" when calling. This extension provides entertainment, shortcut commands, dice pools and other common features.
 
-## alias —— 快捷指令管理
+## alias — Shortcut command management
 
-创建、删除或查看快捷指令。args 按 SealDice .alias 原始命令的顺序逐项传入。
+Create, delete or view shortcut commands. Pass args in the order of the original SealDice .alias command.
 
-## & / a —— 执行快捷指令
+## & / a — Run a shortcut command
 
-执行已有快捷指令。args=["快捷指令名","参数..."]，第一个参数是快捷指令名，其余按该快捷指令的参数顺序传入。
+Run an existing shortcut command. args=["<shortcut name>","args..."]; the first argument is the shortcut name and the rest are passed in that shortcut's argument order.
 
-## ping —— 测试回复
+## ping — Test reply
 
-触发一条回复，通常 args=[]。
+Trigger a reply, usually args=[].
 
-## send —— 给骰主留言
+## send — Leave a message for the dice master
 
-args=["留言内容"]。内容会被骰主看到，涉及私密信息时谨慎使用。
+args=["<message>"]. The content is visible to the dice master; be careful with private information.
 
-## welcome —— 入群欢迎
+## welcome — Group welcome
 
-查看或设置入群欢迎相关内容，参数按原命令帮助传入。
+View or set group-welcome related content. Pass arguments as documented by the original command help.
 
-## gugu / 咕咕 —— 生成咕咕理由
+## gugu / 咕咕 — Generate a "gugu" excuse
 
-生成咕咕（放鸽子/摸鱼）理由。args 可传来源或触发词。
+Generate a "gugu" (flaking/slacking) excuse. args may carry a source or trigger word.
 
-## jrrp —— 今日人品
+## jrrp — Today's luck
 
-查询今日人品。args 可传用户名或 QQ 号（查询对象），不带参数时查询当前用户。
+Query today's luck. args may carry a user name or QQ number (the queried target); without arguments it queries the current user.
 
-## text —— 文本/豹语
+## text — Text / SealDice script
 
-文本、豹语等相关功能，参数按原命令帮助传入。
+Text, SealDice script (Baoyu) and related features. Pass arguments as documented by the original command help.
 
-## rsr —— 暗影狂奔骰点
+## rsr — Shadowrun roll
 
-args=["骰数或表达式"]。
+args=["<dice count or expression>"].
 
-## ek / ekgen —— 特殊规则生成
+## ek / ekgen — Special rule generation
 
-特殊规则或生成相关功能，参数按原命令帮助传入。
+Special rule or generation related features. Pass arguments as documented by the original command help.
 
-## dx —— 掷骰
+## dx — Roll dice
 
-掷骰命令，例如 {"action":"call","extension":"fun","command":"dx","args":["3c4"]}。
+Dice command, e.g. {"action":"call","extension":"fun","command":"dx","args":["3c4"]}.
 
-## w / ww / dxh / wh / wwh —— 掷骰/暗骰
+## w / ww / dxh / wh / wwh — Roll / hidden roll
 
-同一类掷骰/暗骰命令，优先使用主名称 w 或 ww；参数按原命令帮助传入。
+Roll or hidden-roll commands of the same kind; prefer the main names w or ww. Pass arguments as documented by the original command help.
 
-## jsr —— 不重复投掷
+## jsr — Roll without duplicates
 
-不重复投掷。例如 args=["3#","10"]（多次投掷得到不重复结果，具体语义以原命令为准）。
+Roll without duplicate results. For example args=["3#","10"] (several rolls that produce distinct results; exact semantics follow the original command).
 
-## drl / drlh —— 骰池抽取/管理
+## drl / drlh — Dice pool draw / management
 
-骰池抽取或管理。例如 drl 无参查看当前骰池；drl new 等子操作的参数按原命令帮助传入。
+Dice pool draw or management. For example drl without arguments views the current dice pool; pass arguments for sub-operations such as drl new as documented by the original command help.
 
-## check —— 校验
+## check — Check
 
-校验相关命令，参数按原命令帮助传入。
+Check related commands. Pass arguments as documented by the original command help.
 
-# story 扩展
+# story extension
 
-调用时 extension 固定为 "story"。该扩展提供随机姓名、人物组合与 COC 模组相关命令。
+extension is always "story" when calling. This extension provides random names, character combinations and COC module related commands.
 
-## name —— 随机姓名
+## name — Random name
 
-args=["cn"、"en" 或 "jp", "数量", "性别"]，按原命令顺序传参。
+args=["cn", "en" or "jp", "<count>", "<gender>"], passed in the original command order.
 
-## namednd —— DND 种族姓名
+## namednd — DND race name
 
-生成 DND 种族姓名。args 可传种族，例如 ["精灵"]。
+Generate a DND race name. args may carry a race, e.g. ["精灵"].
 
-## who —— 随机人物/身份
+## who — Random person/identity
 
-随机人物/身份组合。args 按原命令帮助传入，例如 ["a","b","c"]。
+Random person/identity combinations. Pass arguments as documented by the original command help, e.g. ["a","b","c"].
 
-## cnmods / modu / 魔都 —— COC 模组
+## cnmods / modu / 魔都 — COC modules
 
-COC 模组功能。modu args=["roll"] 随机抽取模组；args=["search","关键词"] 按关键词搜索。
+COC module features. modu args=["roll"] randomly draws a module; args=["search","<keyword>"] searches by keyword.
 
-# coc7 扩展
+# coc7 extension
 
-调用时 extension 固定为 "coc7"。该扩展提供 COC7 规则的角色属性、检定与疯狂症状命令。
+extension is always "coc7" when calling. This extension provides COC7 character attributes, checks and madness symptom commands.
 
-## en —— COC 规则/角色设置
+## en — COC rule/character setup
 
-COC 规则/角色相关设置，参数按原命令帮助传入。
+COC rule/character related setup. Pass arguments as documented by the original command help.
 
-## setcoc —— 设置 COC 规则
+## setcoc — Set COC rules
 
-设置 COC 规则，参数按原命令帮助传入。
+Set COC rules. Pass arguments as documented by the original command help.
 
-## ti —— 临时性疯狂
+## ti — Temporary insanity
 
-抽取临时性疯狂症状，args=[]。
+Draw a temporary insanity symptom, args=[].
 
-## li —— 总结性疯狂
+## li — Long-term insanity
 
-抽取总结性疯狂症状，args=[]。
+Draw a long-term insanity symptom, args=[].
 
-## ra / rc / rch / rah / cra / crc / crch / crah —— 属性/技能检定
+## ra / rc / rch / rah / cra / crc / crch / crah — Ability/skill checks
 
-属性或技能检定，同一实现的不同别名。args 按顺序传奖励/惩罚骰、检定表达式、原因。
+Ability or skill checks; different aliases of the same implementation. Pass bonus/penalty dice, the check expression and the reason in order as args.
 
-## rav / rcv —— 对抗/竞争检定
+## rav / rcv — Opposed/competitive checks
 
-对抗/竞争检定。args 按原命令帮助传入；需要替其他用户触发或 @ 对象时，额外传 trigger / at。
+Opposed/competitive checks. Pass arguments as documented by the original command help; to trigger on behalf of another user or @ a target, additionally pass trigger / at.
 
-## sc —— San 检定
+## sc — San check
 
-San 检定。args 按顺序传奖励/惩罚骰、成功/失败损失表达式，例如 ["0/1d6"]。
+San check. Pass bonus/penalty dice and the success/failure loss expressions in order as args, e.g. ["0/1d6"].
 
-## coc —— 生成 COC 角色卡
+## coc — Generate a COC character card
 
-生成 COC 角色卡。args 可传数量，例如 ["3"]。
+Generate a COC character card. args may carry a count, e.g. ["3"].
 
-## st / cst —— COC 属性查看/修改
+## st / cst — COC attribute view/modification
 
-COC 扩展的角色属性查看/修改别名。常用 args=["show","角色名或用户ID"]；角色名是角色卡命令自身的参数，涉及用户定位时只使用用户 ID。整卡导入等录卡流程优先使用核心 run_core_command 的 st（见「核心指令」知识库）。
+Alias for viewing/modifying COC extension character attributes. Common args=["show","<character name or user ID>"]; the character name is an argument of the character-card command itself, so use only user IDs when targeting users. For whole-card import and similar flows prefer core run_core_command st (see the "Core Commands" knowledge base).
 
-# deck 扩展
+# deck extension
 
-调用时 extension 固定为 "deck"。该扩展提供牌堆抽取命令。
+extension is always "deck" when calling. This extension provides deck draw commands.
 
-## draw / deck —— 牌堆抽取
+## draw / deck — Deck draw
 
-从已配置牌堆抽取内容。args 通常为 ["牌堆名称"]，需要指定抽取次数或其他选项时按原命令顺序继续传入。只调用已配置且允许提供给 AI 的牌堆，不要猜测不存在的牌堆名称。
+Draw content from a configured deck. args are usually ["<deck name>"]; to specify a draw count or other options, continue passing them in the original command order. Only use decks that are configured and allowed for the AI; never guess deck names that do not exist.
 
-# dnd5e 扩展
+# dnd5e extension
 
-调用时 extension 固定为 "dnd5e"。该扩展提供 DND5E 规则的角色、先攻、检定、法术位与战斗命令。
+extension is always "dnd5e" when calling. This extension provides DND5E character, initiative, check, spell-slot and combat commands.
 
-## dnd / dndx —— DND 规则/角色设置
+## dnd / dndx — DND rule/character setup
 
-DND 规则或角色相关设置，参数按原命令帮助传入。
+DND rule or character related setup. Pass arguments as documented by the original command help.
 
-## ri —— 先攻/遭遇
+## ri — Initiative/encounter
 
-先攻/遭遇相关操作，参数按原命令帮助传入。
+Initiative/encounter related operations. Pass arguments as documented by the original command help.
 
-## init —— 查看先攻列表
+## init — View the initiative list
 
-查看先攻列表，args=[]。
+View the initiative list, args=[].
 
-## st / dst —— 查看角色属性
+## st / dst — View character attributes
 
-查看 DND 角色属性，参数按原命令帮助传入。
+View DND character attributes. Pass arguments as documented by the original command help.
 
-## rc / ra / rah / rch / drc —— DND 检定
+## rc / ra / rah / rch / drc — DND checks
 
-DND 检定。args 按顺序传检定表达式、难度或原因；别名可按习惯选择。
+DND checks. Pass the check expression, difficulty or reason in order as args; pick an alias by habit.
 
-## buff / dbuff —— 增益/减益
+## buff / dbuff — Buff/debuff
 
-增益/减益效果，参数按原命令帮助传入。
+Buff/debuff effects. Pass arguments as documented by the original command help.
 
-## spellslots / ss / dss / 法术位 —— 法术位
+## spellslots / ss / dss / 法术位 — Spell slots
 
-查看或管理法术位，参数按原命令帮助传入。
+View or manage spell slots. Pass arguments as documented by the original command help.
 
-## cast / dcast —— 施法
+## cast / dcast — Cast a spell
 
-施法。args 按原命令帮助传入；需要替其他用户触发或 @ 对象时，额外传 trigger / at。
+Cast a spell. Pass arguments as documented by the original command help; to trigger on behalf of another user or @ a target, additionally pass trigger / at.
 
-## 长休 / longrest / dlongrest —— 长休
+## 长休 / longrest / dlongrest — Long rest
 
-执行长休，参数按原命令帮助传入。
+Take a long rest. Pass arguments as documented by the original command help.
 
-## ds / 死亡豁免 —— 死亡豁免
+## ds / 死亡豁免 — Death saving throw
 
-死亡豁免检定。args 按原命令帮助传入；需要替其他用户触发或 @ 对象时，额外传 trigger / at。
+Death saving throw. Pass arguments as documented by the original command help; to trigger on behalf of another user or @ a target, additionally pass trigger / at.
 
-# log 扩展
+# log extension
 
-调用时 extension 固定为 "log"。该扩展提供日志、统计与日志导出命令。日志命令可能读取或导出群聊历史，调用前确认范围，避免无必要地暴露隐私。
+extension is always "log" when calling. This extension provides log, statistics and log-export commands. Log commands may read or export group history; confirm the scope before calling to avoid exposing privacy unnecessarily.
 
-## log —— 日志记录/管理
+## log — Log recording/management
 
-查看、记录或管理日志，参数按原命令帮助传入。
+View, record or manage logs. Pass arguments as documented by the original command help.
 
-## stat / hiy —— 日志统计
+## stat / hiy — Log statistics
 
-查看日志统计，参数按原命令帮助传入。
+View log statistics. Pass arguments as documented by the original command help.
 
-## ob —— 日志导出
+## ob — Log export
 
-导出或查看日志内容；涉及大量输出时限制范围。
+Export or view log content; limit the scope when a large output is involved.
 
-## sn —— 日志名称/故事操作
+## sn — Log name/story operations
 
-日志相关的名称/故事操作，参数按原命令帮助传入。`;
+Log-related name/story operations. Pass arguments as documented by the original command help.`;
 
 /** 「知识库」配置默认条目（顺序即默认注入顺序） */
 export const KNOWLEDGE_BASE_DEFAULTS: string[] = [CORE_COMMAND_KB, EXT_COMMAND_KB, OB11_API_KB];

@@ -1,6 +1,6 @@
 // v2 → v3 惰性迁移（幂等）：观察单元去除、字段改名、可见性重分类、心智模型结构化。
 import { parseMarkdown } from "./structured";
-import { LEGACY_PERSONA_QUESTION, personaQuestionFor } from "./templates";
+import { isLegacyPersonaQuestion, personaQuestionFor } from "./templates";
 import type { MemoryBankMeta, MemoryUnit, MentalModel, Observation, PersistedBank } from "./types";
 
 function withSafeVisibility(tags: string[], kind: 'user' | 'group' | 'global'): string[] {
@@ -159,7 +159,7 @@ export function migrateBankV3(input: PersistedBank): MigrateResult {
     const mentalModels = bank.mentalModels.map((m: any) => {
         const content = String(m.content ?? m.answer ?? '');
         const rawQuestion = String(m.sourceQuery ?? m.question ?? '');
-        const legacyPersona = rawQuestion === LEGACY_PERSONA_QUESTION || rawQuestion === '这个用户的设定是什么？' || rawQuestion === '这个群聊的设定是什么？';
+        const legacyPersona = isLegacyPersonaQuestion(rawQuestion);
         const sourceQuery = legacyPersona ? personaQuestionFor(kind) : rawQuestion;
         const tags = Array.isArray(m.tags) ? m.tags : (Array.isArray(m.scopeTags) ? m.scopeTags : []);
         const trigger = m.trigger && typeof m.trigger === 'object'

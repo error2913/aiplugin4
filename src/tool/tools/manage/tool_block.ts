@@ -12,17 +12,17 @@ export function registerBlockTool() {
         type: 'function',
         function: {
             name: 'suggest_block',
-            description: '建议骰主拉黑指定用户，使其无法触发AI（仅建议，不会直接拉黑，需骰主通过指令确认）',
+            description: 'Suggest that the bot owner block the specified user so they cannot trigger the AI (suggestion only; does not block directly, the owner must confirm via command)',
             parameters: {
                 type: 'object',
                 properties: {
                     user_id: {
                         type: 'string',
-                        description: '用户ID'
+                        description: 'User ID'
                     },
                     reason: {
                         type: 'string',
-                        description: '建议拉黑原因'
+                        description: 'Reason for the suggested block'
                     }
                 },
                 required: ['user_id', 'reason']
@@ -59,13 +59,13 @@ export function registerBlockTool() {
         type: 'function',
         function: {
             name: 'unblock_user',
-            description: '移除黑名单中的用户，使其恢复触发AI',
+            description: 'Remove a user from the blocklist so they can trigger the AI again',
             parameters: {
                 type: 'object',
                 properties: {
                     user_id: {
                         type: 'string',
-                        description: '用户ID'
+                        description: 'User ID'
                     }
                 },
                 required: ['user_id']
@@ -89,7 +89,7 @@ export function registerBlockTool() {
         type: 'function',
         function: {
             name: 'get_block_list',
-            description: '获取AI黑名单列表',
+            description: 'Get the AI blocklist',
             parameters: {
                 type: 'object',
                 properties: {},

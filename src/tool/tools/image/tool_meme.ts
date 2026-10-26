@@ -36,7 +36,7 @@ export function registerMeme() {
         type: "function",
         function: {
             name: "meme_list",
-            description: `访问可用表情包列表`,
+            description: `List available meme templates`,
             parameters: {
                 type: "object",
                 properties: {
@@ -59,13 +59,13 @@ export function registerMeme() {
         type: "function",
         function: {
             name: "get_meme_info",
-            description: `获取表情包制作信息`,
+            description: `Get meme template creation info`,
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: "string",
-                        description: "表情包名字,为 meme_list 返回的结果"
+                        description: "Meme name, from meme_list results"
                     }
                 },
                 required: ["name"]
@@ -87,27 +87,27 @@ export function registerMeme() {
         type: "function",
         function: {
             name: "meme_generator",
-            description: `制作表情包,使用之前需要调用meme_list获取可用表情包列表,调用get_meme_info获取制作信息`,
+            description: `Create a meme. Call meme_list first for available templates and get_meme_info for creation info`,
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: "string",
-                        description: "表情包名字,为 meme_list 返回的结果"
+                        description: "Meme name, from meme_list results"
                     },
                     text: {
                         type: "array",
                         items: { type: "string" },
-                        description: "文字信息，不能插入图片"
+                        description: "Text content; images cannot be inserted"
                     },
                     image_ids: {
                         type: "array",
                         items: { type: "string" },
-                        description: '图片ID，或user_avatar:用户ID，或group_avatar:群ID'
+                        description: 'Image ID, or user_avatar:userID, or group_avatar:groupID'
                     },
                     save: {
                         type: "boolean",
-                        description: "是否保存图片"
+                        description: "Whether to save the image"
                     }
                 },
                 required: ["name", "text", "image_ids", "save"]

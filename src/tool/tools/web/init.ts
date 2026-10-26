@@ -7,7 +7,7 @@ import { registerWebSearch } from "./tool_search";
 
 /** 注册 web 下全部联网工具（分类：网页） */
 export function registerWebTools() {
-    Tool.withCategory('网页', () => {
+    Tool.withCategory('Web', () => {
         registerWebSearch();
         registerWebFetch();
         registerForum();

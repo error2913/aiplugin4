@@ -29,8 +29,9 @@ import { decideWake, WAKE_REASON } from './wake';
 const log = Logger.withTag('subagent');
 
 const DEFAULT_CHILD_INSTRUCTION =
-    '你是一名子代理。请独立完成交付的任务：分步推进、需要信息时自行调用可用工具，'
-    + '不确定时明确说明而不编造；完成后给出最终结论。';
+    'You are a sub-agent. Independently complete the task you are given: make progress step by step, '
+    + 'call available tools yourself when information is needed, state clearly when unsure instead of making things up, '
+    + 'and give the final conclusion when done.';
 
 /** 子代理上下文默认上限（token）：配置 0 且模型窗口未探测到时的回退值 */
 export const DEFAULT_SUBAGENT_CONTEXT_TOKENS = 32000;
@@ -89,9 +90,10 @@ export function createSubAgentSummarizer(): SubAgentSummaryFn | undefined {
     if (!hasAuxLlm()) return undefined;
     return async (input: string, opts: { maxTokens: number }) => {
         const prompt = [
-            `请把下面这段子代理历史对话压缩成一条简洁摘要（不超过 ${opts.maxTokens} token）。`,
-            '必须保留：任务目标、关键事实与数字、已完成的动作/工具调用及其结论、未完成项与约束。',
-            '不要编造，不要输出寒暄，只输出摘要正文。',
+            `Compress the following sub-agent conversation history into one concise summary (no more than ${opts.maxTokens} tokens).`,
+            'You must keep: the task goal, key facts and numbers, completed actions/tool calls and their conclusions, unfinished items and constraints.',
+            'Do not make things up, do not output greetings, output only the summary body.',
+            'Write all generated text in the language of the conversation.',
             '',
             input,
         ].join('\n');

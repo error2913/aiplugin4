@@ -14,21 +14,21 @@ export interface ChildSystemOptions {
 }
 
 const TOOL_GUIDANCE_TEXT =
-    '你拥有与主会话相同的工具能力；仅当任务本身需要时才使用对外发送/管理类工具。\n'
-    + '你的中间过程不返回给主会话，完成时只给最终结论；拿不准就直接说明，不要编造。';
+    'You have the same tool capabilities as the main conversation; use outbound send/management tools only when the task itself needs them.\n'
+    + 'Your intermediate process is not returned to the main conversation; when done, give only the final conclusion; if unsure, say so directly instead of making things up.';
 
 export function buildChildSystemContent(opts: ChildSystemOptions): string {
     const sections: string[] = [];
     const instruction = (opts.instruction ?? '').trim();
     if (instruction !== '') sections.push(instruction);
     const now = (opts.nowText ?? '').trim();
-    if (now !== '') sections.push(`## 当前时间\n${now}`);
+    if (now !== '') sections.push(`## Current time\n${now}`);
     const toolBlock = (opts.toolBlock ?? '').trim();
     if (toolBlock !== '') sections.push(toolBlock);
     if (opts.promptEngineering) {
         sections.push(
-            '工具调用格式：使用 ```function 代码块包裹 JSON 数组调用工具（与主会话同一约定）；'
-            + '工具返回会作为新消息给你。'
+            'Tool call format: wrap a JSON array in a ```function code block to call tools (same convention as the main conversation); '
+            + 'tool results come back to you as new messages.'
         );
     }
     if (opts.toolGuidance !== false) sections.push(TOOL_GUIDANCE_TEXT);

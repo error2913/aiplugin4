@@ -19,6 +19,7 @@ import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
 import { installPromptMemorySource } from "./prompt/memory_source_impl";
+import { registerBuiltinSections } from "./prompt/sections";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import { registerAllTools } from "./tool/bootstrap";
@@ -50,6 +51,8 @@ function main() {
   registerAgentApi();
   checkUpdate();
   registerAllTools();
+  // 提示词段注册：必须在工具注册之后（段构建依赖工具可见性）与配置预热之后（读取角色/开关）
+  registerBuiltinSections();
   TimerManager.init();
   MemoryScheduler.init();
   MediaTaskManager.init();

@@ -25,7 +25,7 @@ function legacyContext(): LegacyContextLike {
                     { userId: 'QQ:1', messageId: 'm2', time: 12, text: '普通消息' },
                 ],
             },
-            { role: 'user', contentItems: [{ systemName: '事件', eventType: 'group_recall', raw: { id: 1 }, time: 13, text: '有人撤回' }] },
+            { role: 'user', contentItems: [{ systemName: 'group-event', eventType: 'group_recall', raw: { id: 1 }, time: 13, text: '有人撤回' }] },
             {
                 role: 'assistant',
                 contentItems: [{ text: '我来看看', time: 14, messageId: 'a1', reasoningContent: '思考' }],

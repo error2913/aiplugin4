@@ -84,7 +84,7 @@ export function renderPubSnapshot(messages: MessageType[], opts: SnapshotOptions
                 const text = it.text.trim();
                 if (!text) return '';
                 const msgId = it.messageId ? `[msg_id:${it.messageId}]` : '';
-                return `${msgId ? msgId + ' ' : ''}Bot 回复: ${text}`;
+                return `${msgId ? msgId + ' ' : ''}Bot reply: ${text}`;
             }).filter(Boolean);
             picked.push(...rows.reverse());
         }
@@ -94,7 +94,7 @@ export function renderPubSnapshot(messages: MessageType[], opts: SnapshotOptions
 
     let out = picked.join('\n');
     if (out.length > maxChars) {
-        out = out.slice(0, maxChars) + `\n[快照已截断：超过 ${maxChars} 字符，如需更多请用更大 rounds/chars 重新调用]`;
+        out = out.slice(0, maxChars) + `\n[snapshot truncated: exceeded ${maxChars} chars; call again with a larger rounds/chars for more]`;
     }
     return out;
 }

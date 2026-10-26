@@ -83,6 +83,14 @@ try {
             }
         }, { solve: async () => 'ok' }) === true,
         'getAgent(*) 返回智能体实例': !!api && typeof api.getAgent('*').chat === 'function',
+        'registerPromptSection 方法': !!api && typeof api.registerPromptSection === 'function',
+        'onPromptAssemble 方法': !!api && typeof api.onPromptAssemble === 'function',
+        'registerPromptSection 扩展段注册成功': !!api && api.registerPromptSection({
+            name: 'ext:smoke:test',
+            order: 10000,
+            channel: 'system',
+            build: () => 'smoke section'
+        }) === true,
     };
     const failedChecks = Object.entries(apiChecks).filter(([, ok]) => !ok).map(([name]) => name);
     if (failedChecks.length > 0) {
@@ -90,6 +98,8 @@ try {
         process.exit(1);
     }
     console.log('SMOKE OK: globalThis.aiplugin4 API 可用');
+    // 冒烟只验证加载与 API：进程可能因底层 fetch keep-alive 套接字而无法自然退出，显式结束
+    process.exit(0);
 } catch (e) {
     console.error('SMOKE FAIL:', e.message);
     console.error(e.stack);

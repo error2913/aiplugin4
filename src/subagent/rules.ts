@@ -52,15 +52,15 @@ export function resultErrorText(result: SubAgentResult): string {
  * 对接层负责加 [system:…]/[/system] 边界与标签剥离。
  */
 export function settleNoticeText(childId: string, label: string, result: SubAgentResult, maxLen = 2000): string {
-    const head = result.stopReason === 'completed' ? '已完成' : `已结束（${result.stopReason}）`;
-    let text = `子代理 ${childId}（${label}）${head}`;
+    const head = result.stopReason === 'completed' ? 'completed' : `ended (${result.stopReason})`;
+    let text = `Sub-agent ${childId} (${label}) ${head}`;
     if (result.stopReason === 'completed') {
-        text += `\n结论：${result.output}`;
+        text += `\nResult: ${result.output}`;
     } else {
         const err = resultErrorText(result);
         if (err !== '') text += `\n${err}`;
     }
-    return text.length > maxLen ? text.slice(0, maxLen) + '…（已截断，可用 read_raw 查阅）' : text;
+    return text.length > maxLen ? text.slice(0, maxLen) + '… (truncated; use read_raw to read more)' : text;
 }
 
 /**

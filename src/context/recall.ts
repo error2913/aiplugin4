@@ -183,23 +183,23 @@ function isInt(value: unknown): value is number {
 
 function positiveInt(value: unknown, fallback: number, name: string): number {
     if (value === undefined) return fallback;
-    if (!isInt(value) || value < 1) throw new RecallError('INVALID_ARGUMENT', `${name} 应为 ≥1 的整数`);
+    if (!isInt(value) || value < 1) throw new RecallError('INVALID_ARGUMENT', `${name} must be an integer >= 1`);
     return value;
 }
 
 function normalizeCursor(cursor: ReadCursor | null | undefined): ReadCursor | null {
     if (cursor === null || cursor === undefined) return null;
     if (!isInt(cursor.seq) || cursor.seq < 1 || !isInt(cursor.offset) || cursor.offset < 0) {
-        throw new RecallError('INVALID_ARGUMENT', 'cursor 非法（需要 { seq: ≥1 整数, offset: ≥0 整数 }）');
+        throw new RecallError('INVALID_ARGUMENT', 'invalid cursor (expected { seq: integer >= 1, offset: integer >= 0 })');
     }
     return { seq: cursor.seq, offset: cursor.offset };
 }
 
 function normalizeGrepCursor(cursor: GrepCursor | null | undefined): GrepCursor | null {
     if (cursor === null || cursor === undefined) return null;
-    if (!isInt(cursor.pageNo) || cursor.pageNo < 1) throw new RecallError('INVALID_ARGUMENT', 'grep cursor.pageNo 非法');
+    if (!isInt(cursor.pageNo) || cursor.pageNo < 1) throw new RecallError('INVALID_ARGUMENT', 'invalid grep cursor.pageNo');
     if (cursor.beforeSeq !== undefined && (!isInt(cursor.beforeSeq) || cursor.beforeSeq < 1)) {
-        throw new RecallError('INVALID_ARGUMENT', 'grep cursor.beforeSeq 非法');
+        throw new RecallError('INVALID_ARGUMENT', 'invalid grep cursor.beforeSeq');
     }
     return cursor.beforeSeq === undefined ? { pageNo: cursor.pageNo } : { pageNo: cursor.pageNo, beforeSeq: cursor.beforeSeq };
 }
@@ -211,7 +211,7 @@ function uniqueSorted(values: number[]): number[] {
 function pageSummary(pages: number[]): string {
     const unique = uniqueSorted(pages);
     const shown = unique.slice(0, 5).join(',');
-    return `缺页/坏页 ${unique.length} 个（${shown}${unique.length > 5 ? '…' : ''}）`;
+    return `missing/corrupt pages: ${unique.length} (${shown}${unique.length > 5 ? '…' : ''})`;
 }
 
 // ---------------- 展示文本 ----------------
@@ -384,12 +384,12 @@ function buildEventReadResult(
 ): ReadRawResult {
     const skippedPages = uniqueSorted(acc.skippedPages);
     const notes: string[] = [];
-    if (acc.hidden > 0) notes.push(`${acc.hidden} 条已按记录索引隐藏（epoch/redact）`);
+    if (acc.hidden > 0) notes.push(`${acc.hidden} events hidden by record index (epoch/redact)`);
     if (skippedPages.length > 0) notes.push(pageSummary(skippedPages));
-    if (options.locateFailed) notes.push('较早页缺失，起点无法精确定位（已从可定位处开始）');
-    if (options.fromSeq < options.pageFloor) notes.push(`seq<${options.pageFloor} 的原文已被清理`);
+    if (options.locateFailed) notes.push('earlier pages missing; start position could not be located exactly (started from the earliest locatable point)');
+    if (options.fromSeq < options.pageFloor) notes.push(`originals before seq<${options.pageFloor} have been cleaned up`);
     if (options.exhausted && acc.items.length === 0 && notes.length === 0) {
-        notes.push(`区间 ${address} 内没有可读事件（seq 可能已清理、被隐藏或本会话不存在）`);
+        notes.push(`no readable events in range ${address} (seq may be cleaned up, hidden, or not in this session)`);
     }
     const total = options.exhausted
         && options.fresh
@@ -407,7 +407,7 @@ function buildEventReadResult(
         exhausted: options.exhausted,
         returnedChars: acc.usedChars,
         skippedPages,
-        ...(notes.length > 0 ? { note: notes.join('；') } : {}),
+        ...(notes.length > 0 ? { note: notes.join('; ') } : {}),
     };
 }
 
@@ -423,7 +423,7 @@ function readRawEventRange(
     const cursor = normalizeCursor(options.cursor);
     const address = fromSeqRaw === toSeqRaw ? `e:${fromSeqRaw}` : `e:${fromSeqRaw}-${toSeqRaw}`;
     if (!isInt(fromSeqRaw) || !isInt(toSeqRaw) || fromSeqRaw < 1 || toSeqRaw < 1) {
-        throw new RecallError('INVALID_ADDRESS', `事件地址非法：${address}`);
+        throw new RecallError('INVALID_ADDRESS', `invalid event address: ${address}`);
     }
     const fromSeq = Math.max(1, Math.min(fromSeqRaw, toSeqRaw));
     const toSeq = Math.max(fromSeqRaw, toSeqRaw);
@@ -533,7 +533,7 @@ function readRawMsg(
     msgId: string,
     options: ReadRawOptions,
 ): ReadRawResult {
-    if (msgId === '') throw new RecallError('INVALID_ADDRESS', 'msg_id 不能为空');
+    if (msgId === '') throw new RecallError('INVALID_ADDRESS', 'msg_id must not be empty');
     const maxChars = positiveInt(options.maxChars, READ_RAW_DEFAULT_MAX_CHARS, 'maxChars');
     const maxItems = positiveInt(options.maxItems, READ_RAW_DEFAULT_MAX_ITEMS, 'maxItems');
     const cursor = normalizeCursor(options.cursor);
@@ -551,7 +551,7 @@ function readRawMsg(
             exhausted: true,
             returnedChars: 0,
             skippedPages: uniqueSorted(skipped),
-            note: `${pageSummary(skipped)}；未找到 msg_id=${msgId}（可能已清理或不属于本会话）`,
+            note: `${pageSummary(skipped)}; msg_id=${msgId} not found (may be cleaned up or belong to another session)`,
         };
     }
     const index = buildRecordIndex(snapshot.records);
@@ -585,7 +585,7 @@ function readLegacyAddress(
             exhausted: true,
             returnedChars: 0,
             skippedPages: [],
-            note: '旧分片不存在、已清理或内容损坏（arc:/raw: 只读兼容）',
+            note: 'legacy shard missing, cleaned up, or corrupted (arc:/raw: read-only compatibility)',
         };
     }
     const items: RawLegacyItem[] = [];
@@ -636,7 +636,7 @@ function readLegacyAddress(
         exhausted: nextCursor === null,
         returnedChars: usedChars,
         skippedPages: [],
-        ...(shard.length === 0 ? { note: '旧分片存在但没有可读条目' } : {}),
+        ...(shard.length === 0 ? { note: 'legacy shard exists but has no readable items' } : {}),
     };
 }
 
@@ -706,7 +706,7 @@ export function readRaw(
                 exhausted: true,
                 returnedChars: 0,
                 skippedPages: [],
-                note: `旧原文块 blk:${parsed.id} 的兼容读取尚未接线；迁移期请用 arc:/raw:/e:/msg_id 地址`,
+                note: `read-only compatibility for legacy block blk:${parsed.id} is not wired yet; during migration use arc:/raw:/e:/msg_id addresses`,
             };
         default:
             return {
@@ -717,7 +717,7 @@ export function readRaw(
                 exhausted: true,
                 returnedChars: 0,
                 skippedPages: [],
-                note: `无法识别的召回地址：${parsed.raw}（支持 e:<seq>、e:<from>-<to>、msg_id、blk:、arc:<seq>、raw:<seq>）`,
+                note: `unrecognized recall address: ${parsed.raw} (supported: e:<seq>, e:<from>-<to>, msg_id, blk:, arc:<seq>, raw:<seq>)`,
             };
     }
 }
@@ -728,14 +728,14 @@ type Matcher = (text: string) => { index: number; length: number } | null;
 
 function buildMatcher(pattern: string, regex: boolean): Matcher {
     if (typeof pattern !== 'string' || pattern.length === 0) {
-        throw new RecallError('INVALID_ARGUMENT', 'pattern 不能为空');
+        throw new RecallError('INVALID_ARGUMENT', 'pattern must not be empty');
     }
     if (regex) {
         let compiled: RegExp;
         try {
             compiled = new RegExp(pattern, 'i');
         } catch (error) {
-            throw new RecallError('INVALID_ARGUMENT', `正则非法：${error instanceof Error ? error.message : String(error)}`);
+            throw new RecallError('INVALID_ARGUMENT', `invalid regular expression: ${error instanceof Error ? error.message : String(error)}`);
         }
         return (text: string) => {
             const match = compiled.exec(text);
@@ -765,7 +765,7 @@ function buildGrepResult(
     hidden: number,
 ): GrepRawResult {
     const notes: string[] = [];
-    if (hidden > 0) notes.push(`已跳过 ${hidden} 条不可见事件（epoch/redact/supersede）`);
+    if (hidden > 0) notes.push(`skipped ${hidden} invisible events (epoch/redact/supersede)`);
     const skipped = uniqueSorted(skippedPages);
     if (skipped.length > 0) notes.push(pageSummary(skipped));
     return {
@@ -774,7 +774,7 @@ function buildGrepResult(
         exhausted,
         scannedPages,
         skippedPages: skipped,
-        ...(notes.length > 0 ? { note: notes.join('；') } : {}),
+        ...(notes.length > 0 ? { note: notes.join('; ') } : {}),
     };
 }
 
@@ -797,8 +797,8 @@ export function grepRaw(
     const pageFloor = head.pageFloor;
     const fromSeq = options.fromSeq === undefined ? 0 : options.fromSeq;
     const toSeq = options.toSeq === undefined ? Number.MAX_SAFE_INTEGER : options.toSeq;
-    if (!isInt(fromSeq) || fromSeq < 0) throw new RecallError('INVALID_ARGUMENT', 'fromSeq 应为 ≥0 的整数');
-    if (!isInt(toSeq) || toSeq < 1) throw new RecallError('INVALID_ARGUMENT', 'toSeq 应为 ≥1 的整数');
+    if (!isInt(fromSeq) || fromSeq < 0) throw new RecallError('INVALID_ARGUMENT', 'fromSeq must be an integer >= 0');
+    if (!isInt(toSeq) || toSeq < 1) throw new RecallError('INVALID_ARGUMENT', 'toSeq must be an integer >= 1');
 
     const index = buildRecordIndex(snapshot.records);
     const events = snapshot.events.slice().sort((a, b) => a.seq - b.seq);

@@ -151,7 +151,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const missing = readRaw(store, snapshot, 'm-not-exist');
         assert.equal(missing.items.length, 0);
         assert.equal(missing.exhausted, true);
-        assert.ok(String(missing.note).includes('未找到 msg_id'));
+        assert.ok(String(missing.note).includes('msg_id=m-not-exist not found (may be cleaned up or belong to another session)'));
     },
 
     async testContextRecallBadPageSkipped() {
@@ -164,7 +164,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.deepEqual(result.skippedPages, [1], '坏页应被记录而不是抛错');
         assert.ok(result.items.length > 0, '坏页之后的页仍应可读');
         assert.equal(result.items[0].seq, page2Start, '应从坏页之后的第一页开始返回');
-        assert.ok(String(result.note).includes('缺页/坏页'));
+        assert.ok(String(result.note).includes('missing/corrupt pages: 1 (1)'));
     },
 
     async testContextRecallMissingPageSkipped() {
@@ -198,7 +198,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const after = snapshotOf(store);
         const hidden = readRaw(store, after, 'e:2');
         assert.equal(hidden.items.length, 0);
-        assert.ok(String(hidden.note).includes('隐藏'));
+        assert.ok(String(hidden.note).includes('events hidden by record index (epoch/redact)'));
         const visible = readRaw(store, after, 'e:4');
         assert.equal(visible.items.length, 1);
         assert.ok(snapshot.events.length > 0);
@@ -236,7 +236,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         storage.map.set(legacyShardKey(SID, 'raw', 2), '{bad');
         const broken = readRaw(store, snapshot, 'raw:2');
         assert.equal(broken.items.length, 0);
-        assert.ok(String(broken.note).includes('不存在'));
+        assert.ok(String(broken.note).includes('legacy shard missing, cleaned up, or corrupted'));
         const missing = readRaw(store, snapshot, 'raw:9');
         assert.equal(missing.items.length, 0);
         assert.equal(readLegacyShard(SID, 'arc', 1)?.length, 2);
@@ -249,10 +249,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const snapshot = snapshotOf(store);
         const block = readRaw(store, snapshot, 'blk:m1');
         assert.equal(block.kind, 'block');
-        assert.ok(String(block.note).includes('尚未接线'));
+        assert.ok(String(block.note).includes('read-only compatibility for legacy block blk:m1 is not wired yet'));
         const unknown = readRaw(store, snapshot, '');
         assert.equal(unknown.kind, 'unknown');
-        assert.ok(String(unknown.note).includes('无法识别'));
+        assert.ok(String(unknown.note).includes('unrecognized recall address'));
     },
 
     async testContextRecallGrepFindsHits() {
@@ -306,7 +306,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         store.appendRecord({ kind: 'summary', id: 'sm1', at: 102, epoch: 1, fromSeq: 1, toSeq: 6, text: '摘要' });
         const result = grepRaw(store, snapshotOf(store), 'p', { maxHits: 100 });
         assert.deepEqual(hitSeqs(result), [10, 9, 8, 7, 6, 5, 1], 'redact(2,3)/supersede(4) 跳过；摘要覆盖的 1 仍可搜');
-        assert.ok(String(result.note).includes('不可见'));
+        assert.ok(String(result.note).includes('skipped 3 invisible events (epoch/redact/supersede)'));
     },
 
     async testContextRecallGrepAppliesEdit() {

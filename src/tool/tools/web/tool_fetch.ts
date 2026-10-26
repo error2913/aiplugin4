@@ -13,21 +13,21 @@ export function registerWebFetch() {
         type: "function",
         function: {
             name: "web_fetch",
-            description: "抓取网页正文（Markdown）。支持 DeepSeek / Kimi / Tavily / Exa / Firecrawl 或 generic 抓取描述",
+            description: "Fetch web page content (Markdown). Backends: DeepSeek / Kimi / Tavily / Exa / Firecrawl or generic fetching",
             parameters: {
                 type: "object",
                 properties: {
                     url: {
                         type: "string",
-                        description: "要抓取的网页地址（http/https）",
+                        description: "Web page URL to fetch (http/https)",
                     },
                     max_chars: {
                         type: "integer",
-                        description: "本次返回的正文长度上限，默认取配置（5000）",
+                        description: "Max length of the returned text; defaults to the configured value (5000)",
                     },
                     start_index: {
                         type: "integer",
-                        description: "从第几个字符开始返回；上次被截断时按提示传入",
+                        description: "Start returning from this character offset; pass the value suggested when the previous result was truncated",
                     },
                 },
                 required: ["url"],

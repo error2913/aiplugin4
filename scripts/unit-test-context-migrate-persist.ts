@@ -49,7 +49,7 @@ function legacyContext() {
                 role: 'user',
                 contentItems: [
                     { userId: 'QQ:1', messageId: 'm1', time: 10, text: '带标签 [at:123] 的文字' },
-                    { systemName: '事件', eventType: 'group_recall', raw: { x: 1 }, time: 11, text: '撤回' },
+                    { systemName: 'group-event', eventType: 'group_recall', raw: { x: 1 }, time: 11, text: '撤回' },
                 ],
             },
             { role: 'assistant', contentItems: [{ text: '收到', time: 12, messageId: 'a1' }] },

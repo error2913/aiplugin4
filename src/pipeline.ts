@@ -12,6 +12,7 @@ import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
 import { getRecordMessageId, transformMsgId } from "./utils/message_id";
+import { SYSTEM_NAME } from "./utils/protocol";
 import { createCtx, createMsg } from "./utils/seal";
 import { expandMilkySegments, formatMessageSegmentsForMatching, transformTextToArray } from "./utils/string";
 import { getPlatform } from "./utils/target_id";
@@ -312,7 +313,7 @@ export class MessagePipeline {
                         return session.deferReceipt(ctx, msg, messageArray, 'trigger', condition.reason).then(() => session.savePending());
                     }
                     return session.handleReceipt(ctx, msg, messageArray)
-                        .then(() => session.context.addSystemUserMessage(condition.reason, '触发原因提示'))
+                        .then(() => session.context.addSystemUserMessage(condition.reason, SYSTEM_NAME.trigger))
                         .then(() => triggerConditionMap[sid].splice(i, 1))
                         .then(() => session.chat(ctx, msg, 'AI设定触发条件'));
                 }

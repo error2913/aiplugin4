@@ -6,7 +6,7 @@ import { registerMeme } from "./tool_meme";
 
 /** 注册 image.ts 下全部图片工具（分类：图片） */
 export function registerImageTools() {
-    Tool.withCategory('图片', () => {
+    Tool.withCategory('Images', () => {
         registerImage();
         registerMeme();
     });

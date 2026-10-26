@@ -10,20 +10,20 @@ import { getTool, toolMap } from "../../registry";
 import Tool from "../../tool";
 import { ToolInfo } from "../../types";
 
-/** call_tool 路径的错误文案（与改造前逐字一致） */
+/** call_tool 路径的错误文案 */
 function callToolErrorText(toolName: string, failure?: ToolFailure): string {
     switch (failure?.code) {
-        case 'not_found': return `工具 ${toolName} 不存在，可先调用 search_tools 查看可用工具`;
-        case 'not_enabled': return `工具 ${toolName} 未开启，无法调用`;
+        case 'not_found': return `Tool "${toolName}" does not exist. Call search_tools to see available tools and get parameter docs.`;
+        case 'not_enabled': return `Tool "${toolName}" is not enabled in this session.`;
         case 'platform': {
             const tool = getTool(toolName);
-            return `工具 ${toolName} 在当前平台不可用（来源 ${Tool.groupLabel(tool?.group)} 的平台限制）`;
+            return `Tool "${toolName}" is not available on the current platform (source group "${Tool.groupLabel(tool?.group)}" has a platform restriction).`;
         }
-        case 'session_type': return `工具 ${toolName} 不适用于当前会话类型`;
-        case 'bad_args': return `call_tool 参数解析失败: ${failure.message}`;
-        case 'missing_required': return `调用工具 ${toolName} 缺少必需参数 ${failure.param}`;
-        case 'invalid_arg': return `调用工具 ${toolName} 参数错误: ${failure.message}`;
-        default: return `工具 ${toolName} 执行失败: ${failure?.message ?? '未知错误'}`;
+        case 'session_type': return `Tool "${toolName}" is not available in this session type.`;
+        case 'bad_args': return `call_tool failed to parse arguments: ${failure.message}`;
+        case 'missing_required': return `Tool "${toolName}" is missing required parameter "${failure.param}".`;
+        case 'invalid_arg': return `Tool "${toolName}" has an invalid argument: ${failure.message}`;
+        default: return `Tool "${toolName}" failed: ${failure?.message ?? 'unknown error'}`;
     }
 }
 
@@ -37,25 +37,25 @@ export function registerDispatchTools() {
         type: "function",
         function: {
             name: "list_tools",
-            description: `分页列出当前会话可用（当前平台）工具的名称与一句话描述，按工具组分组（内置分类如 记忆/图片/子代理、MCP 服务器名、技能、知识库）；不返回参数详情。需要获取某个工具的参数说明时使用 search_tools。`,
+            description: `List this session's available tools (current platform) with names and one-line descriptions, grouped by tool group (builtin categories such as Memory/Images/Subagents, MCP server names, Skills/Knowledge); parameter details are not included. Use search_tools to get a tool's parameter documentation.`,
             parameters: {
                 type: "object",
                 properties: {
                     page: {
                         type: "integer",
-                        description: "页码，从 1 开始，默认 1"
+                        description: "Page number, starting at 1; default 1"
                     },
                     page_size: {
                         type: "integer",
-                        description: "每页数量，默认 20，最大 100"
+                        description: "Page size; default 20, max 100"
                     },
                     query: {
                         type: "string",
-                        description: "按工具名称或描述关键词过滤"
+                        description: "Filter by tool name or description keyword"
                     },
                     mcp: {
                         type: "string",
-                        description: "可选，只列出某个来源分组或内置分类下的工具（如 MCP 服务器名 mcp-browser、分类 记忆/图片/子代理）"
+                        description: "Optional; only list tools from one source group or builtin category (e.g. MCP server name mcp-browser, category Memory/Images/Subagents)"
                     }
                 },
                 required: []
@@ -77,15 +77,17 @@ export function registerDispatchTools() {
             )
             : tools;
         if (filtered.length === 0) {
-            return groupFilter ? `未找到来源分组/分类「${groupFilter}」下的工具；可用 list_mcps 查看 MCP 服务器，.ai tool 查看工具组` : '当前没有可用工具';
+            return groupFilter
+                ? `No tools found in source group/category "${groupFilter}". Use list_mcps to see MCP servers, or call list_tools without a group filter.`
+                : 'No tools are available in this session.';
         }
         const size = Math.min(Math.max(parseInt(page_size, 10) || 20, 1), 100);
         const current = Math.max(parseInt(page, 10) || 1, 1);
         const totalPages = Math.max(1, Math.ceil(filtered.length / size));
         const start = (current - 1) * size;
         const pageItems = filtered.slice(start, start + size);
-        const lines = [`可用工具（共 ${filtered.length} 个）`];
-        // 按组渲染（组头 + 组内工具，编号全局连续）；组头用「内置·分类 / MCP 服务器名 / 技能 / 知识库」
+        const lines = [`Available tools (${filtered.length} total)`];
+        // 按组渲染（组头 + 组内工具，编号全局连续）；组头用「builtin · Category / MCP 服务器名 / Skills / Knowledge」
         const groups: { [group: string]: ToolInfo[] } = {};
         for (const t of pageItems) {
             const g = Tool.groupDisplay(toolMap[t.function.name]);
@@ -93,15 +95,15 @@ export function registerDispatchTools() {
         }
         let n = start;
         for (const g of Object.keys(groups).sort()) {
-            lines.push(`【${g}】`);
+            lines.push(`## ${g}`);
             for (const t of groups[g]) {
                 n += 1;
                 const desc = String(t.function.description || '').replace(/\s+/g, ' ').trim();
-                const shortDesc = desc.length > 120 ? desc.slice(0, 120) + '...' : desc;
-                lines.push(`${n}. ${t.function.name}：${shortDesc}`);
+                const shortDesc = desc.length > 240 ? desc.slice(0, 240) + '...' : desc;
+                lines.push(`${n}. ${t.function.name}: ${shortDesc}`);
             }
         }
-        lines.push(`当前第 ${current} 页，共 ${totalPages} 页；使用 search_tools 获取具体参数说明。`);
+        lines.push(`Page ${current} of ${totalPages}. Use search_tools(name=...) for full parameter docs, or search_tools(query=...) to find a tool by capability.`);
         return lines.join('\n');
     };
 
@@ -110,25 +112,25 @@ export function registerDispatchTools() {
         type: "function",
         function: {
             name: "search_tools",
-            description: `查看/搜索当前会话可用（当前平台）的工具。不传参数：返回全部可用工具的名字列表；指定 name：返回该工具的完整参数说明；指定 query：按关键词搜索匹配工具并返回完整参数说明；指定 mcp：只在该 MCP 服务器或内置分类（如 记忆/图片/子代理）内搜索。需要调用未直接在函数列表中提供的工具时，先通过本工具获取参数格式，再通过 call_tool 执行。`,
+            description: `View/search this session's available tools (current platform). With no arguments: returns the names of all available tools; with name: returns that tool's full parameter documentation; with query: searches tools by keyword and returns full parameter documentation; with mcp: searches only within that MCP server or builtin category (e.g. Memory/Images/Subagents). To call a tool that is not directly exposed in the function list, first get its parameter format from this tool, then execute it via call_tool.`,
             parameters: {
                 type: "object",
                 properties: {
                     query: {
                         type: "string",
-                        description: "搜索关键词，匹配工具名称或描述；与 name 同时给出时以 name 优先"
+                        description: "Search keyword matched against tool name or description; name takes precedence when both are given"
                     },
                     name: {
                         type: "string",
-                        description: "指定工具名，返回该工具的完整参数说明"
+                        description: "Tool name; returns that tool's full parameter documentation"
                     },
                     mcp: {
                         type: "string",
-                        description: "可选，限定在某个来源分组或内置分类内搜索工具（MCP 服务器名如 mcp-browser、分类如 记忆/图片/子代理）；可用 list_mcps 查看 MCP 服务器名"
+                        description: "Optional; restrict the search to one source group or builtin category (MCP server name such as mcp-browser, category such as Memory/Images/Subagents); list_mcps lists MCP server names"
                     },
                     limit: {
                         type: "integer",
-                        description: "query 搜索时最多返回的工具数，默认 8，最大 20"
+                        description: "Max number of tools returned by a query search; default 8, max 20"
                     }
                 },
                 required: []
@@ -143,7 +145,7 @@ export function registerDispatchTools() {
         if (groupFilter) {
             tools = tools.filter(t => Tool.matchesGroupFilter(toolMap[t.function.name], groupFilter));
         }
-        const notFoundInGroup = () => `未找到来源分组/分类「${groupFilter}」下的工具；可用 list_mcps 查看 MCP 服务器，.ai tool 查看工具组`;
+        const notFoundInGroup = () => `No tools found in source group/category "${groupFilter}". Use list_mcps to see MCP servers, or call list_tools without a group filter.`;
         if (groupFilter && tools.length === 0) {
             return notFoundInGroup();
         }
@@ -153,8 +155,8 @@ export function registerDispatchTools() {
         if (toolName) {
             const target = tools.find(t => t.function.name === toolName);
             if (!target) {
-                if (groupFilter) return `来源分组/分类「${groupFilter}」中没有工具 ${toolName}；可用 list_mcps 查看 MCP 服务器，search_tools（不传参数）查看全部工具名`;
-                return `工具 ${toolName} 不存在、未开启或当前平台不可用；可调用 search_tools（不传参数）查看全部工具名`;
+                if (groupFilter) return `Source group/category "${groupFilter}" has no tool named "${toolName}". Use list_mcps for MCP servers, or search_tools without arguments for all tool names.`;
+                return `Tool "${toolName}" does not exist, is not enabled, or is not available on the current platform. Call search_tools without arguments to list all tool names.`;
             }
             return formatToolDetail(target, 1);
         }
@@ -162,9 +164,9 @@ export function registerDispatchTools() {
         // 不传参数：返回全部工具名字列表（紧凑），详情按需查询
         if (!String(query || '').trim()) {
             if (tools.length === 0) {
-                return groupFilter ? `未找到来源分组/分类「${groupFilter}」下的工具；可用 list_mcps 查看 MCP 服务器，.ai tool 查看工具组` : '当前没有可用工具';
+                return groupFilter ? notFoundInGroup() : 'No tools are available in this session.';
             }
-            return `可用工具（共 ${tools.length} 个）：\n${tools.map((t, i) => `${i + 1}. ${t.function.name}`).join('\n')}\n查看工具名称与描述：调用 list_tools；查看某个工具的详情：调用 search_tools 并指定 name=工具名；查看 MCP 服务器：调用 list_mcps`;
+            return `Available tools (${tools.length} total):\n${tools.map((t, i) => `${i + 1}. ${t.function.name}`).join('\n')}\nNames and descriptions: call list_tools; parameter docs: search_tools(name="<tool>"); MCP servers: list_mcps`;
         }
 
         // 关键词搜索：分词匹配，返回匹配工具的完整详情
@@ -179,9 +181,9 @@ export function registerDispatchTools() {
         const n = Math.max(1, Math.min(20, parseInt(limit, 10) || MAX_SEARCH_RESULTS));
         const list = matched.slice(0, n);
         if (list.length === 0) {
-            return `没有找到与「${query}」匹配的工具`;
+            return `No tools matched "${query}". Try list_tools to see available domains, or search a broader keyword.`;
         }
-        return list.map((t, i) => formatToolDetail(t, i + 1)).join('\n\n') + `\n\n共匹配 ${matched.length} 个，已返回 ${list.length} 个。`;
+        return list.map((t, i) => formatToolDetail(t, i + 1)).join('\n\n') + `\n\nMatched ${matched.length} tools, showing ${list.length}.`;
     };
 
     // 列出全部 MCP 服务器及其工具（按 MCP 分组的能力入口）
@@ -189,21 +191,21 @@ export function registerDispatchTools() {
         type: "function",
         function: {
             name: "list_mcps",
-            description: `列出当前平台可用的全部 MCP 服务器及其工具清单（按服务器分组，含会话开关状态），用于按能力组选择工具；随后可用 search_tools(mcp=服务器名) 获取工具参数、call_tool 执行`,
+            description: `List all MCP servers available on the current platform with their tool inventory (grouped by server, including session switch state), for choosing tool groups by capability; then use search_tools(mcp=server-name) to get tool parameters and call_tool to execute`,
             parameters: {
                 type: "object",
                 properties: {
                     page: {
                         type: "integer",
-                        description: "页码，从 1 开始，默认 1"
+                        description: "Page number, starting at 1; default 1"
                     },
                     page_size: {
                         type: "integer",
-                        description: "每页数量，默认 20，最大 100"
+                        description: "Page size; default 20, max 100"
                     },
                     query: {
                         type: "string",
-                        description: "按服务器名或工具名关键词过滤"
+                        description: "Filter by server name or tool name keyword"
                     }
                 },
                 required: []
@@ -214,7 +216,7 @@ export function registerDispatchTools() {
         const { page = 1, page_size = 20, query = '' } = args || {};
         const platform = platformOf(ctx);
         const servers = getConfiguredMCPServers().filter(s => matchesPlatform(s.platforms, platform));
-        if (servers.length === 0) return '当前没有可用的 MCP 服务器（未配置、未启用或平台不匹配；请管理员检查「MCP服务器配置」）';
+        if (servers.length === 0) return 'No MCP servers are available on the current platform (not configured, disabled, or platform mismatch; ask the bot owner to check the MCP server config).';
         const q = String(query || '').trim().toLowerCase();
         const rows: string[] = [];
         for (const s of servers) {
@@ -226,21 +228,21 @@ export function registerDispatchTools() {
             const onCount = states.filter(x => x.on).length;
             const matchesQuery = !q || s.name.toLowerCase().includes(q) || states.some(x => x.name.toLowerCase().includes(q));
             if (!matchesQuery) continue;
-            rows.push(`${s.name}（${groupTools.length} 个工具，开 ${onCount} 关 ${groupTools.length - onCount}）`);
+            rows.push(`${s.name} (${groupTools.length} tools, ${onCount} on / ${groupTools.length - onCount} off${s.description ? `; ${s.description}` : ''})`);
             for (const st of states.slice(0, MCP_PAGE_SIZE_LIMIT)) {
                 const tool = toolMap[st.name];
-                const desc = String(tool?.toolInfo?.function?.description || '').replace(/\s+/g, ' ').trim().slice(0, 100);
-                rows.push(`  ${st.name}${st.on ? '' : '[关]'}${desc ? `：${desc}` : ''}`);
+                const desc = String(tool?.toolInfo?.function?.description || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+                rows.push(`  ${st.name}${st.on ? '' : ' [off]'}${desc ? `: ${desc}` : ''}`);
             }
-            if (states.length > MCP_PAGE_SIZE_LIMIT) rows.push(`  …共 ${states.length} 个工具`);
+            if (states.length > MCP_PAGE_SIZE_LIMIT) rows.push(`  ... ${states.length} tools total`);
         }
-        if (rows.length === 0) return '没有匹配的 MCP 服务器';
+        if (rows.length === 0) return 'No MCP servers matched the query.';
         const size = Math.min(Math.max(parseInt(page_size, 10) || 20, 1), MCP_PAGE_SIZE_LIMIT);
         const current = Math.max(parseInt(page, 10) || 1, 1);
         const totalPages = Math.max(1, Math.ceil(rows.length / size));
         const slice = rows.slice((current - 1) * size, current * size);
-        const lines = [`MCP 服务器（共 ${servers.length} 台，当前平台可用）`, ...slice];
-        lines.push(`当前第 ${current} 页，共 ${totalPages} 页；使用 search_tools(mcp=服务器名) 查看参数，call_tool 执行。`);
+        const lines = [`MCP servers (${servers.length} available on this platform)`, ...slice];
+        lines.push(`Page ${current} of ${totalPages}. Use search_tools(mcp=<server-name>) for parameter docs, then call_tool to execute.`);
         return lines.join('\n');
     };
 
@@ -249,17 +251,17 @@ export function registerDispatchTools() {
         type: "function",
         function: {
             name: "call_tool",
-            description: `执行指定名称的工具并返回结果。可调用当前会话所有已开启且当前平台可用的工具，包括未直接在函数列表中提供的工具；工具参数格式请先用 search_tools 查询。`,
+            description: `Execute the tool with the given name and return its result. Any enabled tool available on the current platform can be called, including tools not directly exposed in the function list; query search_tools first for the tool's parameter format.`,
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: "string",
-                        description: "要执行的工具名称"
+                        description: "Name of the tool to execute"
                     },
                     arguments: {
                         type: "object",
-                        description: "传给该工具的参数对象，字段与 search_tools 返回的参数说明一致"
+                        description: "Argument object passed to the tool; fields match the parameter documentation returned by search_tools"
                     }
                 },
                 required: ["name"]
@@ -270,23 +272,23 @@ export function registerDispatchTools() {
     callTool.solve = async (ctx, msg, session: Session, args) => {
         const { name, arguments: rawArgs } = args || {};
         const toolName = String(name || '').trim();
-        if (!toolName) return 'call_tool 缺少工具名 name';
+        if (!toolName) return 'call_tool requires a tool name (name).';
 
         const execution = await executeTool(toolName, ctx, msg, session, { source: 'call_tool', args: rawArgs ?? {} });
         if (!execution.ok) return callToolErrorText(toolName, execution.failure);
 
         const content = execution.content ?? '';
         if (execution.contentParts && execution.contentParts.length > 0) {
-            return { text: `工具 ${toolName} 返回：\n${content}`, contentParts: execution.contentParts };
+            return { text: `${toolName} returned:\n${content}`, contentParts: execution.contentParts };
         }
-        return `工具 ${toolName} 返回：\n${content}`;
+        return `${toolName} returned:\n${content}`;
     };
 }
 
 /** 输出单个工具的完整详情（名称/描述/来源/参数 schema/调用方式）；来源统一用 groupDisplay 口径 */
 function formatToolDetail(tool: ToolInfo, index: number): string {
     const source = Tool.groupDisplay(toolMap[tool.function.name]);
-    return `${index}. ${tool.function.name}（来源：${source}）\n描述：${tool.function.description}\n参数（JSON Schema）：\n${JSON.stringify(tool.function.parameters, null, 2)}\n调用方式：使用 call_tool，参数为 {"name": "${tool.function.name}", "arguments": {…}}`;
+    return `${index}. ${tool.function.name} (source: ${source})\nDescription: ${tool.function.description}\nParameters (JSON Schema):\n${JSON.stringify(tool.function.parameters, null, 2)}\nCall it with call_tool, arguments: {"name": "${tool.function.name}", "arguments": {…}}`;
 }
 
 /** 统计工具被命中的关键词数（匹配名称或描述） */

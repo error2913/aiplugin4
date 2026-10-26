@@ -5,5 +5,5 @@ import { registerRawTools } from "./tool_raw";
 
 /** 注册 raw 下全部工具原文读取工具（分类：原文检索） */
 export function registerRawToolSet() {
-    Tool.withCategory('原文检索', registerRawTools);
+    Tool.withCategory('Raw search', registerRawTools);
 }

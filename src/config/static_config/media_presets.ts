@@ -59,7 +59,7 @@ function openAiCompatTts(opts: { response_format?: string; voice?: string; speed
     };
     if (opts.speed) body.speed = '{rate}';
     const params: Record<string, MediaPresetParam> = {};
-    if (opts.voice) params.voice = { type: 'string', default: opts.voice, desc: opts.desc ?? '音色' };
+    if (opts.voice) params.voice = { type: 'string', default: opts.voice, desc: opts.desc ?? 'Voice' };
     return {
         body,
         request: { urlSuffix: '/audio/speech' },
@@ -80,7 +80,7 @@ function openAiCompatImage(opts: { response_format?: string; size?: string; data
     };
     if (opts.response_format) body.response_format = opts.response_format;
     const params: Record<string, MediaPresetParam> = {};
-    if (opts.size) params.size = { type: 'string', default: opts.size, desc: '尺寸，如 1024x1024' };
+    if (opts.size) params.size = { type: 'string', default: opts.size, desc: 'Size, e.g. 1024x1024' };
     return {
         body,
         request: { urlSuffix: '/images/generations' },
@@ -97,7 +97,7 @@ const GOOGLE_CLOUD_TTS: MediaPreset = {
     },
     request: { auth_header_name: 'x-goog-api-key', url: '{origin}/v1beta1/text:synthesize' },
     response: { data_path: 'audioContent', data_type: 'base64' },
-    params: { voice: { type: 'string', default: 'zh-CN-Chirp3-HD-Aoqi', desc: '音色（Google 音色名）' } },
+    params: { voice: { type: 'string', default: 'zh-CN-Chirp3-HD-Aoqi', desc: 'Voice (Google voice name)' } },
 };
 
 /** 百炼原生（dashscope）：wanx 系列异步提交 + 轮询 */
@@ -122,7 +122,7 @@ const DASHSCOPE_WANX: MediaPreset = {
         success_values: ['SUCCEEDED', 'SUCCESS'],
         failure_values: ['FAILED'],
     },
-    params: { size: { type: 'string', default: '1024*1024', desc: '尺寸（百炼用 * 分隔，如 1024*1024）' } },
+    params: { size: { type: 'string', default: '1024*1024', desc: 'Size (DashScope uses * as separator, e.g. 1024*1024)' } },
 };
 
 /** 百炼原生（dashscope）：qwen-image 系列同步返回 */
@@ -134,7 +134,7 @@ const DASHSCOPE_QWEN_IMAGE: MediaPreset = {
     },
     request: { url: '{origin}/api/v1/services/aigc/multimodal-generation/generation' },
     response: { data_path: 'output.choices.0.message.content.0.image' },
-    params: { size: { type: 'string', default: '1024*1024', desc: '尺寸（百炼用 * 分隔，如 1024*1024）' } },
+    params: { size: { type: 'string', default: '1024*1024', desc: 'Size (DashScope uses * as separator, e.g. 1024*1024)' } },
 };
 
 /**
@@ -168,9 +168,9 @@ const DASHSCOPE_QWEN_AUDIO_TTS: MediaPreset = {
         // ⚠ 音色**按代际区分**，不通用：`longanhuan_v3.1` 属 3.1 族、`longanhuan_v3.6` 属 3.0 族。
         // 用错代际不会报「音色不存在」，而是 `[cosyvoice:]Engine error [411]`（实测），很难查。
         // 默认取 3.1 族（当前主力）；用 3.0 模型时请自行改成对应音色。
-        voice: { type: 'string', default: 'longanhuan_v3.1', desc: '音色（须与模型代际匹配，见官方音色列表）' },
-        format: { type: 'string', enum: ['mp3', 'wav', 'pcm', 'opus'], default: 'mp3', desc: '音频编码格式' },
-        sample_rate: { type: 'number', default: 24000, desc: '采样率（Hz）' },
+        voice: { type: 'string', default: 'longanhuan_v3.1', desc: 'Voice (must match the model generation; see the official voice list)' },
+        format: { type: 'string', enum: ['mp3', 'wav', 'pcm', 'opus'], default: 'mp3', desc: 'Audio encoding format' },
+        sample_rate: { type: 'number', default: 24000, desc: 'Sample rate (Hz)' },
     },
 };
 
@@ -195,8 +195,8 @@ const DASHSCOPE_QWEN3_TTS: MediaPreset = {
     request: { url: '{origin}/api/v1/services/aigc/multimodal-generation/generation' },
     response: { data_path: 'output.audio.url', data_type: 'url' },
     params: {
-        voice: { type: 'string', default: 'Cherry', desc: '音色，如 Cherry / Serena' },
-        language_type: { type: 'string', default: 'Chinese', desc: '语种；Auto 让模型自动判断' },
+        voice: { type: 'string', default: 'Cherry', desc: 'Voice, e.g. Cherry / Serena' },
+        language_type: { type: 'string', default: 'Chinese', desc: 'Language; Auto lets the model decide' },
     },
 };
 
@@ -222,8 +222,8 @@ const DASHSCOPE_COSYVOICE: MediaPreset = {
     request: { url: '{origin}/api/v1/services/audio/tts/SpeechSynthesizer' },
     response: { data_path: 'output.audio.url', data_type: 'url' },
     params: {
-        voice: { type: 'string', default: 'longanyang', desc: '音色，见官方音色列表' },
-        format: { enum: ['mp3', 'wav', 'pcm', 'opus'], default: 'mp3', desc: '音频格式' },
+        voice: { type: 'string', default: 'longanyang', desc: 'Voice; see the official voice list' },
+        format: { enum: ['mp3', 'wav', 'pcm', 'opus'], default: 'mp3', desc: 'Audio format' },
     },
 };
 
@@ -278,9 +278,9 @@ export const MEDIA_PRESETS: Record<MediaPresetUse, Record<string, MediaPreset[]>
             request: { urlSuffix: '/t2a_v2' },
             response: { data_path: 'data.audio', data_type: 'hex' },
             params: {
-                voice: { type: 'string', default: 'female-cq', desc: '音色（MiniMax voice_id）' },
-                volume: { type: 'number', desc: '音量' },
-                pitch: { type: 'number', desc: '音调' },
+                voice: { type: 'string', default: 'female-cq', desc: 'Voice (MiniMax voice_id)' },
+                volume: { type: 'number', desc: 'Volume' },
+                pitch: { type: 'number', desc: 'Pitch' },
             },
         }],
         // Fish Audio v3
@@ -288,7 +288,7 @@ export const MEDIA_PRESETS: Record<MediaPresetUse, Record<string, MediaPreset[]>
             body: { text: '{text}', voiceId: '{voice}', modelId: '{model}', format: 'mp3' },
             request: { url: '{origin}/api/open/v3/speech/tts' },
             response: { data_type: 'base64' },
-            params: { voice: { type: 'string', default: '53a27b24-38c9-47fd-9dc6-dd8fcd55f0a9', desc: '音色 ID' } },
+            params: { voice: { type: 'string', default: '53a27b24-38c9-47fd-9dc6-dd8fcd55f0a9', desc: 'Voice ID' } },
         }],
         // 百度短文本在线合成（语音技术，非 OpenAI 兼容）：表单编码 + access_token 进 body。
         // 鉴权用 access_token（aip.baidubce.com/oauth/2.0/token 由 API Key + Secret Key 换取，30 天有效），
@@ -315,10 +315,10 @@ export const MEDIA_PRESETS: Record<MediaPresetUse, Record<string, MediaPreset[]>
             // 失败：HTTP 200 + application/json，业务错误在 err_msg（err_no 一律 502，无区分度）
             response: { data_type: 'base64', error_message_path: 'err_msg' },
             params: {
-                voice: { type: 'string', default: '5003', desc: '发音人 per 编号（5003=度逍遥精品，0=度小美，4189=度涵竹大模型音库；完整列表见百度音色列表文档）' },
-                rate: { type: 'string', default: '5', desc: '语速 spd，0~15，5 为中速' },
-                pitch: { type: 'string', default: '5', desc: '音调 pit，0~15，5 为中调' },
-                volume: { type: 'string', default: '5', desc: '音量 vol，基础音库 0~9、其他音库 0~15，5 为中音量' },
+                voice: { type: 'string', default: '5003', desc: 'Speaker per number (5003=度逍遥精品, 0=度小美, 4189=度涵竹大模型音库; see the Baidu voice list doc for the full list)' },
+                rate: { type: 'string', default: '5', desc: 'Speed spd, 0-15, 5 is medium speed' },
+                pitch: { type: 'string', default: '5', desc: 'Pitch pit, 0-15, 5 is medium pitch' },
+                volume: { type: 'string', default: '5', desc: 'Volume vol, basic voice library 0-9, other libraries 0-15, 5 is medium volume' },
             },
         }],
         // ElevenLabs：音色 ID 直接进地址，鉴权头为 xi-api-key
@@ -326,7 +326,7 @@ export const MEDIA_PRESETS: Record<MediaPresetUse, Record<string, MediaPreset[]>
             body: { text: '{text}', model_id: '{model}', voice_settings: { stability: 0.5, similarity_boost: 0.75 } },
             request: { auth_header_name: 'xi-api-key', url: '{origin}/v1/text-to-speech/{voice}' },
             response: { data_type: 'base64' },
-            params: { voice: { type: 'string', default: '21m00Tcm4TlvDq8ikWAM', desc: '音色 ID（ElevenLabs voice_id）' } },
+            params: { voice: { type: 'string', default: '21m00Tcm4TlvDq8ikWAM', desc: 'Voice ID (ElevenLabs voice_id)' } },
         }],
     },
     'image-generation': {
@@ -344,8 +344,8 @@ export const MEDIA_PRESETS: Record<MediaPresetUse, Record<string, MediaPreset[]>
             ...openAiCompatImage({ data_path: 'data.0.url' }),
             body: { model: '{model}', prompt: '{prompt}', size: '{size}', quality: '{quality}' },
             params: {
-                size: { type: 'string', default: '1024x1024', desc: '尺寸，如 1024x1024' },
-                quality: { enum: ['hd', 'standard'], desc: '画质' },
+                size: { type: 'string', default: '1024x1024', desc: 'Size, e.g. 1024x1024' },
+                quality: { enum: ['hd', 'standard'], desc: 'Quality' },
             },
         }],
         // 百炼（**用户只该看到这一个入口**）。
@@ -363,7 +363,7 @@ export const MEDIA_PRESETS: Record<MediaPresetUse, Record<string, MediaPreset[]>
             body: { model: '{model}', prompt: '{prompt}', image_size: '{size}', batch_size: 1, negative_prompt: '{negative_prompt}' },
             request: { urlSuffix: '/images/generations' },
             response: { data_path: 'images.0.url' },
-            params: { size: { type: 'string', default: '1024x1024', desc: '图片尺寸，如 1024x1024' } },
+            params: { size: { type: 'string', default: '1024x1024', desc: 'Image size, e.g. 1024x1024' } },
         }],
         // Google Gemini 原生 generateContent
         gemini: [{

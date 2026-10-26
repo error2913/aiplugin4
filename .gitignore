@@ -23,3 +23,6 @@ __pycache__/
 docs-site/site-src/
 docs-site/site/
 .mkdocs-venv/
+
+# 提示词快照（npm run prompt:snapshot 生成的本地对比产物）
+test-reports/prompt-baseline/

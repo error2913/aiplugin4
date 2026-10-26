@@ -24,19 +24,21 @@ export function registerMusicPlay() {
         type: "function",
         function: {
             name: "search_music",
-            description: "搜索音乐并返回可交给 call_ob11_api 的 music 消息段，不会自动发送。",
+            description: "Search music and return a music message segment for call_ob11_api; does not send automatically.",
             parameters: {
                 type: "object",
                 properties: {
-                    platform: { type: "string", enum: ["网易云", "qq"], description: "音乐平台" },
-                    song_name: { type: "string", description: "歌曲名称" }
+                    platform: { type: "string", enum: ["netease", "qq"], description: "Music platform" },
+                    song_name: { type: "string", description: "Song name" }
                 },
                 required: ["platform", "song_name"]
             }
         }
     });
     tool.solve = async (_ctx, _msg, _session, args) => {
-        const platform = String(args.platform || "");
+        // 参数枚举用英文键 netease；配置里的平台值仍是「网易云」，此处做映射（qq 两边一致）
+        const requested = String(args.platform || "");
+        const platform = requested === "netease" ? "网易云" : requested;
         const songName = String(args.song_name || "");
         if (!songName) return "歌曲名称不能为空";
         const config = getMusicConfig(platform);

@@ -11,7 +11,7 @@ import type {
     ReflectSynthesizer,
 } from "./types";
 
-const NO_MEMORY_TEXT = '暂无足够记忆进行推理';
+const NO_MEMORY_TEXT = 'Not enough memory to reason from yet';
 const FAST_PATH_SCORE = 0.5;
 
 export interface ReflectHost {
@@ -102,9 +102,9 @@ export async function reflect(
         if (opts.strict) text = '';
         else if (hasEvidence) {
             text = [
-                ...mentalModels.map(m => `【心智模型】${m.sourceQuery}\n${m.content}`),
-                ...observations.map(o => `【观察】${o.text}`),
-                ...memories.map(m => `【事实】${m.text}`),
+                ...mentalModels.map(m => `Mental model: ${m.sourceQuery}\n${m.content}`),
+                ...observations.map(o => `Observation: ${o.text}`),
+                ...memories.map(m => `Fact: ${m.text}`),
             ].join('\n');
         } else {
             text = NO_MEMORY_TEXT;
@@ -122,10 +122,10 @@ export function scopeNoteForBank(bankId: string): string {
     const sep = bankId.indexOf('_');
     const prefix = sep > 0 ? bankId.slice(0, sep) : '';
     const raw = sep > 0 ? bankId.slice(sep + 1) : bankId;
-    const kindLabel = prefix === 'group' ? '群聊' : prefix === 'user' ? '私聊' : '会话';
+    const kindLabel = prefix === 'group' ? 'group' : prefix === 'user' ? 'private' : 'conversation';
     const colon = raw.indexOf(':');
     const platform = colon > 0 ? raw.slice(0, colon) : '';
     return platform
-        ? `当前范围：平台=${platform}，会话=${kindLabel} ${raw}`
-        : `当前范围：会话=${kindLabel} ${raw}`;
+        ? `Current scope: platform=${platform}, conversation=${kindLabel} ${raw}`
+        : `Current scope: conversation=${kindLabel} ${raw}`;
 }

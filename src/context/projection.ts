@@ -8,6 +8,8 @@
 // - 应用可见性/编辑（epoch/redact/supersede/edit），不注入摘要（投影是渲染窗口，不是请求体）；
 // - 非文本 Part 用规范文本投影（[img:…]/[at:…]）表示，保持旧消费者可读；
 // - 真实原文回查走 recall（e:<seq>），不在这里塞 rawText。
+import { SYSTEM_NAME } from "../utils/protocol";
+
 import { renderText } from "./content/render";
 import type { ConversationEvent, Part } from "./events";
 import type { ContextSnapshot } from "./store";
@@ -54,7 +56,7 @@ function systemItem(event: ConversationEvent, index: ReturnType<typeof buildReco
     const item: SystemUserMessageItem = {
         text: partsText(applyEdit(event, index)),
         time: Number(e.at ?? 0),
-        systemName: e.systemName || '事件',
+        systemName: e.systemName || SYSTEM_NAME.event,
     };
     if (e.eventType !== undefined) item.eventType = e.eventType;
     if (e.raw !== undefined) item.raw = e.raw;
@@ -114,7 +116,7 @@ function toolGroupMessages(unit: ConversationUnit, index: ReturnType<typeof buil
         out.push({
             role: 'assistant',
             contentItems: [{
-                text: `（工具 ${missing.map(c => c.name || c.callId).join('、')} 调用未完成）`,
+                text: `Tool calls unfinished: ${missing.map(c => c.name || c.callId).join(', ')}`,
                 time: Number(missing[0].at ?? 0),
                 messageId: '',
             }],

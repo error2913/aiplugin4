@@ -126,11 +126,11 @@ tests['subagent.rules.stopReasonText'] = () => {
 
 tests['subagent.rules.settleNoticeText'] = () => {
     const done = settleNoticeText('sub:QQ:1:2', '调研', makeResult({ output: '结论A' }));
-    assert.ok(done.includes('已完成') && done.includes('结论：结论A'));
+    assert.equal(done, 'Sub-agent sub:QQ:1:2 (调研) completed\nResult: 结论A');
     const err = settleNoticeText('sub:QQ:1:2', '调研', makeResult({ stopReason: 'refusal' }));
-    assert.ok(err.includes('已结束（refusal）') && err.includes('subagent declined the task'));
+    assert.equal(err, 'Sub-agent sub:QQ:1:2 (调研) ended (refusal)\nsubagent declined the task');
     const long = settleNoticeText('s', 'l', makeResult({ output: 'x'.repeat(5000) }), 100);
-    assert.ok(long.includes('已截断'), '超长截断标记');
+    assert.ok(long.endsWith('… (truncated; use read_raw to read more)'), '超长截断标记');
 };
 
 tests['subagent.rules.delegationAllowed'] = () => {
@@ -397,17 +397,17 @@ tests['subagent.service.cleanTerminated'] = async () => {
 tests['subagent.childSystem.sections'] = () => {
     const content = buildChildSystemContent({ instruction: '你是只读研究员' });
     assert.ok(content.startsWith('你是只读研究员'), 'instruction 优先');
-    assert.ok(content.includes('工具能力'), '默认含工具语义引导');
+    assert.ok(content.includes('You have the same tool capabilities as the main conversation'), '默认含工具语义引导');
     const pe = buildChildSystemContent({
         instruction: 'x', promptEngineering: true, nowText: '2026-08-19 10:00',
         toolBlock: '## 可用工具\ntool-a',
     });
-    assert.ok(pe.includes('## 当前时间\n2026-08-19 10:00'));
+    assert.ok(pe.includes('## Current time\n2026-08-19 10:00'));
     assert.ok(pe.includes('## 可用工具\ntool-a'));
     assert.ok(pe.includes('```function'), '提示词工程模式含调用格式说明');
     const noGuidance = buildChildSystemContent({ instruction: 'x', toolGuidance: false });
-    assert.ok(!noGuidance.includes('工具能力'), '可关引导');
-    assert.ok(!buildChildSystemContent({ instruction: 'x' }).includes('## 当前时间'), '无时间不渲染');
+    assert.ok(!noGuidance.includes('same tool capabilities'), '可关引导');
+    assert.ok(!buildChildSystemContent({ instruction: 'x' }).includes('## Current time'), '无时间不渲染');
 };
 
 tests['subagent.wake.decision'] = () => {

@@ -6,7 +6,7 @@ export function init() {
     const judgeAgent = Agent.get("judge_agent");
     judgeAgent.name = "judge_agent";
     judgeAgent.description = "评分智能体";
-    judgeAgent.instruction = "你是一个群聊插话质量评判员，对消息进行五维评分并输出 JSON。";
+    judgeAgent.instruction = "You are a group-chat interjection quality rater; rate messages on five dimensions and output JSON. Write the reason in the language of the conversation.";
     judgeAgent.use = "judge";
     Agent.save(judgeAgent);
     return judgeAgent;

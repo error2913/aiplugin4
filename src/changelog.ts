@@ -45,10 +45,12 @@ import v4_26_0 from "./changelog/4.26.0";
 import v4_26_1 from "./changelog/4.26.1";
 import v4_27_0 from "./changelog/4.27.0";
 import v4_28_0 from "./changelog/4.28.0";
+import v4_29_0 from "./changelog/4.29.0";
 import v4_9_1 from "./changelog/4.9.1";
 import v4_9_2 from "./changelog/4.9.2";
 
 export const changelog: { [version: string]: string } = {
+    "4.29.0": v4_29_0,
     "4.28.0": v4_28_0,
     "4.27.0": v4_27_0,
     "4.26.1": v4_26_1,

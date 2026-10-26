@@ -5,6 +5,7 @@
 import { markMediaNotified } from "../core/ports/media_notice";
 import { logger } from "../logger";
 import { getRecordMessageId } from "../utils/message_id";
+import { SYSTEM_NAME } from "../utils/protocol";
 import { transformArrayToContent } from "../utils/string";
 import type { MessageSegment } from "../utils/string";
 
@@ -52,7 +53,7 @@ export async function flushPending(session: Session): Promise<boolean> {
     for (const p of pending) {
         if (p.kind === 'trigger') hasTrigger = true;
         await session.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
-        if (p.systemReason) await session.context.addSystemUserMessage(p.systemReason, '触发原因提示');
+        if (p.systemReason) await session.context.addSystemUserMessage(p.systemReason, SYSTEM_NAME.trigger);
     }
     session.save();
     session.clearPending();
@@ -61,7 +62,7 @@ export async function flushPending(session: Session): Promise<boolean> {
 
 /**
  * 把后台完成通知队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数。
- * 两类来源分开口径：媒体生成任务用 `[system:生成任务]`，子代理结算用 `[system:子代理]`
+ * 两类来源分开口径：媒体生成任务用 `[system:media-task]`，子代理结算用 `[system:subagent]`
  * 并附 `raw: subagent-notice`（供生命周期清扫识别）。
  */
 export async function flushNotices(session: Session): Promise<number> {
@@ -70,7 +71,7 @@ export async function flushNotices(session: Session): Promise<number> {
     session.noticeQueue = [];
     for (const n of queue) {
         if (n.kind === 'media') {
-            await session.context.addSystemUserMessage(n.text, '生成任务');
+            await session.context.addSystemUserMessage(n.text, SYSTEM_NAME.mediaTask);
             // 真正呈现给 AI 后才回置 notified：这是"结果已送达、不再需要任何补发"的唯一时机。
             // 放在入队时置位会谎报成功，让重载补发与轮末补触发两条兜底同时失效（原实现的永久等待）。
             if (n.taskId) {
@@ -82,9 +83,9 @@ export async function flushNotices(session: Session): Promise<number> {
             }
             continue;
         }
-        const tag = n.from && n.from !== '' ? `子代理 ${n.from} ` : '子代理 ';
+        const tag = n.from && n.from !== '' ? `Sub-agent ${n.from} ` : 'Sub-agent ';
         // raw 标记：子代理生命周期绑定（父上下文淘汰该 notice 时清扫对应记录）
-        await session.context.addSystemUserMessage(tag + n.text, '子代理', {
+        await session.context.addSystemUserMessage(tag + n.text, SYSTEM_NAME.subagent, {
             raw: { kind: 'subagent-notice', childId: n.from || '' },
         });
     }

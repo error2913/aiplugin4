@@ -67,7 +67,7 @@ function evSystem(seq: number, text = `s${seq}`, dedupKey = `recall:${seq}`): Sy
     return {
         ...eventBase(seq, `e:${dedupKey}`),
         kind: 'event',
-        systemName: '事件提示',
+        systemName: 'group-event',
         parts: [{ type: 'text', text }],
     };
 }

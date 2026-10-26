@@ -111,11 +111,11 @@ function messageSummary(m: MessageType): string {
     if (type === 'tool_calls') {
         const tcm = m as ToolCallsMessage;
         const names = (tcm.toolCalls || []).map(tc => tc.function && tc.function.name).filter(Boolean);
-        return `[工具调用] ${names.join(', ')}`;
+        return `[tool call] ${names.join(', ')}`;
     }
     if (type === 'tool_callback') {
         const tcb = m as ToolCallbackMessage;
-        return `[工具返回] ${tcb.toolName || '未知'}`;
+        return `[tool result] ${tcb.toolName || 'unknown'}`;
     }
     return '';
 }
@@ -490,20 +490,20 @@ export function registerContextEditTools() {
         function: {
             name: 'context_edit_list',
             description:
-                '列出某个会话上下文的结构化条目（带稳定序号 idx），用于后续 context_edit_replace 精准定位。' +
-                '只读，不改动任何内容。\n' +
-                '目标会话：缺省=当前会话；跨会话用 bot_id + session_id（BotID 如 QQ:123，会话ID 如 QQ-Group:456 或 QQ:789）；也可传 bot_id 或 session_id 单字段（完整 "BotID/会话ID" 路径亦可）。\n' +
-                '可加 role（user/assistant/tool）、keyword、time_from/time_to 过滤。序号 idx 即消息在上下文数组中的下标，仅在「list 后同一轮内马上 replace」的短生命周期内稳定。',
+                'List the structured entries of a session context (with stable sequence numbers idx) for precise targeting by context_edit_replace. ' +
+                'Read-only; changes nothing.\n' +
+                'Target session: defaults to the current session; for cross-session use bot_id + session_id (BotID such as QQ:123, session ID such as QQ-Group:456 or QQ:789); bot_id or session_id alone is also accepted (a full "BotID/sessionID" path also works).\n' +
+                'Optional filters: role (user/assistant/tool), keyword, time_from/time_to. idx is the message index in the context array and is stable only within the short lifetime of "list then immediately replace in the same turn".',
             parameters: {
                 type: 'object',
                 properties: {
-                    bot_id: { type: 'string', description: '可选：目标 Bot 端点 ID（含平台前缀，如 QQ:123456）' },
-                    session_id: { type: 'string', description: '可选：目标会话 ID（如 QQ-Group:7890 或 QQ:111）' },
-                    role: { type: 'string', description: '可选：user / assistant / tool（tool_calls 归为 assistant(tool_calls)）' },
-                    keyword: { type: 'string', description: '可选：正文子串过滤（忽略大小写）' },
-                    time_from: { type: 'integer', description: '可选：起始时间（秒级时间戳）' },
-                    time_to: { type: 'integer', description: '可选：截止时间（秒级时间戳）' },
-                    limit: { type: 'integer', description: `可选：返回条目上限，默认 ${DEFAULT_LIMIT}，最大 ${MAX_LIMIT}` },
+                    bot_id: { type: 'string', description: 'Optional: target bot endpoint ID (with platform prefix, e.g. QQ:123456)' },
+                    session_id: { type: 'string', description: 'Optional: target session ID (e.g. QQ-Group:7890 or QQ:111)' },
+                    role: { type: 'string', description: 'Optional: user / assistant / tool (tool_calls count as assistant(tool_calls))' },
+                    keyword: { type: 'string', description: 'Optional: substring filter on the body text (case-insensitive)' },
+                    time_from: { type: 'integer', description: 'Optional: start time (Unix seconds)' },
+                    time_to: { type: 'integer', description: 'Optional: end time (Unix seconds)' },
+                    limit: { type: 'integer', description: `Optional: max entries to return, default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}` },
                 },
                 required: [],
             },
@@ -573,21 +573,21 @@ export function registerContextEditTools() {
         function: {
             name: 'context_edit_replace',
             description:
-                '批量替换（纯文本字面量或正则）目标会话上下文正文，可传空串 replacement 删除匹配文本。会同步修改原文副本并持久化。' +
-                '这是修改 AI 自身/他人记忆的敏感操作，不可自动回滚。\n' +
-                '务必先用 context_edit_list 定位拿到准确序号/范围，再用 scope 精准限定，避免误改。\n' +
-                '目标会话：缺省=当前会话；跨会话用 bot_id + session_id（与 context_edit_list 一致）。\n' +
-                'scope：all（默认全部）/ role:<role> / idx:<n> / idx:<a>-<b>。只替换正文 text 字段；压缩/截断原文副本（rawText/rawItems）同步修改。',
+                'Batch-replace (plain-text literal or regex) the body text of a target session context; an empty replacement deletes the matched text. Raw copies are updated in sync and persisted. ' +
+                'This is a sensitive operation that modifies the AI own/others memory and cannot be rolled back automatically.\n' +
+                'Always locate the exact sequence numbers/range with context_edit_list first, then narrow it precisely with scope to avoid unintended edits.\n' +
+                'Target session: defaults to the current session; for cross-session use bot_id + session_id (same as context_edit_list).\n' +
+                'scope: all (default, everything) / role:<role> / idx:<n> / idx:<a>-<b>. Only the body text field is replaced; compressed/truncated raw copies (rawText/rawItems) are updated in sync.',
             parameters: {
                 type: 'object',
                 properties: {
-                    bot_id: { type: 'string', description: '可选：目标 Bot 端点 ID（含平台前缀，如 QQ:123456）' },
-                    session_id: { type: 'string', description: '可选：目标会话 ID（如 QQ-Group:7890 或 QQ:111）' },
-                    scope: { type: 'string', description: '可选：替换范围 all / role:<role> / idx:<n> / idx:<a>-<b>，默认 all' },
-                    search: { type: 'string', description: '必填：要匹配的纯文本字面量（或正则源，见 match）' },
-                    replacement: { type: 'string', description: '必填：替换成的文本（空串=删除匹配文本）' },
-                    match: { type: 'string', description: '可选：literal（默认，子串替换）/ regex（正则，全局，不支持捕获组反向引用）' },
-                    count: { type: 'integer', description: '可选：最多替换处数，缺省=全部命中处' },
+                    bot_id: { type: 'string', description: 'Optional: target bot endpoint ID (with platform prefix, e.g. QQ:123456)' },
+                    session_id: { type: 'string', description: 'Optional: target session ID (e.g. QQ-Group:7890 or QQ:111)' },
+                    scope: { type: 'string', description: 'Optional: replacement scope: all / role:<role> / idx:<n> / idx:<a>-<b>, default all' },
+                    search: { type: 'string', description: 'Required: plain-text literal to match (or a regex source, see match)' },
+                    replacement: { type: 'string', description: 'Required: replacement text (empty string deletes the matched text)' },
+                    match: { type: 'string', description: 'Optional: literal (default, substring replacement) / regex (global, capture-group backreferences not supported)' },
+                    count: { type: 'integer', description: 'Optional: max replacements; omit to replace all matches' },
                 },
                 required: ['search', 'replacement'],
             },

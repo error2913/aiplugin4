@@ -103,7 +103,7 @@ function genMessage(rnd: () => number, seq: number, openCalls: string[], nextCal
         const n = 1 + Math.floor(rnd() * 3);
         for (let i = 0; i < n; i++) {
             if (rnd() < 0.25) {
-                items.push({ text: `系统事件${seq}_${i}`, time: seq, systemName: '事件', eventType: 'recall', raw: { x: 1 } });
+                items.push({ text: `系统事件${seq}_${i}`, time: seq, systemName: 'group-event', eventType: 'recall', raw: { x: 1 } });
             } else if (rnd() < 0.2) {
                 // 压缩块条目：原文在 rawItems
                 items.push({
@@ -328,7 +328,7 @@ async function runRound(seed: number, round: number) {
                 await ctx.addUserMessage({ endPoint: { userId: 'QQ:9001' }, player: { userId: 'QQ:9001' }, group: { groupId: sid } } as any, text, `QQ:${1 + Math.floor(rnd() * 3)}`, `ing_${step}`);
             } else if (action < 0.72) {
                 // 系统消息（不经 ingestChain —— 真实 pipeline 就是这样）
-                ctx.addSystemUserMessage(`系统提示${step}`, '事件');
+                ctx.addSystemUserMessage(`系统提示${step}`, 'group-event');
             } else if (action < 0.80) {
                 ctx.trimToWindow();
             } else if (action < 0.86) {

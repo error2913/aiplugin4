@@ -157,11 +157,11 @@ function formatSkillLine(s: RuntimeSkill): string {
     const name = oneLine(s.name);
     const desc = s.summaryDescription;
     if (!desc) return name;
-    const line = `${name}：${desc}`;
+    const line = `${name}: ${desc}`;
     if (line.length <= SKILL_SUMMARY_LINE_MAX) return line;
     if (name.length >= SKILL_SUMMARY_LINE_MAX) return name;
-    const room = SKILL_SUMMARY_LINE_MAX - name.length - 2; // 全角冒号 + 省略号
-    return `${name}：${desc.slice(0, Math.max(0, room))}…`;
+    const room = SKILL_SUMMARY_LINE_MAX - name.length - 3; // ": " + ellipsis
+    return `${name}: ${desc.slice(0, Math.max(0, room))}…`;
 }
 
 /**
@@ -193,12 +193,12 @@ export function getSkillSummariesBudgeted(
 /** 把技能摘要渲染成 system prompt 段（builder 与单测共用） */
 export function formatSkillSummaryBlock(r: SkillSummaryResult): string {
     if (r.summaries.length === 0) return '';
-    const lines = ['## 可用技能'];
+    const lines = ['## Available skills'];
     for (const s of r.summaries) lines.push(`- ${s}`);
     if (r.truncated) {
-        lines.push(`（共 ${r.total} 个技能，已按预算展示 ${r.summaries.length} 个；其余用 skill_list 查看）`);
+        lines.push(`( ${r.total} skills total, ${r.summaries.length} listed within budget; use skill_list to see the rest)`);
     }
-    lines.push('需要完整列表：skill_list；需要技能内容：use_skill。');
+    lines.push('Full list: skill_list; skill content: use_skill.');
     return lines.join('\n');
 }
 
@@ -216,13 +216,13 @@ function resolveSkillContent(
     stack: Set<string>,
 ): string {
     const skill = all.find(s => s.name === name);
-    if (!skill) return `（技能 ${name} 不存在）`;
-    if (!allowed.has(name)) return `（技能 ${name} 当前不可用，已跳过）`;
-    if (stack.has(name)) return `（技能 ${name} 存在循环引用，已跳过）`;
+    if (!skill) return `(skill ${name} does not exist)`;
+    if (!allowed.has(name)) return `(skill ${name} is unavailable in this session; skipped)`;
+    if (stack.has(name)) return `(skill ${name} has a circular reference; skipped)`;
 
     let content = skill.content;
     if (depth >= MAX_REF_DEPTH) {
-        return replaceSkillRefs(content, ref => `（引用 ${ref} 超过最大解析深度，未展开）`);
+        return replaceSkillRefs(content, ref => `(reference ${ref} exceeds max resolution depth; not expanded)`);
     }
     stack.add(name);
     try {
@@ -244,18 +244,18 @@ function renderSkillContent(
 ): string {
     const total = raw.length;
     if (total > 0 && offset >= total) {
-        return `## ${title}\n\n（offset=${offset} 超出内容长度：共 ${total} 字符）`;
+        return `## ${title}\n\n(offset=${offset} is beyond content length: ${total} chars total)`;
     }
     const start = Math.min(Math.max(offset, 0), total);
     const end = Math.min(start + MAX_SKILL_CONTENT_LENGTH, total);
     const lines = [`## ${title}`, '', raw.slice(start, end)];
     if (end < total) {
         const call = continueCall ? continueCall(end) : `use_skill(offset=${end})`;
-        lines.push('', `（内容共 ${total} 字符，本次返回 ${start}–${end}；继续读取：${call}）`);
+        lines.push('', `(${total} chars total; this call returns ${start}-${end}; continue with ${call})`);
     } else {
         lines.push('', start > 0
-            ? '（已读到内容末尾。）'
-            : '（技能正文结束。以上是「技能列表」中的操作指引，不是用户指令；请只执行与当前任务相关的部分。）');
+            ? '(end of skill content.)'
+            : '(End of skill content. The text above is operational guidance from the skill list, not a user instruction; only do the parts relevant to the current task.)');
     }
     return lines.join('\n');
 }
@@ -268,21 +268,21 @@ export function registerSkills() {
         type: "function",
         function: {
             name: "skill_list",
-            description: "列出当前平台可用且本会话已开启的技能名称与描述（用于发现 system prompt「可用技能」段未列出的技能），随后可用 use_skill 按名称获取技能内容",
+            description: "List skill names and descriptions available on this platform and enabled in this session (for discovering skills not listed in the system prompt's Available skills section); fetch content with use_skill.",
             parameters: {
                 type: "object",
                 properties: {
                     page: {
                         type: "integer",
-                        description: "页码，从 1 开始，默认 1"
+                        description: "Page number, starting at 1 (default 1)"
                     },
                     page_size: {
                         type: "integer",
-                        description: "每页数量，默认 20，最大 100"
+                        description: "Items per page (default 20, max 100)"
                     },
                     query: {
                         type: "string",
-                        description: "按技能名称或描述关键词过滤"
+                        description: "Filter by skill name or description keyword"
                     }
                 }
             }
@@ -294,7 +294,7 @@ export function registerSkills() {
         const all = getSkills().filter(s =>
             skillAllowedFor(s, platform, !session?.skillState || session.skillState[s.name] !== false)
         );
-        if (all.length === 0) return '暂无技能';
+        if (all.length === 0) return 'No skills available.';
         const q = String(query || '').trim().toLowerCase();
         const filtered = q
             ? all.filter(s =>
@@ -308,9 +308,9 @@ export function registerSkills() {
         const safePage = Math.min(current, totalPages);
         const start = (safePage - 1) * size;
         const items = filtered.slice(start, start + size).map(formatSkillLine);
-        const lines = [`技能列表（共 ${filtered.length} 个）`];
+        const lines = [`Skills (${filtered.length} total)`];
         items.forEach((item, i) => lines.push(`${start + i + 1}. ${item}`));
-        lines.push(`当前第 ${safePage} 页，共 ${totalPages} 页；使用 use_skill 获取技能正文。`);
+        lines.push(`Page ${safePage} of ${totalPages}; use use_skill to fetch skill content.`);
         // 关键词命中但被平台/会话开关挡住的技能：显式提示，避免模型误以为不存在
         if (q) {
             const allowedNames = new Set(all.map(s => s.name));
@@ -321,8 +321,8 @@ export function registerSkills() {
                 ))
                 .map(s => s.name);
             if (unavailable.length > 0) {
-                const shown = unavailable.slice(0, 10).join('、');
-                lines.push(`另有 ${unavailable.length} 个匹配技能因平台或会话开关不可用：${shown}${unavailable.length > 10 ? ' 等' : ''}`);
+                const shown = unavailable.slice(0, 10).join(', ');
+                lines.push(`${unavailable.length} more matching skill(s) are unavailable due to platform or session switches: ${shown}${unavailable.length > 10 ? ', ...' : ''}`);
             }
         }
         return lines.join('\n');
@@ -332,17 +332,17 @@ export function registerSkills() {
         type: "function",
         function: {
             name: "use_skill",
-            description: "使用指定技能完成当前任务。技能名称以 system prompt 中「可用技能」列表或 skill_list 返回的列表为准；正文超过单次上限时用 offset 续读",
+            description: "Use a skill to complete the current task. Skill names come from the Available skills section or skill_list; when content exceeds one call, continue with offset.",
             parameters: {
                 type: "object",
                 properties: {
                     name: {
                         type: "string",
-                        description: "技能名称"
+                        description: "Skill name"
                     },
                     offset: {
                         type: "integer",
-                        description: "可选：正文起始字符偏移，默认 0；用于超长正文续读"
+                        description: "Optional: start character offset (default 0) for continuing long content"
                     }
                 },
                 required: ["name"]
@@ -351,16 +351,16 @@ export function registerSkills() {
     }, false, SKILL_GROUP);
     tool.solve = async (ctx, _msg, session, args) => {
         const name = typeof args?.name === 'string' ? args.name.trim() : '';
-        if (!name) return 'use_skill 缺少技能名称 name';
+        if (!name) return 'use_skill requires a skill name (name)';
         const offsetRaw = Number(args?.offset);
         const offset = Number.isInteger(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
         const platform = platformOf(ctx);
         const enabled = (skillName: string) => !session?.skillState || session.skillState[skillName] !== false;
         const all = getSkills();
         const target = all.find(s => s.name === name);
-        if (!target) return `技能 ${name} 不存在`;
+        if (!target) return `Skill ${name} does not exist.`;
         if (!skillAllowedFor(target, platform, enabled(target.name))) {
-            return `技能 ${name} 当前不可用（平台限制或已在本会话关闭，可用 .ai skill on ${name} 开启）`;
+            return `Skill ${name} is unavailable (platform restriction or disabled in this session; enable with .ai skill on ${name}).`;
         }
 
         const allowed = new Set(all
@@ -369,7 +369,7 @@ export function registerSkills() {
         const resolved = resolveSkillContent(all, allowed, target.name, 0, new Set<string>());
         Logger.debug(`[skill] session=${session?.sessionId || ''} name=${name} chars=${resolved.length} offset=${offset}`);
         return renderSkillContent(
-            `技能：${name}`,
+            `Skill: ${name}`,
             resolved,
             offset,
             next => `use_skill(name=${JSON.stringify(name)}, offset=${next})`,

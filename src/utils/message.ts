@@ -5,15 +5,19 @@ import type { CompiledMessage } from "../context/view/compile";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
-import { buildSystemPromptContent } from "../prompt/builder";
+import { buildPromptParts, buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
+import { foldOmittedLine, foldSummaryHeader, AUX_HISTORY_OMIT_MARK as PROTOCOL_AUX_HISTORY_OMIT_MARK, SYSTEM_NAME, toolResultHeader } from "./protocol";
+import { getRoleSetting } from "./role";
 import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./timeout";
+
+export { getRoleSetting } from "./role";
 
 /** OpenAI 兼容内容：纯文本，或多模态内容块（文本 + 图片） */
 export type RequestMessageContent =
@@ -33,6 +37,8 @@ export interface MultimodalBuildOptions {
     imagesAsText?: boolean;
     /** 本次请求实际使用的模型（用于判断模型端点是否可达图床公网/内网地址） */
     model?: { baseUrl?: string };
+    /** runtime 段文本（由 agent 每轮构建一次传入；缺省时 handleMessages 兜底构建） */
+    runtimeText?: string;
 }
 
 interface MessageItem {
@@ -57,7 +63,7 @@ interface ContextMessage {
     reasoningContent?: string;
 }
 
-const SYSTEM_REMINDER_TEXT = '请继续遵守上方角色设定、上下文标记和工具调用规范。';
+const SYSTEM_REMINDER_TEXT = 'Keep following the role setting, context markers and tool-call rules above.';
 
 /**
  * 无依赖的 token 估算：按 Unicode 类别分桶近似 BPE。
@@ -321,7 +327,7 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
     // 这里**刻意不额外做一遍剔除**：本函数也服务 PE 模式（tool 结果转 user 文本，无配对是合法的），
     // 在那条路径上删 tool 会丢工具结果。详见 handleMessages 的非 PE 分支。
     if (foldedNewestFirst.length === 0) return kept;
-    const header = `更早的群聊/工具内容已折叠为摘要（共 ${foldedNewestFirst.length} 条；需要原文时用 read_raw / grep_raw 回查）：`;
+    const header = foldSummaryHeader(foldedNewestFirst.length);
     const detail: string[] = [];
     let foldUsed = header.length + 1;
     let omitted = 0;
@@ -333,13 +339,13 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
             omitted++;
         }
     }
-    const aggLine = omitted > 0 ? `- 更早的 ${omitted} 条已省略（同上，按需回查原文）` : '';
+    const aggLine = omitted > 0 ? foldOmittedLine(omitted) : '';
     const foldText = [header, aggLine, ...detail.reverse()].filter(Boolean).join('\n');
 
     const foldItem = {
         text: foldText,
         time: Math.floor(Date.now() / 1000),
-        systemName: '折叠摘要',
+        systemName: SYSTEM_NAME.condensedHistory,
     };
     const first = kept[0];
     if (first && first.role === 'user' && Array.isArray(first.contentItems)) first.contentItems.unshift(foldItem);
@@ -401,7 +407,7 @@ export function renderFoldBudget(session: Session, messages: ContextMessage[]): 
  * @param maxCharsOverride 显式预算；不传则自动按会话推导
  */
 export const AUX_HISTORY_FALLBACK_CHARS = 5000;
-export const AUX_HISTORY_OMIT_MARK = '…（更早内容已省略）';
+export const AUX_HISTORY_OMIT_MARK = PROTOCOL_AUX_HISTORY_OMIT_MARK;
 
 export function renderWindowedHistory(
     session: Session,
@@ -422,7 +428,7 @@ export function renderWindowedHistory(
         if (m.role !== 'user' && m.role !== 'assistant') continue;
         const text = buildContent(m).replace(/\f/g, '\n').trim();
         if (!text) continue;
-        lines.push(`${m.role === 'assistant' ? '[bot]' : '[用户]'} ${text}`);
+        lines.push(`${m.role === 'assistant' ? '[AI]' : '[user]'} ${text}`);
     }
 
     let out = lines.join('\n');
@@ -626,6 +632,16 @@ function compileV2Request(
     }
 }
 
+/**
+ * 追加 runtime 段（时间/记忆等易变内容）：以 user 角色注入，不进稳定 system 前缀。
+ * 消息不持久化，只在本次请求体里出现。
+ */
+function withRuntimeContext(messages: RequestMessage[], runtimeText: string): RequestMessage[] {
+    if (!runtimeText) return messages;
+    messages.push({ role: 'user', content: `[system:runtime]\n${runtimeText}\n[/system]` });
+    return messages;
+}
+
 export async function handleMessages(
     ctx: seal.MsgContext,
     session: Session,
@@ -635,13 +651,22 @@ export async function handleMessages(
     modelName?: string,
     opts?: MultimodalBuildOptions
 ): Promise<RequestMessage[]> {
-    const system = systemMessage ?? await buildSystemMessage(ctx, session);
+    let runtimeText = opts?.runtimeText || '';
+    let system = systemMessage;
+    if (!system) {
+        const parts = await buildPromptParts(ctx, session);
+        system = {
+            role: 'system',
+            contentItems: [{ text: parts.system, time: Math.floor(Date.now() / 1000), systemName: '' }],
+        };
+        runtimeText = runtimeText || parts.runtime;
+    }
     const samplesMessages = buildSamplesMessages(ctx);
     // 事件账本：请求完全由 compileRequest 决定，不再走下面的旧 messages 折叠/预算/配对路径。
     // 编译失败才回退旧路径（迁移失败/兼容场景），避免冷热折叠等旧逻辑在 v2 下继续执行。
     if (session.contextV2) {
         const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
-        if (compiled) return compiled as RequestMessage[];
+        if (compiled) return withRuntimeContext(compiled as RequestMessage[], runtimeText);
     }
     const clonedContext = (session.context.messages as ContextMessage[]).map(cloneContextMessage);
     const contextMessages = buildContextMessages(clonedContext, renderFoldBudget(session, clonedContext));
@@ -654,13 +679,15 @@ export async function handleMessages(
     );
 
     // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
-    // 工具结果转成 user 文本（带【工具返回】标记），保证模型能看到结果而不会反复调用工具
+    // 工具结果转成 user 文本（[tool_result:name]…[/tool_result] 边界），保证模型能看到结果而不会反复调用工具
     if (Config.tool.PROMPT_ENGINEERING) {
         const peMessages = await Promise.all(messages.map(async message => {
             if (message.role === 'tool') {
-                // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记
+                // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记。
+                // 与原生路径统一：`[tool_result:name]…[/tool_result]` 边界，声明为外部数据。
                 const toolName = (message as ContextMessage).toolName;
-                const prefix = toolName ? `【工具返回:${toolName}】` : `【工具返回】`;
+                const header = toolResultHeader(toolName);
+                const body = `${header}\n${buildContent(message)}\n[/tool_result]`;
                 // PE 模式下工具结果是 user 文本；若工具返回了图片内容块（image_view / MCP image），
                 // 必须把 image_url 一起带上，否则多模态模型看不到图
                 const imageParts = multimodal && Array.isArray(message.contentParts)
@@ -670,12 +697,12 @@ export async function handleMessages(
                     return {
                         role: 'user',
                         content: [
-                            { type: 'text' as const, text: prefix + buildContent(message) },
+                            { type: 'text' as const, text: body },
                             ...imageParts,
                         ],
                     };
                 }
-                return { role: 'user', content: prefix + buildContent(message) };
+                return { role: 'user', content: body };
             }
             const out: RequestMessage = {
                 role: message.role,
@@ -685,7 +712,7 @@ export async function handleMessages(
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
-        return peMessages;
+        return withRuntimeContext(peMessages, runtimeText);
     }
 
     // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
@@ -780,7 +807,7 @@ export async function handleMessages(
         }
         return out;
     }));
-    return finalMessages as RequestMessage[];
+    return withRuntimeContext(finalMessages as RequestMessage[], runtimeText);
 }
 
 export function buildContent(message: ContextMessage): string {
@@ -894,18 +921,4 @@ export function collectImageUrls(messages: RequestMessage[]): string[] {
         }
     }
     return urls;
-}
-
-export function getRoleSetting(ctx: seal.MsgContext) {
-    const { ROLE_NAMES, ROLE_SETTINGS, INSTRUCTIONS } = Config.role;
-    const [roleName, exists] = seal.vars.strGet(ctx, "$gSYSPROMPT");
-    let roleIndex = 0;
-    if (exists && roleName !== '' && ROLE_NAMES.includes(roleName)) {
-        roleIndex = ROLE_NAMES.indexOf(roleName);
-        if (roleIndex < 0 || roleIndex >= INSTRUCTIONS.length) roleIndex = 0;
-    } else {
-        const [roleIndex2, exists2] = seal.vars.intGet(ctx, "$gSYSPROMPT");
-        if (exists2 && roleIndex2 >= 0 && roleIndex2 < INSTRUCTIONS.length) roleIndex = roleIndex2;
-    }
-    return { roleName, roleIndex, roleSetting: ROLE_SETTINGS[roleIndex] || '' }
 }

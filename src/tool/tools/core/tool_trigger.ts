@@ -8,21 +8,21 @@ export function registerSetTrigger() {
         type: "function",
         function: {
             name: "set_trigger_condition",
-            description: `设置一个触发条件，当触发条件满足时，会自动进行一次对话`,
+            description: `Set a trigger condition; when it matches, a conversation turn starts automatically`,
             parameters: {
                 type: "object",
                 properties: {
                     keyword: {
                         type: 'string',
-                        description: '触发关键词，可使用正则表达式，为空时任意消息都可触发'
+                        description: 'Trigger keyword; regex is supported; empty means any message triggers'
                     },
                     user_id: {
                         type: 'string',
-                        description: '指定触发必须满足的用户ID，为空时任意用户均可触发'
+                        description: 'User ID that must match for the trigger; empty means any user'
                     },
                     reason: {
                         type: 'string',
-                        description: '触发原因'
+                        description: 'Trigger reason'
                     }
                 },
                 required: ["reason"]

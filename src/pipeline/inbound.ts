@@ -11,7 +11,7 @@ const MAX_FORWARD_DEPTH = 5;
 /** ob11 数组消息段 → MessageSegment[]：把卡片/视频/音乐/文件/消息节点/合并转发展开为文本段，其余段保留 */
 export async function expandOb11Segments(ctx: seal.MsgContext, segs: any[], depth: number = 0): Promise<MessageSegment[]> {
     if (depth > MAX_FORWARD_DEPTH) {
-        return [{ type: 'text', data: { text: '[消息嵌套过深，已截断]' } }];
+        return [{ type: 'text', data: { text: '[nested message too deep; truncated]' } }];
     }
     const result: MessageSegment[] = [];
     const epId = ctx.endPoint.userId;
@@ -28,19 +28,19 @@ export async function expandOb11Segments(ctx: seal.MsgContext, segs: any[], dept
                 // milky 适配器会丢弃语音段，这里由 ob11 转接事件补收：登记句柄并渲染 [record:句柄]摘要[/record]，
                 // AI 可通过 resolve_special_id(type=record, id=句柄) 获取原始文件字段。
                 const recordHandle = registerSpecialResource('record', data);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('语音', data, recordHandle), __system: '1' } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('voice', data, recordHandle), __system: '1' } });
                 break;
             }
             case 'file': {
                 // 登记句柄并渲染 [file:句柄]文件名[/file]，AI 可通过 resolve_special_id(type=file, id=句柄) 查询或下载
                 const fileHandle = registerSpecialResource('file', data);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('文件', data, fileHandle), __system: '1' } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('file', data, fileHandle), __system: '1' } });
                 break;
             }
             case 'video': {
                 // 登记句柄并渲染 [video:句柄]摘要[/video]，AI 可通过 resolve_special_id(type=video, id=句柄) 查询
                 const videoHandle = registerSpecialResource('video', data);
-                result.push({ type: 'text', data: { text: formatMediaSegmentText('视频', data, videoHandle), __system: '1' } });
+                result.push({ type: 'text', data: { text: formatMediaSegmentText('video', data, videoHandle), __system: '1' } });
                 break;
             }
             case 'music': {
@@ -49,17 +49,17 @@ export async function expandOb11Segments(ctx: seal.MsgContext, segs: any[], dept
             }
             case 'market_face': {
                 // 商城表情/超级表情：milky 转接只透传元数据，转为 [face]表情名[/face] 占位避免段静默丢失
-                result.push({ type: 'text', data: { text: `[face]${data.summary ? String(data.summary) : '未知商城表情'}[/face]`, __system: '1' } });
+                result.push({ type: 'text', data: { text: `[face]${data.summary ? String(data.summary) : 'unknown market emoji'}[/face]`, __system: '1' } });
                 break;
             }
             case 'xml': {
                 // XML 卡片/公众号消息：转为 [xml]...[/xml]，过长时截断避免污染上下文
-                result.push({ type: 'text', data: { text: `[xml]${data.data ? truncateText(String(data.data), 500) : '未知XML消息'}[/xml]`, __system: '1' } });
+                result.push({ type: 'text', data: { text: `[xml]${data.data ? truncateText(String(data.data), 500) : 'unknown XML message'}[/xml]`, __system: '1' } });
                 break;
             }
             case 'markdown': {
                 // Markdown 消息：milky 转接成 OB11 markdown 段，转为 [markdown]...[/markdown] 进入上下文
-                result.push({ type: 'text', data: { text: `[markdown]${data.content ? truncateText(String(data.content), 500) : '未知Markdown'}[/markdown]`, __system: '1' } });
+                result.push({ type: 'text', data: { text: `[markdown]${data.content ? truncateText(String(data.content), 500) : 'unknown markdown'}[/markdown]`, __system: '1' } });
                 break;
             }
             case 'node': {
@@ -71,7 +71,7 @@ export async function expandOb11Segments(ctx: seal.MsgContext, segs: any[], dept
                 const text = await expandForwardMessage(epId, data.id || data.file || '', depth + 1);
                 result.push({
                     type: 'text',
-                    data: { text: text ? `[forward]\n${text}\n[/forward]` : '[forward]合并转发展开失败[/forward]', __system: '1' }
+                    data: { text: text ? `[forward]\n${text}\n[/forward]` : '[forward]failed to expand merged forward[/forward]', __system: '1' }
                 });
                 break;
             }
@@ -83,9 +83,9 @@ export async function expandOb11Segments(ctx: seal.MsgContext, segs: any[], dept
 
 /** 消息节点（node）转可读文本：完整节点递归内容，仅 id 时走 ob11 获取 */
 export async function parseNodeToText(ctx: seal.MsgContext, data: any, depth: number = 0): Promise<string> {
-    const name = (data && (data.nickname || data.name)) || (data && data.user_id ? `用户${data.user_id}` : '');
+    const name = (data && (data.nickname || data.name)) || (data && data.user_id ? `user ${data.user_id}` : '');
     if (depth > MAX_FORWARD_DEPTH) {
-        return `${name}（嵌套过深，已截断）`;
+        return `${name} (nested too deep; truncated)`;
     }
     if (data && typeof data.content === 'string') {
         return `${name}: ${data.content}`;
@@ -102,5 +102,5 @@ export async function parseNodeToText(ctx: seal.MsgContext, data: any, depth: nu
         const text = await expandForwardMessage(ctx.endPoint.userId, String(data.id), depth + 1);
         return text ? `${name}:\n${text}` : `${name}`;
     }
-    return name || '未知消息节点';
+    return name || 'unknown message node';
 }

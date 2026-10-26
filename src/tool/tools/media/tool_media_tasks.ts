@@ -55,17 +55,17 @@ export function registerMediaTaskTools() {
         function: {
             name: "media_tasks",
             description:
-                "查看或取消当前会话的语音/图片生成任务队列（这些任务是异步的：提交后立即返回任务号，完成后会自动通知你）。"
-                + "action=list 列出任务与状态/结果；action=cancel 取消未完成的任务（需要 id）。",
+                "View or cancel the current session's voice/image generation task queue (these tasks are asynchronous: submitting returns a task number immediately, and you are notified automatically on completion)."
+                + "action=list lists tasks with status/result; action=cancel cancels an unfinished task (requires id).",
             parameters: {
                 type: "object",
                 properties: {
-                    action: { type: "string", enum: ["list", "cancel"], description: "list=查看队列；cancel=取消任务" },
-                    id: { type: "string", description: "cancel 时必填，任务号（如 3）" },
+                    action: { type: "string", enum: ["list", "cancel"], description: "list=view queue; cancel=cancel a task" },
+                    id: { type: "string", description: "Required for cancel; task number (e.g. 3)" },
                     status: {
                         type: "string",
                         enum: ["all", "pending", "running", "done", "failed", "canceled"],
-                        description: "list 时筛选状态，默认 all"
+                        description: "Filter by status when listing; default all"
                     },
                 },
                 required: [],

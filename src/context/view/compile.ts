@@ -8,6 +8,14 @@
 // - 工具组整组选择；不完整组降级为文本，不产生无结果的 tool_calls；
 // - 被省略的区间：注入 rolling summary；没有摘要则显式提示缺口（绝不静默）；
 // - 纯函数：不读 Config/seal/storage，时间/名字/估算全部注入，便于单测与 goldens。
+import {
+    buildEventRangeTruncateMarker,
+    earlierSummaryBlock,
+    earlierSummaryGapText,
+    SYSTEM_NAME,
+    TOOL_RESULT_CLOSE,
+    toolResultHeader,
+} from "../../utils/protocol";
 import type { LLMCaps, MediaResolvers } from "../content/descriptors";
 import type { LLMContentBlock, LLMDialect } from "../content/llm";
 import { toLLM, toLLMText } from "../content/llm";
@@ -133,7 +141,7 @@ function toToolCalls(unit: ConversationUnit): { complete: boolean; calls: Compil
         if (id && resultByCallId.has(id)) {
             calls.push({ id, type: 'function', function: { name, arguments: args } });
         } else {
-            missingNames.push(name || id || '未知工具');
+            missingNames.push(name || id || 'unknown-tool');
         }
     }
     return { complete: missingNames.length === 0, calls, missingNames, resultByCallId };
@@ -183,16 +191,16 @@ function renderAssistantEvent(event: ConversationEvent, options: CompileOptions,
 
 function renderSystemEvent(event: ConversationEvent, options: CompileOptions, index: RecordIndex): CompiledMessage {
     const e = event as unknown as { systemName?: string; eventType?: string; parts?: Part[]; raw?: unknown; at?: number };
-    const name = e.systemName || '事件';
+    const name = e.systemName || SYSTEM_NAME.event;
     const text = toLLMText(applyEdit(event, index), options.caps ?? {}, options.resolve ?? {});
     const time = Number(e.at ?? 0) > 0 ? `[time:${fmtTime(options, Number(e.at))}]` : '';
     return { role: 'user', content: `[system:${name}]${time}${text ? ' ' + text : ''} [/system]` };
 }
 
-/** 工具结果边界：与旧 buildContent 的 [tool_result:id]…[/tool_result] 对齐 */
-function wrapToolResult(callId: string, content: string | ContentBlock[]): string | ContentBlock[] {
-    const head = `[tool_result:${callId}]\n`;
-    const tail = '\n[/tool_result]';
+/** 工具结果边界：native 与提示词工程统一为 [tool_result:name-or-id]…[/tool_result] */
+function wrapToolResult(label: string, content: string | ContentBlock[]): string | ContentBlock[] {
+    const head = toolResultHeader(label) + '\n';
+    const tail = '\n' + TOOL_RESULT_CLOSE;
     if (typeof content === 'string') return head + content + tail;
     return [{ type: 'text', text: head }, ...content, { type: 'text', text: tail }];
 }
@@ -208,13 +216,13 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
             lines.push(JSON.stringify({ name: call.function.name, arguments: call.function.arguments }));
             lines.push('```');
         }
-        for (const name of missingNames) lines.push(`（工具 ${name} 调用未完成，无结果）`);
+        for (const name of missingNames) lines.push(`Tool ${name}: call unfinished (no result)`);
         const out: CompiledMessage[] = [{ role: 'assistant', content: lines.join('\n') }];
         for (const [callId, results] of resultByCallId) {
             const name = calls.find(c => c.id === callId)?.function.name ?? '';
             for (const result of results) {
                 const text = toLLMText(applyEdit(result, index), options.caps ?? {}, options.resolve ?? {});
-                out.push({ role: 'user', content: `【工具返回${name ? `:${name}` : ''}】${wrapToolResult(callId, text)}` });
+                out.push({ role: 'user', content: wrapToolResult(name || callId, text) as string });
             }
         }
         return out;
@@ -222,7 +230,7 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
 
     const out: CompiledMessage[] = [];
     const contentParts: string[] = [];
-    if (missingNames.length > 0) contentParts.push(`（以下工具调用未完成，无结果：${missingNames.join('、')}）`);
+    if (missingNames.length > 0) contentParts.push(`Unfinished tool calls (no result): ${missingNames.join(', ')}`);
     const assistant: CompiledMessage = {
         role: 'assistant',
         content: contentParts.join('\n'),
@@ -248,7 +256,7 @@ function renderOrphanResult(unit: ConversationUnit, options: CompileOptions, ind
         const text = toLLMText(applyEdit(event, index), options.caps ?? {}, options.resolve ?? {});
         const name = String((event as { name?: unknown }).name ?? '')
             || String((event as { callId?: unknown }).callId ?? '');
-        out.push({ role: 'user', content: `【工具返回${name ? `:${name}` : ''}】\n${text}` });
+        out.push({ role: 'user', content: wrapToolResult(name, text) as string });
     }
     return out;
 }
@@ -309,7 +317,7 @@ function truncateEventParts(event: ConversationEvent, maxChars: number, readFrom
     });
     nextParts.push({
         type: 'text',
-        text: `\n[原文过长: 共${totalChars}字，仅显示头尾${head + tail}字；完整原文 read_raw id=e:${readFrom}-${readTo}]`,
+        text: buildEventRangeTruncateMarker(totalChars, head + tail, readFrom, readTo),
     });
     return { ...(event as object), parts: nextParts } as ConversationEvent;
 }
@@ -370,7 +378,7 @@ export function compileRequest(options: CompileOptions): CompileResult {
         const text = gap.summary.text.length > maxSummaryChars
             ? gap.summary.text.slice(0, maxSummaryChars) + '…'
             : gap.summary.text;
-        const summaryTokens = estimateText(`【更早内容摘要】\n${text}\n（原文可用 read_raw id=e:${gap.summary.fromSeq}-${gap.summary.toSeq} 查看）`) + 8;
+        const summaryTokens = estimateText(earlierSummaryBlock(text, gap.summary.fromSeq, gap.summary.toSeq)) + 8;
         if (used + summaryTokens <= available) break;
         const removed = selected.shift()!;
         used = Math.max(0, used - estimateUnitTokens(removed, estimateEvent));
@@ -401,7 +409,7 @@ export function compileRequest(options: CompileOptions): CompileResult {
                 const text = summary.text.length > maxChars ? summary.text.slice(0, maxChars) + '…' : summary.text;
                 messages.push({
                     role: 'user',
-                    content: `【更早内容摘要】\n${text}\n（原文可用 read_raw id=e:${summary.fromSeq}-${summary.toSeq} 查看）`,
+                    content: earlierSummaryBlock(text, summary.fromSeq, summary.toSeq),
                 });
                 stats.summaryInjected = true;
             }
@@ -410,7 +418,7 @@ export function compileRequest(options: CompileOptions): CompileResult {
                 const to = gap.uncoveredToSeq ?? gap.skippedToSeq;
                 messages.push({
                     role: 'user',
-                    content: `【更早内容未摘要】共约 ${Math.max(0, to - from + 1)} 条事件未生成摘要；可用 read_raw id=e:${from}-${to} 查看原文。`,
+                    content: earlierSummaryGapText(to - from + 1, from, to),
                 });
                 stats.gapInjected = true;
             }

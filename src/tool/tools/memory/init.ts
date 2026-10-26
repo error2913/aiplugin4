@@ -6,7 +6,7 @@ import { registerMemory } from "./tool_memory";
 
 /** 注册 memory 下全部记忆工具（分类：记忆） */
 export function registerMemoryTools() {
-    Tool.withCategory('记忆', registerMemory);
+    Tool.withCategory('Memory', registerMemory);
 }
 
 /** 注册知识库工具（来源分组=知识库，不参与工具组维度，由 .ai kb 管理会话开关） */

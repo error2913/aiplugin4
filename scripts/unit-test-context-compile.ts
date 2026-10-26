@@ -108,8 +108,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(result.stats.truncated, true);
         const text = textOf(result.messages);
         assert.ok(text.includes('新'));
-        assert.ok(text.includes('原文过长'));
-        assert.ok(text.includes('read_raw id=e:2-2'));
+        assert.ok(text.includes('[content-truncated:'));
+        assert.ok(text.includes('read_raw id=e:2'));
     },
 
     testContextV2CompileSummaryAndGapInjected() {
@@ -133,8 +133,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(result.stats.gapInjected, true);
         const text = textOf(result.messages);
         assert.ok(text.includes('更早的摘要内容'));
-        assert.ok(text.includes('更早内容未摘要'));
-        assert.ok(text.includes('read_raw id=e:1-1'));
+        assert.ok(text.includes('Earlier events were not summarized'));
+        assert.ok(text.includes('read_raw id=e:1'));
     },
 
     testContextV2CompileToolGroupNative() {
@@ -168,7 +168,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const assistant = result.messages.find(m => m.role === 'assistant');
         assert.ok(assistant);
         assert.equal(assistant!.tool_calls, undefined, '不完整组不得产生 tool_calls');
-        assert.ok(textOf([assistant!]).includes('未完成'));
+        assert.ok(textOf([assistant!]).includes('Unfinished tool calls (no result): get_weather'));
     },
 
     testContextV2CompilePromptEngineeringMode() {
@@ -185,7 +185,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         const text = textOf(result.messages);
         assert.ok(text.includes('```function'));
-        assert.ok(text.includes('【工具返回:get_weather】'));
+        assert.ok(text.includes('[tool_result:get_weather]'));
+        assert.ok(text.includes('[/tool_result]'));
         assert.equal(result.messages.some(m => m.role === 'tool'), false);
     },
 

@@ -101,25 +101,25 @@ export function registerImage() {
         type: "function",
         function: {
             name: "image_to_text",
-            description: "查看图片内容并返回文字描述（由识图模型转述，适合不想让图片占用对话上下文、或聊天模型不支持视觉时使用）。" +
-                "id 支持标准图片引用 [img:<ref>]、图床托管 ID h<sha256>、裸 sha256、插件图片 ID、user_avatar:/group_avatar:；" +
-                `支持批量 ids[]（单次最多 ${IMAGE_VIEW_MAX_DESCRIBE} 张）。多模态聊天模型想自己直接看图请用 image_view。`,
+            description: "View image content and return a text description (transcribed by the image-recognition model; suitable when you do not want images to occupy the conversation context, or when the chat model does not support vision)." +
+                "id accepts standard image references [img:<ref>], image-host ID h<sha256>, bare sha256, plugin image ID, user_avatar:/group_avatar:; " +
+                `batch ids[] is supported (max ${IMAGE_VIEW_MAX_DESCRIBE} per call). Multimodal chat models that want to see the image directly should use image_view.`,
             parameters: {
                 type: "object",
                 properties: {
                     id: {
                         type: "string",
-                        description: "图片引用（与 ids 二选一）"
+                        description: "Image reference (mutually exclusive with ids)"
                     },
                     ids: {
                         type: "array",
                         items: { type: "string" },
                         maxItems: IMAGE_VIEW_MAX_DESCRIBE,
-                        description: `批量图片引用（与 id 二选一，单次最多 ${IMAGE_VIEW_MAX_DESCRIBE} 张）`
+                        description: `Batch image references (mutually exclusive with id, max ${IMAGE_VIEW_MAX_DESCRIBE} per call)`
                     },
                     content: {
                         type: "string",
-                        description: "需要特别关注的内容（可选）"
+                        description: "Content to pay special attention to (optional)"
                     }
                 },
                 additionalProperties: false
@@ -167,26 +167,26 @@ export function registerImage() {
         type: "function",
         function: {
             name: "image_view",
-            description: "直接查看图片内容（把图片交给当前多模态聊天模型）。" +
-                "id 支持标准图片引用 [img:<ref>]、图床托管 ID h<sha256>、裸 sha256、插件图片 ID、user_avatar:/group_avatar:；" +
-                `支持批量 ids[]（单次最多 ${IMAGE_VIEW_MAX_IMAGES} 张）。当前聊天模型不支持视觉或取图失败时会自动降级为文字描述。` +
-                "注意：最终回复里写 [img:<ref>] 是发给用户，不是自己看图；要自己看图必须调用本工具（或 image_to_text）。",
+            description: "View image content directly (hand the image to the current multimodal chat model)." +
+                "id accepts standard image references [img:<ref>], image-host ID h<sha256>, bare sha256, plugin image ID, user_avatar:/group_avatar:; " +
+                `batch ids[] is supported (max ${IMAGE_VIEW_MAX_IMAGES} per call). If the current chat model does not support vision or fetching fails, it automatically falls back to a text description.` +
+                "Note: writing [img:<ref>] in the final reply sends it to the user; it does not let you see the image. To view it yourself you must call this tool (or image_to_text).",
             parameters: {
                 type: "object",
                 properties: {
                     id: {
                         type: "string",
-                        description: "单张图片引用（与 ids 二选一）"
+                        description: "Single image reference (mutually exclusive with ids)"
                     },
                     ids: {
                         type: "array",
                         items: { type: "string" },
                         maxItems: IMAGE_VIEW_MAX_IMAGES,
-                        description: `批量图片引用（与 id 二选一，单次最多 ${IMAGE_VIEW_MAX_IMAGES} 张，超过请分批）`
+                        description: `Batch image references (mutually exclusive with id, max ${IMAGE_VIEW_MAX_IMAGES} per call; split into batches if more)`
                     },
                     detail: {
                         type: "string",
-                        description: "可选：特别想看清图中的什么细节"
+                        description: "Optional: which details in the image you especially want to see"
                     }
                 },
                 additionalProperties: false
@@ -290,16 +290,16 @@ export function registerImage() {
     const toolTTI = new Tool(buildMediaToolInfo({
         name: 'text_to_image',
         description:
-            '生成图片（提交生成任务，立即返回任务号；生成完成后会自动通知你，届时在回复里用返回的 [img:图片ID] 把图发给用户）。',
+            'Generate an image (submits a generation task and returns the task number immediately; when generation completes you are notified automatically, then use the returned [img:image ID] in your reply to send the image to the user).',
         properties: {
-            prompt: { type: 'string', description: '图像描述' },
-            negative_prompt: { type: 'string', description: '不希望图片中出现的内容描述' },
-            model: { type: 'string', description: '可选，指定生图模型（来自「api连接」）；缺省用 image-generation 用途默认模型' },
-            save: { type: 'boolean', description: '是否保存图片（生成完成后写入记忆）' },
-            name: { type: 'string', description: '如果保存图片，图片的名称' },
+            prompt: { type: 'string', description: 'Image description' },
+            negative_prompt: { type: 'string', description: 'Description of content that should not appear in the image' },
+            model: { type: 'string', description: 'Optional; specify an image model (from "API connections"); defaults to the default model for image-generation' },
+            save: { type: 'boolean', description: 'Whether to save the image (written to memory after generation)' },
+            name: { type: 'string', description: 'Name of the image if saved' },
             image: {
                 type: 'string',
-                description: '可选参考图，用于以图生图。支持标准图片引用 [img:<ref>]、图床托管 ID h<sha256>、插件图片 ID、user_avatar:用户ID、group_avatar:群ID、http(s)图片URL、data:image/...;base64或base64数据'
+                description: 'Optional reference image for image-to-image. Supports standard image references [img:<ref>], image-host ID h<sha256>, plugin image ID, user_avatar:userID, group_avatar:groupID, http(s) image URL, data:image/...;base64, or base64 data'
             }
         },
         required: ['prompt'],

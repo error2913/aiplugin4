@@ -1,200 +1,139 @@
-// prompt 构建：system prompt 分节组装（角色/会话信息/静态能力/动态记忆）
+// Prompt 构建入口（薄壳）：构造 PromptContext → assemblePrompt，产出 system/runtime 两路文本。
+// 兼容旧 API：buildSystemPromptContent 仍返回 system 文本；buildSystemMessage 在 utils/message.ts。
 import Config from "../config/config";
 import Message from "../context/message";
-import { UserMessage, UserMessageItem } from "../context/types";
-import Model from "../model/model";
+import type { UserMessage, UserMessageItem } from "../context/types";
 import { ImageHost } from "../resource/image_host";
-import { Session } from "../session/session";
-import { GroupInfo, UserInfo } from "../session/types";
+import type { Session } from "../session/session";
+import type { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
-import { buildDelegationGuide } from "../subagent/limits";
-import { formatSkillSummaryBlock, getSkillsSignature, getSkillSummariesBudgeted, SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS } from "../tool/skills";
+import { toolMap } from "../tool/registry";
 import Tool from "../tool/tool";
-import { fmtDate, stripInternalTags } from "../utils/string";
-import { matchesPlatform, platformOf } from "../utils/target_id";
+import { getRoleSetting } from "../utils/role";
+import { stripInternalTags } from "../utils/string";
+import { platformOf } from "../utils/target_id";
 
-import { getPromptMemorySource } from "./memory_source";
-import { getCachedString } from "./prompt_cache";
-import { SYSTEM_MESSAGE_TEMPLATE } from "./templates";
+import { assemblePrompt } from "./assemble";
+import { initKnowledgeBase } from "./sections/skills_knowledge";
+import type { PromptContext, PromptFlags, PromptParts } from "./types";
 
-export interface SystemPromptSection {
-    name: string;
-    content: string;
-}
-
-const STATIC_FRAME_TTL = 30_000;
-const LONG_TERM_MEMORY_TTL = 10_000;
-
-function signature(parts: Array<string | number | boolean>): string {
-    return parts.map(String).join('|');
-}
-
-function toolStateSignature(session: Session): string {
-    return Object.keys(session.toolState)
-        .sort()
-        .map(key => `${key}:${session.toolState[key] ? '1' : '0'}`)
-        .join(',');
-}
-
-/** 会话级技能/知识库关闭开关签名：仅记录被 off 的项，参与静态段缓存 key */
-function flagStateSignature(state: { [key: string]: boolean } | undefined): string {
-    if (!state) return '';
-    return Object.keys(state)
-        .filter(k => state[k] === false)
-        .sort()
-        .join(',');
-}
-
-/** 技能摘要块：只列当前平台可用且本会话未关闭的技能 */
-function buildSkillSummaryBlock(session: Session, platform: string): string {
-    const r = getSkillSummariesBudgeted(SKILL_INJECT_MAX_CHARS, SKILL_INJECT_MAX_ITEMS, s =>
-        matchesPlatform(s.platforms, platform) && session.skillState?.[s.name] !== false
-    );
-    return formatSkillSummaryBlock(r);
-}
-
-/**
- * 组装 system prompt 内容。
- * 静态段：角色/会话信息/消息标记/工作方向/工具/技能/知识库。
- * 动态段：当前时间/观察记忆/记忆工具提示/长期记忆与心智模型。
- */
-export async function buildSystemPromptContent(
-    ctx: seal.MsgContext,
-    session: Session,
-    _roleIndex: number,
-    roleSetting: string
-): Promise<string> {
-    const { RECEIVE_IMAGE } = Config.received;
-    const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
-    // 记忆/知识库数据经端口取（实现由组合根注入，builder 不直接依赖 memory 模块）
-    const memorySource = getPromptMemorySource();
-
-    if (Config.knowledgeBase.KNOWLEDGE) await memorySource.initKnowledge();
-
-    // 取最近 2~3 条用户消息拼接，作为记忆检索的上下文（剥离内部标签）；
-    // 同时收集全部发言者：群聊多人在线时，记忆检索不再只按最后一位发言者过滤
-    const userMessages = session.context.messages.filter(m => m.role === 'user');
+/** 记忆检索输入：最近 2~3 条用户消息拼接（≤2000 字符）+ 发言者/群信息 */
+function collectMemoryInput(ctx: seal.MsgContext, session: Session): {
+    query: string;
+    users: UserInfo[];
+    group: GroupInfo | null;
+} {
+    const userMessages = session.context.messages.filter(message => message.role === 'user');
     let text = '';
-    const uis: UserInfo[] = [];
-    let gi: GroupInfo | null = null;
-    for (const userMsg of userMessages.slice(-3)) {
-        if (!Array.isArray((userMsg as UserMessage).contentItems)) continue;
-        for (const item of (userMsg as UserMessage).contentItems) {
+    const users: UserInfo[] = [];
+    let group: GroupInfo | null = null;
+    for (const userMessage of userMessages.slice(-3)) {
+        if (!Array.isArray((userMessage as UserMessage).contentItems)) continue;
+        for (const item of (userMessage as UserMessage).contentItems) {
             if (Message.getUserMessageItemType(item) !== 'user') continue;
-            const umi = item as UserMessageItem;
-            if (umi.text) text += (text ? ' ' : '') + stripInternalTags(umi.text);
-            if (umi.userId) {
-                const u = User.get(umi.userId);
-                const info: UserInfo = { isPrivate: true, id: umi.userId, name: u.userName || umi.userId };
-                if (!uis.some(x => x.id === info.id)) uis.push(info);
+            const userItem = item as UserMessageItem;
+            if (userItem.text) text += (text ? ' ' : '') + stripInternalTags(userItem.text);
+            if (userItem.userId) {
+                const user = User.get(userItem.userId);
+                const info: UserInfo = { isPrivate: true, id: userItem.userId, name: user.userName || userItem.userId };
+                if (!users.some(existing => existing.id === info.id)) users.push(info);
             }
         }
     }
     if (!ctx.isPrivate && ctx.group) {
-        gi = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
+        group = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
     }
-    // 限制记忆检索 query 长度：优先保留最近内容，避免超长合并消息/合并转发完整送入 embedding
     if (text.length > 2000) text = text.slice(-2000);
+    return { query: text, users, group };
+}
 
-    // 静态壳：角色/平台/会话/BotID/工具/技能/知识库，连续对话可复用 30 秒。
+/** 读取配置开关快照 */
+function readFlags(): PromptFlags {
+    const { RECEIVE_IMAGE } = Config.received;
+    const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
+    return {
+        status: !!STATUS,
+        promptEngineering: !!PROMPT_ENGINEERING,
+        directionPrompt: !!DIRECTION_PROMPT,
+        receiveImage: !!RECEIVE_IMAGE,
+        imageLibrary: !!(ImageHost.enabled || Config.mcp.MCP_ENABLED),
+        memory: !!((Config.memory as any).MEMORY_ENABLED ?? Config.memory.MEMORY),
+        knowledge: !!Config.knowledgeBase.KNOWLEDGE,
+    };
+}
+
+/** 构造一次组装的只读上下文 */
+export async function createPromptContext(ctx: seal.MsgContext, session: Session, roleSettingOverride?: string): Promise<PromptContext> {
+    const role = getRoleSetting(ctx);
+    const roleSetting = roleSettingOverride !== undefined ? roleSettingOverride : role.roleSetting;
     const platform = platformOf(ctx);
-    // 图片与图库提示段：仅在图床或 MCP 启用时注入（无图床/MCP 时保持旧提示词不变）
-    const IMAGE_LIBRARY = ImageHost.enabled || Config.mcp.MCP_ENABLED;
-    const toolState = STATUS ? toolStateSignature(session) : '';
-    const skillConfigSignature = STATUS ? getSkillsSignature() : '';
-    const knowledgeSignature = Config.knowledgeBase.KNOWLEDGE ? memorySource.knowledgeSignature() : '';
-    const skillStateSig = STATUS ? flagStateSignature(session.skillState) : '';
-    const kbStateSig = STATUS && Config.knowledgeBase.KNOWLEDGE ? flagStateSignature(session.kbState) : '';
-    const staticKey = signature([
-        'prompt:static',
+    const flags = readFlags();
+    if (flags.status && flags.knowledge) await initKnowledgeBase();
+
+    const memory = collectMemoryInput(ctx, session);
+    const tool = (name: string): boolean => {
+        if (!session.toolState?.[name]) return false;
+        const item = toolMap[name];
+        if (!item) return false;
+        if (!Tool.isAllowedPlatform(item, platform)) return false;
+        if (item.sessionType !== 'any' && item.sessionType !== session.sessionType) return false;
+        return true;
+    };
+
+    const sessionName = ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName;
+    const sessionId = ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId;
+    return {
+        ctx,
+        session,
         roleSetting,
+        roleIndex: role.roleIndex,
         platform,
-        ctx.isPrivate ? 'private' : 'group',
-        ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
-        ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
-        ctx.endPoint.userId,
-        RECEIVE_IMAGE,
-        IMAGE_LIBRARY,
-        STATUS,
-        PROMPT_ENGINEERING,
-        DIRECTION_PROMPT,
-        Config.tool.BLOCKED.join(','),
-        Config.tool.DEFAULT_CLOSED.join(','),
-        toolState,
-        skillConfigSignature,
-        knowledgeSignature,
-        skillStateSig,
-        kbStateSig
-    ]);
-    const frame = await getCachedString(staticKey, STATIC_FRAME_TTL, async () => {
-        const toolBlock = STATUS
-            ? (PROMPT_ENGINEERING ? Tool.getPromptEngineeringToolBlock(session, platform) : Tool.getToolDiscoveryBlock(session))
-            : '';
-        const skillBlock = STATUS ? buildSkillSummaryBlock(session, platform) : '';
-        let knowledgeBlock = '';
-        if (STATUS && Config.knowledgeBase.KNOWLEDGE) {
-            const enabledIds = new Set<string>();
-            for (const id of memorySource.knowledgeIds()) {
-                if (session.kbState?.[id] !== false) enabledIds.add(id);
-            }
-            knowledgeBlock = memorySource.formatKnowledgeFor(platform, enabledIds);
-        }
-        const staticBlocks = [toolBlock, skillBlock, knowledgeBlock].filter(Boolean).join('\n\n');
-        // 子代理委派指引：仅当本会话开启了委派工具时注入
-        const delegationGuide = STATUS ? buildDelegationGuide(session.toolState) : '';
-        const blocksWithGuide = delegationGuide === ''
-            ? staticBlocks
-            : staticBlocks === '' ? delegationGuide : `${staticBlocks}\n\n${delegationGuide}`;
+        isPrivate: ctx.isPrivate,
+        sessionName,
+        sessionId,
+        botId: ctx.endPoint.userId,
+        flags,
+        tool,
+        memoryQuery: memory.query,
+        memoryUsers: memory.users,
+        memoryGroup: memory.group,
+    };
+}
 
-        return SYSTEM_MESSAGE_TEMPLATE({
-            instruction: roleSetting,
-            platform,
-            sessionType: ctx.isPrivate ? 'private' : 'group',
-            sessionName: ctx.isPrivate ? ctx.player!.name : ctx.group!.groupName,
-            sessionId: ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId,
-            botId: ctx.endPoint.userId,
-            RECEIVE_IMAGE,
-            IMAGE_LIBRARY,
-            DIRECTION_PROMPT,
-            toolBlock: blocksWithGuide
-        });
-    });
+/** 组装 system + runtime（每轮调用一次，工具循环内复用返回值） */
+export async function buildPromptParts(ctx: seal.MsgContext, session: Session, roleSettingOverride?: string): Promise<PromptParts> {
+    const promptContext = await createPromptContext(ctx, session, roleSettingOverride);
+    return assemblePrompt(promptContext);
+}
 
-    // 动态段：记忆单 cache（观察已并入同一渲染器）；当前时间每次动态生成
-    const embeddingModelName = Model.getEmbeddingModel('text-embedding')?.name || '';
-    const memoryEnabled = (Config.memory as any).MEMORY_ENABLED ?? Config.memory.MEMORY;
-    const memoryKey = signature([
-        'prompt:memory',
-        session.sessionId,
-        memorySource.memoryRevision(),
-        memoryEnabled,
-        Model.getEmbeddingDimension(),
-        embeddingModelName,
-        ctx.isPrivate,
-        session.memory.persona,
-        seal.formatTmpl(ctx, '核心:骰子名字'),
-        uis.map(u => u.id).join(','),
-        uis.map(u => u.name).join(','),
-        gi?.id || '',
-        gi?.name || '',
-        text
-    ]);
-    const memoryTask = memoryEnabled
-        ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => memorySource.buildLongTermPrompt(ctx, session, text, uis, gi || null))
-        : Promise.resolve('');
+/**
+ * 兼容旧 API：返回 system 文本。
+ * @param roleSetting 显式角色设定（缺省按 $gSYSPROMPT 解析）
+ */
+export async function buildSystemPromptContent(
+    ctx: seal.MsgContext,
+    session: Session,
+    _roleIndex?: number,
+    roleSetting?: string,
+): Promise<string> {
+    const parts = await buildPromptParts(ctx, session, roleSetting);
+    return parts.system;
+}
 
-    const [memoryPrompt] = await Promise.all([memoryTask]);
+/** 仅取 runtime 文本（handleMessages 未拿到 systemMessage 时的兜底） */
+export async function buildRuntimePromptText(ctx: seal.MsgContext, session: Session): Promise<string> {
+    const parts = await buildPromptParts(ctx, session);
+    return parts.runtime;
+}
 
-    const timeBlock = `## 当前时间\n${fmtDate(Math.floor(Date.now() / 1000))}`;
-    const memoryToolHint = memoryEnabled ? '需要查看更多记忆时，使用 memory_recall 工具。' : '';
-    const dynamicSections = [timeBlock, memoryToolHint, memoryPrompt]
-        .filter(Boolean)
-        .join('\n\n');
-
-    const content = frame
-        .split('**DYNAMIC_SECTIONS**')
-        .join(dynamicSections);
-
-    // 防注入：长期记忆/观察记忆等外部内容可能夹带内部上下文标签，system prompt 出口统一兜底剥离
-    return stripInternalTags(content);
+/** 把组装结果转成 system 消息体（与 utils/message.ts 的 ContextMessage 结构兼容） */
+export function promptPartsToSystemMessage(parts: PromptParts): { role: 'system'; contentItems: Array<{ text: string; time: number; systemName: string }> } {
+    return {
+        role: 'system',
+        contentItems: [{
+            text: parts.system,
+            time: Math.floor(Date.now() / 1000),
+            systemName: '',
+        }],
+    };
 }

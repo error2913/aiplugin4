@@ -13,14 +13,14 @@ export function registerAudioTools() {
     const tool = new Tool(buildMediaToolInfo({
         name: "generate_audio",
         description:
-            "生成语音（提交生成任务，立即返回任务号；生成完成后会自动通知你，届时再把语音发给用户）。不会自动发送。"
-            + "传 path 时改为解析已有本地/MCP 音频资源并同步返回 record 段，不生成、不排队。",
+            "Generate voice (submits a generation task and returns the task number immediately; when generation completes you are notified automatically, then send the voice to the user). Sending is not automatic."
+            + "When path is given, instead resolve an existing local/MCP audio resource and return the record segment synchronously; nothing is generated and nothing is queued.",
         properties: {
-            text: { type: "string", description: "要合成的文本" },
-            model: { type: "string", description: "可选，指定语音模型（来自「api连接」）；缺省用 tts 用途默认模型" },
-            path: { type: "string", description: "已有本地语音路径、file:// URI 或 mcp:// 资源（给了 path 就不生成，直接解析返回）" },
-            source: { type: "string", enum: ["local", "mcp"], description: "路径资源来源" },
-            server: { type: "string", description: "MCP 文件服务器名称" },
+            text: { type: "string", description: "Text to synthesize" },
+            model: { type: "string", description: "Optional; specify a voice model (from \"API connections\"); defaults to the default model for tts" },
+            path: { type: "string", description: "Existing local voice path, file:// URI or mcp:// resource (when path is given nothing is generated; it is resolved and returned directly)" },
+            source: { type: "string", enum: ["local", "mcp"], description: "Source of the path resource" },
+            server: { type: "string", description: "MCP file server name" },
         },
         required: [],
     }, 'tts'));

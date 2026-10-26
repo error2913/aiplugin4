@@ -5,5 +5,5 @@ import { registerBlockTool } from "./tool_block";
 
 /** 注册 manage 下全部管理工具（分类：黑名单） */
 export function registerManageTools() {
-    Tool.withCategory('黑名单', registerBlockTool);
+    Tool.withCategory('Blocks', registerBlockTool);
 }
