@@ -1,8 +1,8 @@
-// Prompt 记忆数据源的实现：接到 MemoryManager / knowledgeService / revision。
+// Prompt 记忆数据源的实现：接到 MemoryService / knowledgeService / revision。
 // 只由组合根导入，避免 prompt 模块重新依赖 memory 模块。
 import { knowledgeService } from "../memory/knowledge";
-import { MemoryManager } from "../memory/manager";
 import { getMemoryRevision, getSummaryRevision } from "../memory/revision";
+import { MemoryService } from "../memory/service";
 
 import { setPromptMemorySource } from "./memory_source";
 
@@ -14,7 +14,7 @@ export function installPromptMemorySource(): void {
         formatKnowledgeFor: (platform, enabledIds) => knowledgeService.formatLibrariesFor(platform, enabledIds),
         memoryRevision: () => getMemoryRevision(),
         summaryRevision: () => getSummaryRevision(),
-        buildLongTermPrompt: (ctx, session, text, uis, gi) => MemoryManager.buildLongTermPrompt(ctx, session, text, uis, gi),
-        buildObservationPrompt: (session) => MemoryManager.buildObservationPrompt(session),
+        buildLongTermPrompt: (_ctx, session, text, uis, gi) => MemoryService.buildMemoryPrompt(session, text, uis, gi),
+        buildObservationPrompt: () => '',
     });
 }

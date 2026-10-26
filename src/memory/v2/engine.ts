@@ -1,28 +1,46 @@
-// Hindsight-like 记忆引擎：Retain / Recall / Consolidation / Reflect 的纯 TS 实现。
-// 设计参考 Hindsight：MemoryUnit + Entity + MemoryLink + Observation + MentalModel。
+// Hindsight-like 记忆引擎：retain / recall / consolidation / mental model / reflect 的编排。
+// 认知层细节在 consolidation.ts / mental_models.ts / reflection.ts / prompt.ts / structured.ts。
 import { generateId } from "../../utils/id";
 import { cosineSimilarity } from "../../utils/similarity";
 
-import { doConsolidate, pruneBank as pruneBankImpl } from "./consolidation";
+import { canReadByTags, getOriginScope, getVisibility } from "./access";
+import { doConsolidate } from "./consolidation";
 import { MentalModelService } from "./mental_models";
-import { reflect } from "./reflection";
-import { MemoryRepository, normalizeName } from "./repository";
-import { estimateTokens, filterByTags, keywordLimit, keywordScore, matchedStrategies, rrf, SEMANTIC_SIMILARITY_THRESHOLD, semanticLimit, simpleHash, temporalSearch, tokenize } from "./scoring";
-import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
+import { reflect, scopeNoteForBank } from "./reflection";
+import { MemoryRepository } from "./repository";
+import {
+    decayScore,
+    DEDUP_THRESHOLD,
+    estimateTokens,
+    evictionGroup,
+    filterByTags,
+    keywordLimit,
+    keywordScore,
+    matchedStrategies,
+    OBSERVATION_STALE_DAYS,
+    rrf,
+    SEMANTIC_LINK_MIN,
+    SEMANTIC_SIMILARITY_THRESHOLD,
+    semanticLimit,
+    temporalSearch,
+} from "./scoring";
+import { type BankPart, InMemoryMemoryStorage, type MemoryStorage } from "./storage";
 import type {
-    ConsolidationResult,
-    FactExtractor,
+    ConsolidateOutcome,
+    DeltaOperator,
     FactType,
     MemoryBankMeta,
+    MemoryLink,
     MemoryUnit,
     MentalModel,
     MentalModelRefreshReason,
     MentalModelRefreshSummary,
     MentalModelTemplateId,
     MentalModelTrigger,
-    ObservationSynthesizer,
+    Observation,
+    ObservationDecisionMaker,
+    RecallHit,
     RecallOptions,
-    RecallResult,
     ReflectResult,
     ReflectSynthesizer,
     Reranker,
@@ -30,52 +48,46 @@ import type {
     RetainResult,
 } from "./types";
 
-const DEFAULT_MAX_TOKENS = 2048;
-const BACKFILL_BATCH_LIMIT = 20;
-
 export interface MemoryEngineOptions {
     storage?: MemoryStorage;
     embedding?: (text: string) => Promise<number[]>;
-    extract?: FactExtractor;
     rerank?: Reranker;
-    synthesizeObservation?: ObservationSynthesizer;
+    observationDecision?: ObservationDecisionMaker;
+    observationSynthesizer?: (quotes: string[]) => Promise<string>;
     reflectSynthesizer?: ReflectSynthesizer;
-    /** 检索新近度加分权重（0 为关闭，默认 0.4） */
+    deltaOps?: DeltaOperator;
     recencyWeight?: number;
-    /** 新近度加分半衰期（天），默认 60 */
     recencyHalfLifeDays?: number;
-    /** 长期记忆条数上限（0 = 不限制，默认 100 由配置注入） */
     memoryCap?: number;
-    /** 可注入时钟（返回秒级时间戳），测试用；默认 Date.now()/1000 */
     now?: () => number;
 }
+
+const DEFAULT_MAX_TOKENS = 2048;
 
 export class MemoryEngine {
     readonly repository: MemoryRepository;
     private embedding?: (text: string) => Promise<number[]>;
-    private extract?: FactExtractor;
     private rerank?: Reranker;
-    private synthesizeObservation?: ObservationSynthesizer;
+    private observationDecision?: ObservationDecisionMaker;
+    private observationSynthesizer?: (quotes: string[]) => Promise<string>;
     private reflectSynthesizer?: ReflectSynthesizer;
-    /** 心智模型服务（创建/刷新/固定模板/限流与防重入状态都在服务内） */
+    private deltaOps?: DeltaOperator;
     private readonly mentalModels: MentalModelService;
-    /** 正在巩固的 bank（防重入） */
-    private consolidatingBanks = new Set<string>();
-    /** 检索新近度加分权重（0 为关闭，默认 0.4） */
-    private recencyWeight = 0.4;
-    /** 新近度加分半衰期（天），默认 60 */
-    private recencyHalfLifeDays = 60;
-    /** 长期记忆条数上限（0 = 不限制） */
-    private memoryCap = 0;
-    /** 时钟（秒级时间戳），测试可注入 */
+    private recencyWeight: number;
+    private recencyHalfLifeDays: number;
+    private memoryCap: number;
+    private semanticThreshold = SEMANTIC_SIMILARITY_THRESHOLD;
     private nowFn: () => number;
+    private consolidating = new Set<string>();
+
     constructor(options: MemoryEngineOptions = {}) {
         this.repository = new MemoryRepository(options.storage || new InMemoryMemoryStorage());
         this.embedding = options.embedding;
-        this.extract = options.extract;
         this.rerank = options.rerank;
-        this.synthesizeObservation = options.synthesizeObservation;
+        this.observationDecision = options.observationDecision;
+        this.observationSynthesizer = options.observationSynthesizer;
         this.reflectSynthesizer = options.reflectSynthesizer;
+        this.deltaOps = options.deltaOps;
         this.recencyWeight = options.recencyWeight ?? 0.4;
         this.recencyHalfLifeDays = options.recencyHalfLifeDays ?? 60;
         this.memoryCap = options.memoryCap ?? 0;
@@ -84,649 +96,434 @@ export class MemoryEngine {
             repository: this.repository,
             nowSec: () => this.nowSec(),
             reflect: (bankId, question, opts) => this.reflect(bankId, question, opts),
-            computeEmbedding: (bankId, model) => this.computeMentalModelEmbedding(bankId, model),
+            deltaOps: this.deltaOps,
+            embed: (text) => this.embedText(text),
         });
     }
 
-    /** 秒级当前时间（统一走可注入时钟） */
-    private nowSec(): number {
-        return this.nowFn();
-    }
+    nowSec(): number { return this.nowFn(); }
 
-    setExtractor(extract: FactExtractor): void {
-        this.extract = extract;
-    }
-
-    setReranker(rerank: Reranker): void {
-        this.rerank = rerank;
-    }
-
-    setObservationSynthesizer(synthesizeObservation: ObservationSynthesizer): void {
-        this.synthesizeObservation = synthesizeObservation;
-    }
-
-    setReflectSynthesizer(reflectSynthesizer: ReflectSynthesizer): void {
-        this.reflectSynthesizer = reflectSynthesizer;
-    }
-
-    /** 自动刷新最小间隔（秒）：consolidate 后的自动刷新受此限流，0 为不限制 */
-    setRefreshMinInterval(seconds: number): void {
-        this.mentalModels.setRefreshMinInterval(seconds);
-    }
-
-    /** 配置检索新近度加权：weight<=0 关闭；halfLifeDays 为加分半衰期（天） */
+    setReranker(rerank?: Reranker): void { this.rerank = rerank; }
+    setObservationDecision(decider?: ObservationDecisionMaker): void { this.observationDecision = decider; }
+    setObservationSynthesizer(synth?: (quotes: string[]) => Promise<string>): void { this.observationSynthesizer = synth; }
+    setReflectSynthesizer(synth?: ReflectSynthesizer): void { this.reflectSynthesizer = synth; }
+    setDeltaOps(ops?: DeltaOperator): void { this.deltaOps = ops; }
     setRecency(weight: number, halfLifeDays: number): void {
-        this.recencyWeight = weight > 0 ? weight : 0;
+        this.recencyWeight = weight;
         this.recencyHalfLifeDays = halfLifeDays > 0 ? halfLifeDays : 60;
     }
-
-    /** 配置长期记忆条数上限：cap<=0 为不限制（默认 100 由 createMemoryEngine 注入） */
-    setMemoryCap(cap: number): void {
-        this.memoryCap = cap > 0 ? cap : 0;
+    setMemoryCap(cap: number): void { this.memoryCap = cap > 0 ? cap : 0; }
+    setSemanticThreshold(threshold: number): void {
+        this.semanticThreshold = threshold > 0 ? threshold : SEMANTIC_SIMILARITY_THRESHOLD;
     }
-
-    /** 配置心智模型默认刷新参数（createMentalModel 未显式指定时生效） */
     setMentalModelDefaults(opts: { mode?: MentalModelTrigger; excludeMentalModels?: boolean }): void {
         this.mentalModels.setDefaults(opts);
     }
-
-    /** 各 bank 最近一次心智模型自动刷新时间（秒），供定时 tick 判断是否到点 */
-    getLastAutoRefreshAt(bankId: string): number {
-        return this.mentalModels.getLastAutoRefreshAt(bankId);
+    setRefreshMinInterval(seconds: number): void { this.mentalModels.setRefreshMinInterval(seconds); }
+    setMentalModelLimits(opts: { maxTokens?: number; failedCooldownSec?: number; deltaFullRebuildSec?: number }): void {
+        if (opts.maxTokens) this.mentalModels.setMaxTokens(opts.maxTokens);
+        if (opts.failedCooldownSec) this.mentalModels.setFailedCooldown(opts.failedCooldownSec);
+        if (opts.deltaFullRebuildSec) this.mentalModels.setDeltaFullRebuild(opts.deltaFullRebuildSec);
     }
+    getLastAutoRefreshAt(bankId: string): number { return this.mentalModels.getLastAutoRefreshAt(bankId); }
 
-    // ===== Bank =====
-
-    ensureBank(bankId: string, kind: MemoryBankMeta['kind'] = 'global', agentName = ''): void {
-        this.repository.getOrCreateBank(bankId, kind, agentName);
-    }
-
-    deleteBank(bankId: string): void {
-        this.repository.deleteBank(bankId);
-    }
-
-    // ===== Retain =====
-
-    async retain(bankId: string, input: RetainInput): Promise<RetainResult> {
-        const text = String(input.content || '').trim();
-        if (!text) return { unitIds: [], action: 'noop' };
-        const now = Math.floor(Date.now() / 1000);
-        const bank = this.repository.getOrCreateBank(bankId, 'global');
-        const timestamp = input.timestamp || now;
-
-        if (input.verbatim === false && this.extract) {
-            const facts = await this.extract(input);
-            if (facts.length === 0) return { unitIds: [], action: 'noop' };
-            const unitIds: string[] = [];
-            let lastAction: RetainResult['action'] = 'added';
-            for (const fact of facts) {
-                const r = await this.retain(bankId, {
-                    ...input,
-                    content: fact.text,
-                    context: fact.context || input.context,
-                    entities: fact.entities || input.entities,
-                    factType: fact.factType || input.factType,
-                    occurredStart: fact.occurredStart,
-                    occurredEnd: fact.occurredEnd,
-                    importance: fact.importance ?? input.importance,
-                    verbatim: true,
-                });
-                if (r.unitIds[0]) unitIds.push(r.unitIds[0]);
-                if (r.action !== 'added') lastAction = r.action;
-            }
-            return { unitIds, action: lastAction };
-        }
-
-
-        // 精确查重：同 bank 同文本合并。
-        const normalized = normalizeName(text);
-        const existing = bank.units.find(u => u.state === 'valid' && normalizeName(u.text) === normalized);
-        if (existing) {
-            existing.tags = Array.from(new Set([...existing.tags, ...(input.tags || [])]));
-            existing.metadata = { ...existing.metadata, ...(input.metadata || {}) };
-            existing.importance = Math.max(existing.importance, input.importance ?? existing.importance);
-            existing.accessCount++;
-            existing.lastAccessedAt = now;
-            existing.updatedAt = now;
-            this.repository.updateUnit(bankId, existing);
-            return { unitIds: [existing.id], action: 'merged' };
-        }
-
-        const unitId = generateId();
-        const entityIds = this.resolveEntityIds(bankId, input.entities || [], false);
-        const unit: MemoryUnit = {
-            id: unitId,
-            bankId,
-            documentId: input.documentId,
-            text,
-            context: input.context,
-            factType: input.factType || 'world',
-            occurredStart: input.occurredStart,
-            occurredEnd: input.occurredEnd,
-            mentionedAt: timestamp,
-            createdAt: now,
-            updatedAt: now,
-            embedding: await this.embedText(text),
-            entityIds,
-            tags: input.tags || [],
-            metadata: input.metadata || {},
-            importance: input.importance ?? 0.5,
-            accessCount: 0,
-            lastAccessedAt: now,
-            state: 'valid',
-            consolidationState: 'pending',
-        };
-        this.repository.addUnit(bankId, unit, false);
-
-        // 实体链接：同一实体的所有有效记忆互连。
-        for (const entityId of entityIds) {
-            const linked = bank.units.filter(u => u.id !== unitId && u.state === 'valid' && u.entityIds.includes(entityId));
-            for (const other of linked) {
-                this.repository.addLink(bankId, {
-                    fromUnitId: unitId,
-                    toUnitId: other.id,
-                    linkType: 'entity',
-                    entityId,
-                    weight: 1,
-                    createdAt: now,
-                }, false);
-            }
-        }
-
-        // 语义近似链接：向量可用时，与高相似记忆建立 semantic link。
-        if (unit.embedding.length > 0) {
-            for (const other of bank.units) {
-                if (other.id === unitId || other.state !== 'valid' || other.embedding.length === 0) continue;
-                const sim = cosineSimilarity(unit.embedding, other.embedding);
-                if (sim >= SEMANTIC_SIMILARITY_THRESHOLD) {
-                    this.repository.addLink(bankId, {
-                        fromUnitId: unitId,
-                        toUnitId: other.id,
-                        linkType: 'semantic',
-                        weight: sim,
-                        createdAt: now,
-                    }, false);
-                }
-            }
-        }
-
-        if (input.documentId) {
-            this.repository.addDocument(bankId, {
-                id: input.documentId,
-                bankId,
-                originalText: text,
-                contentHash: simpleHash(text),
-                createdAt: now,
-                metadata: input.metadata || {},
-            }, false);
-            this.repository.addChunk(bankId, {
-                id: `${input.documentId}_${unitId}`,
-                documentId: input.documentId,
-                bankId,
-                text,
-                embedding: unit.embedding.length ? unit.embedding : undefined,
-            }, false);
-        }
-
-        // 遗忘机制：超限时按覆盖/衰减优先级物理删除多余记忆（上限为硬约束）
-        await this.pruneBank(bankId, false);
-
-        // 批量写穿：retain 全程 persist=false 累计变更，末尾统一落盘一次
-        this.repository.save(bankId);
-        return { unitIds: [unitId], documentId: input.documentId, action: 'added' };
-    }
-
-    async addMemory(bankId: string, input: RetainInput): Promise<RetainResult> {
-        return this.retain(bankId, { ...input, verbatim: true });
-    }
-
-    // ===== Recall =====
-
-    async recall(bankId: string, query: string, options: Partial<RecallOptions> = {}): Promise<RecallResult[]> {
-        const bank = this.repository.getBank(bankId);
-        if (!bank) return [];
-        const q = String(query || '').trim();
-        const opts: RecallOptions = {
-            query: q,
-            tags: options.tags || [],
-            tagsMatch: options.tagsMatch || 'any',
-            types: options.types || ['world', 'experience', 'observation'],
-            maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-            budget: options.budget || 'mid',
-            includeChunks: !!options.includeChunks,
-            preferObservations: !!options.preferObservations,
-        };
-
-        let units = bank.units.filter(u => u.state === 'valid' && (opts.types ?? ['world', 'experience', 'observation']).includes(u.factType));
-        units = filterByTags(units, opts.tags || [], opts.tagsMatch || 'any');
-
-        if (units.length === 0) return [];
-
-        const queryEmbedding = q ? await this.embedText(q) : [];
-
-        // 存量回填：语义检索可用时，对尚无向量的记忆惰性补算并落库（每轮限量，避免阻塞）
-        if (queryEmbedding.length > 0) {
-            await this.backfillEmbeddings(bankId, units);
-        }
-        const strategyResults: Array<{ strategy: string; ids: string[] }> = [];
-
-        // 1. Semantic
-        if (queryEmbedding.length > 0) {
-            const ranked = units
-                .filter(u => u.embedding.length > 0)
-                .map(u => ({ id: u.id, sim: cosineSimilarity(queryEmbedding, u.embedding) }))
-                .sort((a, b) => b.sim - a.sim)
-                .slice(0, semanticLimit(opts.budget || 'mid'));
-            strategyResults.push({ strategy: 'semantic', ids: ranked.map(r => r.id) });
-        }
-
-        // 2. Keyword / BM25-like
-        const keywordRanked = units
-            .map(u => ({ id: u.id, score: keywordScore(u.text, q) }))
-            .filter(x => x.score > 0)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, keywordLimit(opts.budget || 'mid'));
-        strategyResults.push({ strategy: 'keyword', ids: keywordRanked.map(r => r.id) });
-
-        // 3. Graph
-        const graphIds = this.graphSearch(bankId, q, opts.budget || 'mid');
-        if (graphIds.length > 0) strategyResults.push({ strategy: 'graph', ids: graphIds });
-
-        // 4. Temporal
-        const temporalIds = temporalSearch(units, q);
-        if (temporalIds.length > 0) strategyResults.push({ strategy: 'temporal', ids: temporalIds });
-
-        let rrfEntries = rrf(strategyResults);
-        const results: RecallResult[] = [];
-        const usedTokens = new Map<string, number>();
-        const unitById = new Map(units.map(u => [u.id, u]));
-        // 本轮是否有命中被 touch：有则末尾统一落盘一次（touchUnit 只改内存，避免每条命中整库序列化）
-        let touched = false;
-
-        if (this.rerank && q && rrfEntries.length > 0) {
-            const candidates = rrfEntries
-                .slice(0, 20)
-                .map(([id]) => unitById.get(id))
-                .filter((u): u is MemoryUnit => !!u);
-            try {
-                const rankedIds = await this.rerank(q, candidates);
-                const rank = new Map(rankedIds.map((id, index) => [id, index]));
-                rrfEntries = rrfEntries.slice().sort((a, b) => {
-                    const ra = rank.get(a[0]) ?? Number.MAX_SAFE_INTEGER;
-                    const rb = rank.get(b[0]) ?? Number.MAX_SAFE_INTEGER;
-                    return ra - rb;
-                });
-            } catch {
-                // rerank 失败时保留 RRF 原始排序
-            }
-        }
-
-        // Hindsight 式新近度加分：按 lastAccessedAt 做指数衰减加权（半衰期 halfLife），
-        // 让"最近用过/验证过"的记忆在同等相关度下更靠前；不删除旧记忆，只影响召回排序。
-        if (this.recencyWeight > 0 && rrfEntries.length > 0) {
-            const nowSec = Math.floor(Date.now() / 1000);
-            rrfEntries = rrfEntries
-                .map(([id, score]) => {
-                    const u = unitById.get(id);
-                    if (!u) return [id, score] as [string, number];
-                    const last = u.lastAccessedAt || u.updatedAt || u.createdAt || nowSec;
-                    const ageDays = Math.max(0, (nowSec - last) / 86400);
-                    const bonus = this.recencyWeight * Math.exp((-Math.log(2) * ageDays) / this.recencyHalfLifeDays);
-                    return [id, score + bonus] as [string, number];
-                })
-                .sort((a, b) => b[1] - a[1]);
-        }
-
-        for (const [id, rrfScoreValue] of rrfEntries) {
-            const unit = unitById.get(id);
-            if (!unit) continue;
-            if (opts.preferObservations && unit.factType !== 'observation') {
-                const obs = bank.observations.find(o => o.evidence.some(e => e.memoryId === id));
-                if (obs) {
-                    const obsUnit = units.find(u => u.id === obs.id);
-                    if (obsUnit && !results.some(r => r.unit.id === obs.id)) {
-                        const before = results.length;
-                        this.pushResult(results, usedTokens, { unit: obsUnit, score: rrfScoreValue, matchedStrategies: matchedStrategies(strategyResults, id) }, opts.maxTokens || DEFAULT_MAX_TOKENS);
-                        if (results.length > before) {
-                            this.touchUnit(bankId, obsUnit);
-                            touched = true;
-                        }
-                        continue;
-                    }
-                }
-            }
-            const item: RecallResult = {
-                unit,
-                score: rrfScoreValue,
-                matchedStrategies: matchedStrategies(strategyResults, id),
-            };
-            if (opts.includeChunks && unit.documentId) {
-                item.chunks = this.repository.listChunks(bankId, unit.documentId);
-            }
-            const before = results.length;
-            this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
-            if (results.length > before) {
-                this.touchUnit(bankId, unit);
-                touched = true;
-            }
-        }
-
-        // 如果 token 预算宽松，用关键词/重要性补足（Hindsight recall 同样有 backfill 行为）
-        const known = new Set(results.map(r => r.unit.id));
-        for (const u of units) {
-            if (known.has(u.id)) continue;
-            const item: RecallResult = {
-                unit: u,
-                score: u.importance,
-                matchedStrategies: [],
-            };
-            const before = results.length;
-            this.pushResult(results, usedTokens, item, opts.maxTokens || DEFAULT_MAX_TOKENS);
-            if (results.length > before) {
-                this.touchUnit(bankId, u);
-                touched = true;
-            }
-        }
-
-        // 统一落盘一次（原实现每条命中都整库 JSON.stringify + storageSet，记忆库越大越慢）
-        if (touched) this.repository.save(bankId);
-
-        return results;
-    }
-
-    // ===== Observations / Consolidation =====
-
-    async consolidate(bankId: string): Promise<ConsolidationResult> {
-        // 防重入：同一 bank 的巩固已在执行时直接跳过，避免并发重复合并
-        if (this.consolidatingBanks.has(bankId)) return { created: [], updated: [], merged: [], skipped: 0 };
-        this.consolidatingBanks.add(bankId);
-        try {
-            const result = await doConsolidate({ repository: this.repository, synthesizeObservation: this.synthesizeObservation }, bankId);
-            // 遗忘机制：consolidate 后大量细节已被 observation 覆盖，覆盖优先物理删（上限硬约束）
-            // doConsolidate 末尾已统一落盘一次；若 pruneBank 实际淘汰了单元，须再落盘一次，否则淘汰只停留在内存、重载后复活
-            const evicted = await this.pruneBank(bankId, false);
-            if (evicted.length > 0) this.repository.save(bankId);
-            return result;
-        } finally {
-            this.consolidatingBanks.delete(bankId);
-        }
-    }
-
-
-
-
-    /** 淘汰包装：参数化实现见 ./consolidation.pruneBank（上限来自实例配置 memoryCap） */
-    private async pruneBank(bankId: string, persist = true): Promise<string[]> {
-        return pruneBankImpl(this.repository, this.memoryCap, bankId, persist);
-    }
-
-    // ===== Consolidation 计数（驱动「每隔多少次观察整合一次记忆」配置） =====
-
-    getConsolidateSince(bankId: string): number {
-        const bank = this.repository.getBank(bankId);
-        return bank?.meta.settings.consolidateSince ?? 0;
-    }
-
-    setConsolidateSince(bankId: string, count: number): void {
-        const bank = this.repository.getOrCreateBank(bankId, 'global');
-        bank.meta.settings.consolidateSince = count;
-        this.repository.save(bankId);
-    }
-
-
-
-    // ===== Mental Models =====
-    // ===== Mental Models（实现见 ./mental_models.MentalModelService，公开方法保留委派） =====
-
-    listMentalModels(bankId: string): MentalModel[] {
-        return this.mentalModels.listMentalModels(bankId);
-    }
-
-    async createMentalModel(
-        bankId: string,
-        question: string,
-        answer: string,
-        scopeTags: string[] = [],
-        opts: {
-            mode?: MentalModelTrigger;
-            autoRefresh?: boolean;
-            factTypes?: FactType[];
-            excludeMentalModels?: boolean;
-            templateId?: MentalModelTemplateId;
-        } = {}
-    ): Promise<MentalModel> {
-        return this.mentalModels.createMentalModel(bankId, question, answer, scopeTags, opts);
-    }
-
-    deleteMentalModel(bankId: string, id: string): boolean {
-        return this.mentalModels.deleteMentalModel(bankId, id);
-    }
-
-    ensureDefaultMentalModels(
-        bankId: string,
-        kind: 'user' | 'group',
-        scopeTag: string
-    ): { created: number; renamed: number } {
-        return this.mentalModels.ensureDefaultMentalModels(bankId, kind, scopeTag);
-    }
-
-    async refreshMentalModels(
-        bankId: string,
-        id?: string,
-        opts: { force?: boolean; reason?: MentalModelRefreshReason } = {}
-    ): Promise<MentalModelRefreshSummary> {
-        return this.mentalModels.refreshMentalModels(bankId, id, opts);
-    }
-
-
-
-    /** 计算查询向量（未配置 embedding 或失败返回 null），供注入语义排序复用，避免每库各算一次 */
-    async embedQuery(text: string): Promise<number[] | null> {
-        const q = String(text || '').trim();
-        if (!q) return null;
-        const v = await this.embedText(q);
-        return v && v.length > 0 ? v : null;
-    }
-
-    /**
-     * 心智模型语义召回（Hindsight 心智模型参与检索的 TS 版）：只返回 ready，
-     * 按 query 相关度排序（语义向量优先，关键词兜底，最后更新时间兜底）。
-     * 传入 queryEmbedding 可复用同一查询向量（注入场景每轮只算一次）。
-     */
-    async searchMentalModels(
-        bankId: string,
-        query: string,
-        opts: { tags?: string[]; limit?: number; queryEmbedding?: number[] | null; excludeTemplates?: boolean } = {}
-    ): Promise<MentalModel[]> {
-        const models = this.repository.listMentalModels(bankId)
-            .filter(m => m.status === 'ready' || m.status === undefined)
-            .filter(m => !(opts.excludeTemplates && m.templateId))
-            .filter(m => {
-                if (!opts.tags || opts.tags.length === 0) return true;
-                const tags = m.scopeTags || [];
-                if (tags.length === 0) return true; // 全局心智模型放行
-                return tags.some(t => opts.tags!.includes(t));
-            });
-        if (models.length === 0) return [];
-        const q = String(query || '').trim();
-        const qv = opts.queryEmbedding !== undefined
-            ? (opts.queryEmbedding || [])
-            : (q ? await this.embedText(q) : []);
-        const scored = models.map(m => {
-            let score = 0;
-            if (qv.length > 0 && m.embedding && m.embedding.length > 0) {
-                score = Math.max(score, cosineSimilarity(qv, m.embedding));
-            }
-            if (q) {
-                // 关键词兜底：无向量或向量未命中时仍可按 question/answer 命中排序
-                score = Math.max(score, keywordScore(`${m.question} ${m.answer}`, q) * 0.5);
-            }
-            return { m, score };
-        });
-        scored.sort((a, b) => b.score - a.score || (b.m.updatedAt || 0) - (a.m.updatedAt || 0));
-        return scored.slice(0, opts.limit ?? 5).map(x => x.m);
-    }
-
-    /** 计算并落库心智模型语义向量（best-effort，失败静默） */
-    private async computeMentalModelEmbedding(bankId: string, model: MentalModel): Promise<void> {
-        const vec = await this.embedText(`${model.question} ${model.answer}`);
-        if (!vec || vec.length === 0) return;
-        const current = this.repository.getBank(bankId)?.mentalModels.find(m => m.id === model.id);
-        if (!current) return;
-        current.embedding = vec;
-        this.repository.updateMentalModel(bankId, current);
-    }
-
-    // ===== Reflect（实现见 ./reflection） =====
-
-    async reflect(
-        bankId: string,
-        query: string,
-        opts: {
-            factTypes?: FactType[];
-            scopeTags?: string[];
-            excludeMentalModelIds?: string[];
-            createdAfter?: number;
-            mode?: MentalModelTrigger;
-            existingAnswer?: string;
-            strict?: boolean;
-            maxTokens?: number;
-            scopeNote?: string;
-        } = {}
-    ): Promise<ReflectResult> {
-        return reflect({
-            repository: this.repository,
-            reflectSynthesizer: this.reflectSynthesizer,
-            recall: (b, q, o) => this.recall(b, q, o as any),
-        }, bankId, query, opts);
-    }
-
-    // ===== Utility =====
-
-
-    /** 存量回填：为尚无向量的有效记忆惰性补算 embedding（每轮限量，失败自动降级） */
-    private async backfillEmbeddings(bankId: string, units: MemoryUnit[]): Promise<void> {
-        const missing = units.filter(u => u.state === 'valid' && u.embedding.length === 0);
-        if (missing.length === 0) return;
-        const batch = missing.slice(0, BACKFILL_BATCH_LIMIT);
-        const vectors = await Promise.all(batch.map(u => this.embedText(u.text)));
-        const bank = this.repository.getBank(bankId);
-        if (!bank) return;
-        let changed = false;
-        for (let i = 0; i < batch.length; i++) {
-            const vector = vectors[i];
-            if (vector.length > 0) {
-                const idx = bank.units.findIndex(u => u.id === batch[i].id);
-                if (idx >= 0) {
-                    bank.units[idx] = { ...bank.units[idx], embedding: vector };
-                    changed = true;
-                }
-            }
-        }
-        if (changed) this.repository.save(bankId);
+    ensureBank(bankId: string, kind: MemoryBankMeta['kind'] = 'global', agentName = '', sessionId?: string): void {
+        this.repository.getOrCreateBank(bankId, kind, agentName, sessionId);
     }
 
     private async embedText(text: string): Promise<number[]> {
         if (!this.embedding || !text) return [];
         try {
-            const v = await this.embedding(text);
-            return Array.isArray(v) ? v : [];
+            const vec = await this.embedding(text);
+            return Array.isArray(vec) ? vec : [];
         } catch {
             return [];
         }
     }
 
-    private resolveEntityIds(bankId: string, names: string[], persist = true): string[] {
-        const ids: string[] = [];
-        const now = Math.floor(Date.now() / 1000);
-        for (const raw of names) {
-            const name = String(raw || '').trim();
-            if (!name) continue;
-            let entity = this.repository.findEntityByName(bankId, name);
-            if (!entity) {
-                entity = {
-                    id: generateId(),
-                    bankId,
-                    canonicalName: name,
-                    aliases: [],
-                    entityType: undefined,
-                    metadata: {},
-                    firstSeen: now,
-                    lastSeen: now,
-                    mentionCount: 1,
-                };
-                this.repository.addEntity(bankId, entity, persist);
-            } else {
-                entity.lastSeen = now;
-                entity.mentionCount++;
-                if (!entity.aliases.includes(name) && normalizeName(entity.canonicalName) !== normalizeName(name)) {
-                    entity.aliases.push(name);
-                }
-                this.repository.updateEntity(bankId, entity, persist);
-            }
-            ids.push(entity.id);
+    // ===== retain =====
+
+    async retain(bankId: string, input: RetainInput): Promise<RetainResult> {
+        const content = String(input.content || '').trim();
+        if (!content) return { unitIds: [], action: 'noop' };
+        const bank = this.repository.getOrCreateBank(bankId);
+        const hash = contentHash(content);
+        const existing = this.repository.findUnitByHash(bankId, hash);
+        if (existing) return { unitIds: [existing.id], action: 'duplicate' };
+
+        const now = this.nowSec();
+        const seq = (bank.meta.settings.nextFactSeq || 0) + 1;
+        bank.meta.settings.nextFactSeq = seq;
+        const id = generateId();
+        const entityIds: string[] = [];
+        const entityNames = Array.from(new Set((input.entities || []).map(e => String(e).trim()).filter(Boolean)));
+        for (const name of entityNames) {
+            const entity = this.repository.upsertEntity(bankId, name);
+            entityIds.push(entity.id);
         }
-        return ids;
+        const unit: MemoryUnit = {
+            id,
+            bankId,
+            text: content,
+            factType: input.factType === 'experience' ? 'experience' : 'world',
+            occurredStart: input.occurredStart,
+            occurredEnd: input.occurredEnd,
+            mentionedAt: input.timestamp ?? now,
+            createdAt: now,
+            createdAtSeq: seq,
+            updatedAt: now,
+            embedding: await this.embedText(content),
+            entityIds,
+            tags: Array.from(new Set(input.tags || [])),
+            metadata: { ...(input.metadata || {}), contentHash: hash },
+            supersedes: input.supersedes,
+            importance: typeof input.importance === 'number' ? Math.max(0, Math.min(1, input.importance)) : 0.5,
+            accessCount: 0,
+            lastAccessedAt: 0,
+            state: 'valid',
+            consolidationState: 'pending',
+        };
+        this.repository.addUnit(bankId, unit, false);
+
+        // 实体链接 + 语义链接（只对最近 200 条候选，避免 O(n²) 全库）
+        const recent = this.repository.listUnits(bankId)
+            .filter(u => u.id !== id && u.state === 'valid')
+            .slice(-200);
+        for (const candidate of recent) {
+            if (entityIds.some(eid => candidate.entityIds.includes(eid))) {
+                this.repository.addLink(bankId, this.link(id, candidate.id, 'entity', now));
+            }
+            if (unit.embedding.length && candidate.embedding.length) {
+                try {
+                    const sim = cosineSimilarity(unit.embedding, candidate.embedding);
+                    if (sim >= SEMANTIC_LINK_MIN) this.repository.addLink(bankId, this.link(id, candidate.id, 'semantic', now, sim));
+                } catch { /* ignore */ }
+            }
+        }
+        this.repository.save(bankId, ['units', 'links', 'obs', 'meta'] as BankPart[]);
+        if (this.memoryCap > 0) this.prune(bankId);
+        return { unitIds: [id], action: 'added' };
     }
 
+    private link(from: string, to: string, type: MemoryLink['linkType'], now: number, weight = 1): MemoryLink {
+        return { fromUnitId: from, toUnitId: to, linkType: type, weight, createdAt: now };
+    }
 
+    // ===== recall =====
 
-
-
-    private graphSearch(bankId: string, query: string, budget: string): string[] {
+    async recall(bankId: string, options: RecallOptions): Promise<RecallHit[]> {
         const bank = this.repository.getBank(bankId);
         if (!bank) return [];
-        const qNames = tokenize(query);
-        const entityIds = bank.entities
-            .filter(e => qNames.some(t => normalizeName(e.canonicalName).includes(normalizeName(t)) || e.aliases.some(a => normalizeName(a).includes(normalizeName(t)))))
-            .map(e => e.id);
-        if (!entityIds.length) return [];
-        const direct = bank.units.filter(u => u.state === 'valid' && u.entityIds.some(id => entityIds.includes(id))).map(u => u.id);
-        const hops = budget === 'high' ? 3 : budget === 'low' ? 1 : 2;
-        const seen = new Set<string>(direct);
-        const frontier = new Set(direct);
-        for (let h = 0; h < hops; h++) {
-            const next = new Set<string>();
-            for (const unitId of frontier) {
-                for (const link of bank.links) {
-                    if (link.fromUnitId === unitId && !seen.has(link.toUnitId)) next.add(link.toUnitId);
-                    if (link.toUnitId === unitId && !seen.has(link.fromUnitId)) next.add(link.fromUnitId);
+        const query = String(options.query || '');
+        const tags = options.tags || [];
+        const tagsMatch = options.tagsMatch ?? 'any';
+        const types = options.types;
+        let units = bank.units.filter(u =>
+            (options.includeInvalidated || u.state === 'valid')
+            && (!types || types.includes(u.factType))
+            && (!options.createdAfterSeq || u.createdAtSeq > options.createdAfterSeq));
+        units = filterByTags(units, tags, tagsMatch);
+        if (units.length === 0) return [];
+
+        const byId = new Map(units.map(u => [u.id, u]));
+        const lists: Array<{ strategy: string; ids: string[] }> = [];
+
+        // 语义
+        if (this.embedding && query) {
+            const qvec = await this.embedText(query);
+            if (qvec.length) {
+                const scored = units
+                    .filter(u => u.embedding.length)
+                    .map(u => ({ id: u.id, sim: safeCosine(qvec, u.embedding) }))
+                    .filter(x => x.sim >= this.semanticThreshold)
+                    .sort((a, b) => b.sim - a.sim)
+                    .slice(0, semanticLimit(options.budget || 'mid'));
+                lists.push({ strategy: 'semantic', ids: scored.map(x => x.id) });
+            }
+        }
+
+        // 关键词
+        if (query) {
+            const kw = units
+                .map(u => ({ id: u.id, score: keywordScore(u.text, query) }))
+                .filter(x => x.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, keywordLimit(options.budget || 'mid'));
+            if (kw.length) lists.push({ strategy: 'keyword', ids: kw.map(x => x.id) });
+        }
+
+        // 图（只从已过滤 units 出发，≤2 跳）
+        if (query) {
+            const seeds = units.filter(u => queryTokens(query).some(t => u.text.includes(t)) || u.tags.some(t => t.includes(query))).slice(0, 20);
+            const graph = this.graphExpand(bank.links, seeds.map(u => u.id), byId, 2);
+            if (graph.length) lists.push({ strategy: 'graph', ids: graph });
+        }
+
+        // 时间
+        const temporal = temporalSearch(units, query);
+        if (temporal.length) lists.push({ strategy: 'temporal', ids: temporal });
+
+        let ordered = rrf(lists);
+        if (ordered.length === 0) {
+            // 无策略命中：空 query 按 importance+recency；有 query 返回空（不做插入序 backfill）
+            if (!query) {
+                ordered = units
+                    .slice()
+                    .sort((a, b) => (b.importance + recencyBonus(b, this.nowSec(), this.recencyWeight, this.recencyHalfLifeDays))
+                        - (a.importance + recencyBonus(a, this.nowSec(), this.recencyWeight, this.recencyHalfLifeDays)))
+                    .map(u => [u.id, u.importance] as [string, number]);
+            }
+        }
+
+        // 可选 rerank（失败回退 RRF）
+        const candidateIds = ordered.map(([id]) => id);
+        let reranked = candidateIds;
+        if (this.rerank && query && candidateIds.length > 1) {
+            try {
+                const candidates = candidateIds.map(id => byId.get(id)!).filter(Boolean).slice(0, 20);
+                const ids = await this.rerank(query, candidates);
+                if (Array.isArray(ids) && ids.length) {
+                    reranked = ids.filter(id => byId.has(id));
+                    for (const id of candidateIds) if (!reranked.includes(id)) reranked.push(id);
+                }
+            } catch {
+                reranked = candidateIds;
+            }
+        }
+
+        // 新近度加分（只作用于 RRF 结果）
+        const scoreMap = new Map(ordered);
+        const now = this.nowSec();
+        reranked.sort((a, b) => {
+            const ua = byId.get(a)!;
+            const ub = byId.get(b)!;
+            const sa = (scoreMap.get(a) || 0) + recencyBonus(ua, now, this.recencyWeight, this.recencyHalfLifeDays);
+            const sb = (scoreMap.get(b) || 0) + recencyBonus(ub, now, this.recencyWeight, this.recencyHalfLifeDays);
+            return sb - sa;
+        });
+
+        const hits: RecallHit[] = [];
+        const usedTokens = new Map<string, number>();
+        const addedObservations = new Set<string>();
+        const activeObs = bank.observations.filter(o => o.status === 'active');
+        const maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
+        const coveredFactIds = new Set<string>();
+        if (options.collapseObservations) {
+            for (const obs of activeObs) for (const e of obs.evidence) coveredFactIds.add(e.memoryId);
+        }
+        for (const id of reranked) {
+            const unit = byId.get(id);
+            if (!unit) continue;
+            const cost = estimateTokens(unit.text);
+            const used = sumTokens(usedTokens);
+            if (maxTokens > 0 && used + cost > maxTokens) continue;
+            if (options.collapseObservations && coveredFactIds.has(unit.id)) {
+                const obs = activeObs.find(o => o.evidence.some(e => e.memoryId === unit.id));
+                if (obs) {
+                    if (addedObservations.has(obs.id)) continue;
+                    addedObservations.add(obs.id);
+                    const obsCost = estimateTokens(obs.text);
+                    if (maxTokens > 0 && used + obsCost > maxTokens) continue;
+                    hits.push({
+                        kind: 'observation',
+                        observation: obs,
+                        score: scoreMap.get(id) || 0,
+                        matchedStrategies: matchedStrategies(lists, id),
+                    });
+                    usedTokens.set(obs.id, obsCost);
+                    continue;
                 }
             }
-            for (const id of next) seen.add(id);
-            frontier.clear();
-            for (const id of next) frontier.add(id);
+            hits.push({
+                kind: 'fact',
+                unit,
+                score: scoreMap.get(id) || 0,
+                matchedStrategies: matchedStrategies(lists, id),
+            });
+            usedTokens.set(unit.id, cost);
         }
-        return Array.from(seen);
+
+        // 访问计数：只对实际返回的 fact 更新一次；不落盘（调用方统一 save）
+        for (const hit of hits) {
+            if (hit.kind !== 'fact' || !hit.unit) continue;
+            hit.unit.accessCount = (hit.unit.accessCount || 0) + 1;
+            hit.unit.lastAccessedAt = now;
+        }
+        if (hits.some(h => h.kind === 'fact')) this.repository.save(bankId, ['units']);
+        return hits;
     }
 
-
-
-
-    private pushResult(results: RecallResult[], usedTokens: Map<string, number>, item: RecallResult, maxTokens: number): void {
-        const cost = estimateTokens(item.unit.text);
-        const used = Array.from(usedTokens.values()).reduce((a, b) => a + b, 0);
-        if (maxTokens > 0 && used + cost > maxTokens) return;
-        results.push(item);
-        usedTokens.set(item.unit.id, cost);
+    private graphExpand(links: MemoryLink[], seeds: string[], byId: Map<string, MemoryUnit>, maxHops: number): string[] {
+        const visited = new Set(seeds);
+        let frontier = seeds;
+        for (let hop = 0; hop < maxHops; hop++) {
+            const next: string[] = [];
+            for (const id of frontier) {
+                for (const link of links) {
+                    const other = link.fromUnitId === id ? link.toUnitId : link.toUnitId === id ? link.fromUnitId : '';
+                    if (other && !visited.has(other) && byId.has(other)) {
+                        visited.add(other);
+                        next.push(other);
+                    }
+                }
+            }
+            frontier = next;
+            if (!frontier.length) break;
+        }
+        return Array.from(visited).filter(id => !seeds.includes(id));
     }
 
-    /** 召回命中：更新访问计数与最近访问时间（新近度加分的依据）；只改内存不落盘，由 recall 末尾统一 save */
-    private touchUnit(bankId: string, unit: MemoryUnit): void {
-        const now = Math.floor(Date.now() / 1000);
-        // 以库中最新对象为准（backfill 可能已替换为带向量的新对象），避免回写覆盖
-        const current = this.repository.getUnit(bankId, unit.id) || unit;
-        current.accessCount = (current.accessCount || 0) + 1;
-        current.lastAccessedAt = now;
-        this.repository.updateUnit(bankId, current, false);
+    // ===== consolidation / mental models / reflect =====
+
+    isConsolidating(bankId: string): boolean { return this.consolidating.has(bankId); }
+
+    async consolidate(bankId: string, opts: { maxFacts?: number; targetedTags?: string[] } = {}): Promise<ConsolidateOutcome> {
+        if (this.consolidating.has(bankId)) {
+            return { created: [], updated: [], merged: [], skipped: 0, touchedTags: [], pendingRemaining: this.pendingCount(bankId) };
+        }
+        this.consolidating.add(bankId);
+        try {
+            return await doConsolidate({
+                repository: this.repository,
+                decideObservation: this.observationDecision,
+                synthesizeObservation: this.observationSynthesizer,
+            }, bankId, opts);
+        } finally {
+            this.consolidating.delete(bankId);
+        }
     }
 
+    async createMentalModel(bankId: string, sourceQuery: string, answer: string, tags: string[] = [], opts: {
+        mode?: MentalModelTrigger;
+        autoRefresh?: boolean;
+        factTypes?: FactType[];
+        templateId?: MentalModelTemplateId;
+    } = {}): Promise<MentalModel> {
+        return this.mentalModels.createMentalModel(bankId, sourceQuery, answer, tags, opts);
+    }
 
+    listMentalModels(bankId: string): MentalModel[] { return this.mentalModels.listMentalModels(bankId); }
 
+    async deleteMentalModel(bankId: string, id: string): Promise<void> { return this.mentalModels.deleteMentalModel(bankId, id); }
 
+    async ensureDefaultMentalModels(bankId: string, kind: 'user' | 'group' | 'global', scopeTag: string, enabled = true): Promise<string[]> {
+        return this.mentalModels.ensureDefaultMentalModels(bankId, kind, scopeTag, enabled);
+    }
+
+    async refreshMentalModels(bankId: string, id: string | undefined, opts: {
+        force?: boolean;
+        reason?: MentalModelRefreshReason;
+        touchedTags?: string[];
+        ids?: string[];
+    } = {}): Promise<MentalModelRefreshSummary & { seedIds?: string[] }> {
+        return this.mentalModels.refreshMentalModels(bankId, id, opts);
+    }
+
+    async refreshMentalModel(bankId: string, id: string, opts: { force?: boolean; reason?: MentalModelRefreshReason } = {}): Promise<MentalModelRefreshSummary> {
+        return this.mentalModels.refreshMentalModels(bankId, id, opts);
+    }
+
+    async reflect(bankId: string, query: string, opts: {
+        factTypes?: FactType[];
+        scopeTags?: string[];
+        excludeMentalModelIds?: string[];
+        createdAfterSeq?: number;
+        mode?: MentalModelTrigger;
+        existingAnswer?: string;
+        strict?: boolean;
+        maxTokens?: number;
+        scopeNote?: string;
+        fastPath?: boolean;
+    } = {}): Promise<ReflectResult> {
+        return reflect({
+            repository: this.repository,
+            reflectSynthesizer: this.reflectSynthesizer,
+            recall: (b, q, o) => this.recall(b, { query: q, ...o } as RecallOptions),
+            searchModels: (b, q, tags) => this.mentalModels.searchMentalModels(b, q, tags),
+        }, bankId, query, opts);
+    }
+
+    searchMentalModels(bankId: string, query: string, tags: string[] = []): Array<{ model: MentalModel; score: number; stale: boolean }> {
+        return this.mentalModels.searchMentalModels(bankId, query, tags);
+    }
+
+    pendingCount(bankId: string): number {
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return 0;
+        return bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+    }
+
+    async computeMentalModelEmbedding(model: MentalModel): Promise<void> {
+        const vec = await this.embedText(`${model.sourceQuery}\n${model.content}`);
+        if (vec.length) model.embedding = vec;
+    }
+
+    // ===== retention =====
+
+    prune(bankId: string): string[] {
+        if (this.memoryCap <= 0) return [];
+        const bank = this.repository.getBank(bankId);
+        if (!bank) return [];
+        const valid = bank.units.filter(u => u.state === 'valid');
+        if (valid.length <= this.memoryCap) return [];
+        const now = this.nowSec();
+        const covered = new Set<string>();
+        for (const obs of bank.observations) if (obs.status === 'active') for (const e of obs.evidence) covered.add(e.memoryId);
+        const protectedByEvidence = covered;
+        const candidates = valid
+            .filter(u => !protectedByEvidence.has(u.id))
+            .sort((a, b) => {
+                const ga = evictionGroup(a, covered);
+                const gb = evictionGroup(b, covered);
+                if (ga !== gb) return ga - gb;
+                return decayScore(a, now) - decayScore(b, now);
+            });
+        const need = valid.length - this.memoryCap;
+        const evict = candidates.slice(0, need).map(u => u.id);
+        if (evict.length) this.repository.deleteUnits(bankId, evict, true);
+        return evict;
+    }
+
+    /** 观察过期派生：不删除，只用于注入/status。 */
+    observationExpired(obs: Observation, now = this.nowSec()): boolean {
+        return now - (obs.lastSupportedAt || obs.updatedAt || obs.createdAt) > OBSERVATION_STALE_DAYS * 86400;
+    }
+
+    canReadUnit(unit: MemoryUnit, viewer: Parameters<typeof canReadByTags>[2]): boolean {
+        return canReadByTags(unit.bankId, unit.tags, viewer);
+    }
 }
 
+function sumTokens(map: Map<string, number>): number {
+    let sum = 0;
+    for (const v of map.values()) sum += v;
+    return sum;
+}
 
+function safeCosine(a: number[], b: number[]): number {
+    try { return cosineSimilarity(a, b); } catch { return 0; }
+}
 
+function recencyBonus(unit: MemoryUnit, now: number, weight: number, halfLifeDays: number): number {
+    if (!weight || weight <= 0) return 0;
+    const last = unit.lastAccessedAt || unit.updatedAt || unit.createdAt || now;
+    const ageDays = Math.max(0, (now - last) / 86400);
+    return weight * Math.exp((-Math.LN2 * ageDays) / Math.max(1, halfLifeDays)) * 0.01;
+}
 
+function contentHash(text: string): string {
+    let h = 2166136261;
+    const s = text.trim().toLowerCase().replace(/\s+/g, ' ');
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16);
+}
+
+function queryTokens(query: string): string[] {
+    return String(query || '').split(/[\s,，。.、;；:：!！?？()（）[\]【】]+/).filter(t => t.length >= 1);
+}
+
+export { scopeNoteForBank, getVisibility, getOriginScope, DEDUP_THRESHOLD };
 

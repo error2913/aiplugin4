@@ -24,7 +24,8 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { compactContextV2, consumeContextV2 } from "./context_bridge";
+import { collectContextBacklog, compactContextV2 } from "./context_bridge";
+import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
 
@@ -119,7 +120,7 @@ export default class Agent {
     private async settleBacklog(session: Session): Promise<void> {
         try {
             if (session.contextV2) {
-                await consumeContextV2(session);
+                collectContextBacklog(session);
                 await compactContextV2(session);
                 return;
             }
@@ -180,6 +181,8 @@ export default class Agent {
             resetStopEvent(session.stopEvent);
             session.running = true;
             session.starting = false;
+            session.aiTriggeredAt = Math.floor(Date.now() / 1000);
+            MemoryScheduler.onRunStart(session);
             session.activeRuns++;
             await this.runInternal(session, ctx, msg, tool_choice);
         } catch (e) {
@@ -200,6 +203,7 @@ export default class Agent {
             // 必须在 resumePending 之后、starting 归零之后 —— 此时判定"空闲"才是准的，
             // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
             if (acquired) MediaTaskManager.wakePendingNotices(session);
+            if (acquired) MemoryScheduler.onRunEnd(session);
         }
     }
 
@@ -495,6 +499,8 @@ export default class Agent {
             resetStopEvent(session.stopEvent);
             session.running = true;
             session.starting = false;
+            session.aiTriggeredAt = Math.floor(Date.now() / 1000);
+            MemoryScheduler.onRunStart(session);
             session.activeRuns++;
             await this.runStreamInner(session, ctx, msg, undefined, handled);
         } catch (e) {
@@ -515,6 +521,7 @@ export default class Agent {
             // 必须在 resumePending 之后、starting 归零之后 —— 此时判定"空闲"才是准的，
             // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
             if (acquired) MediaTaskManager.wakePendingNotices(session);
+            if (acquired) MemoryScheduler.onRunEnd(session);
         }
     }
 
@@ -698,4 +705,3 @@ export default class Agent {
 // 把 Agent 解析能力注册到 core/ports/agent_registry：context/session/memory 只依赖该端口，
 // 端口再把名字委派回 Agent.get（懒加载语义与既有测试桩都保持不变）。
 setAgentResolver((name: string) => Agent.get(name));
-

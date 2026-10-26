@@ -2,12 +2,16 @@
 import assert from 'node:assert/strict';
 
 import Agent from '../src/agent/agent';
-import { compactContextV2, consumeContextV2, consumedThrough, resetContextRuntime, resetContextBridgeCursor } from '../src/agent/context_bridge';
+import { compactContextV2, collectContextBacklog, commitExtraction, consumeContextV2, consumedThrough, peekExtractionChunk, resetContextRuntime, resetContextBridgeCursor } from '../src/agent/context_bridge';
+import { MemoryScheduler, resetMemorySchedulerForTest } from '../src/agent/memory_scheduler';
 import Config from '../src/config/config';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
 import { setAuxLlm } from '../src/core/ports/aux_llm';
 import { MemoryManager } from '../src/memory/manager';
+import { MemoryService, setMemoryEngineFactory } from '../src/memory/service';
+import { MemoryEngine } from '../src/memory/v2/engine';
+import { InMemoryMemoryStorage } from '../src/memory/v2/storage';
 import { SessionService } from '../src/session/session_service';
 
 class FakeStorage {
@@ -89,6 +93,62 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(consumedThrough(session), 0, '失败不推进');
         } finally {
             (MemoryManager as any).summarizeChunkWithRetry = original;
+        }
+    },
+
+    async testContextBridgeSplitCollectPeekCommit() {
+        installHost();
+        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
+        (Config as any).cache = {};
+        const session = await makeSession('QQ:bridge-split');
+        resetContextBridgeCursor(session);
+        // 只收集：0 LLM
+        const before = collectContextBacklog(session);
+        assert.ok(before.pendingChars > 0, '收集后应有 pending');
+        assert.equal(consumedThrough(session), 0, '收集不推进 consumed');
+        const chunk = peekExtractionChunk(session, true);
+        assert.ok(chunk && chunk.text.includes('记忆桥消息'), '应能取到抽取块');
+        // 不 commit：pending 保留，consumed 不推进
+        assert.equal(consumedThrough(session), 0);
+        // 重载后 pending 仍在（持久化 mem_cursor）；生产路径下一轮 run 会先 collect
+        resetContextRuntime(session);
+        collectContextBacklog(session);
+        const pendingAgain = peekExtractionChunk(session, true);
+        assert.ok(pendingAgain && pendingAgain.text.includes('记忆桥消息'), '重载后 pending 仍在');
+        commitExtraction(session, chunk!.throughSeq, chunk!.textLength);
+        assert.ok(consumedThrough(session) >= 1, 'commit 推进 consumed');
+        const left = peekExtractionChunk(session, true);
+        assert.equal(left, null, '提交后无剩余 pending');
+    },
+
+    async testContextBridgeSchedulerEndToEnd() {
+        installHost();
+        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
+        (Config as any).cache = {};
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => Math.floor(Date.now() / 1000) });
+        setMemoryEngineFactory(() => engine);
+        resetMemorySchedulerForTest();
+        MemoryScheduler.init();
+        setAuxLlm({
+            chat: async () => JSON.stringify({ facts: [{ memory_type: 'private', target_id: 'QQ:bridge-e2e', text: '用户喜欢猫', type: 'fact', confidence: 0.9 }] }),
+            chatMessages: async () => '',
+        } as any);
+        try {
+            const session = await makeSession('QQ:bridge-e2e');
+            resetContextBridgeCursor(session);
+            MemoryScheduler.onRunEnd(session);
+            assert.equal(MemoryScheduler.status().jobs, 1, 'AI 结束后应入队 extract');
+            const now = Math.floor(Date.now() / 1000);
+            assert.equal(await MemoryScheduler.tick(now), true, 'extract job 应执行');
+            assert.ok(engine.repository.listUnits('user_QQ:bridge-e2e').length > 0, '抽取后应写入事实');
+            // consolidate job（可能已由 extract 入队）
+            if (MemoryScheduler.status().jobs > 0) assert.equal(await MemoryScheduler.tick(now), true);
+            assert.ok(engine.repository.listObservations('user_QQ:bridge-e2e').length > 0, '巩固后应生成观察');
+        } finally {
+            setAuxLlm(null);
+            resetMemorySchedulerForTest();
         }
     },
 

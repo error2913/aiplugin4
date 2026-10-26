@@ -1,36 +1,28 @@
-
+// 记忆存储抽象：meta/units/links/obs 四分片 + bank 索引。
+// 旧 v2 单 key / docs 分片在读取时兼容迁移；不再写入 docs。
 import { getHost } from "../../core/host";
-// 记忆存储抽象：支持 SealDice ext.storage 与测试用内存存储。
 
-import type {
-    MemoryBankMeta,
-    MemoryChunk,
-    MemoryDocument,
-    MemoryEntity,
-    MemoryLink,
-    MemoryUnit,
-    MentalModel,
-    Observation,
-    PersistedBank,
-} from "./types";
+import type { MemoryBankMeta, MemoryEntity, MemoryLink, MemoryUnit, MentalModel, Observation, PersistedBank } from "./types";
+
+export type BankPart = 'meta' | 'units' | 'links' | 'obs';
 
 export interface MemoryStorage {
     getBank(id: string): PersistedBank | null;
-    saveBank(bank: PersistedBank): void;
+    /** 只读 meta（调度器 tick 用，避免解析 units/links/obs） */
+    getBankMeta(id: string): MemoryBankMeta | null;
+    saveBank(bank: PersistedBank, parts?: BankPart[]): void;
+    saveBankMeta(meta: MemoryBankMeta): void;
+    listBankIds(): string[];
     deleteBank(id: string): void;
+    /** 迁移前备份（幂等，不覆盖已有备份） */
+    backupBank?(id: string, bank: PersistedBank, source: 'legacy' | 'v2'): void;
 }
+
+const INDEX_KEY = 'memv2:banks';
+const PARTS: BankPart[] = ['meta', 'units', 'links', 'obs'];
 
 function keyOf(bankId: string, part: string): string {
     return `memv2:${bankId}:${part}`;
-}
-
-// 分片键：meta / units / links / docs（documents+chunks）/ obs（observations+entities+mentalModels）
-// 避免整库大 JSON 反复全量写穿，仅变更的分片重写；旧版单 key（memv2:<id>:bank）读取时一次性迁移。
-const MEMV2_PARTS = ['meta', 'units', 'links', 'docs', 'obs'] as const;
-
-interface DocsPart {
-    documents?: MemoryDocument[];
-    chunks?: MemoryChunk[];
 }
 
 interface ObsPart {
@@ -42,14 +34,12 @@ interface ObsPart {
 export class SealMemoryStorage implements MemoryStorage {
     getBank(id: string): PersistedBank | null {
         try {
-            // 新版分片：存在 meta 分片即按分片读取，部分分片缺失时容忍为空数组（迁移中断/旧数据兜底）
             const metaRaw = getHost().storage.get(keyOf(id, 'meta'));
             if (metaRaw) {
                 const meta = JSON.parse(metaRaw) as MemoryBankMeta;
-                const units = (this.readPart(id, 'units') as MemoryUnit[] | null) ?? [];
-                const links = (this.readPart(id, 'links') as MemoryLink[] | null) ?? [];
-                const docs = (this.readPart(id, 'docs') as DocsPart | null) ?? {};
-                const obs = (this.readPart(id, 'obs') as ObsPart | null) ?? {};
+                const units = this.readPart<MemoryUnit[]>(id, 'units') ?? [];
+                const links = this.readPart<MemoryLink[]>(id, 'links') ?? [];
+                const obs = this.readPart<ObsPart>(id, 'obs') ?? {};
                 return {
                     meta,
                     units,
@@ -57,15 +47,22 @@ export class SealMemoryStorage implements MemoryStorage {
                     links,
                     observations: obs.observations ?? [],
                     mentalModels: obs.mentalModels ?? [],
-                    documents: docs.documents ?? [],
-                    chunks: docs.chunks ?? [],
                 };
             }
-
-            // 旧版单 key：命中即一次性迁移到分片，并清空旧 key
+            // 旧 v2 单 key：迁移到分片后清空
             const raw = getHost().storage.get(keyOf(id, 'bank'));
             if (!raw) return null;
-            const bank = JSON.parse(raw) as PersistedBank;
+            const legacy = JSON.parse(raw) as PersistedBank & { documents?: unknown; chunks?: unknown };
+            const bank: PersistedBank = {
+                meta: legacy.meta,
+                units: legacy.units ?? [],
+                entities: legacy.entities ?? [],
+                links: legacy.links ?? [],
+                observations: legacy.observations ?? [],
+                mentalModels: legacy.mentalModels ?? [],
+            };
+            this.backupBank(id, bank, 'legacy');
+            this.registerBank(id);
             this.saveBank(bank);
             getHost().storage.set(keyOf(id, 'bank'), '');
             return bank;
@@ -74,42 +71,108 @@ export class SealMemoryStorage implements MemoryStorage {
         }
     }
 
-    private readPart(id: string, part: string): unknown {
-        const raw = getHost().storage.get(keyOf(id, part));
-        if (!raw) return null;
-        return JSON.parse(raw);
+    getBankMeta(id: string): MemoryBankMeta | null {
+        try {
+            const raw = getHost().storage.get(keyOf(id, 'meta'));
+            return raw ? JSON.parse(raw) as MemoryBankMeta : null;
+        } catch {
+            return null;
+        }
     }
 
-    saveBank(bank: PersistedBank): void {
-        getHost().storage.set(keyOf(bank.meta.id, 'meta'), JSON.stringify(bank.meta));
-        getHost().storage.set(keyOf(bank.meta.id, 'units'), JSON.stringify(bank.units));
-        getHost().storage.set(keyOf(bank.meta.id, 'links'), JSON.stringify(bank.links));
-        getHost().storage.set(keyOf(bank.meta.id, 'docs'), JSON.stringify({ documents: bank.documents, chunks: bank.chunks } satisfies DocsPart));
-        getHost().storage.set(keyOf(bank.meta.id, 'obs'), JSON.stringify({ observations: bank.observations, entities: bank.entities, mentalModels: bank.mentalModels } satisfies ObsPart));
+    saveBank(bank: PersistedBank, parts: BankPart[] = PARTS): void {
+        if (parts.includes('meta')) this.saveBankMeta(bank.meta);
+        if (parts.includes('units')) getHost().storage.set(keyOf(bank.meta.id, 'units'), JSON.stringify(bank.units));
+        if (parts.includes('links')) getHost().storage.set(keyOf(bank.meta.id, 'links'), JSON.stringify(bank.links));
+        if (parts.includes('obs')) {
+            const obs: ObsPart = {
+                observations: bank.observations,
+                entities: bank.entities,
+                mentalModels: bank.mentalModels,
+            };
+            getHost().storage.set(keyOf(bank.meta.id, 'obs'), JSON.stringify(obs));
+        }
+        this.registerBank(bank.meta.id);
+    }
+
+    saveBankMeta(meta: MemoryBankMeta): void {
+        getHost().storage.set(keyOf(meta.id, 'meta'), JSON.stringify(meta));
+        this.registerBank(meta.id);
+    }
+
+    listBankIds(): string[] {
+        try {
+            const raw = getHost().storage.get(INDEX_KEY);
+            const arr = raw ? JSON.parse(raw) : [];
+            return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
+        } catch {
+            return [];
+        }
     }
 
     deleteBank(id: string): void {
-        for (const part of MEMV2_PARTS) {
-            getHost().storage.set(keyOf(id, part), '');
+        for (const part of [...PARTS, 'bank', 'docs']) getHost().storage.set(keyOf(id, part), '');
+        this.writeIndex(this.listBankIds().filter(x => x !== id));
+    }
+
+    backupBank(id: string, bank: PersistedBank, source: 'legacy' | 'v2'): void {
+        try {
+            const key = keyOf(id, `backup:${source}`);
+            if (getHost().storage.get(key)) return;
+            getHost().storage.set(key, JSON.stringify(bank));
+        } catch { /* 备份失败不阻塞迁移 */ }
+    }
+
+    private registerBank(id: string): void {
+        if (!id) return;
+        const ids = this.listBankIds();
+        if (!ids.includes(id)) {
+            ids.push(id);
+            this.writeIndex(ids);
         }
-        // 兼容清理旧版单 key
-        getHost().storage.set(keyOf(id, 'bank'), '');
+    }
+
+    private writeIndex(ids: string[]): void {
+        getHost().storage.set(INDEX_KEY, JSON.stringify(Array.from(new Set(ids))));
+    }
+
+    private readPart<T>(id: string, part: string): T | null {
+        const raw = getHost().storage.get(keyOf(id, part));
+        return raw ? JSON.parse(raw) as T : null;
     }
 }
 
 export class InMemoryMemoryStorage implements MemoryStorage {
     private map = new Map<string, PersistedBank>();
+    private order: string[] = [];
 
     getBank(id: string): PersistedBank | null {
-        return this.map.get(id) || null;
+        const bank = this.map.get(id);
+        return bank ? JSON.parse(JSON.stringify(bank)) as PersistedBank : null;
+    }
+
+    getBankMeta(id: string): MemoryBankMeta | null {
+        const bank = this.map.get(id);
+        return bank ? JSON.parse(JSON.stringify(bank.meta)) as MemoryBankMeta : null;
     }
 
     saveBank(bank: PersistedBank): void {
         this.map.set(bank.meta.id, JSON.parse(JSON.stringify(bank)) as PersistedBank);
+        if (!this.order.includes(bank.meta.id)) this.order.push(bank.meta.id);
+    }
+
+    saveBankMeta(meta: MemoryBankMeta): void {
+        const bank = this.map.get(meta.id);
+        if (bank) bank.meta = JSON.parse(JSON.stringify(meta)) as MemoryBankMeta;
+    }
+
+    listBankIds(): string[] {
+        return this.order.slice();
     }
 
     deleteBank(id: string): void {
         this.map.delete(id);
+        this.order = this.order.filter(x => x !== id);
     }
 }
 

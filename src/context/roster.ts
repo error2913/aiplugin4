@@ -88,14 +88,14 @@ export function getGroupById(host: RosterHost, groupId: string | number): Group 
     return Group.get(normalizedId);
 }
 
-export async function findImage(host: RosterHost, _ctx: seal.MsgContext, id: string): Promise<Image | null> {
+export async function findImage(_host: RosterHost, _ctx: seal.MsgContext, id: string): Promise<Image | null> {
     const img = Image.resolveRef(id);
     if (img) return img;
     const { LOCAL_IMAGE_PATH_MAP } = Config.image as any;
     if (LOCAL_IMAGE_PATH_MAP && Object.prototype.hasOwnProperty.call(LOCAL_IMAGE_PATH_MAP, id)) {
         return Image.createLocalImage(id, LOCAL_IMAGE_PATH_MAP[id]);
     }
-    return host.session.memory.findImage(id);
+    return null;
 }
 
 export async function updateName(host: RosterHost, epId: string, gid: string, uid: string): Promise<void> {

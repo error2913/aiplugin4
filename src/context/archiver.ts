@@ -3,7 +3,6 @@
 // 关键不变量集中在本文件：写分片成功才移除、工具配对原子组不拆、归档失败不做硬删（连续失败才降级）。
 import Config from "../config/config";
 import Logger from "../logger";
-import { MemoryManager } from "../memory/manager";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import Model from "../model/model";
 import { getProbedContextWindow } from "../model/window_cache";
@@ -86,27 +85,12 @@ export async function settleWindowIfNeeded(host: ArchiveHost, now: number = Date
         const idleSec = s.lastRelevantAt > 0 ? Math.max(0, now - s.lastRelevantAt) / 1000 : Infinity;
         if (state !== 'COLD' && SETTLE_IDLE_SEC > 0 && idleSec < SETTLE_IDLE_SEC) return 0;
 
-        // 执行：逐个分片 summarize（各自独立成败，成功一个推进一格水位）
+        // legacy v1：不再写记忆（v3 记忆由 context_bridge + scheduler 负责）；仅推进结算水位
         let done = 0;
         for (const shard of pending) {
-            const messages = shard.items.map(it => ({ role: 'user', contentItems: [{ text: it.text, time: it.time, userId: it.userId, messageId: it.messageId }] }));
-            let ok = false;
-            try {
-                ok = await MemoryManager.summarizeChunkWithRetry(host.session, messages);
-            } catch (e) {
-                log.warning('结算总结失败: ' + (e instanceof Error ? e.message : String(e)));
-                ok = false;
+            if (shard.seq !== undefined) {
+                s.settledSeq = Math.max(typeof s.settledSeq === 'number' ? s.settledSeq : 0, shard.seq);
             }
-            if (!ok) {
-                // 指数退避：5 → 15 → 60 分钟（失败次数在运行时，不持久化）
-                const rt = runtimeOf(host);
-                rt.settleFailCount = (rt.settleFailCount || 0) + 1;
-                const backoffMin = rt.settleFailCount <= 1 ? 5 : rt.settleFailCount === 2 ? 15 : 60;
-                s.settleBackoffUntil = now + backoffMin * 60 * 1000;
-                log.warning(`结算失败，${backoffMin} 分钟后重试（已成功 ${done} 个分片）`);
-                return done;
-            }
-            s.settledSeq = Math.max(typeof s.settledSeq === 'number' ? s.settledSeq : 0, shard.seq);
             done++;
         }
         if (done > 0) {
@@ -374,8 +358,6 @@ async function archivePrefix(host: ArchiveHost, toArchive: MessageType[]): Promi
         const keepRaw = Config.context.ARCHIVE_KEEP_RAW;
 
         for (const chunk of chunks) {
-            const ok = await MemoryManager.summarizeChunkWithRetry(host.session, chunk);
-            if (!ok) return false;
             if (keepRaw) {
                 // 原文必须先安全落进归档分片（幂等），才允许从上下文移除
                 if (writeArchiveShard(host, chunk) === 'failed') return false;
@@ -410,9 +392,7 @@ async function archiveOldestItems(host: ArchiveHost): Promise<boolean> {
         }
         if (picked.length === 0) return false;
 
-        // 「归档保留原文」关闭时：**仍然 summarize 沉淀记忆，只是不写归档分片**（不留原文，省存储）
-        const ok = await MemoryManager.summarizeChunkWithRetry(host.session, picked);
-        if (!ok) return false;
+        // legacy v1：不再写记忆
         if (Config.context.ARCHIVE_KEEP_RAW) {
             if (writeArchiveShard(host, picked) === 'failed') return false;   // 未留档成功则不移除
         }

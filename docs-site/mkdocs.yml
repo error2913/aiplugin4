@@ -102,6 +102,7 @@ nav:
       - 12 配置 JSON 化方案: kb/12-配置JSON化方案.md
       - "16 图片生命周期与图床（已实现）": kb/16-图片生命周期与图床方案.md
       - "17 图片引用标准与 AI 图库交互（已实现）": kb/17-图片引用标准与AI图库交互方案.md
+      - "18 系统提示词重构与英文化（方案）": kb/18-系统提示词重构与英文化方案.md
   - 第三方参考（Claude Code）:
       - reference/index.md
       - Amazon Bedrock: reference/amazon-bedrock.md

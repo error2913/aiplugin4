@@ -1,59 +1,38 @@
-// Hindsight-like 记忆引擎类型定义（纯 TS 自研，无外部服务）
-// 参考 Hindsight 的 MemoryUnit / Entity / MemoryLink / Observation / MentalModel 结构
-// 但按本仓库 SealDice 场景裁剪为可持久化 JSON 的版本。
+// 记忆 v3 类型（唯一数据模型）：原始事实 / 观察 / 心智模型三层。
+// 与 Hindsight 对齐：raw facts append-only、observation evidence/proofCount、mental model sourceQuery/content/structuredContent/trigger/reflectResponse。
 
-export type FactType = 'world' | 'experience' | 'observation';
-export type MemoryState = 'valid' | 'invalidated';
-export type ConsolidationState = 'pending' | 'done' | 'failed';
 export type BankKind = 'user' | 'group' | 'global';
+export type FactType = 'world' | 'experience';
+export type MemoryState = 'valid' | 'invalidated';
+export type ConsolidationState = 'pending' | 'done';
+export type Visibility = 'public' | 'origin' | 'owner';
+export type TagsMatch = 'any' | 'all' | 'all_strict' | 'exact';
 
-export interface MemoryBankMeta {
-    id: string;
-    kind: BankKind;
-    agentName?: string;
-    sessionId?: string;
-    createdAt: number;
-    updatedAt: number;
-    settings: {
-        retainMission?: string;
-        observationsMission?: string;
-        disposition?: {
-            skepticism: number;
-            literalism: number;
-            empathy: number;
-        };
-        directives?: Array<{
-            name: string;
-            content: string;
-            tags?: string[];
-        }>;
-        /** 距上次巩固的观察次数（驱动「每隔多少次观察整合一次记忆」配置） */
-        consolidateSince?: number;
-        /** 固定心智模型模板已播种版本：推进后删除内置模型不会自动复活，版本升级只增量补新 */
-        seededMentalModelVersion?: number;
-    };
-}
-
+/** 原始事实：只增不改；纠错通过 invalidated + supersedes 表达。 */
 export interface MemoryUnit {
     id: string;
     bankId: string;
-    documentId?: string;
     text: string;
-    context?: string;
     factType: FactType;
     occurredStart?: number;
     occurredEnd?: number;
     mentionedAt?: number;
     createdAt: number;
+    /** 单调序号：watermark / delta 窗口使用，避免秒级同秒漏记 */
+    createdAtSeq: number;
     updatedAt: number;
     embedding: number[];
     entityIds: string[];
+    /** scope（user:/group:/global:）+ visibility（vis:*）+ source（src:*）+ keyword（kw:） */
     tags: string[];
     metadata: Record<string, string>;
     importance: number;
     accessCount: number;
     lastAccessedAt: number;
     state: MemoryState;
+    invalidatedAt?: number;
+    invalidatedBy?: string;
+    supersedes?: string;
     consolidationState: ConsolidationState;
     consolidatedAt?: number;
 }
@@ -63,21 +42,12 @@ export interface MemoryEntity {
     bankId: string;
     canonicalName: string;
     aliases: string[];
-    entityType?: string;
-    metadata: Record<string, string>;
     firstSeen: number;
     lastSeen: number;
     mentionCount: number;
 }
 
-export type MemoryLinkType =
-    | 'entity'
-    | 'semantic'
-    | 'temporal'
-    | 'causes'
-    | 'caused_by'
-    | 'enables'
-    | 'prevents';
+export type MemoryLinkType = 'entity' | 'semantic' | 'related';
 
 export interface MemoryLink {
     fromUnitId: string;
@@ -91,98 +61,140 @@ export interface MemoryLink {
 export interface ObservationEvidence {
     memoryId: string;
     quote: string;
+    addedAt: number;
 }
+
+export type ObservationHistoryReason =
+    | 'created'
+    | 'reinforced'
+    | 'refined'
+    | 'contradicted'
+    | 'merged'
+    | 'invalidated';
 
 export interface ObservationHistoryEntry {
     text: string;
-    reason: 'created' | 'reinforced' | 'refined' | 'contradicted' | 'merged';
+    reason: ObservationHistoryReason;
     at: number;
 }
 
-/** 心智模型刷新触发方式：full=基于全部记忆重新推理，delta=增量更新 */
-export type MentalModelTrigger = 'full' | 'delta';
-
-/** 固定心智模型模板标识：persona=设定 / preference=偏好 / rules=规则 */
-export type MentalModelTemplateId = 'persona' | 'preference' | 'rules';
-
-/** 心智模型生命周期状态：ready=可用，pending=占位待生成，failed=上次生成失败 */
-export type MentalModelStatus = 'ready' | 'pending' | 'failed';
-
-/** 心智模型刷新触发配置（Hindsight MentalModelTrigger 的 TS 裁剪版） */
-export interface MentalModelTriggerConfig {
-    /** 刷新方式：full=基于全部记忆重新推理，delta=只按新增记忆增量更新 */
-    mode: MentalModelTrigger;
-    /** 巩固后是否自动刷新（对应 Hindsight refresh_after_consolidation） */
-    refreshAfterConsolidation: boolean;
-    /** 刷新时读取的记忆类型，缺省=全部（world/experience/observation） */
-    factTypes?: FactType[];
-    /** 刷新时排除其它心智模型，避免模型间互相引用（Hindsight exclude_mental_models） */
-    excludeMentalModels?: boolean;
-}
-
-export interface MentalModelHistoryEntry {
-    answer: string;
-    at: number;
-    trigger: MentalModelTrigger;
-}
-
+/** 观察：独立一等公民，不再复制为 MemoryUnit。 */
 export interface Observation {
     id: string;
     bankId: string;
     text: string;
-    scopeTags: string[];
+    tags: string[];
     evidence: ObservationEvidence[];
+    /** distinct live source facts；每次折入证据后重算 */
     proofCount: number;
     createdAt: number;
     updatedAt: number;
-    lastVerifiedAt: number;
+    /** 最近一次新增/验证证据的时间；用于派生“过期” */
+    lastSupportedAt: number;
+    status: 'active' | 'invalidated';
     history: ObservationHistoryEntry[];
+    embedding?: number[];
+}
+
+// ===== 心智模型：结构化文档 + 类型化 delta =====
+
+export type MentalModelTrigger = 'full' | 'delta';
+export type MentalModelTemplateId =
+    | 'persona'
+    | 'preference'
+    | 'rules'
+    | 'self_rules'
+    | 'self_experience';
+export type MentalModelStatus = 'ready' | 'pending' | 'failed';
+export type MentalModelRefreshReason = 'consolidate' | 'manual' | 'create' | 'seed';
+
+export interface MentalModelTriggerConfig {
+    mode: MentalModelTrigger;
+    refreshAfterConsolidation: boolean;
+    factTypes: FactType[];
+    tagsMatch: TagsMatch;
+}
+
+export type StructuredBlockType = 'paragraph' | 'bullet' | 'checklist' | 'code';
+
+export interface StructuredBlock {
+    id: string;
+    type: StructuredBlockType;
+    text: string;
+}
+
+export interface StructuredSection {
+    id: string;
+    heading: string;
+    blocks: StructuredBlock[];
+}
+
+export interface StructuredDoc {
+    version: 1;
+    sections: StructuredSection[];
+}
+
+export interface MentalModelHistoryEntry {
+    content: string;
+    at: number;
+    trigger: MentalModelTrigger | 'manual' | 'seed';
+}
+
+export interface MentalModelReflectResponse {
+    at: number;
+    basedOn: {
+        mentalModelIds: string[];
+        observationIds: string[];
+        memoryIds: string[];
+    };
+    skipped?: 'empty_candidate' | 'llm_error' | 'no_memory' | 'source_query_changed';
 }
 
 export interface MentalModel {
     id: string;
     bankId: string;
-    question: string;
-    answer: string;
-    scopeTags: string[];
+    /** 原 question：refresh 时用 sourceQuery 重新做 reflect */
+    sourceQuery: string;
+    content: string;
+    structuredContent: StructuredDoc;
+    trigger: MentalModelTriggerConfig;
+    tags: string[];
+    maxTokens: number;
+    status: MentalModelStatus;
     createdAt: number;
     updatedAt: number;
-    version: number;
-    /** 最近一次基于记忆重新推理的时间（秒） */
     lastRefreshedAt: number;
-    /** 历史答案（每次 refresh 前压入旧答案，最多保留 10 条） */
-    history: MentalModelHistoryEntry[];
-    /** 最近一次刷新方式：full=全量重推理，delta=增量更新 */
-    trigger: MentalModelTrigger;
-    /** 刷新触发配置（mode/自动刷新/读取类型/排除其它模型） */
-    triggerConfig?: MentalModelTriggerConfig;
-    /** 生命周期状态：pending=占位待生成，failed=上次生成失败 */
-    status?: MentalModelStatus;
-    /** watermark：上次刷新见过的最新 in-scope 记忆时间（秒），用于 staleness gating */
-    lastMemorySeenAt?: number;
-    /** 上次生成失败时间（秒），用于失败重试冷却 */
+    lastFullRefreshAt: number;
+    lastRefreshedSourceQuery: string;
+    /** 上次刷新见过的 scope 内最新 fact/observation seq（watermark） */
+    lastMemorySeenSeq: number;
     lastFailedAt?: number;
-    /** (question+answer) 语义向量，用于注入语义排序与 searchMentalModels 召回 */
+    reflectResponse?: MentalModelReflectResponse;
+    history: MentalModelHistoryEntry[];
     embedding?: number[];
-    /** 内置模板标记；未设置=用户自定义心智模型 */
     templateId?: MentalModelTemplateId;
 }
 
-export interface MemoryDocument {
-    id: string;
-    bankId: string;
-    originalText: string;
-    contentHash: string;
-    createdAt: number;
-    metadata: Record<string, string>;
-}
+// ===== Bank / 持久化 =====
 
-export interface MemoryChunk {
+export interface MemoryBankMeta {
     id: string;
-    documentId: string;
-    bankId: string;
-    text: string;
-    embedding?: number[];
+    kind: BankKind;
+    agentName?: string;
+    /** 原始平台会话 ID（不带 bank 前缀）；global 为空 */
+    sessionId?: string;
+    createdAt: number;
+    updatedAt: number;
+    schemaVersion: 3;
+    settings: {
+        seededMentalModelVersion?: number;
+        nextFactSeq?: number;
+        /** 调度器 tick 只读此计数，不解析 units */
+        pendingFactCount?: number;
+        lastExtractAt?: number;
+        lastConsolidateAt?: number;
+        lastAutoRefreshAt?: number;
+    };
 }
 
 export interface PersistedBank {
@@ -192,84 +204,81 @@ export interface PersistedBank {
     links: MemoryLink[];
     observations: Observation[];
     mentalModels: MentalModel[];
-    documents: MemoryDocument[];
-    chunks: MemoryChunk[];
 }
+
+// ===== 输入/输出 =====
 
 export interface RetainInput {
     content: string;
-    context?: string;
     tags?: string[];
     metadata?: Record<string, string>;
-    documentId?: string;
     timestamp?: number;
-    /** 是否直接按原文入库（跳过 LLM 抽取）。默认 true，便于工具/迁移使用。 */
-    verbatim?: boolean;
-    entities?: string[];
-    factType?: FactType;
-    occurredStart?: number;
-    occurredEnd?: number;
-    importance?: number;
-}
-
-export interface ExtractedFact {
-    text: string;
     factType?: FactType;
     entities?: string[];
     occurredStart?: number;
     occurredEnd?: number;
     importance?: number;
-    context?: string;
+    /** 被本事实取代的旧事实 id（纠错链） */
+    supersedes?: string;
+    /** private 语义映射到 owner 可见性 */
+    visibility?: 'public' | 'private' | 'origin' | 'owner';
 }
-
-export type FactExtractor = (input: RetainInput) => Promise<ExtractedFact[]>;
-
-export type Reranker = (query: string, candidates: MemoryUnit[]) => Promise<string[]>;
-
-export type ObservationSynthesizer = (quotes: string[]) => Promise<string>;
-
-/** 心智模型推理合成器：基于问题与相关记忆（心智模型/观察/事实）生成结论文本。 */
-export type ReflectSynthesizer = (query: string, context: {
-    mentalModels: MentalModel[];
-    observations: Observation[];
-    memories: MemoryUnit[];
-    /** delta 模式：待增量更新的旧答案（full 模式为空） */
-    existingAnswer?: string;
-    /** 本次合成方式：full=全量重写，delta=增量更新 */
-    mode?: MentalModelTrigger;
-    /** 当前范围提示行（如 平台=QQ，会话=群聊 QQ-Group:xxx），置于 prompt 开头 */
-    scopeNote?: string;
-}) => Promise<string>;
 
 export interface RetainResult {
     unitIds: string[];
-    documentId?: string;
-    action: 'added' | 'merged' | 'updated' | 'noop';
+    action: 'added' | 'duplicate' | 'noop';
 }
 
 export interface RecallOptions {
     query: string;
     tags?: string[];
-    tagsMatch?: 'any' | 'all' | 'exact';
+    tagsMatch?: TagsMatch;
     types?: FactType[];
     maxTokens?: number;
     budget?: 'low' | 'mid' | 'high';
-    includeChunks?: boolean;
-    preferObservations?: boolean;
+    /** 只取 createdAtSeq > 该值的证据（delta 窗口） */
+    createdAfterSeq?: number;
+    includeInvalidated?: boolean;
+    /** 用覆盖该事实的 active observation 替换事实，且观察只出现一次 */
+    collapseObservations?: boolean;
 }
 
-export interface RecallResult {
-    unit: MemoryUnit;
+export interface RecallHit {
+    kind: 'fact' | 'observation';
+    unit?: MemoryUnit;
+    observation?: Observation;
     score: number;
     matchedStrategies: string[];
-    chunks?: MemoryChunk[];
 }
 
-export interface ConsolidationResult {
+export interface ExtractOutcome {
+    touchedBanks: string[];
+    factsAdded: number;
+    factsInvalidated: number;
+    factsDropped: number;
+    touchedTags: string[];
+}
+
+export interface ConsolidateOutcome {
     created: string[];
     updated: string[];
     merged: string[];
     skipped: number;
+    touchedTags: string[];
+    pendingRemaining: number;
+}
+
+export interface ObservationDecision {
+    action: 'create' | 'reinforce' | 'refine' | 'contradict' | 'merge' | 'noop';
+    targetId?: string;
+    text?: string;
+    evidenceMemoryIds?: string[];
+}
+
+export interface RefreshOutcome {
+    modelId: string;
+    status: 'updated' | 'skipped' | 'failed';
+    reason?: string;
 }
 
 export interface ReflectResult {
@@ -279,17 +288,63 @@ export interface ReflectResult {
         observations: Observation[];
         memories: MemoryUnit[];
     };
+    answeredBy?: 'model' | 'synthesis' | 'none';
 }
 
-/** 心智模型刷新触发来源 */
-export type MentalModelRefreshReason = 'consolidate' | 'manual' | 'tick' | 'create';
-
-/** 心智模型批量刷新结果（Hindsight 语义：updated 推进 watermark；skipped 不调 LLM；failed 保留旧答案） */
 export interface MentalModelRefreshSummary {
     updated: number;
     skipped: number;
     failed: number;
-    /** 跳过原因计数，便于调试：no_source/not_stale/unchanged/failed_cooldown */
     skippedReasons: Record<string, number>;
     refreshedIds: string[];
 }
+
+export interface MemoryStatus {
+    bankId: string;
+    facts: number;
+    invalidated: number;
+    pendingFacts: number;
+    observations: number;
+    expiredObservations: number;
+    mentalModels: number;
+    pendingMentalModels: number;
+    failedMentalModels: number;
+    backlog: 'up_to_date' | 'slightly_stale' | 'stale';
+    nextRefreshAt?: number;
+}
+
+// ===== LLM 回调 =====
+
+export type Reranker = (query: string, candidates: MemoryUnit[]) => Promise<string[]>;
+export type ObservationSynthesizer = (quotes: string[]) => Promise<string>;
+export type ObservationDecisionMaker = (input: {
+    evidence: string[];
+    existing: Observation[];
+    tags: string[];
+}) => Promise<ObservationDecision>;
+
+export interface ReflectSynthesizerContext {
+    mentalModels: MentalModel[];
+    observations: Observation[];
+    memories: MemoryUnit[];
+    existingAnswer?: string;
+    mode?: MentalModelTrigger;
+    scopeNote?: string;
+}
+
+export type ReflectSynthesizer = (query: string, context: ReflectSynthesizerContext) => Promise<string>;
+
+export interface DeltaOperation {
+    op: 'add_section' | 'append_bullet' | 'replace_block' | 'remove_stale_paragraph' | 'replace_section_blocks';
+    sectionId?: string;
+    blockId?: string;
+    heading?: string;
+    blocks?: StructuredBlock[];
+    text?: string;
+}
+
+export type DeltaOperator = (input: {
+    sourceQuery: string;
+    structured: StructuredDoc;
+    evidence: string[];
+}) => Promise<DeltaOperation[]>

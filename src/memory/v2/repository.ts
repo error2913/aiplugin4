@@ -1,10 +1,9 @@
-// 记忆仓库：内存态 Bank 管理 + 持久化。
-import { InMemoryMemoryStorage, MemoryStorage } from "./storage";
+// 记忆仓库：内存态 bank 管理 + 分片持久化 + v2→v3 惰性迁移。
+import { migrateBankV3 } from "./migrate_v3";
+import type { BankPart, MemoryStorage } from "./storage";
+import { InMemoryMemoryStorage } from "./storage";
 import type {
-    ConsolidationResult,
     MemoryBankMeta,
-    MemoryChunk,
-    MemoryDocument,
     MemoryEntity,
     MemoryLink,
     MemoryUnit,
@@ -13,44 +12,90 @@ import type {
     PersistedBank,
 } from "./types";
 
-function nowSec(): number {
+function localId(): string { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+
+export function nowSec(): number {
     return Math.floor(Date.now() / 1000);
+}
+
+export function normalizeName(name: string): string {
+    return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 export class MemoryRepository {
     private banks = new Map<string, PersistedBank>();
+    private dirty = new Map<string, Set<BankPart>>();
     private storage: MemoryStorage;
 
     constructor(storage?: MemoryStorage) {
         this.storage = storage || new InMemoryMemoryStorage();
     }
 
+    get storageBackend(): MemoryStorage {
+        return this.storage;
+    }
+
     getBank(id: string): PersistedBank | null {
         let bank = this.banks.get(id);
+        if (!bank && id === 'global_main') {
+            // D9：旧 `*` 归一为 `_` 形成的 global__ 孤儿，惰性改名到 global_main
+            const legacy = this.storage.getBank('global__');
+            if (legacy && !this.storage.getBankMeta(id)) {
+                this.storage.backupBank?.('global__', legacy, 'v2');
+                legacy.meta.id = 'global_main';
+                legacy.meta.kind = 'global';
+                legacy.meta.sessionId = undefined;
+                for (const u of legacy.units) u.bankId = 'global_main';
+                for (const o of legacy.observations) o.bankId = 'global_main';
+                for (const m of legacy.mentalModels) m.bankId = 'global_main';
+                for (const e of legacy.entities) e.bankId = 'global_main';
+                this.storage.saveBank(legacy);
+                this.storage.deleteBank('global__');
+            }
+        }
         if (!bank) {
             bank = this.storage.getBank(id) ?? undefined;
             if (bank) {
-                normalizeBank(bank);
+                const oldSchema = (bank.meta as unknown as { schemaVersion?: number })?.schemaVersion;
+                if (oldSchema !== 3) this.storage.backupBank?.(id, bank, 'v2');
+                const result = migrateBankV3(bank);
+                bank = result.bank;
                 this.banks.set(id, bank);
+                if (result.changed) this.save(id);
             }
         }
         return bank || null;
     }
 
-    getOrCreateBank(id: string, kind: MemoryBankMeta['kind'] = 'global', agentName = ''): PersistedBank {
+    /** 只读 meta：调度器 tick 使用，不解析 units/links/obs。 */
+    getBankMeta(id: string): MemoryBankMeta | null {
+        const cached = this.banks.get(id);
+        if (cached) return cached.meta;
+        return this.storage.getBankMeta(id);
+    }
+
+    listBankIds(): string[] {
+        return this.storage.listBankIds();
+    }
+
+    getOrCreateBank(id: string, kind?: MemoryBankMeta['kind'], agentName = '', sessionId?: string): PersistedBank {
         const existing = this.getBank(id);
         if (existing) return existing;
+        const inferred = inferKind(id);
+        const bankKind = kind && kind === inferred ? kind : inferred;
+        const now = nowSec();
         const bank: PersistedBank = {
             meta: {
                 id,
-                kind,
+                kind: bankKind,
                 agentName,
-                sessionId: kind !== 'global' ? id : undefined,
-                createdAt: nowSec(),
-                updatedAt: nowSec(),
+                sessionId: bankKind === 'global' ? undefined : (sessionId ?? id.replace(/^(user|group|global)_/, '')),
+                createdAt: now,
+                updatedAt: now,
+                schemaVersion: 3,
                 settings: {
-                    disposition: { skepticism: 3, literalism: 3, empathy: 3 },
-                    directives: [],
+                    nextFactSeq: 0,
+                    pendingFactCount: 0,
                 },
             },
             units: [],
@@ -58,360 +103,267 @@ export class MemoryRepository {
             links: [],
             observations: [],
             mentalModels: [],
-            documents: [],
-            chunks: [],
         };
         this.banks.set(id, bank);
         this.save(id);
         return bank;
     }
 
-    deleteBank(id: string): void {
-        this.banks.delete(id);
-        this.storage.deleteBank(id);
-    }
-
-    save(id: string): void {
+    save(id: string, parts?: BankPart[]): void {
         const bank = this.banks.get(id);
         if (!bank) return;
         bank.meta.updatedAt = nowSec();
-        this.storage.saveBank(bank);
+        const dirtyParts = parts ?? Array.from(this.dirty.get(id) ?? new Set<BankPart>(['meta', 'units', 'links', 'obs']));
+        if (!parts) dirtyParts.push('meta');
+        const unique = Array.from(new Set(dirtyParts));
+        this.storage.saveBank(bank, unique);
+        this.dirty.delete(id);
     }
 
-    // ===== Units =====
+    markDirty(id: string, part: BankPart): void {
+        const set = this.dirty.get(id) ?? new Set<BankPart>();
+        set.add(part);
+        this.dirty.set(id, set);
+    }
+
+    deleteBank(id: string): void {
+        this.banks.delete(id);
+        this.dirty.delete(id);
+        this.storage.deleteBank(id);
+    }
+
+    // ===== 原始事实 =====
 
     listUnits(bankId: string): MemoryUnit[] {
-        const bank = this.getBank(bankId);
-        return bank ? bank.units.slice() : [];
+        return this.getBank(bankId)?.units.slice() ?? [];
     }
 
     getUnit(bankId: string, unitId: string): MemoryUnit | null {
-        const bank = this.getBank(bankId);
-        return bank ? bank.units.find(u => u.id === unitId) || null : null;
+        return this.getBank(bankId)?.units.find(u => u.id === unitId) ?? null;
     }
 
-    addUnit(bankId: string, unit: MemoryUnit, persist = true): void {
-        const bank = this.getOrCreateBank(bankId, 'global');
+    findUnitByHash(bankId: string, hash: string): MemoryUnit | null {
+        return this.getBank(bankId)?.units.find(u => u.metadata?.contentHash === hash) ?? null;
+    }
+
+    addUnit(bankId: string, unit: MemoryUnit, persist = false): void {
+        const bank = this.getOrCreateBank(bankId);
         bank.units.push(unit);
-        if (persist) this.save(bankId);
+        bank.meta.settings.pendingFactCount = (bank.meta.settings.pendingFactCount || 0) + 1;
+        this.markDirty(bankId, 'units');
+        this.markDirty(bankId, 'meta');
+        if (persist) this.save(bankId, ['units', 'meta']);
     }
 
-    updateUnit(bankId: string, unit: MemoryUnit, persist = true): void {
+    updateUnit(bankId: string, unit: MemoryUnit, persist = false): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.units.findIndex(u => u.id === unit.id);
         if (idx >= 0) {
             bank.units[idx] = unit;
-            // persist=false 用于高频元数据更新（如 recall 的访问计数），由调用方批量落盘，避免每条命中都整库序列化
-            if (persist) this.save(bankId);
+            this.markDirty(bankId, 'units');
+            if (persist) this.save(bankId, ['units']);
         }
     }
 
-    deleteUnit(bankId: string, unitId: string): void {
+    deleteUnits(bankId: string, ids: string[], persist = false): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
-        bank.units = bank.units.filter(u => u.id !== unitId);
-        bank.links = bank.links.filter(l => l.fromUnitId !== unitId && l.toUnitId !== unitId);
-        bank.observations = bank.observations.map(o => ({
-            ...o,
-            evidence: o.evidence.filter(e => e.memoryId !== unitId),
-            proofCount: o.evidence.filter(e => e.memoryId !== unitId).length,
-        }));
-        this.save(bankId);
+        const removing = new Set(ids);
+        const pendingBefore = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+        bank.units = bank.units.filter(u => !removing.has(u.id));
+        const pendingAfter = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+        if (pendingAfter !== pendingBefore) {
+            bank.meta.settings.pendingFactCount = pendingAfter;
+            this.markDirty(bankId, 'meta');
+        }
+        bank.links = bank.links.filter(l => !removing.has(l.fromUnitId) && !removing.has(l.toUnitId));
+        for (const obs of bank.observations) {
+            const before = obs.evidence.length;
+            obs.evidence = obs.evidence.filter(e => !removing.has(e.memoryId));
+            obs.proofCount = distinctLiveEvidence(bank, obs.evidence);
+            if (obs.evidence.length !== before) this.markDirty(bankId, 'obs');
+        }
+        this.markDirty(bankId, 'units');
+        this.markDirty(bankId, 'links');
+        if (persist) this.save(bankId, ['units', 'links', 'obs', 'meta']);
     }
 
-    /**
-     * 批量物理删除单元（遗忘淘汰/手动清除用）：一次落盘，避免逐条整库序列化。
-     * 同步清理相关 links 与 observation evidence 引用，返回实际删除条数。
-     */
-    deleteUnits(bankId: string, unitIds: string[], persist = true): number {
-        const bank = this.getBank(bankId);
-        if (!bank || unitIds.length === 0) return 0;
-        const ids = new Set(unitIds);
-        const before = bank.units.length;
-        bank.units = bank.units.filter(u => !ids.has(u.id));
-        bank.links = bank.links.filter(l => !ids.has(l.fromUnitId) && !ids.has(l.toUnitId));
-        bank.observations = bank.observations.map(o => ({
-            ...o,
-            evidence: o.evidence.filter(e => !ids.has(e.memoryId)),
-            proofCount: o.evidence.filter(e => !ids.has(e.memoryId)).length,
-        }));
-        if (persist) this.save(bankId);
-        return before - bank.units.length;
+    listPendingFacts(bankId: string, limit: number): MemoryUnit[] {
+        return this.listUnits(bankId)
+            .filter(u => u.state === 'valid' && u.consolidationState === 'pending')
+            .sort((a, b) => a.createdAtSeq - b.createdAtSeq)
+            .slice(0, limit);
     }
 
-    /**
-     * 删除观察记忆：移除 observation 条目与同步的 observation unit，
-     * 清理其他 observation 中对该观察证据的引用，并移除相关 links。
-     */
-    deleteObservation(bankId: string, observationId: string, persist = true): void {
+    markConsolidated(bankId: string, ids: string[]): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
-        bank.observations = bank.observations.filter(o => o.id !== observationId);
-        bank.units = bank.units.filter(u => u.id !== observationId);
-        bank.links = bank.links.filter(l => l.fromUnitId !== observationId && l.toUnitId !== observationId);
-        bank.observations = bank.observations.map(o => ({
-            ...o,
-            evidence: o.evidence.filter(e => e.memoryId !== observationId),
-            proofCount: o.evidence.filter(e => e.memoryId !== observationId).length,
-        }));
-        if (persist) this.save(bankId);
+        const set = new Set(ids);
+        const now = nowSec();
+        let changed = false;
+        for (const unit of bank.units) {
+            if (set.has(unit.id) && unit.consolidationState === 'pending') {
+                unit.consolidationState = 'done';
+                unit.consolidatedAt = now;
+                changed = true;
+            }
+        }
+        if (changed) {
+            bank.meta.settings.pendingFactCount = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+            this.markDirty(bankId, 'units');
+            this.markDirty(bankId, 'meta');
+        }
     }
 
-    // ===== Entities =====
+    setPendingCount(bankId: string, count?: number): void {
+        const bank = this.getBank(bankId);
+        if (!bank) return;
+        bank.meta.settings.pendingFactCount = count ?? bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+        this.markDirty(bankId, 'meta');
+    }
+
+    maxFactSeq(bankId: string): number {
+        const bank = this.getBank(bankId);
+        if (!bank) return 0;
+        return bank.units.reduce((max, u) => Math.max(max, u.createdAtSeq || 0), 0);
+    }
+
+    // ===== 实体/链接 =====
 
     listEntities(bankId: string): MemoryEntity[] {
-        const bank = this.getBank(bankId);
-        return bank ? bank.entities.slice() : [];
+        return this.getBank(bankId)?.entities.slice() ?? [];
     }
 
-    getEntity(bankId: string, entityId: string): MemoryEntity | null {
-        const bank = this.getBank(bankId);
-        return bank ? bank.entities.find(e => e.id === entityId) || null : null;
-    }
-
-    findEntityByName(bankId: string, name: string): MemoryEntity | null {
-        const bank = this.getBank(bankId);
-        if (!bank) return null;
-        const normalized = normalizeName(name);
-        return bank.entities.find(e => normalizeName(e.canonicalName) === normalized
-            || e.aliases.some(a => normalizeName(a) === normalized)) || null;
-    }
-
-    addEntity(bankId: string, entity: MemoryEntity, persist = true): void {
-        const bank = this.getOrCreateBank(bankId, 'global');
-        bank.entities.push(entity);
-        if (persist) this.save(bankId);
-    }
-
-    updateEntity(bankId: string, entity: MemoryEntity, persist = true): void {
-        const bank = this.getBank(bankId);
-        if (!bank) return;
-        const idx = bank.entities.findIndex(e => e.id === entity.id);
-        if (idx >= 0) {
-            bank.entities[idx] = entity;
-            if (persist) this.save(bankId);
+    upsertEntity(bankId: string, name: string, aliases?: string[]): MemoryEntity {
+        const bank = this.getOrCreateBank(bankId);
+        const canonical = normalizeName(name);
+        if (!canonical) {
+            return { id: localId(), bankId, canonicalName: name, aliases: aliases ?? [], firstSeen: nowSec(), lastSeen: nowSec(), mentionCount: 0 };
         }
+        let entity = bank.entities.find(e => normalizeName(e.canonicalName) === canonical
+            || e.aliases.some(a => normalizeName(a) === canonical));
+        const now = nowSec();
+        if (entity) {
+            entity.lastSeen = now;
+            entity.mentionCount++;
+            for (const alias of aliases ?? []) {
+                if (!entity.aliases.includes(alias)) entity.aliases.push(alias);
+            }
+        } else {
+            entity = {
+                id: localId(),
+                bankId,
+                canonicalName: name,
+                aliases: aliases ?? [],
+                firstSeen: now,
+                lastSeen: now,
+                mentionCount: 1,
+            };
+            bank.entities.push(entity);
+        }
+        this.markDirty(bankId, 'obs');
+        return entity;
     }
 
-    // ===== Links =====
+    findEntity(bankId: string, name: string): MemoryEntity | null {
+        const canonical = normalizeName(name);
+        return this.getBank(bankId)?.entities.find(e => normalizeName(e.canonicalName) === canonical
+            || e.aliases.some(a => normalizeName(a) === canonical)) ?? null;
+    }
 
     listLinks(bankId: string): MemoryLink[] {
-        const bank = this.getBank(bankId);
-        return bank ? bank.links.slice() : [];
+        return this.getBank(bankId)?.links.slice() ?? [];
     }
 
-    addLink(bankId: string, link: MemoryLink, persist = true): void {
-        const bank = this.getOrCreateBank(bankId, 'global');
-        const exists = bank.links.some(l =>
-            l.fromUnitId === link.fromUnitId
-            && l.toUnitId === link.toUnitId
-            && l.linkType === link.linkType
-            && l.entityId === link.entityId
-        );
-        if (!exists) bank.links.push(link);
-        if (persist) this.save(bankId);
+    addLink(bankId: string, link: MemoryLink, persist = false): void {
+        const bank = this.getOrCreateBank(bankId);
+        if (link.fromUnitId === link.toUnitId) return;
+        if (bank.links.some(l => l.fromUnitId === link.fromUnitId && l.toUnitId === link.toUnitId && l.linkType === link.linkType)) return;
+        bank.links.push(link);
+        this.markDirty(bankId, 'links');
+        if (persist) this.save(bankId, ['links']);
     }
 
-    // ===== Observations =====
+    // ===== 观察 =====
 
     listObservations(bankId: string): Observation[] {
-        const bank = this.getBank(bankId);
-        return bank ? bank.observations.slice() : [];
+        return this.getBank(bankId)?.observations.slice() ?? [];
     }
 
-    addObservation(bankId: string, observation: Observation, persist = true): void {
-        const bank = this.getOrCreateBank(bankId, 'global');
+    getObservation(bankId: string, id: string): Observation | null {
+        return this.getBank(bankId)?.observations.find(o => o.id === id) ?? null;
+    }
+
+    addObservation(bankId: string, observation: Observation, persist = false): void {
+        const bank = this.getOrCreateBank(bankId);
         bank.observations.push(observation);
-        if (persist) this.save(bankId);
+        this.markDirty(bankId, 'obs');
+        if (persist) this.save(bankId, ['obs']);
     }
 
-    updateObservation(bankId: string, observation: Observation, persist = true): void {
+    updateObservation(bankId: string, observation: Observation, persist = false): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.observations.findIndex(o => o.id === observation.id);
         if (idx >= 0) {
             bank.observations[idx] = observation;
-            if (persist) this.save(bankId);
+            this.markDirty(bankId, 'obs');
+            if (persist) this.save(bankId, ['obs']);
         }
     }
 
-    // ===== Mental Models =====
+    deleteObservation(bankId: string, id: string, persist = false): void {
+        const bank = this.getBank(bankId);
+        if (!bank) return;
+        bank.observations = bank.observations.filter(o => o.id !== id);
+        this.markDirty(bankId, 'obs');
+        if (persist) this.save(bankId, ['obs']);
+    }
+
+    // ===== 心智模型 =====
 
     listMentalModels(bankId: string): MentalModel[] {
-        const bank = this.getBank(bankId);
-        return bank ? bank.mentalModels.slice() : [];
+        return this.getBank(bankId)?.mentalModels.slice() ?? [];
     }
 
-    addMentalModel(bankId: string, model: MentalModel): void {
-        const bank = this.getOrCreateBank(bankId, 'global');
+    getMentalModel(bankId: string, id: string): MentalModel | null {
+        return this.getBank(bankId)?.mentalModels.find(m => m.id === id) ?? null;
+    }
+
+    addMentalModel(bankId: string, model: MentalModel, persist = false): void {
+        const bank = this.getOrCreateBank(bankId);
         bank.mentalModels.push(model);
-        this.save(bankId);
+        this.markDirty(bankId, 'obs');
+        if (persist) this.save(bankId, ['obs']);
     }
 
-    updateMentalModel(bankId: string, model: MentalModel): void {
+    updateMentalModel(bankId: string, model: MentalModel, persist = false): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
         const idx = bank.mentalModels.findIndex(m => m.id === model.id);
         if (idx >= 0) {
             bank.mentalModels[idx] = model;
-            this.save(bankId);
+            this.markDirty(bankId, 'obs');
+            if (persist) this.save(bankId, ['obs']);
         }
     }
 
-    deleteMentalModel(bankId: string, id: string): boolean {
-        const bank = this.getBank(bankId);
-        if (!bank) return false;
-        const idx = bank.mentalModels.findIndex(m => m.id === id);
-        if (idx < 0) return false;
-        bank.mentalModels.splice(idx, 1);
-        this.save(bankId);
-        return true;
-    }
-
-    // ===== Documents / Chunks =====
-
-    getDocument(bankId: string, documentId: string): MemoryDocument | null {
-        const bank = this.getBank(bankId);
-        return bank ? bank.documents.find(d => d.id === documentId) || null : null;
-    }
-
-    addDocument(bankId: string, document: MemoryDocument, persist = true): MemoryDocument {
-        const bank = this.getOrCreateBank(bankId, 'global');
-        const existing = bank.documents.find(d => d.id === document.id);
-        if (existing) {
-            existing.originalText = document.originalText;
-            existing.contentHash = document.contentHash;
-            existing.metadata = { ...existing.metadata, ...document.metadata };
-        } else {
-            bank.documents.push(document);
-        }
-        if (persist) this.save(bankId);
-        return this.getDocument(bankId, document.id)!;
-    }
-
-    addChunk(bankId: string, chunk: MemoryChunk, persist = true): void {
-        const bank = this.getOrCreateBank(bankId, 'global');
-        const existing = bank.chunks.find(c => c.id === chunk.id);
-        if (existing) {
-            existing.text = chunk.text;
-            existing.embedding = chunk.embedding;
-        } else {
-            bank.chunks.push(chunk);
-        }
-        if (persist) this.save(bankId);
-    }
-
-    listChunks(bankId: string, documentId?: string): MemoryChunk[] {
-        const bank = this.getBank(bankId);
-        if (!bank) return [];
-        return bank.chunks.filter(c => !documentId || c.documentId === documentId);
-    }
-
-    // ===== Consolidation helpers =====
-
-    markUnitConsolidated(bankId: string, unitIds: string[], observationId?: string, persist = true): void {
+    deleteMentalModel(bankId: string, id: string, persist = false): void {
         const bank = this.getBank(bankId);
         if (!bank) return;
-        const now = nowSec();
-        for (const unit of bank.units) {
-            if (unitIds.includes(unit.id)) {
-                unit.consolidationState = 'done';
-                unit.consolidatedAt = now;
-                if (observationId) unit.metadata = { ...unit.metadata, observationId };
-            }
-        }
-        if (persist) this.save(bankId);
-    }
-
-    mergeSimilarObservations(bankId: string, threshold: number, persist = true): ConsolidationResult {
-        const bank = this.getBank(bankId);
-        if (!bank) return { created: [], updated: [], merged: [], skipped: 0 };
-        const merged: string[] = [];
-        const kept: Observation[] = [];
-        for (const obs of bank.observations) {
-            const target = kept.find(o => observationSimilarity(o.text, obs.text) >= threshold);
-            if (target) {
-                target.evidence = dedupEvidence([...target.evidence, ...obs.evidence]);
-                target.proofCount = target.evidence.length;
-                target.history.push({ text: obs.text, reason: 'merged', at: nowSec() });
-                target.updatedAt = nowSec();
-                merged.push(obs.id);
-                bank.units = bank.units.filter(u => u.id !== obs.id);
-                // 同步保留观察的 synced unit（文本/标签/时间），避免 observation 与 unit 失同步，
-                // 否则心智模型 watermark/staleness 基于 unit 时间判断会漏掉合并产生的更新
-                const unit = bank.units.find(u => u.id === target.id);
-                if (unit) {
-                    unit.text = target.text;
-                    unit.tags = target.scopeTags;
-                    unit.updatedAt = target.updatedAt;
-                }
-            } else {
-                kept.push(obs);
-            }
-        }
-        bank.observations = kept;
-        if (persist) this.save(bankId);
-        return { created: [], updated: [], merged, skipped: 0 };
+        bank.mentalModels = bank.mentalModels.filter(m => m.id !== id);
+        this.markDirty(bankId, 'obs');
+        if (persist) this.save(bankId, ['obs']);
     }
 }
 
-export function normalizeName(name: string): string {
-    return String(name || '').trim().toLowerCase().replace(/\s+/g, '');
+export function inferKind(bankId: string): MemoryBankMeta['kind'] {
+    const prefix = String(bankId || '').split('_')[0];
+    return prefix === 'user' || prefix === 'group' ? prefix : 'global';
 }
 
-/** 补齐旧存档缺省字段：MentalModel 的 E4 扩展字段与 Hindsight 式心智模型字段 */
-function normalizeBank(bank: PersistedBank): void {
-    // meta/settings 缺省补齐（旧存档/异常存档兜底），模板播种版本缺省为 0
-    if (!bank.meta) bank.meta = { id: 'unknown', kind: 'global', createdAt: nowSec(), updatedAt: nowSec(), settings: {} };
-    if (!bank.meta.settings) bank.meta.settings = {};
-    if (typeof bank.meta.settings.seededMentalModelVersion !== 'number') bank.meta.settings.seededMentalModelVersion = 0;
-    if (!Array.isArray(bank.mentalModels)) bank.mentalModels = [];
-    for (const m of bank.mentalModels) {
-        if (typeof m.lastRefreshedAt !== 'number') m.lastRefreshedAt = typeof m.updatedAt === 'number' ? m.updatedAt : nowSec();
-        if (!Array.isArray(m.history)) m.history = [];
-        if (m.trigger !== 'full' && m.trigger !== 'delta') m.trigger = 'full';
-        // Hindsight 式心智模型扩展字段回填（triggerConfig/status/watermark/embedding）
-        const cfg = m.triggerConfig;
-        m.triggerConfig = {
-            mode: cfg?.mode === 'delta' ? 'delta' : m.trigger === 'delta' ? 'delta' : 'full',
-            refreshAfterConsolidation: cfg?.refreshAfterConsolidation !== false,
-            excludeMentalModels: cfg?.excludeMentalModels !== false,
-            factTypes: Array.isArray(cfg?.factTypes) && (cfg?.factTypes?.length ?? 0) > 0 ? cfg!.factTypes!.slice() : undefined,
-        };
-        if (m.status !== 'ready' && m.status !== 'pending' && m.status !== 'failed') m.status = 'ready';
-        if (typeof m.lastMemorySeenAt !== 'number') m.lastMemorySeenAt = typeof m.updatedAt === 'number' ? m.updatedAt : nowSec();
-        if (!Array.isArray(m.embedding)) m.embedding = [];
-    }
-}
-
-function dedupEvidence(evidence: Array<{ memoryId: string; quote: string }>): Array<{ memoryId: string; quote: string }> {
-    const seen = new Set<string>();
-    const out: Array<{ memoryId: string; quote: string }> = [];
-    for (const e of evidence) {
-        const key = `${e.memoryId}:${e.quote}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            out.push(e);
-        }
-    }
-    return out;
-}
-
-function observationSimilarity(a: string, b: string): number {
-    const gramsA = charNGrams(a);
-    const gramsB = charNGrams(b);
-    if (gramsA.size === 0 || gramsB.size === 0) return 0;
-    let hit = 0;
-    for (const g of gramsA) if (gramsB.has(g)) hit++;
-    return hit / Math.min(gramsA.size, gramsB.size);
-}
-
-function charNGrams(s: string, min = 2, max = 3): Set<string> {
-    const text = String(s || '').replace(/\s+/g, '');
-    const set = new Set<string>();
-    for (let n = min; n <= max; n++) {
-        for (let i = 0; i + n <= text.length; i++) set.add(text.slice(i, i + n));
-    }
-    return set;
+export function distinctLiveEvidence(bank: PersistedBank, evidence: Array<{ memoryId: string }>): number {
+    const live = new Set(bank.units.filter(u => u.state === 'valid').map(u => u.id));
+    return new Set(evidence.filter(e => live.has(e.memoryId)).map(e => e.memoryId)).size;
 }

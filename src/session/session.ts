@@ -9,7 +9,7 @@ import type { ContextService } from "../context/service";
 import { getAgent } from "../core/ports/agent_registry";
 import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
-import SessionMemoryService from "../memory/session_memory";
+import SessionMemoryState from "../memory/session_state";
 import { isAnthropicMessages } from "../model/api_dialect";
 import Model from "../model/model";
 import type Image from "../resource/image";
@@ -54,7 +54,7 @@ export class Session {
             objectValue: 'any'
         },
         context: Context,
-        memory: SessionMemoryService,
+        memory: SessionMemoryState,
         setting: Setting,
         archiveSeq: 'number',
         lastArchivedAt: 'number',
@@ -93,7 +93,7 @@ export class Session {
     context: Context;
     /** 上下文事件账本门面（供写入/投影/召回；旧 context 仅回退） */
     contextV2: ContextService | null;
-    memory: SessionMemoryService;
+    memory: SessionMemoryState;
     setting: Setting;
     stream: {
         id: string,
@@ -157,6 +157,8 @@ export class Session {
     headlessTranscript: string[] = [];
     /** 运行时字段：最近一次"相关活动"＝任何一次 session.chat（@/触发/送达/定时任务都走它）；普通消息入库不算（不持久化） */
     lastRelevantAt = 0;
+    /** 运行时字段：本会话最近一次 AI 触发时间（秒）；记忆自动抽取门控使用（不持久化） */
+    aiTriggeredAt = 0;
     /** 运行时字段：本会话账本——压缩/归档/评分各调用了多少次（不持久化） */
     ctxStats: { compression: number; summarization: number; judge: number } = { compression: 0, summarization: 0, judge: 0 };
     /** 运行时字段：保存节流状态（不持久化） */
@@ -193,7 +195,7 @@ export class Session {
             count: 0,
             lastTime: 0
         }
-        this.memory = new SessionMemoryService();
+        this.memory = new SessionMemoryState();
         this.lastCtx = null;
         this.running = false;
         this.stopVersion = 0;
@@ -465,7 +467,6 @@ export class Session {
                 });
             }
         }
-        this.memory?.migrateLegacyTags();
     }
 
     async stopCurrentChatStream(): Promise<void> {
@@ -511,4 +512,3 @@ export class Session {
     }
 
 }
-

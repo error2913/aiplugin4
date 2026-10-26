@@ -273,7 +273,7 @@ async function scenarioKeepRawOff() {
     const outcome = await session.context.archiveByTokenIfNeeded();
     const afterSum = llm.byUse['summarization'] || 0;
     check('关闭后归档不写分片', session.archiveSeq === 0, `archiveSeq=${session.archiveSeq}`);
-    check('关闭后仍沉淀记忆（只是不留原文）', afterSum > beforeSum,
+    check('关闭归档后不再调用旧记忆 summarize（v3 已解耦）', afterSum === beforeSum,
         `summarization 调用 ${beforeSum} → ${afterSum}`);
     check('消息仍被移出上下文', session.context.messages.length < 4,
         `剩余 ${session.context.messages.length} 条`);

@@ -1,9 +1,11 @@
-// 记忆引擎统一出口：默认使用 SealDice 持久化，测试可注入内存存储。
+// 记忆引擎统一出口：默认 SealDice 持久化；测试可注入内存存储/回调。
 import Config from "../../config/config";
 import Model from "../../model/model";
+import { getMemoryEngineInstance, setMemoryEngineFactory } from "../service";
 
 import { MemoryEngine } from "./engine";
-import { defaultFactExtractor, defaultObservationSynthesizer, defaultReflectSynthesizer, defaultReranker } from "./llm";
+import { defaultDeltaOperator, defaultObservationDecisionMaker, defaultObservationSynthesizer, defaultReflectSynthesizer, defaultReranker } from "./llm";
+import { setObservationStaleDays } from "./prompt";
 import { getDefaultMemoryStorage, InMemoryMemoryStorage } from "./storage";
 import type { MemoryStorage } from "./storage";
 
@@ -11,13 +13,20 @@ export { MemoryEngine } from "./engine";
 export { MemoryRepository } from "./repository";
 export { InMemoryMemoryStorage, SealMemoryStorage, setDefaultMemoryStorage, getDefaultMemoryStorage } from "./storage";
 export * from "./types";
-export * from "./bank_resolver";
 export * from "./prompt";
 export * from "./templates";
-export { defaultFactExtractor, defaultReranker, defaultObservationSynthesizer, defaultReflectSynthesizer } from "./llm";
+export { MemoryService } from "../service";
+
+function flag(key: string, fallback: boolean): boolean {
+    const value = (Config.memory as unknown as Record<string, unknown>)[key];
+    return typeof value === 'boolean' ? value : fallback;
+}
+function int(key: string, fallback: number): number {
+    const value = (Config.memory as unknown as Record<string, unknown>)[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
 
 export function createMemoryEngine(): MemoryEngine {
-    // 与知识库检索一致：配置了 text-embedding 模型时接入语义向量，未配置时自动降级为关键词/图/时间检索
     const embeddingModel = (() => {
         const dimension = Model.getEmbeddingDimension();
         return dimension > 0 ? Model.getEmbeddingModel("text-embedding") : null;
@@ -26,31 +35,37 @@ export function createMemoryEngine(): MemoryEngine {
         storage: getDefaultMemoryStorage(),
         embedding: embeddingModel ? (text: string) => embeddingModel.callEmbedding(text) : undefined,
     });
-    const memoryConfig = Config.memory;
-    if (memoryConfig.MEMORY_LLM_EXTRACT) engine.setExtractor(defaultFactExtractor);
-    if (memoryConfig.MEMORY_LLM_RERANK) engine.setReranker(defaultReranker);
-    if (memoryConfig.MEMORY_OBSERVATION_SYNTH) engine.setObservationSynthesizer(defaultObservationSynthesizer);
-    if (memoryConfig.MEMORY_REFLECT_SYNTH) engine.setReflectSynthesizer(defaultReflectSynthesizer);
-    if (memoryConfig.MEMORY_REFRESH_MIN_INTERVAL > 0) engine.setRefreshMinInterval(memoryConfig.MEMORY_REFRESH_MIN_INTERVAL * 60);
-    // Hindsight 式心智模型刷新：默认模式 / 排除其它模型 / 定时刷新间隔
+    if (flag('LLM_RERANK', false)) engine.setReranker(defaultReranker);
+    if (flag('OBSERVATION_ENABLED', true)) {
+        engine.setObservationSynthesizer(defaultObservationSynthesizer);
+        engine.setObservationDecision(defaultObservationDecisionMaker);
+    }
+    if (flag('LLM_REFLECT_SYNTH', true)) engine.setReflectSynthesizer(defaultReflectSynthesizer);
+    engine.setDeltaOps(defaultDeltaOperator);
+    engine.setRefreshMinInterval(int('MM_MIN_REFRESH_INTERVAL_SEC', int('MM_MIN_REFRESH_INTERVAL_MIN', 0) * 60));
     engine.setMentalModelDefaults({
-        mode: memoryConfig.MEMORY_MM_DEFAULT_MODE === 'delta' ? 'delta' : 'full',
-        excludeMentalModels: memoryConfig.MEMORY_MM_EXCLUDE_SIBLINGS,
+        mode: (Config.memory as any).MM_MODE === 'delta' || (Config.memory as any).MM_DEFAULT_MODE === 'delta' ? 'delta' : 'full',
+        excludeMentalModels: (Config.memory as any).MM_EXCLUDE_SIBLINGS !== false,
     });
-    // 遗忘机制：长期记忆条数上限（0 为不限制，默认 100）
-    engine.setMemoryCap(memoryConfig.MEMORY_CAP);
-    // Hindsight 式新近度加权：接入召回排序（权重 0 时关闭）
-    engine.setRecency(memoryConfig.MEMORY_RECENCY_WEIGHT, memoryConfig.MEMORY_RECENCY_HALF_LIFE_DAYS);
+    engine.setMemoryCap(int('MEMORY_MAX_FACTS', 300));
+    engine.setSemanticThreshold(Number((Config.memory as any).RECALL_SEMANTIC_MIN_SIM) > 0 ? Number((Config.memory as any).RECALL_SEMANTIC_MIN_SIM) : 0.35);
+    engine.setMentalModelLimits({
+        maxTokens: int('MM_MAX_TOKENS', 2048),
+        failedCooldownSec: int('MM_FAILED_COOLDOWN_MIN', 30) * 60,
+        deltaFullRebuildSec: int('MM_DELTA_FULL_REBUILD_HOURS', 48) * 3600,
+    });
+    setObservationStaleDays(int('OBSERVATION_STALE_DAYS', 90));
+    engine.setRecency(Number((Config.memory as any).RECALL_RECENCY_WEIGHT ?? 0.4), int('RECALL_RECENCY_HALF_LIFE_DAYS', 60));
     return engine;
 }
 
-let globalEngine: MemoryEngine | null = null;
+setMemoryEngineFactory(createMemoryEngine);
 
 export function getMemoryEngine(): MemoryEngine {
-    if (!globalEngine) globalEngine = createMemoryEngine();
-    return globalEngine;
+    return getMemoryEngineInstance() as MemoryEngine;
 }
 
 export function resetMemoryEngineForTest(storage?: MemoryStorage): void {
-    globalEngine = new MemoryEngine({ storage: storage || new InMemoryMemoryStorage() });
+    const engine = new MemoryEngine({ storage: storage || new InMemoryMemoryStorage() });
+    setMemoryEngineFactory(() => engine);
 }

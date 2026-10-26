@@ -1,183 +1,246 @@
-// 记忆巩固/观察同步/淘汰（叶子）：LLM 合成观察记忆 → 观察单元同步 → 相似观察合并 → 过期清理 → 超限淘汰。
-// 从 memory/v2/engine.ts 拆出——只依赖 repository + 合成回调 + 打分函数，便于单测；
-// engine.ts 保留 consolidate() 入口（含防重入锁）与 pruneBank 包装。
+// 观察巩固：pending facts → 观察（evidence / proofCount / history）。
+// 不物理删除过期观察；不在本层调用 LLM 之外的副作用。
 import { generateId } from "../../utils/id";
 
-import { OBSERVATION_STALE_DAYS } from "./prompt";
 import type { MemoryRepository } from "./repository";
-import { decayScore, evictionGroup, sameCluster, SEMANTIC_SIMILARITY_THRESHOLD } from "./scoring";
+import { distinctLiveEvidence } from "./repository";
+import { sameCluster, textSimilarity } from "./scoring";
 import type {
-    ConsolidationResult,
+    ConsolidateOutcome,
     MemoryUnit,
     Observation,
-    ObservationSynthesizer,
+    ObservationDecision,
+    ObservationDecisionMaker,
 } from "./types";
 
-/** 巩固所需的最小宿主视图（MemoryEngine 满足）：repository + 可选的观察合成回调 */
-export interface ObservationStore {
+export interface ConsolidationHost {
     repository: MemoryRepository;
-    synthesizeObservation?: ObservationSynthesizer;
+    decideObservation?: ObservationDecisionMaker;
+    synthesizeObservation?: (quotes: string[]) => Promise<string>;
 }
 
-export async function doConsolidate(store: ObservationStore, bankId: string): Promise<ConsolidationResult> {
-    const bank = store.repository.getBank(bankId);
-    if (!bank) return { created: [], updated: [], merged: [], skipped: 0 };
+export async function doConsolidate(
+    host: ConsolidationHost,
+    bankId: string,
+    opts: { maxFacts?: number; targetedTags?: string[] } = {},
+): Promise<ConsolidateOutcome> {
+    const repo = host.repository;
+    const bank = repo.getBank(bankId);
+    const empty: ConsolidateOutcome = { created: [], updated: [], merged: [], skipped: 0, touchedTags: [], pendingRemaining: 0 };
+    if (!bank) return empty;
 
-    // Hindsight 式惰性清理：观察记忆长期未验证视为过期，直接清理（连同同步 unit/evidence/links）
-    const staleRemoved = cleanupStaleObservations(store.repository, bankId);
+    let pending = repo.listPendingFacts(bankId, opts.maxFacts ?? 50);
+    if (opts.targetedTags && opts.targetedTags.length) {
+        const scope = new Set(opts.targetedTags);
+        pending = pending.filter(f => f.tags.some(t => scope.has(t)));
+    }
+    if (pending.length === 0) return { ...empty, pendingRemaining: countPending(bank.units) };
 
-    const pending = bank.units.filter(u => u.state === 'valid' && u.consolidationState === 'pending');
-    if (pending.length === 0) {
-        // 清理过期观察可能已产生变更，仍需落盘一次
-        if (staleRemoved > 0) store.repository.save(bankId);
-        return { created: [], updated: [], merged: [], skipped: 0 };
+    const clusters = clusterFacts(pending);
+    const created: string[] = [];
+    const updated: string[] = [];
+    const merged: string[] = [];
+    const touched = new Set<string>();
+    const processed: string[] = [];
+
+    for (const cluster of clusters) {
+        const evidenceTexts = cluster.map(f => f.text);
+        const related = findRelatedObservations(bank.observations, cluster);
+        let decision: ObservationDecision | null = null;
+        if (host.decideObservation) {
+            decision = await host.decideObservation({
+                evidence: evidenceTexts,
+                existing: related,
+                tags: unionTags(cluster),
+            });
+        }
+        if (!decision) {
+            const text = host.synthesizeObservation
+                ? await host.synthesizeObservation(evidenceTexts)
+                : evidenceTexts.join('；');
+            decision = related.length
+                ? { action: 'refine', targetId: related[0].id, text, evidenceMemoryIds: cluster.map(f => f.id) }
+                : { action: 'create', text, evidenceMemoryIds: cluster.map(f => f.id) };
+        }
+        applyDecision(host, bankId, cluster, decision, { created, updated, merged });
+        for (const fact of cluster) {
+            touched.add(fact.tags.find(t => /^(user|group|global):/.test(t)) || '');
+            processed.push(fact.id);
+        }
     }
 
+    if (processed.length) {
+        repo.markConsolidated(bankId, processed);
+        const now = Math.floor(Date.now() / 1000);
+        const meta = repo.getBankMeta(bankId);
+        if (meta) {
+            meta.settings.lastConsolidateAt = now;
+            repo.setPendingCount(bankId);
+        }
+        repo.save(bankId, ['units', 'obs', 'meta']);
+    }
+
+    return {
+        created,
+        updated,
+        merged,
+        skipped: pending.length - processed.length,
+        touchedTags: Array.from(touched).filter(Boolean),
+        pendingRemaining: repo.listUnits(bankId).filter(u => u.state === 'valid' && u.consolidationState === 'pending').length,
+    };
+}
+
+function countPending(units: MemoryUnit[]): number {
+    return units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+}
+
+function clusterFacts(facts: MemoryUnit[]): MemoryUnit[][] {
     const clusters: MemoryUnit[][] = [];
     const used = new Set<string>();
-    for (const unit of pending) {
-        if (used.has(unit.id)) continue;
-        const cluster = [unit];
-        used.add(unit.id);
-        for (const other of pending) {
+    for (const fact of facts) {
+        if (used.has(fact.id)) continue;
+        const cluster = [fact];
+        used.add(fact.id);
+        for (const other of facts) {
             if (used.has(other.id)) continue;
-            if (sameCluster(unit, other)) {
+            if (sameCluster(fact, other)) {
                 cluster.push(other);
                 used.add(other.id);
             }
         }
         clusters.push(cluster);
     }
-
-    const created: string[] = [];
-    const updated: string[] = [];
-    const merged: string[] = [];
-    const skipped = 0;
-    const now = Math.floor(Date.now() / 1000);
-
-    for (const cluster of clusters) {
-        const quotes = cluster.map(u => u.text);
-        const evidence = cluster.map(u => ({ memoryId: u.id, quote: u.text }));
-        const observationText = await synthesizeObservationText(store, quotes);
-        const similar = bank.observations.find(o => o.evidence.some(e => cluster.some(u => u.id === e.memoryId)));
-        if (similar) {
-            similar.evidence = Array.from(new Map([...similar.evidence, ...evidence].map(e => [`${e.memoryId}:${e.quote}`, e])).values());
-            similar.proofCount = similar.evidence.length;
-            similar.text = observationText;
-            similar.history.push({ text: observationText, reason: 'refined', at: now });
-            similar.updatedAt = now;
-            similar.lastVerifiedAt = now;
-            store.repository.updateObservation(bankId, similar, false);
-            syncObservationUnit(store.repository, bankId, similar, now, false);
-            updated.push(similar.id);
-        } else {
-            const obsId = generateId();
-            const observation: Observation = {
-                id: obsId,
-                bankId,
-                text: observationText,
-                scopeTags: cluster.reduce<string[]>((acc, u) => acc.concat(u.tags), []).filter(t => t.startsWith('user:') || t.startsWith('group:')),
-                evidence,
-                proofCount: evidence.length,
-                createdAt: now,
-                updatedAt: now,
-                lastVerifiedAt: now,
-                history: [{ text: observationText, reason: 'created', at: now }],
-            };
-            store.repository.addObservation(bankId, observation, false);
-            syncObservationUnit(store.repository, bankId, observation, now, false);
-            created.push(obsId);
-        }
-        store.repository.markUnitConsolidated(bankId, cluster.map(u => u.id), undefined, false);
-    }
-
-    const dedup = store.repository.mergeSimilarObservations(bankId, SEMANTIC_SIMILARITY_THRESHOLD, false);
-    merged.push(...dedup.merged);
-
-    // 批量写穿：consolidate 全程 persist=false 累计变更，末尾统一落盘一次
-    store.repository.save(bankId);
-    return { created, updated, merged, skipped };
+    return clusters;
 }
 
-/** 清理超过 OBSERVATION_STALE_DAYS 未验证的观察记忆（与注入时的 STALE 剔除口径一致） */
-export function cleanupStaleObservations(repository: MemoryRepository, bankId: string): number {
-    const bank = repository.getBank(bankId);
-    if (!bank) return 0;
-    const now = Math.floor(Date.now() / 1000);
-    const staleCutoff = now - OBSERVATION_STALE_DAYS * 86400;
-    const staleIds = bank.observations
-        .filter(o => (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff)
-        .map(o => o.id);
-    for (const obsId of staleIds) {
-        repository.deleteObservation(bankId, obsId, false);
-    }
-    return staleIds.length;
-}
-
-export async function synthesizeObservationText(store: ObservationStore, quotes: string[]): Promise<string> {
-    if (store.synthesizeObservation && quotes.length > 0) {
-        try {
-            const text = await store.synthesizeObservation(quotes);
-            if (text && text.trim()) return text.trim();
-        } catch {
-            // 合成失败时退回简单拼接
+function unionTags(facts: MemoryUnit[]): string[] {
+    const scope = new Set<string>();
+    const visibility = new Set<string>();
+    for (const f of facts) {
+        for (const t of f.tags) {
+            if (/^(user|group|global):/.test(t)) scope.add(t);
+            else if (/^vis:/.test(t)) visibility.add(t);
         }
     }
-    return quotes.join('；');
+    // 观察继承来源事实的可见性：owner 最严格优先，其次 origin；无 vis 视为 public
+    if (visibility.has('vis:owner')) return [...Array.from(scope), 'vis:owner'];
+    const origin = Array.from(visibility).find(t => t.startsWith('vis:origin:'));
+    if (origin) return [...Array.from(scope), origin];
+    return [...Array.from(scope), 'vis:public'];
 }
 
-export function syncObservationUnit(repository: MemoryRepository, bankId: string, observation: Observation, now: number, persist = true): void {
-    let unit = repository.getUnit(bankId, observation.id);
-    if (!unit) {
-        unit = {
-            id: observation.id,
+function findRelatedObservations(observations: Observation[], cluster: MemoryUnit[]): Observation[] {
+    const factIds = new Set(cluster.map(f => f.id));
+    const clusterText = cluster.map(f => f.text).join(' ');
+    const scope = new Set(cluster.reduce<string[]>((acc, f) => acc.concat(f.tags.filter(t => /^(user|group|global):/.test(t))), []));
+    return observations
+        .filter(o => o.status === 'active')
+        .map(o => ({
+            o,
+            score: Math.max(
+                o.evidence.some(e => factIds.has(e.memoryId)) ? 1 : 0,
+                textSimilarity(o.text, clusterText),
+                o.tags.some(t => scope.has(t)) ? 0.7 : 0,
+            ),
+        }))
+        .filter(x => x.score >= 0.6)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map(x => x.o);
+}
+
+function applyDecision(
+    host: ConsolidationHost,
+    bankId: string,
+    cluster: MemoryUnit[],
+    decision: ObservationDecision,
+    out: { created: string[]; updated: string[]; merged: string[] },
+): void {
+    const repo = host.repository;
+    const bank = repo.getBank(bankId);
+    if (!bank) return;
+    const now = Math.floor(Date.now() / 1000);
+    const target = decision.targetId ? bank.observations.find(o => o.id === decision.targetId) : undefined;
+    const evidenceIds = new Set(decision.evidenceMemoryIds || []);
+    const chosen = evidenceIds.size ? cluster.filter(f => evidenceIds.has(f.id)) : cluster;
+    const evidence = chosen.map(f => ({ memoryId: f.id, quote: f.text, addedAt: now }));
+    const text = String(decision.text || '').trim() || chosen.map(f => f.text).join('；');
+    const tags = unionTags(chosen);
+
+    if (decision.action === 'noop') return;
+
+    if (decision.action === 'create' || !target) {
+        const observation: Observation = {
+            id: generateId(),
             bankId,
-            text: observation.text,
-            factType: 'observation',
-            createdAt: observation.createdAt,
-            updatedAt: observation.updatedAt,
-            embedding: [],
-            entityIds: [],
-            tags: observation.scopeTags,
-            metadata: {},
-            importance: 0.8,
-            accessCount: 0,
-            lastAccessedAt: now,
-            state: 'valid',
-            consolidationState: 'done',
+            text,
+            tags,
+            evidence,
+            proofCount: evidence.length,
+            createdAt: now,
+            updatedAt: now,
+            lastSupportedAt: now,
+            status: 'active',
+            history: [{ text, reason: 'created', at: now }],
         };
-        repository.addUnit(bankId, unit, persist);
-    } else {
-        unit.text = observation.text;
-        unit.tags = observation.scopeTags;
-        unit.updatedAt = observation.updatedAt;
-        repository.updateUnit(bankId, unit, persist);
+        repo.addObservation(bankId, observation, false);
+        out.created.push(observation.id);
+        return;
     }
+
+    if (decision.action === 'merge') {
+        const other = target;
+        const mergedEvidence = dedupeEvidence([...other.evidence, ...evidence]);
+        other.evidence = mergedEvidence;
+        other.proofCount = distinctLiveEvidence(bank, mergedEvidence);
+        other.text = text;
+        other.tags = mergeObservationTags(other.tags, tags);
+        other.updatedAt = now;
+        other.lastSupportedAt = now;
+        other.history.push({ text, reason: 'merged', at: now });
+        repo.updateObservation(bankId, other, false);
+        out.merged.push(other.id);
+        return;
+    }
+
+    const reason = decision.action === 'contradict' ? 'contradicted'
+        : decision.action === 'reinforce' ? 'reinforced'
+            : 'refined';
+    const before = target.text;
+    target.evidence = dedupeEvidence([...target.evidence, ...evidence]);
+    target.proofCount = distinctLiveEvidence(bank, target.evidence);
+    target.tags = mergeObservationTags(target.tags, tags);
+    target.text = decision.action === 'reinforce' && !decision.text ? before : text;
+    target.updatedAt = now;
+    target.lastSupportedAt = now;
+    target.history.push({ text, reason, at: now });
+    repo.updateObservation(bankId, target, false);
+    out.updated.push(target.id);
 }
 
-/** 召回/巩固后触发：超过条数上限时物理删除多余记忆（上限为硬约束）。返回被淘汰的 unit id */
-export async function pruneBank(repository: MemoryRepository, memoryCap: number, bankId: string, persist = true): Promise<string[]> {
-    if (memoryCap <= 0) return [];
-    const bank = repository.getBank(bankId);
-    if (!bank) return [];
-    const valid = bank.units.filter(u => u.state === 'valid');
-    if (valid.length <= memoryCap) return [];
-
-    const now = Math.floor(Date.now() / 1000);
-    const coveredIds = new Set<string>();
-    for (const o of bank.observations) {
-        for (const e of o.evidence) coveredIds.add(e.memoryId);
+function dedupeEvidence<T extends { memoryId: string; quote: string }>(evidence: T[]): T[] {
+    const seen = new Set<string>();
+    const out: T[] = [];
+    for (const e of evidence) {
+        const key = `${e.memoryId}:${e.quote}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(e);
     }
-    const sorted = valid.slice().sort((a, b) => {
-        const ga = evictionGroup(a, coveredIds);
-        const gb = evictionGroup(b, coveredIds);
-        if (ga !== gb) return ga - gb;
-        const da = decayScore(a, now);
-        const db = decayScore(b, now);
-        if (da !== db) return da - db;
-        return (a.lastAccessedAt || 0) - (b.lastAccessedAt || 0);
-    });
-    const toEvict = sorted.slice(0, valid.length - memoryCap).map(u => u.id);
-    if (toEvict.length > 0) repository.deleteUnits(bankId, toEvict, persist);
-    return toEvict;
+    return out;
 }
+
+function mergeObservationTags(existing: string[], incoming: string[]): string[] {
+    const scope = new Set<string>();
+    let owner = false;
+    let origin: string | undefined;
+    for (const tag of [...existing, ...incoming]) {
+        if (/^(user|group|global):/.test(tag)) scope.add(tag);
+        else if (tag === 'vis:owner') owner = true;
+        else if (tag.startsWith('vis:origin:')) origin = origin || tag;
+    }
+    scope.add(owner ? 'vis:owner' : origin || 'vis:public');
+    return Array.from(scope);
+}
+
+export { sameCluster, textSimilarity };

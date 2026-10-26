@@ -2,8 +2,10 @@
 // 只由组合根调用：src/index.ts（产品）与 scripts/test-host.ts（单测/验收入口）。
 import { registerConfigHook } from "../hooks";
 
+import { applyMemoryConfig } from "./memory";
 import { applyModelConfig } from "./model";
 
 export function registerConfigAppliers(): void {
     registerConfigHook('model', (_key, data) => applyModelConfig(data));
+    registerConfigHook('memory', (_key, data) => applyMemoryConfig(data));
 }

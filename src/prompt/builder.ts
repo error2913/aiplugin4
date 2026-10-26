@@ -24,7 +24,6 @@ export interface SystemPromptSection {
 
 const STATIC_FRAME_TTL = 30_000;
 const LONG_TERM_MEMORY_TTL = 10_000;
-const SUMMARY_TTL = 60_000;
 
 function signature(parts: Array<string | number | boolean>): string {
     return parts.map(String).join('|');
@@ -161,13 +160,14 @@ export async function buildSystemPromptContent(
         });
     });
 
-    // 动态段：长期记忆/观察记忆分别缓存；当前时间每次动态生成
+    // 动态段：记忆单 cache（观察已并入同一渲染器）；当前时间每次动态生成
     const embeddingModelName = Model.getEmbeddingModel('text-embedding')?.name || '';
+    const memoryEnabled = (Config.memory as any).MEMORY_ENABLED ?? Config.memory.MEMORY;
     const memoryKey = signature([
         'prompt:memory',
         session.sessionId,
         memorySource.memoryRevision(),
-        Config.memory.MEMORY,
+        memoryEnabled,
         Model.getEmbeddingDimension(),
         embeddingModelName,
         ctx.isPrivate,
@@ -179,26 +179,15 @@ export async function buildSystemPromptContent(
         gi?.name || '',
         text
     ]);
-    const summaryKey = signature([
-        'prompt:summary',
-        session.sessionId,
-        memorySource.summaryRevision(),
-        Config.memory.SUMMARY
-    ]);
-    const memoryTask = Config.memory.MEMORY
+    const memoryTask = memoryEnabled
         ? getCachedString(memoryKey, LONG_TERM_MEMORY_TTL, () => memorySource.buildLongTermPrompt(ctx, session, text, uis, gi || null))
         : Promise.resolve('');
-    const summaryTask = Config.memory.SUMMARY
-        ? getCachedString(summaryKey, SUMMARY_TTL, () => memorySource.buildObservationPrompt(session))
-        : Promise.resolve('');
 
-    const [memoryPrompt, summaryPrompt] = await Promise.all([memoryTask, summaryTask]);
+    const [memoryPrompt] = await Promise.all([memoryTask]);
 
     const timeBlock = `## 当前时间\n${fmtDate(Math.floor(Date.now() / 1000))}`;
-    const memoryToolHint = (Config.memory.MEMORY || Config.memory.SUMMARY)
-        ? '需要查看更多记忆时，使用 memory_recall 工具。'
-        : '';
-    const dynamicSections = [timeBlock, summaryPrompt, memoryToolHint, memoryPrompt]
+    const memoryToolHint = memoryEnabled ? '需要查看更多记忆时，使用 memory_recall 工具。' : '';
+    const dynamicSections = [timeBlock, memoryToolHint, memoryPrompt]
         .filter(Boolean)
         .join('\n\n');
 

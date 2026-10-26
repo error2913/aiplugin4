@@ -1,4 +1,4 @@
-// 旧记忆迁移：把旧存档中的记忆数据写入 Hindsight-like 新引擎。
+// 旧记忆导入：把旧存档 memoryMap/summaries/persona 写入 v3 引擎（仅测试/迁移使用）。
 import type { MemoryEngine } from "./engine";
 
 import { bankKindOfBankId, getMemoryEngine, personaQuestionFor } from "./index";
@@ -23,52 +23,52 @@ export interface LegacyMemorySource {
 export async function migrateLegacyMemory(
     bankId: string,
     source: LegacyMemorySource,
-    engine: MemoryEngine = getMemoryEngine()
+    engine: MemoryEngine = getMemoryEngine(),
 ): Promise<number> {
-    const tags: string[] = [];
     let count = 0;
-
     if (source.memoryMap) {
         for (const id of Object.keys(source.memoryMap)) {
             const m = source.memoryMap[id];
-            if (!m || !m.content) continue;
-            const unitTags = [
-                ...tags,
+            if (!m?.content) continue;
+            const tags = [
                 ...(m.tags || []),
                 ...(m.users || []).map(u => `user:${u}`),
                 ...(m.groups || []).map(g => `group:${g}`),
-                m.visibility === 'private' ? 'vis:private' : 'vis:public',
+                m.visibility === 'private' ? 'vis:owner' : 'vis:public',
             ];
-            const result = await engine.addMemory(bankId, {
+            const result = await engine.retain(bankId, {
                 content: m.content,
-                tags: Array.from(new Set(unitTags)),
+                tags: Array.from(new Set(tags)),
                 metadata: { legacyId: id, type: m.type || 'text' },
                 importance: m.importance ?? 0.5,
                 factType: m.type === 'event' ? 'experience' : 'world',
-                verbatim: true,
             });
             if (result.action !== 'noop') count++;
         }
     }
-
-    if (source.summaries && source.summaries.length > 0) {
+    if (source.summaries?.length) {
+        const now = Math.floor(Date.now() / 1000);
         for (const summary of source.summaries) {
             if (!summary) continue;
-            await engine.addMemory(bankId, {
-                content: summary,
-                tags: [...tags, 'observation:legacy'],
-                factType: 'observation',
-                importance: 0.7,
-                verbatim: true,
-            });
+            engine.repository.addObservation(bankId, {
+                id: `legacy_${count}_${Date.now().toString(36)}`,
+                bankId,
+                text: summary,
+                tags: ['legacy:observation'],
+                evidence: [],
+                proofCount: 0,
+                createdAt: now,
+                updatedAt: now,
+                lastSupportedAt: now,
+                status: 'active',
+                history: [{ text: summary, reason: 'created', at: now }],
+            }, true);
             count++;
         }
     }
-
     if (source.persona && source.persona !== '无') {
         const kind = bankKindOfBankId(bankId);
-        await engine.createMentalModel(bankId, personaQuestionFor(kind), source.persona, tags, { templateId: 'persona' });
+        await engine.createMentalModel(bankId, personaQuestionFor(kind), source.persona, [], { templateId: 'persona' });
     }
-
     return count;
 }

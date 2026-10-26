@@ -23,9 +23,9 @@
 
 | 配置 | 现状 | 待办 |
 | --- | --- | --- |
-| `心智模型定时刷新间隔` | 已在配置面板注册，`src/config/configs/memory.ts:42` 也读进了 `MEMORY_MM_TICK_INTERVAL`，但该常量在 `src/` 内没有消费点（全仓仅注册与赋值两处）——设了不生效 | 接线：按该间隔定时触发心智模型重建/刷新（仅当有新记忆时实际刷新）；或若确定不做，从配置面板注销以免误导用户 |
+| `心智模型定时刷新间隔` | v3 已删除该配置；auto refresh 由 `agent/memory_scheduler` 的 `mm_refresh` 任务驱动（巩固/seed/手动），并按 `心智模型刷新最小间隔`、watermark、失败冷却门控。 | 无 |
 
-> 排查方法：`grep -rn "MEMORY_MM_TICK_INTERVAL" src/` —— 只在 `src/config/configs/memory.ts` 出现（注册 + 赋值）即说明未接线。
+> 排查方法：`grep -rn "MEMORY_MM_TICK_INTERVAL" src/` 应无结果；旧配置键不再注册。
 
 ## 联网搜索：未实现 / 非目标
 

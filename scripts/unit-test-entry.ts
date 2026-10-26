@@ -1,6 +1,8 @@
 // 提示词/上下文构建单元测试入口（由 scripts/test-unit.cjs 打包后加载运行，不会启动 SealDice/QQ）
 // @ts-nocheck
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import { installTestHost } from "./test-host";
 
@@ -38,6 +40,12 @@ import { registerCmdBalance } from "../src/cmd/sub_cmd/balance";
 import { registerCmdMemory, resolveMmAddOptions } from "../src/cmd/sub_cmd/memory";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
+import { MemoryService, setMemoryEngineFactory } from "../src/memory/service";
+import { canReadByTags } from "../src/memory/v2/access";
+import { applyDeltaOps, parseMarkdown, blockSnapshot } from "../src/memory/v2/structured";
+import { migrateBankV3 } from "../src/memory/v2/migrate_v3";
+import { MemoryScheduler, resetMemorySchedulerForTest } from "../src/agent/memory_scheduler";
+import { setAuxLlm } from "../src/core/ports/aux_llm";
 import { KnowledgeBaseService, parseKnowledgeLibrary } from "../src/memory/knowledge_base";
 import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memory";
 import { MemoryEngine } from "../src/memory/v2/engine";
@@ -1203,9 +1211,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /** 归档失败：**不再降级硬删**（修 M7），数据保持原样并如实返回 false */
-    async testArchiveFailureKeepsData(): Promise<void> {
+    async testArchiveDoesNotDependOnMemory(): Promise<void> {
         const old = MemoryManager.summarizeChunkWithRetry;
-        MemoryManager.summarizeChunkWithRetry = async () => false;
+        let called = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { called++; return false; };
         const origRounds = TC.intConfigs['对话保存轮数'];
         const origTokens = TC.intConfigs['上下文最大token'];
         TC.intConfigs['对话保存轮数'] = 1;
@@ -1223,22 +1232,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { role: 'user', contentItems: [{ text: 'u3', time: 0, userId: '1', messageId: '' }] },
                 { role: 'assistant', contentItems: [{ text: 'a3', time: 0, messageId: '' }] },
             ] as any;
-            const before = JSON.stringify(session.context.messages);
-            const ok = await session.context.archiveByTokenIfNeeded();
-            assert.equal(ok, 'failed', '归档失败应返回 failed（供调用方如实记录，不再谎报成功）');
-            assert.equal(session.context.messages.length, 6, '失败时不得丢弃任何消息（不再整段硬删）');
-            assert.equal(JSON.stringify(session.context.messages), before, '内容应保持原样');
-            assert.equal(session.archiveSeq, 0, '失败时不应写入归档分片');
-
-            // 并发归档在飞：返回 busy（调用方可稍后重试），而不是 failed
-            // 用真实并发模拟：第一次 summarize 挂起时再次调用，锁必须生效
-            let release: (ok: boolean) => void = () => undefined;
-            const gate = new Promise<boolean>((resolve) => { release = resolve; });
-            MemoryManager.summarizeChunkWithRetry = async () => gate;
-            const first = session.context.archiveByTokenIfNeeded();
-            assert.equal(await session.context.archiveByTokenIfNeeded(), 'busy', '已有归档在飞应返回 busy');
-            release(false);
-            assert.equal(await first, 'failed', '挂起的首次归档失败时应如实返回 failed');
+            const result = await session.context.archiveByTokenIfNeeded();
+            assert.notEqual(result, 'failed', '归档不应因记忆抽取失败而失败（v3 记忆已解耦）');
+            assert.equal(called, 0, '归档路径不得再调用 MemoryManager.summarizeChunkWithRetry');
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
@@ -1551,9 +1547,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /** 归档连续失败到阈值后允许一次降级丢弃（否则 summarize 长期不可用时会话永久无法回复） */
-    async testArchiveFailureFallbackAfterLimit(): Promise<void> {
+    async testArchiveConvergesWithoutMemory(): Promise<void> {
         const old = MemoryManager.summarizeChunkWithRetry;
-        MemoryManager.summarizeChunkWithRetry = async () => false;
+        let summarizeCalls = 0;
+        MemoryManager.summarizeChunkWithRetry = async () => { summarizeCalls++; return false; };
         const origRounds = TC.intConfigs['对话保存轮数'];
         const origTokens = TC.intConfigs['上下文最大token'];
         TC.intConfigs['对话保存轮数'] = 1;
@@ -1563,20 +1560,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:997';
             session.sessionType = 'user';
-            const msgs = () => [
+            session.context.messages = [
                 { role: 'user', contentItems: [{ text: 'u1', time: 0, userId: '1', messageId: '' }] },
                 { role: 'assistant', contentItems: [{ text: 'a1', time: 0, messageId: '' }] },
                 { role: 'user', contentItems: [{ text: 'u2', time: 0, userId: '1', messageId: '' }] },
                 { role: 'assistant', contentItems: [{ text: 'a2', time: 0, messageId: '' }] },
             ] as any;
-            session.context.messages = msgs();
-            assert.equal(await session.context.archiveByTokenIfNeeded(), 'failed', '第 1 次失败应如实返回 failed');
-            assert.equal(session.context.messages.length, 4, '前两次失败不得丢数据');
-            session.context.messages = msgs();
-            assert.equal(await session.context.archiveByTokenIfNeeded(), 'failed', '第 2 次失败仍是 failed');
-            session.context.messages = msgs();
-            assert.equal(await session.context.archiveByTokenIfNeeded(), 'converged', '连续失败到阈值后应降级丢弃最早轮次，保证会话还能回复');
-            assert.ok(estimateContextMessagesTokens(session.context.messages) <= 20, '降级后应收敛到目标内');
+            assert.equal(await session.context.archiveByTokenIfNeeded(), 'converged', 'v3 归档不再依赖记忆抽取，应直接收敛');
+            assert.equal(summarizeCalls, 0, '不得再调用旧记忆 summarize');
+            assert.ok(estimateContextMessagesTokens(session.context.messages) <= 20, '应收敛到目标内');
         } finally {
             MemoryManager.summarizeChunkWithRetry = old;
             if (origRounds === undefined) delete TC.intConfigs['对话保存轮数']; else TC.intConfigs['对话保存轮数'] = origRounds;
@@ -1619,7 +1611,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ] as any;
             const ok = await session.context.archiveByTokenIfNeeded();
             assert.equal(ok, 'converged', '关闭「归档保留原文」时归档也应能收敛');
-            assert.ok(summarizeCalls > 0, '关闭时**仍应调用总结智能体**沉淀记忆（只是不留原文）');
+            assert.ok(summarizeCalls === 0, 'v3 关闭归档保留原文时也不调用旧记忆 summarize');
             assert.equal(session.archiveSeq, 0, '关闭时不应推进归档分片序号');
             assert.equal(Array.from(store.keys()).filter(k => k.includes(':arc:')).length, 0, '关闭时不应产生分片键');
             assert.ok(session.context.messages.length < 4, '消息仍应被移出上下文（不是保留全部）');
@@ -9758,13 +9750,13 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const builtin = Object.keys(toolMap).filter(n => !toolMap[n].group);
         const missing = builtin.filter(n => !toolMap[n].category);
         assert.deepEqual(missing, [], `内置工具必须打上分类（缺: ${missing.join('、')}）`);
-        assert.equal(builtin.length, 63, `内置工具数应为 63，实际 ${builtin.length}`);
+        assert.equal(builtin.length, 58, `内置工具数应为 58（记忆工具 12→7），实际 ${builtin.length}`);
 
         const byCategory: { [k: string]: string[] } = {};
         for (const n of builtin) (byCategory[Tool.categoryOf(toolMap[n])] = byCategory[Tool.categoryOf(toolMap[n])] || []).push(n);
         assert.equal(byCategory['基础调度'].length, 4, `基础调度应有 4 个: ${byCategory['基础调度']}`);
         assert.ok(byCategory['基础调度'].includes('list_tools') && byCategory['基础调度'].includes('call_tool'), '调度组应含 list_tools/call_tool');
-        assert.equal(byCategory['记忆'].length, 12, `记忆应有 12 个: ${byCategory['记忆']}`);
+        assert.equal(byCategory['记忆'].length, 7, `记忆应有 7 个: ${byCategory['记忆']}`);
         assert.equal(byCategory['子代理'].length, 8, `子代理应有 8 个: ${byCategory['子代理']}`);
         assert.ok(byCategory['子代理'].includes('subagent') && byCategory['子代理'].includes('job_kill'), '子代理组应含 subagent/job_kill');
         assert.ok(byCategory['图片'].includes('meme_generator') && byCategory['资源'].includes('search_music'), '图片/资源分类应命中各自的工具');
@@ -9819,8 +9811,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             // 平台过滤：DISCORD 限定工具不进 QQ 视图；组内计数与实际开关一致
             const memory = groups.find(g => g.key === '记忆')!;
-            assert.equal(memory.names.length, 12);
-            assert.equal(memory.on, 12);
+            assert.equal(memory.names.length, 7);
+            assert.equal(memory.on, 7);
             assert.equal(memory.off, 0);
             assert.equal(memory.label, '内置·记忆');
             const mcp = groups.find(g => g.key === 'zz-mcp-server')!;
@@ -9835,7 +9827,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             session.tool.state['memory_add'] = false;
             session.tool.state['memory_delete'] = false;
             const memory2 = Tool.getToolGroups(session, 'QQ').find(g => g.key === '记忆')!;
-            assert.equal(memory2.on, 10);
+            assert.equal(memory2.on, 5);
             assert.equal(memory2.off, 2);
 
             // 显示名/分类名/服务器名都能解析；未命中与多命中给可读错误
@@ -9869,14 +9861,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // 普通分类：整组关闭 / 开启
         const memory = Tool.getToolGroups(session, 'QQ').find(g => g.key === '记忆')!;
         const off = setToolGroupState(session, memory.names, false, { skipCore: true });
-        assert.equal(off.changed, 12);
+        assert.equal(off.changed, 7);
         assert.equal(session.toolState['memory_add'], false);
         const on = setToolGroupState(session, memory.names, true, { skipBlocked: true });
-        assert.equal(on.changed, 12);
+        assert.equal(on.changed, 7);
         assert.equal(session.toolState['memory_add'], true);
         const again = setToolGroupState(session, memory.names, true, { skipBlocked: true });
         assert.equal(again.changed, 0);
-        assert.equal(again.unchanged, 12, '已是目标状态应计入 unchanged');
+        assert.equal(again.unchanged, 7, '已是目标状态应计入 unchanged');
 
         // 核心常驻工具：默认跳过，--force（skipCore=false）才真正关闭
         const dispatch = Tool.getToolGroups(session, 'QQ').find(g => g.key === '基础调度')!;
@@ -9900,7 +9892,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             s2.sessionId = 'QQ:2';
             const memory2 = Tool.getToolGroups(s2, 'QQ').find(g => g.key === '记忆')!;
             assert.equal(memory2.names.includes('memory_add'), false, '禁止调用的函数不应出现在组内');
-            assert.equal(memory2.names.length, 11);
+            assert.equal(memory2.names.length, 6);
             s2.tool.state['memory_delete'] = false;
             const r = setToolGroupState(s2, ['memory_add', 'memory_delete'], true, { skipBlocked: true });
             assert.equal(r.skippedBlocked, 1, '禁用名单内的工具应被跳过');
@@ -9924,23 +9916,23 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const overview = await runSubCmd('tool', [''], { session });
         assert.ok(overview.startsWith('工具组（当前平台 QQ'), `应输出组概览: ${overview.slice(0, 120)}`);
         assert.ok(overview.includes('1. 基础调度（4，开 4 关 0）'), `概览应含基础调度统计: ${overview}`);
-        assert.ok(overview.includes('记忆（12，开 12 关 0）'), `概览应含记忆统计: ${overview}`);
+        assert.ok(overview.includes('记忆（7，开 7 关 0）'), `概览应含记忆统计: ${overview}`);
         assert.ok(!overview.includes('memory_add'), '概览不应展开组内工具');
         assert.ok(overview.includes('技能/知识库工具不在工具组范围'), '概览应提示技能/知识库管理入口');
         assert.ok(!overview.includes('技能（'), '概览不应把技能列为工具组');
 
         // 组明细
         const detail = await runSubCmd('tool', ['', '记忆'], { session });
-        assert.ok(detail.includes('工具组「记忆」（内置）：12 个，开 12 关 0'), `组明细头部错误: ${detail.slice(0, 120)}`);
+        assert.ok(detail.includes('工具组「记忆」（内置）：7 个，开 7 关 0'), `组明细头部错误: ${detail.slice(0, 120)}`);
         assert.ok(detail.includes('memory_add[开]') && detail.includes('memory_recall[开]'), '组明细应列出组内工具与开关');
         assert.ok(detail.includes('.ai tool on/off 记忆'), '组明细应给出批量开关提示');
 
         // 组开关：关 → 概览与状态同步，开 → 恢复
         const off = await runSubCmd('tool', ['', 'off', '记忆'], { session });
-        assert.ok(off.includes('已关闭工具组「记忆」') && off.includes('实际变更 12 个'), `组关闭回复错误: ${off}`);
+        assert.ok(off.includes('已关闭工具组「记忆」') && off.includes('实际变更 7 个'), `组关闭回复错误: ${off}`);
         assert.equal(session.toolState['memory_add'], false);
         const overviewOff = await runSubCmd('tool', [''], { session });
-        assert.ok(overviewOff.includes('记忆（12，开 0 关 12）'), `关闭后概览统计应更新: ${overviewOff}`);
+        assert.ok(overviewOff.includes('记忆（7，开 0 关 7）'), `关闭后概览统计应更新: ${overviewOff}`);
         const on = await runSubCmd('tool', ['', 'on', '记忆'], { session });
         assert.ok(on.includes('已开启工具组「记忆」'), `组开启回复错误: ${on}`);
         assert.equal(session.toolState['memory_add'], true);
@@ -13349,5 +13341,351 @@ Object.assign(tests, {
             TokenCalibration.resetForTest();
             installTestHost();
         }
+    },
+
+    // ================= 记忆 v3：三层数据模型 / 可见性 / 巩固 / 心智模型 / 结构化 delta =================
+
+    async testV3RetainAppendOnlyAndDedup(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => 1000 });
+        const bank = 'user_QQ:1';
+        const tags = ['user:QQ:1', 'vis:owner'];
+        const r1 = await engine.retain(bank, { content: '喜欢咖啡', tags });
+        const r2 = await engine.retain(bank, { content: '喜欢茶', tags });
+        assert.equal(r1.action, 'added');
+        assert.equal(r2.action, 'added');
+        const units = engine.repository.listUnits(bank);
+        assert.equal(units.length, 2, '原始事实 append-only，不做同实体合并');
+        assert.equal(units[0].text, '喜欢咖啡');
+        assert.equal(units[1].text, '喜欢茶');
+        const dup = await engine.retain(bank, { content: '  喜欢咖啡  ', tags });
+        assert.equal(dup.action, 'duplicate', '完全相同事实应去重');
+        assert.equal(engine.repository.listUnits(bank).length, 2);
+        assert.equal(engine.repository.listUnits(bank)[0].consolidationState, 'pending');
+    },
+
+    testV3VisibilityMatrix(): void {
+        const dm = { sessionId: 'QQ:1', sessionType: 'user' as const, userId: 'QQ:1' };
+        const sameGroup = { sessionId: 'QQ-Group:9', sessionType: 'group' as const, groupId: 'QQ-Group:9', userId: 'QQ:1' };
+        const otherGroup = { sessionId: 'QQ-Group:8', sessionType: 'group' as const, groupId: 'QQ-Group:8', userId: 'QQ:1' };
+        assert.equal(canReadByTags('user_QQ:1', ['user:QQ:1', 'vis:owner'], dm), true, '本人私聊可见 owner');
+        assert.equal(canReadByTags('user_QQ:1', ['user:QQ:1', 'vis:owner'], sameGroup), false, 'owner 事实不得进群');
+        assert.equal(canReadByTags('user_QQ:1', ['user:QQ:1', 'vis:public'], sameGroup), true, 'public 可进本人发言的群');
+        assert.equal(canReadByTags('user_QQ:1', ['user:QQ:1', 'vis:public'], otherGroup), true, 'public 是显式跨群，本人发言的群均可读');
+        assert.equal(canReadByTags('user_QQ:1', ['user:QQ:1', 'vis:origin:QQ-Group:9'], sameGroup), true, 'origin 来源群可读');
+        assert.equal(canReadByTags('user_QQ:1', ['user:QQ:1', 'vis:origin:QQ-Group:9'], otherGroup), false, 'origin 非来源群不可读');
+        assert.equal(canReadByTags('group_QQ-Group:9', ['group:QQ-Group:9', 'vis:public'], otherGroup), false, '群 bank 不跨群');
+        assert.equal(canReadByTags('global_main', ['global:main', 'vis:public'], dm), true, 'global public 所有会话可见');
+        assert.equal(canReadByTags('global_main', ['global:main', 'vis:owner'], dm), false, 'global 不允许 owner');
+    },
+
+    async testV3ConsolidationEvidenceAndContradiction(): Promise<void> {
+        let call = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000 + call,
+            observationDecision: async ({ existing }) => {
+                call++;
+                if (call === 1) return { action: 'create', text: '用户喜欢咖啡' } as any;
+                if (call === 2) return { action: 'reinforce', targetId: existing[0]?.id, text: '用户喜欢咖啡' } as any;
+                return { action: 'contradict', targetId: existing[0]?.id, text: '用户以前喜欢咖啡，现在改喝茶' } as any;
+            },
+        });
+        const bank = 'user_QQ:1';
+        const tags = ['user:QQ:1', 'vis:owner'];
+        await engine.retain(bank, { content: '喜欢咖啡', tags, entities: ['咖啡'] });
+        await engine.retain(bank, { content: '每天一杯咖啡', tags, entities: ['咖啡'] });
+        const c1 = await engine.consolidate(bank);
+        assert.equal(c1.created.length, 1);
+        let obs = engine.repository.listObservations(bank);
+        assert.equal(obs.length, 1);
+        assert.equal(obs[0].proofCount, 2, 'proofCount=distinct live sources');
+        assert.equal(obs[0].history[0].reason, 'created');
+
+        await engine.retain(bank, { content: '咖啡不加糖', tags, entities: ['咖啡'] });
+        const c2 = await engine.consolidate(bank);
+        assert.equal(c2.updated.length, 1);
+        obs = engine.repository.listObservations(bank);
+        assert.equal(obs[0].proofCount, 3);
+        assert.equal(obs[0].history.some(h => h.reason === 'reinforced'), true);
+
+        await engine.retain(bank, { content: '最近改喝茶了', tags, entities: ['咖啡'] });
+        const c3 = await engine.consolidate(bank);
+        assert.equal(c3.updated.length, 1);
+        obs = engine.repository.listObservations(bank);
+        assert.ok(obs[0].text.includes('现在改喝茶'), 'contradict 应改写成时间叙事');
+        assert.equal(obs[0].history.some(h => h.reason === 'contradicted'), true);
+        assert.equal(engine.repository.listUnits(bank).filter(u => u.consolidationState === 'pending').length, 0);
+    },
+
+    async testV3MentalModelRefreshWatermark(): Promise<void> {
+        let now = 1000;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => now,
+            reflectSynthesizer: async (_q, ctx) => `答案:${ctx.memories.length}`,
+        });
+        const bank = 'user_QQ:1';
+        const model = await engine.createMentalModel(bank, '用户偏好？', '');
+        assert.equal(model.status, 'pending');
+        await engine.retain(bank, { content: '喜欢咖啡', tags: ['user:QQ:1', 'vis:owner'] });
+        now += 1;
+        const r1 = await engine.refreshMentalModels(bank, model.id);
+        assert.equal(r1.updated, 1);
+        let stored = engine.listMentalModels(bank)[0];
+        assert.equal(stored.status, 'ready');
+        assert.ok(stored.content.includes('答案:1'));
+        assert.ok(stored.lastMemorySeenSeq > 0, '刷新后应推进 watermark');
+
+        now += 1;
+        const r2 = await engine.refreshMentalModels(bank, model.id);
+        assert.equal(r2.skipped, 1, '无新事实应跳过');
+        assert.equal(r2.skippedReasons.not_stale, 1);
+
+        await engine.retain(bank, { content: '也喜欢茶', tags: ['user:QQ:1', 'vis:owner'] });
+        now += 1;
+        const r3 = await engine.refreshMentalModels(bank, model.id);
+        assert.equal(r3.updated, 1, '有新事实应更新');
+        stored = engine.listMentalModels(bank)[0];
+        assert.ok(stored.content.includes('答案:2'));
+    },
+
+    async testV3ReflectFastPathAndFallback(): Promise<void> {
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000,
+            reflectSynthesizer: async () => '合成答案',
+        });
+        const bank = 'user_QQ:1';
+        const tags = ['user:QQ:1', 'vis:owner'];
+        await engine.retain(bank, { content: '喜欢咖啡', tags });
+        const model = await engine.createMentalModel(bank, '用户偏好？', '直接答案');
+        model.lastRefreshedAt = 1000;
+        model.lastMemorySeenSeq = engine.repository.maxFactSeq(bank);
+        engine.repository.updateMentalModel(bank, model, true);
+        const fast = await engine.reflect(bank, '用户偏好？', { scopeTags: tags, fastPath: true });
+        assert.equal(fast.answeredBy, 'model');
+        assert.equal(fast.text, '直接答案');
+        const deep = await engine.reflect(bank, '用户偏好？', { scopeTags: tags, fastPath: false, strict: false });
+        assert.ok(deep.basedOn.memories.length >= 1 || deep.basedOn.mentalModels.length >= 1);
+    },
+
+    testV3StructuredDeltaPreservesUnrelatedBlocks(): void {
+        const doc = parseMarkdown('## A\n- a\n- b\n\n## B\nhello');
+        const before = blockSnapshot(doc);
+        const sectionA = doc.sections.find(s => s.heading === 'A')!;
+        const blockB = doc.sections.find(s => s.heading === 'B')!.blocks[0];
+        const result = applyDeltaOps(doc, [
+            { op: 'append_bullet', sectionId: sectionA.id, text: 'c' },
+            { op: 'replace_block', blockId: blockB.id, text: 'world' },
+        ]);
+        assert.equal(result.applied, 2);
+        assert.equal(result.rejected, 0);
+        const after = blockSnapshot(result.doc);
+        for (const old of before) {
+            if (old.id === blockB.id) {
+                assert.equal(after.find(b => b.id === old.id)?.text, 'world');
+            } else {
+                assert.equal(after.find(b => b.id === old.id)?.text, old.text, '未命中 block 必须原样保留');
+            }
+        }
+        const rejected = applyDeltaOps(doc, [{ op: 'remove_stale_paragraph', blockId: 'no_such_block' }]);
+        assert.equal(rejected.rejected, 1);
+    },
+
+    async testV3MigrationFromV2(): Promise<void> {
+        const old: any = {
+            meta: { id: 'user_QQ:1', kind: 'user', createdAt: 1, updatedAt: 1, settings: {} },
+            units: [
+                { id: 'u1', bankId: 'user_QQ:1', text: '喜欢咖啡', factType: 'world', createdAt: 1, updatedAt: 1, tags: ['user:QQ:1', 'vis:public'], embedding: [], entityIds: [], metadata: {}, consolidationState: 'done' },
+                { id: 'o1', bankId: 'user_QQ:1', text: '旧观察同步单元', factType: 'observation', createdAt: 1, updatedAt: 1, tags: ['user:QQ:1'], embedding: [], entityIds: [], metadata: {} },
+            ],
+            entities: [],
+            links: [],
+            observations: [],
+            mentalModels: [{ id: 'm1', question: 'Q', answer: 'A', scopeTags: ['user:QQ:1'], createdAt: 1, updatedAt: 1, trigger: {} }],
+        };
+        const { bank, changed } = migrateBankV3(old);
+        assert.equal(changed, true);
+        assert.equal(bank.meta.schemaVersion, 3);
+        assert.equal(bank.units.length, 1, 'observation unit 必须消除');
+        assert.ok(bank.units[0].tags.includes('vis:owner'), '旧 user bank public 迁移为 owner');
+        assert.equal(bank.observations.length, 1, 'observation unit 迁移为观察表');
+        assert.ok(bank.observations[0].tags.includes('vis:owner'), '旧个人观察必须收紧为 owner');
+        assert.equal(bank.mentalModels[0].sourceQuery, 'Q');
+        assert.equal(bank.mentalModels[0].structuredContent.sections.length > 0, true);
+        assert.equal(bank.mentalModels[0].trigger.refreshAfterConsolidation, false);
+        assert.equal(bank.mentalModels[0].maxTokens, 2048);
+        assert.equal(bank.mentalModels[0].lastMemorySeenSeq, 0);
+    },
+
+    async testV3PromptDedupBudget(): Promise<void> {
+        const now = 1000;
+        const obs: any = { id: 'o1', text: '观察A', tags: [], status: 'active', createdAt: now, updatedAt: now, lastSupportedAt: now, proofCount: 2 };
+        const prompt = buildMemoryPrompt([
+            { kind: 'user', title: '个人记忆', observations: [obs], recalls: [
+                { kind: 'observation', observation: obs, score: 1, matchedStrategies: [] },
+                { kind: 'fact', unit: { id: 'f1', text: '观察A', tags: [] } as any, score: 1, matchedStrategies: [] },
+            ] },
+        ], 1000);
+        assert.equal(prompt.split('观察A').length - 1, 1, '同一文本只渲染一次');
+    },
+
+    async testV3SchedulerNoAiNoWork(): Promise<void> {
+        resetMemorySchedulerForTest();
+        MemoryScheduler.init();
+        const before = MemoryScheduler.status();
+        assert.equal(before.jobs, 0);
+        const fake: any = { sessionId: 'QQ:1', agentName: '*', headless: false, subagentDepth: 0 };
+        MemoryScheduler.onRunEnd(fake);
+        assert.ok(MemoryScheduler.status().lastAiActivityAt > 0, 'AI 结束后记录 lastAiActivityAt');
+        assert.equal(MemoryScheduler.status().jobs, 0, '无待抽取文本时不得入队');
+        resetMemorySchedulerForTest();
+    },
+
+    async testV3SchedulerGatingAndManualBypass(): Promise<void> {
+        resetMemorySchedulerForTest();
+        MemoryScheduler.init();
+        MemoryScheduler.enqueueForTest({ kind: 'mm_refresh', bankId: 'user_QQ:1', modelId: 'm1', source: 'ai', priority: 2, payload: {} });
+        assert.equal(await MemoryScheduler.tick(Math.floor(Date.now() / 1000)), false, '无 AI 活动不得执行自动任务');
+        assert.equal(MemoryScheduler.status().jobs, 1, '自动任务应保留在队列');
+        MemoryScheduler.enqueueForTest({ kind: 'mm_refresh', bankId: 'user_QQ:2', modelId: 'm2', source: 'manual', priority: 0, payload: {} });
+        assert.equal(await MemoryScheduler.tick(Math.floor(Date.now() / 1000)), true, '手动任务应可执行');
+        const jobs = MemoryScheduler.snapshot();
+        assert.equal(jobs.some(j => j.source === 'manual'), false, '手动任务完成后移除');
+        assert.equal(jobs.some(j => j.source === 'ai'), true, '自动任务仍等待 AI');
+        resetMemorySchedulerForTest();
+    },
+
+    async testV3ServicePromptVisibility(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => 1000 });
+        setMemoryEngineFactory(() => engine);
+        await MemoryService.retainForSessionId('QQ:1', '*', { content: '私密偏好茶', visibility: 'owner' });
+        await MemoryService.retainForSessionId('QQ:1', '*', { content: '公开偏好茶', visibility: 'public' });
+        const group = makeMemoSession('QQ-Group:9');
+        group.agentName = '*';
+        const prompt = await MemoryService.buildMemoryPrompt(group, '茶', [{ id: 'QQ:1', name: '小明' }], { id: 'QQ-Group:9', name: '测试群' });
+        assert.equal(prompt.includes('私密偏好茶'), false, 'owner 事实不得进入群提示词');
+        assert.equal(prompt.includes('公开偏好茶'), true, 'public 事实应进入本人发言的群提示词');
+        await MemoryService.retainToBank('global_main', { content: '本体经验茶', visibility: 'public' });
+        const dm = makeMemoSession('QQ:1');
+        dm.agentName = '*';
+        const dmPrompt = await MemoryService.buildMemoryPrompt(dm, '茶', [{ id: 'QQ:1', name: '小明' }], null);
+        assert.ok(dmPrompt.includes('本体经验茶'), 'global public 事实应注入所有会话');
+        await MemoryService.consolidateBank('user_QQ:1');
+        const afterObs = await MemoryService.buildMemoryPrompt(group, '茶', [{ id: 'QQ:1', name: '小明' }], { id: 'QQ-Group:9', name: '测试群' });
+        assert.equal(afterObs.includes('私密偏好茶；公开偏好茶'), false, '含 owner 证据的观察不得进入群提示词');
+    },
+
+    async testV3ExtractionRoutesAndPrivacy(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => 1000 });
+        setMemoryEngineFactory(() => engine);
+        const TC = (globalThis as any).__TEST_CONFIG__;
+        TC.boolConfigs['本体自动抽取'] = false;
+        TC.boolConfigs['群聊自动写个人记忆'] = false;
+        (Config as any).cache = {};
+        setAuxLlm({
+            chat: async () => JSON.stringify({
+                facts: [
+                    { memory_type: 'private', target_id: 'QQ:1', text: '小明喜欢咖啡', type: 'fact', confidence: 0.9 },
+                    { memory_type: 'group', target_id: 'QQ-Group:9', text: '本群十点后禁言', type: 'rule', confidence: 0.9 },
+                    { memory_type: 'global', text: '助手应简洁', type: 'rule', confidence: 0.9 },
+                ],
+            }),
+            chatMessages: async () => '',
+        } as any);
+        try {
+            const group = makeMemoSession('QQ-Group:9');
+            group.agentName = '*';
+            await MemoryService.extractFromChunk(group, { text: '群聊内容', throughSeq: 1, textLength: 4 }, 'ai');
+            const groupUnits = engine.repository.listUnits('group_QQ-Group:9');
+            assert.ok(groupUnits.some(u => u.text.includes('小明喜欢咖啡')), '群聊 private 默认落群 bank（origin），不写个人');
+            assert.ok(groupUnits.some(u => u.text.includes('禁言')), 'group 事实落本群');
+            assert.equal(groupUnits.some(u => u.text.includes('助手应简洁')), false, 'group 自动抽取默认不得写 global');
+            assert.ok(groupUnits.find(u => u.text.includes('小明喜欢咖啡'))!.tags.some(t => t.startsWith('vis:origin')), '群聊 private 回退为 origin');
+            assert.equal(engine.repository.listUnits('user_QQ:1').length, 0, '默认不把群聊事实写个人 bank');
+
+            const dm = makeMemoSession('QQ:1');
+            dm.agentName = '*';
+            await MemoryService.extractFromChunk(dm, { text: '私聊内容', throughSeq: 1, textLength: 4 }, 'ai');
+            const userUnits = engine.repository.listUnits('user_QQ:1');
+            assert.ok(userUnits.some(u => u.text.includes('小明喜欢咖啡')), '私聊 private 写个人 bank');
+            assert.ok(userUnits.find(u => u.text.includes('小明喜欢咖啡'))!.tags.includes('vis:owner'));
+        } finally {
+            setAuxLlm(null);
+            delete TC.boolConfigs['本体自动抽取'];
+            delete TC.boolConfigs['群聊自动写个人记忆'];
+            (Config as any).cache = {};
+        }
+    },
+
+    async testV3LegacyPersonaMigratesToModel(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => 1000 });
+        setMemoryEngineFactory(() => engine);
+        const dm = makeMemoSession('QQ:1');
+        dm.agentName = '*';
+        dm.memory.persona = '喜欢猫，讨厌下雨';
+        await MemoryService.buildMemoryPrompt(dm, '你好', [{ id: 'QQ:1', name: '小明' }], null);
+        assert.equal(dm.memory.persona, '无', '旧 persona 字段应清空');
+        const models = engine.listMentalModels('user_QQ:1');
+        const persona = models.find(m => m.templateId === 'persona');
+        assert.ok(persona, '应生成 persona 心智模型');
+        assert.equal(persona!.status, 'ready');
+        assert.ok(persona!.content.includes('喜欢猫'));
+    },
+
+    async testV3MentalModelSeedOnce(): Promise<void> {
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000,
+            reflectSynthesizer: async () => '种子答案',
+        });
+        const bank = 'user_QQ:1';
+        const firstIds = await engine.ensureDefaultMentalModels(bank, 'user', 'user:QQ:1', true);
+        assert.ok(firstIds.length >= 2, '首次应播种个人模板');
+        assert.ok(engine.listMentalModels(bank).every(m => m.status === 'pending'));
+        await engine.retain(bank, { content: '喜欢咖啡', tags: ['user:QQ:1', 'vis:owner'] });
+        const seedAgain = await engine.ensureDefaultMentalModels(bank, 'user', 'user:QQ:1', true);
+        assert.ok(seedAgain.length >= 1, '有来源后应返回待 seed 的模型');
+        for (const id of seedAgain) await engine.refreshMentalModels(bank, id);
+        assert.ok(engine.listMentalModels(bank).every(m => m.status === 'ready'), 'seed 后应 ready');
+        const afterReady = await engine.ensureDefaultMentalModels(bank, 'user', 'user:QQ:1', true);
+        assert.equal(afterReady.length, 0, 'ready 后不应重复排队');
+    },
+
+    testV3ContextDecoupledFromMemory(): void {
+        const root = path.join(process.cwd(), 'src', 'context');
+        const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+            const full = path.join(dir, entry.name);
+            return entry.isDirectory() ? walk(full) : [full];
+        });
+        for (const file of walk(root).filter(f => f.endsWith('.ts'))) {
+            const text = fs.readFileSync(file, 'utf8');
+            assert.equal(/^\s*import\s+[^;]*from\s+['"][^'"]*memory\//m.test(text), false, `${file} 不应 import memory`);
+            assert.equal(/\.memory\./.test(text), false, `${file} 不应访问 session.memory`);
+        }
+    },
+
+    async testV3CommandUsable(): Promise<void> {
+        registerCmdMemory();
+        const s = makeMemoSession('QQ:1');
+        s.sessionType = 'user';
+        s.agentName = '*';
+        const status = await runSubCmd('memory', ['memo', 'status'], { session: s });
+        assert.ok(status.includes('长期事实'), `memo status 应可用: ${status}`);
+        const add = await runSubCmd('memory', ['memo', 'add', '喜欢手冲咖啡'], { session: s });
+        assert.ok(add.includes('已添加'), `memo add 应可用: ${add}`);
+        const list = await runSubCmd('memory', ['memo', 'list'], { session: s });
+        assert.ok(list.includes('喜欢手冲咖啡'), `memo list 应显示事实: ${list}`);
+        const noYes = await runSubCmd('memory', ['memo', 'clear'], { session: s });
+        assert.ok(noYes.includes('--yes'), `clear 无 --yes 应拒绝: ${noYes}`);
+        const yes = await runSubCmd('memory', ['memo', 'clear'], { session: s }, [{ name: 'yes' }]);
+        assert.ok(yes.includes('已清除'), `clear --yes 应执行: ${yes}`);
+        // 全局（本体）记忆：默认仅骰主；写入目标必须是 global bank 而不是当前 user bank
+        const master = { session: s, ctx: { privilegeLevel: 100 } };
+        const gAdd = await runSubCmd('memory', ['memo', 'add', '本体经验'], master, [{ name: 'self' }]);
+        assert.ok(gAdd.includes('已添加'), `--self add 应写入全局: ${gAdd}`);
+        const gList = await runSubCmd('memory', ['memo', 'list'], master, [{ name: 'self' }]);
+        assert.ok(gList.includes('本体经验'), `--self list 应读到全局事实: ${gList}`);
+        assert.ok(gList.includes('本体'), `--self 应标明本体范围: ${gList}`);
     },
 });

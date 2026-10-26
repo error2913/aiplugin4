@@ -1,646 +1,335 @@
-// .ai memo：个人/群聊/观察记忆与心智模型管理（范围参数 --u/--g）
+// .ai memo：个人/群聊/本体记忆、观察、心智模型管理。
+import { resetContextBridgeCursor } from "../../agent/context_bridge";
+import { MemoryScheduler } from "../../agent/memory_scheduler";
 import Config from "../../config/config";
 import { PRIVILEGE_LEVEL_MAP } from "../../config/static_config";
 import { MemoryManager } from "../../memory/manager";
-import { bumpMemoryRevision } from "../../memory/revision";
-import { resolveBankId } from "../../memory/v2/bank_resolver";
-import { getMemoryEngine, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../../memory/v2/index";
+import { bumpMemoryRevision, bumpSummaryRevision } from "../../memory/revision";
+import { MemoryService } from "../../memory/service";
+import { parseIdOrIndex } from "../../memory/v2/access";
 import { Session } from "../../session/session";
 import { getSession } from "../../session/session_service";
 import { aliasToCmd } from "../../utils/alias";
-import { fmtDate, stripInternalTags } from "../../utils/string";
+import { fmtDate } from "../../utils/string";
 import { normalizeGroupId, normalizeUserId, platformOf } from "../../utils/target_id";
 import { S, U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
-/** 受保护记忆：其他会话创建的私有记忆仅创建会话可删（与工具层 del_memory / clear_memory 一致） */
-function protectedMemoryIds(target: Session, callerSessionId: string): Set<string> {
-    const ids = new Set<string>();
-    if (target.sessionId !== callerSessionId) {
-        for (const m of target.memory.memories) {
-            const privateTags = m.tags.filter(t => t.startsWith('vis:private:'));
-            if (privateTags.length > 0 && !privateTags.some(t => t === `vis:private:${callerSessionId}`)) ids.add(m.id);
-        }
-    }
-    return ids;
-}
-
-/** 记忆范围解析结果 */
 interface MemoTarget {
-    session: Session;   // 目标会话
-    kind: 'user' | 'group';
-    scopeLabel: string; // 个人/群聊
-    explicit: boolean;  // 是否显式指定了 --u/--g（用于限制裸 obs 生成）
+    bankId: string;
+    kind: 'user' | 'group' | 'global';
+    label: string;
+    explicit: boolean;
+    session?: Session;
+    agentName: string;
 }
 
-/**
- * 解析 --u/--g 范围参数（应用到 memo 所有子命令）：
- *  - 默认当前会话（私聊=个人，群聊=当前群）
- *  - --u 无值 = 调用者本人个人记忆；--u=<ID> 仅骰主
- *  - --g 无值 = 当前群；--g=<ID> 仅骰主
- */
-function resolveMemoTarget(scc: SubCmdContext): { ok: true; target: MemoTarget } | { ok: false; reply: string } {
+function resolveTarget(scc: SubCmdContext): { ok: true; target: MemoTarget } | { ok: false; reply: string } {
     const { ctx, cmdArgs, session } = scc;
-    const uKw = cmdArgs.getKwarg('u');
-    const gKw = cmdArgs.getKwarg('g');
     const isMaster = ctx.privilegeLevel >= PRIVILEGE_LEVEL_MAP.master;
-
-    if (uKw && gKw) {
-        return { ok: false, reply: '不能同时使用 --u 和 --g' };
+    const u = cmdArgs.getKwarg('u');
+    const g = cmdArgs.getKwarg('g');
+    const self = cmdArgs.getKwarg('self');
+    const count = [u, g, self].filter(Boolean).length;
+    if (count > 1) return { ok: false, reply: '--u / --g / --self 只能用一个' };
+    const agentName = session.agentName;
+    if (self) {
+        if (!isMaster) return { ok: false, reply: '权限不足：--self（本体记忆）仅骰主' };
+        return { ok: true, target: { bankId: MemoryService.globalBankId(agentName), kind: 'global', label: '本体', explicit: true, agentName } };
     }
-
-    const defaultKind: 'user' | 'group' = session.sessionType === 'group' ? 'group' : 'user';
-    let targetSession = session;
-    let kind = defaultKind;
-    let explicit = false;
-
-    if (uKw) {
-        explicit = true;
-        if (uKw.valueExists) {
-            // --u=<ID>：仅骰主可查看他人个人记忆
-            if (!isMaster) {
-                return { ok: false, reply: '权限不足：仅骰主可查看他人个人记忆（--u=<用户ID>）' };
-            }
-            const uid = normalizeUserId(uKw.value, platformOf(ctx));
-            if (!uid) {
-                return { ok: false, reply: '参数无效：--u=<用户ID>，支持裸数字（如 --u=1234）或带前缀（如 --u=QQ:1234）' };
-            }
-            targetSession = getSession(uid);
-            kind = 'user';
-        } else {
-            // --u 无值 = 调用者本人
-            const rawPlayerId = ctx.player?.userId || '';
-            const uid = normalizeUserId(rawPlayerId, platformOf(ctx))
-                || (ctx.isPrivate && session.sessionId ? session.sessionId : null);
-            if (!uid) {
-                return { ok: false, reply: `当前消息缺少有效用户ID（player=${rawPlayerId || '空'}, session=${session.sessionId || '空'}）` };
-            }
-            targetSession = getSession(uid);
-            kind = 'user';
-        }
-    } else if (gKw) {
-        explicit = true;
-        if (gKw.valueExists) {
-            // --g=<ID>：仅骰主可查看其他群记忆
-            if (!isMaster) {
-                return { ok: false, reply: '权限不足：仅骰主可查看其他群记忆（--g=<群ID>）' };
-            }
-            const gid = normalizeGroupId(gKw.value, platformOf(ctx));
-            if (!gid) {
-                return { ok: false, reply: '参数无效：--g=<群ID>，支持裸数字（如 --g=1234）或带前缀（如 --g=QQ-Group:1234）' };
-            }
-            targetSession = getSession(gid);
-            kind = 'group';
-        } else {
-            // --g 无值 = 当前群（仅群聊可用）
-            if (session.sessionType !== 'group') {
-                return { ok: false, reply: '当前为私聊会话，--g 需指定群ID（仅骰主：--g=<群ID>）' };
-            }
-            targetSession = session;
-            kind = 'group';
-        }
+    if (u) {
+        if (u.valueExists && !isMaster) return { ok: false, reply: '权限不足：仅骰主可操作他人个人记忆（--u=<ID>）' };
+        const id = u.valueExists ? normalizeUserId(u.value, platformOf(ctx)) : (ctx.player?.userId || (ctx.isPrivate ? session.sessionId : ''));
+        if (!id) return { ok: false, reply: '参数无效：--u=<用户ID>' };
+        const target = getSession(id);
+        return { ok: true, target: { bankId: MemoryService.bankIdForSessionId(id, agentName), kind: 'user', label: `个人:${id}`, explicit: true, session: target, agentName } };
     }
-
-    return { ok: true, target: { session: targetSession, kind, scopeLabel: kind === 'user' ? '个人' : '群聊', explicit } };
+    if (g) {
+        if (g.valueExists && !isMaster) return { ok: false, reply: '权限不足：仅骰主可操作其他群记忆（--g=<ID>）' };
+        const id = g.valueExists ? normalizeGroupId(g.value, platformOf(ctx)) : (session.sessionType === 'group' ? session.sessionId : '');
+        if (!id) return { ok: false, reply: '参数无效：--g=<群ID>' };
+        const target = getSession(id);
+        return { ok: true, target: { bankId: MemoryService.bankIdForSessionId(id, agentName), kind: 'group', label: `群聊:${id}`, explicit: true, session: target, agentName } };
+    }
+    const kind = session.sessionType === 'group' ? 'group' : 'user';
+    return { ok: true, target: { bankId: MemoryService.bankIdForSessionId(session.sessionId, agentName), kind, label: kind === 'group' ? '群聊' : '个人', explicit: false, session, agentName } };
 }
 
-/** 输出前缀：范围标识，跨范围时带上目标ID */
-function scopePrefix(target: MemoTarget): string {
-    return target.explicit ? `【${target.scopeLabel}:${target.session.sessionId}】` : `【${target.scopeLabel}】`;
+function prefix(target: MemoTarget): string {
+    return target.explicit ? `【${target.label}】` : `【${target.label}】`;
 }
 
-/** .ai memo mm add 的 mode/autoRefresh 解析：未显式指定时不覆盖引擎默认/模型原有配置 */
-export function resolveMmAddOptions(
-    modeValue?: string | null,
-    auto = false,
-    noAuto = false
-): { mode?: 'full' | 'delta'; autoRefresh?: boolean } {
-    const opts: { mode?: 'full' | 'delta'; autoRefresh?: boolean } = {};
-    if (modeValue !== undefined && modeValue !== null && modeValue !== '') {
-        opts.mode = modeValue === 'delta' ? 'delta' : 'full';
-    }
-    if (noAuto) opts.autoRefresh = false;
-    else if (auto) opts.autoRefresh = true;
-    return opts;
+function idsOf(target: MemoTarget): string[] {
+    return MemoryService.listFactIds(target.bankId);
 }
 
-const MEMO_SCOPE_NOTE = `范围: 默认当前会话（私聊=个人，群聊=当前群）；--u 本人个人记忆、--g 当前群；--u=<ID>/--g=<ID> 仅骰主`;
+function resolveIdOrIndex(target: MemoTarget, raw: string): string | null {
+    return parseIdOrIndex(raw, idsOf(target));
+}
+
+function isMaster(scc: SubCmdContext): boolean {
+    return scc.ctx.privilegeLevel >= PRIVILEGE_LEVEL_MAP.master;
+}
+
+const SCOPE_NOTE = '范围: 默认当前会话；--u 本人 / --g 当前群 / --self 本体（仅骰主）；--u=<ID>/--g=<ID> 仅骰主';
 
 const MEMO_HELP = `帮助:
-  【.ai memo status】查看记忆状态
-  【.ai memo add <内容>】添加长期记忆
-  【.ai memo list [页码]】展示长期记忆
-  【.ai memo update <ID> <新内容>】更新长期记忆
-  【.ai memo delete <ID1> <ID2> --关键词】删除长期记忆
-  【.ai memo clear】清除长期记忆
-  【.ai memo obs [on/off|list|view <ID>|clr]】观察记忆
-  【.ai memo consolidate】巩固记忆
+  【.ai memo status】记忆状态（含 backlog/队列/下次刷新）
+  【.ai memo add <内容>】添加事实（--shared 跨群；--private 仅本人）
+  【.ai memo list [页码]】事实列表（#序号可代替 ID）
+  【.ai memo update <ID|#N> <新内容>】更新
+  【.ai memo delete <ID|#N> ... [--关键词] [--hard]】默认软失效
+  【.ai memo clear --yes】清除（不可恢复）
+  【.ai memo obs list|view <ID>|clr --yes|on|off|refresh】观察记忆
+  【.ai memo consolidate】巩固
   【.ai memo reflect <问题>】基于记忆推理
-  【.ai memo mm list|view|add|refresh|del】心智模型
-  【.ai memo <子命令> help】查看子命令详细帮助
-  ${MEMO_SCOPE_NOTE}`;
+  【.ai memo mm list|view|add|refresh|clear|del】心智模型
+  ${SCOPE_NOTE}`;
 
-const MEMO_STATUS_HELP = `【.ai memo status】查看记忆状态
-  ${MEMO_SCOPE_NOTE}`;
+function registerPriv(cmd: SubCmd): void {
+    cmd.priv = {
+        priv: U, args: {
+            status: { priv: U }, add: { priv: U }, list: { priv: U }, update: { priv: U },
+            delete: { priv: U }, clear: { priv: U }, consolidate: { priv: U }, reflect: { priv: U },
+            obs: { priv: U, args: { list: { priv: U }, view: { priv: U }, clear: { priv: U }, clr: { priv: U }, on: { priv: S }, off: { priv: S }, refresh: { priv: U } } },
+            mm: { priv: U, args: { list: { priv: U }, view: { priv: U }, add: { priv: U }, refresh: { priv: U }, clear: { priv: U }, del: { priv: U }, delete: { priv: U }, "*": { priv: U } } },
+            "*": { priv: U },
+        },
+    };
+}
 
-const MEMO_MEMORY_HELP = `长期记忆操作:
-  【.ai memo add <内容>】添加
-  【.ai memo list [页码]】展示（页码也可用 --page=N）
-  【.ai memo update <ID> <新内容>】更新
-  【.ai memo delete <ID1> <ID2> --关键词】删除（支持关键词过滤）
-  【.ai memo clear】清除
-  注: delete/clear 为物理删除（从存储中彻底移除，释放空间，不可恢复）
-  ${MEMO_SCOPE_NOTE}`;
-
-const MEMO_OBS_HELP = `观察记忆操作:
-  【.ai memo obs on/off】开启/关闭（会话级设置）
-  【.ai memo obs list】展示
-  【.ai memo obs view <ID>】详情
-  【.ai memo obs clr】清除
-  【.ai memo obs】立即生成一次观察（仅当前会话，不带 --u/--g）
-  ${MEMO_SCOPE_NOTE}`;
-
-const MEMO_CONSOLIDATE_HELP = `【.ai memo consolidate】立即巩固一次记忆（合并重复观察、清理过期观察记忆）
-  ${MEMO_SCOPE_NOTE}`;
-
-const MEMO_REFLECT_HELP = `【.ai memo reflect <问题>】基于记忆进行推理
-  ${MEMO_SCOPE_NOTE}`;
-
-const MEMO_MM_HELP = `心智模型操作:
-  【.ai memo mm list [页码]】查看心智模型列表
-  【.ai memo mm view <ID>】查看心智模型详情
-  【.ai memo mm add <问题> [答案]】添加/更新心智模型（不填答案时基于记忆自动生成，已有答案会保留作失败兜底；--tag=xx 范围标签；--mode=full|delta 刷新方式，缺省跟随「心智模型刷新模式」配置且更新时保留原配置；--no-auto 关闭自动刷新；--auto 重新开启）
-  【.ai memo mm refresh [ID]】刷新心智模型（基于当前记忆重新推理，自动跳过无新记忆项）
-  【.ai memo mm del <ID|问题关键词>】删除心智模型（ID 或问题名/关键词，关键词唯一命中时直接删除）
-  ${MEMO_SCOPE_NOTE}`;
-export function registerCmdMemory() {
+export function registerCmdMemory(): void {
     const cmd = new SubCmd('memory');
     cmd.desc = '记忆相关操作';
     cmd.help = MEMO_HELP;
-    cmd.priv = {
-        priv: U, args: {
-            status: { priv: U },
-            add: { priv: U },
-            list: { priv: U },
-            update: { priv: U },
-            delete: { priv: U },
-            clear: { priv: U },
-            obs: {
-                priv: U, args: {
-                    list: { priv: U },
-                    view: { priv: U },
-                    clear: { priv: U },
-                    on: { priv: S },
-                    off: { priv: S }
+    registerPriv(cmd);
+    cmd.solve = async (scc: SubCmdContext) => {
+        const { cmdArgs, ctx, msg, ret } = scc;
+        const sub = aliasToCmd(cmdArgs.getArgN(2)) || 'status';
+        const t = resolveTarget(scc);
+        if (t.ok === false) { seal.replyToSender(ctx, msg, t.reply); return ret; }
+        const target = t.target;
+        const reply = (text: string) => seal.replyToSender(ctx, msg, `${prefix(target)}${text}`);
+        const rev = () => { bumpMemoryRevision(); };
+
+        switch (sub) {
+            case 'status': {
+                const status = MemoryService.status(target.bankId);
+                const sched = MemoryScheduler.status();
+                const models = MemoryService.listMentalModels(target.bankId);
+                reply([
+                    `长期事实 ${status.facts} 条（失效 ${status.invalidated}）`,
+                    `观察 ${status.observations} 条（过期 ${status.expiredObservations}）`,
+                    `心智模型 ${status.mentalModels} 条（pending ${status.pendingMentalModels} / failed ${status.failedMentalModels}）`,
+                    `巩固积压：${status.backlog}（pending ${status.pendingFacts} 条）`,
+                    `后台队列 ${sched.jobs}，本小时 LLM ${sched.hourlyCalls}${sched.pausedUntil > Date.now() / 1000 ? '（熔断中）' : ''}`,
+                    `MM 自动刷新：${(Config.memory as any).MM_REFRESH_AFTER_CONSOLIDATION ? '开' : '关'}；模型：${models.slice(0, 5).map(m => `${m.sourceQuery.slice(0, 12)}${m.status === 'ready' ? '' : `(${m.status})`}`).join('；') || '（空）'}`,
+                ].join('\n'));
+                return ret;
+            }
+            case 'add': {
+                const content = String(cmdArgs.getRestArgsFrom(3) || '').trim();
+                if (!content) { reply('用法：.ai memo add <内容>'); return ret; }
+                const shared = !!cmdArgs.getKwarg('shared');
+                const isPrivate = !!cmdArgs.getKwarg('private');
+                const result = await MemoryService.retainToBank(target.bankId, {
+                    content,
+                    visibility: isPrivate ? 'owner' : shared ? 'public' : (target.kind === 'user' ? 'owner' : 'public'),
+                    relatedUserIds: target.kind === 'user' ? [target.bankId.replace(/^user_/, '')] : [],
+                    relatedGroupIds: target.kind === 'group' ? [target.bankId.replace(/^group_/, '')] : [],
+                    metadata: { type: 'text' },
+                });
+                rev();
+                reply(result.action === 'duplicate' ? `已存在同文记忆 <${result.unitIds[0]}>` : `已添加 <${result.unitIds[0]}>`);
+                return ret;
+            }
+            case 'list': {
+                const all = MemoryService.listFacts(target.bankId);
+                const pageSize = 20;
+                const page = Math.max(1, scc.page || Number(cmdArgs.getArgN(3)) || 1);
+                const start = (page - 1) * pageSize;
+                const slice = all.slice(start, start + pageSize);
+                if (!slice.length) { reply('暂无长期记忆'); return ret; }
+                reply(slice.map((m, i) => `${start + i + 1}. [${m.id}] ${m.text.slice(0, 80)} · ${fmtDate(m.createdAt)}${m.state === 'invalidated' ? '（失效）' : ''}`).join('\n'));
+                return ret;
+            }
+            case 'update': {
+                const raw = String(cmdArgs.getArgN(3) || '');
+                const id = resolveIdOrIndex(target, raw);
+                const content = String(cmdArgs.getRestArgsFrom(4) || '').trim();
+                if (!id || !content) { reply('用法：.ai memo update <ID|#N> <新内容>'); return ret; }
+                const unit = MemoryService.getFact(target.bankId, id);
+                if (!unit) { reply(`记忆不存在<${id}>`); return ret; }
+                const old = unit.text;
+                unit.text = content;
+                unit.updatedAt = Math.floor(Date.now() / 1000);
+                MemoryService.saveFact(target.bankId, unit);
+                rev();
+                reply(`已更新<${id}>`);
+                void old;
+                return ret;
+            }
+            case 'delete': {
+                const rawIds = [cmdArgs.getArgN(3), cmdArgs.getArgN(4), cmdArgs.getArgN(5)].filter(Boolean).map(String);
+                const keywords = cmdArgs.kwargs.map(k => k.name).filter(n => !['u', 'g', 'self', 'hard', 'page'].includes(n));
+                const hard = !!cmdArgs.getKwarg('hard');
+                let ids = rawIds.map(r => resolveIdOrIndex(target, r)).filter((x): x is string => !!x);
+                if (keywords.length) {
+                    const all = MemoryService.listFacts(target.bankId);
+                    const matched = all.filter(m => keywords.some(k => m.text.includes(k) || m.tags.some(t => t.includes(k))));
+                    ids = Array.from(new Set([...ids, ...matched.map(m => m.id)]));
                 }
-            },
-            consolidate: { priv: U },
-            reflect: { priv: U },
-            mm: {
-                priv: U, args: {
-                    list: { priv: U },
-                    view: { priv: U },
-                    add: { priv: U },
-                    refresh: { priv: U },
-                    del: { priv: U },
-                    "*": { priv: U }
+                if (!ids.length) { reply('未找到可删除记忆（支持 #N / ID / --关键词）'); return ret; }
+                if (hard && !isMaster(scc)) { reply('--hard 仅骰主可用'); return ret; }
+                const n = hard ? await MemoryService.deleteFacts(target.bankId, ids) : await MemoryService.invalidateFacts(target.bankId, ids);
+                rev();
+                reply(`已${hard ? '物理删除' : '失效'} ${n} 条`);
+                return ret;
+            }
+            case 'clear': {
+                if (!cmdArgs.getKwarg('yes')) { reply('清除不可恢复；确认请使用 .ai memo clear --yes'); return ret; }
+                const n = await MemoryService.clearBank(target.bankId, true);
+                MemoryScheduler.dropBank(target.bankId);
+                if (target.kind !== 'global') {
+                    const sid = target.session?.sessionId || target.bankId.replace(/^(user|group)_/, '');
+                    try { resetContextBridgeCursor(getSession(sid)); } catch { /* ignore */ }
                 }
-            },
-            "*": { priv: U }
+                rev();
+                reply(`已清除 ${n} 条事实/观察/模型`);
+                return ret;
+            }
+            case 'obs': return solveObs(scc, target, reply);
+            case 'consolidate': {
+                const result = await MemoryService.consolidateBank(target.bankId);
+                bumpSummaryRevision();
+                const mm = (Config.memory as any).MM_REFRESH_AFTER_CONSOLIDATION
+                    ? await MemoryService.refreshMentalModels(target.bankId, { touchedTags: result.touchedTags, reason: 'consolidate' })
+                    : null;
+                reply(`巩固完成：新建 ${result.created.length}，更新 ${result.updated.length}，合并 ${result.merged.length}，剩余 pending ${result.pendingRemaining}${mm ? `；模型更新 ${mm.updated}` : ''}`);
+                return ret;
+            }
+            case 'reflect': {
+                const question = String(cmdArgs.getRestArgsFrom(3) || '').trim();
+                if (!question) { reply('用法：.ai memo reflect <问题>'); return ret; }
+                const result = await MemoryService.reflect(target.bankId, question, { fastPath: !cmdArgs.getKwarg('deep'), strict: false });
+                reply(`${result.text || '暂无足够记忆进行推理'}\n来源：模型 ${result.basedOn.mentalModels.length} / 观察 ${result.basedOn.observations.length} / 事实 ${result.basedOn.memories.length}${result.answeredBy === 'model' ? '（心智模型直答）' : ''}`);
+                return ret;
+            }
+            case 'mm': return solveMM(scc, target, reply);
+            default:
+                if (sub === 'private' || sub === 'group' || sub === 'set') reply('旧语法已废弃：请使用 --u / --g / --self 范围参数');
+                else reply(MEMO_HELP);
+                return ret;
         }
     };
-    cmd.solve = async (scc: SubCmdContext) => {
-        const { ctx, msg, cmdArgs, session, page, ret } = scc;
+}
 
-        const resolved = resolveMemoTarget(scc);
-        if (resolved.ok === false) {
-            seal.replyToSender(ctx, msg, resolved.reply);
-            return ret;
-        }
-        const target = resolved.target;
-        const targetSession = target.session;
-        const bank = resolveBankId(targetSession.sessionId, target.kind, targetSession.agentName);
-        const prefix = scopePrefix(target);
-        const isHelp = (n: number) => aliasToCmd(cmdArgs.getArgN(n)) === 'help';
-
-        switch (aliasToCmd(cmdArgs.getArgN(2))) {
-            case 'status': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_STATUS_HELP);
-                    return ret;
-                }
-                const { MEMORY: isMemory, SUMMARY: isSummary } = Config.memory;
-                const cap = Config.memory.MEMORY_CAP;
-                const capText = cap > 0 ? ` / ${cap}（上限）` : `（未设上限）`;
-                const summaryEffective = targetSession.memory.summaryOverride === false ? false : targetSession.memory.summaryOverride === true ? true : isSummary;
-                const summarySuffix = targetSession.memory.summaryOverride === undefined ? '' : '（会话级）';
-                const statusModels = getMemoryEngine().listMentalModels(bank.bankId);
-                const modelOverview = statusModels.length === 0 ? '（空）' : statusModels.map(m => `${m.question}${m.version > 1 ? `(v${m.version})` : ''}`).join('；');
-                // 注入可见性：按当前目标会话的 user/group 标签宽松估算「将注入」条数（运行时还会叠加最近发言人标签）
-                const injectableModels = selectInjectionCandidates(statusModels, [], [
-                    target.kind === 'group' ? `group:${targetSession.sessionId}` : `user:${targetSession.sessionId}`
-                ]).mentalModels.length;
-                seal.replyToSender(ctx, msg, `${target.explicit ? prefix : `${prefix} ${targetSession.id}`}
-     长期记忆开启状态: ${isMemory ? '是' : '否'}
-     长期记忆条数: ${targetSession.memory.memoryIds.length}${capText}
-     观察记忆开启状态: ${summaryEffective ? '是' : '否'}${summarySuffix}
-     观察记忆条数: ${getMemoryEngine().repository.listObservations(bank.bankId).length}
-     心智模型条数: ${statusModels.length}（将注入 ${injectableModels} 条）
-     心智模型概览: ${modelOverview}`);
-                return ret;
-            }
-
-            case 'add': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_MEMORY_HELP);
-                    return ret;
-                }
-                const content = cmdArgs.getRestArgsFrom(3);
-                if (!content) {
-                    seal.replyToSender(ctx, msg, `参数缺失，${MEMO_MEMORY_HELP}`);
-                    return ret;
-                }
-                const result = await targetSession.memory.retainMemory(null, targetSession, [], [], [], [], stripInternalTags(content), 'public', undefined, 0.5);
-                targetSession.save();
-                seal.replyToSender(ctx, msg, result.unitIds[0] ? `${target.scopeLabel}记忆已添加<${result.unitIds[0]}>` : `${target.scopeLabel}记忆已添加`);
-                return ret;
-            }
-
-            case 'list': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_MEMORY_HELP);
-                    return ret;
-                }
-                const listText = targetSession.memory.getLatestMemoryListText({
-                    isPrivate: target.kind === 'user',
-                    id: target.kind === 'group' ? (ctx.group?.groupId || targetSession.sessionId) : targetSession.sessionId,
-                    name: target.kind === 'group' ? (ctx.group?.groupName || targetSession.sessionId) : ''
-                }, page);
-                if (!listText) {
-                    seal.replyToSender(ctx, msg, `${prefix}暂无${target.scopeLabel}记忆，【.ai memo add <内容>】添加`);
-                    return ret;
-                }
-                seal.replyToSender(ctx, msg, `${prefix}${listText}`);
-                return ret;
-            }
-
-            case 'update': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_MEMORY_HELP);
-                    return ret;
-                }
-                const id = cmdArgs.getArgN(3);
-                const content = cmdArgs.getRestArgsFrom(4);
-                if (!id || !content) {
-                    seal.replyToSender(ctx, msg, `参数缺失，【.ai memo update <ID> <新内容>】更新${target.scopeLabel}记忆`);
-                    return ret;
-                }
-                const unit = getMemoryEngine().repository.getUnit(bank.bankId, id);
-                if (!unit) {
-                    seal.replyToSender(ctx, msg, `未找到记忆<${id}>`);
-                    return ret;
-                }
-                unit.text = stripInternalTags(content);
-                unit.updatedAt = Math.floor(Date.now() / 1000);
-                getMemoryEngine().repository.updateUnit(bank.bankId, unit);
-                bumpMemoryRevision();
-                targetSession.save();
-                seal.replyToSender(ctx, msg, `${target.scopeLabel}记忆已更新<${unit.id}>`);
-                return ret;
-            }
-
-            case 'delete': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_MEMORY_HELP);
-                    return ret;
-                }
-                const idList = cmdArgs.args.slice(2);
-                const kw = cmdArgs.kwargs.map(item => item.name).filter(n => n !== 'u' && n !== 'g' && n !== 'page');
-                if (idList.length === 0 && kw.length === 0) {
-                    seal.replyToSender(ctx, msg, `参数缺失，【.ai memo delete <ID1> <ID2> --关键词】删除${target.scopeLabel}记忆`);
-                    return ret;
-                }
-                // 与工具层一致：其他会话创建的私有记忆不可删除
-                const protectedIds = protectedMemoryIds(targetSession, session.sessionId);
-                const deleteIds = new Set<string>();
-                for (const id of idList) {
-                    if (!protectedIds.has(id)) deleteIds.add(id);
-                }
-                if (kw.length > 0) {
-                    for (const m of targetSession.memory.memories) {
-                        if (!protectedIds.has(m.id) && kw.some(k => m.tags.includes(k))) deleteIds.add(m.id);
-                    }
-                }
-                if (deleteIds.size === 0) {
-                    seal.replyToSender(ctx, msg, '没有可删除的记忆（其他会话创建的私有记忆仅创建会话可删除）');
-                    return ret;
-                }
-                targetSession.memory.deleteMemory(Array.from(deleteIds));
-                const listText = targetSession.memory.getLatestMemoryListText({
-                    isPrivate: target.kind === 'user',
-                    id: target.kind === 'group' ? (ctx.group?.groupId || targetSession.sessionId) : targetSession.sessionId,
-                    name: target.kind === 'group' ? (ctx.group?.groupName || targetSession.sessionId) : ''
-                }, page);
-                seal.replyToSender(ctx, msg, listText ? `${prefix}${listText}` : `${prefix}${target.scopeLabel}记忆已全部清除`);
-                targetSession.save();
-                return ret;
-            }
-
-            case 'clear': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_MEMORY_HELP);
-                    return ret;
-                }
-                // 与工具层一致：保留其他会话创建的私有记忆
-                const protectedIds = protectedMemoryIds(targetSession, session.sessionId);
-                if (protectedIds.size > 0) {
-                    const deleteIds = targetSession.memory.memoryIds.filter(id => !protectedIds.has(id));
-                    if (deleteIds.length === 0) {
-                        seal.replyToSender(ctx, msg, '无可清除的记忆（存在其他会话创建的私有记忆）');
-                        return ret;
-                    }
-                    targetSession.memory.deleteMemory(deleteIds);
-                    seal.replyToSender(ctx, msg, `${target.scopeLabel}记忆已清除（保留 ${protectedIds.size} 条其他会话的私有记忆）`);
-                    targetSession.save();
-                    return ret;
-                }
-                targetSession.memory.clearMemory();
-                seal.replyToSender(ctx, msg, `${target.scopeLabel}记忆已清除`);
-                targetSession.save();
-                return ret;
-            }
-            case 'obs': {
-                const val3 = aliasToCmd(cmdArgs.getArgN(3));
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_OBS_HELP);
-                    return ret;
-                }
-                switch (val3) {
-                    case 'on': {
-                        targetSession.memory.summaryOverride = true;
-                        targetSession.memory.summaryStatus = true;
-                        targetSession.save();
-                        seal.replyToSender(ctx, msg, `${prefix}观察记忆已开启`);
-                        return ret;
-                    }
-                    case 'off': {
-                        targetSession.memory.summaryOverride = false;
-                        targetSession.memory.summaryStatus = false;
-                        targetSession.save();
-                        seal.replyToSender(ctx, msg, `${prefix}观察记忆已关闭`);
-                        return ret;
-                    }
-                    case 'list': {
-                        const observations = getMemoryEngine().repository.listObservations(bank.bankId);
-                        if (observations.length === 0) {
-                            seal.replyToSender(ctx, msg, `${prefix}观察记忆为空`);
-                            return ret;
-                        }
-                        const staleCutoff = Math.floor(Date.now() / 1000) - OBSERVATION_STALE_DAYS * 86400;
-                        const lines = observations.map((o, i) => {
-                            const stale = (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff;
-                            return `${i + 1}. ${o.text}\n   证据${o.proofCount}条 · 更新${fmtDate(o.updatedAt)}${stale ? ' · [已过期]' : ''}`;
-                        });
-                        seal.replyToSender(ctx, msg, `${prefix}观察记忆 ${observations.length} 条\n${lines.join('\n')}`);
-                        return ret;
-                    }
-                    case 'view': {
-                        const id = cmdArgs.getArgN(4);
-                        if (!id) {
-                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo obs view <ID>】查看观察记忆详情');
-                            return ret;
-                        }
-                        const o = getMemoryEngine().repository.listObservations(bank.bankId).find(x => x.id === id);
-                        if (!o) {
-                            seal.replyToSender(ctx, msg, `未找到观察记忆<${id}>`);
-                            return ret;
-                        }
-                        const staleCutoff = Math.floor(Date.now() / 1000) - OBSERVATION_STALE_DAYS * 86400;
-                        const stale = (o.lastVerifiedAt ?? o.updatedAt ?? 0) < staleCutoff;
-                        const evidence = o.evidence.map(e => `- ${e.quote}`).join('\n') || '（无）';
-                        seal.replyToSender(ctx, msg, `【观察记忆】${o.text}${stale ? '\n[已过期]' : ''}\nID: ${o.id} · 证据${o.proofCount}条\n范围: ${o.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(o.createdAt)}\n更新: ${fmtDate(o.updatedAt)}${o.lastVerifiedAt ? `\n最近验证: ${fmtDate(o.lastVerifiedAt)}` : ''}\n证据:\n${evidence}`);
-                        return ret;
-                    }
-                    case 'clear': {
-                        const repo = getMemoryEngine().repository;
-                        const bankData = repo.getBank(bank.bankId);
-                        if (bankData) {
-                            bankData.observations = [];
-                            bankData.units = bankData.units.filter(u => u.factType !== 'observation');
-                            repo.save(bank.bankId);
-                        }
-                        targetSession.save();
-                        seal.replyToSender(ctx, msg, `${prefix}观察记忆已清除`);
-                        return ret;
-                    }
-                    default: {
-                        if (cmdArgs.getArgN(3)) {
-                            seal.replyToSender(ctx, msg, MEMO_OBS_HELP);
-                            return ret;
-                        }
-                        if (target.explicit) {
-                            seal.replyToSender(ctx, msg, '立即生成观察记忆仅支持当前会话（不要带 --u/--g）');
-                            return ret;
-                        }
-                        MemoryManager.summarizeChunk(session, session.context.messages)
-                            .then(() => session.save())
-                            .catch(() => undefined);
-                        seal.replyToSender(ctx, msg, '正在生成观察记忆，请稍后用 .ai memo obs list 查看');
-                        return ret;
-                    }
-                }
-            }
-
-            case 'consolidate': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_CONSOLIDATE_HELP);
-                    return ret;
-                }
-                const result = await MemoryManager.consolidateMemory(targetSession);
-                const obsCount = getMemoryEngine().repository.listObservations(bank.bankId).length;
-                const mmCount = getMemoryEngine().listMentalModels(bank.bankId).length;
-                seal.replyToSender(ctx, msg, `${prefix}记忆巩固完成：新建观察 ${result.created.length} 条，更新 ${result.updated.length} 条，合并 ${result.merged.length} 条\n当前：观察记忆 ${obsCount} 条，长期记忆 ${targetSession.memory.memoryIds.length} 条，心智模型 ${mmCount} 条`);
-                return ret;
-            }
-
-            case 'reflect': {
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_REFLECT_HELP);
-                    return ret;
-                }
-                const question = cmdArgs.getRestArgsFrom(3);
-                if (!question) {
-                    seal.replyToSender(ctx, msg, `参数缺失，${MEMO_REFLECT_HELP}`);
-                    return ret;
-                }
-                const result = await getMemoryEngine().reflect(bank.bankId, question);
-                seal.replyToSender(ctx, msg, `${prefix}${result.text}\n（来源：心智模型 ${result.basedOn.mentalModels.length} 条 · 观察 ${result.basedOn.observations.length} 条 · 事实 ${result.basedOn.memories.length} 条）`);
-                return ret;
-            }
-
-            case 'mm': {
-                const mmEngine = getMemoryEngine();
-                const mmVal3 = aliasToCmd(cmdArgs.getArgN(3));
-                if (isHelp(3)) {
-                    seal.replyToSender(ctx, msg, MEMO_MM_HELP);
-                    return ret;
-                }
-                switch (mmVal3) {
-                    case 'list': {
-                        const models = mmEngine.listMentalModels(bank.bankId);
-                        if (models.length === 0) {
-                            seal.replyToSender(ctx, msg, `${prefix}心智模型为空，【.ai memo mm add <问题> [答案]】添加${target.kind === 'group' ? '，或使用 --u 查看自己的心智模型' : ''}`);
-                            return ret;
-                        }
-                        const perPage = 5;
-                        const totalPages = Math.max(1, Math.ceil(models.length / perPage));
-                        const pageArg = parseInt(cmdArgs.getArgN(4) || '', 10);
-                        const pageNum = pageArg > 0 ? pageArg : page;
-                        const cur = Math.min(Math.max(pageNum, 1), totalPages);
-                        const items = models.slice((cur - 1) * perPage, cur * perPage);
-                        const lines = items.map(m => {
-                            const flag = m.status === 'pending' ? ' ⏳生成中' : m.status === 'failed' ? ' ⚠生成失败' : '';
-                            const builtin = m.templateId ? ' [内置]' : '';
-                            return `${m.id} ${m.question} (v${m.version} · 更新于${fmtDate(m.updatedAt)})${builtin}${flag}`;
-                        });
-                        seal.replyToSender(ctx, msg, `${prefix}心智模型 ${models.length} 条\n${lines.join('\n')}\n当前页码: ${cur}/${totalPages}`);
-                        return ret;
-                    }
-                    case 'view': {
-                        const id = cmdArgs.getArgN(4);
-                        if (!id) {
-                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo mm view <ID>】查看心智模型详情');
-                            return ret;
-                        }
-                        const m = mmEngine.listMentalModels(bank.bankId).find(x => x.id === id);
-                        if (!m) {
-                            seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
-                            return ret;
-                        }
-                        const answer = m.answer.length > 600 ? m.answer.slice(0, 600) + '…' : m.answer;
-                        const historyInfo = Array.isArray(m.history) && m.history.length > 0 ? `\n历史: ${m.history.length} 条（最近 ${fmtDate(m.history[m.history.length - 1].at)}）` : '';
-                        const triggerText = m.trigger === 'delta' ? '增量' : '全量';
-                        const statusText = m.status === 'pending' ? '生成中' : m.status === 'failed' ? '生成失败' : '可用';
-                        const autoText = m.triggerConfig?.refreshAfterConsolidation === false ? ' · 不自动刷新' : '';
-                        const builtinText = m.templateId ? ' · 内置' : '';
-                        const seenText = m.lastMemorySeenAt ? `\n最近读到记忆: ${fmtDate(m.lastMemorySeenAt)}` : '';
-                        seal.replyToSender(ctx, msg, `【心智模型】${m.question}\n${answer}\nID: ${m.id} · v${m.version}${builtinText}\n状态: ${statusText}${autoText}\n范围: ${m.scopeTags.join(', ') || '（全局）'}\n创建: ${fmtDate(m.createdAt)}\n更新: ${fmtDate(m.updatedAt)}${m.lastRefreshedAt ? `\n最近推理: ${fmtDate(m.lastRefreshedAt)}（${triggerText}）` : ''}${seenText}${historyInfo}`);
-                        return ret;
-                    }
-                    case 'add': {
-                        const question = cmdArgs.getArgN(4);
-                        if (!question) {
-                            seal.replyToSender(ctx, msg, `参数缺失，${MEMO_MM_HELP}`);
-                            return ret;
-                        }
-                        const answer = cmdArgs.getRestArgsFrom(5);
-                        const tagKw = cmdArgs.getKwarg('tag');
-                        const modeKw = cmdArgs.getKwarg('mode');
-                        const autoKw = cmdArgs.getKwarg('auto');
-                        const noAutoKw = cmdArgs.getKwarg('no-auto');
-                        const mmAddOpts = resolveMmAddOptions(modeKw?.value, !!autoKw, !!noAutoKw);
-                        const prevModel = mmEngine.listMentalModels(bank.bankId).find(x => x.question === question);
-                        const isUpdate = !!prevModel;
-                        const hadAnswerBefore = !!(prevModel && prevModel.answer && prevModel.answer !== '生成中…');
-                        // --tag 校验/归一化：必须是 user:/group: 前缀，且个人目标只接受 user:；
-                        // 非法或与目标类型不符时回退默认标签，避免心智模型因标签不匹配而注入失效
-                        const rawTag = tagKw && tagKw.value ? String(tagKw.value).trim() : '';
-                        const tagOk = rawTag && (rawTag.startsWith('user:') || rawTag.startsWith('group:')) && (target.kind === 'group' || rawTag.startsWith('user:'));
-                        const scopeTags = tagOk ? [rawTag] : [target.kind === 'group' ? `group:${targetSession.sessionId}` : `user:${targetSession.sessionId}`];
-                        if (!answer) {
-                            // Hindsight 式：占位创建（pending）+ 同步生成（strict reflect，不 dump 记忆原文）；
-                            // 更新已有模型时引擎保留旧答案作失败兜底
-                            const m = await mmEngine.createMentalModel(bank.bankId, question, '', scopeTags, mmAddOpts);
-                            await mmEngine.refreshMentalModels(bank.bankId, m.id, { force: true, reason: 'create' });
-                            const fresh = mmEngine.listMentalModels(bank.bankId).find(x => x.id === m.id) || m;
-                            bumpMemoryRevision();
-                            targetSession.save();
-                            if (fresh.status === 'ready') {
-                                seal.replyToSender(ctx, msg, `${prefix}心智模型${isUpdate ? '已更新' : '已添加'}<${fresh.id}>\n问题: ${question}\n答案: ${fresh.answer}`);
-                            } else {
-                                const reason = fresh.status === 'failed' ? '生成失败' : '记忆不足';
-                                const keepText = hadAnswerBefore ? `，保留原答案：${fresh.answer}` : `，暂为占位：${fresh.answer}`;
-                                const hint = hadAnswerBefore
-                                    ? '稍后 consolidate / mm refresh 重试'
-                                    : '积累记忆后 consolidate / mm refresh 会自动生成';
-                                seal.replyToSender(ctx, msg, `${prefix}心智模型${isUpdate ? '已更新' : '已创建'}<${fresh.id}>（${reason}${keepText}）\n问题: ${question}\n${hint}`);
-                            }
-                            return ret;
-                        }
-                        const m = await mmEngine.createMentalModel(bank.bankId, question, stripInternalTags(answer), scopeTags, mmAddOpts);
-                        bumpMemoryRevision();
-                        targetSession.save();
-                        const flagParts: string[] = [];
-                        if (m.trigger === 'delta') flagParts.push('（增量模式）');
-                        if (m.triggerConfig?.refreshAfterConsolidation === false) flagParts.push('（不自动刷新）');
-                        seal.replyToSender(ctx, msg, `${prefix}心智模型${isUpdate ? '已更新' : '已添加'}<${m.id}>${flagParts.join('')}`);
-                        return ret;
-                    }
-                    case 'refresh': {
-                        const id = cmdArgs.getArgN(4);
-                        if (id) {
-                            const exists = mmEngine.listMentalModels(bank.bankId).some(x => x.id === id);
-                            if (!exists) {
-                                seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
-                                return ret;
-                            }
-                        }
-                        const summary = await mmEngine.refreshMentalModels(bank.bankId, id || undefined, { force: true, reason: 'manual' });
-                        if (summary.updated > 0) bumpMemoryRevision();
-                        targetSession.save();
-                        const reasonText = Object.entries(summary.skippedReasons)
-                            .map(([k, v]) => `${k}=${v}`).join(' ');
-                        seal.replyToSender(ctx, msg, `${prefix}已刷新 ${summary.updated} 条，跳过 ${summary.skipped} 条，失败 ${summary.failed} 条${reasonText ? `（${reasonText}）` : ''}`);
-                        return ret;
-                    }
-                    case 'delete': {
-                        const id = cmdArgs.getArgN(4);
-                        if (!id) {
-                            seal.replyToSender(ctx, msg, '参数缺失，【.ai memo mm del <ID|问题关键词>】删除心智模型');
-                            return ret;
-                        }
-                        // 优先按 ID 精确删除，其次按问题名精确匹配，再按问题关键词（唯一命中时删除，多条列出让用户用 ID 指定）
-                        const models = mmEngine.listMentalModels(bank.bankId);
-                        const byId = models.find(x => x.id === id);
-                        const byQuestion = byId ? null : models.find(x => x.question === id);
-                        const byKeyword = byId || byQuestion ? null : models.filter(x => x.question.includes(id));
-                        const target = byId || byQuestion || (byKeyword && byKeyword.length === 1 ? byKeyword[0] : null);
-                        if (!target) {
-                            if (byKeyword && byKeyword.length > 1) {
-                                seal.replyToSender(ctx, msg, `关键词「${id}」匹配到 ${byKeyword.length} 条心智模型，请用 ID 指定：\n${byKeyword.map(m => `${m.id} ${m.question}`).join('\n')}`);
-                                return ret;
-                            }
-                            seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
-                            return ret;
-                        }
-                        const ok = mmEngine.deleteMentalModel(bank.bankId, target.id);
-                        if (!ok) {
-                            seal.replyToSender(ctx, msg, `未找到心智模型<${id}>`);
-                            return ret;
-                        }
-                        bumpMemoryRevision();
-                        targetSession.save();
-                        const builtinNote = target.templateId ? '（内置模板，不会自动重建）' : '';
-                        seal.replyToSender(ctx, msg, `${prefix}心智模型已删除<${target.id}>：${target.question}${builtinNote}`);
-                        return ret;
-                    }
-                    default: {
-                        seal.replyToSender(ctx, msg, MEMO_MM_HELP);
-                        return ret;
-                    }
-                }
-            }
-
-            default: {
-                const raw2 = cmdArgs.getArgN(2);
-                const a2 = aliasToCmd(raw2);
-                if (a2 === 'private' || a2 === 'group' || a2 === 'set') {
-                    seal.replyToSender(ctx, msg, `旧语法已废弃：.ai memo ${raw2} 不再作为子命令，请改用范围参数 --u/--g，例如【.ai memo list --u】查看个人记忆、【.ai memo list --g】查看群聊记忆`);
-                    return ret;
-                }
-                seal.replyToSender(ctx, msg, MEMO_HELP);
-                return ret;
-            }
-        }
+async function solveObs(scc: SubCmdContext, target: MemoTarget, reply: (t: string) => void) {
+    const { cmdArgs, session, ret } = scc;
+    const action = aliasToCmd(cmdArgs.getArgN(3)) || 'refresh';
+    if (action === 'on' || action === 'off') {
+        session.memory.observationEnabled = action === 'on';
+        session.save();
+        reply(`观察记忆已${action === 'on' ? '开启' : '关闭'}（会话级）`);
+        return ret;
     }
+    if (action === 'list') {
+        const obs = MemoryService.listObservations(target.bankId);
+        reply(obs.length ? obs.slice(0, 20).map((o, i) => `${i + 1}. [${o.id}] ${o.text.slice(0, 80)} · 证据${o.proofCount}`).join('\n') : '暂无观察记忆');
+        return ret;
+    }
+    if (action === 'view') {
+        const id = resolveIdOrIndex(target, String(cmdArgs.getArgN(4) || ''));
+        const o = id ? MemoryService.getObservation(target.bankId, id) : null;
+        if (!o) { reply('用法：.ai memo obs view <ID>'); return ret; }
+        reply(`【观察】${o.text}\nID: ${o.id} · 证据${o.proofCount} 条 · 状态${o.status}\n范围: ${o.tags.filter(t => /^(user|group|global):/.test(t)).join(', ') || '（全局）'}\n创建: ${fmtDate(o.createdAt)} · 最近支持: ${fmtDate(o.lastSupportedAt)}\n证据:\n${o.evidence.map(e => `- [${e.memoryId}] ${e.quote}`).join('\n') || '（无）'}`);
+        return ret;
+    }
+    if (action === 'clr' || action === 'clear') {
+        if (!cmdArgs.getKwarg('yes')) { reply('清除观察不可恢复；确认请使用 .ai memo obs clr --yes'); return ret; }
+        const n = await MemoryService.clearObservations(target.bankId);
+        bumpSummaryRevision();
+        reply(`已清除 ${n} 条观察（源事实已重置待巩固）`);
+        return ret;
+    }
+    // refresh / bare obs：同步抽取当前上下文并巩固
+    await MemoryManager.summarizeChunk(session, session.context.messages);
+    const result = await MemoryService.consolidateBank(target.bankId);
+    bumpSummaryRevision();
+    reply(`已刷新：新建观察 ${result.created.length}，更新 ${result.updated.length}`);
+    return ret;
+}
+
+async function solveMM(scc: SubCmdContext, target: MemoTarget, reply: (t: string) => void) {
+    const { cmdArgs, ret } = scc;
+    const action = aliasToCmd(cmdArgs.getArgN(3)) || 'list';
+    const models = MemoryService.listMentalModels(target.bankId);
+    if (action === 'list') {
+        reply(models.length ? models.slice(0, 20).map((m, i) => `${i + 1}. [${m.id}] ${m.sourceQuery} · ${m.status}${m.lastRefreshedAt ? ` · 刷新${fmtDate(m.lastRefreshedAt)}` : ''}`).join('\n') : '暂无心智模型');
+        return ret;
+    }
+    if (action === 'view') {
+        const id = resolveIdOrIndex(target, String(cmdArgs.getArgN(4) || ''));
+        const m = id ? models.find(x => x.id === id) : null;
+        if (!m) { reply('用法：.ai memo mm view <ID>'); return ret; }
+        reply(`【心智模型】${m.sourceQuery}\nID: ${m.id} · ${m.status} · 模式 ${m.trigger.mode} · 自动刷新 ${m.trigger.refreshAfterConsolidation ? '开' : '关'}\n${m.content || '（待生成）'}`);
+        return ret;
+    }
+    if (action === 'add') {
+        const question = String(cmdArgs.getArgN(4) || '').trim();
+        const answer = String(cmdArgs.getRestArgsFrom(5) || '').trim();
+        const tag = cmdArgs.getKwarg('tag');
+        if (!question) { reply('用法：.ai memo mm add <问题> [答案] [--tag=xx] [--mode=full|delta] [--auto|--no-auto]'); return ret; }
+        const modeKw = cmdArgs.getKwarg('mode');
+        const auto = !!cmdArgs.getKwarg('auto');
+        const noAuto = !!cmdArgs.getKwarg('no-auto');
+        const model = await MemoryService.createMentalModel(target.bankId, question, answer, tag?.value ? [tag.value] : [], {
+            mode: modeKw?.value === 'delta' ? 'delta' : modeKw?.value === 'full' ? 'full' : undefined,
+            autoRefresh: noAuto ? false : auto ? true : undefined,
+        });
+        MemoryScheduler.enqueueMentalModelRefresh(target.bankId, model.id, 'manual');
+        reply(`已${answer ? '' : '创建待生成'}心智模型 <${model.id}>`);
+        return ret;
+    }
+    if (action === 'refresh') {
+        const raw = String(cmdArgs.getArgN(4) || '');
+        const id = raw ? resolveIdOrIndex(target, raw) : undefined;
+        const summary = await MemoryService.refreshMentalModels(target.bankId, { id, force: true, reason: 'manual' });
+        reply(`刷新完成：更新 ${summary.updated}，跳过 ${summary.skipped}，失败 ${summary.failed}（${Object.keys(summary.skippedReasons || {}).map(k => `${k}:${summary.skippedReasons[k]}`).join(' ') || '—'}）`);
+        return ret;
+    }
+    if (action === 'clear') {
+        const id = resolveIdOrIndex(target, String(cmdArgs.getArgN(4) || ''));
+        const m = id ? models.find(x => x.id === id) : null;
+        if (!m) { reply('用法：.ai memo mm clear <ID>'); return ret; }
+        m.content = '';
+        m.structuredContent = { version: 1, sections: [] };
+        m.status = 'pending';
+        MemoryService.saveMentalModel(target.bankId, m);
+        MemoryScheduler.enqueueMentalModelRefresh(target.bankId, m.id, 'manual');
+        reply(`已清空 <${m.id}> 内容，正在重建`);
+        return ret;
+    }
+    if (action === 'del' || action === 'delete') {
+        const raw = String(cmdArgs.getArgN(4) || '');
+        let id = resolveIdOrIndex(target, raw);
+        if (!id && raw) {
+            const matched = models.filter(m => m.sourceQuery.includes(raw));
+            if (matched.length === 1) id = matched[0].id;
+        }
+        if (!id) { reply('用法：.ai memo mm del <ID|问题关键词>'); return ret; }
+        await MemoryService.deleteMentalModel(target.bankId, id);
+        reply(`已删除心智模型 <${id}>`);
+        return ret;
+    }
+    reply(MEMO_HELP);
+    return ret;
+}
+
+export function resolveMmAddOptions(modeValue?: string | null, auto = false, noAuto = false): { mode?: 'full' | 'delta'; autoRefresh?: boolean } {
+    const opts: { mode?: 'full' | 'delta'; autoRefresh?: boolean } = {};
+    if (modeValue) opts.mode = modeValue === 'delta' ? 'delta' : 'full';
+    if (noAuto) opts.autoRefresh = false;
+    else if (auto) opts.autoRefresh = true;
+    return opts;
 }

@@ -477,21 +477,27 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 启用长期记忆 | 开启后对话内容会沉淀为长期记忆 |
-| 启用观察记忆 | 开启后上下文超过 token 上限归档删除前，会把旧对话沉淀为观察记忆 |
-| 记忆召回新近度权重 | 检索时给新近记忆的加分权重，0 为关闭（默认 0.4） |
-| 记忆召回新近度半衰期 | 新近度加分半衰期（天），越大旧记忆衰减越慢（默认 60） |
-| 长期记忆条数上限 | 长期记忆超过该条数自动遗忘最不重要的记忆，0 为不限制（默认 100） |
-| 用LLM抽取记忆 | 使用 LLM 从对话中抽取原子事实（实验性，默认关闭） |
-| 用LLM重排召回结果 | 使用 LLM 对召回结果重新排序（较慢，默认关闭） |
-| 用LLM合成观察记忆 | 使用 LLM 合成观察记忆（默认开启） |
-| 用LLM推理记忆 | 使用 LLM 合成心智模型推理答案（.ai memo mm / reflect 使用，默认开启） |
-| 自动维护固定心智模型 | 自动为个人/群聊补建写死的固定心智模型问题（设定/偏好/规则），并固定优先注入；删除后不会自动重建（默认开启） |
-| 巩固后自动刷新心智模型 | 巩固记忆后自动基于最新记忆刷新心智模型（默认开启） |
-| 心智模型刷新最小间隔 | 自动刷新心智模型的最小间隔（分钟），0 为不限制（默认 30） |
-| 心智模型刷新模式 | 新增心智模型的刷新方式：full=基于全部记忆重新推理 / delta=只按新增记忆增量更新（默认 full） |
-| 心智模型刷新排除其它心智模型 | 刷新心智模型时不把其它心智模型作为推理输入，避免互相引用（默认开启） |
-| 心智模型定时刷新间隔 | 每累计该分钟数自动检查并刷新心智模型（仅当有新记忆时实际刷新），0 为关闭（默认 0） |
+| 启用长期记忆 | 开启后对话内容会沉淀为长期记忆并注入 |
+| 启用观察记忆 | 开启后将多条事实巩固为观察记忆（证据/证据数/历史） |
+| 自动记忆抽取 | AI 触发后自动抽取事实；关闭后仅命令/工具写入 |
+| 群聊自动写个人记忆 | 群聊中关于用户的稳定事实写入其个人记忆（隐私敏感，默认关） |
+| 本体自动抽取 | 从助手经验/纠正中抽取全局本体记忆（隐私敏感，默认关） |
+| 启用全局记忆 | 注入/命令使用本体（global）记忆；无数据零成本 |
+| 自动维护固定心智模型 | 为个人/群聊/本体补建固定模板并首次生成（默认开启） |
+| 巩固后自动刷新心智模型 | 巩固后仅对标签重叠且已过期的模型刷新（默认关闭，对齐 Hindsight） |
+| 心智模型刷新模式 | full=全部记忆重新推理（默认）/ delta=只喂新增记忆做类型化编辑 |
+| 心智模型刷新最小间隔 | 同一模型两次自动刷新的最小分钟数；0=不限（默认 0，建议开自动刷新时设 30） |
+| 心智模型失败冷却 | 刷新失败后暂停自动重试的分钟数（默认 30） |
+| 心智模型输出上限 | 单次刷新/合成输出 token 上限（默认 2048） |
+| 增量模型定期重建 | delta 模型定期 full 重建的小时数（默认 48） |
+| 心智模型刷新排除其它心智模型 | 刷新时不把其它心智模型作为输入（默认开启） |
+| 记忆召回新近度权重/半衰期 | 检索新近度加分权重与半衰期（默认 0.4 / 60 天） |
+| 记忆召回语义相似度下限 | 语义通路最低 cosine（默认 0.35） |
+| 长期记忆条数上限 | 安全阀，超过后按失效/覆盖/衰减淘汰，0 不限制（默认 300） |
+| 记忆注入 token 预算 | 单轮注入记忆总预算（默认 3000） |
+| 观察记忆过期天数 | 无新证据超过该天数的观察不注入（不删除，默认 90） |
+| 后台记忆 LLM 每小时上限 | 后台抽取/巩固/刷新每小时最多调用次数；0 不限（默认 20） |
+| 用LLM重排召回结果 / 合成观察 / 推理记忆 | 三个独立回调开关（重排默认关，后两者默认开） |
 
 ### 知识库
 
@@ -608,26 +614,27 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai memo status [用户ID]` | - | 查看当前（或指定用户ID的）长期/观察记忆状态 |
-| `.ai memo [p/g] st <内容>` | `.ai memo p st 西瓜` | 设置个人/群聊设定（个人≤20字，群聊≤30字） |
-| `.ai memo [p/g] st clr` | - | 清除设定 |
-| `.ai memo [p/g] del <ID1> <ID2> --关键词` | - | 按 ID 删除记忆，可附带关键词（物理删除不可恢复） |
-| `.ai memo [p/g] list` | - | 展示长期记忆列表，支持 `--page` 翻页 |
-| `.ai memo [p/g] clr` | - | 清除长期记忆（物理删除不可恢复） |
-| `.ai memo obs [on/off]` | - | 开启/关闭观察记忆 |
-| `.ai memo obs list` | - | 展示观察记忆列表，支持 `--page` 翻页 |
-| `.ai memo obs` | - | 立即生成一次观察记忆 |
-| `.ai memo obs view <ID>` | - | 查看观察记忆详情（含证据条数与范围） |
-| `.ai memo obs clr` | - | 清除观察记忆 |
-| `.ai memo cons` | - | 立即巩固一次记忆（合并重复观察、清理过期记忆） |
-| `.ai memo reflect <问题>` | - | 基于记忆推理回答问题（引用心智模型 / 观察记忆 / 长期记忆证据） |
-| `.ai memo mm list [页码]` | - | 展示心智模型列表，支持 `--page` 翻页 |
-| `.ai memo mm view <ID>` | - | 查看心智模型详情 |
-| `.ai memo mm add <问题> [答案]` | - | 添加/更新心智模型：不填答案时基于记忆重新生成并保留旧答案兜底；`--tag=范围`、`--mode=full|delta`、`--auto/--no-auto` 可调 |
-| `.ai memo mm refresh [ID]` | - | 刷新心智模型（基于当前记忆重新推理） |
-| `.ai memo mm del <ID或问题关键词>` | - | 删除心智模型（关键词唯一命中时直接删除） |
+| `.ai memo status` | - | 查看当前范围记忆状态（含 backlog/后台队列/模型状态） |
+| `.ai memo add <内容>` | `.ai memo add 喜欢手冲咖啡 --u` | 添加事实；`--shared` 显式跨群、`--private` 仅本人；范围见下 |
+| `.ai memo list [页码]` | - | 展示事实列表（`#N` 可代替 ID） |
+| `.ai memo update <ID\|#N> <新内容>` | - | 更新事实 |
+| `.ai memo delete <ID\|#N> ... [--关键词] [--hard]` | - | 默认软失效；`--hard` 物理删除仅骰主 |
+| `.ai memo clear --yes` | - | 清除事实/观察/模型（不可恢复） |
+| `.ai memo obs list` | - | 观察记忆列表 |
+| `.ai memo obs view <ID>` | - | 观察详情（证据、证据数、历史） |
+| `.ai memo obs clr --yes` | - | 清除观察并把源事实重置为待巩固 |
+| `.ai memo obs on/off` | - | 会话级观察开关 |
+| `.ai memo obs refresh` | - | 立即抽取当前上下文并巩固（手动） |
+| `.ai memo consolidate` | - | 立即巩固一次 |
+| `.ai memo reflect <问题>` | - | 心智模型优先的推理；`--deep` 强制下探事实 |
+| `.ai memo mm list` | - | 心智模型列表 |
+| `.ai memo mm view <ID>` | - | 查看模型内容/状态/触发方式 |
+| `.ai memo mm add <问题> [答案]` | - | 新建模型；无答案时排队生成；`--tag`/`--mode=full\|delta`/`--auto\|--no-auto` |
+| `.ai memo mm refresh [ID]` | - | 手动刷新（绕过自动门控） |
+| `.ai memo mm clear <ID>` | - | 清空内容并排队 full 重建 |
+| `.ai memo mm del <ID\|关键词>` | - | 删除模型 |
 
-> 个人记忆跨群、群聊记忆仅限本群；group 分支需邀请者以上，`.ai memo obs on/off` 需会话权限 1。
+> 范围参数：默认当前会话；`--u` 本人、`--g` 当前群、`--self` 本体（仅骰主）；`--u=<ID>`/`--g=<ID>` 仅骰主。个人事实默认 `vis:owner`（仅本人私聊），群聊默认 `vis:public`（仅本群）；跨群必须显式 `--shared`。`.ai memo clear` 与 `.ai memo obs clr` 必须带 `--yes`。
 
 ### 工具管理命令
 
@@ -735,7 +742,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 指令 | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
 | 定时 | `set_timer`、`show_timer_list`、`cancel_timer` |
 | 触发 | `set_trigger_condition` |
-| 记忆 | `memory_add`、`memory_update`、`memory_delete`、`memory_recall`、`memory_clear`、`memory_reflect`、`memory_consolidate`、`memory_mm_list`、`memory_mm_view`、`memory_mm_create`、`memory_mm_refresh`、`memory_mm_delete` |
+| 记忆 | `memory_recall`、`memory_add`、`memory_update`、`memory_delete`、`memory_consolidate`、`memory_reflect`、`memory_mental_model`（action: list/view/create/refresh/clear/delete） |
 | 图片 | `image_to_text`（文字描述，`ids[]`≤3）、`image_view`（多模态直接看，`ids[]`≤4；不支持视觉时降级）、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |
 | 多媒体 | `media_tasks`（查看/取消本会话的语音与图片生成任务队列） |
 | OB11 | `call_ob11_api`（通过 action 调用消息、查询、管理、文件和合并转发 API；群资料、精华消息等均传入对应 action）、`resolve_special_id`（还原上下文短 ID/句柄为原始字段，用于对接协议 API） |

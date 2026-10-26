@@ -4,6 +4,7 @@ import Handlebars from "handlebars";
 import { initAgents } from "./agent/agents";
 import { registerAgentApi } from "./agent/api";
 import { installAuxLlm } from "./agent/aux_llm_impl";
+import { MemoryScheduler } from "./agent/memory_scheduler";
 import { BlockManager } from "./block";
 import { registerAllCmds } from "./cmd/bootstrap";
 import { PrivilegeManager } from "./cmd/privilege";
@@ -21,6 +22,8 @@ import { installPromptMemorySource } from "./prompt/memory_source_impl";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import { registerAllTools } from "./tool/bootstrap";
+// 副作用导入：注册默认 MemoryEngine 工厂（命令/工具/调度器首次使用时按配置创建引擎）
+import "./memory/v2";
 import { normalizeMsgId } from "./utils/message_id";
 import { createMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
@@ -48,6 +51,7 @@ function main() {
   checkUpdate();
   registerAllTools();
   TimerManager.init();
+  MemoryScheduler.init();
   MediaTaskManager.init();
   ImageGC.init();
   knowledgeService.init();
