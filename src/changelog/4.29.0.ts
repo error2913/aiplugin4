@@ -40,13 +40,26 @@ export default `## ⚠️ 重要：提示词全面英文化（破坏性）
 - 技能输出（\`## Skill: …\` / \`use_skill returned:\`）的截断豁免前缀随英文化同步更新，避免技能正文被误截断。
 - 压缩/摘要/子代理摘要头、上下文桥角色标签、入站媒体占位符、折叠摘要系统名义等统一改为英文。
 
+## 图片：角色规则、请求体预算与模型图源（v2）
+
+- **assistant 消息不再携带图片**：API 明确拒绝 \`Image in assistant message is not supported\`；机器人回复里的 \`[img:ID]\` 在入库、编译、旧数据迁移三处统一降级为文本标签，历史脏数据无需迁移即生效。
+- **aux / 对外 API 默认不解析图片（破坏性）**：摘要/压缩/评分/记忆等辅助调用固定不带图；\`globalThis.aiplugin4.chat()\` / \`chatMessages()\` 默认把 \`[img:]\` 当文本，需要模型看图时显式传第 3 个参数 \`{ allowImages: true }\`（非 user 消息里的图片块仍会被清洗）。
+- **请求体过大（413）恢复**：识别 413 与网关 HTML 报错 → 本轮丢全部图片重发 → 仍超限按 \`resolveEffectiveMaxTokens×0.8\` 归档重试 → 再失败则记日志放弃（不再静默无回复）。
+- **内联预算**：下载失败等异常路径只内联 \`/m\` 模型变体（禁止内联原图），默认单张 1MB / 整轮 4MB / 最多 4 张，超预算只留文本标签；旧后端（无 \`/m\`）内联原图同样受限。
+- **模型图源**：单边超过 8192 的图只留文本；图床 1.0.16+ 按「模型图片目标长边」提供 \`/m\` 变体（GIF 默认首帧）；\`/i\`、\`/m\`、\`/b64\` 四种 URL 统一映射回图床 ID，下载失败降级不再误判。
+- **数量与开关**：每轮图片上限默认 8（原 20）、每条工具结果升格默认 4（原 8）；新增「模型工具结果图片」开关（默认开）；MCP 原生图片块与旧 \`contentParts\` 图片统一受上限约束。
+- **\`thinking\` 字段校验**：模型规则 \`body.thinking\` 写成字符串（如 \`"enabled"\`）时校验给出可读报错，请求层也会忽略并告警，避免整轮 422。
+- **\`.ai img unmark <图片ID|all>\`**：清除「模型不可用」标记（图本身没坏，可恢复使用）。
+
 ## 配置项更改
 
-- 无新增/删除配置项；\`MCP服务器\` 的 JSON 条目新增可选字段 \`exposeInstructions\`（默认 false，旧配置无需修改）与 \`description\`（服务器用途，可选，用于能力地图与 \`.ai mcp list\`）。
+- 图片页签新增：模型图片单边上限(8192)、模型图片目标长边(2048)、每轮最多图片数(8)、每条工具结果最多升格图片数(4)、单张内联上限KB(1024)、每轮内联总字节KB(4096)、每轮最多内联图片数(4)、模型工具结果图片(开)；原「每轮最多内联图片数」拆为「每轮最多图片数」与「每轮最多内联图片数」两个键。
+- \`MCP服务器\` 的 JSON 条目新增可选字段 \`exposeInstructions\`（默认 false，旧配置无需修改）与 \`description\`（服务器用途，可选，用于能力地图与 \`.ai mcp list\`）。
 - 「提示词模板」维持内置不可配置；本次内置模板内容已全部改为英文。
 
 ## 开发与工程
 
-- 新增单测：\`scripts/unit-test-prompt.ts\`（注册表/组装/缓存/清洗/通道/hook/digest/内置段集成/能力地图）、\`scripts/unit-test-protocol.ts\`（标记构造与剥离、旧中文不识别锁定、系统名/包装）、\`scripts/unit-test-mcp.ts\`（instructions/annotations/prompts/resources/能力地图标签）。
+- 新增单测：\`scripts/unit-test-prompt.ts\`（注册表/组装/缓存/清洗/通道/hook/digest/内置段集成/能力地图）、\`scripts/unit-test-protocol.ts\`（标记构造与剥离、旧中文不识别锁定、系统名/包装）、\`scripts/unit-test-mcp.ts\`（instructions/annotations/prompts/resources/能力地图标签）、\`scripts/unit-test-image-source.ts\`（图源头解析/选源/轨迹定位/角色与 413 分类/URL 映射/内联预算/MCP 图上限）；\`scripts/unit-test-image-host.ts\` 增补变体内联预算与排除用例。
 - 协议文本单一事实源 \`src/utils/protocol.ts\`（L0 叶子）；记忆缓存失效前缀改为 \`sect:core:memory|\`；依赖边界检查无新增跨层依赖。
+- 验证：单测 654 通过、\`tsc --noEmit\`、\`lint\`、\`smoke\`、\`deps:check\`、\`domain:check\`、\`sim\` / \`sim:matrix\` 全绿。
 `;
