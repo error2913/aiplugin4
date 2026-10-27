@@ -6549,11 +6549,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
             // v5 起视觉需显式声明（glm-4v 不再靠命名自动判为 vision）
             seedPinnedConns([pinConnTyped('zhipu', ['glm-4v'], { 'glm-4v': 'vision' })]);
             const agent = new Agent();
-            const ret = await agent.chat('看看[img:not_exist_zz]');
+            // D3：默认不解析图片（breaking）；需要模型看图必须显式 allowImages
+            const ret = await agent.chat('看看[img:not_exist_zz]', { allowImages: true });
             assert.equal(ret, '回复');
             assert.ok(Array.isArray(captured.messages[0].content), '多模态 user content 应为内容块数组');
             assert.equal(captured.model.name, 'glm-4v', '请求层应收到解析出的多模态模型');
             assert.equal(captured.model.isMultimodal, true);
+
+            await agent.chat('看看[img:not_exist_zz]');
+            assert.equal(typeof captured.messages[0].content, 'string', '默认 chat() 不应把 [img:] 解析成图片块');
 
             // 纯文本：content 为字符串，模型为文本实例
             seedPinnedConns([pinConn('deepseek', ['text-a'])]);
@@ -6949,13 +6953,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const ret = await agent.chatMessages([
                 { role: 'user', content: '看看[img:not_exist_zz]' },
                 { role: 'assistant', content: '好的' }
-            ]);
+            ], { allowImages: true });
             assert.equal(ret, '回复');
             assert.ok(Array.isArray(captured.messages[0].content), '多模态 user content 应为内容块数组');
             assert.ok(captured.messages[0].content.some((p: any) => p.type === 'text'), '内容块应含 text 块');
             assert.equal(captured.messages[1].content, '好的', 'assistant content 应保持字符串');
             assert.equal(captured.model.name, 'glm-4v', '请求层应收到解析出的多模态模型');
             assert.equal(captured.model.isMultimodal, true);
+
+            // D3：默认不解析图片（breaking）
+            await agent.chatMessages([{ role: 'user', content: '看看[img:not_exist_zz]' }]);
+            assert.equal(typeof captured.messages[0].content, 'string', '默认 chatMessages() 不应把 [img:] 解析成图片块');
 
             // 纯文本：user content 保持字符串，模型为文本实例
             seedPinnedConns([pinConn('deepseek', ['text-a'])]);

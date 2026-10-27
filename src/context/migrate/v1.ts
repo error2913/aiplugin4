@@ -3,6 +3,7 @@
 // 设计：确定性 seq/eventId，中断可重跑；rawText/rawItems 转为"原文事件 + 微摘要记录"。
 import { SYSTEM_NAME } from "../../utils/protocol";
 import { stripRawMarkers } from "../../utils/raw_marker";
+import { demoteMediaParts } from "../content/render";
 import {
     AssistantEvent,
     assistantEventId,
@@ -260,7 +261,8 @@ export function buildLegacyEvents(ctx: LegacyContextLike, opts: MigrateOptions =
                     recvAt: at,
                     kind: 'assistant',
                     msgId: a.messageId || '',
-                    parts: textParts(a.text, 'internal', opts),
+                    // INV-8：迁移来的 assistant 内容同样不收图片 part（文本投影保留 [img:ID]）
+                    parts: demoteMediaParts(textParts(a.text, 'internal', opts)),
                 };
                 if (a.reasoningContent !== undefined) event.reasoning = a.reasoningContent;
                 events.push(event);

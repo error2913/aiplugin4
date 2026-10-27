@@ -65,6 +65,8 @@ export interface ConnConfigLike {
     modelTypes?: Record<string, DeclarableModelTag>;
     /** v5：模型名 → 模型 id。ModelEntry.ref 用它取代 v4 的 `[连接序号]:模型名` */
     modelIds?: Record<string, string>;
+    /** v5：模型名 → 视觉输入覆盖（图片单边上限/目标长边；缺省用「图片」全局配置） */
+    imageLimits?: Record<string, { maxSide?: number; targetSide?: number }>;
     /** 连接配置 [request]（列表拉取覆盖），默认 {} */
     request?: Record<string, any>;
 }
@@ -251,6 +253,8 @@ export default class Model {
             entry.ref = idFromConfig
                 ? idFromConfig
                 : ((counts.get(name) || 0) > 1 ? `[${st.connIndex}]:${name}` : name);
+            const limits = conn?.imageLimits?.[name];
+            if (limits) entry.imageLimits = limits;
             return entry;
         });
         Model.entries = entries;

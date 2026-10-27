@@ -7,6 +7,11 @@ import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
 import { buildPromptParts, buildSystemPromptContent } from "../prompt/builder";
 import Image from "../resource/image";
+import {
+    buildImageTrace,
+    type ImageLimits,
+    type ImageTraceEntry,
+} from "../resource/image_model_source";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
@@ -32,13 +37,45 @@ export interface RequestMessage {
     reasoning_content?: string;
 }
 
-/** 多模态请求构建选项：imagesAsText=本轮把 URL 型图片降级为文本标签（模型报「图片下载失败」后重发用） */
+/** 请求图片轨迹：组包时记录实际产出的图片块顺序，供模型报错时精确定位（见 19-模型图片尺寸上限与图源方案 P0） */
+export interface ImageTraceState {
+    /** resolver 实际产出图片块的图片引用顺序（返回 null 的不计入） */
+    refs: string[];
+    /** 组包完成后按 messages 下标回填的轨迹 */
+    entries: ImageTraceEntry[];
+}
+
+export function createImageTrace(): ImageTraceState {
+    return { refs: [], entries: [] };
+}
+
+/** 本轮内联图片预算：张数 + 总字节（防 413；见 20 号方案 P0-C） */
+export interface InlineImageBudget {
+    left: number;
+    bytesLeft: number;
+}
+
+/** 多模态请求构建选项：imagesAsText=本轮把图片降级为文本标签（模型报「图片拒绝/下载失败」后重发用） */
 export interface MultimodalBuildOptions {
     imagesAsText?: boolean;
-    /** 本次请求实际使用的模型（用于判断模型端点是否可达图床公网/内网地址） */
-    model?: { baseUrl?: string };
+    /** 是否允许解析图片标签（aux/对外 API 默认 false；见 20 号方案 D3） */
+    allowImages?: boolean;
+    /** 本轮强制不带任何图片（413 丢图重发 / 角色错误恢复用，连 base64 也不放） */
+    noImages?: boolean;
+    /** 本轮排除的图片（下载失败等临时降级，不持久化） */
+    excludeImageIds?: Set<string>;
+    /** 本次请求实际使用的模型（可达性判断 + 模型级图片限制覆盖） */
+    model?: { baseUrl?: string; imageLimits?: ImageLimits };
     /** runtime 段文本（由 agent 每轮构建一次传入；缺省时 handleMessages 兜底构建） */
     runtimeText?: string;
+    /** 请求图片轨迹（可选；失败恢复用） */
+    trace?: ImageTraceState;
+    /** 本轮图片块数量预算（同一次请求共享；缺省由 handleMessages 按配置创建） */
+    imageBudget?: { left: number };
+    /** 本轮内联字节预算（同一次请求共享） */
+    inlineBudget?: InlineImageBudget;
+    /** 工具消息是否允许图片（false = 文本投影；缺省读配置） */
+    toolImages?: boolean;
 }
 
 interface MessageItem {
@@ -561,6 +598,7 @@ function compileV2Request(
     multimodal: boolean,
     tools: unknown[] | undefined,
     modelName: string | undefined,
+    opts?: MultimodalBuildOptions,
 ): CompiledMessage[] | null {
     if (!session.contextV2) return null;
     try {
@@ -574,32 +612,65 @@ function compileV2Request(
         const { tokens: resolvedBudget } = resolveEffectiveMaxTokens(baseBudget, getProbedContextWindow(modelName || ''));
         const cap = session.context.v2BudgetCapValue;
         const budget = cap !== null && cap > 0 ? Math.min(resolvedBudget, cap) : resolvedBudget;
+        // 本轮内联图片预算（同一次请求共享）：超出后只留文本标签（descriptors 会先渲染 [img:ID] 文本）
+        const cfgLimit = Config.image.MAX_IMAGES_PER_REQUEST;
+        const budgetRef = opts?.imageBudget ?? { left: cfgLimit > 0 ? cfgLimit : Number.POSITIVE_INFINITY };
+        const cfgInline = Config.image.INLINE_MAX_IMAGES;
+        const inlineRef = opts?.inlineBudget ?? {
+            left: cfgInline > 0 ? cfgInline : Number.POSITIVE_INFINITY,
+            bytesLeft: Math.max(0, Config.image.INLINE_TOTAL_BYTES_KB) * 1024,
+        };
+        const imageRefs = opts?.trace?.refs;
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
             budgetTokens: budget,
             toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
             caps: { vision: multimodal },
+            toolImages: opts?.toolImages ?? Config.image.TOOL_RESULT_IMAGES,
             resolve: {
                 imageUrl: (ref: string) => {
                     try {
+                        if (opts?.noImages) return null;
                         const image = Image.resolveRef(ref);
-                        if (!image || image.isUrlUnusable()) return null;
-                        return image.src || null;
+                        if (!image) return null;
+                        if (opts?.excludeImageIds?.has(image.imageId)) return null;
+                        if (budgetRef.left <= 0) return null;
+                        // 图床对外地址不可达时预取变体内联字节（异步，本轮取不到就先用文本标签，下轮命中缓存）
+                        if (image.hosted) void image.ensureModelSource(opts?.model).catch(() => { /* 预取失败不影响本轮 */ });
+                        const decision = image.modelSourceDecision(opts?.model, !!opts?.imagesAsText);
+                        if (decision.kind === 'none') return null;
+                        if (decision.kind === 'base64') {
+                            const bytes = Math.floor((decision.src || '').length * 0.75);
+                            if (inlineRef.left <= 0 || (inlineRef.bytesLeft > 0 && bytes > inlineRef.bytesLeft)) return null;
+                            inlineRef.left--;
+                            inlineRef.bytesLeft -= bytes;
+                        }
+                        budgetRef.left--;
+                        if (imageRefs) imageRefs.push(ref);
+                        return decision.src || null;
                     } catch {
                         return null;
                     }
                 },
                 avatarUrl: (uid: string) => {
                     try {
-                        return Image.resolveRef(`user_avatar:${uid}`)?.src || null;
+                        if (opts?.noImages) return null;
+                        const image = Image.resolveRef(`user_avatar:${uid}`);
+                        const src = image?.modelSourceDecision(opts?.model, false).src || null;
+                        if (src && imageRefs) imageRefs.push(`user_avatar:${uid}`);
+                        return src;
                     } catch {
                         return null;
                     }
                 },
                 groupAvatarUrl: (gid: string) => {
                     try {
-                        return Image.resolveRef(`group_avatar:${gid}`)?.src || null;
+                        if (opts?.noImages) return null;
+                        const image = Image.resolveRef(`group_avatar:${gid}`);
+                        const src = image?.modelSourceDecision(opts?.model, false).src || null;
+                        if (src && imageRefs) imageRefs.push(`group_avatar:${gid}`);
+                        return src;
                     } catch {
                         return null;
                     }
@@ -625,6 +696,12 @@ function compileV2Request(
                 return Math.max(1, Math.ceil(chars / 3)) + 4;
             },
         });
+        if (opts?.trace) {
+            opts.trace.entries = buildImageTrace(
+                compiled.messages as unknown as Array<{ content: unknown }>,
+                opts.trace.refs,
+            );
+        }
         return compiled.messages;
     } catch (error) {
         logger.warning('上下文请求构建失败，回退旧路径: ' + (error instanceof Error ? error.message : String(error)));
@@ -662,10 +739,26 @@ export async function handleMessages(
         runtimeText = runtimeText || parts.runtime;
     }
     const samplesMessages = buildSamplesMessages(ctx);
+    // 本轮图片预算（同一次请求共享；v2/v1 两条路径一致）。配置 0 = 不限。
+    const imageLimit = Config.image.MAX_IMAGES_PER_REQUEST;
+    const imageBudget = opts?.imageBudget ?? { left: imageLimit > 0 ? imageLimit : Number.POSITIVE_INFINITY };
+    const inlineLeft = Config.image.INLINE_MAX_IMAGES;
+    const inlineBudget: InlineImageBudget = opts?.inlineBudget ?? {
+        left: inlineLeft > 0 ? inlineLeft : Number.POSITIVE_INFINITY,
+        bytesLeft: Math.max(0, Config.image.INLINE_TOTAL_BYTES_KB) * 1024,
+    };
+    const effectiveToolImages = opts?.toolImages ?? Config.image.TOOL_RESULT_IMAGES;
+    const messageOpts = (trace?: ImageTraceState): MultimodalBuildOptions => ({
+        ...(opts ?? {}),
+        imageBudget,
+        inlineBudget,
+        toolImages: effectiveToolImages,
+        ...(trace ? { trace } : {}),
+    });
     // 事件账本：请求完全由 compileRequest 决定，不再走下面的旧 messages 折叠/预算/配对路径。
     // 编译失败才回退旧路径（迁移失败/兼容场景），避免冷热折叠等旧逻辑在 v2 下继续执行。
     if (session.contextV2) {
-        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName);
+        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName, messageOpts());
         if (compiled) return withRuntimeContext(compiled as RequestMessage[], runtimeText);
     }
     const clonedContext = (session.context.messages as ContextMessage[]).map(cloneContextMessage);
@@ -681,7 +774,8 @@ export async function handleMessages(
     // 提示词工程模式：不向 API 发送 role:'tool'，也不带 assistant tool_calls；
     // 工具结果转成 user 文本（[tool_result:name]…[/tool_result] 边界），保证模型能看到结果而不会反复调用工具
     if (Config.tool.PROMPT_ENGINEERING) {
-        const peMessages = await Promise.all(messages.map(async message => {
+        const traceStates = messages.map(() => createImageTrace());
+        const peMessages = await Promise.all(messages.map(async (message, index) => {
             if (message.role === 'tool') {
                 // 保留工具名来源，便于模型区分不同工具的返回；旧上下文无 toolName 时退化为通用标记。
                 // 与原生路径统一：`[tool_result:name]…[/tool_result]` 边界，声明为外部数据。
@@ -689,11 +783,14 @@ export async function handleMessages(
                 const header = toolResultHeader(toolName);
                 const body = `${header}\n${buildContent(message)}\n[/tool_result]`;
                 // PE 模式下工具结果是 user 文本；若工具返回了图片内容块（image_view / MCP image），
-                // 必须把 image_url 一起带上，否则多模态模型看不到图
-                const imageParts = multimodal && Array.isArray(message.contentParts)
-                    ? message.contentParts.filter(p => p && p.type === 'image_url')
+                // 必须把 image_url 一起带上，否则多模态模型看不到图。
+                // 受「模型工具结果图片」开关 + 每轮图片/内联预算约束（20 号方案 INV-12/P0-C）。
+                const imageParts = multimodal
+                    ? pickToolImageParts(message.contentParts, { enabled: effectiveToolImages, budget: imageBudget, inline: inlineBudget })
                     : [];
                 if (imageParts.length > 0) {
+                    // 这些图片块来自 contentParts（没有 CIR ref）：占位保持轨迹对齐
+                    for (let k = 0; k < imageParts.length; k++) traceStates[index].refs.push('');
                     return {
                         role: 'user',
                         content: [
@@ -706,12 +803,18 @@ export async function handleMessages(
             }
             const out: RequestMessage = {
                 role: message.role,
-                content: multimodal ? await buildMultimodalContent(message, opts) : buildContent(message)
+                content: multimodal ? await buildMultimodalContent(message, messageOpts(traceStates[index])) : buildContent(message)
             };
             const reasoning = resolveReasoningContent(message);
             if (reasoning !== undefined) out.reasoning_content = reasoning;
             return out;
         }));
+        if (opts?.trace) {
+            opts.trace.entries = buildImageTrace(
+                peMessages as unknown as Array<{ content: unknown }>,
+                traceStates.reduce<string[]>((all, state) => all.concat(state.refs), []),
+            );
+        }
         return withRuntimeContext(peMessages, runtimeText);
     }
 
@@ -780,14 +883,26 @@ export async function handleMessages(
         if (!adjacent) messages.splice(i, 1);
     }
 
-    const finalMessages = await Promise.all(messages.map(async message => {
+    const traceStates = messages.map(() => createImageTrace());
+    const finalMessages = await Promise.all(messages.map(async (message, index) => {
+        let content: RequestMessageContent;
+        if (message.role === 'tool') {
+            const toolImageParts = multimodal
+                ? pickToolImageParts(message.contentParts, { enabled: effectiveToolImages, budget: imageBudget, inline: inlineBudget })
+                : [];
+            if (toolImageParts.length > 0) {
+                // contentParts 图片块没有 CIR ref：占位保持轨迹对齐
+                for (let k = 0; k < toolImageParts.length; k++) traceStates[index].refs.push('');
+                content = toolImageParts;
+            } else {
+                content = buildContent(message);
+            }
+        } else {
+            content = multimodal ? await buildMultimodalContent(message, messageOpts(traceStates[index])) : buildContent(message);
+        }
         const out: RequestMessage = {
             role: message.role,
-            content: message.role === 'tool'
-                ? (multimodal && Array.isArray(message.contentParts) && message.contentParts.length > 0
-                    ? message.contentParts
-                    : buildContent(message))
-                : (multimodal ? await buildMultimodalContent(message, opts) : buildContent(message))
+            content,
         };
         // 只在 assistant 且 tool_calls 非空时附带该字段：空数组在 JSON 里是合法值，
         // 会被原样序列化为 "tool_calls":[]，部分后端直接报错拒绝请求
@@ -807,6 +922,12 @@ export async function handleMessages(
         }
         return out;
     }));
+    if (opts?.trace) {
+        opts.trace.entries = buildImageTrace(
+            finalMessages as unknown as Array<{ content: unknown }>,
+            traceStates.reduce<string[]>((all, state) => all.concat(state.refs), []),
+        );
+    }
     return withRuntimeContext(finalMessages as RequestMessage[], runtimeText);
 }
 
@@ -868,10 +989,13 @@ function resolveImageById(id: string): Image | null {
  * 图片不可用（URL 已确认失效 / QQ 临时直链转换失败）时也只保留文本标签：死链会让模型整轮请求报错，整个会话不回复。
  */
 export async function textToMultimodalContent(text: string, opts?: MultimodalBuildOptions): Promise<RequestMessageContent> {
+    if (opts?.allowImages === false || opts?.noImages) return text;
     if (!/\[(?:img|avatar|group_avatar)[:：]/i.test(text)) return text;
 
     const parts: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string } }> = [];
     const segs = text.split(/([[［](?:img|avatar|group_avatar)[:：]?[^\]］]*[\]］])/).filter(Boolean);
+    const budget = opts?.imageBudget;
+    const inlineRef = opts?.inlineBudget;
     for (const seg of segs) {
         const match = seg.match(/^[[［](img|avatar|group_avatar)[:：]?\s?(.*?)[\]］]$/i);
         if (!match) {
@@ -880,25 +1004,44 @@ export async function textToMultimodalContent(text: string, opts?: MultimodalBui
         }
         const type = match[1].toLowerCase();
         const value = match[2].trim();
+        const ref = type === 'avatar'
+            ? `user_avatar:${value}`
+            : type === 'group_avatar'
+                ? `group_avatar:${value}`
+                : value;
         const image: Image | null = type === 'avatar'
             ? Image.getUserAvatar(value)
             : type === 'group_avatar'
                 ? Image.getGroupAvatar(value)
                 : resolveImageById(value);
-        // 统一走 CIR 取图：图床按“模型可达性”选 URL/b64；非图床 URL 优先转 b64，失败回退稳定 URL。
-        // 头像（qlogo）是稳定公网地址，直接给 URL；死链/临时直链转换失败只留文本标签。
-        if (!image || image.isUrlUnusable() || (!!opts?.imagesAsText && image.type === 'url' && !image.base64)) {
+        // 统一走 CIR 取图：图床按「模型可达性/尺寸限制」选变体 URL 或内联字节；
+        // 超出本轮预算 / 被本轮排除 / 被模型拒绝过 / 尺寸超限 → 只保留文本标签。
+        if (!image || image.isUrlUnusable() || (budget && budget.left <= 0) || (opts?.excludeImageIds?.has(image.imageId))) {
             parts.push({ type: 'text', text: seg });
             continue;
         }
         let src = '';
         try {
-            src = await withTimeout(() => image.getModelSrc(opts?.model), 10000);
+            src = await withTimeout(() => image.getModelSrc(opts?.model, !!opts?.imagesAsText), 15000);
         } catch (e) {
             logger.warning(`多模态图片取图失败，改用文本标签: ${image.imageId}（${e instanceof Error ? e.message : String(e)}）`);
         }
-        if (src) parts.push({ type: 'image_url', image_url: { url: src } });
-        else parts.push({ type: 'text', text: seg });
+        if (!src) {
+            parts.push({ type: 'text', text: seg });
+            continue;
+        }
+        if (src.startsWith('data:') && inlineRef) {
+            const bytes = Math.floor(src.length * 0.75);
+            if (inlineRef.left <= 0 || (inlineRef.bytesLeft > 0 && bytes > inlineRef.bytesLeft)) {
+                parts.push({ type: 'text', text: seg });
+                continue;
+            }
+            inlineRef.left--;
+            inlineRef.bytesLeft -= bytes;
+        }
+        if (budget) budget.left--;
+        if (opts?.trace) opts.trace.refs.push(ref);
+        parts.push({ type: 'image_url', image_url: { url: src } });
     }
     return parts;
 }
@@ -907,6 +1050,66 @@ export async function textToMultimodalContent(text: string, opts?: MultimodalBui
 export async function buildMultimodalContent(message: ContextMessage, opts?: MultimodalBuildOptions): Promise<RequestMessageContent> {
     if (message.role !== 'user') return buildContent(message);
     return textToMultimodalContent(buildContent(message), opts);
+}
+
+/**
+ * 外部 `chatMessages` 入参的角色清洗（20 号方案 D3/INV-13）：
+ * - 非 user 消息中的图片块降级为文本占位（API 不允许 assistant 消息带图；tool 图由内部链路负责）；
+ * - 外部插件即使传了数组内容也不会把整轮打挂。
+ */
+export function sanitizeChatMessages(messages: Array<{ role: string; content: unknown }>): Array<{ role: string; content: string }> {
+    const out: Array<{ role: string; content: string }> = [];
+    for (const message of messages || []) {
+        const role = typeof message?.role === 'string' ? message.role : 'user';
+        const content = message?.content;
+        if (typeof content === 'string') {
+            out.push({ role, content });
+            continue;
+        }
+        if (!Array.isArray(content)) {
+            out.push({ role, content: content === undefined || content === null ? '' : String(content) });
+            continue;
+        }
+        const texts: string[] = [];
+        for (const block of content) {
+            if (!block || typeof block !== 'object') continue;
+            const type = (block as { type?: unknown }).type;
+            if (type === 'text') {
+                texts.push(String((block as { text?: unknown }).text ?? ''));
+            } else if (role === 'user') {
+                // user 图片内容块原样保留（后续 textToMultimodalContent 不会再处理数组，这里按占位保留）
+                texts.push('[image]');
+            } else {
+                texts.push('[image omitted: not allowed in non-user message]');
+            }
+        }
+        out.push({ role, content: texts.join('\n') });
+    }
+    return out;
+}
+
+/** 从工具 contentParts 中挑选可携带的图片块：受开关/张数预算/内联字节预算约束 */
+function pickToolImageParts(
+    parts: ToolContentPart[] | undefined,
+    opts: { enabled: boolean; budget?: { left: number }; inline?: InlineImageBudget },
+): Array<{ type: 'image_url'; image_url: { url: string } }> {
+    if (!opts.enabled || !Array.isArray(parts)) return [];
+    const out: Array<{ type: 'image_url'; image_url: { url: string } }> = [];
+    for (const part of parts) {
+        if (!part || part.type !== 'image_url') continue;
+        const url = part.image_url && part.image_url.url || '';
+        if (!url) continue;
+        if (opts.budget && opts.budget.left <= 0) break;
+        if (url.startsWith('data:') && opts.inline) {
+            const bytes = Math.floor(url.length * 0.75);
+            if (opts.inline.left <= 0 || (opts.inline.bytesLeft > 0 && bytes > opts.inline.bytesLeft)) continue;
+            opts.inline.left--;
+            opts.inline.bytesLeft -= bytes;
+        }
+        if (opts.budget) opts.budget.left--;
+        out.push({ type: 'image_url', image_url: { url } });
+    }
+    return out;
 }
 
 /** 收集请求体里所有非 data: 的图片 URL（模型报「无法下载图片」时用来定位并降级这些图片） */

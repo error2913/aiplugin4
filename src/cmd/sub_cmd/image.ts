@@ -20,7 +20,8 @@ export function registerCmdImage() {
                 }
             },
             itt: { priv: M },
-            find: { priv: I }
+            find: { priv: I },
+            unmark: { priv: I }
         }
     };
     cmd.solve = async (scc: SubCmdContext) => {
@@ -73,11 +74,23 @@ export function registerCmdImage() {
                 seal.replyToSender(ctx, msg, file ? `[CQ:image,file=${file}]` : '图片不可用（取不到可发送的本地文件/地址）');
                 return ret;
             }
+            case 'unmark': {
+                const target = cmdArgs.getArgN(3);
+                if (!target) {
+                    seal.replyToSender(ctx, msg, '【.ai img unmark <图片ID|all>】解除「模型不可用」标记');
+                    return ret;
+                }
+                const ids = target === 'all' ? Image.loadedImageIds() : [target];
+                const cleared = Image.clearModelUnsafe(ids);
+                seal.replyToSender(ctx, msg, `已解除 ${cleared} 张图片的「模型不可用」标记（下次对话会重新尝试把图交给模型）`);
+                return ret;
+            }
             default: {
                 seal.replyToSender(ctx, msg, `帮助:
  【.ai img list [lcl]】展示本地图片
  【.ai img itt [图片] (附加提示词)】图片转文字
- 【.ai img find <图片ID>】查找图片`);
+ 【.ai img find <图片ID>】查找图片
+ 【.ai img unmark <图片ID|all>】解除「模型不可用」标记`);
                 return ret;
             }
         }

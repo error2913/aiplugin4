@@ -99,6 +99,10 @@ class _ImageHost {
     static lastError = '';
     /** 最近一次请求的 HTTP 状态码（0 = 网络错误/超时）；用于区分 404 与“够不到” */
     static lastStatus = 0;
+    /** 后端自报能力（/api/health 的 capabilities；旧后端为空 → 走旧图源路径） */
+    static capabilities: string[] = [];
+    /** 是否已成功探测过一次能力（旧后端无 capabilities / 启动时后端未就绪时不反复 probe） */
+    private static probedOnce = false;
     /** 上传并发上限：合并转发几十张图时不要一次打爆后端 */
     private static readonly MAX_UPLOAD_CONCURRENCY = 4;
     private static activeUploads = 0;
@@ -202,6 +206,79 @@ class _ImageHost {
         return this.canModelFetch(hostedId, modelBaseUrl);
     }
 
+    /** 后端是否支持「模型变体」图源（`/m/<id>?max=`） */
+    static get supportsModelVariant(): boolean {
+        return this.enabled && this.capabilities.includes('model-variant');
+    }
+
+    /**
+     * 确保能力已探测（供失败恢复等异步路径调用；不在同步选源路径触发网络请求）。
+     * 启动探测失败时 probedOnce 保持 false，下一次失败恢复会再探一次。
+     */
+    static async ensureCapabilities(): Promise<void> {
+        if (!this.enabled || this.probedOnce) return;
+        await this.probe();
+    }
+
+    /** 进行一次能力探测（下载失败等场景可主动刷新，避免后端升级后长期走旧路径） */
+    static async refreshCapabilities(): Promise<boolean> {
+        return this.probe();
+    }
+
+    /**
+     * 模型变体 URL（同步；后端不支持/对外地址不可用返回空串）。
+     * maxSide<=0 时不带 max 参数，由后端默认目标长边决定。
+     */
+    static modelUrl(hostedId: string, maxSide: number): string {
+        if (!hostedId || !this.supportsModelVariant) return '';
+        const path = `/m/${hostedId}${maxSide > 0 ? `?max=${Math.floor(maxSide)}` : ''}`;
+        return this.externalUrl(path);
+    }
+
+    /** 取模型变体内联字节（`/m/<id>/b64?max=`；模型访问不到图床对外地址时用） */
+    static async fetchModelBase64(
+        hostedId: string,
+        maxSide: number,
+    ): Promise<{ base64: string; format: string; mime: string; w: number; h: number } | null> {
+        if (!this.enabled || !hostedId || !this.supportsModelVariant) return null;
+        const path = `/m/${hostedId}/b64${maxSide > 0 ? `?max=${Math.floor(maxSide)}` : ''}`;
+        const data = await this.requestJson(path, { method: 'GET', headers: this.headers() }, READ_TIMEOUT_MS, '读取模型变体base64');
+        if (!data || typeof data.base64 !== 'string' || !data.base64) return null;
+        const format = typeof data.format === 'string' ? data.format : '';
+        const mime = typeof data.mime === 'string' && data.mime ? data.mime : (format ? `image/${format}` : 'image/png');
+        return {
+            base64: data.base64,
+            format,
+            mime,
+            w: Number(data.w) || 0,
+            h: Number(data.h) || 0,
+        };
+    }
+
+    /** 批量取图片元数据（尺寸/格式/是否存在）；失败返回 null */
+    static async meta(ids: string[]): Promise<Record<string, { w: number; h: number; format: string; mime: string; deleted: boolean }> | null> {
+        const list = (ids || []).filter(Boolean);
+        if (!this.enabled || list.length === 0) return null;
+        const out: Record<string, { w: number; h: number; format: string; mime: string; deleted: boolean }> = {};
+        for (let i = 0; i < list.length; i += 200) {
+            const part = list.slice(i, i + 200);
+            const data = await this.requestJson(`/api/meta?ids=${encodeURIComponent(part.join(','))}`,
+                { method: 'GET', headers: this.headers() }, READ_TIMEOUT_MS, '读取图床元数据');
+            if (!Array.isArray(data)) return null;
+            for (const item of data) {
+                if (!item || typeof item.id !== 'string') continue;
+                out[item.id] = {
+                    w: Number(item.w) || 0,
+                    h: Number(item.h) || 0,
+                    format: typeof item.format === 'string' ? item.format : '',
+                    mime: typeof item.mime === 'string' ? item.mime : '',
+                    deleted: !!item.deleted,
+                };
+            }
+        }
+        return out;
+    }
+
     private static headers(): Record<string, string> {
         return {
             'Content-Type': 'application/json',
@@ -234,11 +311,20 @@ class _ImageHost {
         }
     }
 
-    /** 探测图床是否可用（/api/health 公开） */
+    /** 探测图床是否可用（/api/health 公开）；同时记录后端能力（capabilities） */
     static async probe(): Promise<boolean> {
         if (!this.enabled) return false;
         const data = await this.requestJson('/api/health', { method: 'GET' }, READ_TIMEOUT_MS, '探测图床');
         const ok = !!(data && data.ok);
+        this.probedOnce = ok;
+        this.capabilities = ok && Array.isArray(data.capabilities)
+            ? data.capabilities.filter((x: unknown): x is string => typeof x === 'string')
+            : [];
+        if (ok && !this.capabilities.includes('model-variant')) {
+            log.warning('图床后端不支持「模型变体」图源（/m）：图片将按原图交给模型，'
+                + '超大图（单边 > 8192px 等）可能被模型拒绝（已被错误兜底降级为文本）。'
+                + '升级 aiplugin4-backends 的 image-host 到 1.0.16+ 可根治。');
+        }
         if (ok && !this.externalEnabled) {
             log.warning(`图床未配置对外地址（后端配置 image-host.publicUrl），且 url 是回环地址（${this.base}）：`
                 + `QQ 协议端与模型都访问不到该地址。请在后端 WebUI 点「复制后端配置」时填写「图床对外地址」`
@@ -246,6 +332,12 @@ class _ImageHost {
                 + `当前会降级：发图用本地文件、模型用内联 base64。`);
         }
         return ok;
+    }
+
+    /** 测试用：重置能力缓存 */
+    static resetCapabilitiesForTest(): void {
+        this.capabilities = [];
+        this.probedOnce = false;
     }
 
     /** 按 URL 抓取入库；tags 只放类型/内容标签（元数据走 source） */

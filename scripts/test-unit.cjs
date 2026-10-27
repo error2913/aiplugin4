@@ -44,6 +44,7 @@ const bundles = {
     prompt: path.join(outDir, 'unit-prompt.cjs'),
     protocol: path.join(outDir, 'unit-protocol.cjs'),
     mcp: path.join(outDir, 'unit-mcp.cjs'),
+    imageSource: path.join(outDir, 'unit-image-source.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -83,7 +84,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['subagentContext', path.join(repo, 'scripts/unit-test-subagent-context.ts')],
         ['prompt', path.join(repo, 'scripts/unit-test-prompt.ts')],
         ['protocol', path.join(repo, 'scripts/unit-test-protocol.ts')],
-        ['mcp', path.join(repo, 'scripts/unit-test-mcp.ts')]
+        ['mcp', path.join(repo, 'scripts/unit-test-mcp.ts')],
+        ['imageSource', path.join(repo, 'scripts/unit-test-image-source.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

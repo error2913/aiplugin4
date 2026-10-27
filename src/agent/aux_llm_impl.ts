@@ -7,7 +7,9 @@ import Agent from "./agent";
 
 export function installAuxLlm(): void {
     setAuxLlm({
-        chat: (agentName, prompt) => Agent.get(agentName).chat(prompt),
-        chatMessages: (agentName, messages) => Agent.get(agentName).chatMessages(messages),
+        // 摘要/压缩/评分/记忆等辅助调用一律不解析图片（20 号方案 D3/INV-9）：
+        // prompt 里渲染出的 [img:ID] 只作为文本，避免 20+ 张图被打包进 aux 请求。
+        chat: (agentName, prompt) => Agent.get(agentName).chat(prompt, { allowImages: false }),
+        chatMessages: (agentName, messages) => Agent.get(agentName).chatMessages(messages, { allowImages: false }),
     });
 }

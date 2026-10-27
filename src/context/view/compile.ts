@@ -69,6 +69,11 @@ export interface CompileOptions {
     caps?: LLMCaps;
     dialect?: LLMDialect;
     resolve?: MediaResolvers;
+    /**
+     * tool 消息是否允许图片块（默认 true）。部分网关不支持 tool 角色带图；
+     * 关闭时 tool 结果用纯文本投影（[img:ID] 保留）。见 20 号方案 INV-12。
+     */
+    toolImages?: boolean;
     /** 必填：文本 token 估算（仓库内用 estimateTextTokens） */
     estimateTextTokens: (text: string) => number;
     /** 必填：单事件 token 估算（应包含 role/parts/tool_calls 口径） */
@@ -177,13 +182,12 @@ function renderUserEvent(event: ConversationEvent, options: CompileOptions, inde
 
 function renderAssistantEvent(event: ConversationEvent, options: CompileOptions, index: RecordIndex): CompiledMessage {
     const parts = applyEdit(event, index);
-    const base = toLLM(parts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
+    // INV-8：assistant 消息不允许图片（API 明确 "Image in assistant message is not supported"）。
+    // 即便历史数据/编辑注入了 image part，这里也只做纯文本投影，[img:<ref>] 标签保留。
+    const base = toLLMText(parts, options.caps ?? {}, options.resolve ?? {});
     const msgId = String((event as { msgId?: string }).msgId ?? '');
     const prefix = msgId ? `[msg_id:${fmtMsgId(options, msgId)}]` : '';
-    const content = prefix
-        ? (typeof base === 'string' ? prefix + base : [{ type: 'text' as const, text: prefix }, ...base])
-        : base;
-    const message: CompiledMessage = { role: 'assistant', content };
+    const message: CompiledMessage = { role: 'assistant', content: prefix ? prefix + base : base };
     const reasoning = (event as { reasoning?: string }).reasoning;
     if (reasoning !== undefined) message.reasoning_content = reasoning;
     return message;
@@ -243,7 +247,11 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
     for (const call of calls) {
         const results = resultByCallId.get(call.id) ?? [];
         for (const result of results) {
-            const content = toLLM(applyEdit(result, index), options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
+            const resultParts = applyEdit(result, index);
+            // INV-12：tool 图片可按配置关闭（部分网关不支持 tool 角色带图），关闭时纯文本投影
+            const content = options.toolImages === false
+                ? toLLMText(resultParts, options.caps ?? {}, options.resolve ?? {})
+                : toLLM(resultParts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
             out.push({ role: 'tool', tool_call_id: call.id, content: wrapToolResult(call.id, content) });
         }
     }

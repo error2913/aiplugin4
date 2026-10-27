@@ -52,6 +52,8 @@ export class ModelEntry {
     source: ListSource | 'none';
     /** 标识：v5 用配置里的模型 id；无 id 时退回 裸名 / [连接序号]:模型名 */
     ref: string = '';
+    /** v5 视觉输入覆盖：图片单边接受上限 / 目标长边（缺省用「图片」全局配置） */
+    imageLimits?: { maxSide?: number; targetSide?: number };
 
     constructor(
         connIndex: number, name: string, provider: string, baseUrl: string, apiKey: string,

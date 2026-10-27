@@ -21,6 +21,16 @@ export function renderText(parts: Part[]): string {
     return parts.map(part => renderPartText(part)).join('');
 }
 
+/**
+ * 把媒体类 Part 降级为文本 Part（写入侧用；见 20 号方案 INV-8）：
+ * - 图片/头像/语音/视频等 → 各自的规范文本投影（[img:<ref>] 等），信息不丢；
+ * - 文本 Part 原样保留（连续文本不合并，保持与 renderText 往返一致）。
+ */
+export function demoteMediaParts(parts: Part[]): Part[] {
+    if (!Array.isArray(parts)) return [];
+    return parts.map(part => (part.type === 'text' ? part : ({ type: 'text', text: renderPartText(part) } as Part)));
+}
+
 function pushTextSegment(out: PlatformSegment[], text: string): void {
     if (!text) return;
     const last = out[out.length - 1];

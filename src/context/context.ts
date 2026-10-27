@@ -14,6 +14,7 @@ import { TypeDescriptor } from "../utils/revive";
 import { stripInternalTags } from "../utils/string";
 
 import { archiveByTokenIfNeeded as archiveByTokenIfNeededImpl, settleWindowIfNeeded as settleWindowIfNeededImpl, trimToWindow as trimToWindowImpl } from "./archiver";
+import { demoteMediaParts } from "./content/render";
 import { parseText } from "./content/text_parse";
 import { normalizeToolResult } from "./content/tool_result";
 import type { Part } from "./events";
@@ -195,7 +196,9 @@ export class Context {
     private appendV2Assistant(text: string, messageId: string, reasoningContent?: string): void {
         const service = this.v2Service;
         if (!service) return;
-        service.appendAssistant(messageId, parseText(stripInternalTags(text), 'model-output'), {
+        // INV-8：assistant 消息不允许图片（API 明确拒绝）。模型回复里的 [img:ID] 等媒体标签
+        // 解析后一律降级为文本 part 再入库，避免编译进 assistant 消息。
+        service.appendAssistant(messageId, demoteMediaParts(parseText(stripInternalTags(text), 'model-output')), {
             ...(reasoningContent !== undefined ? { reasoning: reasoningContent } : {}),
         });
         this.invalidateV2();
@@ -638,7 +641,11 @@ export class Context {
         if (this.v2Service) {
             let parts: Part[] = [];
             try {
-                parts = normalizeToolResult({ text, contentParts }, { allowImageRefs: true, noteUnregisteredMedia: false });
+                parts = normalizeToolResult({ text, contentParts }, {
+                    allowImageRefs: true,
+                    noteUnregisteredMedia: false,
+                    maxMedia: Config.image.MAX_IMAGES_PER_TOOL_RESULT,
+                });
             } catch {
                 parts = [];
             }

@@ -424,7 +424,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         useHost();
         captureStorage();
         mockFetch();
-        routes = [b64Route()];
+        ImageHost.capabilities = ['model-variant', 'meta'];
+        // 20 号方案 P0-C：下载失败只允许内联模型变体（/m/<id>/b64）
+        routes = [{ match: (url: string) => url.endsWith('/m/abc123/b64'), data: { base64: 'QUJD', format: 'png', mime: 'image/png', w: 1, h: 1 } }];
         try {
             const img = new Image();
             img.imageId = 'img_broken';
@@ -439,6 +441,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(img.src, 'data:image/png;base64,QUJD');
         } finally {
             delete Image.imageMap['img_broken'];
+            ImageHost.resetCapabilitiesForTest();
             restoreFetch();
             restoreHost();
         }
@@ -449,7 +452,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         useHost();
         captureStorage();
         mockFetch();
-        routes = [{ match: (url: string) => url.endsWith('/i/abc123/b64'), status: 404, text: '{"error":"not_found"}' }];
+        ImageHost.capabilities = ['model-variant', 'meta'];
+        routes = [{ match: (url: string) => url.endsWith('/m/abc123/b64'), status: 404, text: '{"error":"not_found"}' }];
         try {
             const img = new Image();
             img.imageId = 'img_gone';
@@ -462,6 +466,38 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(img.hostedId, '', '404 后应清掉图床 id，避免继续发送死链');
         } finally {
             delete Image.imageMap['img_gone'];
+            ImageHost.resetCapabilitiesForTest();
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 20 号方案 P0-C：变体内联超单张字节预算 → 本轮临时排除（excludeIds），不标坏、不发大 body */
+    async testHostedDownloadFailureExcludesOversizeInline(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        ImageHost.capabilities = ['model-variant', 'meta'];
+        TC.intConfigs['单张内联上限KB'] = 1;
+        routes = [{
+            match: (url: string) => url.endsWith('/m/abc123/b64'),
+            data: { base64: 'A'.repeat(4000), format: 'png', mime: 'image/png', w: 10, h: 10 },
+        }];
+        try {
+            const img = new Image();
+            img.imageId = 'img_too_big_inline';
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            Image.imageMap['img_too_big_inline'] = img;
+            const res = await Image.markModelDownloadFailures([`${BACKEND}/i/abc123`]);
+            assert.equal(res.retryInline, false, '超预算不应内联');
+            assert.deepEqual(res.excludeIds, ['img_too_big_inline'], '应返回本轮排除列表');
+            assert.equal(img.urlBroken, false, '不能永久标坏');
+            assert.equal(img.base64, '', '不应写入超大 base64');
+        } finally {
+            delete Image.imageMap['img_too_big_inline'];
+            delete TC.intConfigs['单张内联上限KB'];
+            ImageHost.resetCapabilitiesForTest();
             restoreFetch();
             restoreHost();
         }

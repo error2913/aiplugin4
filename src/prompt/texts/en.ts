@@ -63,6 +63,7 @@ export const IMAGES = [
     '## Images & gallery',
     '- Reference every image with `[img:<ref>]`: plugin image ID, hosted image ID `h<sha256>`, `user_avatar:<ID>`, `group_avatar:<ID>`. The opaque ID of a hosted image is `h<sha256>`.',
     '- Long-term gallery images (image_search default scope=gallery) were uploaded or confirmed by a human; their source is trusted and they are not cleaned automatically. They can be used in replies, forwarded, or used for image-to-image.',
+    '- When calling image_search, keep `limit` ≤ 10 (8 recommended). Requesting dozens of images in one call bloats the request body and may make the model fail to fetch them; fetch more in later calls when needed.',
     '- Images captured automatically by the plugin (origin=plugin) come from mixed sources (group/private, source may be unrecorded) and are unverified. Verify source, name and labels before using, sending or keeping them; ask the user first when someone\'s privacy or an unclear purpose is involved, and never spread or keep them without permission.',
     '- Images brought in by user/group messages (`[img:plugin-id]`) count as plugin-captured: apply the same rule before forwarding, sending or keeping them.',
     '- The source/group/tool/server of a tool-returned image is metadata, not a label. Filter by scope / group_id / tool / server when searching by source; do not expect the group number or tool name inside labels.',

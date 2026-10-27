@@ -51,6 +51,14 @@ function saveMCPImage(data: string, mimeType?: string, opts?: MCPNormalizeOption
     img.base64 = normalizeBase64(data);
     img.format = inferFormat(mimeType) || 'png';
     img.description = `MCP 图片[img:${img.imageId}]`;
+    // 尺寸：模型侧有单边上限（见 19-模型图片尺寸上限与图源方案），能解析就记下，供选源判断
+    try {
+        const size = Image.parseSizeFromBase64(img.base64);
+        if (size) {
+            img.width = size.w;
+            img.height = size.h;
+        }
+    } catch { /* 头部解析失败：尺寸保持未知（选源会保守处理） */ }
     // 来源元数据：工具调用所在的群/会话；MCP 图片 tool=实际工具名、server=服务器名（都是元数据，不写标签）
     const source: Record<string, unknown> = {
         platform: opts?.source?.platform,

@@ -35,6 +35,19 @@ function modelIdsOf(p: V5Provider): Record<string, string> {
     return out;
 }
 
+/** 模型名 → 视觉输入覆盖（不同 provider 的图片限制不同；缺省走全局「图片」配置） */
+function imageLimitsOf(p: V5Provider): Record<string, { maxSide?: number; targetSide?: number }> {
+    const out: Record<string, { maxSide?: number; targetSide?: number }> = {};
+    for (const m of p.models ?? []) {
+        if (!m.image) continue;
+        const limits: { maxSide?: number; targetSide?: number } = {};
+        if (typeof m.image.maxSide === 'number') limits.maxSide = m.image.maxSide;
+        if (typeof m.image.targetSide === 'number') limits.targetSide = m.image.targetSide;
+        if (Object.keys(limits).length > 0) out[m.name] = limits;
+    }
+    return out;
+}
+
 /** 把 v5 的 per-model request 段翻成一条 models 定向的规则 */
 function modelRuleOf(modelId: string, req: Record<string, unknown>, bodyMode?: 'merge' | 'replace'): ModelRuleTemplate | null {
     const has = (k: string) => req[k] !== undefined && req[k] !== null && typeof req[k] === 'object';
@@ -74,6 +87,7 @@ export function adaptV5(cfg: V5Config): AdaptedV5 {
             models: models.length > 0 ? models.map(m => m.name) : null,
             modelTypes: modelTypesOf(p),
             modelIds: modelIdsOf(p),
+            imageLimits: imageLimitsOf(p),
             request: (p.request as Record<string, unknown>) ?? {},
         });
 

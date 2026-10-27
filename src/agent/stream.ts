@@ -16,6 +16,19 @@ import { StopError, StopEvent, withTimeout } from "../utils/timeout";
 
 const log = logger.withTag('model');
 
+/** 请求体顶层字段净化：`thinking` 只接受 provider 的结构化对象，字符串（如 "enabled"）会被 422 拒绝 */
+let thinkingStringWarned = false;
+function sanitizeProviderBodyFields(body: any): any {
+    if (body && typeof body === 'object' && typeof body.thinking === 'string') {
+        if (!thinkingStringWarned) {
+            thinkingStringWarned = true;
+            log.warning(`「模型规则」body.thinking 写成了字符串（${JSON.stringify(body.thinking)}）：provider 需要结构化对象，已忽略该字段；请检查模型配置`);
+        }
+        delete body.thinking;
+    }
+    return body;
+}
+
 /**
  * 请求体消息净化（防御层）：一次遍历同时完成——
  * 1) 删除空 tool_calls 数组；
@@ -106,6 +119,7 @@ export class streamService {
                 model: model.name,
                 messages
             });
+            sanitizeProviderBodyFields(body);
             body.messages = sanitizeRequestMessages(body.messages);
             const rawEstimate = estimateRequestTokens(body.messages, []);
 
@@ -177,6 +191,7 @@ export class streamService {
             });
             // 显式非流式：headless 子代理/单轮直呼等需要一次性 JSON 响应（chat 用途模板可能配 stream:true）
             if (opts?.stream === false) body.stream = false;
+            sanitizeProviderBodyFields(body);
             body.messages = sanitizeRequestMessages(body.messages);
             if (STATUS && !PROMPT_ENGINEERING) {
                 if (tools && tools.length > 0) body.tools = tools;

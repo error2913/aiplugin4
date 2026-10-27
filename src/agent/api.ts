@@ -51,10 +51,16 @@ export interface AgentGlobalApi {
     getAgent(name?: string): Agent;
     /** 获取指定智能体的会话 */
     getSession(agentName: string, sessionId: string): Session;
-    /** 单轮对话：不经过会话上下文与工具，直接返回模型回复文本（无可用模型时返回空串） */
-    chat(prompt: string, agentName?: string): Promise<string>;
-    /** 对话：直接发送 OpenAI 风格 messages 数组到对话模型，返回回复文本（无可用模型时返回空串） */
-    chatMessages(messages: { role: string, content: string }[], agentName?: string): Promise<string>;
+    /**
+     * 单轮对话：不经过会话上下文与工具，直接返回模型回复文本（无可用模型时返回空串）。
+     * **默认不解析 prompt 里的 [img:ID]**；需要模型看图时传 `{ allowImages: true }`（V2 起，breaking）。
+     */
+    chat(prompt: string, agentName?: string, options?: { allowImages?: boolean }): Promise<string>;
+    /**
+     * 对话：直接发送 OpenAI 风格 messages 数组到对话模型，返回回复文本（无可用模型时返回空串）。
+     * **默认不解析图片**；`allowImages:true` 时 user 文本里的 [img:] 才变成图片块（非 user 消息的图片会被降级为文本）。
+     */
+    chatMessages(messages: { role: string, content: string }[], agentName?: string, options?: { allowImages?: boolean }): Promise<string>;
     /** 识图：对图片 id 或 http(s) 图片地址调用图片识别模型，返回描述文本；识图模型开关未开启/未配置模型/找不到图片时返回错误说明 */
     imageToText(source: string, prompt?: string): Promise<string>;
     /** 嵌入：调用嵌入模型返回文本向量；未配置嵌入模型时返回空数组 */
@@ -77,8 +83,10 @@ export function registerAgentApi(): void {
         Agent,
         getAgent: (name?: string) => Agent.get(name || '*'),
         getSession: (agentName: string, sessionId: string) => Agent.get(agentName).sessionService.getSession(sessionId),
-        chat: async (prompt: string, agentName?: string) => Agent.get(agentName || '*').chat(prompt),
-        chatMessages: async (messages: { role: string, content: string }[], agentName?: string) => Agent.get(agentName || '*').chatMessages(messages),
+        chat: async (prompt: string, agentName?: string, options?: { allowImages?: boolean }) =>
+            Agent.get(agentName || '*').chat(prompt, { allowImages: options?.allowImages === true }),
+        chatMessages: async (messages: { role: string, content: string }[], agentName?: string, options?: { allowImages?: boolean }) =>
+            Agent.get(agentName || '*').chatMessages(messages, { allowImages: options?.allowImages === true }),
         imageToText: async (source: string, prompt?: string) => {
             if (!Model.getMultimodalModel('image-understanding')) return '未找到支持 image-understanding 的多模态模型';
             // CIR：插件图片 ID / 图床 h<sha256> / 裸 sha256 / [img:<ref>] / 头像别名

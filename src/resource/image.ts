@@ -14,6 +14,12 @@ import type { ImageHealthHost } from "./image_health";
 import { ImageHost } from "./image_host";
 import type { HostItem, ImageSource } from "./image_host";
 import { ImageIndex } from "./image_index";
+import {
+    decideModelSource,
+    type ImageLimits,
+    type ModelSourceDecision,
+    parseImageSizeFromBase64,
+} from "./image_model_source";
 import { IMAGE_PROMPT_TEMPLATE } from "./image_prompt";
 import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
 import { imageToText } from "./image_text";
@@ -49,6 +55,9 @@ export default class Image {
         base64FailedAt: 'number',
         base64FailedCount: 'number',
         urlBroken: 'boolean',
+        modelUnsafe: 'boolean',
+        width: 'number',
+        height: 'number',
         hostedUrl: 'string',
         hostedId: 'string',
         hostedAt: 'number',
@@ -74,6 +83,15 @@ export default class Image {
     base64FailedCount: number;
     /** URL 已确认不可用（后端下载被 4xx 拒绝 / 模型报下载图片失败），不再发给模型也不再重试转换 */
     urlBroken: boolean;
+    /**
+     * 模型拒绝过这张图（超尺寸/无法解码）：只影响「作为 image 块喂对话模型」，
+     * 不影响发图、图库展示、`image_view` 取图；可用 `.ai img unmark` 解封。
+     */
+    modelUnsafe: boolean;
+    /** 原图宽（px；0/未定义 = 未知，首次按需从头解析并持久化） */
+    width: number;
+    /** 原图高（px；同上） */
+    height: number;
     /** 图床相对路径（如 /i/<sha256>；空 = 未入库） */
     hostedUrl: string;
     /** 图床 id（sha256），取 b64 / 后续释放用 */
@@ -101,6 +119,9 @@ export default class Image {
         this.base64FailedAt = 0;
         this.base64FailedCount = 0;
         this.urlBroken = false;
+        this.modelUnsafe = false;
+        this.width = 0;
+        this.height = 0;
         this.hostedUrl = '';
         this.hostedId = '';
         this.hostedAt = 0;
@@ -215,7 +236,7 @@ export default class Image {
      * 模型报“无法下载图片”时处置（实现见 ./image_health）：图床先探测 404/可达性，非图床直接标坏。
      * 图床 200 → 本轮改内联 b64（retryInline）；404 → 标坏并清 hosted 字段；网络错误 → 留待下轮。
      */
-    static async markModelDownloadFailures(urls: string[]): Promise<{ marked: number; retryInline: boolean }> {
+    static async markModelDownloadFailures(urls: string[]): Promise<{ marked: number; retryInline: boolean; excludeIds: string[] }> {
         return markModelDownloadFailures(this.healthHost(), urls);
     }
 
@@ -355,39 +376,142 @@ export default class Image {
         return this.base64;
     }
 
+    /** 模型选源所需的限制（模型级覆盖 > 全局配置 > 内置默认） */
+    private modelLimits(model?: { imageLimits?: ImageLimits }): { maxSide: number; targetSide: number } {
+        const cfg = Config.image;
+        const maxSide = Number(model?.imageLimits?.maxSide ?? cfg.MODEL_MAX_SIDE) || 0;
+        const targetSide = Number(model?.imageLimits?.targetSide ?? cfg.MODEL_TARGET_SIDE) || 0;
+        return { maxSide: Math.max(0, maxSide), targetSide: Math.max(0, targetSide) };
+    }
+
+    /** 惰性解析原图尺寸（base64 头部；hosted 由后端提供，缺失时保持未知） */
+    widthHint(): number {
+        if (!this.width || !this.height) this.ensureSize();
+        return this.width;
+    }
+
+    heightHint(): number {
+        if (!this.width || !this.height) this.ensureSize();
+        return this.height;
+    }
+
+    private ensureSize(): { w: number; h: number } | null {
+        if (this.width > 0 && this.height > 0) return { w: this.width, h: this.height };
+        if (!this.base64) return null;
+        const size = parseImageSizeFromBase64(this.base64Url);
+        if (!size) return null;
+        this.width = size.w;
+        this.height = size.h;
+        Image.save(this);
+        return size;
+    }
+
+    /** 模型变体 URL（同步；后端不支持 / 图床对外地址不可用时返回空串） */
+    modelVariantUrl(maxSide: number): string {
+        if (!this.hostedId || !ImageHost.enabled) return '';
+        if (!ImageHost.supportsModelVariant) return '';
+        return ImageHost.modelUrl(this.hostedId, maxSide);
+    }
+
     /**
-     * 模型/上游取图地址：URL 或 data URL。
-     * - 图床：模型可达则给 remoteUrl；内网/云模型或本轮已被模型报下载失败则走 b64 出口；
-     * - 非图床 URL：优先转 b64（与旧行为一致），失败再回退稳定原始 URL；
-     * - 头像：公开 qlogo URL。
+     * 预取「模型变体内联字节」（异步；模型访问不到图床对外地址时使用）。
+     * 结果只存内存（不落盘），进程重启后按需重取；受「单张内联上限KB」约束（防 413）。
      */
-    async getModelSrc(model?: { baseUrl?: string }): Promise<string> {
-        if (this.base64) return this.base64Url;
-        if (this.urlBroken) return '';
-        if (this.isAvatarImage) return this.url || '';
-        if (this.hostedId && ImageHost.enabled) {
-            if (!this.urlBroken && !Image.inlineModelIds.has(this.imageId)) {
-                const url = ImageHost.urlForModel(this.hostedId, model?.baseUrl);
-                if (url) return url;
-            }
+    async prepareModelInline(maxSide: number): Promise<string> {
+        const cacheKey = `${this.imageId}:${maxSide}`;
+        const cached = Image.modelInlineCache.get(cacheKey);
+        if (cached) return cached;
+        if (!this.hostedId || !ImageHost.enabled || !ImageHost.supportsModelVariant) return '';
+        const data = await ImageHost.fetchModelBase64(this.hostedId, maxSide);
+        if (!data || !data.base64) return '';
+        const maxBytes = Math.max(0, Config.image.INLINE_MAX_BYTES_KB) * 1024;
+        if (maxBytes > 0 && Math.floor(data.base64.length * 0.75) > maxBytes) {
+            log.warning(`图片${this.imageId}的模型变体超过单张内联上限（${Config.image.INLINE_MAX_BYTES_KB}KB），本轮改用文本标签`);
+            return '';
+        }
+        const sub = String(data.mime.split('/')[1] || data.format || '').toLowerCase();
+        const format = sub === 'jpg' ? 'jpeg' : (sub || this.format || 'png');
+        const mime = data.mime || `image/${format}`;
+        if (!this.width || !this.height) {
+            this.width = data.w || this.width;
+            this.height = data.h || this.height;
+        }
+        const url = `data:${mime};base64,${data.base64}`;
+        Image.modelInlineCache.set(cacheKey, url);
+        return url;
+    }
+
+    /**
+     * 组装选源事实并给出决策（纯函数调用；不发起网络）。
+     * 需要内联变体时先 `prepareModelInline()`——两条组包路径都会在 async 侧预取。
+     */
+    modelSourceDecision(model?: { baseUrl?: string; imageLimits?: ImageLimits }, imagesAsText = false): ModelSourceDecision {
+        const { maxSide, targetSide } = this.modelLimits(model);
+        const size = this.ensureSize();
+        const forceInline = Image.inlineModelIds.has(this.imageId);
+        return decideModelSource({
+            imageId: this.imageId,
+            kind: this.type,
+            isAvatar: this.isAvatarImage,
+            hosted: this.hosted,
+            backendVariant: ImageHost.supportsModelVariant,
+            variantUrl: this.hosted && ImageHost.supportsModelVariant && !forceInline ? this.modelVariantUrl(targetSide) : '',
+            inlineVariantUrl: Image.modelInlineCache.get(`${this.imageId}:${targetSide}`) || '',
+            remoteUrl: this.remoteUrl || this.url,
+            urlUnusable: this.isUrlUnusable(),
+            base64Url: this.base64 ? this.base64Url : '',
+            size,
+            modelUnsafe: !!this.modelUnsafe,
+            maxSide,
+            imagesAsText,
+            forceInline,
+        });
+    }
+
+    /** 预取模型图源（异步；图床对外地址不可达/被要求内联时取变体内联字节） */
+    async ensureModelSource(model?: { baseUrl?: string; imageLimits?: ImageLimits }): Promise<void> {
+        if (!this.hosted || this.modelUnsafe || this.isUrlUnusable()) return;
+        const { targetSide } = this.modelLimits(model);
+        if (ImageHost.supportsModelVariant) {
+            if (ImageHost.canModelFetch(this.hostedId, model?.baseUrl) && !Image.inlineModelIds.has(this.imageId)) return;
+            await this.prepareModelInline(targetSide);
+            return;
+        }
+        // 旧后端：模型够不到对外地址时沿用“取 b64 出口内联”的旧兜底（受单张内联上限约束）
+        if (!ImageHost.canModelFetch(this.hostedId, model?.baseUrl) && !this.base64) {
             const data = await ImageHost.fetchBase64(this.hostedId);
             if (data) {
+                const maxBytes = Math.max(0, Config.image.INLINE_MAX_BYTES_KB) * 1024;
+                if (maxBytes > 0 && Math.floor(data.base64.length * 0.75) > maxBytes) return;
                 this.base64 = data.base64;
                 this.format = data.format || this.format || 'png';
                 this.urlBroken = false;
-                return this.base64Url;
+                this.ensureSize();
             }
-            if (ImageHost.lastStatus === 404) this.urlBroken = true;
-            // 图床取不到时，最后回退稳定原始 URL（QQ 临时直链不赌）
-            if (this.url && !Image.isTemporaryUrl(this.url) && !this.urlBroken) return this.url;
-            return '';
         }
-        if (this.type === 'url' && this.url && !this.isBase64RetryBlocked()) {
-            await this.urlToBase64();
+    }
+
+    /**
+     * 模型/上游取图地址：URL 或 data URL。
+     * - 图床：有模型变体能力时给 `/m/<id>?max=`（或预取的变体内联）；旧后端维持现状；
+     * - 非图床 URL：按旧配置尝试转 b64（失败回退稳定原始 URL）；
+     * - 头像：公开 qlogo URL；
+     * - 超限/被模型拒绝/不可用：返回空串，调用方保留文本标签。
+     */
+    async getModelSrc(model?: { baseUrl?: string; imageLimits?: ImageLimits }, imagesAsText = false): Promise<string> {
+        if (this.modelUnsafe) return '';
+        // 非图床 URL：保持旧行为（先尝试转 b64；失败/冷却期则回退稳定 URL）
+        if (!this.base64 && this.type === 'url' && !this.urlBroken && !this.hosted) {
+            if (!this.isBase64RetryBlocked()) await this.urlToBase64();
         }
-        if (this.base64) return this.base64Url;
-        if (this.url && !Image.isTemporaryUrl(this.url)) return this.url;
-        return '';
+        await this.ensureModelSource(model);
+        const decision = this.modelSourceDecision(model, imagesAsText);
+        if (this.hosted && !ImageHost.supportsModelVariant && decision.kind === 'url'
+            && !ImageHost.canModelFetch(this.hostedId, model?.baseUrl)) {
+            // 旧后端 + 模型够不到对外地址：沿用旧的 b64 兜底（取不到就只留文本）
+            return this.base64 ? this.base64Url : '';
+        }
+        return decision.kind === 'none' ? '' : (decision.src || '');
     }
 
     /** 工具产出图片的自动类型标签（确定性映射，不调模型） */
@@ -453,10 +577,13 @@ export default class Image {
     private static hostedRefs = new Map<string, { img: Image; at: number }>();
     /** 本轮模型取图失败、要求改用内联 b64 的图片（imageId） */
     private static inlineModelIds = new Set<string>();
+    /** 已预取的模型变体内联 data URI（内存缓存，不落盘） */
+    private static modelInlineCache = new Map<string, string>();
 
     static resetHostedRefsForTest(): void {
         this.hostedRefs.clear();
         this.inlineModelIds.clear();
+        this.modelInlineCache.clear();
     }
 
     static hostedRefCountForTest(): number {
@@ -482,6 +609,38 @@ export default class Image {
     /** 标记该图本轮改用内联 b64（模型 URL 取图失败时使用） */
     static preferInlineForModel(imageId: string): void {
         if (imageId) this.inlineModelIds.add(imageId);
+    }
+
+    /** 模型拒绝过这些图（超尺寸/不可解码）：持久化，后续组包只留文本标签 */
+    static markModelUnsafe(imageIds: string[]): number {
+        let marked = 0;
+        for (const imageId of imageIds || []) {
+            const image = imageId ? this.get(imageId) : null;
+            if (!image || image.modelUnsafe) continue;
+            image.modelUnsafe = true;
+            this.save(image);
+            marked++;
+        }
+        if (marked > 0) log.warning(`已把 ${marked} 张图标记为「模型不可用」（保留 [img:ID] 文本标签，可用 .ai img unmark 解封）`);
+        return marked;
+    }
+
+    /** 清除「模型不可用」标记（provider 限制变化/误标时使用） */
+    static clearModelUnsafe(imageIds: string[]): number {
+        let cleared = 0;
+        for (const imageId of imageIds || []) {
+            const image = imageId ? this.get(imageId) : null;
+            if (!image || !image.modelUnsafe) continue;
+            image.modelUnsafe = false;
+            this.save(image);
+            cleared++;
+        }
+        return cleared;
+    }
+
+    /** 全部已加载图片 ID（`.ai img unmark all` 用） */
+    static loadedImageIds(): string[] {
+        return Object.keys(this.imageMap).filter(id => id && !id.includes(':'));
     }
 
     static resetInlineModelForTest(): void {
@@ -577,10 +736,15 @@ export default class Image {
         return rewriteHostedImageRefs(text, sha => { this.fromHostedId(sha); }).text;
     }
 
+    /** 从 base64（可带 data URI 前缀）解析图片尺寸；失败返回 null */
+    static parseSizeFromBase64(base64: string): { w: number; h: number } | null {
+        return parseImageSizeFromBase64(base64);
+    }
+
     /** 把 Image 转成 OpenAI 兼容的 image_url 内容块；取不到返回 null */
     static async toModelPart(
         image: Image,
-        model?: { baseUrl?: string },
+        model?: { baseUrl?: string; imageLimits?: ImageLimits },
     ): Promise<{ type: 'image_url'; image_url: { url: string } } | null> {
         const src = await image.getModelSrc(model);
         return src ? { type: 'image_url', image_url: { url: src } } : null;

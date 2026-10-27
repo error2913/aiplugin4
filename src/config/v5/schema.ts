@@ -44,6 +44,12 @@ export interface V5Model {
     maxTokens?: number;
     request?: Record<string, unknown>;
     bodyMode?: BodyMode;
+    /**
+     * 视觉输入覆盖（可选）：不同 provider 的图片限制不同。
+     * maxSide = 单边接受上限（px）；targetSide = 交给模型前缩放到的长边（px）。
+     * 缺省时用「图片」页签的全局配置。
+     */
+    image?: { maxSide?: number; targetSide?: number };
 }
 
 export interface V5Provider {
@@ -125,6 +131,18 @@ export function isEligibleKind(use: ModelUse, kind: ModelKind | undefined): bool
     if (use === 'image-generation') return k === 'gen';
     if (use === 'tts') return k === 'tts';
     return k !== 'embed' && k !== 'gen' && k !== 'tts';
+}
+
+/** 校验请求体模板里的 thinking 字段：只接受结构化对象（字符串会被 provider 422 拒绝） */
+function checkThinkingField(path: string, body: unknown): V5Issue | null {
+    if (!isPlainObject(body)) return null;
+    if (!Object.prototype.hasOwnProperty.call(body, 'thinking')) return null;
+    const value = (body as Record<string, unknown>).thinking;
+    if (value === undefined || value === null) return null;
+    if (!isPlainObject(value)) {
+        return { path: `${path}.thinking`, msg: `thinking 需为结构化对象（如 {"type":"enabled"}），不能是 ${JSON.stringify(value)}` };
+    }
+    return null;
 }
 
 /** 校验一份已解析的 v5 配置对象；返回全部问题（空数组 = 通过） */
@@ -220,6 +238,24 @@ export function validateV5Config(raw: unknown): V5Issue[] {
                     if (m.bodyMode !== undefined && m.bodyMode !== 'merge' && m.bodyMode !== 'replace') {
                         push(`${mp}.bodyMode`, `bodyMode ${JSON.stringify(m.bodyMode)} 非法（可选：merge / replace）`);
                     }
+
+                    if (m.image !== undefined) {
+                        if (!isPlainObject(m.image)) {
+                            push(`${mp}.image`, 'image 需为对象（如 {"maxSide":8192,"targetSide":2048}）');
+                        } else {
+                            for (const field of ['maxSide', 'targetSide'] as const) {
+                                const value = (m.image as Record<string, unknown>)[field];
+                                if (value === undefined || value === null) continue;
+                                if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100000 || Math.floor(value) !== value) {
+                                    push(`${mp}.image.${field}`, `${field} 需为 0~100000 的整数（0=交由全局配置/不检查）`);
+                                }
+                            }
+                        }
+                    }
+                    if (m.request && isPlainObject(m.request)) {
+                        const reqBodyIssue = checkThinkingField(`${mp}.request.body`, (m.request as Record<string, unknown>).body);
+                        if (reqBodyIssue) push(reqBodyIssue.path, reqBodyIssue.msg);
+                    }
                 });
             }
         }
@@ -283,6 +319,13 @@ export function validateV5Config(raw: unknown): V5Issue[] {
                             push(`${gp}.purposes[${j}]`, `未知用途 ${JSON.stringify(u)}`);
                         }
                     });
+                }
+                // thinking 只接受结构化对象；字符串（如 "enabled"）会被 provider 422 拒绝
+                const gBodyIssue = checkThinkingField(`${gp}.body`, g.body);
+                if (gBodyIssue) push(gBodyIssue.path, gBodyIssue.msg);
+                if (isPlainObject(g.request)) {
+                    const gReqIssue = checkThinkingField(`${gp}.request.body`, (g.request as Record<string, unknown>).body);
+                    if (gReqIssue) push(gReqIssue.path, gReqIssue.msg);
                 }
             });
         }

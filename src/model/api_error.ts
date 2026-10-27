@@ -12,6 +12,9 @@ export type ApiErrorKind =
     | 'permission'         // 权限不足（403 / 模型未开通 / 免费额度耗尽）
     | 'model_not_found'    // 模型不存在 / 无访问该模型的权限（404/400 特定码）
     | 'content_filter'     // 内容安全拦截（输入/输出命中审查）
+    | 'image_rejected'     // 图片被模型拒绝（超尺寸/无法解码；文案常伪装成“格式不支持”）
+    | 'image_role'         // 图片出现在 API 不允许的角色（assistant/tool/system 消息带图）
+    | 'payload_too_large'  // 请求体过大（413 / 网关 Request Entity Too Large）
     | 'invalid_request'    // 请求体/参数错误（400/422 等）
     | 'server'             // 服务端内部错误（500 等）
     | 'unknown';           // 无法归类
@@ -26,6 +29,9 @@ export const KIND_LABEL: Record<ApiErrorKind, string> = {
     permission: '权限不足',
     model_not_found: '模型不存在',
     content_filter: '内容安全拦截',
+    image_rejected: '图片被模型拒绝',
+    image_role: '图片角色不支持',
+    payload_too_large: '请求体过大',
     invalid_request: '请求参数错误',
     server: '服务端错误',
     unknown: '未知错误'
@@ -180,7 +186,14 @@ export function classifyApiError(providerRaw: string, status: number, rawText: s
     if (status === 403) return 'permission';
     if (type === 'permission_error' || type === 'permission_denied_error' || type === 'access_denied') return 'permission';
 
+    // 请求体过大（413 / 网关 HTML 报错）：必须先于 400 参数错误与图片判定，否则会归 unknown 后静默 giveup
+    if (isPayloadTooLargeFailure(status, message, rawText)) return 'payload_too_large';
+
     // 请求参数错误（400/422 剩余）
+    // 图片被模型拒绝（超尺寸/无法解码）：先于通用参数错误识别，避免整轮静默 giveup 后
+    // 坏图继续留在上下文里每轮复现（见 19-模型图片尺寸上限与图源方案 P0）。
+    if (isImageRoleFailure(message)) return 'image_role';
+    if (isImageRejectedFailure(message)) return 'image_rejected';
     if (status === 400 || status === 422) return 'invalid_request';
 
     // ---- 3) 剩余状态码兜底 ----
@@ -197,6 +210,55 @@ export function classifyApiError(providerRaw: string, status: number, rawText: s
 export function isImageDownloadFailure(message: string): boolean {
     const text = String(message ?? '');
     return /failed to (download|fetch|load) (the )?image|error while downloading|unable to download (the )?image|image (download|fetch) failed|(图片|图像).{0,6}下载失败|下载图片失败/i.test(text);
+}
+
+/**
+ * 模型拒绝图片本身（超尺寸 / 无法解码 / 格式不支持）。
+ *
+ * 注意与 `isImageDownloadFailure` 的区别：下载失败是「图取不到」，这里是「图拿到了但模型不收」。
+ * 常见报文（OpenAI 兼容网关）：
+ *   `You have uploaded an unsupported image. Please make sure your image is valid and has one of the following formats: webp, png, jpeg, and gif.`
+ * 该文案具有误导性——实测 deepseek-flash 对 `data:image/jpg` 放行，但对单边 > 8192 的合法 PNG 报同一句。
+ */
+export function isImageRejectedFailure(message: string): boolean {
+    const text = String(message ?? '');
+    if (isImageDownloadFailure(text)) return false;
+    return /unsupported image|unsupported_image|image format is not supported|InvalidParameter\.UnsupportedImageFormat|invalid image format|image (is )?(invalid|corrupt|too large)/i.test(text);
+}
+
+/**
+ * 图片出现在 API 不允许的角色（assistant/tool/system 消息带图）。
+ * 实测 deepseek-flash 报：`Image in assistant message is not supported`。
+ */
+export function isImageRoleFailure(message: string): boolean {
+    const text = String(message ?? '');
+    return /image(s)? (in|on) (assistant|tool|system) message|image(s)? (are|is) not (allowed|supported) (in|on) (assistant|tool|system)|(assistant|tool|system) message (does not|doesn't) (allow|support) image/i.test(text);
+}
+
+/** 请求体过大（413 / 网关 HTML 报错；openresty 常返回 HTML 而非 JSON） */
+export function isPayloadTooLargeFailure(status: number, message: string, rawText = ''): boolean {
+    if (status === 413) return true;
+    const text = `${message || ''}\n${rawText || ''}`;
+    return /request entity too large|request body too large|payload too large|content[- ]length exceeded|request too large|413/i.test(text)
+        && /413|too large|payload/i.test(text);
+}
+
+/**
+ * 解析模型报文里的图片定位：`.messages[1].image[20]` / `.messages[0]`。
+ *
+ * - `.image[K]` 存在 = 声明类型合法但解码/尺寸校验失败（可精确定位第 K 张图）；
+ * - 只有 `.messages[N]` = 声明 mime 就被拒（无法定位到具体图，调用方降级全部图片）。
+ *
+ * @returns `{ messageIndex, imageIndex }`；无该形态返回 null。
+ */
+export function parseImageErrorPosition(message: string): { messageIndex: number; imageIndex: number | null } | null {
+    const m = /\.?messages\[(\d+)\](?:\.image\[(\d+)\])?/.exec(String(message ?? ''));
+    if (!m) return null;
+    const messageIndex = parseInt(m[1], 10);
+    if (!Number.isFinite(messageIndex)) return null;
+    if (m[2] === undefined) return { messageIndex, imageIndex: null };
+    const imageIndex = parseInt(m[2], 10);
+    return { messageIndex, imageIndex: Number.isFinite(imageIndex) ? imageIndex : null };
 }
 
 /** 上下文/输入超长的 message 判定：跨厂关键词（中英双语），并排除文件大小/参数范围等近义误伤 */

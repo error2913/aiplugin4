@@ -5,13 +5,14 @@ import { getHost } from "../core/host";
 import { setAgentResolver } from "../core/ports/agent_registry";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
-import { ApiError, computeArchiveTarget, isImageDownloadFailure, KIND_LABEL, parseMaxContextTokens } from "../model/api_error";
+import { ApiError, computeArchiveTarget, isImageDownloadFailure, isImageRejectedFailure, KIND_LABEL, parseImageErrorPosition, parseMaxContextTokens, resolveEffectiveMaxTokens } from "../model/api_error";
 import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
-import { rememberProbedContextWindow } from "../model/window_cache";
+import { getProbedContextWindow, rememberProbedContextWindow } from "../model/window_cache";
 import { buildPromptParts, promptPartsToSystemMessage } from "../prompt/builder";
 import type { PromptParts } from "../prompt/types";
 import Image from "../resource/image";
+import { locateRejectedImageRefs } from "../resource/image_model_source";
 import { Session } from "../session/session";
 import { SessionService } from "../session/session_service";
 import { ToolRunner } from "../tool/runner";
@@ -19,7 +20,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { collectImageUrls, handleMessages, RequestMessage, textToMultimodalContent } from "../utils/message";
+import { collectImageUrls, createImageTrace, handleMessages, ImageTraceState, RequestMessage, sanitizeChatMessages, textToMultimodalContent } from "../utils/message";
 import { SYSTEM_NAME } from "../utils/protocol";
 import { revive, TypeDescriptor } from "../utils/revive";
 import { getSessionCtxAndMsg } from "../utils/seal";
@@ -31,6 +32,23 @@ import { collectContextBacklog, compactContextV2 } from "./context_bridge";
 import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
+
+/** run 级错误恢复状态（每类动作限流；见 20 号方案 P0） */
+interface ModelErrorHandled {
+    archived: boolean;
+    switched: boolean;
+    imageDegraded: boolean;
+    /** 本轮已因「图片角色不支持」降级为纯文本 */
+    imageRoleDegraded: boolean;
+    /** 413 恢复阶段：0=未处理，1=已丢图，2=已归档 */
+    payloadTries: number;
+    /** 本轮临时排除的图片（下载失败等，不持久化） */
+    excludeImageIds: Set<string>;
+}
+
+function newModelErrorHandled(): ModelErrorHandled {
+    return { archived: false, switched: false, imageDegraded: false, imageRoleDegraded: false, payloadTries: 0, excludeImageIds: new Set<string>() };
+}
 
 /**
  * 从**有序**候选列表里选下一个备用模型。
@@ -132,7 +150,12 @@ export default class Agent {
             log.warning('[ctx-cost] 记忆结算失败（不影响本轮回复）: ' + (e instanceof Error ? e.message : String(e)));
         }
     }
-    async chat(prompt: string): Promise<string> {
+    /**
+     * 单轮对话（aux LLM / 外部插件）：
+     * **默认不解析图片**（D3）——prompt 里的 [img:ID] 只作为文本保留；
+     * 需要模型看图的调用方显式传 `{ allowImages: true }`。
+     */
+    async chat(prompt: string, opts?: { allowImages?: boolean }): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
         if (!model) return '';
@@ -143,22 +166,29 @@ export default class Agent {
                 content: typeof this.instruction === 'function' ? this.instruction(this.sessionService) : this.instruction
             });
         }
-        messages.push({ role: 'user', content: model.isMultimodal ? await textToMultimodalContent(prompt, { model }) : prompt });
+        const allowImages = opts?.allowImages === true;
+        messages.push({ role: 'user', content: model.isMultimodal && allowImages ? await textToMultimodalContent(prompt, { model, allowImages: true }) : prompt });
         const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model, undefined, { use: this.use });
         return content;
     }
 
-    /** 直接发送自定义 messages（OpenAI 风格数组）到对话模型，返回回复文本；供外部插件构建消息后调用 */
-    async chatMessages(messages: { role: string, content: string }[]): Promise<string> {
+    /**
+     * 直接发送自定义 messages（OpenAI 风格数组）到对话模型，返回回复文本；供外部插件构建消息后调用。
+     * **默认不解析图片**；`allowImages:true` 时 user 文本里的 [img:] 才会变成图片块，
+     * 且非 user 消息里的图片块会被降级为文本（assistant 消息不允许带图）。
+     */
+    async chatMessages(messages: { role: string, content: string }[], opts?: { allowImages?: boolean }): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
         if (!model) return '';
-        const requestMessages: RequestMessage[] = model.isMultimodal
-            ? await Promise.all(messages.map(async m => ({
+        const safeMessages = sanitizeChatMessages(messages as Array<{ role: string; content: unknown }>);
+        const allowImages = opts?.allowImages === true;
+        const requestMessages: RequestMessage[] = model.isMultimodal && allowImages
+            ? await Promise.all(safeMessages.map(async m => ({
                 role: m.role,
-                content: m.role === 'user' ? await textToMultimodalContent(m.content, { model }) : m.content
+                content: m.role === 'user' ? await textToMultimodalContent(m.content, { model, allowImages: true }) : m.content
             })))
-            : messages;
+            : safeMessages.map(m => ({ role: m.role, content: m.content }));
         const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model, undefined, { use: this.use });
         return content;
     }
@@ -253,7 +283,7 @@ export default class Agent {
         const MaxNudge = 2;
 
         // 模型分类错误自动处理的 run 级状态：上下文超长归档 / 自动切模型 / 图片降级各自至多触发一次，避免反复恢复死循环
-        const handled = { archived: false, switched: false, imageDegraded: false };
+        const handled = newModelErrorHandled();
 
         for (let retry = 1; retry <= MaxRetry; retry++) {
             // stop 中止检查点：上一轮工具执行/回调期间被 stop 则不再发下一轮请求
@@ -265,7 +295,8 @@ export default class Agent {
             await session.flushNotices();
             // L2 记忆结算（P1-3）：三条件满足时把窗口外原文总结进长期记忆（有界、失败退避、不阻塞回复）
             await this.settleBacklog(session);
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded, model: Model.getChatModel('chat') || undefined, runtimeText: promptParts.runtime });
+            const imageTrace = createImageTrace();
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded, noImages: handled.imageRoleDegraded || handled.payloadTries > 0, excludeImageIds: handled.excludeImageIds, model: Model.getChatModel('chat') || undefined, runtimeText: promptParts.runtime, trace: imageTrace });
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
             try {
@@ -275,7 +306,7 @@ export default class Agent {
             } catch (e) {
                 if (e instanceof StopError) return;
                 if (!(e instanceof ApiError)) throw e;
-                const action = await this.handleModelError(ctx, session, e, handled, collectImageUrls(messages));
+                const action = await this.handleModelError(ctx, session, e, handled, collectImageUrls(messages), imageTrace);
                 if (action !== 'retry') return;
                 // 已归档/已切模型：重跑一轮（handleMessages 会基于归档后的上下文重建请求体）
                 continue;
@@ -401,14 +432,46 @@ export default class Agent {
         ctx: seal.MsgContext,
         session: Session,
         e: ApiError,
-        handled: { archived: boolean; switched: boolean; imageDegraded: boolean },
-        imageUrls: string[] = []
+        handled: ModelErrorHandled,
+        imageUrls: string[] = [],
+        imageTrace?: ImageTraceState,
     ): Promise<'retry' | 'giveup'> {
         const { ENABLED, CONTEXT_ARCHIVE_RETRY, AUTO_SWITCH_MODEL, SWITCH_KINDS, SWITCH_STRATEGY, SWITCH_NOTIFY } = Config.error;
         const current = Model.getChatModel('chat');
         const modelLabel = e.modelName || current?.name || '';
         const snippet = e.message.length > 200 ? e.message.slice(0, 200) + '…' : e.message;
-        log.error(`[model-error] kind=${e.kind}(${KIND_LABEL[e.kind]}) provider=${e.provider || '?'} model=${modelLabel} status=${e.status} msg=${snippet}`);
+        log.error(`[model-error] kind=${e.kind}(${KIND_LABEL[e.kind]}) provider=${e.provider || '?'} model=${modelLabel} status=${e.status} images=${imageTrace?.entries.length ?? 0} msg=${snippet}`);
+
+        // 动作零：请求体过大（413，含网关 HTML）→ 第一次丢全部图片重发；仍超限则归档后重发。
+        // 必须在图片分支之前：否则丢图后的 413 会被当成普通参数错误静默 giveup（见 20 号方案 P0-C）。
+        if (e.kind === 'payload_too_large' && handled.payloadTries < 2) {
+            if (!ENABLED) return 'giveup';
+            handled.payloadTries++;
+            if (handled.payloadTries === 1) {
+                log.warning('[model-error] 请求体过大（413）：本轮丢掉全部图片后重发');
+                return 'retry';
+            }
+            const budget = Config.context.BUDGET_TOKENS;
+            const effective = resolveEffectiveMaxTokens(budget, getProbedContextWindow(modelLabel));
+            const target = computeArchiveTarget(budget, e.rawText) ?? Math.floor(effective.tokens * 0.8);
+            if (!(target > 0)) return 'giveup';
+            const outcome = await session.context.archiveByTokenIfNeeded(target);
+            if (outcome === 'failed') {
+                log.warning(`[model-error] 请求体过大：归档未完成（目标 ${target} tokens），本轮放弃`);
+                return 'giveup';
+            }
+            log.warning(`[model-error] 请求体仍过大（413）：已归档至 ${target} tokens 后重发（本轮仍不带图片）`);
+            return 'retry';
+        }
+
+        // 动作零之二：图片出现在 API 不允许的角色（assistant/tool/system 消息带图）
+        // 一般是历史/迁移脏数据或外部 chatMessages 触发；本轮改成纯文本重发一次。
+        if (e.kind === 'image_role' && !handled.imageRoleDegraded) {
+            if (!ENABLED) return 'giveup';
+            handled.imageRoleDegraded = true;
+            log.warning('[model-error] 模型不支持非 user 消息携带图片：本轮改为纯文本（含 tool 图）重发');
+            return 'retry';
+        }
 
         // 动作一：上下文超长 → 观察归档（原文进归档分片）→ 自动重发
         if (e.kind === 'context_too_long' && !handled.archived) {
@@ -435,8 +498,11 @@ export default class Agent {
             return 'retry';
         }
 
-        // 动作二：模型无法下载上下文里的图片（QQ 图床直链过期等）→ 标记这些图片为不可用并降级为文本标签后重发。
-        // 排在自动切换模型之前：换模型救不了死链，而重新组包（不再带 image_url）能立刻救回这一轮。
+        // 动作二：图片类拒绝/下载失败。
+        // - 下载失败（QQ 图床直链过期等）：标记这些图片为不可用并降级为文本标签后重发；
+        // - 图片被模型拒绝（超尺寸/无法解码，文案常伪装成“格式不支持”）：用请求图片轨迹精确定位并标记
+        //   `modelUnsafe`（不标 urlBroken：图本身没坏，发图/图库/看图工具照常），本轮改为文本标签重发。
+        // 排在自动切换模型之前：换模型救不了死链/超限图，而重新组包（不再带 image_url）能立刻救回这一轮。
         if (isImageDownloadFailure(e.message) && !handled.imageDegraded) {
             if (!ENABLED || imageUrls.length === 0) return 'giveup';
             handled.imageDegraded = true;
@@ -449,7 +515,28 @@ export default class Agent {
                 log.warning(`[model-error] 模型无法下载上下文图片：已标记 ${res.marked}/${imageUrls.length} 张不可用，本轮改为文本标签重发`);
                 return 'retry';
             }
+            if (res.excludeIds.length > 0) {
+                for (const id of res.excludeIds) handled.excludeImageIds.add(id);
+                log.warning(`[model-error] 模型无法下载图床图片：${res.excludeIds.length} 张无法内联（超预算/取不到），本轮临时改为文本标签重发`);
+                return 'retry';
+            }
             return 'giveup';
+        }
+        if (isImageRejectedFailure(e.message) && !handled.imageDegraded && Config.image.IMAGE_DEGRADE_ENABLED) {
+            handled.imageDegraded = true;
+            const refs = locateRejectedImageRefs(e.message, imageTrace?.entries);
+            const marked = refs.length > 0 ? Image.markModelUnsafe(refs) : 0;
+            const pos = parseImageErrorPosition(e.message);
+            log.warning(`[model-error] 图片被模型拒绝：定位 ${refs.length} 张（message=${pos ? pos.messageIndex : '?'}，image=${pos && pos.imageIndex !== null ? pos.imageIndex : '?'}），标记 ${marked} 张为「模型不可用」，本轮改为文本标签重发`);
+            if (refs.length === 0) return 'giveup';
+            if (Config.image.IMAGE_DEGRADE_NOTICE && (ctx as any).notice) {
+                try {
+                    (ctx as any).notice(`有 ${refs.length} 张图片模型无法识别（超尺寸/格式不支持），已改为文字占位；如需恢复可用 .ai img unmark <图片ID>`);
+                } catch (noticeErr) {
+                    log.warning(`[model-error] 图片降级通知发送失败: ${noticeErr instanceof Error ? noticeErr.message : String(noticeErr)}`);
+                }
+            }
+            return 'retry';
         }
 
         // 动作三：余额不足/权限不足等（按「自动切换触发错误」配置）→ 切备用 chat 模型 → 自动重发
@@ -488,7 +575,7 @@ export default class Agent {
     async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
         const version = session.stopVersion;
         // 模型分类错误自动处理的 run 级状态（runInternal 同款：每类动作单次 run 至多一次）
-        const handled = { archived: false, switched: false, imageDegraded: false };
+        const handled = newModelErrorHandled();
         // 同会话闸门：已有 run/runStream 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
         if (session.running || session.starting) return;
         session.starting = true;
@@ -534,13 +621,13 @@ export default class Agent {
         ctx: seal.MsgContext,
         msg: seal.Message,
         promptParts?: PromptParts,
-        handled?: { archived: boolean; switched: boolean; imageDegraded: boolean }
+        handled?: ModelErrorHandled
     ): Promise<void> {
         const { STATUS, PROMPT_ENGINEERING } = Config.tool;
         const modelName = Model.getChatModel('chat')?.name || '';
         const trace = new AgentRunContext();
         const version = session.stopVersion;
-        const h = handled ?? { archived: false, switched: false, imageDegraded: false };
+        const h = handled ?? newModelErrorHandled();
 
         await session.stopCurrentChatStream();
         // 挂起消息入库：上一轮工具回调已写入上下文，此时插入位置合法（修复工具链中插入 user 导致 tool 失配的问题）
@@ -555,9 +642,12 @@ export default class Agent {
         const systemMessage = promptPartsToSystemMessage(parts);
         let id = '';
         let requestImages: string[] = [];
+        let lastTrace: ImageTraceState | undefined;
         for (let attempt = 0; attempt <= 1; attempt++) {
             try {
-                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, systemMessage, modelName, { imagesAsText: h.imageDegraded, model: Model.getChatModel('chat') || undefined, runtimeText: parts.runtime });
+                const imageTrace = createImageTrace();
+                lastTrace = imageTrace;
+                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, systemMessage, modelName, { imagesAsText: h.imageDegraded, noImages: h.imageRoleDegraded || h.payloadTries > 0, excludeImageIds: h.excludeImageIds, model: Model.getChatModel('chat') || undefined, runtimeText: parts.runtime, trace: imageTrace });
                 requestImages = collectImageUrls(messages);
                 const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
                 if (!newId) return;
@@ -575,7 +665,7 @@ export default class Agent {
                     log.exception('runStreamInner startStream', e);
                     return;
                 }
-                const action = await this.handleModelError(ctx, session, e, h, requestImages);
+                const action = await this.handleModelError(ctx, session, e, h, requestImages, lastTrace);
                 if (action !== 'retry') return;
                 // 自动处理已生效：进入下一轮重建（归档后上下文已收敛 / 已切备用模型 / 图片已降级为文本标签）
             }

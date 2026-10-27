@@ -6,6 +6,7 @@
 import type { Part } from "../events";
 
 import { ParseMode, sanitizeTagValue } from "./descriptors";
+import { renderPartText } from "./render";
 import { parseText } from "./text_parse";
 
 /** 旧版 ToolContentPart（OpenAI 多模态内容块） */
@@ -57,6 +58,8 @@ export interface ToolResultNormalizeOptions {
     allowImageRefs?: boolean;
     /** 未登记 base64 时是否保留「未入库」说明文本（默认 true，保证信息不丢） */
     noteUnregisteredMedia?: boolean;
+    /** 单条工具结果最多升格多少张图片（<=0 = 不限；超出保留 [img:] 文本）。 */
+    maxMedia?: number;
     ingest?: ToolResultIngest;
 }
 
@@ -90,8 +93,9 @@ const MEDIA_TAG_RE = /[\[［]img[:：][^\]］]+[\]］]/g;
  * 工具返回文本按 external 解析后，把其中的 `[img:…]` 显式允许为媒体 part。
  * 其余可发送标签（at/poke/quote/face）保持字面量文本，防止外部数据诱导发送。
  */
-function upgradeImageRefs(parts: Part[]): Part[] {
+function upgradeImageRefs(parts: Part[], maxMedia = 0): Part[] {
     const out: Part[] = [];
+    let upgraded = 0;
     for (const part of parts) {
         if (part.type !== 'text') {
             out.push(part);
@@ -105,8 +109,12 @@ function upgradeImageRefs(parts: Part[]): Part[] {
             if (match.index > cursor) pushText(out, source.slice(cursor, match.index));
             const parsed = parseText(match[0], 'model-output');
             const media = parsed.find(p => p.type === 'image' || p.type === 'avatar' || p.type === 'group_avatar');
-            if (media) {
+            if (media && (maxMedia <= 0 || upgraded < maxMedia)) {
                 out.push(media);
+                upgraded++;
+            } else if (media) {
+                // 超过本条第数上限：保留字面量文本（[img:ref] 仍可被模型/工具后续引用）
+                pushText(out, match[0]);
             } else {
                 // 解析失败：保持字面量（转义投影时不会被当标签）
                 pushText(out, match[0]);
@@ -118,11 +126,11 @@ function upgradeImageRefs(parts: Part[]): Part[] {
     return out;
 }
 
-function textParts(text: string | undefined, mode: ParseMode, opts: Required<Pick<ToolResultNormalizeOptions, 'allowImageRefs'>>): Part[] {
+function textParts(text: string | undefined, mode: ParseMode, opts: { allowImageRefs: boolean; maxMedia?: number }): Part[] {
     const source = String(text ?? '');
     if (!source) return [];
     const parsed = parseText(source, mode);
-    return opts.allowImageRefs ? upgradeImageRefs(parsed) : parsed;
+    return opts.allowImageRefs ? upgradeImageRefs(parsed, opts.maxMedia ?? 0) : parsed;
 }
 
 function registeredImagePart(
@@ -171,7 +179,7 @@ function registeredMediaPart(
 function normalizeLegacyPart(part: LegacyToolContentPart, index: number, opts: ToolResultNormalizeOptions): Part[] {
     if (!part || typeof part.type !== 'string') return [];
     if (part.type === 'text') {
-        return textParts(part.text, 'external', { allowImageRefs: opts.allowImageRefs ?? DEFAULT_OPTIONS.allowImageRefs });
+        return textParts(part.text, 'external', { allowImageRefs: opts.allowImageRefs ?? DEFAULT_OPTIONS.allowImageRefs, maxMedia: opts.maxMedia });
     }
     if (part.type === 'image_url') {
         return registeredImagePart(
@@ -194,7 +202,7 @@ function normalizeMcpBlock(block: unknown, index: number, opts: ToolResultNormal
     const note = opts.noteUnregisteredMedia ?? DEFAULT_OPTIONS.noteUnregisteredMedia;
     switch (type) {
         case 'text': {
-            return textParts(value.text, 'external', { allowImageRefs });
+            return textParts(value.text, 'external', { allowImageRefs, maxMedia: opts.maxMedia });
         }
         case 'image': {
             return registeredImagePart(
@@ -229,7 +237,7 @@ function normalizeMcpBlock(block: unknown, index: number, opts: ToolResultNormal
             const uri = sanitizeTagValue(registered?.uri || resource.uri);
             const name = sanitizeTagValue(registered?.name || resource.name || value.name);
             const mime = sanitizeTagValue(registered?.mime || resource.mimeType || value.mimeType);
-            if (resource.text) parts.push(...textParts(resource.text, 'external', { allowImageRefs }));
+            if (resource.text) parts.push(...textParts(resource.text, 'external', { allowImageRefs, maxMedia: opts.maxMedia }));
             if (uri) {
                 const part: Part = { type: 'resource', uri };
                 if (name) part.name = name;
@@ -296,7 +304,7 @@ export function normalizeToolResult(input: ToolResultInput | string | undefined 
         }
         out.push(part);
     };
-    for (const part of textParts(value.text, 'external', { allowImageRefs: opts.allowImageRefs ?? DEFAULT_OPTIONS.allowImageRefs })) {
+    for (const part of textParts(value.text, 'external', { allowImageRefs: opts.allowImageRefs ?? DEFAULT_OPTIONS.allowImageRefs, maxMedia: opts.maxMedia })) {
         pushUnique(part);
     }
     for (const part of normalizeLegacyContentParts(value.contentParts, opts)) pushUnique(part);
@@ -305,7 +313,22 @@ export function normalizeToolResult(input: ToolResultInput | string | undefined 
         const text = jsonOf(value.structuredContent);
         if (text) pushUnique({ type: 'text', text });
     }
-    return out;
+    // 最终统一图片计数：文本升格的 [img:]、MCP 原生 image block、旧 contentParts 图片都计入
+    return capMediaParts(out, opts.maxMedia ?? 0);
+}
+
+/**
+ * 单条工具结果最多保留 N 张媒体 part（其它来源可能绕过文本升格上限，这里统一兜底）。
+ * 超出的图用规范文本标签（`[img:ID]` 等）保留信息，不丢。
+ */
+function capMediaParts(parts: Part[], maxMedia: number): Part[] {
+    if (!maxMedia || maxMedia <= 0) return parts;
+    let count = 0;
+    return parts.map(part => {
+        if (part.type !== 'image' && part.type !== 'avatar' && part.type !== 'group_avatar') return part;
+        count++;
+        return count > maxMedia ? ({ type: 'text', text: renderPartText(part) } as Part) : part;
+    });
 }
 
 /** 对外暴露：把某段工具文本按 external 策略解析（可发送标签保持字面量文本） */
