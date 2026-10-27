@@ -21,6 +21,8 @@ export interface PromptFlags {
     directionPrompt: boolean;
     /** 「接收图片」 */
     receiveImage: boolean;
+    /** 「额外消息分隔符」提示词展示写法（模板非空项；空 = 仅内置 \f） */
+    extraSeparator: string[];
     /** 图床或 MCP 启用（图片与图库段） */
     imageLibrary: boolean;
     /** 记忆总开关 */

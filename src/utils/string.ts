@@ -10,6 +10,7 @@ import { handleImageMessageSegment } from "../resource/image_inbound";
 import { getLocalAudios } from "../resource/local_paths";
 
 import { getMilkyReplyQuoteId, transformMsgId, transformMsgIdBack } from "./message_id";
+import { messageSeparatorSplitPattern } from "./message_separator";
 import { resolveLocalPath } from "./path";
 import { decodeEscapedNewlines, normalizeRenderTags, parseSpecialTokens, stripInternalTags, stripUserTags } from "./render_tags";
 import { registerSpecialResource } from "./special_id";
@@ -578,7 +579,7 @@ export async function handleReply(ctx: seal.MsgContext, msg: seal.Message, sessi
     s = stripInternalTags(s);
 
     // 模型有时会输出字面量 \n / \r\n；在分段前还原为真实换行。
-    // \f 不在这里处理，仍作为多消息分隔符交给 filterString。
+    // 多消息分隔符不在这里处理，仍交给 filterString 按配置拆分。
     s = decodeEscapedNewlines(s);
 
     // 分离回复消息和戳一戳消息
@@ -673,16 +674,22 @@ function getReplyFilters() {
 }
 
 function filterString(s: string): { contextArray: string[], replyArray: string[] } {
-    const { MAX_CHARS: maxChar } = Config.reply;
+    const { MAX_CHARS: maxChar, EXTRA_SEPARATOR: extraSeparators } = Config.reply;
+
+    // 多消息拆分：内置 \f 始终可拆，另按模板配置追加额外分隔符（真实字符/反斜杠字面量）
+    const sepPattern = messageSeparatorSplitPattern(extraSeparators);
+    const sepSplitRe = new RegExp(`(?:${sepPattern})`, 'g');
+    const sepStartRe = new RegExp(`^(?:${sepPattern})`);
+    const sepEndRe = new RegExp(`(?:${sepPattern})$`);
 
     const contextArray: string[] = [];
     const replyArray: string[] = [];
     let replyLength = 0; //只计算未被匹配的部分
-    let newMessagePending = false; // 遇到裸 \f / 尾部 \f 时置位，下一段非空内容开新消息，避免产生空消息
+    let newMessagePending = false; // 遇到裸分隔符 / 尾部分隔符时置位，下一段非空内容开新消息，避免产生空消息
 
     const filters = getReplyFilters();
 
-    // 应用过滤正则表达式，并按照\f分割消息
+    // 应用过滤正则表达式，并按内置 \f + 配置的额外分隔符分割消息
     const segments = advancedSplit(s, REPLY_FILTER_REGEX).filter(Boolean);
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
@@ -713,9 +720,9 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
         }
 
         if (!isMatched) {
-            const segs = segment.split(/\\f|\f/g).filter(item => item);
-            const startsWithF = segment.startsWith('\\f') || segment.startsWith('\f');
-            const endsWithF = segment.endsWith('\\f') || segment.endsWith('\f');
+            const segs = segment.split(sepSplitRe).filter(item => item);
+            const startsWithSep = sepStartRe.test(segment);
+            const endsWithSep = sepEndRe.test(segment);
 
             for (let j = 0; j < segs.length; j++) {
                 let seg = segs[j];
@@ -725,8 +732,8 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
                     seg = seg.slice(0, maxChar - replyLength);
                 }
 
-                // 前面有分隔符、本段内已出现过 \f、或段首就是 \f 时，当前 seg 应开启新消息
-                if (newMessagePending || contextArray.length === 0 || j !== 0 || (startsWithF && j === 0)) {
+                // 前面有分隔符、本段内已出现过分隔符、或段首就是分隔符时，当前 seg 应开启新消息
+                if (newMessagePending || contextArray.length === 0 || j !== 0 || (startsWithSep && j === 0)) {
                     contextArray.push(seg);
                     replyArray.push(seg);
                 } else {
@@ -743,7 +750,7 @@ function filterString(s: string): { contextArray: string[], replyArray: string[]
             }
 
             // 段尾是分隔符，或整个段就是分隔符时，让下一段内容另起一条消息
-            if (endsWithF || (segs.length === 0 && (startsWithF || endsWithF))) {
+            if (endsWithSep || (segs.length === 0 && (startsWithSep || endsWithSep))) {
                 newMessagePending = true;
             }
         }

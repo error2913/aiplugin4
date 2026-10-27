@@ -9,6 +9,7 @@ import type { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
 import { toolMap } from "../tool/registry";
 import Tool from "../tool/tool";
+import { extraSeparatorLabels } from "../utils/message_separator";
 import { getRoleSetting } from "../utils/role";
 import { stripInternalTags } from "../utils/string";
 import { platformOf } from "../utils/target_id";
@@ -51,11 +52,13 @@ function collectMemoryInput(ctx: seal.MsgContext, session: Session): {
 function readFlags(): PromptFlags {
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
+    const { EXTRA_SEPARATOR } = Config.reply;
     return {
         status: !!STATUS,
         promptEngineering: !!PROMPT_ENGINEERING,
         directionPrompt: !!DIRECTION_PROMPT,
         receiveImage: !!RECEIVE_IMAGE,
+        extraSeparator: extraSeparatorLabels(EXTRA_SEPARATOR),
         imageLibrary: !!(ImageHost.enabled || Config.mcp.MCP_ENABLED),
         memory: !!((Config.memory as any).MEMORY_ENABLED ?? Config.memory.MEMORY),
         knowledge: !!Config.knowledgeBase.KNOWLEDGE,

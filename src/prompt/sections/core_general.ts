@@ -45,8 +45,8 @@ export function registerCoreGeneralSections(): PromptSection[] {
             name: 'core:markers',
             order: 100,
             channel: 'system',
-            cache: { deps: c => [c.flags.receiveImage] },
-            build: c => markersSection(c.flags.receiveImage),
+            cache: { deps: c => [c.flags.receiveImage, c.flags.extraSeparator.join('|')] },
+            build: c => markersSection(c.flags.receiveImage, c.flags.extraSeparator),
         },
         {
             name: 'core:images',

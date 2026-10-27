@@ -1126,6 +1126,41 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     },
 
+    /** 额外消息分隔符（模板）：内置 \f 始终可拆，模板每框一条追加；真实字符与转义字面量都拆分 */
+    async testExtraMessageSeparator(): Promise<void> {
+        const ctx = { endPoint: { userId: 'QQ:10000' }, group: { groupId: 'g' }, player: { userId: 'QQ:20000', name: 'u' } } as any;
+        const msg = { rawId: '124', messageType: 'group' } as any;
+        const session = { context: { findImage: async () => null } } as any;
+        const saved = TC.templateConfigs['额外消息分隔符'];
+        try {
+            TC.templateConfigs['额外消息分隔符'] = ['\\n\\n'];
+            resetConfigCache();
+            const blankReal = await handleReply(ctx, msg, session, '第一条\n\n第二条');
+            assert.deepEqual(blankReal.contextArray, ['第一条', '第二条'], '空行额外分隔符应拆成两条消息');
+            const blankLiteral = await handleReply(ctx, msg, session, '第一条\\n\\n第二条');
+            assert.deepEqual(blankLiteral.contextArray, ['第一条', '第二条'], '空行转义字面量应拆成两条消息');
+            const builtin = await handleReply(ctx, msg, session, '第一条\f第二条');
+            assert.deepEqual(builtin.contextArray, ['第一条', '第二条'], '内置 \\f 在追加额外分隔符后仍应可拆');
+
+            TC.templateConfigs['额外消息分隔符'] = ['\\n\\n', '\\n'];
+            resetConfigCache();
+            const lineReal = await handleReply(ctx, msg, session, '第一条\n第二条');
+            assert.deepEqual(lineReal.contextArray, ['第一条', '第二条'], '换行额外分隔符应把每行拆成一条消息');
+            const both = await handleReply(ctx, msg, session, '第一条\n\n第二条\n第三条');
+            assert.deepEqual(both.contextArray, ['第一条', '第二条', '第三条'], '同一模板里多个额外分隔符都应生效');
+
+            const prompt = markersSection(true, ['\\n\\n', '\\n']);
+            assert.ok(prompt.includes('`\\f` separates multiple messages'), '提示词应始终说明内置 \\f 分隔');
+            assert.ok(prompt.includes('`\\n\\n` also separates multiple messages'), '提示词应追加说明空行分隔符');
+            assert.ok(prompt.includes('`\\n` also separates multiple messages'), '提示词应追加说明换行分隔符');
+            assert.ok(!markersSection(true).includes('also separates multiple messages'), '未配置额外分隔符时提示词不应追加说明');
+        } finally {
+            if (saved === undefined) delete TC.templateConfigs['额外消息分隔符'];
+            else TC.templateConfigs['额外消息分隔符'] = saved;
+            resetConfigCache();
+        }
+    },
+
     /** 宽容 JSON 解析：代码块围栏/前后缀文本都应能提取；垃圾输入返回 null */
     testParseLooseJson(): void {
         assert.deepEqual(parseLooseJson('```json\n{"a":1}\n```'), { a: 1 }, '应剥离 markdown 围栏');

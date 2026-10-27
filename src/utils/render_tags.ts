@@ -12,7 +12,7 @@ const RENDER_TAG_CONTENT = '[^|｜>＞]+?';
 const RENDER_TAG_CLOSE = '(?:[\\|│｜][>＞]|[\\|│｜>＞])';
 
 /** 将模型常见的字面量换行转义（\n / \r\n）还原为真实换行。
- * 注意：不处理 \f；\f 仍由回复过滤器作为多消息分隔符处理。 */
+ * 注意：不处理 \f；\f 是内置多消息分隔符/内部消息边界，另可由「额外消息分隔符」配置追加分隔符。 */
 export function decodeEscapedNewlines(s: string): string {
     return s
         .replace(/\\r\\n/g, '\n')
