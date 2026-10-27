@@ -38,6 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # prepare-sealpack.js 会把 dist/aiplugin4.js 复制为 sealpack/scripts/main.js，
+      # 因此校验前必须先构建（check job 在独立 runner，产物不共享）。
+      - name: Build bundle
+        run: npm run build
+
       - name: Verify tag, version and changelog
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
