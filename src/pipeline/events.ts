@@ -1,9 +1,12 @@
-// 事件分发（叶子）：ob11 通知/请求事件与原生通知事件 → 事件提示词入库（白名单 → 待机 → 去重 → 录入上下文）。
+// 事件分发（叶子）：ob11 通知/请求事件与原生通知事件 → 事件提示词入库（白名单 → 待机 → 去重 → 录入上下文），
+// 并在录制成功后按「事件触发规则」决定是否触发 AI（忙时由 pendingQueue 挂起，轮末由既有 resumePending 续跑）。
 // 从 pipeline.ts 拆出——事件处理只依赖 notice 工具、黑名单、会话与去重表，与消息触发/命令管线解耦；
 // pipeline.ts 保留同名静态方法委派（MessagePipeline.handleOb11*Event 外部调用零改动）。
 import { BlockManager } from "../block";
 import Config from "../config/config";
-import { buildEventDedupExtra, buildEventDedupKey, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isOb11EventPayload, isSelfCoveredNoticeEvent, parseNoticeWhitelist } from "../event/notice";
+import { buildEventDedupKeyFor, buildNativeNoticeText, buildNoticeText, buildRequestText, isDuplicateEvent, isNoticeInWhitelist, isSelfCoveredNoticeEvent, parseNoticeWhitelist } from "../event/notice";
+import { eventTypeOfNotice, eventTypeOfRequest } from "../event/trigger";
+import type { EventView } from "../event/trigger";
 import { logger } from "../logger";
 import { getSession } from "../session/session_service";
 import { normalizeMsgId } from "../utils/message_id";
@@ -12,8 +15,37 @@ import { getPlatform } from "../utils/target_id";
 
 import { getEventEntryRef, rememberEventEntryRef } from "./dedup";
 import { resolveEndpointId } from "./endpoint";
+import { maybeTriggerEvent } from "./event_trigger";
 
 const log = logger.withTag('pipeline');
+
+/** 事件触发视图基础字段（各来源补充自己的类型字段） */
+function baseView(epId: string, prefix: string, sid: string, isPrivate: boolean, text: string): EventView {
+    return {
+        source: 'notice',
+        postType: 'notice',
+        eventType: '',
+        noticeType: '',
+        requestType: '',
+        subType: '',
+        userId: '',
+        operatorId: '',
+        groupId: '',
+        messageId: '',
+        targetId: '',
+        isTargetBot: false,
+        epId,
+        platform: prefix,
+        botId: epId,
+        sid,
+        isPrivate,
+        eventText: text,
+        flag: '',
+        comment: '',
+        receivedAt: Date.now(),
+    };
+}
+
     /** ob11 依赖通知事件（OneBot notice）→ 文本提示词录入上下文：仅白名单内类型，仅作背景不触发 AI */
 export async function handleOb11NoticeEvent(event: any): Promise<void> {
         if (!event || event.post_type !== 'notice' || !event.notice_type) return;
@@ -68,7 +100,20 @@ export async function handleOb11NoticeEvent(event: any): Promise<void> {
         const userId = eventUserId ? `${prefix}:${eventUserId}` : '';
         // 与原生撤回路径共用同一 messageId 归一（十进制转 base36），保证双路径去重 key 一致
         const messageId = normalizeMsgId(event.message_id);
-        await recordEventPrompt({
+        const eventType = eventTypeOfNotice(noticeType, subType);
+        const dedupKey = buildEventDedupKeyFor(epId, sid, eventType, userId, messageId, event);
+        const view: EventView = {
+            ...baseView(epId, prefix, sid, !isGroup, text),
+            eventType,
+            noticeType,
+            subType,
+            userId,
+            operatorId: event.operator_id ? `${prefix}:${event.operator_id}` : '',
+            groupId: isGroup ? `${prefix}-Group:${event.group_id}` : '',
+            messageId,
+            raw: event,
+        };
+        const recorded = await recordEventPrompt({
             sid,
             text,
             systemName: SYSTEM_NAME.groupEvent,
@@ -76,8 +121,10 @@ export async function handleOb11NoticeEvent(event: any): Promise<void> {
             eventType: noticeType,
             userId,
             messageId,
+            dedupKey,
             raw: event,
         });
+        if (recorded) await maybeTriggerEvent(view, dedupKey);
     }
 
     /** ob11 依赖请求事件（OneBot request）→ 文本提示词：白名单含对应类型时录入，仅作背景不触发 AI */
@@ -122,16 +169,34 @@ export async function handleOb11RequestEvent(event: any): Promise<void> {
         if (!text) return;
 
         const userId = event.user_id ? `${prefix}:${event.user_id}` : '';
-        await recordEventPrompt({
+        const eventType = eventTypeOfRequest(requestType);
+        const dedupKey = buildEventDedupKeyFor(epId, sid, eventType, userId, '', event);
+        const view: EventView = {
+            ...baseView(epId, prefix, sid, requestType === 'friend', text),
+            source: 'request',
+            postType: 'request',
+            eventType,
+            requestType,
+            subType: String(event.sub_type || ''),
+            userId,
+            operatorId: event.operator_id ? `${prefix}:${event.operator_id}` : '',
+            groupId: event.group_id ? `${prefix}-Group:${event.group_id}` : '',
+            flag: String(event.flag ?? ''),
+            comment: String(event.comment ?? ''),
+            raw: event,
+        };
+        const recorded = await recordEventPrompt({
             sid,
             text,
             systemName: SYSTEM_NAME.requestEvent,
             epId,
-            eventType: `${requestType}_request`,
+            eventType,
             userId,
             messageId: '',
+            dedupKey,
             raw: event,
         });
+        if (recorded) await maybeTriggerEvent(view, dedupKey);
     }
 
     /** 原生海豹回调事件（成员加入/退出/撤回/加好友/入驻）：白名单含对应类型时录入，与 ob11 依赖双路径共用去重 */
@@ -142,16 +207,35 @@ export async function handleNativeNoticeEvent(epId: string, sid: string, info: {
         if (!whitelist.has(info.noticeType)) return;
         const text = buildNativeNoticeText(info);
         if (!text) return;
-        await recordEventPrompt({
+        const eventType = info.noticeType;
+        const userId = info.userId || '';
+        const messageId = info.messageId || '';
+        const dedupKey = buildEventDedupKeyFor(epId, sid, eventType, userId, messageId, info);
+        const isPrivate = !sid.includes('-Group:');
+        const prefix = getPlatform(epId);
+        const view: EventView = {
+            ...baseView(epId, prefix, sid, isPrivate, text),
+            eventType,
+            noticeType: info.noticeType,
+            subType: info.subType || '',
+            userId,
+            operatorId: info.operatorId || '',
+            groupId: isPrivate ? '' : sid,
+            messageId,
+            raw: info,
+        };
+        const recorded = await recordEventPrompt({
             sid,
             text,
             systemName: SYSTEM_NAME.groupEvent,
             epId,
-            eventType: info.noticeType,
-            userId: info.userId || '',
-            messageId: info.messageId || '',
+            eventType,
+            userId,
+            messageId,
+            dedupKey,
             raw: info,
         });
+        if (recorded) await maybeTriggerEvent(view, dedupKey);
     }
 
     /** 事件提示词统一入库：黑名单 → 待机 → 去重 → 纯代码兜底 → 录入上下文（仅背景，不触发 AI） */
@@ -163,8 +247,8 @@ async function recordEventPrompt(opts: {
         eventType: string;
         userId: string;
         messageId?: string;
-        /** 显式内容指纹覆盖（一般不需要：ob11 原始事件载荷会自动在 raw 上计算整包指纹） */
-        dedupExtra?: string;
+        /** 去重 key（调用方按同一口径预先算好，录制与触发共用） */
+        dedupKey: string;
         raw?: unknown;
     }): Promise<boolean> {
         const blockReason = BlockManager.checkBlock(opts.sid);
@@ -185,20 +269,14 @@ async function recordEventPrompt(opts: {
             log.debug(`事件忽略：会话<${opts.sid}>未开启待机，不录入事件`);
             return false;
         }
-        // ob11 原始事件载荷自动算整包内容指纹做去重细分（含请求类与任意未来/自定义类型）；
-        // 原生回调路径的 raw 是 info 摘要（非 ob11 载荷），不会误算，保持跨路径 key 一致。
-        const dedupExtra = opts.dedupExtra !== undefined
-            ? opts.dedupExtra
-            : isOb11EventPayload(opts.raw) ? buildEventDedupExtra(opts.raw) : '';
         // 事件提示词不再走压缩智能体：文本由纯代码按模板从事件 JSON 生成，通常很短；
         // 此处仅做纯代码兜底（超 2000 字 head 截断），完整原始数据仍挂在条目 raw 上，可用 read_raw kind=event 查看
         const text = opts.text.length > 2000 ? opts.text.slice(0, 2000) : opts.text;
         const entryExtra = { eventType: opts.eventType, raw: opts.raw };
-        const dedupKey = buildEventDedupKey(opts.epId, opts.sid, opts.eventType, opts.userId, opts.messageId || '', dedupExtra);
-        if (isDuplicateEvent(dedupKey)) {
+        if (isDuplicateEvent(opts.dedupKey)) {
             // 去重命中（echo / 双路径 / 指纹无法区分的兜底情况）：不丢弃后到副本，
             // 以"最后到达的事件"作为唯一事件——就地替换先前已入库的旧副本（保留原位置与顺序）。
-            const ref = getEventEntryRef(dedupKey);
+            const ref = getEventEntryRef(opts.dedupKey);
             let replaced = false;
             if (ref) {
                 replaced = session.context.replaceSystemUserMessage(ref, text, opts.systemName, entryExtra);
@@ -207,14 +285,14 @@ async function recordEventPrompt(opts: {
                 // 旧条目已被合并压缩/归档改写或引用丢失：改为追加新副本兜底，避免事件内容彻底丢失
                 log.debug(`事件去重命中但旧条目不可替换，追加新副本：${opts.eventType} @ ${opts.sid}`);
                 const newRef = session.context.addSystemUserMessageTracked(text, opts.systemName, entryExtra);
-                if (newRef) rememberEventEntryRef(dedupKey, newRef);
+                if (newRef) rememberEventEntryRef(opts.dedupKey, newRef);
             }
             session.save(true);   // 合并写：事件是高频入库路径
             log.debug(`事件去重合并（保留最后到达）：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
             return true;
         }
         const entryRef = session.context.addSystemUserMessageTracked(text, opts.systemName, entryExtra);
-        if (entryRef) rememberEventEntryRef(dedupKey, entryRef);
+        if (entryRef) rememberEventEntryRef(opts.dedupKey, entryRef);
         session.save(true);   // 合并写：事件是高频入库路径
         log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
         return true;

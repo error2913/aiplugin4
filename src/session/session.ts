@@ -353,8 +353,8 @@ export class Session {
     }
 
     /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
-    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string) {
-        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason);
+    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string) {
+        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason, systemName);
     }
 
     /** 取出并清空挂起队列 */

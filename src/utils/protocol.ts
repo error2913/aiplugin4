@@ -141,6 +141,8 @@ export const SYSTEM_NAME = {
     condensedHistory: 'condensed-history',
     /** 迁移保留 */
     preserved: 'preserved',
+    /** 事件触发提示 */
+    eventTrigger: 'event-trigger',
     /** 事件缺省兜底 */
     event: 'event',
 } as const;

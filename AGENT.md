@@ -49,7 +49,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 - `src/memory/`：`manager.ts` 门面、知识库 `knowledge_*.ts`、v2 引擎（`engine.ts` + `scoring`/`consolidation`/`mental_models`/`reflection`/`repository`/`storage`/`prompt`/`templates`/`migrate`）。
 - `src/resource/`：`image.ts`（实体/注册表）、`image_url`/`image_inbound`/`image_text`/`image_transfer`/`image_health`（纯逻辑叶子）、`image_host`（图床客户端）、`image_index`/`image_gc`（索引与清理）、`image_ref`（CIR v1）、`local_paths`/`local_images`（本地资源）。
 - `src/config/`：`config.ts` 总线（20 个分组，60s 缓存）、`configs/*` 只解析、`apply/*` + `hooks.ts` 应用、`ext.ts` 宿主句柄叶子、`v5/`（模型配置 schema/adapt/vendor/default）、`domain/`（角色/技能/MCP/知识库 JSON + `default_data.ts` 生成物）、`static_config/`（常量）。
-- `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 27 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
+- `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 27 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本、`src/event/trigger.ts` 事件触发规则、`src/pipeline/event_trigger.ts` 事件触发编排；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
 - `src/utils/`：通用工具已拆叶子——`message_id`/`path`/`alias`/`similarity`/`id`/`revive`/`timeout`/`json`/`render_tags`/`raw_marker`/`special_id`/`target_id`/`url`/`concurrency`/`backend`/`markdown`/`resource` 等；`utils.ts` 只剩 `replyToSender` 等聚合入口，新代码直接 import 对应叶子。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 03 模块 / 04 工具 / 05 命令配置 / 06 存储 / 07 开发指南 / 08 后端 / 09 常见问题 / 10 TODO / 11 核心桥 / 13 记忆系统）。`*-方案.md` 等设计稿统一放 `.dev/docs-archive/`，不随仓库分发。
 - `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）；`examples/use-aiplugin4.js`：外部插件调用 API 示例。

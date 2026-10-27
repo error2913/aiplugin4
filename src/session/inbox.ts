@@ -22,7 +22,7 @@ export async function handleReceipt(session: Session, ctx: seal.MsgContext, msg:
 }
 
 /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
-export async function deferReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string): Promise<void> {
+export async function deferReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string): Promise<void> {
     session.lastCtx = ctx;
     const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
     session.pendingQueue.push({
@@ -33,6 +33,7 @@ export async function deferReceipt(session: Session, ctx: seal.MsgContext, msg: 
         messageId: getRecordMessageId(ctx, msg),
         kind,
         systemReason,
+        systemName,
         epId: ctx.endPoint.userId,
         isPrivate: ctx.isPrivate,
     });
@@ -52,8 +53,9 @@ export async function flushPending(session: Session): Promise<boolean> {
     let hasTrigger = false;
     for (const p of pending) {
         if (p.kind === 'trigger') hasTrigger = true;
-        await session.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
-        if (p.systemReason) await session.context.addSystemUserMessage(p.systemReason, SYSTEM_NAME.trigger);
+        // 事件触发挂起没有用户消息内容，只写触发系统提示（避免产生空 user 事件）
+        if (p.content) await session.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
+        if (p.systemReason) await session.context.addSystemUserMessage(p.systemReason, p.systemName || SYSTEM_NAME.trigger);
     }
     session.save();
     session.clearPending();

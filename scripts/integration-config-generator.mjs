@@ -51,6 +51,7 @@ fs.writeFileSync(entryFile, [
     `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/domain/parse.ts'))};`,
     `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/domain/defaults.ts'))};`,
     `export * from ${JSON.stringify(path.join(repoRoot, 'src/config/domain/types.ts'))};`,
+    `export * from ${JSON.stringify(path.join(repoRoot, 'src/event/trigger.ts'))};`,
 ].join('\n'));
 await esbuild.build({
     entryPoints: [entryFile],
@@ -69,7 +70,7 @@ const {
     composeMediaTemplate, resolveMediaUrl, renderMediaBody, MEDIA_PRESETS, resolveMediaPreset, classifyModel,
     setRuleRows, resetRuleRowsForTest,
     templateParamKeys, normalizeMediaParams,
-    parseRolesConfig, parseSkillsConfig, parseMcpConfig, parseKbConfig,
+    parseRolesConfig, parseSkillsConfig, parseMcpConfig, parseKbConfig, parseEventTriggerConfig,
     DEFAULT_ROLES, DEFAULT_SKILLS, DEFAULT_MCP, DEFAULT_KB,
 } = plugin;
 
@@ -1251,6 +1252,55 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
         const pluginInvalid = pluginParsers[id](invalid);
         ok(`${id}：非法样例两边都拒绝`, !genInvalid.ok && !pluginInvalid.config,
             `generator=${JSON.stringify(genInvalid)} plugin=${JSON.stringify(pluginInvalid.issues)}`);
+    }
+
+    // ---- 事件触发规则（Issue #147）：生成器产出 → 插件解析；两边 schema 漂移会在这里暴露
+    {
+        const spec = specs.eventTrigger;
+        ok('eventTrigger：生成器存在该分区', !!spec);
+        if (spec) {
+            const defaultBuilt = spec.build(spec.defaults.map(item => spec.normalizeItem(item)));
+            ok('eventTrigger：默认输出空规则', Array.isArray(defaultBuilt.rules) && defaultBuilt.rules.length === 0,
+                JSON.stringify(defaultBuilt).slice(0, 200));
+            const defaultParsed = parseEventTriggerConfig(JSON.stringify(defaultBuilt));
+            ok('eventTrigger：空规则被插件接受',
+                !!defaultParsed.config && defaultParsed.config.rules.length === 0,
+                JSON.stringify(defaultParsed.issues));
+
+            const item = spec.normalizeItem({
+                name: '入群欢迎',
+                on: 'group_increase',
+                platforms: ['QQ'],
+                sessions: ['QQ-Group:2001'],
+                exclude: ['QQ-Group:2002'],
+                match: [{ field: 'operator_id', regex: '.+' }],
+                prompt: '新成员 {user_id} 入群了',
+                toolChoice: 'none',
+            });
+            const built = spec.build([item]);
+            const parsed = parseEventTriggerConfig(JSON.stringify(built));
+            ok('eventTrigger：生成器产出被插件接受', !!parsed.config, JSON.stringify(parsed.issues));
+            const rule = parsed.config ? parsed.config.rules[0] : null;
+            ok('eventTrigger：字段一致',
+                !!rule
+                && rule.name === '入群欢迎'
+                && rule.on.length === 1 && rule.on[0] === 'group_increase'
+                && rule.scope.platforms[0] === 'QQ'
+                && rule.scope.sessions[0] === 'QQ-Group:2001'
+                && rule.scope.exclude[0] === 'QQ-Group:2002'
+                && rule.match.length === 1 && rule.match[0].field === 'operator_id'
+                && rule.toolChoice === 'none'
+                && rule.prompt === '新成员 {user_id} 入群了',
+                JSON.stringify(rule));
+
+            const disabledBuilt = spec.build([{ ...item, enabled: false }]);
+            ok('eventTrigger：停用后不写进配置', disabledBuilt.rules.length === 0, JSON.stringify(disabledBuilt));
+            ok('eventTrigger：输出不含 enabled 键', !JSON.stringify(built).includes('"enabled"'));
+
+            const invalid = '{"version":1,"rules":[{"name":"","on":"group_increase","prompt":"x"}]}';
+            ok('eventTrigger：非法样例两边都拒绝',
+                spec.parseImport(invalid).ok === false && parseEventTriggerConfig(invalid).config === null);
+        }
     }
 }
 

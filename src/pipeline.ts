@@ -2,10 +2,12 @@
 import { BlockManager } from "./block";
 import Config, { ext } from "./config/config";
 import { CQ_TYPES_ALLOW } from "./config/static_config";
+import type { EventView } from "./event/trigger";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { consumeDependencyTombstone, deleteCoreMessageState, filterOb11SupplementSegments, getCoreMessageState, getMessageKey, markCoreMessageRecorded, markDependencyFullRecorded, rememberCoreMessageByKey, waitForCoreEvent } from "./pipeline/dedup";
 import { resolveEndpointId } from "./pipeline/endpoint";
+import { hasEventTriggerRules, maybeTriggerEvent } from "./pipeline/event_trigger";
 import { handleNativeNoticeEvent, handleOb11NoticeEvent, handleOb11RequestEvent } from "./pipeline/events";
 import { expandOb11Segments } from "./pipeline/inbound";
 import { getSession } from "./session/session_service";
@@ -15,7 +17,7 @@ import { getRecordMessageId, transformMsgId } from "./utils/message_id";
 import { SYSTEM_NAME } from "./utils/protocol";
 import { createCtx, createMsg } from "./utils/seal";
 import { expandMilkySegments, formatMessageSegmentsForMatching, transformTextToArray } from "./utils/string";
-import { getPlatform } from "./utils/target_id";
+import { getPlatform, normalizeUserId, platformOf } from "./utils/target_id";
 
 const log = logger.withTag('pipeline');
 
@@ -271,6 +273,49 @@ export class MessagePipeline {
             // 运行中不重置待触发计时器（待机计数/概率/计时器一律跳过，只入库不推进）
             if (!sessionBusy && session.context.timer) clearTimeout(session.context.timer);
             if (!sessionBusy) session.context.timer = null;
+
+            // poke 事件触发：poke 已被转换为内容部分（[CQ:poke] → poke 段 → [poke:ID]），
+            // 先按消息口径入库，再按「事件触发规则」决定是否起轮；命中即跳过后续普通触发，避免双回复。
+            if (hasEventTriggerRules() && (session.setting.standby || Config.base.GLOBAL_STANDBY)) {
+                const pokeSeg = messageArray.find(item => item.type === 'poke');
+                if (pokeSeg) {
+                    const targetRaw = String((pokeSeg.data && (pokeSeg.data.qq || pokeSeg.data.user_id)) || '');
+                    const targetId = normalizeUserId(targetRaw, platformOf(ctx)) || '';
+                    const eventText = ctx.isPrivate
+                        ? `Private event: ${uid} poked you.`
+                        : `Group event: ${uid} poked ${targetId || targetRaw}.`;
+                    const view: EventView = {
+                        source: 'poke',
+                        postType: 'poke',
+                        eventType: 'notify.poke',
+                        noticeType: 'notify',
+                        requestType: '',
+                        subType: 'poke',
+                        userId: uid,
+                        operatorId: '',
+                        groupId: gid,
+                        messageId: '',
+                        targetId,
+                        isTargetBot: !!targetId && targetId === ctx.endPoint.userId,
+                        epId: ctx.endPoint.userId,
+                        platform: getPlatform(ctx.endPoint.userId),
+                        botId: ctx.endPoint.userId,
+                        sid,
+                        isPrivate: ctx.isPrivate,
+                        eventText,
+                        flag: '',
+                        comment: '',
+                        raw: { notice_type: 'notify', sub_type: 'poke', user_id: uid, target_id: targetId || targetRaw },
+                        receivedAt: Date.now(),
+                    };
+                    // poke 单路径：key 带毫秒时间戳，连戳不被去重；仅为防同一回调重复投递
+                    const dedupKey = `poke|${ctx.endPoint.userId}|${sid}|${uid}|${targetId || targetRaw}|${Date.now()}`;
+                    if (await maybeTriggerEvent(view, dedupKey, { session, ctx, msg, messageArray })) {
+                        markCoreMessageRecorded(coreMessageKey);
+                        return;
+                    }
+                }
+            }
 
             // 非指令消息触发（受会话开关控制）
             if (session.setting.regexTrigger && triggerRegex.test(messageText)) {

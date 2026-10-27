@@ -19,6 +19,8 @@ export interface PendingMessage {
     messageId: string;
     kind: 'trigger' | 'record';
     systemReason?: string;
+    /** 系统提示的名义（缺省 trigger；事件触发挂起用 event-trigger） */
+    systemName?: string;
     /** 落盘轻量字段：重载后用于重建 ctx/msg（getSessionCtxAndMsg）与续跑 */
     epId: string;
     isPrivate: boolean;
@@ -49,6 +51,7 @@ export function serializePendingQueue(queue: PendingMessage[]): string {
         messageId: p.messageId,
         kind: p.kind,
         systemReason: p.systemReason,
+        systemName: p.systemName,
         epId: p.epId,
         isPrivate: p.isPrivate,
     })));

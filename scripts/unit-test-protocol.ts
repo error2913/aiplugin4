@@ -163,6 +163,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             condensedHistory: 'condensed-history',
             preserved: 'preserved',
             event: 'event',
+            eventTrigger: 'event-trigger',
         });
         for (const [key, value] of Object.entries(SYSTEM_NAME)) {
             assert.match(value, /^[a-z][a-z-]*$/, `${key} 必须是 ASCII 小写英文: ${value}`);

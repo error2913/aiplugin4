@@ -13,6 +13,7 @@ const eventDedupMap = new Map<string, number>();
 /** 重置去重状态（单元测试用） */
 export function resetEventGuards(): void {
     eventDedupMap.clear();
+    eventTriggeredMap.clear();
 }
 
 /** 事件级去重：窗口内已存在同 key 返回 true（重复，应丢弃）；否则记录并返回 false */
@@ -69,6 +70,38 @@ export function isSelfCoveredNoticeEvent(noticeType: string, userId: any, selfId
  *  指纹段细分"同一 eventType 下内容不同"的事件，避免 3s 窗口吞掉连续但不同的事件。 */
 export function buildEventDedupKey(epId: string, sessionId: string, eventType: string, userId: string, messageId: string = '', extra: string = ''): string {
     return `${epId}|${sessionId}|${eventType}|${userId}|${messageId}|${extra}`;
+}
+
+/** 按原始载荷算去重 key（与 recordEventPrompt 内部口径一致）：ob11 载荷带整包指纹，原生摘要不带 */
+export function buildEventDedupKeyFor(epId: string, sessionId: string, eventType: string, userId: string, messageId: string = '', raw?: unknown): string {
+    const extra = isOb11EventPayload(raw) ? buildEventDedupExtra(raw) : '';
+    return buildEventDedupKey(epId, sessionId, eventType, userId, messageId, extra);
+}
+
+/** 事件触发"已触发"标记：同一物理事件（原生+ob11 双路径/重复投递）只触发一次。
+ *  与录制去重分开：录制去重仍按"后到覆盖先到"替换文本，触发只认第一次真正触发。 */
+const EVENT_TRIGGERED_WINDOW_MS = 10000;
+const EVENT_TRIGGERED_MAX = 5000;
+const eventTriggeredMap = new Map<string, number>();
+
+/** 该事件 key 在窗口内是否已触发过 */
+export function isEventTriggered(key: string, now: number = Date.now()): boolean {
+    const expiresAt = eventTriggeredMap.get(key);
+    if (expiresAt === undefined) return false;
+    if (expiresAt <= now) {
+        eventTriggeredMap.delete(key);
+        return false;
+    }
+    return true;
+}
+
+/** 标记该事件 key 已触发（窗口默认 10s，覆盖原生/ob11 双路径到达间隔） */
+export function markEventTriggered(key: string, windowMs: number = EVENT_TRIGGERED_WINDOW_MS, now: number = Date.now()): void {
+    eventTriggeredMap.set(key, now + Math.max(0, windowMs));
+    if (eventTriggeredMap.size > EVENT_TRIGGERED_MAX) {
+        const oldest = eventTriggeredMap.keys().next().value;
+        if (oldest !== undefined) eventTriggeredMap.delete(oldest);
+    }
 }
 
 /** 原生回调已覆盖、与 ob11 依赖双路径重叠的通知类型：

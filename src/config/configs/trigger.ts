@@ -1,11 +1,19 @@
-// 触发配置：默认计数器/计时器/概率/活跃时间/触发正则与令牌桶；评分触发参数（TOML 一条配置）
+// 触发配置（页签「触发」）：默认计数器/计时器/概率/活跃时间/触发正则与令牌桶；评分触发参数（TOML）；
+// 事件触发规则（JSON v1，事件先按现有接收链路进上下文，再按规则触发）。
 import { load } from 'js-toml'
 
+import {
+    EVENT_TRIGGER_DEFAULT_JSON,
+    type EventTriggerConfig,
+    parseEventTriggerConfig,
+} from "../../event/trigger";
 import Logger from "../../logger";
 import { revive } from "../../utils/revive";
 import type { TypeDescriptor } from "../../utils/revive";
 import { ext } from "../ext";
 import { getRegexConfig } from "../regex";
+
+import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 
 /** 评分触发配置（TOML 分段解析，缺省段/字段并入默认值） */
 export interface JudgeConfig {
@@ -105,22 +113,63 @@ export function resetJudgeConfigCacheForTest(): void {
     judgeConfigCache = null;
 }
 
+/** 事件触发规则：启动解析一次、重载 JS 才生效（对齐评分触发配置的缓存口径） */
+let eventTriggerConfigCache: EventTriggerConfig | null = null;
+
+/** 读「事件触发规则」；解析失败整份回退空规则集（**永不抛**，Config.trigger 在消息热路径被读取） */
+function getEventTriggerConfig(): EventTriggerConfig {
+    if (eventTriggerConfigCache) return eventTriggerConfigCache;
+    try {
+        const text = seal.ext.getStringConfig(ext, "事件触发规则") ?? '';
+        const result = parseEventTriggerConfig(text);
+        for (const warning of result.warnings) {
+            Logger.warning(`事件触发规则 ${warning.path} ${warning.msg}`);
+        }
+        if (!result.config) {
+            Logger.error(`「事件触发规则」校验失败（共 ${result.issues.length} 处），本次整份不生效：`);
+            for (const issue of result.issues) Logger.error(`  ${issue.path} ${issue.msg}`);
+            Logger.error('提示：可用配置生成器 https://error2913.github.io/aiplugin4-config/ 的「事件触发」页生成后粘贴。');
+            eventTriggerConfigCache = { version: 1, rules: [] };
+            return eventTriggerConfigCache;
+        }
+        eventTriggerConfigCache = result.config;
+    } catch (e) {
+        Logger.error(`读取/解析「事件触发规则」失败，本次不生效: ${e instanceof Error ? e.message : String(e)}`);
+        eventTriggerConfigCache = { version: 1, rules: [] };
+    }
+    return eventTriggerConfigCache;
+}
+
+/** 仅供单元测试使用：清空事件触发规则缓存 */
+export function resetEventTriggerConfigCacheForTest(): void {
+    eventTriggerConfigCache = null;
+}
+
 export default class TriggerConfig {
     static register() {
-        seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "消息触发");
-        seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "消息触发");
+        seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "触发");
+        seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "触发");
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [
             "\\[CQ:at,qq=3893625976\\]",
             "^正确.*[。？！?!]$"
-        ], "每框一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后需重载 JS 生效", "消息触发");
-        seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "消息触发");
-        seal.ext.registerFloatConfig(ext, "默认计时器", 60, "计时器模式下间隔多少秒触发回复", "消息触发");
-        seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "消息触发");
-        seal.ext.registerStringConfig(ext, "默认触发活跃时间", "10:00-20:00-5", "格式：HH:mm-HH:mm-次数，示例 10:00-20:00-5 表示 10:00-20:00 之间最多触发 5 次", "消息触发");
-        seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "消息触发");
+        ], "每框一个正则，任一命中即触发回复（如 @机器人 或包含关键词）；示例：^你好.*；修改后需重载 JS 生效", "触发");
+        seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "触发");
+        seal.ext.registerFloatConfig(ext, "默认计时器", 60, "计时器模式下间隔多少秒触发回复", "触发");
+        seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "触发");
+        seal.ext.registerStringConfig(ext, "默认触发活跃时间", "10:00-20:00-5", "格式：HH:mm-HH:mm-次数，示例 10:00-20:00-5 表示 10:00-20:00 之间最多触发 5 次", "触发");
+        seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "触发");
         seal.ext.registerTemplateConfig(ext, "评分触发配置", [
             JUDGE_TOML_DEFAULT
-        ], "评分触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后需重载 JS 生效", "消息触发");
+        ], "评分触发（.ai on --j）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后需重载 JS 生效", "触发");
+        // 事件触发（v1）：事件先按「事件接收」页的开关/白名单/待机录进上下文，命中本规则后再触发回复。
+        seal.ext.registerStringConfig(
+            ext,
+            "事件触发规则",
+            EVENT_TRIGGER_DEFAULT_JSON,
+            "JSON v1：{\"version\":1,\"rules\":[{\"name\",\"on\",\"scope\",\"match\",\"prompt\",\"toolChoice\"}]}。事件先由「事件接收」页录入上下文（需接收开关+白名单+会话待机），再按本规则触发；空规则=关闭。"
+                + GENERATOR_CONFIG_HINT,
+            "触发",
+        );
     }
 
     static get() {
@@ -133,7 +182,10 @@ export default class TriggerConfig {
             TRIGGER_CONDITION: seal.ext.getStringConfig(ext, "触发需要满足的条件"),
             BUCKET_LIMIT: seal.ext.getIntConfig(ext, "触发次数上限"),
             FILL_INTERVAL: seal.ext.getIntConfig(ext, "触发次数补充间隔"),
-            JUDGE: getJudgeConfig()
+            JUDGE: getJudgeConfig(),
+            EVENT_TRIGGER: {
+                CONFIG: getEventTriggerConfig(),
+            },
         }
     }
 }
