@@ -35,6 +35,8 @@ export interface TriggerEventOptions {
     msg?: seal.Message;
     /** poke 路径传入原始消息段，用于触发前把 poke 内容部分正常入库 */
     messageArray?: MessageSegment[];
+    /** ob11 poke 没有背景事件条目：把事件文本直接并进触发提示（native poke 已作为消息入库，不传） */
+    injectEventText?: boolean;
 }
 
 /** 是否有可用的触发规则（供调用方提前短路，避免无谓的会话加载） */
@@ -58,6 +60,8 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
         if (isEventTriggered(dedupKey)) return false;
 
         const session = options.session ?? getSession(view.sid);
+        // 统一的 AI 开启门禁：未待机（含 .ai off）时不响应事件触发
+        if (!(session.setting.standby || Config.base.GLOBAL_STANDBY)) return false;
         let ctx = options.ctx;
         let msg = options.msg;
         if (!ctx || !msg) {
@@ -70,7 +74,10 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
         }
 
         const instruction = renderTriggerPrompt(rule.prompt, view);
-        const text = eventTriggerInstruction({ instruction });
+        const text = eventTriggerInstruction({
+            instruction,
+            eventText: options.injectEventText ? view.eventText : undefined,
+        });
         markEventTriggered(dedupKey, view.source === 'poke' ? POKE_TRIGGER_WINDOW_MS : undefined);
 
         if (session.running || session.starting) {

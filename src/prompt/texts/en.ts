@@ -1,9 +1,13 @@
 // 内置提示词英文文案（唯一来源；禁止出现中文提示词）。
 // 说明：段落顺序与门控由 sections/* 决定，这里只放文本与简单插值函数。
 
-/** 事件触发提示（事件本体已由上一条 system 事件提供，这里只给规则指令） */
-export function eventTriggerInstruction(values: { instruction: string }): string {
-    return `Event trigger matched the event above.\nInstruction: ${values.instruction || '(no instruction)'}`;
+/** 事件触发提示（事件已由上一条 system 事件提供时只说 "event above"；ob11 poke 等无背景条目时直接带事件文本） */
+export function eventTriggerInstruction(values: { instruction: string; eventText?: string }): string {
+    const instruction = String(values.instruction || '').trim();
+    const head = String(values.eventText || '').trim()
+        ? `Event trigger matched:\n${values.eventText}`
+        : 'Event trigger matched the event above.';
+    return instruction ? `${head}\nInstruction: ${instruction}` : head;
 }
 
 /** 身份总述（固定首段） */

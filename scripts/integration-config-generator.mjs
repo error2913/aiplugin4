@@ -1283,13 +1283,13 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
                 sessions: ['QQ-Group:2001'],
                 exclude: ['QQ-Group:2002'],
                 match: [{ field: 'operator_id', regex: '.+' }],
-                prompt: 'A new member joined the group. Greet them briefly in character.',
+                prompt: '',
             });
             const built = spec.build([item]);
             const parsed = parseEventTriggerConfig(JSON.stringify(built));
             ok('eventTrigger：生成器产出被插件接受', !!parsed.config, JSON.stringify(parsed.issues));
             const rule = parsed.config ? parsed.config.rules[0] : null;
-            ok('eventTrigger：字段一致（无 name/toolChoice、on 单字符串、扁平事件名）',
+            ok('eventTrigger：字段一致（无 name/toolChoice、on 单字符串、扁平事件名、prompt 可空）',
                 !!rule
                 && rule.on === 'group_increase'
                 && !Object.prototype.hasOwnProperty.call(rule, 'name')
@@ -1298,21 +1298,17 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
                 && rule.scope.sessions[0] === 'QQ-Group:2001'
                 && rule.scope.exclude[0] === 'QQ-Group:2002'
                 && rule.match.length === 1 && rule.match[0].field === 'operator_id'
-                && rule.prompt === 'A new member joined the group. Greet them briefly in character.',
+                && rule.prompt === '',
                 JSON.stringify(rule));
 
-            // 戳一戳预设：生成器事件表带默认条件 is_target_bot=true + 英文预设 prompt
+            // 戳一戳预设：生成器事件表带默认条件 is_target_bot=true；提示词默认留空
             const pokeDefault = genEventTrigger.DEFAULT_MATCH.poke || [];
             ok('eventTrigger：戳一戳预设条件', Array.isArray(pokeDefault)
                 && pokeDefault.some(m => m.field === 'is_target_bot' && m.equals === true),
                 JSON.stringify(pokeDefault));
-            ok('eventTrigger：戳一戳英文预设提示词', typeof genEventTrigger.PRESET_PROMPTS.poke === 'string'
-                && genEventTrigger.PRESET_PROMPTS.poke.trim() !== '',
-                String(genEventTrigger.PRESET_PROMPTS.poke));
             const pokeItem = spec.normalizeItem({
                 on: 'poke',
                 match: pokeDefault,
-                prompt: genEventTrigger.PRESET_PROMPTS.poke,
             });
             const pokeParsed = parseEventTriggerConfig(JSON.stringify(spec.build([pokeItem])));
             ok('eventTrigger：戳一戳产出被插件接受', !!pokeParsed.config, JSON.stringify(pokeParsed.issues));
@@ -1324,7 +1320,7 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
                 && !JSON.stringify(built).includes('"name"')
                 && !JSON.stringify(built).includes('"toolChoice"'));
 
-            const invalid = '{"version":1,"rules":[{"on":"group_increase"}]}';
+            const invalid = '{"version":1,"rules":[{"on":"group_increase","prompt":123}]}';
             ok('eventTrigger：非法样例两边都拒绝',
                 spec.parseImport(invalid).ok === false && parseEventTriggerConfig(invalid).config === null);
             const invalidOn = '{"version":1,"rules":[{"on":"","prompt":"x"}]}';

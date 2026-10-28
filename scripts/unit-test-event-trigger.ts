@@ -19,6 +19,8 @@ import {
     type EventView,
 } from '../src/event/trigger';
 import { maybeTriggerEvent } from '../src/pipeline/event_trigger';
+import { handleOb11NoticeEvent } from '../src/pipeline/events';
+import { getSession } from '../src/session/session_service';
 import { serializePendingQueue } from '../src/session/persistence';
 
 const TC = (globalThis as any).__TEST_CONFIG__;
@@ -84,12 +86,13 @@ interface FakeSessionCalls {
     save: number;
 }
 
-function fakeSession(overrides: { running?: boolean; starting?: boolean } = {}): { session: any; calls: FakeSessionCalls } {
+function fakeSession(overrides: { running?: boolean; starting?: boolean; standby?: boolean } = {}): { session: any; calls: FakeSessionCalls } {
     const calls: FakeSessionCalls = { chat: [], defer: [], savePending: 0, handleReceipt: 0, system: [], save: 0 };
     const session: any = {
         running: overrides.running === true,
         starting: overrides.starting === true,
         sessionId: 'QQ-Group:2001',
+        setting: { standby: overrides.standby !== false },
         deferReceipt: async (ctx: any, msg: any, arr: any[], kind: string, reason: string, systemName: string) => {
             calls.defer.push({ ctx, msg, arr, kind, reason, systemName });
         },
@@ -148,8 +151,16 @@ export const tests = {
         assert.equal(arrayOn.config, null, '一条规则只能绑一个事件');
         assert.ok(arrayOn.issues.some(i => i.path === '$.rules[0].on'));
 
-        const noPrompt = parseEventTriggerConfig(rulesJson(validRule({ prompt: '' })));
-        assert.equal(noPrompt.config, null);
+        const emptyPrompt = parseEventTriggerConfig(rulesJson(validRule({ prompt: '' })));
+        assert.equal(emptyPrompt.issues.length, 0, JSON.stringify(emptyPrompt.issues));
+        assert.equal(emptyPrompt.config!.rules[0].prompt, '', 'prompt 可留空');
+
+        const missingPrompt = parseEventTriggerConfig(rulesJson({ on: 'group_increase' }));
+        assert.equal(missingPrompt.issues.length, 0, '省略 prompt 也视为留空');
+        assert.equal(missingPrompt.config!.rules[0].prompt, '');
+
+        const badPrompt = parseEventTriggerConfig(rulesJson(validRule({ prompt: 123 })));
+        assert.equal(badPrompt.config, null, 'prompt 非字符串才报错');
 
         const badOn = parseEventTriggerConfig(rulesJson(validRule({ on: 'not valid!' })));
         assert.equal(badOn.config, null);
@@ -264,6 +275,55 @@ export const tests = {
         assert.equal(calls.defer.length, 0);
     },
 
+    async testMaybeTriggerEmptyPrompt(): Promise<void> {
+        installRules(rulesJson(validRule({ prompt: '' })));
+        const { session, calls } = fakeSession();
+        const ctx: any = { endPoint: { userId: 'QQ:999' }, isPrivate: false };
+        const msg: any = { messageType: 'group', groupId: 'QQ-Group:2001' };
+        assert.equal(await maybeTriggerEvent(view(), 'key-empty-prompt', { session, ctx, msg }), true);
+        assert.equal(calls.system.length, 1);
+        assert.equal(calls.system[0][0], 'Event trigger matched the event above.', '提示词留空时只提示事件已触发');
+        assert.equal(calls.chat.length, 1);
+    },
+
+    async testMaybeTriggerInjectsEventTextForPoke(): Promise<void> {
+        installRules(rulesJson(validRule({ on: 'poke', prompt: '' })));
+        const { session, calls } = fakeSession();
+        const ctx: any = { endPoint: { userId: 'QQ:999' }, isPrivate: false };
+        const msg: any = { messageType: 'group', groupId: 'QQ-Group:2001' };
+        const pokeView = view({
+            source: 'poke',
+            postType: 'poke',
+            eventType: 'poke',
+            noticeType: 'notify',
+            subType: 'poke',
+            userId: 'QQ:1001',
+            targetId: 'QQ:999',
+            isTargetBot: true,
+            eventText: 'Group event: QQ:1001 poked QQ:999.',
+        });
+        assert.equal(await maybeTriggerEvent(pokeView, 'poke-inject', { session, ctx, msg, injectEventText: true }), true);
+        assert.equal(calls.system.length, 1);
+        assert.ok(String(calls.system[0][0]).startsWith('Event trigger matched:\nGroup event: QQ:1001 poked QQ:999.'), String(calls.system[0][0]));
+    },
+
+    async testMaybeTriggerRequiresStandby(): Promise<void> {
+        installRules(rulesJson(validRule()));
+        const { session, calls } = fakeSession({ standby: false });
+        const ctx: any = { endPoint: { userId: 'QQ:999' }, isPrivate: false };
+        const msg: any = { messageType: 'group', groupId: 'QQ-Group:2001' };
+        const prevGlobal = TC.boolConfigs['是否开启全局待机'];
+        TC.boolConfigs['是否开启全局待机'] = false;
+        Config.invalidate('base');
+        try {
+            assert.equal(await maybeTriggerEvent(view(), 'key-no-standby', { session, ctx, msg }), false);
+            assert.equal(calls.chat.length, 0);
+        } finally {
+            TC.boolConfigs['是否开启全局待机'] = prevGlobal;
+            Config.invalidate('base');
+        }
+    },
+
     async testMaybeTriggerBusyDefers(): Promise<void> {
         installRules(rulesJson(validRule()));
         const { session, calls } = fakeSession({ running: true });
@@ -322,6 +382,49 @@ export const tests = {
         assert.equal(calls.handleReceipt, 1);
         assert.equal(calls.chat.length, 1);
         assert.equal(calls.system.length, 1);
+    },
+
+    async testOb11PokeNoticeTriggersWithoutWhitelist(): Promise<void> {
+        installRules(rulesJson(validRule({ on: 'poke', match: [{ field: 'is_target_bot', equals: true }], prompt: '' })));
+        resetEventGuards();
+        const sealObj = (globalThis as any).seal;
+        const origEps = sealObj.getEndPoints;
+        const origCreateCtx = sealObj.createTempCtx;
+        sealObj.getEndPoints = () => [{ userId: 'QQ:3893625976', state: 1 }];
+        // 最小 ctx：getSessionCtxAndMsg 需要 endPoint/player/group
+        sealObj.createTempCtx = (ep: any, msg: any) => ({
+            endPoint: ep,
+            isPrivate: msg.messageType === 'private',
+            player: { userId: msg.sender.userId || '', name: 'bot' },
+            group: { groupId: msg.groupId || '' },
+        });
+        const sid = 'QQ-Group:143412516';
+        const session = getSession(sid);
+        session.setting.standby = true;
+        const chats: any[] = [];
+        (session as any).chat = async (...args: any[]) => { chats.push(args); };
+        try {
+            await handleOb11NoticeEvent({
+                time: 1793166847,
+                self_id: 3893625976,
+                post_type: 'notice',
+                notice_type: 'notify',
+                sub_type: 'poke',
+                group_id: 143412516,
+                user_id: 2484294762,
+                target_id: 3893625976,
+            });
+            assert.equal(chats.length, 1, 'ob11 poke 应触发一次（不依赖事件白名单）');
+            assert.equal(chats[0][2], '事件触发:poke');
+            assert.equal(
+                isEventTriggered('poke|QQ:3893625976|QQ-Group:143412516|QQ:2484294762|QQ:3893625976'),
+                true,
+                '原生/ob11 共用触发 key，应已置位',
+            );
+        } finally {
+            sealObj.getEndPoints = origEps;
+            sealObj.createTempCtx = origCreateCtx;
+        }
     },
 
     testPendingSerializationKeepsSystemName(): void {

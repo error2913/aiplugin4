@@ -342,10 +342,15 @@ export function parseEventTriggerConfig(text: string): EventTriggerParseResult {
         const on = readEventName(item.on, `${path}.on`, issues, warnings);
         const scope = readScope(item.scope, `${path}.scope`, issues, warnings);
         const match = readMatch(item.match, `${path}.match`, issues, warnings);
-        const prompt = typeof item.prompt === 'string' ? item.prompt : '';
-        if (!prompt.trim()) {
-            issues.push(issue(`${path}.prompt`, 'prompt 必填（触发时给 AI 的指令）'));
-        } else if (prompt.length > EVENT_TRIGGER_PROMPT_MAX) {
+        let prompt = '';
+        if (item.prompt !== undefined && item.prompt !== null) {
+            if (typeof item.prompt !== 'string') {
+                issues.push(issue(`${path}.prompt`, 'prompt 必须是字符串（可留空）'));
+            } else {
+                prompt = item.prompt;
+            }
+        }
+        if (prompt.length > EVENT_TRIGGER_PROMPT_MAX) {
             issues.push(issue(`${path}.prompt`, `prompt 最多 ${EVENT_TRIGGER_PROMPT_MAX} 字（当前 ${prompt.length}）`));
         }
         rules.push({ on, scope, match, prompt });

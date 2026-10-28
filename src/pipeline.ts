@@ -308,8 +308,8 @@ export class MessagePipeline {
                         raw: { notice_type: 'notify', sub_type: 'poke', user_id: uid, target_id: targetId || targetRaw },
                         receivedAt: Date.now(),
                     };
-                    // poke 单路径：key 带毫秒时间戳，连戳不被去重；仅为防同一回调重复投递
-                    const dedupKey = `poke|${ctx.endPoint.userId}|${sid}|${uid}|${targetId || targetRaw}|${Date.now()}`;
+                    // 与 ob11 notice poke 路径共用 key：两路径只触发一次
+                    const dedupKey = `poke|${ctx.endPoint.userId}|${sid}|${uid}|${targetId || targetRaw}`;
                     if (await maybeTriggerEvent(view, dedupKey, { session, ctx, msg, messageArray })) {
                         markCoreMessageRecorded(coreMessageKey);
                         return;

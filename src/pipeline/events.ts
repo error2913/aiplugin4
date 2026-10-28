@@ -49,8 +49,6 @@ function baseView(epId: string, prefix: string, sid: string, isPrivate: boolean,
     /** ob11 依赖通知事件（OneBot notice）→ 文本提示词录入上下文：仅白名单内类型，仅作背景不触发 AI */
 export async function handleOb11NoticeEvent(event: any): Promise<void> {
         if (!event || event.post_type !== 'notice' || !event.notice_type) return;
-        const { RECEIVE_NOTICE, NOTICE_TYPES } = Config.event;
-        if (!RECEIVE_NOTICE) return;
 
         const noticeType = String(event.notice_type);
         const subType = String(event.sub_type || '');
@@ -60,6 +58,59 @@ export async function handleOb11NoticeEvent(event: any): Promise<void> {
             log.debug(`ob11 通知事件为机器人自身 ${noticeType}，由原生回调覆盖，跳过`);
             return;
         }
+
+        // notify/poke：部分适配器的核心原生 onPoke 不下发，这里直接用 ob11 事件触发；
+        // 不走「事件接收」白名单（白名单只决定背景录入），并与原生 onPoke 路径共用同一个触发去重 key，
+        // 保证两路径只触发一次（原生路径仍会把 poke 作为消息入库）。
+        if (noticeType === 'notify' && subType === 'poke') {
+            const pokeEpId = resolveEndpointId(event.self_id);
+            if (!pokeEpId) {
+                log.debug(`ob11 poke 事件未找到匹配端点 self_id=${event.self_id}，跳过`);
+                return;
+            }
+            const prefix = getPlatform(pokeEpId);
+            const isGroup = !!event.group_id;
+            const pokeUserRaw = event.user_id ?? event.operator_id;
+            let sid = '';
+            if (isGroup) {
+                sid = `${prefix}-Group:${event.group_id}`;
+            } else {
+                const uid = pokeUserRaw ?? event.target_id;
+                if (!uid) {
+                    log.debug('ob11 poke 事件缺少 user_id/target_id，跳过');
+                    return;
+                }
+                sid = `${prefix}:${uid}`;
+            }
+            const userId = pokeUserRaw ? `${prefix}:${pokeUserRaw}` : '';
+            const targetId = event.target_id !== undefined && event.target_id !== null && String(event.target_id) !== ''
+                ? `${prefix}:${event.target_id}`
+                : '';
+            const eventText = isGroup
+                ? `Group event: ${userId || 'someone'} poked ${targetId || 'someone'}.`
+                : `Private event: ${userId || 'someone'} poked you.`;
+            const view: EventView = {
+                ...baseView(pokeEpId, prefix, sid, !isGroup, eventText),
+                source: 'poke',
+                postType: 'poke',
+                eventType: 'poke',
+                noticeType,
+                subType,
+                userId,
+                groupId: isGroup ? `${prefix}-Group:${event.group_id}` : '',
+                targetId,
+                isTargetBot: !!targetId && targetId === pokeEpId,
+                raw: event,
+            };
+            // 与 pipeline.ts 原生 onPoke 路径共用 key：两路径只触发一次
+            const dedupKey = `poke|${pokeEpId}|${sid}|${userId}|${targetId}`;
+            await maybeTriggerEvent(view, dedupKey, { injectEventText: true });
+            return;
+        }
+
+        const { RECEIVE_NOTICE, NOTICE_TYPES } = Config.event;
+        if (!RECEIVE_NOTICE) return;
+
         const whitelist = parseNoticeWhitelist(NOTICE_TYPES);
         if (!isNoticeInWhitelist(noticeType, subType, whitelist)) {
             log.debug(`ob11 通知事件不在白名单，跳过: type=${noticeType} sub=${subType}`);
