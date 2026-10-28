@@ -9,7 +9,9 @@ import { bankKindOf, canReadByTags, getOriginScope, getVisibility, globalScopeNa
 import { buildExtractPrompt } from "./v2/extract_prompt";
 import {
     DEFAULT_MEMORY_PROMPT_TOKENS,
+    MAX_MENTAL_MODELS,
     type MemoryPromptSection,
+    mergeMentalModels,
     buildMemoryPrompt as renderMemoryPrompt,
     selectInjectionCandidates,
 } from "./v2/prompt";
@@ -72,6 +74,31 @@ function getEngine(): any {
 
 export function getMemoryEngineInstance(): any {
     return getEngine();
+}
+
+/** 单 bank 召回 token 上限：= 单轮注入预算 2048 的一半，避免单个 bank 独占整轮预算；
+ *  global bank 另有渲染段 300 token 上限，实际注入远小于本值。 */
+export const SECTION_RECALL_MAX_TOKENS = 1024;
+
+/** 单 bank 的注入相关性信号（跨 bank 排序用；元组比较，避免不同量纲加权） */
+interface SectionRelevance {
+    /** 该 bank 是否有召回命中 */
+    hasHits: boolean;
+    /** 召回命中最高分（同一 RRF+新近度口径，跨 bank 可比） */
+    bestHit: number;
+    /** 实际会注入的心智模型最高分（群聊个人 bank 不注入模型，记 0） */
+    bestModel: number;
+    /** 候选条目最新更新时间（仅 tie-break） */
+    updatedAt: number;
+}
+
+/** 相关性降序比较（返回 >0 表示 a 比 b 更相关；相等返回 0） */
+function compareSectionRelevance(a: SectionRelevance, b: SectionRelevance): number {
+    if (a.hasHits !== b.hasHits) return a.hasHits ? 1 : -1;
+    if (a.bestHit !== b.bestHit) return a.bestHit - b.bestHit;
+    if (a.bestModel !== b.bestModel) return a.bestModel - b.bestModel;
+    if (a.updatedAt !== b.updatedAt) return a.updatedAt - b.updatedAt;
+    return 0;
 }
 
 /** 配置变更后重建引擎（存储不变）。 */
@@ -455,27 +482,32 @@ export class MemoryService {
             await this.ensureDefaultMentalModels(session, this.globalBankId(session.agentName), 'global', `global:${globalScopeName(session.agentName)}`);
         }
 
-        const sections: MemoryPromptSection[] = [];
         const viewer = viewerOf(session, currentKind === 'group' ? uis[0]?.id : session.sessionId, gi?.id);
         const obsEnabled = session.memory?.observationEnabled ?? configBool('OBSERVATION_ENABLED', true);
+        // 当前会话 bank 固定第一；个人 bank 之间按相关性降序；全局 bank 固定最后（段上限 300）
         const current = await this.collectSections(currentBank, text, sessionTags, viewer, currentKind === 'group' ? 'group' : 'user', currentKind === 'group' ? `Group chat memory (${gi?.name || session.sessionId})` : 'Personal memory', sessionTags, obsEnabled);
-        sections.push(current);
 
+        const personal: Array<{ section: MemoryPromptSection; relevance: SectionRelevance; index: number }> = [];
         if (currentKind === 'group') {
-            for (const user of uis.slice(0, 3)) {
+            const users = uis.slice(0, 3);
+            for (let index = 0; index < users.length; index++) {
+                const user = users[index];
                 const bank = `user_${user.id}`;
                 const userTags = [`user:${user.id}`, ...(gi ? [`group:${gi.id}`] : [])];
-                sections.push(await this.collectSections(bank, text, userTags, viewerOf(session, user.id, gi?.id), 'user', `Personal memory (${user.name || user.id})`, userTags, obsEnabled));
+                const ranked = await this.collectSections(bank, text, userTags, viewerOf(session, user.id, gi?.id), 'user', `Personal memory (${user.name || user.id})`, userTags, obsEnabled);
+                personal.push({ ...ranked, index });
             }
         }
+        personal.sort((a, b) => compareSectionRelevance(b.relevance, a.relevance) || a.index - b.index);
+
+        const ordered: MemoryPromptSection[] = [current.section, ...personal.map(item => item.section)];
         if (configBool('GLOBAL_MEMORY_ENABLED', true)) {
             const globalBank = this.globalBankId(session.agentName);
             const globalTags = [`global:${globalScopeName(session.agentName)}`];
             const globalSection = await this.collectSections(globalBank, text, globalTags, viewer, 'global', "Self experience (global)", globalTags, obsEnabled);
-            globalSection.maxTokens = 300;
-            sections.push(globalSection);
+            ordered.push(globalSection.section);
         }
-        return renderMemoryPrompt(sections, Math.max(500, configInt('MEMORY_PROMPT_TOKENS', DEFAULT_MEMORY_PROMPT_TOKENS)));
+        return renderMemoryPrompt(ordered, Math.max(500, configInt('MEMORY_PROMPT_TOKENS', DEFAULT_MEMORY_PROMPT_TOKENS)));
     }
 
     private static async collectSections(
@@ -487,41 +519,58 @@ export class MemoryService {
         title: string,
         recallTags: string[],
         includeObservations = true,
-    ): Promise<MemoryPromptSection> {
+    ): Promise<{ section: MemoryPromptSection; relevance: SectionRelevance }> {
         const repo = getEngine().repository;
         repo.getOrCreateBank(bankId, kind);
         const tags = recallTags.filter(t => /^(user|group|global):/.test(t));
         const models = getEngine().listMentalModels(bankId);
-        const scored = getEngine().searchMentalModels(bankId, query, tags).map((x: any) => x.model);
-        const fixed = models.filter((m: MentalModel) => m.templateId && m.status === 'ready');
-        const selectedRaw = selectInjectionCandidates(
-            mergeUnique([...fixed, ...scored]),
-            repo.listObservations(bankId),
-            sessionTags,
-        );
+        const scored = getEngine().searchMentalModels(bankId, query, tags) as Array<{ model: MentalModel; score: number; stale: boolean }>;
+        const modelScores = new Map<string, number>(scored.map(item => [item.model.id, item.score]));
+        const tagSet = new Set(sessionTags);
+        const scopeMatch = (scopeTags: string[] | undefined): boolean => {
+            const list = scopeTags || [];
+            return list.length === 0 || list.some(tag => tagSet.has(tag));
+        };
+        const modelTags = (model: MentalModel): string[] => (model.tags || (model as any).scopeTags || []);
+        // 固定模板（persona 等）在前、相关性补余；个人 bank 在群聊不注入心智模型（避免 owner 内容泄露）
+        const fixed = models.filter((model: MentalModel) => model.templateId && model.status === 'ready' && scopeMatch(modelTags(model)));
+        const selectedModels = kind === 'user' && viewer.groupId
+            ? []
+            : mergeMentalModels(fixed, scored.map(item => item.model), MAX_MENTAL_MODELS);
         const selectedObservations = includeObservations
-            ? selectedRaw.observations.filter(o => canReadByTags(bankId, o.tags, viewer))
+            ? selectInjectionCandidates([], repo.listObservations(bankId), sessionTags).observations
+                .filter((o: Observation) => canReadByTags(bankId, o.tags, viewer))
             : [];
-        const selectedModels = kind === 'user' && viewer.groupId ? [] : selectedRaw.mentalModels;
         const recalls = await getEngine().recall(bankId, {
             query,
             tags,
             tagsMatch: 'any',
-            maxTokens: 1600,
+            maxTokens: SECTION_RECALL_MAX_TOKENS,
             collapseObservations: includeObservations,
         });
-        const selectedObs = new Set(selectedObservations.map(o => o.id));
+        const selectedObs = new Set(selectedObservations.map((o: Observation) => o.id));
         const filtered = recalls.filter((h: RecallHit) => (h.kind === 'observation'
             ? includeObservations && !!h.observation && canReadByTags(bankId, h.observation.tags, viewer) && !selectedObs.has(h.observation.id)
             : (h.unit && canReadByTags(h.unit.bankId, h.unit.tags, viewer))));
+        const bestModel = selectedModels.reduce((best: number, model: MentalModel) => Math.max(best, modelScores.get(model.id) || 0), 0);
+        const bestHit = filtered.reduce((best: number, hit: RecallHit) => Math.max(best, hit.score || 0), 0);
+        const updatedAt = Math.max(
+            ...selectedModels.map((model: MentalModel) => model.updatedAt || 0),
+            ...selectedObservations.map((o: Observation) => o.updatedAt || 0),
+            ...filtered.map((hit: RecallHit) => (hit.kind === 'observation' ? hit.observation?.updatedAt || 0 : hit.unit?.updatedAt || 0)),
+            0,
+        );
         return {
-            kind,
-            title,
-            scopeLabel: kind === 'global' ? undefined : scopeLabelOf(bankId),
-            mentalModels: selectedModels,
-            observations: selectedObservations,
-            recalls: filtered,
-            maxTokens: kind === 'global' ? 300 : undefined,
+            section: {
+                kind,
+                title,
+                scopeLabel: kind === 'global' ? undefined : scopeLabelOf(bankId),
+                mentalModels: selectedModels,
+                observations: selectedObservations,
+                recalls: filtered,
+                maxTokens: kind === 'global' ? 300 : undefined,
+            },
+            relevance: { hasHits: filtered.length > 0, bestHit, bestModel, updatedAt },
         };
     }
 
@@ -640,17 +689,6 @@ function scopeLabelOf(bankId: string): string {
     const kind = bankKindOf(bankId);
     const raw = rawSessionId(bankId);
     return kind === 'group' ? `Group: ${raw}` : kind === 'user' ? `Personal: ${raw}` : '';
-}
-
-function mergeUnique(models: MentalModel[]): MentalModel[] {
-    const out: MentalModel[] = [];
-    const seen = new Set<string>();
-    for (const m of models) {
-        if (seen.has(m.id)) continue;
-        seen.add(m.id);
-        out.push(m);
-    }
-    return out;
 }
 
 function safeJson(text: string): any {

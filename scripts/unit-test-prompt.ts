@@ -6,9 +6,11 @@ import "./test-host";
 import Config from "../src/config/config";
 import { assemblePrompt, onPromptAssemble, renderSectionTable, resetPromptHooks } from "../src/prompt/assemble";
 import { buildPromptParts } from "../src/prompt/builder";
+import { getPromptMemorySource, setPromptMemorySource } from "../src/prompt/memory_source";
 import { listPromptSections, registerExtensionSection, registerPromptSection, registerPromptSections, resetPromptSections } from "../src/prompt/registry";
 import { registerBuiltinSections } from "../src/prompt/sections";
 import { buildCapabilitiesSection } from "../src/prompt/sections/capabilities";
+import { MEMORY_TAIL_GUARD } from "../src/prompt/texts/en";
 import type { PromptContext, PromptSection } from "../src/prompt/types";
 import { registerAllTools } from "../src/tool/bootstrap";
 import { toolMap } from "../src/tool/registry";
@@ -53,6 +55,7 @@ function makeContext(patch: Partial<PromptContext> = {}): PromptContext {
             promptEngineering: false,
             directionPrompt: false,
             receiveImage: false,
+            extraSeparator: [],
             imageLibrary: false,
             memory: false,
             knowledge: false,
@@ -327,7 +330,44 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(parts.runtime.includes('## Current time'), '时间应走 runtime 通道');
         assert.ok(!/[\u4e00-\u9fff]/.test(parts.system), 'system 提示词不应包含中文');
         assert.ok(!/[\u4e00-\u9fff]/.test(parts.runtime), 'runtime 文本不应包含中文');
+        assert.ok(!parts.runtime.includes(MEMORY_TAIL_GUARD), '无记忆时不应出现记忆尾部约束句');
         assert.ok(parts.stats.length >= 8, '内置段应有足够多的段被组装');
         assert.match(parts.digest, /^[0-9a-f]{8}$/);
+    },
+
+    /** 记忆尾部约束：只在 runtime 且记忆非空时追加；无记忆时不出现、也不进 system */
+    async testMemoryTailGuard(): Promise<void> {
+        ensureConfigRegistered();
+        restoreBuiltinSections();
+        const original = getPromptMemorySource();
+        let body = '## Group chat memory (GuardGroup)\n- likes coffee';
+        let revision = 1;
+        setPromptMemorySource({
+            initKnowledge: async () => undefined,
+            knowledgeSignature: () => '',
+            knowledgeIds: () => [],
+            formatKnowledgeFor: () => '',
+            memoryRevision: () => revision,
+            summaryRevision: () => revision,
+            buildLongTermPrompt: async () => body,
+            buildObservationPrompt: () => '',
+        });
+        try {
+            const context = (): PromptContext => makeContext({
+                flags: { ...makeContext().flags, memory: true },
+                memoryQuery: `guard-query-${revision}`,
+            });
+            let parts = await assemblePrompt(context());
+            assert.ok(parts.runtime.includes(body), '记忆文本应走 runtime 通道');
+            assert.ok(parts.runtime.endsWith(MEMORY_TAIL_GUARD), `记忆之后应追加尾部约束句，实际结尾：${parts.runtime.slice(-120)}`);
+            assert.ok(!parts.system.includes(MEMORY_TAIL_GUARD), '尾部约束句不得进入 system');
+
+            body = '';
+            revision += 1;
+            parts = await assemblePrompt(context());
+            assert.ok(!parts.runtime.includes(MEMORY_TAIL_GUARD), '无记忆时不应追加尾部约束句');
+        } finally {
+            setPromptMemorySource(original);
+        }
     },
 };

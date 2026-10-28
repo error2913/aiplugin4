@@ -3,7 +3,7 @@ import Model from '../../model/model';
 import { buildDelegationGuide } from '../../subagent/limits';
 import { fmtDate } from '../../utils/string';
 import { getPromptMemorySource } from '../memory_source';
-import { MEMORY_HINT, TIME_HEADING } from '../texts/en';
+import { MEMORY_HINT, MEMORY_TAIL_GUARD, TIME_HEADING } from '../texts/en';
 import type { PromptSection } from '../types';
 
 export function registerDynamicSections(): PromptSection[] {
@@ -55,9 +55,10 @@ export function registerDynamicSections(): PromptSection[] {
                     ];
                 },
             },
-            build: c => {
+            build: async c => {
                 if (!c.flags.memory) return '';
-                return getPromptMemorySource().buildLongTermPrompt(c.ctx, c.session, c.memoryQuery, c.memoryUsers, c.memoryGroup);
+                const text = await getPromptMemorySource().buildLongTermPrompt(c.ctx, c.session, c.memoryQuery, c.memoryUsers, c.memoryGroup);
+                return text ? `${text}\n\n${MEMORY_TAIL_GUARD}` : '';
             },
         },
     ];

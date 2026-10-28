@@ -500,7 +500,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 记忆召回新近度权重/半衰期 | 检索新近度加分权重与半衰期（默认 0.4 / 60 天） |
 | 记忆召回语义相似度下限 | 语义通路最低 cosine（默认 0.35） |
 | 长期记忆条数上限 | 安全阀，超过后按失效/覆盖/衰减淘汰，0 不限制（默认 300） |
-| 记忆注入 token 预算 | 单轮注入记忆总预算（默认 3000） |
+| 记忆注入 token 预算 | 单轮注入记忆总预算（默认 2048；单 bank 召回上限 1024） |
 | 观察记忆过期天数 | 无新证据超过该天数的观察不注入（不删除，默认 90） |
 | 后台记忆 LLM 每小时上限 | 后台抽取/巩固/刷新每小时最多调用次数；0 不限（默认 20） |
 | 用LLM重排召回结果 / 合成观察 / 推理记忆 | 三个独立回调开关（重排默认关，后两者默认开） |
@@ -571,7 +571,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 - 稳定段进 system：身份 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片与图库 / 回复方式 / 工作方向 / **能力地图** / 工具获取或调用格式 / 可用技能 / 知识库 / 子代理委派；段级缓存 30 秒（技能/知识库/工具开关/角色设定等任一变化即失效）。
 - **能力地图**：按当前会话已开启、平台匹配的工具组列出“能力域 + 用途 + 2 个代表工具”（不含参数），并明确要求“不确定能力时先 list_tools/search_tools，不要直接说做不到”；STATUS 关闭或无可用工具时不出现。MCP 服务器的用途标签取配置 `description`，缺省用 `initialize` 的 `serverInfo.title`，再缺省用服务器名。
-- 易变段走 runtime：当前时间 / 长期记忆以 user 消息 `[system:runtime]…[/system]` 注入，system 前缀跨轮稳定。
+- 易变段走 runtime：当前时间 / 长期记忆以 user 消息 `[system:runtime]…[/system]` 注入，system 前缀跨轮稳定。记忆段末尾附一条低权威约束句（背景、非当前请求、相关才用）；空记忆段整体丢弃，群聊多 bank 时个人 bank 按相关性降序（当前会话 bank 固定第一、global 固定最后）。
 - 内置提示词与代码生成的上下文标记均为英文且**不兼容旧中文标记**（旧会话中的中文标记按普通文本保留）；角色设定、技能正文、知识库正文等用户内容保持原语言，机器人按对话语言回复。
 - 外部插件可注册扩展段：`globalThis.aiplugin4.registerPromptSection({ name: 'ext:xxx:yyy', order: 10000, channel: 'system', build: ctx => '...' })`（限 `ext:` 命名空间、单段 ≤2000 字符、合计 ≤4000 字符、默认外部清洗）；也可用 `onPromptAssemble(fn)` 整体改写 system/runtime。
 - 调试：`.ai prompt` 查看 system + runtime；`.ai prompt sections` 查看段统计（order/name/channel/chars/tokens/cache）与 digest。开发侧可用 `npm run prompt:snapshot` 把 group/private 两种会话的 system/runtime/段统计输出到 `test-reports/prompt-baseline/`，便于重构前后对比。

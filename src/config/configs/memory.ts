@@ -3,6 +3,9 @@
 // 全局与群→个人自动抽取默认关（隐私）。
 import { ext } from "../ext";
 
+/** 单轮记忆注入 token 预算默认值（与 `src/memory/v2/prompt.ts` 的渲染兜底常量保持一致） */
+export const MEMORY_PROMPT_TOKEN_BUDGET = 2048;
+
 export default class MemoryConfig {
     static register() {
         seal.ext.registerBoolConfig(ext, "启用长期记忆", true, "开启后对话内容会沉淀为长期记忆并注入", "记忆");
@@ -23,7 +26,7 @@ export default class MemoryConfig {
         seal.ext.registerIntConfig(ext, "记忆召回新近度半衰期", 60, "新近度加分半衰期（天）", "记忆");
         seal.ext.registerFloatConfig(ext, "记忆召回语义相似度下限", 0.35, "语义通路最低 cosine 相似度", "记忆");
         seal.ext.registerIntConfig(ext, "长期记忆条数上限", 300, "安全阀：超过后按失效/覆盖/衰减淘汰；0=不限制", "记忆");
-        seal.ext.registerIntConfig(ext, "记忆注入 token 预算", 3000, "单轮注入记忆总 token 预算", "记忆");
+        seal.ext.registerIntConfig(ext, "记忆注入 token 预算", MEMORY_PROMPT_TOKEN_BUDGET, "单轮注入记忆总 token 预算", "记忆");
         seal.ext.registerIntConfig(ext, "观察记忆过期天数", 90, "超过该天数无新证据的观察不注入（不删除）", "记忆");
         seal.ext.registerIntConfig(ext, "后台记忆 LLM 每小时上限", 20, "后台抽取/巩固/刷新每小时最多 LLM 调用次数；0=不限", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM重排召回结果", false, "使用 LLM 对召回结果重新排序（较慢）", "记忆");

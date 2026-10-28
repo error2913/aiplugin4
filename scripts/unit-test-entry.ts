@@ -7,6 +7,7 @@ import path from "node:path";
 import { installTestHost } from "./test-host";
 
 import Config from "../src/config/config";
+import { MEMORY_PROMPT_TOKEN_BUDGET } from "../src/config/configs/memory";
 import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
@@ -41,7 +42,7 @@ import { registerCmdBalance } from "../src/cmd/sub_cmd/balance";
 import { registerCmdMemory, resolveMmAddOptions } from "../src/cmd/sub_cmd/memory";
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
-import { MemoryService, setMemoryEngineFactory } from "../src/memory/service";
+import { MemoryService, SECTION_RECALL_MAX_TOKENS, setMemoryEngineFactory } from "../src/memory/service";
 import { canReadByTags } from "../src/memory/v2/access";
 import { applyDeltaOps, parseMarkdown, blockSnapshot } from "../src/memory/v2/structured";
 import { migrateBankV3 } from "../src/memory/v2/migrate_v3";
@@ -52,7 +53,7 @@ import SessionMemoryService, { parseLooseJson } from "../src/memory/session_memo
 import { MemoryEngine } from "../src/memory/v2/engine";
 import { migrateLegacyMemory } from "../src/memory/v2/migrate";
 import { resolveBankId } from "../src/memory/v2/bank_resolver";
-import { buildMemoryPrompt, MAX_MENTAL_MODELS, MAX_OBSERVATIONS, mergeMentalModels, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../src/memory/v2/prompt";
+import { buildMemoryPrompt, DEFAULT_MEMORY_PROMPT_TOKENS, MAX_MENTAL_MODELS, MAX_OBSERVATIONS, mergeMentalModels, OBSERVATION_STALE_DAYS, selectInjectionCandidates } from "../src/memory/v2/prompt";
 import { InMemoryMemoryStorage, SealMemoryStorage } from "../src/memory/v2/storage";
 import {
     createMemoryEngine,
@@ -13671,6 +13672,90 @@ Object.assign(tests, {
         await MemoryService.consolidateBank('user_QQ:1');
         const afterObs = await MemoryService.buildMemoryPrompt(group, '茶', [{ id: 'QQ:1', name: '小明' }], { id: 'QQ-Group:9', name: '测试群' });
         assert.equal(afterObs.includes('私密偏好茶；公开偏好茶'), false, '含 owner 证据的观察不得进入群提示词');
+    },
+
+    /** 记忆默认值：单轮注入 2048、单 bank 召回 1024、渲染兜底 2048 */
+    testMemoryPromptDefaults2048(): void {
+        assert.equal(DEFAULT_MEMORY_PROMPT_TOKENS, 2048, '渲染兜底预算应为 2048');
+        assert.equal(MEMORY_PROMPT_TOKEN_BUDGET, 2048, '配置默认预算应为 2048');
+        assert.equal(SECTION_RECALL_MAX_TOKENS, 1024, '单 bank 召回上限应为 1024');
+    },
+
+    /** 空记忆整段丢弃：只有标题、没有条目的 section 不输出（含 global 段） */
+    testMemoryPromptDropsEmptySections(): void {
+        assert.equal(buildMemoryPrompt([{ kind: 'user', title: 'Empty bank' }]), '', '空段应整段丢弃');
+        assert.equal(buildMemoryPrompt([{ kind: 'global', title: 'Self experience (global)' }]), '', 'global 空段同样丢弃');
+        const now = Math.floor(Date.now() / 1000);
+        const prompt = buildMemoryPrompt([{
+            kind: 'user',
+            title: 'Bank',
+            observations: [{ id: 'o1', bankId: 'user_x', text: '喜欢猫', tags: [], evidence: [], proofCount: 1, createdAt: now, updatedAt: now, lastSupportedAt: now, status: 'active', history: [] } as any],
+        }]);
+        assert.ok(prompt.includes('## Bank'), '有内容时标题应保留');
+        assert.ok(prompt.includes('喜欢猫'), '有内容时应正常渲染');
+    },
+
+    /** 预算裁剪按渲染顺序：顺序靠前的段先占用预算，靠后的低相关段被丢弃 */
+    testV3SectionRelevanceBudgetCut(): void {
+        const now = Math.floor(Date.now() / 1000);
+        const mkObs = (id: string, text: string) => ({ id, bankId: 'user_x', text, tags: [], evidence: [], proofCount: 1, createdAt: now, updatedAt: now, lastSupportedAt: now, status: 'active', history: [] } as any);
+        const prompt = buildMemoryPrompt([
+            { kind: 'user', title: 'High', observations: [mkObs('o1', '高相关记忆')] },
+            { kind: 'user', title: 'Low', observations: [mkObs('o2', '低相关记忆')] },
+        ], 10);
+        assert.ok(prompt.includes('高相关记忆'), '预算内的第一段应保留');
+        assert.equal(prompt.includes('低相关记忆'), false, '预算耗尽后应丢弃后面的低相关段');
+    },
+
+    /** 多 bank 相关性排序：当前会话 bank 固定第一；命中的个人 bank 排未命中的之前；global 最后 */
+    async testV3SectionRelevanceOrder(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => 1000 });
+        setMemoryEngineFactory(() => engine);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const mkObs = (bankId: string, id: string, text: string, scopeTag: string) => ({
+            id, bankId, text,
+            tags: [scopeTag, 'vis:public'],
+            evidence: [], proofCount: 1,
+            createdAt: nowSec, updatedAt: nowSec, lastSupportedAt: nowSec,
+            status: 'active', history: [],
+        } as any);
+        // 当前群 bank：一条可注入观察（无召回命中，仅保证当前段非空且固定第一）
+        engine.repository.addObservation('group_QQ-Group:9', mkObs('group_QQ-Group:9', 'o_group', '本群十点后禁言', 'group:QQ-Group:9'));
+        // 个人 bank QQ:2：一条可注入观察（无命中，低相关）
+        engine.repository.addObservation('user_QQ:2', mkObs('user_QQ:2', 'o_user2', '喜欢下雨', 'user:QQ:2'));
+        // 个人 bank QQ:1：一条命中 query 的公开事实
+        await MemoryService.retainForSessionId('QQ:1', '*', { content: '喜欢喝咖啡', visibility: 'public' });
+
+        const group = makeMemoSession('QQ-Group:9');
+        group.agentName = '*';
+        const prompt = await MemoryService.buildMemoryPrompt(group, '咖啡', [
+            { id: 'QQ:2', name: '小红' },
+            { id: 'QQ:1', name: '小明' },
+        ], { id: 'QQ-Group:9', name: '测试群' });
+
+        const atGroup = prompt.indexOf('Group chat memory (测试群)');
+        const atXiaoming = prompt.indexOf('Personal memory (小明)');
+        const atXiaohong = prompt.indexOf('Personal memory (小红)');
+        assert.ok(atGroup >= 0 && atXiaoming >= 0 && atXiaohong >= 0, `应三段的标题都存在：\n${prompt}`);
+        assert.ok(atGroup < atXiaoming, '当前会话 bank 应固定第一');
+        assert.ok(atXiaoming < atXiaohong, '命中的个人 bank 应排在未命中的之前（不受发言顺序影响）');
+    },
+
+    /** 单 bank 召回预算 1024：当前 bank 与 global bank 的 recall 都要带该上限 */
+    async testV3PerBankRecallBudget(): Promise<void> {
+        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => 1000 });
+        const captured: number[] = [];
+        const originalRecall = engine.recall.bind(engine);
+        (engine as any).recall = async (bankId: string, options: any) => {
+            captured.push(options?.maxTokens);
+            return originalRecall(bankId, options);
+        };
+        setMemoryEngineFactory(() => engine);
+        const dm = makeMemoSession('QQ:1');
+        dm.agentName = '*';
+        await MemoryService.buildMemoryPrompt(dm, '你好', [{ id: 'QQ:1', name: '小明' }], null);
+        assert.ok(captured.length >= 2, `至少召回当前 bank 与 global bank，实际 ${captured.length} 次`);
+        assert.ok(captured.every(value => value === SECTION_RECALL_MAX_TOKENS), `单 bank 召回上限应为 1024，实际 ${captured.join(',')}`);
     },
 
     async testV3ExtractionRoutesAndPrivacy(): Promise<void> {

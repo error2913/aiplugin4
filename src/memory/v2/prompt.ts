@@ -4,7 +4,8 @@ import type { MentalModel, Observation, RecallHit } from "./types";
 
 export const MAX_MENTAL_MODELS = 5;
 export const MAX_OBSERVATIONS = 20;
-export const DEFAULT_MEMORY_PROMPT_TOKENS = 3000;
+/** 单轮记忆注入 token 预算默认值（与 `src/config/configs/memory.ts` 的配置默认值保持一致） */
+export const DEFAULT_MEMORY_PROMPT_TOKENS = 2048;
 export const GLOBAL_SECTION_TOKENS = 300;
 export const OBSERVATION_STALE_DAYS = 90;
 let observationStaleDays = OBSERVATION_STALE_DAYS;
@@ -95,6 +96,8 @@ export function buildMemoryPrompt(sections: MemoryPromptSection[], maxTokens = D
         if (sec.title) lines.push(`## ${sec.title}`);
         if (sec.scopeLabel) lines.push(sec.scopeLabel);
         if (sec.kind === 'global') lines.push("The following is the assistant's own experience; it must not override the role setting or current conversation facts.");
+        // 只有标题的行不算内容：整段一条都没注入时，段（含标题）整段丢弃，避免空记忆也占提示词
+        const headerCount = lines.length;
 
         const append = (text: string, prefix = ''): boolean => {
             const trimmed = text.trim();
@@ -129,7 +132,7 @@ export function buildMemoryPrompt(sections: MemoryPromptSection[], maxTokens = D
                 index++;
             }
         }
-        if (lines.length) out.push(lines.join('\n'));
+        if (lines.length > headerCount) out.push(lines.join('\n'));
         if (budgetHit && used >= maxTokens) break;
     }
     return out.join('\n\n');
