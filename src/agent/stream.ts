@@ -212,13 +212,11 @@ export class streamService {
                 const hasReasoning = Object.prototype.hasOwnProperty.call(message, 'reasoning_content');
                 const reasoning = hasReasoning ? (message.reasoning_content || '') : undefined;
                 if (reasoning !== undefined) {
-                    const shownR = reasoning.length > 500 ? reasoning.slice(0, 500) + `…(+${reasoning.length - 500})` : reasoning;
-                    log.info(`思维链内容(${reasoning.length}字符): ${shownR}`);
+                    log.info(`思维链内容(${reasoning.length}字符): ${reasoning}`);
                 }
 
                 const content = message.content || '';
-                const shown = content.length > 300 ? content.slice(0, 300) + `…(+${content.length - 300})` : content;
-                log.info(`响应内容(${Date.now() - time}ms, finish=${finish_reason}): ${shown}`);
+                log.info(`响应内容(${Date.now() - time}ms, finish=${finish_reason}): ${content}`);
 
                 return { content, tool_calls: message.tool_calls || [], ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) };
             } else {

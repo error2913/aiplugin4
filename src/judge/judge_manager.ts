@@ -122,7 +122,7 @@ export class JudgeManager {
         // WAIT 轮进行中：不评分，挂起最新一条消息，轮末重新过 gate
         if (now < state.waitUntil) {
             state.pending = { ctx, msg, text: messageText, session };
-            log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} WAIT轮中 挂起消息 轮末重新过gate 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
+            log.info(`sid=${sid} msg="${messageText}" from=${from} WAIT轮中 挂起消息 轮末重新过gate 截止${fmtDate(Math.floor(state.waitUntil / 1000))}`);
             return;
         }
         // 轮已到点但定时器兜底尚未触发：先补跑轮末挂起消息，再继续处理当前消息
@@ -131,7 +131,7 @@ export class JudgeManager {
             const after = this.ensureState(sid);
             if (Date.now() < after.waitUntil) {
                 after.pending = { ctx, msg, text: messageText, session };
-                log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} 补跑后进入新WAIT轮 挂起消息 截止${fmtDate(Math.floor(after.waitUntil / 1000))}`);
+                log.info(`sid=${sid} msg="${messageText}" from=${from} 补跑后进入新WAIT轮 挂起消息 截止${fmtDate(Math.floor(after.waitUntil / 1000))}`);
                 return;
             }
         }
@@ -195,13 +195,13 @@ export class JudgeManager {
         const from = ctx.player?.userId || '';
         const g = this.gate(session, state);
         if (g.drop) {
-            log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} gate=DROP(${g.reason}) 不触发小模型`);
+            log.info(`sid=${sid} msg="${messageText}" from=${from} gate=DROP(${g.reason}) 不触发小模型`);
             return;
         }
-        log.info(`sid=${sid} msg="${truncate(messageText, 80)}" from=${from} gate=通过 | 精力${state.energy} 密度${state.msgTimes.length}/${DENSITY_LIMIT}/15s 本轮judge ${state.hourly.count}/${cfg.GATE.max_judge_per_hour}`);
+        log.info(`sid=${sid} msg="${messageText}" from=${from} gate=通过 | 精力${state.energy} 密度${state.msgTimes.length}/${DENSITY_LIMIT}/15s 本轮judge ${state.hourly.count}/${cfg.GATE.max_judge_per_hour}`);
 
         const built = this.buildJudgeMessages(ctx, session, messageText, cfg);
-        log.info(`注入: bot=${built.botName} role=${truncate(built.role, 80)} lastBot=${truncate(built.lastBot, 80)} ctx=${built.ctxCount}/${cfg.MODEL.context_count}`);
+        log.info(`注入: bot=${built.botName} role=${built.role} lastBot=${built.lastBot} ctx=${built.ctxCount}/${cfg.MODEL.context_count}`);
         await this.judgeAndBranch(ctx, msg, session, cfg, built);
     }
 

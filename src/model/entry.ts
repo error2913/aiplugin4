@@ -212,7 +212,7 @@ export class ModelEntry {
             });
             if (data.data && data.data.length > 0) {
                 const embedding = data.data[0].embedding;
-                log.info(`文本:`, text.length > 200 ? text.slice(0, 200) + `…(+${text.length - 200})` : text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
+                log.info(`文本:`, text, `\n响应embedding长度:`, embedding.length, '\nlatency:', Date.now() - time, 'ms');
                 if (!Array.isArray(embedding)) {
                     throw new Error('响应 data[0].embedding 不是数组');
                 }
@@ -254,7 +254,7 @@ export class ModelEntry {
             if (response.choices && response.choices.length > 0) {
                 const message = response.choices[0].message;
                 const content = message.content || '';
-                log.info(`识图响应(${Date.now() - time}ms): ${content.length > 300 ? content.slice(0, 300) + `…(+${content.length - 300})` : content}`);
+                log.info(`识图响应(${Date.now() - time}ms): ${content}`);
                 return content;
             }
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);

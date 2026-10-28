@@ -337,8 +337,7 @@ export default class Image {
         this.base64FailedAt = Date.now();
         if (permanent) {
             this.urlBroken = true;
-            const snippet = message.length > 120 ? message.slice(0, 120) + '…' : message;
-            log.warning('图片' + this.imageId + '的URL已确认不可用（' + snippet + '），不再重试转换，发送给模型时降级为文本标签');
+            log.warning('图片' + this.imageId + '的URL已确认不可用（' + message + '），不再重试转换，发送给模型时降级为文本标签');
         } else if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) {
             log.warning('图片' + this.imageId + '连续' + this.base64FailedCount + '次转base64失败，已永久放弃该图片的转换重试');
         }

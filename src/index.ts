@@ -236,7 +236,7 @@ function main() {
   //骰子发送的消息
   ext.onMessageSend = (ctx: seal.MsgContext, msg: seal.Message) => {
     try {
-      log.debug(`[onMessageSend] 收到机器人出站消息 session=${ctx.isPrivate ? ctx.player?.userId : ctx.group?.groupId} text=${String(msg.message || "").slice(0, 120)}`);
+      log.debug(`[onMessageSend] 收到机器人出站消息 session=${ctx.isPrivate ? ctx.player?.userId : ctx.group?.groupId} text=${String(msg.message || "")}`);
       MessagePipeline.handleBotMessage(ctx, msg);
     } catch (e) {
       log.exception('获取发送消息处理出错', e);

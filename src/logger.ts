@@ -1,8 +1,14 @@
 // 日志模块：统一日志输出（级别控制 / 密钥脱敏 / 截断 / 异常堆栈 / 分类标签）
 import { NAME } from "./config/static_config";
 
-const MAX_ITEM_LENGTH = 2000; // 单个日志项最大长度
-const MAX_MESSAGE_LENGTH = 300; // 请求上下文正文日志截断长度
+// 「日志简短打印」是唯一的内容截断开关：
+// - 关闭：完整打印（对象完整 stringify、模型思维链/响应/请求正文等全文），调用方不得预先截断；
+// - 开启：整行超阈值时只保留头尾各 500 字。
+const SHORT_PRINT_THRESHOLD = 1000; // 开启后整行超过该长度才截断
+const SHORT_PRINT_EDGE = 500;       // 开启后头尾各保留的字符数
+// logLong 分片长度：开启时须让「分片 + 标签」低于阈值，避免分片再被简短打印截掉中段
+const LOG_LONG_CHUNK_WITH_TRUNCATION = 900;
+const LOG_LONG_CHUNK_FULL = 1500;
 
 // 日志开关由 config 层注入 provider，而不是启动时快照：
 // 面板改「日志级别/简短打印/记录消息内容」后，必须沿用 Config.base 的 60s TTL 语义在运行中生效。
@@ -43,6 +49,25 @@ function resolveLogConfig(): Required<LoggerConfig> {
     }
 }
 
+/**
+ * 折叠二进制载荷：data URI 里的 base64 本体与 JSON 里裸的 base64 字段不打印原文。
+ * 这不是「截断日志」——关闭「日志简短打印」后整段 base64 可能几 MB 直接灌进海豹日志，
+ * 且没有排障价值；折叠后只保留「已省略 N 字符」的占位。
+ */
+function foldBinaryPayload(text: string): string {
+    if (!text || text.indexOf('base64') === -1) return text;
+    let out = text;
+    // data:image/png;base64,AAAA… → data:image/png;base64,[AAAA 已省略 4096 字符]
+    out = out.replace(/data:([\w/+.-]+);base64,([A-Za-z0-9+/=]{40,})/g, (_m, mime: string, payload: string) => {
+        return `data:${mime};base64,[base64 已省略 ${payload.length} 字符]`;
+    });
+    // JSON 里裸的 base64 字段（如 {"base64":"AAAA…"}）
+    out = out.replace(/("base64"\s*:\s*")([A-Za-z0-9+/=]{40,})(")/g, (_m, head: string, payload: string, tail: string) => {
+        return `${head}[base64 已省略 ${payload.length} 字符]${tail}`;
+    });
+    return out;
+}
+
 const LEVEL_ORDER: { [key: string]: number } = {
     "从不": 0,
     "错误": 1,
@@ -74,16 +99,11 @@ export default class Logger {
             return `${item.name}: ${item.message}`;
         }
         if (typeof item === 'string') {
-            return item.length > MAX_ITEM_LENGTH
-                ? item.slice(0, MAX_ITEM_LENGTH) + `…(+${item.length - MAX_ITEM_LENGTH})`
-                : item;
+            return item;
         }
         try {
             const s = JSON.stringify(item);
-            if (!s) return `${item}`;
-            return s.length > MAX_ITEM_LENGTH
-                ? s.slice(0, MAX_ITEM_LENGTH) + `…(+${s.length - MAX_ITEM_LENGTH})`
-                : s;
+            return s || `${item}`;
         } catch (_e) {
             return `${item}`;
         }
@@ -92,13 +112,16 @@ export default class Logger {
     static handleLogData(...data: any[]): string {
         const { shortPrint: LOG_SHORT_PRINT } = resolveLogConfig();
         let s = data.map(item => this.formatItem(item)).join(" ");
+        // 脱敏前先折叠 base64，避免对超大 base64 串跑正则、也避免它整段进日志
+        s = foldBinaryPayload(s);
         // 脱敏：掩盖常见密钥字段、URL query 参数、Bearer token 与 sk- 前缀密钥
         s = s.replace(/(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|authorization|signature|sig|secret|password|app[_-]?secret|appkey)["']?\s*[:=]\s*["']?)([^"'\s,}&]{6,})/gi, '$1***');
         s = s.replace(/([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|signature|sig|secret|password|authorization|appkey)=)[^&\s]{6,}/gi, '$1***');
         s = s.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1***');
         s = s.replace(/(sk-[A-Za-z0-9]{6,})/gi, 'sk-***');
-        if (LOG_SHORT_PRINT && s.length > 1000) {
-            return s.substring(0, 500) + "\n...\n" + s.substring(s.length - 500);
+        // 「日志简短打印」= 唯一截断点：关闭时原样返回（完整日志），开启时超长行只留头尾
+        if (LOG_SHORT_PRINT && s.length > SHORT_PRINT_THRESHOLD) {
+            return s.substring(0, SHORT_PRINT_EDGE) + "\n...\n" + s.substring(s.length - SHORT_PRINT_EDGE);
         }
         return s;
     }
@@ -120,10 +143,11 @@ export default class Logger {
     static warning(...data: any[]) { this.emit('警告', ...data); }
     static error(...data: any[]) { this.emit('错误', ...data); }
 
-    /** 记录异常：消息进 error，堆栈进 debug（调试级别可见） */
+    /** 记录异常：消息进 error，响应体原文（ApiError.rawText）与堆栈进 debug（调试级别可见） */
     static exception(label: string, e: any) {
         const message = e && e.message ? e.message : `${e}`;
         this.error(`${label}: ${message}`);
+        if (e && typeof e.rawText === 'string' && e.rawText) this.debug(`${label} 响应体原文:\n${e.rawText}`);
         if (e && e.stack) this.debug(`${label} 堆栈:\n${e.stack}`);
     }
 
@@ -140,7 +164,7 @@ export default class Logger {
         };
     }
 
-    /** 请求上下文日志：受“日志记录消息内容”开关控制，正文截断，默认不打印 system */
+    /** 请求上下文日志：受“日志记录消息内容”开关控制，默认不打印 system；正文长度交给「日志简短打印」统一处理 */
     static printRequestMessages(messages: any[], runId: string = '') {
         if (!messages) return;
         const { messageContent: LOG_MESSAGE_CONTENT } = resolveLogConfig();
@@ -161,24 +185,27 @@ export default class Logger {
                 this.debug(base);
                 return;
             }
-            const truncated = m.content.length > MAX_MESSAGE_LENGTH
-                ? m.content.slice(0, MAX_MESSAGE_LENGTH) + `…(+${m.content.length - MAX_MESSAGE_LENGTH})`
-                : m.content;
-            this.debug(`${base} content=${truncated}`);
+            this.debug(`${base} content=${m.content}`);
         });
     }
 
-    /** 分段打印长文本，避免日志截断丢失内容；分片以 [第x段/总段数] 标注 */
-    static logLong(label: string, text: string, chunkSize = 1500) {
+    /**
+     * 分段打印长文本，避免日志截断丢失内容；分片以 [第x段/总段数] 标注。
+     * 开启「日志简短打印」时分片压到 900（加标签仍低于 1000，不会被二次截断）；
+     * 关闭时保持 1500，少刷几行。
+     */
+    static logLong(label: string, text: string, chunkSize?: number) {
         if (!text) return;
-        const total = Math.max(1, Math.ceil(text.length / chunkSize));
+        const { shortPrint: LOG_SHORT_PRINT } = resolveLogConfig();
+        const size = chunkSize ?? (LOG_SHORT_PRINT ? LOG_LONG_CHUNK_WITH_TRUNCATION : LOG_LONG_CHUNK_FULL);
+        const total = Math.max(1, Math.ceil(text.length / size));
         if (total === 1) {
             this.info(label, text);
             return;
         }
-        for (let i = 0; i < text.length; i += chunkSize) {
-            const part = Math.floor(i / chunkSize) + 1;
-            this.info(`${label}[${part}/${total}]:`, text.slice(i, i + chunkSize));
+        for (let i = 0; i < text.length; i += size) {
+            const part = Math.floor(i / size) + 1;
+            this.info(`${label}[${part}/${total}]:`, text.slice(i, i + size));
         }
     }
 }

@@ -3,7 +3,7 @@ import { ext } from "../ext";
 export default class BaseConfig {
     static register() {
         seal.ext.registerOptionConfig(ext, "日志级别", "信息", ["从不", "错误", "警告", "信息", "调试"], "控制台日志详细程度；日常建议「信息」，排查问题时切「调试」可看到更多细节", "基础");
-        seal.ext.registerBoolConfig(ext, "日志简短打印", true, "开启后超长日志只保留首尾各 500 字，便于快速定位", "基础");
+        seal.ext.registerBoolConfig(ext, "日志简短打印", true, "开启后超长日志只保留首尾各 500 字，便于快速定位；关闭则完整打印（不再有其它硬截断，仅 base64 载荷折叠为占位）", "基础");
         seal.ext.registerBoolConfig(ext, "日志记录消息内容", true, "开启后请求上下文日志会打印消息正文；关闭则只记录角色与长度", "基础");
         seal.ext.registerIntConfig(ext, "请求超时时限", 180000, "单次模型请求的超时时限，单位毫秒（默认 180000=3 分钟）", "基础");
         seal.ext.registerIntConfig(ext, "请求并发上限", 10, "同时进行的模型请求数量上限，0 表示不限制（多会话与子代理并行共用；调大请留意成本）", "基础");

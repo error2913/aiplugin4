@@ -7,8 +7,8 @@ export default class ContextConfig {
         seal.ext.registerTemplateConfig(ext, "预设上下文", [""], "每框一条预设上下文，role 按 user/assistant 轮流出现，帮助模型学习对话语气", "上下文");
 
         // Context v2 配置（旧键不再注册，也不再读取）
-        seal.ext.registerIntConfig(ext, "上下文预算", 0, "上下文 token 预算；0=跟随报错探测到的模型真实窗口×0.8（未探测到回退 100 万）", "上下文");
-        seal.ext.registerIntConfig(ext, "摘要水位", 6000, "后台滚动摘要的积压 token 水位；0=关闭自动摘要", "上下文");
+        seal.ext.registerIntConfig(ext, "上下文预算", 131072, "上下文 token 预算；0=跟随报错探测到的模型真实窗口×0.8（未探测到回退 100 万）", "上下文");
+        seal.ext.registerIntConfig(ext, "摘要水位", 8192, "后台滚动摘要的积压 token 水位；0=关闭自动摘要", "上下文");
         seal.ext.registerIntConfig(ext, "待机入库配额", 0, "待机会话每小时最多入库多少条普通群消息（0=不限）", "上下文");
         seal.ext.registerIntConfig(ext, "每小时后台压缩上限", 6, "每小时最多自动压缩次数；0=不限", "上下文");
     }

@@ -296,7 +296,7 @@ class _ImageHost {
             if (!response.ok) {
                 const snippet = text.length > 160 ? `${text.slice(0, 160)}…` : text;
                 this.lastError = `HTTP ${response.status} ${snippet}`;
-                log.warning(`${tag}失败：HTTP ${response.status} ${snippet}`);
+                log.warning(`${tag}失败：HTTP ${response.status} ${text}`);
                 return null;
             }
             this.lastError = '';

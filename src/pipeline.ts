@@ -88,7 +88,7 @@ export class MessagePipeline {
         if (!event || event.post_type !== 'message') return;
         const message = event.message;
         if (!Array.isArray(message)) {
-            log.debug(`ob11 事件消息为字符串（${String(message).slice(0, 50)}），由核心原生路径处理，跳过`);
+            log.debug(`ob11 事件消息为字符串（${String(message)}），由核心原生路径处理，跳过`);
             return;
         }
         if (event.user_id === event.self_id) {
@@ -227,7 +227,7 @@ export class MessagePipeline {
             ? formatMessageSegmentsForMatching(messageArray, typeof message === 'string' ? message : '')
             : message;
         if (hasMilkySegments) {
-            log.debug(`milky 消息段展开: ${messageText.slice(0, 200)}`);
+            log.debug(`milky 消息段展开: ${messageText}`);
         }
 
         const isCoreMessage = options?.source !== 'dependency' && !options?.supplementOnly;

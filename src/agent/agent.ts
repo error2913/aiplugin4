@@ -439,8 +439,8 @@ export default class Agent {
         const { ENABLED, CONTEXT_ARCHIVE_RETRY, AUTO_SWITCH_MODEL, SWITCH_KINDS, SWITCH_STRATEGY, SWITCH_NOTIFY } = Config.error;
         const current = Model.getChatModel('chat');
         const modelLabel = e.modelName || current?.name || '';
-        const snippet = e.message.length > 200 ? e.message.slice(0, 200) + '…' : e.message;
-        log.error(`[model-error] kind=${e.kind}(${KIND_LABEL[e.kind]}) provider=${e.provider || '?'} model=${modelLabel} status=${e.status} images=${imageTrace?.entries.length ?? 0} msg=${snippet}`);
+        log.error(`[model-error] kind=${e.kind}(${KIND_LABEL[e.kind]}) provider=${e.provider || '?'} model=${modelLabel} status=${e.status} images=${imageTrace?.entries.length ?? 0} msg=${e.message}`);
+        if (e.rawText) log.debug(`[model-error] 响应体原文:\n${e.rawText}`);
 
         // 动作零：请求体过大（413，含网关 HTML）→ 第一次丢全部图片重发；仍超限则归档后重发。
         // 必须在图片分支之前：否则丢图后的 413 会被当成普通参数错误静默 giveup（见 20 号方案 P0-C）。
@@ -693,7 +693,7 @@ export default class Agent {
                 await new Promise(resolve => setTimeout(resolve, interval));
                 continue;
             }
-            log.debug('stream reply:', raw_reply.length > 200 ? raw_reply.slice(0, 200) + `…(+${raw_reply.length - 200})` : raw_reply);
+            log.debug('stream reply:', raw_reply);
 
             if (STATUS && PROMPT_ENGINEERING) {
                 if (!session.stream.toolCallStatus && /```function/.test(session.stream.reply + raw_reply)) {

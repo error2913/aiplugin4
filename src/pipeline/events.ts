@@ -339,12 +339,12 @@ async function recordEventPrompt(opts: {
                 if (newRef) rememberEventEntryRef(opts.dedupKey, newRef);
             }
             session.save(true);   // 合并写：事件是高频入库路径
-            log.debug(`事件去重合并（保留最后到达）：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
+            log.debug(`事件去重合并（保留最后到达）：${opts.eventType} @ ${opts.sid} text=${text}`);
             return true;
         }
         const entryRef = session.context.addSystemUserMessageTracked(text, opts.systemName, entryExtra);
         if (entryRef) rememberEventEntryRef(opts.dedupKey, entryRef);
         session.save(true);   // 合并写：事件是高频入库路径
-        log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text.slice(0, 60)}`);
+        log.debug(`事件已录入上下文：${opts.eventType} @ ${opts.sid} text=${text}`);
         return true;
     }

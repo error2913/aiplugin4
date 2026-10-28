@@ -20,11 +20,10 @@ export class ToolRunner {
         return result;
     }
 
-    /** 工具调用审计：记录会话、工具与结果摘要，便于排查与风控 */
+    /** 工具调用审计：记录会话、工具与结果摘要，便于排查与风控（完整内容；长度由 Logger 统一处理） */
     private static audit(session: Session, results: ToolCallResult[]) {
         for (const r of results) {
-            const summary = r.content.length > 120 ? r.content.slice(0, 120) + '…' : r.content;
-            Logger.info(`[tool] session=${session.sessionId} call=${r.tool_call_id} content=${summary}`);
+            Logger.info(`[tool] session=${session.sessionId} call=${r.tool_call_id} content=${r.content}`);
         }
     }
 }

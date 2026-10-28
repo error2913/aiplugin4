@@ -14,7 +14,7 @@ export default class MemoryConfig {
         seal.ext.registerBoolConfig(ext, "自动维护固定心智模型", true, "为个人/群聊/本体补建固定模板，并在首次有来源时生成一次", "记忆");
         seal.ext.registerBoolConfig(ext, "巩固后自动刷新心智模型", false, "默认关闭（Hindsight 默认）；开启后仅 tag 重叠 + 已过期 + 到间隔的模型刷新", "记忆");
         seal.ext.registerOptionConfig(ext, "心智模型刷新模式", "full", ["full", "delta"], "full=全部记忆重新推理（Hindsight 默认）；delta=只喂新增记忆做类型化编辑", "记忆");
-        seal.ext.registerIntConfig(ext, "心智模型刷新最小间隔", 0, "同一模型两次自动刷新的最小分钟数；0=不限（Hindsight 默认，建议开自动刷新时设 30）", "记忆");
+        seal.ext.registerIntConfig(ext, "心智模型刷新最小间隔", 1440, "同一模型两次自动刷新的最小分钟数；0=不限（Hindsight 默认，建议开自动刷新时设 30）", "记忆");
         seal.ext.registerIntConfig(ext, "心智模型失败冷却", 30, "刷新失败后暂停自动重试的分钟数", "记忆");
         seal.ext.registerIntConfig(ext, "心智模型输出上限", 2048, "单次刷新/合成输出 token 上限", "记忆");
         seal.ext.registerIntConfig(ext, "增量模型定期重建（小时）", 48, "delta 模型定期 full 重建；仅在开启自动刷新时生效", "记忆");

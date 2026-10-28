@@ -13253,6 +13253,57 @@ Object.assign(tests, {
         }
     },
 
+    /** logger 截断收敛：关闭「日志简短打印」=完整打印；开启=整行超 1000 字只留头尾各 500（唯一截断点） */
+    testLoggerShortPrintModes(): void {
+        try {
+            setLoggerConfigProvider(() => ({ shortPrint: false, messageContent: true }));
+            const full = 'x'.repeat(3000);
+            assert.strictEqual(Logger.handleLogData(full), full, '关闭「日志简短打印」应完整输出超长文本');
+            const obj = { a: 'y'.repeat(3000) };
+            assert.strictEqual(Logger.handleLogData(obj), JSON.stringify(obj), '关闭时应完整 stringify 对象');
+
+            setLoggerConfigProvider(() => ({ shortPrint: true, messageContent: true }));
+            const exact = 'z'.repeat(1000);
+            assert.strictEqual(Logger.handleLogData(exact), exact, '未超阈值不应截断');
+            const cut = Logger.handleLogData('a'.repeat(1001));
+            assert.strictEqual(cut.length, 1005, '开启时超阈值行应为 头500 + 分隔 + 尾500');
+            assert.ok(cut.startsWith('a'.repeat(500)) && cut.endsWith('a'.repeat(500)), '开启时应保留头尾');
+
+            // 请求上下文正文不再预先截断（完整内容交给 Logger 统一处理）
+            const origEmit = (Logger as any).emit;
+            const emitted: string[] = [];
+            (Logger as any).emit = (_level: string, ...data: any[]) => { emitted.push(data.map(String).join(' ')); };
+            try {
+                const body = 'q'.repeat(1500);
+                Logger.printRequestMessages([{ role: 'user', content: body }]);
+                assert.ok(emitted.some(l => l.includes(body)), '请求上下文正文应完整传给 logger');
+            } finally {
+                (Logger as any).emit = origEmit;
+            }
+
+            // 脱敏仍在（且发生在截断之前）
+            const secret = Logger.handleLogData('api_key=' + 'k'.repeat(40) + ' tail');
+            assert.ok(!secret.includes('k'.repeat(40)), '密钥脱敏应生效');
+        } finally {
+            setLoggerConfigProvider(null);
+        }
+    },
+
+    /** logger base64 折叠：data URI / JSON base64 字段只留占位，关闭截断也不把整段 base64 写进日志 */
+    testLoggerBase64Fold(): void {
+        try {
+            setLoggerConfigProvider(() => ({ shortPrint: false, messageContent: true }));
+            const payload = 'A'.repeat(4096);
+            const dataUri = Logger.handleLogData(`image=data:image/png;base64,${payload}`);
+            assert.ok(!dataUri.includes(payload), 'data URI 的 base64 本体应折叠');
+            assert.ok(dataUri.includes('4096'), '折叠占位应带原文长度');
+            const json = Logger.handleLogData(JSON.stringify({ base64: payload }));
+            assert.ok(!json.includes(payload), 'JSON base64 字段应折叠');
+        } finally {
+            setLoggerConfigProvider(null);
+        }
+    },
+
     /** getRegexConfig：非法正则回退为永不匹配，命中缓存后不再读配置 */
     testGetRegexConfigInvalidFallbackAndCache(): void {
         const TC = (globalThis as any).__TEST_CONFIG__;
