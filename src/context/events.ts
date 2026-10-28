@@ -124,6 +124,10 @@ export interface SummaryRecord extends RecordBase {
     text: string;
     model?: string;
     promptVersion?: number;
+    /** 摘要覆盖区间的最早事件时间（Unix 秒，可选；旧记录无此字段） */
+    fromAt?: number;
+    /** 摘要覆盖区间的最晚事件时间（Unix 秒，可选；旧记录无此字段） */
+    toAt?: number;
 }
 
 /** 有意编辑：展示与召回都以补丁为准 */

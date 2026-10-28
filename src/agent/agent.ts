@@ -20,6 +20,7 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
+import { resolveContextBudgets } from "../utils/context_budget";
 import { collectImageUrls, createImageTrace, handleMessages, ImageTraceState, RequestMessage, sanitizeChatMessages, textToMultimodalContent } from "../utils/message";
 import { SYSTEM_NAME } from "../utils/protocol";
 import { revive, TypeDescriptor } from "../utils/revive";
@@ -28,7 +29,7 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { collectContextBacklog, compactContextV2 } from "./context_bridge";
+import { collectContextBacklog, compactContextV2, forceCompactToTarget } from "./context_bridge";
 import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -141,14 +142,34 @@ export default class Agent {
     private async settleBacklog(session: Session): Promise<void> {
         try {
             if (session.contextV2) {
+                // 上下文压缩改为「预算到顶后由 run 结束钩子触发」（见 scheduleContextCompaction）；
+                // 这里只收集记忆桥待抽取原文（纯代码、零 LLM）。
                 collectContextBacklog(session);
-                await compactContextV2(session);
                 return;
             }
             await session.context.settleWindowIfNeeded();
         } catch (e) {
             log.warning('[ctx-cost] 记忆结算失败（不影响本轮回复）: ' + (e instanceof Error ? e.message : String(e)));
         }
+    }
+
+    /**
+     * 预算到顶后的后台压缩：只在「本轮编译发现未摘要原文被预算裁掉」时触发一次。
+     * 不阻塞回复；失败退避只影响下一次触发，**不为空闲会话设置任何定时器**。
+     */
+    private scheduleContextCompaction(session: Session): void {
+        const service = session.contextV2;
+        if (!service) return;
+        const stats = service.lastCompile();
+        if (!stats || stats.omittedFromSeq === null) return;
+        const budgets = resolveContextBudgets(session, Model.getChatModel('chat')?.name || '');
+        void compactContextV2(session, budgets.targetTokens)
+            .then(result => {
+                if (result?.advanced) {
+                    log.info(`[ctx-compact] 预算到顶触发压缩：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                }
+            })
+            .catch(e => log.warning('[ctx-compact] 后台压缩失败（不影响回复，下次触发再试）: ' + (e instanceof Error ? e.message : String(e))));
     }
     /**
      * 单轮对话（aux LLM / 外部插件）：
@@ -237,6 +258,7 @@ export default class Agent {
             // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
             if (acquired) MediaTaskManager.wakePendingNotices(session);
             if (acquired) MemoryScheduler.onRunEnd(session);
+            if (acquired) this.scheduleContextCompaction(session);
         }
     }
 
@@ -481,6 +503,20 @@ export default class Agent {
             if (probed !== undefined) rememberProbedContextWindow(modelLabel, probed);
             const target = computeArchiveTarget(Config.context.BUDGET_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
+            // v2：先按保留强度强制压缩一次（真正减少内容），成功再重发；
+            // 压缩不可用/失败才回退到旧的「临时收紧请求预算」路径。
+            if (session.contextV2) {
+                const budgets = resolveContextBudgets(session, modelLabel);
+                const compacted = await forceCompactToTarget(session, budgets.targetTokens);
+                if (compacted?.advanced) {
+                    handled.archived = true;
+                    // 双保险：压缩后仍可能因系统提示/摘要/工具 schema 超出报文窗口，
+                    // 用报文解析出的目标临时收紧本轮请求预算（保留强度/标签边界仍按永久预算算）。
+                    session.context.setV2BudgetCap?.(target);
+                    log.info(`[model-error] 上下文超长：已压缩 ${compacted.batches ?? 0} 批（目标 ${budgets.targetTokens} tokens），自动重发`);
+                    return 'retry';
+                }
+            }
             // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），
             // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）；
             // 'busy' 表示已有归档在飞，允许重发一次（重试会用归档后的上下文重建请求）。
@@ -613,6 +649,7 @@ export default class Agent {
             // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
             if (acquired) MediaTaskManager.wakePendingNotices(session);
             if (acquired) MemoryScheduler.onRunEnd(session);
+            if (acquired) this.scheduleContextCompaction(session);
         }
     }
 

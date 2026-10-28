@@ -98,6 +98,10 @@ export interface RawEventItem {
     readonly eventId: string;
     readonly kind: ConversationEvent['kind'];
     readonly text: string;
+    /** 事件发生时间（Unix 秒）；工具层按宿主时区格式化展示 */
+    readonly at: number;
+    /** 消息 ID（user/assistant 才有；用于 read_raw 输出回引） */
+    readonly msgId?: string;
     /** 非 0 表示本条是上一页的续读片段 */
     readonly offset?: number;
 }
@@ -162,6 +166,10 @@ export interface GrepHit {
     readonly kind: ConversationEvent['kind'];
     readonly snippet: string;
     readonly text: string;
+    /** 事件发生时间（Unix 秒）；工具层按宿主时区格式化展示 */
+    readonly at: number;
+    /** 消息 ID（user/assistant 才有） */
+    readonly msgId?: string;
     /** 可直接用于 read_raw 的地址 */
     readonly pointer: string;
 }
@@ -329,6 +337,13 @@ function createAccumulator(): ReadAccumulator {
     return { items: [], usedChars: 0, cursor: null, hidden: 0, candidates: 0, skippedPages: [], locateFailed: false };
 }
 
+/** 事件的消息 ID（仅 user/assistant 事件有；工具/系统事件为空） */
+function eventMsgId(event: ConversationEvent): string {
+    if (event.kind !== 'user' && event.kind !== 'assistant') return '';
+    const id = (event as { msgId?: unknown }).msgId;
+    return typeof id === 'string' ? id : '';
+}
+
 /** 把一个事件按预算追加到 readRaw 结果；返回 false 表示已达预算（cursor 已设置） */
 function feedEvent(
     acc: ReadAccumulator,
@@ -361,6 +376,8 @@ function feedEvent(
             eventId: event.eventId,
             kind: event.kind,
             text: piece,
+            at: Number((event as { at?: number }).at ?? 0),
+            ...(eventMsgId(event) ? { msgId: eventMsgId(event) } : {}),
             ...(offset > 0 ? { offset } : {}),
         });
         acc.usedChars += piece.length;
@@ -768,8 +785,10 @@ function buildGrepResult(
     if (hidden > 0) notes.push(`skipped ${hidden} invisible events (epoch/redact/supersede)`);
     const skipped = uniqueSorted(skippedPages);
     if (skipped.length > 0) notes.push(pageSummary(skipped));
+    // 扫描顺序是从新到旧；输出统一改为按时间（seq）升序，便于模型按时间线理解
+    const ordered = hits.slice().sort((a, b) => a.seq - b.seq);
     return {
-        hits,
+        hits: ordered,
         nextCursor,
         exhausted,
         scannedPages,
@@ -828,6 +847,8 @@ export function grepRaw(
             kind: event.kind,
             snippet: makeSnippet(text, match.index, match.length, radius),
             text,
+            at: Number((event as { at?: number }).at ?? 0),
+            ...(eventMsgId(event) ? { msgId: eventMsgId(event) } : {}),
             pointer: `read_raw id=e:${event.seq}`,
         });
         return hits.length < maxHits;

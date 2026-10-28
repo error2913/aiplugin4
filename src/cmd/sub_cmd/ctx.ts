@@ -5,6 +5,7 @@ import { CompactionRuntime } from "../../context/compact/runtime";
 import type { ConversationEvent } from "../../context/events";
 import { ContextService } from "../../context/service";
 import { getAuxLlm } from "../../core/ports/aux_llm";
+import { COMPACT_BATCH_TOKENS, SUMMARY_MAX_CHARS } from "../../utils/context_limits";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
@@ -22,7 +23,7 @@ function buildRuntime(service: ContextService, session: object): CompactionRunti
     let runtime = runtimes.get(session);
     if (runtime) return runtime;
     runtime = new CompactionRuntime(
-        { watermarkTokens: 0, batchTokens: 6000, summaryMaxChars: 2000, hourlyCap: 0 },
+        { batchTokens: COMPACT_BATCH_TOKENS, summaryMaxChars: SUMMARY_MAX_CHARS, hourlyCap: 0 },
         {
             service,
             summarize: async (text: string) => {

@@ -11,6 +11,7 @@
 // - 纯函数 + 注入依赖：不 import seal/storage/Config/utils；summarizer/estimator/时钟/记录 id 全部注入。
 // - 本文件**不写 store**：成功时返回 record/through/remaining，调用方用
 //   `store.commitSummary(record, through, remaining)` 落库。
+import { SUMMARY_MAX_CHARS } from "../../utils/context_limits";
 import {
     EXISTING_SUMMARY_HEADER,
     NEW_CONTENT_HEADER,
@@ -23,8 +24,8 @@ import type { ContextHead } from "../head";
 import { applyEdit, applyVisibility, buildRecordIndex, latestSummary, RecordIndex } from "../view/records";
 import { ConversationUnit, estimateUnitTokens, segmentUnits } from "../view/units";
 
-/** 摘要文本默认硬上限（字符）：超出截断并标记，避免摘要本身撑爆请求预算 */
-export const DEFAULT_SUMMARY_MAX_CHARS = 2000;
+/** 摘要文本默认硬上限（字符）：与编译注入端共用同一常量，避免生成端/注入端口径漂移 */
+export const DEFAULT_SUMMARY_MAX_CHARS = SUMMARY_MAX_CHARS;
 /** 摘要截断标记（截断后的正文以它结尾，且最终长度不超过上限）；**会持久化**进 SummaryRecord */
 export { SUMMARY_TRUNCATE_MARK };
 
@@ -141,6 +142,21 @@ function renderUnitsText(units: readonly ConversationUnit[], index: RecordIndex)
     return units.map(unit => renderUnitText(unit, index)).join('\n\n');
 }
 
+/** 一批单元的事件时间范围（秒）；无有效 at 时返回空对象 */
+function eventTimeRange(units: readonly ConversationUnit[]): { fromAt?: number; toAt?: number } {
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const unit of units) {
+        for (const event of unit.events) {
+            const at = Number((event as { at?: number }).at ?? 0);
+            if (!Number.isFinite(at) || at <= 0) continue;
+            if (at < min) min = at;
+            if (at > max) max = at;
+        }
+    }
+    return Number.isFinite(min) ? { fromAt: Math.floor(min), toAt: Math.floor(max) } : {};
+}
+
 function applySummaryLimit(text: string, maxChars: number): { text: string; truncated: boolean } {
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
         return { text, truncated: false };
@@ -150,12 +166,15 @@ function applySummaryLimit(text: string, maxChars: number): { text: string; trun
     return { text: text.slice(0, room) + SUMMARY_TRUNCATE_MARK, truncated: true };
 }
 
-function makeRecord(deps: CompactDeps, epoch: number, fromSeq: number, toSeq: number, text: string): SummaryRecord {
+function makeRecord(deps: CompactDeps, epoch: number, fromSeq: number, toSeq: number, text: string, fromAt?: number, toAt?: number): SummaryRecord {
     const at = finiteInt(deps.now ? deps.now() : Date.now(), Date.now());
     const id = deps.newRecordId
         ? deps.newRecordId({ epoch, fromSeq, toSeq, at })
         : `sum:${epoch}:${toSeq}:${at}`;
-    return { id, at, kind: 'summary', epoch, fromSeq, toSeq, text };
+    const record: SummaryRecord = { id, at, kind: 'summary', epoch, fromSeq, toSeq, text };
+    if (typeof fromAt === 'number' && Number.isFinite(fromAt) && fromAt > 0) record.fromAt = Math.floor(fromAt);
+    if (typeof toAt === 'number' && Number.isFinite(toAt) && toAt > 0) record.toAt = Math.floor(toAt);
+    return record;
 }
 
 function computeRemainingTokens(
@@ -298,7 +317,12 @@ export async function compactOnce(
         : finiteInt(opts.summaryMaxChars, DEFAULT_SUMMARY_MAX_CHARS);
     const limited = applySummaryLimit(trimmed, maxChars);
     const epoch = headEpoch > index.epoch ? headEpoch : index.epoch;
-    const record = makeRecord(deps, epoch, epochStartSeq, toSeq, limited.text);
+    // 时间范围：fromAt 沿袭上一条 rolling summary（它覆盖的是 epoch 起点起的内容），toAt 取本批最晚
+    const timeRange = eventTimeRange(batchUnits);
+    const inheritedFromAt = previous && typeof previous.fromAt === 'number' && previous.fromAt > 0
+        ? previous.fromAt
+        : undefined;
+    const record = makeRecord(deps, epoch, epochStartSeq, toSeq, limited.text, inheritedFromAt ?? timeRange.fromAt, timeRange.toAt);
     return {
         advanced: true,
         record,

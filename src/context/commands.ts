@@ -1,6 +1,6 @@
 // `.ai ctx` 命令逻辑：解析、执行、用户可读短文本。
 // 只依赖 ContextService/admin/运行时；权限与回复投递在 cmd 层。
-import Config from "../config/config";
+import { resolveContextBudgets } from "../utils/context_budget";
 
 import { contextStats, hideEvents, HideTarget, purgeSession, repairHead } from "./admin";
 import type { CompactionRuntime } from "./compact/runtime";
@@ -15,6 +15,7 @@ export interface ParsedCtxCommand {
     target?: HideTarget;
     confirmed?: boolean;
     budget?: number;
+    retain?: number;
     clear?: boolean;
     nameArgs?: string[];
     helpTopic?: string;
@@ -40,10 +41,10 @@ const HIDE_LABEL: Record<HideTarget, string> = { user: '用户消息', assistant
 const HELP = [
     '用法：.ai ctx [子命令]',
     '  （无参数）              查看上下文状态',
-    '  archive                 整理更早内容（保留原文，可回查）',
+    '  archive                 整理更早内容（保留最新原文与原文，可回查）',
     '  hide [user|assistant|all]  隐藏消息（原文保留，可审计）',
     '  purge --yes             清除本会话上下文（不可恢复，仅骰主）',
-    '  set [budget=<tokens>|clr]  本会话上下文预算（仅邀请者）',
+    '  set [budget=<tokens>] [retain=<1-100>]|clr  本会话预算/保留强度（仅邀请者）',
     '  name status|set nick|card|mod <0-2>  上下文名字（仅邀请者）',
     '  repair                  检查并修复上下文索引',
     '  help [子命令]           查看帮助',
@@ -54,11 +55,11 @@ export function ctxHelpText(): string {
 }
 
 const TOPIC_HELP: Record<string, string> = {
-    status: '【.ai ctx status】查看当前上下文消息数、整理进度与最近一次整理结果。',
-    archive: '【.ai ctx archive】立即整理更早内容；只生成摘要，不删除原文，不写长期记忆。',
+    status: '【.ai ctx status】查看当前上下文消息数、预算/保留强度、整理进度与最近一次整理结果。',
+    archive: '【.ai ctx archive】立即整理更早内容：压缩到保留强度目标（保留最新原文），只生成摘要，不删除原文，不写长期记忆。',
     hide: '【.ai ctx hide [user|assistant|all]】隐藏消息：模型与检索不可见，原文保留供审计。',
     purge: '【.ai ctx purge --yes】物理清除本会话上下文，不可恢复；需要骰主并显式加 --yes。默认不影响长期记忆。',
-    set: '【.ai ctx set [budget=<tokens>|clr]】本会话覆盖上下文预算；budget=0 表示跟随模型窗口，clr 恢复默认。',
+    set: '【.ai ctx set [budget=<tokens>] [retain=<1-100>]|clr】本会话覆盖上下文预算与保留强度；budget=0 表示跟随模型窗口，clr 恢复默认。',
     name: '【.ai ctx name status】查看名字；【.ai ctx name set nick|card】按昵称/群名片更新；【.ai ctx name mod 0|1|2】自动修改规则。',
     repair: '【.ai ctx repair】检查并修复上下文索引（异常时使用）。',
 };
@@ -83,12 +84,18 @@ export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
     if (head === 'set') {
         if (rest.some(item => ['clr', 'clear', 'reset'].includes(item.toLowerCase()))) return { action: 'set', clear: true };
         let budget: number | undefined;
+        let retain: number | undefined;
         for (const item of rest) {
-            const m = /^budget=(-?\d+)$/i.exec(item);
-            if (m) budget = Number(m[1]);
+            const budgetMatch = /^budget=(-?\d+)$/i.exec(item);
+            if (budgetMatch) budget = Number(budgetMatch[1]);
+            const retainMatch = /^retain=(-?\d+)$/i.exec(item);
+            if (retainMatch) retain = Number(retainMatch[1]);
         }
-        if (budget === undefined) return { action: 'help', error: 'set 需要 budget=<tokens> 或 clr' };
-        return { action: 'set', budget };
+        if (budget === undefined && retain === undefined) return { action: 'help', error: 'set 需要 budget=<tokens>、retain=<1-100> 或 clr' };
+        const parsed: ParsedCtxCommand = { action: 'set' };
+        if (budget !== undefined) parsed.budget = budget;
+        if (retain !== undefined) parsed.retain = retain;
+        return parsed;
     }
     if (head === 'name') return { action: 'name', nameArgs: rest };
     return { action: 'help', error: `未知子命令：${head}` };
@@ -124,19 +131,18 @@ export function formatCtxStatus(input: CtxCommandInput): string {
     const snapshot = input.service.snapshot();
     const visible = segmentUnits(applyVisibility(snapshot.events, buildRecordIndex(snapshot.records))).length;
     const lines = [`上下文：共 ${visible} 条消息`];
-    const override = input.session?.setting?.overrides?.ctxBudgetTokens;
+    const budgets = resolveContextBudgets(input.session, '');
     const cap = input.session?.context.v2BudgetCapValue;
-    const budget = cap && cap > 0
-        ? cap
-        : (typeof override === 'number' && override > 0 ? override : Config.context.BUDGET_TOKENS);
+    const budget = budgets.requestBudget;
     lines.push(cap && cap > 0
         ? `预算：约 ${budget} token（超长回退）`
         : (budget > 0 ? `预算：约 ${budget} token` : '预算：跟随模型窗口'));
+    lines.push(`保留强度：${budgets.retainPercent}%（压缩后保留约 ${budgets.targetTokens} token 最新原文）`);
+    lines.push(`原文窗口：约 ${Math.max(0, stats.unsummarizedTokens)} token（未摘要）`);
     lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
-    if (stats.unsummarizedTokens > 0) lines.push(`待整理：约 ${stats.unsummarizedTokens} token`);
     const last = input.runtime?.getLastResult();
     if (last) {
-        lines.push(`最近整理：${last.advanced ? '成功' : '未完成'}`);
+        lines.push(`最近整理：${last.advanced ? `成功（${last.batches} 批）` : '未完成'}${last.reason ? `（${last.reason}）` : ''}`);
     }
     lines.push('提示：.ai ctx help 查看全部用法');
     return lines.join('\n');
@@ -196,6 +202,12 @@ function runSet(input: CtxCommandInput, parsed: ParsedCtxCommand): CtxCommandRes
         if (parsed.budget === 0) delete session.setting.overrides.ctxBudgetTokens;
         else session.setting.overrides.ctxBudgetTokens = parsed.budget;
     }
+    if (parsed.retain !== undefined) {
+        if (!Number.isFinite(parsed.retain) || parsed.retain < 1 || parsed.retain > 100) {
+            return { text: 'retain 必须是 1-100 的整数（百分比）' };
+        }
+        session.setting.overrides.ctxRetainPercent = Math.floor(parsed.retain);
+    }
     session.context.setV2BudgetCap?.(null);
     session.save?.();
     return { text: '已更新本会话上下文设置', changed: true };
@@ -210,10 +222,11 @@ export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandR
             return { text: helpText(parsed.helpTopic, parsed.error) };
         case 'archive': {
             if (!input.runtime) return { text: '暂时无法整理：摘要服务不可用' };
-            const result = await input.runtime.archiveNow();
+            const budgets = resolveContextBudgets(input.session, '');
+            const result = await input.runtime.archiveNow(budgets.targetTokens);
             return result.advanced
-                ? { text: '已整理更早内容；原文仍然保留，可随时回查', changed: true }
-                : { text: '本次没有需要整理的内容' };
+                ? { text: `已整理 ${result.batches} 批：保留约 ${budgets.targetTokens} token 最新原文，其余压成摘要；原文仍可回查`, changed: true }
+                : { text: `本次没有需要整理的内容${result.reason ? `（${result.reason}）` : ''}` };
         }
         case 'hide': {
             const target = parsed.target ?? 'all';

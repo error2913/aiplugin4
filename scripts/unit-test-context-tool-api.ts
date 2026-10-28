@@ -86,6 +86,21 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(regex.includes('命中'));
     },
 
+    async testContextToolApiReadShowsTimeAndMsgId() {
+        const service = await seed('QQ:tool-read-time');
+        const text = readRawForTool(service, { id: 'e:3' }, (at: number) => `T${at}`);
+        assert.ok(text.includes('time=T'), 'read_raw 事件头应带时间');
+        assert.ok(text.includes('msg_id=m3'), 'read_raw 事件头应带消息 ID');
+    },
+
+    async testContextToolApiGrepByTimeAscending() {
+        const service = await seed('QQ:tool-grep-time', 12);
+        const text = grepRawForTool(service, { pattern: 'needle', max_hits: 10 } as any, (at: number) => `T${at}`);
+        assert.ok(text.includes('按时间升序'));
+        assert.ok(text.includes('msg_id=m3'));
+        assert.ok(text.indexOf('e:3 ') < text.indexOf('e:12 '), '命中应按时间（seq）升序输出');
+    },
+
     testContextToolApiFormatEmptyGrep() {
         const text = formatGrepRawResult('x', { hits: [], nextCursor: null, exhausted: true, scannedPages: 1, skippedPages: [] });
         assert.ok(text.includes('命中 0 条'));

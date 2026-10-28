@@ -78,6 +78,7 @@ const baseOptions = {
     estimateEventTokens,
     resolveUserName: (uid: string) => uid,
     formatTime: (at: number) => String(at),
+    formatDateKey: (at: number) => `d${Math.floor(at / 86400)}`,
     formatMessageId: (id: string) => id,
 };
 
@@ -260,5 +261,100 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         assert.equal(result.stats.summaryInjected, false);
         assert.equal(textOf(result.messages).includes('不应注入'), false);
+    },
+
+    // ---- v5：摘要边界按单元过滤 / 标签分级 / 时间锚点 / stale 回退 / 裁剪统计 ----
+    testContextV2CompileSummaryBoundaryFiltersSummarizedEvents() {
+        const events = [
+            userEvent(1, 'u1'), assistantEvent(2, 'a2'), userEvent(3, 'u3'),
+            assistantEvent(4, 'a4'), userEvent(5, 'u5'), assistantEvent(6, 'a6'),
+        ];
+        const records = [{
+            kind: 'summary' as const, id: 'sum:1', at: 10, epoch: 1,
+            fromSeq: 1, toSeq: 4, text: '旧摘要', fromAt: 1, toAt: 4,
+        }];
+        const result = compileRequest({ ...baseOptions, snapshot: snapshot(events, records), budgetTokens: 1000 });
+        const text = textOf(result.messages);
+        for (const hidden of ['u1', 'a2', 'u3', 'a4']) {
+            assert.equal(text.includes(hidden), false, `已摘要事件 ${hidden} 不应再以原文出现`);
+        }
+        assert.ok(text.includes('旧摘要'));
+        assert.ok(text.includes('u5') && text.includes('a6'));
+        assert.equal(result.stats.summaryBoundarySeq, 4);
+        assert.equal(result.stats.summaryInjected, true);
+        assert.equal(result.stats.gapInjected, false, '摘要与窗口紧邻，不应报缺口');
+        assert.equal(result.stats.omittedFromSeq, null);
+    },
+
+    testContextV2CompileTagBoundary() {
+        const events = [userEvent(1, 'u1', 'm1'), userEvent(2, 'u2', 'm2'), userEvent(3, 'u3', 'm3'),
+            userEvent(4, 'u4', 'm4'), userEvent(5, 'u5', 'm5')];
+        const result = compileRequest({
+            ...baseOptions,
+            snapshot: snapshot(events),
+            budgetTokens: 1000,
+            tagBoundaryTokens: 25,
+        });
+        const text = textOf(result.messages);
+        assert.ok(text.includes('[msg_id:m5]'));
+        assert.ok(text.includes('[msg_id:m4]'));
+        assert.equal(text.includes('[msg_id:m3]'), false, '超出标签边界应去掉 msg_id');
+        assert.equal(text.includes('[msg_id:m1]'), false);
+        assert.equal(result.stats.taggedMessages, 2);
+    },
+
+    testContextV2CompileTimeAnchors() {
+        const ats = [86390, 86410, 86420, 86430, 86440];
+        const events = ats.map((at, i) => ({
+            seq: i + 1,
+            eventId: `u:${i + 1}`,
+            at,
+            recvAt: at,
+            kind: 'user' as const,
+            uid: 'QQ:1',
+            msgId: `m${i + 1}`,
+            parts: [{ type: 'text' as const, text: `msg${i + 1}` }],
+        }));
+        const result = compileRequest({
+            ...baseOptions,
+            snapshot: snapshot(events),
+            budgetTokens: 1000,
+            tagBoundaryTokens: 10,
+        });
+        const text = textOf(result.messages);
+        assert.ok(text.includes('[time:86390]'), '未标记区首条应显示时间');
+        assert.ok(text.includes('[time:86410]'), '跨自然日应显示时间');
+        assert.equal(text.includes('[time:86420]'), false, '同日且无间隔不应显示时间');
+        assert.equal(text.includes('[time:86430]'), false);
+        assert.ok(text.includes('[msg_id:m5]'), '边界内消息仍带 msg_id');
+        assert.equal(text.includes('[msg_id:m1]'), false);
+    },
+
+    testContextV2CompileStaleSummaryFallsBack() {
+        const events = [userEvent(1, '原始一'), assistantEvent(2, '原始二'), userEvent(3, '最新')];
+        const records = [
+            { kind: 'summary' as const, id: 'sum:1', at: 10, epoch: 1, fromSeq: 1, toSeq: 2, text: '旧摘要' },
+            { kind: 'edit' as const, id: 'edit:1', at: 11, seq: 1, parts: [{ type: 'text' as const, text: '编辑后' }] },
+        ];
+        const result = compileRequest({ ...baseOptions, snapshot: snapshot(events, records), budgetTokens: 1000 });
+        const text = textOf(result.messages);
+        assert.equal(result.stats.summaryStale, true, '摘要区间与 edit/redact 相交应为 stale');
+        assert.ok(text.includes('编辑后'), 'stale 时回退旧行为：原文优先（编辑后）');
+        assert.ok(text.includes('原始二'));
+        assert.equal(result.stats.summaryBoundarySeq, 0);
+    },
+
+    testContextV2CompileOmitsUnsummarizedForTrigger() {
+        const events = [userEvent(1, 'u1'), assistantEvent(2, 'a2'), userEvent(3, 'u3'), assistantEvent(4, 'a4')];
+        const records = [{
+            kind: 'summary' as const, id: 'sum:1', at: 10, epoch: 1,
+            fromSeq: 1, toSeq: 2, text: '旧摘要', fromAt: 1, toAt: 2,
+        }];
+        const result = compileRequest({ ...baseOptions, snapshot: snapshot(events, records), budgetTokens: 10 });
+        assert.equal(result.stats.unitsSelected, 1);
+        assert.equal(result.stats.summaryInjected, true);
+        assert.equal(result.stats.gapInjected, true, '摘要与窗口之间被预算裁掉未摘要区，应显式提示');
+        assert.equal(result.stats.omittedFromSeq, 3);
+        assert.equal(result.stats.omittedToSeq, 3);
     },
 };

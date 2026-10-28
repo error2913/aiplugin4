@@ -259,9 +259,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await seedStore(600, needleText);
         const store = await reopen(128);
         const result = grepRaw(store, snapshotOf(store), 'needle', { maxHits: 100, maxPages: 10 });
-        assert.deepEqual(hitSeqs(result), [600, 500, 400, 300, 200, 100]);
-        assert.equal(result.hits[0].pointer, 'read_raw id=e:600');
-        assert.ok(result.hits[0].snippet.includes('needle-600'));
+        assert.deepEqual(hitSeqs(result), [100, 200, 300, 400, 500, 600]);
+        assert.equal(result.hits[0].pointer, 'read_raw id=e:100');
+        assert.ok(result.hits[0].snippet.includes('needle-100'));
         assert.equal(result.exhausted, true);
     },
 
@@ -281,7 +281,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             cursor = result.nextCursor;
             assert.ok(calls < 30, 'grep 分页应在合理次数内穷尽');
         }
-        assert.deepEqual(seqs, [600, 500, 400, 300, 200, 100], '翻页结果不重复、不遗漏');
+        assert.deepEqual(seqs.slice().sort((a, b) => a - b), [100, 200, 300, 400, 500, 600], '翻页结果不重复、不遗漏');
         assert.ok(calls > 1);
     },
 
@@ -290,7 +290,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const store = await reopen(128);
         const snapshot = snapshotOf(store);
         const regex = grepRaw(store, snapshot, '^.*needle-\\d{3}$', { regex: true, maxHits: 100 });
-        assert.deepEqual(hitSeqs(regex), [600, 500, 400, 300, 200, 100]);
+        assert.deepEqual(hitSeqs(regex), [100, 200, 300, 400, 500, 600]);
         assert.throws(() => grepRaw(store, snapshot, '[', { regex: true }), (error: unknown) => {
             assert.ok(error instanceof RecallError);
             assert.equal((error as RecallError).code, 'INVALID_ARGUMENT');
@@ -305,7 +305,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         store.appendRecord({ kind: 'supersede', id: 'sp1', at: 101, dedupKey: 'u:m4', seq: 9 });
         store.appendRecord({ kind: 'summary', id: 'sm1', at: 102, epoch: 1, fromSeq: 1, toSeq: 6, text: '摘要' });
         const result = grepRaw(store, snapshotOf(store), 'p', { maxHits: 100 });
-        assert.deepEqual(hitSeqs(result), [10, 9, 8, 7, 6, 5, 1], 'redact(2,3)/supersede(4) 跳过；摘要覆盖的 1 仍可搜');
+        assert.deepEqual(hitSeqs(result), [1, 5, 6, 7, 8, 9, 10], 'redact(2,3)/supersede(4) 跳过；摘要覆盖的 1 仍可搜；输出按时间升序');
         assert.ok(String(result.note).includes('skipped 3 invisible events (epoch/redact/supersede)'));
     },
 
@@ -333,7 +333,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const store = await reopen(128);
         const result = grepRaw(store, snapshotOf(store), 'needle', { maxHits: 100, maxPages: 10 });
         assert.deepEqual(result.skippedPages, [2]);
-        const expected = [100, 200, 300, 400, 500, 600].filter(seq => !needleSeqsInPage2.has(seq)).sort((a, b) => b - a);
+        const expected = [100, 200, 300, 400, 500, 600].filter(seq => !needleSeqsInPage2.has(seq)).sort((a, b) => a - b);
         assert.ok(expected.length > 0 && expected.length < 6, '第 2 页应至少包含部分命中，用于验证跳过');
         assert.deepEqual(hitSeqs(result), expected, '坏页范围内的命中缺失但其余命中保留');
     },
@@ -342,7 +342,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await seedStore(600, needleText);
         const store = await reopen(128);
         const result = grepRaw(store, snapshotOf(store), 'needle', { fromSeq: 300, toSeq: 400, maxHits: 100 });
-        assert.deepEqual(hitSeqs(result), [400, 300]);
+        assert.deepEqual(hitSeqs(result), [300, 400]);
         const narrow = grepRaw(store, snapshotOf(store), 'needle', { fromSeq: 300, toSeq: 350, maxHits: 100 });
         assert.deepEqual(hitSeqs(narrow), [300]);
         const empty = grepRaw(store, snapshotOf(store), 'needle', { fromSeq: 301, toSeq: 399, maxHits: 100 });

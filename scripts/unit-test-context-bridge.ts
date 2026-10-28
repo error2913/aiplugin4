@@ -49,7 +49,7 @@ async function makeSession(sid: string) {
     session.sessionType = 'user';
     (session.context as any).isColdSession = () => false;
     for (let i = 1; i <= 4; i++) {
-        await session.context.addUserMessage({} as seal.MsgContext, `记忆桥消息 ${i} `.repeat(20), 'QQ:1', `mb${i}`);
+        await session.context.addUserMessage({} as seal.MsgContext, `记忆桥消息 ${i} `.repeat(800), 'QQ:1', `mb${i}`);
     }
     return session;
 }
@@ -57,7 +57,6 @@ async function makeSession(sid: string) {
 export const tests: Record<string, () => void | Promise<void>> = {
     async testContextBridgeConsumesAndAdvances() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         const original = MemoryManager.summarizeChunkWithRetry;
@@ -66,6 +65,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             const session = await makeSession('QQ:bridge-ok');
             resetContextBridgeCursor(session);
+            // 记忆桥单次 collect 最多读 12000 字符（约 4000 token），这里多收集几轮越过 6000 token 水位
+            collectContextBacklog(session);
+            collectContextBacklog(session);
             const consumed = await consumeContextV2(session);
             assert.ok(consumed > 0);
             assert.equal(calls, 1);
@@ -81,7 +83,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     async testContextBridgeFailureKeepsCursor() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         const original = MemoryManager.summarizeChunkWithRetry;
@@ -98,7 +99,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     async testContextBridgeSplitCollectPeekCommit() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         const session = await makeSession('QQ:bridge-split');
@@ -118,13 +118,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(pendingAgain && pendingAgain.text.includes('记忆桥消息'), '重载后 pending 仍在');
         commitExtraction(session, chunk!.throughSeq, chunk!.textLength);
         assert.ok(consumedThrough(session) >= 1, 'commit 推进 consumed');
-        const left = peekExtractionChunk(session, true);
+        // 大文本一次只读一部分：循环提交剩余块，直到 pending 清空
+        let left = peekExtractionChunk(session, true);
+        while (left) {
+            commitExtraction(session, left.throughSeq, left.textLength);
+            left = peekExtractionChunk(session, true);
+        }
         assert.equal(left, null, '提交后无剩余 pending');
     },
 
     async testContextBridgeSchedulerEndToEnd() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => Math.floor(Date.now() / 1000) });
@@ -138,6 +142,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             const session = await makeSession('QQ:bridge-e2e');
             resetContextBridgeCursor(session);
+            // 单次 collect 约 4000 token；多收集两轮越过 6000 token 的记忆水位
+            collectContextBacklog(session);
+            collectContextBacklog(session);
             MemoryScheduler.onRunEnd(session);
             assert.equal(MemoryScheduler.status().jobs, 1, 'AI 结束后应入队 extract');
             const now = Math.floor(Date.now() / 1000);
@@ -154,7 +161,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     async testContextBridgeCompactsV2() {
         installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['摘要水位'] = 1;
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         setAuxLlm({
@@ -164,12 +170,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             const session = await makeSession('QQ:bridge-compact');
             resetContextRuntime(session);
-            const result = await compactContextV2(session);
+            const result = await compactContextV2(session, 1);
             assert.ok(result, '应返回压缩结果');
             assert.equal(result!.advanced, true);
             await session.contextV2!.flush();
-            const summary = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
-            assert.equal(summary.length, 1);
+            const summaries = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
+            assert.ok(summaries.length >= 1, '应写入滚动摘要记录');
             assert.ok(session.contextV2!.head().summarizedThrough >= 1);
         } finally {
             setAuxLlm(null);

@@ -170,10 +170,11 @@ export function wrapToolResultText(nameOrId: string | undefined | null, text: st
 /** 更早内容摘要头（编译层注入） */
 export const EARLIER_SUMMARY_HEADER = 'Earlier context summary';
 
-/** 更早内容摘要注入文本：摘要正文 + read_raw 区间指针 */
-export function earlierSummaryBlock(summaryText: string, fromSeq: number, toSeq: number): string {
+/** 更早内容摘要注入文本：摘要正文 + read_raw 区间指针（可选时间范围） */
+export function earlierSummaryBlock(summaryText: string, fromSeq: number, toSeq: number, timeRange?: string): string {
     const address = fromSeq === toSeq ? `e:${fromSeq}` : `e:${fromSeq}-${toSeq}`;
-    return `${EARLIER_SUMMARY_HEADER} (use read_raw id=${address} for the originals):\n${summaryText}`;
+    const range = typeof timeRange === 'string' && timeRange.trim() !== '' ? `${timeRange.trim()}; ` : '';
+    return `${EARLIER_SUMMARY_HEADER} (${range}use read_raw id=${address} for the originals):\n${summaryText}`;
 }
 
 /** 更早内容未摘要缺口提示（绝不静默）：约 count 条事件无摘要，可按区间回查 */

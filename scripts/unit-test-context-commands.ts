@@ -56,6 +56,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parseCtxCommand(['purge']).confirmed, false);
         assert.equal(parseCtxCommand(['purge', '--yes']).confirmed, true);
         assert.deepEqual(parseCtxCommand(['set', 'budget=1000']), { action: 'set', budget: 1000 });
+        assert.deepEqual(parseCtxCommand(['set', 'retain=45']), { action: 'set', retain: 45 });
+        assert.deepEqual(parseCtxCommand(['set', 'budget=1000', 'retain=45']), { action: 'set', budget: 1000, retain: 45 });
+        assert.equal(parseCtxCommand(['set', 'retain=0']).retain, 0);
         assert.equal(parseCtxCommand(['nope']).action, 'help');
         assert.equal(parseCtxCommand(['archive', 'help']).helpTopic, 'archive');
         assert.equal(parseCtxCommand(['help', 'purge']).helpTopic, 'purge');
@@ -67,6 +70,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const result = await runCtxCommand({ sessionId: sid, service, args: [] });
         assert.ok(result.text.includes('上下文：共 2 条消息'));
         assert.ok(result.text.includes('更早内容'));
+        assert.ok(result.text.includes('保留强度'));
+        assert.ok(result.text.includes('原文窗口'));
         const formatted = formatCtxStatus({ sessionId: sid, service, args: [] });
         assert.ok(formatted.includes('上下文：'));
         assert.equal(formatted.includes('v2'), false, '用户可见文本不暴露实现版本');
@@ -100,12 +105,13 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(noRuntime.text.includes('暂时无法整理'));
 
         const runtime = {
-            archiveNow: async () => ({ ran: true, advanced: true, through: 2 }),
+            archiveNow: async () => ({ ran: true, advanced: true, batches: 2, through: 2 }),
             getLastResult: () => null,
         } as any;
         const archived = await runCtxCommand({ sessionId: sid, service, args: ['archive'], runtime });
         assert.equal(archived.changed, true);
-        assert.ok(archived.text.includes('已整理更早内容'));
+        assert.ok(archived.text.includes('已整理'));
+        assert.ok(archived.text.includes('2 批'));
 
         const repaired = await runCtxCommand({ sessionId: sid, service, args: ['repair'] });
         assert.ok(repaired.text.includes('上下文索引'));
@@ -129,6 +135,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const set = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['set', 'budget=100'] });
         assert.ok(set.text.includes('已更新'));
         assert.equal(overrides.ctxBudgetTokens, 100);
+        const setRetain = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['set', 'retain=45'] });
+        assert.ok(setRetain.text.includes('已更新'));
+        assert.equal(overrides.ctxRetainPercent, 45);
+        const badRetain = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['set', 'retain=0'] });
+        assert.ok(badRetain.text.includes('1-100'));
+        const cleared = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['set', 'clr'] });
+        assert.ok(cleared.text.includes('已恢复'));
+        assert.equal(overrides.ctxRetainPercent, undefined);
+        assert.equal(overrides.ctxBudgetTokens, undefined);
         const name = await runCtxCommand({ sessionId: sid, service, session: fakeSession, args: ['name', 'status'] });
         assert.ok(name.text.includes('上下文名字'));
         assert.equal(name.text.includes('v2'), false);

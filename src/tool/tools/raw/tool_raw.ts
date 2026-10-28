@@ -597,7 +597,7 @@ export function registerRawTools() {
         type: 'function',
         function: {
             name: 'grep_raw',
-            description: 'Search the raw context text for keywords (including history already covered by summaries). Returns hit seq, snippets, and pointers usable directly with read_raw; control with regex/from_seq/to_seq/max_pages/cursor/count. kind filter parameters are legacy-session-only and can be ignored.',
+            description: 'Search the raw context text for keywords (including history already covered by summaries). Results are ordered by time (ascending) and each hit carries its send time and message ID (when present), plus a read_raw pointer; control with regex/from_seq/to_seq/max_pages/cursor/count. kind filter parameters are legacy-session-only and can be ignored.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -668,7 +668,7 @@ export function registerRawTools() {
                     max_pages: max_pages as number | undefined,
                     max_hits: count as number | undefined,
                     cursor: cursor as string | undefined,
-                });
+                }, fmtDate);
             } catch (error) {
                 return `grep_raw 失败：${error instanceof Error ? error.message : String(error)}`;
             }
@@ -699,7 +699,7 @@ export function registerRawTools() {
         type: 'function',
         function: {
             name: 'read_raw',
-            description: 'Read raw context text. id=e:<seq> reads one entry, id=e:<from>-<to> reads a range; results carry seq/offset, and the cursor can be passed back to continue. Legacy sessions may also use old kind/id addresses.',
+            description: 'Read raw context text. id=e:<seq> reads one entry, id=e:<from>-<to> reads a range; each entry header carries its send time and message ID (when present), and the cursor can be passed back to continue. Legacy sessions may also use old kind/id addresses.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -759,7 +759,7 @@ export function registerRawTools() {
                     limit: (count ?? max_lines) as number | undefined,
                     max_chars: max_chars as number | undefined,
                     cursor: cursor as string | undefined,
-                });
+                }, fmtDate);
             } catch (error) {
                 return `read_raw 失败：${error instanceof Error ? error.message : String(error)}`;
             }

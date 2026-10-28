@@ -8,6 +8,12 @@ import { getHost } from "../core/host";
 import { getAuxLlm } from "../core/ports/aux_llm";
 import { MemoryManager } from "../memory/manager";
 import type { Session } from "../session/session";
+import {
+    COMPACT_BATCH_TOKENS,
+    COMPACT_MAX_BATCHES_PER_RUN,
+    MEMORY_WATERMARK_TOKENS,
+    SUMMARY_MAX_CHARS,
+} from "../utils/context_limits";
 import { CONTEXT_BRIDGE_ROLE_LABEL } from "../utils/protocol";
 
 interface BridgeState {
@@ -19,8 +25,7 @@ interface BridgeState {
 }
 
 const states = new WeakMap<object, BridgeState>();
-const compactions = new WeakMap<object, CompactionRuntime>();
-const MEMORY_WATERMARK_TOKENS = 6000;
+const compactions = new WeakMap<object, { runtime: CompactionRuntime; signature: string }>();
 const MAX_PENDING_CHARS = 120_000;
 const MAX_CHUNK_CHARS = 12_000;
 const SOURCE_KINDS = new Set<ConversationEvent['kind']>(['user', 'assistant', 'tool_result']);
@@ -36,14 +41,17 @@ function estimateEventTokens(event: ConversationEvent): number {
 function compactionRuntimeFor(session: Session): CompactionRuntime | null {
     const service = session.contextV2;
     if (!service) return null;
-    let runtime = compactions.get(session);
-    if (runtime) return runtime;
-    runtime = new CompactionRuntime(
+    // 配置热更新：小时上限等变化时重建 runtime（构造参数里只有不变常量）
+    const hourlyCap = Config.context.HOURLY_COMPACT_CAP;
+    const signature = `${COMPACT_BATCH_TOKENS}|${SUMMARY_MAX_CHARS}|${COMPACT_MAX_BATCHES_PER_RUN}|${hourlyCap}`;
+    const cached = compactions.get(session);
+    if (cached && cached.signature === signature) return cached.runtime;
+    const runtime = new CompactionRuntime(
         {
-            watermarkTokens: Config.context.SUMMARY_WATERMARK,
-            batchTokens: 6000,
-            summaryMaxChars: 2000,
-            hourlyCap: Config.context.HOURLY_COMPACT_CAP,
+            batchTokens: COMPACT_BATCH_TOKENS,
+            summaryMaxChars: SUMMARY_MAX_CHARS,
+            maxBatchesPerRun: COMPACT_MAX_BATCHES_PER_RUN,
+            hourlyCap,
         },
         {
             service,
@@ -58,15 +66,29 @@ function compactionRuntimeFor(session: Session): CompactionRuntime | null {
             estimateEventTokens,
         },
     );
-    compactions.set(session, runtime);
+    compactions.set(session, { runtime, signature });
     return runtime;
 }
 
-/** 后台滚动摘要：run 前后调用；与记忆抽取无关。 */
-export async function compactContextV2(session: Session): Promise<{ advanced: boolean; reason?: string } | null> {
+/**
+ * 后台滚动摘要（自动路径）：只在「编译发现未摘要原文被预算裁掉」后调用。
+ * 不在空闲会话上设置定时器；失败退避只影响下一次触发。
+ */
+export async function compactContextV2(session: Session, targetTokens: number): Promise<{ advanced: boolean; reason?: string; batches?: number } | null> {
     const runtime = compactionRuntimeFor(session);
     if (!runtime) return null;
-    return runtime.maybeRun();
+    const result = await runtime.maybeRun(targetTokens);
+    return { advanced: result.advanced, reason: result.reason, batches: result.batches };
+}
+
+/**
+ * 强制压缩到目标（context_too_long 恢复路径 / 手动）：忽略节流与每小时上限，单飞。
+ */
+export async function forceCompactToTarget(session: Session, targetTokens: number): Promise<{ advanced: boolean; reason?: string; batches?: number } | null> {
+    const runtime = compactionRuntimeFor(session);
+    if (!runtime) return null;
+    const result = await runtime.archiveNow(targetTokens);
+    return { advanced: result.advanced, reason: result.reason, batches: result.batches };
 }
 
 function cursorKey(sessionId: string): string {
@@ -74,8 +96,8 @@ function cursorKey(sessionId: string): string {
 }
 
 function effectiveWatermark(): number {
-    const configured = Config.context.SUMMARY_WATERMARK;
-    return configured > 0 ? Math.min(configured, MEMORY_WATERMARK_TOKENS) : MEMORY_WATERMARK_TOKENS;
+    // 上下文与记忆解耦：记忆抽取水位用内部常量（原「摘要水位」默认行为等价）
+    return MEMORY_WATERMARK_TOKENS;
 }
 
 function loadState(session: Session, epochStartSeq: number): BridgeState {

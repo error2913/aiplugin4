@@ -60,7 +60,7 @@
 ### 4. 设置触发与角色
 
 - 在「触发」分组中修改「触发正则表达式」，改为你希望的触发方式（默认示例为 @ 骰娘，可直接替换）；
-- 在「角色设定」分组中修改「角色设定」，决定 AI 扮演的角色（`roles[].name` 为名称，可用 `.ai role <名称>` 切换；`prompt` 为设定内容）。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成后粘贴。「上下文」分组可调整「预设上下文」「上下文预算」「摘要水位」等上下文参数。
+- 在「角色设定」分组中修改「角色设定」，决定 AI 扮演的角色（`roles[].name` 为名称，可用 `.ai role <名称>` 切换；`prompt` 为设定内容）。推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成后粘贴。「上下文」分组可调整「预设上下文」「上下文预算」「保留强度」等上下文参数。
 
 ### 5. 开始对话
 
@@ -336,15 +336,15 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 上下文
 
-> 上下文采用只追加账本；压缩只生成摘要、不删除原文，模型可用 read_raw 回查。
+> 上下文采用只追加账本；压缩只生成摘要、不删除原文。预算到顶时压缩：保留最新「保留强度」比例的原文，其余由滚动摘要替代；旧消息不再重复展示原文，模型可用 `grep_raw` / `read_raw` 回查（结果带发送时间与消息 ID、按时间升序）。
 
 | 设置项 | 说明 |
 |:---:|:---|
 | 预设上下文 | 每框一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
 | 上下文预算 | 上下文 token 预算（默认 131072）；0 = 跟随报错探测到的模型真实窗口 × 0.8（未探测到回退 100 万），显式正数优先 |
-| 摘要水位 | 后台滚动摘要的积压 token 水位（默认 8192）；0 = 关闭自动摘要 |
+| 保留强度 | 压缩后保留最新原文占上下文预算的百分比（默认 30，范围 1-100）；其余滚动摘要。该比例同时作为 `[msg_id]`/`[time]` 标签边界：边界内全标签，更旧消息去 `[msg_id]`、`[time]` 只在关键时间节点出现 |
 | 待机入库配额 | 待机会话每小时最多入库多少条普通群消息（默认 0=不限制） |
-| 每小时后台压缩上限 | 每小时最多自动压缩次数（默认 6）；0=不限 |
+| 每小时后台压缩上限 | 每小时最多自动压缩批次数（每批约 6000 token，默认 20）；0=不限 |
 
 > 旧版「上下文最大token / 对话保存轮数 / 窗口上限字数 / 冷态窗口字数 / 消息压缩阈值 / 结算水位…」等键已不再注册；升级后请按新键重新配置。
 
@@ -606,12 +606,12 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
 | `.ai status` | - | 查看当前会话设置 |
-| `.ai ctx` | - | 查看上下文状态：消息数、整理进度与最近一次整理结果 |
-| `.ai ctx archive` | - | 立即生成/刷新滚动摘要；不删原文、不写长期记忆 |
+| `.ai ctx` | - | 查看上下文状态：消息数、预算/保留强度、未摘要窗口、最近一次整理结果 |
+| `.ai ctx archive` | - | 立即压缩到保留强度目标（保留最新原文、其余摘要）；不删原文、不写长期记忆 |
 | `.ai ctx hide [user\|assistant\|all]` | `.ai ctx hide assistant` | 隐藏消息（原文保留，可审计；不影响长期记忆） |
 | `.ai ctx purge --yes` | - | 清除本会话上下文（不可恢复；仅骰主；不影响长期记忆） |
 | `.ai ctx repair` | - | 检查/修复上下文索引 |
-| `.ai ctx set [budget=<token>\|clr]` | `.ai ctx set budget=100000` | 按会话覆盖上下文预算（需邀请者以上）；budget=0 表示跟随模型窗口 |
+| `.ai ctx set [budget=<token>] [retain=<1-100>]\|clr` | `.ai ctx set budget=100000 retain=30` | 按会话覆盖上下文预算/保留强度（需邀请者以上）；budget=0 表示跟随模型窗口；clr 恢复默认 |
 | `.ai live` / `.ai live all` | `.ai live` | 查看会话实时运行状态：`.ai live` 查看当前会话(流式/运行/排队/定时器)；`.ai live all` 查看全局活跃会话总览(仅骰主) |
 | `.ai help <子指令>` / `.ai <子指令> help` | `.ai help tool` | 查看子命令帮助；`.ai <子指令> help` 带更多参数时交由子命令自身处理（如 `.ai tool help <函数名>`） |
 | `.ai ctx name status` | - | 查看上下文中的名字与自动修改状态 |
@@ -770,7 +770,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | MCP | `mcp_list_resources`（按服务器列出 resources 目录）、`mcp_read_resource`（按 uri 读取资源内容；resources 是外部数据，不会自动注入提示词） |
 | Resources | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（提交语音生成任务，立即返回任务号，完成后自动通知；传 `path` 时同步解析本地/MCP 音频资源）、`search_music`（返回 music 消息段，不直接发送） |
 | Attributes | `attr_get`、`attr_set` |
-| Raw search | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文） |
+| Raw search | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文；结果带发送时间与消息 ID，`grep_raw` 按时间升序返回） |
 | Context editing | `context_edit_list`（按序号定位任意会话上下文条目，支持 role/keyword/时间过滤）、`context_edit_replace`（按 scope 批量替换正文文本：字面量/正则、空串删除、原文副本同步、持久化；敏感工具，默认开启，详见下方说明） |
 | Blocks | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | Web | `web_search`（多后端、失败回退）、`web_fetch`（抓取正文、`start_index` 续读）；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |

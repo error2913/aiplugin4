@@ -17,6 +17,7 @@ import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
+import { resolveContextBudgets } from "./context_budget";
 import { foldOmittedLine, foldSummaryHeader, AUX_HISTORY_OMIT_MARK as PROTOCOL_AUX_HISTORY_OMIT_MARK, SYSTEM_NAME, toolResultHeader } from "./protocol";
 import { getRoleSetting } from "./role";
 import { escapeToolResultBoundary, fmtDate } from "./string";
@@ -606,12 +607,8 @@ function compileV2Request(
             role: message.role as CompiledMessage['role'],
             content: buildContent(message),
         }));
-        const configured = Config.context.BUDGET_TOKENS;
-        const overrideBudget = (session.setting as { overrides?: Record<string, unknown> } | undefined)?.overrides?.ctxBudgetTokens;
-        const baseBudget = typeof overrideBudget === 'number' && overrideBudget > 0 ? overrideBudget : configured;
-        const { tokens: resolvedBudget } = resolveEffectiveMaxTokens(baseBudget, getProbedContextWindow(modelName || ''));
-        const cap = session.context.v2BudgetCapValue;
-        const budget = cap !== null && cap > 0 ? Math.min(resolvedBudget, cap) : resolvedBudget;
+        const budgets = resolveContextBudgets(session, modelName || '');
+        const budget = budgets.requestBudget;
         // 本轮内联图片预算（同一次请求共享）：超出后只留文本标签（descriptors 会先渲染 [img:ID] 文本）
         const cfgLimit = Config.image.MAX_IMAGES_PER_REQUEST;
         const budgetRef = opts?.imageBudget ?? { left: cfgLimit > 0 ? cfgLimit : Number.POSITIVE_INFINITY };
@@ -687,6 +684,8 @@ function compileV2Request(
             },
             formatTime: fmtDate,
             formatMessageId: (id: string) => id,
+            tagBoundaryTokens: budgets.tagBoundaryTokens,
+            formatDateKey: (at: number) => fmtDate(at).slice(0, 10),
             estimateTextTokens,
             estimateEventTokens: (event: ConversationEvent) => {
                 const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];

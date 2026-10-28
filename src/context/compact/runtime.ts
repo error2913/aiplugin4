@@ -1,18 +1,26 @@
-// 后台滚动摘要的运行时编排：水位/节流/小时上限/退避/单飞。
-// 只做"什么时候该压、压完 flush"，不关心摘要质量与渲染（compactor/service 负责）。
-import type { ConversationEvent, RecordEntry } from "../events";
+// 上下文压缩的运行时编排：按目标保留量循环压批、单飞、节流、退避与每小时批次上限。
+//
+// v5 语义（与旧版不同）：
+// - **触发不看水位**：调用方只在「编译发现未摘要原文被预算裁掉」（预算到顶）或手动 archive 时才调用；
+// - `maybeRun(targetTokens)`：自动路径；`archiveNow(targetTokens)`：手动路径（忽略节流/每小时上限）；
+// - 每次循环把「未摘要原文」压到 `targetTokens` 附近；每批按「还差多少到目标」截断，避免压过头；
+// - `每小时上限` 计的是**批次数**（等价 aux LLM 调用数），不是运行次数。
+//
+// 约束：本文件不读 Config/seal；summarizer/estimator/时钟/记录 id 全部注入。
+import { COMPACT_ARCHIVE_MAX_BATCHES, COMPACT_BATCH_TOKENS, COMPACT_MAX_BATCHES_PER_RUN } from "../../utils/context_limits";
+import type { ConversationEvent } from "../events";
 
 import { Backoff } from "./compactor";
 import type { CompactResult } from "./compactor";
 
 export interface CompactionRuntimeOptions {
-    /** 积压 token 水位；<=0 关闭自动压缩 */
-    watermarkTokens: number;
-    /** 单次压缩最多吃进多少 token 的段 */
-    batchTokens: number;
+    /** 单批送入摘要器的 token 上限 */
+    batchTokens?: number;
     /** 摘要文本硬上限（字符） */
     summaryMaxChars?: number;
-    /** 每小时最多自动压缩次数；<=0 不限制 */
+    /** 单次自动压缩最多连续压多少批 */
+    maxBatchesPerRun?: number;
+    /** 每小时最多压缩批次数；<=0 不限 */
     hourlyCap?: number;
     /** 自动压缩最小间隔（毫秒）；默认 60s */
     throttleMs?: number;
@@ -20,62 +28,54 @@ export interface CompactionRuntimeOptions {
     backoffDelaysMs?: number[];
 }
 
-export type CompactionTrigger = 'run-end' | 'idle' | 'manual';
-
 export interface CompactionRuntimeService {
-    shouldCompact(watermarkTokens: number): boolean;
-    compact(
-        options: { batchTokens: number; summaryMaxChars?: number },
-        deps: {
-            summarize: (text: string) => Promise<string | null | undefined> | string | null | undefined;
-            estimateEventTokens: (event: ConversationEvent) => number;
-            now?: () => number;
-            newRecordId?: (info: { epoch: number; fromSeq: number; toSeq: number; at: number }) => string;
-        },
-    ): Promise<CompactResult>;
+    head(): { unsummarizedTokens: number };
+    compact(options: { batchTokens: number; summaryMaxChars?: number }, deps: CompactionDeps): Promise<CompactResult>;
     flush(): Promise<{ ok: boolean; error?: string }>;
 }
 
-export interface CompactionRuntimeDeps {
-    service: CompactionRuntimeService;
+export interface CompactionDeps {
     summarize: (text: string) => Promise<string | null | undefined> | string | null | undefined;
-    /** 事件 token 估算；与 compile/存储保持同一口径 */
     estimateEventTokens: (event: ConversationEvent) => number;
-    /** 时钟（测试注入）；缺省 Date.now */
     now?: () => number;
-    /** 摘要记录 id 生成（同 toSeq 重算时可带版本） */
     newRecordId?: (info: { epoch: number; fromSeq: number; toSeq: number; at: number }) => string;
 }
 
-export type CompactionSkipReason =
-    | 'disabled'
-    | 'backlog-below-watermark'
-    | 'throttled'
-    | 'hourly-cap'
-    | 'backoff'
-    | 'running';
+export interface CompactionRuntimeDeps extends CompactionDeps {
+    service: CompactionRuntimeService;
+}
 
 export interface CompactionRunResult {
     ran: boolean;
     advanced: boolean;
-    reason?: CompactionSkipReason | string;
-    record?: RecordEntry;
-    through?: number;
-    flushed?: boolean;
+    /** 本次实际执行的批次数 */
+    batches: number;
+    /** 目标保留 token */
+    targetTokens: number;
+    /** 压缩前未摘要 token */
+    pendingBefore: number;
+    /** 压缩后未摘要 token */
+    pendingAfter: number;
+    /** 未完成原因（already-summarized / empty-summary / throttled / hourly-cap / running / ...） */
+    reason?: string;
+    error?: string;
 }
 
 const DEFAULT_THROTTLE_MS = 60_000;
-const DEFAULT_HOURLY_CAP = 6;
+const DEFAULT_HOURLY_CAP = 20;
+const DEFAULT_MAX_BATCHES = COMPACT_MAX_BATCHES_PER_RUN;
+const ARCHIVE_MAX_BATCHES = COMPACT_ARCHIVE_MAX_BATCHES;
 
 export class CompactionRuntime {
-    private readonly watermarkTokens: number;
     private readonly batchTokens: number;
     private readonly summaryMaxChars?: number;
+    private readonly maxBatchesPerRun: number;
     private readonly hourlyCap: number;
     private readonly throttleMs: number;
     private readonly backoff: Backoff;
     private readonly now: () => number;
     private readonly deps: CompactionRuntimeDeps;
+
     private running = false;
     private lastAttemptAt = 0;
     private hourStart = 0;
@@ -83,85 +83,111 @@ export class CompactionRuntime {
     private lastResult: CompactionRunResult | null = null;
 
     constructor(options: CompactionRuntimeOptions, deps: CompactionRuntimeDeps) {
-        this.watermarkTokens = Math.max(0, Math.floor(options.watermarkTokens));
-        this.batchTokens = Math.max(1, Math.floor(options.batchTokens));
+        this.batchTokens = positiveInt(options.batchTokens, COMPACT_BATCH_TOKENS);
         this.summaryMaxChars = options.summaryMaxChars;
+        this.maxBatchesPerRun = Math.max(1, positiveInt(options.maxBatchesPerRun, DEFAULT_MAX_BATCHES));
         this.hourlyCap = Math.max(0, Math.floor(options.hourlyCap ?? DEFAULT_HOURLY_CAP));
         this.throttleMs = Math.max(0, Math.floor(options.throttleMs ?? DEFAULT_THROTTLE_MS));
         this.backoff = new Backoff({ delaysMs: options.backoffDelaysMs });
-        this.deps = deps;
         this.now = deps.now ?? (() => Date.now());
+        this.deps = deps;
     }
 
-    /** 最近一次运行结果（`.ai ctx status` 用） */
     getLastResult(): CompactionRunResult | null {
         return this.lastResult;
     }
 
     /**
-     * 自动压缩入口（run 结束/空闲检查调用）。
-     * 返回 skipped 原因，调用方可据此决定是否在下一轮重试。
+     * 自动压缩入口（仅在「预算到顶」触发的调用点使用）。
+     * 失败/未完成会退避；退避不影响下一次显式 archive。
      */
-    async maybeRun(): Promise<CompactionRunResult> {
+    async maybeRun(targetTokens: number): Promise<CompactionRunResult> {
         const now = this.now();
-        if (this.watermarkTokens <= 0) return this.skip('disabled');
-        if (this.running) return this.skip('running');
-        if (now < this.backoff.blockedUntil) return this.skip('backoff');
-        if (!this.deps.service.shouldCompact(this.watermarkTokens)) return this.skip('backlog-below-watermark');
-        this.rollHour(now);
-        if (this.hourlyCap > 0 && this.callsThisHour >= this.hourlyCap) return this.skip('hourly-cap');
-        if (this.lastAttemptAt > 0 && now - this.lastAttemptAt < this.throttleMs) return this.skip('throttled');
-        return this.run(now, false);
-    }
-
-    /** 手动 `.ai ctx archive`：忽略水位/节流/小时上限，仍单飞；失败退避 */
-    async archiveNow(): Promise<CompactionRunResult> {
-        if (this.running) return this.skip('running');
-        return this.run(this.now(), true);
-    }
-
-    private async run(now: number, manual: boolean): Promise<CompactionRunResult> {
-        this.running = true;
+        if (this.running) return this.skip('running', targetTokens);
+        if (now < this.backoff.blockedUntil) return this.skip('backoff', targetTokens);
+        if (this.lastAttemptAt > 0 && now - this.lastAttemptAt < this.throttleMs) return this.skip('throttled', targetTokens);
         this.lastAttemptAt = now;
-        this.rollHour(now);
-        if (!manual) this.callsThisHour++;
+        return this.runToTarget(targetTokens, { manual: false, maxBatches: this.maxBatchesPerRun, now });
+    }
+
+    /** 手动 `.ai ctx archive`：忽略节流/每小时上限/退避，仍单飞。 */
+    async archiveNow(targetTokens: number): Promise<CompactionRunResult> {
+        const now = this.now();
+        if (this.running) return this.skip('running', targetTokens);
+        return this.runToTarget(targetTokens, { manual: true, maxBatches: ARCHIVE_MAX_BATCHES, now });
+    }
+
+    private async runToTarget(
+        targetTokens: number,
+        opts: { manual: boolean; maxBatches: number; now: number },
+    ): Promise<CompactionRunResult> {
+        this.running = true;
+        const pendingBefore = pendingOf(this.deps.service);
+        const result: CompactionRunResult = {
+            ran: true,
+            advanced: false,
+            batches: 0,
+            targetTokens: Math.max(1, Math.floor(targetTokens)),
+            pendingBefore,
+            pendingAfter: pendingBefore,
+        };
         try {
-            const result = await this.deps.service.compact(
-                { batchTokens: this.batchTokens, summaryMaxChars: this.summaryMaxChars },
-                {
-                    summarize: this.deps.summarize,
-                    estimateEventTokens: this.deps.estimateEventTokens,
-                    now: () => this.now(),
-                    newRecordId: this.deps.newRecordId,
-                },
-            );
-            const out: CompactionRunResult = {
-                ran: true,
-                advanced: result.advanced,
-                reason: result.reason,
-                record: result.record ?? undefined,
-                through: result.through,
-            };
+            if (!opts.manual) this.rollHour(opts.now);
+            let lastError: string | undefined;
+            while (result.batches < opts.maxBatches) {
+                const pending = pendingOf(this.deps.service);
+                if (pending <= result.targetTokens) break;
+                // 只按「还差多少到目标」截断本批，避免一次压到目标以下过多
+                const batchTokens = Math.max(1, Math.min(this.batchTokens, pending - result.targetTokens));
+                if (!opts.manual) {
+                    if (this.hourlyCap > 0 && this.callsThisHour >= this.hourlyCap) {
+                        result.reason = 'hourly-cap';
+                        break;
+                    }
+                    this.callsThisHour++;
+                }
+                const batch = await this.deps.service.compact(
+                    { batchTokens, summaryMaxChars: this.summaryMaxChars },
+                    {
+                        summarize: this.deps.summarize,
+                        estimateEventTokens: this.deps.estimateEventTokens,
+                        now: () => this.now(),
+                        newRecordId: this.deps.newRecordId,
+                    },
+                );
+                if (!batch.advanced) {
+                    result.reason = batch.reason ?? 'not-advanced';
+                    lastError = batch.error;
+                    break;
+                }
+                result.advanced = true;
+                result.batches++;
+            }
             if (result.advanced) {
                 const flushed = await this.deps.service.flush();
-                out.flushed = flushed.ok;
                 if (!flushed.ok) {
-                    out.reason = `flush-failed: ${flushed.error ?? 'unknown'}`;
+                    result.reason = `flush-failed: ${flushed.error ?? 'unknown'}`;
                     this.backoff.fail(this.now());
                 } else {
                     this.backoff.reset();
                 }
             } else if (result.reason === 'summary-error' || result.reason === 'missing-history') {
                 this.backoff.fail(this.now());
+            } else if (result.batches > 0 && result.reason === 'flush-failed') {
+                this.backoff.fail(this.now());
             }
-            this.lastResult = out;
-            return out;
+            result.pendingAfter = pendingOf(this.deps.service);
+            if (lastError) result.error = lastError;
+            if (!result.advanced && !result.reason) result.reason = 'nothing-to-do';
+            this.lastResult = result;
+            return result;
         } catch (error) {
             this.backoff.fail(this.now());
             const out: CompactionRunResult = {
-                ran: true,
+                ...result,
                 advanced: false,
                 reason: error instanceof Error ? error.message : String(error),
+                pendingAfter: pendingOf(this.deps.service),
             };
             this.lastResult = out;
             return out;
@@ -170,8 +196,21 @@ export class CompactionRuntime {
         }
     }
 
-    private skip(reason: CompactionSkipReason): CompactionRunResult {
-        const result: CompactionRunResult = { ran: false, advanced: false, reason };
+    private skip(reason: string, targetTokens: number): CompactionRunResult {
+        const result: CompactionRunResult = {
+            ran: false,
+            advanced: false,
+            batches: 0,
+            targetTokens: Math.max(1, Math.floor(targetTokens)),
+            pendingBefore: 0,
+            pendingAfter: 0,
+            reason,
+        };
+        try {
+            const pending = pendingOf(this.deps.service);
+            result.pendingBefore = pending;
+            result.pendingAfter = pending;
+        } catch { /* ignore */ }
         this.lastResult = result;
         return result;
     }
@@ -183,4 +222,20 @@ export class CompactionRuntime {
             this.callsThisHour = 0;
         }
     }
+}
+
+function pendingOf(service: CompactionRuntimeService): number {
+    try {
+        const pending = Number(service.head()?.unsummarizedTokens);
+        return Number.isFinite(pending) ? Math.max(0, Math.floor(pending)) : 0;
+    } catch {
+        return 0;
+    }
+}
+
+function positiveInt(value: unknown, fallback: number): number {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    const v = Math.floor(n);
+    return v > 0 ? v : fallback;
 }

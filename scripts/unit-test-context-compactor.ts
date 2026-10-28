@@ -414,4 +414,22 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(custom.delayMsFor(2), 2000);
         assert.equal(custom.delayMsFor(9), 2000, '自定义档位超出按最后一档');
     },
+
+    async testCompactorSummaryTimeRangeInheritsFromAt() {
+        const h = harness();
+        const events = [evUser(1), evAssistant(2)];
+        const head = makeHead({ nextSeq: 3, summarizedThrough: 0, unsummarizedTokens: 20 });
+        const first = await runCompact(events, [], head, h);
+        assert.equal(first.advanced, true);
+        assert.equal(first.record!.fromAt, 10);
+        assert.equal(first.record!.toAt, 20);
+
+        // 第二次滚动摘要：fromAt 必须沿袭上一条摘要（覆盖 epoch 起点），toAt 取本批最晚
+        const more = [...events, evUser(3), evAssistant(4)];
+        const head2 = makeHead({ nextSeq: 5, summarizedThrough: 2, unsummarizedTokens: 20 });
+        const second = await runCompact(more, [first.record!], head2, h);
+        assert.equal(second.advanced, true);
+        assert.equal(second.record!.fromAt, 10, 'fromAt 沿袭上一条摘要');
+        assert.equal(second.record!.toAt, 40);
+    },
 };

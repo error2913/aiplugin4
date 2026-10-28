@@ -21,7 +21,7 @@ import { buildProjection, ProjectionOptions } from "./projection";
 import { GrepOptions, grepRaw, GrepRawResult, readRaw, ReadRawOptions, ReadRawResult } from "./recall";
 import { ContextSnapshot, ContextStore, ContextStoreOptions } from "./store";
 import type { MessageType } from "./types";
-import { CompileOptions, compileRequest, CompileResult } from "./view/compile";
+import { CompileOptions, compileRequest, CompileResult, CompileStats } from "./view/compile";
 
 export interface AppendMeta {
     at?: number;
@@ -34,6 +34,8 @@ export type ContextServiceOptions = ContextStoreOptions;
 export class ContextService {
     readonly sessionId: string;
     private readonly store: ContextStore;
+    /** 最近一次编译的统计（仅运行时状态，不持久化）：用于「预算到顶」触发压缩 */
+    private lastCompileStats: CompileStats | null = null;
 
     private constructor(sessionId: string, store: ContextStore) {
         this.sessionId = sessionId;
@@ -164,7 +166,14 @@ export class ContextService {
 
     /** 请求编译（prefix/预算/能力由调用方传入） */
     compile(options: Omit<CompileOptions, 'snapshot'>): CompileResult {
-        return compileRequest({ ...options, snapshot: this.store.snapshot() });
+        const result = compileRequest({ ...options, snapshot: this.store.snapshot() });
+        this.lastCompileStats = result.stats;
+        return result;
+    }
+
+    /** 最近一次编译统计（触发「预算到顶」压缩用；重载后为 null） */
+    lastCompile(): CompileStats | null {
+        return this.lastCompileStats;
     }
 
     readRaw(address: string, options: ReadRawOptions = {}): ReadRawResult {

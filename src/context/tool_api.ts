@@ -53,8 +53,21 @@ export function normalizeReadParams(params: ReadRawToolParams): { address: strin
     return { address: id, maxItems: limit, maxChars, cursor: parseReadCursor(params.cursor) };
 }
 
-/** 格式化 read_raw 结果（原文完整输出，带寻址指针/游标） */
-export function formatReadRawResult(result: ReadRawResult): string {
+/** 工具适配层的时间格式化钩子（注入 fmtDate，避免 context 层依赖 Config/时区实现） */
+export type RawTimeFormatter = (at: number) => string;
+
+function fmtRawTime(formatTime: RawTimeFormatter | undefined, at: number): string {
+    const value = Number(at);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    try {
+        return formatTime ? formatTime(value) : String(value);
+    } catch {
+        return String(value);
+    }
+}
+
+/** 格式化 read_raw 结果（原文完整输出，带时间/消息 ID/寻址指针/游标） */
+export function formatReadRawResult(result: ReadRawResult, formatTime?: RawTimeFormatter): string {
     const lines: string[] = [];
     const kindText = result.kind === 'events' ? '事件' : result.kind === 'legacy-shard' ? '旧分片' : result.kind === 'block' ? '旧块' : '未知';
     lines.push(`read_raw ${result.address}（${kindText}${typeof result.total === 'number' ? `，共 ${result.total} 条` : ''}）`);
@@ -63,7 +76,9 @@ export function formatReadRawResult(result: ReadRawResult): string {
             lines.push(`[旧分片 index=${item.index} msg_id=${item.messageId} uid=${item.userId} time=${item.time}]`);
             lines.push(item.text);
         } else {
-            lines.push(`[e:${item.seq} kind=${item.kind}${item.offset ? ` offset=${item.offset}` : ''} event=${item.eventId}]`);
+            const time = fmtRawTime(formatTime, item.at);
+            const msgId = item.msgId ? ` msg_id=${item.msgId}` : '';
+            lines.push(`[e:${item.seq} kind=${item.kind}${time ? ` time=${time}` : ''}${msgId}${item.offset ? ` offset=${item.offset}` : ''} event=${item.eventId}]`);
             lines.push(item.text);
         }
     }
@@ -78,12 +93,14 @@ export function formatReadRawResult(result: ReadRawResult): string {
     return lines.join('\n');
 }
 
-/** 格式化 grep_raw 结果（命中片段 + read_raw 指针 + 翻页游标） */
-export function formatGrepRawResult(pattern: string, result: GrepRawResult): string {
+/** 格式化 grep_raw 结果（命中片段 + 时间/消息 ID + read_raw 指针 + 翻页游标） */
+export function formatGrepRawResult(pattern: string, result: GrepRawResult, formatTime?: RawTimeFormatter): string {
     const lines: string[] = [];
-    lines.push(`grep_raw ${pattern}：命中 ${result.hits.length} 条${result.exhausted ? '（已扫描完）' : '（还有更多，可传 cursor 继续）'}`);
+    lines.push(`grep_raw ${pattern}：命中 ${result.hits.length} 条（本页按时间升序）${result.exhausted ? '（已扫描完）' : '（还有更多，可传 cursor 继续）'}`);
     for (const hit of result.hits) {
-        lines.push(`[e:${hit.seq} kind=${hit.kind}] ${hit.snippet}`);
+        const time = fmtRawTime(formatTime, hit.at);
+        const meta = `${time ? ` | ${time}` : ''}${hit.msgId ? ` | msg_id=${hit.msgId}` : ''}`;
+        lines.push(`[e:${hit.seq} kind=${hit.kind}${meta}] ${hit.snippet}`);
         lines.push(`  → ${hit.pointer}`);
     }
     if (result.hits.length === 0) lines.push('（无命中）');
@@ -94,18 +111,18 @@ export function formatGrepRawResult(pattern: string, result: GrepRawResult): str
 }
 
 /** 执行 read_raw（工具参数 → recall → 文本） */
-export function readRawForTool(service: ContextService, params: ReadRawToolParams): string {
+export function readRawForTool(service: ContextService, params: ReadRawToolParams, formatTime?: RawTimeFormatter): string {
     const normalized = normalizeReadParams(params);
     const result = service.readRaw(normalized.address, {
         maxItems: normalized.maxItems,
         maxChars: normalized.maxChars,
         cursor: normalized.cursor,
     });
-    return formatReadRawResult(result);
+    return formatReadRawResult(result, formatTime);
 }
 
 /** 执行 grep_raw（工具参数 → recall → 文本） */
-export function grepRawForTool(service: ContextService, params: GrepRawToolParams): string {
+export function grepRawForTool(service: ContextService, params: GrepRawToolParams, formatTime?: RawTimeFormatter): string {
     const pattern = String(params.pattern ?? '');
     if (!pattern) throw new Error('grep_raw 缺少 pattern');
     let cursor: GrepRawResult['nextCursor'] = null;
@@ -124,5 +141,5 @@ export function grepRawForTool(service: ContextService, params: GrepRawToolParam
         maxHits: intOrUndefined(params.max_hits),
         cursor,
     });
-    return formatGrepRawResult(pattern, result);
+    return formatGrepRawResult(pattern, result, formatTime);
 }
