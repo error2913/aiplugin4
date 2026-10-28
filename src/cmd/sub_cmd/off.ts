@@ -9,7 +9,7 @@ export function registerCmdOff() {
     cmd.desc = '关闭AI（含非指令正则触发）';
     cmd.help = `帮助:
 【.ai off】关闭 AI 及全部触发模式
-【.ai off --<参数>】按模式关闭（--r 正则 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机）`;
+【.ai off --<参数>】按模式关闭（--r 正则 / --e 事件触发 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机）`;
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
@@ -26,6 +26,7 @@ export function registerCmdOff() {
             setting.timer = -1;
             setting.prob = -1;
             setting.regexTrigger = false;
+            setting.eventTrigger = false;
             setting.judge = false;
             setting.standby = false;
             setting.activeTimeInfo = {
@@ -51,6 +52,13 @@ export function registerCmdOff() {
                     setting.regexTrigger = false;
                     matched++;
                     text += `\n非指令正则触发`;
+                    break;
+                }
+                case 'e':
+                case 'event': {
+                    setting.eventTrigger = false;
+                    matched++;
+                    text += `\n事件触发`;
                     break;
                 }
                 case 'j':
@@ -117,7 +125,7 @@ export function registerCmdOff() {
         if (matched === 0) {
             seal.replyToSender(ctx, msg,
                 `未识别的参数${unknown.length > 0 ? `：${unknown.map(n => `--${n}`).join('、')}` : ''}，未做任何更改。\n` +
-                `可用：--r 正则 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机；不带参数则整体关闭。`);
+                `可用：--r 正则 / --e 事件触发 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机；不带参数则整体关闭。`);
             return ret;
         }
 

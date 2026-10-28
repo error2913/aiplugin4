@@ -86,13 +86,13 @@ interface FakeSessionCalls {
     save: number;
 }
 
-function fakeSession(overrides: { running?: boolean; starting?: boolean; standby?: boolean } = {}): { session: any; calls: FakeSessionCalls } {
+function fakeSession(overrides: { running?: boolean; starting?: boolean; standby?: boolean; eventTrigger?: boolean } = {}): { session: any; calls: FakeSessionCalls } {
     const calls: FakeSessionCalls = { chat: [], defer: [], savePending: 0, handleReceipt: 0, system: [], save: 0 };
     const session: any = {
         running: overrides.running === true,
         starting: overrides.starting === true,
         sessionId: 'QQ-Group:2001',
-        setting: { standby: overrides.standby !== false },
+        setting: { standby: overrides.standby !== false, eventTrigger: overrides.eventTrigger !== false },
         deferReceipt: async (ctx: any, msg: any, arr: any[], kind: string, reason: string, systemName: string) => {
             calls.defer.push({ ctx, msg, arr, kind, reason, systemName });
         },
@@ -322,6 +322,15 @@ export const tests = {
             TC.boolConfigs['是否开启全局待机'] = prevGlobal;
             Config.invalidate('base');
         }
+    },
+
+    async testMaybeTriggerRespectsPerSessionSwitch(): Promise<void> {
+        installRules(rulesJson(validRule()));
+        const { session, calls } = fakeSession({ eventTrigger: false });
+        const ctx: any = { endPoint: { userId: 'QQ:999' }, isPrivate: false };
+        const msg: any = { messageType: 'group', groupId: 'QQ-Group:2001' };
+        assert.equal(await maybeTriggerEvent(view(), 'key-event-off', { session, ctx, msg }), false);
+        assert.equal(calls.chat.length, 0);
     },
 
     async testMaybeTriggerBusyDefers(): Promise<void> {

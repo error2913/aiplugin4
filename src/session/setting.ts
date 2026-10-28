@@ -2,7 +2,7 @@
 import { TypeDescriptor } from "../utils/revive";
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'judge', 'overrides'];
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
         standby: 'boolean',
@@ -10,6 +10,7 @@ export class Setting {
         timer: 'number',
         prob: 'number',
         regexTrigger: 'boolean',
+        eventTrigger: 'boolean',
         judge: 'boolean',
         activeTimeInfo: { objectValue: 'any' },
         overrides: { objectValue: 'any' }
@@ -20,6 +21,7 @@ export class Setting {
     timer: number;
     prob: number;
     regexTrigger: boolean;
+    eventTrigger: boolean;
     judge: boolean;
     activeTimeInfo: {
         start: number;
@@ -43,6 +45,7 @@ export class Setting {
         this.timer = -1;
         this.prob = -1;
         this.regexTrigger = true;
+        this.eventTrigger = true;
         this.judge = false;
         this.activeTimeInfo = {
             start: 0,
