@@ -2,9 +2,8 @@
 // 说明：段落顺序与门控由 sections/* 决定，这里只放文本与简单插值函数。
 
 /** 事件触发提示（事件本体已由上一条 system 事件提供，这里只给规则指令） */
-export function eventTriggerInstruction(values: { ruleName: string; instruction: string }): string {
-    const name = String(values.ruleName || '').trim() || 'unnamed rule';
-    return `Event trigger rule "${name}" matched the event above.\nInstruction: ${values.instruction || '(no instruction)'}`;
+export function eventTriggerInstruction(values: { instruction: string }): string {
+    return `Event trigger matched the event above.\nInstruction: ${values.instruction || '(no instruction)'}`;
 }
 
 /** 身份总述（固定首段） */

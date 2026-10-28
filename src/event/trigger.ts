@@ -36,6 +36,33 @@ export const EVENT_TRIGGER_FIELDS = [
 export type EventTriggerField = typeof EVENT_TRIGGER_FIELDS[number];
 export type EventTriggerPostType = 'notice' | 'request' | 'poke';
 
+/**
+ * 已知事件名（扁平）：生成器下拉与插件校验共用这一份口径。
+ * `profile_like` 保留在集合内（协议端会上报）但触发侧硬排除，生成器不提供。
+ */
+export const EVENT_TRIGGER_KNOWN_EVENTS = [
+    'group_increase',
+    'group_decrease',
+    'group_admin',
+    'group_ban',
+    'group_recall',
+    'group_upload',
+    'group_card',
+    'group_msg_emoji_like',
+    'essence',
+    'group_joined',
+    'poke',
+    'group_name',
+    'title',
+    'honor',
+    'lucky_king',
+    'profile_like',
+    'friend_add',
+    'friend_recall',
+    'group_request',
+    'friend_request',
+] as const;
+
 export interface EventTriggerCondition {
     field: EventTriggerField;
     regex?: string;
@@ -51,13 +78,11 @@ export interface EventTriggerScope {
 }
 
 export interface EventTriggerRule {
-    name: string;
-    /** 归一后的 eventType 列表；`*` 表示全部 */
-    on: string[];
+    /** 单个扁平事件名（一规则一事件），如 group_increase / poke */
+    on: string;
     scope: EventTriggerScope;
     match: EventTriggerCondition[];
     prompt: string;
-    toolChoice: 'auto' | 'none';
 }
 
 export interface EventTriggerConfig {
@@ -81,7 +106,7 @@ export interface EventTriggerParseResult {
 export interface EventView {
     source: EventTriggerPostType;
     postType: EventTriggerPostType;
-    /** 匹配键：notice 非 notify 用 notice_type；notify 用 `notify.<sub_type>`；request 用 `<request_type>_request`；poke 用 `notify.poke` */
+    /** 匹配键：notice 非 notify 用 notice_type；notify 用 sub_type 扁平名；request 用 `<request_type>_request`；poke 用 `poke` */
     eventType: string;
     noticeType: string;
     requestType: string;
@@ -105,7 +130,8 @@ export interface EventView {
 }
 
 export function eventTypeOfNotice(noticeType: string, subType: string): string {
-    return noticeType === 'notify' ? `notify.${subType || 'unknown'}` : noticeType;
+    // notify 大类使用扁平子类型名（poke / group_name / title / honor / lucky_king / profile_like …）
+    return noticeType === 'notify' ? (subType || 'unknown') : noticeType;
 }
 
 export function eventTypeOfRequest(requestType: string): string {
@@ -173,56 +199,61 @@ function readScope(value: unknown, path: string, issues: EventTriggerIssue[], wa
     return { platforms, sessions, exclude };
 }
 
-function readOn(value: unknown, path: string, issues: EventTriggerIssue[], warnings: EventTriggerIssue[]): string[] {
-    const list: unknown[] = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
-    if (list.length === 0) {
-        issues.push(issue(path, 'on 必填（事件类型字符串或字符串数组）'));
-        return [];
+function readEventName(value: unknown, path: string, issues: EventTriggerIssue[], warnings: EventTriggerIssue[]): string {
+    if (Array.isArray(value)) {
+        issues.push(issue(path, '一条规则只绑定一个事件：on 必须是字符串（多个事件请建多条规则）'));
+        return '';
     }
-    const out: string[] = [];
-    for (let i = 0; i < list.length; i++) {
-        const item = list[i];
-        if (typeof item !== 'string' || !item.trim()) {
-            issues.push(issue(`${path}[${i}]`, '必须是事件类型字符串'));
-            continue;
-        }
-        const token = item.trim();
-        if (token !== '*' && !/^[a-z0-9_]+(\.[a-z0-9_]+)?$/.test(token)) {
-            issues.push(issue(`${path}[${i}]`, `非法事件类型「${token}」（示例：group_increase / notify.poke / group_request / *）`));
-            continue;
-        }
-        if (token !== '*') {
-            // 只做提示：允许自定义/未来协议端事件，运行期匹配不到自然不触发
-            const KNOWN = new Set([
-                'group_increase', 'group_decrease', 'group_admin', 'group_ban', 'group_recall',
-                'group_msg_emoji_like', 'essence', 'group_upload', 'group_card', 'friend_recall',
-                'friend_add', 'group_joined', 'notify.poke', 'notify.group_name', 'notify.title',
-                'notify.honor', 'notify.lucky_king', 'notify.profile_like', 'group_request', 'friend_request',
-            ]);
-            if (!KNOWN.has(token)) warnings.push(issue(`${path}[${i}]`, `未知事件类型「${token}」，若协议端未上报将不会触发`));
-        }
-        if (!out.includes(token)) out.push(token);
+    if (typeof value !== 'string' || !value.trim()) {
+        issues.push(issue(path, 'on 必填（事件名，如 group_increase / poke / group_request）'));
+        return '';
     }
-    return out;
+    const token = value.trim();
+    if (!/^[a-z0-9_]+$/.test(token)) {
+        issues.push(issue(path, `非法事件名「${token}」（示例：group_increase / poke / group_request）`));
+        return '';
+    }
+    if (!(EVENT_TRIGGER_KNOWN_EVENTS as readonly string[]).includes(token)) {
+        warnings.push(issue(path, `未知事件名「${token}」，若协议端未上报将不会触发`));
+    }
+    return token;
 }
 
 function readMatch(value: unknown, path: string, issues: EventTriggerIssue[], warnings: EventTriggerIssue[]): EventTriggerCondition[] {
     if (value === undefined || value === null) return [];
-    if (!Array.isArray(value)) {
-        issues.push(issue(path, '必须是数组'));
+    let list: unknown[];
+    if (Array.isArray(value)) {
+        list = value;
+    } else if (isPlainObject(value)) {
+        // 对象糖：{"sub_type":"leave","is_target_bot":true} → 等值条件（正则请用数组形态）
+        const out: EventTriggerCondition[] = [];
+        for (const [field, rawValue] of Object.entries(value)) {
+            if (!(EVENT_TRIGGER_FIELDS as readonly string[]).includes(field)) {
+                issues.push(issue(`${path}.${field}`, `字段必须是 ${EVENT_TRIGGER_FIELDS.join(' / ')} 之一`));
+                continue;
+            }
+            if (rawValue === null || rawValue === undefined || typeof rawValue === 'object') {
+                issues.push(issue(`${path}.${field}`, '对象形态的值只支持字符串/数字/布尔（正则请用数组形态）'));
+                continue;
+            }
+            out.push({ field: field as EventTriggerField, equals: rawValue as string | number | boolean });
+        }
+        return out;
+    } else {
+        issues.push(issue(path, '必须是数组或对象（对象形态示例：{"sub_type":"leave"}）'));
         return [];
     }
-    if (value.length > EVENT_TRIGGER_MATCH_MAX) {
-        issues.push(issue(path, `最多 ${EVENT_TRIGGER_MATCH_MAX} 条条件（当前 ${value.length}）`));
+    if (list.length > EVENT_TRIGGER_MATCH_MAX) {
+        issues.push(issue(path, `最多 ${EVENT_TRIGGER_MATCH_MAX} 条条件（当前 ${list.length}）`));
     }
     const out: EventTriggerCondition[] = [];
-    for (let i = 0; i < value.length; i++) {
+    for (let i = 0; i < list.length; i++) {
         const itemPath = `${path}[${i}]`;
-        if (!isPlainObject(value[i])) {
+        if (!isPlainObject(list[i])) {
             issues.push(issue(itemPath, '必须是对象（{field, regex} 或 {field, equals}）'));
             continue;
         }
-        const item: Record<string, any> = value[i];
+        const item: Record<string, any> = list[i];
         for (const key of Object.keys(item)) {
             if (!['field', 'regex', 'equals'].includes(key)) warnings.push(issue(`${itemPath}.${key}`, '未知字段，已忽略'));
         }
@@ -304,17 +335,11 @@ export function parseEventTriggerConfig(text: string): EventTriggerParseResult {
             return;
         }
         for (const key of Object.keys(item)) {
-            if (!['name', 'on', 'scope', 'match', 'prompt', 'toolChoice'].includes(key)) {
-                warnings.push(issue(`${path}.${key}`, '未知字段，已忽略'));
+            if (!['on', 'scope', 'match', 'prompt'].includes(key)) {
+                warnings.push(issue(`${path}.${key}`, '未知字段，已忽略（规则不再支持 name / toolChoice）'));
             }
         }
-        const name = typeof item.name === 'string' ? item.name.trim() : '';
-        if (!name) {
-            issues.push(issue(`${path}.name`, 'name 必填（字符串）'));
-        } else if (name.length > 40) {
-            issues.push(issue(`${path}.name`, `name 最多 40 字（当前 ${name.length}）`));
-        }
-        const on = readOn(item.on, `${path}.on`, issues, warnings);
+        const on = readEventName(item.on, `${path}.on`, issues, warnings);
         const scope = readScope(item.scope, `${path}.scope`, issues, warnings);
         const match = readMatch(item.match, `${path}.match`, issues, warnings);
         const prompt = typeof item.prompt === 'string' ? item.prompt : '';
@@ -323,23 +348,7 @@ export function parseEventTriggerConfig(text: string): EventTriggerParseResult {
         } else if (prompt.length > EVENT_TRIGGER_PROMPT_MAX) {
             issues.push(issue(`${path}.prompt`, `prompt 最多 ${EVENT_TRIGGER_PROMPT_MAX} 字（当前 ${prompt.length}）`));
         }
-        let toolChoice: 'auto' | 'none' = 'auto';
-        if (item.toolChoice !== undefined && item.toolChoice !== null) {
-            if (item.toolChoice !== 'auto' && item.toolChoice !== 'none') {
-                issues.push(issue(`${path}.toolChoice`, '只能是 auto 或 none'));
-            } else {
-                toolChoice = item.toolChoice;
-            }
-        }
-        rules.push({ name, on, scope, match, prompt, toolChoice });
-    });
-
-    // 重名只提示（允许导入历史配置）
-    const seen = new Set<string>();
-    rules.forEach((rule, index) => {
-        if (!rule.name) return;
-        if (seen.has(rule.name)) warnings.push(issue(`$.rules[${index}].name`, `规则名重复：${rule.name}`));
-        seen.add(rule.name);
+        rules.push({ on, scope, match, prompt });
     });
 
     if (issues.length > 0) return { config: null, issues, warnings };
@@ -368,7 +377,7 @@ function viewFieldValue(view: EventView, field: EventTriggerField): string | boo
 /** 命中第一条规则（顺序 = 优先级）；无命中返回 null */
 export function matchEventTrigger(rules: EventTriggerRule[], view: EventView): EventTriggerRule | null {
     for (const rule of rules) {
-        if (!rule.on.includes('*') && !rule.on.includes(view.eventType)) continue;
+        if (rule.on !== view.eventType) continue;
         if (!matchesPlatform(rule.scope.platforms, view.platform)) continue;
         if (rule.scope.sessions.length > 0 && !rule.scope.sessions.includes(view.sid)) continue;
         if (rule.scope.exclude.includes(view.sid)) continue;
@@ -395,7 +404,7 @@ export function matchEventTrigger(rules: EventTriggerRule[], view: EventView): E
  */
 export function isEventTriggerExcluded(view: EventView): boolean {
     if (!view.eventType) return true;
-    if (view.eventType === 'notify.profile_like' || view.eventType === 'notify.gray_tip' || view.eventType === 'notify.input_status') return true;
+    if (view.eventType === 'profile_like' || view.eventType === 'gray_tip' || view.eventType === 'input_status') return true;
     if (view.noticeType === 'group_decrease' && (view.subType === 'kick_me' || view.subType === 'disband')) return true;
     if (view.noticeType === 'group_ban' && view.userId && view.userId === view.botId) return true;
     if (view.source === 'poke' && view.userId && view.userId === view.botId) return true;

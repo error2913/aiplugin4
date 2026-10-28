@@ -71,12 +71,14 @@ const {
     setRuleRows, resetRuleRowsForTest,
     templateParamKeys, normalizeMediaParams,
     parseRolesConfig, parseSkillsConfig, parseMcpConfig, parseKbConfig, parseEventTriggerConfig,
+    EVENT_TRIGGER_KNOWN_EVENTS,
     DEFAULT_ROLES, DEFAULT_SKILLS, DEFAULT_MCP, DEFAULT_KB,
 } = plugin;
 
 const gen = await import(pathToFileURL(genV5).href);
 const tpl = await import(pathToFileURL(genTpl).href);
 const genDomain = await import(pathToFileURL(genDomains).href);
+const genEventTrigger = await import(pathToFileURL(path.join(genRoot, 'js', 'domains', 'event-trigger.js')).href);
 
 process.on('exit', () => { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } });
 
@@ -1254,11 +1256,19 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
             `generator=${JSON.stringify(genInvalid)} plugin=${JSON.stringify(pluginInvalid.issues)}`);
     }
 
-    // ---- 事件触发规则（Issue #147）：生成器产出 → 插件解析；两边 schema 漂移会在这里暴露
+    // ---- 事件触发规则（Issue #147）：生成器产出 → 插件解析；两边 schema / 事件表漂移会在这里暴露
     {
         const spec = specs.eventTrigger;
         ok('eventTrigger：生成器存在该分区', !!spec);
         if (spec) {
+            const genEvents = genEventTrigger.EVENT_TABLE.map(item => item.on);
+            ok('eventTrigger：生成器事件表 ⊆ 插件已知事件',
+                genEvents.every(name => EVENT_TRIGGER_KNOWN_EVENTS.includes(name)),
+                genEvents.filter(name => !EVENT_TRIGGER_KNOWN_EVENTS.includes(name)).join(', '));
+            ok('eventTrigger：插件已知事件 ⊆ 生成器事件表（profile_like 除外）',
+                EVENT_TRIGGER_KNOWN_EVENTS.filter(name => name !== 'profile_like').every(name => genEvents.includes(name)),
+                EVENT_TRIGGER_KNOWN_EVENTS.filter(name => name !== 'profile_like' && !genEvents.includes(name)).join(', '));
+
             const defaultBuilt = spec.build(spec.defaults.map(item => spec.normalizeItem(item)));
             ok('eventTrigger：默认输出空规则', Array.isArray(defaultBuilt.rules) && defaultBuilt.rules.length === 0,
                 JSON.stringify(defaultBuilt).slice(0, 200));
@@ -1268,38 +1278,58 @@ console.log('\n=== C. 角色 / 技能 / MCP / 知识库：生成器产出 → �
                 JSON.stringify(defaultParsed.issues));
 
             const item = spec.normalizeItem({
-                name: '入群欢迎',
                 on: 'group_increase',
                 platforms: ['QQ'],
                 sessions: ['QQ-Group:2001'],
                 exclude: ['QQ-Group:2002'],
                 match: [{ field: 'operator_id', regex: '.+' }],
-                prompt: '新成员 {user_id} 入群了',
-                toolChoice: 'none',
+                prompt: 'A new member joined the group. Greet them briefly in character.',
             });
             const built = spec.build([item]);
             const parsed = parseEventTriggerConfig(JSON.stringify(built));
             ok('eventTrigger：生成器产出被插件接受', !!parsed.config, JSON.stringify(parsed.issues));
             const rule = parsed.config ? parsed.config.rules[0] : null;
-            ok('eventTrigger：字段一致',
+            ok('eventTrigger：字段一致（无 name/toolChoice、on 单字符串、扁平事件名）',
                 !!rule
-                && rule.name === '入群欢迎'
-                && rule.on.length === 1 && rule.on[0] === 'group_increase'
+                && rule.on === 'group_increase'
+                && !Object.prototype.hasOwnProperty.call(rule, 'name')
+                && !Object.prototype.hasOwnProperty.call(rule, 'toolChoice')
                 && rule.scope.platforms[0] === 'QQ'
                 && rule.scope.sessions[0] === 'QQ-Group:2001'
                 && rule.scope.exclude[0] === 'QQ-Group:2002'
                 && rule.match.length === 1 && rule.match[0].field === 'operator_id'
-                && rule.toolChoice === 'none'
-                && rule.prompt === '新成员 {user_id} 入群了',
+                && rule.prompt === 'A new member joined the group. Greet them briefly in character.',
                 JSON.stringify(rule));
+
+            // 戳一戳预设：生成器事件表带默认条件 is_target_bot=true + 英文预设 prompt
+            const pokeDefault = genEventTrigger.DEFAULT_MATCH.poke || [];
+            ok('eventTrigger：戳一戳预设条件', Array.isArray(pokeDefault)
+                && pokeDefault.some(m => m.field === 'is_target_bot' && m.equals === true),
+                JSON.stringify(pokeDefault));
+            ok('eventTrigger：戳一戳英文预设提示词', typeof genEventTrigger.PRESET_PROMPTS.poke === 'string'
+                && genEventTrigger.PRESET_PROMPTS.poke.trim() !== '',
+                String(genEventTrigger.PRESET_PROMPTS.poke));
+            const pokeItem = spec.normalizeItem({
+                on: 'poke',
+                match: pokeDefault,
+                prompt: genEventTrigger.PRESET_PROMPTS.poke,
+            });
+            const pokeParsed = parseEventTriggerConfig(JSON.stringify(spec.build([pokeItem])));
+            ok('eventTrigger：戳一戳产出被插件接受', !!pokeParsed.config, JSON.stringify(pokeParsed.issues));
 
             const disabledBuilt = spec.build([{ ...item, enabled: false }]);
             ok('eventTrigger：停用后不写进配置', disabledBuilt.rules.length === 0, JSON.stringify(disabledBuilt));
-            ok('eventTrigger：输出不含 enabled 键', !JSON.stringify(built).includes('"enabled"'));
+            ok('eventTrigger：输出不含 enabled/name/toolChoice 键',
+                !JSON.stringify(built).includes('"enabled"')
+                && !JSON.stringify(built).includes('"name"')
+                && !JSON.stringify(built).includes('"toolChoice"'));
 
-            const invalid = '{"version":1,"rules":[{"name":"","on":"group_increase","prompt":"x"}]}';
+            const invalid = '{"version":1,"rules":[{"on":"group_increase"}]}';
             ok('eventTrigger：非法样例两边都拒绝',
                 spec.parseImport(invalid).ok === false && parseEventTriggerConfig(invalid).config === null);
+            const invalidOn = '{"version":1,"rules":[{"on":"","prompt":"x"}]}';
+            ok('eventTrigger：空事件名两边都拒绝',
+                spec.parseImport(invalidOn).ok === false && parseEventTriggerConfig(invalidOn).config === null);
         }
     }
 }

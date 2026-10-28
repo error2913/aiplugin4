@@ -53,14 +53,12 @@ function view(patch: Partial<EventView> = {}): EventView {
     };
 }
 
-function validRule(patch: Partial<EventTriggerRule> = {}): any {
+function validRule(patch: Record<string, any> = {}): any {
     return {
-        name: '入群欢迎',
         on: 'group_increase',
         scope: { platforms: [], sessions: [], exclude: [] },
         match: [],
-        prompt: '欢迎 {user_id} 入群',
-        toolChoice: 'none',
+        prompt: 'A new member joined. Greet them briefly.',
         ...patch,
     };
 }
@@ -74,7 +72,6 @@ function installRules(text: string): void {
     TC.stringConfigs['事件触发规则'] = text;
     Config.invalidate('trigger');
     resetEventTriggerConfigCacheForTest();
-    // 触发配置的解析/回退在 get 内完成
     void Config.trigger.EVENT_TRIGGER.CONFIG;
 }
 
@@ -120,9 +117,18 @@ export const tests = {
         const ok = parseEventTriggerConfig(rulesJson(validRule()));
         assert.equal(ok.issues.length, 0, JSON.stringify(ok.issues));
         assert.equal(ok.config!.rules.length, 1);
-        assert.deepEqual(ok.config!.rules[0].on, ['group_increase']);
-        assert.equal(ok.config!.rules[0].toolChoice, 'none');
+        assert.equal(ok.config!.rules[0].on, 'group_increase');
+        assert.equal((ok.config!.rules[0] as any).name, undefined, '规则不再有 name');
+        assert.equal((ok.config!.rules[0] as any).toolChoice, undefined, '规则不再有 toolChoice');
         assert.equal(ok.config!.rules[0].scope.platforms.length, 0);
+
+        const flatNotify = parseEventTriggerConfig(rulesJson(validRule({ on: 'poke', match: { is_target_bot: true } })));
+        assert.equal(flatNotify.issues.length, 0, JSON.stringify(flatNotify.issues));
+        assert.equal(flatNotify.config!.rules[0].on, 'poke');
+        assert.deepEqual(flatNotify.config!.rules[0].match, [{ field: 'is_target_bot', equals: true }], '对象糖应展开为等值条件');
+
+        const oldNotify = parseEventTriggerConfig(rulesJson(validRule({ on: 'notify.poke' })));
+        assert.equal(oldNotify.config, null, 'notify.* 复合名不再接受');
 
         const badJson = parseEventTriggerConfig('{oops');
         assert.equal(badJson.config, null);
@@ -134,9 +140,13 @@ export const tests = {
         const noRules = parseEventTriggerConfig(JSON.stringify({ version: 1 }));
         assert.equal(noRules.config, null);
 
-        const missing = parseEventTriggerConfig(rulesJson({ on: 'group_increase', prompt: 'x' }));
-        assert.equal(missing.config, null);
-        assert.ok(missing.issues.some(i => i.path === '$.rules[0].name'));
+        const noOn = parseEventTriggerConfig(rulesJson({ prompt: 'x' }));
+        assert.equal(noOn.config, null);
+        assert.ok(noOn.issues.some(i => i.path === '$.rules[0].on'));
+
+        const arrayOn = parseEventTriggerConfig(rulesJson(validRule({ on: ['group_request', 'friend_request'] })));
+        assert.equal(arrayOn.config, null, '一条规则只能绑一个事件');
+        assert.ok(arrayOn.issues.some(i => i.path === '$.rules[0].on'));
 
         const noPrompt = parseEventTriggerConfig(rulesJson(validRule({ prompt: '' })));
         assert.equal(noPrompt.config, null);
@@ -146,9 +156,6 @@ export const tests = {
 
         const badRegex = parseEventTriggerConfig(rulesJson(validRule({ match: [{ field: 'user_id', regex: '[' }] })));
         assert.equal(badRegex.config, null);
-
-        const badToolChoice = parseEventTriggerConfig(rulesJson(validRule({ toolChoice: 'always' })));
-        assert.equal(badToolChoice.config, null);
 
         const both = parseEventTriggerConfig(rulesJson(validRule({ match: [{ field: 'user_id', regex: 'x', equals: 'y' }] })));
         assert.equal(both.config, null);
@@ -162,50 +169,43 @@ export const tests = {
         const tooMany = parseEventTriggerConfig(JSON.stringify({ version: 1, rules: Array.from({ length: 51 }, () => validRule()) }));
         assert.equal(tooMany.config, null);
 
-        const warns = parseEventTriggerConfig(JSON.stringify({ version: 1, extra: 1, rules: [validRule({ name: 'A', unknownKey: 1 }), validRule({ name: 'A' })] }));
+        const warns = parseEventTriggerConfig(JSON.stringify({ version: 1, extra: 1, rules: [validRule({ name: 'A', toolChoice: 'none', unknownKey: 1, on: 'some_custom_event' })] }));
         assert.equal(warns.issues.length, 0, JSON.stringify(warns.issues));
         assert.ok(warns.warnings.some(w => w.path === '$.extra'));
         assert.ok(warns.warnings.some(w => w.path === '$.rules[0].unknownKey'));
-        assert.ok(warns.warnings.some(w => w.path === '$.rules[1].name'));
+        assert.ok(warns.warnings.some(w => w.path === '$.rules[0].name'), '旧 name 只 warning');
+        assert.ok(warns.warnings.some(w => w.path === '$.rules[0].toolChoice'), '旧 toolChoice 只 warning');
+        assert.ok(warns.warnings.some(w => w.path === '$.rules[0].on'), '未知事件名 warning');
 
-        const requestRule = parseEventTriggerConfig(rulesJson(validRule({ on: ['group_request', 'friend_request'] })));
-        assert.equal(requestRule.issues.length, 0);
-        assert.deepEqual(requestRule.config!.rules[0].on, ['group_request', 'friend_request']);
-        assert.equal(eventTypeOfNotice('notify', 'poke'), 'notify.poke');
+        assert.equal(eventTypeOfNotice('notify', 'poke'), 'poke');
+        assert.equal(eventTypeOfNotice('notify', 'group_name'), 'group_name');
+        assert.equal(eventTypeOfNotice('group_increase', 'approve'), 'group_increase');
         assert.equal(eventTypeOfRequest('group'), 'group_request');
     },
 
     testMatchEventTrigger(): void {
         const parsed = parseEventTriggerConfig(rulesJson(
-            {
-                name: '只QQ群入群',
-                on: 'group_increase',
-                scope: { platforms: ['QQ'], sessions: ['QQ-Group:2001'], exclude: [] },
-                match: [{ field: 'operator_id', regex: '^QQ:100' }],
-                prompt: 'x',
-            },
-            { name: '任意入群', on: 'group_increase', prompt: 'y' },
-            { name: '戳一戳', on: 'notify.poke', match: [{ field: 'is_target_bot', equals: true }], prompt: 'z' },
-            { name: '全部', on: '*', prompt: 'w' },
+            validRule({ on: 'group_increase', scope: { platforms: ['QQ'], sessions: ['QQ-Group:2001'], exclude: [] }, match: [{ field: 'operator_id', regex: '^QQ:100' }], prompt: 'x' }),
+            validRule({ on: 'group_increase', prompt: 'y' }),
+            validRule({ on: 'poke', match: [{ field: 'is_target_bot', equals: true }], prompt: 'z' }),
         ));
         assert.equal(parsed.issues.length, 0, JSON.stringify(parsed.issues));
         const rules = parsed.config!.rules;
 
-        assert.equal(matchEventTrigger(rules, view())!.name, '只QQ群入群');
-        assert.equal(matchEventTrigger(rules, view({ operatorId: 'QQ:9999' }))!.name, '任意入群');
-        assert.equal(matchEventTrigger(rules, view({ platform: 'DISCORD' }))!.name, '任意入群');
-        assert.equal(matchEventTrigger(rules, view({ sid: 'QQ-Group:2', platform: 'QQ', eventType: 'group_ban', noticeType: 'group_ban', subType: 'ban' }))!.name, '全部');
-        assert.equal(matchEventTrigger(rules, view({ source: 'poke', postType: 'poke', eventType: 'notify.poke', isTargetBot: true }))!.name, '戳一戳');
-        assert.equal(matchEventTrigger(rules, view({ source: 'poke', postType: 'poke', eventType: 'notify.poke', isTargetBot: false }))!.name, '全部');
-        assert.equal(matchEventTrigger(rules, view({ eventType: 'group_decrease', noticeType: 'group_decrease', subType: 'leave' }))!.name, '全部');
+        assert.equal(matchEventTrigger(rules, view())!.prompt, 'x');
+        assert.equal(matchEventTrigger(rules, view({ operatorId: 'QQ:9999' }))!.prompt, 'y');
+        assert.equal(matchEventTrigger(rules, view({ platform: 'DISCORD' }))!.prompt, 'y');
+        assert.equal(matchEventTrigger(rules, view({ eventType: 'group_ban', noticeType: 'group_ban', subType: 'ban' })), null);
+        assert.equal(matchEventTrigger(rules, view({ source: 'poke', postType: 'poke', eventType: 'poke', isTargetBot: true }))!.prompt, 'z');
+        assert.equal(matchEventTrigger(rules, view({ source: 'poke', postType: 'poke', eventType: 'poke', isTargetBot: false })), null);
 
-        // 硬排除
-        assert.equal(isEventTriggerExcluded(view({ eventType: 'notify.profile_like', noticeType: 'notify', subType: 'profile_like' })), true);
-        assert.equal(isEventTriggerExcluded(view({ eventType: 'notify.gray_tip', noticeType: 'notify', subType: 'gray_tip' })), true);
+        // 硬排除（扁平事件名）
+        assert.equal(isEventTriggerExcluded(view({ eventType: 'profile_like', noticeType: 'notify', subType: 'profile_like' })), true);
+        assert.equal(isEventTriggerExcluded(view({ eventType: 'gray_tip', noticeType: 'notify', subType: 'gray_tip' })), true);
         assert.equal(isEventTriggerExcluded(view({ noticeType: 'group_decrease', eventType: 'group_decrease', subType: 'kick_me' })), true);
         assert.equal(isEventTriggerExcluded(view({ noticeType: 'group_decrease', eventType: 'group_decrease', subType: 'disband' })), true);
         assert.equal(isEventTriggerExcluded(view({ noticeType: 'group_ban', eventType: 'group_ban', userId: 'QQ:999' })), true);
-        assert.equal(isEventTriggerExcluded(view({ source: 'poke', eventType: 'notify.poke', userId: 'QQ:999' })), true);
+        assert.equal(isEventTriggerExcluded(view({ source: 'poke', eventType: 'poke', userId: 'QQ:999' })), true);
         assert.equal(isEventTriggerExcluded(view()), false);
     },
 
@@ -241,7 +241,7 @@ export const tests = {
 
         installRules(rulesJson(validRule()));
         assert.equal(Config.trigger.EVENT_TRIGGER.CONFIG.rules.length, 1);
-        assert.equal(Config.trigger.EVENT_TRIGGER.CONFIG.rules[0].name, '入群欢迎');
+        assert.equal(Config.trigger.EVENT_TRIGGER.CONFIG.rules[0].on, 'group_increase');
 
         installRules(EVENT_TRIGGER_DEFAULT_JSON);
         assert.equal(Config.trigger.EVENT_TRIGGER.CONFIG.rules.length, 0);
@@ -255,10 +255,11 @@ export const tests = {
         const ok = await maybeTriggerEvent(view(), 'key-idle', { session, ctx, msg });
         assert.equal(ok, true);
         assert.equal(calls.chat.length, 1);
-        assert.equal(calls.chat[0][2], '事件触发:入群欢迎');
-        assert.equal(calls.chat[0][3], 'none');
+        assert.equal(calls.chat[0][2], '事件触发:group_increase');
+        assert.equal(calls.chat[0].length, 3, '不再传 tool_choice');
         assert.equal(calls.system.length, 1);
         assert.ok(String(calls.system[0][0]).includes('欢迎 QQ:1001'));
+        assert.ok(String(calls.system[0][0]).startsWith('Event trigger matched the event above.'), String(calls.system[0][0]));
         assert.equal(calls.system[0][1], 'event-trigger');
         assert.equal(calls.defer.length, 0);
     },
@@ -296,20 +297,20 @@ export const tests = {
         assert.equal(await maybeTriggerEvent(view(), 'k1', { session, ctx, msg }), false);
         assert.equal(calls.chat.length, 0);
 
-        installRules(rulesJson(validRule({ on: 'notify.profile_like' })));
-        assert.equal(await maybeTriggerEvent(view({ eventType: 'notify.profile_like', noticeType: 'notify', subType: 'profile_like' }), 'k2', { session, ctx, msg }), false);
+        installRules(rulesJson(validRule({ on: 'profile_like' })));
+        assert.equal(await maybeTriggerEvent(view({ eventType: 'profile_like', noticeType: 'notify', subType: 'profile_like' }), 'k2', { session, ctx, msg }), false);
         assert.equal(calls.chat.length, 0);
     },
 
     async testPokeTriggerRecordsMessage(): Promise<void> {
-        installRules(rulesJson(validRule({ name: '戳一戳', on: 'notify.poke', match: [{ field: 'is_target_bot', equals: true }], prompt: '回应' })));
+        installRules(rulesJson(validRule({ on: 'poke', match: [{ field: 'is_target_bot', equals: true }], prompt: '回应' })));
         const { session, calls } = fakeSession();
         const ctx: any = { endPoint: { userId: 'QQ:999' }, isPrivate: false };
         const msg: any = { messageType: 'group', groupId: 'QQ-Group:2001' };
         const pokeView = view({
             source: 'poke',
             postType: 'poke',
-            eventType: 'notify.poke',
+            eventType: 'poke',
             noticeType: 'notify',
             subType: 'poke',
             isTargetBot: true,
@@ -330,7 +331,7 @@ export const tests = {
             userId: 'QQ:1001',
             messageId: '',
             kind: 'trigger',
-            systemReason: 'Event trigger rule "x" matched the event above.',
+            systemReason: 'Event trigger matched the event above.',
             systemName: 'event-trigger',
             epId: 'QQ:999',
             isPrivate: false,

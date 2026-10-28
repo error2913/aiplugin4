@@ -166,7 +166,7 @@ export default class TriggerConfig {
             ext,
             "事件触发规则",
             EVENT_TRIGGER_DEFAULT_JSON,
-            "JSON v1：{\"version\":1,\"rules\":[{\"name\",\"on\",\"scope\",\"match\",\"prompt\",\"toolChoice\"}]}。事件先由「事件接收」页录入上下文（需接收开关+白名单+会话待机），再按本规则触发；空规则=关闭。"
+            "JSON v1：{\"version\":1,\"rules\":[{\"on\":\"group_increase\",\"scope\":{...},\"match\":[...],\"prompt\":\"...\"}]}。一条规则只绑一个事件；事件先由「事件接收」页录入上下文（需接收开关+白名单+会话待机），再按本规则触发；空规则=关闭。"
                 + GENERATOR_CONFIG_HINT,
             "触发",
         );

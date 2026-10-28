@@ -70,14 +70,14 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
         }
 
         const instruction = renderTriggerPrompt(rule.prompt, view);
-        const text = eventTriggerInstruction({ ruleName: rule.name, instruction });
+        const text = eventTriggerInstruction({ instruction });
         markEventTriggered(dedupKey, view.source === 'poke' ? POKE_TRIGGER_WINDOW_MS : undefined);
 
         if (session.running || session.starting) {
             // 忙：只挂起触发提示；事件文本已由录制链路写入上下文，轮末 flush/resume 再起一轮。
             await session.deferReceipt(ctx, msg, options.messageArray ?? [], 'trigger', text, SYSTEM_NAME.eventTrigger);
             session.savePending();
-            log.info(`事件触发已挂起（会话忙）：${view.eventType} rule=${rule.name} sid=${view.sid}`);
+            log.info(`事件触发已挂起（会话忙）：${view.eventType} sid=${view.sid}`);
             return true;
         }
 
@@ -88,10 +88,10 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
             ...(view.source === 'poke' && view.raw !== undefined ? { raw: view.raw } : {}),
         });
         session.save(true);
-        void session.chat(ctx, msg, `事件触发:${rule.name}`, rule.toolChoice).catch((e: any) => {
+        void session.chat(ctx, msg, `事件触发:${rule.on}`).catch((e: any) => {
             log.exception('事件触发起轮出错', e);
         });
-        log.info(`事件触发：${view.eventType} rule=${rule.name} sid=${view.sid}`);
+        log.info(`事件触发：${view.eventType} sid=${view.sid}`);
         return true;
     } catch (e) {
         log.exception('事件触发处理出错（已忽略，不影响事件录制）', e);
