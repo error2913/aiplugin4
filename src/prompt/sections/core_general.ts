@@ -1,5 +1,5 @@
-// 基础段：身份 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片图库 / 回复方式 / 工作方向
-import { IDENTITY, IMAGES, markersSection, REPLY_STYLE, RESPONSE_LANGUAGE, ROLE_HEADING, sessionSection, WORK_DIRECTION } from '../texts/en';
+// 基础段：身份 / 全局提示词 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片图库 / 回复方式 / 工作方向
+import { GLOBAL_HEADING, IDENTITY, IMAGES, markersSection, REPLY_STYLE, RESPONSE_LANGUAGE, ROLE_HEADING, sessionSection, WORK_DIRECTION } from '../texts/en';
 import type { PromptSection } from '../types';
 
 export function registerCoreGeneralSections(): PromptSection[] {
@@ -10,6 +10,13 @@ export function registerCoreGeneralSections(): PromptSection[] {
             channel: 'system',
             cache: { deps: () => [] },
             build: () => IDENTITY,
+        },
+        {
+            name: 'core:global',
+            order: -950,
+            channel: 'system',
+            cache: { deps: c => [c.globalPrompt] },
+            build: c => (c.globalPrompt ? `${GLOBAL_HEADING}\n${c.globalPrompt}` : ''),
         },
         {
             name: 'core:role',

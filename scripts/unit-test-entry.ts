@@ -11454,6 +11454,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(parseMcpConfig(factoryStr['MCP服务器']).config);
         assert.ok(parseKbConfig(factoryStr['知识库配置']).config);
 
+        // 2.1.1) 全局提示词默认留空：升级后不改变 system prompt
+        assert.equal(factoryStr['全局提示词'], '', '「全局提示词」默认留空');
+
         // 2.2) 默认运行时结构与旧默认一致
         resetConfigCache();
         assert.equal((Config as any).role.ROLE_NAMES[0], 'Test Bot');

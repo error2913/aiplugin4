@@ -16,6 +16,9 @@ export const IDENTITY = 'You are an AI dice bot running on SealDice. Role-play t
 /** 角色段标题 */
 export const ROLE_HEADING = '## Role';
 
+/** 全局提示词段标题（所有角色共用，位于角色段之前） */
+export const GLOBAL_HEADING = '## Global instructions';
+
 /** 回复语言约定（英文提示词不影响对话语言） */
 export const RESPONSE_LANGUAGE = [
     '## Response language',

@@ -89,6 +89,7 @@ export async function createPromptContext(ctx: seal.MsgContext, session: Session
         ctx,
         session,
         roleSetting,
+        globalPrompt: String(Config.role.GLOBAL_PROMPT || '').trim(),
         roleIndex: role.roleIndex,
         platform,
         isPrivate: ctx.isPrivate,

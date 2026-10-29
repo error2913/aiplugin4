@@ -44,4 +44,14 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 ## 开发与工程
 
 - 单测新增/调整：压缩运行时目标循环与每小时批次上限、摘要边界单元过滤、标签分级与时间锚点、stale 摘要回退、摘要 \`fromAt\` 继承、检索时间/消息 ID 与升序输出；\`npx tsc --noEmit\`、\`npm run lint\`、\`npm run test:unit\`、\`npm run deps:check\`、\`npm run build && npm run smoke\`、\`npm run sim\` 全绿。
+
+## 全局提示词
+
+- 新增「全局提示词」配置（「角色设定」页，默认留空）：对所有角色生效的公共提示词，作为 system prompt 新段 \`core:global\`，位于身份总述与角色设定之间；\`.ai role\` / \`$gSYSPROMPT\` 切换角色时内容不变。
+- 留空则整段不注入，升级后默认行为不变（system prompt 与旧版一致）；内容保持原语言。修改后约 1 分钟内自动生效，可用 \`.ai prompt\` / \`.ai prompt sections\` 查看。
+- 不进入判分、记忆抽取与子代理 child system：这些入口的输入与主对话 system prompt 相互独立。
+
+## 配置项更改
+
+- 新增「全局提示词」（「角色设定」分组）：默认空字符串；不需要公共提示词时保持留空即可，行为与旧版完全一致。
 `;

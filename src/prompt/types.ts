@@ -36,6 +36,8 @@ export interface PromptContext {
     ctx: seal.MsgContext;
     session: Session;
     roleSetting: string;
+    /** 全局提示词（所有角色共用；空 = 不注入） */
+    globalPrompt: string;
     roleIndex: number;
     platform: string;
     isPrivate: boolean;
