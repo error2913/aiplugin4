@@ -336,7 +336,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 ### 上下文
 
-> 上下文采用只追加账本；压缩只生成摘要、不删除原文。预算到顶时压缩：保留最新「保留强度」比例的原文，其余由滚动摘要替代；旧消息不再重复展示原文，模型可用 `grep_raw` / `read_raw` 回查（结果带发送时间与消息 ID、按时间升序）。
+> 上下文采用只追加账本；压缩只生成摘要、不删除原文。预算到顶时压缩：保留最新「保留强度」比例的原文，其余由滚动摘要替代；旧消息不再重复展示原文，模型可用 `grep_raw` / `read_raw` / `resolve_context_ref` 回查（结果带发送时间与消息 ID、按时间升序）。
 
 | 设置项 | 说明 |
 |:---:|:---|
@@ -365,7 +365,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 接收依赖通知事件 | 开启后把 ob11 依赖订阅到的通知/请求事件（禁言/管理变动/文件上传/名片变更/表情回应/精华/运气王/入群申请/好友申请等）转成文本提示词录入上下文，仅作背景不触发 AI；仅当会话待机或全局待机开启时才录入 |
-| 通知事件白名单 | 每行一个事件类型；notify 大类下需单独写子类型才收录；poke 不作为背景事件录入（原生 onPoke 走消息路径；适配器不下发时由 ob11 notify/poke 直接评估触发）；事件文本由纯代码模板生成（超长仅 head 截断兜底），完整原始数据由 `read_raw kind=event` 只读读取（原 `get_event_detail` 工具已删除） |
+| 通知事件白名单 | 每行一个事件类型；notify 大类下需单独写子类型才收录；poke 不作为背景事件录入（原生 onPoke 走消息路径；适配器不下发时由 ob11 notify/poke 直接评估触发）；事件文本由纯代码模板生成（超长仅 head 截断兜底），完整原始数据由 `resolve_context_ref`（`kind=event_raw` + `e:<seq>`）或旧会话的 `read_raw kind=event` 只读读取（原 `get_event_detail` 工具已删除） |
 
 ### 触发
 
@@ -770,7 +770,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | MCP | `mcp_list_resources`（按服务器列出 resources 目录）、`mcp_read_resource`（按 uri 读取资源内容；resources 是外部数据，不会自动注入提示词） |
 | Resources | `list_resources`、`get_resource_path`（本地资源查询）；`generate_audio`（提交语音生成任务，立即返回任务号，完成后自动通知；传 `path` 时同步解析本地/MCP 音频资源）、`search_music`（返回 music 消息段，不直接发送） |
 | Attributes | `attr_get`、`attr_set` |
-| Raw search | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文；结果带发送时间与消息 ID，`grep_raw` 按时间升序返回） |
+| Raw search | `grep_raw`、`read_raw`（按 kind 检索/读取工具、用户消息、图片、事件被截断或压缩前的完整原文；结果带发送时间与消息 ID，`grep_raw` 按时间升序返回）、`resolve_context_ref`（把上下文表示原样解析为原文/字段/元数据；支持 `[mem:<id>]`、`[img:…]`、`[quote:…]`、`e:<seq>`、`read_raw` 指针与 system 事件 `raw`） |
 | Context editing | `context_edit_list`（按序号定位任意会话上下文条目，支持 role/keyword/时间过滤）、`context_edit_replace`（按 scope 批量替换正文文本：字面量/正则、空串删除、原文副本同步、持久化；敏感工具，默认开启，详见下方说明） |
 | Blocks | `suggest_block`（AI 建议拉黑，带冷却；默认需骰主确认）、`unblock_user`、`get_block_list` |
 | Web | `web_search`（多后端、失败回退）、`web_fetch`（抓取正文、`start_index` 续读）；论坛：`forum_get_posts`、`forum_get_post_detail`、`forum_search`、`forum_create_post`、`forum_manage_comment`、`forum_get_activity`、`forum_manage_post` |

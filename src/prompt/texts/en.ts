@@ -171,6 +171,15 @@ export const READ_RAW_GUIDANCE = [
     '- Never guess or fabricate the omitted part.',
 ].join('\n');
 
+/** 上下文引用解析说明（resolve_context_ref 可用时） */
+export const RESOLVE_CONTEXT_GUIDANCE = [
+    '## Resolving context references',
+    '- The context may show a representation instead of the real value: `[mem:<id>]`, `e:<seq>`, `msg_id:<id>`, `[img:...]`, `[record:...]summary[/record]`, `[quote:...]`, or a `read_raw ...` pointer.',
+    '- Copy the handle verbatim into resolve_context_ref when you need the original text, original fields, sender/time metadata, or the raw payload of a system event.',
+    '- If that tool is not in the current function list, discover it with search_tools(name="resolve_context_ref") and run it with call_tool.',
+    '- Use grep_raw for free-text search and read_raw for long or paged ranges; use resolve_context_ref when you already have a specific representation to dereference.',
+].join('\n');
+
 /** 图片工具使用说明（image_view / image_to_text 可用时） */
 export const IMAGE_TOOLS_GUIDANCE = [
     '## Image tools',

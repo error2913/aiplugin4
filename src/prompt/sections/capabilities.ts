@@ -16,7 +16,7 @@ const GROUP_PURPOSE: { [key: string]: string } = {
     'OB11': 'call OneBot 11 APIs: messages, queries, group admin, files, forward',
     'Resources': 'find local resources and generated media',
     'Attributes': 'read or write SealDice character attributes',
-    'Raw search': 'read original content behind compressed/truncated messages',
+    'Raw search': 'read original content and resolve compressed/truncated context references',
     'Context editing': 'locate and edit conversation context entries',
     'Blocks': 'block or unblock users/groups',
     'Web': 'web search, web fetch and forum operations',

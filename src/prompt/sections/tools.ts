@@ -6,6 +6,7 @@ import {
     IMAGE_TOOLS_GUIDANCE,
     OB11_GUIDANCE,
     READ_RAW_GUIDANCE,
+    RESOLVE_CONTEXT_GUIDANCE,
     RESOURCES_GUIDANCE,
     TOOL_ACCESS,
     toolCallFormat,
@@ -74,6 +75,14 @@ export function registerToolSections(): PromptSection[] {
             maxChars: 1200,
             cache: { deps: c => [c.tool('read_raw'), c.tool('grep_raw')] },
             build: c => (c.tool('read_raw') || c.tool('grep_raw') ? READ_RAW_GUIDANCE : ''),
+        },
+        {
+            name: 'tool:resolve-context',
+            order: 525,
+            channel: 'system',
+            maxChars: 900,
+            cache: { deps: c => [c.tool('resolve_context_ref')] },
+            build: c => (c.tool('resolve_context_ref') ? RESOLVE_CONTEXT_GUIDANCE : ''),
         },
         {
             name: 'tool:resources',

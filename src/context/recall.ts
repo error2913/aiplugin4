@@ -544,6 +544,48 @@ function findEventByMsgId(
     return null;
 }
 
+export interface EventBySeqResult {
+    readonly event: ConversationEvent | null;
+    readonly skippedPages: readonly number[];
+}
+
+/**
+ * 按 seq 取完整事件对象（含 parts/raw），供 resolve_context_ref 的 event_raw 分支使用。
+ * 先查内存窗口，再按页二分定位；坏页/缺页跳过并回报，不静默返回空。
+ */
+export function findEventBySeq(store: ContextStore, snapshot: ContextSnapshot, seq: number): EventBySeqResult {
+    const target = Number(seq);
+    if (!Number.isFinite(target) || Math.floor(target) !== target || target < 1) {
+        return { event: null, skippedPages: [] };
+    }
+    const cached = snapshot.events.find(event => event.seq === target);
+    if (cached) return { event: cached, skippedPages: [] };
+
+    const head = snapshot.head;
+    if (target < head.pageFloor || target > head.nextSeq - 1) return { event: null, skippedPages: [] };
+    const lastPageNo = head.nextPageNo - 1;
+    if (lastPageNo < head.pageFloor) return { event: null, skippedPages: [] };
+
+    const skipped: number[] = [];
+    const located = locateStartPage(store.sessionId, head.pageFloor, lastPageNo, target, skipped);
+    if (!located) return { event: null, skippedPages: skipped };
+
+    for (let pageNo = located.pageNo; pageNo <= lastPageNo; pageNo++) {
+        const outcome = readPageForRecall(store.sessionId, pageNo);
+        if (outcome.status === 'error') throw outcome.error;
+        if (outcome.status === 'skip') {
+            skipped.push(pageNo);
+            continue;
+        }
+        const page = outcome.page;
+        if (page.seqEnd < target) continue;
+        const event = page.events.find(item => item.seq === target);
+        if (event) return { event, skippedPages: skipped };
+        if (page.seqStart > target) break;
+    }
+    return { event: null, skippedPages: skipped };
+}
+
 function readRawMsg(
     store: ContextStore,
     snapshot: ContextSnapshot,

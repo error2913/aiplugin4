@@ -4,35 +4,16 @@ import { MemoryScheduler } from "../../../agent/memory_scheduler";
 import { PRIVILEGE_LEVEL_MAP } from "../../../config/static_config";
 import { bumpMemoryRevision, bumpSummaryRevision } from "../../../memory/revision";
 import { MemoryService } from "../../../memory/service";
-import type { Session } from "../../../session/session";
 import Tool from "../../tool";
 
-function currentBank(session: Session): { bankId: string; kind: 'user' | 'group' } {
-    const kind = session.sessionType === 'group' ? 'group' : 'user';
-    return { bankId: MemoryService.bankIdForSessionId(session.sessionId, session.agentName), kind };
-}
-
-function resolveBank(session: Session, scope?: string, targetId?: string): { ok: true; bankId: string; kind: 'user' | 'group' | 'global' } | { ok: false; error: string } {
-    const kind = scope === 'group' ? 'group' : scope === 'global' ? 'global' : scope === 'user' ? 'user' : (session.sessionType === 'group' ? 'group' : 'user');
-    if (kind === 'global') {
-        if ((session.setting?.priv ?? 0) < PRIVILEGE_LEVEL_MAP.master) return { ok: false, error: 'global 记忆仅骰主会话可写' };
-        return { ok: true, bankId: MemoryService.globalBankId(session.agentName), kind };
-    }
-    const current = currentBank(session);
-    if (!targetId) return { ok: true, bankId: current.bankId, kind: current.kind };
-    const expected = kind === 'group' ? session.sessionType === 'group' ? session.sessionId : '' : session.sessionType === 'user' ? session.sessionId : '';
-    if (targetId !== expected && (session.setting?.priv ?? 0) < PRIVILEGE_LEVEL_MAP.master) {
-        return { ok: false, error: `目标 ${targetId} 不是当前会话；跨目标仅骰主可用` };
-    }
-    return { ok: true, bankId: MemoryService.bankIdForSessionId(targetId, session.agentName), kind };
-}
+import { memoryIdArg, resolveBank } from "./shared";
 
 function formatHits(hits: Array<{ kind: string; unit?: any; observation?: any; score: number }>): string {
     if (!hits.length) return '未找到相关记忆';
     return hits.map((h, i) => {
         const id = h.unit?.id || h.observation?.id || '';
         const text = h.unit?.text || h.observation?.text || '';
-        return `${i + 1}. [${id}] (${h.kind}) ${text}`;
+        return `${i + 1}. ${id ? `[mem:${id}] ` : ''}(${h.kind}) ${text}`;
     }).join('\n');
 }
 
@@ -121,7 +102,8 @@ export function registerMemory() {
     update.solve = async (_ctx, _msg, session, args) => {
         const target = resolveBank(session, args.memory_scope, args.target_id);
         if ('error' in target) return target.error;
-        const unit = MemoryService.getFact(target.bankId, String(args.id || ''));
+        const id = memoryIdArg(args.id);
+        const unit = MemoryService.getFact(target.bankId, id);
         if (!unit) return `记忆不存在<${args.id}>`;
         unit.text = String(args.text || '');
         unit.updatedAt = Math.floor(Date.now() / 1000);
@@ -150,7 +132,7 @@ export function registerMemory() {
     del.solve = async (_ctx, _msg, session, args) => {
         const target = resolveBank(session, args.memory_scope, args.target_id);
         if ('error' in target) return target.error;
-        const ids = Array.isArray(args.id_list) ? args.id_list.map(String) : [];
+        const ids = Array.isArray(args.id_list) ? args.id_list.map(memoryIdArg).filter(Boolean) : [];
         if (!ids.length) return 'id_list 不能为空';
         if (args.hard && (session.setting?.priv ?? 0) < PRIVILEGE_LEVEL_MAP.master) return 'hard 仅骰主可用';
         const n = args.hard ? await MemoryService.deleteFacts(target.bankId, ids) : await MemoryService.invalidateFacts(target.bankId, ids);
@@ -223,12 +205,13 @@ export function registerMemory() {
     mm.solve = async (_ctx, _msg, session, args) => {
         const target = resolveBank(session, args.memory_scope, args.target_id);
         if ('error' in target) return target.error;
+        const modelId = memoryIdArg(args.model_id);
         if (args.action === 'list') {
             const models = MemoryService.listMentalModels(target.bankId);
-            return models.length ? models.map(m => `${m.id} ${m.sourceQuery} · ${m.status}`).join('\n') : '暂无心智模型';
+            return models.length ? models.map(m => `[mem:${m.id}] ${m.sourceQuery} · ${m.status}`).join('\n') : '暂无心智模型';
         }
         if (args.action === 'view') {
-            const m = MemoryService.listMentalModels(target.bankId).find(x => x.id === args.model_id);
+            const m = MemoryService.listMentalModels(target.bankId).find(x => x.id === modelId);
             return m ? `${m.sourceQuery}\n${m.content || '（待生成）'}` : '未找到';
         }
         if (args.action === 'create') {
@@ -240,11 +223,11 @@ export function registerMemory() {
             return `已创建 <${m.id}>（${m.status}）`;
         }
         if (args.action === 'refresh') {
-            const summary = await MemoryService.refreshMentalModels(target.bankId, { id: args.model_id, force: true, reason: 'manual' });
+            const summary = await MemoryService.refreshMentalModels(target.bankId, { id: modelId, force: true, reason: 'manual' });
             return `刷新：更新 ${summary.updated}，跳过 ${summary.skipped}，失败 ${summary.failed}`;
         }
         if (args.action === 'clear') {
-            const m = MemoryService.listMentalModels(target.bankId).find(x => x.id === args.model_id);
+            const m = MemoryService.listMentalModels(target.bankId).find(x => x.id === modelId);
             if (!m) return '未找到';
             m.content = '';
             m.structuredContent = { version: 1, sections: [] };
@@ -254,7 +237,7 @@ export function registerMemory() {
             return '已清空，正在重建';
         }
         if (args.action === 'delete') {
-            await MemoryService.deleteMentalModel(target.bankId, String(args.model_id || ''));
+            await MemoryService.deleteMentalModel(target.bankId, modelId);
             return '已删除';
         }
         return '未知 action';

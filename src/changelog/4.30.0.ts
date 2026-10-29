@@ -26,6 +26,14 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 - **摘要记录**：新增可选 \`fromAt/toAt\`（\`fromAt\` 沿袭上一条滚动摘要）；摘要文本硬上限 2000 → 4000，与编译注入上限统一。
 - 摘要落盘/读取、事件账本、原文保留策略均不变：不删除、不改写历史事件。
 
+## 上下文引用解析：resolve_context_ref 与记忆句柄
+
+- **新增 \`resolve_context_ref\`（Raw search 组）**：模型把上下文里的表示原样粘贴进去即可还原具体信息——\`e:<seq>\` / \`e:<from>-<to>\` / \`msg_id\` / \`read_raw\` 指针 → 事件原文（带时间、msg_id、游标）；\`[mem:<id>]\` → 记忆完整文本/标签/时间；\`[img:…]\`、\`[record:…]\`、\`[quote:…]\`、\`[at:…]\`、\`[resource:…]\` → 原始字段、同会话被引用原文、昵称或 URI；\`kind=event_raw\` + \`e:<seq>\` → system 事件原始 JSON。只读、无网络、不调 LLM；长区间精读仍用 \`read_raw\`，自由文本检索仍用 \`grep_raw\`。
+- **记忆注入带 \`[mem:<id>]\` 句柄**：事实、观察、心智模型统一带句柄；\`memory_recall\` 输出同步。\`memory_update\` / \`memory_delete\` / \`memory_mental_model\` 接受 \`[mem:<id>]\` / \`mem:<id>\` 形式，模型复制标签即可操作。
+- **短 ID/媒体解析去重**：\`resolve_special_id\` 与 \`resolve_context_ref\` 共用一个 \`src/resource/resolve.ts\`，避免两套字段口径；\`resolve_special_id\` 输出行为不变。
+- **v2 事件 raw**：新增按 seq 读取 system 事件 \`raw\` 的能力（\`Event.raw\` 含禁言/入群/申请等原始 JSON），并受 epoch/redact 可见性约束。
+- 新增单测：引用解析、事件/事件 raw、read_raw 指针、内容标签、记忆句柄、歧义/错误路径。
+
 ## 配置项更改
 
 - **删除「摘要水位」**：压缩触发改为「预算到顶（编译裁剪未摘要原文）」；记忆桥抽取水位改用内部常量 6000（与原默认行为等价）。

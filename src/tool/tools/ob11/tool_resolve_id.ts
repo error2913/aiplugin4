@@ -3,26 +3,14 @@
 // - image：上下文 [img:图片ID] → 接收时的原始段字段（file/file_unique/md5/url 等）与落盘 url/path/base64
 // - record/video/file：媒体消息里的 handle=句柄 → 登记时的原始字段（file/url/path/file_id/file_unique 等）
 // 供 AI 对接 get_msg/delete_msg/get_image/get_record/文件下载等协议能力，避免把短 ID 原样外发。
-import Image from "../../../resource/image";
-import { transformMsgIdBack } from "../../../utils/message_id";
-import { resolveSpecialResourceByType } from "../../../utils/special_id";
+// 实际解析在 src/resource/resolve.ts，与 resolve_context_ref 共用，避免两套口径。
+import { resolveSpecialRef, SpecialResolveType } from "../../../resource/resolve";
 import Tool from "../../tool";
 
 const RESOLVE_TYPES = ["message", "image", "record", "video", "file"] as const;
-type ResolveType = typeof RESOLVE_TYPES[number];
 
 function fail(code: string, message: string): string {
     return JSON.stringify({ ok: false, error: { code, message } });
-}
-
-/** 剥掉标签包裹：[msg_id:xxx]/[quote:xxx]/[img:xxx] 单行形式，及
- *  [record:xxx]摘要[/record]/[video:xxx]...[/video]/[file:xxx]...[/file] 闭合形式 → 取开标签参数 xxx；兼容 handle=xxx 旧形式 */
-function stripTag(raw: string): string {
-    const trimmed = String(raw || '').trim();
-    const m = /^\[(?:msg_id|quote|img|record|video|file):([^\]]+)\]/i.exec(trimmed);
-    if (m) return m[1].trim();
-    if (/^handle=/i.test(trimmed)) return trimmed.replace(/^handle=/i, '').trim();
-    return trimmed;
 }
 
 export function registerResolveSpecialId() {
@@ -55,54 +43,13 @@ export function registerResolveSpecialId() {
     tool.solve = async (_ctx, _msg, _session, args) => {
         const type = String((args && args.type) || "").trim().toLowerCase();
         const rawId = String((args && args.id) ?? "").trim();
-        if (!RESOLVE_TYPES.includes(type as ResolveType)) {
+        if (!RESOLVE_TYPES.includes(type as (typeof RESOLVE_TYPES)[number])) {
             return fail("INVALID_PARAMS", `type 必须是 ${RESOLVE_TYPES.join("/")}`);
         }
         if (!rawId) return fail("INVALID_PARAMS", "id 不能为空");
 
-        const id = stripTag(rawId);
-        if (!id) return fail("INVALID_PARAMS", `无法从 ${rawId} 中提取短 ID`);
-
-        switch (type as ResolveType) {
-            case "message": {
-                const backId = transformMsgIdBack(id);
-                if (backId === "") return fail("INVALID_ID", `无法解析消息 ID：${rawId}`);
-                return JSON.stringify({ ok: true, type, id: rawId, message_id: String(backId) });
-            }
-            case "image": {
-                // CIR：插件图片 ID / 图床 h<sha256> / 裸 sha256 / user_avatar: / group_avatar:
-                const image = Image.resolveRef(id);
-                if (!image) return fail("NOT_FOUND", `未找到图片引用：${rawId}`);
-                let raw: any = null;
-                if (image.raw) {
-                    try { raw = JSON.parse(image.raw); } catch { raw = null; }
-                }
-                return JSON.stringify({
-                    ok: true,
-                    type,
-                    id: rawId,
-                    image_id: image.imageId,
-                    ...(raw || {}),
-                    hosted_id: image.hostedId || undefined,
-                    hosted_url: image.hostedUrl || undefined,
-                    url: (raw && raw.url) || image.url || undefined,
-                    path: (raw && raw.path) || image.path || undefined,
-                    base64: image.base64 || undefined,
-                    format: image.format || undefined,
-                    description: image.description || undefined
-                });
-            }
-            case "record":
-            case "video":
-            case "file": {
-                const res = resolveSpecialResourceByType(type as any, id);
-                if (!res) {
-                    return fail("NOT_FOUND", `未找到${type}句柄：${rawId}（媒体句柄仅保存在内存，重启后失效）`);
-                }
-                return JSON.stringify({ ok: true, type, id: rawId, ...(res.data || {}) });
-            }
-            default:
-                return fail("INVALID_PARAMS", "未知类型");
-        }
+        const result = resolveSpecialRef(type as SpecialResolveType, rawId);
+        if (result.ok === false) return fail(result.code, result.message);
+        return JSON.stringify({ ok: true, type: result.type, id: result.ref, ...result.data });
     };
 }

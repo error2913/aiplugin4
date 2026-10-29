@@ -1,4 +1,5 @@
 // 记忆 Prompt 渲染：单入口，按 section 合并心智模型 / 观察 / 事实，统一预算与去重。
+import { memoryHandle } from "./ref";
 import { estimateTokens } from "./scoring";
 import type { MentalModel, Observation, RecallHit } from "./types";
 
@@ -116,19 +117,19 @@ export function buildMemoryPrompt(sections: MemoryPromptSection[], maxTokens = D
 
         let budgetHit = false;
         for (const model of sec.mentalModels || []) {
-            if (!append(`${model.sourceQuery}\n${truncate(model.content, 1000)}`)) { budgetHit = true; break; }
+            if (!append(`${model.sourceQuery}\n${truncate(model.content, 1000)}`, memoryHandle(model.id))) { budgetHit = true; break; }
         }
         if (!budgetHit) {
             for (const obs of sec.observations || []) {
                 if (isExpiredObservation(obs)) continue;
-                if (!append(truncate(obs.text, 1000), '- ')) { budgetHit = true; break; }
+                if (!append(truncate(obs.text, 1000), `- ${memoryHandle(obs.id)}`)) { budgetHit = true; break; }
             }
         }
         if (!budgetHit) {
             let index = 1;
             for (const hit of sec.recalls || []) {
                 const text = truncate(unitText(hit), 1000);
-                if (!append(text, `${index}. [${unitId(hit)}] `)) { budgetHit = true; break; }
+                if (!append(text, `${index}. ${memoryHandle(unitId(hit))}`)) { budgetHit = true; break; }
                 index++;
             }
         }
@@ -148,7 +149,7 @@ export function buildMentalModelsPrompt(mentalModels: MentalModel[] | undefined,
 export function buildLongTermMemoryPrompt(recalls: RecallHit[] | undefined, isPrivate: boolean, sessionName: string, max = 1000): string {
     if (!recalls?.length) return '';
     const head = isPrivate ? 'Memory type: personal memory' : `Memory type: group chat memory\nGroup name: ${sessionName}`;
-    return `## Long-term memory\n${head}\nMemory list:\n${recalls.map((r, i) => `${i + 1}. [${unitId(r)}] ${truncate(unitText(r), max)}`).join('\n')}`;
+    return `## Long-term memory\n${head}\nMemory list:\n${recalls.map((r, i) => `${i + 1}. ${memoryHandle(unitId(r))}${truncate(unitText(r), max)}`).join('\n')}`;
 }
 
 export function buildGroupedMemoryPrompt(sections: MemoryPromptSection[]): string {
