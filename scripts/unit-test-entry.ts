@@ -9340,12 +9340,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parseKbConfig('{"version":1,"libraries":[{"name":"K","content":"1"},{"name":"K","content":"2"}]}').config, null);
 
         // ---- 默认 JSON 可解析，内容与旧默认一致
-        assert.equal(parseRolesConfig(DEFAULT_ROLES_JSON).config!.roles[0].name, 'Test Bot');
-        assert.equal(parseSkillsConfig(DEFAULT_SKILLS_JSON).config!.skills[0].name, 'Character Card Import');
+        assert.equal(parseRolesConfig(DEFAULT_ROLES_JSON).config!.roles[0].name, '测试机器人');
+        assert.equal(parseSkillsConfig(DEFAULT_SKILLS_JSON).config!.skills[0].name, '录卡');
         const defaultMcp = parseMcpConfig(DEFAULT_MCP_JSON).config!;
         assert.equal(defaultMcp.servers.length, 0, '插件侧 MCP 默认配置为空（生成器仍保留示例）');
         const defaultKb = parseKbConfig(DEFAULT_KB_JSON).config!;
-        assert.deepEqual(defaultKb.libraries.map(l => l.name), ['Core Commands', 'Extension Commands', 'ob11-api']);
+        assert.deepEqual(defaultKb.libraries.map(l => l.name), ['核心指令', '扩展指令', 'ob11-api']);
         assert.deepEqual(defaultKb.libraries[2].platforms, ['QQ']);
     },
 
@@ -10040,7 +10040,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(kb.includes(name), `常见角色名应渲染进知识库: ${name}`);
         }
         // 与插件 TTS 链路的区分（避免再次把两条链路搞混）
-        assert.ok(kb.includes('generate_audio') && kb.includes('self-hosted TTS'), '应说明与插件 TTS 链路的区别');
+        assert.ok(kb.includes('generate_audio') && kb.includes('自建 TTS'), '应说明与插件 TTS 链路的区别');
     },
 
     /** 能力标签：tts/gen 识别与手动声明；语音必须先于 vision 命名能力位判定 */
@@ -11453,10 +11453,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
         // 2.2) 默认运行时结构与旧默认一致
         resetConfigCache();
-        assert.equal((Config as any).role.ROLE_NAMES[0], 'Test Bot');
-        assert.ok((Config as any).skills.SKILLS.some((s: any) => s.name === 'Character Card Import'));
+        assert.equal((Config as any).role.ROLE_NAMES[0], '测试机器人');
+        assert.ok((Config as any).skills.SKILLS.some((s: any) => s.name === '录卡'));
         assert.equal((Config as any).mcp.MCP_SERVERS.length, 0, 'MCP 默认配置应为空');
-        assert.deepEqual((Config as any).knowledgeBase.LIBRARIES.map((l: any) => l.name), ['Core Commands', 'Extension Commands', 'ob11-api']);
+        assert.deepEqual((Config as any).knowledgeBase.LIBRARIES.map((l: any) => l.name), ['核心指令', '扩展指令', 'ob11-api']);
 
         // 3) 真跑一遍出厂默认：只有 deepseek 会去请求，且不产出媒体/嵌入候选
         const origStr = TC.stringConfigs['模型配置'];

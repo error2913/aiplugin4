@@ -465,7 +465,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 技能列表 | 整份技能配置（JSON v1）：`{"version":1,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"技能正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；`description` 省略/为空时自动取正文首段。生成器「技能」页支持直接拖入标准 `SKILL.md`（`---` frontmatter + 正文）转成 JSON，推荐生成后粘贴。默认只含 `Character Card Import` 技能（Excel 角色卡录入，摘要/正文为英文）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：`Core Commands` / `Extension Commands` / `ob11-api`）。配置修改后下一条消息自动生效（也可用 `.ai skill refresh` 强制重解析） |
+| 技能列表 | 整份技能配置（JSON v1）：`{"version":1,"skills":[{"name":"技能名","description":"摘要","platform":["QQ"],"content":"技能正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；`description` 省略/为空时自动取正文首段。生成器「技能」页支持直接拖入标准 `SKILL.md`（`---` frontmatter + 正文）转成 JSON，推荐生成后粘贴。默认只含 `录卡` 技能（Excel 角色卡录入）；SealDice 核心/扩展指令与 OB11 API 的调用帮助已作为默认知识库提供（「知识库」页签默认库：`核心指令` / `扩展指令` / `ob11-api`）。配置修改后下一条消息自动生效（也可用 `.ai skill refresh` 强制重解析） |
 
 > system prompt 的「Available skills」段只列「当前平台可用且本会话未关闭」的技能摘要（名称 + 描述，1500 字符预算内尽可能多列，单条描述超过 240 字符截断；描述为空自动取正文首段）；技能过多时超出部分用 `skill_list` 查看完整列表、用 `use_skill` 按需获取正文（支持 `offset` 续读超长正文）。`.ai skill list` 可查看当前平台技能与开关状态，`.ai skill on/off <名称>` 按会话开关。配置修改后下一条消息自动生效。
 
@@ -516,7 +516,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用知识库记忆 | 开启后把知识库内容注入 system prompt，供对话参考 |
-| 知识库配置 | 整份知识库配置（JSON v1）：`{"version":1,"libraries":[{"name":"库名","description":"描述","platform":["QQ"],"content":"Markdown 正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；描述省略时用正文首段兜底。正文支持列表/表格/引用/代码块等标准 Markdown（`#` 一级标题为一个条目，`##`/`###` 为该条目下的小节，超长自动分块）。生成器「知识库」页可直接拖入 `.md` / `.txt` 自动转成 JSON，推荐生成后粘贴。默认三个库：`Core Commands`、`Extension Commands`（各扩展为 `#` 子条目、命令为 `##` 小节）、`ob11-api`（`platform: [QQ]`，仅 QQ 平台可见与注入）。知识库只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` / `knowledge_docs` 工具只读检索（检索范围 = 当前平台可用 + 本会话开启的库）；管理员可用 `.ai kb list/on/off/refresh` 查看与按会话开关。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
+| 知识库配置 | 整份知识库配置（JSON v1）：`{"version":1,"libraries":[{"name":"库名","description":"描述","platform":["QQ"],"content":"Markdown 正文"}]}`。`platform` 省略或 `[]` = 所有平台；`name` 唯一；描述省略时用正文首段兜底。正文支持列表/表格/引用/代码块等标准 Markdown（`#` 一级标题为一个条目，`##`/`###` 为该条目下的小节，超长自动分块）。生成器「知识库」页可直接拖入 `.md` / `.txt` 自动转成 JSON，推荐生成后粘贴。默认三个库：`核心指令`、`扩展指令`（各扩展为 `#` 子条目、命令为 `##` 小节）、`ob11-api`（`platform: [QQ]`，仅 QQ 平台可见与注入）。知识库只读，内容由管理员维护，AI 通过 `knowledge_search` / `knowledge_read` / `knowledge_list` / `knowledge_docs` 工具只读检索（检索范围 = 当前平台可用 + 本会话开启的库）；管理员可用 `.ai kb list/on/off/refresh` 查看与按会话开关。语法定义见 [CommonMark 规范](https://commonmark.org/help/) |
 
 ### 回复
 
