@@ -13,6 +13,7 @@ import {
     SubAgentContext,
     SubAgentService,
     SubAgentStore,
+    clipChildToolResult,
     createChildSession,
     decodeCheckpoint,
     encodeCheckpoint,
@@ -404,6 +405,35 @@ tests['subagentChildLoop.compressionIntegration'] = async () => {
     const system = String((captured[0][0] as { content?: string }).content ?? '');
     assert.ok(system.includes('子代理历史摘要'));
     assert.ok(captured[0].some(m => String((m as { content?: string }).content ?? '').includes('新任务：')));
+};
+
+// ---------- child 工具结果 token 截断 ----------
+
+tests['subagentChildLoop.toolResultTruncatedByTokens'] = () => {
+    // 前面的用例可能已注册过配置（重复 registerConfig 会因 defineProperty 失败），这里容忍重复
+    try { Config.registerConfig(); } catch { /* already registered */ }
+    const tc = (globalThis as any).__TEST_CONFIG__;
+    const key = '工具结果展示token上限';
+    const orig = tc.intConfigs[key];
+    const text = 'x'.repeat(2000);   // 500 token（ascii 字母按 /4 估算）
+    try {
+        tc.intConfigs[key] = 10;
+        (Config as any).cache = {};
+        const clipped = clipChildToolResult(text);
+        assert.ok(clipped.includes('[tool-output-truncated:'), '超限应带工具截断标记');
+        assert.ok(clipped.includes('tokens'), '标记按 token 计');
+        assert.ok(clipped.includes("tool's own offset/start_index"), '子代理没有 read_raw，应提示用工具自身分页');
+        assert.ok(!clipped.includes('read_raw id=e:'), '子代理标记不得给 read_raw 指针');
+        assert.ok(clipped.length < text.length, '展示文本应短于原文');
+
+        // 0 = 关闭
+        tc.intConfigs[key] = 0;
+        (Config as any).cache = {};
+        assert.equal(clipChildToolResult(text), text, '0=不截断');
+    } finally {
+        if (orig === undefined) delete tc.intConfigs[key]; else tc.intConfigs[key] = orig;
+        (Config as any).cache = {};
+    }
 };
 
 // ---------- 模块边界与公共入口 ----------

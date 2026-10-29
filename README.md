@@ -40,9 +40,9 @@
       ]
     }
   ],
-  "purposes": { "chat": ["flash"], "compression": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
+  "purposes": { "chat": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
   "groups": [
-    { "purposes": ["chat", "compression", "summarization", "judge"],
+    { "purposes": ["chat", "summarization", "judge"],
       "body": { "temperature": 1, "top_p": 1, "max_tokens": 8192, "stop": null, "stream": false } }
   ]
 }
@@ -52,6 +52,7 @@
 - `providers[].models` **留空/不写 = 启动时自动拉取**该连接的模型列表（OpenAI 兼容 `GET /models`；`anthropic-messages` 走 `/v1/models` 并自动翻页）；拉取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；离线或没有列表接口的服务，就把模型写死在 `models` 里；
 - `models[].kind` 取 `text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**。⚠️ **视觉能力不再按模型名猜测**：`gpt-4o`、`gemini`、`qwen-vl` 这类名字**不会**被自动认成视觉模型，要识图必须显式写 `"kind": "vision"`（生成器会自动预填）；嵌入/生图/语音仍可按命名推断；
 - `purposes` 是**用途 → 模型 id 的有序数组**：优先用列出的，按此顺序取用（首选失败时顺着往后切）；未列出的同类型模型仍在候选池里、排在后面。留空则由插件取该用途**首个可用**模型；
+- **`compression`（压缩）用途已移除**：`.ai model` 的用途列表与绑定都不再有 `compression`；`purposes` / `groups[].purposes` 里残留的 `compression` 会在解析期自动忽略并打 WARN，**无需重建配置**；`chat` / `summarization` / `judge` 仍共用文本/视觉候选链；
 - 常用命令：`.ai model` 查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）、`.ai model list` 读当前模型列表（不联网）、`.ai model pull` 立即重拉全部连接（无视 `models` 钉住清单，强制网络）、`.ai model <用途> <模型>` 绑定为该用途的**运行时覆盖**（优先级最高，但只在插件存储里；想进配置就把它填进 `purposes`）；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
 - `api` 支持 `openai-completions`（默认）与 `anthropic-messages`（Claude，请求/响应格式自动转换：system 拆出、tool_result 合并、响应归一化，流式暂不支持、配 `stream = true` 会回退非流式）。`openai-responses` **本期未实现**，写上会明确报错而不是静默走错协议；
 - `provider`（厂商标识）**通常不用填**：由 `baseURL` 的 host 自动识别；只有自动识别失败、且该地址代理某家原生接口时才手工指定；
@@ -188,7 +189,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 模型配置 | **整份模型配置（一个 JSON）**。顶层字段：`version`（固定 `5`，必填）、`providers`（连接数组，至少 1 项，必填）、`purposes`（用途 → 模型 id 的有序数组）、`groups`（用途组默认请求体）。<br>**`providers[]`**：`api`（必填，`openai-completions` / `anthropic-messages` / `openai-responses`）、`baseURL`（必填，`http(s)://` 开头，**不再兜默认值**）、`apiKey`（必填，明文）、`provider`（厂商标识，**通常不填**，由 `baseURL` 的 host 自动识别）、`models`（该连接的模型；**留空/不写 = 启动时自动拉取**）、`enabled`（默认 `true`；`false`=忽略该连接，取代旧的 `ignore = 1`）、`displayName`（仅展示用）、`timeout`（秒）、`request`（连接级覆盖：`list_url`/`auth_header_name`/`headers`/`balance_url`/`balance_json_path`/`balance_divisor`/`balance_currency`）。<br>**`providers[].models[]`**：`id`（必填，**全局唯一**，被 `purposes` 引用）、`name`（必填，发给 API 的真实模型名，可含 `/` `.` `:`，**不需加引号**）、`kind`（`text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**）、`contextWindow`、`maxTokens`、`request`（**per-model** 覆盖：`body`/`request`/`response`/`params`/`prompt`，取代旧的 `models` 定向规则）、`bodyMode`（`merge`/`replace`，媒体用途与内置预设的合成方式）。<br>**`purposes`**：用途 → 模型 id 的**有序数组**（优先用这些、按此顺序；首选失效自动往后切）；留空取该用途首个可用模型。用途取 `chat`/`compression`/`summarization`/`judge`/`image-understanding`/`text-embedding`/`tts`/`image-generation`。<br>**`groups[]`**：`purposes` + `body`，给一组用途预设请求体。校验失败**整份拒绝**（不做部分生效）并一次报出全部问题（带 `$.providers[0].models[1].name` 式路径）。**修改后需重载 JS 生效** |
+| 模型配置 | **整份模型配置（一个 JSON）**。顶层字段：`version`（固定 `5`，必填）、`providers`（连接数组，至少 1 项，必填）、`purposes`（用途 → 模型 id 的有序数组）、`groups`（用途组默认请求体）。<br>**`providers[]`**：`api`（必填，`openai-completions` / `anthropic-messages` / `openai-responses`）、`baseURL`（必填，`http(s)://` 开头，**不再兜默认值**）、`apiKey`（必填，明文）、`provider`（厂商标识，**通常不填**，由 `baseURL` 的 host 自动识别）、`models`（该连接的模型；**留空/不写 = 启动时自动拉取**）、`enabled`（默认 `true`；`false`=忽略该连接，取代旧的 `ignore = 1`）、`displayName`（仅展示用）、`timeout`（秒）、`request`（连接级覆盖：`list_url`/`auth_header_name`/`headers`/`balance_url`/`balance_json_path`/`balance_divisor`/`balance_currency`）。<br>**`providers[].models[]`**：`id`（必填，**全局唯一**，被 `purposes` 引用）、`name`（必填，发给 API 的真实模型名，可含 `/` `.` `:`，**不需加引号**）、`kind`（`text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**）、`contextWindow`、`maxTokens`、`request`（**per-model** 覆盖：`body`/`request`/`response`/`params`/`prompt`，取代旧的 `models` 定向规则）、`bodyMode`（`merge`/`replace`，媒体用途与内置预设的合成方式）。<br>**`purposes`**：用途 → 模型 id 的**有序数组**（优先用这些、按此顺序；首选失效自动往后切）；留空取该用途首个可用模型。用途取 `chat`/`summarization`/`judge`/`image-understanding`/`text-embedding`/`tts`/`image-generation`（`compression` 已移除；旧配置里残留的 `compression` 会在解析期自动忽略并打 WARN，无需重建配置）。<br>**`groups[]`**：`purposes` + `body`，给一组用途预设请求体。校验失败**整份拒绝**（不做部分生效）并一次报出全部问题（带 `$.providers[0].models[1].name` 式路径）。**修改后需重载 JS 生效** |
 | 媒体用途（tts / image-generation） | **默认走内置预设**：不写 `request.body` 时，插件按 vendor + 模型名套用该供应商的原生请求结构（覆盖 OpenAI / 硅基流动 / 智谱 / 百炼 / Google Cloud / Gemini / MiniMax / FishAudio / ElevenLabs / 火山方舟 / 腾讯 TokenHub / Stability / 百度 / 本地自建等），骰主只填连接与 `kind` 即可生成。写了 `body` 默认**整体替换**预设结构（`bodyMode: "merge"` 改为逐键合并），用 `{占位符}` 标出可被 AI/命令覆写的字段、用嵌套表表达字段路径（同一个"语速"在阿里是 `input.parameters.rate`、在 Google 是 `audioConfig.speakingRate`）。内置占位符：`{text}`（语音正文）/`{prompt}`（图片正文）/`{negative_prompt}`/`{image}`/`{image_url}`/`{image_base64}`（参考图）/`{model}`/`{api_key}`。取值优先级：**AI/命令传参 > `params.default` > 预设自带默认 > 无值且无默认时整个键不发送**；未在模板里出现的参数一律忽略（模型不支持的参数不会污染请求）。`request`/`response` 是**逐键覆盖**预设（`headers` 逐键合并），只想改一项时不必重写整段 |
 
 ```json
@@ -205,9 +206,9 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
       ]
     }
   ],
-  "purposes": { "chat": ["flash"], "compression": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
+  "purposes": { "chat": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
   "groups": [
-    { "purposes": ["chat", "compression", "summarization", "judge"],
+    { "purposes": ["chat", "summarization", "judge"],
       "body": { "temperature": 1, "top_p": 1, "max_tokens": 8192, "stop": null, "stream": false } }
   ]
 }
@@ -404,7 +405,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 无工具调用时续跑提示 | 上一轮调用过工具、本轮只回文字时，向上下文注入续跑提示再转一轮，避免只说方向不调用工具就停（默认关闭） |
 | 工具方向提示 | 开启后要求模型调用工具前先向用户说一句方向说明，再在同一回复中给出工具调用块（默认开启） |
 | 允许连续调用函数次数 | 单次触发内允许连续调用函数的次数，防止 AI 陷入调用函数死循环（默认 0=不限制） |
-| 工具响应截断字数 | 工具返回结果超过该字数时改为只展示开头、截断前完整原文保留（0 关闭，默认 10000）；原文可由 `grep_raw` / `read_raw`（kind=tool）只读检索 |
+| 工具结果展示token上限 | 工具返回结果按 **token 估算**超过该上限时只展示开头（默认 8192，0=关闭）；完整原文保留在事件账本（不参与渲染与 token 估算），展示文本带 `[tool-output-truncated: N tokens, first M shown; read_raw id=e:<seq>]` 标记，可用 `read_raw id=e:<seq>` / `grep_raw` 游标分页回读；旧会话仍兼容 `read_raw kind=tool` |
 | 禁止调用的函数 | 每框一个，设置后将不被允许开启（`.ai tool on <组名>` 会跳过名单内的工具并回报跳过个数）；该工具也不参与 `.ai tool` 的组统计 |
 | 默认关闭的函数 | 每框一个，AI 在新会话中默认无法调用，需 `.ai tool on <函数名>` 开启 |
 | 禁止调用的 OB11 action | 每框一个禁止 `call_ob11_api` 调用的原始 OB11 action，例如 `set_group_ban` |
@@ -479,6 +480,8 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 > 委派工具：`subagent`（spawn：子代理看不到本会话历史，任务必须自包含）、`subagent_fork`（fork：继承本会话已完成轮次、看不到当前正在执行的这一轮）。参数：`prompt`（必填）/`description`/`persona`/`run_in_background`（后台执行并返回 job id，用 `job_list` / `job_output` / `job_kill` 收取结果）/`continuable`（建立可续跑子代理并立即返回 id，之后用 `send_message` 续派、`interrupt_agent` 打断、`list_agents` 盘点）。前台调用直接返回最终结论；子代理有独立上下文与工具面（按上面配置收窄），不向聊天发消息。
 >
 > 可续跑子代理结算后以 `[system:subagent]` 只读通知写入主会话上下文，主会话空闲且未待机时自动唤醒一轮补答（受令牌桶/全局待机约束）；单次激活默认最多 8 个模型轮、120 秒护栏；记录与断点落盘，重载 JS 后运行中的子代理标记「已中断·可续」，`send_message` 可继续。管理命令 `.ai subagent`（list / stop <ID|all> / clean）。本会话开启委派工具时（默认开启），system prompt 会注入「Sub-agent delegation」指引。
+>
+> 子代理的工具结果同样按「工具结果展示token上限」（默认 8192 token）截断；但子代理**没有 `read_raw`**，截断后需用工具自身的 `offset` / `start_index` 翻页续读，或收窄查询条件（截断标记里会明确提示）。
 
 ### 记忆
 
@@ -706,7 +709,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | `.ai tk [y/m] (chart)` | `.ai tk y chart` | 查看最近 12 个月 / 31 天的 token 用量，`chart` 生成用量图片 |
 | `.ai tk <模型名> [y/m] (chart)` | - | 查看指定模型的用量记录 |
 | `.ai tk clr [<模型名>]` | - | 清除全部或指定模型的用量记录 |
-| `.ai tk use` | - | 按**用途**（chat / compression / summarization / judge 等）查看 token 用量，便于对账 |
+| `.ai tk use` | - | 按**用途**（chat / summarization / judge 等）查看 token 用量，便于对账；`compression` 用途已移除，不再新增 compression 计数（历史记录保留） |
 
 ### 图片相关命令
 

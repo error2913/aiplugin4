@@ -594,7 +594,7 @@ console.log('\n=== G. 防漂移：生成器的表必须跟上插件的真实数�
         baseURL: 'https://api.deepseek.com/v1', apiKey: 'k',
         models: [{ id: 'flash', name: 'deepseek-v4-flash' }],
         enabled: true, displayName: '', timeout: 0, request: {},
-    }], { chat: 'flash', compression: 'flash', summarization: 'flash', judge: 'flash' });
+    }], { chat: 'flash', summarization: 'flash', judge: 'flash' });
     const genChatGroup = (genDefaultCfg.groups || []).find(g => g.purposes.includes('chat'));
     ok('生成器默认产出的 chat 组与插件出厂默认一致',
         !!genChatGroup && !!pluginChatGroup

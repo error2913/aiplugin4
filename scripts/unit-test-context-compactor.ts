@@ -207,7 +207,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const result = await runCompact(events, [], head, h);
         assert.equal(result.advanced, true);
         assert.ok(h.calls[0].includes('[unfinished tool calls: c1]'), '不完整组在摘要输入里显式标记');
-        assert.ok(h.calls[0].includes('孤儿结果'), '孤儿结果照常进摘要输入');
+        assert.ok(h.calls[0].includes('[tool result c9]') && h.calls[0].includes('read_raw id=e:2'),
+            '孤儿结果只进元信息 + read_raw 指针');
+        assert.ok(!h.calls[0].includes('孤儿结果'), '工具结果正文不进摘要输入（避免长工具输出被二次加工/挤占预算）');
     },
 
     async testCompactorEmptySummaryDoesNotAdvance() {

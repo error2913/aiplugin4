@@ -39,7 +39,7 @@ export class UsageManager {
         return this.store.models;
     }
 
-    /** 按用途维度的用量（chat / compression / summarization / judge / text-embedding / …） */
+    /** 按用途维度的用量（chat / summarization / judge / text-embedding / …） */
     static get purposeUsage(): { [use: string]: UsageByDate } {
         return this.store.purposes;
     }

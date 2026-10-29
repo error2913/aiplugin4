@@ -20,7 +20,7 @@ export default class ToolConfig {
         seal.ext.registerIntConfig(ext, "媒体任务并发上限", 3, "同时进行的语音/图片生成任务数上限（默认 3）；超出的任务排队等待，避免一次提交过多把接口打满", "工具");
         seal.ext.registerIntConfig(ext, "媒体生成同步等待秒数", 5, "调用生图/语音工具后，先等待这么多秒看是否已经出结果（默认 5）：期间生成完就当场把结果返回给 AI，不再走异步通知；超时未完成则正常返回任务号、生成完再通知唤醒。填 0 关闭等待（一律走异步）", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
-        seal.ext.registerIntConfig(ext, "工具响应截断字数", 10000, "工具返回结果超过该字数时不再压缩，改为仅展示开头部分，并保留完整原文供 read_raw kind=tool 阅读；0 为不截断不保留", "工具");
+        seal.ext.registerIntConfig(ext, "工具结果展示token上限", 8192, "工具返回结果按 token 估算超过该上限时只展示开头（完整原文保留在事件账本，可用 read_raw 游标分页回读）；0=不截断", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每框一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每框一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的 OB11 action", [''], "每框一个禁止 call_ob11_api 调用的原始 OB11 action，例如 set_group_ban；修改后自动生效", "工具");
@@ -52,7 +52,7 @@ export default class ToolConfig {
             MEDIA_SYNC_WAIT_SECONDS: seal.ext.getIntConfig(ext, "媒体生成同步等待秒数"),
             NUDGE_ENABLED: seal.ext.getBoolConfig(ext, "无工具调用时续跑提示"),
             DIRECTION_PROMPT: seal.ext.getBoolConfig(ext, "工具方向提示"),
-            TOOL_RESPONSE_TRUNCATE_CHARS: seal.ext.getIntConfig(ext, "工具响应截断字数"),
+            TOOL_RESULT_MAX_TOKENS: seal.ext.getIntConfig(ext, "工具结果展示token上限"),
             BLOCKED: seal.ext.getTemplateConfig(ext, "禁止调用的函数"),
             DEFAULT_CLOSED: seal.ext.getTemplateConfig(ext, "默认关闭的函数"),
             OB11_BLOCKED_ACTIONS: seal.ext.getTemplateConfig(ext, "禁止调用的 OB11 action"),

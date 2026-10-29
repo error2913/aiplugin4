@@ -67,6 +67,8 @@ function buildContextForkSeed(session: Session, budgetTokens: number): ReturnTyp
             toolsReserveTokens: 0,
             mode: 'native',
             caps: { vision: false },
+            // 与主链一致：fork seed 里的工具结果同样按配置上限截断（0=关闭）
+            toolResultMaxTokens: Config.tool.TOOL_RESULT_MAX_TOKENS,
             estimateTextTokens: estimateText,
             estimateEventTokens: (event) => {
                 const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];

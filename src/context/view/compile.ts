@@ -19,12 +19,14 @@ import {
 } from "../../utils/context_limits";
 import {
     buildEventRangeTruncateMarker,
+    buildToolTruncateMarkerV2,
     earlierSummaryBlock,
     earlierSummaryGapText,
     SYSTEM_NAME,
     TOOL_RESULT_CLOSE,
     toolResultHeader,
 } from "../../utils/protocol";
+import { truncateToTokenBudget } from "../../utils/token_budget";
 import type { LLMCaps, MediaResolvers } from "../content/descriptors";
 import type { LLMContentBlock, LLMDialect } from "../content/llm";
 import { toLLM, toLLMText } from "../content/llm";
@@ -100,6 +102,12 @@ export interface CompileOptions {
     formatMessageId?: (msgId: string) => string;
     /** 单个 summary 注入文本的硬上限（字符），防止摘要本身撑爆预算 */
     summaryMaxChars?: number;
+    /**
+     * 单条工具结果展示的 token 上限（0/缺省=不截断）。
+     * 超过时只展示开头并追加 `[tool-output-truncated: N tokens, …; read_raw id=e:<seq>]`，
+     * 完整原文仍在事件账本里（INV-R）；估算口径同样按截断后计算，避免超大工具结果被整组丢弃。
+     */
+    toolResultMaxTokens?: number;
 }
 
 export interface CompileStats {
@@ -360,6 +368,53 @@ function wrapToolResult(label: string, content: string | LLMContentBlock[]): str
     return [{ type: 'text', text: head }, ...content, { type: 'text', text: tail }];
 }
 
+/**
+ * 单条工具结果按 token 上限截断（head-only，保留非文本块）。
+ * 超过上限时末尾追加 `[tool-output-truncated: N tokens, first M shown; read_raw id=e:<seq>]`；
+ * 上限缺省/0 或未超限时原样返回。
+ */
+function capToolResultParts(
+    parts: Part[],
+    maxTokens: number | undefined,
+    estimateTextTokens: (text: string) => number,
+    seq: number,
+): Part[] {
+    if (!maxTokens || maxTokens <= 0) return parts;
+    const textParts = parts.filter(part => part.type === 'text') as Array<{ type: 'text'; text: string }>;
+    if (textParts.length === 0) return parts;
+    const fullText = textParts.map(part => part.text).join('');
+    if (!fullText) return parts;
+    const slice = truncateToTokenBudget(fullText, maxTokens, estimateTextTokens);
+    if (!slice.truncated) return parts;
+    // 头截断：按原文本块顺序吃掉保留的前缀，非文本块（图片等）原样保留
+    const out: Part[] = [];
+    let remaining = slice.text;
+    for (const part of parts) {
+        if (part.type !== 'text') {
+            out.push(part);
+            continue;
+        }
+        if (remaining.length === 0) continue;
+        const take = Math.min(part.text.length, remaining.length);
+        if (take > 0) out.push({ type: 'text', text: remaining.slice(0, take) } as Part);
+        remaining = remaining.slice(take);
+    }
+    out.push({ type: 'text', text: buildToolTruncateMarkerV2(slice.totalTokens, slice.shownTokens, seq) } as Part);
+    return out;
+}
+
+/** 估算口径：tool_result 先按同一上限截断再交给原 estimator，保证"显示得下就选得进" */
+function capEventForEstimate(
+    event: ConversationEvent,
+    maxTokens: number,
+    estimateTextTokens: (text: string) => number,
+): ConversationEvent {
+    if (event.kind !== 'tool_result') return event;
+    const parts = (event as { parts?: Part[] }).parts;
+    if (!Array.isArray(parts)) return event;
+    return { ...(event as object), parts: capToolResultParts(parts, maxTokens, estimateTextTokens, event.seq) } as ConversationEvent;
+}
+
 /** 渲染工具组：native=assistant tool_calls + tool 消息；PE=函数块 + 用户文本 */
 function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index: RecordIndex): CompiledMessage[] {
     const { calls, missingNames, resultByCallId } = toToolCalls(unit);
@@ -376,7 +431,8 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
         for (const [callId, results] of resultByCallId) {
             const name = calls.find(c => c.id === callId)?.function.name ?? '';
             for (const result of results) {
-                const text = toLLMText(applyEdit(result, index), options.caps ?? {}, options.resolve ?? {});
+                const cappedParts = capToolResultParts(applyEdit(result, index), options.toolResultMaxTokens, options.estimateTextTokens, result.seq);
+                const text = toLLMText(cappedParts, options.caps ?? {}, options.resolve ?? {});
                 out.push({ role: 'user', content: wrapToolResult(name || callId, text) as string });
             }
         }
@@ -398,11 +454,11 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
     for (const call of calls) {
         const results = resultByCallId.get(call.id) ?? [];
         for (const result of results) {
-            const resultParts = applyEdit(result, index);
+            const cappedParts = capToolResultParts(applyEdit(result, index), options.toolResultMaxTokens, options.estimateTextTokens, result.seq);
             // INV-12：tool 图片可按配置关闭（部分网关不支持 tool 角色带图），关闭时纯文本投影
             const content = options.toolImages === false
-                ? toLLMText(resultParts, options.caps ?? {}, options.resolve ?? {})
-                : toLLM(resultParts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
+                ? toLLMText(cappedParts, options.caps ?? {}, options.resolve ?? {})
+                : toLLM(cappedParts, options.caps ?? {}, options.dialect ?? 'openai', options.resolve ?? {});
             out.push({ role: 'tool', tool_call_id: call.id, content: wrapToolResult(call.id, content) });
         }
     }
@@ -412,7 +468,8 @@ function renderToolGroup(unit: ConversationUnit, options: CompileOptions, index:
 function renderOrphanResult(unit: ConversationUnit, options: CompileOptions, index: RecordIndex): CompiledMessage[] {
     const out: CompiledMessage[] = [];
     for (const event of unit.events) {
-        const text = toLLMText(applyEdit(event, index), options.caps ?? {}, options.resolve ?? {});
+        const cappedParts = capToolResultParts(applyEdit(event, index), options.toolResultMaxTokens, options.estimateTextTokens, event.seq);
+        const text = toLLMText(cappedParts, options.caps ?? {}, options.resolve ?? {});
         const name = String((event as { name?: unknown }).name ?? '')
             || String((event as { callId?: unknown }).callId ?? '');
         out.push({ role: 'user', content: wrapToolResult(name, text) as string });
@@ -526,7 +583,12 @@ function buildSummaryBlock(options: CompileOptions, summary: SummaryRecord): { t
  */
 export function compileRequest(options: CompileOptions): CompileResult {
     const estimateText = options.estimateTextTokens;
-    const estimateEvent = options.estimateEventTokens;
+    // 工具结果按展示上限截断后再估算：否则超大工具结果会被当作"整组超预算"丢弃，
+    // 而不是显示截断后的头部（显示与预算口径必须一致）。
+    const toolResultMaxTokens = options.toolResultMaxTokens;
+    const estimateEvent = toolResultMaxTokens && toolResultMaxTokens > 0
+        ? (event: ConversationEvent) => options.estimateEventTokens(capEventForEstimate(event, toolResultMaxTokens, estimateText))
+        : options.estimateEventTokens;
     const prefix = options.prefixMessages ? options.prefixMessages.slice() : [];
     const prefixTokens = options.prefixTokens ?? prefix.reduce((n, m) => n + messageTokens(m, estimateText), 0);
     const toolsReserve = Math.max(0, options.toolsReserveTokens ?? 0);

@@ -16,7 +16,7 @@ export const V5_VERSION = 5;
 
 /** 全部合法用途（顺序即 UI 展示顺序） */
 export const MODEL_USES: ModelUse[] = [
-    'chat', 'compression', 'summarization', 'judge',
+    'chat', 'summarization', 'judge',
     'image-understanding', 'text-embedding', 'tts', 'image-generation',
 ];
 
@@ -113,6 +113,8 @@ export interface V5Issue {
 export interface V5ParseResult {
     config: V5Config | null;
     issues: V5Issue[];
+    /** 解析期自动清洗产生的提示（如旧配置里已移除的用途被忽略）；不影响合法性 */
+    warnings?: string[];
 }
 
 const ID_CHARS = /^[\x21-\x7E]+$/;
@@ -122,7 +124,7 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 /**
  * 用途是否接受某种模型类型。
  * **必须与 model.ts 的 isEligible 保持一致**（那边按用途筛候选，这边在配置期就拦住）。
- * chat/压缩/总结/评判 排除 embed/gen/tts；四个终值用途各只接受自己的类型。
+ * chat/总结/评判 排除 embed/gen/tts；四个终值用途各只接受自己的类型。
  */
 export function isEligibleKind(use: ModelUse, kind: ModelKind | undefined): boolean {
     const k = kind || 'text';
@@ -339,6 +341,52 @@ export function formatIssues(issues: V5Issue[]): string {
     return issues.map(i => `  ${i.path}：${i.msg}`).join('\n');
 }
 
+/** 已彻底移除的用途键：旧配置里有的话在解析期自动忽略（见 stripRemovedPurposes） */
+const REMOVED_PURPOSE_KEYS = ['compression'] as const;
+
+/**
+ * 解析期清洗：剔除已移除用途（`purposes` 与 `groups[].purposes`），返回是否有改动。
+ *
+ * 为什么需要：`compression` 用途已从 `ChatModelUse`/`MODEL_USES` 中彻底移除，而 v5 校验对
+ * 未知用途是**整份拒绝**。老用户存储里的模型配置一定带着 `purposes.compression`，若直接校验
+ * 会让他们的模型配置整份失效。这里只在内存 raw 对象上剔除（不写回，海豹也没有配置写入 API），
+ * 属于"输入容错"而非迁移；`configs/model.ts` 会把 warnings 打到日志。
+ */
+export function stripRemovedPurposes(raw: unknown): boolean {
+    if (!isPlainObject(raw)) return false;
+    let touched = false;
+    const purposes = raw.purposes;
+    if (isPlainObject(purposes)) {
+        for (const key of REMOVED_PURPOSE_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(purposes, key)) {
+                delete (purposes as Record<string, unknown>)[key];
+                touched = true;
+            }
+        }
+    }
+    const groups = raw.groups;
+    if (Array.isArray(groups)) {
+        const kept: unknown[] = [];
+        for (const group of groups) {
+            if (!isPlainObject(group) || !Array.isArray(group.purposes)) {
+                kept.push(group);
+                continue;
+            }
+            const groupPurposes = group.purposes as unknown[];
+            const filtered = groupPurposes.filter(
+                (use) => !(REMOVED_PURPOSE_KEYS as readonly string[]).includes(String(use)),
+            );
+            if (filtered.length !== groupPurposes.length) touched = true;
+            // 过滤后为空的组直接丢弃（校验层不接受空 purposes 的用途组）
+            if (filtered.length === 0) continue;
+            group.purposes = filtered;
+            kept.push(group);
+        }
+        if (kept.length !== groups.length) raw.groups = kept;
+    }
+    return touched;
+}
+
 /**
  * 解析「模型配置」的 JSON 文本。
  * 不抛异常：JSON 语法错误与校验错误都通过 issues 返回。
@@ -357,7 +405,13 @@ export function parseV5Config(text: string): V5ParseResult {
         return { config: null, issues: [{ path: '$', msg: `JSON 语法错误：${msg}` }] };
     }
 
+    const warnings: string[] = [];
+    // 旧配置兼容：已移除用途（compression）在校验前清洗，避免整份配置被判非法
+    if (stripRemovedPurposes(data)) {
+        warnings.push('旧配置中的「压缩」用途（compression）已移除，已自动忽略；其余用途不受影响。');
+    }
+
     const issues = validateV5Config(data);
-    if (issues.length > 0) return { config: null, issues };
-    return { config: data as V5Config, issues: [] };
+    if (issues.length > 0) return { config: null, issues, ...(warnings.length > 0 ? { warnings } : {}) };
+    return { config: data as V5Config, issues: [], ...(warnings.length > 0 ? { warnings } : {}) };
 }

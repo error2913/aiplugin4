@@ -159,8 +159,8 @@ export class Session {
     lastRelevantAt = 0;
     /** 运行时字段：本会话最近一次 AI 触发时间（秒）；记忆自动抽取门控使用（不持久化） */
     aiTriggeredAt = 0;
-    /** 运行时字段：本会话账本——压缩/归档/评分各调用了多少次（不持久化） */
-    ctxStats: { compression: number; summarization: number; judge: number } = { compression: 0, summarization: 0, judge: 0 };
+    /** 运行时字段：本会话账本——归档/评分各调用了多少次（不持久化） */
+    ctxStats: { summarization: number; judge: number } = { summarization: 0, judge: 0 };
     /** 运行时字段：保存节流状态（不持久化） */
     private lastSaveAt = 0;
     private saveDeferCount = 0;

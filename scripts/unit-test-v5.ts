@@ -204,7 +204,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(isEligibleKind('image-understanding', 'vision'));
         assert.ok(isEligibleKind('image-generation', 'gen'));
         assert.ok(isEligibleKind('tts', 'tts'));
-        for (const u of ['chat', 'compression', 'summarization', 'judge'] as const) {
+        for (const u of ['chat', 'summarization', 'judge'] as const) {
             assert.ok(isEligibleKind(u, 'text'), `${u} 应接受 text`);
             assert.ok(isEligibleKind(u, 'vision'), `${u} 应接受 vision`);
             for (const k of ['embed', 'gen', 'tts'] as const) {
@@ -461,5 +461,38 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const issues = validateV5Config(bound);
         assert.ok(issues.some(i => i.path === '$.purposes.chat'),
             '把 gen 模型绑到 chat 用途应被校验拒绝（类型不匹配）');
+    },
+
+    /** 已移除的 compression 用途：旧配置解析期自动清洗 + warning，不因移除而整份失效 */
+    testRemovedCompressionPurposeSanitized() {
+        const text = JSON.stringify({
+            version: 5,
+            providers: [{
+                api: 'openai-completions', baseURL: 'https://api.deepseek.com/v1', apiKey: 'k',
+                models: [{ id: 'm', name: 'deepseek-chat' }],
+            }],
+            purposes: { chat: 'm', compression: 'm' },
+            groups: [
+                { purposes: ['chat', 'compression', 'summarization', 'judge'], body: { max_tokens: 5 } },
+                { purposes: ['compression'], body: { max_tokens: 9 } },
+            ],
+        });
+
+        // 前提：不清洗时这份旧配置确实会被判非法（这正是解析期清洗存在的理由）
+        assert.ok(validateV5Config(JSON.parse(text)).some(i => /compression/.test(i.path + i.msg)),
+            '未清洗的旧配置应因未知用途 compression 报错');
+
+        const { config, issues, warnings } = parseV5Config(text);
+        assert.deepEqual(issues, [], '清洗后应通过校验');
+        assert.ok(config, '应解析成功');
+        assert.ok(warnings && warnings.some(w => w.includes('compression')), '应给出清洗 warning');
+        assert.deepEqual(Object.keys(config!.purposes ?? {}), ['chat'], 'purposes.compression 应被剔除');
+        assert.equal(config!.groups!.length, 1, '只含 compression 的用途组应被删除');
+        assert.deepEqual(config!.groups![0].purposes, ['chat', 'summarization', 'judge']);
+
+        // 清洗后的配置再解析不应再有 warning（幂等，不会反复提示）
+        const again = parseV5Config(JSON.stringify(config));
+        assert.deepEqual(again.issues, []);
+        assert.deepEqual(again.warnings ?? [], []);
     },
 };

@@ -22,6 +22,7 @@ import { foldOmittedLine, foldSummaryHeader, AUX_HISTORY_OMIT_MARK as PROTOCOL_A
 import { getRoleSetting } from "./role";
 import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./timeout";
+import { estimateTextTokens } from "./token_estimate";
 
 export { getRoleSetting } from "./role";
 
@@ -103,62 +104,8 @@ interface ContextMessage {
 
 const SYSTEM_REMINDER_TEXT = 'Keep following the role setting, context markers and tool-call rules above.';
 
-/**
- * 无依赖的 token 估算：按 Unicode 类别分桶近似 BPE。
- * 用于「上下文最大token」的整包预算估算，避免依赖外部 tokenizer。
- */
-export function estimateTextTokens(text: string): number {
-    let asciiAlnum = 0;
-    let asciiSpace = 0;
-    let asciiPunct = 0;
-    let cjk = 0;
-    let cjkLike = 0;
-    let otherBmp = 0;
-    let astral = 0;
-
-    for (const ch of String(text || '')) {
-        const cp = ch.codePointAt(0) as number;
-        if (isCjkCodePoint(cp)) {
-            cjk++;
-        } else if (cp > 0xFFFF) {
-            astral++;
-        } else if (cp <= 0x7F) {
-            if ((cp >= 0x30 && cp <= 0x39) || (cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A)) {
-                asciiAlnum++;
-            } else if (cp === 0x20 || (cp >= 0x09 && cp <= 0x0D)) {
-                asciiSpace++;
-            } else if (cp >= 0x21 && cp <= 0x7E) {
-                asciiPunct++;
-            } else {
-                asciiSpace++;
-            }
-        } else if (isCjkLikeCodePoint(cp)) {
-            cjkLike++;
-        } else {
-            otherBmp++;
-        }
-    }
-
-    return Math.ceil(asciiAlnum / 4)
-        + Math.ceil(asciiSpace / 4)
-        + Math.ceil(asciiPunct / 2)
-        + cjk
-        + Math.ceil(cjkLike * 3 / 2)
-        + Math.ceil(otherBmp / 2)
-        + astral * 2;
-}
-
-function isCjkCodePoint(cp: number): boolean {
-    return (cp >= 0x3400 && cp <= 0x4DBF)
-        || (cp >= 0x4E00 && cp <= 0x9FFF)
-        || (cp >= 0xF900 && cp <= 0xFAFF)
-        || (cp >= 0x20000 && cp <= 0x2FA1F);
-}
-
-function isCjkLikeCodePoint(cp: number): boolean {
-    return (cp >= 0x3040 && cp <= 0x30FF)
-        || (cp >= 0xAC00 && cp <= 0xD7AF);
-}
+// token 估算已拆到 L1 叶子 `token_estimate.ts`（供上下文层复用）；此处 re-export 保持既有 import。
+export { estimateTextTokens } from "./token_estimate";
 
 /** 请求体结构 overhead 默认值 */
 const MESSAGE_BASE_OVERHEAD = 4;
@@ -625,6 +572,7 @@ function compileV2Request(
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
             caps: { vision: multimodal },
             toolImages: opts?.toolImages ?? Config.image.TOOL_RESULT_IMAGES,
+            toolResultMaxTokens: Config.tool.TOOL_RESULT_MAX_TOKENS,
             resolve: {
                 imageUrl: (ref: string) => {
                     try {

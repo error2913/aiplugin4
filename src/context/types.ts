@@ -6,12 +6,12 @@ export interface BaseMessageItem {
     text: string;
 }
 
-/** 合并压缩块内的一条原始用户消息（rawItems 条目） */
+/** 合并压缩块内的一条原始用户消息（rawItems 条目；历史数据兼容） */
 export interface RawUserItem {
     userId: string;
     messageId: string;
     time: number;
-    /** 该条被压缩前的原文（含单条压缩时的 rawText 兜底） */
+    /** 该条被压缩前的原文（历史合并压缩块；旧回退路径单条截断见 rawText） */
     text: string;
 }
 
@@ -19,13 +19,13 @@ export interface UserMessageItem extends BaseMessageItem {
     userId: string;
     messageId: string;
     /**
-     * 该条已尝试过压缩（**含失败**）：不再进入下一次压缩输入，避免同一批内容被反复付费压缩。
-     * 冷态（待机）入库的条目始终为 true（冷态只做纯代码截断，永不调用压缩智能体）。
+     * 该条已做过有损处理（历史 LLM 压缩/合并压缩，或旧回退路径纯代码截断）：
+     * 旧读取逻辑据此避免重复处理；新写入不再有 LLM 压缩调用。
      */
     compressed?: boolean;
-    /** 单条消息被压缩前的完整原文：不参与渲染与 token 估算，仅由 read_raw/grep_raw(kind=user) 按需读取；随消息归档/清理失效 */
+    /** 单条消息被截断/压缩前的完整原文：不参与渲染与 token 估算，仅由 read_raw/grep_raw(kind=user) 按需读取；随消息归档/清理失效 */
     rawText?: string;
-    /** 连续多条 user 消息合并压缩后，块内各条原始消息（含各自 messageId/time）；块寻址 id 为 blk:<末条messageId> */
+    /** 历史连续多条 user 消息合并压缩块，块内各条原始消息（含各自 messageId/time）；块寻址 id 为 blk:<末条messageId> */
     rawItems?: RawUserItem[];
 }
 export interface AssistantMessageItem extends BaseMessageItem {

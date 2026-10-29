@@ -108,13 +108,15 @@ function rejected(issues: V5Issue[]): ModelConfigData {
 function buildModelConfig(): ModelConfigData {
     const text = readStringConfig(MODEL_CONFIG_KEY);
     if (nonEmpty(text)) {
-        const { config, issues } = parseV5Config(text);
+        const { config, issues, warnings } = parseV5Config(text);
+        for (const warning of warnings ?? []) Logger.warning(`「${MODEL_CONFIG_KEY}」：${warning}`);
         if (config) return fromV5(config);
         return rejected(issues);
     }
 
     // 配置为空 → 出厂默认
-    const { config, issues } = parseV5Config(DEFAULT_V5_CONFIG);
+    const { config, issues, warnings } = parseV5Config(DEFAULT_V5_CONFIG);
+    for (const warning of warnings ?? []) Logger.warning(`「${MODEL_CONFIG_KEY}」：${warning}`);
     if (!config) {
         // 出厂默认自身不合法属于代码 bug，必须显式暴露
         Logger.error(`出厂默认配置不合法（这是插件 bug）：\n${formatIssues(issues)}`);

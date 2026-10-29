@@ -4146,16 +4146,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!rendered.includes('inject'), '原始数据内容不应渲染');
     },
 
-    /** 工具回调超长改为 head 截断（不再走压缩智能体）：保留截断前完整原文 rawText，展示开头 N 字 + 自解释标记 */
+    /** 工具回调超长改为 token 截断（不再走压缩智能体）：保留截断前完整原文 rawText，展示开头 + 自解释标记 */
     async testToolCallbackTruncatedKeepsRaw(): Promise<void> {
-        const compressAgent = Agent.get('compress_agent');
-        const origChat = compressAgent.chat;
         const original = '网页搜索结果正文：' + '详细内容'.repeat(40);
-        TC.intConfigs['工具响应截断字数'] = 50;
+        TC.intConfigs['工具结果展示token上限'] = 30;
         resetConfigCache();
         try {
-            // 若实现误调压缩智能体，这里直接抛错让测试失败
-            compressAgent.chat = async () => { throw new Error('压缩智能体不应在工具回调路径被调用'); };
             const ctx = new Context();
             await ctx.addToolCallbackMessage(original, 'call_1', 'web_search');
             const m = ctx.messages[0] as any;
@@ -4164,6 +4160,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(m.text.indexOf('网页搜索结果正文'), 0, '展示文本应为原文开头（head 截断）');
             assert.ok(m.text.length < original.length, '展示文本应短于原文');
             assert.ok(m.text.includes('[tool-output-truncated:'), '展示文本应带截断标记');
+            assert.ok(m.text.includes('tokens'), '截断标记应按 token 计');
             assert.ok(m.text.includes('id=call_1'), '截断标记应携带 tool_call_id 供 read_raw kind=tool 寻址');
             assert.ok(!m.text.includes('详细内容'.repeat(30)), '展示文本不应含被截掉的尾部');
             const rendered = buildContent(m);
@@ -4172,15 +4169,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const textOnly = estimateMessageTokens({ role: 'tool', text: m.text, toolCallId: 'call_1' } as any);
             assert.equal(withRaw, textOnly, 'rawText 不应计入 token 估算');
         } finally {
-            compressAgent.chat = origChat;
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
     },
 
     /** 工具回调原文入库前同样剥离内部上下文标签，防止回读时逃逸边界 */
     async testToolCallbackTruncatedStripsInternalTags(): Promise<void> {
-        TC.intConfigs['工具响应截断字数'] = 50;
+        TC.intConfigs['工具结果展示token上限'] = 50;
         resetConfigCache();
         try {
             const ctx = new Context();
@@ -4193,14 +4189,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(!buildContent(m).includes('/system'), '渲染内容不应泄露内部标签');
             assert.ok(m.text.includes('[tool-output-truncated:'), '超长工具结果应带英文截断标记');
         } finally {
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
     },
 
     /** 未截断（短结果/超大阈值/阈值=0）时不产生 rawText 副本与标记 */
     async testToolCallbackTruncationSkipped(): Promise<void> {
-        TC.intConfigs['工具响应截断字数'] = 1000000;
+        TC.intConfigs['工具结果展示token上限'] = 1000000;
         resetConfigCache();
         try {
             const ctx = new Context();
@@ -4210,12 +4206,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(!m.text.includes('tool-output-truncated'), '未截断时不加标记');
             assert.equal(m.text, '短结果', '短结果原样保留');
         } finally {
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
 
         // 阈值 = 0：不截断不保留
-        TC.intConfigs['工具响应截断字数'] = 0;
+        TC.intConfigs['工具结果展示token上限'] = 0;
         resetConfigCache();
         try {
             const ctx = new Context();
@@ -4225,14 +4221,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(m.text.includes('完整内容不截断'), '阈值=0 时展示完整内容');
             assert.ok(!m.text.includes('tool-output-truncated'), '阈值=0 时不加标记');
         } finally {
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
     },
 
     /** use_skill 结果豁免通用 head 截断：续读/TOC 元信息在末尾，不能被截掉；普通工具仍截断 */
     async testUseSkillResultSkipsGenericTruncation(): Promise<void> {
-        TC.intConfigs['工具响应截断字数'] = 1000;
+        TC.intConfigs['工具结果展示token上限'] = 1000;
         resetConfigCache();
         try {
             const text = '技能正文'.repeat(300) + '\n（技能正文结束）';
@@ -4257,28 +4253,28 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(m2.rawText, '普通工具仍应保留原文');
             assert.ok(m2.text.length < text.length, '普通工具仍应 head 截断');
         } finally {
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
     },
 
-    /** 「工具响应截断字数」直接决定截断阈值（旧 key「工具响应压缩触发字数」已移除，不再迁移读取） */
+    /** 「工具结果展示token上限」直接决定截断阈值（旧「工具响应截断字数」已移除，不再迁移读取） */
     testToolTruncateConfigDirect(): void {
-        TC.intConfigs['工具响应截断字数'] = 5000;
+        TC.intConfigs['工具结果展示token上限'] = 5000;
         resetConfigCache();
         try {
-            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 5000, '显式设置应生效');
+            assert.equal((Config as any).tool.TOOL_RESULT_MAX_TOKENS, 5000, '显式设置应生效');
         } finally {
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
 
-        TC.intConfigs['工具响应截断字数'] = 0; // 显式关闭
+        TC.intConfigs['工具结果展示token上限'] = 0; // 显式关闭
         resetConfigCache();
         try {
-            assert.equal((Config as any).tool.TOOL_RESPONSE_TRUNCATE_CHARS, 0, '显式关闭=0 应生效');
+            assert.equal((Config as any).tool.TOOL_RESULT_MAX_TOKENS, 0, '显式关闭=0 应生效');
         } finally {
-            delete TC.intConfigs['工具响应截断字数'];
+            delete TC.intConfigs['工具结果展示token上限'];
             resetConfigCache();
         }
     },
@@ -6274,10 +6270,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
     /** 模型解析（v4）：候选按能力标签；默认取首个可用同类型模型；覆盖优先、失效回退；重名用 [序号]:模型名 */
     testGetChatModelResolution(): void {
         try {
-            // 单文本候选 → 四个对话用途自动默认同一模型
+            // 单文本候选 → 三个对话用途自动默认同一模型
             seedPinnedConns([pinConn('deepseek', ['text-a'])]);
             assert.equal(Model.getChatModel('chat')?.name, 'text-a');
-            assert.equal(Model.getChatModel('compression')?.name, 'text-a');
             assert.equal(Model.getChatModel('summarization')?.name, 'text-a');
             assert.equal(Model.getChatModel('judge')?.name, 'text-a');
             // 嵌入/识图候选为空 → 无默认
@@ -6385,7 +6380,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             // 方向三：覆盖生图/排序等命名终值白名单
             seedPinnedConns([pinConnTyped('openai', ['dall-e-3', 'bge-reranker-v2'], { 'dall-e-3': 'text', 'bge-reranker-v2': 'text' })]);
             assert.equal(Model.getChatModel('chat')?.name, 'dall-e-3', '手动声明应覆盖生图白名单');
-            assert.equal(Model.getChatModel('compression')?.name, 'dall-e-3');
         } finally {
             Model.reset();
         }
@@ -7121,7 +7115,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                         models: [v5Model('gpt4o', 'gpt-4o')],
                     }),
                 ],
-                groups: [{ purposes: ['chat', 'compression'], body: { max_tokens: 4096 } }],
+                groups: [{ purposes: ['chat', 'summarization'], body: { max_tokens: 4096 } }],
             });
 
             assert.equal(cfg.conns.length, 3);
@@ -8575,21 +8569,21 @@ export const tests: Record<string, () => void | Promise<void>> = {
     /** 模型规则用途组模板：body 模板命中合并、重叠行后覆盖先；request 覆盖可取回 */
     testModelRuleTemplateAndRequestOverrides(): void {
         try {
-            // 单行模板：chat/compression 命中 body 覆盖，summarization/judge 未命中走代码兜底
+            // 单行模板：chat/summarization 命中 body 覆盖，judge 未命中走代码兜底
             seedPinnedConns([pinConn('deepseek', ['text-a'])], [{
-                use: ['chat', 'compression'],
+                use: ['chat', 'summarization'],
                 body: { max_tokens: 4096, temperature: 0.7 },
                 request: { auth_header_name: 'x-custom', headers: { 'X-Tag': 'v1' }, timeout: 5 },
             }]);
             assert.equal(Model.getBodyDefaultsFor('chat').max_tokens, 4096, '规则 body 应覆盖代码兜底');
             assert.equal(Model.getBodyDefaultsFor('chat').temperature, 0.7);
-            assert.equal(Model.getBodyDefaultsFor('compression').max_tokens, 4096);
-            assert.equal(Model.getBodyDefaultsFor('summarization').max_tokens, 8192, '未命中规则走对话代码兜底');
+            assert.equal(Model.getBodyDefaultsFor('summarization').max_tokens, 4096);
+            assert.equal(Model.getBodyDefaultsFor('judge').max_tokens, 8192, '未命中规则走对话代码兜底');
             const ov = Model.requestOverridesFor('chat');
             assert.equal(ov?.auth_header_name, 'x-custom');
             assert.equal(ov?.headers['X-Tag'], 'v1');
             assert.equal(ov?.timeout, 5);
-            assert.equal(Model.requestOverridesFor('summarization'), null, '未命中规则无 request 覆盖');
+            assert.equal(Model.requestOverridesFor('judge'), null, '未命中规则无 request 覆盖');
 
             // 重叠规则按框顺序逐键合并、后面的框覆盖前面的
             seedPinnedConns([pinConn('deepseek', ['text-a'])], [
@@ -11437,7 +11431,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.providers[0].models?.[1].kind, 'text', 'pro 应声明 text');
         // 对话用途已绑定；媒体/嵌入不绑定
         assert.deepEqual(Object.keys(cfg.purposes ?? {}).sort(),
-            ['chat', 'compression', 'judge', 'summarization']);
+            ['chat', 'judge', 'summarization']);
         assert.ok(cfg.groups && cfg.groups.length > 0, '出厂应带对话默认 body');
 
         // 2) 旧框**不再注册**（v5 / 本轮配置 JSON 化都不做兼容/迁移）
@@ -11811,7 +11805,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ],
             purposes: {
                 chat: ['deepseek-flash'],
-                compression: ['deepseek-flash'],
                 summarization: ['deepseek-flash'],
                 judge: ['deepseek-flash'],
                 'image-understanding': ['deepseek-flash'],
@@ -11820,7 +11813,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             },
             groups: [
                 {
-                    purposes: ['chat', 'compression', 'summarization', 'judge'],
+                    purposes: ['chat', 'summarization', 'judge'],
                     body: { temperature: 1, top_p: 1, max_tokens: 8192, stop: null, stream: false },
                 },
                 { purposes: ['image-understanding'], body: { temperature: 1, max_tokens: 2048, stop: null, stream: false } },
@@ -13872,5 +13865,37 @@ Object.assign(tests, {
         const gList = await runSubCmd('memory', ['memo', 'list'], master, [{ name: 'self' }]);
         assert.ok(gList.includes('本体经验'), `--self list 应读到全局事实: ${gList}`);
         assert.ok(gList.includes('本体'), `--self 应标明本体范围: ${gList}`);
+    },
+
+    /** 旧回退路径（无事件账本）超长用户消息：纯代码 token 截断 + rawText 回查（不再调用任何 LLM） */
+    async testUserMessageLegacyTokenTruncate(): Promise<void> {
+        const origGlobal = TC.boolConfigs['是否开启全局待机'];
+        TC.boolConfigs['是否开启全局待机'] = false;   // 测试桩默认 true；关掉才能进旧热态路径
+        resetConfigCache();
+        try {
+            const long = '长'.repeat(9000);   // ~9000 token > 8192
+            const ctx = new Context();
+            ctx.agentName = '*';
+            ctx.sessionId = 'QQ:legacy-hot';
+            const sess = ctx.session;
+            sess.setting.standby = false;
+            sess.lastRelevantAt = Math.floor(Date.now() / 1000);
+            await ctx.addUserMessage(makeCtx(), long, 'QQ:1', 'm_legacy');
+            const item = (ctx.messages[0] as any).contentItems[0];
+            assert.equal(item.rawText, long, '截断前原文应保留在 rawText');
+            assert.ok(item.text.includes('[content-truncated:'), '展示文本应带截断标记');
+            assert.ok(item.text.includes('tokens'), '标记按 token 计');
+            assert.ok(item.text.length < long.length, '展示文本应短于原文');
+            assert.equal(item.compressed, true, '截断过的旧路径条目应标记已处理');
+            assert.ok(!buildContent(ctx.messages[0]).includes(long), '渲染不应泄露 rawText');
+            // 旧路径 read_raw kind=user 仍可按 msg_id 回查原文
+            registerRawToolSet();
+            const readRaw = toolMap['read_raw'];
+            const r = await readRaw.solve(makeCtx(), {} as any, { context: ctx } as any, { kind: 'user', id: 'm_legacy' });
+            assert.ok(r.includes('长'.repeat(100)), 'read_raw kind=user 应能读到截断前原文');
+        } finally {
+            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
+            resetConfigCache();
+        }
     },
 });

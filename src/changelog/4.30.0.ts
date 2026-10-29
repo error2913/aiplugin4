@@ -54,4 +54,28 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 ## 配置项更改
 
 - 新增「全局提示词」（「角色设定」分组）：默认空字符串；不需要公共提示词时保持留空即可，行为与旧版完全一致。
+
+## 移除压缩智能体与 compression 用途
+
+- **删除压缩智能体（compress_agent）**：v2 事件账本已不再调用它；旧回退路径的用户消息超长改为**纯代码 token 截断**（保留头+尾、原文进 rawText，\`read_raw kind=user\` 可回查），不再产生任何 LLM 调用；\`agent_compress_agent\` 存储键不再使用。
+- **彻底移除 \`compression\` 模型用途**：\`ChatModelUse\` / v5 \`MODEL_USES\` / 出厂 \`purposes\` / \`.ai model\` 用途列表 / \`groups\` 用途组 / 用量页说明都不再有 compression；\`chat\` / \`summarization\` / \`judge\` 仍共用文本/视觉候选链。
+- **旧模型配置自动兼容**：解析期自动剔除 \`purposes.compression\` 与 \`groups[].purposes\` 里的 compression（空组丢弃）并打 WARN；**无需重建配置**。配置生成器同步移除该用途，导入旧配置时同样清洗并提示。
+- 历史 token 用量里的 compression 记录保留可查，不再新增。
+
+## 工具结果：token 截断 + 分页回读
+
+- **新配置「工具结果展示token上限」**（「工具」页，默认 **8192** token，0=关闭）取代旧「工具响应截断字数」；工具结果按 token 估算截断，只展示开头，末尾附 \`[tool-output-truncated: N tokens, first M shown; read_raw id=e:<seq>]\`。
+- **完整原文不丢**：截断只发生在请求编译展示层，事件账本里的 \`tool_result\` 原文完整保留；用 \`read_raw id=e:<seq>\`（游标分页，单条/区间）或 \`grep_raw\` 回读。旧会话仍兼容 \`read_raw kind=tool\`。
+- **工具结果不进滚动摘要**：摘要输入只保留工具名称/字数/\`read_raw\` 指针，不再把工具正文喂给摘要器，避免长工具输出挤占摘要预算并被二次加工。
+- **子代理**：child 的工具结果同样按该上限截断；子代理没有 \`read_raw\`，截断标记会提示用工具自身的 \`offset\`/\`start_index\` 翻页或收窄查询。
+
+## 配置项更改
+
+- 新增「工具结果展示token上限」（「工具」分组）：默认 8192，0=关闭；旧「工具响应截断字数」不再注册/读取（旧存储值忽略）。已安装用户如需调整请在 WebUI 手动配置新键。
+- \`compression\` 用途从模型配置与 \`.ai model\` 中移除；旧配置里的该用途会被自动忽略（日志 WARN），无需重建。
+
+## 开发与工程
+
+- 新增 token 截断叶子 \`src/utils/token_budget.ts\`；编译层 \`toolResultMaxTokens\` 与估算口径同源，避免"显示已截断但预算仍按全文计"。
+- 单测新增/调整：编译期工具结果 token 截断（标记/图片保留/关闭/估算一致）、摘要输入不含工具正文、旧回退路径用户消息 token 截断、v5 旧配置 compression 清洗、子代理工具结果截断；\`npx tsc --noEmit\`、\`npm run lint\`、\`npm run test:unit\`、\`npm run build && npm run smoke\`、\`npm run sim\`、\`npm run deps:check\` 全绿。
 `;

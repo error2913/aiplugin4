@@ -224,7 +224,7 @@ export class streamService {
             }
         } catch (e) {
             if (e instanceof StopError) throw e;
-            // 主链路（agent 编排）需要按语义自动处理：把分类错误上抛；其余调用方（judge/压缩/外部 chatMessages 等）维持吞错返回空
+            // 主链路（agent 编排）需要按语义自动处理：把分类错误上抛；其余调用方（judge/摘要/外部 chatMessages 等）维持吞错返回空
             if (e instanceof ApiError && opts?.throwClassified) throw e;
             log.exception('sendChatRequest', e);
             return { content: '', tool_calls: [] };

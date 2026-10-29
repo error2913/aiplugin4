@@ -71,7 +71,6 @@ svc.agentName = 'default';
     return s;
 };
 Agent.get = ((name: string) => {
-    if (name === 'compress_agent') return { chat: async () => '压' };
     if (name === 'summarize_agent') return { chat: async () => '{"facts":[]}' };
     return { sessionService: svc, chat: async () => '回复' };
 }) as any;

@@ -5,6 +5,7 @@ import { ConversationEvent, Part } from '../src/context/events';
 import { createEmptyHead } from '../src/context/head';
 import { ContextSnapshot } from '../src/context/store';
 import { compileRequest, CompiledMessage } from '../src/context/view/compile';
+import { truncateToTokenBudget } from '../src/utils/token_budget';
 
 const HEAD = createEmptyHead();
 const estimateTextTokens = (text: string): number => String(text || '').length;
@@ -356,5 +357,96 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(result.stats.gapInjected, true, '摘要与窗口之间被预算裁掉未摘要区，应显式提示');
         assert.equal(result.stats.omittedFromSeq, 3);
         assert.equal(result.stats.omittedToSeq, 3);
+    },
+
+    testTokenBudgetTruncateHeadOnly() {
+        const text = 'x'.repeat(100);
+        const slice = truncateToTokenBudget(text, 20, estimateTextTokens);
+        assert.equal(slice.truncated, true);
+        assert.equal(slice.text.length, 20, 'head-only 应保留前 20 token');
+        assert.equal(slice.totalTokens, 100);
+        assert.equal(slice.shownTokens, 20);
+        const off = truncateToTokenBudget(text, 0, estimateTextTokens);
+        assert.equal(off.truncated, false, '0=不截断');
+        assert.equal(off.text, text);
+    },
+
+    testContextV2CompileCapsToolResultByTokens() {
+        const events: ConversationEvent[] = [
+            toolCall(1, 't1', 'g1', 'c1'),
+            {
+                ...toolResult(2, 't1', 'g1', 'c1'),
+                parts: [{ type: 'text', text: 'x'.repeat(100) }],
+            },
+        ];
+        const result = compileRequest({
+            ...baseOptions,
+            snapshot: snapshot(events),
+            budgetTokens: 1000,
+            toolResultMaxTokens: 20,
+        });
+        const text = textOf(result.messages);
+        assert.ok(text.includes('[tool-output-truncated:'), '超限工具结果应带 english 截断标记');
+        assert.ok(text.includes('first 20 shown'), '标记应带展示 token 数');
+        assert.ok(text.includes('read_raw id=e:2'), '标记应带事件地址供分页回读');
+        assert.ok(!text.includes('x'.repeat(30)), '被截掉的尾部不应进入请求');
+        assert.equal(result.stats.truncated, false, '单条上限不应触发"最新单元超预算"截断');
+    },
+
+    testContextV2CompileToolResultCapOffByDefault() {
+        const events: ConversationEvent[] = [
+            toolCall(1, 't1', 'g1', 'c1'),
+            {
+                ...toolResult(2, 't1', 'g1', 'c1'),
+                parts: [{ type: 'text', text: 'x'.repeat(100) }],
+            },
+        ];
+        const result = compileRequest({ ...baseOptions, snapshot: snapshot(events), budgetTokens: 1000 });
+        const text = textOf(result.messages);
+        assert.ok(!text.includes('[tool-output-truncated:'), '未配置上限时不截断');
+        assert.ok(text.includes('x'.repeat(100)), '原文完整展示');
+    },
+
+    testContextV2CompileToolResultCapKeepsImages() {
+        const events: ConversationEvent[] = [
+            toolCall(1, 't1', 'g1', 'c1'),
+            {
+                ...toolResult(2, 't1', 'g1', 'c1'),
+                parts: [
+                    { type: 'text', text: 'y'.repeat(100) },
+                    { type: 'image', ref: 'img_keep' },
+                ],
+            },
+        ];
+        const result = compileRequest({
+            ...baseOptions,
+            snapshot: snapshot(events),
+            budgetTokens: 1000,
+            toolResultMaxTokens: 20,
+        });
+        const text = textOf(result.messages);
+        assert.ok(text.includes('img_keep'), '图片等非文本块应保留（不被截断）');
+        assert.ok(text.includes('[tool-output-truncated:'), '文本仍按上限截断');
+    },
+
+    testContextV2CompileToolResultCapEstimatorAligned() {
+        // 若估算不按上限截断：1000 token 的最新工具结果在 30 预算下会被 compile 兜底截断，
+        // 而不是显示"截断后的头部 + 工具截断标记"。
+        const events: ConversationEvent[] = [
+            toolCall(1, 't1', 'g1', 'c1'),
+            {
+                ...toolResult(2, 't1', 'g1', 'c1'),
+                parts: [{ type: 'text', text: 'z'.repeat(1000) }],
+            },
+        ];
+        const result = compileRequest({
+            ...baseOptions,
+            snapshot: snapshot(events),
+            budgetTokens: 30,
+            toolResultMaxTokens: 20,
+        });
+        const text = textOf(result.messages);
+        assert.equal(result.stats.truncated, false, '估算与展示同口径：截断后应能装下');
+        assert.ok(text.includes('[tool-output-truncated:'), '应显示工具截断标记而不是整条丢弃/兜底截断');
     },
 };

@@ -110,6 +110,19 @@ function positiveInt(value: unknown, fallback: number): number {
 }
 
 function renderEventText(event: ConversationEvent, index: RecordIndex): string {
+    // 工具结果不进摘要正文：只给元信息 + read_raw 指针（正文可由 read_raw/grep_raw 回查）。
+    // 理由：超长工具输出若整段进入摘要输入，会挤占批次预算并被二次加工；而消费该结果的
+    // assistant 回复本身会被正常摘要，结论不会丢。
+    if (event.kind === 'tool_result') {
+        const text = toLLMText(applyEdit(event, index), { vision: false });
+        const name = event.name || event.callId || 'tool';
+        return `[tool result ${name}] ${text.length} chars; read_raw id=e:${event.seq}`;
+    }
+    if (event.kind === 'tool_call') {
+        const name = event.name || event.callId || 'tool';
+        const args = String(event.args || '');
+        return `[tool call ${name}] args ${args.length} chars`;
+    }
     const text = toLLMText(applyEdit(event, index), { vision: false });
     switch (event.kind) {
         case 'user':
@@ -118,10 +131,6 @@ function renderEventText(event: ConversationEvent, index: RecordIndex): string {
             return `[AI @${event.at}] ${text}`;
         case 'event':
             return `[event ${event.systemName || SYSTEM_NAME.event}] ${text}`;
-        case 'tool_call':
-            return `[tool call ${event.name || event.callId}] ${event.args || ''}`;
-        case 'tool_result':
-            return `[tool result ${event.name || event.callId}] ${text}`;
         default:
             return text;
     }

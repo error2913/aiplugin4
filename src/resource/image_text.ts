@@ -32,7 +32,7 @@ export interface ImageTextHost {
     saveSelf(): void;
 }
 
-/** 图片转文字结果超长时不再交给压缩智能体，改为只展示开头 N 字并把完整原文存入 rawDescription */
+/** 图片转文字结果超长时只展示开头 N 字，完整原文存入 rawDescription（read_raw kind=image 可回查） */
 export function truncateIfLong(host: Pick<ImageTextHost, 'rawDescription'>, text: string): string {
     const { IMAGE_TEXT_TRUNCATE_CHARS } = Config.image;
     if (!text) return text;

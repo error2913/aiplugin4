@@ -1,17 +1,19 @@
-// 会话上下文：消息增删/忽略名单/压缩与总结触发/按 ID 获取目标/图片查找
+// 会话上下文：消息增删/忽略名单/上下文摘要与旧路径截断/按 ID 获取目标/图片查找
 import type Agent from "../agent/agent";
 import Config from "../config/config";
 import { getAgent } from "../core/ports/agent_registry";
-import { getAuxLlm } from "../core/ports/aux_llm";
 import Logger from "../logger";
 import Image from "../resource/image";
 import Group from "../session/group";
 import { Session } from "../session/session";
 import User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
-import { buildToolTruncateMarker, buildUserBlockMarker, buildUserSingleMarker, buildUserTruncateMarker, stripRawMarkers } from "../utils/raw_marker";
+import { LEGACY_USER_MESSAGE_MAX_TOKENS } from "../utils/context_limits";
+import { buildToolTruncateMarkerTokens, buildUserTruncateMarker, buildUserTruncateMarkerTokens } from "../utils/raw_marker";
 import { TypeDescriptor } from "../utils/revive";
 import { stripInternalTags } from "../utils/string";
+import { truncateMiddleToTokenBudget, truncateToTokenBudget } from "../utils/token_budget";
+import { estimateTextTokens } from "../utils/token_estimate";
 
 import { archiveByTokenIfNeeded as archiveByTokenIfNeededImpl, settleWindowIfNeeded as settleWindowIfNeededImpl, trimToWindow as trimToWindowImpl } from "./archiver";
 import { demoteMediaParts } from "./content/render";
@@ -267,26 +269,13 @@ export class Context {
     }
 
     /**
-     * 文本超过压缩阈值时交给压缩智能体，返回 {display, original, changed, called}。
-     * 采纳条件（docs/03 上下文模块）：结果必须**比原文更短**，否则保留原文（不更短就不采纳）；
-     * `called` 表示这次是否真的调用了压缩智能体（未超阈值时为 false，供账本计数用）。
+     * 旧回退路径（无事件账本）：用户消息超长时**纯代码截断**，不再调用任何 LLM。
+     * 头+尾保留、原文写 rawText（不参与渲染/预算），供 read_raw/grep_raw(kind=user) 按 msg_id 回查。
      */
-    static async compressPreserveIfLong(text: string): Promise<{ display: string; original: string; changed: boolean; called: boolean }> {
-        // 旧「消息压缩阈值」配置已移除，使用内部固定阈值
-        const COMPRESS_THRESHOLD = 8000;
-        if (text.length <= COMPRESS_THRESHOLD) return { display: text, original: text, changed: false, called: false };
-        try {
-            const compressed = await getAuxLlm().chat('compress_agent', text);
-            if (compressed && compressed !== text && compressed.length < text.length) {
-                return { display: compressed, original: text, changed: true, called: true };
-            }
-            if (compressed && compressed.length >= text.length) {
-                log.info(`[ctx-cost] 压缩结果未变短（原 ${text.length} 字 → ${compressed.length} 字），保留原文`);
-            }
-        } catch (e) {
-            log.warning('压缩消息失败，保留原文: ' + (e instanceof Error ? e.message : String(e)));
-        }
-        return { display: text, original: text, changed: false, called: true };
+    static truncatePreserveIfLong(text: string): { display: string; original: string; changed: boolean; totalTokens: number; shownTokens: number } {
+        const original = text;
+        const slice = truncateMiddleToTokenBudget(text, LEGACY_USER_MESSAGE_MAX_TOKENS, estimateTextTokens);
+        return { display: slice.text, original, changed: slice.truncated, totalTokens: slice.totalTokens, shownTokens: slice.shownTokens };
     }
 
     /** 待机判定（配额用；v2 不再使用冷/热状态机） */
@@ -302,14 +291,7 @@ export class Context {
         return s.stateOf() === 'COLD';
     }
 
-    /** 本会话账本计数（游离/桩会话没有 ctxStats 时忽略） */
-    private bumpStat(key: 'compression' | 'summarization' | 'judge'): void {
-        const s: any = this.session;
-        if (s && s.ctxStats && typeof s.ctxStats[key] === 'number') s.ctxStats[key] += 1;
-    }
-
-    /**
-     * 待机入库配额（P2-2）：本会话**每小时**最多入库 `待机入库配额` 条普通群消息（0=不限制）。
+    /** 待机入库配额（P2-2）：本会话**每小时**最多入库 `待机入库配额` 条普通群消息（0=不限制）。
      * 计数放模块级 WeakMap（运行时状态，不持久化）——重载后重置等价于"新的一小时"，是安全的放宽。
      * @returns 是否允许本次入库
      */
@@ -329,7 +311,7 @@ export class Context {
 
     /**
      * 冷态入库条目：**零 LLM** —— 只做纯代码截断（留头留尾），原文进 rawText 并带 `content-truncated` 标记。
-     * 标记 compressed=true 表示"永不参与 LLM 压缩"（冷态诞生的内容转热后也不会被回溯压缩）。
+     * 标记 compressed=true 表示该条已做过有损处理（历史兼容语义；新写入不再有 LLM 压缩）。
      */
     private buildColdUserItem(text: string, userId: string, messageId: string): UserMessageItem {
         // 按会话覆盖优先（P2-1）
@@ -362,62 +344,8 @@ export class Context {
     }
 
     /**
-     * 合并压缩块内**尚未尝试过压缩的尾部连续条目**（已尝试过的一律不再进入压缩输入）。
-     * - 采纳：这批条目替换为一条块条目（rawItems 保留原文），块条目 compressed=true；
-     * - 未采纳/失败：把这批条目标记为已尝试，避免下一条消息到来时再次付费重压。
-     *
-     * 注意：必须取"**尾部连续**未压缩段"（从末尾向前扫到第一个已压缩条目为止），不能用
-     * `filter(it => !it.compressed)` —— 单条压缩成功的条目会带 compressed 夹在中间，过滤会把
-     * 夹在其前后的旧条目合并后搬到末尾，打乱消息时序。
-     */
-    private async compressPendingTail(userMsg: UserMessage): Promise<void> {
-        const items = userMsg.contentItems as UserMessageItem[];
-        let start = items.length;
-        while (start > 0 && !items[start - 1].compressed) start--;
-        const pending = items.slice(start);
-        if (pending.length === 0) return;
-        // 尾部若全是系统条目（事件/提示，没有 userId），不做压缩：没有群聊原文值得付这笔钱
-        if (!pending.some(it => it.userId)) return;
-
-        const joined = pending.map(it => stripRawMarkers(it.rawText ?? it.text)).join('\f');
-        const block = await Context.compressPreserveIfLong(joined);
-        if (block.called) this.bumpStat('compression');
-        if (block.changed && block.display !== joined) {
-            // 块条目的身份取"最后一条真实用户条目"（系统条目没有 messageId，不能当块 id）
-            const last = [...pending].reverse().find(it => it.userId) as UserMessageItem;
-            // 系统条目不进块内原文（read_raw 的块目录按 msg_id 寻址，无 userId 的条目会变成 undefined）
-            const rawItems = pending
-                .filter(it => it.userId)
-                .map(it => ({
-                    userId: it.userId,
-                    messageId: it.messageId,
-                    time: it.time,
-                    text: stripRawMarkers(it.rawText ?? it.text)
-                }));
-            let display = stripInternalTags(block.display);
-            display += buildUserBlockMarker(pending.length, joined.length, last.messageId);
-            userMsg.contentItems = [
-                ...items.slice(0, start),
-                {
-                    text: display,
-                    time: last.time,
-                    userId: last.userId,
-                    messageId: last.messageId,
-                    compressed: true,
-                    rawItems
-                }
-            ];
-        } else if (block.called) {
-            // 真的调用过压缩但未采纳/失败：标记为已尝试，避免下一条消息到来时再次付费重压
-            for (const it of pending) it.compressed = true;
-        }
-        // called=false（合计未超阈值）：不标记，留待后续消息累积后再合并
-    }
-
-    /**
-     * 用户消息入库（串行化入口）：压缩段是异步的，两条消息并发时会在 await 期间互相覆盖
-     * `contentItems`（后完成者用旧快照重建，可能丢掉中间追加的条目）。这里用每会话的
-     * promise 链把入库串行化——运行时状态放模块级 WeakMap，不污染持久化字段。
+     * 用户消息入库（串行化入口）：两条消息并发时会在 await 期间互相覆盖 `contentItems`，
+     * 这里用每会话的 promise 链把入库串行化——运行时状态放模块级 WeakMap，不污染持久化字段。
      */
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string): Promise<void> {
         if (this.v2Service) {
@@ -432,9 +360,9 @@ export class Context {
         return run;
     }
 
-    // 用户消息入库：热态下"单条超长 / 连续多条合并后超阈值"交给压缩智能体；冷态（待机）只做纯代码截断。
-    // 压缩前原文保留在条目 rawText/rawItems（不参与渲染与 token 估算），展示文本末尾带标记，
-    // AI 可用 read_raw/grep_raw(kind=user) 按 msg_id（单条）/ blk:<末条messageId>（合并块）核对原文
+    // 用户消息入库：冷态（待机）与旧回退路径都只做纯代码截断（零 LLM）；
+    // 截断前原文保留在条目 rawText（不参与渲染与 token 估算），展示文本末尾带标记，
+    // AI 可用 read_raw/grep_raw(kind=user) 按 msg_id 核对原文
     private async addUserMessageInner(ctx: seal.MsgContext, text: string, userId: string, messageId: string) {
         // 自动改名：按 autoNameMod 设置，在用户首次出现时更新上下文中的名字
         if (this.autoNameMod > 0) {
@@ -445,7 +373,7 @@ export class Context {
             }
         }
 
-        // 冷态（待机且无在途对话）：入库零 LLM —— 只追加 + 纯代码截断，不调用压缩智能体、不做合并压缩
+        // 冷态（待机且无在途对话）：入库零 LLM —— 只追加 + 纯代码截断，不做合并压缩
         if (this.isColdSession()) {
             // 待机入库配额（P2-2）：极端灌水群防滥用。超出后只计数不入库（不报错、不回复）。
             if (!this.allowColdIngest()) return;
@@ -459,37 +387,23 @@ export class Context {
             return;
         }
 
-        // —— 热态：单条压缩（超阈值即视为"已尝试过"，含未采纳/失败，避免反复付费） ——
-        const single = await Context.compressPreserveIfLong(text);
-        if (single.called) this.bumpStat('compression');
+        // —— 热态旧路径：单条超长纯代码截断（头+尾），原文进 rawText 供 read_raw 回查 ——
+        const single = Context.truncatePreserveIfLong(text);
         let itemText = stripInternalTags(single.display);
         const rawText = single.changed ? stripInternalTags(single.original) : undefined;
         if (rawText !== undefined) {
-            // 防注入：压缩智能体可能回带标签，入库前再兜底剥离一次（主入口在 transformArrayToContent）
+            // 防注入：入库前兜底剥离内部标签（主入口在 transformArrayToContent）
             itemText = stripInternalTags(itemText);
-            itemText += buildUserSingleMarker(single.original.length, itemText.length, messageId);
+            itemText += buildUserTruncateMarkerTokens(single.totalTokens, single.shownTokens, messageId);
         }
-        const umi: UserMessageItem = {
+        this.appendUserItem({
             text: itemText,
             time: Math.floor(Date.now() / 1000),
             userId,
             messageId,
-            // 真的调用过压缩（含未采纳/失败）才标记"已尝试"，避免反复付费；未超阈值时不标记，留待后续合并
-            ...(single.called ? { compressed: true } : {}),
+            ...(single.changed ? { compressed: true } : {}),
             ...(rawText !== undefined ? { rawText } : {})
-        };
-        const lastMessage = this.messages[this.messages.length - 1];
-        if (lastMessage && Message.getMessageType(lastMessage) === 'user' && Array.isArray((lastMessage as UserMessage).contentItems)) {
-            const userMsg = lastMessage as UserMessage;
-            userMsg.contentItems.push(umi);
-            // 连续多条 user 消息合并后总长超阈值 → 合并压缩（只压未尝试过的尾部，见 compressPendingTail）
-            await this.compressPendingTail(userMsg);
-        } else {
-            this.messages.push({
-                role: 'user',
-                contentItems: [umi]
-            });
-        }
+        });
         // 群内用户会话的权重更新节流持久化（避免每条消息全量写盘）
         flushGroupUserMemories(this.session);
     }
@@ -586,7 +500,7 @@ export class Context {
         const m = this.messages[ref.messageIndex];
         if (!m || m.role !== 'user' || !Array.isArray(m.contentItems)) return false;
         const item = m.contentItems[ref.itemIndex];
-        // 仅当原位置仍是"系统用户消息"（未被压缩成块/清理/归档改写）时才可安全替换
+        // 仅当原位置仍是"系统用户消息"（未被历史合并压缩/清理/归档改写）时才可安全替换
         if (!item || typeof item.text !== 'string' || !(item as SystemUserMessageItem).systemName) return false;
         const systemItem = item as SystemUserMessageItem;
         systemItem.text = stripInternalTags(text);
@@ -635,8 +549,8 @@ export class Context {
         this.messages.push(tcm);
     }
 
-    // 工具回调消息：过长的结果不再交给压缩智能体，改为只展示开头 N 字（head 截断），
-    // 完整原文以 rawText 保留（不参与渲染/预算），供 read_raw/grep_raw(kind=tool) 按 tool_call_id 按需读取。
+    // 工具回调消息：完整原文写入事件账本（超长在请求编译层按 token 上限截断并给 read_raw 指针）；
+    // 旧回退路径（无事件账本）在此按 token 上限 head 截断，原文写 rawText 供 read_raw kind=tool 回查。
     async addToolCallbackMessage(text: string, toolCallId: string, toolName?: string, contentParts?: ToolContentPart[]) {
         if (this.v2Service) {
             let parts: Part[] = [];
@@ -676,7 +590,7 @@ export class Context {
             this.flushV2();
             return;
         }
-        const { TOOL_RESPONSE_TRUNCATE_CHARS } = Config.tool;
+        const maxTokens = Config.tool.TOOL_RESULT_MAX_TOKENS;
         // use_skill 自己已做 12000 字符分页，且「续读 offset」在结果末尾：
         // 再套通用 head 截断会把续读提示一起截掉，导致模型无法续读，故豁免。
         // 直接调用（toolName=use_skill）与 call_tool 包装（工具输出以 `use_skill returned:` 开头）都要识别。
@@ -686,16 +600,19 @@ export class Context {
             || /^use_skill returned:\n/.test(text);
         // 截断前原文：仅当文本确实被截断后保留，供只读工具按需读取（不参与渲染/预算）
         let rawText: string | undefined;
-        if (!skipTruncate && TOOL_RESPONSE_TRUNCATE_CHARS > 0 && text.length > TOOL_RESPONSE_TRUNCATE_CHARS) {
-            rawText = text;
-            text = text.slice(0, TOOL_RESPONSE_TRUNCATE_CHARS);
+        if (!skipTruncate && maxTokens > 0) {
+            const slice = truncateToTokenBudget(text, maxTokens, estimateTextTokens);
+            if (slice.truncated) {
+                rawText = text;
+                text = slice.text;
+            }
         }
         // 防注入：工具返回内容（如历史消息、网页文本）中的内部上下文标签直接剥离，不进入上下文
         text = stripInternalTags(text);
         if (rawText !== undefined) {
             // 原文与展示文本走同一防注入处理；附加指针提示让模型知道内容被截断、可以按需翻原文
             rawText = stripInternalTags(rawText);
-            text += buildToolTruncateMarker(rawText.length, text.length, toolCallId);
+            text += buildToolTruncateMarkerTokens(estimateTextTokens(rawText), estimateTextTokens(text), toolCallId);
         }
         const tcbm: ToolCallbackMessage = {
             role: 'tool',

@@ -19,7 +19,7 @@ export function isEligible(e: ModelEntry, use: ModelUse): boolean {
     if (use === 'image-understanding') return e.tags.includes('vision');
     if (use === 'image-generation') return e.tags.includes('gen');
     if (use === 'tts') return e.tags.includes('tts');
-    // chat / compression / summarization / judge：排除嵌入、生图与语音
+    // chat / summarization / judge：排除嵌入、生图与语音
     return !e.tags.includes('embed') && !e.tags.includes('gen') && !e.tags.includes('tts');
 }
 

@@ -320,8 +320,8 @@ async function recordEventPrompt(opts: {
             log.debug(`事件忽略：会话<${opts.sid}>未开启待机，不录入事件`);
             return false;
         }
-        // 事件提示词不再走压缩智能体：文本由纯代码按模板从事件 JSON 生成，通常很短；
-        // 此处仅做纯代码兜底（超 2000 字 head 截断），完整原始数据仍挂在条目 raw 上，可用 read_raw kind=event 查看
+        // 事件提示词由纯代码按模板从事件 JSON 生成，超长仅 head 截断兜底（不调用模型）；
+        // 完整原始数据仍挂在条目 raw 上，可用 read_raw kind=event 查看
         const text = opts.text.length > 2000 ? opts.text.slice(0, 2000) : opts.text;
         const entryExtra = { eventType: opts.eventType, raw: opts.raw };
         if (isDuplicateEvent(opts.dedupKey)) {

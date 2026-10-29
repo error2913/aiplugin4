@@ -66,7 +66,6 @@ const noopAgent = {
     chat: async () => '（模拟回复）',
 };
 Agent.get = ((name: string) => {
-    if (name === 'compress_agent') return { chat: async (t: string) => '压' };
     if (name === 'summarize_agent') return { chat: async () => '{"facts":[]}' };
     return noopAgent;
 }) as any;
