@@ -1,6 +1,7 @@
 // .ai stop：完全暂停当前对话（打断流式/工具链/排队/计时器，保留触发条件）
 import { claimTable } from "../../pipeline/claim_table";
 import { decisionSchedule } from "../../pipeline/decision_schedule";
+import { cancelProbe } from "../../pipeline/probe";
 import { pendingDelays } from "../../trigger/runtime";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -20,6 +21,7 @@ export function registerCmdStop() {
         claimTable.releaseSession(sid);
         decisionSchedule.cancelForSession(sid);
         pendingDelays.cancelSession(sid);
+        cancelProbe(sid);
         if (!hadStream && !hadRun && !hadTimer && queueCleared === 0) {
             seal.replyToSender(ctx, msg, '当前没有正在进行的对话');
             return ret;

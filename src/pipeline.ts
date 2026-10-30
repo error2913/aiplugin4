@@ -11,6 +11,7 @@ import { hasChainEventRules } from "./pipeline/event_ingress";
 import { hasEventTriggerRules, maybeTriggerEvent } from "./pipeline/event_trigger";
 import { handleNativeNoticeEvent, handleOb11NoticeEvent, handleOb11RequestEvent } from "./pipeline/events";
 import { expandOb11Segments } from "./pipeline/inbound";
+import { noteProbeActivity } from "./pipeline/probe";
 import { runChain } from "./pipeline/trigger_rule";
 import { wakeSession } from "./pipeline/wake";
 import { getSession } from "./session/session_service";
@@ -333,6 +334,9 @@ export class MessagePipeline {
                 }
                 return session.handleReceipt(ctx, msg, messageArray)
                     .then(async (): Promise<void> => {
+                        // 静默探针活动记录（默认 [probe] enabled=false ⇒ 零开销/零行为）
+                        noteProbeActivity(session, ctx);
+
                         // 1) 门控链规则（新）：命中即停止后续模式，保证"一条消息只触发一次"
                         try {
                             const chain = await runChain({

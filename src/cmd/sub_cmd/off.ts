@@ -2,6 +2,7 @@
 import { JudgeManager } from "../../judge/judge_manager";
 import { claimTable } from "../../pipeline/claim_table";
 import { decisionSchedule } from "../../pipeline/decision_schedule";
+import { cancelProbe } from "../../pipeline/probe";
 import { TimerManager } from "../../timer";
 import { pendingDelays } from "../../trigger/runtime";
 import { I } from "../privilege";
@@ -28,6 +29,7 @@ export function registerCmdOff() {
             claimTable.releaseSession(sid);
             decisionSchedule.cancelForSession(sid);
             pendingDelays.cancelSession(sid);
+            cancelProbe(sid);
 
             setting.counter = -1;
             setting.timer = -1;
