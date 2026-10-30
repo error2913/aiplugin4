@@ -35,7 +35,7 @@ export const JUDGE_TOML_DEFAULT = `# 评分触发参数（TOML v2）。空/非�
 version = 2
 
 [decision]
-shadow = true                  # R1 默认 true（只记日志、用旧五维判定）；切流时改 false
+shadow = false                 # R2 已切流：新判定内核驱动动作；改 true 可回滚到旧五维判定（仅观测新内核）
 aggressiveness = 2             # 1..3
 
 [scoring]
@@ -85,7 +85,7 @@ extra = ""`;
 
 /** 默认值（v2 模板等价；也是解析时逐字段兜底） */
 export const DEFAULT_JUDGE_CONFIG: JudgeDecisionConfigV2 = {
-    DECISION: { shadow: true, aggressiveness: 2 },
+    DECISION: { shadow: false, aggressiveness: 2 },
     SCORING: { speak_threshold: 0.55, ignore_threshold: 0.35, wait_cooldown: 60, ignore_cooldown: 20 },
     ENERGY: { initial: 100, reply_cost: 5, recover_min: 4 },
     WEIGHTS: { addressed: 4, help_signal: 2, relevance: 1.5, friendships: 1, silence_gap: 1, interruption_risk: -3 },

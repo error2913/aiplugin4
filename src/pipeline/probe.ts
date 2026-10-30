@@ -8,7 +8,6 @@
 // - 0:00–7:00 静默不探
 // - 距最近一条群消息 ≥ first_gap_sec；失败/无消息后按 backoff 增长至 max_gap_sec
 import Config from "../config/config";
-import { JudgeManager } from "../judge/judge_manager";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
 import { getSessionCtxAndMsg } from "../utils/seal";
@@ -17,6 +16,7 @@ import { activeSegmentIndex } from "../utils/time_window";
 
 
 import { claimTable } from "./claim_table";
+import { decisionSchedule } from "./decision_schedule";
 
 
 const log = logger.withTag('probe');
@@ -127,12 +127,13 @@ async function runProbe(session: Session, ctx: seal.MsgContext): Promise<void> {
     try {
         const { ctx: freshCtx, msg } = getSessionCtxAndMsg(ctx.endPoint.userId, sid, ctx.isPrivate);
         nextCtx = freshCtx;
-        await JudgeManager.evaluate(freshCtx, msg, session, text);
+        // 探针与消息/轮末共用同一「在飞去重」入口（在飞 ⇒ 合并为排队，不并发调模型）
+        decisionSchedule.requestNow({ session, ctx: freshCtx, msg, text, source: 'probe' });
     } catch (e) {
         // 端点未注册等场景：退回现有 ctx + 合成 msg，仍交给判定内核（失败只记日志）
         try {
             const fallbackMsg = createMsg(ctx.isPrivate ? 'private' : 'group', ctx.player?.userId || '', ctx.group?.groupId || '');
-            await JudgeManager.evaluate(ctx, fallbackMsg, session, text);
+            decisionSchedule.requestNow({ session, ctx, msg: fallbackMsg, text, source: 'probe' });
         } catch (inner) {
             log.warning(`静默探针评估失败（已忽略）：${inner instanceof Error ? inner.message : String(inner)}`);
         }

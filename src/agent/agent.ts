@@ -217,6 +217,12 @@ export default class Agent {
      * **默认不解析图片**；`allowImages:true` 时 user 文本里的 [img:] 才会变成图片块，
      * 且非 user 消息里的图片块会被降级为文本（assistant 消息不允许带图）。
      */
+    /** 当前 use 是否已解析到可用模型（判定降级：未配置 judge 模型时走纯规则保守发言） */
+    async hasModel(): Promise<boolean> {
+        await Model.ensureLoaded();
+        return !!Model.getChatModel(this.use);
+    }
+
     async chatMessages(messages: { role: string, content: string }[], opts?: { allowImages?: boolean }): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);

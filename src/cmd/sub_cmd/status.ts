@@ -26,20 +26,26 @@ function collectTriggerStatus(sid: string): string {
         const waitLeft = judgeStats && judgeStats.waitUntil > Date.now()
             ? `${Math.ceil((judgeStats.waitUntil - Date.now()) / 1000)}s`
             : '无';
-        const shadow = judgeStats?.lastShadow;
-        const shadowText = shadow
-            ? `${shadow.action}（旧=${shadow.legacy}）S=${shadow.S.toFixed(3)} 置信=${shadow.confidence} @${fmtDate(Math.floor(shadow.at / 1000))}`
+        const last = judgeStats?.lastDecision;
+        const lastText = last
+            ? `${last.action}${last.legacy ? `（旧=${last.legacy}）` : ''} S=${last.S.toFixed(3)} 置信=${last.confidence} 源=${last.source} @${fmtDate(Math.floor(last.at / 1000))}`
             : '无';
+        const burst = Config.trigger.JUDGE.GATE.call_burst;
+        const maxCalls = Config.trigger.JUDGE.GATE.max_calls_per_hour;
         const budget = judgeStats
-            ? `本小时 ${judgeStats.hourlyCount}/${Config.trigger.JUDGE.GATE.max_calls_per_hour} ｜ 精力 ${judgeStats.energy}`
-            : `本小时 0/${Config.trigger.JUDGE.GATE.max_calls_per_hour} ｜ 精力 ${Config.trigger.JUDGE.ENERGY.initial}`;
+            ? `本小时 ${judgeStats.usedThisHour}/${maxCalls} ｜ 令牌 ${judgeStats.budgetTokens.toFixed(1)}/${burst} ｜ 精力 ${judgeStats.energy}`
+            : `本小时 0/${maxCalls} ｜ 令牌 ${burst}/${burst} ｜ 精力 ${Config.trigger.JUDGE.ENERGY.initial}`;
+        const queued = decisionSchedule.hasQueued(sid) ? '（有排队）' : '';
+        const mode = Config.trigger.JUDGE.DECISION.shadow
+            ? 'shadow（回滚：旧五维动作，新内核只记日志）'
+            : '已切流（新判定内核驱动动作）';
         return `触发规则: ${rules.length} 条（损坏 ${badRules}）
-        delay 挂起: ${pending} 条 ｜ 判定去抖/在飞: ${schedule.pending}/${schedule.inflight}
-        ---- 判定（shadow 观测） ----
+        delay 挂起: ${pending} 条 ｜ 判定去抖/在飞: ${schedule.pending}/${schedule.inflight}${queued}
+        ---- 判定（${mode}） ----
         判定配置: ${judgeCfg}
         判定预算: ${budget}
         WAIT 轮剩余: ${waitLeft}
-        最近决策: ${shadowText}`;
+        最近决策: ${lastText}`;
     } catch (e) {
         return `观测不可用（${e instanceof Error ? e.message : String(e)}）`;
     }

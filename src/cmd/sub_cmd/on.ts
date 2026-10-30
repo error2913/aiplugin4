@@ -1,5 +1,6 @@
 // .ai on：开启 AI 及计数器/计时器/概率/活跃时间模式
 import Config from "../../config/config";
+import { noteProbeActivity } from "../../pipeline/probe";
 import { TimerManager } from "../../timer";
 import { S } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
@@ -39,6 +40,8 @@ export function registerCmdOn() {
             setting.aiEnabled = true;
             setting.regexTrigger = true;
             setting.eventTrigger = true;
+            // 探针重武装点（方案 §6.4.2）：.ai on 后 arm 一次（已有则不重复；默认 [probe] enabled=false 时零开销）
+            noteProbeActivity(session, ctx);
             seal.replyToSender(ctx, msg, 'AI已开启：非指令正则触发、事件触发');
             session.save();
             return ret;
@@ -146,6 +149,8 @@ export function registerCmdOn() {
         };
 
         setting.aiEnabled = true;
+        // 探针重武装点（方案 §6.4.2）：.ai on 后 arm 一次（默认关时零开销）
+        noteProbeActivity(session, ctx);
 
         seal.replyToSender(ctx, msg, text);
         session.save();

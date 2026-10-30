@@ -4,12 +4,18 @@ import assert from 'node:assert/strict';
 import { DEFAULT_JUDGE_CONFIG, JUDGE_TOML_DEFAULT, parseJudgeConfig } from '../src/judge/config';
 import { DecisionSchedule } from '../src/pipeline/decision_schedule';
 
-function fakeScheduler(): { scheduler: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void }; runAll(): void; pending(): number } {
+function fakeScheduler(): {
+    scheduler: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void };
+    runAll(): void;
+    pending(): number;
+    delays: number[];
+} {
     let seq = 0;
     const timers = new Map<number, () => void>();
+    const delays: number[] = [];
     return {
         scheduler: {
-            setTimeout: fn => { const id = ++seq; timers.set(id, fn); return id; },
+            setTimeout: (fn, ms) => { const id = ++seq; timers.set(id, fn); delays.push(ms); return id; },
             clearTimeout: handle => { timers.delete(handle as number); },
         },
         runAll: () => {
@@ -19,6 +25,7 @@ function fakeScheduler(): { scheduler: { setTimeout(fn: () => void, ms: number):
             }
         },
         pending: () => timers.size,
+        delays,
     };
 }
 
@@ -26,7 +33,7 @@ export const tests = {
     testJudgeConfigV2DefaultTemplateValid(): void {
         const state = parseJudgeConfig(JUDGE_TOML_DEFAULT);
         assert.equal(state.valid, true, state.errors.join(';'));
-        assert.equal(state.config.DECISION.shadow, true);
+        assert.equal(state.config.DECISION.shadow, false, 'R2 默认切流：shadow=false');
         assert.equal(state.config.SCORING.speak_threshold, 0.55);
         assert.equal(state.config.WEIGHTS.interruption_risk, -3);
         assert.equal(state.config.MODEL.context_tokens, 1500);
@@ -99,5 +106,51 @@ export const tests = {
         assert.ok((schedule.probeNextAt('s1') || 0) > 90_000);
         schedule.cancelProbe('s1');
         assert.equal(schedule.probeNextAt('s1'), null);
+    },
+
+    /** R2 治理：消息去抖延迟按连续消息翻倍、封顶 maxMs；Addressed/强 Help 旁路 */
+    testDecisionScheduleMessageDebounceGrows(): void {
+        const fake = fakeScheduler();
+        const schedule = new DecisionSchedule({ scheduler: fake.scheduler, now: () => 0 });
+        const due: string[] = [];
+        schedule.setHandler(async (c) => { due.push(c.text); });
+        const cand = (text: string) => ({ session: { sessionId: 's1' } as never, ctx: {} as never, msg: {} as never, text });
+        schedule.scheduleMessage(cand('a'), { debounceMs: 4000, maxMs: 12000 });
+        assert.equal(fake.delays[0], 4000, '首条消息按 debounce_sec 去抖');
+        schedule.scheduleMessage(cand('b'), { debounceMs: 4000, maxMs: 12000 });
+        assert.equal(fake.delays[1], 8000, '连续消息延迟应翻倍');
+        schedule.scheduleMessage(cand('c'), { debounceMs: 4000, maxMs: 12000 });
+        assert.equal(fake.delays[2], 12000, '延迟应封顶 debounce_max_sec');
+        schedule.scheduleMessage(cand('d'), { debounceMs: 4000, maxMs: 12000, bypass: true });
+        // setTimeout 最小 1ms（0ms 也走下一拍）：bypass 表示「不额外等待去抖窗口」
+        assert.ok(fake.delays[3] <= 1, `Addressed/强 Help 应跳过去抖（实际延迟 ${fake.delays[3]}ms）`);
+        fake.runAll();
+        assert.deepEqual(due, ['d'], '同会话只保留最新候选');
+    },
+
+    /** R2 治理：同一会话只允许一个在飞；在飞期间到达的候选合并为最新一条，结束后立即补跑 */
+    async testDecisionScheduleInflightMergesQueued(): Promise<void> {
+        const fake = fakeScheduler();
+        const schedule = new DecisionSchedule({ scheduler: fake.scheduler, now: () => 0 });
+        const seen: string[] = [];
+        let release: (() => void) | null = null;
+        schedule.setHandler(async (c) => {
+            seen.push(c.text);
+            await new Promise<void>(resolve => { release = resolve; });
+        });
+        const cand = (text: string) => ({ session: { sessionId: 's1' } as never, ctx: {} as never, msg: {} as never, text, source: 'message' as const });
+        schedule.requestNow(cand('first'));
+        await Promise.resolve();
+        assert.deepEqual(seen, ['first']);
+        schedule.requestNow(cand('second'));
+        schedule.requestNow(cand('third'));
+        assert.equal(schedule.hasQueued('s1'), true, '在飞期间候选应合并排队');
+        assert.equal(schedule.stats().inflight, 1, '同一会话只允许一个在飞');
+        release!();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        fake.runAll();
+        await Promise.resolve();
+        assert.deepEqual(seen, ['first', 'third'], '在飞期间只保留最新候选');
+        assert.equal(schedule.hasQueued('s1'), false, '补跑后队列应清空');
     },
 };

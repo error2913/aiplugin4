@@ -210,7 +210,7 @@ function restoreImageTestConfig() {
 
 
 
-/** Judge 测试辅助：干净的 judge 状态（当前小时） */
+/** Judge 测试辅助：干净的 judge 状态（当前小时；含 R2 新内核字段） */
 function freshJudgeState(now: number): any {
     return {
         pending: null,
@@ -218,13 +218,23 @@ function freshJudgeState(now: number): any {
         energy: 100,
         waitUntil: 0,
         hourly: { hour: Math.floor(now / 3600000), count: 0 },
-        msgTimes: []
+        msgTimes: [],
+        timeline: [],
+        calls: { tokens: 5, lastRefillAt: now, hour: Math.floor(now / 3600000), used: 0 },
+        lastCallAt: 0,
+        ignoreUntil: 0,
     };
 }
 
-/** Judge 测试辅助：最小 Session 桩（context.timer 可独立覆盖） */
+/** Judge 测试辅助：最小 Session 桩（context.timer 可独立覆盖；chat 默认返回 fired） */
 function makeJudgeSession(sid: string): any {
-    return { sessionId: sid, context: { timer: null, messages: [] }, running: false, starting: false };
+    return {
+        sessionId: sid,
+        context: { timer: null, messages: [] },
+        running: false,
+        starting: false,
+        chat: async () => 'fired',
+    };
 }
 
 /** 构造测试用 Observation（selectInjectionCandidates 纯函数测试） */
@@ -5789,7 +5799,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(r.reason.length, 100);
     },
 
-    /** 评分注入上下文：只收集 user/assistant，跳过 system/tool/空内容；当前消息兜底补入并去重，受条数限制 */
+    /** 评分注入上下文（R2 token 口径）：user/assistant 内容项逐行渲染；预算从最新往前累加 */
     testJudgeBuildHistory(): void {
         const bh = (JudgeManager as any).buildHistory;
         const session = {
@@ -5805,7 +5815,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             }
         };
         // 当前消息不在末尾：兜底补入
-        let h = bh(session, 10, '第三条');
+        let h = bh(session, 1000, '第三条');
         assert.ok(h.text.includes('[user] 第一条'), '应包含最早的用户消息');
         assert.ok(h.text.includes('[AI] 回复一'), '应包含 assistant 消息并标记 [AI]');
         assert.ok(h.text.includes('[user] 第二条'));
@@ -5814,96 +5824,71 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!h.text.includes('工具结果'), 'tool 消息不应进入注入上下文');
         assert.equal(h.count, 4);
         // 当前消息已在末尾：不重复补入
-        h = bh(session, 10, '第二条');
+        h = bh(session, 1000, '第二条');
         assert.equal(h.count, 3);
         assert.ok(!h.text.includes('第三条'), '当前消息已在末尾时不应重复补入');
-        // 条数限制：最近 count 条 + 当前消息兜底
-        h = bh(session, 2, '第三条');
-        assert.equal(h.count, 3);
-        assert.ok(!h.text.includes('第一条'), '超出条数限制的历史不应注入');
+        // token 预算收紧：从最新往前取，早期历史被裁掉（不再是条数限制）
+        h = bh(session, 8, '第三条');
+        assert.ok(!h.text.includes('第一条'), '超出 token 预算的早期历史不应注入');
+        assert.ok(h.text.includes('[user] 第二条'), '最新历史必须保留');
+        // budget <= 0 = 不注入历史，只保留当前消息
+        h = bh(session, 0, '第三条');
+        assert.equal(h.text, '[User] 第三条');
     },
 
     /**
-     * P1-1：judge 历史**体积有上界**——待机群里所有消息在同一条 user 块内时，
-     * 旧实现按"最近 N 条消息"整条渲染会把整个待机块塞进打分 prompt。
+     * P1-1（R2 token 口径）：待机群里所有消息在同一条 user 块内时，按 token 从最新往前累加，
+     * 早期群消息被预算裁掉而不是整块塞进打分 prompt。
      */
     testJudgeHistoryBounded(): void {
-        const origGlobal = TC.boolConfigs['是否开启全局待机'];
-        const origWindow = TC.intConfigs['冷态窗口字数'];
-        TC.boolConfigs['是否开启全局待机'] = false;
-        TC.intConfigs['冷态窗口字数'] = 5000;
-        resetConfigCache();
-        try {
-            const session = new Session();
-            session.sessionId = 'QQ:judge-bounded';
-            session.sessionType = 'group';
-            session.setting.aiEnabled = true;
-            // 单条 user 块内含 100 条群消息（>20000 字）：待机群的典型形态
-            const items = [];
-            for (let i = 0; i < 100; i++) {
-                items.push({ text: `第${i}条群消息内容${'填充'.repeat(40)}`, time: 1000 + i, userId: 'QQ:1', messageId: `j${i}` });
-            }
-            session.context.messages = [{ role: 'user', contentItems: items }] as any;
-
-            const h = (JudgeManager as any).buildHistory(session, 10, '当前待评判消息');
-            const limit = 5000 * 1.1;
-            assert.ok(h.text.length <= limit, `judge 历史应受窗口字数限制：实际 ${h.text.length} > ${limit}`);
-            assert.ok(h.text.includes('当前待评判消息'), '当前待评判消息必须保留（最后一条）');
-        } finally {
-            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
-            if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
-            resetConfigCache();
+        const session = new Session();
+        session.sessionId = 'QQ:judge-bounded';
+        session.sessionType = 'group';
+        session.setting.aiEnabled = true;
+        // 单条 user 块内含 100 条群消息（>20000 字）：待机群的典型形态
+        const items = [];
+        for (let i = 0; i < 100; i++) {
+            items.push({ text: `第${i}条群消息内容${'填充'.repeat(40)}`, time: 1000 + i, userId: 'QQ:1', messageId: `j${i}` });
         }
+        session.context.messages = [{ role: 'user', contentItems: items }] as any;
+
+        const h = (JudgeManager as any).buildHistory(session, 1500, '当前待评判消息');
+        const used = estimateTextTokens(h.text);
+        assert.ok(used <= 1500 * 1.2, `judge 历史应受 token 预算约束：实际 ${used} > ${1500 * 1.2}`);
+        assert.ok(h.text.includes('当前待评判消息'), '当前待评判消息必须保留（最后一条）');
+        assert.ok(h.text.includes('第99条'), '最新群消息应保留');
+        assert.ok(!h.text.includes('第0条群消息'), '早期群消息应被 token 预算裁掉');
     },
 
-    /** P1-1 兜底：即使折叠被绕过（超大单条被"窗口优先"保留），head 硬截断仍保证上界 */
+    /** P1-1 兜底（R2 token 口径）：超大单条自身超预算时按 token 中段截断，仍保证有界 */
     testJudgeHistoryHardTruncated(): void {
-        const origGlobal = TC.boolConfigs['是否开启全局待机'];
-        const origWindow = TC.intConfigs['冷态窗口字数'];
-        TC.boolConfigs['是否开启全局待机'] = false;
-        TC.intConfigs['冷态窗口字数'] = 1000;
-        resetConfigCache();
-        try {
-            const session = new Session();
-            session.sessionId = 'QQ:judge-trunc';
-            session.sessionType = 'group';
-            session.setting.aiEnabled = true;
-            session.context.messages = [
-                { role: 'user', contentItems: [{ text: '巨'.repeat(50000), time: 1, userId: 'QQ:1', messageId: 'big' }] },
-            ] as any;
-            const h = (JudgeManager as any).buildHistory(session, 10, '');
-            assert.ok(h.text.length <= 1000 * 1.1, `超大单条也必须被硬截断：实际 ${h.text.length}`);
-            assert.ok(h.text.includes('更早内容已省略'), '硬截断应留下省略标记');
-        } finally {
-            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
-            if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
-            resetConfigCache();
-        }
+        const session = new Session();
+        session.sessionId = 'QQ:judge-trunc';
+        session.sessionType = 'group';
+        session.setting.aiEnabled = true;
+        session.context.messages = [
+            { role: 'user', contentItems: [{ text: '巨'.repeat(50000), time: 1, userId: 'QQ:1', messageId: 'big' }] },
+        ] as any;
+        const h = (JudgeManager as any).buildHistory(session, 200, '');
+        const used = estimateTextTokens(h.text);
+        assert.ok(used <= 220, `超大单条也必须被 token 截断：实际 ${used}`);
+        assert.ok(h.text.includes('…'), '中段截断应留下省略标记');
     },
 
-    /** P1-1：非待机会话不折叠（行为与旧实现一致），短上下文原样渲染 */
+    /** 短上下文：token 预算内完整保留并标记 assistant */
     testJudgeHistoryNonStandbyUnchanged(): void {
-        const origGlobal = TC.boolConfigs['是否开启全局待机'];
-        TC.boolConfigs['是否开启全局待机'] = false;
-        resetConfigCache();
-        try {
-            const session = new Session();
-            session.sessionId = 'QQ:judge-hot';
-            session.sessionType = 'user';
-            session.setting.aiEnabled = false;   // 非待机
-            session.context.messages = [
-                { role: 'user', contentItems: [{ text: '热态消息一', time: 1, userId: 'QQ:1', messageId: 'h1' }] },
-                { role: 'assistant', contentItems: [{ text: '热态回复', time: 2, messageId: '' }] },
-            ] as any;
-            const h = (JudgeManager as any).buildHistory(session, 10, '新消息');
-            assert.ok(h.text.includes('热态消息一'), '非待机会话应正常包含历史');
-            assert.ok(h.text.includes('[AI] 热态回复'), 'assistant 应标记 [AI]');
-            assert.ok(h.text.includes('新消息'), '当前消息应补入');
-            assert.ok(!h.text.includes('compacted into a summary'), '非待机会话不应产生折叠摘要');
-        } finally {
-            if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
-            resetConfigCache();
-        }
+        const session = new Session();
+        session.sessionId = 'QQ:judge-hot';
+        session.sessionType = 'user';
+        session.setting.aiEnabled = false;   // 非待机
+        session.context.messages = [
+            { role: 'user', contentItems: [{ text: '热态消息一', time: 1, userId: 'QQ:1', messageId: 'h1' }] },
+            { role: 'assistant', contentItems: [{ text: '热态回复', time: 2, messageId: '' }] },
+        ] as any;
+        const h = (JudgeManager as any).buildHistory(session, 1500, '新消息');
+        assert.ok(h.text.includes('热态消息一'), '短上下文应完整包含历史');
+        assert.ok(h.text.includes('[AI] 热态回复'), 'assistant 应标记 [AI]');
+        assert.ok(h.text.includes('新消息'), '当前消息应补入');
     },
 
     /** 评分触发参数（TOML v2）：空/非法/旧版 → 判定不可用；部分覆盖并入默认；合法 v2 生效 */
@@ -5924,7 +5909,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.SCORING.speak_threshold, 0.8);
         assert.equal(cfg.SCORING.wait_cooldown, 30, 'TOML 覆盖 wait_cooldown 应生效');
         assert.equal(cfg.SCORING.ignore_threshold, 0.35, '未覆盖键用默认');
-        assert.equal(cfg.DECISION.shadow, true, 'v2 默认 shadow=true（R1 行为不变）');
+        assert.equal(cfg.DECISION.shadow, false, 'R2 默认 shadow=false（新内核驱动动作）');
         assert.equal(cfg.WEIGHTS.addressed, 4, '未配置段应并入默认权重');
         assert.equal(cfg.ENERGY.initial, 100);
         assert.equal(cfg.GATE.max_calls_per_hour, 30);
@@ -6006,66 +5991,143 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** evaluate 端到端：高分 SPEAK 直接插话（扣精力）/ 低分进入 WAIT 轮（不插话、注册轮末定时器） */
+    /** evaluate 端到端（R2 切流）：新内核 decision 驱动 SPEAK/WAIT/IGNORE；仅 fired 扣精力 */
     async testJudgeEvaluateBranches(): Promise<void> {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
-        // 缩短评分超时，避免 withTimeout 的兜底定时器拖慢测试
-        TC.stringConfigs['评分触发参数'] = 'version = 2\n[model]\ntimeout_sec = 0.001';
+        // 关闭预筛（保证分支测试一定进入模型），缩短评分超时
+        TC.stringConfigs['评分触发参数'] = 'version = 2\n[gate]\nprefilter_threshold = 0\nmin_interval_sec = 0\n[model]\ntimeout_sec = 0.001';
         resetConfigCache();
         const cfg = (Config as any).trigger.JUDGE;
         const chatReasons: string[] = [];
-        const mkSession = (sid: string) => ({
+        const mkSession = (sid: string, outcome: string = 'fired') => ({
             sessionId: sid,
             context: { timer: null, messages: [] },
             running: false,
             starting: false,
-            chat: async (_ctx: any, _msg: any, reason: string) => { chatReasons.push(reason); }
+            chat: async (_ctx: any, _msg: any, reason: string) => { chatReasons.push(reason); return outcome; }
+        });
+        const sixDim = (decision: string) => JSON.stringify({
+            dims: { addressed: 0.9, help_signal: 0.5, relevance: 0.6, friendships: 0.2, silence_gap: 0.1, interruption_risk: 0.1 },
+            decision,
+            confidence: 'high',
+            reason: decision,
         });
         const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
         let judgeWaitTimers = 0;
         (TimerManager as any).addJudgeWaitTimer = () => { judgeWaitTimers++; };
         try {
-            // SPEAK：高分直接插话
-            (Agent as any).agentMap['judge_agent'] = {
-                chatMessages: async () => JSON.stringify({ relevance: 10, willingness: 10, social: 10, timing: 10, continuity: 10, reason: '高相关' })
-            };
-            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-speak'), '点名');
+            // SPEAK：模型 decision=SPEAK 且 S >= floor ⇒ 插话并扣精力
+            (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => sixDim('SPEAK') };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-speak'), '点名', { addressed: true });
             assert.deepEqual(chatReasons, ['评分触发'], 'SPEAK 分支应以评分触发发起会话');
-            const speakState = (JudgeManager as any).states.get('eval-speak');
-            assert.equal(speakState.energy, 100 - cfg.ENERGY.reply_cost, 'SPEAK 插话成功应扣减精力');
+            let state = (JudgeManager as any).states.get('eval-speak');
+            assert.equal(state.energy, 100 - cfg.ENERGY.reply_cost, 'SPEAK 起轮成功应扣减精力');
 
-            // WAIT：低于 speak_threshold 进入 WAIT 轮，不直接插话，注册轮末定时器
-            (Agent as any).agentMap['judge_agent'] = {
-                chatMessages: async () => JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' })
-            };
-            const waitSession = mkSession('eval-wait');
-            await (JudgeManager as any).evaluate(makeCtx(), {}, waitSession, '普通消息');
-            const waitState = (JudgeManager as any).states.get('eval-wait');
-            assert.ok(waitState, 'WAIT 分支应保留状态');
-            assert.ok(waitState.waitUntil > fakeNow, 'WAIT 分支应进入 WAIT 轮');
-            assert.ok(waitState.waitUntil <= fakeNow + cfg.SCORING.wait_cooldown * 1000, 'WAIT 轮截止应为 now + wait_cooldown');
-            assert.equal(waitState.pending, null, 'WAIT 轮开始时无挂起消息');
-            assert.deepEqual(chatReasons, ['评分触发'], 'WAIT 分支不应直接插话');
-            assert.equal(waitState.energy, 100, 'WAIT 未插话不扣精力');
+            // SPEAK 但 chat 未真正起轮（bucket-empty）⇒ 不扣精力（C6/A1 修复）
+            chatReasons.length = 0;
+            (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => sixDim('SPEAK') };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-speak-nofire', 'bucket-empty'), '点名', { addressed: true });
+            state = (JudgeManager as any).states.get('eval-speak-nofire');
+            assert.equal(state.energy, 100, '未 fired 不应扣精力');
+            assert.deepEqual(chatReasons, ['评分触发'], 'chat 仍被调用一次');
+
+            // WAIT：模型 decision=WAIT ⇒ 进入 WAIT 轮、不插话、注册轮末定时器
+            (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => sixDim('WAIT') };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-wait'), '普通消息', { addressed: true });
+            state = (JudgeManager as any).states.get('eval-wait');
+            assert.ok(state.waitUntil > fakeNow, 'WAIT 分支应进入 WAIT 轮');
+            assert.equal(state.pending, null, 'WAIT 轮开始时无挂起消息');
+            assert.equal(state.energy, 100, 'WAIT 未插话不扣精力');
             assert.equal(judgeWaitTimers, 1, 'WAIT 分支应注册轮末定时器');
 
-            // 低分同样进入 WAIT（无 IGNORE 级别）：不插话、不扣精力
-            (Agent as any).agentMap['judge_agent'] = {
-                chatMessages: async () => JSON.stringify({ relevance: 0, willingness: 0, social: 0, timing: 0, continuity: 0, reason: '无关' })
-            };
-            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-wait-low'), '广告');
-            const lowState = (JudgeManager as any).states.get('eval-wait-low');
-            assert.ok(lowState && lowState.waitUntil > fakeNow, '低分也应进入 WAIT 轮');
-            assert.deepEqual(chatReasons, ['评分触发'], '低分不应插话');
-            assert.equal(judgeWaitTimers, 2, '低分也应注册轮末定时器');
+            // IGNORE：短冷却、不进入 WAIT 轮、不插话
+            (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => sixDim('IGNORE') };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-ignore'), '广告', { addressed: false });
+            state = (JudgeManager as any).states.get('eval-ignore');
+            assert.ok(state.ignoreUntil > fakeNow, 'IGNORE 应设置短冷却');
+            assert.equal(state.waitUntil, 0, 'IGNORE 不进入 WAIT 轮');
+            assert.equal(judgeWaitTimers, 1, 'IGNORE 不注册新 WAIT 定时器');
+            // 冷却内普通消息跳过（不调模型）
+            let callsAfterIgnore = 0;
+            (Agent as any).agentMap['judge_agent'] = { chatMessages: async () => { callsAfterIgnore++; return sixDim('IGNORE'); } };
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-ignore'), '再来一条', { addressed: false });
+            assert.equal(callsAfterIgnore, 0, 'IGNORE 冷却内非 Addressed 消息应跳过模型');
+            // Addressed 可绕过冷却
+            await (JudgeManager as any).evaluate(makeCtx(), {}, mkSession('eval-ignore'), '@bot 在吗', { addressed: true });
+            assert.equal(callsAfterIgnore, 1, 'Addressed 应绕过 IGNORE 冷却');
         } finally {
             Date.now = origNow;
             (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession('eval-speak');
+            (JudgeManager as any).clearSession('eval-speak-nofire');
             (JudgeManager as any).clearSession('eval-wait');
-            (JudgeManager as any).clearSession('eval-wait-low');
+            (JudgeManager as any).clearSession('eval-ignore');
+            delete (Agent as any).agentMap['judge_agent'];
+            delete TC.stringConfigs['评分触发参数'];
+            resetConfigCache();
+        }
+    },
+
+    /** 预筛：明显不该说话的候选不调 LLM；Addressed 永远放行（不误伤 @/点名） */
+    async testJudgePrefilterSkipsLlm(): Promise<void> {
+        TC.stringConfigs['评分触发参数'] = 'version = 2\n[gate]\nprefilter_threshold = 0.5';
+        resetConfigCache();
+        let calls = 0;
+        (Agent as any).agentMap['judge_agent'] = {
+            chatMessages: async () => {
+                calls++;
+                return JSON.stringify({
+                    dims: { addressed: 0.9, help_signal: 0.5, relevance: 0.6, friendships: 0.2, silence_gap: 0.1, interruption_risk: 0.1 },
+                    decision: 'WAIT', confidence: 'high', reason: 'wait',
+                });
+            },
+        };
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        (TimerManager as any).addJudgeWaitTimer = () => { };
+        try {
+            const session = makeJudgeSession('eval-prefilter');
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '今天天气不错', { addressed: false });
+            assert.equal(calls, 0, '零 LLM 预筛命中时不应调用模型');
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '骰娘 今天天气不错', { addressed: true });
+            assert.equal(calls, 1, 'Addressed 应跳过预筛并调用模型');
+        } finally {
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
+            (JudgeManager as any).clearSession('eval-prefilter');
+            delete (Agent as any).agentMap['judge_agent'];
+            delete TC.stringConfigs['评分触发参数'];
+            resetConfigCache();
+        }
+    },
+
+    /** 调用预算：令牌桶用尽后不再调 LLM（cost 已发生，失败也扣） */
+    async testJudgeCallBudget(): Promise<void> {
+        TC.stringConfigs['评分触发参数'] = 'version = 2\n[gate]\nprefilter_threshold = 0\nmin_interval_sec = 0\ncall_burst = 1\nmax_calls_per_hour = 0\n[scoring]\nwait_cooldown = 0';
+        resetConfigCache();
+        let calls = 0;
+        (Agent as any).agentMap['judge_agent'] = {
+            chatMessages: async () => {
+                calls++;
+                return JSON.stringify({
+                    dims: { addressed: 0.9, help_signal: 0.5, relevance: 0.6, friendships: 0.2, silence_gap: 0.1, interruption_risk: 0.1 },
+                    decision: 'WAIT', confidence: 'high', reason: 'wait',
+                });
+            },
+        };
+        const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
+        (TimerManager as any).addJudgeWaitTimer = () => { };
+        try {
+            const session = makeJudgeSession('eval-budget');
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '第一条', { addressed: true });
+            assert.equal(calls, 1, '首次调用应扣 1 个令牌');
+            await (JudgeManager as any).evaluate(makeCtx(), {}, session, '第二条', { addressed: true });
+            assert.equal(calls, 1, '预算用尽后应跳过 LLM');
+            const state = (JudgeManager as any).states.get('eval-budget');
+            assert.equal(state.calls.used, 1, '本小时使用计数应为 1');
+        } finally {
+            (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
+            (JudgeManager as any).clearSession('eval-budget');
             delete (Agent as any).agentMap['judge_agent'];
             delete TC.stringConfigs['评分触发参数'];
             resetConfigCache();
@@ -6077,9 +6139,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
+        // 关闭预筛，保证轮末重评真正进入模型（分支语义测试）
+        TC.stringConfigs['评分触发参数'] = 'version = 2\n[gate]\nprefilter_threshold = 0\n[model]\ntimeout_sec = 0.001';
+        resetConfigCache();
         let llmCalls = 0;
         (Agent as any).agentMap['judge_agent'] = {
-            chatMessages: async () => { llmCalls++; return JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' }); }
+            chatMessages: async () => {
+                llmCalls++;
+                return JSON.stringify({
+                    dims: { addressed: 0.5, help_signal: 0.2, relevance: 0.3, friendships: 0.1, silence_gap: 0.1, interruption_risk: 0.1 },
+                    decision: 'WAIT', confidence: 'high', reason: '中',
+                });
+            }
         };
         const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
         (TimerManager as any).addJudgeWaitTimer = () => { };
@@ -6123,6 +6194,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession(sid);
             delete (Agent as any).agentMap['judge_agent'];
+            delete TC.stringConfigs['评分触发参数'];
             resetConfigCache();
         }
     },
@@ -6159,9 +6231,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
+        // 关闭预筛，保证补跑重评进入模型
+        TC.stringConfigs['评分触发参数'] = 'version = 2\n[gate]\nprefilter_threshold = 0\n[model]\ntimeout_sec = 0.001';
+        resetConfigCache();
         let llmCalls = 0;
         (Agent as any).agentMap['judge_agent'] = {
-            chatMessages: async () => { llmCalls++; return JSON.stringify({ relevance: 5, willingness: 5, social: 5, timing: 5, continuity: 5, reason: '中' }); }
+            chatMessages: async () => {
+                llmCalls++;
+                return JSON.stringify({
+                    dims: { addressed: 0.5, help_signal: 0.2, relevance: 0.3, friendships: 0.1, silence_gap: 0.1, interruption_risk: 0.1 },
+                    decision: 'WAIT', confidence: 'high', reason: '中',
+                });
+            }
         };
         const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
         (TimerManager as any).addJudgeWaitTimer = () => { };
@@ -6186,6 +6267,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession(sid);
             delete (Agent as any).agentMap['judge_agent'];
+            delete TC.stringConfigs['评分触发参数'];
             resetConfigCache();
         }
     },
@@ -8916,7 +8998,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 公开会话快照渲染：保留 msg_id/from/img，跳过 system/工具，轮数与字数上限 */
+    /** 公开会话快照渲染：保留 msg_id/from/img，跳过 system/工具，token 预算从最新往前取 */
     testPubSnapshotRenderer(): void {
         const msgs: any[] = [
             {
@@ -8942,7 +9024,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             },
         ];
         const resolve = (uid: string) => (uid === 'QQ:10001' ? '小明' : '');
-        const out = renderPubSnapshot(msgs, { rounds: 6, chars: 8000 }, resolve);
+        const out = renderPubSnapshot(msgs, { tokens: 8000 }, resolve);
         assert.ok(out, '快照应有内容');
         assert.ok(out!.includes('[msg_id:aaa]'), '应保留 msg_id');
         assert.ok(out!.includes('[from:小明(10001)]'), '应渲染 from 名字(QQ号)');
@@ -8953,17 +9035,23 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(!out!.includes('xxx进群'), '系统名义条目内容不应出现');
         assert.ok(!out!.includes('工具返回'), '工具返回不应出现');
 
-        // 轮数限制：rounds=1 只取最近一轮
-        const one = renderPubSnapshot(msgs, { rounds: 1, chars: 8000 }, resolve);
-        assert.ok(one!.includes('长消息'), '最新一轮应包含');
-        assert.ok(!one!.includes('晚上好'), '旧轮不应包含');
+        // token 预算从最新往前取：tokens=20 装不下最新块 → 最新块必留、更旧消息不选
+        const one = renderPubSnapshot(msgs, { tokens: 20 }, resolve);
+        assert.ok(one!.includes('长消息'), '最新消息应包含');
+        assert.ok(!one!.includes('晚上好'), '旧消息不应包含');
 
-        // 字数截断（渲染层最小截断 500 字 + 英文截断标记）
-        const tiny = renderPubSnapshot(msgs, { rounds: 6, chars: 150 }, resolve);
-        const truncatedMark = '[snapshot truncated: exceeded 500 chars; call again with a larger rounds/chars for more]';
-        assert.ok(tiny!.endsWith(truncatedMark), `超长应截断并注明: ${tiny!.slice(-120)}`);
-        // 截断正文 500 字 + 标记前换行 + 标记本体
-        assert.ok(tiny!.length <= 500 + 1 + truncatedMark.length, '截断后长度受控');
+        // 最新块自身超预算：按 token 截断并给标记（不再有 500 字下限）
+        const tiny = renderPubSnapshot(msgs, { tokens: 200 }, resolve);
+        assert.ok(tiny!.includes('[snapshot truncated: exceeded 200 tokens'), `超长应截断并注明: ${tiny!.slice(-120)}`);
+        assert.ok(!tiny!.includes('晚上好'), '截断后不应回退去展示更旧消息');
+
+        // tokens=0：不返回内容（0 = 不读取，不是「无限」）
+        assert.equal(renderPubSnapshot(msgs, { tokens: 0 }, resolve), null);
+
+        // 旧参数 rounds/chars 兼容一版：接受但忽略，结果与缺省一致（不报错）
+        const legacy = renderPubSnapshot(msgs, { rounds: 6, chars: 8000 } as any, resolve);
+        const defaults = renderPubSnapshot(msgs, {}, resolve);
+        assert.equal(legacy, defaults, '旧参数 rounds/chars 应被忽略（仅兼容一版）');
     },
 
     /** .ai pub 子命令：list / add（本会话）/ rm（无参=本会话，带过滤=按平台/bot/会话删） */
@@ -9147,6 +9235,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 // 私聊条目：无权限限制，任意调用者可读
                 out = await pubRead.solve(makeCtx(0), {} as any, {} as any, { session: priv.id });
                 assert.ok(out.includes('[cross-session read-only snapshot]'), '私聊快照应可读（无权限限制）: ' + out);
+
+                // tokens 参数：预算足够时仍返回快照；旧 rounds/chars 接受但忽略（不报错）
+                out = await pubRead.solve(makeCtx(), {} as any, {} as any, { session: other.id, tokens: 3000 });
+                assert.ok(out.includes('测试内容'), 'tokens 参数应正常返回快照: ' + out);
+                out = await pubRead.solve(makeCtx(), {} as any, {} as any, { session: other.id, rounds: 2, chars: 8000 });
+                assert.ok(out.includes('测试内容'), '旧 rounds/chars 应被接受（忽略）而非报错: ' + out);
 
                 // 路径直读（不在目录中的会话）：给出 botId/sid 即可读
                 out = await pubRead.solve(makeCtx(), {} as any, {} as any, { session: 'QQ:10000/QQ-Group:7777' });

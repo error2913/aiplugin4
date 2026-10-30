@@ -7,6 +7,11 @@ export interface AuxLlm {
     chat(agentName: string, prompt: string): Promise<string>;
     /** 多轮消息推理（对应 Agent.chatMessages(messages)） */
     chatMessages(agentName: string, messages: { role: string; content: string }[]): Promise<string>;
+    /**
+     * 指定用途是否已配置可用模型（判定降级用：未配置 ⇒ 纯规则保守发言）。
+     * 可选方法：测试桩/裁剪场景未实现时视为「有模型」，保持既有桩语义。
+     */
+    hasModel?(agentName: string): Promise<boolean>;
 }
 
 let impl: AuxLlm | null = null;

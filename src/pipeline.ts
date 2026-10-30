@@ -5,6 +5,7 @@ import { CQ_TYPES_ALLOW } from "./config/static_config";
 import type { EventView } from "./event/trigger";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
+import { decisionSchedule } from "./pipeline/decision_schedule";
 import { consumeDependencyTombstone, deleteCoreMessageState, filterOb11SupplementSegments, getCoreMessageState, getMessageKey, markCoreMessageRecorded, markDependencyFullRecorded, rememberCoreMessageByKey, waitForCoreEvent } from "./pipeline/dedup";
 import { resolveEndpointId } from "./pipeline/endpoint";
 import { hasChainEventRules } from "./pipeline/event_ingress";
@@ -417,9 +418,25 @@ export class MessagePipeline {
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
                         }
 
-                        // 6) 评分触发（M3 接新内核；当前仍走旧 JudgeManager）
+                        // 6) 评分触发（R2 切流）：先落盘（外层 save），再去抖评估（fire-and-forget）。
+                        //    去抖/在飞/pending 合并由决策调度（L4）负责；判定内核（L2）只做决策与副作用。
                         if (setting.judge) {
-                            await JudgeManager.evaluate(ctx, msg, session, messageText);
+                            const judgeCfg = Config.trigger.JUDGE;
+                            const addressed = detectBotMention(messageArray, ctx);
+                            const strongHelp = /(求助|帮我|帮忙|求问|请问)/.test(messageText);
+                            decisionSchedule.scheduleMessage({
+                                session,
+                                ctx,
+                                msg,
+                                text: messageText,
+                                source: 'message',
+                                addressed,
+                                senderId: uid,
+                            }, {
+                                debounceMs: Math.max(0, judgeCfg.GATE.debounce_sec * 1000),
+                                maxMs: Math.max(0, judgeCfg.GATE.debounce_max_sec * 1000),
+                                bypass: addressed || strongHelp,
+                            });
                         }
                     })
                     .then(() => session.save(true));   // 合并写：开启 AI 的群每条消息都会走到这里
@@ -501,3 +518,13 @@ export class MessagePipeline {
         }
     }
 }
+
+// R2 治理装配：决策调度（L4）到期/在飞结束后进入判定内核（L2）。回调注册在 L4 模块加载时完成，
+// 避免 judge（L2）反向依赖 pipeline（L4）；未注册时调度器不产生任何回调（测试/裁剪场景安全）。
+decisionSchedule.setHandler(async (candidate) => {
+    await JudgeManager.evaluate(candidate.ctx, candidate.msg, candidate.session, candidate.text, {
+        source: candidate.source || 'message',
+        addressed: candidate.addressed === true,
+        senderId: candidate.senderId,
+    });
+});

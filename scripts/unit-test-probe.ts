@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 
 import Config from '../src/config/config';
-import { JudgeManager } from '../src/judge/judge_manager';
 import { claimTable } from '../src/pipeline/claim_table';
+import { decisionSchedule } from '../src/pipeline/decision_schedule';
 import { cancelAllProbes, noteProbeActivity, probeInfo, setProbeSchedulerForTest } from '../src/pipeline/probe';
 import { Session } from '../src/session/session';
 
@@ -68,8 +68,9 @@ export const tests = {
         const fake = fakeScheduler();
         setProbeSchedulerForTest(fake.scheduler);
         const called: string[] = [];
-        const origEvaluate = JudgeManager.evaluate;
-        (JudgeManager as unknown as { evaluate: (ctx: unknown, msg: unknown, session: unknown, text: string) => Promise<void> }).evaluate = async (_ctx, _msg, _session, text) => { called.push(text); };
+        // R2：探针与消息/轮末共用决策调度入口（在飞去重），测试桩改为记录 requestNow 候选
+        const origRequestNow = decisionSchedule.requestNow;
+        (decisionSchedule as unknown as { requestNow: (candidate: { text: string }) => void }).requestNow = (candidate) => { called.push(candidate.text); };
         try {
             const session = makeSession('QQ-Group:p-on');
             const ctx = makeCtx();
@@ -93,7 +94,7 @@ export const tests = {
             assert.equal(called[0], '有人吗');
         } finally {
             Date.now = origNow;
-            (JudgeManager as unknown as { evaluate: typeof JudgeManager.evaluate }).evaluate = origEvaluate;
+            (decisionSchedule as unknown as { requestNow: typeof decisionSchedule.requestNow }).requestNow = origRequestNow;
             cancelAllProbes();
             setProbeSchedulerForTest(null);
         }
