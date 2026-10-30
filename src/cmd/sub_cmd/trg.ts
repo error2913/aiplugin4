@@ -84,7 +84,7 @@ function allModesOff(session: Session): string {
     return '全部单触发模式已关闭（链规则未动；规则请用 .ai trg rule）';
 }
 
-function toggleMode(session: Session, mode: ModeMeta, enable: boolean, args: string[]): string {
+function toggleMode(session: Session, mode: ModeMeta, enable: boolean, args: string[], ctx?: seal.MsgContext): string {
     const setting = session.setting;
     const sid = session.sessionId;
     switch (mode.token) {
@@ -94,6 +94,7 @@ function toggleMode(session: Session, mode: ModeMeta, enable: boolean, args: str
             if (enable && Config.trigger.ACTIVE_TIME_SEGMENTS.length === 0) {
                 return '活跃时间模式已开启，但「触发活跃时间」为空，不会触发；请先在配置页填写时段。';
             }
+            if (enable && ctx) session.checkActiveTimer(ctx);
             return `活跃时间模式：${enable ? '开' : '关'}`;
         case 'at':
             setting.atTrigger = enable;
@@ -316,6 +317,6 @@ judge 评分 / prob 概率 / regex 正则 / timer 定时器
         const action = (args[1] || '').toLowerCase();
         if (action !== 'on' && action !== 'off') return reply(`用法：.ai trg ${mode.token} on|off`);
         if (action === 'on' && !session.setting.aiEnabled) return reply('请先 .ai on 打开 AI 总闸');
-        return reply(toggleMode(session, mode, action === 'on', args.slice(2)));
+        return reply(toggleMode(session, mode, action === 'on', args.slice(2), ctx));
     };
 }

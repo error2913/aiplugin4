@@ -21,6 +21,7 @@ import { requestLimiter } from "../utils/concurrency";
 import { TypeDescriptor } from "../utils/revive";
 import type { MessageSegment } from "../utils/string";
 import { normalizeRenderTags } from "../utils/string";
+import { nextActivePoint } from "../utils/time_window";
 import { createStopEvent, fireStopEvent, StopEvent } from "../utils/timeout";
 
 import Group from "./group";
@@ -353,6 +354,11 @@ export class Session {
         writePendingRecord(this.sessionId, null);
     }
 
+    /** 全局「触发活跃时间」多段（M4 active 模式；配置读取留在 Session 层，timer 不依赖 config） */
+    getActiveTimeSegments() {
+        return Config.trigger.ACTIVE_TIME_SEGMENTS;
+    }
+
     get curActiveTimeSegIndex(): number {
         return activeTimeSegmentIndex(this.setting.activeTimeInfo);
     }
@@ -361,16 +367,27 @@ export class Session {
         return nextActiveTimePoint(this.setting.activeTimeInfo, curSegIndex, Date.now());
     }
 
+    /**
+     * 确保持有活跃时间定时器（每次消息/指令入口调用，幂等）：
+     * - 新语义（M4）：`setting.activeMode` + 全局「触发活跃时间」多段 → 下一子段/下一段起点；
+     * - 旧语义兼容：旧存档的 `activeTimeInfo`（单段）仍可用。
+     */
     checkActiveTimer(ctx: seal.MsgContext) {
+        if (TimerManager.getTimers(this.sessionId, '', ['activeTime']).length > 0) return;
+        if (this.setting.activeMode) {
+            const segments = Config.trigger.ACTIVE_TIME_SEGMENTS;
+            if (segments.length === 0) return;
+            const next = nextActivePoint(segments, Date.now());
+            if (next !== -1) TimerManager.addActiveTimeTimer(ctx, this, next);
+            else log.error('active time timer add failed');
+            return;
+        }
         const { segs, start, end } = this.setting.activeTimeInfo;
         if (segs !== 0 && (start !== 0 || end !== 0)) {
-            const timers = TimerManager.getTimers(this.sessionId, '', ['activeTime']);
-            if (timers.length === 0) {
-                const curSegIndex = this.curActiveTimeSegIndex;
-                const nextTimePoint = this.getNextTimePoint(curSegIndex);
-                if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
-                else log.error('active time timer add failed');
-            }
+            const curSegIndex = this.curActiveTimeSegIndex;
+            const nextTimePoint = this.getNextTimePoint(curSegIndex);
+            if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
+            else log.error('active time timer add failed');
         }
     }
 

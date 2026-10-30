@@ -10,10 +10,12 @@ import {
 import type { RuleTimerSpec, RuleTimerTarget } from "./core/ports/trigger_timer";
 import { logger } from "./logger";
 import type { Session } from "./session/session";
+import { wakeSession } from "./trigger/wake";
 import { SYSTEM_NAME } from "./utils/protocol";
 import { revive, TypeDescriptor } from "./utils/revive";
 import { applyLastMessageRef, getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
+import { activeSegmentIndex, nextActivePoint } from "./utils/time_window";
 import { pickPrompt } from "./utils/timer_spec";
 
 
@@ -428,6 +430,24 @@ Prompt: ${pickPrompt(timer.prompts) || content}`;
                             const session = getSessionById(sid);
                             applyLastMessageRef(session, ctx, msg);
 
+                            // 新语义（M4）：activeMode + 全局「触发活跃时间」多段；
+                            // 驱动规则：到点后若在窗口内则起轮，并总是排下一个子段/下一段起点。
+                            if (session.setting.activeMode) {
+                                const segments = session.getActiveTimeSegments();
+                                const nowMs = Date.now();
+                                const curIndex = activeSegmentIndex(segments, new Date(nowMs));
+                                const nextPoint = nextActivePoint(segments, nowMs);
+                                removeTimer(timer);
+                                if (nextPoint !== -1) this.addActiveTimeTimer(ctx, session, nextPoint);
+                                if (curIndex < 0) {
+                                    log.info(`${sid} 不在活跃时段内，跳过本次 activeTime 触发（下次 ${fmtDate(nextPoint)}）`);
+                                    break;
+                                }
+                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '活跃时间', raw: { mode: 'active' } });
+                                break;
+                            }
+
+                            // 旧语义（兼容旧存档的 activeTimeInfo 单段配置）
                             const curSegIndex = session.curActiveTimeSegIndex;
                             const nextTimePoint = session.getNextTimePoint(curSegIndex);
                             if (curSegIndex === -1) {
