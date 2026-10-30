@@ -68,17 +68,22 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             const session = await makeSession('QQ:bridge-ok');
             resetContextBridgeCursor(session);
-            // 记忆桥单次 collect 最多读 12000 字符（约 4000 token），这里多收集几轮越过 6000 token 水位
+            // 记忆桥按 token 控量（MAX_PENDING_TOKENS=40000 / MAX_CHUNK_TOKENS=4000）：
+            // 多收集几轮越过 6000 token 记忆水位
             collectContextBacklog(session);
             collectContextBacklog(session);
             const consumed = await consumeContextV2(session);
             assert.ok(consumed > 0);
-            assert.equal(calls, 1);
             assert.ok(consumedThrough(session) >= 1);
-            assert.equal(await consumeContextV2(session), 0, '水位已推进，无新事件不重复消费');
+            assert.ok(calls >= 1, '至少沉淀一块');
+            // 单块 4000 token 不一定清空 pending（总 ~18k token）：继续消费直到低于水位，
+            // 验证 pending 消费语义而不是依赖「一次 collect 的字符量」
+            while (await consumeContextV2(session) > 0) { /* drain */ }
+            const callsAfterDrain = calls;
+            assert.ok(callsAfterDrain >= 1);
             resetContextRuntime(session);
             assert.equal(await consumeContextV2(session), 0, '重载后从持久化进度继续，不重复沉淀');
-            assert.equal(calls, 1);
+            assert.equal(calls, callsAfterDrain, '重载后不得额外沉淀');
         } finally {
             (MemoryManager as any).summarizeChunkWithRetry = original;
         }
@@ -119,15 +124,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         collectContextBacklog(session);
         const pendingAgain = peekExtractionChunk(session, true);
         assert.ok(pendingAgain && pendingAgain.text.includes('记忆桥消息'), '重载后 pending 仍在');
-        commitExtraction(session, chunk!.throughSeq, chunk!.textLength);
-        assert.ok(consumedThrough(session) >= 1, 'commit 推进 consumed');
-        // 大文本一次只读一部分：循环提交剩余块，直到 pending 清空
-        let left = peekExtractionChunk(session, true);
+        // token 口径（单块 4000 token）下，一块可能小于一条超长事件：此时 commit 只移除已抽取
+        // 文本，consumed 要等整条事件消费完才推进（否则会丢未抽取部分）。循环提交直到 pending 清空。
+        let left: ReturnType<typeof peekExtractionChunk> = chunk!;
+        let commits = 0;
         while (left) {
             commitExtraction(session, left.throughSeq, left.textLength);
+            commits++;
             left = peekExtractionChunk(session, true);
         }
         assert.equal(left, null, '提交后无剩余 pending');
+        assert.ok(commits > 1, '超长事件应分多块提交');
+        assert.ok(consumedThrough(session) >= 1, '全部提交后 consumed 应推进');
     },
 
     async testContextBridgeSchedulerEndToEnd() {
@@ -145,7 +153,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             const session = await makeSession('QQ:bridge-e2e');
             resetContextBridgeCursor(session);
-            // 单次 collect 约 4000 token；多收集两轮越过 6000 token 的记忆水位
+            // collect 按 token 控量（单块 4000 token）；多收集两轮越过 6000 token 记忆水位
             collectContextBacklog(session);
             collectContextBacklog(session);
             MemoryScheduler.onRunEnd(session);

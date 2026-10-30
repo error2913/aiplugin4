@@ -4,14 +4,18 @@
 // 旧实现按「最近 N 条消息」取，而待机群里所有群聊消息可能合并在同一条 user 消息内，
 // 条数口径会失控。这里改成 token 口径：从最新往前累加，装不下就截断。
 //
-// 约定：
+// 约定（与 utils/token_select 的通用口径一致）：
 // - budget <= 0 → 返回空（0 = 不注入历史，不是「无限」）；
 // - 返回顺序与入参一致（旧→新），便于拼接渲染；
 // - alwaysKeepLatest（默认 true）：budget > 0 但最新一条自身超预算时仍保留它，避免判定
 //   「瞎看历史」；需要严格预算的调用方传 false（judge/prompt 的历史区即传 false，因为当前
 //   候选消息由独立字段保证注入）；
 // - estimate 可注入；缺省按 `utils/token_estimate.estimateTextTokens` 估算字符串或 `{text}`。
+//
+// 实现已下沉到 `utils/token_select`（全插件统一的选择纯函数）；本文件只保留判定侧的默认
+// 估算器与既有导出签名，避免调用点/单测因重构改动。
 import { estimateTextTokens } from '../utils/token_estimate';
+import { selectByTokenBudget } from '../utils/token_select';
 
 /** 选择选项 */
 export interface SelectHistoryOptions {
@@ -42,31 +46,5 @@ export function selectHistoryByTokens<T>(
     estimate: (item: T) => number = defaultEstimate as (item: T) => number,
     options: SelectHistoryOptions = {},
 ): T[] {
-    const safeBudget = Number.isFinite(budget) ? budget : 0;
-    if (safeBudget <= 0 || !Array.isArray(items) || items.length === 0) return [];
-    const safeEstimate = (item: T): number => {
-        let value = 0;
-        try {
-            value = estimate(item);
-        } catch (_e) {
-            value = 0;
-        }
-        return Number.isFinite(value) && value > 0 ? value : 0;
-    };
-    const alwaysKeepLatest = options.alwaysKeepLatest !== false;
-    const picked: T[] = [];
-    let used = 0;
-    for (let i = items.length - 1; i >= 0; i--) {
-        const item = items[i];
-        const cost = safeEstimate(item);
-        if (used + cost <= safeBudget) {
-            picked.push(item);
-            used += cost;
-            continue;
-        }
-        // 超预算：一条都还没选时，按 alwaysKeepLatest 决定是否保留最新一条；否则直接截断
-        if (picked.length === 0 && alwaysKeepLatest) picked.push(item);
-        break;
-    }
-    return picked.reverse();
+    return selectByTokenBudget(items, estimate, budget, { alwaysKeepLatest: options.alwaysKeepLatest !== false });
 }

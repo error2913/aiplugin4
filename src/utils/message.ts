@@ -391,6 +391,12 @@ export function renderFoldBudget(session: Session, messages: ContextMessage[]): 
  *
  * @param maxCharsOverride 显式预算；不传则自动按会话推导
  */
+/**
+ * 旧辅助历史兜底窗口（字符）——**legacy 回退专用**：
+ * 仅当 `renderWindowedHistory` 拿不到 session 折叠预算时的旧回退路径使用；
+ * judge 新动作路径（R2 切流后）不再依赖它（方案 §11.2 B8）。
+ * 本常量不纳入 token 范围化（字符窗口是显式标注的 legacy 回退边界），不要新增调用。
+ */
 export const AUX_HISTORY_FALLBACK_CHARS = 5000;
 export const AUX_HISTORY_OMIT_MARK = PROTOCOL_AUX_HISTORY_OMIT_MARK;
 

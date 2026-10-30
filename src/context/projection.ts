@@ -4,11 +4,13 @@
 // 仍按 `Context.messages`（旧 MessageType[]）读取的消费者，在 P2-P3 迁移期间读这里。
 // 规则：
 // - 只读：返回深度冻结的数组/对象；任何 mutate 都应被视为 bug；
-// - 有界：从最新单元往前按字符预算选择，最新单元必留；工具组整组保留；
+// - 有界：从最新单元往前按 **token 预算**选择，最新单元必留；工具组整组保留；
+//   `maxChars` 仅为旧调用保留的兼容/安全上限（方案 §11.2 B1：字符不再是主口径）；
 // - 应用可见性/编辑（epoch/redact/supersede/edit），不注入摘要（投影是渲染窗口，不是请求体）；
 // - 非文本 Part 用规范文本投影（[img:…]/[at:…]）表示，保持旧消费者可读；
 // - 真实原文回查走 recall（e:<seq>），不在这里塞 rawText。
 import { SYSTEM_NAME } from "../utils/protocol";
+import { estimateTextTokens } from "../utils/token_estimate";
 
 import { renderText } from "./content/render";
 import type { ConversationEvent, Part } from "./events";
@@ -27,16 +29,29 @@ import { applyEdit, applyVisibility, buildRecordIndex } from "./view/records";
 import { ConversationUnit, segmentUnits } from "./view/units";
 
 export interface ProjectionOptions {
-    /** 最多保留多少个可选单元（从新到旧）；缺省 40 */
+    /**
+     * 主口径：token 预算（从最新单元往前累加，装不下就停）。
+     * 缺省 6000；<=0 = 只保留最新单元（不是「无限」）。
+     */
+    maxTokens?: number;
+    /**
+     * 单元数安全上限（从新到旧）；缺省 200。
+     * 注意：这是「安全上限」不是范围口径，范围由 maxTokens 决定。
+     */
     maxUnits?: number;
-    /** 最多保留多少字符（按规范文本投影计）；缺省 20000 */
+    /**
+     * @deprecated 字符上限（按规范文本投影计），仅为旧调用兼容保留：
+     * 传入时与 maxTokens 同时生效（先到先停）；不传 = 不设字符上限。
+     */
     maxChars?: number;
     /** 是否深度冻结（默认 true；旧消费者过渡期可传 false 保持可变） */
     freeze?: boolean;
 }
 
-const DEFAULT_MAX_UNITS = 40;
-const DEFAULT_MAX_CHARS = 20000;
+/** 投影 token 主口径默认值（方案 §11.2 B1） */
+export const DEFAULT_PROJECTION_MAX_TOKENS = 6000;
+/** 单元数安全上限默认值（不是范围口径，只防碎片/空单元无界增长） */
+export const DEFAULT_PROJECTION_MAX_UNITS = 200;
 
 function partsText(parts: readonly Part[]): string {
     return renderText(parts as Part[]);
@@ -47,6 +62,16 @@ function unitChars(unit: ConversationUnit, index: ReturnType<typeof buildRecordI
     for (const event of unit.events) {
         total += partsText(applyEdit(event, index)).length;
         if (event.kind === 'tool_call') total += String((event as { args?: string }).args ?? '').length;
+    }
+    return total;
+}
+
+/** 单元 token 估算（与 unitChars 同口径，按 estimateTextTokens 计） */
+function unitTokens(unit: ConversationUnit, index: ReturnType<typeof buildRecordIndex>): number {
+    let total = 0;
+    for (const event of unit.events) {
+        total += estimateTextTokens(partsText(applyEdit(event, index)));
+        if (event.kind === 'tool_call') total += estimateTextTokens(String((event as { args?: string }).args ?? ''));
     }
     return total;
 }
@@ -181,30 +206,41 @@ function deepFreeze<T>(value: T): T {
 }
 
 /**
- * 生成有界只读投影：最新单元必留，从新到旧按 maxUnits/maxChars 选择。
+ * 生成有界只读投影：最新单元必留，从新到旧按 maxTokens 选择（maxUnits 为安全上限，
+ * maxChars 为旧调用兼容上限，同时生效）。
+ * 0 语义：maxTokens <= 0 = 只保留最新单元（不是「无限」）；maxChars <= 0 同理。
  * 返回深度冻结数组；消费者只读。
  */
 export function buildProjection(snapshot: ContextSnapshot, options: ProjectionOptions = {}): MessageType[] {
-    const maxUnits = Math.max(1, Math.floor(options.maxUnits ?? DEFAULT_MAX_UNITS));
-    const maxChars = Math.max(200, Math.floor(options.maxChars ?? DEFAULT_MAX_CHARS));
+    const rawTokens = options.maxTokens === undefined ? DEFAULT_PROJECTION_MAX_TOKENS : Number(options.maxTokens);
+    const maxTokens = Number.isFinite(rawTokens) ? Math.max(0, Math.floor(rawTokens)) : DEFAULT_PROJECTION_MAX_TOKENS;
+    const maxUnits = Math.max(1, Math.floor(options.maxUnits ?? DEFAULT_PROJECTION_MAX_UNITS));
+    const rawChars = options.maxChars === undefined ? Number.POSITIVE_INFINITY : Number(options.maxChars);
+    const maxChars = Number.isFinite(rawChars) ? Math.max(0, Math.floor(rawChars)) : Number.POSITIVE_INFINITY;
 
     const index = buildRecordIndex(snapshot.records);
     const visible = applyVisibility(snapshot.events, index);
     const units = segmentUnits(visible);
 
     const selected: ConversationUnit[] = [];
+    let tokens = 0;
     let chars = 0;
     for (let i = units.length - 1; i >= 0 && selected.length < maxUnits; i--) {
         const unit = units[i];
-        const size = unitChars(unit, index);
+        const sizeTokens = unitTokens(unit, index);
+        const sizeChars = unitChars(unit, index);
         if (selected.length === 0) {
+            // 最新单元必留（即使自身超预算，也至少让消费者看到最新内容）
             selected.push(unit);
-            chars += size;
+            tokens += sizeTokens;
+            chars += sizeChars;
             continue;
         }
-        if (chars + size > maxChars) break;
+        if (tokens + sizeTokens > maxTokens) break;
+        if (chars + sizeChars > maxChars) break;
         selected.push(unit);
-        chars += size;
+        tokens += sizeTokens;
+        chars += sizeChars;
     }
     selected.reverse();
 

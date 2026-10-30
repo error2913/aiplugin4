@@ -99,6 +99,44 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(JSON.stringify(projection).includes('最新消息'));
     },
 
+    /** token 主口径（方案 §11.2 B1）：从最新单元往前按 token 预算选，最新单元必留 */
+    testContextV2ProjectionTokenBudget() {
+        // 交替 user/assistant，保证每条消息各自成单元；每条 ≈ 102 token（2 CJK + 1 digit + 100 CJK）
+        const events: ConversationEvent[] = [];
+        for (let i = 1; i <= 3; i++) {
+            events.push(userEvent(i * 2 - 1, '用户' + i + '字'.repeat(100)));
+            events.push(assistantEvent(i * 2, '助手' + i + '字'.repeat(100)));
+        }
+        const projection = buildProjection(snapshot(events), { maxTokens: 250 });
+        const text = JSON.stringify(projection);
+        assert.ok(text.includes('助手3'), '最新单元必留');
+        assert.ok(text.includes('用户3'), '最新两条应能装进 250 token');
+        assert.ok(!text.includes('助手2'), '更旧单元超出 token 预算应被裁掉');
+        assert.ok(!text.includes('用户1'), '最旧单元不应包含');
+
+        // maxTokens=0：只保留最新单元（0 = 不额外保留，不是「无限」）
+        const onlyLatest = buildProjection(snapshot(events), { maxTokens: 0 });
+        assert.equal(onlyLatest.length, 1, 'maxTokens=0 应只保留最新单元');
+        assert.ok(JSON.stringify(onlyLatest).includes('助手3'));
+
+        // 最新单元自身超预算也必留
+        const huge = [{ seq: 1, eventId: 'u:huge', at: 1, recvAt: 1, kind: 'user' as const, uid: 'QQ:1', msgId: 'huge', parts: [{ type: 'text' as const, text: '巨'.repeat(2000) }] }];
+        const hugeProjection = buildProjection(snapshot(huge), { maxTokens: 10 });
+        assert.equal(hugeProjection.length, 1, '最新单元必留');
+    },
+
+    /** maxChars 作为旧调用兼容上限仍与 token 同时生效（先到先停） */
+    testContextV2ProjectionLegacyMaxCharsStillApplies() {
+        const events: ConversationEvent[] = [
+            userEvent(1, '旧'.repeat(100)),
+            assistantEvent(2, '中'.repeat(100)),
+            userEvent(3, '新'.repeat(100)),
+        ];
+        const projection = buildProjection(snapshot(events), { maxChars: 150 });
+        assert.equal(projection.length, 1, '字符上限应继续生效（最新 100 字 + 次新 100 字超过 150）');
+        assert.ok(JSON.stringify(projection).includes('新'));
+    },
+
     testContextV2ProjectionOrphanResult() {
         const events = [{ seq: 1, eventId: 'tr:orphan', at: 1, recvAt: 1, kind: 'tool_result', turnId: 't', groupId: 'g', callId: 'x', parts: [{ type: 'text', text: '孤儿结果' }] }] as ConversationEvent[];
         const projection = buildProjection(snapshot(events));

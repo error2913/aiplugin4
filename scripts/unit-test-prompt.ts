@@ -5,7 +5,7 @@ import "./test-host";
 
 import Config from "../src/config/config";
 import { assemblePrompt, onPromptAssemble, renderSectionTable, resetPromptHooks } from "../src/prompt/assemble";
-import { buildPromptParts } from "../src/prompt/builder";
+import { buildPromptParts, collectMemoryInput, MEMORY_QUERY_TOKEN_BUDGET } from "../src/prompt/builder";
 import { getPromptMemorySource, setPromptMemorySource } from "../src/prompt/memory_source";
 import { listPromptSections, registerExtensionSection, registerPromptSection, registerPromptSections, resetPromptSections } from "../src/prompt/registry";
 import { registerBuiltinSections } from "../src/prompt/sections";
@@ -14,6 +14,7 @@ import { MEMORY_TAIL_GUARD } from "../src/prompt/texts/en";
 import type { PromptContext, PromptSection } from "../src/prompt/types";
 import { registerAllTools } from "../src/tool/bootstrap";
 import { toolMap } from "../src/tool/registry";
+import { estimateTextTokens } from "../src/utils/token_estimate";
 
 /** Config.registerConfig 只能调用一次（重复定义宿主属性会抛错），多个用例共用一次注册 */
 let configRegistered = false;
@@ -88,7 +89,45 @@ function runWithSections(sections: PromptSection[], fn: () => Promise<void>): Pr
     return fn().finally(() => restoreBuiltinSections());
 }
 
+/** 构造仅含 user 消息的假会话（记忆检索输入只读 context.messages） */
+function makeUserSession(texts: string[]): any {
+    return {
+        context: {
+            messages: texts.map((text, i) => ({
+                role: 'user',
+                contentItems: [{ text, time: i, userId: `QQ:${100 + i}`, messageId: `m${i}` }],
+            })),
+        },
+    };
+}
+
+const MEMORY_TEST_CTX = { isPrivate: true, player: { name: 'tester', userId: 'QQ:1' }, group: undefined } as any;
+
 export const tests: Record<string, () => void | Promise<void>> = {
+    /** 记忆检索输入 token 预算（方案 §11.2 A 组）：从最新 user 条目往前累加，0 = 不检索 */
+    testPromptBuilderMemoryInputTokenBudget() {
+        const texts = Array.from({ length: 8 }, (_, i) => `第${i}条` + '字'.repeat(100));
+        const context = collectMemoryInput(MEMORY_TEST_CTX, makeUserSession(texts));
+        const picked = context.query.split(' ').filter(Boolean);
+        assert.ok(picked.length > 0, '应收集到记忆检索输入');
+        assert.ok(estimateTextTokens(context.query) <= MEMORY_QUERY_TOKEN_BUDGET, `query 应在 token 预算内（实际 ${estimateTextTokens(context.query)}）`);
+        assert.ok(context.query.includes('第7条'), '最新一条应包含');
+        assert.ok(!context.query.includes('第0条'), '超出预算的最旧条目不应包含');
+        assert.equal(context.users.length, picked.length, 'users 只来自被选中的条目');
+        assert.ok(picked[picked.length - 1].includes('第7条'), 'query 保持旧→新顺序（末尾是最新条目）');
+
+        // 0 语义：不收集任何文本（不检索），不退化成「最近 N 条」
+        const zero = collectMemoryInput(MEMORY_TEST_CTX, makeUserSession(texts), 0);
+        assert.equal(zero.query, '', 'budget=0 应得到空 query');
+        assert.deepEqual(zero.users, [], 'budget=0 不应收集 users');
+
+        // 最新单条自身超预算：仍保留最新内容，但 query 按 token 预算中段收口
+        const huge = '巨'.repeat(MEMORY_QUERY_TOKEN_BUDGET * 3);
+        const big = collectMemoryInput(MEMORY_TEST_CTX, makeUserSession([huge]));
+        assert.ok(big.query.length > 0 && big.query.length < huge.length, '超长单条应被截断');
+        assert.ok(estimateTextTokens(big.query) <= MEMORY_QUERY_TOKEN_BUDGET + 8, '截断后 query 仍应在预算附近');
+    },
+
     /** 内置段注册齐全且命名符合 core:/tool: 约定 */
     testBuiltinSectionsRegistered(): void {
         restoreBuiltinSections();

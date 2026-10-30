@@ -22,23 +22,37 @@ import {
 import type { ParsedContextRef, ResolveKindParam } from "../../../context/resolve";
 import { parseReadCursor } from "../../../context/tool_api";
 import { buildRecordIndex, isVisible } from "../../../context/view/records";
+import { logger } from "../../../logger";
 import { MemoryService } from "../../../memory/service";
 import { resolveSpecialRef } from "../../../resource/resolve";
 import type { Session } from "../../../session/session";
 import User from "../../../session/user";
 import { fmtDate } from "../../../utils/string";
 import { getPlatform, normalizeUserId } from "../../../utils/target_id";
+import { truncateToTokenBudget } from "../../../utils/token_budget";
+import { estimateTextTokens } from "../../../utils/token_estimate";
 import Tool from "../../tool";
 import { candidateMemoryBanks, resolveBank } from "../memory/shared";
 
-const DEFAULT_MAX_CHARS = 4000;
-const MIN_MAX_CHARS = 500;
-const MAX_MAX_CHARS = 12000;
+const DEFAULT_MAX_TOKENS = 4000;
+const MIN_MAX_TOKENS = 500;
+const MAX_MAX_TOKENS = 12000;
+/** 事件条数上限：非消息计数（不分页/不是范围口径），保留 */
 const MAX_EVENT_ITEMS = 20;
+/**
+ * 旧参数 max_chars 的兼容映射（方案 §11.2 B4）：1 token ≈ 3 字符（与旧 `length / 3` 口径一致）。
+ * readRaw 本身仍是字符分页 API（非消息范围，本次不改），token 预算换算字符上限也用它。
+ */
+const LEGACY_CHARS_PER_TOKEN = 3;
+
+const log = logger.withTag('tool-resolve');
 
 interface ResolveArgs {
     ref?: unknown;
     kind?: unknown;
+    /** 主口径：返回内容的 token 预算 */
+    max_tokens?: unknown;
+    /** @deprecated 旧字符上限：接受一版并按 3 字符/token 映射为 max_tokens（WARN），下一版删除 */
     max_chars?: unknown;
     cursor?: unknown;
     scope?: unknown;
@@ -55,18 +69,17 @@ function stringArg(value: unknown): string {
     return String(value ?? '').trim();
 }
 
-function truncate(text: string, max: number): { text: string; truncated: boolean } {
-    const value = String(text ?? '');
-    if (value.length <= max) return { text: value, truncated: false };
-    return { text: value.slice(0, max), truncated: true };
+/** token 预算 → readRaw 字符上限（readRaw 是字符分页 API，非消息范围口径） */
+function tokenBudgetToCharCap(maxTokens: number): number {
+    return Math.max(1, Math.floor(Math.max(0, maxTokens) * LEGACY_CHARS_PER_TOKEN));
 }
 
 function errorText(code: string, message: string, hint?: string): string {
     return resolveError(code, message, hint);
 }
 
-/** 事件分支：e:/msg_id/read_raw 指针 */
-function resolveEvent(session: Session, parsed: ParsedContextRef, maxChars: number, cursorRaw: unknown): string {
+/** 事件分支：e:/msg_id/read_raw 指针（maxTokens 为返回内容 token 预算） */
+function resolveEvent(session: Session, parsed: ParsedContextRef, maxTokens: number, cursorRaw: unknown): string {
     const service = session.contextV2;
     if (!service) {
         return errorText('LEGACY_SESSION', 'This session has no v2 context ledger.', 'Use read_raw with legacy kind/id for old sessions.');
@@ -75,7 +88,7 @@ function resolveEvent(session: Session, parsed: ParsedContextRef, maxChars: numb
     if (!address) return errorText('INVALID_REF', 'Missing event address.', 'Use e:<seq>, e:<from>-<to>, or msg_id:<id>.');
     const cursor = typeof cursorRaw === 'string' && cursorRaw.trim() ? parseReadCursor(cursorRaw) : null;
     try {
-        const result = service.readRaw(address, { maxItems: MAX_EVENT_ITEMS, maxChars, cursor });
+        const result = service.readRaw(address, { maxItems: MAX_EVENT_ITEMS, maxChars: tokenBudgetToCharCap(maxTokens), cursor });
         if (result.items.length === 0) {
             return errorText('NOT_FOUND', `No readable event at ${address}.`, result.note || 'The id may be cleaned up, hidden, or from another session.');
         }
@@ -86,8 +99,8 @@ function resolveEvent(session: Session, parsed: ParsedContextRef, maxChars: numb
     }
 }
 
-/** 事件原始数据分支：SystemEvent.raw */
-function resolveEventRaw(session: Session, parsed: ParsedContextRef, maxChars: number): string {
+/** 事件原始数据分支：SystemEvent.raw（maxTokens 为返回内容 token 预算） */
+function resolveEventRaw(session: Session, parsed: ParsedContextRef, maxTokens: number): string {
     const service = session.contextV2;
     if (!service) return errorText('LEGACY_SESSION', 'This session has no v2 context ledger.');
     const seq = parsed.eventSeq;
@@ -121,7 +134,7 @@ function resolveEventRaw(session: Session, parsed: ParsedContextRef, maxChars: n
     } catch {
         return errorText('INVALID_RAW', `Event e:${seq} raw payload is not serializable.`);
     }
-    const cut = truncate(json, maxChars);
+    const cut = truncateToTokenBudget(json, maxTokens, estimateTextTokens);
     const header = resolveHeader('event_raw', {
         ref: `e:${seq}`,
         system: event.systemName,
@@ -132,7 +145,7 @@ function resolveEventRaw(session: Session, parsed: ParsedContextRef, maxChars: n
     return [
         header,
         cut.text,
-        ...(cut.truncated ? [`[note] Truncated at ${maxChars} chars; the full raw JSON may be larger.`] : []),
+        ...(cut.truncated ? [`[note] Truncated near ${maxTokens} tokens; the full raw JSON may be larger (pass a larger max_tokens).`] : []),
         RESOLVE_EXTERNAL_NOTE,
     ].join('\n');
 }
@@ -216,7 +229,7 @@ function findMemory(session: Session, id: string, scope?: string, targetId?: str
     };
 }
 
-function resolveMemory(session: Session, parsed: ParsedContextRef, maxChars: number, scope: string, targetId: string): string {
+function resolveMemory(session: Session, parsed: ParsedContextRef, maxTokens: number, scope: string, targetId: string): string {
     const id = parsed.memoryId;
     if (!id) return errorText('INVALID_REF', 'Missing memory id.', 'Use [mem:<id>] or kind=memory with ref=<id>.');
     let hit: MemoryHit | { error: string; code: 'FORBIDDEN' | 'NOT_FOUND'; hint?: string };
@@ -226,12 +239,12 @@ function resolveMemory(session: Session, parsed: ParsedContextRef, maxChars: num
         return errorText('MEMORY_UNAVAILABLE', error instanceof Error ? error.message : String(error), 'Memory may be disabled or not initialized.');
     }
     if ('error' in hit) return errorText(hit.code, hit.error, hit.hint);
-    const cut = truncate(hit.text, maxChars);
+    const cut = truncateToTokenBudget(hit.text, maxTokens, estimateTextTokens);
     const header = formatMemoryRefHeader(hit.kind, { ...hit.fields, source: 'memory' });
     return [
         header,
         cut.text,
-        ...(cut.truncated ? [`[note] Truncated at ${maxChars} chars; pass a larger max_chars or use memory_recall for a summary.`] : []),
+        ...(cut.truncated ? [`[note] Truncated near ${maxTokens} tokens; pass a larger max_tokens or use memory_recall for a summary.`] : []),
         RESOLVE_EXTERNAL_NOTE,
     ].join('\n');
 }
@@ -247,8 +260,8 @@ function formatSpecialData(kind: string, data: Record<string, unknown>): string 
     return [header, RESOLVE_EXTERNAL_NOTE].join('\n');
 }
 
-/** 内容标签分支：img/avatar/record/video/file/quote/at/poke/forward/resource/face */
-function resolveContentTag(session: Session, parsed: ParsedContextRef, maxChars: number): string {
+/** 内容标签分支：img/avatar/record/video/file/quote/at/poke/forward/resource/face（maxTokens 为返回内容 token 预算） */
+function resolveContentTag(session: Session, parsed: ParsedContextRef, maxTokens: number): string {
     const part = parsed.part;
     if (!part) return errorText('UNSUPPORTED_REF', `Unsupported content tag: ${parsed.raw}`, 'Copy the whole tag, e.g. [img:...] or [record:...]summary[/record].');
 
@@ -292,7 +305,7 @@ function resolveContentTag(session: Session, parsed: ParsedContextRef, maxChars:
             const service = session.contextV2;
             if (service && out.id) {
                 try {
-                    const raw = service.readRaw(out.id, { maxItems: 1, maxChars });
+                    const raw = service.readRaw(out.id, { maxItems: 1, maxChars: tokenBudgetToCharCap(maxTokens) });
                     if (raw.items.length > 0) lines.push(raw.items[0].text);
                 } catch {
                     // 反查原文失败时仍返回 ID，不把解析整体判失败
@@ -337,26 +350,26 @@ function resolveContentTag(session: Session, parsed: ParsedContextRef, maxChars:
     }
 }
 
-function dispatch(session: Session, parsed: ParsedContextRef, args: ResolveArgs, maxChars: number): string {
+function dispatch(session: Session, parsed: ParsedContextRef, args: ResolveArgs, maxTokens: number): string {
     const explicit = parsed.explicitKind;
     // 显式 kind 优先，但内容标签仍走标签分支
     const kind = parsed.part ? parsed.kind : (explicit && parsed.kind === 'unknown' ? explicit : parsed.kind);
     switch (kind) {
         case 'event':
-            return resolveEvent(session, parsed, maxChars, args.cursor);
+            return resolveEvent(session, parsed, maxTokens, args.cursor);
         case 'message':
-            return parsed.part ? resolveContentTag(session, parsed, maxChars) : resolveEvent(session, parsed, maxChars, args.cursor);
+            return parsed.part ? resolveContentTag(session, parsed, maxTokens) : resolveEvent(session, parsed, maxTokens, args.cursor);
         case 'image':
         case 'media':
         case 'resource':
         case 'forward':
         case 'face':
         case 'text':
-            return resolveContentTag(session, parsed, maxChars);
+            return resolveContentTag(session, parsed, maxTokens);
         case 'memory':
-            return resolveMemory(session, parsed, maxChars, stringArg(args.scope), stringArg(args.target_id));
+            return resolveMemory(session, parsed, maxTokens, stringArg(args.scope), stringArg(args.target_id));
         case 'event_raw':
-            return resolveEventRaw(session, parsed, maxChars);
+            return resolveEventRaw(session, parsed, maxTokens);
         default:
             return errorText(
                 parsed.ambiguous ? 'AMBIGUOUS' : 'UNSUPPORTED_REF',
@@ -364,6 +377,24 @@ function dispatch(session: Session, parsed: ParsedContextRef, args: ResolveArgs,
                 parsed.hint || 'Use e:<seq>, msg_id:<id>, [mem:<id>], a read_raw pointer, or a content tag.',
             );
     }
+}
+
+/**
+ * 解析返回内容 token 预算（方案 §11.2 B4）：
+ * - `max_tokens` 是主口径（默认 4000，范围 500-12000）；
+ * - 旧 `max_chars` 接受一版：按 3 字符/token 映射并 WARN（不报错），下一版删除；
+ * - 两者都缺省 → DEFAULT_MAX_TOKENS（0/负数按 MIN 收敛，不退化成条数）。
+ */
+function resolveTokenBudget(args: ResolveArgs): number {
+    const hasTokens = args.max_tokens !== undefined && args.max_tokens !== null && args.max_tokens !== '';
+    if (hasTokens) return intArg(args.max_tokens, DEFAULT_MAX_TOKENS, MIN_MAX_TOKENS, MAX_MAX_TOKENS);
+    const hasChars = args.max_chars !== undefined && args.max_chars !== null && args.max_chars !== '';
+    if (hasChars) {
+        const legacyChars = intArg(args.max_chars, DEFAULT_MAX_TOKENS * LEGACY_CHARS_PER_TOKEN, 1, Number.MAX_SAFE_INTEGER);
+        log.warning('resolve_context_ref 参数 max_chars 已废弃：按 3 字符/token 映射为 max_tokens（请改用 max_tokens，下一版删除）');
+        return Math.max(MIN_MAX_TOKENS, Math.min(MAX_MAX_TOKENS, Math.floor(legacyChars / LEGACY_CHARS_PER_TOKEN)));
+    }
+    return DEFAULT_MAX_TOKENS;
 }
 
 export function registerResolveContextRef() {
@@ -387,9 +418,13 @@ export function registerResolveContextRef() {
                         enum: ['auto', 'event', 'message', 'image', 'media', 'memory', 'event_raw', 'resource', 'forward', 'face'],
                         description: 'Optional explicit type; auto detects from the tag/address. Use it when a bare id is ambiguous.',
                     },
+                    max_tokens: {
+                        type: 'integer',
+                        description: `Optional max tokens of returned content, default ${DEFAULT_MAX_TOKENS}, range ${MIN_MAX_TOKENS}-${MAX_MAX_TOKENS}`,
+                    },
                     max_chars: {
                         type: 'integer',
-                        description: `Optional max characters returned, default ${DEFAULT_MAX_CHARS}, range ${MIN_MAX_CHARS}-${MAX_MAX_CHARS}`,
+                        description: 'Deprecated: ignored as characters and mapped to max_tokens (about 3 chars = 1 token) for one version; use max_tokens instead',
                     },
                     cursor: {
                         type: 'string',
@@ -415,8 +450,8 @@ export function registerResolveContextRef() {
         const raw = stringArg(a.ref);
         if (!raw) return errorText('INVALID_PARAMS', 'ref is required.', 'Copy the tag/pointer from the context.');
         const kindParam = stringArg(a.kind) || 'auto';
-        const maxChars = intArg(a.max_chars, DEFAULT_MAX_CHARS, MIN_MAX_CHARS, MAX_MAX_CHARS);
+        const maxTokens = resolveTokenBudget(a);
         const parsed = parseContextRef(raw, kindParam as ResolveKindParam);
-        return dispatch(session, parsed, a, maxChars);
+        return dispatch(session, parsed, a, maxTokens);
     };
 }

@@ -23,7 +23,7 @@ import { type ConversationEvent, type Part, toolResultEventId } from "./events";
 import { EVENT_PAGE_MAX_SINGLE_EVENT_BYTES, measureEventPageBytes } from "./log/page_store";
 import Message from "./message";
 import { editEventParts } from "./mutations";
-import { buildProjection } from "./projection";
+import { buildProjection, DEFAULT_PROJECTION_MAX_TOKENS, DEFAULT_PROJECTION_MAX_UNITS } from "./projection";
 import { findImage as findImageOf, getGroupById as getGroupByIdOf, getUserById as getUserByIdOf, setName as setNameOf, updateName as updateNameOf, userInfoList as userInfoListOf } from "./roster";
 import { runtimeOf } from "./runtime";
 import type { ContextService } from "./service";
@@ -220,9 +220,11 @@ export class Context {
     get messages(): MessageType[] {
         if (!this.v2Service) return this.legacyMessages;
         if (!this.v2Projection) {
+            // 范围主口径是 token（方案 §11.2 B1）：default 6000 tokens + 最新单元必留；
+            // 旧的 maxChars: 200_000 字符主口径已移除；maxUnits 仅作为安全上限保留。
             this.v2Projection = buildProjection(this.v2Service.snapshot(), {
-                maxUnits: 200,
-                maxChars: 200_000,
+                maxTokens: DEFAULT_PROJECTION_MAX_TOKENS,
+                maxUnits: DEFAULT_PROJECTION_MAX_UNITS,
                 freeze: false,
             });
         }

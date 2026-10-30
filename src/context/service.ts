@@ -188,7 +188,11 @@ export class ContextService {
         return readRaw(this.store, this.store.snapshot(), address, options);
     }
 
-    /** 最近 N 条事件（记忆桥/调试用；只读） */
+    /**
+     * 最近 N 条事件（**调试/诊断专用**，方案 §11.2 A5：条数口径，不是「消息范围」）。
+     * 生产路径已无调用（仅单测/诊断用）；消息范围统一走 projection（token 主口径）。
+     * 保留签名以兼容既有诊断脚本/单测。
+     */
     readRecent(limit = 20): ConversationEvent[] {
         const n = Math.max(0, Math.floor(limit));
         return this.store.snapshot().events.slice(-Math.max(0, n));
@@ -238,7 +242,10 @@ export class ContextService {
         return this.store.flush();
     }
 
-    /** 当前预览（调试/命令用；不落盘） */
+    /**
+     * 当前预览（**调试/命令专用**，方案 §11.2 B2：条数口径，不是「消息范围」）。
+     * 不落盘、不参与 token 预算；如需范围请用 projection（token 主口径）。
+     */
     preview(count = 5): ConversationEvent[] {
         return this.store.snapshot().events.slice(-Math.max(0, count));
     }
