@@ -2,7 +2,7 @@
 import { TypeDescriptor } from "../utils/revive";
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'aiEnabled', 'activeMode', 'atTrigger', 'timerTrigger', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
+    static validKeys: (keyof Setting)[] = ['priv', 'aiEnabled', 'activeMode', 'timerTrigger', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
         // 绝对触发闸：新会话默认关（Q3）；旧存档 standby=true 由 SessionService 迁移
@@ -10,7 +10,6 @@ export class Setting {
         // 会话级活跃时间开关（默认关；全局时段由「触发活跃时间」提供）
         activeMode: 'boolean',
         // 被 @ 触发开关（默认开，R17）
-        atTrigger: 'boolean',
         // timer 单模式开关（配置驱动；默认关）
         timerTrigger: 'boolean',
         counter: 'number',
@@ -25,7 +24,6 @@ export class Setting {
     priv: number;
     aiEnabled: boolean;
     activeMode: boolean;
-    atTrigger: boolean;
     timerTrigger: boolean;
     counter: number;
     timer: number;
@@ -53,7 +51,6 @@ export class Setting {
         // 绝对触发闸：新会话默认关（Q3）；旧存档由 SessionService 迁移 standby=true → true
         this.aiEnabled = false;
         this.activeMode = false;
-        this.atTrigger = true;
         this.timerTrigger = false;
         this.counter = -1;
         this.timer = -1;

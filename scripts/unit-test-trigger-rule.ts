@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 import { GATE_META, pickWakePrompt, ruleMatchesScope, ruleSkipReason, summarizeGates, validateRule } from '../src/trigger/rule';
 import { createGateRuntime, evaluateGates } from '../src/trigger/eval';
+import { MODES, MODE_TOKENS, TRIGGER_CONFIG_KEYS } from '../src/config/static_config/trigger_meta';
 import { validateTimerSpec } from '../src/utils/timer_spec';
 import { activeSegmentIndex, nextActivePoint, parseTimeSegments } from '../src/utils/time_window';
 import { detectBotMention } from '../src/utils/mention';
@@ -192,5 +193,14 @@ export const tests = {
         for (const meta of Object.values(GATE_META)) {
             assert.equal(typeof meta.summary, 'function');
         }
+    },
+    /** 作者修正：@ 触发是触发页配置开关，不再是 `.ai trg` 命令模式 */
+    testAtTriggerIsConfigSwitch(): void {
+        assert.ok(!MODE_TOKENS.includes('at' as never), 'at 不应出现在命令模式 token 里');
+        assert.ok(!MODES.some(mode => mode.token === 'at'), 'at 不应出现在 MODES 里');
+        const key = TRIGGER_CONFIG_KEYS.find(item => item.id === 'atTrigger');
+        assert.ok(key, '触发页必须有 atTrigger 配置键');
+        assert.equal(key!.type, 'boolean');
+        assert.equal(key!.default, true, '默认开启');
     },
 };

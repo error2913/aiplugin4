@@ -5935,6 +5935,19 @@ export const tests: Record<string, () => void | Promise<void>> = {
         resetConfigCache();
     },
 
+    /** 被@触发：触发页配置开关（默认开；关闭后 @ 不再单独触发） */
+    testTriggerAtConfigSwitch(): void {
+        delete TC.boolConfigs['被@触发'];
+        resetConfigCache();
+        assert.equal((Config as any).trigger.AT_TRIGGER, true, '默认应为开');
+        TC.boolConfigs['被@触发'] = false;
+        resetConfigCache();
+        assert.equal((Config as any).trigger.AT_TRIGGER, false, '配置关闭应生效');
+        delete TC.boolConfigs['被@触发'];
+        resetConfigCache();
+        assert.equal((Config as any).trigger.AT_TRIGGER, true, '恢复默认后应为开');
+    },
+
     /** 清理会话 judge 状态：移除内存状态，重复清理不抛错 */
     testJudgeClearSession(): void {
         const sid = 'clear-me';

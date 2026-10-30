@@ -23,8 +23,6 @@ function describeMode(session: Session, mode: ModeMeta): string {
     switch (mode.token) {
         case 'active':
             return setting.activeMode ? '开' : '关';
-        case 'at':
-            return setting.atTrigger ? '开' : '关';
         case 'counter':
             return setting.counter > -1 ? `开(${setting.counter})` : '关';
         case 'delay':
@@ -48,8 +46,9 @@ function describeMode(session: Session, mode: ModeMeta): string {
 }
 
 function overview(session: Session): string {
-    const lines = MODES.map(mode => `${mode.token}${mode.aliases.length && mode.token !== 'at' ? `(${mode.aliases[0]})` : ''} ${mode.label}：${describeMode(session, mode)}`);
-    return `触发模式总览（${session.sessionId}）｜AI 总闸：${session.setting.aiEnabled ? '开' : '关'}\n${lines.join('\n')}\n\n切换：.ai trg <模式> on|off ｜ 规则：.ai trg rule`;
+    const atOn = Config.trigger.AT_TRIGGER ? '开' : '关';
+    const lines = MODES.map(mode => `${mode.token}${mode.aliases.length ? `(${mode.aliases[0]})` : ''} ${mode.label}：${describeMode(session, mode)}`);
+    return `触发模式总览（${session.sessionId}）｜AI 总闸：${session.setting.aiEnabled ? '开' : '关'}｜被@触发（配置页）：${atOn}\n${lines.join('\n')}\n\n切换：.ai trg <模式> on|off ｜ 规则：.ai trg rule`;
 }
 
 /** 解析可选的数值参数（如 `.ai trg counter on 5`） */
@@ -70,7 +69,6 @@ function allModesOff(session: Session): string {
     const setting = session.setting;
     setting.regexTrigger = false;
     setting.eventTrigger = false;
-    setting.atTrigger = false;
     setting.counter = -1;
     setting.timer = -1;
     setting.prob = -1;
@@ -96,9 +94,6 @@ function toggleMode(session: Session, mode: ModeMeta, enable: boolean, args: str
             }
             if (enable && ctx) session.checkActiveTimer(ctx);
             return `活跃时间模式：${enable ? '开' : '关'}`;
-        case 'at':
-            setting.atTrigger = enable;
-            return `@ 触发：${enable ? '开' : '关'}`;
         case 'counter': {
             if (!enable) {
                 setting.counter = -1;
@@ -250,7 +245,7 @@ export function registerCmdTrg() {
     const cmd = new SubCmd('trg');
     cmd.desc = '触发域模式开关/规则/定时器总览';
     cmd.help = `帮助:
-【.ai trg】查看总闸与 9 个单触发模式状态
+【.ai trg】查看总闸与 8 个单触发模式状态（被@触发已改为触发页配置开关）
 【.ai trg <模式>】模式详情
 【.ai trg <模式> on|off [值]】切换单个模式（不含链规则）
 【.ai trg all off】关闭全部单触发（不动链规则）
@@ -262,8 +257,10 @@ export function registerCmdTrg() {
 【.ai trg timer clr】清除手动定时器（规则条目保留）
 
 <模式>（按字母序）:
-active 活跃时间 / at 被@ / counter 计数器 / delay 延迟 / event 事件
+active 活跃时间 / counter 计数器 / delay 延迟 / event 事件
 judge 评分 / prob 概率 / regex 正则 / timer 定时器
+
+「被@触发」在触发页配置（默认开），不在本命令内。
 
 【.ai trg counter on 5】【.ai trg timer on】`;
     cmd.priv = {
@@ -272,7 +269,7 @@ judge 评分 / prob 概率 / regex 正则 / timer 定时器
             rule: { priv: U, args: { lst: { priv: U }, rm: { priv: I }, clr: { priv: I }, set: { priv: I } } },
             timer: { priv: I, args: { lst: { priv: I }, clr: { priv: I } } },
             all: { priv: I },
-            active: { priv: I }, at: { priv: I }, counter: { priv: I }, delay: { priv: I }, event: { priv: I },
+            active: { priv: I }, counter: { priv: I }, delay: { priv: I }, event: { priv: I },
             judge: { priv: I }, prob: { priv: I }, regex: { priv: I },
         },
     };

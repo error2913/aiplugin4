@@ -125,6 +125,8 @@ export default class TriggerConfig {
         seal.ext.registerTemplateConfig(ext, "触发活跃时间", [
             "10:00-20:00-5"
         ], "每框一段活跃时间：HH:mm-HH:mm-次数（时段内最多触发次数）；可多段，示例 09:00-12:00-3；空=不限。修改后即时生效", "触发");
+        // @ 触发开关（R17，作者修正：做成触发页配置开关，不再进 .ai trg 命令）
+        seal.ext.registerBoolConfig(ext, "被@触发", true, "群聊中有人 @ 机器人即直接触发回复（默认开；私聊不触发）。关闭后 @ 不会再单独触发，仍可被正则/其他模式命中", "触发");
         seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "触发");
         seal.ext.registerFloatConfig(ext, "默认计时器", 60, "延迟模式（旧计时器）下最后一条消息后多少秒触发", "触发");
         // 事件触发（v1）：事件先按「事件接收」页的开关/白名单/录入，命中本规则后再触发回复（链事件规则不读本开关）
@@ -154,6 +156,7 @@ export default class TriggerConfig {
             // 兼容旧读法：单条活跃时间字符串；多段请用 ACTIVE_TIME_SEGMENTS
             ACTIVE_TIME: activeTimeList[0] || '',
             ACTIVE_TIME_SEGMENTS: parseTimeSegments(activeTimeList).segments,
+            AT_TRIGGER: seal.ext.getBoolConfig(ext, "被@触发"),
             TRIGGER_REGEX: getRegexConfig(ext, "触发正则表达式"),
             TRIGGER_CONDITION: seal.ext.getStringConfig(ext, "触发需要满足的条件"),
             BUCKET_LIMIT: seal.ext.getIntConfig(ext, "触发次数上限"),

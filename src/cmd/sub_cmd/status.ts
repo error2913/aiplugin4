@@ -80,7 +80,7 @@ export function registerCmdStatus() {
         上下文轮数: ${session.context.messages.filter(m => m.role === 'user').length}
         AI 总闸(aiEnabled): ${setting.aiEnabled ? '开启' : '关闭'}
         非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}
-        @ 触发: ${setting.atTrigger ? '开启' : '关闭'}
+        @ 触发(配置页): ${Config.trigger.AT_TRIGGER ? '开启' : '关闭'}
         事件触发(e): ${setting.eventTrigger ? '开启' : '关闭'}
         计数器模式(c): ${setting.counter > -1 ? `${setting.counter}条` : '关闭'}
         延迟模式(d): ${setting.timer > -1 ? `${setting.timer}秒` : '关闭'}

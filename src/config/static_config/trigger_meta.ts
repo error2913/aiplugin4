@@ -6,10 +6,9 @@
 // 本文件只放数据，不放实现：任何消费者（trigger/modes_meta、configs/trigger、
 // cmd/sub_cmd/trg_modes、Setting 构造默认）都从这里派生。
 
-/** 单触发模式 token（按 token 字母序，即展示顺序） */
+/** 单触发模式 token（按 token 字母序，即展示顺序）。`at` 已改为触发页配置开关，不再是命令模式 */
 export const MODE_TOKENS = [
     'active',
-    'at',
     'counter',
     'delay',
     'event',
@@ -44,6 +43,7 @@ export type TriggerConfigKey =
     | 'bucketLimit'
     | 'bucketFillInterval'
     | 'activeTime'
+    | 'atTrigger'
     | 'counter'
     | 'timer'
     | 'eventRules'
@@ -57,7 +57,7 @@ export interface TriggerConfigKeyMeta {
     /** 海豹配置显示名（注册/读取都用它） */
     name: string;
     /** 海豹配置控件类型 */
-    type: 'string' | 'int' | 'float' | 'template';
+    type: 'string' | 'int' | 'float' | 'template' | 'boolean';
     /** 是否本次新增键（旧版没有） */
     isNew: boolean;
     /** 关联模式（全局键为 null） */
@@ -65,19 +65,20 @@ export interface TriggerConfigKeyMeta {
     /** 生效方式：动态（≤60s）/ 重载（改后需重载 JS） */
     refresh: 'dynamic' | 'reload';
     /** 默认值（仅供文档/单测对照；实际注册值以 configs/trigger.ts 为准） */
-    default: string | number | string[];
+    default: string | number | boolean | string[];
 }
 
 /**
- * 触发页 11 键唯一顺序（注册顺序 = WebUI 顺序）。
- * 3 个全局键前置，其余按模式 token 字母序（active/at/counter/delay/event/judge/prob/regex/timer），
- * `at` 无配置键（纯开关）。
+ * 触发页 12 键唯一顺序（注册顺序 = WebUI 顺序）。
+ * 3 个全局键前置，随后按语义：活跃时间 → **被@触发（开关）** → 其余按模式 token 字母序。
+ * `at` 是配置开关，不是 `.ai trg` 命令模式。
  */
 export const TRIGGER_CONFIG_KEYS: TriggerConfigKeyMeta[] = [
     { id: 'triggerCondition', name: '触发需要满足的条件', type: 'string', isNew: false, mode: null, refresh: 'dynamic', default: '1' },
     { id: 'bucketLimit', name: '触发次数上限', type: 'int', isNew: false, mode: null, refresh: 'dynamic', default: 3 },
     { id: 'bucketFillInterval', name: '触发次数补充间隔', type: 'int', isNew: false, mode: null, refresh: 'dynamic', default: 3 },
     { id: 'activeTime', name: '触发活跃时间', type: 'template', isNew: true, mode: 'active', refresh: 'dynamic', default: [''] },
+    { id: 'atTrigger', name: '被@触发', type: 'boolean', isNew: true, mode: null, refresh: 'dynamic', default: true },
     { id: 'counter', name: '默认计数器', type: 'int', isNew: false, mode: 'counter', refresh: 'dynamic', default: 10 },
     { id: 'timer', name: '默认计时器', type: 'float', isNew: false, mode: 'delay', refresh: 'dynamic', default: 60 },
     { id: 'eventRules', name: '事件触发规则', type: 'string', isNew: false, mode: 'event', refresh: 'reload', default: '{"version":1,"rules":[]}' },
@@ -87,10 +88,9 @@ export const TRIGGER_CONFIG_KEYS: TriggerConfigKeyMeta[] = [
     { id: 'timerToml', name: '默认定时器', type: 'string', isNew: true, mode: 'timer', refresh: 'dynamic', default: '' },
 ];
 
-/** 单触发模式元数据（顺序 = MODE_TOKENS） */
+/** 单触发模式元数据（顺序 = MODE_TOKENS；at 已改为配置开关，不在此列表） */
 export const MODES: ModeMeta[] = [
     { token: 'active', aliases: ['a'], label: '活跃时间', kind: 'toggle', gateSupported: true, configKey: 'activeTime', desc: '全局活跃时段内自动触发（会话需开启 activeMode）' },
-    { token: 'at', aliases: ['@'], label: '被@触发', kind: 'toggle', gateSupported: false, configKey: null, desc: '群聊中有人 @ 机器人即触发（默认开启）' },
     { token: 'counter', aliases: ['c'], label: '计数器', kind: 'valued', gateSupported: true, configKey: 'counter', desc: '累计消息数达到阈值触发' },
     { token: 'delay', aliases: ['d'], label: '延迟', kind: 'valued', gateSupported: true, configKey: 'timer', desc: '最后一条消息后静默 N 秒触发（原计时器）' },
     { token: 'event', aliases: ['e'], label: '事件', kind: 'toggle', gateSupported: true, configKey: 'eventRules', desc: '事件触发规则（v1 JSON）' },

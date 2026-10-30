@@ -354,8 +354,8 @@ export class MessagePipeline {
                             log.exception('门控链规则求值出错（已跳过）', e);
                         }
 
-                        // 2) @ 触发（R17：第 9 个单触发模式；默认开，私聊不触发）
-                        if (setting.atTrigger && detectBotMention(messageArray, ctx)) {
+                        // 2) @ 触发（R17：触发页「被@触发」开关，默认开；私聊不触发）
+                        if (Config.trigger.AT_TRIGGER && detectBotMention(messageArray, ctx)) {
                             await wakeSession(session, ctx, msg, { kind: 'mode', reason: '@', raw: { mode: 'at' } });
                             return;
                         }
