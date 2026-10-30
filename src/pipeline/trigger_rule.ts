@@ -5,13 +5,14 @@
 // - 只有 wake 返回 fired 才提交 fired++/lastFiredAt；counter 计数增量随求值持久化；
 // - 消息路径用认领表保证一条消息最多一个触发对象（链规则之间、链与判定之间）；
 // - 自主源（timer 到点）经 runChain({ruleId, sourceSatisfied:true}) 复用同一求值/起轮路径。
-import { EVENT_TRIGGER_KNOWN_EVENTS, matchEventTrigger } from "../event/trigger";
+import { matchEventTrigger } from "../event/trigger";
 import type { EventView } from "../event/trigger";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
 import type { ChatOutcome } from "../session/session";
-import { createGateRuntime, evaluateGates, GATE_META, PendingDelays, pickWakePrompt, ruleMatchesScope, ruleSkipReason, ruleWakePrompts, TriggerRuleStore } from "../trigger";
+import { createGateRuntime, evaluateGates, GATE_META, PendingDelays, pickWakePrompt, ruleMatchesScope, ruleSkipReason, ruleWakePrompts } from "../trigger";
 import type { Gate, GateInput, RuleStateShard, TriggerRule } from "../trigger";
+import { getRuleStore, pendingDelays, resetTriggerRuntimeForTest } from "../trigger/runtime";
 import { applyLastMessageRef } from "../utils/seal";
 
 import { claimTable, messageClaimKey } from "./claim_table";
@@ -49,23 +50,18 @@ export interface ChainResult {
     ruleId?: string;
 }
 
-let storeInstance: TriggerRuleStore | null = null;
-export function getRuleStore(): TriggerRuleStore {
-    if (!storeInstance) {
-        storeInstance = new TriggerRuleStore({ knownEvents: EVENT_TRIGGER_KNOWN_EVENTS });
-    }
-    return storeInstance;
-}
+/** 规则库/挂起槽单例来自 L2 runtime（工具/命令/编排共享；L4 只再导出保持调用点不变） */
+export { getRuleStore } from "../trigger/runtime";
 
-const pending = new PendingDelays<{ session: Session; ctx: seal.MsgContext; msg: seal.Message }>();
+/** delay 挂起槽（本编排使用的 payload 形状；runtime 单例为 unknown 泛型） */
+const pending = pendingDelays as PendingDelays<{ session: Session; ctx: seal.MsgContext; msg: seal.Message }>;
 export function getPendingDelays() {
     return pending;
 }
 
 /** 仅测试：重置单例（规则库 + 挂起槽） */
 export function resetTriggerRuleStateForTest(): void {
-    storeInstance = null;
-    pending.clear();
+    resetTriggerRuntimeForTest();
 }
 
 function stateOf(rule: TriggerRule, sessionId: string): RuleStateShard {

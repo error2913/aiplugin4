@@ -9878,10 +9878,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const builtin = Object.keys(toolMap).filter(n => !toolMap[n].group);
         const missing = builtin.filter(n => !toolMap[n].category);
         assert.deepEqual(missing, [], `内置工具必须打上分类（缺: ${missing.join('、')}）`);
-        assert.equal(builtin.length, 61, `内置工具数应为 61（新增 resolve_context_ref），实际 ${builtin.length}`);
+        assert.equal(builtin.length, 64, `内置工具数应为 64（新增 resolve_context_ref + 触发规则三件套），实际 ${builtin.length}`);
 
         const byCategory: { [k: string]: string[] } = {};
         for (const n of builtin) (byCategory[Tool.categoryOf(toolMap[n])] = byCategory[Tool.categoryOf(toolMap[n])] || []).push(n);
+        assert.equal(byCategory['Triggers'].length, 4, `Triggers 应有 4 个: ${byCategory['Triggers']}`);
         assert.equal(byCategory['Dispatch'].length, 4, `Dispatch 应有 4 个: ${byCategory['Dispatch']}`);
         assert.ok(byCategory['Dispatch'].includes('list_tools') && byCategory['Dispatch'].includes('call_tool'), '调度组应含 list_tools/call_tool');
         assert.equal(byCategory['Memory'].length, 7, `Memory 应有 7 个: ${byCategory['Memory']}`);

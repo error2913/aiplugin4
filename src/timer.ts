@@ -186,6 +186,17 @@ export class TimerManager {
         return this.timerQueue.filter(timer => !!timer.ruleId && (ruleId === undefined || timer.ruleId === ruleId));
     }
 
+    /** 清除手动 set_timer 条目（ruleId 为空且非 activeTime/judgeWait）；返回删除数量并立即落盘 */
+    static clearManualTimers(): number {
+        const before = this.timerQueue.length;
+        this.timerQueue = this.timerQueue.filter(timer =>
+            !!timer.ruleId || timer.type === 'activeTime' || timer.type === 'judgeWait',
+        );
+        const removed = before - this.timerQueue.length;
+        if (removed > 0) this.saveTimerQueue();
+        return removed;
+    }
+
     static addActiveTimeTimer(ctx: seal.MsgContext, session: Session, target: number) {
         const uid = ctx.player!.userId;
         const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
