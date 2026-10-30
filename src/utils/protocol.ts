@@ -169,6 +169,8 @@ export const SYSTEM_NAME = {
     eventTrigger: 'event-trigger',
     /** 事件缺省兜底 */
     event: 'event',
+    /** 触发域统一提示（链规则/单模式/自主源/探针/判定，raw.kind 区分来源） */
+    triggerRule: 'trigger-rule',
 } as const;
 
 export type SystemName = typeof SYSTEM_NAME[keyof typeof SYSTEM_NAME];

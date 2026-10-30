@@ -53,6 +53,7 @@ const bundles = {
     aux: path.join(outDir, 'unit-aux.cjs'),
     triggerStore: path.join(outDir, 'unit-trigger-store.cjs'),
     claimTable: path.join(outDir, 'unit-claim-table.cjs'),
+    chatOutcome: path.join(outDir, 'unit-chat-outcome.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -101,7 +102,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['judgeDecision', path.join(repo, 'scripts/unit-test-judge-decision.ts')],
         ['aux', path.join(repo, 'scripts/unit-test-aux.ts')],
         ['triggerStore', path.join(repo, 'scripts/unit-test-trigger-store.ts')],
-        ['claimTable', path.join(repo, 'scripts/unit-test-claim-table.ts')]
+        ['claimTable', path.join(repo, 'scripts/unit-test-claim-table.ts')],
+        ['chatOutcome', path.join(repo, 'scripts/unit-test-chat-outcome.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

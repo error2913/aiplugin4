@@ -237,19 +237,20 @@ export default class Agent {
      * 标准智能体编排：构建消息 → 请求模型 → 执行工具调用（函数调用/提示词工程）→ 回填上下文 →
      * 循环直到模型给出最终回复（工具轮数由「允许连续调用函数次数」配置控制，0 为不限制），最后统一拆分并发送回复。
      */
-    async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
+    async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<boolean> {
         // 启动前捕获 stopVersion：.ai stop 发生在排队期间或拿到许可瞬间都会因版本变化而中止
         const version = session.stopVersion;
         // 同会话闸门：已有 run 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
-        if (session.running || session.starting) return;
+        if (session.running || session.starting) return false;
         session.starting = true;
         let acquired = false;
+        let started = false;
         try {
             // 首轮对话前等待模型列表预热完成（连接拉取失败已按连接降级，不会阻塞）
             await Model.ensureLoaded();
             acquired = await requestLimiter.acquire(session.sessionId);
-            if (!acquired) return;
-            if (session.stopVersion !== version) return;
+            if (!acquired) return false;
+            if (session.stopVersion !== version) return false;
             // 新一轮 run 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
             resetStopEvent(session.stopEvent);
             session.running = true;
@@ -259,10 +260,12 @@ export default class Agent {
             session.aiTriggeredAt = Math.floor(Date.now() / 1000);
             MemoryScheduler.onRunStart(session);
             session.activeRuns++;
+            // started=true 表示本轮确实起轮（用于 chat 的 ChatOutcome 记账，避免"假 SPEAK 扣精力"）
+            started = true;
             await this.runInternal(session, ctx, msg, tool_choice);
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
-            if (e instanceof StopError) return;
+            if (e instanceof StopError) return started;
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -281,6 +284,7 @@ export default class Agent {
             if (acquired) MemoryScheduler.onRunEnd(session);
             if (acquired) this.scheduleContextCompaction(session);
         }
+        return started;
     }
 
     /** 链结束后处理挂起队列：先全部入库（记录类不续跑），若含触发类且未被 stop 则用第一条串行再起一轮 */
@@ -623,20 +627,21 @@ export default class Agent {
 
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
-    async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<boolean> {
         const version = session.stopVersion;
         // 模型分类错误自动处理的 run 级状态（runInternal 同款：每类动作单次 run 至多一次）
         const handled = newModelErrorHandled();
         // 同会话闸门：已有 run/runStream 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
-        if (session.running || session.starting) return;
+        if (session.running || session.starting) return false;
         session.starting = true;
         let acquired = false;
+        let started = false;
         try {
             // 首轮对话前等待模型列表预热完成
             await Model.ensureLoaded();
             acquired = await requestLimiter.acquire(session.sessionId);
-            if (!acquired) return;
-            if (session.stopVersion !== version) return;
+            if (!acquired) return false;
+            if (session.stopVersion !== version) return false;
             // 新一轮 runStream 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
             resetStopEvent(session.stopEvent);
             session.running = true;
@@ -646,10 +651,12 @@ export default class Agent {
             session.aiTriggeredAt = Math.floor(Date.now() / 1000);
             MemoryScheduler.onRunStart(session);
             session.activeRuns++;
+            // started=true 表示本轮确实起轮（用于 chat 的 ChatOutcome 记账）
+            started = true;
             await this.runStreamInner(session, ctx, msg, undefined, handled);
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
-            if (e instanceof StopError) return;
+            if (e instanceof StopError) return started;
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -668,6 +675,7 @@ export default class Agent {
             if (acquired) MemoryScheduler.onRunEnd(session);
             if (acquired) this.scheduleContextCompaction(session);
         }
+        return started;
     }
 
     private async runStreamInner(

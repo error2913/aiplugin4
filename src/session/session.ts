@@ -35,6 +35,15 @@ import User from "./user";
 
 const log = logger.withTag('session');
 
+/**
+ * 起轮结果（C6 统一契约）：
+ * - fired：真正起了一轮（run/runStream 返回 started=true）
+ * - deferred：会话忙/未真正起轮（已退还令牌；调用方可挂起后重试）
+ * - bucket-empty：令牌桶空，未起轮（不扣桶、不记账）
+ * - gated：aiEnabled=false 且调用方未 bypassGate（外部 API/送达可显式 bypass）
+ */
+export type ChatOutcome = 'fired' | 'deferred' | 'bucket-empty' | 'gated';
+
 // 兼容旧引用：这些符号从 session.ts 拆到叶子模块后仍可继续从本文件 import（内部实现请直接引用叶子）
 export { Setting } from "./setting";
 export { COLD_AFTER_MS, COOL_DOWN_MS, HOT_HOLD_MS, SessionTemperature } from "./rhythm";
@@ -420,11 +429,17 @@ export class Session {
      *        非主动搭话的场景（如媒体生成完成唤醒）。注意与旧有的 `reason === '函数回调触发'`
      *        不同：那条豁免只跳过检查、仍会扣减令牌，此处保持原样不动。
      */
-    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean } = {}): Promise<void> {
+    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean; bypassGate?: boolean } = {}): Promise<ChatOutcome> {
         this.lastCtx = ctx;
         // 冷热状态的"相关活动"：任何一次起一轮对话（@/触发命中/结果送达/定时任务）都算，普通消息入库不算
         this.lastRelevantAt = Date.now();
         log.info('trigger reply:', reason || 'unknown');
+
+        // C6：绝对闸（外部 API/结果送达可显式 bypassGate）。会话忙/未真正起轮由 started 判定并退还令牌。
+        if (!options.bypassGate && !this.setting.aiEnabled) {
+            log.info('ai disabled, skip reply:', reason || 'unknown');
+            return 'gated';
+        }
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
         this.migrateStoredTags();
@@ -439,7 +454,7 @@ export class Session {
             }
             if (this.bucket.count <= 0) {
                 log.warning('bucket empty, skip reply');
-                return;
+                return 'bucket-empty';
             }
         }
 
@@ -451,12 +466,6 @@ export class Session {
         this.resetState();
         if (!skipBucket) this.bucket.count--;
 
-        // 评分触发：仅当评分触发开启时，无论以何种方式触发会话，都起一轮 WAIT 作为冷却（不扣精力）；
-        // 未开启评分时不创建 judgeWait 定时器，避免非指令/其他模式回复也残留评分轮末定时器
-        if (this.setting.judge) {
-            JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
-        }
-
         const model = Model.getChatModel('chat');
         // 是否流式由「chat 用途」规则模板 body 里的 stream=true 决定（v4：模型不再自带 body，读用途组模板）
         const chatStream = (Model.getBodyDefaultsFor('chat') as any).stream === true;
@@ -466,22 +475,36 @@ export class Session {
             log.warning(`anthropic-messages 协议（${model!.name}）暂不支持流式输出，已自动切换为非流式`);
         }
         if (model && chatStream && !isAnthropic) {
-            await this.chatStream(ctx, msg);
+            const started = await this.chatStream(ctx, msg);
+            if (!started) {
+                if (!skipBucket) this.bucket.count++;
+                return 'deferred';
+            }
             this.save();
-            return;
+            // 评分触发：真正起轮后才记一轮 WAIT 冷却（C6：未起轮不记）
+            if (this.setting.judge) JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
+            return 'fired';
         }
 
         // 对话与工具调用编排统一由智能体 run() 处理（构建消息 → 模型 → 工具执行 → 回填 → 最终回复）
-        await this.agent.run(this, ctx, msg, tool_choice);
+        const started = await this.agent.run(this, ctx, msg, tool_choice);
+        if (!started) {
+            // 假起轮（会话忙/并发队列未取到/被 stop）：退还令牌，交调用方决定是否挂起
+            if (!skipBucket) this.bucket.count++;
+            return 'deferred';
+        }
         this.save();
+        // 评分触发：真正起轮后才记一轮 WAIT 冷却（不扣精力）
+        if (this.setting.judge) JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
+        return 'fired';
     }
 
-    async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<boolean> {
         this.lastCtx = ctx;
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等）
         this.migrateStoredTags();
-        // 流式编排统一由智能体 runStream() 处理
-        await this.agent.runStream(this, ctx, msg);
+        // 流式编排统一由智能体 runStream() 处理；返回是否真正起轮（ChatOutcome 记账用）
+        return this.agent.runStream(this, ctx, msg);
     }
 
     /** 迁移本会话上下文/记忆与全局记忆中的历史 <|...|> 标签为新格式 [xxx]（幂等） */

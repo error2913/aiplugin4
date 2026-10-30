@@ -326,7 +326,7 @@ export class MessagePipeline {
                         return session.deferReceipt(ctx, msg, messageArray, 'trigger').then(() => session.savePending());
                     }
                     return session.handleReceipt(ctx, msg, messageArray)
-                        .then(() => session.chat(ctx, msg, '非指令'));
+                        .then(() => { void session.chat(ctx, msg, '非指令'); });
                 }
             }
 
@@ -360,7 +360,7 @@ export class MessagePipeline {
                     return session.handleReceipt(ctx, msg, messageArray)
                         .then(() => session.context.addSystemUserMessage(condition.reason, SYSTEM_NAME.trigger))
                         .then(() => triggerConditionMap[sid].splice(i, 1))
-                        .then(() => session.chat(ctx, msg, 'AI设定触发条件'));
+                        .then(() => { void session.chat(ctx, msg, 'AI设定触发条件'); });
                 }
             }
 

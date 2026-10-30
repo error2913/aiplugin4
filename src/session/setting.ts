@@ -2,10 +2,16 @@
 import { TypeDescriptor } from "../utils/revive";
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
+    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'aiEnabled', 'activeMode', 'atTrigger', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
         standby: 'boolean',
+        // 绝对触发闸：M2 迁移期默认 true（保持旧行为），.ai 命令重写后切为 false（新会话默认关）
+        aiEnabled: 'boolean',
+        // 会话级活跃时间开关（默认关；全局时段由「触发活跃时间」提供）
+        activeMode: 'boolean',
+        // 被 @ 触发开关（默认开，R17）
+        atTrigger: 'boolean',
         counter: 'number',
         timer: 'number',
         prob: 'number',
@@ -17,6 +23,9 @@ export class Setting {
     }
     priv: number;
     standby: boolean;
+    aiEnabled: boolean;
+    activeMode: boolean;
+    atTrigger: boolean;
     counter: number;
     timer: number;
     prob: number;
@@ -41,6 +50,10 @@ export class Setting {
     constructor() {
         this.priv = 0;
         this.standby = false;
+        // 迁移期默认 true：M2 接线完成、.ai on/off 改为只动 aiEnabled 后切为 false
+        this.aiEnabled = true;
+        this.activeMode = false;
+        this.atTrigger = true;
         this.counter = -1;
         this.timer = -1;
         this.prob = -1;

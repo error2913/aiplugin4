@@ -2,17 +2,25 @@
 import { getHost } from "./core/host";
 import { finishJudgeWaitRound, setJudgeWaitScheduler } from "./core/ports/judge_wait";
 import { getSessionById } from "./core/ports/session_lookup";
+import {
+    fireTriggerTimer,
+    ownsTriggerTimer,
+    setTriggerTimerScheduler,
+} from "./core/ports/trigger_timer";
+import type { RuleTimerSpec, RuleTimerTarget } from "./core/ports/trigger_timer";
 import { logger } from "./logger";
 import type { Session } from "./session/session";
 import { SYSTEM_NAME } from "./utils/protocol";
 import { revive, TypeDescriptor } from "./utils/revive";
 import { applyLastMessageRef, getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
+import { pickPrompt } from "./utils/timer_spec";
+
 
 const log = logger.withTag('timer');
 
 export class TimerInfo {
-    static validKeys: (keyof TimerInfo)[] = ['sid', 'isPrivate', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content'];
+    static validKeys: (keyof TimerInfo)[] = ['sid', 'isPrivate', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content', 'prompts', 'ruleId', 'modeTag'];
     static validKeysMap: { [key in keyof TimerInfo]?: TypeDescriptor<TimerInfo[key]> } = {
         sid: 'string',
         isPrivate: 'boolean',
@@ -22,7 +30,10 @@ export class TimerInfo {
         interval: 'number',
         count: 'number',
         type: 'string',
-        content: 'string'
+        content: 'string',
+        prompts: { objectValue: 'any' },
+        ruleId: 'string',
+        modeTag: 'string'
     }
     sid: string;
     isPrivate: boolean;
@@ -33,6 +44,12 @@ export class TimerInfo {
     count: number; // 定时器触发次数，若为-1则无限循环，若为0则不触发，若为其他正整数则触发该次数后停止
     type: 'target' | 'interval' | 'activeTime' | 'judgeWait'; // 定时器类型，目标时间定时器、间隔定时器、活动时间定时器、评分WAIT轮末定时器
     content: string;
+    /** 多条唤醒提示（1~10，fire 随机一条）；规则/模式定时器写入，旧存档无此字段 */
+    prompts?: string[];
+    /** 规则/模式标识（普通定时器无此字段；存在时由触发域端口 owns() 接管） */
+    ruleId?: string;
+    /** 条目归属：隐式模式规则 / 门控链规则 */
+    modeTag?: 'mode' | 'rule';
 
     constructor() {
         this.sid = '';
@@ -70,7 +87,7 @@ export class TimerManager {
         getHost().storage.set(`timerQueue`, JSON.stringify(this.timerQueue));
     }
 
-    static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string) {
+    static addTargetTimer(ctx: seal.MsgContext, session: Session, target: number, content: string, prompts?: string[]) {
         const uid = ctx.player!.userId;
         const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
         const timer = new TimerInfo();
@@ -80,6 +97,7 @@ export class TimerManager {
         timer.set = Math.floor(Date.now() / 1000);
         timer.target = target;
         timer.content = content;
+        if (prompts && prompts.length > 0) timer.prompts = [...prompts];
 
         this.timerQueue.push(timer);
         this.saveTimerQueue();
@@ -94,7 +112,7 @@ export class TimerManager {
 内容:${content}`);
     }
 
-    static addIntervalTimer(ctx: seal.MsgContext, session: Session, interval: number, count: number, content: string) {
+    static addIntervalTimer(ctx: seal.MsgContext, session: Session, interval: number, count: number, content: string, prompts?: string[]) {
         const uid = ctx.player!.userId;
         const sessionId = ctx.isPrivate ? uid : ctx.group!.groupId;
         const timer = new TimerInfo();
@@ -106,6 +124,7 @@ export class TimerManager {
         timer.count = count;
         timer.type = 'interval';
         timer.content = content;
+        if (prompts && prompts.length > 0) timer.prompts = [...prompts];
 
         this.timerQueue.push(timer);
         this.saveTimerQueue();
@@ -119,6 +138,52 @@ export class TimerManager {
 间隔:${interval}秒
 次数:${count}次
 内容:${content}`);
+    }
+
+    /**
+     * 注册规则/模式定时器（由触发域经 L0 端口调用）：
+     * - 生命周期由触发域 handler.fire 负责（触发后 removeRuleTimers / 递减 count 再 add）；
+     * - task() 遇到 ruleId 条目只做分派（owns/fire），不再按旧 target/interval 语义消费。
+     */
+    static addRuleTimer(target: RuleTimerTarget, spec: RuleTimerSpec) {
+        const timer = new TimerInfo();
+        timer.sid = target.sid;
+        timer.isPrivate = target.isPrivate;
+        timer.epId = target.epId;
+        timer.set = Math.floor(Date.now() / 1000);
+        timer.ruleId = spec.ruleId;
+        timer.modeTag = spec.modeTag;
+        timer.prompts = spec.prompts && spec.prompts.length > 0 ? [...spec.prompts] : undefined;
+        if (spec.type === 'target') {
+            timer.type = 'target';
+            timer.target = spec.target || 0;
+            timer.count = 1;
+        } else {
+            timer.type = 'interval';
+            const interval = spec.interval || 0;
+            timer.interval = interval;
+            timer.target = timer.set + interval;
+            timer.count = spec.count;
+        }
+        this.timerQueue.push(timer);
+        this.saveTimerQueue();
+        if (!this.intervalId) {
+            log.info('定时器任务启动');
+            this.executeTask();
+        }
+        log.info(`添加规则定时器 ${spec.ruleId}（${target.sid}，${timer.type}）`);
+    }
+
+    /** 取消某规则/模式的全部定时器（规则删除/停用/关闸/用尽） */
+    static removeRuleTimers(ruleId: string) {
+        const before = this.timerQueue.length;
+        this.timerQueue = this.timerQueue.filter(timer => timer.ruleId !== ruleId);
+        if (this.timerQueue.length !== before) this.saveTimerQueue();
+    }
+
+    /** 列出规则/模式定时器（不传 ruleId = 全部） */
+    static listRuleTimers(ruleId?: string): TimerInfo[] {
+        return this.timerQueue.filter(timer => !!timer.ruleId && (ruleId === undefined || timer.ruleId === ruleId));
     }
 
     static addActiveTimeTimer(ctx: seal.MsgContext, session: Session, target: number) {
@@ -250,6 +315,17 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                 this.saveTimerQueue();
             };
             for (const timer of snapshot) {
+                // 触发域条目（ruleId 存在）：全权交给端口 handler（判闸/渲染 prompt/起轮/续期），
+                // task 只负责到点分派；旧 target/interval 语义不再适用（避免双重消费）。
+                if (timer.ruleId) {
+                    try {
+                        if (ownsTriggerTimer(timer)) await fireTriggerTimer(timer);
+                        else log.warning(`规则定时器 ${timer.ruleId} 无触发域处理器，已跳过`);
+                    } catch (e) {
+                        log.exception(`${timer.sid} 执行规则定时器 ${timer.ruleId} 出错`, e);
+                    }
+                    continue;
+                }
                 try {
                     switch (timer.type) {
                         case 'target': {
@@ -273,7 +349,7 @@ WAIT轮末时间：${fmtDate(t.target)}`;
 Timer set at: ${fmtDate(set)}
 Target time: ${fmtDate(target)}
 Triggered at: ${fmtDate(Math.floor(Date.now() / 1000))}
-Prompt: ${content}`;
+Prompt: ${pickPrompt(timer.prompts) || content}`;
 
                             try {
                                 await session.context.addSystemUserMessage(s, SYSTEM_NAME.timer);
@@ -320,7 +396,7 @@ Timer set at: ${fmtDate(set)}
 Interval: ${fmtDate(interval)}
 Remaining triggers: ${count === -1 ? 'unlimited' : count - 1}
 Triggered at: ${fmtDate(Math.floor(Date.now() / 1000))}
-Prompt: ${content}`;
+Prompt: ${pickPrompt(timer.prompts) || content}`;
 
                             await session.context.addSystemUserMessage(s, SYSTEM_NAME.timer);
                             await session.chat(ctx, msg, '定时任务');
@@ -423,13 +499,29 @@ Say something.`;
         }
     }
 
-    static init() {
+    /** 加载队列（M2 拆分：装配期 recover/reconcile 使用；start 前不动调度） */
+    static loadQueue() {
         this.getTimerQueue();
+    }
+
+    /** 启动轮询（装配期在 reconcile 完成后调用） */
+    static start() {
         this.executeTask();
+    }
+
+    static init() {
+        this.loadQueue();
+        this.start();
     }
 }
 // 把 judgeWait 定时器操作注册到 L0 端口：judge 评分轮末经端口安排/取消（避免 judge ↔ timer 互相 import）
 setJudgeWaitScheduler({
     schedule: (ctx, session, target) => TimerManager.addJudgeWaitTimer(ctx, session, target),
     cancel: (sid) => TimerManager.removeTimers(sid, "", ["judgeWait"], []),
+});
+// 把规则/模式定时器的增删查注册到 L0 端口（方向 B）：触发域不 import timer，经此回调操作队列
+setTriggerTimerScheduler({
+    addRuleTimer: (target, spec) => TimerManager.addRuleTimer(target, spec),
+    removeRuleTimers: (ruleId) => TimerManager.removeRuleTimers(ruleId),
+    listRuleTimers: (ruleId) => TimerManager.listRuleTimers(ruleId),
 });
