@@ -5948,6 +5948,52 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal((Config as any).trigger.AT_TRIGGER, true, '恢复默认后应为开');
     },
 
+    /** 默认定时器：Template 每框一个 TimerSpec TOML；单框非法跳过、全非法拒绝、全空可用 */
+    testTimerTemplateConfig(): void {
+        const key = '默认定时器';
+        delete TC.templateConfigs[key];
+        resetConfigCache();
+        let cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, true);
+        assert.equal(cfg.SPECS.length, 0);
+
+        // 多框 = 多个定时器
+        TC.templateConfigs[key] = [
+            'types = "interval"\nhours = 12\ncount = -1\nprompts = ["a"]',
+            'types = "target"\nyears = 2027\nmonths = 1\ndays = 1\nhours = 0\nminutes = 0\nprompts = ["b"]',
+        ];
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, true);
+        assert.equal(cfg.SPECS.length, 2);
+        assert.equal(cfg.SPECS[0].intervalSec, 12 * 3600);
+
+        // 混合：一框非法只跳过该框
+        TC.templateConfigs[key] = [
+            'types = "interval"\nhours = 1\ncount = 0\nprompts = ["a"]',
+            'types = "interval"\nhours = 12\ncount = -1\nprompts = ["x"]',
+        ];
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, true);
+        assert.equal(cfg.SPECS.length, 1);
+
+        // 全部非法（含 TOML 语法错误）→ VALID=false，trg timer on 拒绝
+        TC.templateConfigs[key] = ['not = = toml'];
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, false);
+
+        TC.templateConfigs[key] = ['types = "interval"\nhours = 1\ncount = 0\nprompts = ["a"]'];
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, false);
+
+        delete TC.templateConfigs[key];
+        resetConfigCache();
+        assert.equal((Config as any).trigger.TIMER_SPECS.VALID, true);
+    },
+
     /** 清理会话 judge 状态：移除内存状态，重复清理不抛错 */
     testJudgeClearSession(): void {
         const sid = 'clear-me';

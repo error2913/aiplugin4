@@ -70,22 +70,22 @@ export interface TriggerConfigKeyMeta {
 
 /**
  * 触发页 12 键唯一顺序（注册顺序 = WebUI 顺序）。
- * 3 个全局键前置，随后按语义：活跃时间 → **被@触发（开关）** → 其余按模式 token 字母序。
+ * 按作者要求：「被@触发」放**第一个**；其余 3 个全局键 → 活跃时间 → 模式配置键。
  * `at` 是配置开关，不是 `.ai trg` 命令模式。
  */
 export const TRIGGER_CONFIG_KEYS: TriggerConfigKeyMeta[] = [
+    { id: 'atTrigger', name: '被@触发', type: 'boolean', isNew: true, mode: null, refresh: 'dynamic', default: true },
     { id: 'triggerCondition', name: '触发需要满足的条件', type: 'string', isNew: false, mode: null, refresh: 'dynamic', default: '1' },
     { id: 'bucketLimit', name: '触发次数上限', type: 'int', isNew: false, mode: null, refresh: 'dynamic', default: 3 },
     { id: 'bucketFillInterval', name: '触发次数补充间隔', type: 'int', isNew: false, mode: null, refresh: 'dynamic', default: 3 },
     { id: 'activeTime', name: '触发活跃时间', type: 'template', isNew: true, mode: 'active', refresh: 'dynamic', default: [''] },
-    { id: 'atTrigger', name: '被@触发', type: 'boolean', isNew: true, mode: null, refresh: 'dynamic', default: true },
     { id: 'counter', name: '默认计数器', type: 'int', isNew: false, mode: 'counter', refresh: 'dynamic', default: 10 },
     { id: 'timer', name: '默认计时器', type: 'float', isNew: false, mode: 'delay', refresh: 'dynamic', default: 60 },
     { id: 'eventRules', name: '事件触发规则', type: 'string', isNew: false, mode: 'event', refresh: 'reload', default: '{"version":1,"rules":[]}' },
     { id: 'judgeToml', name: '评分触发参数', type: 'string', isNew: true, mode: 'judge', refresh: 'reload', default: '' },
     { id: 'prob', name: '默认概率', type: 'float', isNew: false, mode: 'prob', refresh: 'dynamic', default: 10 },
     { id: 'regexTemplate', name: '触发正则表达式', type: 'template', isNew: false, mode: 'regex', refresh: 'reload', default: ['^正确.*[。？！?!]$'] },
-    { id: 'timerToml', name: '默认定时器', type: 'string', isNew: true, mode: 'timer', refresh: 'dynamic', default: '' },
+    { id: 'timerToml', name: '默认定时器', type: 'template', isNew: true, mode: 'timer', refresh: 'dynamic', default: ['types = "interval"\nhours = 12\ncount = -1\nprompts = ["该休息一下了"]'] },
 ];
 
 /** 单触发模式元数据（顺序 = MODE_TOKENS；at 已改为配置开关，不在此列表） */
@@ -95,7 +95,7 @@ export const MODES: ModeMeta[] = [
     { token: 'delay', aliases: ['d'], label: '延迟', kind: 'valued', gateSupported: true, configKey: 'timer', desc: '最后一条消息后静默 N 秒触发（原计时器）' },
     { token: 'event', aliases: ['e'], label: '事件', kind: 'toggle', gateSupported: true, configKey: 'eventRules', desc: '事件触发规则（v1 JSON）' },
     { token: 'judge', aliases: ['j'], label: '评分触发', kind: 'toggle', gateSupported: false, configKey: 'judgeToml', desc: '判定管线决定是否主动插话' },
-    { token: 'prob', aliases: ['pb'], label: '概率', kind: 'valued', gateSupported: true, configKey: 'prob', desc: '每条消息按概率触发' },
+    { token: 'prob', aliases: ['p'], label: '概率', kind: 'valued', gateSupported: true, configKey: 'prob', desc: '每条消息按概率触发（单字母别名 p；与旧命令 p=private 通过用途域隔离）' },
     { token: 'regex', aliases: ['r'], label: '正则', kind: 'toggle', gateSupported: true, configKey: 'regexTemplate', desc: '非指令消息按触发正则触发' },
     { token: 'timer', aliases: ['t'], label: '定时器', kind: 'configured', gateSupported: true, configKey: 'timerToml', desc: '按全局「默认定时器」TOML 计划触发（每个 [[timer]] 一个定时器）' },
 ];

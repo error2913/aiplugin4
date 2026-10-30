@@ -266,11 +266,13 @@ judge 评分 / prob 概率 / regex 正则 / timer 定时器
     cmd.priv = {
         priv: U,
         args: {
-            rule: { priv: U, args: { lst: { priv: U }, rm: { priv: I }, clr: { priv: I }, set: { priv: I } } },
-            timer: { priv: I, args: { lst: { priv: I }, clr: { priv: I } } },
+            // 键名是**归一后**的名字（lst→list、rm→remove、clr→clear），别名在权限层按用途域解析
+            rule: { priv: U, args: { list: { priv: U }, remove: { priv: I }, clear: { priv: I }, set: { priv: I }, "*": { priv: U } } },
+            timer: { priv: I, args: { list: { priv: I }, clear: { priv: I }, "*": { priv: I } } },
             all: { priv: I },
             active: { priv: I }, counter: { priv: I }, delay: { priv: I }, event: { priv: I },
             judge: { priv: I }, prob: { priv: I }, regex: { priv: I },
+            "*": { priv: I },
         },
     };
     cmd.solve = (scc: SubCmdContext) => {

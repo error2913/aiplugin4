@@ -109,8 +109,8 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 
 - **统一触发域**：消息/事件/调度/延迟回调/判定五类入口收敛到同一张「闸 → 裁决 → 起轮」流水线；新增门控链规则（regex/event/active_time/timer 源门 + user/counter/prob 过滤门 + delay 时序门），AI 可用 \`set_trigger_rule\`/\`list_trigger_rules\`/\`delete_trigger_rule\` 管理，用户可用 \`.ai trg rule lst/rm/clr/set\` 查看/删除。
 - **\`standby\` 概念删除**：会话开关统一为 \`aiEnabled\`（新会话默认关，\`.ai on\` 开启；旧存档 \`standby=true\` 自动迁移）；\`.ai standby\` 与 \`.ai off --sb\` 移除。\`Session.chat\` 返回 \`ChatOutcome\`（fired/deferred/bucket-empty/gated），未真正起轮不再扣精力/记 WAIT。
-- **单触发模式统一为 8 个命令模式**（active/counter/delay/event/judge/prob/regex/timer）：新增 **@ 触发**，但按作者要求做成**触发页配置开关「被@触发」**（默认开，群聊中有人 @ 机器人即触发，私聊不触发；替代默认正则里的 at CQ），**不进入 \`.ai trg\` 命令**（\`.ai trg at\` 不存在）；\`.ai trg\` 总览与开关、\`.ai trg all off\`。
-- **触发页 12 键**：\`触发需要满足的条件 / 触发次数上限 / 触发次数补充间隔 / 触发活跃时间(Template 多段) / 被@触发(开关，默认开) / 默认计数器 / 默认计时器 / 事件触发规则 / 评分触发参数(String TOML v2) / 默认概率 / 触发正则表达式 / 默认定时器(String TOML 多 [[timer]])\`；旧 \`默认触发活跃时间\`/\`评分触发配置\` 废弃且**旧值不迁移**。
+- **单触发模式统一为 8 个命令模式**（active/counter/delay/event/judge/prob/regex/timer；单字母别名 a/c/d/e/j/p/r/t，p 与旧 private 通过别名用途域隔离）：新增 **@ 触发**，但按作者要求做成**触发页配置开关「被@触发」**（默认开，群聊中有人 @ 机器人即触发，私聊不触发；替代默认正则里的 at CQ），**不进入 \`.ai trg\` 命令**（\`.ai trg at\` 不存在）；\`.ai trg\` 总览与开关、\`.ai trg all off\`。
+- **触发页 12 键（顺序）**：\`被@触发(开关，默认开，第一项) / 触发需要满足的条件 / 触发次数上限 / 触发次数补充间隔 / 触发活跃时间(Template 多段) / 默认计数器 / 默认计时器 / 事件触发规则 / 评分触发参数(String TOML v2) / 默认概率 / 触发正则表达式 / 默认定时器(Template，每框一个 TimerSpec TOML，多框=多个定时器)\`；旧 \`默认触发活跃时间\`/\`评分触发配置\` 废弃且**旧值不迁移**。
 - **判定内核 R1 shadow**：\`评分触发参数\` 升级 TOML v2（9 段全参数化，空/非法⇒判定不可用并报错）；新判定内核（六维特征 → prompt → parse → 策略 \`S\`）默认 \`shadow=true\` **只记日志、不改变发言**；\`.ai status\` 可看最近 shadow 决策与判定预算，供 2~4 周灰度定阈值。
 - **定时器参数统一**：\`set_timer\` / 全局「默认定时器」/ 链 \`timer\` 门共用一套参数与 \`validateTimerSpec\`（\`prompts\` 1~10 必填；target 必填年/月/日；修掉旧 target 缺省年份的 1900 年 bug）；\`TimerManager\` 支持规则/模式条目（\`ruleId/modeTag/prompts\`）、双向端口分派与启动对账；\`.ai trg timer lst/clr\`。
 - **事件域**：链事件规则独立于「事件触发规则」开关（只需录制门），v1 规则保留兼容；事件认领去重防「链 + v1」双触发。

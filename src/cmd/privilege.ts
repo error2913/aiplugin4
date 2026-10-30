@@ -3,7 +3,7 @@ import { PRIVILEGE_LEVEL_MAP } from "../config/static_config";
 import { getHost } from "../core/host";
 import { logger } from "../logger";
 import { Session } from "../session/session";
-import { aliasToCmd } from "../utils/alias";
+import { resolveCmdChain } from "../utils/alias";
 
 
 export interface CmdPrivInfo {
@@ -73,17 +73,16 @@ export class PrivilegeManager {
         if (cmdChain.length === 0) {
             return null;
         }
+        return this.walkPrivInfo(resolveCmdChain(cmdChain), 0, cp);
+    }
 
-        const cmd = aliasToCmd(cmdChain[0]);
-        if (!Object.prototype.hasOwnProperty.call(cp, cmd)) {
-            return null;
-        }
-
+    /** 内部递归：整条链已在入口按用途域归一，递归时按索引前进，禁止二次归一（否则 `p` 会串用途） */
+    private static walkPrivInfo(chain: string[], index: number, cp: CmdPriv): CmdPrivInfo | null {
+        if (index >= chain.length) return null;
+        const cmd = chain[index];
+        if (!Object.prototype.hasOwnProperty.call(cp, cmd)) return null;
         const cpi = cp[cmd];
-        if (cpi.args && cmdChain.length > 1) {
-            return this.getCmdPrivInfo(cmdChain.slice(1), cpi.args);
-        }
-
+        if (cpi.args && index + 1 < chain.length) return this.walkPrivInfo(chain, index + 1, cpi.args);
         return cpi;
     }
 
@@ -92,28 +91,29 @@ export class PrivilegeManager {
         if (cmdChain.length === 0) {
             return null;
         }
+        return this.walkEffectivePrivInfo(resolveCmdChain(cmdChain), 0, cp);
+    }
 
-        const cmd = aliasToCmd(cmdChain[0]);
+    private static walkEffectivePrivInfo(chain: string[], index: number, cp: CmdPriv): { cpi: CmdPrivInfo; viaWildcard: boolean } | null {
+        if (index >= chain.length) return null;
+        const cmd = chain[index];
         const exact = Object.prototype.hasOwnProperty.call(cp, cmd);
         const wildcard = Object.prototype.hasOwnProperty.call(cp, "*");
-        if (!exact && !wildcard) {
-            return null;
-        }
-
+        if (!exact && !wildcard) return null;
         const cpi = exact ? cp[cmd] : cp["*"];
         const viaWildcard = !exact && wildcard;
-        if (cpi.args && cmdChain.length > 1) {
-            const child = this.getEffectiveCmdPrivInfo(cmdChain.slice(1), cpi.args);
+        if (cpi.args && index + 1 < chain.length) {
+            const child = this.walkEffectivePrivInfo(chain, index + 1, cpi.args);
             if (child) return child;
         }
-
         return { cpi, viaWildcard };
     }
 
     static checkPriv(ctx: seal.MsgContext, cmdArgs: seal.CmdArgs, session: Session): { success: boolean, exist: boolean } {
         const sessionPriv = session.setting.priv;
         const userPriv = ctx.privilegeLevel;
-        const cmdChain = [cmdArgs.command, ...cmdArgs.args].map(cmd => aliasToCmd(cmd));
+        // 一次归一：命令位/触发模式位/参数动词位各有别名表（`trg p` = prob，`memo p` = private）
+        const cmdChain = resolveCmdChain([cmdArgs.command, ...cmdArgs.args]);
 
         function checkCmdPriv(cp: CmdPriv, i: number): { success: boolean, exist: boolean } {
             if (i >= cmdChain.length) {

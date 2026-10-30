@@ -372,13 +372,13 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
+| 被@触发 | 群聊中有人 @ 机器人即直接触发回复（**默认开**，私聊不触发）；关闭后 @ 不再单独触发，仍可被正则/其它模式命中 |
 | 触发需要满足的条件 / 触发次数上限 / 触发次数补充间隔 | 全局触发闸与令牌桶：表达式命中为 1 才触发；桶容量与补充间隔（秒） |
 | 触发活跃时间 | 每框一段 `HH:mm-HH:mm-次数`（可多段）；`.ai trg active on` 使用该全局时段 |
-| 被@触发 | 群聊中有人 @ 机器人即直接触发回复（**默认开**，私聊不触发）；关闭后 @ 不再单独触发，仍可被正则/其它模式命中 |
 | 默认计数器 / 默认计时器 / 默认概率 | `counter` / `delay` / `prob` 模式开启时的默认参数；`默认计时器` 单位秒 |
 | 触发正则表达式 | 匹配即强制触发 AI 回复（**默认已不含 @ CQ**，@ 由「被@触发」开关判定），[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html) |
 | 评分触发参数 | String TOML v2（`[decision]/[scoring]/[energy]/[weights]/[features]/[gate]/[probe]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常）。R2 默认 `[decision] shadow=false`（新判定内核驱动发言），改 `shadow=true` 可回滚旧五维评分一版 |
-| 默认定时器 | String TOML，多 `[[timer]]`；参数与 `set_timer` 完全一致（含 `prompts`）；`.ai trg timer on` 后按表为每会话注册定时器 |
+| 默认定时器 | **Template，每框一个定时器**（框内为单条 TimerSpec 的 TOML：`types/years/months/days/hours/minutes/count/prompts`，与 `set_timer` 完全一致、`prompts` 必填）；可多框=多个定时器；`.ai trg timer on` 后按表为每会话注册 |
 | 事件触发规则 | JSON v1：一条规则只绑一个扁平事件名（`group_increase`/`poke`/`group_request` 等，不再用 `notify.*`、不再支持多事件数组），按「事件接收」页的开关/白名单录入上下文后，命中即让会话对事件做出响应（顺序 = 优先级，首条命中）。空规则 = 关闭；`prompt` 可留空（事件已在上一条系统消息里，留空 = 只触发响应、不附加指令）；修改后需重载 JS 生效。依赖「接收依赖通知事件」开启 + 事件在白名单 + 会话 AI 已开启；group_request（加群申请）为主场景，friend_request 可能因非好友无法投递回复。链事件规则独立于本开关（只需录制门）。格式推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成 |
 
 ### 图片

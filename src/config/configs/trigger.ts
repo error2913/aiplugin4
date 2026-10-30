@@ -59,14 +59,14 @@ export function resetEventTriggerConfigCacheForTest(): void {
     eventTriggerConfigCache = null;
 }
 
-/** 「默认定时器」TOML 默认示例：多 [[timer]]，参数与 set_timer / 链 timer 门完全一致（含 prompts） */
-const TIMER_TOML_DEFAULT = `# 默认定时器（.ai trg timer on 后按此计划触发；可写多个 [[timer]]）
-# 参数与 set_timer 完全一致：types(timer 型) / years / months / days / hours / minutes / count / prompts
-# [[timer]]
-# types = "interval"
-# hours = 12
-# count = -1
-# prompts = ["该休息一下了", "提醒你喝水"]`;
+/**
+ * 「默认定时器」Template 默认示例：**每框一个定时器**，框内是单条 TimerSpec 的 TOML
+ * （参数与 set_timer / 链 timer 门完全一致，含 prompts）。多个框 = 多个定时器。
+ */
+const TIMER_SPEC_TOML_DEFAULT = `types = "interval"
+hours = 12
+count = -1
+prompts = ["该休息一下了", "提醒你喝水"]`;
 
 /** 「默认定时器」解析结果；VALID=false 时 `trg timer on` 应拒绝开启 */
 export interface TimerTomlConfig {
@@ -77,37 +77,44 @@ export interface TimerTomlConfig {
 
 let timerTomlCache: TimerTomlConfig | null = null;
 
-/** 解析「默认定时器」多 [[timer]]：单条非法 WARN 跳过；整份非法报错且拒绝 */
+/**
+ * 解析「默认定时器」Template：逐个非空框解析为 TOML → validateTimerSpec。
+ * - 单框非法：WARN 跳过（其余框仍生效）；
+ * - 所有非空框都非法：VALID=false（trg timer on 拒绝，避免"开着但不触发"的错觉）；
+ * - 全空：VALID=true、SPECS=[]（trg timer on 会提示为空）。
+ */
 function getTimerTomlConfig(): TimerTomlConfig {
     if (timerTomlCache) return timerTomlCache;
-    const text = seal.ext.getStringConfig(ext, "默认定时器") || '';
-    if (!text.trim()) {
+    const entries = (seal.ext.getTemplateConfig(ext, "默认定时器") || []).filter(text => text && text.trim() !== '');
+    if (entries.length === 0) {
         timerTomlCache = { VALID: true, SPECS: [], ERRORS: [] };
         return timerTomlCache;
     }
     const errors: string[] = [];
     const specs: NormalizedTimerSpec[] = [];
-    try {
-        const doc = load(text) as Record<string, unknown>;
-        const rawList = doc.timer;
-        const list = Array.isArray(rawList) ? rawList : rawList ? [rawList] : [];
-        list.forEach((entry, index) => {
-            const result = validateTimerSpec(entry);
-            if (!result.ok || !result.spec) {
-                const message = `默认定时器第 ${index + 1} 条：${result.errors.join('；')}`;
-                Logger.warning(`${message}（已跳过）`);
-                errors.push(message);
-                return;
-            }
-            specs.push(result.spec);
-        });
-    } catch (e) {
-        const message = `默认定时器 TOML 解析失败：${e instanceof Error ? e.message : String(e)}`;
-        Logger.error(message);
-        timerTomlCache = { VALID: false, SPECS: [], ERRORS: [message] };
-        return timerTomlCache;
-    }
-    timerTomlCache = { VALID: true, SPECS: specs, ERRORS: errors };
+    entries.forEach((text, index) => {
+        let doc: Record<string, unknown>;
+        try {
+            doc = load(text.trim()) as Record<string, unknown>;
+        } catch (e) {
+            const message = `默认定时器第 ${index + 1} 框 TOML 解析失败：${e instanceof Error ? e.message : String(e)}`;
+            Logger.warning(`${message}（已跳过）`);
+            errors.push(message);
+            return;
+        }
+        const result = validateTimerSpec(doc);
+        if (!result.ok || !result.spec) {
+            const message = `默认定时器第 ${index + 1} 框：${result.errors.join('；')}`;
+            Logger.warning(`${message}（已跳过）`);
+            errors.push(message);
+            return;
+        }
+        specs.push(result.spec);
+    });
+    // 有配置但一个有效条目都没有 → 整份视为非法（拒绝开启）
+    const valid = specs.length > 0 || errors.length === 0;
+    if (!valid) Logger.error('「默认定时器」没有任何有效条目，timer 模式将拒绝开启');
+    timerTomlCache = { VALID: valid, SPECS: specs, ERRORS: errors };
     return timerTomlCache;
 }
 
@@ -118,15 +125,14 @@ export function resetTimerTomlConfigCacheForTest(): void {
 
 export default class TriggerConfig {
     static register() {
-        // 触发页顺序（= TRIGGER_CONFIG_KEYS）：3 个全局键 + 按模式 token 字母序（active/counter/delay/event/judge/prob/regex/timer）
+        // 触发页顺序（= TRIGGER_CONFIG_KEYS）：被@触发第一个，其后 3 个全局键 + 活跃时间 + 各模式配置
+        seal.ext.registerBoolConfig(ext, "被@触发", true, "群聊中有人 @ 机器人即直接触发回复（默认开；私聊不触发）。关闭后 @ 不会再单独触发，仍可被正则/其他模式命中", "触发");
         seal.ext.registerStringConfig(ext, "触发需要满足的条件", '1', "额外的豹语表达式条件，命中为 1 才触发；示例：$t群号_RAW=='2001'，不需要额外条件时填 1", "触发");
         seal.ext.registerIntConfig(ext, "触发次数上限", 3, "消息触发令牌桶容量，达到上限后需等待补充", "触发");
         seal.ext.registerIntConfig(ext, "触发次数补充间隔", 3, "令牌桶补充间隔（秒）", "触发");
         seal.ext.registerTemplateConfig(ext, "触发活跃时间", [
             "10:00-20:00-5"
         ], "每框一段活跃时间：HH:mm-HH:mm-次数（时段内最多触发次数）；可多段，示例 09:00-12:00-3；空=不限。修改后即时生效", "触发");
-        // @ 触发开关（R17，作者修正：做成触发页配置开关，不再进 .ai trg 命令）
-        seal.ext.registerBoolConfig(ext, "被@触发", true, "群聊中有人 @ 机器人即直接触发回复（默认开；私聊不触发）。关闭后 @ 不会再单独触发，仍可被正则/其他模式命中", "触发");
         seal.ext.registerIntConfig(ext, "默认计数器", 10, "计数器模式下达到该条数触发回复", "触发");
         seal.ext.registerFloatConfig(ext, "默认计时器", 60, "延迟模式（旧计时器）下最后一条消息后多少秒触发", "触发");
         // 事件触发（v1）：事件先按「事件接收」页的开关/白名单/录入，命中本规则后再触发回复（链事件规则不读本开关）
@@ -140,11 +146,13 @@ export default class TriggerConfig {
         );
         seal.ext.registerStringConfig(ext, "评分触发参数", JUDGE_TOML_DEFAULT, "评分触发（.ai trg judge on）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后需重载 JS 生效", "触发");
         seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "触发");
-        // 默认正则不再包含 at CQ：@ 触发由独立的 at 模式（默认开）判定
+        // 默认正则不再包含 at CQ：@ 触发由「被@触发」配置开关判定
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [
             "^正确.*[。？！?!]$"
-        ], "每框一个正则，任一命中即触发回复（不含 @，@ 由 at 模式处理）；示例：^你好.*；修改后需重载 JS 生效", "触发");
-        seal.ext.registerStringConfig(ext, "默认定时器", TIMER_TOML_DEFAULT, "timer 模式的计划表：可写多个 [[timer]]，参数与 set_timer 完全一致（types/years/months/days/hours/minutes/count/prompts）。.ai trg timer on 后按此表为每个会话注册定时器", "触发");
+        ], "每框一个正则，任一命中即触发回复（不含 @，@ 由「被@触发」开关处理）；示例：^你好.*；修改后需重载 JS 生效", "触发");
+        seal.ext.registerTemplateConfig(ext, "默认定时器", [
+            TIMER_SPEC_TOML_DEFAULT
+        ], "每框一个定时器（TOML，单条 TimerSpec）：types/years/months/days/hours/minutes/count/prompts（参数与 set_timer 完全一致，prompts 1~10 必填）；可多框=多个定时器。.ai trg timer on 后按此表为每个会话注册定时器", "触发");
     }
 
     static get() {

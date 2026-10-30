@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 
 import { GATE_META, pickWakePrompt, ruleMatchesScope, ruleSkipReason, summarizeGates, validateRule } from '../src/trigger/rule';
 import { createGateRuntime, evaluateGates } from '../src/trigger/eval';
-import { MODES, MODE_TOKENS, TRIGGER_CONFIG_KEYS } from '../src/config/static_config/trigger_meta';
+import { MODES, MODE_TOKENS, TRIGGER_CONFIG_KEYS, modeByToken } from '../src/config/static_config/trigger_meta';
+import { aliasToCmd, resolveCmdChain } from '../src/utils/alias';
 import { validateTimerSpec } from '../src/utils/timer_spec';
 import { activeSegmentIndex, nextActivePoint, parseTimeSegments } from '../src/utils/time_window';
 import { detectBotMention } from '../src/utils/mention';
@@ -202,5 +203,19 @@ export const tests = {
         assert.ok(key, '触发页必须有 atTrigger 配置键');
         assert.equal(key!.type, 'boolean');
         assert.equal(key!.default, true, '默认开启');
+    },
+    /** 别名表按用途域拆分：触发模式 p=prob，命令参数 p=private，互不污染 */
+    testAliasScopes(): void {
+        assert.equal(modeByToken('p')?.token, 'prob', '`.ai trg p` 应为概率');
+        assert.equal(modeByToken('pb'), null, '不再保留双字母 pb');
+        for (const [alias, token] of Object.entries({ a: 'active', c: 'counter', d: 'delay', e: 'event', j: 'judge', p: 'prob', r: 'regex', t: 'timer' })) {
+            assert.equal(modeByToken(alias)?.token, token, `别名 ${alias} 应映射到 ${token}`);
+        }
+        assert.deepEqual(resolveCmdChain(['trg', 'p', 'on']), ['trg', 'prob', 'on'], 'trg 模式位走触发模式表');
+        assert.deepEqual(resolveCmdChain(['trg', 'rule', 'lst']), ['trg', 'rule', 'list'], '参数动词位走动词表');
+        assert.deepEqual(resolveCmdChain(['memo', 'mm', 'lst']), ['memory', 'mm', 'list'], '命令位先归一');
+        assert.deepEqual(resolveCmdChain(['memory', 'p']), ['memory', 'private'], '非 trg 的 p 仍是旧 private 语义');
+        assert.equal(aliasToCmd('priv'), 'privilege');
+        assert.equal(aliasToCmd('md'), 'media');
     },
 };
