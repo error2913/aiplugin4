@@ -58,6 +58,8 @@ interface JudgeState {
     hourly: { hour: number; count: number };
     /** 15 秒窗口内的消息时间戳，用于密度判断 */
     msgTimes: number[];
+    /** R1 shadow 最近一次新内核结论（`.ai status` 观测用；不持久化） */
+    lastShadow?: { at: number; S: number; action: string; legacy: string; confidence: string };
 }
 
 type JudgeResult = { dims: JudgeDims; reason: string } | { error: string };
@@ -391,6 +393,7 @@ export class JudgeManager {
             },
         });
         const round = (value: number): number => Math.round(value * 100) / 100;
+        state.lastShadow = { at: startedAt, S: decision.S, action: decision.action, legacy: legacyDecision, confidence: llm?.confidence ?? '-' };
         log.info(
             `[judge-shadow] sid=${session.sessionId} S=${decision.S.toFixed(3)} U=${decision.U.toFixed(2)}`
             + ` new=${decision.action} legacy=${legacyDecision} confidence=${llm?.confidence ?? '-'}`
@@ -398,6 +401,13 @@ export class JudgeManager {
             + ` dims=${JSON.stringify({ addressed: round(features.addressed), help: round(features.help_signal), relevance: round(features.relevance), friendships: round(features.friendships), silence: round(features.silence_gap), risk: round(features.interruption_risk) })}`
             + ` costMs=${Date.now() - startedAt}`,
         );
+    }
+
+    /** 会话判定状态快照（`.ai status` 观测用；无状态返回 null） */
+    static getSessionStats(sid: string): { energy: number; hourlyCount: number; waitUntil: number; pending: boolean; lastShadow?: JudgeState['lastShadow'] } | null {
+        const state = this.states.get(sid);
+        if (!state) return null;
+        return { energy: state.energy, hourlyCount: state.hourly.count, waitUntil: state.waitUntil, pending: !!state.pending, lastShadow: state.lastShadow };
     }
 
     /** 调用评分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */

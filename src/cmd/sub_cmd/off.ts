@@ -1,6 +1,9 @@
 // .ai off：关闭 AI（整体或按模式）
 import { JudgeManager } from "../../judge/judge_manager";
+import { claimTable } from "../../pipeline/claim_table";
+import { decisionSchedule } from "../../pipeline/decision_schedule";
 import { TimerManager } from "../../timer";
+import { pendingDelays } from "../../trigger/runtime";
 import { I } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
@@ -21,6 +24,10 @@ export function registerCmdOff() {
             session.resetState();
             TimerManager.removeTimers(sid, '', ['activeTime'], []);
             JudgeManager.clearSession(sid);
+            // 触发域瞬态清理（§5.9）：认领表/判定调度/延迟挂起都不应跨关闸残留
+            claimTable.releaseSession(sid);
+            decisionSchedule.cancelForSession(sid);
+            pendingDelays.cancelSession(sid);
 
             setting.counter = -1;
             setting.timer = -1;
