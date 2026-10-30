@@ -71,6 +71,10 @@ export class SessionService {
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
             if (session.setting) session.setting = revive(Setting, session.setting);
+            // M2 迁移：旧存档只有 standby；待机=开 AI。standby 字段删除前保持单向兼容读。
+            if (session.setting.standby && !session.setting.aiEnabled) session.setting.aiEnabled = true;
+            // 双向兼容写：aiEnabled 为真值来源，standby 仅作旧代码/旧面板读取镜像
+            session.setting.standby = session.setting.aiEnabled;
             // 同步归属字段，确保 context/memory 能解析到正确的 agent/session
             session.context.agentName = session.agentName;
             session.context.sessionId = session.sessionId;

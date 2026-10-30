@@ -7,14 +7,17 @@ import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
 import { consumeDependencyTombstone, deleteCoreMessageState, filterOb11SupplementSegments, getCoreMessageState, getMessageKey, markCoreMessageRecorded, markDependencyFullRecorded, rememberCoreMessageByKey, waitForCoreEvent } from "./pipeline/dedup";
 import { resolveEndpointId } from "./pipeline/endpoint";
+import { hasChainEventRules } from "./pipeline/event_ingress";
 import { hasEventTriggerRules, maybeTriggerEvent } from "./pipeline/event_trigger";
 import { handleNativeNoticeEvent, handleOb11NoticeEvent, handleOb11RequestEvent } from "./pipeline/events";
 import { expandOb11Segments } from "./pipeline/inbound";
+import { runChain } from "./pipeline/trigger_rule";
+import { wakeSession } from "./pipeline/wake";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
+import { detectBotMention } from "./utils/mention";
 import { getRecordMessageId, transformMsgId } from "./utils/message_id";
-import { SYSTEM_NAME } from "./utils/protocol";
 import { createCtx, createMsg } from "./utils/seal";
 import { expandMilkySegments, formatMessageSegmentsForMatching, transformTextToArray } from "./utils/string";
 import { getPlatform, normalizeUserId, platformOf } from "./utils/target_id";
@@ -276,7 +279,8 @@ export class MessagePipeline {
 
             // poke 事件触发：poke 已被转换为内容部分（[CQ:poke] → poke 段 → [poke:ID]），
             // 先按消息口径入库，再按「事件触发规则」决定是否起轮；命中即跳过后续普通触发，避免双回复。
-            if (hasEventTriggerRules() && (session.setting.standby || Config.base.GLOBAL_STANDBY)) {
+            // 链事件规则与 v1 事件规则共用入口（maybeTriggerEvent 内部先跑链规则）。
+            if ((hasEventTriggerRules() || hasChainEventRules()) && (session.setting.enabled() || Config.base.GLOBAL_STANDBY)) {
                 const pokeSeg = messageArray.find(item => item.type === 'poke');
                 if (pokeSeg) {
                     const targetRaw = String((pokeSeg.data && (pokeSeg.data.qq || pokeSeg.data.user_id)) || '');
@@ -317,63 +321,72 @@ export class MessagePipeline {
                 }
             }
 
-            // 非指令消息触发（受会话开关控制）
-            if (session.setting.regexTrigger && triggerRegex.test(messageText)) {
-                const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
-                if (fmtCondition === 1) {
-                    markCoreMessageRecorded(coreMessageKey);
-                    if (sessionBusy) {
-                        return session.deferReceipt(ctx, msg, messageArray, 'trigger').then(() => session.savePending());
-                    }
-                    return session.handleReceipt(ctx, msg, messageArray)
-                        .then(() => { void session.chat(ctx, msg, '非指令'); });
-                }
-            }
-
-            // AI自己设定的触发条件触发
-            if (Object.prototype.hasOwnProperty.call(triggerConditionMap, sid) && triggerConditionMap[sid].length !== 0) {
-                for (let i = 0; i < triggerConditionMap[sid].length; i++) {
-                    const condition = triggerConditionMap[sid][i];
-                    // 关键词正则非法时跳过该条件，避免解析异常中断整条消息处理
-                    let keywordMatched = true;
-                    if (condition.keyword) {
-                        try {
-                            keywordMatched = new RegExp(condition.keyword).test(messageText);
-                        } catch (e) {
-                            log.exception('触发关键词正则错误，已忽略该条件: ' + condition.keyword, e);
-                            keywordMatched = false;
-                        }
-                    }
-                    if (!keywordMatched) {
-                        continue;
-                    }
-                    if (condition.uid && condition.uid !== uid) {
-                        continue;
-                    }
-
-                    markCoreMessageRecorded(coreMessageKey);
-                    if (sessionBusy) {
-                        // 先消费一次性触发条件再挂起，避免条件残留导致下次重复触发
-                        triggerConditionMap[sid].splice(i, 1);
-                        return session.deferReceipt(ctx, msg, messageArray, 'trigger', condition.reason).then(() => session.savePending());
-                    }
-                    return session.handleReceipt(ctx, msg, messageArray)
-                        .then(() => session.context.addSystemUserMessage(condition.reason, SYSTEM_NAME.trigger))
-                        .then(() => triggerConditionMap[sid].splice(i, 1))
-                        .then(() => { void session.chat(ctx, msg, 'AI设定触发条件'); });
-                }
-            }
-
-            // 开启任一模式时
+            // 触发域统一入口（M2）：录入门 = aiEnabled || GLOBAL_STANDBY（全局待机仍入库）。
+            // 顺序：链规则（AI 工具创建，含 delay 挂起）→ @ → 正则 → AI 一次性条件 → 计数器/概率/延迟 → 评分。
+            // 同一条消息最多一个触发对象：链规则命中（含挂起/认领）后不再走后面的单模式。
             const setting = session.setting;
-            if (setting.standby || Config.base.GLOBAL_STANDBY) {
+            if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
                 markCoreMessageRecorded(coreMessageKey);
                 if (sessionBusy) {
-                    // 运行中待机消息只挂起入库：计数/概率/计时器一律跳过，不推进、不触发
+                    // 运行中消息只挂起入库：计数/概率/延迟一律跳过，不推进、不触发
                     return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
                 }
                 return session.handleReceipt(ctx, msg, messageArray)
                     .then(async (): Promise<void> => {
+                        // 1) 门控链规则（新）：命中即停止后续模式，保证"一条消息只触发一次"
+                        try {
+                            const chain = await runChain({
+                                session,
+                                ctx,
+                                msg,
+                                text: messageText,
+                                userId: uid,
+                                platform: getPlatform(ctx.endPoint.userId),
+                                claimIdentity: msg.rawId ? String(msg.rawId) : undefined,
+                            });
+                            if (chain.status !== 'no-match') return;
+                        } catch (e) {
+                            log.exception('门控链规则求值出错（已跳过）', e);
+                        }
+
+                        // 2) @ 触发（R17：第 9 个单触发模式；默认开，私聊不触发）
+                        if (setting.atTrigger && detectBotMention(messageArray, ctx)) {
+                            await wakeSession(session, ctx, msg, { kind: 'mode', reason: '@', raw: { mode: 'at' } });
+                            return;
+                        }
+
+                        // 3) 正则触发（默认正则已去掉 at CQ，@ 由上面的 at 模式独立判定）
+                        if (setting.regexTrigger && triggerRegex.test(messageText)) {
+                            const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
+                            if (fmtCondition === 1) {
+                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '非指令' });
+                                return;
+                            }
+                        }
+
+                        // 4) AI 自己设定的触发条件（一次性，命中即消费）
+                        if (Object.prototype.hasOwnProperty.call(triggerConditionMap, sid) && triggerConditionMap[sid].length !== 0) {
+                            for (let i = 0; i < triggerConditionMap[sid].length; i++) {
+                                const condition = triggerConditionMap[sid][i];
+                                // 关键词正则非法时跳过该条件，避免解析异常中断整条消息处理
+                                let keywordMatched = true;
+                                if (condition.keyword) {
+                                    try {
+                                        keywordMatched = new RegExp(condition.keyword).test(messageText);
+                                    } catch (e) {
+                                        log.exception('触发关键词正则错误，已忽略该条件: ' + condition.keyword, e);
+                                        keywordMatched = false;
+                                    }
+                                }
+                                if (!keywordMatched) continue;
+                                if (condition.uid && condition.uid !== uid) continue;
+                                triggerConditionMap[sid].splice(i, 1);
+                                await wakeSession(session, ctx, msg, { kind: 'mode', wakeText: condition.reason, reason: 'AI设定触发条件' });
+                                return;
+                            }
+                        }
+
+                        // 5) 计数器 / 概率 / 延迟（旧单模式保留，行为不变；后续并入 trigger 叶）
                         if (setting.counter > -1) {
                             session.context.counter += 1;
                             if (session.context.counter >= setting.counter) {
@@ -400,11 +413,12 @@ export class MessagePipeline {
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
                         }
 
+                        // 6) 评分触发（M3 接新内核；当前仍走旧 JudgeManager）
                         if (setting.judge) {
                             await JudgeManager.evaluate(ctx, msg, session, messageText);
                         }
                     })
-                    .then(() => session.save(true));   // 合并写：待机群每条消息都会走到这里
+                    .then(() => session.save(true));   // 合并写：开启 AI 的群每条消息都会走到这里
             }
         }
     }
@@ -432,7 +446,7 @@ export class MessagePipeline {
             const setting = session.setting;
             // 待机判定必须同时看全局待机（B3）：只判 setting.standby 会让"全局待机"下指令消息不入库，
             // 与会话待机行为不一致（其余入库点如 handleGroupMessage 已是 `standby || GLOBAL_STANDBY`）。
-            if (setting.standby || Config.base.GLOBAL_STANDBY) {
+            if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
                 session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {
                     log.exception('指令消息入库出错', e);
                 });
@@ -475,7 +489,7 @@ export class MessagePipeline {
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
             // 同上（B3）：全局待机下机器人自身消息也应入库
-            if (setting.standby || Config.base.GLOBAL_STANDBY) {
+            if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
                 session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {
                     log.exception('机器人消息入库出错', e);
                 });

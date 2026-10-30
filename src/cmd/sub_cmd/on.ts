@@ -33,6 +33,9 @@ export function registerCmdOn() {
 
         const kwargs = cmdArgs.kwargs;
         if (kwargs.length == 0) {
+            // M2 语义：on 打开 AI 总闸，并只强制开启 regex/event（其它模式开关保持原值）
+            setting.aiEnabled = true;
+            setting.standby = true;
             setting.regexTrigger = true;
             setting.eventTrigger = true;
             seal.replyToSender(ctx, msg, 'AI已开启：非指令正则触发、事件触发');
@@ -157,6 +160,7 @@ export function registerCmdOn() {
             }
         };
 
+        setting.aiEnabled = true;
         setting.standby = true;
 
         seal.replyToSender(ctx, msg, text);

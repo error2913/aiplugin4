@@ -28,6 +28,7 @@ export function registerCmdOff() {
             setting.regexTrigger = false;
             setting.eventTrigger = false;
             setting.judge = false;
+            setting.aiEnabled = false;
             setting.standby = false;
             setting.activeTimeInfo = {
                 start: 0,
@@ -107,6 +108,7 @@ export function registerCmdOff() {
                 }
                 case 'sb':
                 case 'standby': {
+                    setting.aiEnabled = false;
                     setting.standby = false;
                     matched++;
                     text += `\n待机模式`;

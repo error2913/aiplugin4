@@ -330,7 +330,7 @@ export class Session {
     stateOf(now: number = Date.now(), opts?: { touch?: boolean }): 'HOT' | 'COOLING' | 'COLD' {
         const touch = opts?.touch !== false;
         const { state, lastRelevantAt } = computeSessionState({
-            standby: this.setting.standby || Config.base.GLOBAL_STANDBY,
+            standby: this.setting.enabled() || Config.base.GLOBAL_STANDBY,
             busy: this.running || this.starting || this.activeRuns > 0,
             lastRelevantAt: this.lastRelevantAt,
             now,
@@ -436,7 +436,7 @@ export class Session {
         log.info('trigger reply:', reason || 'unknown');
 
         // C6：绝对闸（外部 API/结果送达可显式 bypassGate）。会话忙/未真正起轮由 started 判定并退还令牌。
-        if (!options.bypassGate && !this.setting.aiEnabled) {
+        if (!options.bypassGate && !this.setting.enabled()) {
             log.info('ai disabled, skip reply:', reason || 'unknown');
             return 'gated';
         }

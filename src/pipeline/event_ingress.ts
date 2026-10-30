@@ -37,7 +37,7 @@ export async function tryChainEventTrigger(view: EventView, dedupKey: string, op
 
         const session: Session | undefined = options.session ?? getSessionById(view.sid);
         // 录制门（Q12）：链事件不需要 eventTrigger 开关，但仍要求 AI 未彻底关闭
-        if (!session.setting.aiEnabled && !Config.base.GLOBAL_STANDBY) {
+        if (!session.setting.enabled() && !Config.base.GLOBAL_STANDBY) {
             return false;
         }
         if (session.running || session.starting) {

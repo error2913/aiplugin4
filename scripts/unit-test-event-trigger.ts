@@ -92,7 +92,12 @@ function fakeSession(overrides: { running?: boolean; starting?: boolean; standby
         running: overrides.running === true,
         starting: overrides.starting === true,
         sessionId: 'QQ-Group:2001',
-        setting: { standby: overrides.standby !== false, eventTrigger: overrides.eventTrigger !== false },
+        setting: {
+            standby: overrides.standby !== false,
+            aiEnabled: overrides.standby !== false,
+            eventTrigger: overrides.eventTrigger !== false,
+            enabled() { return this.aiEnabled === true || this.standby === true; },
+        },
         deferReceipt: async (ctx: any, msg: any, arr: any[], kind: string, reason: string, systemName: string) => {
             calls.defer.push({ ctx, msg, arr, kind, reason, systemName });
         },

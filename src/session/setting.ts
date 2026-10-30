@@ -50,8 +50,8 @@ export class Setting {
     constructor() {
         this.priv = 0;
         this.standby = false;
-        // 迁移期默认 true：M2 接线完成、.ai on/off 改为只动 aiEnabled 后切为 false
-        this.aiEnabled = true;
+        // 绝对触发闸：新会话默认关（Q3）；旧存档由 SessionService 迁移 standby=true → true
+        this.aiEnabled = false;
         this.activeMode = false;
         this.atTrigger = true;
         this.counter = -1;
@@ -66,6 +66,14 @@ export class Setting {
             segs: 0
         }
         this.overrides = {};
+    }
+
+    /**
+     * 迁移期统一闸值：aiEnabled 是唯一真值来源；旧存档/旧调用方仍可能只写 standby，
+     * 因此两者取或。`.ai on/off` 重写、standby 字段删除后本方法收敛为 `aiEnabled`。
+     */
+    enabled(): boolean {
+        return this.aiEnabled || this.standby;
     }
 
     /**
