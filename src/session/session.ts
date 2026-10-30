@@ -61,6 +61,7 @@ export class Session {
         rawSeq: 'number',
         lastRawAt: 'number',
         settledSeq: 'number',
+        ctxAutoSummaryUsed: 'number',
         stream: {
             object: {
                 id: 'string',
@@ -159,8 +160,15 @@ export class Session {
     lastRelevantAt = 0;
     /** 运行时字段：本会话最近一次 AI 触发时间（秒）；记忆自动抽取门控使用（不持久化） */
     aiTriggeredAt = 0;
-    /** 运行时字段：本会话账本——归档/评分各调用了多少次（不持久化） */
-    ctxStats: { summarization: number; judge: number } = { summarization: 0, judge: 0 };
+    /** 运行时字段：本会话账本——评分调用次数（不持久化；`.ai ctx` 展示用） */
+    ctxStats: { judge: number } = { judge: 0 };
+    /**
+     * **持久化**：本会话（context epoch）内自动摘要额度，0=未用，1=已用（最多 1 次）。
+     * 只有摘要成功（advanced=true）才置 1；失败/未推进不消耗；`.ai ctx purge --yes` 后重置。
+     */
+    ctxAutoSummaryUsed = 0;
+    /** 运行时字段：自动摘要已发起未落地，防同一会话并发重复触发（不持久化，重载后回 false） */
+    ctxAutoSummaryInFlight = false;
     /** 运行时字段：保存节流状态（不持久化） */
     private lastSaveAt = 0;
     private saveDeferCount = 0;

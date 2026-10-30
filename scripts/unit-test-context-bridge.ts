@@ -5,6 +5,7 @@ import Agent from '../src/agent/agent';
 import { compactContextV2, collectContextBacklog, commitExtraction, consumeContextV2, consumedThrough, peekExtractionChunk, resetContextRuntime, resetContextBridgeCursor } from '../src/agent/context_bridge';
 import { MemoryScheduler, resetMemorySchedulerForTest } from '../src/agent/memory_scheduler';
 import Config from '../src/config/config';
+import { compactionRuntimeFor, resetCompactionRuntime } from '../src/context/compact/session_runtime';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { setHost } from '../src/core/host';
 import { setAuxLlm } from '../src/core/ports/aux_llm';
@@ -13,6 +14,8 @@ import { MemoryService, setMemoryEngineFactory } from '../src/memory/service';
 import { MemoryEngine } from '../src/memory/v2/engine';
 import { InMemoryMemoryStorage } from '../src/memory/v2/storage';
 import { SessionService } from '../src/session/session_service';
+import { TokenCalibration } from '../src/token_calibration';
+import { estimateMessageTokens, estimateTextTokens, handleMessages } from '../src/utils/message';
 
 class FakeStorage {
     map = new Map<string, string>();
@@ -181,4 +184,150 @@ export const tests: Record<string, () => void | Promise<void>> = {
             setAuxLlm(null);
         }
     },
+
+    /**
+     * 编译预算口径回归（P0）：
+     * v2 编译的预算必须按 TokenCalibration 校准系数折算、tools 预留必须按 JSON 实际估算，
+     * 否则请求体估算会超出预算且 `omittedFromSeq` 永不出现（“预算到顶”检测不到 → 一次摘要永不触发）。
+     */
+    async testContextCompileBudgetMatchesRequestEstimate() {
+        installHost();
+        const TC = (globalThis as any).__TEST_CONFIG__;
+        const origBudget = TC.intConfigs['上下文预算'];
+        const origPE = TC.boolConfigs['切换为提示词工程'];
+        TC.intConfigs['上下文预算'] = 20000;
+        TC.boolConfigs['切换为提示词工程'] = false;
+        (Config as any).cache = {};
+        TokenCalibration.resetForTest();
+        const origAgentGet = Agent.get;
+        try {
+            TokenCalibration.record('cal-budget-model', 100, 200); // factor = 2
+            // 构造多个小单元（user/assistant 交替），避免命中「最新单元自身超预算」的 truncate 路径，
+            // 从而单独验证预算口径（校准系数 + tools JSON 预留）是否与真实请求估算同口径。
+            const sessionService = new SessionService();
+            sessionService.agentName = '*';
+            Agent.get = (() => ({ sessionService })) as any;
+            const session = sessionService.getSession('QQ:compile-budget');
+            session.sessionType = 'user';
+            (session.context as any).isColdSession = () => false;
+            for (let i = 1; i <= 6; i++) {
+                await session.context.addUserMessage({} as seal.MsgContext, `预算口径用户消息 ${i} `.repeat(150), 'QQ:1', `cb-u${i}`);
+                session.context.addAssistantMessage(`预算口径助手回复 ${i} `.repeat(150), `cb-a${i}`);
+            }
+            const real = session.contextV2!;
+            let captured: any = null;
+            // 包装真实 service：记录 compile 入参，同时保留真实编译结果与最近统计
+            (session as any).contextV2 = {
+                compile: (options: any) => {
+                    captured = options;
+                    return real.compile(options);
+                },
+            };
+            const tools = [{
+                type: 'function',
+                function: {
+                    name: 'big_tool',
+                    description: 'x'.repeat(4000),
+                    parameters: { type: 'object', properties: { q: { type: 'string' } } },
+                },
+            }];
+            const system = { role: 'system', contentItems: [{ text: 'system prompt' }] };
+            const out = await handleMessages(
+                { endPoint: { userId: 'QQ:1' } } as any,
+                session,
+                false,
+                tools,
+                system as any,
+                'cal-budget-model',
+            );
+            assert.ok(captured, 'v2 路径应调用 compile');
+            assert.equal(captured.budgetTokens, 10000, '有效预算 = requestBudget(20000) / 校准系数(2)');
+            assert.equal(
+                captured.toolsReserveTokens,
+                estimateTextTokens(JSON.stringify(tools)),
+                'tools 预留按 JSON 实际估算（不再是 tools.length * 20）',
+            );
+
+            const requestEstimate = (out as any[]).reduce((sum, message) => sum + estimateMessageTokens(message), 0)
+                + estimateTextTokens(JSON.stringify(tools));
+            assert.ok(
+                requestEstimate <= captured.budgetTokens,
+                `请求体估算 ${requestEstimate} 应 ≤ 有效预算 ${captured.budgetTokens}`,
+            );
+
+            const stats = real.lastCompile();
+            assert.ok(stats, '编译应写入最近编译统计');
+            assert.notEqual(stats!.omittedFromSeq, null, '预算到顶必须能检测到 omittedFromSeq（否则一次摘要永不触发）');
+            assert.ok((stats!.omittedToSeq ?? 0) >= 1);
+        } finally {
+            Agent.get = origAgentGet;
+            if (origBudget === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origBudget;
+            if (origPE === undefined) delete TC.boolConfigs['切换为提示词工程']; else TC.boolConfigs['切换为提示词工程'] = origPE;
+            TokenCalibration.resetForTest();
+            (Config as any).cache = {};
+        }
+    },
+
+    /**
+     * 自动摘要与手动 `.ai ctx archive` 必须共用同一 CompactionRuntime：
+     * 两个“单飞”互不可见时，可同时对同一批未摘要事件 compactOnce → 重复摘要/重复计费。
+     */
+    async testContextBridgeSharedRuntimeSingleFlight() {
+        installHost();
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
+        (Config as any).cache = {};
+        let summarizeCalls = 0;
+        let release: (() => void) | null = null;
+        setAuxLlm({
+            chat: async () => {
+                summarizeCalls++;
+                if (summarizeCalls === 1) {
+                    await new Promise<void>(resolve => { release = resolve; });
+                }
+                return '共享 runtime 摘要';
+            },
+            chatMessages: async () => '',
+        } as any);
+        try {
+            const session = await makeSession('QQ:bridge-single-flight');
+            resetContextRuntime(session);
+            resetCompactionRuntime(session);
+            const runtime = compactionRuntimeFor(session);
+            assert.ok(runtime, '接入事件账本后应能取到共享运行时');
+            assert.equal(compactionRuntimeFor(session), runtime, '自动路径与手动 archive 必须复用同一个 runtime');
+
+            // 自动路径发起并阻塞在摘要 LLM 上；此时手动 archive 应被同一单飞挡下（不并发压同一批事件）
+            const auto = compactContextV2(session, 1);
+            await waitForCondition(() => summarizeCalls === 1, '自动摘要请求已发出');
+            const manual = await runtime!.archiveNow(1);
+            assert.equal(manual.ran, false, '自动摘要在飞时手动 archive 不得并发执行');
+            assert.equal(manual.reason, 'running');
+            assert.equal(summarizeCalls, 1, '被单飞挡下的手动调用不得额外调用摘要器');
+
+            release!();
+            const autoResult = await auto;
+            assert.ok(autoResult, '自动路径应返回结果');
+            assert.equal(autoResult!.advanced, true);
+            assert.ok(summarizeCalls >= 1);
+
+            // 共享 runtime 在自动摘要落地后仍可手动归档
+            const after = await runtime!.archiveNow(1);
+            assert.equal(after.ran, true);
+
+            // purge/热重载语义：reset 后按当前 contextV2 重建 runtime
+            resetCompactionRuntime(session);
+            assert.notEqual(compactionRuntimeFor(session), runtime, 'reset 后应重建 runtime');
+        } finally {
+            setAuxLlm(null);
+        }
+    },
 };
+
+/** 等待异步副作用（fire-and-forget 的后台摘要） */
+async function waitForCondition(predicate: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
+    const start = Date.now();
+    while (!predicate()) {
+        if (Date.now() - start > timeoutMs) throw new Error(`等待超时：${label}`);
+        await new Promise(resolve => setTimeout(resolve, 5));
+    }
+}

@@ -1,10 +1,11 @@
-// 上下文压缩的运行时编排：按目标保留量循环压批、单飞、节流、退避与每小时批次上限。
+// 上下文压缩的运行时编排：按目标保留量循环压批、单飞与失败退避。
 //
 // v5 语义（与旧版不同）：
-// - **触发不看水位**：调用方只在「编译发现未摘要原文被预算裁掉」（预算到顶）或手动 archive 时才调用；
-// - `maybeRun(targetTokens)`：自动路径；`archiveNow(targetTokens)`：手动路径（忽略节流/每小时上限）；
-// - 每次循环把「未摘要原文」压到 `targetTokens` 附近；每批按「还差多少到目标」截断，避免压过头；
-// - `每小时上限` 计的是**批次数**（等价 aux LLM 调用数），不是运行次数。
+// - **触发不看水位**：调用方只在「编译发现未摘要原文被预算裁掉」（预算到顶，且本会话额度未用）
+//   或手动 archive 时才调用；
+// - `maybeRun(targetTokens)`：自动路径（单飞 + 失败退避 + 单次最多 20 批）；
+// - `archiveNow(targetTokens)`：手动 `.ai ctx archive`（忽略退避，单次最多 200 批），仍单飞；
+// - 每次循环把「未摘要原文」压到 `targetTokens` 附近；每批按「还差多少到目标」截断，避免压过头。
 //
 // 约束：本文件不读 Config/seal；summarizer/estimator/时钟/记录 id 全部注入。
 import { COMPACT_ARCHIVE_MAX_BATCHES, COMPACT_BATCH_TOKENS, COMPACT_MAX_BATCHES_PER_RUN } from "../../utils/context_limits";
@@ -20,10 +21,6 @@ export interface CompactionRuntimeOptions {
     summaryMaxChars?: number;
     /** 单次自动压缩最多连续压多少批 */
     maxBatchesPerRun?: number;
-    /** 每小时最多压缩批次数；<=0 不限 */
-    hourlyCap?: number;
-    /** 自动压缩最小间隔（毫秒）；默认 60s */
-    throttleMs?: number;
     /** 失败退避档位（毫秒） */
     backoffDelaysMs?: number[];
 }
@@ -56,13 +53,11 @@ export interface CompactionRunResult {
     pendingBefore: number;
     /** 压缩后未摘要 token */
     pendingAfter: number;
-    /** 未完成原因（already-summarized / empty-summary / throttled / hourly-cap / running / ...） */
+    /** 未完成原因（already-summarized / empty-summary / backoff / running / ...） */
     reason?: string;
     error?: string;
 }
 
-const DEFAULT_THROTTLE_MS = 60_000;
-const DEFAULT_HOURLY_CAP = 20;
 const DEFAULT_MAX_BATCHES = COMPACT_MAX_BATCHES_PER_RUN;
 const ARCHIVE_MAX_BATCHES = COMPACT_ARCHIVE_MAX_BATCHES;
 
@@ -70,24 +65,17 @@ export class CompactionRuntime {
     private readonly batchTokens: number;
     private readonly summaryMaxChars?: number;
     private readonly maxBatchesPerRun: number;
-    private readonly hourlyCap: number;
-    private readonly throttleMs: number;
     private readonly backoff: Backoff;
     private readonly now: () => number;
     private readonly deps: CompactionRuntimeDeps;
 
     private running = false;
-    private lastAttemptAt = 0;
-    private hourStart = 0;
-    private callsThisHour = 0;
     private lastResult: CompactionRunResult | null = null;
 
     constructor(options: CompactionRuntimeOptions, deps: CompactionRuntimeDeps) {
         this.batchTokens = positiveInt(options.batchTokens, COMPACT_BATCH_TOKENS);
         this.summaryMaxChars = options.summaryMaxChars;
         this.maxBatchesPerRun = Math.max(1, positiveInt(options.maxBatchesPerRun, DEFAULT_MAX_BATCHES));
-        this.hourlyCap = Math.max(0, Math.floor(options.hourlyCap ?? DEFAULT_HOURLY_CAP));
-        this.throttleMs = Math.max(0, Math.floor(options.throttleMs ?? DEFAULT_THROTTLE_MS));
         this.backoff = new Backoff({ delaysMs: options.backoffDelaysMs });
         this.now = deps.now ?? (() => Date.now());
         this.deps = deps;
@@ -98,29 +86,22 @@ export class CompactionRuntime {
     }
 
     /**
-     * 自动压缩入口（仅在「预算到顶」触发的调用点使用）。
-     * 失败/未完成会退避；退避不影响下一次显式 archive。
+     * 自动压缩入口（仅在「预算到顶」且本会话自动摘要额度未用时调用）。
+     * 单飞 + 失败退避；退避不影响下一次显式 archive。
      */
     async maybeRun(targetTokens: number): Promise<CompactionRunResult> {
-        const now = this.now();
         if (this.running) return this.skip('running', targetTokens);
-        if (now < this.backoff.blockedUntil) return this.skip('backoff', targetTokens);
-        if (this.lastAttemptAt > 0 && now - this.lastAttemptAt < this.throttleMs) return this.skip('throttled', targetTokens);
-        this.lastAttemptAt = now;
-        return this.runToTarget(targetTokens, { manual: false, maxBatches: this.maxBatchesPerRun, now });
+        if (this.now() < this.backoff.blockedUntil) return this.skip('backoff', targetTokens);
+        return this.runToTarget(targetTokens, this.maxBatchesPerRun);
     }
 
-    /** 手动 `.ai ctx archive`：忽略节流/每小时上限/退避，仍单飞。 */
+    /** 手动 `.ai ctx archive`：忽略退避，仍单飞。 */
     async archiveNow(targetTokens: number): Promise<CompactionRunResult> {
-        const now = this.now();
         if (this.running) return this.skip('running', targetTokens);
-        return this.runToTarget(targetTokens, { manual: true, maxBatches: ARCHIVE_MAX_BATCHES, now });
+        return this.runToTarget(targetTokens, ARCHIVE_MAX_BATCHES);
     }
 
-    private async runToTarget(
-        targetTokens: number,
-        opts: { manual: boolean; maxBatches: number; now: number },
-    ): Promise<CompactionRunResult> {
+    private async runToTarget(targetTokens: number, maxBatches: number): Promise<CompactionRunResult> {
         this.running = true;
         const pendingBefore = pendingOf(this.deps.service);
         const result: CompactionRunResult = {
@@ -132,20 +113,12 @@ export class CompactionRuntime {
             pendingAfter: pendingBefore,
         };
         try {
-            if (!opts.manual) this.rollHour(opts.now);
             let lastError: string | undefined;
-            while (result.batches < opts.maxBatches) {
+            while (result.batches < maxBatches) {
                 const pending = pendingOf(this.deps.service);
                 if (pending <= result.targetTokens) break;
                 // 只按「还差多少到目标」截断本批，避免一次压到目标以下过多
                 const batchTokens = Math.max(1, Math.min(this.batchTokens, pending - result.targetTokens));
-                if (!opts.manual) {
-                    if (this.hourlyCap > 0 && this.callsThisHour >= this.hourlyCap) {
-                        result.reason = 'hourly-cap';
-                        break;
-                    }
-                    this.callsThisHour++;
-                }
                 const batch = await this.deps.service.compact(
                     { batchTokens, summaryMaxChars: this.summaryMaxChars },
                     {
@@ -213,14 +186,6 @@ export class CompactionRuntime {
         } catch { /* ignore */ }
         this.lastResult = result;
         return result;
-    }
-
-    private rollHour(now: number): void {
-        const bucket = Math.floor(now / 3_600_000);
-        if (bucket !== this.hourStart) {
-            this.hourStart = bucket;
-            this.callsThisHour = 0;
-        }
     }
 }
 

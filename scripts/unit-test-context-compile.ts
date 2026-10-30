@@ -6,6 +6,7 @@ import { createEmptyHead } from '../src/context/head';
 import { ContextSnapshot } from '../src/context/store';
 import { compileRequest, CompiledMessage } from '../src/context/view/compile';
 import { truncateToTokenBudget } from '../src/utils/token_budget';
+import { estimateEventTokens as estimateEventTokensReal, estimateTextTokens as estimateTextTokensReal } from '../src/utils/token_estimate';
 
 const HEAD = createEmptyHead();
 const estimateTextTokens = (text: string): number => String(text || '').length;
@@ -448,5 +449,27 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const text = textOf(result.messages);
         assert.equal(result.stats.truncated, false, '估算与展示同口径：截断后应能装下');
         assert.ok(text.includes('[tool-output-truncated:'), '应显示工具截断标记而不是整条丢弃/兜底截断');
+    },
+
+    /**
+     * 回归：最新单元自身超预算时，按实际 token 估算截断。
+     * 旧实现按 `availableTokens * 3` 换算字符（英文假设），在 CJK≈1 token/字符时会完全不截断，
+     * 但仍按 min(tokens, available) 记账 → 请求体实际超预算。
+     */
+    testContextV2CompileTruncatesOversizedNewestUnitByTokenEstimate() {
+        // 4 条连续 user 会被 segmentUnits 合并成 1 个 user 单元（25600 字符）
+        const events = [0, 1, 2, 3].map(i => userEvent(i + 1, '喵'.repeat(6400)));
+        const result = compileRequest({
+            ...baseOptions,
+            estimateTextTokens: estimateTextTokensReal,
+            estimateEventTokens: (event) => estimateEventTokensReal(event),
+            snapshot: snapshot(events),
+            budgetTokens: 10000,
+        });
+        const text = textOf(result.messages);
+        assert.equal(result.stats.truncated, true, '最新单元超预算应标记截断');
+        assert.ok(result.stats.estimatedTokens <= 10000, `截断后估算应 <= 预算（实际 ${result.stats.estimatedTokens}）`);
+        assert.ok(text.length < 4 * 6400, `应实际截断文本（实际 ${text.length} / 25600 字符）`);
+        assert.ok(text.includes('…'), '截断文本应带省略号/指针标记');
     },
 };

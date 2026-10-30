@@ -6,7 +6,6 @@ import {
     compactOnce,
     CompactOptions,
     CompactResult,
-    shouldCompact,
 } from "./compact/compactor";
 import type { ConversationEvent, EventInput, Part, RecordEntry } from "./events";
 import {
@@ -164,16 +163,25 @@ export class ContextService {
         return buildProjection(this.store.snapshot(), options);
     }
 
-    /** 请求编译（prefix/预算/能力由调用方传入） */
-    compile(options: Omit<CompileOptions, 'snapshot'>): CompileResult {
+    /**
+     * 请求编译（prefix/预算/能力由调用方传入）。
+     * `observe=false` 时不写最近编译统计：子代理 fork seed 等「只为取投影」的编译不能覆盖
+     * 父/本会话的统计，否则轮末自动摘要会基于陈旧/无关的 omittedFromSeq 误触发。
+     */
+    compile(options: Omit<CompileOptions, 'snapshot'>, opts: { observe?: boolean } = {}): CompileResult {
         const result = compileRequest({ ...options, snapshot: this.store.snapshot() });
-        this.lastCompileStats = result.stats;
+        if (opts.observe !== false) this.lastCompileStats = result.stats;
         return result;
     }
 
     /** 最近一次编译统计（触发「预算到顶」压缩用；重载后为 null） */
     lastCompile(): CompileStats | null {
         return this.lastCompileStats;
+    }
+
+    /** 清空编译统计（每轮 run 开始调用，防止上一轮/其他编译的陈旧统计误触发自动摘要） */
+    resetLastCompile(): void {
+        this.lastCompileStats = null;
     }
 
     readRaw(address: string, options: ReadRawOptions = {}): ReadRawResult {
@@ -224,11 +232,6 @@ export class ContextService {
             this.store.commitSummary(result.record, result.through, result.unsummarizedTokens);
         }
         return result;
-    }
-
-    /** 是否达到压缩水位 */
-    shouldCompact(watermarkTokens: number): boolean {
-        return shouldCompact(this.store.getHead(), watermarkTokens);
     }
 
     async flush(): Promise<Awaited<ReturnType<ContextStore['flush']>>> {

@@ -1,19 +1,12 @@
 // 记忆桥：只从上下文事件账本收集“待抽取原文”；抽取/巩固由 MemoryScheduler 后台执行。
 // pending 是唯一事实源，job 只存引用。
-import Config from "../config/config";
-import { CompactionRuntime } from "../context/compact/runtime";
+import { compactionRuntimeFor } from "../context/compact/session_runtime";
 import type { ConversationEvent } from "../context/events";
 import { type ReadCursor, readRaw } from "../context/recall";
 import { getHost } from "../core/host";
-import { getAuxLlm } from "../core/ports/aux_llm";
 import { MemoryManager } from "../memory/manager";
 import type { Session } from "../session/session";
-import {
-    COMPACT_BATCH_TOKENS,
-    COMPACT_MAX_BATCHES_PER_RUN,
-    MEMORY_WATERMARK_TOKENS,
-    SUMMARY_MAX_CHARS,
-} from "../utils/context_limits";
+import { MEMORY_WATERMARK_TOKENS } from "../utils/context_limits";
 import { CONTEXT_BRIDGE_ROLE_LABEL } from "../utils/protocol";
 
 interface BridgeState {
@@ -25,69 +18,18 @@ interface BridgeState {
 }
 
 const states = new WeakMap<object, BridgeState>();
-const compactions = new WeakMap<object, { runtime: CompactionRuntime; signature: string }>();
 const MAX_PENDING_CHARS = 120_000;
 const MAX_CHUNK_CHARS = 12_000;
 const SOURCE_KINDS = new Set<ConversationEvent['kind']>(['user', 'assistant', 'tool_result']);
 
-function estimateEventTokens(event: ConversationEvent): number {
-    const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
-    let chars = 0;
-    for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
-    if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
-    return Math.max(1, Math.ceil(chars / 3)) + 4;
-}
-
-function compactionRuntimeFor(session: Session): CompactionRuntime | null {
-    const service = session.contextV2;
-    if (!service) return null;
-    // 配置热更新：小时上限等变化时重建 runtime（构造参数里只有不变常量）
-    const hourlyCap = Config.context.HOURLY_COMPACT_CAP;
-    const signature = `${COMPACT_BATCH_TOKENS}|${SUMMARY_MAX_CHARS}|${COMPACT_MAX_BATCHES_PER_RUN}|${hourlyCap}`;
-    const cached = compactions.get(session);
-    if (cached && cached.signature === signature) return cached.runtime;
-    const runtime = new CompactionRuntime(
-        {
-            batchTokens: COMPACT_BATCH_TOKENS,
-            summaryMaxChars: SUMMARY_MAX_CHARS,
-            maxBatchesPerRun: COMPACT_MAX_BATCHES_PER_RUN,
-            hourlyCap,
-        },
-        {
-            service,
-            summarize: async (text: string) => {
-                try {
-                    const out = await getAuxLlm().chat('summarize_agent', text);
-                    return typeof out === 'string' && out.trim() ? out : null;
-                } catch {
-                    return null;
-                }
-            },
-            estimateEventTokens,
-        },
-    );
-    compactions.set(session, { runtime, signature });
-    return runtime;
-}
-
 /**
- * 后台滚动摘要（自动路径）：只在「编译发现未摘要原文被预算裁掉」后调用。
- * 不在空闲会话上设置定时器；失败退避只影响下一次触发。
+ * 后台滚动摘要（自动路径）：只在「编译发现未摘要原文被预算裁掉」且本会话额度未用时调用。
+ * 不在空闲会话上设置定时器；runtime 由 `context/compact/session_runtime` 按会话共享（与手动 archive 同一单飞）。
  */
 export async function compactContextV2(session: Session, targetTokens: number): Promise<{ advanced: boolean; reason?: string; batches?: number } | null> {
     const runtime = compactionRuntimeFor(session);
     if (!runtime) return null;
     const result = await runtime.maybeRun(targetTokens);
-    return { advanced: result.advanced, reason: result.reason, batches: result.batches };
-}
-
-/**
- * 强制压缩到目标（context_too_long 恢复路径 / 手动）：忽略节流与每小时上限，单飞。
- */
-export async function forceCompactToTarget(session: Session, targetTokens: number): Promise<{ advanced: boolean; reason?: string; batches?: number } | null> {
-    const runtime = compactionRuntimeFor(session);
-    if (!runtime) return null;
-    const result = await runtime.archiveNow(targetTokens);
     return { advanced: result.advanced, reason: result.reason, batches: result.batches };
 }
 

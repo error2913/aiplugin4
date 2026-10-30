@@ -5,7 +5,8 @@
 // - 海豹 `storageGet` 对不存在的 key **会抛异常**：本模块把"缺失"归一为 `null`，
 //   把"读失败/页损坏"抛 `PageStoreError`，由上层决定重试/隔离/修复（不静默吞）。
 // - 页号从 1 连续递增、不复用；页内 seq 连续；页内容自描述（pageNo/seqStart/seqEnd/bytes/events）。
-// - 单页 256 条 / 32KB 上限由**调用方切片**，store 只校验（超限视为调用方参数错误）。
+// - 单页 256 条 / 32KB 上限由**调用方切片**，store 只校验（超限视为调用方参数错误）；
+//   单条事件独占一页时放宽到 256KB（大工具结果原文不丢，否则 flush 会永久卡在失败页）。
 // - 写入幂等：已存在的页不再写（只写一次）；已存在但 seq 范围不同的页拒绝覆盖（数据异常，交上层）。
 //
 // `bytes` 口径：事件负载（pageNo/seqStart/seqEnd/events）的 JSON 序列化长度，**不含 bytes 字段本身**。
@@ -18,8 +19,19 @@ import { eventPageKey } from '../keys';
 export const EVENT_PAGE_MAX_EVENTS = 256;
 /** 单页负载字节上限（调用方切片，store 只校验） */
 export const EVENT_PAGE_MAX_BYTES = 32 * 1024;
+/**
+ * 单条事件独占一页时的负载字节上限（多事件页仍受 EVENT_PAGE_MAX_BYTES 约束）。
+ * 大工具结果（如拉取群历史）原文单条即可超过 32KB；若仍按 32KB 拒绝，该页会永久 flush 失败，
+ * 整批事件（含 read_raw 指针目标）丢失。放宽到 256KB 后入库前再按此上限截断（见 context.appendToolResult）。
+ */
+export const EVENT_PAGE_MAX_SINGLE_EVENT_BYTES = 256 * 1024;
 /** 恢复探测单次最多采纳的页数：防止异常数据导致同步长循环，未采纳完可再次调用 */
 export const EVENT_RECOVERY_MAX_PAGES = 256;
+
+/** 页负载上限：单条事件独占页放宽到 256KB，多事件页仍 32KB */
+function pageMaxBytesFor(eventCount: number): number {
+    return eventCount === 1 ? EVENT_PAGE_MAX_SINGLE_EVENT_BYTES : EVENT_PAGE_MAX_BYTES;
+}
 
 /** PageStoreError 分类：READ_FAILED=存储读失败（非缺失）；INVALID_PAGE=页内容损坏；INVALID_ARGUMENT=调用方传参非法 */
 export type PageStoreErrorCode = 'READ_FAILED' | 'INVALID_PAGE' | 'INVALID_ARGUMENT';
@@ -241,8 +253,9 @@ export function buildEventPage(pageNo: number, events: ConversationEvent[]): Eve
         events: copied,
     };
     page.bytes = measureEventPageBytes(page);
-    if (page.bytes > EVENT_PAGE_MAX_BYTES) {
-        throw new PageStoreError('INVALID_ARGUMENT', `事件页 ${pageNo} 负载 ${page.bytes} 字节超过上限 ${EVENT_PAGE_MAX_BYTES}`, pageNo);
+    const maxBytes = pageMaxBytesFor(page.events.length);
+    if (page.bytes > maxBytes) {
+        throw new PageStoreError('INVALID_ARGUMENT', `事件页 ${pageNo} 负载 ${page.bytes} 字节超过上限 ${maxBytes}`, pageNo);
     }
     // 提前暴露不可序列化的数据（raw/parts 里可能有循环引用），写入时不再二次抛未知异常
     stringifyOrThrow(page, pageNo, `事件页 ${pageNo}`);
@@ -286,7 +299,8 @@ function parseEventPage(raw: string, pageNo: number): EventPage {
     };
     const measured = measureEventPageBytes(page);
     if (measured !== data.bytes) throw invalidPageError(pageNo, `bytes 自描述不一致（存 ${data.bytes}，实算 ${measured}）`);
-    if (measured > EVENT_PAGE_MAX_BYTES) throw invalidPageError(pageNo, `负载 ${measured} 字节超过上限 ${EVENT_PAGE_MAX_BYTES}`);
+    const maxBytes = pageMaxBytesFor(events.length);
+    if (measured > maxBytes) throw invalidPageError(pageNo, `负载 ${measured} 字节超过上限 ${maxBytes}`);
     return page;
 }
 

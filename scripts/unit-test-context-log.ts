@@ -12,6 +12,7 @@ import { eventPageKey, recordPageKey } from '../src/context/keys';
 import {
     buildEventPage,
     EVENT_PAGE_MAX_BYTES,
+    EVENT_PAGE_MAX_SINGLE_EVENT_BYTES,
     measureEventPageBytes,
     isMissingKeyError,
     PageStoreError,
@@ -194,11 +195,23 @@ export const tests: Record<string, () => void | Promise<void>> = {
         expectPageError(() => buildEventPage(1, tooMany), 'INVALID_ARGUMENT');
         expectPageError(() => buildEventPage(1, []), 'INVALID_ARGUMENT');
 
-        const huge = 'x'.repeat(EVENT_PAGE_MAX_BYTES + 100);
-        expectPageError(() => buildEventPage(1, [userEvent(1, huge)]), 'INVALID_ARGUMENT');
+        // 单条事件独占一页：40KB 合法（多事件页的 32KB 上限不再误伤大工具结果）
+        const single40k = 'x'.repeat(40 * 1024);
+        const bigSingle = buildEventPage(1, [userEvent(1, single40k)]);
+        assert.ok(bigSingle.bytes > EVENT_PAGE_MAX_BYTES, `单事件页应超过多事件页上限，实际 ${bigSingle.bytes}`);
+        assert.ok(bigSingle.bytes <= EVENT_PAGE_MAX_SINGLE_EVENT_BYTES);
+        assert.equal(bigSingle.events.length, 1);
 
-        // 读侧：外部写入的超大页（绕过 build）应判损坏，而不是当缺失
-        const oversized = { pageNo: 1, seqStart: 1, seqEnd: 1, events: [userEvent(1, 'x'.repeat(EVENT_PAGE_MAX_BYTES + 100))] };
+        // 单条事件超过单事件页上限（256KB）仍拒绝
+        const tooHugeSingle = 'x'.repeat(EVENT_PAGE_MAX_SINGLE_EVENT_BYTES + 100);
+        expectPageError(() => buildEventPage(1, [userEvent(1, tooHugeSingle)]), 'INVALID_ARGUMENT');
+
+        // 多事件页仍受 32KB 约束：两个 ~20KB 事件合页超限 → 拒绝
+        const half = 'x'.repeat(20 * 1024);
+        expectPageError(() => buildEventPage(1, [userEvent(1, half), userEvent(2, half)]), 'INVALID_ARGUMENT');
+
+        // 读侧：外部写入的超过「单事件页上限」的页应判损坏，而不是当缺失
+        const oversized = { pageNo: 1, seqStart: 1, seqEnd: 1, events: [userEvent(1, tooHugeSingle)] };
         storage.map.set(eventPageKey(SID, 1), JSON.stringify({ ...oversized, bytes: measureEventPageBytes(oversized) }));
         expectPageError(() => readEventPage(SID, 1), 'INVALID_PAGE');
     },

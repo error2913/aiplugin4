@@ -547,12 +547,56 @@ function truncateEventParts(event: ConversationEvent, maxChars: number, readFrom
     return { ...(event as object), parts: nextParts } as ConversationEvent;
 }
 
-function truncateUnit(unit: ConversationUnit, availableTokens: number): ConversationUnit {
+/**
+ * 最新单元自身超过预算时的截断（按**实际 token 估算**，不假设 3 字符/token）。
+ *
+ * 旧实现 `maxChars = availableTokens * 3` 是针对英文的粗略换算；`estimateTextTokens` 对
+ * 中文（CJK≈1 token/字符）估算后，这个 ×3 会让 `maxChars` 远大于实际可放字符数 → 实际不截断，
+ * 但调用方仍按 `min(tokens, available)` 记账，导致请求体超预算。
+ *
+ * 这里对「每个事件保留的字符数」做二分，用注入的 `estimateEventTokens` 实测整单元 token，
+ * 找到能塞进 `availableTokens` 的最大保留量；每个事件都带 `read_raw` 截断标记。
+ */
+function truncateUnit(
+    unit: ConversationUnit,
+    availableTokens: number,
+    estimateEventTokens: (event: ConversationEvent) => number,
+): ConversationUnit {
     if (availableTokens < 0) availableTokens = 0;
-    const maxChars = Math.max(80, Math.floor(availableTokens * 3));
-    const each = Math.max(60, Math.floor(maxChars / Math.max(1, unit.events.length)));
-    const events = unit.events.map(event => truncateEventParts(event, each, event.seq, event.seq));
-    return { ...unit, events };
+    let maxEventChars = 0;
+    for (const event of unit.events) {
+        const parts = (event as { parts?: Part[] }).parts;
+        if (!Array.isArray(parts)) continue;
+        for (const part of parts) {
+            if (part.type === 'text') maxEventChars = Math.max(maxEventChars, part.text.length);
+        }
+    }
+    if (maxEventChars <= 0) return unit;
+    const build = (perEventChars: number): ConversationUnit => {
+        const each = Math.max(1, Math.floor(perEventChars));
+        return {
+            ...unit,
+            events: unit.events.map(event => truncateEventParts(event, each, event.seq, event.seq)),
+        };
+    };
+    // 下限（每事件 1 字符 + 标记）仍超预算：返回下限，调用方会按实际估算记账/触发缺口；
+    // 极端情况下请求体可能略超，但不会静默把未截断的大单元当成“装得下”。
+    const floorUnit = build(1);
+    if (estimateUnitTokens(floorUnit, estimateEventTokens) > availableTokens) return floorUnit;
+    let low = 1;
+    let high = maxEventChars;
+    let best = floorUnit;
+    while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        const candidate = build(mid);
+        if (estimateUnitTokens(candidate, estimateEventTokens) <= availableTokens) {
+            best = candidate;
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return best;
 }
 
 /** 摘要区间是否与 edit/redact 相交：相交时摘要文本可能过期，回退旧行为（原文优先，摘要只作预算兜底） */
@@ -622,9 +666,11 @@ export function compileRequest(options: CompileOptions): CompileResult {
         const tokens = estimateUnitTokens(unit, estimateEvent);
         if (selected.length === 0) {
             if (tokens > available) {
-                selected.push(truncateUnit(unit, available));
+                const truncatedUnit = truncateUnit(unit, available, estimateEvent);
+                selected.push(truncatedUnit);
                 truncated = true;
-                used += Math.min(tokens, available);
+                // 按截断后的实际估算记账：旧实现按 min(原 tokens, available) 会把“实际仍超”算成刚好装下
+                used += Math.min(estimateUnitTokens(truncatedUnit, estimateEvent), available);
             } else {
                 selected.push(unit);
                 used += tokens;

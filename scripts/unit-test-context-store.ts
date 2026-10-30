@@ -116,6 +116,26 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(reopened.getHead().persistedSeq, 1);
     },
 
+    async testContextStoreSingleHugeEventFlushes() {
+        resetHost();
+        const sid = 'QQ-Group:store-single-huge';
+        const store = await ContextStore.open(sid);
+        const hugeText = '长'.repeat(40 * 1024);
+        const hugeUser = { kind: 'user' as const, uid: 'QQ:1', msgId: 'm-huge', parts: [{ type: 'text' as const, text: hugeText }] };
+        store.append([hugeUser, userInput('m-after')]);
+        const result = await store.flush();
+        assert.equal(result.ok, true, '40KB 单事件应可落盘（旧实现会因单事件页 >32KB 永久 flush 失败）');
+        assert.equal(result.writtenEventPages, 2, '超大单事件独占一页，后续事件另起一页');
+        // 重开：原文完整可读回，head 正常推进
+        const reopened = await ContextStore.open(sid);
+        assert.equal(reopened.snapshot().events.length, 2);
+        const hugeEvent = reopened.snapshot().events[0] as any;
+        const text = hugeEvent.parts.filter((part: any) => part.type === 'text').map((part: any) => part.text).join('');
+        assert.equal(text.length, hugeText.length, '40KB 原文不应丢/截断');
+        assert.equal(reopened.getHead().nextPageNo, 3);
+        assert.equal(reopened.getHead().persistedSeq, 2);
+    },
+
     async testContextStoreRecordsPersist() {
         resetHost();
         const sid = 'QQ-Group:store-record';

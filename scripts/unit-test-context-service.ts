@@ -122,13 +122,34 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(reopened.head().summarizedThrough >= 2);
     },
 
-    async testContextServiceShouldCompact() {
-        storage = new FakeStorage();
-        installHost();
-        const service = await ContextService.open('QQ:service-6', { estimateEventTokens: () => 5 });
-        service.appendUser('QQ:1', 'm1', [{ type: 'text', text: 'x' }]);
-        assert.equal(service.shouldCompact(1), true);
-        assert.equal(service.shouldCompact(0), false);
+    async testContextServiceCompileObserveAndReset() {
+        const service = await openService('QQ:service-6');
+        service.appendUser('QQ:1', 'm1', [{ type: 'text', text: '一' }]);
+        service.appendUser('QQ:1', 'm2', [{ type: 'text', text: '二' }]);
+        const baseOptions = {
+            prefixMessages: [{ role: 'system' as const, content: 'sys' }],
+            estimateTextTokens,
+            estimateEventTokens,
+            resolveUserName: (uid: string) => uid,
+        };
+        assert.equal(service.lastCompile(), null, '新服务无编译统计');
+
+        // observe 缺省 = true：写入最近编译统计
+        const first = service.compile({ ...baseOptions, budgetTokens: 1000 });
+        assert.equal(service.lastCompile(), first.stats, '默认编译应记录统计');
+
+        // observe:false：子代理 fork seed 等「只为取投影」的编译不得覆盖统计
+        const second = service.compile({ ...baseOptions, budgetTokens: 5 }, { observe: false });
+        assert.notEqual(second.stats, first.stats, '第二次编译确实产生了不同统计');
+        assert.equal(service.lastCompile(), first.stats, 'observe:false 不得覆盖最近编译统计');
+
+        // 再次观察编译：更新为新统计
+        const third = service.compile({ ...baseOptions, budgetTokens: 1000 });
+        assert.equal(service.lastCompile(), third.stats);
+
+        // 每轮 run 开始 reset：统计清空，防止陈旧 omittedFromSeq 误触发自动摘要
+        service.resetLastCompile();
+        assert.equal(service.lastCompile(), null);
     },
 
     async testContextServiceMemoryBridge() {

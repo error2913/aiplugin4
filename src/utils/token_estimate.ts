@@ -56,3 +56,37 @@ function isCjkLikeCodePoint(cp: number): boolean {
     return (cp >= 0x3040 && cp <= 0x30FF)
         || (cp >= 0xAC00 && cp <= 0xD7AF);
 }
+
+/**
+ * 事件级 token 估算（与 `estimateTextTokens` 同口径，供事件账本/编译/压缩共用）。
+ *
+ * 历史实现按「字符数 / 3」估算，对中文（CJK 约 1 token/字符）会低估约 3 倍，
+ * 导致编译以为装得下、实际请求体超预算，且 `omittedFromSeq` 检测不到（预算到顶不触发）。
+ * 这里统一走 `estimateTextTokens`：
+ * - 文本 part：按 `estimateTextTokens`；
+ * - 图片等非文本 part：固定 64（与 `estimateMessageTokens` 一致）；
+ * - tool_call 的 args、assistant 的 reasoning：按文本估算；
+ * - +4 结构开销（role/字段名）；不包含编译层渲染前缀（[from]/[time]/[msg_id]）。
+ *
+ * 注意：本函数是 L1 叶子，不得 import 任何上层类型；用结构化参数接收事件。
+ */
+export interface EventTokenLike {
+    kind?: string;
+    parts?: ReadonlyArray<{ type?: string; text?: string } | null | undefined>;
+    args?: string;
+    reasoning?: string;
+}
+
+export function estimateEventTokens(event: EventTokenLike | null | undefined): number {
+    if (!event || typeof event !== 'object') return 1;
+    const parts = Array.isArray(event.parts) ? event.parts : [];
+    let tokens = 4;
+    for (const part of parts) {
+        if (!part || typeof part !== 'object') continue;
+        if (part.type === 'text') tokens += estimateTextTokens(String(part.text ?? ''));
+        else tokens += 64;
+    }
+    if (event.kind === 'tool_call') tokens += estimateTextTokens(String(event.args ?? ''));
+    if (typeof event.reasoning === 'string') tokens += estimateTextTokens(event.reasoning);
+    return Math.max(1, tokens);
+}

@@ -22,7 +22,7 @@ import { foldOmittedLine, foldSummaryHeader, AUX_HISTORY_OMIT_MARK as PROTOCOL_A
 import { getRoleSetting } from "./role";
 import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./timeout";
-import { estimateTextTokens } from "./token_estimate";
+import { estimateEventTokens, estimateTextTokens } from "./token_estimate";
 
 export { getRoleSetting } from "./role";
 
@@ -489,6 +489,17 @@ function truncateMessageText(message: ContextMessage, maxChars: number): number 
 }
 
 /**
+ * 预算口径换算（旧路径 applyTokenBudget 与 v2 编译共用）：
+ * 把配置/探测得到的请求预算换算成与真实 `prompt_tokens` 同口径的估算预算。
+ * `TokenCalibration` 校准系数 > 0 时除以它（请求体估算侧会乘以该系数，这里先折算回去）；
+ * 否则原样返回。两条路径共用此函数，避免再次漂移。
+ */
+function resolveCompileBudget(requestBudget: number, modelName?: string): number {
+    const factor = TokenCalibration.getFactor(modelName || '');
+    return factor > 0 ? Math.max(1, Math.floor(requestBudget / factor)) : requestBudget;
+}
+
+/**
  * token 预算裁剪：在 system + samples + context 完整组装后统一计算，超出预算时从最早的
  * context 消息开始丢弃；system 与 samples 永不丢弃。tools 的 JSON 长度同样预留进预算，
  * 使「上下文最大token」更接近真实请求体上限。
@@ -505,10 +516,10 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     if (maxTokens <= 0) return messages;
 
     const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
-    const factor = TokenCalibration.getFactor(modelName || '');
-    const budget = factor > 0
-        ? Math.max(Math.floor(maxTokens / factor - reserve), 1)
-        : Math.max(maxTokens - reserve, 1);
+    // 口径与 v2 编译共用 resolveCompileBudget：先按校准系数折算预算，再扣 tools 预留。
+    // 与旧实现 `factor > 0 ? max(floor(maxTokens / factor - reserve), 1)` 等价（reserve 为整数，
+    // floor(x - reserve) === floor(x) - reserve），故旧路径行为不变。
+    const budget = Math.max(resolveCompileBudget(maxTokens, modelName) - reserve, 1);
     const totalTokens = () => messages.reduce((acc, m) => acc + estimateMessageTokens(m), 0);
     let tokens = totalTokens();
 
@@ -555,7 +566,13 @@ function compileV2Request(
             content: buildContent(message),
         }));
         const budgets = resolveContextBudgets(session, modelName || '');
-        const budget = budgets.requestBudget;
+        // 预算口径与真实请求/警告同口径（见 resolveCompileBudget、checkRequestBudget）：
+        // 未乘校准系数时编译会误以为“装得下”，导致请求体实际超预算且 omittedFromSeq 永不出现。
+        const budget = resolveCompileBudget(budgets.requestBudget, modelName);
+        // 工具 schema 预留按 JSON 实际估算（旧实现 tools.length * 20 远小于真实值，请求体因此超预算）。
+        const toolsReserveTokens = Array.isArray(tools) && tools.length > 0
+            ? estimateTextTokens(JSON.stringify(tools))
+            : 0;
         // 本轮内联图片预算（同一次请求共享）：超出后只留文本标签（descriptors 会先渲染 [img:ID] 文本）
         const cfgLimit = Config.image.MAX_IMAGES_PER_REQUEST;
         const budgetRef = opts?.imageBudget ?? { left: cfgLimit > 0 ? cfgLimit : Number.POSITIVE_INFINITY };
@@ -568,7 +585,7 @@ function compileV2Request(
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
             budgetTokens: budget,
-            toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
+            toolsReserveTokens,
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
             caps: { vision: multimodal },
             toolImages: opts?.toolImages ?? Config.image.TOOL_RESULT_IMAGES,
@@ -635,13 +652,7 @@ function compileV2Request(
             tagBoundaryTokens: budgets.tagBoundaryTokens,
             formatDateKey: (at: number) => fmtDate(at).slice(0, 10),
             estimateTextTokens,
-            estimateEventTokens: (event: ConversationEvent) => {
-                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
-                let chars = 0;
-                for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
-                if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
-                return Math.max(1, Math.ceil(chars / 3)) + 4;
-            },
+            estimateEventTokens: (event: ConversationEvent) => estimateEventTokens(event),
         });
         if (opts?.trace) {
             opts.trace.entries = buildImageTrace(

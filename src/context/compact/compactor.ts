@@ -343,26 +343,6 @@ export async function compactOnce(
     };
 }
 
-/**
- * 是否满足后台压缩的**积压条件**（纯逻辑；不含"不在 run 中/节流/小时上限"，那些由调用方判断）：
- * - watermarkTokens <= 0 → 关闭（配置语义：0=关）；
- * - 必须还有未摘要事件（summarizedThrough < nextSeq-1 且当前 epoch 内有事件）；
- * - 未摘要 token 积压 ≥ 水位。
- */
-export function shouldCompact(head: Readonly<ContextHead>, watermarkTokens: number): boolean {
-    if (!head) return false;
-    const watermark = finiteInt(watermarkTokens, 0);
-    if (watermark <= 0) return false;
-    const nextSeq = finiteInt(head.nextSeq, 1);
-    const lastSeq = Math.max(0, nextSeq - 1);
-    const epochStartSeq = Math.max(1, finiteInt(head.epochStartSeq, 1));
-    const through = Math.max(0, finiteInt(head.summarizedThrough, 0));
-    if (lastSeq < epochStartSeq) return false;      // 当前 epoch 还没有事件
-    if (through >= lastSeq) return false;           // 没有未摘要事件
-    const pending = Math.max(0, finiteInt(head.unsummarizedTokens, 0));
-    return pending >= watermark;
-}
-
 /** 指数退避（纯逻辑）：默认 5 / 15 / 60 分钟，之后封顶 60 分钟（设计 gap-review X9） */
 export interface BackoffOptions {
     /** 各次失败对应的退避时长（ms）；缺省 [5min, 15min, 60min] */

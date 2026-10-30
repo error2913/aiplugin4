@@ -2825,12 +2825,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(activeTimeSegmentIndex({ start: 0, end: 0, segs: 0 }, new Date(2026, 0, 1, 10, 0)), -1, '未配置活跃时段返回 -1');
     },
 
-    /** 会话持久化契约：运行时字段不落盘、挂起队列只留轻量字段、节流边界 */
+    /** 会话持久化契约：运行时字段不落盘、挂起队列只留轻量字段、节流边界、自动摘要额度持久化 */
     testSessionPersistenceContract(): void {
         const session = new Session();
         session.sessionId = 'QQ:persist';
         session.setting.standby = true;
         session.running = true;
+        session.ctxAutoSummaryUsed = 1;
+        session.ctxAutoSummaryInFlight = true;
         session.pendingQueue.push({ ctx: {} as any, msg: {} as any, content: '你好', userId: 'QQ:1', messageId: 'm1', kind: 'record', epId: 'ep1', isPrivate: false });
         const raw = serializeSession(session);
         const data = JSON.parse(raw);
@@ -2839,6 +2841,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
         for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
             assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
         }
+        // 自动摘要额度必须持久化（重启后不白送一次）；在飞标记只在运行期
+        assert.equal(data.ctxAutoSummaryUsed, 1, '自动摘要额度应持久化');
+        assert.ok(!('ctxAutoSummaryInFlight' in data), '在飞标记不应落盘');
+        const revived = revive(Session, data) as Session;
+        assert.equal(revived.ctxAutoSummaryUsed, 1, '重启恢复后额度仍为已用');
+        assert.equal(revived.ctxAutoSummaryInFlight, false, '在飞标记重载后回 false');
+        // 旧会话没有该字段：revive 缺省 0（不因升级白送/误判）
+        const oldRaw = JSON.parse(raw);
+        delete oldRaw.ctxAutoSummaryUsed;
+        const revivedOld = revive(Session, oldRaw) as Session;
+        assert.equal(revivedOld.ctxAutoSummaryUsed, 0, '旧会话缺省额度未用');
         const pending = JSON.parse(serializePendingQueue(session.pendingQueue));
         assert.equal(pending.length, 1);
         assert.equal(pending[0].content, '你好');
@@ -8558,6 +8571,71 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const handled4 = { archived: false, switched: false };
             assert.equal(await agent.handleModelError(ctx, session3, err, handled4), 'retry', 'busy 应允许重发一次');
             assert.equal(handled4.archived, true);
+        } finally {
+            if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;
+            if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;
+            if (origTokens === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origTokens;
+            resetConfigCache();
+        }
+    },
+
+    /**
+     * handleModelError 动作一（v2 快速路径）：事件账本存在时 context_too_long **只收紧本轮请求预算**后重发，
+     * 不做摘要/不走旧归档（0 次 LLM）；同一 run 第二次同错误 giveup，不重复收紧。
+     */
+    async testHandleModelErrorContextTooLongV2FastPath(): Promise<void> {
+        const agent: any = Object.create(Agent.prototype);
+        const ctx: any = { notice: () => undefined };
+        const caps: Array<number | null> = [];
+        let archiveCalls = 0;
+        let summaryCalls = 0;
+        const contextV2: any = {
+            head: () => { summaryCalls++; return { unsummarizedTokens: 0 }; },
+            lastCompile: () => { summaryCalls++; return null; },
+            compact: async () => { summaryCalls++; return { advanced: false }; },
+            flush: async () => ({ ok: true }),
+            resetLastCompile: () => undefined,
+        };
+        const session: any = {
+            context: {
+                setV2BudgetCap: (t: number | null) => { caps.push(t); },
+                archiveByTokenIfNeeded: async () => { archiveCalls++; return 'converged'; },
+            },
+            contextV2,
+        };
+        const raw = '{"error":{"message":"This model\'s maximum context length is 128000 tokens. However, you requested 130000 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}';
+        const err = ApiError.fromResponse(400, 'openai', raw);
+
+        const origEnabled = TC.boolConfigs['启用报错自动处理'];
+        const origArchive = TC.boolConfigs['上下文超长自动归档重试'];
+        const origTokens = TC.intConfigs['上下文预算'];
+        TC.boolConfigs['启用报错自动处理'] = true;
+        TC.boolConfigs['上下文超长自动归档重试'] = true;
+        TC.intConfigs['上下文预算'] = 1000000;
+        resetConfigCache();
+        try {
+            assert.equal(err.kind, 'context_too_long');
+            const expected = Math.floor(128000 * 0.8);
+            const handled = { archived: false, switched: false };
+            const action = await agent.handleModelError(ctx, session, err, handled);
+            assert.equal(action, 'retry', 'v2 路径应收紧预算后直接重发');
+            assert.deepEqual(caps, [expected], '只调用 setV2BudgetCap(target)，目标=min(本地预算,报文窗口)×0.8');
+            assert.equal(handled.archived, true);
+            assert.equal(archiveCalls, 0, 'v2 路径不得走旧 archiveByTokenIfNeeded');
+            assert.equal(summaryCalls, 0, 'v2 快速路径不得触发摘要（0 次 LLM / 不读 head/lastCompile/compact）');
+
+            // 同 run 再次同错误：已 archived → giveup，不再收紧预算
+            const action2 = await agent.handleModelError(ctx, session, err, handled);
+            assert.equal(action2, 'giveup');
+            assert.equal(caps.length, 1, '第二次不应重复收紧');
+
+            // 开关关闭 → giveup 且不收紧预算
+            TC.boolConfigs['上下文超长自动归档重试'] = false;
+            resetConfigCache();
+            const handled2 = { archived: false, switched: false };
+            assert.equal(await agent.handleModelError(ctx, session, err, handled2), 'giveup');
+            assert.equal(caps.length, 1, '开关关闭时不应收紧预算');
+            assert.equal(handled2.archived, false);
         } finally {
             if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;
             if (origArchive === undefined) delete TC.boolConfigs['上下文超长自动归档重试']; else TC.boolConfigs['上下文超长自动归档重试'] = origArchive;

@@ -2,7 +2,7 @@
 // 纯逻辑：注入 summarizer/estimator/时钟；不依赖 seal/store/Config。
 import assert from 'node:assert/strict';
 
-import { Backoff, compactOnce, shouldCompact } from '../src/context/compact/compactor';
+import { Backoff, compactOnce } from '../src/context/compact/compactor';
 import type { CompactDeps, CompactOptions, CompactResult } from '../src/context/compact/compactor';
 import type {
     AssistantEvent,
@@ -376,19 +376,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(ok.advanced, true);
         assert.equal(ok.record!.fromSeq, 1);
         assert.equal(ok.record!.toSeq, 5);
-    },
-
-    async testCompactorShouldCompact() {
-        const base = makeHead({ nextSeq: 5, summarizedThrough: 2, unsummarizedTokens: 9000 });
-        assert.equal(shouldCompact(base, 6000), true);
-        assert.equal(shouldCompact(base, 9000), true);
-        assert.equal(shouldCompact(base, 9001), false);
-        assert.equal(shouldCompact(base, 0), false, '水位 0 = 关闭');
-        assert.equal(shouldCompact(base, -1), false);
-        assert.equal(shouldCompact(makeHead({ nextSeq: 5, summarizedThrough: 4 }), 1), false, '没有未摘要事件');
-        assert.equal(shouldCompact(makeHead({ nextSeq: 5, summarizedThrough: 5 }), 1), false, '水位越界也不触发');
-        assert.equal(shouldCompact(makeHead({ nextSeq: 1 }), 1), false, '还没有事件');
-        assert.equal(shouldCompact(makeHead({ epochStartSeq: 10, nextSeq: 5 }), 1), false, 'epoch 起点晚于最后事件');
     },
 
     testCompactorBackoff() {

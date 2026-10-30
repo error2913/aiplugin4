@@ -8,6 +8,7 @@ import { getHost } from "../core/host";
 import { getAgent } from "../core/ports/agent_registry";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/revive";
+import { estimateEventTokens as estimateEventTokensShared } from "../utils/token_estimate";
 
 import { pendingKey, sessionStorageKey, writeSessionRecord } from "./persistence";
 import { Session } from "./session";
@@ -91,17 +92,14 @@ export class SessionService {
                             settledSeq: (session.context as unknown as { settledSeq?: number }).settledSeq,
                         }, {
                             parseText: (text) => parseText(text, 'model-output'),
-                            estimateEventTokens: (event: ConversationEvent) => {
-                                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts;
-                                if (!parts) return 8;
-                                let chars = 0;
-                                for (const part of parts) if (part.type === 'text') chars += String(part.text || '').length;
-                                return Math.max(1, Math.ceil(chars / 3));
-                            },
+                            estimateEventTokens: (event: ConversationEvent) => estimateEventTokensShared(event),
                         });
                         logger.info(`会话${session.sessionId}上下文已迁移（旧 messages 保留）`);
                     }
-                    session.contextV2 = ContextService.openSync(session.sessionId);
+                    session.contextV2 = ContextService.openSync(session.sessionId, {
+                        // 事件账本/未摘要计数的 token 估算与编译/请求告警同口径（否则中文会话 pending 被低估）
+                        estimateEventTokens: (event: ConversationEvent) => estimateEventTokensShared(event),
+                    });
                 }
             } catch (error) {
                 session.contextV2 = null;

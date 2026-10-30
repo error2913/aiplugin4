@@ -29,7 +29,7 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { collectContextBacklog, compactContextV2, forceCompactToTarget } from "./context_bridge";
+import { collectContextBacklog, compactContextV2 } from "./context_bridge";
 import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -154,22 +154,41 @@ export default class Agent {
     }
 
     /**
-     * 预算到顶后的后台压缩：只在「本轮编译发现未摘要原文被预算裁掉」时触发一次。
-     * 不阻塞回复；失败退避只影响下一次触发，**不为空闲会话设置任何定时器**。
+     * 预算到顶后的自动摘要：**本会话（epoch）最多 1 次**，成功才消耗额度。
+     * 触发条件（全部满足）：
+     * - 额度未用且没有在飞（`ctxAutoSummaryUsed` / `ctxAutoSummaryInFlight`）；
+     * - 本轮编译确实发生了预算裁剪（`lastCompile()` 非空且 `omittedFromSeq !== null`）；
+     * - 仍有未摘要原文超过保留目标（`unsummarizedTokens > targetTokens`，避免空跑）。
+     * 不阻塞回复；失败/未推进不消耗额度；额度用尽后只归档（编译期省略，零 LLM）。
      */
     private scheduleContextCompaction(session: Session): void {
         const service = session.contextV2;
         if (!service) return;
+        if (session.ctxAutoSummaryUsed || session.ctxAutoSummaryInFlight) return;
+
         const stats = service.lastCompile();
         if (!stats || stats.omittedFromSeq === null) return;
+
         const budgets = resolveContextBudgets(session, Model.getChatModel('chat')?.name || '');
+        const pending = service.head().unsummarizedTokens;
+        if (pending <= budgets.targetTokens) return;
+
+        session.ctxAutoSummaryInFlight = true;
         void compactContextV2(session, budgets.targetTokens)
             .then(result => {
+                session.ctxAutoSummaryInFlight = false;
                 if (result?.advanced) {
-                    log.info(`[ctx-compact] 预算到顶触发压缩：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                    session.ctxAutoSummaryUsed = 1;
+                    session.save();
+                    log.info(`[ctx-compact] 本会话唯一一次自动摘要：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                } else {
+                    log.warning(`[ctx-compact] 自动摘要未推进（${result?.reason ?? 'unknown'}），额度保留`);
                 }
             })
-            .catch(e => log.warning('[ctx-compact] 后台压缩失败（不影响回复，下次触发再试）: ' + (e instanceof Error ? e.message : String(e))));
+            .catch(e => {
+                session.ctxAutoSummaryInFlight = false;
+                log.warning('[ctx-compact] 自动摘要异常（额度保留）: ' + (e instanceof Error ? e.message : String(e)));
+            });
     }
     /**
      * 单轮对话（aux LLM / 外部插件）：
@@ -234,6 +253,8 @@ export default class Agent {
             // 新一轮 run 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
             resetStopEvent(session.stopEvent);
             session.running = true;
+            // 编译统计按轮重置：run 提前 return / fork seed 复用父 service.compile 时不得读到陈旧统计
+            session.contextV2?.resetLastCompile?.();
             session.starting = false;
             session.aiTriggeredAt = Math.floor(Date.now() / 1000);
             MemoryScheduler.onRunStart(session);
@@ -444,7 +465,8 @@ export default class Agent {
 
     /**
      * 模型分类错误的自动处理（runInternal / runStreamInner 共用）：
-     * - context_too_long：按「观察归档+删除」链路把持久化上下文压到模型窗口内（目标=min(本地预算, 报文窗口×0.8)），返回 retry；
+     * - context_too_long：v2 只把本轮请求预算收紧到报文窗口内（目标=min(本地预算, 报文窗口×0.8)）后
+     *   直接重发，不调用摘要；无事件账本的旧路径仍走「观察归档」，返回 retry；
      * - 图片下载失败（invalid_request：QQ 图床直链过期等）：把这些图片标记为不可用并降级为文本标签后重发，返回 retry；
      * - 配置触发的类别（默认 balance）：自动切换 chat 备用模型并持久化（可选 ctx.notice 通知），返回 retry；
      * - 其余类别 / 动作已用过仍失败：仅记日志，返回 giveup（静默结束本轮，不回复用户）。
@@ -495,7 +517,10 @@ export default class Agent {
             return 'retry';
         }
 
-        // 动作一：上下文超长 → 观察归档（原文进归档分片）→ 自动重发
+        // 动作一：上下文超长。
+        // - v2（事件账本）：**快速路径**——只收紧本轮请求预算后直接重发，不做摘要（0 次 LLM）；
+        //   原文永久留在账本，不影响 read_raw/grep_raw 回查，后续轮次照常编译省略。
+        // - 旧回退路径（无事件账本）：保持原样，观察归档后重发。
         if (e.kind === 'context_too_long' && !handled.archived) {
             if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
             // P2-3：把报文里解析出的模型窗口**按模型名持久化**，下次不必再撞一次超长报错
@@ -503,20 +528,14 @@ export default class Agent {
             if (probed !== undefined) rememberProbedContextWindow(modelLabel, probed);
             const target = computeArchiveTarget(Config.context.BUDGET_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
-            // v2：先按保留强度强制压缩一次（真正减少内容），成功再重发；
-            // 压缩不可用/失败才回退到旧的「临时收紧请求预算」路径。
             if (session.contextV2) {
-                const budgets = resolveContextBudgets(session, modelLabel);
-                const compacted = await forceCompactToTarget(session, budgets.targetTokens);
-                if (compacted?.advanced) {
-                    handled.archived = true;
-                    // 双保险：压缩后仍可能因系统提示/摘要/工具 schema 超出报文窗口，
-                    // 用报文解析出的目标临时收紧本轮请求预算（保留强度/标签边界仍按永久预算算）。
-                    session.context.setV2BudgetCap?.(target);
-                    log.info(`[model-error] 上下文超长：已压缩 ${compacted.batches ?? 0} 批（目标 ${budgets.targetTokens} tokens），自动重发`);
-                    return 'retry';
-                }
+                // 预算收紧只作用于本轮请求；保留强度/标签边界仍按永久预算算。第二次仍超长则 giveup。
+                session.context.setV2BudgetCap(target);
+                handled.archived = true;
+                log.info(`[model-error] 上下文超长：请求预算收紧至 ${target} tokens，直接重发（不做摘要）`);
+                return 'retry';
             }
+            // 旧回退路径保持原样。
             // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），
             // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）；
             // 'busy' 表示已有归档在飞，允许重发一次（重试会用归档后的上下文重建请求）。
@@ -526,11 +545,7 @@ export default class Agent {
                 return 'giveup';
             }
             handled.archived = true;
-            if (session.contextV2) {
-                log.info(`[model-error] 上下文超长：已按超长报文收紧请求预算至 ${target} tokens（事件账本，自动重发）`);
-            } else {
-                log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
-            }
+            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
             return 'retry';
         }
 
@@ -625,6 +640,8 @@ export default class Agent {
             // 新一轮 runStream 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
             resetStopEvent(session.stopEvent);
             session.running = true;
+            // 编译统计按轮重置：runStream 提前 return / fork seed 复用父 service.compile 时不得读到陈旧统计
+            session.contextV2?.resetLastCompile?.();
             session.starting = false;
             session.aiTriggeredAt = Math.floor(Date.now() / 1000);
             MemoryScheduler.onRunStart(session);

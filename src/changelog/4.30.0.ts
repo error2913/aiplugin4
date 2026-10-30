@@ -74,6 +74,25 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 - 新增「工具结果展示token上限」（「工具」分组）：默认 8192，0=关闭；旧「工具响应截断字数」不再注册/读取（旧存储值忽略）。已安装用户如需调整请在 WebUI 手动配置新键。
 - \`compression\` 用途从模型配置与 \`.ai model\` 中移除；旧配置里的该用途会被自动忽略（日志 WARN），无需重建。
 
+## 上下文：自动摘要改为每会话最多一次，预算到顶只归档
+
+- **自动摘要额度**：每会话（context epoch）最多自动摘要 1 次；只有摘要成功才消耗额度，失败/空摘要/被单飞挡下不消耗，额度持久化在会话存档（重启不重置）；\`.ai ctx purge --yes\` 后重置。
+- **额度用完后只归档**：编译发现预算装不下未摘要原文时，只把更早原文省略出请求（原文仍在事件账本，\`read_raw\`/\`grep_raw\`/\`resolve_context_ref\` 可回查），不再产生摘要 LLM 调用；手动 \`.ai ctx archive\` 不受额度限制。
+- **context_too_long 恢复改为快速路径**：v2 事件账本下只把本轮请求预算收紧到 \`min(本地预算, 报文窗口) × 0.8\` 后直接重发，不再同步压缩/摘要；旧回退路径保持原行为。
+- **自动/手动压缩共用同一运行时**：修复自动路径与 \`.ai ctx archive\` 各自 new 一个运行时导致两个单飞互不可见、同一批事件被重复摘要/重复计费的问题。
+- **编译预算口径修复**：工具 schema 预留改为按 JSON 估算，请求预算按 \`TokenCalibration\` 校准系数折算；事件 token 估算统一为 \`estimateTextTokens\`（CJK≈1 token/字符，不再按 chars/3 低估约 3 倍），并修复最新单元超预算时 \`truncateUnit\` 的旧「3 字符/token」假设。
+- **事件页大事件落盘**：单条事件独占一页时上限放宽到 256KB（多事件页仍 32KB）；超过上限的 tool_result 在写账本前截断并追加 \`[tool-result-truncated-for-storage: …]\` 标记，避免 flush 永久卡在失败页、重启后整批事件丢失。
+- **\`.ai ctx\`**：status 增加自动摘要额度与「超预算内容不注入请求、原文可回查」说明；archive 帮助改为“手动整理…会花 LLM；自动摘要每会话最多 1 次”；删除 \`settle\` 别名。
+
+## 配置项更改
+
+- 删除「每小时后台压缩上限」：自动摘要改为每会话最多 1 次后不再需要（旧存储值升级后自动忽略，无需重建配置）。
+
+## 开发与工程
+
+- 新增 \`src/context/compact/session_runtime.ts\`（按会话共享压缩运行时）；删除 \`shouldCompact\`、\`forceCompactToTarget\`、\`ctxStats.summarization\`、\`DEFAULT_HOURLY_COMPACT_CAP\`、\`TOOL_RESULT_MAX_TOKENS_DEFAULT\` 等冗余。
+- 单测：更新上下文运行时/服务/编译/日志/存储/命令/会话/桥接/入口用例，新增额度一次性/失败退还/持久化、context_too_long 快速路径、40KB 单事件页落盘、CJK 大单元截断等用例；\`npx tsc --noEmit\`、\`npm run lint\`、\`npm run test:unit\`（714）、\`npm run deps:check\`、\`npm run build && npm run smoke\`、\`npm run sim\`、\`npm run sim:matrix\`、\`npm run fuzz\`、\`npm run test:integration\`、\`npm run docs:manifest\` 全绿。
+
 ## 默认内容：角色/技能/知识库正文恢复中文
 
 - 4.29.0 曾把默认角色「测试机器人」、默认技能「录卡」与三个内置知识库（\`核心指令\` / \`扩展指令\` / \`ob11-api\`）正文一并英文化；本版**改回中文**。系统提示词、工具描述、协议标记等非用户内容仍保持英文，机器人回复语言仍按对话语言。

@@ -19,7 +19,8 @@ import { archiveByTokenIfNeeded as archiveByTokenIfNeededImpl, settleWindowIfNee
 import { demoteMediaParts } from "./content/render";
 import { parseText } from "./content/text_parse";
 import { normalizeToolResult } from "./content/tool_result";
-import type { Part } from "./events";
+import { type ConversationEvent, type Part, toolResultEventId } from "./events";
+import { EVENT_PAGE_MAX_SINGLE_EVENT_BYTES, measureEventPageBytes } from "./log/page_store";
 import Message from "./message";
 import { editEventParts } from "./mutations";
 import { buildProjection } from "./projection";
@@ -78,6 +79,105 @@ export interface SystemEntryRef {
     itemIndex: number;
     /** Context v2：被追踪事件的 seq（用于后续 EditRecord 替换） */
     seq?: number;
+}
+
+/** 单事件页落盘余量（字节）：给 flush 时实际页号/seq 位数增长与测量差异留空间 */
+const TOOL_RESULT_STORAGE_PAGE_MARGIN_BYTES = 256;
+/** 存储层截断标记前缀：与展示层截断（compile 的 token 上限 + read_raw 指针）是两层 */
+const TOOL_RESULT_STORAGE_MARK = '[tool-result-truncated-for-storage:';
+
+interface ToolResultStorageInput {
+    turnId: string;
+    groupId: string;
+    callId: string;
+    name?: string;
+    parts: readonly Part[];
+}
+
+/** 构造与 store 实际入库同口径的 tool_result 事件（仅用于「单事件伪页」字节测量） */
+function toolResultStorageEvent(input: ToolResultStorageInput, parts: readonly Part[], seq: number): ConversationEvent {
+    const at = Math.floor(Date.now() / 1000);
+    return {
+        kind: 'tool_result',
+        turnId: input.turnId,
+        groupId: input.groupId,
+        callId: input.callId,
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        parts: parts as Part[],
+        eventId: toolResultEventId(input.groupId, input.callId),
+        seq,
+        at,
+        recvAt: at,
+    };
+}
+
+/** 单事件伪页的负载字节数（与 page_store.buildEventPage 的 bytes 口径一致） */
+function measureToolResultStoragePage(input: ToolResultStorageInput, parts: readonly Part[], seq: number, pageNo: number): number {
+    return measureEventPageBytes({
+        pageNo,
+        seqStart: seq,
+        seqEnd: seq,
+        events: [toolResultStorageEvent(input, parts, seq)],
+    });
+}
+
+/** 按字符预算保留各 text part（头 2/3 + 尾 1/3），并追加存储截断标记；非 text part 原样保留 */
+function buildStorageLimitedParts(parts: readonly Part[], keepChars: number, totalChars: number): Part[] {
+    const out: Part[] = parts.map(part => (part.type === 'text' ? { ...part } : part));
+    const textParts = out.filter((part): part is { type: 'text'; text: string } => part.type === 'text');
+    let remaining = Math.max(0, Math.min(Math.floor(keepChars), totalChars));
+    for (const part of textParts) {
+        const original = part.text;
+        const share = totalChars > 0 ? Math.floor((original.length * Math.floor(keepChars)) / totalChars) : 0;
+        const keep = Math.max(0, Math.min(original.length, share, remaining));
+        remaining -= keep;
+        part.text = keep <= 0 ? '' : (keep >= original.length ? original : truncateMiddle(original, keep));
+    }
+    const kept = out.filter(part => !(part.type === 'text' && part.text.length === 0));
+    const marker = `${TOOL_RESULT_STORAGE_MARK} 保留 ${Math.max(0, Math.floor(keepChars))}/${totalChars} 字符，完整结果可重新执行工具获取]`;
+    const lastText = [...kept].reverse().find((part): part is { type: 'text'; text: string } => part.type === 'text');
+    if (lastText) lastText.text = `${lastText.text}\n${marker}`;
+    else kept.push({ type: 'text', text: marker });
+    return kept;
+}
+
+/**
+ * 单事件 tool_result 存储上限（极端兜底）：写入账本前若「单事件页」字节超过
+ * `EVENT_PAGE_MAX_SINGLE_EVENT_BYTES`，按字符二分截断 text parts，保证 buildEventPage 能接受。
+ * 否则 store.flush 会永久卡在同一张失败页（buffer 不前进），重启后整批事件丢失、read_raw 不可达。
+ * 返回 null 表示无需截断。
+ */
+function limitToolResultForStorage(
+    input: ToolResultStorageInput,
+    seq: number,
+    pageNo: number,
+): { parts: Part[]; beforeBytes: number; afterBytes: number; totalChars: number; keptChars: number } | null {
+    const measure = (parts: readonly Part[]): number => measureToolResultStoragePage(input, parts, seq, pageNo);
+    const beforeBytes = measure(input.parts);
+    if (beforeBytes <= EVENT_PAGE_MAX_SINGLE_EVENT_BYTES) return null;
+    const totalChars = input.parts.reduce((n, part) => n + (part.type === 'text' ? part.text.length : 0), 0);
+    // 目标留余量：flush 时的实际页号可能比当前 head.nextPageNo 更大（位数增长）
+    const targetBytes = EVENT_PAGE_MAX_SINGLE_EVENT_BYTES - TOOL_RESULT_STORAGE_PAGE_MARGIN_BYTES;
+    let low = 0;
+    let high = totalChars;
+    let best: { parts: Part[]; keptChars: number; bytes: number } | null = null;
+    while (low <= high) {
+        const keep = Math.floor((low + high) / 2);
+        const parts = buildStorageLimitedParts(input.parts, keep, totalChars);
+        const bytes = measure(parts);
+        if (bytes <= targetBytes) {
+            best = { parts, keptChars: keep, bytes };
+            low = keep + 1;
+        } else {
+            high = keep - 1;
+        }
+    }
+    if (!best) {
+        // 理论兜底：只保留标记一定远小于上限（无 text part 的超大结构极少）
+        const parts = buildStorageLimitedParts(input.parts, 0, totalChars);
+        best = { parts, keptChars: 0, bytes: measure(parts) };
+    }
+    return { parts: best.parts, beforeBytes, afterBytes: best.bytes, totalChars, keptChars: best.keptChars };
 }
 
 export class Context {
@@ -579,13 +679,31 @@ export class Context {
                 }
                 if (call && call.kind === 'tool_call') group = { turnId: call.turnId, groupId: call.groupId };
             }
-            this.v2Service.appendToolResult({
-                turnId: group?.turnId ?? `orphan:${toolCallId}`,
-                groupId: group?.groupId ?? `orphan:${toolCallId}`,
+            const turnId = group?.turnId ?? `orphan:${toolCallId}`;
+            const groupId = group?.groupId ?? `orphan:${toolCallId}`;
+            // 存储层上限（极少数超大工具结果，如拉取群历史）：只在写账本前截断 text parts，
+            // 保证单事件页 <= EVENT_PAGE_MAX_SINGLE_EVENT_BYTES 可落盘。
+            // 展示层不受影响：compile 仍按 token 上限截断并给 read_raw 指针（原文不可回查时才需重新执行工具）。
+            const head = this.v2Service.head();
+            const limited = limitToolResultForStorage(
+                { turnId, groupId, callId: toolCallId, name: toolName, parts },
+                head.nextSeq,
+                head.nextPageNo,
+            );
+            const accepted = this.v2Service.appendToolResult({
+                turnId,
+                groupId,
                 callId: toolCallId,
                 name: toolName,
-                parts,
+                parts: limited ? limited.parts : parts,
             });
+            if (limited) {
+                const seqText = accepted.length > 0 ? `seq=${accepted[0]}` : '未入库（重复事件）';
+                log.warning(
+                    `工具结果超单事件页上限，已截断入账本：${seqText}，页负载 ${limited.beforeBytes}→${limited.afterBytes} 字节，`
+                    + `保留 ${limited.keptChars}/${limited.totalChars} 字符；被截断原文可重新执行工具获取`,
+                );
+            }
             this.invalidateV2();
             this.flushV2();
             return;
