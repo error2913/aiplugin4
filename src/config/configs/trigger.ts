@@ -7,9 +7,8 @@ import {
     type EventTriggerConfig,
     parseEventTriggerConfig,
 } from "../../event/trigger";
+import { getJudgeConfigState, JUDGE_TOML_DEFAULT } from "../../judge/config";
 import Logger from "../../logger";
-import { revive } from "../../utils/revive";
-import type { TypeDescriptor } from "../../utils/revive";
 import { parseTimeSegments } from "../../utils/time_window";
 import { validateTimerSpec } from "../../utils/timer_spec";
 import type { NormalizedTimerSpec } from "../../utils/timer_spec";
@@ -18,101 +17,14 @@ import { getRegexConfig } from "../regex";
 
 import { GENERATOR_CONFIG_HINT } from "./generator_hint";
 
-/** 评分触发参数（TOML 文本；缺省/空=未配置，按 Q9 报错并禁用判定） */
-export interface JudgeConfig {
-    /** 判定：得分(0-1)≥该值直接插话；WAIT 冷却秒数（0=不冷却） */
-    SCORING: { speak_threshold: number; wait_cooldown: number };
-    /** 五维权重（加权平均，归一化到 0-10） */
-    WEIGHTS: { relevance: number; willingness: number; social: number; timing: number; continuity: number };
-    /** 精力（0-100）：仅 SPEAK 插话成功扣减；每 5 分钟懒恢复 */
-    ENERGY: { initial: number; reply_cost: number; recover_min: number };
-    /** 门禁限额 */
-    GATE: { max_judge_per_hour: number };
-    /** 评分小模型调用 */
-    MODEL: { context_count: number; timeout_sec: number; retries: number };
-}
+// 评分触发参数（String TOML v2）：解析/默认值/有效性在 judge/config.ts（L2 唯一事实源），
+// 本文件只负责从 seal 配置读取原文并暴露给 Config.trigger。
 
-const JUDGE_TOML_DEFAULT = `# 评分触发参数（.ai on --j 开启后生效；缺省段/字段使用默认值）
-[scoring]                       # 判定
-speak_threshold = 0.70          # 得分(0-1)≥该值直接插话
-wait_cooldown = 60              # 得分<speak_threshold 或 bot 发言/被触发后的 WAIT 轮秒数；轮内消息挂起、轮末重新过 gate；0=不冷却
+export { resetJudgeConfigCacheForTest } from "../../judge/config";
 
-[weights]                       # 五维权重
-relevance = 25
-willingness = 20
-social = 20
-timing = 15
-continuity = 20
-
-[energy]                        # 精力(0-100)
-initial = 100                   # 初始精力
-reply_cost = 5                  # 每次 SPEAK 插话成功扣减精力（0.05×100，精力为 0-100 整数）
-recover_min = 4                 # 每 5 分钟懒恢复精力
-
-[gate]                          # 门禁限额
-max_judge_per_hour = 20         # 每会话每小时最多评分次数
-
-[model]                         # 评分小模型调用
-context_count = 10              # 注入给评分智能体的最近上下文条数
-timeout_sec = 30                # 单次评分请求超时(秒)
-retries = 3                     # 评分返回非 JSON 时的重试次数`;
-
-class JudgeConfigItem {
-    static validKeysMap: { [key in keyof JudgeConfigItem]?: TypeDescriptor<JudgeConfigItem[key]> } = {
-        scoring: { object: { speak_threshold: 'number', wait_cooldown: 'number' } },
-        weights: { object: { relevance: 'number', willingness: 'number', social: 'number', timing: 'number', continuity: 'number' } },
-        energy: { object: { initial: 'number', reply_cost: 'number', recover_min: 'number' } },
-        gate: { object: { max_judge_per_hour: 'number' } },
-        model: { object: { context_count: 'number', timeout_sec: 'number', retries: 'number' } }
-    }
-    scoring: { speak_threshold: number; wait_cooldown: number };
-    weights: { relevance: number, willingness: number, social: number, timing: number, continuity: number };
-    energy: { initial: number; reply_cost: number; recover_min: number };
-    gate: { max_judge_per_hour: number };
-    model: { context_count: number; timeout_sec: number; retries: number };
-    constructor() {
-        this.scoring = { speak_threshold: 0.70, wait_cooldown: 60 };
-        this.weights = { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 };
-        this.energy = { initial: 100, reply_cost: 5, recover_min: 4 };
-        this.gate = { max_judge_per_hour: 20 };
-        this.model = { context_count: 10, timeout_sec: 30, retries: 3 };
-    }
-}
-
-// 评分触发配置属于启动解析一次、重载 JS 才生效的复杂配置（TOML 分段解析）：模块级缓存
-let judgeConfigCache: JudgeConfig | null = null;
-
-/** 解析评分智能体 TOML 配置（文本来自「评分触发参数」String 配置） */
-function getJudgeConfig(): JudgeConfig {
-    if (judgeConfigCache) return judgeConfigCache;
-    const tomlString = seal.ext.getStringConfig(ext, "评分触发参数") || JUDGE_TOML_DEFAULT;
-    const d = new JudgeConfigItem();
-    try {
-        const mc = revive(JudgeConfigItem, load(tomlString));
-        // 每段都是部分覆盖：TOML 里只写了部分键时，其余并入默认值
-        judgeConfigCache = {
-            SCORING: { ...d.scoring, ...(mc.scoring || {}) },
-            WEIGHTS: { ...d.weights, ...(mc.weights || {}) },
-            ENERGY: { ...d.energy, ...(mc.energy || {}) },
-            GATE: { ...d.gate, ...(mc.gate || {}) },
-            MODEL: { ...d.model, ...(mc.model || {}) }
-        };
-    } catch (e) {
-        Logger.error(`评分触发配置解析错误，已使用默认值:${e instanceof Error ? e.message : String(e)}`);
-        judgeConfigCache = {
-            SCORING: { speak_threshold: 0.70, wait_cooldown: 60 },
-            WEIGHTS: { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 },
-            ENERGY: { initial: 100, reply_cost: 5, recover_min: 4 },
-            GATE: { max_judge_per_hour: 20 },
-            MODEL: { context_count: 10, timeout_sec: 30, retries: 3 }
-        };
-    }
-    return judgeConfigCache;
-}
-
-/** 仅供单元测试使用：清空模块级缓存，模拟重载 JS 后重新解析评分触发配置 */
-export function resetJudgeConfigCacheForTest(): void {
-    judgeConfigCache = null;
+/** 读取并缓存判定配置状态（v2；空/非法 ⇒ valid=false，判定入口直接不发起） */
+function getJudgeState() {
+    return getJudgeConfigState(seal.ext.getStringConfig(ext, "评分触发参数"));
 }
 
 /** 事件触发规则：启动解析一次、重载 JS 才生效（对齐评分触发配置的缓存口径） */
@@ -246,7 +158,9 @@ export default class TriggerConfig {
             TRIGGER_CONDITION: seal.ext.getStringConfig(ext, "触发需要满足的条件"),
             BUCKET_LIMIT: seal.ext.getIntConfig(ext, "触发次数上限"),
             FILL_INTERVAL: seal.ext.getIntConfig(ext, "触发次数补充间隔"),
-            JUDGE: getJudgeConfig(),
+            JUDGE: getJudgeState().config,
+            JUDGE_VALID: getJudgeState().valid,
+            JUDGE_ERRORS: getJudgeState().errors,
             TIMER_SPECS: getTimerTomlConfig(),
             EVENT_TRIGGER: {
                 CONFIG: getEventTriggerConfig(),

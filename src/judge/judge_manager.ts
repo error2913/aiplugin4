@@ -1,7 +1,6 @@
 // 评分触发管理：gate 门禁（零 LLM）→ 评分小模型 → SPEAK/WAIT 两级；
 // 其他方式触发会话 = 起一轮 WAIT（bot 刚发言/刚被触发即冷却）；WAIT 轮内新消息不评分、挂起轮末最新一条重新过 gate，由内置定时器兜底触发。
 import Config from "../config/config";
-import { JudgeConfig } from "../config/configs/trigger";
 import { getAuxLlm } from "../core/ports/aux_llm";
 import { cancelJudgeWait, scheduleJudgeWait, setJudgeWaitFinisher } from "../core/ports/judge_wait";
 import { logger } from "../logger";
@@ -10,6 +9,14 @@ import { AUX_HISTORY_FALLBACK_CHARS, buildContent, getRoleSetting, renderWindowe
 import { fmtDate } from "../utils/string";
 import { withTimeout } from "../utils/timeout";
 
+import { type JudgeDecisionConfigV2 } from "./config";
+import { extractFeatures } from "./features";
+import type { JudgeContextMessage } from "./features";
+import { parseDecision } from "./parse";
+import { decide, mergeDims } from "./policy";
+import { buildJudgeMessages } from "./prompt";
+
+
 const log = logger.withTag('judge');
 
 /** 内存状态上限（LRU 淘汰最久未使用的会话） */
@@ -17,6 +24,10 @@ const MAX_STATES = 1000;
 /** 消息密度统计窗口：15 秒内群消息达到 DENSITY_LIMIT 条时 gate 直接 DROP（刷屏不插话） */
 const DENSITY_WINDOW_MS = 15 * 1000;
 const DENSITY_LIMIT = 5;
+/** R1 shadow 期间旧动作路径的冻结常量：与旧版默认值一致（v2 只影响新内核/观测） */
+const LEGACY_SPEAK_THRESHOLD = 0.70;
+const LEGACY_CONTEXT_COUNT = 10;
+const LEGACY_WEIGHTS = { relevance: 25, willingness: 20, social: 20, timing: 15, continuity: 20 };
 
 interface JudgeDims {
     relevance: number;
@@ -58,6 +69,8 @@ function truncate(s: string, max: number): string {
 
 export class JudgeManager {
     private static states = new Map<string, JudgeState>();
+    /** 配置无效告警节流（毫秒时间戳；仅内存） */
+    private static lastConfigWarnAt = 0;
 
     /** 取（或创建）会话 judge 状态；Map 按插入序，命中重插实现 LRU */
     private static ensureState(sid: string): JudgeState {
@@ -112,6 +125,16 @@ export class JudgeManager {
     /** 主入口：消息已入库后由 pipeline 待机块调用；WAIT 轮内挂起，轮外 gate 通过才调用评分小模型 */
     static async evaluate(ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string): Promise<void> {
         const sid = session.sessionId;
+        // Q9：评分触发参数空/非法 → 判定不可用（其它触发照常）；日志按 5 分钟节流避免刷屏
+        if (!Config.trigger.JUDGE_VALID) {
+            const now = Date.now();
+            if (now - this.lastConfigWarnAt > 5 * 60 * 1000) {
+                this.lastConfigWarnAt = now;
+                const errors = (Config.trigger.JUDGE_ERRORS || []).join('；');
+                log.error(`评分触发参数无效，判定功能不可用：${errors || '未知原因'}（其它触发照常）`);
+            }
+            return;
+        }
         const cfg = Config.trigger.JUDGE;
         const state = this.ensureState(sid);
         const from = ctx.player?.userId || '';
@@ -188,7 +211,7 @@ export class JudgeManager {
 
     /** 轮外消息进 gate：任一条件命中 DROP（不触发小模型），通过则评分 */
     private static async processMessage(
-        ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string, cfg: JudgeConfig
+        ctx: seal.MsgContext, msg: seal.Message, session: Session, messageText: string, cfg: JudgeDecisionConfigV2
     ): Promise<void> {
         const sid = session.sessionId;
         const state = this.ensureState(sid);
@@ -198,11 +221,11 @@ export class JudgeManager {
             log.info(`sid=${sid} msg="${messageText}" from=${from} gate=DROP(${g.reason}) 不触发小模型`);
             return;
         }
-        log.info(`sid=${sid} msg="${messageText}" from=${from} gate=通过 | 精力${state.energy} 密度${state.msgTimes.length}/${DENSITY_LIMIT}/15s 本轮judge ${state.hourly.count}/${cfg.GATE.max_judge_per_hour}`);
+        log.info(`sid=${sid} msg="${messageText}" from=${from} gate=通过 | 精力${state.energy} 密度${state.msgTimes.length}/${DENSITY_LIMIT}/15s 本轮judge ${state.hourly.count}/${cfg.GATE.max_calls_per_hour}`);
 
-        const built = this.buildJudgeMessages(ctx, session, messageText, cfg);
-        log.info(`注入: bot=${built.botName} role=${built.role} lastBot=${built.lastBot} ctx=${built.ctxCount}/${cfg.MODEL.context_count}`);
-        await this.judgeAndBranch(ctx, msg, session, cfg, built);
+        const built = this.buildJudgeMessages(ctx, session, messageText);
+        log.info(`注入: bot=${built.botName} role=${built.role} lastBot=${built.lastBot} ctx=${built.ctxCount}/${LEGACY_CONTEXT_COUNT}`);
+        await this.judgeAndBranch(ctx, msg, session, cfg, built, messageText);
     }
 
     /** gate 门禁（零 LLM）：任一条件命中直接 DROP，不触发小模型；WAIT 轮判定在 evaluate 入口，gate 不再管冷却 */
@@ -231,7 +254,7 @@ export class JudgeManager {
         // 每会话每小时评分上限
         const hour = Math.floor(now / 3600000);
         if (state.hourly.hour !== hour) state.hourly = { hour, count: 0 };
-        if (state.hourly.count >= cfg.GATE.max_judge_per_hour) return { drop: true, reason: `本轮judge已用尽(${state.hourly.count}/${cfg.GATE.max_judge_per_hour})` };
+        if (state.hourly.count >= cfg.GATE.max_calls_per_hour) return { drop: true, reason: `本轮judge已用尽(${state.hourly.count}/${cfg.GATE.max_calls_per_hour})` };
 
         state.hourly.count++;
         return { drop: false, reason: '' };
@@ -240,7 +263,7 @@ export class JudgeManager {
     /** 评分 + 两级分支：SPEAK 直接插话（session.chat 内部会起一轮 WAIT 作为冷却）/ WAIT 起一轮 WAIT 挂起后续消息 */
     private static async judgeAndBranch(
         ctx: seal.MsgContext, msg: seal.Message, session: Session,
-        cfg: JudgeConfig, built: JudgeBuilt
+        cfg: JudgeDecisionConfigV2, built: JudgeBuilt, messageText: string
     ): Promise<void> {
         // 账本：评分触发的评分次数（`.ai ctx` 展示；游离会话无 ctxStats 时忽略）
         const stats: any = (session as any).ctxStats;
@@ -251,7 +274,7 @@ export class JudgeManager {
             return;
         }
         const { dims, reason } = result;
-        const w = cfg.WEIGHTS;
+        const w = LEGACY_WEIGHTS;
         const totalW = w.relevance + w.willingness + w.social + w.timing + w.continuity || 1;
         const score10 = (
             dims.relevance * w.relevance +
@@ -265,7 +288,15 @@ export class JudgeManager {
         log.info(`dims: relevance=${dims.relevance}(w${w.relevance}) willingness=${dims.willingness}(w${w.willingness}) social=${dims.social}(w${w.social}) timing=${dims.timing}(w${w.timing}) continuity=${dims.continuity}(w${w.continuity})`);
         log.info(`reason: ${reason}`);
 
-        if (s >= cfg.SCORING.speak_threshold) {
+        // R1 shadow：新判定内核完整跑一遍（特征→prompt→模型→parse→policy），只记结构化日志，不影响动作
+        const legacyDecision: 'SPEAK' | 'WAIT' = s >= LEGACY_SPEAK_THRESHOLD ? 'SPEAK' : 'WAIT';
+        if (cfg.DECISION.shadow) {
+            void this.runShadowDecision(ctx, session, messageText, cfg, legacyDecision).catch((e: unknown) => {
+                log.warning(`[judge-shadow] 失败（已忽略）：${e instanceof Error ? e.message : String(e)}`);
+            });
+        }
+
+        if (s >= LEGACY_SPEAK_THRESHOLD) {
             log.info(`score=${score10.toFixed(2)}/10 → SPEAK`);
             await session.chat(ctx, msg, '评分触发');
             // A1：精力只在 SPEAK 插话成功时扣减
@@ -276,11 +307,101 @@ export class JudgeManager {
             return;
         }
         this.startWaitRound(ctx, session, '评分低分');
-        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${cfg.SCORING.speak_threshold}) 冷却${cfg.SCORING.wait_cooldown}s`);
+        log.info(`score=${score10.toFixed(2)}/10 → WAIT (s<${LEGACY_SPEAK_THRESHOLD}) 冷却${cfg.SCORING.wait_cooldown}s`);
+    }
+
+    /**
+     * R1 shadow：新判定内核完整跑一遍（六维特征 → prompt → LLM → parse → policy.decide），
+     * 只输出一行结构化日志（S/U/decision/confidence/reason/耗时），**不改变任何动作**。
+     * 方案 §6.8：R1 默认 shadow=true，用于 2–4 周灰度与 τ 校准。
+     */
+    private static async runShadowDecision(
+        ctx: seal.MsgContext, session: Session, messageText: string,
+        cfg: JudgeDecisionConfigV2, legacyDecision: 'SPEAK' | 'WAIT',
+    ): Promise<void> {
+        const startedAt = Date.now();
+        const state = this.ensureState(session.sessionId);
+        const botName = seal.formatTmpl(ctx, "核心:骰子名字") || '骰娘';
+        const { roleSetting } = getRoleSetting(ctx);
+
+        // Context → features 最小投影（时间戳缺失按未知处理；senderIds 不参与决策，留空）
+        const projected: JudgeContextMessage[] = [];
+        const rawMessages = session.context.messages as any[];
+        for (const message of rawMessages.slice(-30)) {
+            const text = buildContent(message).replace(/\f/g, '\n').trim();
+            if (!text) continue;
+            projected.push({ role: String(message.role || 'user'), text });
+        }
+        const features = extractFeatures({
+            messages: projected,
+            msgTimes: state.msgTimes.slice(),
+            senderIds: [],
+            botId: ctx.endPoint.userId,
+            isGroup: !ctx.isPrivate,
+            now: startedAt,
+            candidate: { role: 'user', text: messageText },
+            botNames: [botName],
+            roleSetting,
+        });
+        const built = buildJudgeMessages({
+            botName,
+            botId: ctx.endPoint.userId,
+            roleSetting,
+            history: projected.slice(0, -1),
+            candidate: projected.length > 0 ? projected[projected.length - 1] : { role: 'user', text: messageText },
+            features,
+            contextTokens: cfg.MODEL.context_tokens,
+            promptExtra: cfg.PROMPT.extra,
+            now: startedAt,
+        });
+
+        let raw = '';
+        let lastError = '';
+        for (let attempt = 0; attempt <= cfg.MODEL.retries; attempt++) {
+            try {
+                raw = await withTimeout(() => getAuxLlm().chatMessages('judge_agent', built.messages), cfg.MODEL.timeout_sec * 1000);
+                break;
+            } catch (e) {
+                lastError = e instanceof Error ? e.message : String(e);
+                raw = '';
+            }
+        }
+        const parsed = raw ? parseDecision(raw) : null;
+        const llm = parsed && parsed.ok ? parsed.value : null;
+        const parseError = parsed && 'error' in parsed ? parsed.error : (raw ? '' : lastError || 'no-response');
+        const failed = !(parsed && parsed.ok);
+        const dims = mergeDims(features, llm?.dims);
+        const decision = decide({
+            dims,
+            decision: llm?.decision,
+            confidence: llm?.confidence,
+            failed,
+            weights: cfg.WEIGHTS,
+            policy: {
+                aggressiveness: cfg.DECISION.aggressiveness,
+                speak_threshold: cfg.SCORING.speak_threshold,
+                ignore_threshold: cfg.SCORING.ignore_threshold,
+                interruption_veto: cfg.FEATURES.interruption_veto,
+            },
+            hard: {
+                energy: state.energy,
+                busy: session.running || session.starting,
+                pendingTimer: session.context.timer !== null,
+                waitRound: Date.now() < state.waitUntil,
+            },
+        });
+        const round = (value: number): number => Math.round(value * 100) / 100;
+        log.info(
+            `[judge-shadow] sid=${session.sessionId} S=${decision.S.toFixed(3)} U=${decision.U.toFixed(2)}`
+            + ` new=${decision.action} legacy=${legacyDecision} confidence=${llm?.confidence ?? '-'}`
+            + ` reason="${(llm?.reason ?? parseError).slice(0, 120)}"`
+            + ` dims=${JSON.stringify({ addressed: round(features.addressed), help: round(features.help_signal), relevance: round(features.relevance), friendships: round(features.friendships), silence: round(features.silence_gap), risk: round(features.interruption_risk) })}`
+            + ` costMs=${Date.now() - startedAt}`,
+        );
     }
 
     /** 调用评分智能体（use=judge，未单独配置 judge 模型时回退 chat 模型），带 JSON 重试与超时 */
-    private static async requestScore(messages: { role: string; content: string }[], cfg: JudgeConfig): Promise<JudgeResult> {
+    private static async requestScore(messages: { role: string; content: string }[], cfg: JudgeDecisionConfigV2): Promise<JudgeResult> {
         let lastError = '';
         for (let i = 0; i <= cfg.MODEL.retries; i++) {
             try {
@@ -325,13 +446,13 @@ export class JudgeManager {
 
     /** 组装评分输入：bot 名/角色设定/上次发言/最近上下文注入，并声明外部数据仅供参考防注入 */
     private static buildJudgeMessages(
-        ctx: seal.MsgContext, session: Session, messageText: string, cfg: JudgeConfig
+        ctx: seal.MsgContext, session: Session, messageText: string
     ): JudgeBuilt {
         const botName = seal.formatTmpl(ctx, "核心:骰子名字") || '骰娘';
         const { roleSetting } = getRoleSetting(ctx);
         const role = roleSetting || '(none)';
         const lastBot = this.getLastBotSpeak(session);
-        const history = this.buildHistory(session, cfg.MODEL.context_count, messageText);
+        const history = this.buildHistory(session, LEGACY_CONTEXT_COUNT, messageText);
 
         const system = `You rate whether a group-chat interjection is worth making. Decide whether the bot "${botName}" should join in and reply to the latest message in the group.
 
