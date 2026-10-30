@@ -12,6 +12,8 @@ export class Setting {
         activeMode: 'boolean',
         // 被 @ 触发开关（默认开，R17）
         atTrigger: 'boolean',
+        // timer 单模式开关（配置驱动；默认关）
+        timerTrigger: 'boolean',
         counter: 'number',
         timer: 'number',
         prob: 'number',
@@ -26,6 +28,7 @@ export class Setting {
     aiEnabled: boolean;
     activeMode: boolean;
     atTrigger: boolean;
+    timerTrigger: boolean;
     counter: number;
     timer: number;
     prob: number;
@@ -54,6 +57,7 @@ export class Setting {
         this.aiEnabled = false;
         this.activeMode = false;
         this.atTrigger = true;
+        this.timerTrigger = false;
         this.counter = -1;
         this.timer = -1;
         this.prob = -1;

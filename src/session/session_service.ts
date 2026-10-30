@@ -10,6 +10,7 @@ import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/revive";
 import { estimateEventTokens as estimateEventTokensShared } from "../utils/token_estimate";
 
+import { syncModeTimers } from "./mode_timers";
 import { pendingKey, sessionStorageKey, writeSessionRecord } from "./persistence";
 import { Session } from "./session";
 import { Setting } from "./setting";
@@ -75,6 +76,14 @@ export class SessionService {
             if (session.setting.standby && !session.setting.aiEnabled) session.setting.aiEnabled = true;
             // 双向兼容写：aiEnabled 为真值来源，standby 仅作旧代码/旧面板读取镜像
             session.setting.standby = session.setting.aiEnabled;
+            // timer 单模式：恢复会话时按全局「默认定时器」TOML 重建该会话的隐式定时器
+            if (session.setting.timerTrigger) {
+                try {
+                    syncModeTimers(session);
+                } catch (e) {
+                    logger.warning(`重建 timer 模式定时器失败: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
             // 同步归属字段，确保 context/memory 能解析到正确的 agent/session
             session.context.agentName = session.agentName;
             session.context.sessionId = session.sessionId;

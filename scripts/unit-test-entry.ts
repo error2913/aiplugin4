@@ -8,7 +8,7 @@ import { installTestHost } from "./test-host";
 
 import Config from "../src/config/config";
 import { MEMORY_PROMPT_TOKEN_BUDGET } from "../src/config/configs/memory";
-import { resetJudgeConfigCacheForTest } from "../src/config/configs/trigger";
+import { resetJudgeConfigCacheForTest, resetTimerTomlConfigCacheForTest } from "../src/config/configs/trigger";
 Config.registerConfig();
 
 import { buildContent, buildMultimodalContent, collectImageUrls, estimateTextTokens, estimateMessageTokens, foldContextMessages, handleMessages, pickTier, renderFoldBudget, textToMultimodalContent, windowCharsForTier } from "../src/utils/message";
@@ -180,6 +180,7 @@ const TC = (globalThis as any).__TEST_CONFIG__;
 function resetConfigCache() {
     (Config as any).cache = {};
     resetJudgeConfigCacheForTest();
+    resetTimerTomlConfigCacheForTest();
     resetModelConfigCacheForTest();
 }
 
@@ -5901,8 +5902,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
     /** 评分触发配置（TOML 分段）：默认值、单段/单键部分覆盖并入默认与非法 TOML 回退默认 */
     testJudgeConfigDefaults(): void {
-        const key = '评分触发配置';
-        delete TC.templateConfigs[key];
+        const key = '评分触发参数';
+        delete TC.stringConfigs[key];
         resetConfigCache();
         // 默认值
         let cfg = (Config as any).trigger.JUDGE;
@@ -5917,7 +5918,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.MODEL.timeout_sec, 30);
         assert.equal(cfg.MODEL.retries, 3);
         // 单段部分覆盖：只改 scoring 段，其余段并入默认值
-        TC.templateConfigs[key] = ['[scoring]\nspeak_threshold = 0.8\nwait_cooldown = 30'];
+        TC.stringConfigs[key] = '[scoring]\nspeak_threshold = 0.8\nwait_cooldown = 30';
         resetConfigCache();
         cfg = (Config as any).trigger.JUDGE;
         assert.equal(cfg.SCORING.speak_threshold, 0.8);
@@ -5926,18 +5927,51 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(cfg.ENERGY.initial, 100, '未配置段应并入默认精力');
         assert.equal(cfg.MODEL.timeout_sec, 30, '未配置段应并入默认模型');
         // 单键部分覆盖：只改 energy.reply_cost，其余键并入默认值
-        TC.templateConfigs[key] = ['[energy]\nreply_cost = 8'];
+        TC.stringConfigs[key] = '[energy]\nreply_cost = 8';
         resetConfigCache();
         cfg = (Config as any).trigger.JUDGE;
         assert.equal(cfg.ENERGY.reply_cost, 8, 'TOML 覆盖 reply_cost 应生效');
         assert.equal(cfg.ENERGY.initial, 100, '缺省键应使用默认值');
         assert.equal(cfg.SCORING.speak_threshold, 0.70, '缺省段应使用默认值');
         // 非法 TOML：回退默认值
-        TC.templateConfigs[key] = ['not = = toml'];
+        TC.stringConfigs[key] = 'not = = toml';
         resetConfigCache();
         cfg = (Config as any).trigger.JUDGE;
         assert.equal(cfg.SCORING.speak_threshold, 0.70, '非法 TOML 应回退默认值');
-        delete TC.templateConfigs[key];
+        delete TC.stringConfigs[key];
+        resetConfigCache();
+    },
+
+    /** 默认定时器（String TOML，多 [[timer]]）：空/合法/单条非法跳过/整份非法拒绝 */
+    testTimerTomlConfig(): void {
+        const key = '默认定时器';
+        delete TC.stringConfigs[key];
+        resetConfigCache();
+        let cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, true);
+        assert.equal(cfg.SPECS.length, 0);
+
+        TC.stringConfigs[key] = '[[timer]]\ntypes = "interval"\nhours = 12\ncount = -1\nprompts = ["a"]\n\n[[timer]]\ntypes = "target"\nyears = 2027\nmonths = 1\ndays = 1\nhours = 0\nminutes = 0\nprompts = ["b"]';
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, true);
+        assert.equal(cfg.SPECS.length, 2);
+        assert.equal(cfg.SPECS[0].intervalSec, 12 * 3600);
+
+        // 单条非法只跳过自己，不影响整份
+        TC.stringConfigs[key] = '[[timer]]\ntypes = "interval"\nhours = 1\ncount = 0\nprompts = ["a"]';
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, true);
+        assert.equal(cfg.SPECS.length, 0);
+
+        // 整份 TOML 非法：VALID=false（trg timer on 应拒绝）
+        TC.stringConfigs[key] = 'not = = toml';
+        resetConfigCache();
+        cfg = (Config as any).trigger.TIMER_SPECS;
+        assert.equal(cfg.VALID, false);
+
+        delete TC.stringConfigs[key];
         resetConfigCache();
     },
 
@@ -6003,7 +6037,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
         // 缩短评分超时，避免 withTimeout 的兜底定时器拖慢测试
-        TC.templateConfigs['评分触发配置'] = ['[model]\ntimeout_sec = 0.001'];
+        TC.stringConfigs['评分触发参数'] = '[model]\ntimeout_sec = 0.001';
         resetConfigCache();
         const cfg = (Config as any).trigger.JUDGE;
         const chatReasons: string[] = [];
@@ -6058,7 +6092,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (JudgeManager as any).clearSession('eval-wait');
             (JudgeManager as any).clearSession('eval-wait-low');
             delete (Agent as any).agentMap['judge_agent'];
-            delete TC.templateConfigs['评分触发配置'];
+            delete TC.stringConfigs['评分触发参数'];
             resetConfigCache();
         }
     },
@@ -6186,7 +6220,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origNow = Date.now;
         const fakeNow = 1_700_000_000_000;
         Date.now = () => fakeNow;
-        TC.templateConfigs['评分触发配置'] = ['[scoring]\nwait_cooldown = 0'];
+        TC.stringConfigs['评分触发参数'] = '[scoring]\nwait_cooldown = 0';
         resetConfigCache();
         const origAddJudgeWaitTimer = (TimerManager as any).addJudgeWaitTimer;
         let judgeWaitTimers = 0;
@@ -6211,7 +6245,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             Date.now = origNow;
             (TimerManager as any).addJudgeWaitTimer = origAddJudgeWaitTimer;
             (JudgeManager as any).clearSession(sid);
-            delete TC.templateConfigs['评分触发配置'];
+            delete TC.stringConfigs['评分触发参数'];
             resetConfigCache();
         }
     },

@@ -28,6 +28,7 @@ import { registerCmdSubAgent } from "./sub_cmd/subagent";
 import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
+import { registerCmdTrg } from "./sub_cmd/trg";
 import { registerCmdTti } from "./sub_cmd/tti";
 import { registerCmdTts } from "./sub_cmd/tts";
 
@@ -43,6 +44,7 @@ export function registerSubCommands(): void {
     registerCmdCtx();
     registerCmdLive();
     registerCmdTimer();
+registerCmdTrg();
     registerCmdOn();
     registerCmdStandby();
     registerCmdOff();
