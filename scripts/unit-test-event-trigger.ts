@@ -86,17 +86,16 @@ interface FakeSessionCalls {
     save: number;
 }
 
-function fakeSession(overrides: { running?: boolean; starting?: boolean; standby?: boolean; eventTrigger?: boolean } = {}): { session: any; calls: FakeSessionCalls } {
+function fakeSession(overrides: { running?: boolean; starting?: boolean; aiEnabled?: boolean; eventTrigger?: boolean } = {}): { session: any; calls: FakeSessionCalls } {
     const calls: FakeSessionCalls = { chat: [], defer: [], savePending: 0, handleReceipt: 0, system: [], save: 0 };
     const session: any = {
         running: overrides.running === true,
         starting: overrides.starting === true,
         sessionId: 'QQ-Group:2001',
         setting: {
-            standby: overrides.standby !== false,
-            aiEnabled: overrides.standby !== false,
+            aiEnabled: overrides.aiEnabled !== false,
             eventTrigger: overrides.eventTrigger !== false,
-            enabled() { return this.aiEnabled === true || this.standby === true; },
+            enabled() { return this.aiEnabled === true; },
         },
         deferReceipt: async (ctx: any, msg: any, arr: any[], kind: string, reason: string, systemName: string) => {
             calls.defer.push({ ctx, msg, arr, kind, reason, systemName });
@@ -312,9 +311,9 @@ export const tests = {
         assert.ok(String(calls.system[0][0]).startsWith('Event trigger matched:\nGroup event: QQ:1001 poked QQ:999.'), String(calls.system[0][0]));
     },
 
-    async testMaybeTriggerRequiresStandby(): Promise<void> {
+    async testMaybeTriggerRequiresAiEnabled(): Promise<void> {
         installRules(rulesJson(validRule()));
-        const { session, calls } = fakeSession({ standby: false });
+        const { session, calls } = fakeSession({ aiEnabled: false });
         const ctx: any = { endPoint: { userId: 'QQ:999' }, isPrivate: false };
         const msg: any = { messageType: 'group', groupId: 'QQ-Group:2001' };
         const prevGlobal = TC.boolConfigs['是否开启全局待机'];
@@ -414,7 +413,7 @@ export const tests = {
         });
         const sid = 'QQ-Group:143412516';
         const session = getSession(sid);
-        session.setting.standby = true;
+        session.setting.aiEnabled = true;
         const chats: any[] = [];
         (session as any).chat = async (...args: any[]) => { chats.push(args); };
         try {

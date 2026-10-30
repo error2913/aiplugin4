@@ -379,9 +379,9 @@ export class Context {
     }
 
     /** 待机判定（配额用；v2 不再使用冷/热状态机） */
-    private isStandbySession(): boolean {
+    private isRecordOnlySession(): boolean {
         const s: any = this.session;
-        return !!(s?.setting?.standby || Config.base.GLOBAL_STANDBY);
+        return !!(s?.setting?.aiEnabled || Config.base.GLOBAL_STANDBY);
     }
 
     /** 冷态判定（仅旧回退路径使用） */
@@ -450,7 +450,7 @@ export class Context {
     async addUserMessage(ctx: seal.MsgContext, text: string, userId: string, messageId: string): Promise<void> {
         if (this.v2Service) {
             // 只有启用配额时才限流；按待机判定，不进入旧冷热状态机
-            if (Config.context.STANDBY_QUOTA > 0 && this.isStandbySession() && !this.allowColdIngest()) return;
+            if (Config.context.STANDBY_QUOTA > 0 && this.isRecordOnlySession() && !this.allowColdIngest()) return;
             this.appendV2User(text, userId, messageId);
             return;
         }

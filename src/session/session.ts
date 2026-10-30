@@ -330,7 +330,7 @@ export class Session {
     stateOf(now: number = Date.now(), opts?: { touch?: boolean }): 'HOT' | 'COOLING' | 'COLD' {
         const touch = opts?.touch !== false;
         const { state, lastRelevantAt } = computeSessionState({
-            standby: this.setting.enabled() || Config.base.GLOBAL_STANDBY,
+            aiActive: this.setting.enabled() || Config.base.GLOBAL_STANDBY,
             busy: this.running || this.starting || this.activeRuns > 0,
             lastRelevantAt: this.lastRelevantAt,
             now,

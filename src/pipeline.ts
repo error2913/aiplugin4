@@ -444,7 +444,7 @@ export class MessagePipeline {
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
-            // 待机判定必须同时看全局待机（B3）：只判 setting.standby 会让"全局待机"下指令消息不入库，
+            // 待机判定必须同时看全局待机（B3）：只判 setting.aiEnabled 会让"全局待机"下指令消息不入库，
             // 与会话待机行为不一致（其余入库点如 handleGroupMessage 已是 `standby || GLOBAL_STANDBY`）。
             if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
                 session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {

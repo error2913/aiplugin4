@@ -2,11 +2,10 @@
 import { TypeDescriptor } from "../utils/revive";
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'aiEnabled', 'activeMode', 'atTrigger', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
+    static validKeys: (keyof Setting)[] = ['priv', 'aiEnabled', 'activeMode', 'atTrigger', 'timerTrigger', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
-        standby: 'boolean',
-        // 绝对触发闸：M2 迁移期默认 true（保持旧行为），.ai 命令重写后切为 false（新会话默认关）
+        // 绝对触发闸：新会话默认关（Q3）；旧存档 standby=true 由 SessionService 迁移
         aiEnabled: 'boolean',
         // 会话级活跃时间开关（默认关；全局时段由「触发活跃时间」提供）
         activeMode: 'boolean',
@@ -24,7 +23,6 @@ export class Setting {
         overrides: { objectValue: 'any' }
     }
     priv: number;
-    standby: boolean;
     aiEnabled: boolean;
     activeMode: boolean;
     atTrigger: boolean;
@@ -52,7 +50,6 @@ export class Setting {
 
     constructor() {
         this.priv = 0;
-        this.standby = false;
         // 绝对触发闸：新会话默认关（Q3）；旧存档由 SessionService 迁移 standby=true → true
         this.aiEnabled = false;
         this.activeMode = false;
@@ -73,11 +70,11 @@ export class Setting {
     }
 
     /**
-     * 迁移期统一闸值：aiEnabled 是唯一真值来源；旧存档/旧调用方仍可能只写 standby，
-     * 因此两者取或。`.ai on/off` 重写、standby 字段删除后本方法收敛为 `aiEnabled`。
+     * 绝对触发闸（standby 概念已删除：aiEnabled 即唯一开关）。
+     * 保留方法名是为了让旧调用点迁移期不用一次性改完，语义等同 `this.aiEnabled`。
      */
     enabled(): boolean {
-        return this.aiEnabled || this.standby;
+        return this.aiEnabled;
     }
 
     /**

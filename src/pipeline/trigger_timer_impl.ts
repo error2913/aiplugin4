@@ -6,7 +6,7 @@
 // - 规则 fire 复用 runChain(sourceSatisfied=true)，保证与消息/事件入口同一求值/起轮路径；
 // - 隐式模式 timer（mode:<sid>）不建规则，直接按 prompts 起轮。
 import { getSessionById } from "../core/ports/session_lookup";
-import { addRuleTimer, removeRuleTimers, setTriggerTimerHandler } from "../core/ports/trigger_timer";
+import { addRuleTimer, listRuleTimers, removeRuleTimers, setTriggerTimerHandler } from "../core/ports/trigger_timer";
 import { logger } from "../logger";
 import type { TimerInfo } from "../timer";
 import { applyLastMessageRef, getSessionCtxAndMsg } from "../utils/seal";
@@ -115,6 +115,23 @@ export function installTriggerTimerHandler(): void {
 export function resetTriggerTimerHandlerForTest(): void {
     installed = false;
     setTriggerTimerHandler(null);
+}
+
+/**
+ * 装配期 reconcile：队列里规则已删/失效的条目清理掉，避免重载后遗留幽灵定时器。
+ * 在 TimerManager.loadQueue() 之后、start() 之前调用。
+ */
+export function reconcileRuleTimers(): { kept: number; removed: number } {
+    const timers = listRuleTimers();
+    let removed = 0;
+    for (const timer of timers) {
+        if (!ownsRuleTimer(timer)) {
+            removeRuleTimers(timer.ruleId || '');
+            removed++;
+        }
+    }
+    if (removed > 0) log.info(`规则定时器 reconcile：清理 ${removed} 条失效条目（保留 ${timers.length - removed} 条）`);
+    return { kept: timers.length - removed, removed };
 }
 
 // 模块加载即注册：只要 index 装配 import 本模块，TimerManager 就能分派规则条目

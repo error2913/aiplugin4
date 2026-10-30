@@ -101,7 +101,7 @@ function makeStandbyGroup(sid: string): Session {
     s.sessionId = sid;
     s.sessionType = 'group';
     s.agentName = 'default';
-    s.setting.standby = true;
+    s.setting.aiEnabled = true;
     // Context 旧配置键已移除；模拟器用会话覆盖复现旧窗口/冷态参数
     s.setting.overrides = { coldWindowChars: 5000, coldTruncate: 500, windowMaxChars: 20000 };
     s.lastRelevantAt = Date.now() - 11 * 60_000;   // 超过 10 分钟阈值 → 冷态
@@ -138,7 +138,7 @@ async function scenarioColdIngest() {
     const before = { llmCalls: llm.calls, setCalls: storage.setCalls, bytes: storage.writtenBytes };
 
     const N = 1000;
-    console.log(`  · 灌消息前：stateOf=${session.stateOf(Date.now(), { touch: false })}，standby=${session.setting.standby}，GLOBAL_STANDBY=${Config.base.GLOBAL_STANDBY}`);
+    console.log(`  · 灌消息前：stateOf=${session.stateOf(Date.now(), { touch: false })}，standby=${session.setting.aiEnabled}，GLOBAL_STANDBY=${Config.base.GLOBAL_STANDBY}`);
     for (let i = 0; i < N; i++) {
         const text = i % 37 === 0
             ? `第${i}条超长消息${'内容'.repeat(400)}`   // 制造单条超长，触发冷态截断

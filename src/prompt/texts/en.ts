@@ -1,5 +1,14 @@
 // 内置提示词英文文案（唯一来源；禁止出现中文提示词）。
 // 说明：段落顺序与门控由 sections/* 决定，这里只放文本与简单插值函数。
+import { FALLBACK_PROMPT_TEXTS, registerJudgePromptTexts } from "../../core/ports/prompt_texts";
+
+/**
+ * 判定内核文案注册（L3 → L0 端口）：判定是 L2，不能 import prompt/**；
+ * 装配期由这里注册实现。当前复用端口内置英文常量；M3 需要定制时在此替换为专属文案。
+ */
+export function registerJudgePromptTextsImpl(): void {
+    registerJudgePromptTexts(FALLBACK_PROMPT_TEXTS);
+}
 
 /** 事件触发提示（事件已由上一条 system 事件提供时只说 "event above"；ob11 poke 等无背景条目时直接带事件文本） */
 export function eventTriggerInstruction(values: { instruction: string; eventText?: string }): string {

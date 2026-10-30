@@ -1277,7 +1277,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const session = new Session();
         session.sessionId = 'QQ:cold';
         session.sessionType = 'group';
-        session.setting.standby = true;
+        session.setting.aiEnabled = true;
         Agent.get = (name: any) => name === 'compress_agent'
             ? { chat: async (t: string) => { compressCalls.push(String(t)); return '不该被调用'; } }
             : { sessionService: { getSession: () => session } };
@@ -1670,7 +1670,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:win';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             for (let i = 0; i < 200; i++) await ctx.addUserMessage(makeCtx(), `第${i}条群消息${'填充'.repeat(10)}`, 'QQ:1', `w${i}`);
@@ -1705,7 +1705,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:win-tool';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             ctx.messages = [
@@ -1767,7 +1767,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:blob';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             for (let i = 0; i < 1000; i++) {
@@ -1807,7 +1807,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:raw-read';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             for (let i = 0; i < 100; i++) await ctx.addUserMessage(makeCtx(), `可回查原文第${i}条`, 'QQ:1', `r${i}`);
@@ -1847,7 +1847,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:win-off';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             for (let i = 0; i < 100; i++) await ctx.addUserMessage(makeCtx(), `第${i}条群消息${'填充'.repeat(10)}`, 'QQ:1', `o${i}`);
@@ -1886,7 +1886,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:win-huge';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             for (let i = 0; i < 50; i++) await ctx.addUserMessage(makeCtx(), `早先消息第${i}条${'填充'.repeat(10)}`, 'QQ:1', `h${i}`);
@@ -1931,7 +1931,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 const session = new Session();
                 session.sessionId = 'QQ:settle';
                 session.sessionType = 'group';
-                session.setting.standby = true;
+                session.setting.aiEnabled = true;
                 Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
                 const seq = 1;
                 store.set(`session_QQ:settle:raw:001`, JSON.stringify({ seq, from: 1, to: 2, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: rawText }] }));
@@ -2026,7 +2026,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:settle-idem';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             store.set('session_QQ:settle-idem:raw:001', JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: '原文一' }] }));
             (session as any).rawSeq = 1;
@@ -2075,7 +2075,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:settle-limit';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             for (let i = 1; i <= 5; i++) {
                 store.set(`session_QQ:settle-limit:raw:${String(i).padStart(3, '0')}`,
@@ -2123,7 +2123,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:settle-backoff';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             store.set('session_QQ:settle-backoff:raw:001', JSON.stringify({ seq: 1, from: 1, to: 1, items: [{ messageId: 'a', userId: 'QQ:1', time: 1, text: '原文' }] }));
             (session as any).rawSeq = 1;
@@ -2204,7 +2204,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:quota';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             const ctx = session.context;
             for (let i = 0; i < 20; i++) await ctx.addUserMessage(makeCtx(), `配额消息${i}`, 'QQ:1', `q${i}`);
@@ -2216,7 +2216,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             TC.intConfigs['待机入库配额'] = 0;
             resetConfigCache();
             const ctx2 = new Context();
-            (ctx2 as any).session = { setting: { standby: true }, sessionType: 'group', sessionId: 'QQ:quota2' };
+            (ctx2 as any).session = { setting: { aiEnabled: true }, sessionType: 'group', sessionId: 'QQ:quota2' };
             for (let i = 0; i < 20; i++) await ctx2.addUserMessage(makeCtx(), `不限消息${i}`, 'QQ:1', `n${i}`);
             const items2 = ((ctx2.messages[0] as any)?.contentItems || []).length;
             assert.equal(items2, 20, '配额 0 时不应限制入库');
@@ -2242,7 +2242,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const s = new Session();
             s.sessionId = 'QQ:ovr';
             s.sessionType = 'group';
-            s.setting.standby = true;
+            s.setting.aiEnabled = true;
 
             // 未覆盖 → 回退全局
             assert.equal(s.setting.overrideOr('coldWindowChars', 5000), 5000, '未覆盖应回退全局值');
@@ -2363,7 +2363,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 const session = new Session();
                 session.sessionId = `QQ:pairing-${budget}`;
                 session.sessionType = 'group';
-                session.setting.standby = true;
+                session.setting.aiEnabled = true;
                 Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
                 const ctx = session.context;
                 ctx.messages = [
@@ -2426,7 +2426,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 const session = new Session();
                 session.sessionId = `QQ:nc-${budget}`;
                 session.sessionType = 'group';
-                session.setting.standby = true;
+                session.setting.aiEnabled = true;
                 Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
                 const ctx = session.context;
                 ctx.messages = [
@@ -2542,7 +2542,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:many-small';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             Agent.get = () => ({ sessionService: { getSession: () => session } }) as any;
             // 50 个小分片，每片约 150 字 → 总量远超水位 3000 token；但单次只看前 2 片时每片都不够
             for (let i = 1; i <= 50; i++) {
@@ -2596,7 +2596,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const s = new Session();
             s.sessionId = 'QQ:state';
             s.sessionType = 'user';
-            s.setting.standby = true;
+            s.setting.aiEnabled = true;
             const t0 = 1_000_000;
             const TOTAL = 10 * 60 * 1000;   // 冷态进入阈值：10 分钟
             s.lastRelevantAt = t0;
@@ -2617,7 +2617,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(s.stateOf(t0), 'HOT', '时钟回拨时 idle 取 0，不应误判为冷');
 
             // 非待机＝正常对话模式：永远 HOT
-            s.setting.standby = false;
+            s.setting.aiEnabled = false;
             assert.equal(s.stateOf(t0 + TOTAL + 10_000_000), 'HOT', '非待机模式恒为 HOT');
         } finally {
             if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
@@ -2637,7 +2637,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const s = new Session();
             s.sessionId = 'QQ:state-ro';
             s.sessionType = 'user';
-            s.setting.standby = true;
+            s.setting.aiEnabled = true;
             const t0 = 2_000_000;
             s.lastRelevantAt = t0;
             s.running = true;                       // 在途任务：默认会刷新 lastRelevantAt
@@ -2741,7 +2741,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:998';
             session.sessionType = 'user';
-            session.setting.standby = false;
+            session.setting.aiEnabled = false;
             Agent.get = (name: any) => name === 'compress_agent'
                 ? {
                     chat: async () => {
@@ -2808,16 +2808,16 @@ export const tests: Record<string, () => void | Promise<void>> = {
     testSessionRhythmPureFunctions(): void {
         const t0 = 1_000_000;
         // 非待机恒 HOT；待机+在途=HOT 且 touch 刷新；只读查询不刷新
-        assert.equal(computeSessionState({ standby: false, busy: false, lastRelevantAt: t0, now: t0 + 10 * HOT_HOLD_MS }).state, 'HOT', '非待机恒 HOT');
-        const busy = computeSessionState({ standby: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 });
+        assert.equal(computeSessionState({ aiActive: false, busy: false, lastRelevantAt: t0, now: t0 + 10 * HOT_HOLD_MS }).state, 'HOT', '非待机恒 HOT');
+        const busy = computeSessionState({ aiActive: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 });
         assert.equal(busy.state, 'HOT');
         assert.equal(busy.lastRelevantAt, t0 + 12345, 'busy + touch 应刷新 lastRelevantAt');
-        const busyReadOnly = computeSessionState({ standby: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 }, false);
+        const busyReadOnly = computeSessionState({ aiActive: true, busy: true, lastRelevantAt: t0, now: t0 + 12345 }, false);
         assert.equal(busyReadOnly.lastRelevantAt, t0, 'touch=false 时 busy 也不得刷新（只读查询无副作用）');
-        assert.equal(computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS - 1 }).state, 'HOT');
-        const cooling = computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS + 1 });
+        assert.equal(computeSessionState({ aiActive: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS - 1 }).state, 'HOT');
+        const cooling = computeSessionState({ aiActive: true, busy: false, lastRelevantAt: t0, now: t0 + HOT_HOLD_MS + 1 });
         assert.equal(cooling.state, 'COOLING');
-        assert.equal(computeSessionState({ standby: true, busy: false, lastRelevantAt: t0, now: t0 - 5000 }).state, 'HOT', '时钟回拨 idle 取 0');
+        assert.equal(computeSessionState({ aiActive: true, busy: false, lastRelevantAt: t0, now: t0 - 5000 }).state, 'HOT', '时钟回拨 idle 取 0');
         // 活跃时段：09:00-18:00 分 3 段 → 10:00 落在第 0 段，20:00 不在时段
         const seg = { start: 9 * 60, end: 18 * 60, segs: 3 };
         assert.equal(activeTimeSegmentIndex(seg, new Date(2026, 0, 1, 10, 0)), 0);
@@ -2830,14 +2830,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
     testSessionPersistenceContract(): void {
         const session = new Session();
         session.sessionId = 'QQ:persist';
-        session.setting.standby = true;
+        session.setting.aiEnabled = true;
         session.running = true;
         session.ctxAutoSummaryUsed = 1;
         session.ctxAutoSummaryInFlight = true;
         session.pendingQueue.push({ ctx: {} as any, msg: {} as any, content: '你好', userId: 'QQ:1', messageId: 'm1', kind: 'record', epId: 'ep1', isPrivate: false });
         const raw = serializeSession(session);
         const data = JSON.parse(raw);
-        assert.equal(data.setting.standby, true, '持久化字段应保留');
+        assert.equal(data.setting.aiEnabled, true, '持久化字段应保留');
         assert.equal(data.sessionId, 'QQ:persist');
         for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
             assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
@@ -2895,18 +2895,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         resetConfigCache();
         try {
             const msgs = [{ role: 'user', contentItems: items }] as any;
-            assert.equal(renderFoldBudget({ setting: { standby: false } } as any, msgs), 0, '非待机会话不应折叠（正常对话渲染全文）');
-            assert.equal(renderFoldBudget({ setting: { standby: true } } as any, msgs), 5000, '待机会话按冷态窗口字数折叠');
+            assert.equal(renderFoldBudget({ setting: { aiEnabled: false } } as any, msgs), 0, '非待机会话不应折叠（正常对话渲染全文）');
+            assert.equal(renderFoldBudget({ setting: { aiEnabled: true } } as any, msgs), 5000, '待机会话按冷态窗口字数折叠');
             TC.boolConfigs['是否开启全局待机'] = true;
             resetConfigCache();
-            assert.equal(renderFoldBudget({ setting: { standby: false } } as any, msgs), 5000, '全局待机同样生效');
+            assert.equal(renderFoldBudget({ setting: { aiEnabled: false } } as any, msgs), 5000, '全局待机同样生效');
 
             // 档位只看最新一条**真实用户发言**：系统条目里的"总结/继续"不应带偏档位
             const withSystem = [{ role: 'user', contentItems: [
                 { text: '刚才那个呢', time: 1, userId: 'QQ:1', messageId: 'm1' },
                 { text: '请总结一下并继续干活', time: 2, systemName: '任务续跑提示' },
             ] }] as any;
-            assert.equal(renderFoldBudget({ setting: { standby: true } } as any, withSystem), 25000, '应看真实用户发言（L1）而不是系统条目的"总结"（L2）');
+            assert.equal(renderFoldBudget({ setting: { aiEnabled: true } } as any, withSystem), 25000, '应看真实用户发言（L1）而不是系统条目的"总结"（L2）');
         } finally {
             if (origGlobal === undefined) delete TC.boolConfigs['是否开启全局待机']; else TC.boolConfigs['是否开启全局待机'] = origGlobal;
             if (origWindow === undefined) delete TC.intConfigs['冷态窗口字数']; else TC.intConfigs['冷态窗口字数'] = origWindow;
@@ -3969,7 +3969,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:10000';
             session.sessionType = 'user';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
 
             const runOff = async (kwargs: { name: string }[]) => {
                 replied = '';
@@ -3983,22 +3983,23 @@ export const tests: Record<string, () => void | Promise<void>> = {
             };
 
             // 拼错的 flag：不得声称已关闭，且状态不得改变
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             await runOff([{ name: 'standb' }]);
             assert.ok(!replied.startsWith('AI已关闭：'), `未知 flag 不应回复"AI已关闭："，实际: ${replied}`);
             assert.ok(replied.includes('--standb'), `应回显未识别的参数名，实际: ${replied}`);
-            assert.equal(session.setting.standby, true, '未知 flag 不应改动任何状态');
+            assert.equal(session.setting.aiEnabled, true, '未知 flag 不应改动任何状态');
 
-            // 合法 flag 仍正常生效
-            await runOff([{ name: 'sb' }]);
+            // 合法 flag 仍正常生效（--sb 已随待机概念删除，这里用 --r）
+            session.setting.regexTrigger = true;
+            await runOff([{ name: 'r' }]);
             assert.ok(replied.includes('AI已关闭：'), `合法 flag 应正常关闭，实际: ${replied}`);
-            assert.ok(replied.includes('待机模式'), '应列出被关闭的模式');
-            assert.equal(session.setting.standby, false, '--sb 应真正关闭待机');
+            assert.ok(replied.includes('非指令正则触发'), '应列出被关闭的模式');
+            assert.equal(session.setting.regexTrigger, false, '--r 应真正关闭正则触发');
 
             // 混合：合法 + 非法 → 生效并提示忽略了哪些
-            session.setting.standby = true;
-            await runOff([{ name: 'sb' }, { name: 'nope' }]);
-            assert.equal(session.setting.standby, false, '合法项应生效');
+            session.setting.regexTrigger = true;
+            await runOff([{ name: 'r' }, { name: 'nope' }]);
+            assert.equal(session.setting.regexTrigger, false, '合法项应生效');
             assert.ok(replied.includes('已忽略未识别的参数'), `应提示忽略了非法项，实际: ${replied}`);
             assert.ok(replied.includes('--nope'), `应回显非法项名，实际: ${replied}`);
         } finally {
@@ -5831,7 +5832,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:judge-bounded';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             // 单条 user 块内含 100 条群消息（>20000 字）：待机群的典型形态
             const items = [];
             for (let i = 0; i < 100; i++) {
@@ -5861,7 +5862,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:judge-trunc';
             session.sessionType = 'group';
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             session.context.messages = [
                 { role: 'user', contentItems: [{ text: '巨'.repeat(50000), time: 1, userId: 'QQ:1', messageId: 'big' }] },
             ] as any;
@@ -5884,7 +5885,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = new Session();
             session.sessionId = 'QQ:judge-hot';
             session.sessionType = 'user';
-            session.setting.standby = false;   // 非待机
+            session.setting.aiEnabled = false;   // 非待机
             session.context.messages = [
                 { role: 'user', contentItems: [{ text: '热态消息一', time: 1, userId: 'QQ:1', messageId: 'h1' }] },
                 { role: 'assistant', contentItems: [{ text: '热态回复', time: 2, messageId: '' }] },
@@ -10658,7 +10659,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             session.sessionType = 'group';
             session.running = false;
             session.starting = false;
-            session.setting.standby = false;
+            session.setting.aiEnabled = false;
             session.noticeQueue = [];
             const woken: { reason: string; options: any }[] = [];
             session.chat = (async (_ctx: any, _msg: any, reason: string, _tc: any, options: any) => {
@@ -10708,7 +10709,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             // 待机也必须触发对话：待机约束的是"主动搭话"，而这是用户请求的送达
             session.noticeQueue = [];
             woken.length = 0;
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             const task3 = MediaTaskManager.submit({ ctx, kind: 'tti', origin: 'tool', entry: fakeEntry, text: '待机也要发' });
             await new Promise(r => setTimeout(r, 40));
             assert.equal(task3.status, 'done');
@@ -10719,7 +10720,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             // 桩绕过了 Agent.run 的闸门，所以"chat 被调用但内部静默 return"这个真实故障它看不见。
             session.noticeQueue = [];
             woken.length = 0;
-            session.setting.standby = false;
+            session.setting.aiEnabled = false;
             session.running = true;
             const task4 = MediaTaskManager.submit({ ctx, kind: 'tti', origin: 'tool', entry: fakeEntry, text: '忙则不立即唤醒' });
             await new Promise(r => setTimeout(r, 40));
@@ -10769,7 +10770,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = getSession('G2');
             session.sessionId = 'G2';
             session.sessionType = 'group';
-            session.setting.standby = false;
+            session.setting.aiEnabled = false;
             session.noticeQueue = [];
             session.stopEvent.fired = false;
             const ctx = makeMediaCtx('G2');
@@ -10847,7 +10848,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             // ---- 7) 会话待机也必须唤醒：待机约束"主动搭话"，这是用户请求的送达 ----
             session.noticeQueue = [];
-            session.setting.standby = true;
+            session.setting.aiEnabled = true;
             session.running = false;
             session.activeRuns = 0;
             woken.length = 0;
@@ -10996,21 +10997,21 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const session = getSession('G4');
             session.sessionId = 'G4';
             session.sessionType = 'group';
-            session.setting.standby = false;
+            session.setting.aiEnabled = false;
             session.noticeQueue = [];
             session.stopEvent.fired = false;
             const ctx = makeMediaCtx('G4');
 
             // 场景矩阵：忙 / 待机 / 空闲，逐个验证"结果必有归属"
-            const cases: { name: string; busy: boolean; standby: boolean }[] = [
-                { name: '空闲', busy: false, standby: false },
-                { name: '忙', busy: true, standby: false },
-                { name: '待机', busy: false, standby: true },
-                { name: '忙且待机', busy: true, standby: true },
+            const cases: { name: string; busy: boolean; aiActive: boolean }[] = [
+                { name: '空闲', busy: false, aiActive: false },
+                { name: '忙', busy: true, aiActive: false },
+                { name: 'AI开启', busy: false, aiActive: true },
+                { name: '忙且AI开启', busy: true, aiActive: true },
             ];
             for (const c of cases) {
                 session.noticeQueue = [];
-                session.setting.standby = c.standby;
+                session.setting.aiEnabled = c.aiActive;
                 session.running = c.busy;
                 session.activeRuns = c.busy ? 1 : 0;
                 session.chat = (async () => { }) as any;
@@ -13990,7 +13991,7 @@ Object.assign(tests, {
             ctx.agentName = '*';
             ctx.sessionId = 'QQ:legacy-hot';
             const sess = ctx.session;
-            sess.setting.standby = false;
+            sess.setting.aiEnabled = false;
             sess.lastRelevantAt = Math.floor(Date.now() / 1000);
             await ctx.addUserMessage(makeCtx(), long, 'QQ:1', 'm_legacy');
             const item = (ctx.messages[0] as any).contentItems[0];

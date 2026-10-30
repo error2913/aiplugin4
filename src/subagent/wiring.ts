@@ -225,8 +225,8 @@ function makeWakeHook(opt: SubAgentWireOptions): (record: ChildRecord, _result: 
             const decision = decideWake({
                 noticeCount: parent.noticeQueue.length,
                 parentBusy: parent.running || parent.starting,
-                sessionStandby: parent.setting.standby === true,
-                globalStandby: Config.base.GLOBAL_STANDBY === true,
+                sessionAiEnabled: parent.setting.aiEnabled === true,
+                globalAiEnabled: Config.base.GLOBAL_STANDBY === true,
             });
             if (decision !== 'wake') return;
             const { ctx, msg } = getSessionCtxAndMsg(record.meta.epId, record.parentSessionId, record.meta.isPrivate);

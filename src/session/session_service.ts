@@ -71,11 +71,10 @@ export class SessionService {
             if (!(session.context instanceof Context)) session.context = revive(Context, session.context || {});
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
+            // 旧存档只有 standby 字段：在 revive（validKeysMap 已不含 standby）之前读出，迁移为 aiEnabled
+            const legacyStandby = session.setting ? (session.setting as unknown as { standby?: unknown }).standby === true : false;
             if (session.setting) session.setting = revive(Setting, session.setting);
-            // M2 迁移：旧存档只有 standby；待机=开 AI。standby 字段删除前保持单向兼容读。
-            if (session.setting.standby && !session.setting.aiEnabled) session.setting.aiEnabled = true;
-            // 双向兼容写：aiEnabled 为真值来源，standby 仅作旧代码/旧面板读取镜像
-            session.setting.standby = session.setting.aiEnabled;
+            if (legacyStandby && !session.setting.aiEnabled) session.setting.aiEnabled = true;
             // timer 单模式：恢复会话时按全局「默认定时器」TOML 重建该会话的隐式定时器
             if (session.setting.timerTrigger) {
                 try {

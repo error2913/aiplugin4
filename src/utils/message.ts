@@ -356,8 +356,8 @@ export function toolResultCallId(m: any): string {
  * - 档位按本轮最新一条 user 条目判定（L0 默认 / L1 含指代 / L2 明确要求回顾不折叠）。
  */
 export function renderFoldBudget(session: Session, messages: ContextMessage[]): number {
-    const standby = session.setting?.standby === true || Config.base.GLOBAL_STANDBY === true;
-    if (!standby) return 0;
+    const aiEnabled = session.setting?.aiEnabled === true || Config.base.GLOBAL_STANDBY === true;
+    if (!aiEnabled) return 0;
     // 按会话覆盖优先（P2-1）：本会话设了「冷态窗口字数」就用它，否则用全局配置
     const base = session.setting?.overrideOr?.('coldWindowChars', 0) ?? 0;
     if (base <= 0) return 0;

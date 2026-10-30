@@ -9,7 +9,7 @@ export function registerCmdOff() {
     cmd.desc = '关闭AI（含非指令正则触发）';
     cmd.help = `帮助:
 【.ai off】关闭 AI 及全部触发模式
-【.ai off --<参数>】按模式关闭（--r 正则 / --e 事件触发 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机）`;
+【.ai off --<参数>】按模式关闭（--r 正则 / --e 事件触发 / --c 计数器 / --t 延迟 / --p 概率 / --a 活跃时间段 / --j 评分触发）`;
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
@@ -29,7 +29,6 @@ export function registerCmdOff() {
             setting.eventTrigger = false;
             setting.judge = false;
             setting.aiEnabled = false;
-            setting.standby = false;
             setting.activeTimeInfo = {
                 start: 0,
                 end: 0,
@@ -106,14 +105,6 @@ export function registerCmdOff() {
                     text += `\n活跃时间段`;
                     break;
                 }
-                case 'sb':
-                case 'standby': {
-                    setting.aiEnabled = false;
-                    setting.standby = false;
-                    matched++;
-                    text += `\n待机模式`;
-                    break;
-                }
                 default: {
                     // 未知 flag 不能静默忽略：否则 `--standb` 这类拼写错误会照旧回复"AI已关闭："，
                     // 用户会误判为已生效。
@@ -127,7 +118,7 @@ export function registerCmdOff() {
         if (matched === 0) {
             seal.replyToSender(ctx, msg,
                 `未识别的参数${unknown.length > 0 ? `：${unknown.map(n => `--${n}`).join('、')}` : ''}，未做任何更改。\n` +
-                `可用：--r 正则 / --e 事件触发 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机；不带参数则整体关闭。`);
+                `可用：--r 正则 / --e 事件触发 / --c 计数器 / --t 延迟 / --p 概率 / --a 活跃时间段 / --j 评分触发；不带参数则整体关闭。`);
             return ret;
         }
 

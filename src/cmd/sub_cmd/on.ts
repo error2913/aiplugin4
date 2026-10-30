@@ -9,20 +9,23 @@ export function registerCmdOn() {
     const cmd = new SubCmd('on');
     cmd.desc = '开启AI';
     cmd.help = `帮助:
-【.ai on --<参数>=<数字>】
+【.ai on】开启 AI：强制开启正则 + 事件触发（其它模式开关不变）
+【.ai on --<参数>=<数字>】按模式开启
 
 <参数>:
 【r】非指令正则触发开关
 【e】事件触发开关，接收事件后按「事件触发规则」响应
 【c】计数器模式，接收消息数达到后触发
 单位/条，默认10条
-【t】计时器模式，最后一条消息后达到时限触发
+【t】延迟模式，最后一条消息后静默 N 秒触发
 单位/秒，默认60秒
 【p】概率模式，每条消息按概率触发
 单位/%，默认10%
-【a】活跃时间段和活跃次数
+【a】活跃时间段和活跃次数（参数为空时用「触发活跃时间」配置）
 格式为"开始时间-结束时间-活跃次数"(如"09:00-18:00-5")
 【j】评分触发开关，开启后由评分智能体判断是否插话（无参数）
+
+更多模式（at / timer / 链规则）见 .ai trg
 
 【.ai on --t --p=42】使用示例`;
     cmd.priv = { priv: S };
@@ -35,7 +38,6 @@ export function registerCmdOn() {
         if (kwargs.length == 0) {
             // M2 语义：on 打开 AI 总闸，并只强制开启 regex/event（其它模式开关保持原值）
             setting.aiEnabled = true;
-            setting.standby = true;
             setting.regexTrigger = true;
             setting.eventTrigger = true;
             seal.replyToSender(ctx, msg, 'AI已开启：非指令正则触发、事件触发');
@@ -161,7 +163,6 @@ export function registerCmdOn() {
         };
 
         setting.aiEnabled = true;
-        setting.standby = true;
 
         seal.replyToSender(ctx, msg, text);
         session.save();

@@ -316,7 +316,7 @@ async function recordEventPrompt(opts: {
         }
         // 待机关口：事件仅在待机（会话待机或全局待机）时录入上下文，与普通消息入库口径一致
         const session = getSession(opts.sid);
-        if (!(session.setting.standby || Config.base.GLOBAL_STANDBY)) {
+        if (!(session.setting.aiEnabled || Config.base.GLOBAL_STANDBY)) {
             log.debug(`事件忽略：会话<${opts.sid}>未开启待机，不录入事件`);
             return false;
         }
