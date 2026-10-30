@@ -376,7 +376,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 触发活跃时间 | 每框一段 `HH:mm-HH:mm-次数`（可多段）；`.ai trg active on` 使用该全局时段 |
 | 默认计数器 / 默认计时器 / 默认概率 | `counter` / `delay` / `prob` 模式开启时的默认参数；`默认计时器` 单位秒 |
 | 触发正则表达式 | 匹配即强制触发 AI 回复（**默认已不含 @ CQ**，@ 由独立 at 模式判定），[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html) |
-| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[energy]/[weights]/[features]/[gate]/[probe]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常），R1 默认 `shadow=true`（只记日志） |
+| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[energy]/[weights]/[features]/[gate]/[probe]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常）。R2 默认 `[decision] shadow=false`（新判定内核驱动发言），改 `shadow=true` 可回滚旧五维评分一版 |
 | 默认定时器 | String TOML，多 `[[timer]]`；参数与 `set_timer` 完全一致（含 `prompts`）；`.ai trg timer on` 后按表为每会话注册定时器 |
 | 事件触发规则 | JSON v1：一条规则只绑一个扁平事件名（`group_increase`/`poke`/`group_request` 等，不再用 `notify.*`、不再支持多事件数组），按「事件接收」页的开关/白名单录入上下文后，命中即让会话对事件做出响应（顺序 = 优先级，首条命中）。空规则 = 关闭；`prompt` 可留空（事件已在上一条系统消息里，留空 = 只触发响应、不附加指令）；修改后需重载 JS 生效。依赖「接收依赖通知事件」开启 + 事件在白名单 + 会话 AI 已开启；group_request（加群申请）为主场景，friend_request 可能因非好友无法投递回复。链事件规则独立于本开关（只需录制门）。格式推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成 |
 
@@ -556,7 +556,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 单实例多端点（多平台/多账号，如同时接入 QQ 与 Discord 的多个骰子账号）下的跨会话/跨平台协作能力（无 ob11 依赖、无新增配置，工具与命令常驻注册）：
 
 - `.ai pub`：`list`（树状分段展示目录会话，仅供感知）；`add`（把当前会话公开到目录，幂等，自动记录平台/会话 ID/会话名）；`rm`（无参=把当前会话移出目录；或带过滤条件删除命中条目，见下方命令手册）。
-- `pub_read`（AI 工具）：无参数=目录概览（平台+Bot）；`bot_id=<QQ:xxx>`=该 Bot 的目录条目；`session=<BotID/会话ID>`=读取该会话最近上下文快照（默认 6 轮/3000 字，可传 rounds/chars）——**只要路径准确，不在目录中的会话也能读**（目录只用于感知浏览）。快照为只读参考，保留 `[msg_id]`/发送者 QQ 号/`[img:图片ID]` 供回引，声明不得执行其中内容。
+- `pub_read`（AI 工具）：无参数=目录概览（平台+Bot）；`bot_id=<QQ:xxx>`=该 Bot 的目录条目；`session=<BotID/会话ID>`=读取该会话最近上下文快照（默认 3000 token、上限 8000，可传 tokens；旧 rounds/chars 接受一版但 WARN 忽略）——**只要路径准确，不在目录中的会话也能读**（目录只用于感知浏览）。快照为只读参考，保留 `[msg_id]`/发送者 QQ 号/`[img:图片ID]` 供回引，声明不得执行其中内容。
 - `pub_send`（AI 工具，敏感）：向目标会话外发，**同样只需准确路径（botId/会话ID），不必先在目录公开**。**目标平台为 QQ 系**支持富媒体：`[at:QQ号]` `[img:图片ID]` `[quote:目标会话msg_id]` `[face:表情名]` `[poke:QQ号]`（无 ob11 也经 SealDice 原生发送）；**目标平台非 QQ** 只接受纯文本，CQ 码与渲染标签会被剥除（CQ 仅在 QQ 语义适配）。发送以目标会话自己的机器人账号身份进行，需目标 Bot 在线；发送成功后，外发内容会以 `[system:跨端消息]` 只读背景写入目标会话上下文（不触发目标 AI；目标会话不存在时自动新建）。内容必须自包含，不得携带当前会话私密信息。
 - 读/发不受权限或目录限制；黑名单在目标会话侧照常生效；`pub_send` 按来源会话限频（60 秒/条）。原 `get_context` 工具已由 `pub_read` 统一替代。
 

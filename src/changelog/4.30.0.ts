@@ -118,4 +118,14 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 - **观测**：\`.ai status\` 新增触发域观测（规则数/损坏数、delay 挂起、去抖/在飞、判定配置有效性、预算、WAIT 剩余、最近 shadow 决策）。
 - 兼容：\`set_trigger_condition\` 旧版一次性条件继续可用；v1 事件规则配置契约不变；外部插件 API 不受总闸影响（\`bypassGate\`）。
 - 单测/门禁：新增触发域纯逻辑、链编排、规则工具、判定配置 v2、判定调度、探针、ChatOutcome 等用例（\`npm run test:unit\` 833）；\`npx tsc --noEmit\`、\`npm run lint\`、\`npm run deps:check\`、\`npm run test:integration\`（260）、\`npm run build && npm run smoke\` 全绿。
+
+## 触发域统一重构（R2：判定切流 / 治理启用 / token 范围化）
+
+- **判定切流（重要）**：\`[decision] shadow\` 默认值 \`true\` → **\`false\`**。新判定内核（六维特征 → 单次 LLM → 归一化分 \`S\`/decision → 策略层）直接驱动 SPEAK/WAIT/IGNORE；旧五维动作路径只在 \`shadow=true\` 时保留一版，可配置回滚。切流后判定时机与成本与 R1 不同：新增零 LLM 预筛、IGNORE 短冷却、调用令牌桶（默认 30 次/小时、burst 5）与最短调用间隔。
+- **治理启用**：消息判定改为「先落盘 → 去抖 4~12 秒评估」（Addressed/强求助立即评估）；同会话在飞去重、在飞期间仅合并保留最新候选、WAIT 轮内候选轮末合并、\`.ai off\`/\`.ai stop\` 清理；\`.ai status\` 里的「去抖/在飞」现在真实生效。静默探针仍默认关。
+- **精力记账修复**：评分触发 SPEAK 只有 \`Session.chat\` 返回 \`fired\`（真正起轮）才扣精力；\`bucket-empty\`/\`deferred\`/\`gated\` 不再出现「假 SPEAK 扣精力」。
+- **token 范围化（A/B 组）**：新增 \`selectByTokenBudget\` 纯函数；\`[model] context_tokens\` 成为 judge 历史唯一口径（删除条数口径 \`context_count\`，0 = 不注入历史，旧值忽略并 WARN）；\`pub_read\` 参数 \`rounds\`/\`chars\` → \`tokens\`（默认 3000、上限 8000；旧参数接受但 WARN 并忽略一版）；上下文投影改 \`maxTokens: 6000\`（最新单元必留）；记忆桥、\`resolve_context\` 参数（\`max_chars\` → \`max_tokens\`）、子代理内容截断等字符口径统一改 token 预算；白名单（\`read_raw\`/\`grep_raw\` 分页、图片张数、工具轮数、记忆事实条数、legacy 归档字符窗口）保持不变并在文档标注。
+- **τ/主动度校准**：R1 发布后未进入真机 shadow 灰度（无 \`[judge-shadow]\` 样本），本版用 14 条标注场景做离线校准（阈值扫描 0.40~0.80）：τ∈[0.53,0.60] 均可保持 SPEAK precision=1，默认保持 \`speak_threshold=0.55\`、\`aggressiveness=2\`；上线后建议继续收集 \`[judge-shadow]\`/\`[judge-decision]\` 日志复核。
+- **生成器同步**：judge 用途标签改「评分 / 决策（判定）」并新增选型提示（vendor/价格档/structured_output/thinking，只提示不预选）；可选「判定请求体预设」（默认关，独立 \`groups[]\`：temperature 0 / max_tokens 300 / json_object）；MCP 新增 \`capability: "image-host"\` 扩展字段（旧 \`imageRefs\` 兼容一版），默认数据同步。
+- 单测：新增/调整判定切流分支（SPEAK/WAIT/IGNORE、仅 fired 扣精力、预筛、调用预算、IGNORE 冷却绕过）、去抖延迟增长/封顶/旁路、在飞合并、token 选择与各调用点 token 口径；全量门禁见 PR。
 `;
