@@ -19,7 +19,7 @@ import { eventTriggerInstruction } from "../prompt/texts/en";
 import type { Session } from "../session/session";
 import { getSession } from "../session/session_service";
 import { SYSTEM_NAME } from "../utils/protocol";
-import { getSessionCtxAndMsg } from "../utils/seal";
+import { applyLastMessageRef, getSessionCtxAndMsg } from "../utils/seal";
 import type { MessageSegment } from "../utils/string";
 
 const log = logger.withTag('event-trigger');
@@ -68,6 +68,8 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
         if (!ctx || !msg) {
             try {
                 ({ ctx, msg } = getSessionCtxAndMsg(view.epId, view.sid, view.isPrivate));
+                // A12：事件触发的合成 msg 无 rawId，回填同端点最近真实用户消息，开启「回复引用」时也能带 [CQ:reply]
+                applyLastMessageRef(session, ctx, msg);
             } catch (e) {
                 log.debug(`事件触发跳过：无法重建会话上下文 ${view.sid}（${e instanceof Error ? e.message : String(e)}）`);
                 return false;

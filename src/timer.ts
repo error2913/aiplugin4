@@ -6,7 +6,7 @@ import { logger } from "./logger";
 import type { Session } from "./session/session";
 import { SYSTEM_NAME } from "./utils/protocol";
 import { revive, TypeDescriptor } from "./utils/revive";
-import { getSessionCtxAndMsg } from "./utils/seal";
+import { applyLastMessageRef, getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
 
 const log = logger.withTag('timer');
@@ -266,6 +266,8 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             const { sid, isPrivate, epId, set, content } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const session = getSessionById(sid);
+                            // A12：合成 msg 无 rawId，回填同端点最近真实用户消息，开启「回复引用」时也能带 [CQ:reply]
+                            applyLastMessageRef(session, ctx, msg);
 
                             const s = `Your timer fired. Send this reply:
 Timer set at: ${fmtDate(set)}
@@ -296,6 +298,7 @@ Prompt: ${content}`;
                             const { sid, isPrivate, epId, set, interval, count, content } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const session = getSessionById(sid);
+                            applyLastMessageRef(session, ctx, msg);
 
                             // 无效次数：不触发，直接移除
                             if (count === 0 || count < -1) {
@@ -336,6 +339,7 @@ Prompt: ${content}`;
                             const { sid, isPrivate, epId, set } = timer;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const session = getSessionById(sid);
+                            applyLastMessageRef(session, ctx, msg);
 
                             const curSegIndex = session.curActiveTimeSegIndex;
                             const nextTimePoint = session.getNextTimePoint(curSegIndex);

@@ -62,6 +62,7 @@ export class Session {
         lastRawAt: 'number',
         settledSeq: 'number',
         ctxAutoSummaryUsed: 'number',
+        lastMsgRef: { objectValue: 'any' },
         stream: {
             object: {
                 id: 'string',
@@ -167,6 +168,13 @@ export class Session {
      * 只有摘要成功（advanced=true）才置 1；失败/未推进不消耗；`.ai ctx purge --yes` 后重置。
      */
     ctxAutoSummaryUsed = 0;
+    /**
+     * **持久化**：按端点记录最近一条真实用户消息的原始 `rawId`（A12）。
+     * 定时/自主/事件触发时用合成的 msg 没有 rawId，导致"开了回复引用却没有引用"；
+     * 起轮前用本表回填。`rawId` 是会话内 message_seq，Session 本身按 sid 索引 ⇒ 等价于 (sid, epId)。
+     * 上限 8 个端点，超出按最早写入淘汰。
+     */
+    lastMsgRef: { [epId: string]: number } = {};
     /** 运行时字段：自动摘要已发起未落地，防同一会话并发重复触发（不持久化，重载后回 false） */
     ctxAutoSummaryInFlight = false;
     /** 运行时字段：保存节流状态（不持久化） */
@@ -219,6 +227,7 @@ export class Session {
         }
         this.skillState = {};
         this.kbState = {};
+        this.lastMsgRef = {};
     }
 
     get agent(): Agent {
@@ -356,13 +365,34 @@ export class Session {
         }
     }
 
-    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
-        await handleReceiptImpl(this, ctx, msg, messageArray);
+    /**
+     * 记录"最近一条真实用户消息"的原始 rawId（按端点，A12）。
+     * 只接受真实用户消息：rawId 有效、非 0、发送者不是 bot 自身。bot/命令/ob11 补收不应更新引用。
+     */
+    noteInboundRef(ctx: seal.MsgContext, msg: seal.Message, updateRef = true): void {
+        if (!updateRef) return;
+        const rawId = Number(msg.rawId);
+        if (!Number.isFinite(rawId) || rawId === 0) return;
+        const epId = ctx.endPoint && ctx.endPoint.userId;
+        if (!epId) return;
+        // bot 自身消息不更新引用（群聊机器人发言也会走 handleReceipt）
+        const sender = ctx.player && ctx.player.userId;
+        if (sender && sender === epId) return;
+        this.lastMsgRef[epId] = rawId;
+        // 上限 8：对象键按插入序，超限删最早
+        const keys = Object.keys(this.lastMsgRef);
+        if (keys.length > 8) {
+            for (const key of keys.slice(0, keys.length - 8)) delete this.lastMsgRef[key];
+        }
+    }
+
+    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], opts?: { updateRef?: boolean }) {
+        await handleReceiptImpl(this, ctx, msg, messageArray, opts);
     }
 
     /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
-    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string) {
-        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason, systemName);
+    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string, opts?: { updateRef?: boolean }) {
+        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason, systemName, opts);
     }
 
     /** 取出并清空挂起队列 */

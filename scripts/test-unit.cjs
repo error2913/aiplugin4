@@ -47,6 +47,7 @@ const bundles = {
     mcp: path.join(outDir, 'unit-mcp.cjs'),
     imageSource: path.join(outDir, 'unit-image-source.cjs'),
     eventTrigger: path.join(outDir, 'unit-event-trigger.cjs'),
+    triggerM0: path.join(outDir, 'unit-trigger-m0.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -89,7 +90,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['protocol', path.join(repo, 'scripts/unit-test-protocol.ts')],
         ['mcp', path.join(repo, 'scripts/unit-test-mcp.ts')],
         ['imageSource', path.join(repo, 'scripts/unit-test-image-source.ts')],
-        ['eventTrigger', path.join(repo, 'scripts/unit-test-event-trigger.ts')]
+        ['eventTrigger', path.join(repo, 'scripts/unit-test-event-trigger.ts')],
+        ['triggerM0', path.join(repo, 'scripts/unit-test-trigger-m0.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

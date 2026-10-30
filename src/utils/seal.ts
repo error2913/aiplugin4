@@ -1,4 +1,6 @@
 // seal 上下文工具：构造 ctx/msg/会话ID
+import type { Session } from "../session/session";
+
 export function createMsg(messageType: "group" | "private", uid: string, gid: string = ''): seal.Message {
     const msg = seal.newMessage();
     // goja 运行时下新建 Message 可能缺 segment 字段（jsbind 数组默认不初始化），
@@ -82,4 +84,20 @@ export function createOnlinePubCtx(botId: string, sid: string, isPrivate: boolea
 
 export function getSessionId(ctx: seal.MsgContext): string {
     return ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId;
+}
+
+/**
+ * A12：用会话记录的「最近一条真实用户消息 rawId」回填合成 msg。
+ *
+ * 定时器/活跃时间/事件触发重建的 ctx/msg 没有 rawId，导致用户开启「回复引用」后
+ * 这些触发也不带 `[CQ:reply]`。只回填同一端点的最新记录；已有 rawId 的路径（poke、
+ * 普通消息入口）不覆盖。发送引用用原始 rawId（milky 端需要 message_seq），
+ * 不能用 getRecordMessageId 的转换值。
+ */
+export function applyLastMessageRef(session: Session, ctx: seal.MsgContext, msg: seal.Message): void {
+    if (msg.rawId) return;
+    const epId = ctx.endPoint && ctx.endPoint.userId;
+    if (!epId) return;
+    const ref = session.lastMsgRef ? session.lastMsgRef[epId] : 0;
+    if (ref) msg.rawId = ref;
 }

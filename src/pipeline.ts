@@ -249,9 +249,9 @@ export class MessagePipeline {
             const supplementTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
             if (supplementTypes.some(type => !CQ_TYPES_ALLOW.includes(type))) return;
             if (sessionBusy) {
-                return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
+                return session.deferReceipt(ctx, msg, messageArray, 'record', undefined, undefined, { updateRef: false }).then(() => session.savePending());
             }
-            return session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true));
+            return session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true));
         }
 
         // 忽略条件（豹语表达式）命中时直接忽略
@@ -287,7 +287,7 @@ export class MessagePipeline {
                     const view: EventView = {
                         source: 'poke',
                         postType: 'poke',
-                        eventType: 'notify.poke',
+                        eventType: 'poke',
                         noticeType: 'notify',
                         requestType: '',
                         subType: 'poke',
@@ -433,7 +433,7 @@ export class MessagePipeline {
             // 待机判定必须同时看全局待机（B3）：只判 setting.standby 会让"全局待机"下指令消息不入库，
             // 与会话待机行为不一致（其余入库点如 handleGroupMessage 已是 `standby || GLOBAL_STANDBY`）。
             if (setting.standby || Config.base.GLOBAL_STANDBY) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
+                session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {
                     log.exception('指令消息入库出错', e);
                 });
             }
@@ -476,7 +476,7 @@ export class MessagePipeline {
             const setting = session.setting;
             // 同上（B3）：全局待机下机器人自身消息也应入库
             if (setting.standby || Config.base.GLOBAL_STANDBY) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
+                session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {
                     log.exception('机器人消息入库出错', e);
                 });
             }
