@@ -22,6 +22,8 @@ import { SYSTEM_NAME } from "../utils/protocol";
 import { applyLastMessageRef, getSessionCtxAndMsg } from "../utils/seal";
 import type { MessageSegment } from "../utils/string";
 
+import { tryChainEventTrigger } from "./event_ingress";
+
 const log = logger.withTag('event-trigger');
 
 /** poke 单路径：同一毫秒的重复回调用短窗口挡住，正常连戳不受影响 */
@@ -51,6 +53,8 @@ export function hasEventTriggerRules(): boolean {
  */
 export async function maybeTriggerEvent(view: EventView, dedupKey: string, options: TriggerEventOptions = {}): Promise<boolean> {
     try {
+        // 链规则优先（独立于「事件触发」开关，只需录制门）；命中/认领后不再走 v1
+        if (await tryChainEventTrigger(view, dedupKey, options)) return true;
         const config = Config.trigger.EVENT_TRIGGER.CONFIG;
         if (!config || config.rules.length === 0) return false;
         if (isEventTriggerExcluded(view)) return false;

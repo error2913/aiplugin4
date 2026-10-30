@@ -54,6 +54,7 @@ const bundles = {
     triggerStore: path.join(outDir, 'unit-trigger-store.cjs'),
     claimTable: path.join(outDir, 'unit-claim-table.cjs'),
     chatOutcome: path.join(outDir, 'unit-chat-outcome.cjs'),
+    triggerChain: path.join(outDir, 'unit-trigger-chain.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -103,7 +104,8 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['aux', path.join(repo, 'scripts/unit-test-aux.ts')],
         ['triggerStore', path.join(repo, 'scripts/unit-test-trigger-store.ts')],
         ['claimTable', path.join(repo, 'scripts/unit-test-claim-table.ts')],
-        ['chatOutcome', path.join(repo, 'scripts/unit-test-chat-outcome.ts')]
+        ['chatOutcome', path.join(repo, 'scripts/unit-test-chat-outcome.ts')],
+        ['triggerChain', path.join(repo, 'scripts/unit-test-trigger-chain.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

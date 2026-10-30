@@ -42,10 +42,10 @@ function activeTimePass(gate: Gate, now: number): boolean {
  * - fail：某门不通过（之前的 counter 增量已写回 runtime，调用方决定是否持久化）
  * - suspend：delay 门命中，调用方必须挂起并在到期后从 index+1 继续
  */
-export function evaluateGates(gates: readonly Gate[], input: GateInput, runtime: GateRuntime): GateEvalResult {
+export function evaluateGates(gates: readonly Gate[], input: GateInput, runtime: GateRuntime, startIndex = 0): GateEvalResult {
     if (gates.length === 0) return { status: 'fail', index: -1, reason: 'empty' };
     const deltas: GateDelta[] = [];
-    for (let index = 0; index < gates.length; index++) {
+    for (let index = Math.max(0, startIndex); index < gates.length; index++) {
         const gate = gates[index];
         const meta = GATE_META[gate.type];
         if (!meta) return { status: 'fail', index, reason: `unknown-gate:${gate.type}` };
