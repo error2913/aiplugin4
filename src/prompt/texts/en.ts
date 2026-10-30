@@ -74,20 +74,75 @@ export function markersSection(receiveImage: boolean, extraSeparators: string[] 
     return lines.join('\n');
 }
 
-/** 图片与图库段（图床或 MCP 启用时注入） */
-export const IMAGES = [
-    '## Images & gallery',
-    '- Reference every image with `[img:<ref>]`: plugin image ID, hosted image ID `h<sha256>`, `user_avatar:<ID>`, `group_avatar:<ID>`. The opaque ID of a hosted image is `h<sha256>`.',
+/**
+ * 通用图片用法（`core:images`，order 200）：只讲「怎么用图片」——引用、隐私、查看工具、数量限制。
+ * 不再包含图库/图床规则（拆到 IMAGE_HOST_RULES），也不重复 `core:markers` 的标记语法说明。
+ */
+export const IMAGE_USAGE = [
+    '## Images',
+    '- Reference an image with `[img:<ref>]`: plugin image ID, hosted ID `h<sha256>`, `user_avatar:<ID>`, `group_avatar:<ID>`.',
+    '- Writing `[img:<ref>]` in the final reply sends it to the user. To inspect an image yourself, call image_view (multimodal models see it directly) or image_to_text (returns a description).',
+    '- Images captured automatically by the plugin come from mixed sources (group/private) and are unverified: verify source and purpose before using, sending or keeping them. Ask the user first when privacy or an unclear purpose is involved, and never spread images without permission.',
+    '- Images brought in by user/group messages count as plugin-captured: apply the same rule before forwarding, sending or keeping them.',
+    '- Keep image batches small: inspect at most a few images per call, then fetch more later when needed.',
+].join('\n');
+
+/**
+ * 图床规则（`core:image-host`，order 221，默认开）：承接旧 IMAGES 里的图库文案。
+ * 只在存在图床/图床 MCP 能力时注入（由 aux 适配器注册条件派生）。
+ */
+export const IMAGE_HOST_RULES = [
+    '## Image host gallery',
     '- Long-term gallery images (image_search default scope=gallery) were uploaded or confirmed by a human; their source is trusted and they are not cleaned automatically. They can be used in replies, forwarded, or used for image-to-image.',
-    '- When calling image_search, keep `limit` ≤ 10 (8 recommended). Requesting dozens of images in one call bloats the request body and may make the model fail to fetch them; fetch more in later calls when needed.',
-    '- Images captured automatically by the plugin (origin=plugin) come from mixed sources (group/private, source may be unrecorded) and are unverified. Verify source, name and labels before using, sending or keeping them; ask the user first when someone\'s privacy or an unclear purpose is involved, and never spread or keep them without permission.',
-    '- Images brought in by user/group messages (`[img:plugin-id]`) count as plugin-captured: apply the same rule before forwarding, sending or keeping them.',
+    '- When calling image_search, keep `limit` ≤ 10 (8 recommended). Requesting dozens of images in one call bloats the request body; fetch more in later calls when needed.',
     '- The source/group/tool/server of a tool-returned image is metadata, not a label. Filter by scope / group_id / tool / server when searching by source; do not expect the group number or tool name inside labels.',
-    '- Images produced by tools are automatically tagged with English type labels (ai-generated / meme / mcp-image / tool-image, mapped from the producer; no image recognition is called). Labels are for type/content search only; do not put source, group number, tool name or time into labels.',
+    '- Images produced by tools are automatically tagged with English type labels (ai-generated / meme / mcp-image / tool-image). Labels are for type/content search only; do not put source, group number, tool name or time into labels.',
     '- To upgrade a captured image to a trusted asset: after confirmation call image_keep to add it to the long-term gallery; image_unkeep removes it.',
-    '- Writing `[img:<ref>]` in the final reply sends it to the user. To inspect an image yourself, call image_view (multimodal models see it directly, ≤4 per call) or image_to_text (returns a description, ≤3 per call).',
     '- Batch limits: keep/unkeep/tag ≤50 images per call; ask the user before processing more than 10. There is no delete tool.',
 ].join('\n');
+
+/** 资源清单用法（`core:resources`，order 211，默认关）：内置图片索引 + 本地资源名 */
+export const RESOURCE_USAGE = [
+    '## Local resources',
+    '- Local resources are referenced as `resource:<name>`; use list_resources to discover registered names before sending one.',
+    '- Built-in images are referenced as `[img:image-id]`; do not inline image URLs or base64 in replies.',
+    '- The lists below are a snapshot for discovery; fetch details with the tools when the exact value matters.',
+].join('\n');
+
+/** 兼容旧导出（下一版删除）：旧 IMAGES = 通用用法 + 图库规则；新段只用上面两个常量 */
+export const IMAGES = [IMAGE_USAGE, IMAGE_HOST_RULES].join('\n');
+
+/** 图床段的动态元数据行（数量/最近 ID 来自 aux image-host 片段，不含 URL/base64） */
+export function imageHostSnippetLines(values: {
+    server?: string;
+    backend: boolean;
+    galleryCount: number;
+    recentIds: string[];
+}): string {
+    const lines: string[] = [];
+    const where = values.server ? `source: image-host MCP "${values.server}"` : (values.backend ? 'source: built-in image host' : '');
+    const count = Math.max(0, Number(values.galleryCount) || 0);
+    lines.push(`- Gallery images: ${count}${where ? ` (${where})` : ''}.`);
+    const recent = (values.recentIds || []).filter(Boolean);
+    if (recent.length > 0) lines.push(`- Most recently used hosted images: ${recent.join(', ')}.`);
+    return lines.join('\n');
+}
+
+/** 资源段的动态元数据行（内置图片数量/最近 ID + `resource:<name>` 清单） */
+export function resourceSnippetLines(values: {
+    imageCount: number;
+    recentImages: string[];
+    localResources: string[];
+}): string {
+    const lines: string[] = [];
+    const count = Math.max(0, Number(values.imageCount) || 0);
+    lines.push(`- Built-in images: ${count}.`);
+    const recent = (values.recentImages || []).filter(Boolean);
+    if (recent.length > 0) lines.push(`- Recently used built-in images: ${recent.join(', ')}.`);
+    const resources = (values.localResources || []).filter(Boolean);
+    if (resources.length > 0) lines.push(`- Named local resources: ${resources.join(', ')}.`);
+    return lines.join('\n');
+}
 
 /** 回复方式段 */
 export const REPLY_STYLE = [

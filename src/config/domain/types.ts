@@ -59,6 +59,12 @@ export interface McpServerEntry {
      */
     imageRefs?: boolean;
     /**
+     * 能力声明扩展字段（标准 mcpServers 的扩展）：`image-host` 表示该服务器提供图床画廊能力
+     *（image_search / image_keep / image_unkeep / image_tag），辅助层据此注册图床适配器。
+     * 解析时非该值 WARN 并忽略；缺省时按 imageRefs / 服务器名回退。
+     */
+    capability?: 'image-host';
+    /**
      * 是否把 initialize 返回的服务器 instructions 提供给提示词（runtime 段，外部数据）。
      * 缺省 false（主流客户端默认不注入）；非布尔值按 false 处理并记 warning。
      */

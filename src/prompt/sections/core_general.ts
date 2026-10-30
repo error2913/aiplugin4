@@ -1,5 +1,5 @@
 // 基础段：身份 / 全局提示词 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片图库 / 回复方式 / 工作方向
-import { GLOBAL_HEADING, IDENTITY, IMAGES, markersSection, REPLY_STYLE, RESPONSE_LANGUAGE, ROLE_HEADING, sessionSection, WORK_DIRECTION } from '../texts/en';
+import { GLOBAL_HEADING, IDENTITY, IMAGE_USAGE, markersSection, REPLY_STYLE, RESPONSE_LANGUAGE, ROLE_HEADING, sessionSection, WORK_DIRECTION } from '../texts/en';
 import type { PromptSection } from '../types';
 
 export function registerCoreGeneralSections(): PromptSection[] {
@@ -60,8 +60,9 @@ export function registerCoreGeneralSections(): PromptSection[] {
             order: 200,
             channel: 'system',
             maxChars: 3000,
-            cache: { deps: c => [c.flags.imageLibrary] },
-            build: c => (c.flags.imageLibrary ? IMAGES : ''),
+            // 只用 imageUsage（接收图片 || 图床 || 资源段）；图库/图床规则拆到 core:image-host（order 221）
+            cache: { deps: c => [c.flags.imageUsage] },
+            build: c => (c.flags.imageUsage ? IMAGE_USAGE : ''),
         },
         {
             name: 'core:reply',

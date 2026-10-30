@@ -9,10 +9,16 @@ export default class ResourceConfig {
         seal.ext.registerTemplateConfig(ext, "本地语音路径", [''], "每框一个本地语音：语音名=路径（省略语音名时默认用文件名），示例：早安=records/早安.mp3；发送语音需要配置ffmpeg到环境变量中；修改后需重载 JS 生效", "资源");
         seal.ext.registerTemplateConfig(ext, "本地文件路径", [''], "每框一个本地文件：文件名=路径（省略文件名时默认用文件名），示例：规则书=data/files/规则书.pdf；发送文件需安装ob11网络连接依赖；修改后需重载 JS 生效", "资源");
         seal.ext.registerTemplateConfig(ext, "本地视频路径", [''], "每框一个本地视频：视频名=路径（省略视频名时默认用文件名），示例：开场动画=data/videos/开场.mp4；发送视频需安装ob11网络连接依赖；修改后需重载 JS 生效", "资源");
+        // 资源清单注入（方案 §9.4 / §10.5）：默认关 = 与旧版一致
+        seal.ext.registerBoolConfig(ext, "资源清单注入", false, "开启后主对话系统提示词注入资源清单段（core:resources：内置图片数量/最近 ID + resource:<name> 清单）；默认关闭", "资源");
+        seal.ext.registerIntConfig(ext, "资源清单预算", 600, "资源清单段字符预算（默认 600，受段硬上限 600 约束）", "资源");
     }
 
-    /** 配置数据：解析结果在资源层（src/resource/local_resources.ts），本分区不再产出运行期数据 */
+    /** 配置数据：解析结果在资源层（src/resource/local_resources.ts），本分区只额外产出提示词开关 */
     static get() {
-        return {};
+        return {
+            RESOURCE_LIBRARY: seal.ext.getBoolConfig(ext, "资源清单注入"),
+            RESOURCE_LIBRARY_BUDGET: seal.ext.getIntConfig(ext, "资源清单预算"),
+        };
     }
 }

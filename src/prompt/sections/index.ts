@@ -4,7 +4,9 @@ import { registerPromptSections } from '../registry';
 import { registerCapabilitySections } from './capabilities';
 import { registerCoreGeneralSections } from './core_general';
 import { registerDynamicSections } from './dynamic';
+import { registerImageHostSections } from './image_host';
 import { registerMcpSections } from './mcp';
+import { registerResourceSections } from './resources';
 import { registerSkillKnowledgeSections } from './skills_knowledge';
 import { registerToolSections } from './tools';
 
@@ -17,5 +19,8 @@ export function registerBuiltinSections(): void {
         ...registerSkillKnowledgeSections(),
         ...registerDynamicSections(),
         ...registerMcpSections(),
+        // 三段图片/资源注入（order 211/221）：数据来自 aux 注册表片段，没有对应能力时整段为空
+        ...registerResourceSections(),
+        ...registerImageHostSections(),
     ]);
 }

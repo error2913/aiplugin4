@@ -3,7 +3,7 @@
 import Config from "../config/config";
 import Message from "../context/message";
 import type { UserMessage, UserMessageItem } from "../context/types";
-import { ImageHost } from "../resource/image_host";
+import { auxRegistry } from "../core/ports/aux_tools";
 import type { Session } from "../session/session";
 import type { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
@@ -48,18 +48,82 @@ function collectMemoryInput(ctx: seal.MsgContext, session: Session): {
     return { query: text, users, group };
 }
 
+/** 图片段 flag 派生输入（纯函数入参，供单测直接断言；方案 v1.4 §10.5） */
+export interface ImagePromptFlagInput {
+    /** 消息接收页「接收图片」 */
+    receiveImage: boolean;
+    /** 图片页「图床提示注入」开关（默认 true） */
+    imageHostPrompt: boolean;
+    /** 资源页「资源清单注入」开关（默认 false） */
+    resourcePrompt: boolean;
+    /** aux 注册表是否存在 image-host 片段（适配器注册条件已保证 = 图床/MCP 有图片能力） */
+    hasImageHostSnippet: boolean;
+    /** aux 注册表是否存在 resource 片段（资源开关开且确有内置图片/本地资源） */
+    hasResourceSnippet: boolean;
+}
+
+/** 图片相关 flag 的唯一派生点：不再直接 import ImageHost/MCP 判断（等价性由适配器注册条件保证） */
+export function deriveImagePromptFlags(input: ImagePromptFlagInput): {
+    imageUsage: boolean;
+    imageHost: boolean;
+    resourceLibrary: boolean;
+    imageLibrary: boolean;
+} {
+    const imageHost = !!input.imageHostPrompt && !!input.hasImageHostSnippet;
+    const resourceLibrary = !!input.resourcePrompt && !!input.hasResourceSnippet;
+    // 有意修正（方案 §10.5 行为差异 #2）：只开了「接收图片」也应该告诉模型怎么用图片
+    const imageUsage = !!input.receiveImage || imageHost || resourceLibrary;
+    return {
+        imageUsage,
+        imageHost,
+        resourceLibrary,
+        // 兼容旧字段（下一版删除）：语义已收窄为「真有图片能力的来源」，与旧 ImageHost||MCP 等价
+        imageLibrary: imageHost,
+    };
+}
+
+/** 配置读取兜底：配置尚未注册/读取异常时按出厂默认处理，避免提示词装配崩溃 */
+function safeBoolean(read: () => boolean, fallback: boolean): boolean {
+    try {
+        return !!read();
+    } catch {
+        return fallback;
+    }
+}
+
+function safeNumber(read: () => number, fallback: number): number {
+    try {
+        const value = Number(read());
+        return Number.isFinite(value) && value > 0 ? value : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
 /** 读取配置开关快照 */
 function readFlags(): PromptFlags {
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
     const { EXTRA_SEPARATOR } = Config.reply;
+    const derived = deriveImagePromptFlags({
+        receiveImage: !!RECEIVE_IMAGE,
+        imageHostPrompt: safeBoolean(() => Config.image.IMAGE_HOST_PROMPT, true),
+        resourcePrompt: safeBoolean(() => Config.resource.RESOURCE_LIBRARY, false),
+        hasImageHostSnippet: auxRegistry.hasSnippet('image-host'),
+        hasResourceSnippet: auxRegistry.hasSnippet('resource'),
+    });
     return {
         status: !!STATUS,
         promptEngineering: !!PROMPT_ENGINEERING,
         directionPrompt: !!DIRECTION_PROMPT,
         receiveImage: !!RECEIVE_IMAGE,
         extraSeparator: extraSeparatorLabels(EXTRA_SEPARATOR),
-        imageLibrary: !!(ImageHost.enabled || Config.mcp.MCP_ENABLED),
+        imageUsage: derived.imageUsage,
+        resourceLibrary: derived.resourceLibrary,
+        imageHost: derived.imageHost,
+        resourceBudget: safeNumber(() => Config.resource.RESOURCE_LIBRARY_BUDGET, 600),
+        imageHostBudget: safeNumber(() => Config.image.IMAGE_HOST_PROMPT_BUDGET, 600),
+        imageLibrary: derived.imageLibrary,
         memory: !!((Config.memory as any).MEMORY_ENABLED ?? Config.memory.MEMORY),
         knowledge: !!Config.knowledgeBase.KNOWLEDGE,
     };

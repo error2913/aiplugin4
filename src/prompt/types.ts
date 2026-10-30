@@ -23,7 +23,23 @@ export interface PromptFlags {
     receiveImage: boolean;
     /** 「额外消息分隔符」提示词展示写法（模板非空项；空 = 仅内置 \f） */
     extraSeparator: string[];
-    /** 图床或 MCP 启用（图片与图库段） */
+    /**
+     * 图片相关**能力**开关：接收图片 || 图库能力（图床/资源段）。
+     * 由 builder 从 aux 适配器元数据派生（方案 v1.4 §10.5），不再直接判 ImageHost/MCP。
+     */
+    imageUsage: boolean;
+    /** 资源清单注入：资源页开关 && 存在 resource 片段（默认关） */
+    resourceLibrary: boolean;
+    /** 图床提示注入：图片页开关 && 存在 image-host 片段（默认开） */
+    imageHost: boolean;
+    /** 资源清单段字符预算（配置「资源清单预算」，缺省 600） */
+    resourceBudget: number;
+    /** 图床提示段字符预算（配置「图床提示预算」，缺省 600） */
+    imageHostBudget: number;
+    /**
+     * 兼容旧字段（下一版删除）：旧「图床或 MCP 启用」。
+     * 新段只用 imageHost/resourceLibrary/imageUsage，不再读本字段。
+     */
     imageLibrary: boolean;
     /** 记忆总开关 */
     memory: boolean;

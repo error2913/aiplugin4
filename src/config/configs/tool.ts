@@ -1,4 +1,5 @@
 // 工具配置：函数调用开关/提示词工程/上限/禁用与默认关闭
+import Logger from "../../logger";
 import { ext } from "../ext";
 import { SEALDICE_COMMAND_WHITELIST } from "../static_config/sealdice_command_defaults";
 // 音乐服务配置属于启动解析一次、重载 JS 才生效的复杂配置（JSON 逐行解析）：模块级缓存
@@ -7,6 +8,25 @@ function getMusicTemplateConfig(): string[] {
     if (musicConfigCache) return musicConfigCache;
     musicConfigCache = seal.ext.getTemplateConfig(ext, "音乐服务配置");
     return musicConfigCache;
+}
+
+/** 摘要智能体工具集白名单（其它值 WARN 并忽略，方案 §9.4） */
+const SUMMARY_AGENT_TOOLSETS = ['summary-image', 'summary-memory-read'];
+
+/** 读取并清洗「摘要智能体工具集」：未知值 WARN 后忽略；全空时回退出厂两项（默认非空，AGENT.md 规则 9） */
+function readSummaryToolsetConfig(): string[] {
+    const raw = seal.ext.getTemplateConfig(ext, "摘要智能体工具集");
+    const out: string[] = [];
+    for (const item of Array.isArray(raw) ? raw : []) {
+        const name = String(item || '').trim();
+        if (!name) continue;
+        if (!SUMMARY_AGENT_TOOLSETS.includes(name)) {
+            Logger.warning(`「摘要智能体工具集」未知值已忽略：${name}（可选：${SUMMARY_AGENT_TOOLSETS.join(' / ')}）`);
+            continue;
+        }
+        if (!out.includes(name)) out.push(name);
+    }
+    return out.length > 0 ? out : SUMMARY_AGENT_TOOLSETS.slice();
 }
 
 export default class ToolConfig {
@@ -20,6 +40,10 @@ export default class ToolConfig {
         seal.ext.registerIntConfig(ext, "媒体任务并发上限", 3, "同时进行的语音/图片生成任务数上限（默认 3）；超出的任务排队等待，避免一次提交过多把接口打满", "工具");
         seal.ext.registerIntConfig(ext, "媒体生成同步等待秒数", 5, "调用生图/语音工具后，先等待这么多秒看是否已经出结果（默认 5）：期间生成完就当场把结果返回给 AI，不再走异步通知；超时未完成则正常返回任务号、生成完再通知唤醒。填 0 关闭等待（一律走异步）", "工具");
         seal.ext.registerIntConfig(ext, "允许连续调用函数次数", 0, "单次回复流程中允许连续调用工具的次数，防止无限循环；0 为不限制", "工具");
+        // 辅助智能体（摘要）工具能力：默认关闭，保持旧行为（方案 §9.4 / §10.7）
+        seal.ext.registerBoolConfig(ext, "启用摘要智能体工具", false, "摘要智能体可调用只读工具（记忆检索/看图/图床）；默认关闭保持旧行为。需同时开启「开启调用函数功能」并关闭「切换为提示词工程」，否则本次无工具（只记日志）", "工具");
+        seal.ext.registerTemplateConfig(ext, "摘要智能体工具集", ['summary-image', 'summary-memory-read'], "每框一个摘要场景工具集：summary-image=看图/图床（image_view/image_to_text/list_resources/image_search/keep/unkeep）；summary-memory-read=记忆只读检索（memory_recall）；未知值 WARN 并忽略", "工具");
+        seal.ext.registerIntConfig(ext, "摘要工具最多轮数", 3, "摘要智能体单次调用最多几轮工具（1~10，默认 3）；工具循环另有总超时 30s，最后一轮不带工具收尾", "工具");
         seal.ext.registerIntConfig(ext, "工具结果展示token上限", 8192, "工具返回结果按 token 估算超过该上限时只展示开头（完整原文保留在事件账本，可用 read_raw 游标分页回读）；0=不截断", "工具");
         seal.ext.registerTemplateConfig(ext, "禁止调用的函数", [''], "每框一个禁止 AI 调用的函数名，示例：run_ext_command；扩展指令的细粒度控制请使用「可调用指令白名单」；修改后自动生效", "工具");
         seal.ext.registerTemplateConfig(ext, "默认关闭的函数", [''], "每框一个默认关闭的函数名，AI 默认无法调用；OB11 action 请使用下方 action 配置；修改后自动生效", "工具");
@@ -48,6 +72,9 @@ export default class ToolConfig {
             PROMPT_ENGINEERING: seal.ext.getBoolConfig(ext, "切换为提示词工程"),
             BLOCK_REQUIRE_OWNER_CONFIRM: seal.ext.getBoolConfig(ext, "拉黑前需要骰主确认"),
             MAX_CALL_COUNT: seal.ext.getIntConfig(ext, "允许连续调用函数次数"),
+            SUMMARY_AGENT_TOOLS: seal.ext.getBoolConfig(ext, "启用摘要智能体工具"),
+            SUMMARY_AGENT_TOOLSETS: readSummaryToolsetConfig(),
+            SUMMARY_MAX_ROUNDS: seal.ext.getIntConfig(ext, "摘要工具最多轮数"),
             MEDIA_MAX_CONCURRENT: seal.ext.getIntConfig(ext, "媒体任务并发上限"),
             MEDIA_SYNC_WAIT_SECONDS: seal.ext.getIntConfig(ext, "媒体生成同步等待秒数"),
             NUDGE_ENABLED: seal.ext.getBoolConfig(ext, "无工具调用时续跑提示"),
