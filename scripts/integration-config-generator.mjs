@@ -605,6 +605,12 @@ console.log('\n=== G. 防漂移：生成器的表必须跟上插件的真实数�
     ok('插件 media_presets 只覆盖 tts 与 image-generation（识图/嵌入无 vendor 预设）',
         Object.keys(MEDIA_PRESETS).sort().join(',') === 'image-generation,tts',
         Object.keys(MEDIA_PRESETS).join(','));
+
+    // G7) 生成器用途表必须与插件 MODEL_USES 完全一致（键与顺序）：审计 A13
+    const genPurposeKeys = (tpl.PURPOSES || []).map(p => p.key);
+    ok('生成器 PURPOSES 与插件 MODEL_USES 完全一致（含顺序）',
+        isDeepStrictEqual(genPurposeKeys, plugin.MODEL_USES),
+        `生成器=${genPurposeKeys.join(',')} 插件=${plugin.MODEL_USES.join(',')}`);
 }
 // ---------------------------------------------------------------- H. 逐模型「请求覆盖」端到端
 
