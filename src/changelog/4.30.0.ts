@@ -104,4 +104,18 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 
 - 新增 token 截断叶子 \`src/utils/token_budget.ts\`；编译层 \`toolResultMaxTokens\` 与估算口径同源，避免"显示已截断但预算仍按全文计"。
 - 单测新增/调整：编译期工具结果 token 截断（标记/图片保留/关闭/估算一致）、摘要输入不含工具正文、旧回退路径用户消息 token 截断、v5 旧配置 compression 清洗、子代理工具结果截断；\`npx tsc --noEmit\`、\`npm run lint\`、\`npm run test:unit\`、\`npm run build && npm run smoke\`、\`npm run sim\`、\`npm run deps:check\` 全绿。
+
+## 触发域统一重构（R1：判定 shadow，行为不变）
+
+- **统一触发域**：消息/事件/调度/延迟回调/判定五类入口收敛到同一张「闸 → 裁决 → 起轮」流水线；新增门控链规则（regex/event/active_time/timer 源门 + user/counter/prob 过滤门 + delay 时序门），AI 可用 \`set_trigger_rule\`/\`list_trigger_rules\`/\`delete_trigger_rule\` 管理，用户可用 \`.ai trg rule lst/rm/clr/set\` 查看/删除。
+- **\`standby\` 概念删除**：会话开关统一为 \`aiEnabled\`（新会话默认关，\`.ai on\` 开启；旧存档 \`standby=true\` 自动迁移）；\`.ai standby\` 与 \`.ai off --sb\` 移除。\`Session.chat\` 返回 \`ChatOutcome\`（fired/deferred/bucket-empty/gated），未真正起轮不再扣精力/记 WAIT。
+- **单触发模式统一为 9 个**（active/at/counter/delay/event/judge/prob/regex/timer）：新增 **@ 触发**（默认开，替代默认正则里的 at CQ）；\`.ai trg\` 总览与开关；\`.ai trg all off\`。
+- **触发页 11 键**：\`触发需要满足的条件 / 触发次数上限 / 触发次数补充间隔 / 触发活跃时间(Template 多段) / 默认计数器 / 默认计时器 / 事件触发规则 / 评分触发参数(String TOML v2) / 默认概率 / 触发正则表达式 / 默认定时器(String TOML 多 [[timer]])\`；旧 \`默认触发活跃时间\`/\`评分触发配置\` 废弃且**旧值不迁移**。
+- **判定内核 R1 shadow**：\`评分触发参数\` 升级 TOML v2（9 段全参数化，空/非法⇒判定不可用并报错）；新判定内核（六维特征 → prompt → parse → 策略 \`S\`）默认 \`shadow=true\` **只记日志、不改变发言**；\`.ai status\` 可看最近 shadow 决策与判定预算，供 2~4 周灰度定阈值。
+- **定时器参数统一**：\`set_timer\` / 全局「默认定时器」/ 链 \`timer\` 门共用一套参数与 \`validateTimerSpec\`（\`prompts\` 1~10 必填；target 必填年/月/日；修掉旧 target 缺省年份的 1900 年 bug）；\`TimerManager\` 支持规则/模式条目（\`ruleId/modeTag/prompts\`）、双向端口分派与启动对账；\`.ai trg timer lst/clr\`。
+- **事件域**：链事件规则独立于「事件触发规则」开关（只需录制门），v1 规则保留兼容；事件认领去重防「链 + v1」双触发。
+- **辅助适配层**：图床/资源/内置记忆工具统一走 \`aux_tools\` 端口与三段注入（图床提示/资源清单按 snippet 派生），摘要辅助智能体工具循环（默认关）。
+- **观测**：\`.ai status\` 新增触发域观测（规则数/损坏数、delay 挂起、去抖/在飞、判定配置有效性、预算、WAIT 剩余、最近 shadow 决策）。
+- 兼容：\`set_trigger_condition\` 旧版一次性条件继续可用；v1 事件规则配置契约不变；外部插件 API 不受总闸影响（\`bypassGate\`）。
+- 单测/门禁：新增触发域纯逻辑、链编排、规则工具、判定配置 v2、判定调度、探针、ChatOutcome 等用例（\`npm run test:unit\` 833）；\`npx tsc --noEmit\`、\`npm run lint\`、\`npm run deps:check\`、\`npm run test:integration\`（260）、\`npm run build && npm run smoke\` 全绿。
 `;

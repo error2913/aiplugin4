@@ -372,12 +372,13 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 默认计数器 / 默认计时器 / 默认概率 / 默认触发活跃时间 | `.ai on` 不带参数时使用的默认值；活跃时间格式 `HH:mm-HH:mm-次数` |
-| 触发正则表达式 | 匹配符合正则的消息用于强制触发 AI 回复，[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html) |
-| 触发需要满足的条件 | 豹语表达式，例如 `$t群号_RAW=='2001'` 表示仅允许群 2001 触发；填 1 为无限制 |
-| 触发次数上限 | 群内共用令牌桶容量，触发一次减少一计数，计数为 0 时无法触发 |
-| 触发次数补充间隔 | 单位秒，按该间隔补充触发次数 |
-| 事件触发规则 | JSON v1：一条规则只绑一个扁平事件名（`group_increase`/`poke`/`group_request` 等，不再用 `notify.*`、不再支持多事件数组），按「事件接收」页的开关/白名单/待机录入上下文后，命中即让会话对事件做出响应（顺序 = 优先级，首条命中）。空规则 = 关闭；`prompt` 可留空（事件已在上一条系统消息里，留空 = 只触发响应、不附加指令）；修改后需重载 JS 生效。依赖「接收依赖通知事件」开启 + 事件在白名单 + 会话已 .ai on（待机）；group_request（加群申请）为主场景，friend_request 可能因非好友无法投递回复。格式推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成 |
+| 触发需要满足的条件 / 触发次数上限 / 触发次数补充间隔 | 全局触发闸与令牌桶：表达式命中为 1 才触发；桶容量与补充间隔（秒） |
+| 触发活跃时间 | 每框一段 `HH:mm-HH:mm-次数`（可多段）；`.ai trg active on` 使用该全局时段 |
+| 默认计数器 / 默认计时器 / 默认概率 | `counter` / `delay` / `prob` 模式开启时的默认参数；`默认计时器` 单位秒 |
+| 触发正则表达式 | 匹配即强制触发 AI 回复（**默认已不含 @ CQ**，@ 由独立 at 模式判定），[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html) |
+| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[energy]/[weights]/[features]/[gate]/[probe]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常），R1 默认 `shadow=true`（只记日志） |
+| 默认定时器 | String TOML，多 `[[timer]]`；参数与 `set_timer` 完全一致（含 `prompts`）；`.ai trg timer on` 后按表为每会话注册定时器 |
+| 事件触发规则 | JSON v1：一条规则只绑一个扁平事件名（`group_increase`/`poke`/`group_request` 等，不再用 `notify.*`、不再支持多事件数组），按「事件接收」页的开关/白名单录入上下文后，命中即让会话对事件做出响应（顺序 = 优先级，首条命中）。空规则 = 关闭；`prompt` 可留空（事件已在上一条系统消息里，留空 = 只触发响应、不附加指令）；修改后需重载 JS 生效。依赖「接收依赖通知事件」开启 + 事件在白名单 + 会话 AI 已开启；group_request（加群申请）为主场景，friend_request 可能因非好友无法投递回复。链事件规则独立于本开关（只需录制门）。格式推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成 |
 
 ### 图片
 
@@ -620,10 +621,14 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | `.ai ctx name status` | - | 查看上下文中的名字与自动修改状态 |
 | `.ai ctx name set [nick/card]` | - | 将上下文中的名字设置为昵称/群名片 |
 | `.ai ctx name mod <0\|1\|2>` | - | 自动修改上下文中的名字：0 不修改，1 昵称，2 群名片 |
-| `.ai on` / `.ai on --r` / `.ai on --e` | - | 开启 AI：非指令正则触发与事件触发默认随之开启；`.ai off --r/--e` 仅关闭对应触发，`.ai on` 重新开启 |
-| `.ai on [--r --e --j --c=<条> --t=<秒> --p=<%> --a=<开始-结束-次数>]` | `.ai on --c=10 --t=60` | 开启 AI：--r 开启非指令正则触发，--e 开启事件触发，--j 开启评分触发（评分智能体判断是否插话），--c/--t/--p/--a 开启计数器/计时器/概率/活跃时间段模式，不带参数仅开启非指令正则触发 |
-| `.ai standby [on/off]` | `.ai standby off` | 待机模式：仅录入上下文不主动发言，非指令关键词触发才发言；`off` 仅关闭待机、保留其它触发模式（适合只播报不读群消息） |
-| `.ai off [--r/--e/--j/--c/--t/--p/--a/--sb]` | `.ai off --t` | 关闭 AI（含非指令正则触发与事件触发），加参数只关闭对应模式（`--sb` 仅关闭待机） |
+| `.ai on` / `.ai on --r` / `.ai on --e` | - | 打开 AI 总闸（`aiEnabled`）：**新会话默认关闭**；`.ai on` 强制开启正则 + 事件触发，其它模式开关保持原值 |
+| `.ai on [--r --e --j --c=<条> --t=<秒> --p=<%> --a]` | `.ai on --c=10 --t=60` | 打开总闸并按模式开启：--r 正则 / --e 事件 / --j 评分（判定，需先配置「评分触发参数」）/ --c 计数器 / --t 延迟 / --p 概率 / --a 活跃时间（参数来自全局「触发活跃时间」，不再接受自定义时段） |
+| `.ai off [--r/--e/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI 总闸或对应模式；不带参数整体关闭并清理触发域瞬态（认领/delay/判定调度/WAIT） |
+| `.ai trg` | - | 触发域总览：AI 总闸 + 9 个单触发模式（active/at/counter/delay/event/judge/prob/regex/timer） |
+| `.ai trg <模式> on\|off [值]` | `.ai trg counter on 5` | 单模式开关；`timer on` 按全局 TOML 注册计划；未开总闸时拒绝并提示先 `.ai on` |
+| `.ai trg all off` | - | 关闭全部单触发模式（不动链规则） |
+| `.ai trg rule lst/rm/clr/set` | `.ai trg rule lst` | 链规则列表/删除/清空（`clr` 需 `--yes`）/改唤醒词 |
+| `.ai trg timer lst/clr` | `.ai trg timer clr` | 本会话定时器条目（含规则内部）；`clr` 只清手动 `set_timer` 条目 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
 | `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）与连接状态；`.ai model list` 读加载/最近一次拉取到内存的模型列表（不联网，按连接序号分组）；`.ai model pull` 立即重拉全部连接并展示（无视 `models` 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选（按取用顺序编号）；`.ai model <用途> <模型>` 设为该用途的**运行时覆盖**（支持编号 / 模型 id / 模型名，优先级最高、存插件存储）。模型类型在「模型配置」里用 `kind` 声明（text/vision/embed/gen/tts） |
 | `.ai balance` | - | 并发查询全部（非忽略）连接的账户余额（骰主）：deepseek / moonshot / siliconflow 内置余额接口直接查；其余平台提示控制台入口；one-api/new-api 等网关可在连接的 `request` 里配置 `balance_url` + `balance_json_path` 后查询 |
