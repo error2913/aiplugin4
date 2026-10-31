@@ -9,12 +9,12 @@ export const tests = {
         const state = parseJudgeConfig(JUDGE_TOML_DEFAULT);
         assert.equal(state.valid, true, state.errors.join(';'));
         assert.equal(state.config.DECISION.aggressiveness, 2);
-        assert.equal(state.config.SCORING.speak_threshold, 0.6);
+        assert.equal(state.config.SCORING.speak_threshold, 0.4);
         assert.equal(state.config.SCORING.wait_cooldown, 30);
-        assert.ok(JUDGE_TOML_DEFAULT.includes('speak_threshold = 0.6'), '默认模板应展示阈值 0.6');
+        assert.ok(JUDGE_TOML_DEFAULT.includes('speak_threshold = 0.4'), '默认模板应展示阈值 0.4');
         assert.ok(!JUDGE_TOML_DEFAULT.includes('shadow'), '默认模板不应再出现 shadow');
         assert.ok(!JUDGE_TOML_DEFAULT.includes('[gate]'), '默认模板不再有 [gate]');
-        assert.equal(state.config.WEIGHTS.interruption_risk, -3);
+        assert.equal(state.config.WEIGHTS.interruption_risk, -1);
         assert.equal(state.config.MODEL.context_tokens, 1500);
     },
 

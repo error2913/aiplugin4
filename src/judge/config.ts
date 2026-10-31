@@ -28,16 +28,16 @@ version = 2
 aggressiveness = 2             # 1..3
 
 [scoring]
-speak_threshold = 0.6
+speak_threshold = 0.4
 wait_cooldown = 30             # WAIT 挂起窗口秒数（0 = 不进入 WAIT）
 
 [weights]                      # 带符号权重
 addressed = 4
-help_signal = 2
-relevance = 1.5
-friendships = 1
-silence_gap = 1
-interruption_risk = -3
+help_signal = 3
+relevance = 6
+friendships = 3
+silence_gap = 2
+interruption_risk = -1
 
 [model]
 context_tokens = 1500          # 0 = 不注入历史
@@ -50,8 +50,8 @@ extra = ""`;
 /** 默认值（v2 模板等价；也是解析时逐字段兜底） */
 export const DEFAULT_JUDGE_CONFIG: JudgeDecisionConfigV2 = {
     DECISION: { aggressiveness: 2 },
-    SCORING: { speak_threshold: 0.6, wait_cooldown: 30 },
-    WEIGHTS: { addressed: 4, help_signal: 2, relevance: 1.5, friendships: 1, silence_gap: 1, interruption_risk: -3 },
+    SCORING: { speak_threshold: 0.4, wait_cooldown: 30 },
+    WEIGHTS: { addressed: 4, help_signal: 3, relevance: 6, friendships: 3, silence_gap: 2, interruption_risk: -1 },
     MODEL: { context_tokens: 1500, timeout_sec: 8, retries: 2 },
     PROMPT: { extra: '' },
 };
