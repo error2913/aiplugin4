@@ -58,8 +58,11 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 ## 移除压缩智能体与 compression 用途
 
 - **删除压缩智能体（compress_agent）**：v2 事件账本已不再调用它；旧回退路径的用户消息超长改为**纯代码 token 截断**（保留头+尾、原文进 rawText，\`read_raw kind=user\` 可回查），不再产生任何 LLM 调用；\`agent_compress_agent\` 存储键不再使用。
-- **彻底移除 \`compression\` 模型用途**：\`ChatModelUse\` / v5 \`MODEL_USES\` / 出厂 \`purposes\` / \`.ai model\` 用途列表 / \`groups\` 用途组 / 用量页说明都不再有 compression；\`chat\` / \`summarization\` / \`judge\` 仍共用文本/视觉候选链。
-- **旧模型配置自动兼容**：解析期自动剔除 \`purposes.compression\` 与 \`groups[].purposes\` 里的 compression（空组丢弃）并打 WARN；**无需重建配置**。配置生成器同步移除该用途，导入旧配置时同样清洗并提示。
+- **彻底移除 \`compression\` 模型用途**：\`ChatModelUse\` / v5 \`MODEL_USES\` / 出厂 \`purposes\` / \`.ai model\` 用途列表 / 用量页说明都不再有 compression；\`chat\` / \`summarization\` / \`judge\` 仍共用文本/视觉候选链。
+- **旧模型配置自动兼容**：解析期自动剔除 \`purposes.compression\` 并打 WARN；**无需重建配置**。配置生成器同步移除该用途，导入旧配置时同样清洗并提示。
+- **模型请求体配置调整**：删除 v5 的 \`groups[]\`（旧配置里的 groups 解析期忽略并 WARN，不迁移）；请求体覆盖改为 \`providers[].models[].request.bodyByUse\`（用途 → 请求体，逐模型；优先级高于代码默认）；插件默认请求体改为 \`{"max_tokens": 65536, "temperature": 1}\`（对话/总结/评分/识图；嵌入与媒体不变），**原样发送**、超过模型上限由服务商拒绝（用户自担）。
+- **判定模型契约调整**：judge 的模型**只输出六维 0~10 分，直接乘权重后归一化 S（默认阈值 0.6）**（\`dims\`），不再输出 \`decision\`/\`confidence\`/\`reason\`/\`evidence\`；SPEAK/WAIT 改由策略层阈值决定。新增模型 kind \`decision\`（System One：阿里 \`decision-model-preview\` / Jev \`jev-latest\`），只能绑 \`judge\`，请求固定 \`POST {baseURL}/systemone\`，响应 \`answers\` 归一化回六维；生成器同步支持该 kind。
+- **判定时序裁剪**：删除 shadow/旧五维动作路径、IGNORE、预筛、调用预算、精力、活跃时间/计时器挂起/会话忙/密度闸门、静默探针与 4~12s 去抖；消息到达立即评分，结果为 WAIT 或回复成功后进入 30s WAIT，期间只挂起最新一条，WAIT 到点才评；[scoring] wait_cooldown 默认 30。旧 TOML 的 [energy]/[features]/[gate]/[probe]/shadow/ignore_* 会被忽略。
 - 历史 token 用量里的 compression 记录保留可查，不再新增。
 
 ## 工具结果：token 截断 + 分页回读
@@ -125,7 +128,28 @@ export default `## 记忆注入：尾部约束、预算下调与多 bank 相关�
 - **治理启用**：消息判定改为「先落盘 → 去抖 4~12 秒评估」（Addressed/强求助立即评估）；同会话在飞去重、在飞期间仅合并保留最新候选、WAIT 轮内候选轮末合并、\`.ai off\`/\`.ai stop\` 清理；\`.ai status\` 里的「去抖/在飞」现在真实生效。静默探针仍默认关。
 - **精力记账修复**：评分触发 SPEAK 只有 \`Session.chat\` 返回 \`fired\`（真正起轮）才扣精力；\`bucket-empty\`/\`deferred\`/\`gated\` 不再出现「假 SPEAK 扣精力」。
 - **token 范围化（A/B 组）**：新增 \`selectByTokenBudget\` 纯函数；\`[model] context_tokens\` 成为 judge 历史唯一口径（删除条数口径 \`context_count\`，0 = 不注入历史，旧值忽略并 WARN）；\`pub_read\` 参数 \`rounds\`/\`chars\` → \`tokens\`（默认 3000、上限 8000；旧参数接受但 WARN 并忽略一版）；上下文投影改 \`maxTokens: 6000\`（最新单元必留）；记忆桥、\`resolve_context\` 参数（\`max_chars\` → \`max_tokens\`）、子代理内容截断等字符口径统一改 token 预算；白名单（\`read_raw\`/\`grep_raw\` 分页、图片张数、工具轮数、记忆事实条数、legacy 归档字符窗口）保持不变并在文档标注。
-- **τ/主动度校准**：R1 发布后未进入真机 shadow 灰度（无 \`[judge-shadow]\` 样本），本版用 14 条标注场景做离线校准（阈值扫描 0.40~0.80）：τ∈[0.53,0.60] 均可保持 SPEAK precision=1，默认保持 \`speak_threshold=0.55\`、\`aggressiveness=2\`；上线后建议继续收集 \`[judge-shadow]\`/\`[judge-decision]\` 日志复核。
-- **生成器同步**：judge 用途标签改「评分 / 决策（判定）」并新增选型提示（vendor/价格档/structured_output/thinking，只提示不预选）；可选「判定请求体预设」（默认关，独立 \`groups[]\`：temperature 0 / max_tokens 300 / json_object）；MCP 新增 \`capability: "image-host"\` 扩展字段（旧 \`imageRefs\` 兼容一版），默认数据同步。
+- **τ/主动度校准**：R1 发布后未进入真机 shadow 灰度（无 \`[judge-shadow]\` 样本），本版用 14 条标注场景做离线校准（阈值扫描 0.40~0.80）：τ∈[0.53,0.60] 均可保持 SPEAK precision=1，默认保持 \`speak_threshold=0.6\`、\`aggressiveness=2\`；上线后建议继续收集 \`[judge-shadow]\`/\`[judge-decision]\` 日志复核。
+- **生成器同步**：judge 标签保持「评分」；删除「判定请求体预设」与主界面「用途组请求体」；请求体改为**逐模型** \`models[].request.bodyByUse\`（连接编辑里每个模型可添加 N 条「用途 → 请求体」，默认 0 条 = 用插件默认）；新增条目预填 \`{"max_tokens":65536,"temperature":1}\`；MCP 新增 \`capability: "image-host"\` 扩展字段（旧 \`imageRefs\` 兼容一版），默认数据同步。
 - 单测：新增/调整判定切流分支（SPEAK/WAIT/IGNORE、仅 fired 扣精力、预筛、调用预算、IGNORE 冷却绕过）、去抖延迟增长/封顶/旁路、在飞合并、token 选择与各调用点 token 口径；全量门禁见 PR。
+
+## 触发域重构复审修复（R2 补充）
+
+- **旧存档迁移**：修正 \`standby=true → aiEnabled=true\` 在 \`revive\` 之后读取导致迁移失效的问题；升级后原开启会话不再被静默关闭。
+- **事件入口不阻塞**：链 event 规则改为异步起轮（\`detached\`），不再 await 整轮 AI 阻塞 ob11 通知/请求分发；会话忙时改为挂起 \`kind:'trigger'\`，轮末补一轮。
+- **忙时强触发挂起**：运行中收到的消息先做链规则/@/正则/AI 一次性条件的轻量判定，命中则 defer 为 trigger；计数器/概率/延迟/评分仍不推进。恢复时二次判闸，\`.ai off\` 期间不写 trigger 提示。
+- **wake 先判闸/判桶再写提示**：gated/bucket-empty 不再留下无法兑现的 system 提示；\`.ai off\` 期间规则/模式 timer 不再持续污染上下文。
+- **\`.ai off\` 清理矩阵**：补齐规则/模式 timer 条目移除、activeMode/activeTime 清理、judge WAIT/去抖清理；\`.ai on\` 按模式开关重建 active/timer/规则 timer。\`.ai trg judge off\` / \`all off\` 同步清理判定状态。
+- **结果送达/外部 API 豁免**：媒体完成送达、子代理唤醒、外部插件 API 补 \`bypassGate\`（前两者同时免桶），与文档承诺一致。
+- **GLOBAL_STANDBY 语义**：录制闸与触发闸分离；全局待机只记录、不触发任何模式（配置文案同步）。
+- **timer 模式修复**：重载恢复不再用 \`sessionId\` 兜底 epId（避免首轮点火自删）；多个「默认定时器」框共用 ruleId 时改为精确续期，不再互相删除；\`.ai on\`/会话入口幂等补注册规则 timer；target 型超时 1 小时丢弃；默认定时器解析不再做模块级缓存（target 绝对时间按当前时间重算）。
+- **delay 与事件认领**：delay 到期续算复核 scope/过期/次数；到期遇忙 3s×5 退避重试；事件入口先 claim 再求值（no-match 释放），防双路径 TOCTOU。
+- **存储与观测**：规则库主键损坏回退 \`:bak\`，坏规则随主库保留不再被下次写入删除；state 分片无变化不写（计数/fired 仍写穿）；WAIT 轮末重放标记 \`source:'wait'\`，不再重复记时间线；\`show_timer_list\`/\`cancel_timer\`/\`.ai trg timer clr\` 隔离手动定时器。
+- **active_time 源门补齐自主调度**：规则创建/\`.ai on\`/会话入口按 \`start/end/segs\` 排下一子段起点，到点走 \`runChain(sourceSatisfied)\`；每段最多 1 次（occurrence 持久去重，重载/重复投递不重复），跨天自动续排。
+- **命令面收敛**：删除顶层 \`.ai timer\`（按方案收敛到 \`.ai trg timer lst/clr\`）；手动定时器工具与视图保留。
+- **命令输出窄屏友好**：\`.ai status\`（判定预算/去抖在飞）、\`.ai trg\`（总览/模式详情/规则列表/定时器列表）、\`.ai live\`、\`.ai pub add\` 原先把多个字段用「｜」/「|」挤在同一行，现改为逐字段换行；规则与定时器每条一个块、块间空行，手机窄屏更易读（字段语义不变）。
+- **判定（R2）复审修复**：IGNORE 短冷却按方案允许 Addressed 绕过（此前 @ 也会被冷却静默成 WAIT）；\`[features] density_limit\` 接入新内核密度硬闸与特征密度（此前配置未接线、固定常量生效）；无 judge 模型回退也遵守 interruption veto；在飞判定在 \`.ai off\`/\`.ai stop\` 后丢弃（执行副作用前二次判闸）；判定候选消息按 600 token 截断注入；判定配置无效时不再排 WAIT 轮定时器；judge 关闭后去抖/WAIT 不再评估。
+- **判定（R2）复审修复（二）**：新增会话判定 generation——\`.ai off\`/\`.ai stop\`/\`judge off\`/LRU 淘汰后，在飞判定返回直接丢弃（不再出现 stop 后按旧上下文插话）；判定配置增加范围校验（负值/越界拒绝，\`timeout_sec\` 必须 >0，\`speak_threshold\` 必须 ≥ \`ignore_threshold\`；探针关闭时不校验其参数）；\`[gate] call_burst\` 或 \`max_calls_per_hour\` 为 0 表示**调用预算不限**（\`.ai status\` 与日志显示“不限”）。
+- **规则 timer 会话入口补齐**：多会话 scope 的 timer / active_time 规则在会话入口按 60s 节流幂等补注册（非创建会话不再只能等 \`.ai on\`）。
+- **权限与文档**：全局链规则删除/改写仅骰主；同步 README/docs（触发页/全局待机/命令语义/定时器命令调整）。
+- 单测：新增迁移、wake 闸门、手动/规则 timer 隔离、多计划精确续期、规则 timer 补注册、链规则 parked、规则库备份/坏规则保留等用例（\`npm run test:unit\` 863）；\`tsc/lint/deps/build/smoke\` 全绿。
 `;

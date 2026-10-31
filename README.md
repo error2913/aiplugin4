@@ -40,19 +40,15 @@
       ]
     }
   ],
-  "purposes": { "chat": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
-  "groups": [
-    { "purposes": ["chat", "summarization", "judge"],
-      "body": { "temperature": 1, "top_p": 1, "max_tokens": 8192, "stop": null, "stream": false } }
-  ]
+  "purposes": { "chat": ["flash"], "summarization": ["flash"], "judge": ["flash"] }
 }
 ```
 
 - **推荐用配置生成器生成后粘贴**：<https://error2913.github.io/aiplugin4-config/> —— 它会按 `baseURL` 拉取模型列表、自动预填 `kind`，并把「用途绑定」可视化；
 - `providers[].models` **留空/不写 = 启动时自动拉取**该连接的模型列表（OpenAI 兼容 `GET /models`；`anthropic-messages` 走 `/v1/models` 并自动翻页）；拉取失败按连接降级展示（认证失败/无列表接口/超时），不影响其它连接；离线或没有列表接口的服务，就把模型写死在 `models` 里；
-- `models[].kind` 取 `text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**。⚠️ **视觉能力不再按模型名猜测**：`gpt-4o`、`gemini`、`qwen-vl` 这类名字**不会**被自动认成视觉模型，要识图必须显式写 `"kind": "vision"`（生成器会自动预填）；嵌入/生图/语音仍可按命名推断；
+- `models[].kind` 取 `text`/`vision`/`embed`/`gen`/`tts`/`decision`，**取代旧的 `[types]` 表**。`decision` 是 System One 决策模型（阿里 `decision-model-preview` / Jev `jev-latest`），只能绑「评分」用途，不参与对话。⚠️ **视觉能力不再按模型名猜测**：`gpt-4o`、`gemini`、`qwen-vl` 这类名字**不会**被自动认成视觉模型，要识图必须显式写 `"kind": "vision"`（生成器会自动预填）；嵌入/生图/语音仍可按命名推断；
 - `purposes` 是**用途 → 模型 id 的有序数组**：优先用列出的，按此顺序取用（首选失败时顺着往后切）；未列出的同类型模型仍在候选池里、排在后面。留空则由插件取该用途**首个可用**模型；
-- **`compression`（压缩）用途已移除**：`.ai model` 的用途列表与绑定都不再有 `compression`；`purposes` / `groups[].purposes` 里残留的 `compression` 会在解析期自动忽略并打 WARN，**无需重建配置**；`chat` / `summarization` / `judge` 仍共用文本/视觉候选链；
+- **`compression`（压缩）用途已移除**：`.ai model` 的用途列表与绑定都不再有 `compression`；`purposes` 里残留的 `compression` 会在解析期自动忽略并打 WARN，**无需重建配置**；`chat` / `summarization` / `judge` 仍共用文本/视觉候选链；
 - 常用命令：`.ai model` 查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）、`.ai model list` 读当前模型列表（不联网）、`.ai model pull` 立即重拉全部连接（无视 `models` 钉住清单，强制网络）、`.ai model <用途> <模型>` 绑定为该用途的**运行时覆盖**（优先级最高，但只在插件存储里；想进配置就把它填进 `purposes`）；`.ai balance` 可查全部连接余额（deepseek/moonshot/siliconflow 内置接口直接查，其余平台提示控制台入口，见下方[可用AI大模型开放平台列表](#可用ai大模型开放平台列表)的余额说明）；
 - `api` 支持 `openai-completions`（默认）与 `anthropic-messages`（Claude，请求/响应格式自动转换：system 拆出、tool_result 合并、响应归一化，流式暂不支持、配 `stream = true` 会回退非流式）。`openai-responses` **本期未实现**，写上会明确报错而不是静默走错协议；
 - `provider`（厂商标识）**通常不用填**：由 `baseURL` 的 host 自动识别；只有自动识别失败、且该地址代理某家原生接口时才手工指定；
@@ -189,7 +185,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 模型配置 | **整份模型配置（一个 JSON）**。顶层字段：`version`（固定 `5`，必填）、`providers`（连接数组，至少 1 项，必填）、`purposes`（用途 → 模型 id 的有序数组）、`groups`（用途组默认请求体）。<br>**`providers[]`**：`api`（必填，`openai-completions` / `anthropic-messages` / `openai-responses`）、`baseURL`（必填，`http(s)://` 开头，**不再兜默认值**）、`apiKey`（必填，明文）、`provider`（厂商标识，**通常不填**，由 `baseURL` 的 host 自动识别）、`models`（该连接的模型；**留空/不写 = 启动时自动拉取**）、`enabled`（默认 `true`；`false`=忽略该连接，取代旧的 `ignore = 1`）、`displayName`（仅展示用）、`timeout`（秒）、`request`（连接级覆盖：`list_url`/`auth_header_name`/`headers`/`balance_url`/`balance_json_path`/`balance_divisor`/`balance_currency`）。<br>**`providers[].models[]`**：`id`（必填，**全局唯一**，被 `purposes` 引用）、`name`（必填，发给 API 的真实模型名，可含 `/` `.` `:`，**不需加引号**）、`kind`（`text`/`vision`/`embed`/`gen`/`tts`，**取代旧的 `[types]` 表**）、`contextWindow`、`maxTokens`、`request`（**per-model** 覆盖：`body`/`request`/`response`/`params`/`prompt`，取代旧的 `models` 定向规则）、`bodyMode`（`merge`/`replace`，媒体用途与内置预设的合成方式）。<br>**`purposes`**：用途 → 模型 id 的**有序数组**（优先用这些、按此顺序；首选失效自动往后切）；留空取该用途首个可用模型。用途取 `chat`/`summarization`/`judge`/`image-understanding`/`text-embedding`/`tts`/`image-generation`（`compression` 已移除；旧配置里残留的 `compression` 会在解析期自动忽略并打 WARN，无需重建配置）。<br>**`groups[]`**：`purposes` + `body`，给一组用途预设请求体。校验失败**整份拒绝**（不做部分生效）并一次报出全部问题（带 `$.providers[0].models[1].name` 式路径）。**修改后需重载 JS 生效** |
+| 模型配置 | **整份模型配置（一个 JSON）**。顶层字段：`version`（固定 `5`，必填）、`providers`（连接数组，至少 1 项，必填）、`purposes`（用途 → 模型 id 的有序数组）。<br>**`providers[]`**：`api`（必填，`openai-completions` / `anthropic-messages` / `openai-responses`）、`baseURL`（必填，`http(s)://` 开头，**不再兜默认值**）、`apiKey`（必填，明文）、`provider`（厂商标识，**通常不填**，由 `baseURL` 的 host 自动识别）、`models`（该连接的模型；**留空/不写 = 启动时自动拉取**）、`enabled`（默认 `true`；`false`=忽略该连接，取代旧的 `ignore = 1`）、`displayName`（仅展示用）、`timeout`（秒）、`request`（连接级覆盖：`list_url`/`auth_header_name`/`headers`/`balance_url`/`balance_json_path`/`balance_divisor`/`balance_currency`）。<br>**`providers[].models[]`**：`id`（必填，**全局唯一**，被 `purposes` 引用）、`name`（必填，发给 API 的真实模型名，可含 `/` `.` `:`，**不需加引号**）、`kind`（`text`/`vision`/`embed`/`gen`/`tts`/`decision`，**取代旧的 `[types]` 表**；`decision` 只能绑 judge，走 `{baseURL}/systemone`）、`contextWindow`、`maxTokens`、`request`（**per-model** 覆盖：`body`/`request`/`response`/`params`/`prompt`；其中 `bodyByUse` 是「用途 → 请求体」逐模型覆盖，空 = 用插件默认）、`bodyMode`（`merge`/`replace`，媒体用途与内置预设的合成方式）。<br>**`purposes`**：用途 → 模型 id 的**有序数组**（优先用这些、按此顺序；首选失效自动往后切）；留空取该用途首个可用模型。用途取 `chat`/`summarization`/`judge`/`image-understanding`/`text-embedding`/`tts`/`image-generation`（`compression` 已移除；旧配置里残留的 `compression` 会在解析期自动忽略并打 WARN，无需重建配置）。**请求体默认值**：对话/总结/评分/识图默认 `{"max_tokens": 65536, "temperature": 1}`（原样发送，超过模型上限由服务商拒绝，用户自担）；逐模型覆盖写 `models[].request.bodyByUse`；旧 `groups[]` 已在 4.30.0 移除，配置里残留会被忽略（不报错、不迁移）。校验失败**整份拒绝**（不做部分生效）并一次报出全部问题（带 `$.providers[0].models[1].name` 式路径）。**修改后需重载 JS 生效** |
 | 媒体用途（tts / image-generation） | **默认走内置预设**：不写 `request.body` 时，插件按 vendor + 模型名套用该供应商的原生请求结构（覆盖 OpenAI / 硅基流动 / 智谱 / 百炼 / Google Cloud / Gemini / MiniMax / FishAudio / ElevenLabs / 火山方舟 / 腾讯 TokenHub / Stability / 百度 / 本地自建等），骰主只填连接与 `kind` 即可生成。写了 `body` 默认**整体替换**预设结构（`bodyMode: "merge"` 改为逐键合并），用 `{占位符}` 标出可被 AI/命令覆写的字段、用嵌套表表达字段路径（同一个"语速"在阿里是 `input.parameters.rate`、在 Google 是 `audioConfig.speakingRate`）。内置占位符：`{text}`（语音正文）/`{prompt}`（图片正文）/`{negative_prompt}`/`{image}`/`{image_url}`/`{image_base64}`（参考图）/`{model}`/`{api_key}`。取值优先级：**AI/命令传参 > `params.default` > 预设自带默认 > 无值且无默认时整个键不发送**；未在模板里出现的参数一律忽略（模型不支持的参数不会污染请求）。`request`/`response` 是**逐键覆盖**预设（`headers` 逐键合并），只想改一项时不必重写整段 |
 
 ```json
@@ -206,11 +202,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
       ]
     }
   ],
-  "purposes": { "chat": ["flash"], "summarization": ["flash"], "judge": ["flash"] },
-  "groups": [
-    { "purposes": ["chat", "summarization", "judge"],
-      "body": { "temperature": 1, "top_p": 1, "max_tokens": 8192, "stop": null, "stream": false } }
-  ]
+  "purposes": { "chat": ["flash"], "summarization": ["flash"], "judge": ["flash"] }
 }
 ```
 
@@ -299,7 +291,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
   } }
 ```
 
-> 模型类型判定优先级：**`models[].kind` 显式声明 > 命名终值（reranker/生图/语音/嵌入白名单） > 接口自报能力位 > 兜底纯文本**。⚠️ **视觉能力不再按命名猜测**——`gpt-4o`/`gemini`/`qwen-vl` 这类名字**不会**被自动认成视觉模型，要进识图候选必须在配置里显式写 `"kind": "vision"`（生成器会自动预填；接口自报能力位 `vision` 仍作正向证据）。模型按类型进各用途候选：`text`/`vision` 进对话候选（`vision` 另进识图候选）；嵌入白名单命名（如 `text-embedding-*`/`bge-*`）进嵌入候选；生图白名单命名（如 `gpt-image-*`/`wanx*`/`flux*`/`stable-diffusion*`）进生图候选；语音白名单命名（如 `tts-*`/`*-tts`/`cosyvoice*`/`fish-speech*`）进语音候选；reranker 不进任何候选。
+> 模型类型判定优先级：**`models[].kind` 显式声明 > 命名终值（reranker/生图/语音/嵌入白名单） > 接口自报能力位 > 兜底纯文本**。⚠️ **视觉/决策模型不按命名猜测**（`decision` 必须显式声明，并只能绑 judge）。⚠️ **视觉能力不再按命名猜测**——`gpt-4o`/`gemini`/`qwen-vl` 这类名字**不会**被自动认成视觉模型，要进识图候选必须在配置里显式写 `"kind": "vision"`（生成器会自动预填；接口自报能力位 `vision` 仍作正向证据）。模型按类型进各用途候选：`text`/`vision` 进对话候选（`vision` 另进识图候选）；嵌入白名单命名（如 `text-embedding-*`/`bge-*`）进嵌入候选；生图白名单命名（如 `gpt-image-*`/`wanx*`/`flux*`/`stable-diffusion*`）进生图候选；语音白名单命名（如 `tts-*`/`*-tts`/`cosyvoice*`/`fish-speech*`）进语音候选；reranker 不进任何候选。
 >
 > 用途绑定：`purposes` 里写**模型 id 的有序数组**（优先用这些、按此顺序，首选失效自动往后切）；留空则取该用途首个可用模型。`.ai model` 查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）、`.ai model list` 读当前模型列表（不联网、不持久化）、`.ai model pull` 立即重拉全部连接（无视 `models` 钉住清单，强制网络）、`.ai model <用途>` 查看候选（按取用顺序编号）、`.ai model <用途> <模型>` 设为**运行时覆盖**（优先级最高，存插件存储、重装会丢；想进配置就填进 `purposes`）。
 >
@@ -316,7 +308,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 请求并发上限 | 同时进行中的请求数量上限，0 表示不限制；超出后进入等待队列 |
 | 请求队列上限 | 排队等待的请求数量上限，超过后直接丢弃；0 表示超出并发后不排队 |
 | 海豹核心全局路径 | 本地资源相对路径拼接用的 SealDice 核心目录 |
-| 是否开启全局待机 | 开启后 AI 不主动回复，收到的所有消息会录入上下文（会话的计数器/计时器/概率仍可触发）；长时间开启可能占用较多上下文 |
+| 是否开启全局待机 | 开启后 AI 不主动回复，收到的所有消息会录入上下文；所有触发模式（含计数器/概率/延迟/定时器/判定）都不触发；长时间开启可能占用较多上下文 |
 
 ### 错误处理
 
@@ -377,7 +369,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 触发活跃时间 | 每框一段 `HH:mm-HH:mm-次数`（可多段）；`.ai trg active on` 使用该全局时段 |
 | 默认计数器 / 默认计时器 / 默认概率 | `counter` / `delay` / `prob` 模式开启时的默认参数；`默认计时器` 单位秒 |
 | 触发正则表达式 | 匹配即强制触发 AI 回复（**默认已不含 @ CQ**，@ 由「被@触发」开关判定），[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html) |
-| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[energy]/[weights]/[features]/[gate]/[probe]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常）。R2 默认 `[decision] shadow=false`（新判定内核驱动发言），改 `shadow=true` 可回滚旧五维评分一版 |
+| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[weights]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常）。消息立即评分；WAIT 结果/回复后进入 30s WAIT，期间挂起最新一条，WAIT 到点才评；模型给六维 0~10 分，直接乘权重后归一化 `S`，默认阈值 0.6（0~1 可配）；无 shadow/IGNORE/预筛/预算/精力/活跃时间闸门 |
 | 默认定时器 | **Template，每框一个定时器**（框内为单条 TimerSpec 的 TOML：`types/years/months/days/hours/minutes/count/prompts`，与 `set_timer` 完全一致、`prompts` 必填）；可多框=多个定时器；`.ai trg timer on` 后按表为每会话注册 |
 | 事件触发规则 | JSON v1：一条规则只绑一个扁平事件名（`group_increase`/`poke`/`group_request` 等，不再用 `notify.*`、不再支持多事件数组），按「事件接收」页的开关/白名单录入上下文后，命中即让会话对事件做出响应（顺序 = 优先级，首条命中）。空规则 = 关闭；`prompt` 可留空（事件已在上一条系统消息里，留空 = 只触发响应、不附加指令）；修改后需重载 JS 生效。依赖「接收依赖通知事件」开启 + 事件在白名单 + 会话 AI 已开启；group_request（加群申请）为主场景，friend_request 可能因非好友无法投递回复。链事件规则独立于本开关（只需录制门）。格式推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成 |
 
@@ -624,11 +616,11 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | `.ai ctx name mod <0\|1\|2>` | - | 自动修改上下文中的名字：0 不修改，1 昵称，2 群名片 |
 | `.ai on` / `.ai on --r` / `.ai on --e` | - | 打开 AI 总闸（`aiEnabled`）：**新会话默认关闭**；`.ai on` 强制开启正则 + 事件触发，其它模式开关保持原值 |
 | `.ai on [--r --e --j --c=<条> --t=<秒> --p=<%> --a]` | `.ai on --c=10 --t=60` | 打开总闸并按模式开启：--r 正则 / --e 事件 / --j 评分（判定，需先配置「评分触发参数」）/ --c 计数器 / --t 延迟 / --p 概率 / --a 活跃时间（参数来自全局「触发活跃时间」，不再接受自定义时段） |
-| `.ai off [--r/--e/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI 总闸或对应模式；不带参数整体关闭并清理触发域瞬态（认领/delay/判定调度/WAIT） |
+| `.ai off [--r/--e/--j/--c/--t/--p/--a]` | `.ai off --t` | 关闭 AI 总闸或对应模式；不带参数整体关闭并清理触发域瞬态（认领/delay/判定调度/WAIT），同时移除本会话的规则/模式定时器条目（规则本身保留，`.ai on` 时按开关重建） |
 | `.ai trg` | - | 触发域总览：AI 总闸 + 8 个单触发模式（active/counter/delay/event/judge/prob/regex/timer）；「被@触发」在触发页配置 |
 | `.ai trg <模式> on\|off [值]` | `.ai trg counter on 5` | 单模式开关；`timer on` 按全局 TOML 注册计划；未开总闸时拒绝并提示先 `.ai on` |
 | `.ai trg all off` | - | 关闭全部单触发模式（不动链规则） |
-| `.ai trg rule lst/rm/clr/set` | `.ai trg rule lst` | 链规则列表/删除/清空（`clr` 需 `--yes`）/改唤醒词 |
+| `.ai trg rule lst/rm/clr/set` | `.ai trg rule lst` | 链规则列表/删除/清空（`clr` 需 `--yes`）/改唤醒词；全局规则（无会话白名单）的删除/改写仅骰主可操作 |
 | `.ai trg timer lst/clr` | `.ai trg timer clr` | 本会话定时器条目（含规则内部）；`clr` 只清手动 `set_timer` 条目 |
 | `.ai role [<名称>]` | - | 查看 / 切换角色设定 |
 | `.ai model [list\|pull\|<用途> [<模型>]]` | `.ai model chat deepseek-v4-flash` | 查看 / 绑定全局分用途模型（骰主）：无参数查看各用途当前模型与来源（运行时覆盖 / 配置绑定 / 自动）与连接状态；`.ai model list` 读加载/最近一次拉取到内存的模型列表（不联网，按连接序号分组）；`.ai model pull` 立即重拉全部连接并展示（无视 `models` 钉住清单，强制网络）；`.ai model <用途>` 查看指定用途候选（按取用顺序编号）；`.ai model <用途> <模型>` 设为该用途的**运行时覆盖**（支持编号 / 模型 id / 模型名，优先级最高、存插件存储）。模型类型在「模型配置」里用 `kind` 声明（text/vision/embed/gen/tts） |
@@ -728,8 +720,6 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
-| `.ai timer lst` | - | 查看当前会话所有定时任务 |
-| `.ai timer clr` | - | 清除所有定时任务 |
 
 ### 媒体生成命令（4.24.0 起内置）
 
@@ -806,7 +796,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 - 简单配置（开关/数值/单行字符串/纯字符串数组/「后端配置」JSON/「全局提示词」）修改后自动生效（缓存最多 1 分钟），无需重载 JS；复杂配置（模型、触发/忽略正则、评分触发、「角色设定」、「MCP服务器」、「知识库配置」、本地资源路径、音乐服务）修改后需重载 JS 才生效（其中「MCP服务器」「知识库配置」也可用 `.ai mcp refresh` / `.ai kb refresh` 立即生效）；「技能列表」修改后下一条消息自动生效（也可用 `.ai skill refresh` 强制重解析）；
 - 嵌入输出维度取该模型 `request.body` 里的 `dimensions`（默认 1024）；有嵌入模型参与 text-embedding 用途后长期记忆与知识库启用语义检索，未配置时自动降级为关键词检索（知识库加载本身不请求嵌入）；
-- 流式输出需要自建或使用公共后端，并在「后端 → 后端配置」里配置 stream-output 地址；在 chat 用途组 `groups[].body` 里设 `stream = true` 的模型才会走流式（`anthropic-messages` 协议不支持，会自动回退非流式）；
+- 流式输出需要自建或使用公共后端，并在「后端 → 后端配置」里配置 stream-output 地址；在当前 chat 模型的 `models[].request.bodyByUse.chat.stream = true` 时才会走流式（`anthropic-messages` 协议不支持，会自动回退非流式）；
 - 「请求超时时限」同时约束模型请求与工具调用，过小会导致长回复/慢工具超时；
 - CQ 码白名单之外的图片类型消息不处理（当前允许 at/image/reply/face/poke）；卡片/视频/文件/语音/合并转发等段经 ob11 事件分发接收，不受该白名单限制。
 

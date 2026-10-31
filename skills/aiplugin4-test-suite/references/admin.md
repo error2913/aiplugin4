@@ -37,11 +37,11 @@
 | ADM-19 | `.ai tk y chart` | S | `[CQ:image` 或 `图表生成失败` | 依赖用量图表后端；无后端则 SKIP(env) |
 | ADM-20 | `.ai tk clr` | S | `已清除token使用记录` | **破坏性（全局记录）**，默认跳过，需用户确认 |
 
-## timer
+## timer（顶层 `.ai timer` 已删除，改用 `.ai trg timer`）
 
 | ID | 指令 | 权限 | 预期关键字 | 备注 |
 |---|---|---|---|---|
-| ADM-21 | `.ai timer lst` | U | `当前对话没有定时器` 或 `定时器` | |
-| ADM-22 | `.ai timer clr` | I | `所有定时器已清除` | 收尾清理 |
+| ADM-21 | `.ai trg timer lst` | I | `定时器` 或 `没有` | |
+| ADM-22 | `.ai trg timer clr` | I | `手动定时器` | 收尾清理 |
 
 说明：`priv st` 与 `priv reset` 修改的是全局 `cmdPriv` 存储，执行后必须复位；`token clr` 清空全局用量记录，默认不执行。
