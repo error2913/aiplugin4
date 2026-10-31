@@ -1,24 +1,14 @@
-// 判定配置（L2）：`评分触发参数` String TOML v2 的解析/默认值/有效性判定（唯一事实源）。
+// 判定配置（L2）：评分触发参数 String TOML v2 的解析/默认值/有效性判定（唯一事实源）。
 //
-// 方案 §4.8：9 段全参数化；空/非法/旧 v1 → 判定不可用（Q9「没配报错」，不静默用默认值）。
-// 读取路径由 configs/trigger.ts 注入原始文本（L2 不摸 seal.ext），保持本文件可单测。
+// 现行判定只需要：主动度/阈值/权重/模型请求/额外 prompt。
+// 旧版的 shadow、精力、活跃时间/密度闸门、调用预算、预筛、探针配置全部移除；
+// 旧 TOML 里的这些段/键按未知键忽略（不迁移、不报错）。
 import { load } from "js-toml";
 
 export interface JudgeDecisionConfigV2 {
-    DECISION: { shadow: boolean; aggressiveness: number };
-    SCORING: { speak_threshold: number; ignore_threshold: number; wait_cooldown: number; ignore_cooldown: number };
-    ENERGY: { initial: number; reply_cost: number; recover_min: number };
+    DECISION: { aggressiveness: number };
+    SCORING: { speak_threshold: number; wait_cooldown: number };
     WEIGHTS: { addressed: number; help_signal: number; relevance: number; friendships: number; silence_gap: number; interruption_risk: number };
-    FEATURES: { interruption_veto: number; density_limit: number };
-    GATE: {
-        max_calls_per_hour: number;
-        call_burst: number;
-        min_interval_sec: number;
-        debounce_sec: number;
-        debounce_max_sec: number;
-        prefilter_threshold: number;
-    };
-    PROBE: { enabled: boolean; first_gap_sec: number; backoff: number; max_gap_sec: number };
     MODEL: { context_tokens: number; timeout_sec: number; retries: number };
     PROMPT: { extra: string };
 }
@@ -30,24 +20,16 @@ export interface JudgeConfigState {
     config: JudgeDecisionConfigV2;
 }
 
-/** 触发页「评分触发参数」默认模板（用户配置为空/非法时的修复提示，不自动写回） */
+/** 触发页「评分触发参数」默认模板 */
 export const JUDGE_TOML_DEFAULT = `# 评分触发参数（TOML v2）。空/非法时判定不可用（其它触发照常）
 version = 2
 
 [decision]
-shadow = false                 # R2 已切流：新判定内核驱动动作；改 true 可回滚到旧五维判定（仅观测新内核）
 aggressiveness = 2             # 1..3
 
 [scoring]
-speak_threshold = 0.55
-ignore_threshold = 0.35
-wait_cooldown = 60             # WAIT 轮秒数（0=不冷却）
-ignore_cooldown = 20
-
-[energy]                       # 精力（仅 SPEAK 且真正起轮才扣）
-initial = 100
-reply_cost = 5
-recover_min = 4                # 每 5 分钟懒恢复
+speak_threshold = 0.6
+wait_cooldown = 30             # WAIT 挂起窗口秒数（0 = 不进入 WAIT）
 
 [weights]                      # 带符号权重
 addressed = 4
@@ -56,24 +38,6 @@ relevance = 1.5
 friendships = 1
 silence_gap = 1
 interruption_risk = -3
-
-[features]
-interruption_veto = 0.8
-density_limit = 5
-
-[gate]
-max_calls_per_hour = 30
-call_burst = 5
-min_interval_sec = 5
-debounce_sec = 4
-debounce_max_sec = 12
-prefilter_threshold = 0.5
-
-[probe]
-enabled = false
-first_gap_sec = 90
-backoff = 2
-max_gap_sec = 600
 
 [model]
 context_tokens = 1500          # 0 = 不注入历史
@@ -85,13 +49,9 @@ extra = ""`;
 
 /** 默认值（v2 模板等价；也是解析时逐字段兜底） */
 export const DEFAULT_JUDGE_CONFIG: JudgeDecisionConfigV2 = {
-    DECISION: { shadow: false, aggressiveness: 2 },
-    SCORING: { speak_threshold: 0.55, ignore_threshold: 0.35, wait_cooldown: 60, ignore_cooldown: 20 },
-    ENERGY: { initial: 100, reply_cost: 5, recover_min: 4 },
+    DECISION: { aggressiveness: 2 },
+    SCORING: { speak_threshold: 0.6, wait_cooldown: 30 },
     WEIGHTS: { addressed: 4, help_signal: 2, relevance: 1.5, friendships: 1, silence_gap: 1, interruption_risk: -3 },
-    FEATURES: { interruption_veto: 0.8, density_limit: 5 },
-    GATE: { max_calls_per_hour: 30, call_burst: 5, min_interval_sec: 5, debounce_sec: 4, debounce_max_sec: 12, prefilter_threshold: 0.5 },
-    PROBE: { enabled: false, first_gap_sec: 90, backoff: 2, max_gap_sec: 600 },
     MODEL: { context_tokens: 1500, timeout_sec: 8, retries: 2 },
     PROMPT: { extra: '' },
 };
@@ -106,7 +66,7 @@ function isFiniteNumber(value: unknown): value is number {
 
 type SectionKey = keyof JudgeDecisionConfigV2;
 
-/** 按默认值逐字段覆盖（类型不符 = 错误；未知键忽略，等价 revive 的丢弃语义） */
+/** 按默认值逐字段覆盖（类型不符 = 错误；未知键忽略） */
 function mergeSection<K extends SectionKey>(name: K, raw: unknown, errors: string[]): JudgeDecisionConfigV2[K] {
     const target = cloneDefaults()[name] as Record<string, unknown>;
     if (raw === undefined) return target as JudgeDecisionConfigV2[K];
@@ -143,7 +103,7 @@ function mergeSection<K extends SectionKey>(name: K, raw: unknown, errors: strin
 
 /**
  * 解析 v2 TOML 文本。
- * @param text 原始配置（来自 `评分触发参数`）；空/语法错误/version≠2 → valid=false
+ * @param text 原始配置（来自 评分触发参数）；空/语法错误/version≠2 → valid=false
  */
 export function parseJudgeConfig(text: string): JudgeConfigState {
     const errors: string[] = [];
@@ -163,20 +123,26 @@ export function parseJudgeConfig(text: string): JudgeConfigState {
     }
     config.DECISION = mergeSection('DECISION', doc.decision, errors);
     config.SCORING = mergeSection('SCORING', doc.scoring, errors);
-    config.ENERGY = mergeSection('ENERGY', doc.energy, errors);
     config.WEIGHTS = mergeSection('WEIGHTS', doc.weights, errors);
-    config.FEATURES = mergeSection('FEATURES', doc.features, errors);
-    config.GATE = mergeSection('GATE', doc.gate, errors);
-    config.PROBE = mergeSection('PROBE', doc.probe, errors);
     config.MODEL = mergeSection('MODEL', doc.model, errors);
     config.PROMPT = mergeSection('PROMPT', doc.prompt, errors);
-    // 关键范围校验：主动度仅 1..3，阈值 0..1
     if (config.DECISION.aggressiveness < 1 || config.DECISION.aggressiveness > 3) {
         errors.push('[decision] aggressiveness 必须在 1..3');
     }
-    for (const key of ['speak_threshold', 'ignore_threshold'] as const) {
-        const value = config.SCORING[key];
-        if (value < 0 || value > 1) errors.push(`[scoring] ${key} 必须在 0..1`);
+    if (config.SCORING.speak_threshold < 0 || config.SCORING.speak_threshold > 1) {
+        errors.push('[scoring] speak_threshold 必须在 0..1');
+    }
+    if (!Number.isFinite(config.SCORING.wait_cooldown) || config.SCORING.wait_cooldown < 0) {
+        errors.push('[scoring] wait_cooldown 必须 >= 0 秒');
+    }
+    if (!Number.isInteger(config.MODEL.context_tokens) || config.MODEL.context_tokens < 0) {
+        errors.push('[model] context_tokens 必须 >= 0 的整数');
+    }
+    if (!Number.isFinite(config.MODEL.timeout_sec) || config.MODEL.timeout_sec <= 0) {
+        errors.push('[model] timeout_sec 必须 > 0 秒');
+    }
+    if (!Number.isInteger(config.MODEL.retries) || config.MODEL.retries < 0) {
+        errors.push('[model] retries 必须 >= 0 的整数');
     }
     return { valid: errors.length === 0, errors, config };
 }

@@ -76,6 +76,8 @@ export function evaluateGates(gates: readonly Gate[], input: GateInput, runtime:
         }
 
         if (gate.type === 'active_time') {
+            // 自主源：规则自己的 active_time 调度器到点触发时，窗口由调度时点保证，直接放行
+            if (input.sourceSatisfied) continue;
             if (!activeTimePass(gate, input.now)) return { status: 'fail', index, reason: 'outside-active-time' };
             continue;
         }

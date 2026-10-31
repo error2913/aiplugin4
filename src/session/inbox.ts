@@ -51,15 +51,19 @@ export function drainPending(session: Session): PendingMessage[] {
 }
 
 /** 把挂起队列全部写入上下文（此时上一轮工具回调已入库，位置合法）并保存；返回是否存在触发类消息 */
-export async function flushPending(session: Session): Promise<boolean> {
+export async function flushPending(session: Session, opts?: { writeTriggerPrompts?: boolean }): Promise<boolean> {
     const pending = drainPending(session);
     if (pending.length === 0) return false;
     let hasTrigger = false;
+    // 触发闸关闭（.ai off）时不再写 trigger 提示：消息内容照常入库，但不留无法兑现的"请说话"
+    const writeTriggerPrompts = opts?.writeTriggerPrompts !== false;
     for (const p of pending) {
         if (p.kind === 'trigger') hasTrigger = true;
         // 事件触发挂起没有用户消息内容，只写触发系统提示（避免产生空 user 事件）
         if (p.content) await session.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
-        if (p.systemReason) await session.context.addSystemUserMessage(p.systemReason, p.systemName || SYSTEM_NAME.trigger);
+        if (p.systemReason && (p.kind !== 'trigger' || writeTriggerPrompts)) {
+            await session.context.addSystemUserMessage(p.systemReason, p.systemName || SYSTEM_NAME.trigger);
+        }
     }
     session.save();
     session.clearPending();

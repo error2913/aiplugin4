@@ -297,8 +297,12 @@ export default class Agent {
     private async resumePending(session: Session, version: number): Promise<void> {
         if (session.pendingQueue.length === 0) return;
         const firstTrigger = session.pendingQueue.find(p => p.kind === 'trigger');
-        const hasTrigger = await session.flushPending();
-        if (hasTrigger && firstTrigger && session.stopVersion === version && !session.stopEvent.fired) {
+        // 触发闸二次判定（方案 §5.9）：.ai off 期间挂起的 trigger 项只入库、丢弃触发语义；
+        // 桶空时也不写 trigger 提示（避免无法兑现的提示残留在上下文）。
+        const aiActive = session.setting.enabled();
+        const canWake = aiActive && session.hasBucketToken();
+        const hasTrigger = await session.flushPending({ writeTriggerPrompts: canWake });
+        if (hasTrigger && firstTrigger && canWake && session.stopVersion === version && !session.stopEvent.fired) {
             // 重载恢复的挂起消息没有 ctx/msg 运行时对象：按落盘的 epId/isPrivate 重建；失败则跳过续跑（消息已入库不丢）
             let ctx = firstTrigger.ctx;
             let msg = firstTrigger.msg;

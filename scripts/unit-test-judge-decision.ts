@@ -8,7 +8,8 @@ import { FALLBACK_PROMPT_TEXTS, getPromptTexts, setPromptTexts } from '../src/co
 import { selectHistoryByTokens } from '../src/judge/context_select';
 import { extractFeatures, FEATURE_WINDOWS } from '../src/judge/features';
 import type { JudgeContextMessage, JudgeDims } from '../src/judge/features';
-import { parseDecision } from '../src/judge/parse';
+import { parseScores } from '../src/judge/parse';
+import { parseSystemOneAnswers } from '../src/judge/systemone';
 import {
     computeScore,
     decide,
@@ -17,7 +18,7 @@ import {
     mergeDims,
 } from '../src/judge/policy';
 import type { PolicyWeights } from '../src/judge/policy';
-import { buildDecisionRequest, buildJudgeMessages } from '../src/judge/prompt';
+import { buildJudgeMessages, buildJudgeOutputSchema, buildSystemOnePayload, JUDGE_SCORE_QUESTIONS } from '../src/judge/prompt';
 
 const ZERO_DIMS: JudgeDims = {
     addressed: 0,
@@ -94,160 +95,75 @@ export const tests = {
     // policy：S = (U + W-)/(W+ + W-)，所有阈值只比 S
     // ------------------------------------------------------------------
 
-    /** 默认权重 + 全 0 维度：U=0, W+=9.5, W-=3, S=3/12.5=0.24 */
+    /** 默认权重 + 全 0 维度：U=0, S=0 */
     testPolicyComputeScoreDefault(): void {
         const score = computeScore(ZERO_DIMS);
         near(score.U, 0, 'U');
         near(score.Wplus, 9.5, 'W+');
         near(score.Wminus, 3, 'W-');
-        near(score.S, 0.24, 'S');
+        near(score.S, 0, 'S');
     },
 
-    /** 全 1 维度（interruption_risk 取 1 时权重 -3）：U=6.5, S=(6.5+3)/12.5=0.76 */
-    testPolicyComputeScoreAllOnes(): void {
+    /** 全 10 维度：U=65, maxU=95, S=65/95≈0.6842 */
+    testPolicyComputeScoreAllTen(): void {
         const score = computeScore(dims({
-            addressed: 1, help_signal: 1, relevance: 1, friendships: 1, silence_gap: 1, interruption_risk: 1,
+            addressed: 10, help_signal: 10, relevance: 10, friendships: 10, silence_gap: 10, interruption_risk: 10,
         }));
-        near(score.U, 6.5, 'U');
-        near(score.S, 0.76, 'S');
+        near(score.U, 65, 'U');
+        near(score.S, 65 / 95, 'S');
     },
 
-    /** S 必须钳制在 0~1（U 可以越界，S 不行） */
+    /** S 必须钳制在 0~1 */
     testPolicyComputeScoreClamps(): void {
-        const lowest = computeScore(dims({ interruption_risk: 1 }));
-        near(lowest.U, -3, '最低 U');
+        const lowest = computeScore(dims({ interruption_risk: 10 }));
+        near(lowest.U, -30, '最低 U');
         near(lowest.S, 0, '最低 S');
         const highest = computeScore(dims({
-            addressed: 1, help_signal: 1, relevance: 1, friendships: 1, silence_gap: 1,
+            addressed: 10, help_signal: 10, relevance: 10, friendships: 10, silence_gap: 10,
         }));
-        near(highest.U, 9.5, '最高 U');
+        near(highest.U, 95, '最高 U');
         near(highest.S, 1, '最高 S');
     },
 
-    /** 自定义权重：W+ 只由正权重算，S 随 addressed 线性（权重 [2,0,0,0,0,0]） */
+    /** 自定义权重：S 随 addressed 线性（权重 [2,0,0,0,0,0]） */
     testPolicyComputeScoreCustomWeights(): void {
         const weights: PolicyWeights = { ...ZERO_WEIGHTS, addressed: 2 };
-        const half = computeScore(dims({ addressed: 0.5 }), weights);
+        const half = computeScore(dims({ addressed: 5 }), weights);
         near(half.Wplus, 2, 'W+');
         near(half.Wminus, 0, 'W-');
         near(half.S, 0.5, 'S');
     },
 
-    /** 权重全 0：分母为 0 时保守 S=0（没有证据 = 不发言） */
+    /** 权重全 0：maxU=0 时保守 S=0 */
     testPolicyComputeScoreZeroWeights(): void {
-        const score = computeScore(dims({ addressed: 1 }), ZERO_WEIGHTS);
+        const score = computeScore(dims({ addressed: 10 }), ZERO_WEIGHTS);
         near(score.S, 0, 'S');
     },
 
-    /** τ_eff = 0.55 + (2-aggr)*0.05；floor = τ-0.10；主动度钳制 1~3 */
+    /** τ_eff = 0.6 + (2-aggr)*0.05；主动度钳制 1~3 */
     testPolicyEffectiveThresholds(): void {
-        const d = effectiveThresholds();
-        near(d.tau, 0.55, '默认 τ');
-        near(d.floor, 0.45, '默认 floor');
-        const aggressive = effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 1 });
-        near(aggressive.tau, 0.6, 'aggr=1 τ');
-        near(aggressive.floor, 0.5, 'aggr=1 floor');
-        const passive = effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 3 });
-        near(passive.tau, 0.5, 'aggr=3 τ');
-        near(passive.floor, 0.4, 'aggr=3 floor');
-        near(effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 0 }).tau, 0.6, '越界下界钳制');
-        near(effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 9 }).tau, 0.5, '越界上界钳制');
+        near(effectiveThresholds().tau, 0.6, '默认 τ');
+        near(effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 1 }).tau, 0.65, 'aggr=1 τ');
+        near(effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 3 }).tau, 0.55, 'aggr=3 τ');
+        near(effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 0 }).tau, 0.65, '越界下界钳制');
+        near(effectiveThresholds({ ...DEFAULT_POLICY, aggressiveness: 9 }).tau, 0.55, '越界上界钳制');
     },
 
-    /** 硬否决：interruption_risk ≥ veto(0.8) → WAIT，即使模型 decision=SPEAK */
-    testPolicyVetoInterruptionRisk(): void {
-        const below = decide({
-            dims: dims({ addressed: 1 }),
-            decision: 'SPEAK',
-            hard: { interruptionRisk: 0.79 },
-        });
-        assert.equal(below.action, 'SPEAK');
-        const vetoed = decide({
-            dims: dims({ addressed: 1 }),
-            decision: 'SPEAK',
-            hard: { interruptionRisk: 0.8 },
-        });
-        assert.equal(vetoed.action, 'WAIT');
-        assert.equal(vetoed.veto, 'interruption_risk');
-        assert.equal(vetoed.reason, 'hard:interruption_risk');
-    },
-
-    /** 硬否决：精力/冷却/忙/计时器挂起/WAIT 轮 → 全部不 SPEAK */
-    testPolicyHardVetoFlags(): void {
-        const cases: { flag: 'energy' | 'inCooldown' | 'busy' | 'pendingTimer' | 'waitRound'; expected: string }[] = [
-            { flag: 'energy', expected: 'no_energy' },
-            { flag: 'inCooldown', expected: 'cooldown' },
-            { flag: 'busy', expected: 'busy' },
-            { flag: 'pendingTimer', expected: 'timer_pending' },
-            { flag: 'waitRound', expected: 'wait_round' },
-        ];
-        for (const item of cases) {
-            const hard = item.flag === 'energy' ? { energy: 0 } : { [item.flag]: true };
-            const result = decide({ dims: dims({ addressed: 1 }), decision: 'SPEAK', hard });
-            assert.equal(result.action, 'WAIT', item.flag);
-            assert.equal(result.veto, item.expected, item.flag);
-        }
-        // 精力 > 0 不否决
-        const ok = decide({ dims: dims({ addressed: 1 }), decision: 'SPEAK', hard: { energy: 0.5 } });
-        assert.equal(ok.action, 'SPEAK');
-    },
-
-    /** 模型 SPEAK 需过收益地板：S=0.5 ≥ floor(0.45) 但 < τ(0.55) 仍 SPEAK */
-    testPolicyModelSpeakPassesFloorBelowTau(): void {
-        const result = decide({ dims: dims({ addressed: 0.5 }), decision: 'SPEAK', weights: ONLY_ADDRESSED_WEIGHTS });
-        assert.equal(result.action, 'SPEAK');
-        assert.equal(result.reason, 'model:speak');
-    },
-
-    /** 模型 SPEAK 低于地板 → WAIT(floor_fail)；低置信度地板 +0.05 */
-    testPolicyModelSpeakFloorFail(): void {
-        const fail = decide({ dims: dims({ addressed: 0.4 }), decision: 'SPEAK', weights: ONLY_ADDRESSED_WEIGHTS });
-        assert.equal(fail.action, 'WAIT');
-        assert.equal(fail.reason, 'floor_fail');
-        // 0.48 在默认 floor(0.45) 上但低于低置信度地板(0.50) → WAIT
-        const low = decide({
-            dims: dims({ addressed: 0.48 }),
-            decision: 'SPEAK',
-            confidence: 'low',
-            weights: ONLY_ADDRESSED_WEIGHTS,
-        });
-        assert.equal(low.action, 'WAIT');
-        assert.equal(low.reason, 'floor_fail');
-        const medium = decide({
-            dims: dims({ addressed: 0.48 }),
-            decision: 'SPEAK',
-            confidence: 'medium',
-            weights: ONLY_ADDRESSED_WEIGHTS,
-        });
-        assert.equal(medium.action, 'SPEAK');
-    },
-
-    /** 模型 IGNORE/WAIT 直通（不看 S 高低） */
-    testPolicyDecisionPassthrough(): void {
-        const ignore = decide({ dims: dims({ addressed: 1 }), decision: 'IGNORE', weights: ONLY_ADDRESSED_WEIGHTS });
-        assert.equal(ignore.action, 'IGNORE');
-        assert.equal(ignore.reason, 'model:ignore');
-        const wait = decide({ dims: dims({ addressed: 1 }), decision: 'WAIT', weights: ONLY_ADDRESSED_WEIGHTS });
-        assert.equal(wait.action, 'WAIT');
-        assert.equal(wait.reason, 'model:wait');
-    },
-
-    /** 无 decision（纯评分型）：S≥τ SPEAK / S<ignore_threshold IGNORE / 其余 WAIT */
-    testPolicyNoDecisionThresholds(): void {
-        const speak = decide({ dims: dims({ addressed: 0.9 }), weights: ONLY_ADDRESSED_WEIGHTS });
+    /** 纯评分：S>=τ SPEAK，否则 WAIT（没有 IGNORE） */
+    testPolicyThresholds(): void {
+        const speak = decide({ dims: dims({ addressed: 9 }), weights: ONLY_ADDRESSED_WEIGHTS });
         assert.equal(speak.action, 'SPEAK');
         assert.equal(speak.reason, 'threshold:speak');
-        const ignore = decide({ dims: dims({ addressed: 0.1 }), weights: ONLY_ADDRESSED_WEIGHTS });
-        assert.equal(ignore.action, 'IGNORE');
-        assert.equal(ignore.reason, 'threshold:ignore');
-        const wait = decide({ dims: dims({ addressed: 0.5 }), weights: ONLY_ADDRESSED_WEIGHTS });
+        const wait = decide({ dims: dims({ addressed: 5 }), weights: ONLY_ADDRESSED_WEIGHTS });
         assert.equal(wait.action, 'WAIT');
         assert.equal(wait.reason, 'threshold:wait');
+        const exactly = decide({ dims: dims({ addressed: 6 }), weights: ONLY_ADDRESSED_WEIGHTS });
+        assert.equal(exactly.action, 'SPEAK', 'S=0.6 达到默认阈值');
     },
 
-    /** 失败/无 dims → 失败即 WAIT（即使模型 decision=SPEAK） */
+    /** 失败/无 dims → 失败即 WAIT */
     testPolicyFailureWaits(): void {
-        const failed = decide({ failed: true, decision: 'SPEAK' });
+        const failed = decide({ failed: true });
         assert.equal(failed.action, 'WAIT');
         assert.equal(failed.reason, 'failure');
         const noDims = decide({});
@@ -255,161 +171,120 @@ export const tests = {
         assert.equal(noDims.reason, 'failure');
     },
 
-    /** mergeDims：Addressed/Interruption max，Help/Relevance 只取 LLM，Friendships/SilenceGap 只取规则 */
+    /** mergeDims：规则特征（0~1）与模型（0~10）合并为 0~10 */
     testPolicyMergeDimsAuthority(): void {
         const features = dims({
             addressed: 0.2, help_signal: 0.1, relevance: 0.2, friendships: 0.3, silence_gap: 0.4, interruption_risk: 0.1,
         });
         const merged = mergeDims(features, {
-            addressed: 0.9, help_signal: 0.8, relevance: 0.7, friendships: -1, silence_gap: 0, interruption_risk: 0.95,
+            addressed: 9, help_signal: 8, relevance: 7, friendships: 10, silence_gap: 0, interruption_risk: 9.5,
         });
-        near(merged.addressed, 0.9, 'addressed=max');
-        near(merged.help_signal, 0.8, 'help=llm');
-        near(merged.relevance, 0.7, 'relevance=llm');
-        near(merged.friendships, 0.3, 'friendships=rule');
-        near(merged.silence_gap, 0.4, 'silence_gap=rule');
-        near(merged.interruption_risk, 0.95, 'interruption=max');
-        // 无 LLM：只有规则值；Help/Relevance 记 0
+        near(merged.addressed, 9, 'addressed=max');
+        near(merged.help_signal, 8, 'help=llm');
+        near(merged.relevance, 7, 'relevance=llm');
+        near(merged.friendships, 10, 'friendships=llm');
+        near(merged.silence_gap, 0, 'silence_gap=llm');
+        near(merged.interruption_risk, 9.5, 'interruption=max');
+        // 无 LLM：六维回退规则值（规则 0~1 → 0~10；friendships -1~1 → 0~10）
         const ruleOnly = mergeDims(features);
-        near(ruleOnly.addressed, 0.2, '仅规则 addressed');
-        near(ruleOnly.help_signal, 0, '仅规则 help');
-        near(ruleOnly.relevance, 0, '仅规则 relevance');
-        near(ruleOnly.interruption_risk, 0.1, '仅规则 interruption');
+        near(ruleOnly.addressed, 2, '仅规则 addressed');
+        near(ruleOnly.help_signal, 1, '仅规则 help');
+        near(ruleOnly.relevance, 2, '仅规则 relevance');
+        near(ruleOnly.friendships, 6.5, '仅规则 friendships');
+        near(ruleOnly.silence_gap, 4, '仅规则 silence_gap');
+        near(ruleOnly.interruption_risk, 1, '仅规则 interruption');
+        // 模型只给部分维度：缺失维度回退规则
+        const partial = mergeDims(features, { help_signal: 10 });
+        near(partial.help_signal, 10, '部分 help=llm');
+        near(partial.friendships, 6.5, '缺维 friendships 回退规则');
     },
 
     // ------------------------------------------------------------------
     // parse：三档容错 + 范围钳制 + 永不抛异常
     // ------------------------------------------------------------------
 
-    /** 纯 JSON：全部字段正常读取 */
+    /** 纯 JSON：0~10 原始分 */
     testParsePureJson(): void {
         const raw = JSON.stringify({
             dims: {
-                addressed: 0.8, help_signal: 0.4, relevance: 0.3, friendships: 0.2, silence_gap: 0.1, interruption_risk: 0.6,
+                addressed: 8, help_signal: 4, relevance: 3, friendships: 2, silence_gap: 1, interruption_risk: 6,
             },
             decision: 'SPEAK',
             confidence: 'high',
-            reason: '在问 bot 问题',
-            evidence: [0, 2],
+            reason: 'ignored',
         });
-        const result = parseDecision(raw);
+        const result = parseScores(raw);
         assert.ok(result.ok);
         if (!result.ok) return;
         assert.equal(result.source, 'json');
-        near(result.value.dims.addressed, 0.8, 'addressed');
-        assert.equal(result.value.decision, 'SPEAK');
-        assert.equal(result.value.confidence, 'high');
-        assert.equal(result.value.reason, '在问 bot 问题');
-        assert.deepEqual(result.value.evidence, [0, 2]);
+        near(result.value.dims.addressed, 8, 'addressed');
+        near(result.value.dims.help_signal, 4, 'help_signal');
+        near(result.value.dims.friendships, 2, 'friendships');
+        near(result.value.dims.interruption_risk, 6, 'interruption_risk');
     },
 
     /** ```json 围栏：source=fenced */
     testParseFencedJson(): void {
-        const raw = '```json\n{"dims":{"addressed":0.5},"decision":"WAIT"}\n```';
-        const result = parseDecision(raw);
+        const raw = '```json\n{"dims":{"addressed":5}}\n```';
+        const result = parseScores(raw);
         assert.ok(result.ok);
         if (!result.ok) return;
         assert.equal(result.source, 'fenced');
-        near(result.value.dims.addressed, 0.5, 'addressed');
-        assert.equal(result.value.decision, 'WAIT');
+        near(result.value.dims.addressed, 5, 'addressed');
     },
 
     /** 文本中截取首个平衡对象：JSON 字符串内的花括号不影响配对 */
     testParseEmbeddedBalancedObject(): void {
-        const raw = '好的，结果如下：{"dims":{"addressed":0.6},"decision":"SPEAK","reason":"他说的是 { 主题 } 相关"} 请查收';
-        const result = parseDecision(raw);
+        const raw = '好的，结果如下：{"dims":{"addressed":6},"note":"他说的是 { 主题 } 相关"} 请查收';
+        const result = parseScores(raw);
         assert.ok(result.ok);
         if (!result.ok) return;
         assert.equal(result.source, 'embedded');
-        near(result.value.dims.addressed, 0.6, 'addressed');
-        assert.ok(result.value.reason.includes('{ 主题 }'));
+        near(result.value.dims.addressed, 6, 'addressed');
     },
 
     /** 缺维补 0（只给一个维度） */
     testParseMissingDimsZero(): void {
-        const result = parseDecision('{"dims":{"addressed":0.5}}');
+        const result = parseScores('{"dims":{"addressed":5}}');
         assert.ok(result.ok);
         if (!result.ok) return;
-        near(result.value.dims.addressed, 0.5, 'addressed');
+        near(result.value.dims.addressed, 5, 'addressed');
         for (const key of Object.keys(ZERO_DIMS) as (keyof JudgeDims)[]) {
             if (key === 'addressed') continue;
             near(result.value.dims[key], 0, key);
         }
-        assert.equal(result.value.decision, undefined);
-        assert.equal(result.value.confidence, undefined);
     },
 
-    /** 范围钳制：0~1；friendships -1~1；数字字符串可接受 */
+    /** 范围钳制：原始分 0~10；数字字符串可接受 */
     testParseClampsRanges(): void {
-        const raw = '{"dims":{"addressed":2,"help_signal":-0.5,"relevance":"0.7","friendships":-2,"silence_gap":9,"interruption_risk":"x"}}';
-        const result = parseDecision(raw);
+        const raw = '{"dims":{"addressed":20,"help_signal":-5,"relevance":"7","friendships":-2,"silence_gap":20,"interruption_risk":"x"}}';
+        const result = parseScores(raw);
         assert.ok(result.ok);
         if (!result.ok) return;
-        near(result.value.dims.addressed, 1, 'addressed 上钳');
+        near(result.value.dims.addressed, 10, 'addressed 上钳');
         near(result.value.dims.help_signal, 0, 'help_signal 下钳');
-        near(result.value.dims.relevance, 0.7, 'relevance 数字字符串');
-        near(result.value.dims.friendships, -1, 'friendships 下钳');
-        near(result.value.dims.silence_gap, 1, 'silence_gap 上钳');
+        near(result.value.dims.relevance, 7, 'relevance 数字字符串');
+        near(result.value.dims.friendships, 0, 'friendships 下钳');
+        near(result.value.dims.silence_gap, 10, 'silence_gap 上钳');
         near(result.value.dims.interruption_risk, 0, '非法数值补 0');
-    },
-
-    /** 枚举非法 = 视为未提供；大小写不敏感 */
-    testParseInvalidEnums(): void {
-        const invalid = parseDecision('{"dims":{},"decision":"MAYBE","confidence":"sure"}');
-        assert.ok(invalid.ok);
-        if (!invalid.ok) return;
-        assert.equal(invalid.value.decision, undefined);
-        assert.equal(invalid.value.confidence, undefined);
-        const lower = parseDecision('{"dims":{},"decision":"speak","confidence":"HIGH"}');
-        assert.ok(lower.ok);
-        if (!lower.ok) return;
-        assert.equal(lower.value.decision, 'SPEAK');
-        assert.equal(lower.value.confidence, 'high');
-    },
-
-    /** evidence：只保留非负有限数值、去重、最多 20 条 */
-    testParseEvidenceFiltered(): void {
-        const raw = '{"dims":{},"evidence":[1,"2",-3,"x",2.7,1]}';
-        const result = parseDecision(raw);
-        assert.ok(result.ok);
-        if (!result.ok) return;
-        assert.deepEqual(result.value.evidence, [1, 2]);
-        const many = JSON.stringify({ dims: {}, evidence: Array.from({ length: 30 }, (_, i) => i) });
-        const capped = parseDecision(many);
-        assert.ok(capped.ok);
-        if (!capped.ok) return;
-        assert.equal(capped.value.evidence.length, 20);
-    },
-
-    /** reason：非字符串记空串；超长截断到 200 字符 */
-    testParseReasonNormalized(): void {
-        const nonString = parseDecision('{"dims":{},"reason":42}');
-        assert.ok(nonString.ok);
-        if (!nonString.ok) return;
-        assert.equal(nonString.value.reason, '');
-        const long = parseDecision(JSON.stringify({ dims: {}, reason: 'x'.repeat(500) }));
-        assert.ok(long.ok);
-        if (!long.ok) return;
-        assert.equal(long.value.reason.length, 200);
     },
 
     /** 未知键忽略；兼容旧评分型模型把维度平铺在顶层 */
     testParseUnknownKeysAndFlatDims(): void {
-        const raw = '{"addressed":0.4,"decision":"WAIT","unknown_key":{"a":1}}';
-        const result = parseDecision(raw);
+        const raw = '{"addressed":4,"decision":"WAIT","unknown_key":{"a":1}}';
+        const result = parseScores(raw);
         assert.ok(result.ok);
         if (!result.ok) return;
-        near(result.value.dims.addressed, 0.4, '平铺 addressed');
-        assert.equal(result.value.decision, 'WAIT');
+        near(result.value.dims.addressed, 4, '平铺 addressed');
     },
 
     /** 解析失败返回 {ok:false,error}，绝不抛异常 */
     testParseFailureNeverThrows(): void {
         const inputs = ['', '   ', 'not json at all', '{"dims": ', '```json\n{"dims": ', 'null', '[]', '{bad}'];
         for (const raw of inputs) {
-            let result: ReturnType<typeof parseDecision> | null = null;
+            let result: ReturnType<typeof parseScores> | null = null;
             assert.doesNotThrow(() => {
-                result = parseDecision(raw);
+                result = parseScores(raw);
             }, `不应抛异常: ${raw}`);
             assert.ok(result && result.ok === false, `应解析失败: ${raw}`);
         }
@@ -575,22 +450,22 @@ export const tests = {
         assert.equal(allDay.stats.inActiveWindow, true);
     },
 
-    /** InterruptionRisk：15s 满 5 条（刷屏阈值）即达到默认 veto 0.8；平静群接近 0 */
+    /** InterruptionRisk：15s 满 5 条（刷屏阈值）即接近 0.8；平静群接近 0 */
     testFeaturesInterruptionRisk(): void {
         const burstTimes = [NOW - 1000, NOW - 2000, NOW - 3000, NOW - 4000, NOW - 5000];
         const burst = extractFeatures(featureInput({
             msgTimes: burstTimes,
             senderIds: burstTimes.map(() => 'QQ:spam'),
         }));
-        assert.ok(burst.interruption_risk >= DEFAULT_POLICY.interruption_veto,
-            `5 条/15s 应达到 veto: ${burst.interruption_risk}`);
+        assert.ok(burst.interruption_risk >= 0.8,
+            `5 条/15s 应达到高干扰风险: ${burst.interruption_risk}`);
         const calm = extractFeatures(featureInput({ msgTimes: [NOW - 600000] }));
         assert.ok(calm.interruption_risk < 0.1, `平静群应接近 0: ${calm.interruption_risk}`);
         const four = extractFeatures(featureInput({
             msgTimes: burstTimes.slice(0, 4),
             senderIds: burstTimes.slice(0, 4).map(() => 'QQ:spam'),
         }));
-        assert.ok(four.interruption_risk < DEFAULT_POLICY.interruption_veto, '4 条/15s 不应否决');
+        assert.ok(four.interruption_risk < 0.8, '4 条/15s 风险应低于 0.8');
     },
 
     // ------------------------------------------------------------------
@@ -750,21 +625,79 @@ export const tests = {
         assert.equal(getPromptTexts(), FALLBACK_PROMPT_TEXTS);
     },
 
-    /** buildDecisionRequest：返回 messages + schema/instruction，不发请求 */
-    testPromptDecisionRequest(): void {
-        const request = buildDecisionRequest({
+    /** 输出 schema：只要求 dims（0~10），不含 decision/confidence/reason */
+    testPromptOutputSchemaDimsOnly(): void {
+        const schema = buildJudgeOutputSchema();
+        assert.equal(schema.type, 'object');
+        assert.deepEqual(schema.required, ['dims']);
+        const properties = schema.properties as Record<string, any>;
+        assert.ok(properties.dims);
+        const dimProps = properties.dims.properties as Record<string, any>;
+        for (const key of Object.keys(ZERO_DIMS)) assert.ok(dimProps[key], key);
+        assert.equal(dimProps.addressed.minimum, 0);
+        assert.equal(dimProps.addressed.maximum, 10);
+        assert.equal(dimProps.friendships.minimum, 0);
+        assert.equal(dimProps.friendships.maximum, 10);
+        assert.equal(properties.decision, undefined);
+        assert.equal(properties.confidence, undefined);
+        assert.equal(properties.reason, undefined);
+    },
+
+    /** System One payload：六个 score 问题 + state 上下文，与 messages 同源 */
+    testPromptSystemOnePayload(): void {
+        const payload = buildSystemOnePayload({
             botName: '骰娘',
-            candidate: { role: 'user', text: '在吗', time: NOW },
+            botId: 'QQ:3893625976',
+            roleSetting: '一个乐于助人的骰娘',
+            history: [{ role: 'user', text: '前一条消息', time: NOW - 60000, userId: 'QQ:u1' }],
+            candidate: { role: 'user', text: '在吗', time: NOW, userId: 'QQ:u2' },
             now: NOW,
         });
-        assert.equal(request.messages.length, 2);
-        assert.equal(request.expected.schema.type, 'object');
-        const properties = request.expected.schema.properties as Record<string, unknown>;
-        assert.ok(properties.dims);
-        assert.ok(properties.decision);
-        assert.ok(properties.confidence);
-        assert.ok(request.expected.instruction.length > 0);
-        assert.equal(request.historyCount, 0);
+        const keys = Object.keys(payload.questions).sort();
+        assert.deepEqual(keys, [
+            'addressed', 'friendships', 'help_signal', 'interruption_risk', 'relevance', 'silence_gap',
+        ]);
+        for (const key of Object.keys(payload.questions) as (keyof typeof JUDGE_SCORE_QUESTIONS)[]) {
+            assert.equal(payload.questions[key].type, 'score');
+            assert.equal(payload.questions[key].criteria.length, 10);
+        }
+        const state = payload.state as any;
+        assert.equal(state.bot.name, '骰娘');
+        assert.equal(state.bot.account, 'QQ:3893625976');
+        assert.equal(state.role, '一个乐于助人的骰娘');
+        assert.equal(state.history.length, 1);
+        assert.equal(state.candidate.text, '在吗');
+        assert.ok(String(state.dataBoundary).length > 0);
+        assert.equal(payload.historyCount, 1);
+    },
+
+    /** System One answers → 六维：score 按 criteria.length-1 归一化，friendships 映射 -1..1 */
+    testParseSystemOneAnswers(): void {
+        const parsed = parseSystemOneAnswers({
+            answers: {
+                addressed: { type: 'score', score: 9 },
+                help_signal: { type: 'score', score: 4 },
+                relevance: { type: 'score', score: 1 },
+                friendships: { type: 'score', score: 0 },
+                silence_gap: { type: 'score', score: 6 },
+                interruption_risk: { type: 'score', score: '5' },
+            },
+        });
+        assert.ok(parsed);
+        near(parsed!.addressed!, 10, 'addressed');
+        near(parsed!.help_signal!, 40 / 9, 'help_signal');
+        near(parsed!.relevance!, 10 / 9, 'relevance');
+        near(parsed!.friendships!, 0, 'friendships');
+        near(parsed!.silence_gap!, 60 / 9, 'silence_gap');
+        near(parsed!.interruption_risk!, 50 / 9, 'interruption_risk');
+        // 缺问题不返回该键（由 mergeDims 回退规则）；全部无效/无 answers → null
+        const partial = parseSystemOneAnswers({ answers: { addressed: { type: 'score', score: 2 } } });
+        assert.ok(partial);
+        near(partial!.addressed!, 20 / 9, 'partial addressed');
+        assert.equal(partial!.help_signal, undefined);
+        assert.equal(parseSystemOneAnswers({ answers: {} }), null);
+        assert.equal(parseSystemOneAnswers(null), null);
+        assert.equal(parseSystemOneAnswers({}), null);
     },
 
     /** 角色设定超长按 token 预算截断（默认 600） */

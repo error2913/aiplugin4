@@ -7,6 +7,7 @@
 // - `aitrig:state:<hash>`：按规则的触发/计数进度分片，只在 `fired` 变化时写，且默认 ≥60s 节流；
 //   删规则时删分片，加载时按现存规则与会话 prune。
 import { getHost } from "../core/host";
+import Logger from "../logger";
 
 import { validateRule } from "./rule";
 import type { RuleScope, RuleStateShard, TriggerRule } from "./types";
@@ -53,6 +54,8 @@ function safeParse<T>(text: string | null): T | null {
 export class TriggerRuleStore {
     private rules: TriggerRule[] = [];
     private bad: BadRuleEntry[] = [];
+    /** 校验失败条目的原始 JSON（保留后随 saveAll 原样写回，避免"任何一次写入把坏规则永久删掉"） */
+    private badRaw: unknown[] = [];
     private loaded = false;
     private lastStateWriteAt = new Map<string, number>();
     private readonly now: () => number;
@@ -69,12 +72,24 @@ export class TriggerRuleStore {
         this.loaded = true;
         this.rules = [];
         this.bad = [];
-        const parsed = safeParse<{ version?: number; rules?: unknown[] }>(getHost().storage.get(KEY_RULES));
+        this.badRaw = [];
+        let parsed = safeParse<{ version?: number; rules?: unknown[] }>(getHost().storage.get(KEY_RULES));
+        // 主键整体解析失败（宿主半写/手改）时回读覆盖写前的备份，避免"一次损坏 = 全量规则丢失"
+        if (!parsed) {
+            const backup = safeParse<{ version?: number; rules?: unknown[] }>(getHost().storage.get(KEY_BAK));
+            if (backup && Array.isArray(backup.rules)) {
+                parsed = backup;
+                Logger.warning("规则库主键解析失败，已回退到 aitrig:rules:bak 备份");
+            }
+        }
         const rawList = parsed && Array.isArray(parsed.rules) ? parsed.rules : [];
         for (const raw of rawList) {
             const result = validateRule(raw, { scope: this.scopeOf(raw), knownEvents: this.knownEvents, now: this.now() });
             if ('rule' in result) this.rules.push(result.rule);
-            else this.bad.push({ raw: JSON.stringify(raw), errors: result.errors, at: this.now() });
+            else {
+                this.bad.push({ raw: JSON.stringify(raw), errors: result.errors, at: this.now() });
+                this.badRaw.push(raw);
+            }
         }
         if (this.bad.length > 0) {
             try {
@@ -116,7 +131,8 @@ export class TriggerRuleStore {
         this.rules = [...rules];
         this.loaded = true;
         this.backup();
-        getHost().storage.set(KEY_RULES, JSON.stringify({ version: 1, rules: this.rules }));
+        // 坏条目原样回写：它们被排除在 this.rules 之外，但不能在下一次正常写入时静默消失
+        getHost().storage.set(KEY_RULES, JSON.stringify({ version: 1, rules: [...this.rules, ...this.badRaw] }));
     }
 
     /** 新增或替换（按 id）；不做上限校验（由编排层做） */
@@ -197,6 +213,7 @@ export class TriggerRuleStore {
     resetForTest(): void {
         this.rules = [];
         this.bad = [];
+        this.badRaw = [];
         this.loaded = false;
         this.lastStateWriteAt.clear();
     }

@@ -10,7 +10,6 @@ import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/revive";
 import { estimateEventTokens as estimateEventTokensShared } from "../utils/token_estimate";
 
-import { syncModeTimers } from "./mode_timers";
 import { pendingKey, sessionStorageKey, writeSessionRecord } from "./persistence";
 import { Session } from "./session";
 import { Setting } from "./setting";
@@ -46,8 +45,12 @@ export class SessionService {
     getSession(sessionId: string): Session {
         if (!Object.prototype.hasOwnProperty.call(this.sessionMap, sessionId)) {
             let session = new Session();
+            // 旧存档只有 standby 字段：必须在 revive 前保留原始 setting（revive 会按新 validKeysMap 丢弃 standby，
+            // 之后再读恒 undefined，迁移会变成死代码）；真正迁移在 Setting.applyLegacyStandby 里做。
+            let rawSetting: unknown = null;
             try {
                 const data = JSON.parse(getHost().storage.get(sessionStorageKey(sessionId)) || '{}');
+                rawSetting = data?.setting ?? null;
                 session = revive(Session, data);
             } catch (error) {
                 logger.error(`加载会话${sessionId}失败: ${error}`);
@@ -71,18 +74,11 @@ export class SessionService {
             if (!(session.context instanceof Context)) session.context = revive(Context, session.context || {});
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
-            // 旧存档只有 standby 字段：在 revive（validKeysMap 已不含 standby）之前读出，迁移为 aiEnabled
-            const legacyStandby = session.setting ? (session.setting as unknown as { standby?: unknown }).standby === true : false;
             if (session.setting) session.setting = revive(Setting, session.setting);
-            if (legacyStandby && !session.setting.aiEnabled) session.setting.aiEnabled = true;
-            // timer 单模式：恢复会话时按全局「默认定时器」TOML 重建该会话的隐式定时器
-            if (session.setting.timerTrigger) {
-                try {
-                    syncModeTimers(session);
-                } catch (e) {
-                    logger.warning(`重建 timer 模式定时器失败: ${e instanceof Error ? e.message : String(e)}`);
-                }
-            }
+            Setting.applyLegacyStandby(rawSetting, session.setting);
+            // timer 单模式的定时器随 timerQueue 持久化，重载后保留原有（正确）epId/isPrivate；
+            // 这里**不再**用 lastCtx 重建（加载阶段 lastCtx 必为 null，会把 epId 覆写成 sessionId 并自删条目）。
+            // 条目缺失时由首个带 ctx 的消息/指令入口经 session.ensureModeTimers(ctx) 幂等补齐。
             // 同步归属字段，确保 context/memory 能解析到正确的 agent/session
             session.context.agentName = session.agentName;
             session.context.sessionId = session.sessionId;

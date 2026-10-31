@@ -127,6 +127,39 @@ export const tests = {
         assert.equal(Object.keys(store.readState('r1')).length, 0);
     },
 
+    testStoreRecoversFromBackup(): void {
+        const storage = installMemoryHost();
+        storage.set('aitrig:rules', '{not-json');
+        storage.set('aitrig:rules:bak', JSON.stringify({ version: 1, rules: [rule('from-bak')] }));
+        const store = new TriggerRuleStore({ now: () => NOW });
+        const rules = store.load();
+        assert.equal(rules.length, 1);
+        assert.equal(rules[0].id, 'from-bak');
+    },
+
+    testStorePreservesBadRulesOnSave(): void {
+        const storage = installMemoryHost();
+        storage.set('aitrig:rules', JSON.stringify({
+            version: 1,
+            rules: [
+                { id: 'ok1', gates: [{ type: 'regex', pattern: 'x' }], wake_prompts: ['p'] },
+                { id: 'bad1', gates: [] },
+            ],
+        }));
+        const store = new TriggerRuleStore({ now: () => NOW });
+        assert.equal(store.load().length, 1);
+        store.upsert(rule('ok2'));
+        const saved = JSON.parse(storage.get('aitrig:rules') || '{}');
+        const ids = (saved.rules || []).map((item: { id?: string }) => item.id);
+        assert.ok(ids.includes('ok1'));
+        assert.ok(ids.includes('ok2'));
+        assert.ok(ids.includes('bad1'), '校验失败条目不能被下一次正常写入静默删除');
+        // 重新加载后仍能识别坏条目（不会被当成有效规则）
+        const reloaded = new TriggerRuleStore({ now: () => NOW });
+        assert.equal(reloaded.load().length, 2);
+        assert.equal(reloaded.getBad().length, 1);
+    },
+
     testStoreCountByScope(): void {
         installMemoryHost();
         const store = new TriggerRuleStore({ now: () => NOW });

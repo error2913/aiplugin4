@@ -1,40 +1,19 @@
-// M3 单测：判定配置 v2（解析/有效性/默认值） + 判定入口调度（去抖/在飞/探针，注入式时钟）。
+// 单测：判定配置 v2（现行字段/默认值/旧键忽略） + 判定调度（在飞合并）。
 import assert from 'node:assert/strict';
 
 import { DEFAULT_JUDGE_CONFIG, JUDGE_TOML_DEFAULT, parseJudgeConfig } from '../src/judge/config';
 import { DecisionSchedule } from '../src/pipeline/decision_schedule';
 
-function fakeScheduler(): {
-    scheduler: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void };
-    runAll(): void;
-    pending(): number;
-    delays: number[];
-} {
-    let seq = 0;
-    const timers = new Map<number, () => void>();
-    const delays: number[] = [];
-    return {
-        scheduler: {
-            setTimeout: (fn, ms) => { const id = ++seq; timers.set(id, fn); delays.push(ms); return id; },
-            clearTimeout: handle => { timers.delete(handle as number); },
-        },
-        runAll: () => {
-            for (const [id, fn] of [...timers.entries()]) {
-                timers.delete(id);
-                fn();
-            }
-        },
-        pending: () => timers.size,
-        delays,
-    };
-}
-
 export const tests = {
     testJudgeConfigV2DefaultTemplateValid(): void {
         const state = parseJudgeConfig(JUDGE_TOML_DEFAULT);
         assert.equal(state.valid, true, state.errors.join(';'));
-        assert.equal(state.config.DECISION.shadow, false, 'R2 默认切流：shadow=false');
-        assert.equal(state.config.SCORING.speak_threshold, 0.55);
+        assert.equal(state.config.DECISION.aggressiveness, 2);
+        assert.equal(state.config.SCORING.speak_threshold, 0.6);
+        assert.equal(state.config.SCORING.wait_cooldown, 30);
+        assert.ok(JUDGE_TOML_DEFAULT.includes('speak_threshold = 0.6'), '默认模板应展示阈值 0.6');
+        assert.ok(!JUDGE_TOML_DEFAULT.includes('shadow'), '默认模板不应再出现 shadow');
+        assert.ok(!JUDGE_TOML_DEFAULT.includes('[gate]'), '默认模板不再有 [gate]');
         assert.equal(state.config.WEIGHTS.interruption_risk, -3);
         assert.equal(state.config.MODEL.context_tokens, 1500);
     },
@@ -45,93 +24,40 @@ export const tests = {
         assert.ok(empty.errors[0].includes('未配置'));
         const v1 = parseJudgeConfig('[scoring]\nspeak_threshold = 0.7');
         assert.equal(v1.valid, false, '缺 version=2 应拒绝');
-        // 非法值/范围
         const bad = parseJudgeConfig('version = 2\n[decision]\naggressiveness = 9');
         assert.equal(bad.valid, false);
     },
 
+    /** 范围校验：负数/越界拒绝；旧段/键忽略 */
+    testJudgeConfigRangeValidation(): void {
+        const bad = (toml: string): string[] => parseJudgeConfig(toml).errors;
+        assert.ok(bad('version = 2\n[model]\nretries = -1').some(e => e.includes('retries')), 'retries 负数应拒绝');
+        assert.ok(bad('version = 2\n[model]\ntimeout_sec = 0').some(e => e.includes('timeout_sec')), 'timeout_sec 0 应拒绝');
+        assert.ok(bad('version = 2\n[scoring]\nspeak_threshold = 1.5').some(e => e.includes('speak_threshold')), 'speak 越界应拒绝');
+        assert.ok(bad('version = 2\n[scoring]\nwait_cooldown = -1').some(e => e.includes('wait_cooldown')), 'wait_cooldown 负数应拒绝');
+        // 旧配置段/键不再校验，按未知键忽略
+        assert.equal(parseJudgeConfig('version = 2\n[energy]\ninitial = 1').valid, true);
+        assert.equal(parseJudgeConfig('version = 2\n[gate]\ncall_burst = 0').valid, true);
+        assert.equal(parseJudgeConfig('version = 2\n[features]\ninterruption_veto = 1.5').valid, true);
+        assert.equal(parseJudgeConfig('version = 2\n[probe]\nenabled = true').valid, true);
+        assert.equal(parseJudgeConfig('version = 2\n[decision]\nshadow = true').valid, true);
+    },
+
     testJudgeConfigPartialOverride(): void {
-        const state = parseJudgeConfig('version = 2\n[energy]\nreply_cost = 8');
-        assert.equal(state.valid, true);
-        assert.equal(state.config.ENERGY.reply_cost, 8);
-        assert.equal(state.config.ENERGY.initial, DEFAULT_JUDGE_CONFIG.ENERGY.initial);
-        assert.equal(state.config.GATE.max_calls_per_hour, 30);
+        const state = parseJudgeConfig('version = 2\n[scoring]\nwait_cooldown = 45');
+        assert.equal(state.valid, true, state.errors.join(';'));
+        assert.equal(state.config.SCORING.wait_cooldown, 45);
+        assert.equal(state.config.SCORING.speak_threshold, DEFAULT_JUDGE_CONFIG.SCORING.speak_threshold);
+        assert.equal(state.config.MODEL.timeout_sec, DEFAULT_JUDGE_CONFIG.MODEL.timeout_sec);
+        // 旧 energy 段被忽略，不影响默认值
+        const legacy = parseJudgeConfig('version = 2\n[energy]\nreply_cost = 8');
+        assert.equal(legacy.valid, true);
+        assert.equal((legacy.config as any).ENERGY, undefined);
     },
 
-    testDecisionScheduleDebounce(): void {
-        const fake = fakeScheduler();
-        let now = 1000;
-        const schedule = new DecisionSchedule({ scheduler: fake.scheduler, now: () => now });
-        let due = 0;
-        schedule.setHandler(async () => { due++; });
-        const candidate = { session: { sessionId: 's1' } as never, ctx: {} as never, msg: {} as never, text: 'hi' };
-        schedule.schedule(candidate, 4000);
-        assert.equal(schedule.hasPending('s1'), true);
-        assert.equal(fake.pending(), 1);
-        now += 4000;
-        fake.runAll();
-        assert.equal(due, 1);
-        assert.equal(schedule.hasPending('s1'), false);
-    },
-
-    testDecisionScheduleReplaceAndCancel(): void {
-        const fake = fakeScheduler();
-        const schedule = new DecisionSchedule({ scheduler: fake.scheduler, now: () => 0 });
-        let due = 0;
-        schedule.setHandler(async () => { due++; });
-        const candidate = { session: { sessionId: 's1' } as never, ctx: {} as never, msg: {} as never, text: 'hi' };
-        schedule.schedule(candidate, 4000);
-        schedule.schedule(candidate, 6000);
-        assert.equal(fake.pending(), 1, '同会话新候选应覆盖旧定时器');
-        schedule.cancelForSession('s1');
-        assert.equal(fake.pending(), 0);
-        fake.runAll();
-        assert.equal(due, 0);
-    },
-
-    testDecisionScheduleInflight(): void {
-        const schedule = new DecisionSchedule({ scheduler: fakeScheduler().scheduler });
-        assert.equal(schedule.markInflight('s1'), true);
-        assert.equal(schedule.markInflight('s1'), false, '同一会话只允许一个在飞');
-        schedule.clearInflight('s1');
-        assert.equal(schedule.markInflight('s1'), true);
-        assert.deepEqual(schedule.stats(), { pending: 0, inflight: 1, probes: 0 });
-    },
-
-    testDecisionScheduleProbeBackoff(): void {
-        const schedule = new DecisionSchedule({ scheduler: fakeScheduler().scheduler, now: () => 0 });
-        schedule.armProbe('s1', 90);
-        assert.equal(schedule.probeNextAt('s1'), 90_000);
-        schedule.backoffProbe('s1', 2, 600);
-        assert.ok((schedule.probeNextAt('s1') || 0) > 90_000);
-        schedule.cancelProbe('s1');
-        assert.equal(schedule.probeNextAt('s1'), null);
-    },
-
-    /** R2 治理：消息去抖延迟按连续消息翻倍、封顶 maxMs；Addressed/强 Help 旁路 */
-    testDecisionScheduleMessageDebounceGrows(): void {
-        const fake = fakeScheduler();
-        const schedule = new DecisionSchedule({ scheduler: fake.scheduler, now: () => 0 });
-        const due: string[] = [];
-        schedule.setHandler(async (c) => { due.push(c.text); });
-        const cand = (text: string) => ({ session: { sessionId: 's1' } as never, ctx: {} as never, msg: {} as never, text });
-        schedule.scheduleMessage(cand('a'), { debounceMs: 4000, maxMs: 12000 });
-        assert.equal(fake.delays[0], 4000, '首条消息按 debounce_sec 去抖');
-        schedule.scheduleMessage(cand('b'), { debounceMs: 4000, maxMs: 12000 });
-        assert.equal(fake.delays[1], 8000, '连续消息延迟应翻倍');
-        schedule.scheduleMessage(cand('c'), { debounceMs: 4000, maxMs: 12000 });
-        assert.equal(fake.delays[2], 12000, '延迟应封顶 debounce_max_sec');
-        schedule.scheduleMessage(cand('d'), { debounceMs: 4000, maxMs: 12000, bypass: true });
-        // setTimeout 最小 1ms（0ms 也走下一拍）：bypass 表示「不额外等待去抖窗口」
-        assert.ok(fake.delays[3] <= 1, `Addressed/强 Help 应跳过去抖（实际延迟 ${fake.delays[3]}ms）`);
-        fake.runAll();
-        assert.deepEqual(due, ['d'], '同会话只保留最新候选');
-    },
-
-    /** R2 治理：同一会话只允许一个在飞；在飞期间到达的候选合并为最新一条，结束后立即补跑 */
+    /** requestNow：入口立即派发；同会话在飞期间只保留最新候选，结束后补跑 */
     async testDecisionScheduleInflightMergesQueued(): Promise<void> {
-        const fake = fakeScheduler();
-        const schedule = new DecisionSchedule({ scheduler: fake.scheduler, now: () => 0 });
+        const schedule = new DecisionSchedule();
         const seen: string[] = [];
         let release: (() => void) | null = null;
         schedule.setHandler(async (c) => {
@@ -148,9 +74,26 @@ export const tests = {
         assert.equal(schedule.stats().inflight, 1, '同一会话只允许一个在飞');
         release!();
         await new Promise(resolve => setTimeout(resolve, 0));
-        fake.runAll();
         await Promise.resolve();
         assert.deepEqual(seen, ['first', 'third'], '在飞期间只保留最新候选');
         assert.equal(schedule.hasQueued('s1'), false, '补跑后队列应清空');
+    },
+
+    /** cancelForSession：清掉排队，避免关闸后补跑 */
+    testDecisionScheduleCancelForSession(): void {
+        const schedule = new DecisionSchedule();
+        let release: (() => void) | null = null;
+        let due = 0;
+        schedule.setHandler(async () => {
+            due++;
+            await new Promise<void>(resolve => { release = resolve; });
+        });
+        const cand = { session: { sessionId: 's2' } as never, ctx: {} as never, msg: {} as never, text: 'x' };
+        schedule.requestNow(cand);
+        schedule.requestNow({ ...cand, text: 'y' });
+        schedule.cancelForSession('s2');
+        assert.equal(schedule.hasQueued('s2'), false);
+        release!();
+        assert.equal(due, 1);
     },
 };

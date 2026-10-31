@@ -9,6 +9,7 @@ import { GATE_META, RULE_LIMITS, ruleWakePrompts, summarizeGates, validateRule }
 import type { TriggerRule } from "../../../trigger";
 import { getRuleStore, pendingDelays } from "../../../trigger/runtime";
 import { fmtDate } from "../../../utils/string";
+import { nextActiveTimeStart, parseActiveTimeGate } from "../../../utils/time_window";
 import { validateTimerSpec } from "../../../utils/timer_spec";
 import Tool from "../../tool";
 
@@ -38,20 +39,38 @@ function parseScope(raw: unknown, session: Session): { ok: true; scope: TriggerR
 }
 
 /**
- * timer 源门规则创建后注册定时器：只对「当前会话」注册（epId 来自 ctx）；
- * 其它会话由各自会话恢复/下次消息时的对账补齐（timer 条目需要 epId）。
+ * 自主源规则（timer / active_time）创建后注册定时器：只对「当前会话」注册（epId 来自 ctx）；
+ * 其它会话在各自 .ai on/会话入口由 ensureRuleTimersForSession 幂等补齐。
  */
 function registerRuleTimers(rule: TriggerRule, ctx: seal.MsgContext, session: Session): void {
     const gates = rule.gates;
-    if (gates.length === 0 || gates[0].type !== 'timer') return;
-    const timerGate = gates[0];
-    const parsed = validateTimerSpec(timerGate);
-    if (!parsed.ok || !parsed.spec) return;
-    const spec = parsed.spec;
+    const gate = gates.length > 0 ? gates[0] : undefined;
+    if (!gate || (gate.type !== 'timer' && gate.type !== 'active_time')) return;
     const sessions = rule.scope.sessions || [];
     for (const sid of sessions) {
         if (sid !== session.sessionId) continue;
-        addRuleTimer({ sid, isPrivate: ctx.isPrivate, epId: ctx.endPoint.userId }, {
+        const target = { sid, isPrivate: ctx.isPrivate, epId: ctx.endPoint.userId };
+        if (gate.type === 'active_time') {
+            // 规则自己的自主源：排下一个子段起点（每段最多触发 1 次，由调度器持久去重）
+            const segment = parseActiveTimeGate(gate);
+            if (!segment) return;
+            const next = nextActiveTimeStart(segment);
+            if (next > 0) {
+                addRuleTimer(target, {
+                    ruleId: rule.id,
+                    modeTag: 'rule',
+                    type: 'target',
+                    target: next,
+                    count: 1,
+                    prompts: ruleWakePrompts(rule),
+                });
+            }
+            continue;
+        }
+        const parsed = validateTimerSpec(gate);
+        if (!parsed.ok || !parsed.spec) continue;
+        const spec = parsed.spec;
+        addRuleTimer(target, {
             ruleId: rule.id,
             modeTag: 'rule',
             type: spec.types,
@@ -86,7 +105,7 @@ export function registerTriggerRuleTools() {
         type: 'function',
         function: {
             name: 'set_trigger_rule',
-            description: 'Create a trigger rule (condition chain). When all gates pass, the bot proactively speaks with one of the wake prompts. Gates: first gate must be a source gate (regex / event / active_time / timer), later gates are filters (user / counter / prob) or a timing gate (delay).',
+            description: 'Create a trigger rule (condition chain). When all gates pass, the bot proactively speaks with one of the wake prompts. Gates: first gate must be a source gate (regex / event / active_time / timer), later gates are filters (user / counter / prob) or a timing gate (delay). active_time rules fire at each sub-segment start (segs = max fires per window).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -98,7 +117,7 @@ export function registerTriggerRuleTools() {
                     gates: {
                         type: 'array',
                         description: `1-${RULE_LIMITS.gates} gates. Gate types: ${GATE_TYPES.join(', ')}. `
-                            + 'regex: {type:"regex",pattern,flags?} | event: {type:"event",on,match?} | active_time: {type:"active_time",start:"HH:mm",end:"HH:mm",segs?} | '
+                            + 'regex: {type:"regex",pattern,flags?} | event: {type:"event",on,match?} | active_time: {type:"active_time",start:"HH:mm",end:"HH:mm",segs?} (fires at each segment start) | '
                             + 'timer: {type:"timer",types:"target|interval",years?,months?,days?,hours?,minutes,count?,prompts:[...]} | '
                             + 'user: {type:"user",ids:[...],exclude?} | counter: {type:"counter",n} | prob: {type:"prob",percent} | delay: {type:"delay",delay_sec}',
                         items: {

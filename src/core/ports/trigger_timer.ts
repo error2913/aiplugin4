@@ -32,6 +32,8 @@ export interface RuleTimerTarget {
 export interface TriggerTimerScheduler {
     addRuleTimer(target: RuleTimerTarget, spec: RuleTimerSpec): void;
     removeRuleTimers(ruleId: string): void;
+    /** 精确删除单条（多计划共用 ruleId 时不能整组删） */
+    removeRuleTimer(timer: TimerInfo): void;
     listRuleTimers(ruleId?: string): TimerInfo[];
 }
 
@@ -67,6 +69,10 @@ export function addRuleTimer(target: RuleTimerTarget, spec: RuleTimerSpec): void
 
 export function removeRuleTimers(ruleId: string): void {
     scheduler?.removeRuleTimers(ruleId);
+}
+
+export function removeRuleTimer(timer: TimerInfo): void {
+    scheduler?.removeRuleTimer(timer);
 }
 
 export function listRuleTimers(ruleId?: string): TimerInfo[] {

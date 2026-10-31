@@ -68,7 +68,7 @@ const {
     purposeBindings, normalizePurposeList,
     vendorByUrlSuffix, knownVendorSuffixes,
     composeMediaTemplate, resolveMediaUrl, renderMediaBody, MEDIA_PRESETS, resolveMediaPreset, classifyModel,
-    setRuleRows, resetRuleRowsForTest,
+    setRuleRows, resetRuleRowsForTest, bodyDefaultsFor,
     templateParamKeys, normalizeMediaParams,
     parseRolesConfig, parseSkillsConfig, parseMcpConfig, parseKbConfig, parseEventTriggerConfig,
     EVENT_TRIGGER_KNOWN_EVENTS,
@@ -256,7 +256,7 @@ for (const sc of scenarios) {
 
 console.log('\n=== B. 生成器与插件对"合法/非法"的判定必须一致 ===');
 
-/** 生成器的合法判定（**完整配置**，含 version/groups，与插件同口径） */
+/** 生成器的合法判定（**完整配置**，与插件同口径） */
 const genValid = (cfg) => gen.validateConfig(cfg).length === 0;
 /** 插件的合法判定 */
 const pluginValid = (cfg) => pluginAccepts(cfg);
@@ -290,7 +290,45 @@ const cases = [
     ['purposes 未知用途', base({ purposes: { nonsense: 'm1' } })],
     ['用途×类型不匹配（text 当生图）', base({ purposes: { 'image-generation': 'm1' } })],
     ['providers 为空', base({ providers: [] })],
-    ['groups 空 purposes', base({ groups: [{ purposes: [] }] })],
+    ['bodyByUse 未知用途', base({
+        providers: [{
+            api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+            models: [{ id: 'm1', name: 'x', kind: 'text', request: { bodyByUse: { nonsense: { max_tokens: 1 } } } }],
+        }],
+    })],
+    ['bodyByUse 值非对象', base({
+        providers: [{
+            api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+            models: [{ id: 'm1', name: 'x', kind: 'text', request: { bodyByUse: { chat: 1 } } }],
+        }],
+    })],
+    ['bodyByUse thinking 字符串', base({
+        providers: [{
+            api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+            models: [{ id: 'm1', name: 'x', kind: 'text', request: { bodyByUse: { chat: { thinking: 'enabled' } } } }],
+        }],
+    })],
+    ['decision 模型绑 judge（合法）', base({
+        providers: [{
+            api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+            models: [{ id: 'd1', name: 'decision-model-preview', kind: 'decision' }],
+        }],
+        purposes: { judge: 'd1' },
+    })],
+    ['decision 模型绑 chat（应拒）', base({
+        providers: [{
+            api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+            models: [{ id: 'd1', name: 'decision-model-preview', kind: 'decision' }],
+        }],
+        purposes: { chat: 'd1' },
+    })],
+    ['decision 模型带 bodyByUse（应拒）', base({
+        providers: [{
+            api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+            models: [{ id: 'd1', name: 'decision-model-preview', kind: 'decision', request: { bodyByUse: { judge: { max_tokens: 1 } } } }],
+        }],
+        purposes: { judge: 'd1' },
+    })],
     ['版本错误', base({ version: 4 })],
 ];
 
@@ -579,27 +617,56 @@ console.log('\n=== G. 防漂移：生成器的表必须跟上插件的真实数�
         ok(`  ${vendor}/${use} 取到预设且带 body`, !!p && !!p.body, JSON.stringify(p && p.body));
     }
 
-    // G5) 用途组 body 必须与插件出厂默认一致
+    // G5) 出厂默认：插件不再带 groups；默认请求体只有 max_tokens/temperature；生成器产出也不含 groups
     const defCfg = JSON.parse(DEFAULT_V5_CONFIG);
-    const pluginChatGroup = (defCfg.groups || []).find(g => g.purposes.includes('chat'));
-    ok('插件出厂默认含 chat 用途组', !!pluginChatGroup);
-    if (pluginChatGroup) {
-        const genBody = gen.DEFAULT_USE_BODIES.chat;
-        ok('生成器 chat 组默认 body 与插件出厂默认逐字段一致',
-            JSON.stringify(pluginChatGroup.body) === JSON.stringify(genBody),
-            `生成器=${JSON.stringify(genBody)} 插件=${JSON.stringify(pluginChatGroup.body)}`);
-    }
+    ok('插件出厂默认不再带 groups', defCfg.groups === undefined);
+    resetRuleRowsForTest();
+    ok('插件默认请求体 = {max_tokens:65536, temperature:1}',
+        JSON.stringify(bodyDefaultsFor('chat')) === JSON.stringify({ max_tokens: 65536, temperature: 1 }),
+        JSON.stringify(bodyDefaultsFor('chat')));
     const genDefaultCfg = gen.build([{
         id: 'c', templateId: 'deepseek', mode: 'vendor', provider: '', api: 'openai-completions',
         baseURL: 'https://api.deepseek.com/v1', apiKey: 'k',
         models: [{ id: 'flash', name: 'deepseek-v4-flash' }],
         enabled: true, displayName: '', timeout: 0, request: {},
     }], { chat: 'flash', summarization: 'flash', judge: 'flash' });
-    const genChatGroup = (genDefaultCfg.groups || []).find(g => g.purposes.includes('chat'));
-    ok('生成器默认产出的 chat 组与插件出厂默认一致',
-        !!genChatGroup && !!pluginChatGroup
-        && JSON.stringify(genChatGroup.body) === JSON.stringify(pluginChatGroup.body),
-        JSON.stringify(genChatGroup && genChatGroup.body));
+    ok('生成器默认产出不含 groups', genDefaultCfg.groups === undefined);
+    ok('生成器默认产出能被插件接受', pluginAccepts(genDefaultCfg));
+
+    // G5.1) 逐模型 bodyByUse：生成器产出 → 插件解析/适配 → 按用途命中
+    const genBodyByUseCfg = gen.build([{
+        id: 'c', templateId: 'deepseek', mode: 'vendor', provider: '', api: 'openai-completions',
+        baseURL: 'https://api.deepseek.com/v1', apiKey: 'k',
+        models: [{
+            id: 'flash', name: 'deepseek-flash', kind: 'text',
+            request: {
+                bodyByUse: {
+                    judge: { max_tokens: 300, temperature: 0 },
+                    chat: { max_tokens: 65536, temperature: 1, stream: true },
+                },
+            },
+        }],
+        enabled: true, displayName: '', timeout: 0, request: {},
+    }], { chat: 'flash', judge: 'flash' });
+    ok('生成器产出保留 bodyByUse',
+        JSON.stringify(genBodyByUseCfg.providers[0].models[0].request.bodyByUse)
+        === JSON.stringify({ judge: { max_tokens: 300, temperature: 0 }, chat: { max_tokens: 65536, temperature: 1, stream: true } }),
+        JSON.stringify(genBodyByUseCfg.providers[0].models[0].request));
+    const bbuParsed = parseV5Config(gen.serialize(genBodyByUseCfg));
+    ok('插件接受带 bodyByUse 的生成器配置', bbuParsed.config !== null, JSON.stringify(bbuParsed.issues));
+    if (bbuParsed.config) {
+        setRuleRows(adaptV5(bbuParsed.config).rules);
+        ok('judge 请求体按模型用途覆盖命中（300/0）',
+            JSON.stringify(bodyDefaultsFor('judge', 'flash')) === JSON.stringify({ max_tokens: 300, temperature: 0 }),
+            JSON.stringify(bodyDefaultsFor('judge', 'flash')));
+        const chatBody = bodyDefaultsFor('chat', 'flash');
+        ok('chat 请求体按模型用途覆盖命中（含 stream）',
+            JSON.stringify(chatBody) === JSON.stringify({ max_tokens: 65536, temperature: 1, stream: true }),
+            JSON.stringify(chatBody));
+        ok('未覆盖用途仍走默认', JSON.stringify(bodyDefaultsFor('summarization', 'flash'))
+            === JSON.stringify({ max_tokens: 65536, temperature: 1 }));
+        resetRuleRowsForTest();
+    }
 
     // G6) 识图 / 嵌入：确认插件**确实没有** vendor 预设（有的话结论要改）
     ok('插件 media_presets 只覆盖 tts 与 image-generation（识图/嵌入无 vendor 预设）',
@@ -678,12 +745,23 @@ console.log('\n=== I. 导入→导出往返后，插件仍须接受（且语义�
     const gen2 = await import(pathToFileURL(path.join(genRoot, 'js', 'v5.js')).href);
 
     const cases = [
-        ['标准分组', gen2.build([{
+        ['标准产出', gen2.build([{
             id: 'c', templateId: 'deepseek', mode: 'vendor', provider: '', api: 'openai-completions',
             baseURL: 'https://api.deepseek.com/v1', apiKey: 'sk-a',
             models: [{ id: 'm', name: 'deepseek-chat' }], enabled: true, displayName: '', timeout: 0, request: {},
         }], { chat: 'm' })],
-        ['非标准分组', {
+        ['含逐模型 bodyByUse', {
+            version: 5,
+            providers: [{
+                api: 'openai-completions', baseURL: 'https://api.deepseek.com/v1', apiKey: 'sk-a',
+                models: [{
+                    id: 'm', name: 'deepseek-chat', kind: 'text',
+                    request: { bodyByUse: { judge: { max_tokens: 300, temperature: 0 } } },
+                }],
+            }],
+            purposes: { chat: 'm', judge: 'm' },
+        }],
+        ['旧 groups（应丢弃）', {
             version: 5,
             providers: [{
                 api: 'openai-completions', baseURL: 'https://api.deepseek.com/v1', apiKey: 'sk-a',
@@ -692,7 +770,7 @@ console.log('\n=== I. 导入→导出往返后，插件仍须接受（且语义�
             purposes: { chat: 'm' },
             groups: [{ purposes: ['chat'], body: { max_tokens: 7 } }],
         }],
-        ['含逐模型覆盖', {
+        ['含逐模型媒体覆盖', {
             version: 5,
             providers: [{
                 api: 'openai-completions', baseURL: 'https://api.siliconflow.cn/v1', apiKey: 'sk-a',
@@ -712,21 +790,24 @@ console.log('\n=== I. 导入→导出往返后，插件仍须接受（且语义�
         const imp = gen2.parseImport(text);
         ok(`  ${name}：生成器导入成功`, imp.ok, JSON.stringify(imp.issues));
         if (!imp.ok) continue;
-        const out = gen2.build(imp.state.providers, imp.state.purposes, imp.state.useBodies, imp.state.extraGroups);
+        const out = gen2.build(imp.state.providers, imp.state.purposes);
         const outText = JSON.stringify(out);
 
         // 关键断言：往返产物仍被**插件**接受
         const parsed = parseV5Config(outText);
         ok(`  ${name}：往返产物仍被插件接受`, parsed.config !== null, JSON.stringify(parsed.issues));
 
-        // 且用途组内容没有漂移（按键序规范化比较）
+        // 往返产物不再有 groups（旧字段被丢弃）
+        ok(`  ${name}：往返产物不含 groups`, out.groups === undefined, JSON.stringify(out.groups));
+
+        // 逐模型 request 往返不漂移（按键序规范化比较）
         const canon = (v) => JSON.stringify(v, (k, val) =>
             (val && typeof val === 'object' && !Array.isArray(val))
                 ? Object.keys(val).sort().reduce((o, kk) => (o[kk] = val[kk], o), {})
                 : val);
-        ok(`  ${name}：用途组往返无漂移`,
-            canon(cfg.groups || []) === canon(out.groups || []),
-            `\n      前=${canon(cfg.groups || [])}\n      后=${canon(out.groups || [])}`);
+        ok(`  ${name}：models[].request 往返无漂移`,
+            canon((cfg.providers[0].models[0] || {}).request || {}) === canon((out.providers[0].models[0] || {}).request || {}),
+            `\n      前=${canon((cfg.providers[0].models[0] || {}).request || {})}\n      后=${canon((out.providers[0].models[0] || {}).request || {})}`);
     }
 }
 // ---------------------------------------------------------------- J. 官方百炼兼容模式：零自定义配置

@@ -24,7 +24,6 @@ import { registerCmdSkill } from "./sub_cmd/skill";
 import { registerCmdStatus } from "./sub_cmd/status";
 import { registerCmdStop } from "./sub_cmd/stop";
 import { registerCmdSubAgent } from "./sub_cmd/subagent";
-import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
 import { registerCmdTrg } from "./sub_cmd/trg";
@@ -42,7 +41,6 @@ export function registerSubCommands(): void {
     registerCmdStatus();
     registerCmdCtx();
     registerCmdLive();
-    registerCmdTimer();
     registerCmdTrg();
     registerCmdOn();
     registerCmdOff();

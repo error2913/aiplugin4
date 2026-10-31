@@ -1,15 +1,15 @@
 // 事件入口（L4）：所有事件触发先走链规则（新），再由 v1 规则兜底（旧），二者共享同一事件去重。
 //
 // 方案 §5.6 / Q12：
-// - 链 event 规则独立于「事件触发」开关（eventTrigger），但需要录制门（aiEnabled || GLOBAL_STANDBY）；
+// - 链 event 规则独立于「事件触发」开关（eventTrigger），但需要触发闸 aiEnabled；
 // - 同一条事件最多一个触发对象：先用调用方 dedupKey 查 v1 去重表，再用认领表标记，防止链+v1 双发言；
 // - 触发文本/起轮统一走 wake（trigger_rule → wakeSession）。
-import Config from "../config/config";
 import { getSessionById } from "../core/ports/session_lookup";
 import { EVENT_TRIGGER_KNOWN_EVENTS, isEventTriggerExcluded } from "../event/trigger";
 import type { EventView } from "../event/trigger";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
+import { SYSTEM_NAME } from "../utils/protocol";
 import { applyLastMessageRef, getSessionCtxAndMsg } from "../utils/seal";
 
 import { claimTable, eventClaimKey } from "./claim_table";
@@ -36,27 +36,33 @@ export async function tryChainEventTrigger(view: EventView, dedupKey: string, op
         if (claimTable.hasClaim(view.sid, claimKey)) return true;
 
         const session: Session | undefined = options.session ?? getSessionById(view.sid);
-        // 录制门（Q12）：链事件不需要 eventTrigger 开关，但仍要求 AI 未彻底关闭
-        if (!session.setting.enabled() && !Config.base.GLOBAL_STANDBY) {
-            return false;
-        }
-        if (session.running || session.starting) {
-            // 忙：不在此处阻塞；交给 v1 路径的挂起语义或下一次事件（链规则挂起不丢会话提示，避免重复起轮）
-            log.info(`事件触发挂起（会话忙）：${view.eventType} sid=${view.sid}`);
-            return false;
-        }
+        // 触发闸（方案 C3）：GLOBAL_STANDBY 只放开录制，不放开触发
+        if (!session.setting.enabled()) return false;
         let ctx = options.ctx;
         let msg = options.msg;
         if (!ctx || !msg) {
-            ({ ctx, msg } = getSessionCtxAndMsg(view.epId, view.sid, view.isPrivate));
-            applyLastMessageRef(session, ctx, msg);
+            try {
+                ({ ctx, msg } = getSessionCtxAndMsg(view.epId, view.sid, view.isPrivate));
+                applyLastMessageRef(session, ctx, msg);
+            } catch (e) {
+                log.debug(`链事件跳过：无法重建会话上下文 ${view.sid}（${e instanceof Error ? e.message : String(e)}）`);
+                return false;
+            }
         }
-        const result = await runChainForEvent(session, view, ctx, msg);
-        if (result.status === 'fired' || result.status === 'suspended' || result.status === 'gated' || result.status === 'bucket-empty' || result.status === 'deferred') {
-            claimTable.claim(view.sid, claimKey, 'chain');
-            return true;
+        // 空闲：求值后异步起轮（detached，不阻塞 ob11 分发）；
+        // 忙：只求值，命中后把唤醒文本挂进 pendingQueue（轮末 resumePending 补一轮）。
+        const busy = session.running || session.starting;
+        const result = busy
+            ? await runChainForEvent(session, view, ctx, msg, { deferWake: true })
+            : await runChainForEvent(session, view, ctx, msg, { detachedWake: true });
+        if (result.status === 'no-match' || result.status === 'claimed') return false;
+        claimTable.claim(view.sid, claimKey, 'chain');
+        if (busy && result.status === 'parked') {
+            await session.deferReceipt(ctx, msg, options.messageArray ?? [], 'trigger', result.wakeText, SYSTEM_NAME.triggerRule);
+            session.savePending();
+            log.info(`事件触发挂起（会话忙）：${view.eventType} sid=${view.sid}`);
         }
-        return false;
+        return true;
     } catch (e) {
         log.warning(`链事件触发失败（已忽略）：${e instanceof Error ? e.message : String(e)}`);
         return false;

@@ -188,15 +188,63 @@ export class TimerManager {
         return this.timerQueue.filter(timer => !!timer.ruleId && (ruleId === undefined || timer.ruleId === ruleId));
     }
 
-    /** 清除手动 set_timer 条目（ruleId 为空且非 activeTime/judgeWait）；返回删除数量并立即落盘 */
-    static clearManualTimers(): number {
+    /** 手动 set_timer 条目（ruleId 为空、仅 target/interval；不含 activeTime/judgeWait） */
+    static getManualTimers(sid: string = ''): TimerInfo[] {
+        return this.timerQueue.filter(timer =>
+            (!sid || timer.sid === sid)
+            && !timer.ruleId
+            && (timer.type === 'target' || timer.type === 'interval'),
+        );
+    }
+
+    /** 按对象引用删除若干定时器（避免用 type 过滤误伤规则/模式条目）；返回删除数量并落盘 */
+    static removeTimerEntries(timers: TimerInfo[], index_list: number[]): number {
+        let removed = 0;
+        for (const index of index_list) {
+            if (index < 1 || index > timers.length) {
+                log.warning(`序号${index}超出范围`);
+                continue;
+            }
+            const i = this.timerQueue.indexOf(timers[index - 1]);
+            if (i === -1) {
+                log.warning(`出错了:找不到序号${index}的定时器`);
+                continue;
+            }
+            this.timerQueue.splice(i, 1);
+            removed++;
+        }
+        if (removed > 0) this.saveTimerQueue();
+        return removed;
+    }
+
+    /** 清除手动 set_timer 条目（ruleId 为空且非 activeTime/judgeWait）；sid 为空=全部会话 */
+    static clearManualTimers(sid: string = ''): number {
         const before = this.timerQueue.length;
         this.timerQueue = this.timerQueue.filter(timer =>
-            !!timer.ruleId || timer.type === 'activeTime' || timer.type === 'judgeWait',
+            !!timer.ruleId || timer.type === 'activeTime' || timer.type === 'judgeWait'
+            || (!!sid && timer.sid !== sid),
         );
         const removed = before - this.timerQueue.length;
         if (removed > 0) this.saveTimerQueue();
         return removed;
+    }
+
+    /** 取消某会话的全部规则/模式定时器（.ai off：规则保留、条目移除，.ai on 按定义重建） */
+    static removeRuleTimersForSession(sid: string): number {
+        const before = this.timerQueue.length;
+        this.timerQueue = this.timerQueue.filter(timer => !(timer.ruleId && timer.sid === sid));
+        const removed = before - this.timerQueue.length;
+        if (removed > 0) this.saveTimerQueue();
+        return removed;
+    }
+
+    /** 精确删除单条规则/模式定时器（多 [[timer]] 计划共用 ruleId 时不能整组删） */
+    static removeRuleTimerEntry(timer: TimerInfo): boolean {
+        const i = this.timerQueue.indexOf(timer);
+        if (i === -1) return false;
+        this.timerQueue.splice(i, 1);
+        this.saveTimerQueue();
+        return true;
     }
 
     static addActiveTimeTimer(ctx: seal.MsgContext, session: Session, target: number) {
@@ -286,7 +334,8 @@ export class TimerManager {
     }
 
     static getTimerListText(sid: string, p: number = 1): string {
-        const timers = TimerManager.getTimers(sid, '', []);
+        // 手动定时器视图：规则/模式条目由 .ai trg timer lst 展示，避免序号空间混用导致误删
+        const timers = TimerManager.getManualTimers(sid);
         if (timers.length === 0) return '';
         if (p > Math.ceil(timers.length / 10)) p = Math.ceil(timers.length / 10);
         return timers.slice((p - 1) * 10, p * 10).map((t, i) => {
@@ -331,9 +380,20 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                 // 触发域条目（ruleId 存在）：全权交给端口 handler（判闸/渲染 prompt/起轮/续期），
                 // task 只负责到点分派；旧 target/interval 语义不再适用（避免双重消费）。
                 if (timer.ruleId) {
+                    // 先判认领：规则被删/停用后 owns() 为 false，必须就地清理，
+                    // 否则幽灵条目会永久驻留队列并每轮刷告警（触发域 owns() 注释约定由 task 清理）。
+                    if (!ownsTriggerTimer(timer)) {
+                        log.info(`规则定时器 ${timer.ruleId} 已失效（规则被删/停用），清理条目`);
+                        removeTimer(timer);
+                        continue;
+                    }
+                    // 再到点判定：规则/模式条目是周期注册的，必须等 set+interval（或 target）到点才 fire，
+                    // 不能像旧 target/interval 分支那样假设快照里都该执行。
+                    const now = Math.floor(Date.now() / 1000);
+                    const due = timer.type === 'target' ? timer.target : (timer.target || timer.set + timer.interval);
+                    if (due > now) continue;
                     try {
-                        if (ownsTriggerTimer(timer)) await fireTriggerTimer(timer);
-                        else log.warning(`规则定时器 ${timer.ruleId} 无触发域处理器，已跳过`);
+                        await fireTriggerTimer(timer);
                     } catch (e) {
                         log.exception(`${timer.sid} 执行规则定时器 ${timer.ruleId} 出错`, e);
                     }
@@ -554,5 +614,6 @@ setJudgeWaitScheduler({
 setTriggerTimerScheduler({
     addRuleTimer: (target, spec) => TimerManager.addRuleTimer(target, spec),
     removeRuleTimers: (ruleId) => TimerManager.removeRuleTimers(ruleId),
+    removeRuleTimer: (timer) => TimerManager.removeRuleTimerEntry(timer),
     listRuleTimers: (ruleId) => TimerManager.listRuleTimers(ruleId),
 });

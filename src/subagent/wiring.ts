@@ -230,7 +230,8 @@ function makeWakeHook(opt: SubAgentWireOptions): (record: ChildRecord, _result: 
             });
             if (decision !== 'wake') return;
             const { ctx, msg } = getSessionCtxAndMsg(record.meta.epId, record.parentSessionId, record.meta.isPrivate);
-            void parent.chat(ctx, msg, WAKE_REASON).catch(e => {
+            // 子代理结算属"结果送达"：不受 aiEnabled 总闸影响、不吃触发令牌（方案 §5.9 豁免）
+            void parent.chat(ctx, msg, WAKE_REASON, undefined, { bypassGate: true, skipBucket: true }).catch(e => {
                 log.warning(`子代理完成唤醒失败: ${e instanceof Error ? e.message : String(e)}`);
             });
         } catch (e) {

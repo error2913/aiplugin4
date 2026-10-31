@@ -38,8 +38,4 @@ export const DEFAULT_V5_CONFIG = JSON.stringify({
     // 用途绑定用**数组**（形状统一，插件侧不必区分单字符串与数组两种写法）。
     // 单字符串仍被接受（手写配置容错），但出厂示例就用规范形态。
     purposes: { chat: ['flash'], summarization: ['flash'], judge: ['flash'] },
-    groups: [{
-        purposes: ['chat', 'summarization', 'judge'],
-        body: { temperature: 1, top_p: 1, max_tokens: 8192, stop: null, stream: false },
-    }],
 });

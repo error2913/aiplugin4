@@ -2,6 +2,8 @@
 // 只由组合根（src/index.ts、scripts/test-host.ts）导入，因此不会把 agent 主链重新连回
 // context / memory / judge（见 core/ports/aux_llm.ts 的说明）。
 import { setAuxLlm } from "../core/ports/aux_llm";
+import Model from "../model/model";
+import { requestSystemOne, type SystemOneQuestions } from "../model/systemone";
 
 import Agent from "./agent";
 
@@ -15,6 +17,20 @@ export function installAuxLlm(): void {
         hasModel: async (agentName) => {
             const agent = Agent.get(agentName) as unknown as { hasModel?: () => Promise<boolean> };
             return typeof agent.hasModel === 'function' ? agent.hasModel() : true;
+        },
+        modelKind: async (agentName) => {
+            await Model.ensureLoaded();
+            const agent = Agent.get(agentName);
+            const model = Model.getChatModel(agent.use);
+            return model && model.tags.includes('decision') ? 'decision' : 'chat';
+        },
+        systemOne: async (agentName, state, questions) => {
+            await Model.ensureLoaded();
+            const agent = Agent.get(agentName);
+            const model = Model.getChatModel(agent.use);
+            if (!model) throw new Error('未找到可用的判定模型');
+            if (!model.tags.includes('decision')) throw new Error('当前判定模型不是决策模型');
+            return requestSystemOne(model, state, questions as SystemOneQuestions);
         },
     });
 }

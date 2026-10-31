@@ -73,6 +73,8 @@ export interface JudgeFeatureInput {
     botNames?: string[];
     /** 角色设定全文：用于 Relevance 词面近似（LLM 仍以角色全文判相关） */
     roleSetting?: string;
+    /** 密度上限（[features] density_limit；缺省用常量 5） */
+    densityLimit?: number;
 }
 
 /** 六维特征（0~1；friendships 允许 -1~1） */
@@ -375,7 +377,10 @@ export function extractFeatures(input: JudgeFeatureInput): JudgeFeatures {
     const silenceSec = timeline.length > 0 ? Math.max(0, (now - timeline[timeline.length - 1]) / 1000) : 0;
     const someoneRecent = count10m > 0;
 
-    const densityScore = round(clamp01(count15s / DENSITY_LIMIT), 3);
+    const densityLimit = Number.isFinite(input?.densityLimit) && (input.densityLimit as number) > 0
+        ? (input.densityLimit as number)
+        : DENSITY_LIMIT;
+    const densityScore = round(clamp01(count15s / densityLimit), 3);
     const burstiness = round(clamp01((count60s - 10) / 20), 3);
     const alternationRate = computeAlternation(input?.senderIds, timeline, now);
     const otherRisk = computeConsecutiveOtherMentions(messages);

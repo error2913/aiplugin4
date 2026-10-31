@@ -3,9 +3,13 @@
 // 方案 §8：`.ai trg` 总览；`<模式> on|off`；`all off`；`rule lst/rm/clr/set`；`timer lst/clr`。
 // 模式元数据唯一来源 trigger_meta.MODES（字母序）；规则数据走 L2 trigger/runtime。
 import Config from "../../config/config";
+import { PRIVILEGE_LEVEL_MAP } from "../../config/static_config";
 import { modeByToken, MODES } from "../../config/static_config/trigger_meta";
 import type { ModeMeta } from "../../config/static_config/trigger_meta";
 import { listRuleTimers } from "../../core/ports/trigger_timer";
+import { JUDGE_TOML_DEFAULT } from "../../judge/config";
+import { JudgeManager } from "../../judge/judge_manager";
+import { decisionSchedule } from "../../pipeline/decision_schedule";
 import { syncModeTimers } from "../../session/mode_timers";
 import type { Session } from "../../session/session";
 import { TimerManager } from "../../timer";
@@ -48,7 +52,14 @@ function describeMode(session: Session, mode: ModeMeta): string {
 function overview(session: Session): string {
     const atOn = Config.trigger.AT_TRIGGER ? '开' : '关';
     const lines = MODES.map(mode => `${mode.token}${mode.aliases.length ? `(${mode.aliases[0]})` : ''} ${mode.label}：${describeMode(session, mode)}`);
-    return `触发模式总览（${session.sessionId}）｜AI 总闸：${session.setting.aiEnabled ? '开' : '关'}｜被@触发（配置页）：${atOn}\n${lines.join('\n')}\n\n切换：.ai trg <模式> on|off ｜ 规则：.ai trg rule`;
+    // 窄屏友好：状态字段逐行，不用「｜」并列
+    return `触发模式总览（${session.sessionId}）
+AI 总闸：${session.setting.aiEnabled ? '开' : '关'}
+被@触发（配置页）：${atOn}
+${lines.join('\n')}
+
+切换：.ai trg <模式> on|off
+规则：.ai trg rule`;
 }
 
 /** 解析可选的数值参数（如 `.ai trg counter on 5`） */
@@ -62,11 +73,17 @@ function optionalNumber(args: string[]): number | null {
 
 function modeDetail(session: Session, mode: ModeMeta): string {
     const aliases = mode.aliases.length > 0 ? mode.aliases.join('/') : '-';
-    return `${mode.token}（别名 ${aliases}）｜${mode.label}\n${mode.desc}\n当前：${describeMode(session, mode)}`;
+    return `${mode.token}（别名 ${aliases}）
+${mode.label}
+${mode.desc}
+当前：${describeMode(session, mode)}`;
 }
 
 function allModesOff(session: Session): string {
     const setting = session.setting;
+    // 判定/WAIT 轮与去抖槽一并清理（否则关掉 judge 后残留 WAIT 轮末仍会重评）
+    JudgeManager.clearSession(session.sessionId);
+    decisionSchedule.cancelForSession(session.sessionId);
     setting.regexTrigger = false;
     setting.eventTrigger = false;
     setting.counter = -1;
@@ -120,6 +137,10 @@ function toggleMode(session: Session, mode: ModeMeta, enable: boolean, args: str
             return `事件触发：${enable ? '开' : '关'}`;
         case 'judge':
             setting.judge = enable;
+            if (!enable) {
+                JudgeManager.clearSession(sid);
+                decisionSchedule.cancelForSession(sid);
+            }
             return `评分触发：${enable ? '开' : '关'}`;
         case 'prob': {
             if (!enable) {
@@ -136,13 +157,13 @@ function toggleMode(session: Session, mode: ModeMeta, enable: boolean, args: str
         case 'timer': {
             if (!enable) {
                 setting.timerTrigger = false;
-                syncModeTimers(session);
+                syncModeTimers(session, ctx);
                 return 'timer 模式：关';
             }
             const specs = Config.trigger.TIMER_SPECS;
             if (!specs.VALID) return '「默认定时器」TOML 非法，无法开启 timer 模式；请修正配置并重载 JS。';
             setting.timerTrigger = true;
-            const count = syncModeTimers(session);
+            const count = syncModeTimers(session, ctx);
             return count > 0 ? `timer 模式：开(${count}个计划)` : 'timer 模式：开，但「默认定时器」为空，不会触发。';
         }
         default:
@@ -172,13 +193,21 @@ function ruleListText(session: Session, scopeArg: string, page: number): string 
         const sessions = rule.scope.sessions || [];
         const scope = sessions.length > 0 ? (sessions.length === 1 ? sessions[0] : `${sessions.length}会话`) : '全局';
         const next = listRuleTimers(rule.id)[0]?.target;
-        return `${rule.id} ｜ ${summarizeGates(rule.gates)} ｜ 唤醒${ruleWakePrompts(rule).length}条 ｜ ${fired}/${max} ｜ ${scope}`
-            + (rule.limits.expire_at > 0 ? ` ｜ 到期${fmtDate(Math.floor(rule.limits.expire_at / 1000))}` : '')
-            + (state?.lastFiredAt ? ` ｜ 上次${fmtDate(Math.floor(state.lastFiredAt / 1000))}` : '')
-            + (next ? ` ｜ 下次${fmtDate(next)}` : '');
+        // 窄屏友好：每条规则一个块，字段逐行，不用「｜」并列
+        const lines = [
+            rule.id,
+            `门控：${summarizeGates(rule.gates)}`,
+            `唤醒：${ruleWakePrompts(rule).length} 条`,
+            `次数：${fired}/${max}`,
+            `范围：${scope}`,
+        ];
+        if (rule.limits.expire_at > 0) lines.push(`到期：${fmtDate(Math.floor(rule.limits.expire_at / 1000))}`);
+        if (state?.lastFiredAt) lines.push(`上次：${fmtDate(Math.floor(state.lastFiredAt / 1000))}`);
+        if (next) lines.push(`下次：${fmtDate(next)}`);
+        return lines.join('\n');
     });
     const pages = Math.ceil(filtered.length / 10);
-    return `门控链规则（${filtered.length} 条，第 ${safePage}/${pages} 页）：\n${items.join('\n')}`;
+    return `门控链规则（${filtered.length} 条，第 ${safePage}/${pages} 页）：\n${items.join('\n\n')}`;
 }
 
 function removeRuleEverywhere(rule: TriggerRule): boolean {
@@ -187,17 +216,31 @@ function removeRuleEverywhere(rule: TriggerRule): boolean {
     return getRuleStore().remove(rule.id);
 }
 
-function ruleRemove(session: Session, ids: string[]): string {
+/** 全局规则（无 sessions 白名单）只能由骰主管理，避免任意群 inviter 跨群删除/改写 */
+function canManageRule(rule: TriggerRule, ctx?: seal.MsgContext): boolean {
+    const sessions = rule.scope.sessions || [];
+    if (sessions.length > 0) return true; // 会话规则另有归属校验
+    return !!ctx && ctx.privilegeLevel >= PRIVILEGE_LEVEL_MAP.master;
+}
+
+function ruleRemove(session: Session, ids: string[], ctx?: seal.MsgContext): string {
     if (ids.length === 0) return '用法：.ai trg rule rm <规则ID...>';
     let removed = 0;
+    let denied = 0;
     for (const id of ids) {
         const rule = getRuleStore().getById(id);
         if (!rule) continue;
         const sessions = rule.scope.sessions || [];
         if (sessions.length > 0 && !sessions.includes(session.sessionId)) continue;
+        if (!canManageRule(rule, ctx)) {
+            denied++;
+            continue;
+        }
         if (removeRuleEverywhere(rule)) removed++;
     }
-    return removed > 0 ? `已删除 ${removed} 条规则（含定时器与 delay 挂起）` : '未删除任何规则（id 不存在或不属于本会话）';
+    if (removed > 0) return `已删除 ${removed} 条规则（含定时器与 delay 挂起）`;
+    if (denied > 0) return '全局规则仅骰主可删除';
+    return '未删除任何规则（id 不存在或不属于本会话）';
 }
 
 function ruleClear(session: Session, confirmed: boolean): string {
@@ -209,7 +252,7 @@ function ruleClear(session: Session, confirmed: boolean): string {
     return `已清空本会话 ${removed} 条规则`;
 }
 
-function ruleSetWake(session: Session, id: string, wake: string): string {
+function ruleSetWake(session: Session, id: string, wake: string, ctx?: seal.MsgContext): string {
     if (!id) return '用法：.ai trg rule set <规则ID> --wake=唤醒词';
     if (!wake) return '请用 --wake=唤醒词 指定新唤醒词';
     const store = getRuleStore();
@@ -217,6 +260,7 @@ function ruleSetWake(session: Session, id: string, wake: string): string {
     if (!rule) return `规则不存在：${id}`;
     const sessions = rule.scope.sessions || [];
     if (sessions.length > 0 && !sessions.includes(session.sessionId)) return '只能修改本会话规则的唤醒词';
+    if (!canManageRule(rule, ctx)) return '全局规则仅骰主可修改';
     rule.wake_prompts = [wake];
     store.upsert(rule);
     return `已更新规则 ${id} 的唤醒词（1 条）`;
@@ -230,14 +274,17 @@ function timerListText(session: Session, page: number): string {
         const no = index + 1 + (safePage - 1) * 10;
         const owner = timer.ruleId ? `规则${timer.ruleId}` : '手动';
         const detail = timer.type === 'target' ? fmtDate(timer.target) : `${timer.interval}秒×${timer.count === -1 ? '无限' : timer.count}`;
-        return `${no}. ${timer.type}｜${owner}｜${detail}`;
+        // 窄屏友好：每个定时器一个块，字段逐行，不用「｜」并列
+        return `${no}. ${timer.type}
+归属：${owner}
+计划：${detail}`;
     });
     const pages = Math.ceil(timers.length / 10);
-    return `定时器（${timers.length} 条，第 ${safePage}/${pages} 页）：\n${items.join('\n')}`;
+    return `定时器（${timers.length} 条，第 ${safePage}/${pages} 页）：\n${items.join('\n\n')}`;
 }
 
-function timerClear(): string {
-    const removed = TimerManager.clearManualTimers();
+function timerClear(sid: string): string {
+    const removed = TimerManager.clearManualTimers(sid);
     return removed > 0 ? `已清除 ${removed} 个手动定时器（规则/模式条目保留）` : '没有可清除的手动定时器';
 }
 
@@ -262,7 +309,8 @@ judge 评分 / prob 概率 / regex 正则 / timer 定时器
 
 「被@触发」在触发页配置（默认开），不在本命令内。
 
-【.ai trg counter on 5】【.ai trg timer on】`;
+【.ai trg counter on 5】【.ai trg timer on】
+【.ai trg judge default】查看评分触发参数默认模板`;
     cmd.priv = {
         priv: U,
         args: {
@@ -299,19 +347,23 @@ judge 评分 / prob 概率 / regex 正则 / timer 定时器
         if (head === 'rule') {
             const sub = (args[1] || 'lst').toLowerCase();
             if (sub === 'lst') return reply(ruleListText(session, (args[2] || 'current').toLowerCase(), page));
-            if (sub === 'rm') return reply(ruleRemove(session, args.slice(2)));
+            if (sub === 'rm') return reply(ruleRemove(session, args.slice(2), ctx));
             if (sub === 'clr') return reply(ruleClear(session, hasFlag('yes')));
-            if (sub === 'set') return reply(ruleSetWake(session, args[2] || '', kwarg('wake')));
+            if (sub === 'set') return reply(ruleSetWake(session, args[2] || '', kwarg('wake'), ctx));
             return reply('用法：.ai trg rule lst|rm|clr|set');
         }
         if (head === 'timer') {
             const sub = (args[1] || 'lst').toLowerCase();
             if (sub === 'lst') return reply(timerListText(session, page));
-            if (sub === 'clr') return reply(timerClear());
+            if (sub === 'clr') return reply(timerClear(session.sessionId));
             return reply('用法：.ai trg timer lst|clr');
         }
         const mode = modeByToken(args[0]);
         if (!mode) return reply(`未知模式：${args[0]}\n可用：${MODES.map(item => item.token).join(' / ')}`);
+        // 默认值可见：.ai trg judge default 直接打印可粘贴的 TOML 模板
+        if (mode.token === 'judge' && (args[1] || '').toLowerCase() === 'default') {
+            return reply('评分触发参数默认模板（粘贴到触发页「评分触发参数」）：\n' + JUDGE_TOML_DEFAULT);
+        }
         if (args.length === 1) return reply(modeDetail(session, mode));
         const action = (args[1] || '').toLowerCase();
         if (action !== 'on' && action !== 'off') return reply(`用法：.ai trg ${mode.token} on|off`);

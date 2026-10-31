@@ -48,21 +48,44 @@ function imageLimitsOf(p: V5Provider): Record<string, { maxSide?: number; target
     return out;
 }
 
-/** 把 v5 的 per-model request 段翻成一条 models 定向的规则 */
-function modelRuleOf(modelId: string, req: Record<string, unknown>, bodyMode?: 'merge' | 'replace'): ModelRuleTemplate | null {
+/**
+ * 把 v5 的 per-model request 段翻成 models 定向规则：
+ *   - 通用一条：body/request/response/params/prompt（媒体预设合并等既有语义）
+ *   - 每个 `bodyByUse[use]` 一条：按用途覆盖，命中时优先于通用规则
+ */
+function modelRulesOf(modelId: string, req: Record<string, unknown>, bodyMode?: 'merge' | 'replace'): ModelRuleTemplate[] {
     const has = (k: string) => req[k] !== undefined && req[k] !== null && typeof req[k] === 'object';
-    if (!has('body') && !has('request') && !has('response') && !has('params') && !has('prompt')) return null;
-    const r: ModelRuleTemplate = {
-        use: [],
-        models: [modelId],
-        body: (req.body as Record<string, unknown>) ?? {},
-        params: (req.params as Record<string, unknown>) ?? {},
-        prompt: (req.prompt as Record<string, unknown>) ?? {},
-        request: (req.request as Record<string, unknown>) ?? {},
-        response: (req.response as Record<string, unknown>) ?? {},
-    };
-    if (bodyMode) r.bodyMode = bodyMode;
-    return r;
+    const out: ModelRuleTemplate[] = [];
+    if (has('body') || has('request') || has('response') || has('params') || has('prompt')) {
+        const r: ModelRuleTemplate = {
+            use: [],
+            models: [modelId],
+            body: (req.body as Record<string, unknown>) ?? {},
+            params: (req.params as Record<string, unknown>) ?? {},
+            prompt: (req.prompt as Record<string, unknown>) ?? {},
+            request: (req.request as Record<string, unknown>) ?? {},
+            response: (req.response as Record<string, unknown>) ?? {},
+        };
+        if (bodyMode) r.bodyMode = bodyMode;
+        out.push(r);
+    }
+    const byUse = req.bodyByUse;
+    if (byUse && typeof byUse === 'object' && !Array.isArray(byUse)) {
+        for (const [use, body] of Object.entries(byUse as Record<string, unknown>)) {
+            if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+            if (Object.keys(body as Record<string, unknown>).length === 0) continue;
+            out.push({
+                use: [use as ModelUse],
+                models: [modelId],
+                body: body as Record<string, unknown>,
+                params: {},
+                prompt: {},
+                request: {},
+                response: {},
+            });
+        }
+    }
+    return out;
 }
 
 /**
@@ -94,23 +117,11 @@ export function adaptV5(cfg: V5Config): AdaptedV5 {
         // per-model 覆盖 → models 定向规则（取代 v4 的 models 定向行）
         for (const m of models) {
             if (!m.request) continue;
-            const r = modelRuleOf(m.id, m.request as Record<string, unknown>, m.bodyMode);
-            if (r) rules.push(r);
+            rules.push(...modelRulesOf(m.id, m.request as Record<string, unknown>, m.bodyMode));
         }
     });
 
-    // 用途组默认请求体（v4 的 use 组规则）
-    for (const g of cfg.groups ?? []) {
-        const r: ModelRuleTemplate = {
-            use: (g.purposes as ModelUse[]) ?? [],
-            body: (g.body as Record<string, unknown>) ?? {},
-            params: (g.params as Record<string, unknown>) ?? {},
-            prompt: (g.prompt as Record<string, unknown>) ?? {},
-            request: (g.request as Record<string, unknown>) ?? {},
-            response: (g.response as Record<string, unknown>) ?? {},
-        };
-        rules.push(r);
-    }
+    // 用途组（groups）已移除：请求体覆盖只走 providers[].models[].request.bodyByUse。
 
     return { conns, rules };
 }

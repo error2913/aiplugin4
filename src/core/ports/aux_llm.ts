@@ -12,6 +12,16 @@ export interface AuxLlm {
      * 可选方法：测试桩/裁剪场景未实现时视为「有模型」，保持既有桩语义。
      */
     hasModel?(agentName: string): Promise<boolean>;
+    /**
+     * judge 当前模型是普通聊天模型还是 System One 决策模型（judge 按此选择 messages / state+questions）。
+     * 可选方法：测试桩缺省按 'chat' 处理。
+     */
+    modelKind?(agentName: string): Promise<'chat' | 'decision'>;
+    /**
+     * System One 决策调用（judge 专用）；返回原始响应，由 judge 归一化。
+     * 可选方法：测试桩缺省视为不可用（judge 记失败并 WAIT）。
+     */
+    systemOne?(agentName: string, state: unknown, questions: Record<string, unknown>): Promise<unknown>;
 }
 
 let impl: AuxLlm | null = null;

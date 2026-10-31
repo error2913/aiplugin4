@@ -75,6 +75,15 @@ export class Setting {
     }
 
     /**
+     * 旧存档 standby → aiEnabled 迁移：必须传原始 JSON 里的 setting（revive 会按新 validKeysMap
+     * 丢弃 standby），revive 后调用；旧版 .ai on 会置 standby=true（=AI 开启）。
+     */
+    static applyLegacyStandby(rawSetting: unknown, setting: Setting): void {
+        if (!rawSetting || typeof rawSetting !== 'object') return;
+        if ((rawSetting as { standby?: unknown }).standby === true && !setting.aiEnabled) setting.aiEnabled = true;
+    }
+
+    /**
      * 解析"按会话覆盖 → 全局配置"（P2-1）：`key` 在本会话设了正数就用它，否则用 `fallback`。
      * 只接受正数：0/负数/非数字一律视为"未覆盖"，避免与全局配置里"0=关闭/不限"的语义混淆
      * （例如 `窗口上限字数=0` 表示"不移出"，但按会话设 0 只应表示"没设过"）。

@@ -26,6 +26,7 @@ import { createStopEvent, fireStopEvent, StopEvent } from "../utils/timeout";
 
 import Group from "./group";
 import { deferReceipt as deferReceiptImpl, drainPending as drainPendingImpl, flushNotices as flushNoticesImpl, flushPending as flushPendingImpl, handleReceipt as handleReceiptImpl } from "./inbox";
+import { syncModeTimers } from "./mode_timers";
 import { deliverReply } from "./outbox";
 import { pendingKey as pendingKeyOf, PendingMessage, SAVE_MIN_INTERVAL_MS, shouldDeferCoalescedSave, writePendingRecord, writeSessionRecord } from "./persistence";
 import { activeTimeSegmentIndex, computeSessionState, nextActiveTimePoint } from "./rhythm";
@@ -187,6 +188,8 @@ export class Session {
     lastMsgRef: { [epId: string]: number } = {};
     /** 运行时字段：自动摘要已发起未落地，防同一会话并发重复触发（不持久化，重载后回 false） */
     ctxAutoSummaryInFlight = false;
+    /** 运行时字段：上次补注册规则 timer 的时间（毫秒；节流用，不持久化） */
+    lastRuleTimerEnsureAt = 0;
     /** 运行时字段：保存节流状态（不持久化） */
     private lastSaveAt = 0;
     private saveDeferCount = 0;
@@ -373,6 +376,8 @@ export class Session {
      * - 旧语义兼容：旧存档的 `activeTimeInfo`（单段）仍可用。
      */
     checkActiveTimer(ctx: seal.MsgContext) {
+        // 触发闸：关闸/全局记录模式下不再排活跃时间定时器（否则 .ai off 后每条消息都会把它重新排上）
+        if (!this.setting.enabled()) return;
         if (TimerManager.getTimers(this.sessionId, '', ['activeTime']).length > 0) return;
         if (this.setting.activeMode) {
             const segments = Config.trigger.ACTIVE_TIME_SEGMENTS;
@@ -388,6 +393,22 @@ export class Session {
             const nextTimePoint = this.getNextTimePoint(curSegIndex);
             if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
             else log.error('active time timer add failed');
+        }
+    }
+
+    /**
+     * 补注册 timer 模式定时器（重载后会话加载时拿不到 epId；首个带 ctx 的入口补齐，幂等）。
+     */
+    ensureModeTimers(ctx: seal.MsgContext) {
+        if (!this.setting.enabled()) return;
+        if (!this.setting.timerTrigger) return;
+        const hasModeTimer = TimerManager.getTimers(this.sessionId, '', [])
+            .some(timer => !!timer.ruleId && timer.ruleId.startsWith('mode:'));
+        if (hasModeTimer) return;
+        try {
+            syncModeTimers(this, ctx);
+        } catch (e) {
+            log.warning(`补注册 timer 模式定时器失败: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
@@ -427,8 +448,8 @@ export class Session {
     }
 
     /** 把挂起队列全部写入上下文（此时上一轮工具回调已入库，位置合法）并保存；返回是否存在触发类消息 */
-    async flushPending(): Promise<boolean> {
-        return flushPendingImpl(this);
+    async flushPending(opts?: { writeTriggerPrompts?: boolean }): Promise<boolean> {
+        return flushPendingImpl(this, opts);
     }
 
     /** 把后台完成通知队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数。 */
@@ -446,6 +467,22 @@ export class Session {
      *        非主动搭话的场景（如媒体生成完成唤醒）。注意与旧有的 `reason === '函数回调触发'`
      *        不同：那条豁免只跳过检查、仍会扣减令牌，此处保持原样不动。
      */
+    /** 令牌桶懒回补（chat 与 wake 预判共用同一口径；只回补不扣减） */
+    private refillBucket(): void {
+        const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
+        if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
+            const fillCount = (Date.now() - this.bucket.lastTime) / (FILL_INTERVAL * 1000);
+            this.bucket.count = Math.min(this.bucket.count + fillCount, BUCKET_LIMIT);
+            this.bucket.lastTime = Date.now();
+        }
+    }
+
+    /** wake 写提示前的可用性预判：有令牌才写提示（避免 bucket-empty 时留下无法兑现的触发提示） */
+    hasBucketToken(): boolean {
+        this.refillBucket();
+        return this.bucket.count > 0;
+    }
+
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean; bypassGate?: boolean } = {}): Promise<ChatOutcome> {
         this.lastCtx = ctx;
         // 冷热状态的"相关活动"：任何一次起一轮对话（@/触发命中/结果送达/定时任务）都算，普通消息入库不算
@@ -463,12 +500,7 @@ export class Session {
 
         const skipBucket = options.skipBucket === true;
         if (reason !== '函数回调触发' && !skipBucket) {
-            const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
-            if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
-                const fillCount = (Date.now() - this.bucket.lastTime) / (FILL_INTERVAL * 1000);
-                this.bucket.count = Math.min(this.bucket.count + fillCount, BUCKET_LIMIT);
-                this.bucket.lastTime = Date.now();
-            }
+            this.refillBucket();
             if (this.bucket.count <= 0) {
                 log.warning('bucket empty, skip reply');
                 return 'bucket-empty';
@@ -484,8 +516,9 @@ export class Session {
         if (!skipBucket) this.bucket.count--;
 
         const model = Model.getChatModel('chat');
-        // 是否流式由「chat 用途」规则模板 body 里的 stream=true 决定（v4：模型不再自带 body，读用途组模板）
-        const chatStream = (Model.getBodyDefaultsFor('chat') as any).stream === true;
+        // 是否流式由「chat 用途」的合并 body 里的 stream=true 决定；传当前模型 ref 才能读到
+        // models[].request.bodyByUse.chat（逐模型覆盖），否则只能看到代码默认。
+        const chatStream = (Model.getBodyDefaultsFor('chat', model?.ref) as any).stream === true;
 
         const isAnthropic = !!model && isAnthropicMessages(model.api, model.provider);
         if (isAnthropic && chatStream) {

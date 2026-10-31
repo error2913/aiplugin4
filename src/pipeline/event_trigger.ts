@@ -64,8 +64,8 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
         if (isEventTriggered(dedupKey)) return false;
 
         const session = options.session ?? getSession(view.sid);
-        // 统一的 AI 开启门禁：未待机（含 .ai off）或本会话关闭「事件触发」时不响应
-        if (!(session.setting.enabled() || Config.base.GLOBAL_STANDBY)) return false;
+        // 触发闸 = aiEnabled（GLOBAL_STANDBY 只放开录制，不放开触发）；本会话关闭「事件触发」时也不响应
+        if (!session.setting.enabled()) return false;
         if (!session.setting.eventTrigger) return false;
         let ctx = options.ctx;
         let msg = options.msg;

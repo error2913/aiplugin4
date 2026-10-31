@@ -144,7 +144,7 @@ export interface GateInput {
     random?: () => number;
     /** 规则进度分片（counter 门的持久计数） */
     state?: RuleStateShard;
-    /** 自主源（active_time/timer）到点后由调度器置 true，供 timer 门放行 */
+    /** 自主源（active_time/timer）到点后由调度器置 true：timer 门靠它放行，active_time 门则跳过窗口复核 */
     sourceSatisfied?: boolean;
 }
 

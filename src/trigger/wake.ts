@@ -28,8 +28,12 @@ export interface WakePayload {
     reason?: string;
 }
 
-/** wake 只需要 Session 的这三个能力（避免 L2 → L3 的值依赖） */
+/** wake 只需要 Session 的这几个能力（避免 L2 → L3 的值依赖） */
 export interface WakeSessionLike {
+    /** 绝对触发闸（aiEnabled）；缺失时按"未闸"处理（测试/裁剪桩） */
+    setting?: { enabled(): boolean };
+    /** 令牌可用性预判（只回补不扣减）；缺失时不预判（交给 chat） */
+    hasBucketToken?(): boolean;
     context: { addSystemUserMessage(text: string, systemName?: string, extra?: unknown): Promise<void> | void };
     save(force?: boolean): void;
     chat(ctx: seal.MsgContext, msg: seal.Message, reason?: string, toolChoice?: string, options?: { skipBucket?: boolean; bypassGate?: boolean }): Promise<ChatOutcome>;
@@ -42,6 +46,14 @@ export interface WakeSessionLike {
 export async function wakeSession(session: WakeSessionLike, ctx: seal.MsgContext, msg: seal.Message, payload: WakePayload): Promise<ChatOutcome> {
     // A12：合成 msg 无 rawId 时回填（幂等：已有 rawId 不覆盖）
     applyLastMessageRef(session as never, ctx, msg);
+    // 方案 C6：先判闸/判桶再写提示——未真正起轮（gated/bucket-empty）时不留无法兑现的 system 提示，
+    // 否则 .ai off / 全局待机 / 桶空期间规则/模式 timer 会持续往上下文灌"请说话"。
+    if (session.setting && typeof session.setting.enabled === 'function' && !session.setting.enabled()) {
+        return 'gated';
+    }
+    if (session.hasBucketToken && !session.hasBucketToken()) {
+        return 'bucket-empty';
+    }
     const text = payload.wakeText && payload.wakeText.trim() ? payload.wakeText : '';
     const systemName = payload.systemName || SYSTEM_NAME.triggerRule;
     if (text) {

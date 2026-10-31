@@ -75,20 +75,19 @@ export interface TimerTomlConfig {
     ERRORS: string[];
 }
 
-let timerTomlCache: TimerTomlConfig | null = null;
-
 /**
  * 解析「默认定时器」Template：逐个非空框解析为 TOML → validateTimerSpec。
  * - 单框非法：WARN 跳过（其余框仍生效）；
  * - 所有非空框都非法：VALID=false（trg timer on 拒绝，避免"开着但不触发"的错觉）；
  * - 全空：VALID=true、SPECS=[]（trg timer on 会提示为空）。
+ *
+ * 不做模块级缓存：target 型 spec 的 targetAt 是"解析时刻的绝对时间"，
+ * 缓存会让过期时刻在进程内被冻结（重载/开启后立刻迟到唤醒）。Config 层已有 60s 缓存，开销可接受。
  */
 function getTimerTomlConfig(): TimerTomlConfig {
-    if (timerTomlCache) return timerTomlCache;
     const entries = (seal.ext.getTemplateConfig(ext, "默认定时器") || []).filter(text => text && text.trim() !== '');
     if (entries.length === 0) {
-        timerTomlCache = { VALID: true, SPECS: [], ERRORS: [] };
-        return timerTomlCache;
+        return { VALID: true, SPECS: [], ERRORS: [] };
     }
     const errors: string[] = [];
     const specs: NormalizedTimerSpec[] = [];
@@ -114,13 +113,12 @@ function getTimerTomlConfig(): TimerTomlConfig {
     // 有配置但一个有效条目都没有 → 整份视为非法（拒绝开启）
     const valid = specs.length > 0 || errors.length === 0;
     if (!valid) Logger.error('「默认定时器」没有任何有效条目，timer 模式将拒绝开启');
-    timerTomlCache = { VALID: valid, SPECS: specs, ERRORS: errors };
-    return timerTomlCache;
+    return { VALID: valid, SPECS: specs, ERRORS: errors };
 }
 
-/** 仅供单元测试使用：清空「默认定时器」缓存 */
+/** 兼容旧测试调用：解析已不再走模块级缓存，保留空实现避免调用点改动 */
 export function resetTimerTomlConfigCacheForTest(): void {
-    timerTomlCache = null;
+    // no-op
 }
 
 export default class TriggerConfig {
@@ -144,7 +142,7 @@ export default class TriggerConfig {
                 + GENERATOR_CONFIG_HINT,
             "触发",
         );
-        seal.ext.registerStringConfig(ext, "评分触发参数", JUDGE_TOML_DEFAULT, "评分触发（.ai trg judge on）的参数，TOML 分段格式（[scoring]/[weights]/[energy]/[gate]/[model]），缺省段或字段使用默认值。修改后需重载 JS 生效", "触发");
+        seal.ext.registerStringConfig(ext, "评分触发参数", JUDGE_TOML_DEFAULT, "评分触发（.ai trg judge on）的参数，TOML v2；消息立即评分，WAIT 结果/回复后进入 30s WAIT，期间只挂起最新一条，WAIT 到点才评。非法值会使判定不可用；默认模板可用 .ai trg judge default 查看；修改后需重载 JS 生效", "触发");
         seal.ext.registerFloatConfig(ext, "默认概率", 10, "概率模式下每条消息触发回复的概率（%）", "触发");
         // 默认正则不再包含 at CQ：@ 触发由「被@触发」配置开关判定
         seal.ext.registerTemplateConfig(ext, "触发正则表达式", [

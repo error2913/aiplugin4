@@ -77,7 +77,7 @@ export function registerTime() {
         }
     });
     toolShow.solve = async (_, __, session, ___) => {
-        const timers = TimerManager.getTimers(session.sessionId, '', ['target', 'interval']);
+        const timers = TimerManager.getManualTimers(session.sessionId);
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
@@ -128,7 +128,7 @@ export function registerTime() {
     });
     toolCancel.solve = async (_, __, session, args) => {
         const { index_list } = args;
-        const timers = TimerManager.getTimers(session.sessionId, '', ['target', 'interval']);
+        const timers = TimerManager.getManualTimers(session.sessionId);
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
@@ -138,8 +138,8 @@ export function registerTime() {
             return '请输入要取消的定时器序号';
         }
 
-        TimerManager.removeTimers(session.sessionId, '', ['target', 'interval'], index_list);
+        const removed = TimerManager.removeTimerEntries(timers, index_list);
 
-        return '定时器取消成功';
+        return removed > 0 ? `已取消 ${removed} 个定时器` : '没有可取消的定时器（序号超出范围）';
     }
 }

@@ -110,7 +110,8 @@ export function registerAgentApi(): void {
             const agent = Agent.get(options.agentName || '*');
             const sessionId = ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId;
             const session = agent.sessionService.getSession(sessionId);
-            await session.chat(ctx, msg, options.reason || '外部插件调用', options.toolChoice);
+            // 外部插件 API 不受会话 AI 总闸影响（作者 Q8：外部不受控）
+            await session.chat(ctx, msg, options.reason || '外部插件调用', options.toolChoice, { bypassGate: true });
         },
         registerTool: (info: ToolInfo, options: RegisterToolOptions = {}) => {
             const name = info?.function?.name;

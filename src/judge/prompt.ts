@@ -76,19 +76,6 @@ export interface BuiltJudgeMessages {
     historyTokens: number;
 }
 
-/** M3 接 stream 时的请求描述：messages + 期望输出说明（不实际发请求） */
-export interface JudgeDecisionRequest {
-    messages: { role: 'system' | 'user'; content: string }[];
-    expected: {
-        /** json_schema 档使用的结构（JSON Schema 子集；M3 决定是否下发） */
-        schema: Record<string, unknown>;
-        /** 纯提示词档使用的输出说明文本 */
-        instruction: string;
-    };
-    historyCount: number;
-    historyTokens: number;
-}
-
 function pad2(value: number): string {
     return value < 10 ? `0${value}` : String(value);
 }
@@ -130,11 +117,22 @@ function renderCandidateLine(item: JudgePromptCandidate): string {
     return `[current] ${renderMeta(item)} ${item.text}`;
 }
 
-/**
- * 组装判定 messages：system = 任务/六维/输出规范（+ [prompt] extra），
- * user = 数据边界声明 + bot 信息 + 角色 + 历史（token 预算内）+ 硬特征 + 当前候选。
- */
-export function buildJudgeMessages(input: BuildJudgePromptInput): BuiltJudgeMessages {
+/** 判定输入的数据准备（messages 与 System One 共用，保证两条路径输入同源） */
+export interface PreparedJudgeData {
+    now: number;
+    botName: string;
+    botId?: string;
+    budget: number;
+    selected: JudgePromptHistoryItem[];
+    historyCount: number;
+    historyTokens: number;
+    role: string;
+    globalPrompt: string;
+    dataBoundary: string;
+    system: string;
+}
+
+export function prepareJudgeData(input: BuildJudgePromptInput): PreparedJudgeData {
     const texts = getPromptTexts();
     const now = Number.isFinite(input.now) ? (input.now as number) : Date.now();
     const botName = String(input.botName ?? '').trim() || '(unknown)';
@@ -160,24 +158,46 @@ export function buildJudgeMessages(input: BuildJudgePromptInput): BuiltJudgeMess
             { alwaysKeepLatest: false },
         )
         : [];
-    const historyLines = selected.map((item, index) => renderHistoryLine(item, index));
     const historyTokens = selected.reduce(
         (sum, item, index) => sum + estimateTextTokens(renderHistoryLine(item, index)) + 4,
         0,
     );
+
+    return {
+        now,
+        botName,
+        botId: input.botId,
+        budget,
+        selected,
+        historyCount: selected.length,
+        historyTokens,
+        role: capToTokens(input.roleSetting ?? '', PROMPT_BUDGETS.roleTokens),
+        globalPrompt: capToTokens(input.globalPrompt ?? '', PROMPT_BUDGETS.globalPromptTokens),
+        dataBoundary: texts.judgeDataBoundary().trim(),
+        system,
+    };
+}
+
+/**
+ * 组装判定 messages：system = 任务/六维/输出规范（+ [prompt] extra），
+ * user = 数据边界声明 + bot 信息 + 角色 + 历史（token 预算内）+ 硬特征 + 当前候选。
+ */
+export function buildJudgeMessages(input: BuildJudgePromptInput): BuiltJudgeMessages {
+    const prepared = prepareJudgeData(input);
+    const { now, botName, selected, budget } = prepared;
+
+    const historyLines = selected.map((item, index) => renderHistoryLine(item, index));
     const historyText = historyLines.length > 0
         ? historyLines.join('\n')
         : (budget > 0 ? '(no recent history)' : '(history injection disabled: context_tokens = 0)');
 
     const dataLines: string[] = [];
-    dataLines.push(texts.judgeDataBoundary().trim());
+    dataLines.push(prepared.dataBoundary);
     dataLines.push('');
     dataLines.push(`Bot name: ${botName}`);
     if (input.botId) dataLines.push(`Bot account: ${input.botId}`);
-    const role = capToTokens(input.roleSetting ?? '', PROMPT_BUDGETS.roleTokens);
-    dataLines.push(`Bot role setting: ${role || '(none)'}`);
-    const globalPrompt = capToTokens(input.globalPrompt ?? '', PROMPT_BUDGETS.globalPromptTokens);
-    if (globalPrompt) dataLines.push(`Global instructions: ${globalPrompt}`);
+    dataLines.push(`Bot role setting: ${prepared.role || '(none)'}`);
+    if (prepared.globalPrompt) dataLines.push(`Global instructions: ${prepared.globalPrompt}`);
     dataLines.push(`Current time: ${formatTime(now)}`);
     dataLines.push('');
     if (input.features) {
@@ -196,26 +216,23 @@ export function buildJudgeMessages(input: BuildJudgePromptInput): BuiltJudgeMess
     const user = dataLines.join('\n');
     return {
         messages: [
-            { role: 'system', content: system },
+            { role: 'system', content: prepared.system },
             { role: 'user', content: user },
         ],
-        system,
+        system: prepared.system,
         user,
-        historyCount: selected.length,
-        historyTokens,
+        historyCount: prepared.historyCount,
+        historyTokens: prepared.historyTokens,
     };
 }
 
-/**
- * 模型输出的 JSON Schema（json_schema 档用；严格档不支持的模型由 M3 降级到 json_object/纯提示词）。
- * 六维 + decision/confidence/reason 必填，evidence 可选；范围与解析层的钳制口径一致。
- */
+/** 模型输出的 JSON Schema（json_schema 档用）：六维 0~10，不含 decision/confidence/reason。 */
 export function buildJudgeOutputSchema(): Record<string, unknown> {
-    const unit = { type: 'number', minimum: 0, maximum: 1 };
+    const unit = { type: 'number', minimum: 0, maximum: 10 };
     return {
         type: 'object',
         additionalProperties: false,
-        required: ['dims', 'decision', 'confidence', 'reason'],
+        required: ['dims'],
         properties: {
             dims: {
                 type: 'object',
@@ -227,32 +244,159 @@ export function buildJudgeOutputSchema(): Record<string, unknown> {
                     addressed: unit,
                     help_signal: unit,
                     relevance: unit,
-                    friendships: { type: 'number', minimum: -1, maximum: 1 },
+                    friendships: unit,
                     silence_gap: unit,
                     interruption_risk: unit,
                 },
             },
-            decision: { type: 'string', enum: ['SPEAK', 'WAIT', 'IGNORE'] },
-            confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
-            reason: { type: 'string', maxLength: 200 },
-            evidence: { type: 'array', items: { type: 'integer', minimum: 0 }, maxItems: 20 },
         },
     };
 }
 
-/**
- * M3 组装判定请求时使用：返回 messages + 期望输出说明（schema + 纯提示词档说明），
- * **不实际调用模型**（调用/超时/重试/三档降级都在 M3 的请求层）。
- */
-export function buildDecisionRequest(input: BuildJudgePromptInput): JudgeDecisionRequest {
-    const built = buildJudgeMessages(input);
+/** System One 的六维 score 问题（低 → 高 10 档；按 criteria.length-1 映射到 0~10） */
+export type JudgeScoreQuestionKey =
+    'addressed' | 'help_signal' | 'relevance' | 'friendships' | 'silence_gap' | 'interruption_risk';
+
+export interface JudgeScoreQuestion {
+    type: 'score';
+    instructions: string;
+    criteria: string[];
+}
+
+export const JUDGE_SCORE_QUESTIONS: Record<JudgeScoreQuestionKey, JudgeScoreQuestion> = {
+    addressed: {
+        type: 'score',
+        instructions: 'How clearly does the current message target this bot (mention, quote, or calling its name)?',
+        criteria: [
+            'Not addressed to the bot at all',
+            'Very indirectly related to the bot',
+            'Slightly related to the bot',
+            'Partially addresses the bot',
+            'Moderately addresses the bot',
+            'Clearly addresses the bot',
+            'Strongly addresses the bot',
+            'Directly addresses the bot',
+            'Almost certainly meant for the bot',
+            'Explicitly @-mentions, quotes, or calls the bot',
+        ],
+    },
+    help_signal: {
+        type: 'score',
+        instructions: 'How strongly does the message ask for help this bot is able to give?',
+        criteria: [
+            'No request for help',
+            'A very faint hint of a request',
+            'A weak hint of a request',
+            'A mild request for help',
+            'A moderate request for help',
+            'A clear request for help',
+            'A strong request for help',
+            'A pressing request for help',
+            'An urgent request for help',
+            'An explicit urgent request for help',
+        ],
+    },
+    relevance: {
+        type: 'score',
+        instructions: "How relevant is the message to the bot's persona or the current topic?",
+        criteria: [
+            'Completely off-topic',
+            'Barely related to the topic',
+            'Loosely related to the topic',
+            'Somewhat related to the topic',
+            'Related to the topic',
+            'Clearly relevant to the topic',
+            'Highly relevant to the topic',
+            'Very highly relevant to the topic',
+            'Directly on the current topic',
+            "Directly on the bot's persona or current topic",
+        ],
+    },
+    friendships: {
+        type: 'score',
+        instructions: 'How familiar and friendly is the sender with the bot?',
+        criteria: [
+            'Hostile or complete stranger',
+            'Very distant',
+            'Distant',
+            'Slightly distant',
+            'Neutral',
+            'Slightly familiar',
+            'Familiar',
+            'Quite familiar',
+            'Close',
+            'Close friend',
+        ],
+    },
+    silence_gap: {
+        type: 'score',
+        instructions: 'How quiet has the conversation been relative to its recent pace?',
+        criteria: [
+            'Very active',
+            'Active',
+            'Fairly active',
+            'Slightly active',
+            'Normal',
+            'Slightly quiet',
+            'Quiet',
+            'Very quiet',
+            'Long silence',
+            'Extremely long silence',
+        ],
+    },
+    interruption_risk: {
+        type: 'score',
+        instructions: 'How risky would it be for the bot to interject right now?',
+        criteria: [
+            'No risk',
+            'Very low risk',
+            'Low risk',
+            'Slightly low risk',
+            'Moderate risk',
+            'Slightly high risk',
+            'High risk',
+            'Very high risk',
+            'Severe risk',
+            'Extremely high risk',
+        ],
+    },
+};
+
+export interface SystemOnePayload {
+    state: Record<string, unknown>;
+    questions: Record<JudgeScoreQuestionKey, JudgeScoreQuestion>;
+    historyCount: number;
+    historyTokens: number;
+}
+
+/** 把同一份判定输入渲染成 System One 的 state + questions（与 LLM messages 同源） */
+export function buildSystemOnePayload(input: BuildJudgePromptInput): SystemOnePayload {
+    const prepared = prepareJudgeData(input);
+    const history = prepared.selected.map(item => ({
+        role: item.role,
+        from: item.userId ?? null,
+        time: item.time ?? null,
+        text: item.text,
+    }));
+    const state: Record<string, unknown> = {
+        bot: { name: prepared.botName, account: input.botId ?? null },
+        role: prepared.role || null,
+        globalInstructions: prepared.globalPrompt || null,
+        currentTime: formatTime(prepared.now),
+        hardFeatures: input.features ?? null,
+        history,
+        candidate: input.candidate ? {
+            role: input.candidate.role,
+            from: input.candidate.userId ?? null,
+            time: input.candidate.time ?? null,
+            text: input.candidate.text,
+        } : null,
+        dataBoundary: prepared.dataBoundary,
+    };
     return {
-        messages: built.messages,
-        expected: {
-            schema: buildJudgeOutputSchema(),
-            instruction: getPromptTexts().judgeOutputSpec().trim(),
-        },
-        historyCount: built.historyCount,
-        historyTokens: built.historyTokens,
+        state,
+        questions: JUDGE_SCORE_QUESTIONS,
+        historyCount: prepared.historyCount,
+        historyTokens: prepared.historyTokens,
     };
 }
