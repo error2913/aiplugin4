@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.30.0-green)
+![Version](https://img.shields.io/badge/Version-4.30.1-green)
 ![Docs](https://img.shields.io/badge/docs-文档站-blue)
 
 > 📖 **文档站**：<https://error2913.github.io/aiplugin4/> —— 在线阅读体验更好（全文搜索、深色模式、目录导航）。
@@ -369,7 +369,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 触发活跃时间 | 每框一段 `HH:mm-HH:mm-次数`（可多段）；`.ai trg active on` 使用该全局时段 |
 | 默认计数器 / 默认计时器 / 默认概率 | `counter` / `delay` / `prob` 模式开启时的默认参数；`默认计时器` 单位秒 |
 | 触发正则表达式 | 匹配即强制触发 AI 回复（**默认已不含 @ CQ**，@ 由「被@触发」开关判定），[正则表达式教程](https://www.runoob.com/regexp/regexp-syntax.html) |
-| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[weights]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常）。消息立即评分；WAIT 结果/回复后进入 30s WAIT，期间挂起最新一条，WAIT 到点才评；模型给六维 0~10 分，直接乘权重后归一化 `S`，默认阈值 0.6（0~1 可配）；无 shadow/IGNORE/预筛/预算/精力/活跃时间闸门 |
+| 评分触发参数 | String TOML v2（`[decision]/[scoring]/[weights]/[model]/[prompt]`）；**空/非法 ⇒ 判定不可用**（其它触发照常）。消息立即评分；WAIT 结果/回复后进入 30s WAIT，期间挂起最新一条，WAIT 到点才评；模型给六维 0~10 分，直接乘权重后归一化 `S`，默认阈值 0.4（0~1 可配）；无 shadow/IGNORE/预筛/预算/精力/活跃时间闸门 |
 | 默认定时器 | **Template，每框一个定时器**（框内为单条 TimerSpec 的 TOML：`types/years/months/days/hours/minutes/count/prompts`，与 `set_timer` 完全一致、`prompts` 必填）；可多框=多个定时器；`.ai trg timer on` 后按表为每会话注册 |
 | 事件触发规则 | JSON v1：一条规则只绑一个扁平事件名（`group_increase`/`poke`/`group_request` 等，不再用 `notify.*`、不再支持多事件数组），按「事件接收」页的开关/白名单录入上下文后，命中即让会话对事件做出响应（顺序 = 优先级，首条命中）。空规则 = 关闭；`prompt` 可留空（事件已在上一条系统消息里，留空 = 只触发响应、不附加指令）；修改后需重载 JS 生效。依赖「接收依赖通知事件」开启 + 事件在白名单 + 会话 AI 已开启；group_request（加群申请）为主场景，friend_request 可能因非好友无法投递回复。链事件规则独立于本开关（只需录制门）。格式推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)生成 |
 
