@@ -3,7 +3,9 @@ import Handlebars from "handlebars";
 
 import { initAgents } from "./agent/agents";
 import { registerAgentApi } from "./agent/api";
+import { installAuxAgent } from "./agent/aux_agent_impl";
 import { installAuxLlm } from "./agent/aux_llm_impl";
+import { installAuxTools } from "./agent/aux_tools_impl";
 import { MemoryScheduler } from "./agent/memory_scheduler";
 import { BlockManager } from "./block";
 import { registerAllCmds } from "./cmd/bootstrap";
@@ -18,8 +20,10 @@ import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
 import { MessagePipeline } from "./pipeline";
+import { reconcileRuleTimers } from "./pipeline/trigger_timer_impl";
 import { installPromptMemorySource } from "./prompt/memory_source_impl";
 import { registerBuiltinSections } from "./prompt/sections";
+import { registerJudgePromptTextsImpl } from "./prompt/texts/en";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import { registerAllTools } from "./tool/bootstrap";
@@ -51,9 +55,16 @@ function main() {
   registerAgentApi();
   checkUpdate();
   registerAllTools();
+  // 辅助智能体能力层装配：适配器注册表必须在提示词段注册前（imageHost/resource 段按 snippet 判断）
+  installAuxTools();
+  installAuxAgent();
   // 提示词段注册：必须在工具注册之后（段构建依赖工具可见性）与配置预热之后（读取角色/开关）
   registerBuiltinSections();
-  TimerManager.init();
+  registerJudgePromptTextsImpl();
+  // 定时器：先加载队列并 reconcile 掉失效规则条目，再启动轮询（M2 拆分 loadQueue/start）
+  TimerManager.loadQueue();
+  reconcileRuleTimers();
+  TimerManager.start();
   MemoryScheduler.init();
   MediaTaskManager.init();
   ImageGC.init();

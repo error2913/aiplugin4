@@ -19,8 +19,10 @@ import { eventTriggerInstruction } from "../prompt/texts/en";
 import type { Session } from "../session/session";
 import { getSession } from "../session/session_service";
 import { SYSTEM_NAME } from "../utils/protocol";
-import { getSessionCtxAndMsg } from "../utils/seal";
+import { applyLastMessageRef, getSessionCtxAndMsg } from "../utils/seal";
 import type { MessageSegment } from "../utils/string";
+
+import { tryChainEventTrigger } from "./event_ingress";
 
 const log = logger.withTag('event-trigger');
 
@@ -51,6 +53,8 @@ export function hasEventTriggerRules(): boolean {
  */
 export async function maybeTriggerEvent(view: EventView, dedupKey: string, options: TriggerEventOptions = {}): Promise<boolean> {
     try {
+        // 链规则优先（独立于「事件触发」开关，只需录制门）；命中/认领后不再走 v1
+        if (await tryChainEventTrigger(view, dedupKey, options)) return true;
         const config = Config.trigger.EVENT_TRIGGER.CONFIG;
         if (!config || config.rules.length === 0) return false;
         if (isEventTriggerExcluded(view)) return false;
@@ -60,14 +64,16 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
         if (isEventTriggered(dedupKey)) return false;
 
         const session = options.session ?? getSession(view.sid);
-        // 统一的 AI 开启门禁：未待机（含 .ai off）或本会话关闭「事件触发」时不响应
-        if (!(session.setting.standby || Config.base.GLOBAL_STANDBY)) return false;
+        // 触发闸 = aiEnabled（GLOBAL_STANDBY 只放开录制，不放开触发）；本会话关闭「事件触发」时也不响应
+        if (!session.setting.enabled()) return false;
         if (!session.setting.eventTrigger) return false;
         let ctx = options.ctx;
         let msg = options.msg;
         if (!ctx || !msg) {
             try {
                 ({ ctx, msg } = getSessionCtxAndMsg(view.epId, view.sid, view.isPrivate));
+                // A12：事件触发的合成 msg 无 rawId，回填同端点最近真实用户消息，开启「回复引用」时也能带 [CQ:reply]
+                applyLastMessageRef(session, ctx, msg);
             } catch (e) {
                 log.debug(`事件触发跳过：无法重建会话上下文 ${view.sid}（${e instanceof Error ? e.message : String(e)}）`);
                 return false;

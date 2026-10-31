@@ -63,7 +63,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 }],
             }],
             purposes: { chat: 'sonnet' },
-            groups: [{ purposes: ['chat'], body: { max_tokens: 4096 } }],
         };
         assert.equal(validateV5Config(full).length, 0, '完整配置应合法');
 
@@ -168,13 +167,26 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(validateV5Config(genCfg).length, 0);
     },
 
-    /** groups：purposes 必须非空且用途合法 */
-    testV5GroupsValidation(): void {
-        assert.ok(issuePaths({ ...goodConfig(), groups: [{ purposes: [] }] }).includes('$.groups[0].purposes'));
-        assert.ok(issuePaths({ ...goodConfig(), groups: [{ purposes: ['bogus'] }] }).includes('$.groups[0].purposes[0]'));
-        assert.equal(validateV5Config({
-            ...goodConfig(), groups: [{ purposes: ['chat'], body: { max_tokens: 1 } }],
-        }).length, 0);
+    /** models[].request.bodyByUse：用途必须合法、值必须是对象、thinking 必须是对象、kind 要匹配 */
+    testV5BodyByUseValidation(): void {
+        const cfg = (bodyByUse: any, kind: any = 'text') => ({
+            ...goodConfig(),
+            providers: [{
+                api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k',
+                models: [{ id: 'm1', name: 'x', kind, request: { bodyByUse } }],
+            }],
+        });
+        const P = '$.providers[0].models[0].request.bodyByUse';
+        assert.ok(issuePaths(cfg({ bogus: { max_tokens: 1 } })).includes(P + '.bogus'));
+        assert.ok(issuePaths(cfg({ chat: 1 })).includes(P + '.chat'));
+        assert.ok(issuePaths(cfg({ chat: { thinking: 'enabled' } })).includes(P + '.chat.thinking'));
+        // kind 不匹配：text 模型不能配 image-understanding 的 body
+        assert.ok(issuePaths(cfg({ 'image-understanding': { max_tokens: 1 } }, 'text'))
+            .includes(P + '.image-understanding'));
+        // 合法
+        assert.equal(validateV5Config(cfg({ chat: { max_tokens: 1, temperature: 1 } })).length, 0);
+        // bodyByUse 不是对象
+        assert.ok(issuePaths(cfg([{ use: 'chat' }])).includes(P));
     },
 
     /** 报错必须带 $.a.b[0].c 形式的路径，且一次报全部 */
@@ -204,7 +216,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(isEligibleKind('image-understanding', 'vision'));
         assert.ok(isEligibleKind('image-generation', 'gen'));
         assert.ok(isEligibleKind('tts', 'tts'));
-        for (const u of ['chat', 'compression', 'summarization', 'judge'] as const) {
+        for (const u of ['chat', 'summarization', 'judge'] as const) {
             assert.ok(isEligibleKind(u, 'text'), `${u} 应接受 text`);
             assert.ok(isEligibleKind(u, 'vision'), `${u} 应接受 vision`);
             for (const k of ['embed', 'gen', 'tts'] as const) {
@@ -284,7 +296,16 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.deepEqual(classifyModel('', 'mystery', { vision: true }), ['vision']);
         assert.deepEqual(classifyModel('', 'mystery', { embed: true }), ['embed']);
         assert.deepEqual(classifyModel('', 'gpt-4o', { manual: 'text' }), ['text']);
-        assert.equal(MODEL_KINDS.length, 5);
+        // 决策模型不靠命名猜（decision-model-preview 默认仍是 text），只能手动声明
+        assert.deepEqual(classifyModel('', 'decision-model-preview'), ['text']);
+        assert.deepEqual(classifyModel('', 'decision-model-preview', { manual: 'decision' }), ['decision']);
+        assert.equal(MODEL_KINDS.length, 6);
+        assert.ok(MODEL_KINDS.includes('decision'));
+        // 用途资格：decision 只允许 judge
+        assert.equal(isEligibleKind('judge', 'decision'), true);
+        assert.equal(isEligibleKind('chat', 'decision'), false);
+        assert.equal(isEligibleKind('summarization', 'decision'), false);
+        assert.equal(isEligibleKind('judge', 'text'), true);
     },
 
     // ---------------------------------------------------------------- 适配
@@ -301,7 +322,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 { api: 'openai-completions', baseURL: 'https://api.siliconflow.cn/v1', apiKey: 'k' },
                 { api: 'openai-completions', baseURL: 'https://a.com/v1', apiKey: 'k', models: [], enabled: false },
             ],
-            groups: [{ purposes: ['chat'], body: { max_tokens: 1 } }],
         };
         const { conns, rules } = adaptV5(cfg);
 
@@ -322,10 +342,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         // enabled:false → ignore
         assert.equal(conns[2].ignore, true);
         assert.equal(conns[0].ignore, false);
-        // 用途组 → 规则
-        assert.equal(rules.length, 1);
-        assert.deepEqual(rules[0].use, ['chat']);
-        assert.deepEqual(rules[0].body, { max_tokens: 1 });
+        // 没有任何 per-model request → 不产规则（groups 已移除）
+        assert.equal(rules.length, 0);
     },
 
     /** per-model request → models 定向规则；bodyMode 透传 */
@@ -347,6 +365,52 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(rules[0].bodyMode, 'replace');
         assert.ok(rules[0].body!.prompt === '{prompt}');
         assert.equal(rules[0].response!.data_path, 'images.0.url');
+    },
+
+    /** bodyByUse → 每个用途一条 models 定向规则；逐用途覆盖通用 body */
+    testAdaptBodyByUse(): void {
+        const cfg: V5Config = {
+            version: 5,
+            providers: [{
+                api: 'openai-completions', baseURL: 'https://api.deepseek.com/v1', apiKey: 'k',
+                models: [{
+                    id: 'flash', name: 'deepseek-flash', kind: 'text',
+                    request: {
+                        body: { temperature: 0.5 },
+                        bodyByUse: {
+                            judge: { max_tokens: 300, temperature: 0 },
+                            chat: { max_tokens: 65536, temperature: 1 },
+                        },
+                    },
+                }],
+            }],
+        };
+        const { rules } = adaptV5(cfg);
+        // 通用一条 + bodyByUse 两条
+        assert.equal(rules.length, 3);
+        assert.deepEqual(rules[0].models, ['flash']);
+        assert.deepEqual(rules[0].use, []);
+        const judge = rules.find(r => r.use.length === 1 && r.use[0] === 'judge')!;
+        assert.deepEqual(judge.body, { max_tokens: 300, temperature: 0 });
+        assert.deepEqual(judge.models, ['flash']);
+
+        // 合并优先级：代码默认 < 通用 body < bodyByUse[use]
+        resetRuleRowsForTest();
+        setRuleRows(rules);
+        assert.deepEqual(bodyDefaultsFor('judge', 'flash'), { max_tokens: 300, temperature: 0 });
+        assert.deepEqual(bodyDefaultsFor('chat', 'flash'), { max_tokens: 65536, temperature: 1 });
+        // 不传 ref → models 定向规则都匹配不到，退回代码默认
+        assert.deepEqual(bodyDefaultsFor('judge'), { max_tokens: 65536, temperature: 1 });
+        resetRuleRowsForTest();
+    },
+
+    /** 插件默认请求体只保留 max_tokens / temperature（嵌入仍有专用默认） */
+    testDefaultBodies(): void {
+        resetRuleRowsForTest();
+        assert.deepEqual(bodyDefaultsFor('chat'), { max_tokens: 65536, temperature: 1 });
+        assert.deepEqual(bodyDefaultsFor('judge'), { max_tokens: 65536, temperature: 1 });
+        assert.deepEqual(bodyDefaultsFor('image-understanding'), { max_tokens: 65536, temperature: 1 });
+        assert.deepEqual(bodyDefaultsFor('text-embedding'), { encoding_format: 'float', dimensions: 1024 });
     },
 
     /** 无 request 的模型不产出规则（避免空规则命中） */
@@ -461,5 +525,42 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const issues = validateV5Config(bound);
         assert.ok(issues.some(i => i.path === '$.purposes.chat'),
             '把 gen 模型绑到 chat 用途应被校验拒绝（类型不匹配）');
+    },
+
+    /** 已移除的 compression 用途：旧配置解析期自动清洗 + warning，不因移除而整份失效 */
+    testRemovedCompressionPurposeSanitized() {
+        const text = JSON.stringify({
+            version: 5,
+            providers: [{
+                api: 'openai-completions', baseURL: 'https://api.deepseek.com/v1', apiKey: 'k',
+                models: [{ id: 'm', name: 'deepseek-chat' }],
+            }],
+            purposes: { chat: 'm', compression: 'm' },
+        });
+
+        // 前提：不清洗时这份旧配置确实会被判非法（这正是解析期清洗存在的理由）
+        assert.ok(validateV5Config(JSON.parse(text)).some(i => /compression/.test(i.path + i.msg)),
+            '未清洗的旧配置应因未知用途 compression 报错');
+
+        const { config, issues, warnings } = parseV5Config(text);
+        assert.deepEqual(issues, [], '清洗后应通过校验');
+        assert.ok(config, '应解析成功');
+        assert.ok(warnings && warnings.some(w => w.includes('compression')), '应给出清洗 warning');
+        assert.deepEqual(Object.keys(config!.purposes ?? {}), ['chat'], 'purposes.compression 应被剔除');
+
+        // 旧配置里的 groups[] 已停用：不报错、原样忽略（不迁移）
+        const legacyGroups = JSON.stringify({
+            ...JSON.parse(text),
+            groups: [{ purposes: ['chat'], body: { max_tokens: 1 } }],
+        });
+        const lg = parseV5Config(legacyGroups);
+        assert.deepEqual(lg.issues, [], '旧 groups[] 不应导致校验失败');
+        assert.ok(lg.config, '含旧 groups[] 的配置仍应解析成功');
+        assert.ok(lg.warnings?.some(w => w.includes('用途组请求体')), '应提示 groups 已忽略');
+
+        // 清洗后的配置再解析不应再有 warning（幂等，不会反复提示）
+        const again = parseV5Config(JSON.stringify(config));
+        assert.deepEqual(again.issues, []);
+        assert.deepEqual(again.warnings ?? [], []);
     },
 };

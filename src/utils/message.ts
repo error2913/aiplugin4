@@ -22,6 +22,7 @@ import { foldOmittedLine, foldSummaryHeader, AUX_HISTORY_OMIT_MARK as PROTOCOL_A
 import { getRoleSetting } from "./role";
 import { escapeToolResultBoundary, fmtDate } from "./string";
 import { withTimeout } from "./timeout";
+import { estimateEventTokens, estimateTextTokens } from "./token_estimate";
 
 export { getRoleSetting } from "./role";
 
@@ -103,62 +104,8 @@ interface ContextMessage {
 
 const SYSTEM_REMINDER_TEXT = 'Keep following the role setting, context markers and tool-call rules above.';
 
-/**
- * 无依赖的 token 估算：按 Unicode 类别分桶近似 BPE。
- * 用于「上下文最大token」的整包预算估算，避免依赖外部 tokenizer。
- */
-export function estimateTextTokens(text: string): number {
-    let asciiAlnum = 0;
-    let asciiSpace = 0;
-    let asciiPunct = 0;
-    let cjk = 0;
-    let cjkLike = 0;
-    let otherBmp = 0;
-    let astral = 0;
-
-    for (const ch of String(text || '')) {
-        const cp = ch.codePointAt(0) as number;
-        if (isCjkCodePoint(cp)) {
-            cjk++;
-        } else if (cp > 0xFFFF) {
-            astral++;
-        } else if (cp <= 0x7F) {
-            if ((cp >= 0x30 && cp <= 0x39) || (cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A)) {
-                asciiAlnum++;
-            } else if (cp === 0x20 || (cp >= 0x09 && cp <= 0x0D)) {
-                asciiSpace++;
-            } else if (cp >= 0x21 && cp <= 0x7E) {
-                asciiPunct++;
-            } else {
-                asciiSpace++;
-            }
-        } else if (isCjkLikeCodePoint(cp)) {
-            cjkLike++;
-        } else {
-            otherBmp++;
-        }
-    }
-
-    return Math.ceil(asciiAlnum / 4)
-        + Math.ceil(asciiSpace / 4)
-        + Math.ceil(asciiPunct / 2)
-        + cjk
-        + Math.ceil(cjkLike * 3 / 2)
-        + Math.ceil(otherBmp / 2)
-        + astral * 2;
-}
-
-function isCjkCodePoint(cp: number): boolean {
-    return (cp >= 0x3400 && cp <= 0x4DBF)
-        || (cp >= 0x4E00 && cp <= 0x9FFF)
-        || (cp >= 0xF900 && cp <= 0xFAFF)
-        || (cp >= 0x20000 && cp <= 0x2FA1F);
-}
-
-function isCjkLikeCodePoint(cp: number): boolean {
-    return (cp >= 0x3040 && cp <= 0x30FF)
-        || (cp >= 0xAC00 && cp <= 0xD7AF);
-}
+// token 估算已拆到 L1 叶子 `token_estimate.ts`（供上下文层复用）；此处 re-export 保持既有 import。
+export { estimateTextTokens } from "./token_estimate";
 
 /** 请求体结构 overhead 默认值 */
 const MESSAGE_BASE_OVERHEAD = 4;
@@ -409,8 +356,8 @@ export function toolResultCallId(m: any): string {
  * - 档位按本轮最新一条 user 条目判定（L0 默认 / L1 含指代 / L2 明确要求回顾不折叠）。
  */
 export function renderFoldBudget(session: Session, messages: ContextMessage[]): number {
-    const standby = session.setting?.standby === true || Config.base.GLOBAL_STANDBY === true;
-    if (!standby) return 0;
+    const aiEnabled = session.setting?.aiEnabled === true || Config.base.GLOBAL_STANDBY === true;
+    if (!aiEnabled) return 0;
     // 按会话覆盖优先（P2-1）：本会话设了「冷态窗口字数」就用它，否则用全局配置
     const base = session.setting?.overrideOr?.('coldWindowChars', 0) ?? 0;
     if (base <= 0) return 0;
@@ -443,6 +390,12 @@ export function renderFoldBudget(session: Session, messages: ContextMessage[]): 
  * 仍为 0 时用内置常量兜底。**无论折叠是否生效都有 head 硬截断兜底**。
  *
  * @param maxCharsOverride 显式预算；不传则自动按会话推导
+ */
+/**
+ * 旧辅助历史兜底窗口（字符）——**legacy 回退专用**：
+ * 仅当 `renderWindowedHistory` 拿不到 session 折叠预算时的旧回退路径使用；
+ * judge 新动作路径（R2 切流后）不再依赖它（方案 §11.2 B8）。
+ * 本常量不纳入 token 范围化（字符窗口是显式标注的 legacy 回退边界），不要新增调用。
  */
 export const AUX_HISTORY_FALLBACK_CHARS = 5000;
 export const AUX_HISTORY_OMIT_MARK = PROTOCOL_AUX_HISTORY_OMIT_MARK;
@@ -542,6 +495,17 @@ function truncateMessageText(message: ContextMessage, maxChars: number): number 
 }
 
 /**
+ * 预算口径换算（旧路径 applyTokenBudget 与 v2 编译共用）：
+ * 把配置/探测得到的请求预算换算成与真实 `prompt_tokens` 同口径的估算预算。
+ * `TokenCalibration` 校准系数 > 0 时除以它（请求体估算侧会乘以该系数，这里先折算回去）；
+ * 否则原样返回。两条路径共用此函数，避免再次漂移。
+ */
+function resolveCompileBudget(requestBudget: number, modelName?: string): number {
+    const factor = TokenCalibration.getFactor(modelName || '');
+    return factor > 0 ? Math.max(1, Math.floor(requestBudget / factor)) : requestBudget;
+}
+
+/**
  * token 预算裁剪：在 system + samples + context 完整组装后统一计算，超出预算时从最早的
  * context 消息开始丢弃；system 与 samples 永不丢弃。tools 的 JSON 长度同样预留进预算，
  * 使「上下文最大token」更接近真实请求体上限。
@@ -558,10 +522,10 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     if (maxTokens <= 0) return messages;
 
     const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
-    const factor = TokenCalibration.getFactor(modelName || '');
-    const budget = factor > 0
-        ? Math.max(Math.floor(maxTokens / factor - reserve), 1)
-        : Math.max(maxTokens - reserve, 1);
+    // 口径与 v2 编译共用 resolveCompileBudget：先按校准系数折算预算，再扣 tools 预留。
+    // 与旧实现 `factor > 0 ? max(floor(maxTokens / factor - reserve), 1)` 等价（reserve 为整数，
+    // floor(x - reserve) === floor(x) - reserve），故旧路径行为不变。
+    const budget = Math.max(resolveCompileBudget(maxTokens, modelName) - reserve, 1);
     const totalTokens = () => messages.reduce((acc, m) => acc + estimateMessageTokens(m), 0);
     let tokens = totalTokens();
 
@@ -608,7 +572,13 @@ function compileV2Request(
             content: buildContent(message),
         }));
         const budgets = resolveContextBudgets(session, modelName || '');
-        const budget = budgets.requestBudget;
+        // 预算口径与真实请求/警告同口径（见 resolveCompileBudget、checkRequestBudget）：
+        // 未乘校准系数时编译会误以为“装得下”，导致请求体实际超预算且 omittedFromSeq 永不出现。
+        const budget = resolveCompileBudget(budgets.requestBudget, modelName);
+        // 工具 schema 预留按 JSON 实际估算（旧实现 tools.length * 20 远小于真实值，请求体因此超预算）。
+        const toolsReserveTokens = Array.isArray(tools) && tools.length > 0
+            ? estimateTextTokens(JSON.stringify(tools))
+            : 0;
         // 本轮内联图片预算（同一次请求共享）：超出后只留文本标签（descriptors 会先渲染 [img:ID] 文本）
         const cfgLimit = Config.image.MAX_IMAGES_PER_REQUEST;
         const budgetRef = opts?.imageBudget ?? { left: cfgLimit > 0 ? cfgLimit : Number.POSITIVE_INFINITY };
@@ -621,10 +591,11 @@ function compileV2Request(
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
             budgetTokens: budget,
-            toolsReserveTokens: Array.isArray(tools) ? tools.length * 20 : 0,
+            toolsReserveTokens,
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
             caps: { vision: multimodal },
             toolImages: opts?.toolImages ?? Config.image.TOOL_RESULT_IMAGES,
+            toolResultMaxTokens: Config.tool.TOOL_RESULT_MAX_TOKENS,
             resolve: {
                 imageUrl: (ref: string) => {
                     try {
@@ -687,13 +658,7 @@ function compileV2Request(
             tagBoundaryTokens: budgets.tagBoundaryTokens,
             formatDateKey: (at: number) => fmtDate(at).slice(0, 10),
             estimateTextTokens,
-            estimateEventTokens: (event: ConversationEvent) => {
-                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
-                let chars = 0;
-                for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
-                if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
-                return Math.max(1, Math.ceil(chars / 3)) + 4;
-            },
+            estimateEventTokens: (event: ConversationEvent) => estimateEventTokens(event),
         });
         if (opts?.trace) {
             opts.trace.entries = buildImageTrace(

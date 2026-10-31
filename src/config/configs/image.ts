@@ -36,6 +36,9 @@ export default class ImageConfig {
         seal.ext.registerBoolConfig(ext, "模型工具结果图片", true, "是否允许 tool 消息携带图片块（实测 deepseek-flash 允许；部分网关不支持 tool 图，可关掉改为文本标签）", "图片");
         seal.ext.registerBoolConfig(ext, "图片被模型拒绝时自动降级", true, "模型报「不支持的图片」时定位并标记该图为「模型不可用」，改为文本标签重发本轮；不再让整个会话卡死", "图片");
         seal.ext.registerBoolConfig(ext, "图片降级通知", false, "图片被模型拒绝并自动降级时，用 ctx.notice 告知骰主", "图片");
+        // 主对话三段注入（方案 §9.4 / §10.5）：图床段默认开（承接旧 IMAGES 的图库文案）
+        seal.ext.registerBoolConfig(ext, "图床提示注入", true, "开启后主对话系统提示词注入图库/图床规则段（core:image-host）；仅在配置了后端图床或图床 MCP 时生效", "图片");
+        seal.ext.registerIntConfig(ext, "图床提示预算", 600, "图床提示段字符预算（默认 600，受段硬上限 600 约束）", "图片");
     }
 
     static get() {
@@ -56,6 +59,8 @@ export default class ImageConfig {
             TOOL_RESULT_IMAGES: seal.ext.getBoolConfig(ext, "模型工具结果图片"),
             IMAGE_DEGRADE_ENABLED: seal.ext.getBoolConfig(ext, "图片被模型拒绝时自动降级"),
             IMAGE_DEGRADE_NOTICE: seal.ext.getBoolConfig(ext, "图片降级通知"),
+            IMAGE_HOST_PROMPT: seal.ext.getBoolConfig(ext, "图床提示注入"),
+            IMAGE_HOST_PROMPT_BUDGET: seal.ext.getIntConfig(ext, "图床提示预算"),
             LOCAL_IMAGE_PATH_MAP: ImageConfig.getPathMapConfig(ext, "本地图片路径")
         }
     }

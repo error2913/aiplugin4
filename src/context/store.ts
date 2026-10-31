@@ -29,6 +29,9 @@ import {
 import { headKey } from "./keys";
 import {
     buildEventPage,
+    EVENT_PAGE_MAX_BYTES,
+    EVENT_PAGE_MAX_EVENTS,
+    EVENT_PAGE_MAX_SINGLE_EVENT_BYTES,
     measureEventPageBytes,
     PageStoreError,
     probeStoredString,
@@ -335,7 +338,16 @@ export class ContextStore {
                 seqEnd: candidate[candidate.length - 1].seq,
                 events: candidate,
             });
-            if (chunk.length > 0 && (candidate.length > 256 || bytes > 32 * 1024)) break;
+            if (chunk.length === 0) {
+                // 首条事件独占一页：放宽到单事件页上限（大工具结果不再让 flush 永久失败）。
+                // 超过该上限的事件已在入库前截断（见 context.appendToolResult）；这里仍单独成页，
+                // 避免与后续事件拼成一个注定被 buildEventPage 拒绝的页。
+                chunk.push(event);
+                if (bytes > EVENT_PAGE_MAX_SINGLE_EVENT_BYTES) break;
+                continue;
+            }
+            // 多事件页仍按 32KB / 256 条切（与 page_store 校验口径一致）
+            if (candidate.length > EVENT_PAGE_MAX_EVENTS || bytes > EVENT_PAGE_MAX_BYTES) break;
             chunk.push(event);
         }
         return chunk;

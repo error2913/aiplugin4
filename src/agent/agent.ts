@@ -29,7 +29,7 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { collectContextBacklog, compactContextV2, forceCompactToTarget } from "./context_bridge";
+import { collectContextBacklog, compactContextV2 } from "./context_bridge";
 import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -154,22 +154,41 @@ export default class Agent {
     }
 
     /**
-     * 预算到顶后的后台压缩：只在「本轮编译发现未摘要原文被预算裁掉」时触发一次。
-     * 不阻塞回复；失败退避只影响下一次触发，**不为空闲会话设置任何定时器**。
+     * 预算到顶后的自动摘要：**本会话（epoch）最多 1 次**，成功才消耗额度。
+     * 触发条件（全部满足）：
+     * - 额度未用且没有在飞（`ctxAutoSummaryUsed` / `ctxAutoSummaryInFlight`）；
+     * - 本轮编译确实发生了预算裁剪（`lastCompile()` 非空且 `omittedFromSeq !== null`）；
+     * - 仍有未摘要原文超过保留目标（`unsummarizedTokens > targetTokens`，避免空跑）。
+     * 不阻塞回复；失败/未推进不消耗额度；额度用尽后只归档（编译期省略，零 LLM）。
      */
     private scheduleContextCompaction(session: Session): void {
         const service = session.contextV2;
         if (!service) return;
+        if (session.ctxAutoSummaryUsed || session.ctxAutoSummaryInFlight) return;
+
         const stats = service.lastCompile();
         if (!stats || stats.omittedFromSeq === null) return;
+
         const budgets = resolveContextBudgets(session, Model.getChatModel('chat')?.name || '');
+        const pending = service.head().unsummarizedTokens;
+        if (pending <= budgets.targetTokens) return;
+
+        session.ctxAutoSummaryInFlight = true;
         void compactContextV2(session, budgets.targetTokens)
             .then(result => {
+                session.ctxAutoSummaryInFlight = false;
                 if (result?.advanced) {
-                    log.info(`[ctx-compact] 预算到顶触发压缩：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                    session.ctxAutoSummaryUsed = 1;
+                    session.save();
+                    log.info(`[ctx-compact] 本会话唯一一次自动摘要：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                } else {
+                    log.warning(`[ctx-compact] 自动摘要未推进（${result?.reason ?? 'unknown'}），额度保留`);
                 }
             })
-            .catch(e => log.warning('[ctx-compact] 后台压缩失败（不影响回复，下次触发再试）: ' + (e instanceof Error ? e.message : String(e))));
+            .catch(e => {
+                session.ctxAutoSummaryInFlight = false;
+                log.warning('[ctx-compact] 自动摘要异常（额度保留）: ' + (e instanceof Error ? e.message : String(e)));
+            });
     }
     /**
      * 单轮对话（aux LLM / 外部插件）：
@@ -198,6 +217,12 @@ export default class Agent {
      * **默认不解析图片**；`allowImages:true` 时 user 文本里的 [img:] 才会变成图片块，
      * 且非 user 消息里的图片块会被降级为文本（assistant 消息不允许带图）。
      */
+    /** 当前 use 是否已解析到可用模型（判定降级：未配置 judge 模型时走纯规则保守发言） */
+    async hasModel(): Promise<boolean> {
+        await Model.ensureLoaded();
+        return !!Model.getChatModel(this.use);
+    }
+
     async chatMessages(messages: { role: string, content: string }[], opts?: { allowImages?: boolean }): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
@@ -218,30 +243,35 @@ export default class Agent {
      * 标准智能体编排：构建消息 → 请求模型 → 执行工具调用（函数调用/提示词工程）→ 回填上下文 →
      * 循环直到模型给出最终回复（工具轮数由「允许连续调用函数次数」配置控制，0 为不限制），最后统一拆分并发送回复。
      */
-    async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<void> {
+    async run(session: Session, ctx: seal.MsgContext, msg: seal.Message, tool_choice?: string): Promise<boolean> {
         // 启动前捕获 stopVersion：.ai stop 发生在排队期间或拿到许可瞬间都会因版本变化而中止
         const version = session.stopVersion;
         // 同会话闸门：已有 run 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
-        if (session.running || session.starting) return;
+        if (session.running || session.starting) return false;
         session.starting = true;
         let acquired = false;
+        let started = false;
         try {
             // 首轮对话前等待模型列表预热完成（连接拉取失败已按连接降级，不会阻塞）
             await Model.ensureLoaded();
             acquired = await requestLimiter.acquire(session.sessionId);
-            if (!acquired) return;
-            if (session.stopVersion !== version) return;
+            if (!acquired) return false;
+            if (session.stopVersion !== version) return false;
             // 新一轮 run 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
             resetStopEvent(session.stopEvent);
             session.running = true;
+            // 编译统计按轮重置：run 提前 return / fork seed 复用父 service.compile 时不得读到陈旧统计
+            session.contextV2?.resetLastCompile?.();
             session.starting = false;
             session.aiTriggeredAt = Math.floor(Date.now() / 1000);
             MemoryScheduler.onRunStart(session);
             session.activeRuns++;
+            // started=true 表示本轮确实起轮（用于 chat 的 ChatOutcome 记账，避免"假 SPEAK 扣精力"）
+            started = true;
             await this.runInternal(session, ctx, msg, tool_choice);
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
-            if (e instanceof StopError) return;
+            if (e instanceof StopError) return started;
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -260,14 +290,19 @@ export default class Agent {
             if (acquired) MemoryScheduler.onRunEnd(session);
             if (acquired) this.scheduleContextCompaction(session);
         }
+        return started;
     }
 
     /** 链结束后处理挂起队列：先全部入库（记录类不续跑），若含触发类且未被 stop 则用第一条串行再起一轮 */
     private async resumePending(session: Session, version: number): Promise<void> {
         if (session.pendingQueue.length === 0) return;
         const firstTrigger = session.pendingQueue.find(p => p.kind === 'trigger');
-        const hasTrigger = await session.flushPending();
-        if (hasTrigger && firstTrigger && session.stopVersion === version && !session.stopEvent.fired) {
+        // 触发闸二次判定（方案 §5.9）：.ai off 期间挂起的 trigger 项只入库、丢弃触发语义；
+        // 桶空时也不写 trigger 提示（避免无法兑现的提示残留在上下文）。
+        const aiActive = session.setting.enabled();
+        const canWake = aiActive && session.hasBucketToken();
+        const hasTrigger = await session.flushPending({ writeTriggerPrompts: canWake });
+        if (hasTrigger && firstTrigger && canWake && session.stopVersion === version && !session.stopEvent.fired) {
             // 重载恢复的挂起消息没有 ctx/msg 运行时对象：按落盘的 epId/isPrivate 重建；失败则跳过续跑（消息已入库不丢）
             let ctx = firstTrigger.ctx;
             let msg = firstTrigger.msg;
@@ -444,7 +479,8 @@ export default class Agent {
 
     /**
      * 模型分类错误的自动处理（runInternal / runStreamInner 共用）：
-     * - context_too_long：按「观察归档+删除」链路把持久化上下文压到模型窗口内（目标=min(本地预算, 报文窗口×0.8)），返回 retry；
+     * - context_too_long：v2 只把本轮请求预算收紧到报文窗口内（目标=min(本地预算, 报文窗口×0.8)）后
+     *   直接重发，不调用摘要；无事件账本的旧路径仍走「观察归档」，返回 retry；
      * - 图片下载失败（invalid_request：QQ 图床直链过期等）：把这些图片标记为不可用并降级为文本标签后重发，返回 retry；
      * - 配置触发的类别（默认 balance）：自动切换 chat 备用模型并持久化（可选 ctx.notice 通知），返回 retry；
      * - 其余类别 / 动作已用过仍失败：仅记日志，返回 giveup（静默结束本轮，不回复用户）。
@@ -495,7 +531,10 @@ export default class Agent {
             return 'retry';
         }
 
-        // 动作一：上下文超长 → 观察归档（原文进归档分片）→ 自动重发
+        // 动作一：上下文超长。
+        // - v2（事件账本）：**快速路径**——只收紧本轮请求预算后直接重发，不做摘要（0 次 LLM）；
+        //   原文永久留在账本，不影响 read_raw/grep_raw 回查，后续轮次照常编译省略。
+        // - 旧回退路径（无事件账本）：保持原样，观察归档后重发。
         if (e.kind === 'context_too_long' && !handled.archived) {
             if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
             // P2-3：把报文里解析出的模型窗口**按模型名持久化**，下次不必再撞一次超长报错
@@ -503,20 +542,14 @@ export default class Agent {
             if (probed !== undefined) rememberProbedContextWindow(modelLabel, probed);
             const target = computeArchiveTarget(Config.context.BUDGET_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
-            // v2：先按保留强度强制压缩一次（真正减少内容），成功再重发；
-            // 压缩不可用/失败才回退到旧的「临时收紧请求预算」路径。
             if (session.contextV2) {
-                const budgets = resolveContextBudgets(session, modelLabel);
-                const compacted = await forceCompactToTarget(session, budgets.targetTokens);
-                if (compacted?.advanced) {
-                    handled.archived = true;
-                    // 双保险：压缩后仍可能因系统提示/摘要/工具 schema 超出报文窗口，
-                    // 用报文解析出的目标临时收紧本轮请求预算（保留强度/标签边界仍按永久预算算）。
-                    session.context.setV2BudgetCap?.(target);
-                    log.info(`[model-error] 上下文超长：已压缩 ${compacted.batches ?? 0} 批（目标 ${budgets.targetTokens} tokens），自动重发`);
-                    return 'retry';
-                }
+                // 预算收紧只作用于本轮请求；保留强度/标签边界仍按永久预算算。第二次仍超长则 giveup。
+                session.context.setV2BudgetCap(target);
+                handled.archived = true;
+                log.info(`[model-error] 上下文超长：请求预算收紧至 ${target} tokens，直接重发（不做摘要）`);
+                return 'retry';
             }
+            // 旧回退路径保持原样。
             // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），
             // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）；
             // 'busy' 表示已有归档在飞，允许重发一次（重试会用归档后的上下文重建请求）。
@@ -526,11 +559,7 @@ export default class Agent {
                 return 'giveup';
             }
             handled.archived = true;
-            if (session.contextV2) {
-                log.info(`[model-error] 上下文超长：已按超长报文收紧请求预算至 ${target} tokens（事件账本，自动重发）`);
-            } else {
-                log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
-            }
+            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
             return 'retry';
         }
 
@@ -608,31 +637,36 @@ export default class Agent {
 
 
     /** 流式编排：与 run() 同层的流式循环（start → poll → 工具调用 → 递归续流），工具轮数由配置控制 */
-    async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    async runStream(session: Session, ctx: seal.MsgContext, msg: seal.Message): Promise<boolean> {
         const version = session.stopVersion;
         // 模型分类错误自动处理的 run 级状态（runInternal 同款：每类动作单次 run 至多一次）
         const handled = newModelErrorHandled();
         // 同会话闸门：已有 run/runStream 在跑或正在启动（含排队等待）时不再并发起一轮，消息已由 pipeline 挂起
-        if (session.running || session.starting) return;
+        if (session.running || session.starting) return false;
         session.starting = true;
         let acquired = false;
+        let started = false;
         try {
             // 首轮对话前等待模型列表预热完成
             await Model.ensureLoaded();
             acquired = await requestLimiter.acquire(session.sessionId);
-            if (!acquired) return;
-            if (session.stopVersion !== version) return;
+            if (!acquired) return false;
+            if (session.stopVersion !== version) return false;
             // 新一轮 runStream 启动：重置停止信号，本轮内 stop 才以 StopError 立即中断请求/工具链
             resetStopEvent(session.stopEvent);
             session.running = true;
+            // 编译统计按轮重置：runStream 提前 return / fork seed 复用父 service.compile 时不得读到陈旧统计
+            session.contextV2?.resetLastCompile?.();
             session.starting = false;
             session.aiTriggeredAt = Math.floor(Date.now() / 1000);
             MemoryScheduler.onRunStart(session);
             session.activeRuns++;
+            // started=true 表示本轮确实起轮（用于 chat 的 ChatOutcome 记账）
+            started = true;
             await this.runStreamInner(session, ctx, msg, undefined, handled);
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
-            if (e instanceof StopError) return;
+            if (e instanceof StopError) return started;
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -651,6 +685,7 @@ export default class Agent {
             if (acquired) MemoryScheduler.onRunEnd(session);
             if (acquired) this.scheduleContextCompaction(session);
         }
+        return started;
     }
 
     private async runStreamInner(

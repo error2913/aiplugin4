@@ -2,10 +2,16 @@
 import { TypeDescriptor } from "../utils/revive";
 
 export class Setting {
-    static validKeys: (keyof Setting)[] = ['priv', 'standby', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
+    static validKeys: (keyof Setting)[] = ['priv', 'aiEnabled', 'activeMode', 'timerTrigger', 'counter', 'timer', 'prob', 'activeTimeInfo', 'regexTrigger', 'eventTrigger', 'judge', 'overrides'];
     static validKeysMap: { [key in keyof Setting]?: TypeDescriptor<Setting[key]> } = {
         priv: 'number',
-        standby: 'boolean',
+        // 绝对触发闸：新会话默认关（Q3）；旧存档 standby=true 由 SessionService 迁移
+        aiEnabled: 'boolean',
+        // 会话级活跃时间开关（默认关；全局时段由「触发活跃时间」提供）
+        activeMode: 'boolean',
+        // 被 @ 触发开关（默认开，R17）
+        // timer 单模式开关（配置驱动；默认关）
+        timerTrigger: 'boolean',
         counter: 'number',
         timer: 'number',
         prob: 'number',
@@ -16,7 +22,9 @@ export class Setting {
         overrides: { objectValue: 'any' }
     }
     priv: number;
-    standby: boolean;
+    aiEnabled: boolean;
+    activeMode: boolean;
+    timerTrigger: boolean;
     counter: number;
     timer: number;
     prob: number;
@@ -40,7 +48,10 @@ export class Setting {
 
     constructor() {
         this.priv = 0;
-        this.standby = false;
+        // 绝对触发闸：新会话默认关（Q3）；旧存档由 SessionService 迁移 standby=true → true
+        this.aiEnabled = false;
+        this.activeMode = false;
+        this.timerTrigger = false;
         this.counter = -1;
         this.timer = -1;
         this.prob = -1;
@@ -53,6 +64,23 @@ export class Setting {
             segs: 0
         }
         this.overrides = {};
+    }
+
+    /**
+     * 绝对触发闸（standby 概念已删除：aiEnabled 即唯一开关）。
+     * 保留方法名是为了让旧调用点迁移期不用一次性改完，语义等同 `this.aiEnabled`。
+     */
+    enabled(): boolean {
+        return this.aiEnabled;
+    }
+
+    /**
+     * 旧存档 standby → aiEnabled 迁移：必须传原始 JSON 里的 setting（revive 会按新 validKeysMap
+     * 丢弃 standby），revive 后调用；旧版 .ai on 会置 standby=true（=AI 开启）。
+     */
+    static applyLegacyStandby(rawSetting: unknown, setting: Setting): void {
+        if (!rawSetting || typeof rawSetting !== 'object') return;
+        if ((rawSetting as { standby?: unknown }).standby === true && !setting.aiEnabled) setting.aiEnabled = true;
     }
 
     /**

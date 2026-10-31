@@ -21,8 +21,8 @@ export const MEMORY_WATERMARK_TOKENS = 6000;
 export const TAG_ANCHOR_GAP_SEC = 3600;
 /** 时间锚点：每经过多少条 user/assistant 消息至少显示一次 `[time]` */
 export const TAG_ANCHOR_EVERY_MESSAGES = 100;
-/** 每小时自动压缩批次数上限默认值 */
-export const DEFAULT_HOURLY_COMPACT_CAP = 20;
+/** 旧回退路径（无事件账本）用户消息纯代码截断的 token 上限 */
+export const LEGACY_USER_MESSAGE_MAX_TOKENS = 8192;
 
 /** 保留强度归一：1-100 之外的输入回退默认值（不静默抛错，由配置层决定是否 warning） */
 export function normalizeRetainPercent(raw: unknown): number {

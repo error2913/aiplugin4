@@ -21,10 +21,12 @@ import { requestLimiter } from "../utils/concurrency";
 import { TypeDescriptor } from "../utils/revive";
 import type { MessageSegment } from "../utils/string";
 import { normalizeRenderTags } from "../utils/string";
+import { nextActivePoint } from "../utils/time_window";
 import { createStopEvent, fireStopEvent, StopEvent } from "../utils/timeout";
 
 import Group from "./group";
 import { deferReceipt as deferReceiptImpl, drainPending as drainPendingImpl, flushNotices as flushNoticesImpl, flushPending as flushPendingImpl, handleReceipt as handleReceiptImpl } from "./inbox";
+import { syncModeTimers } from "./mode_timers";
 import { deliverReply } from "./outbox";
 import { pendingKey as pendingKeyOf, PendingMessage, SAVE_MIN_INTERVAL_MS, shouldDeferCoalescedSave, writePendingRecord, writeSessionRecord } from "./persistence";
 import { activeTimeSegmentIndex, computeSessionState, nextActiveTimePoint } from "./rhythm";
@@ -34,6 +36,15 @@ import { SessionType, State } from "./types";
 import User from "./user";
 
 const log = logger.withTag('session');
+
+/**
+ * 起轮结果（C6 统一契约）：
+ * - fired：真正起了一轮（run/runStream 返回 started=true）
+ * - deferred：会话忙/未真正起轮（已退还令牌；调用方可挂起后重试）
+ * - bucket-empty：令牌桶空，未起轮（不扣桶、不记账）
+ * - gated：aiEnabled=false 且调用方未 bypassGate（外部 API/送达可显式 bypass）
+ */
+export type ChatOutcome = 'fired' | 'deferred' | 'bucket-empty' | 'gated';
 
 // 兼容旧引用：这些符号从 session.ts 拆到叶子模块后仍可继续从本文件 import（内部实现请直接引用叶子）
 export { Setting } from "./setting";
@@ -61,6 +72,8 @@ export class Session {
         rawSeq: 'number',
         lastRawAt: 'number',
         settledSeq: 'number',
+        ctxAutoSummaryUsed: 'number',
+        lastMsgRef: { objectValue: 'any' },
         stream: {
             object: {
                 id: 'string',
@@ -159,8 +172,24 @@ export class Session {
     lastRelevantAt = 0;
     /** 运行时字段：本会话最近一次 AI 触发时间（秒）；记忆自动抽取门控使用（不持久化） */
     aiTriggeredAt = 0;
-    /** 运行时字段：本会话账本——压缩/归档/评分各调用了多少次（不持久化） */
-    ctxStats: { compression: number; summarization: number; judge: number } = { compression: 0, summarization: 0, judge: 0 };
+    /** 运行时字段：本会话账本——评分调用次数（不持久化；`.ai ctx` 展示用） */
+    ctxStats: { judge: number } = { judge: 0 };
+    /**
+     * **持久化**：本会话（context epoch）内自动摘要额度，0=未用，1=已用（最多 1 次）。
+     * 只有摘要成功（advanced=true）才置 1；失败/未推进不消耗；`.ai ctx purge --yes` 后重置。
+     */
+    ctxAutoSummaryUsed = 0;
+    /**
+     * **持久化**：按端点记录最近一条真实用户消息的原始 `rawId`（A12）。
+     * 定时/自主/事件触发时用合成的 msg 没有 rawId，导致"开了回复引用却没有引用"；
+     * 起轮前用本表回填。`rawId` 是会话内 message_seq，Session 本身按 sid 索引 ⇒ 等价于 (sid, epId)。
+     * 上限 8 个端点，超出按最早写入淘汰。
+     */
+    lastMsgRef: { [epId: string]: number } = {};
+    /** 运行时字段：自动摘要已发起未落地，防同一会话并发重复触发（不持久化，重载后回 false） */
+    ctxAutoSummaryInFlight = false;
+    /** 运行时字段：上次补注册规则 timer 的时间（毫秒；节流用，不持久化） */
+    lastRuleTimerEnsureAt = 0;
     /** 运行时字段：保存节流状态（不持久化） */
     private lastSaveAt = 0;
     private saveDeferCount = 0;
@@ -211,6 +240,7 @@ export class Session {
         }
         this.skillState = {};
         this.kbState = {};
+        this.lastMsgRef = {};
     }
 
     get agent(): Agent {
@@ -304,7 +334,7 @@ export class Session {
     stateOf(now: number = Date.now(), opts?: { touch?: boolean }): 'HOT' | 'COOLING' | 'COLD' {
         const touch = opts?.touch !== false;
         const { state, lastRelevantAt } = computeSessionState({
-            standby: this.setting.standby || Config.base.GLOBAL_STANDBY,
+            aiActive: this.setting.enabled() || Config.base.GLOBAL_STANDBY,
             busy: this.running || this.starting || this.activeRuns > 0,
             lastRelevantAt: this.lastRelevantAt,
             now,
@@ -327,6 +357,11 @@ export class Session {
         writePendingRecord(this.sessionId, null);
     }
 
+    /** 全局「触发活跃时间」多段（M4 active 模式；配置读取留在 Session 层，timer 不依赖 config） */
+    getActiveTimeSegments() {
+        return Config.trigger.ACTIVE_TIME_SEGMENTS;
+    }
+
     get curActiveTimeSegIndex(): number {
         return activeTimeSegmentIndex(this.setting.activeTimeInfo);
     }
@@ -335,26 +370,76 @@ export class Session {
         return nextActiveTimePoint(this.setting.activeTimeInfo, curSegIndex, Date.now());
     }
 
+    /**
+     * 确保持有活跃时间定时器（每次消息/指令入口调用，幂等）：
+     * - 新语义（M4）：`setting.activeMode` + 全局「触发活跃时间」多段 → 下一子段/下一段起点；
+     * - 旧语义兼容：旧存档的 `activeTimeInfo`（单段）仍可用。
+     */
     checkActiveTimer(ctx: seal.MsgContext) {
+        // 触发闸：关闸/全局记录模式下不再排活跃时间定时器（否则 .ai off 后每条消息都会把它重新排上）
+        if (!this.setting.enabled()) return;
+        if (TimerManager.getTimers(this.sessionId, '', ['activeTime']).length > 0) return;
+        if (this.setting.activeMode) {
+            const segments = Config.trigger.ACTIVE_TIME_SEGMENTS;
+            if (segments.length === 0) return;
+            const next = nextActivePoint(segments, Date.now());
+            if (next !== -1) TimerManager.addActiveTimeTimer(ctx, this, next);
+            else log.error('active time timer add failed');
+            return;
+        }
         const { segs, start, end } = this.setting.activeTimeInfo;
         if (segs !== 0 && (start !== 0 || end !== 0)) {
-            const timers = TimerManager.getTimers(this.sessionId, '', ['activeTime']);
-            if (timers.length === 0) {
-                const curSegIndex = this.curActiveTimeSegIndex;
-                const nextTimePoint = this.getNextTimePoint(curSegIndex);
-                if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
-                else log.error('active time timer add failed');
-            }
+            const curSegIndex = this.curActiveTimeSegIndex;
+            const nextTimePoint = this.getNextTimePoint(curSegIndex);
+            if (nextTimePoint !== -1) TimerManager.addActiveTimeTimer(ctx, this, nextTimePoint);
+            else log.error('active time timer add failed');
         }
     }
 
-    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]) {
-        await handleReceiptImpl(this, ctx, msg, messageArray);
+    /**
+     * 补注册 timer 模式定时器（重载后会话加载时拿不到 epId；首个带 ctx 的入口补齐，幂等）。
+     */
+    ensureModeTimers(ctx: seal.MsgContext) {
+        if (!this.setting.enabled()) return;
+        if (!this.setting.timerTrigger) return;
+        const hasModeTimer = TimerManager.getTimers(this.sessionId, '', [])
+            .some(timer => !!timer.ruleId && timer.ruleId.startsWith('mode:'));
+        if (hasModeTimer) return;
+        try {
+            syncModeTimers(this, ctx);
+        } catch (e) {
+            log.warning(`补注册 timer 模式定时器失败: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+
+    /**
+     * 记录"最近一条真实用户消息"的原始 rawId（按端点，A12）。
+     * 只接受真实用户消息：rawId 有效、非 0、发送者不是 bot 自身。bot/命令/ob11 补收不应更新引用。
+     */
+    noteInboundRef(ctx: seal.MsgContext, msg: seal.Message, updateRef = true): void {
+        if (!updateRef) return;
+        const rawId = Number(msg.rawId);
+        if (!Number.isFinite(rawId) || rawId === 0) return;
+        const epId = ctx.endPoint && ctx.endPoint.userId;
+        if (!epId) return;
+        // bot 自身消息不更新引用（群聊机器人发言也会走 handleReceipt）
+        const sender = ctx.player && ctx.player.userId;
+        if (sender && sender === epId) return;
+        this.lastMsgRef[epId] = rawId;
+        // 上限 8：对象键按插入序，超限删最早
+        const keys = Object.keys(this.lastMsgRef);
+        if (keys.length > 8) {
+            for (const key of keys.slice(0, keys.length - 8)) delete this.lastMsgRef[key];
+        }
+    }
+
+    async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], opts?: { updateRef?: boolean }) {
+        await handleReceiptImpl(this, ctx, msg, messageArray, opts);
     }
 
     /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
-    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string) {
-        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason, systemName);
+    async deferReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string, opts?: { updateRef?: boolean }) {
+        await deferReceiptImpl(this, ctx, msg, messageArray, kind, systemReason, systemName, opts);
     }
 
     /** 取出并清空挂起队列 */
@@ -363,8 +448,8 @@ export class Session {
     }
 
     /** 把挂起队列全部写入上下文（此时上一轮工具回调已入库，位置合法）并保存；返回是否存在触发类消息 */
-    async flushPending(): Promise<boolean> {
-        return flushPendingImpl(this);
+    async flushPending(opts?: { writeTriggerPrompts?: boolean }): Promise<boolean> {
+        return flushPendingImpl(this, opts);
     }
 
     /** 把后台完成通知队列写入上下文（每轮模型请求前调用，与 flushPending 同点）；返回条数。 */
@@ -382,26 +467,43 @@ export class Session {
      *        非主动搭话的场景（如媒体生成完成唤醒）。注意与旧有的 `reason === '函数回调触发'`
      *        不同：那条豁免只跳过检查、仍会扣减令牌，此处保持原样不动。
      */
-    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean } = {}): Promise<void> {
+    /** 令牌桶懒回补（chat 与 wake 预判共用同一口径；只回补不扣减） */
+    private refillBucket(): void {
+        const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
+        if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
+            const fillCount = (Date.now() - this.bucket.lastTime) / (FILL_INTERVAL * 1000);
+            this.bucket.count = Math.min(this.bucket.count + fillCount, BUCKET_LIMIT);
+            this.bucket.lastTime = Date.now();
+        }
+    }
+
+    /** wake 写提示前的可用性预判：有令牌才写提示（避免 bucket-empty 时留下无法兑现的触发提示） */
+    hasBucketToken(): boolean {
+        this.refillBucket();
+        return this.bucket.count > 0;
+    }
+
+    async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean; bypassGate?: boolean } = {}): Promise<ChatOutcome> {
         this.lastCtx = ctx;
         // 冷热状态的"相关活动"：任何一次起一轮对话（@/触发命中/结果送达/定时任务）都算，普通消息入库不算
         this.lastRelevantAt = Date.now();
         log.info('trigger reply:', reason || 'unknown');
+
+        // C6：绝对闸（外部 API/结果送达可显式 bypassGate）。会话忙/未真正起轮由 started 判定并退还令牌。
+        if (!options.bypassGate && !this.setting.enabled()) {
+            log.info('ai disabled, skip reply:', reason || 'unknown');
+            return 'gated';
+        }
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
         this.migrateStoredTags();
 
         const skipBucket = options.skipBucket === true;
         if (reason !== '函数回调触发' && !skipBucket) {
-            const { BUCKET_LIMIT, FILL_INTERVAL } = Config.trigger;
-            if (Date.now() - this.bucket.lastTime > FILL_INTERVAL * 1000) {
-                const fillCount = (Date.now() - this.bucket.lastTime) / (FILL_INTERVAL * 1000);
-                this.bucket.count = Math.min(this.bucket.count + fillCount, BUCKET_LIMIT);
-                this.bucket.lastTime = Date.now();
-            }
+            this.refillBucket();
             if (this.bucket.count <= 0) {
                 log.warning('bucket empty, skip reply');
-                return;
+                return 'bucket-empty';
             }
         }
 
@@ -413,37 +515,46 @@ export class Session {
         this.resetState();
         if (!skipBucket) this.bucket.count--;
 
-        // 评分触发：仅当评分触发开启时，无论以何种方式触发会话，都起一轮 WAIT 作为冷却（不扣精力）；
-        // 未开启评分时不创建 judgeWait 定时器，避免非指令/其他模式回复也残留评分轮末定时器
-        if (this.setting.judge) {
-            JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
-        }
-
         const model = Model.getChatModel('chat');
-        // 是否流式由「chat 用途」规则模板 body 里的 stream=true 决定（v4：模型不再自带 body，读用途组模板）
-        const chatStream = (Model.getBodyDefaultsFor('chat') as any).stream === true;
+        // 是否流式由「chat 用途」的合并 body 里的 stream=true 决定；传当前模型 ref 才能读到
+        // models[].request.bodyByUse.chat（逐模型覆盖），否则只能看到代码默认。
+        const chatStream = (Model.getBodyDefaultsFor('chat', model?.ref) as any).stream === true;
 
         const isAnthropic = !!model && isAnthropicMessages(model.api, model.provider);
         if (isAnthropic && chatStream) {
             log.warning(`anthropic-messages 协议（${model!.name}）暂不支持流式输出，已自动切换为非流式`);
         }
         if (model && chatStream && !isAnthropic) {
-            await this.chatStream(ctx, msg);
+            const started = await this.chatStream(ctx, msg);
+            if (!started) {
+                if (!skipBucket) this.bucket.count++;
+                return 'deferred';
+            }
             this.save();
-            return;
+            // 评分触发：真正起轮后才记一轮 WAIT 冷却（C6：未起轮不记）
+            if (this.setting.judge) JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
+            return 'fired';
         }
 
         // 对话与工具调用编排统一由智能体 run() 处理（构建消息 → 模型 → 工具执行 → 回填 → 最终回复）
-        await this.agent.run(this, ctx, msg, tool_choice);
+        const started = await this.agent.run(this, ctx, msg, tool_choice);
+        if (!started) {
+            // 假起轮（会话忙/并发队列未取到/被 stop）：退还令牌，交调用方决定是否挂起
+            if (!skipBucket) this.bucket.count++;
+            return 'deferred';
+        }
         this.save();
+        // 评分触发：真正起轮后才记一轮 WAIT 冷却（不扣精力）
+        if (this.setting.judge) JudgeManager.noteSessionTrigger(ctx, this, reason || 'unknown');
+        return 'fired';
     }
 
-    async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<void> {
+    async chatStream(ctx: seal.MsgContext, msg: seal.Message): Promise<boolean> {
         this.lastCtx = ctx;
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等）
         this.migrateStoredTags();
-        // 流式编排统一由智能体 runStream() 处理
-        await this.agent.runStream(this, ctx, msg);
+        // 流式编排统一由智能体 runStream() 处理；返回是否真正起轮（ChatOutcome 记账用）
+        return this.agent.runStream(this, ctx, msg);
     }
 
     /** 迁移本会话上下文/记忆与全局记忆中的历史 <|...|> 标签为新格式 [xxx]（幂等） */

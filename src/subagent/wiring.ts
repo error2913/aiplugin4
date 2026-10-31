@@ -10,6 +10,7 @@ import type { Session } from '../session/session';
 import { getSession } from '../session/session_service';
 import { getSessionCtxAndMsg } from '../utils/seal';
 import { fireStopEvent } from "../utils/timeout";
+import { estimateEventTokens as estimateEventTokensShared, estimateTextTokens } from "../utils/token_estimate";
 
 import { buildForkSeed, createChildSession, decodeCheckpoint, encodeCheckpoint, runHeadlessActivation } from './child';
 import type { CheckpointMessage } from './child';
@@ -60,22 +61,18 @@ function buildContextForkSeed(session: Session, budgetTokens: number): ReturnTyp
     const service = session.contextV2;
     if (!service) return buildForkSeed(session.context.messages);
     try {
-        const estimateText = (text: string) => Math.max(1, Math.ceil(text.length / 3));
+        const estimateText = (text: string) => estimateTextTokens(text);
         const compiled = service.compile({
             prefixMessages: [],
             budgetTokens,
             toolsReserveTokens: 0,
             mode: 'native',
             caps: { vision: false },
+            // 与主链一致：fork seed 里的工具结果同样按配置上限截断（0=关闭）
+            toolResultMaxTokens: Config.tool.TOOL_RESULT_MAX_TOKENS,
             estimateTextTokens: estimateText,
-            estimateEventTokens: (event) => {
-                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
-                let chars = 0;
-                for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
-                if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
-                return Math.max(1, Math.ceil(chars / 3)) + 4;
-            },
-        });
+            estimateEventTokens: (event) => estimateEventTokensShared(event),
+        }, { observe: false });
         return compiled.messages as unknown as ReturnType<typeof buildForkSeed>;
     } catch {
         return buildForkSeed(session.context.messages);
@@ -228,12 +225,13 @@ function makeWakeHook(opt: SubAgentWireOptions): (record: ChildRecord, _result: 
             const decision = decideWake({
                 noticeCount: parent.noticeQueue.length,
                 parentBusy: parent.running || parent.starting,
-                sessionStandby: parent.setting.standby === true,
-                globalStandby: Config.base.GLOBAL_STANDBY === true,
+                sessionAiEnabled: parent.setting.aiEnabled === true,
+                globalAiEnabled: Config.base.GLOBAL_STANDBY === true,
             });
             if (decision !== 'wake') return;
             const { ctx, msg } = getSessionCtxAndMsg(record.meta.epId, record.parentSessionId, record.meta.isPrivate);
-            void parent.chat(ctx, msg, WAKE_REASON).catch(e => {
+            // 子代理结算属"结果送达"：不受 aiEnabled 总闸影响、不吃触发令牌（方案 §5.9 豁免）
+            void parent.chat(ctx, msg, WAKE_REASON, undefined, { bypassGate: true, skipBucket: true }).catch(e => {
                 log.warning(`子代理完成唤醒失败: ${e instanceof Error ? e.message : String(e)}`);
             });
         } catch (e) {

@@ -15,15 +15,19 @@ import type { Session } from "./session";
 const log = logger.withTag('session');
 
 /** 普通收信：转内容并直接入上下文（非忙态） */
-export async function handleReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[]): Promise<void> {
+export async function handleReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], opts?: { updateRef?: boolean }): Promise<void> {
     session.lastCtx = ctx;
+    // A12：记录最近一条真实用户消息的原始 rawId（按端点），供定时/自主/事件触发回填引用。
+    // bot 自身消息、命令、ob11 补收由调用方传 updateRef:false。
+    session.noteInboundRef(ctx, msg, opts?.updateRef !== false);
     const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
     await session.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
 }
 
 /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */
-export async function deferReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string): Promise<void> {
+export async function deferReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], kind: 'trigger' | 'record', systemReason?: string, systemName?: string, opts?: { updateRef?: boolean }): Promise<void> {
     session.lastCtx = ctx;
+    session.noteInboundRef(ctx, msg, opts?.updateRef !== false);
     const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
     session.pendingQueue.push({
         ctx,
@@ -47,15 +51,19 @@ export function drainPending(session: Session): PendingMessage[] {
 }
 
 /** 把挂起队列全部写入上下文（此时上一轮工具回调已入库，位置合法）并保存；返回是否存在触发类消息 */
-export async function flushPending(session: Session): Promise<boolean> {
+export async function flushPending(session: Session, opts?: { writeTriggerPrompts?: boolean }): Promise<boolean> {
     const pending = drainPending(session);
     if (pending.length === 0) return false;
     let hasTrigger = false;
+    // 触发闸关闭（.ai off）时不再写 trigger 提示：消息内容照常入库，但不留无法兑现的"请说话"
+    const writeTriggerPrompts = opts?.writeTriggerPrompts !== false;
     for (const p of pending) {
         if (p.kind === 'trigger') hasTrigger = true;
         // 事件触发挂起没有用户消息内容，只写触发系统提示（避免产生空 user 事件）
         if (p.content) await session.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
-        if (p.systemReason) await session.context.addSystemUserMessage(p.systemReason, p.systemName || SYSTEM_NAME.trigger);
+        if (p.systemReason && (p.kind !== 'trigger' || writeTriggerPrompts)) {
+            await session.context.addSystemUserMessage(p.systemReason, p.systemName || SYSTEM_NAME.trigger);
+        }
     }
     session.save();
     session.clearPending();

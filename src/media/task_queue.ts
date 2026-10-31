@@ -604,7 +604,8 @@ export class MediaTaskManager {
             log.info(`媒体任务 #${task.id}：会话触发令牌桶为空，仍按送达语义唤醒（免桶）`);
         }
         log.info(`媒体任务 #${task.id} 完成通知已入队，唤醒会话 ${task.sid} 起一轮对话`);
-        void session.chat(ctx, msg, '生成任务完成', undefined, { skipBucket: true }).catch((e) => {
+        // 送达语义：不受 aiEnabled 总闸影响，也不吃群触发令牌（方案 §5.9 豁免）
+        void session.chat(ctx, msg, '生成任务完成', undefined, { skipBucket: true, bypassGate: true }).catch((e) => {
             log.warning(`媒体任务 #${task.id} 触发对话失败（通知已入队，本轮结束会补触发）：${e instanceof Error ? e.message : String(e)}`);
         });
     }
@@ -636,7 +637,7 @@ export class MediaTaskManager {
             const ctx2 = this.getSessionCtxAndMsgSafe(session, first.taskId!);
             if (!ctx2) return;
             log.info(`媒体任务 #${first.taskId} 通知仍未被消费，会话已空闲，补触发一轮对话（共 ${pending.length} 条待呈现）`);
-            void session.chat(ctx2.ctx, ctx2.msg, '生成任务完成', undefined, { skipBucket: true }).catch((e) => {
+            void session.chat(ctx2.ctx, ctx2.msg, '生成任务完成', undefined, { skipBucket: true, bypassGate: true }).catch((e) => {
                 log.warning(`媒体任务 #${first.taskId} 补触发失败（通知仍在队列，下次轮末会再试）：${e instanceof Error ? e.message : String(e)}`);
             });
         } catch (e) {

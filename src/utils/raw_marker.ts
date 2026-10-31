@@ -7,13 +7,17 @@
 // stripInternalTags/stripUserTags/stripRenderTags 误剥；标记始终放在文本末尾，即使被兜底截断，
 // 可寻址 id 仍然存活。
 export {
+    buildChildToolTruncateMarker,
     buildEventRangeTruncateMarker,
     buildImageTruncateMarker,
     buildReadRawRef,
     buildToolTruncateMarker,
+    buildToolTruncateMarkerTokens,
+    buildToolTruncateMarkerV2,
     buildUserBlockMarker,
     buildUserSingleMarker,
     buildUserTruncateMarker,
+    buildUserTruncateMarkerTokens,
     hasRawMarker,
     RAW_MARKER_COMPRESSED,
     RAW_MARKER_CONTENT_TRUNCATED,

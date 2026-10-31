@@ -77,7 +77,7 @@ function classDefaultBody(use: ModelUse): Record<string, any> {
     if (use === 'image-understanding') return { ...DEFAULT_MULTIMODAL_MODEL_BODY };
     // 媒体用途不叠代码兜底（结构由内置预设提供），见 bodyDefaultsFor
     if (use === 'tts' || use === 'image-generation') return {};
-    // chat / compression / summarization / judge 共用对话默认
+    // chat / summarization / judge 共用对话默认
     return { ...DEFAULT_CHAT_MODEL_BODY };
 }
 

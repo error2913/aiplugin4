@@ -58,7 +58,8 @@ function formatRuntime(session: Session): string {
         `【运行状态】${sessionType}会话 ${session.sessionId}`,
         `状态: ${r.state}`,
         `流式: ${session.stream.id ? (session.stream.toolCallStatus ? '工具调用中' : '输出中') : '无'}`,
-        `并发: 本会话活跃 ${r.activeRuns} | 本会话排队 ${r.queued}`,
+        `本会话活跃: ${r.activeRuns}`,
+        `本会话排队: ${r.queued}`,
         `挂起消息: ${r.pending}`,
         `定时器: ${timerText(r.timers)}`
     ].join('\n');
@@ -92,7 +93,8 @@ function formatAll(): string {
     const idle = sessions.length - busy.length;
     const lines = [
         `【全局运行总览】已加载会话 ${sessions.length} 个（活跃 ${busy.length} / 空闲 ${idle}）`,
-        `并发: 全局活跃 ${qi.active}/${qi.maxConcurrent} | 排队 ${qi.queued}/${qi.maxQueue}`
+        `全局活跃: ${qi.active}/${qi.maxConcurrent}`,
+        `全局排队: ${qi.queued}/${qi.maxQueue}`
     ];
     if (busy.length === 0) {
         lines.push('当前没有活跃会话');

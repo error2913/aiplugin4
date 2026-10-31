@@ -14,13 +14,13 @@ description: aiplugin4 插件综合测试与调试技能：通过 qqmcp 对测�
 
 1. 配置修改后必须恢复原样：只修改 aiplugin4 设置中「后端」二级页签内的配置项；页面上不属于二级页签的项一律不碰；其他插件配置不乱动。
 2. 指令回复出现「指令.ai执行失败」等异常时，立即按 sealdice-plugin-dev 的日志读取方式查看海豹日志，并把相关日志摘要写入报告。
-3. 破坏性指令（`memo clr`/`forget`/`timer clr` 等）按用例表"清理"步骤执行，做到自清理；全局破坏性操作（`token clr`、`priv st`/`priv reset`）默认只测错误路径，完整操作需用户确认。
+3. 破坏性指令（`memo clr`/`forget`/`trg timer clr` 等）按用例表"清理"步骤执行，做到自清理；全局破坏性操作（`token clr`、`priv st`/`priv reset`）默认只测错误路径，完整操作需用户确认。
 4. 依赖环境的指令（图片识别需视觉模型、图表需用量后端、语音需 ffmpeg 等）：无对应配置时记 `SKIP(env)` 并注明原因。
 
 ## 模式一：全量测试
 
 1. 预检：`qq_get_bot_status` → `qq_list_groups` → `qq_get_group_members` → 发一条 `.ai status` 找到回复者（待测机器人）。
-2. 只读快照：`.ai status`、`.ai model`、`.ai ctxn status`、`.ai memo status`、`.ai tool`、`.ai timer lst`、`.ai tk sum`、`.ai ign list`、`.ai role`。
+2. 只读快照：`.ai status`、`.ai model`、`.ai ctxn status`、`.ai memo status`、`.ai tool`、`.ai trg timer lst`、`.ai tk sum`、`.ai ign list`、`.ai role`。
 3. 逐域执行用例（发送 → 轮询 → 关键字断言）：control.md / memory.md / tool.md / admin.md / image.md / media.md / context.md。
 4. 有用例异常（执行失败/无回复/权限异常）：读取海豹日志，摘录相关日志到报告并给出诊断。
 5. 重载 JS 测试：确认距上次重载 ≥ 1 分钟 → 上传 `dist/aiplugin4.js` 并重载 → 重载完成后等待数秒 → 查看重载日志确认无报错（日志摘要写入报告）→ 向群里发 `.ai status` 验证插件仍响应。

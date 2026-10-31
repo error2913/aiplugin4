@@ -9,5 +9,6 @@ export const PROVIDER_MAP: { [provider: string]: string } = {
     "moonshot": "https://api.moonshot.cn/v1",
     "xai": "https://api.x.ai/v1",
     "mistral": "https://api.mistral.ai/v1",
-    "siliconflow": "https://api.siliconflow.cn/v1"
+    "siliconflow": "https://api.siliconflow.cn/v1",
+    "jev": "https://jevmodel.org/v1"
 }

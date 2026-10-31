@@ -1,6 +1,10 @@
-// 定时器工具：目标/间隔定时器设置与查看、取消
+// 定时器工具：目标/间隔定时器设置与查看、取消。
+//
+// 参数与校验和「默认定时器」TOML / 链 timer 门完全一致（共用 utils/timer_spec.validateTimerSpec）：
+// prompts（1~10 条，fire 时随机一条）为必填；content 仅保留旧调用兼容（等价 1 条 prompts）。
 import { TimerManager } from "../../../timer";
 import { fmtDate } from "../../../utils/string";
+import { summarizeTimerSpec, validateTimerSpec } from "../../../utils/timer_spec";
 import Tool from "../../tool";
 
 export function registerTime() {
@@ -8,106 +12,56 @@ export function registerTime() {
         type: 'function',
         function: {
             name: 'set_timer',
-            description: 'Set a timer that fires after the specified time',
+            description: 'Set a timer that fires after the specified time. One of the prompts is picked randomly when it fires.',
             parameters: {
                 type: 'object',
                 properties: {
                     types: {
                         type: 'string',
                         description: 'Timer type: target = fire at a target time, interval = fire every interval; corresponds to the time parameters below',
-                        enum: ['target', 'interval']
+                        enum: ['target', 'interval'],
                     },
-                    years: {
-                        type: 'integer',
-                        description: 'Years'
+                    years: { type: 'integer', description: 'Years (target: required with months/days)' },
+                    months: { type: 'integer', description: 'Months (target: required with years/days)' },
+                    days: { type: 'integer', description: 'Days (target: required with years/months)' },
+                    hours: { type: 'integer', description: 'Hours' },
+                    minutes: { type: 'integer', description: 'Minutes' },
+                    count: { type: 'integer', description: 'Number of times to fire; -1 = unlimited' },
+                    prompts: {
+                        type: 'array',
+                        description: 'Wake prompts (1-10); one is picked randomly each time the timer fires',
+                        items: { type: 'string' },
                     },
-                    months: {
-                        type: 'integer',
-                        description: 'Months'
-                    },
-                    days: {
-                        type: 'integer',
-                        description: 'Days'
-                    },
-                    hours: {
-                        type: 'integer',
-                        description: 'Hours'
-                    },
-                    minutes: {
-                        type: 'integer',
-                        description: 'Minutes'
-                    },
-                    count: {
-                        type: 'integer',
-                        description: 'Number of times to fire; -1 = unlimited'
-                    },
-                    content: {
-                        type: 'string',
-                        description: 'Prompt sent to yourself when the timer fires'
-                    }
                 },
-                required: ['types', 'minutes', 'content']
-            }
-        }
+                required: ['types', 'prompts'],
+            },
+        },
     });
-    toolSet.solve = async (ctx, _, session, args) => {
-        const { types, years = 0, months = 0, days = 0, hours = 0, minutes, count = 1, content } = args;
-
-        const y = parseInt(years);
-        const m = parseInt(months);
-        const d = parseInt(days);
-        const h = parseInt(hours);
-        const min = parseInt(minutes);
-        const c = parseInt(count);
-        if (isNaN(y)) return '年数应为数字';
-        if (isNaN(m)) return '月数应为数字';
-        if (isNaN(d)) return '天数应为数字';
-        if (isNaN(h)) return '小时数应为数字';
-        if (isNaN(min)) return '分钟数应为数字';
-        if (isNaN(c)) return '触发次数应为数字';
-
-        switch (types) {
-            case 'target': {
-                const t = new Date(y, m - 1, d, h, min).getTime();
-                const now = Date.now();
-                if (isNaN(t)) {
-                    return '时间设置错误';
-                }
-                if (t < now) {
-                    return '目标时间不能早于当前时间';
-                }
-                if (t - now > 365 * 24 * 60 * 60 * 1000) {
-                    return '目标时间不能超过1年';
-                }
-                TimerManager.addTargetTimer(ctx, session, Math.floor(t / 1000), content);
-                break;
-            }
-            case 'interval': {
-                const mins = y * 365 * 24 * 60 + m * 30 * 24 * 60 + d * 24 * 60 + h * 60 + min;
-                if (mins <= 0) {
-                    return '间隔时间必须大于0';
-                }
-                if (mins > 365 * 24 * 60) {
-                    return '间隔时间不能大于1年';
-                }
-                if (c < -1 || c === 0) {
-                    return '触发次数不能小于-1或等于0';
-                }
-                if (c === -1 && mins < 12 * 60) {
-                    return '无限次触发间隔时间不能小于12小时';
-                }
-                if (c > 30) {
-                    return '触发次数不能大于30次';
-                }
-                TimerManager.addIntervalTimer(ctx, session, mins * 60, c, content);
-                break;
-            } default: {
-                return '定时器类型错误';
-            }
+    toolSet.solve = async (ctx, _msg, session, args) => {
+        // 兼容旧调用：content（单条）等价 prompts
+        const prompts = Array.isArray(args.prompts) && args.prompts.length > 0
+            ? args.prompts
+            : (typeof args.content === 'string' && args.content.trim() ? [args.content] : []);
+        const result = validateTimerSpec({
+            types: args.types,
+            years: args.years,
+            months: args.months,
+            days: args.days,
+            hours: args.hours,
+            minutes: args.minutes,
+            count: args.count,
+            prompts,
+        });
+        if (!result.ok || !result.spec) return `设置定时器失败：\n${result.errors.map(item => `- ${item}`).join('\n')}`;
+        const spec = result.spec;
+        const content = spec.prompts[0];
+        if (spec.types === 'target') {
+            TimerManager.addTargetTimer(ctx, session, spec.targetAt || 0, content, spec.prompts);
+        } else {
+            TimerManager.addIntervalTimer(ctx, session, spec.intervalSec || 60, spec.count, content, spec.prompts);
         }
-
-        return `设置定时器成功，请等待`;
-    }
+        return `设置定时器成功：${summarizeTimerSpec(spec)}`;
+    };
 
     const toolShow = new Tool({
         type: 'function',
@@ -123,26 +77,28 @@ export function registerTime() {
         }
     });
     toolShow.solve = async (_, __, session, ___) => {
-        const timers = TimerManager.getTimers(session.sessionId, '', ['target', 'interval']);
+        const timers = TimerManager.getManualTimers(session.sessionId);
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
         }
 
         const s = timers.map((t, i) => {
+            const owner = t.ruleId ? `规则${t.ruleId}` : '手动';
+            const prompt = (t.prompts && t.prompts.length > 0 ? t.prompts[0] : t.content) || '（无）';
             switch (t.type as 'target' | 'interval') {
                 case 'target': {
-                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
+                    return `${i + 1}. [${owner}] 设定时间：${fmtDate(t.set)}
 类型:${t.type}
 目标时间：${fmtDate(t.target)}
-内容：${t.content}`;
+提示：${prompt}`;
                 }
                 case 'interval': {
-                    return `${i + 1}. 定时器设定时间：${fmtDate(t.set)}
+                    return `${i + 1}. [${owner}] 设定时间：${fmtDate(t.set)}
 类型:${t.type}
 间隔时间：${t.interval}秒
 剩余触发次数：${t.count === -1 ? '无限' : t.count - 1}
-内容：${t.content}`;
+提示：${prompt}`;
                 }
             }
         }).join('\n');
@@ -172,7 +128,7 @@ export function registerTime() {
     });
     toolCancel.solve = async (_, __, session, args) => {
         const { index_list } = args;
-        const timers = TimerManager.getTimers(session.sessionId, '', ['target', 'interval']);
+        const timers = TimerManager.getManualTimers(session.sessionId);
 
         if (timers.length === 0) {
             return '当前对话没有定时器';
@@ -182,8 +138,8 @@ export function registerTime() {
             return '请输入要取消的定时器序号';
         }
 
-        TimerManager.removeTimers(session.sessionId, '', ['target', 'interval'], index_list);
+        const removed = TimerManager.removeTimerEntries(timers, index_list);
 
-        return '定时器取消成功';
+        return removed > 0 ? `已取消 ${removed} 个定时器` : '没有可取消的定时器（序号超出范围）';
     }
 }

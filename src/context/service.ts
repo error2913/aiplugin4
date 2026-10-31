@@ -6,7 +6,6 @@ import {
     compactOnce,
     CompactOptions,
     CompactResult,
-    shouldCompact,
 } from "./compact/compactor";
 import type { ConversationEvent, EventInput, Part, RecordEntry } from "./events";
 import {
@@ -164,10 +163,14 @@ export class ContextService {
         return buildProjection(this.store.snapshot(), options);
     }
 
-    /** 请求编译（prefix/预算/能力由调用方传入） */
-    compile(options: Omit<CompileOptions, 'snapshot'>): CompileResult {
+    /**
+     * 请求编译（prefix/预算/能力由调用方传入）。
+     * `observe=false` 时不写最近编译统计：子代理 fork seed 等「只为取投影」的编译不能覆盖
+     * 父/本会话的统计，否则轮末自动摘要会基于陈旧/无关的 omittedFromSeq 误触发。
+     */
+    compile(options: Omit<CompileOptions, 'snapshot'>, opts: { observe?: boolean } = {}): CompileResult {
         const result = compileRequest({ ...options, snapshot: this.store.snapshot() });
-        this.lastCompileStats = result.stats;
+        if (opts.observe !== false) this.lastCompileStats = result.stats;
         return result;
     }
 
@@ -176,11 +179,20 @@ export class ContextService {
         return this.lastCompileStats;
     }
 
+    /** 清空编译统计（每轮 run 开始调用，防止上一轮/其他编译的陈旧统计误触发自动摘要） */
+    resetLastCompile(): void {
+        this.lastCompileStats = null;
+    }
+
     readRaw(address: string, options: ReadRawOptions = {}): ReadRawResult {
         return readRaw(this.store, this.store.snapshot(), address, options);
     }
 
-    /** 最近 N 条事件（记忆桥/调试用；只读） */
+    /**
+     * 最近 N 条事件（**调试/诊断专用**，方案 §11.2 A5：条数口径，不是「消息范围」）。
+     * 生产路径已无调用（仅单测/诊断用）；消息范围统一走 projection（token 主口径）。
+     * 保留签名以兼容既有诊断脚本/单测。
+     */
     readRecent(limit = 20): ConversationEvent[] {
         const n = Math.max(0, Math.floor(limit));
         return this.store.snapshot().events.slice(-Math.max(0, n));
@@ -226,16 +238,14 @@ export class ContextService {
         return result;
     }
 
-    /** 是否达到压缩水位 */
-    shouldCompact(watermarkTokens: number): boolean {
-        return shouldCompact(this.store.getHead(), watermarkTokens);
-    }
-
     async flush(): Promise<Awaited<ReturnType<ContextStore['flush']>>> {
         return this.store.flush();
     }
 
-    /** 当前预览（调试/命令用；不落盘） */
+    /**
+     * 当前预览（**调试/命令专用**，方案 §11.2 B2：条数口径，不是「消息范围」）。
+     * 不落盘、不参与 token 预算；如需范围请用 projection（token 主口径）。
+     */
     preview(count = 5): ConversationEvent[] {
         return this.store.snapshot().events.slice(-Math.max(0, count));
     }

@@ -5,11 +5,10 @@ import { ModelUse } from "../../model/types";
 import { M } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
-const MODEL_PURPOSES: ModelUse[] = ['chat', 'compression', 'summarization', 'judge', 'image-understanding', 'text-embedding', 'tts', 'image-generation'];
+const MODEL_PURPOSES: ModelUse[] = ['chat', 'summarization', 'judge', 'image-understanding', 'text-embedding', 'tts', 'image-generation'];
 
 const PURPOSE_LABEL: Record<ModelUse, string> = {
     chat: '对话',
-    compression: '压缩',
     summarization: '总结',
     judge: '评分',
     'image-understanding': '识图',
@@ -196,7 +195,7 @@ export function registerCmdModel() {
 【.ai model pull】立即重拉全部连接的模型列表并展示（无视配置里的 models 钉住清单，强制走网络）
 【.ai model <用途>】查看指定用途当前模型与该用途候选
 【.ai model <用途> <模型>】把指定用途绑到某模型（支持编号 / 模型 id / 模型名）
-用途: chat / compression / summarization / judge / image-understanding / text-embedding / tts / image-generation
+用途: chat / summarization / judge / image-understanding / text-embedding / tts / image-generation
 绑定有三层，本命令写的是**最上层**（运行时覆盖），优先级最高：
   1. 运行时覆盖（本命令写入，存插件存储）
   2. 配置绑定（「模型配置」里的 purposes，跟配置走、重装不丢）

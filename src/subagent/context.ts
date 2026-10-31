@@ -179,13 +179,57 @@ function withContent(message: RequestMessage, content: string): RequestMessage {
     return { ...message, content } as RequestMessage;
 }
 
-/** 中段截断：留头 2/3 + 尾 1/3（确定性规则，与主链口径一致） */
-export function truncateSubAgentContent(text: string, maxChars: number): string {
-    if (maxChars <= 0 || text.length <= maxChars) return text;
-    const head = Math.floor(maxChars * 2 / 3);
-    const tail = maxChars - head;
+/**
+ * 中段截断：留头 2/3 + 尾 1/3（确定性规则，与主链口径一致）。
+ *
+ * 口径（方案 §11.2 B6）：参数是 **token 预算**，不是字符；估算用本模块自带的
+ * `estimateSubAgentTextTokens`（子代理不能 import 主链 message 层），不做 ×2 字符换算。
+ * 0 语义：`maxTokens <= 0` → 原样返回（0 = 不截断，不是「截到 0」）。
+ */
+export function truncateSubAgentContent(text: string, maxTokens: number): string {
+    const source = String(text ?? '');
+    if (!Number.isFinite(maxTokens) || maxTokens <= 0) return source;
+    if (estimateSubAgentTextTokens(source) <= maxTokens) return source;
     const marker = '\n' + SUBAGENT_TRUNCATE_MARK;
-    return `${text.slice(0, Math.max(0, head - marker.length))}${marker}${tail > 0 ? text.slice(-tail) : ''}`;
+    // 预留标记本身的 token + 2 的结构余量后，头 2/3 + 尾 1/3 都按 token 预算切。
+    const budget = Math.max(1, Math.floor(maxTokens) - estimateSubAgentTextTokens(marker) - 2);
+    const headBudget = Math.max(1, Math.floor((budget * 2) / 3));
+    const tailBudget = Math.max(0, budget - headBudget);
+    const headLength = longestPrefixWithinTokens(source, headBudget);
+    const tailLength = tailBudget > 0 ? longestSuffixWithinTokens(source, tailBudget) : 0;
+    return `${source.slice(0, headLength)}${marker}${tailLength > 0 ? source.slice(source.length - tailLength) : ''}`;
+}
+
+/** 二分找最长前缀长度，使 estimateSubAgentTextTokens(prefix) <= maxTokens（不切代理对） */
+function longestPrefixWithinTokens(text: string, maxTokens: number): number {
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (estimateSubAgentTextTokens(text.slice(0, mid)) <= maxTokens) lo = mid;
+        else hi = mid - 1;
+    }
+    if (lo > 0 && lo < text.length) {
+        const code = text.charCodeAt(lo - 1);
+        if (code >= 0xd800 && code <= 0xdbff) lo--;
+    }
+    return Math.max(0, lo);
+}
+
+/** 二分找最长后缀长度，使 estimateSubAgentTextTokens(suffix) <= maxTokens（不切代理对） */
+function longestSuffixWithinTokens(text: string, maxTokens: number): number {
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (estimateSubAgentTextTokens(text.slice(text.length - mid)) <= maxTokens) lo = mid;
+        else hi = mid - 1;
+    }
+    if (lo > 0 && lo < text.length) {
+        const code = text.charCodeAt(text.length - lo);
+        if (code >= 0xdc00 && code <= 0xdfff) lo--;
+    }
+    return Math.max(0, lo);
 }
 
 // ---------------- 独立上下文 ----------------
@@ -297,9 +341,10 @@ export class SubAgentContext {
         const baseSystem = this.systemTextWithoutInjected();
         let systemText: string;
         if (mode === 'summary') {
+            // 摘要注入按 token 预算收口（方案 §11.2 B6）：直接把 summaryBudgetTokens 当预算，
+            // 不再做 ×2 字符换算。
             const summaryBudgetTokens = Math.max(128, Math.floor(this.maxTokens * 0.25));
-            const maxChars = Math.max(200, summaryBudgetTokens * 2);
-            const bounded = summaryText.length > maxChars ? truncateSubAgentContent(summaryText, maxChars) : summaryText;
+            const bounded = truncateSubAgentContent(summaryText, summaryBudgetTokens);
             systemText = `${baseSystem}\n\n${SUMMARY_HEADER}\n${bounded}`;
         } else {
             systemText = `${baseSystem}\n\n${subagentOmitLine(dropped.length)}`;
@@ -381,17 +426,18 @@ export class SubAgentContext {
         const maxRounds = 16;
         for (let round = 0; round < maxRounds && this.tokenCount() > maxTokens; round++) {
             let biggestIndex = -1;
-            let biggestLength = 0;
+            let biggestTokens = 0;
             for (let i = unitStart; i < this.messages.length; i++) {
-                const text = contentOf(this.messages[i]);
-                if (text.length > biggestLength) {
-                    biggestLength = text.length;
+                const contentTokens = estimateSubAgentTextTokens(contentOf(this.messages[i]));
+                if (contentTokens > biggestTokens) {
+                    biggestTokens = contentTokens;
                     biggestIndex = i;
                 }
             }
-            if (biggestIndex < 0 || biggestLength <= 16) break;
+            if (biggestIndex < 0 || biggestTokens <= 16) break;
             const excess = this.tokenCount() - maxTokens;
-            const target = Math.max(128, biggestLength - Math.max(64, excess * 2));
+            // 目标 content token = 当前 content token - 2×超出量（至少 128，避免一轮切太狠）
+            const target = Math.max(128, biggestTokens - Math.max(64, excess * 2));
             this.messages[biggestIndex] = withContent(this.messages[biggestIndex], truncateSubAgentContent(contentOf(this.messages[biggestIndex]), target));
             changed = true;
         }

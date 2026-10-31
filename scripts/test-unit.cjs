@@ -47,6 +47,17 @@ const bundles = {
     mcp: path.join(outDir, 'unit-mcp.cjs'),
     imageSource: path.join(outDir, 'unit-image-source.cjs'),
     eventTrigger: path.join(outDir, 'unit-event-trigger.cjs'),
+    triggerM0: path.join(outDir, 'unit-trigger-m0.cjs'),
+    triggerRule: path.join(outDir, 'unit-trigger-rule.cjs'),
+    judgeDecision: path.join(outDir, 'unit-judge-decision.cjs'),
+    aux: path.join(outDir, 'unit-aux.cjs'),
+    triggerStore: path.join(outDir, 'unit-trigger-store.cjs'),
+    claimTable: path.join(outDir, 'unit-claim-table.cjs'),
+    chatOutcome: path.join(outDir, 'unit-chat-outcome.cjs'),
+    triggerChain: path.join(outDir, 'unit-trigger-chain.cjs'),
+    judgeConfig: path.join(outDir, 'unit-judge-config.cjs'),
+    triggerTools: path.join(outDir, 'unit-trigger-tools.cjs'),
+    tokenSelect: path.join(outDir, 'unit-token-select.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -89,7 +100,18 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['protocol', path.join(repo, 'scripts/unit-test-protocol.ts')],
         ['mcp', path.join(repo, 'scripts/unit-test-mcp.ts')],
         ['imageSource', path.join(repo, 'scripts/unit-test-image-source.ts')],
-        ['eventTrigger', path.join(repo, 'scripts/unit-test-event-trigger.ts')]
+        ['eventTrigger', path.join(repo, 'scripts/unit-test-event-trigger.ts')],
+        ['triggerM0', path.join(repo, 'scripts/unit-test-trigger-m0.ts')],
+        ['triggerRule', path.join(repo, 'scripts/unit-test-trigger-rule.ts')],
+        ['judgeDecision', path.join(repo, 'scripts/unit-test-judge-decision.ts')],
+        ['aux', path.join(repo, 'scripts/unit-test-aux.ts')],
+        ['triggerStore', path.join(repo, 'scripts/unit-test-trigger-store.ts')],
+        ['claimTable', path.join(repo, 'scripts/unit-test-claim-table.ts')],
+        ['chatOutcome', path.join(repo, 'scripts/unit-test-chat-outcome.ts')],
+        ['triggerChain', path.join(repo, 'scripts/unit-test-trigger-chain.ts')],
+        ['judgeConfig', path.join(repo, 'scripts/unit-test-judge-config.ts')],
+        ['triggerTools', path.join(repo, 'scripts/unit-test-trigger-tools.ts')],
+        ['tokenSelect', path.join(repo, 'scripts/unit-test-token-select.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

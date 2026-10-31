@@ -16,7 +16,7 @@ export const V5_VERSION = 5;
 
 /** 全部合法用途（顺序即 UI 展示顺序） */
 export const MODEL_USES: ModelUse[] = [
-    'chat', 'compression', 'summarization', 'judge',
+    'chat', 'summarization', 'judge',
     'image-understanding', 'text-embedding', 'tts', 'image-generation',
 ];
 
@@ -29,9 +29,9 @@ export type ApiDialect = 'openai-completions' | 'anthropic-messages' | 'openai-r
 export const API_DIALECTS: ApiDialect[] = ['openai-completions', 'anthropic-messages', 'openai-responses'];
 
 /** 模型类型标签（取代 v4「api连接」的 [types] 表） */
-export type ModelKind = 'text' | 'vision' | 'embed' | 'gen' | 'tts';
+export type ModelKind = 'text' | 'vision' | 'embed' | 'gen' | 'tts' | 'decision';
 
-export const MODEL_KINDS: ModelKind[] = ['text', 'vision', 'embed', 'gen', 'tts'];
+export const MODEL_KINDS: ModelKind[] = ['text', 'vision', 'embed', 'gen', 'tts', 'decision'];
 
 /** 媒体请求体与预设的合并方式：merge=逐键深合并；replace=整体替换（v4 靠"是否媒体用途"隐式决定） */
 export type BodyMode = 'merge' | 'replace';
@@ -65,15 +65,6 @@ export interface V5Provider {
     request?: Record<string, unknown>;
 }
 
-export interface V5Group {
-    purposes: ModelUse[];
-    body?: Record<string, unknown>;
-    request?: Record<string, unknown>;
-    response?: Record<string, unknown>;
-    params?: Record<string, unknown>;
-    prompt?: Record<string, unknown>;
-}
-
 export interface V5Config {
     version: number;
     providers: V5Provider[];
@@ -88,7 +79,6 @@ export interface V5Config {
      * 不该被迫写成 `["x"]`。
      */
     purposes?: Partial<Record<ModelUse, string[] | string>>;
-    groups?: V5Group[];
 }
 
 /** 把 purposes 的一项归一成有序数组（去重、去空）。校验与消费两侧共用，避免各写一份。 */
@@ -113,6 +103,8 @@ export interface V5Issue {
 export interface V5ParseResult {
     config: V5Config | null;
     issues: V5Issue[];
+    /** 解析期自动清洗产生的提示（如旧配置里已移除的用途被忽略）；不影响合法性 */
+    warnings?: string[];
 }
 
 const ID_CHARS = /^[\x21-\x7E]+$/;
@@ -122,14 +114,17 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 /**
  * 用途是否接受某种模型类型。
  * **必须与 model.ts 的 isEligible 保持一致**（那边按用途筛候选，这边在配置期就拦住）。
- * chat/压缩/总结/评判 排除 embed/gen/tts；四个终值用途各只接受自己的类型。
+ * chat/总结/评判 排除 embed/gen/tts；四个终值用途各只接受自己的类型。
  */
 export function isEligibleKind(use: ModelUse, kind: ModelKind | undefined): boolean {
     const k = kind || 'text';
+    // 决策模型是 System One 专用后端：只允许 judge 用途。
+    if (k === 'decision') return use === 'judge';
     if (use === 'text-embedding') return k === 'embed';
     if (use === 'image-understanding') return k === 'vision';
     if (use === 'image-generation') return k === 'gen';
     if (use === 'tts') return k === 'tts';
+    // judge 接受普通对话模型（text/vision）；chat/summarization 不接受 decision（上面已拦）
     return k !== 'embed' && k !== 'gen' && k !== 'tts';
 }
 
@@ -253,8 +248,37 @@ export function validateV5Config(raw: unknown): V5Issue[] {
                         }
                     }
                     if (m.request && isPlainObject(m.request)) {
-                        const reqBodyIssue = checkThinkingField(`${mp}.request.body`, (m.request as Record<string, unknown>).body);
+                        const req = m.request as Record<string, unknown>;
+                        const reqBodyIssue = checkThinkingField(`${mp}.request.body`, req.body);
                         if (reqBodyIssue) push(reqBodyIssue.path, reqBodyIssue.msg);
+
+                        // 逐模型「用途 → 请求体」覆盖：键必须是已知用途，值必须是对象
+                        const bbu = req.bodyByUse;
+                        if (bbu !== undefined && mid && modelKinds.get(mid) === 'decision') {
+                            push(`${mp}.request.bodyByUse`, '决策模型不支持 bodyByUse（请求体由内置 System One 适配器生成）');
+                        } else if (bbu !== undefined) {
+                            if (!isPlainObject(bbu)) {
+                                push(`${mp}.request.bodyByUse`, 'bodyByUse 需为对象（用途 → 请求体）');
+                            } else {
+                                const kind = mid ? modelKinds.get(mid) : undefined;
+                                for (const [use, body] of Object.entries(bbu)) {
+                                    const upath = `${mp}.request.bodyByUse.${use}`;
+                                    if (!MODEL_USES.includes(use as ModelUse)) {
+                                        push(upath, `未知用途（可选：${MODEL_USES.join(' / ')}）`);
+                                        continue;
+                                    }
+                                    if (!isPlainObject(body)) {
+                                        push(upath, '请求体需为对象');
+                                        continue;
+                                    }
+                                    const bodyIssue = checkThinkingField(upath, body);
+                                    if (bodyIssue) push(bodyIssue.path, bodyIssue.msg);
+                                    if (kind && !isEligibleKind(use as ModelUse, kind)) {
+                                        push(upath, `模型类型是 ${kind}，不适用于「${use}」用途`);
+                                    }
+                                }
+                            }
+                        }
                     }
                 });
             }
@@ -298,45 +322,38 @@ export function validateV5Config(raw: unknown): V5Issue[] {
         }
     }
 
-    // groups
-    const groups = raw.groups;
-    if (groups !== undefined) {
-        if (!Array.isArray(groups)) {
-            push('$.groups', 'groups 需为数组');
-        } else {
-            groups.forEach((g: unknown, i: number) => {
-                const gp = `$.groups[${i}]`;
-                if (!isPlainObject(g)) {
-                    push(gp, '用途组必须是对象');
-                    return;
-                }
-                const uses = g.purposes;
-                if (!Array.isArray(uses) || uses.length === 0) {
-                    push(`${gp}.purposes`, '用途组需要非空的 purposes 数组');
-                } else {
-                    uses.forEach((u: unknown, j: number) => {
-                        if (!MODEL_USES.includes(u as ModelUse)) {
-                            push(`${gp}.purposes[${j}]`, `未知用途 ${JSON.stringify(u)}`);
-                        }
-                    });
-                }
-                // thinking 只接受结构化对象；字符串（如 "enabled"）会被 provider 422 拒绝
-                const gBodyIssue = checkThinkingField(`${gp}.body`, g.body);
-                if (gBodyIssue) push(gBodyIssue.path, gBodyIssue.msg);
-                if (isPlainObject(g.request)) {
-                    const gReqIssue = checkThinkingField(`${gp}.request.body`, (g.request as Record<string, unknown>).body);
-                    if (gReqIssue) push(gReqIssue.path, gReqIssue.msg);
-                }
-            });
-        }
-    }
-
     return issues;
 }
 
 /** 把问题列表渲染成一段可读文本（供日志与 .ai model 展示） */
 export function formatIssues(issues: V5Issue[]): string {
     return issues.map(i => `  ${i.path}：${i.msg}`).join('\n');
+}
+
+/** 已彻底移除的用途键：旧配置里有的话在解析期自动忽略（见 stripRemovedPurposes） */
+const REMOVED_PURPOSE_KEYS = ['compression'] as const;
+
+/**
+ * 解析期清洗：剔除已移除用途（`purposes`），返回是否有改动。
+ *
+ * 为什么需要：`compression` 用途已从 `ChatModelUse`/`MODEL_USES` 中彻底移除，而 v5 校验对
+ * 未知用途是**整份拒绝**。老用户存储里的模型配置一定带着 `purposes.compression`，若直接校验
+ * 会让他们的模型配置整份失效。这里只在内存 raw 对象上剔除（不写回，海豹也没有配置写入 API），
+ * 属于"输入容错"而非迁移；`configs/model.ts` 会把 warnings 打到日志。
+ */
+export function stripRemovedPurposes(raw: unknown): boolean {
+    if (!isPlainObject(raw)) return false;
+    let touched = false;
+    const purposes = raw.purposes;
+    if (isPlainObject(purposes)) {
+        for (const key of REMOVED_PURPOSE_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(purposes, key)) {
+                delete (purposes as Record<string, unknown>)[key];
+                touched = true;
+            }
+        }
+    }
+    return touched;
 }
 
 /**
@@ -357,7 +374,18 @@ export function parseV5Config(text: string): V5ParseResult {
         return { config: null, issues: [{ path: '$', msg: `JSON 语法错误：${msg}` }] };
     }
 
+    const warnings: string[] = [];
+    // 旧配置兼容：已移除用途（compression）在校验前清洗，避免整份配置被判非法
+    if (stripRemovedPurposes(data)) {
+        warnings.push('旧配置中的「压缩」用途（compression）已移除，已自动忽略；其余用途不受影响。');
+    }
+    // 旧配置里的用途组请求体（groups）已停用：忽略并提示，请求体覆盖改走 models[].request.bodyByUse
+    if (isPlainObject(data) && Object.prototype.hasOwnProperty.call(data, 'groups')) {
+        delete (data as Record<string, unknown>).groups;
+        warnings.push('旧配置中的「用途组请求体」（groups）已移除，已自动忽略；请改用 models[].request.bodyByUse。');
+    }
+
     const issues = validateV5Config(data);
-    if (issues.length > 0) return { config: null, issues };
-    return { config: data as V5Config, issues: [] };
+    if (issues.length > 0) return { config: null, issues, ...(warnings.length > 0 ? { warnings } : {}) };
+    return { config: data as V5Config, issues: [], ...(warnings.length > 0 ? { warnings } : {}) };
 }

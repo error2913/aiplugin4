@@ -1,6 +1,9 @@
 // .ai off：关闭 AI（整体或按模式）
 import { JudgeManager } from "../../judge/judge_manager";
+import { claimTable } from "../../pipeline/claim_table";
+import { decisionSchedule } from "../../pipeline/decision_schedule";
 import { TimerManager } from "../../timer";
+import { pendingDelays } from "../../trigger/runtime";
 import { I } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
@@ -8,8 +11,8 @@ export function registerCmdOff() {
     const cmd = new SubCmd('off');
     cmd.desc = '关闭AI（含非指令正则触发）';
     cmd.help = `帮助:
-【.ai off】关闭 AI 及全部触发模式
-【.ai off --<参数>】按模式关闭（--r 正则 / --e 事件触发 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机）`;
+【.ai off】关闭 AI 与全部触发（规则/模式定时器条目移除，模式开关保留；.ai on 后按开关重建；要清开关用 .ai trg all off）
+【.ai off --<参数>】按模式关闭（--r 正则 / --e 事件触发 / --c 计数器 / --t 延迟 / --p 概率 / --a 活跃时间段 / --j 评分触发）`;
     cmd.priv = { priv: I };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, cmdArgs, sid, session, ret  } = scc;
@@ -20,7 +23,13 @@ export function registerCmdOff() {
         if (kwargs.length == 0) {
             session.resetState();
             TimerManager.removeTimers(sid, '', ['activeTime'], []);
+            // §5.9：规则/模式 timer 条目移除（规则本身保留；.ai on 时按定义重建）
+            TimerManager.removeRuleTimersForSession(sid);
             JudgeManager.clearSession(sid);
+            // 触发域瞬态清理（§5.9）：认领表/判定调度/延迟挂起都不应跨关闸残留
+            claimTable.releaseSession(sid);
+            decisionSchedule.cancelForSession(sid);
+            pendingDelays.cancelSession(sid);
 
             setting.counter = -1;
             setting.timer = -1;
@@ -28,7 +37,7 @@ export function registerCmdOff() {
             setting.regexTrigger = false;
             setting.eventTrigger = false;
             setting.judge = false;
-            setting.standby = false;
+            setting.aiEnabled = false;
             setting.activeTimeInfo = {
                 start: 0,
                 end: 0,
@@ -65,6 +74,7 @@ export function registerCmdOff() {
                 case 'judge': {
                     setting.judge = false;
                     JudgeManager.clearSession(sid);
+                    decisionSchedule.cancelForSession(sid);
                     matched++;
                     text += `\n评分触发`;
                     break;
@@ -96,6 +106,7 @@ export function registerCmdOff() {
                 case 'a':
                 case 'active': {
                     TimerManager.removeTimers(sid, '', ['activeTime'], []);
+                    setting.activeMode = false;
                     setting.activeTimeInfo = {
                         start: 0,
                         end: 0,
@@ -103,13 +114,6 @@ export function registerCmdOff() {
                     }
                     matched++;
                     text += `\n活跃时间段`;
-                    break;
-                }
-                case 'sb':
-                case 'standby': {
-                    setting.standby = false;
-                    matched++;
-                    text += `\n待机模式`;
                     break;
                 }
                 default: {
@@ -125,7 +129,7 @@ export function registerCmdOff() {
         if (matched === 0) {
             seal.replyToSender(ctx, msg,
                 `未识别的参数${unknown.length > 0 ? `：${unknown.map(n => `--${n}`).join('、')}` : ''}，未做任何更改。\n` +
-                `可用：--r 正则 / --e 事件触发 / --c 计数器 / --t 计时器 / --p 概率 / --a 活跃时间段 / --j 评分触发 / --sb 待机；不带参数则整体关闭。`);
+                `可用：--r 正则 / --e 事件触发 / --c 计数器 / --t 延迟 / --p 概率 / --a 活跃时间段 / --j 评分触发；不带参数则整体关闭。`);
             return ret;
         }
 

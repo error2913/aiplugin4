@@ -50,6 +50,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     testContextCommandsParse() {
         assert.equal(parseCtxCommand([]).action, 'status');
         assert.equal(parseCtxCommand(['archive']).action, 'archive');
+        assert.deepEqual(parseCtxCommand(['settle']), { action: 'help', error: '未知子命令：settle' }, 'settle 别名已删除');
         assert.equal(parseCtxCommand(['hide']).target, 'all');
         assert.equal(parseCtxCommand(['hide', 'user']).target, 'user');
         assert.equal(parseCtxCommand(['hide', 'bad']).error !== undefined, true);
@@ -72,6 +73,22 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(result.text.includes('更早内容'));
         assert.ok(result.text.includes('保留强度'));
         assert.ok(result.text.includes('原文窗口'));
+        assert.ok(result.text.includes('自动摘要：本会话未使用（上限 1 次，成功才消耗）'), 'status 应展示自动摘要额度');
+        assert.ok(result.text.includes('超预算内容：不注入请求，原文永久保留'), 'status 应说明归档/回查语义');
+        assert.ok(result.text.includes('read_raw/grep_raw'));
+        assert.equal(result.text.includes('自动评分'), false, 'judge 未触发时不显示评分行');
+
+        // 已用额度的会话：显示“已使用”；judge 计数 > 0 时展示自动评分
+        const usedSession = {
+            setting: {},
+            context: { v2BudgetCapValue: null, autoNameMod: 0, userInfoList: [] },
+            ctxAutoSummaryUsed: 1,
+            ctxStats: { judge: 3 },
+        } as any;
+        const used = formatCtxStatus({ sessionId: sid, service, args: [], session: usedSession });
+        assert.ok(used.includes('自动摘要：已使用（本会话上限 1 次）'), used);
+        assert.ok(used.includes('自动评分：本会话已触发 3 次'), used);
+
         const formatted = formatCtxStatus({ sessionId: sid, service, args: [] });
         assert.ok(formatted.includes('上下文：'));
         assert.equal(formatted.includes('v2'), false, '用户可见文本不暴露实现版本');

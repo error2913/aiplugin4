@@ -6,7 +6,7 @@ export function init() {
     const judgeAgent = Agent.get("judge_agent");
     judgeAgent.name = "judge_agent";
     judgeAgent.description = "评分智能体";
-    judgeAgent.instruction = "You are a group-chat interjection quality rater; rate messages on five dimensions and output JSON. Write the reason in the language of the conversation.";
+    judgeAgent.instruction = "You are a group-chat interjection quality scorer; rate the current message on the six dimensions using 0..10 scores and output JSON. Do not output an action, confidence, or reason.";
     judgeAgent.use = "judge";
     Agent.save(judgeAgent);
     return judgeAgent;

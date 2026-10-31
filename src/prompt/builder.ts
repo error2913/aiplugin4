@@ -3,7 +3,7 @@
 import Config from "../config/config";
 import Message from "../context/message";
 import type { UserMessage, UserMessageItem } from "../context/types";
-import { ImageHost } from "../resource/image_host";
+import { auxRegistry } from "../core/ports/aux_tools";
 import type { Session } from "../session/session";
 import type { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
@@ -13,39 +13,121 @@ import { extraSeparatorLabels } from "../utils/message_separator";
 import { getRoleSetting } from "../utils/role";
 import { stripInternalTags } from "../utils/string";
 import { platformOf } from "../utils/target_id";
+import { truncateMiddleToTokenBudget } from "../utils/token_budget";
+import { estimateTextTokens } from "../utils/token_estimate";
+import { selectByTokenBudget } from "../utils/token_select";
 
 import { assemblePrompt } from "./assemble";
 import { initKnowledgeBase } from "./sections/skills_knowledge";
 import type { PromptContext, PromptFlags, PromptParts } from "./types";
 
-/** 记忆检索输入：最近 2~3 条用户消息拼接（≤2000 字符）+ 发言者/群信息 */
-function collectMemoryInput(ctx: seal.MsgContext, session: Session): {
+/** 记忆检索输入 token 预算（内部常量，不新增配置键；方案 §11.2 A 组） */
+export const MEMORY_QUERY_TOKEN_BUDGET = 512;
+
+interface MemoryQueryItem {
+    /** 已归一化（剥内部标签）的纯文本 */
+    text: string;
+    userId: string;
+}
+
+/**
+ * 记忆检索输入：按 **token 预算**从最新 user 条目往前累加（默认 512 tokens）+ 发言者/群信息。
+ *
+ * 旧实现是「最近 2~3 条用户消息 + 2000 字符」的条数/字符口径（方案 §11.2 A 组）；
+ * 现在改为 token 口径，0 语义显式：tokenBudget <= 0 → 不收集任何文本（query 为空，
+ * 等价于不检索），**不**退化成「最近 N 条」。
+ * 传入过大的单条消息时 selectByTokenBudget 默认仍保留最新一条，这里再按 token 中段收口。
+ *
+ * @param tokenBudget 记忆检索输入 token 预算（缺省 MEMORY_QUERY_TOKEN_BUDGET）
+ */
+export function collectMemoryInput(ctx: seal.MsgContext, session: Session, tokenBudget: number = MEMORY_QUERY_TOKEN_BUDGET): {
     query: string;
     users: UserInfo[];
     group: GroupInfo | null;
 } {
-    const userMessages = session.context.messages.filter(message => message.role === 'user');
-    let text = '';
-    const users: UserInfo[] = [];
-    let group: GroupInfo | null = null;
-    for (const userMessage of userMessages.slice(-3)) {
+    const items: MemoryQueryItem[] = [];
+    for (const userMessage of session.context.messages) {
+        if (userMessage.role !== 'user') continue;
         if (!Array.isArray((userMessage as UserMessage).contentItems)) continue;
         for (const item of (userMessage as UserMessage).contentItems) {
             if (Message.getUserMessageItemType(item) !== 'user') continue;
             const userItem = item as UserMessageItem;
-            if (userItem.text) text += (text ? ' ' : '') + stripInternalTags(userItem.text);
-            if (userItem.userId) {
-                const user = User.get(userItem.userId);
-                const info: UserInfo = { isPrivate: true, id: userItem.userId, name: user.userName || userItem.userId };
-                if (!users.some(existing => existing.id === info.id)) users.push(info);
-            }
+            const text = userItem.text ? stripInternalTags(userItem.text) : '';
+            if (!text) continue;
+            items.push({ text, userId: String(userItem.userId || '') });
         }
     }
+    const selected = selectByTokenBudget(items, item => estimateTextTokens(item.text), tokenBudget);
+    let text = '';
+    const users: UserInfo[] = [];
+    for (const item of selected) {
+        text += (text ? ' ' : '') + item.text;
+        if (!item.userId) continue;
+        const user = User.get(item.userId);
+        const info: UserInfo = { isPrivate: true, id: item.userId, name: user.userName || item.userId };
+        if (!users.some(existing => existing.id === info.id)) users.push(info);
+    }
+    if (estimateTextTokens(text) > tokenBudget) {
+        // 最新条目自身超预算：selectByTokenBudget 默认保留它，查询输入再收口到预算内
+        text = truncateMiddleToTokenBudget(text, tokenBudget, estimateTextTokens).text;
+    }
+    let group: GroupInfo | null = null;
     if (!ctx.isPrivate && ctx.group) {
         group = { isPrivate: false, id: ctx.group.groupId, name: ctx.group.groupName };
     }
-    if (text.length > 2000) text = text.slice(-2000);
     return { query: text, users, group };
+}
+
+/** 图片段 flag 派生输入（纯函数入参，供单测直接断言；方案 v1.4 §10.5） */
+export interface ImagePromptFlagInput {
+    /** 消息接收页「接收图片」 */
+    receiveImage: boolean;
+    /** 图片页「图床提示注入」开关（默认 true） */
+    imageHostPrompt: boolean;
+    /** 资源页「资源清单注入」开关（默认 false） */
+    resourcePrompt: boolean;
+    /** aux 注册表是否存在 image-host 片段（适配器注册条件已保证 = 图床/MCP 有图片能力） */
+    hasImageHostSnippet: boolean;
+    /** aux 注册表是否存在 resource 片段（资源开关开且确有内置图片/本地资源） */
+    hasResourceSnippet: boolean;
+}
+
+/** 图片相关 flag 的唯一派生点：不再直接 import ImageHost/MCP 判断（等价性由适配器注册条件保证） */
+export function deriveImagePromptFlags(input: ImagePromptFlagInput): {
+    imageUsage: boolean;
+    imageHost: boolean;
+    resourceLibrary: boolean;
+    imageLibrary: boolean;
+} {
+    const imageHost = !!input.imageHostPrompt && !!input.hasImageHostSnippet;
+    const resourceLibrary = !!input.resourcePrompt && !!input.hasResourceSnippet;
+    // 有意修正（方案 §10.5 行为差异 #2）：只开了「接收图片」也应该告诉模型怎么用图片
+    const imageUsage = !!input.receiveImage || imageHost || resourceLibrary;
+    return {
+        imageUsage,
+        imageHost,
+        resourceLibrary,
+        // 兼容旧字段（下一版删除）：语义已收窄为「真有图片能力的来源」，与旧 ImageHost||MCP 等价
+        imageLibrary: imageHost,
+    };
+}
+
+/** 配置读取兜底：配置尚未注册/读取异常时按出厂默认处理，避免提示词装配崩溃 */
+function safeBoolean(read: () => boolean, fallback: boolean): boolean {
+    try {
+        return !!read();
+    } catch {
+        return fallback;
+    }
+}
+
+function safeNumber(read: () => number, fallback: number): number {
+    try {
+        const value = Number(read());
+        return Number.isFinite(value) && value > 0 ? value : fallback;
+    } catch {
+        return fallback;
+    }
 }
 
 /** 读取配置开关快照 */
@@ -53,13 +135,25 @@ function readFlags(): PromptFlags {
     const { RECEIVE_IMAGE } = Config.received;
     const { STATUS, PROMPT_ENGINEERING, DIRECTION_PROMPT } = Config.tool;
     const { EXTRA_SEPARATOR } = Config.reply;
+    const derived = deriveImagePromptFlags({
+        receiveImage: !!RECEIVE_IMAGE,
+        imageHostPrompt: safeBoolean(() => Config.image.IMAGE_HOST_PROMPT, true),
+        resourcePrompt: safeBoolean(() => Config.resource.RESOURCE_LIBRARY, false),
+        hasImageHostSnippet: auxRegistry.hasSnippet('image-host'),
+        hasResourceSnippet: auxRegistry.hasSnippet('resource'),
+    });
     return {
         status: !!STATUS,
         promptEngineering: !!PROMPT_ENGINEERING,
         directionPrompt: !!DIRECTION_PROMPT,
         receiveImage: !!RECEIVE_IMAGE,
         extraSeparator: extraSeparatorLabels(EXTRA_SEPARATOR),
-        imageLibrary: !!(ImageHost.enabled || Config.mcp.MCP_ENABLED),
+        imageUsage: derived.imageUsage,
+        resourceLibrary: derived.resourceLibrary,
+        imageHost: derived.imageHost,
+        resourceBudget: safeNumber(() => Config.resource.RESOURCE_LIBRARY_BUDGET, 600),
+        imageHostBudget: safeNumber(() => Config.image.IMAGE_HOST_PROMPT_BUDGET, 600),
+        imageLibrary: derived.imageLibrary,
         memory: !!((Config.memory as any).MEMORY_ENABLED ?? Config.memory.MEMORY),
         knowledge: !!Config.knowledgeBase.KNOWLEDGE,
     };

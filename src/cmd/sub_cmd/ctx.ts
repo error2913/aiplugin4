@@ -1,45 +1,15 @@
 // .ai ctx：上下文状态与管理（status/archive/hide/purge/set/name/repair）。
 import { PRIVILEGE_LEVEL_MAP } from "../../config/static_config";
 import { ctxHelpText, parseCtxCommand, runCtxCommand } from "../../context/commands";
-import { CompactionRuntime } from "../../context/compact/runtime";
+import { compactionRuntimeFor } from "../../context/compact/session_runtime";
 import type { ConversationEvent } from "../../context/events";
 import { ContextService } from "../../context/service";
-import { getAuxLlm } from "../../core/ports/aux_llm";
-import { COMPACT_BATCH_TOKENS, SUMMARY_MAX_CHARS } from "../../utils/context_limits";
+import { estimateEventTokens } from "../../utils/token_estimate";
 import { U } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
 
-function estimateEventTokens(event: ConversationEvent): number {
-    const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
-    let chars = 0;
-    for (const part of parts) if (part.type === 'text') chars += String(part.text ?? '').length;
-    if (event.kind === 'tool_call') chars += String(event.args ?? '').length;
-    return Math.max(1, Math.ceil(chars / 3)) + 4;
-}
-
-const runtimes = new WeakMap<object, CompactionRuntime>();
-
-function buildRuntime(service: ContextService, session: object): CompactionRuntime {
-    let runtime = runtimes.get(session);
-    if (runtime) return runtime;
-    runtime = new CompactionRuntime(
-        { batchTokens: COMPACT_BATCH_TOKENS, summaryMaxChars: SUMMARY_MAX_CHARS, hourlyCap: 0 },
-        {
-            service,
-            summarize: async (text: string) => {
-                try {
-                    const out = await getAuxLlm().chat('summarize_agent', text);
-                    return typeof out === 'string' && out.trim() ? out : null;
-                } catch {
-                    return null;
-                }
-            },
-            estimateEventTokens,
-        },
-    );
-    runtimes.set(session, runtime);
-    return runtime;
-}
+/** 与 SessionService 打开新会话时同口径的事件 token 估算（purge 重建 service 时保持一致） */
+const storeEstimate = (event: ConversationEvent) => estimateEventTokens(event);
 
 export function registerCmdCtx() {
     const cmd = new SubCmd('ctx');
@@ -76,7 +46,8 @@ export function registerCmdCtx() {
                 session,
                 epId,
                 gid,
-                runtime: buildRuntime(service, session),
+                // 自动摘要与手动 archive 共用同一 runtime（单飞/退避状态一致，避免同一批事件被并发摘要两次）
+                runtime: compactionRuntimeFor(session),
             });
         } catch (error) {
             seal.replyToSender(ctx, msg, `上下文操作失败：${error instanceof Error ? error.message : String(error)}`);
@@ -84,11 +55,12 @@ export function registerCmdCtx() {
         }
         if (result.purged) {
             try {
-                const fresh = ContextService.openSync(sid);
+                const fresh = ContextService.openSync(sid, { estimateEventTokens: storeEstimate });
                 session.contextV2 = fresh;
                 session.context.initV2(fresh);
+                // purge = 新 context epoch：重置本会话自动摘要额度（最多一次）；必须在 save 前赋值
+                session.ctxAutoSummaryUsed = 0;
                 session.save();
-                runtimes.delete(session);
             } catch {
                 session.contextV2 = null;
                 session.context.initV2(null);

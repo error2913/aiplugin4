@@ -66,7 +66,6 @@ const noopAgent = {
     chat: async () => '（模拟回复）',
 };
 Agent.get = ((name: string) => {
-    if (name === 'compress_agent') return { chat: async (t: string) => '压' };
     if (name === 'summarize_agent') return { chat: async () => '{"facts":[]}' };
     return noopAgent;
 }) as any;
@@ -90,7 +89,7 @@ function makeSession(sid: string, standby = true): Session {
     s.sessionId = sid;
     s.sessionType = 'group';
     s.agentName = 'default';
-    s.setting.standby = standby;
+    s.setting.aiEnabled = standby;
     s.lastRelevantAt = Date.now() - 11 * 60_000;   // 超过 10 分钟阈值 → 冷态
     (s.context as any).sessionId = sid;
     (s.context as any).agentName = 'default';
@@ -330,7 +329,7 @@ async function scenarioStateTransitions() {
         const s = makeSession(sid);
         for (let i = 0; i < 20; i++) await s.context.addUserMessage(makeCtx(sid), `前半${i}${'内'.repeat(10)}`, 'QQ:1', `h${i}`);
         const coldBefore = s.stateOf(Date.now(), { touch: false });
-        s.setting.standby = false;   // 中途关闭待机
+        s.setting.aiEnabled = false;   // 中途关闭待机
         for (let i = 20; i < 40; i++) await s.context.addUserMessage(makeCtx(sid), `后半${i}${'内'.repeat(10)}`, 'QQ:1', `h${i}`);
         const hotAfter = s.stateOf(Date.now(), { touch: false });
         check(coldBefore === 'COLD' && hotAfter === 'HOT', `C1 中途关待机应 COLD→HOT（${coldBefore}→${hotAfter}）`);

@@ -25,6 +25,10 @@ export interface ParsedCtxCommand {
 export interface CtxSessionLike {
     setting?: { overrides?: Record<string, unknown> };
     save?(): void;
+    /** 本会话自动摘要额度：0/缺省=未使用，1=已使用（每会话最多 1 次，成功才消耗） */
+    ctxAutoSummaryUsed?: number;
+    /** 运行时统计（judge=评分触发次数；旧会话/游离会话可能缺省） */
+    ctxStats?: { judge?: number };
     context: {
         autoNameMod: number;
         userInfoList: Array<{ id: string; name: string }>;
@@ -41,7 +45,7 @@ const HIDE_LABEL: Record<HideTarget, string> = { user: '用户消息', assistant
 const HELP = [
     '用法：.ai ctx [子命令]',
     '  （无参数）              查看上下文状态',
-    '  archive                 整理更早内容（保留最新原文与原文，可回查）',
+    '  archive                 手动整理更早内容为滚动摘要（会花 LLM；保留最新原文，其余原文仍可回查）',
     '  hide [user|assistant|all]  隐藏消息（原文保留，可审计）',
     '  purge --yes             清除本会话上下文（不可恢复，仅骰主）',
     '  set [budget=<tokens>] [retain=<1-100>]|clr  本会话预算/保留强度（仅邀请者）',
@@ -56,7 +60,7 @@ export function ctxHelpText(): string {
 
 const TOPIC_HELP: Record<string, string> = {
     status: '【.ai ctx status】查看当前上下文消息数、预算/保留强度、整理进度与最近一次整理结果。',
-    archive: '【.ai ctx archive】立即整理更早内容：压缩到保留强度目标（保留最新原文），只生成摘要，不删除原文，不写长期记忆。',
+    archive: '【.ai ctx archive】手动整理更早内容为滚动摘要（会花 LLM）：压缩到保留强度目标（保留最新原文），只生成摘要，不删除原文，不写长期记忆。自动摘要每会话最多 1 次。',
     hide: '【.ai ctx hide [user|assistant|all]】隐藏消息：模型与检索不可见，原文保留供审计。',
     purge: '【.ai ctx purge --yes】物理清除本会话上下文，不可恢复；需要骰主并显式加 --yes。默认不影响长期记忆。',
     set: '【.ai ctx set [budget=<tokens>] [retain=<1-100>]|clr】本会话覆盖上下文预算与保留强度；budget=0 表示跟随模型窗口，clr 恢复默认。',
@@ -72,7 +76,7 @@ export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
     if (head === 'help' || head === '-h' || head === '--help') return { action: 'help', helpTopic: rest[0]?.toLowerCase() };
     if (rest[0]?.toLowerCase() === 'help' || rest.includes('--help') || rest.includes('-h')) return { action: 'help', helpTopic: head };
     if (head === 'status') return { action: 'status' };
-    if (head === 'archive' || head === 'settle') return { action: 'archive' };
+    if (head === 'archive') return { action: 'archive' };
     if (head === 'repair') return { action: 'repair' };
     if (head === 'hide') {
         const raw = (rest[0] || 'all').toLowerCase();
@@ -140,6 +144,12 @@ export function formatCtxStatus(input: CtxCommandInput): string {
     lines.push(`保留强度：${budgets.retainPercent}%（压缩后保留约 ${budgets.targetTokens} token 最新原文）`);
     lines.push(`原文窗口：约 ${Math.max(0, stats.unsummarizedTokens)} token（未摘要）`);
     lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
+    lines.push(input.session?.ctxAutoSummaryUsed
+        ? '自动摘要：已使用（本会话上限 1 次）'
+        : '自动摘要：本会话未使用（上限 1 次，成功才消耗）');
+    lines.push(`超预算内容：不注入请求，原文永久保留；可用 read_raw/grep_raw 回查（展示上限约 ${budgets.retainPercent + 100}% 预算）`);
+    const judgeCount = input.session?.ctxStats?.judge;
+    if (typeof judgeCount === 'number' && judgeCount > 0) lines.push(`自动评分：本会话已触发 ${judgeCount} 次`);
     const last = input.runtime?.getLastResult();
     if (last) {
         lines.push(`最近整理：${last.advanced ? `成功（${last.batches} 批）` : '未完成'}${last.reason ? `（${last.reason}）` : ''}`);

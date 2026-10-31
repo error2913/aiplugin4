@@ -411,11 +411,11 @@ tests['subagent.childSystem.sections'] = () => {
 };
 
 tests['subagent.wake.decision'] = () => {
-    const base = { noticeCount: 1, parentBusy: false, sessionStandby: false, globalStandby: false };
+    const base = { noticeCount: 1, parentBusy: false, sessionAiEnabled: false, globalAiEnabled: false };
     assert.equal(decideWake(base), 'wake');
     assert.equal(decideWake({ ...base, parentBusy: true }), 'defer', '父在跑→下轮 flush 呈现');
-    assert.equal(decideWake({ ...base, sessionStandby: true }), 'defer', '会话待机不主动');
-    assert.equal(decideWake({ ...base, globalStandby: true }), 'defer', '全局待机不主动');
+    assert.equal(decideWake({ ...base, sessionAiEnabled: true }), 'defer', '会话待机不主动');
+    assert.equal(decideWake({ ...base, globalAiEnabled: true }), 'defer', '全局待机不主动');
     assert.equal(decideWake({ ...base, noticeCount: 0 }), 'defer', '无 notice 不唤醒');
     assert.equal(WAKE_REASON, '子代理完成通知');
 };

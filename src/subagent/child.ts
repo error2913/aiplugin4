@@ -13,8 +13,10 @@ import { ToolRunner } from '../tool/runner';
 import Tool from '../tool/tool';
 import type { RequestMessage } from '../utils/message';
 import { buildContent } from '../utils/message';
-import { wrapToolResultText } from '../utils/protocol';
+import { buildChildToolTruncateMarker, wrapToolResultText } from '../utils/protocol';
 import { StopError } from "../utils/timeout";
+import { truncateToTokenBudget } from '../utils/token_budget';
+import { estimateTextTokens } from '../utils/token_estimate';
 
 import type { SubAgentSummaryFn } from './context';
 import { SubAgentContext } from './context';
@@ -146,6 +148,22 @@ function errorText(e: unknown): string {
 }
 
 /**
+ * 工具结果回填前按「工具结果展示token上限」截断（子代理侧；0=关闭）。
+ * 子代理没有 read_raw：截断标记只提示用工具自身的 offset/start_index 分页或收窄查询。
+ * 注意：截断不可逆——截断后的文本才进入 child 上下文/checkpoint（已知取舍）。
+ * 导出仅供单测直接断言（child.ts 不在纯机制层测试集内）。
+ */
+export function clipChildToolResult(content: string): string {
+    const maxTokens = Config.tool.TOOL_RESULT_MAX_TOKENS;
+    if (maxTokens <= 0) return content;
+    const source = String(content ?? '');
+    const slice = truncateToTokenBudget(source, maxTokens, estimateTextTokens);
+    return slice.truncated
+        ? `${slice.text}${buildChildToolTruncateMarker(slice.totalTokens, slice.shownTokens)}`
+        : source;
+}
+
+/**
  * 跑一个 child 激活直到终态：completed / aborted / timeout / error。
  * 调用前 child.resetState()（清工具计数）；child.stopEvent 由调用方在激活开始时 reset。
  */
@@ -230,7 +248,7 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
                 let callBackAll = true;
                 for (const r of results) {
                     if (r.callBack === false) callBackAll = false;
-                    context.append({ role: 'user', content: wrapToolResultText(r.toolName ?? 'tool', r.content) });
+                    context.append({ role: 'user', content: wrapToolResultText(r.toolName ?? 'tool', clipChildToolResult(r.content)) });
                 }
                 if (!callBackAll) return { stopReason: 'completed', output: partial };
             } catch (e) {
@@ -269,7 +287,7 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
             let callBackAll = true;
             for (const r of results) {
                 if (r.callBack === false) callBackAll = false;
-                context.append({ role: 'tool', tool_call_id: r.tool_call_id, content: r.content });
+                context.append({ role: 'tool', tool_call_id: r.tool_call_id, content: clipChildToolResult(r.content) });
             }
             if (!callBackAll) return { stopReason: 'completed', output: partial };
         } catch (e) {

@@ -80,26 +80,11 @@ const origSummarize = MemoryManager.summarizeChunkWithRetry;
 };
 
 /**
- * 压缩智能体（LLM）的假实现：**冷态零 LLM 的断言只看它**。
- * 说明：Agent.get('compress_agent').chat 才是"压缩调用"；User.get() 的存储读取失败日志
- * 与此无关（会被 Logger 记成 ERROR），不要混进 LLM 计数。
+ * 辅助 LLM 的假实现（summarize_agent 等）：**冷态零 LLM 的断言看 llm.calls 总计数**。
+ * 说明：User.get() 的存储读取失败日志与此无关（会被 Logger 记成 ERROR），不要混进 LLM 计数。
  */
-const compressCounter = { calls: 0 };
 const origGet = Agent.get;
 Agent.get = ((name: string) => {
-    if (name === 'compress_agent') {
-        return {
-            chat: async (t: string) => {
-                compressCounter.calls++;
-                llm.calls++; llm.byUse['compression'] = (llm.byUse['compression'] || 0) + 1;
-                if (compressCounter.calls <= 3) {
-                    console.log(`    [压缩被调用 #${compressCounter.calls}] 输入前 60 字：${String(t).slice(0, 60)}`);
-                    console.log(`      调用栈：${new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()).join(' | ')}`);
-                }
-                return '（模拟压缩结果）';
-            },
-        };
-    }
     if (name === 'summarize_agent') {
         return {
             chat: async () => { llm.calls++; llm.byUse['summarization'] = (llm.byUse['summarization'] || 0) + 1; return '{"facts":[]}'; },
@@ -116,7 +101,7 @@ function makeStandbyGroup(sid: string): Session {
     s.sessionId = sid;
     s.sessionType = 'group';
     s.agentName = 'default';
-    s.setting.standby = true;
+    s.setting.aiEnabled = true;
     // Context 旧配置键已移除；模拟器用会话覆盖复现旧窗口/冷态参数
     s.setting.overrides = { coldWindowChars: 5000, coldTruncate: 500, windowMaxChars: 20000 };
     s.lastRelevantAt = Date.now() - 11 * 60_000;   // 超过 10 分钟阈值 → 冷态
@@ -150,10 +135,10 @@ async function scenarioColdIngest() {
     const ctx = session.context;
 
     resetConfig();
-    const before = { compressCalls: compressCounter.calls, setCalls: storage.setCalls, bytes: storage.writtenBytes };
+    const before = { llmCalls: llm.calls, setCalls: storage.setCalls, bytes: storage.writtenBytes };
 
     const N = 1000;
-    console.log(`  · 灌消息前：stateOf=${session.stateOf(Date.now(), { touch: false })}，standby=${session.setting.standby}，GLOBAL_STANDBY=${Config.base.GLOBAL_STANDBY}`);
+    console.log(`  · 灌消息前：stateOf=${session.stateOf(Date.now(), { touch: false })}，standby=${session.setting.aiEnabled}，GLOBAL_STANDBY=${Config.base.GLOBAL_STANDBY}`);
     for (let i = 0; i < N; i++) {
         const text = i % 37 === 0
             ? `第${i}条超长消息${'内容'.repeat(400)}`   // 制造单条超长，触发冷态截断
@@ -164,25 +149,25 @@ async function scenarioColdIngest() {
     // 这里显式补一次 save() 把待写内容落盘，否则量到的"落盘 0 次"只是节流还没到期。
     session.save();
 
-    const llmDelta = compressCounter.calls - before.compressCalls;
+    const llmDelta = llm.calls - before.llmCalls;
     const setDelta = storage.setCalls - before.setCalls;
     const bytesDelta = storage.writtenBytes - before.bytes;
     const rendered = ctx.messages.reduce((n, m: any) => n + buildContent(m).length, 0);
 
     // 验收数字
-    check('压缩调用为 0（冷态零 LLM）', llmDelta === 0, `本次新增压缩调用 ${llmDelta} 次`);
+    check('辅助 LLM 调用为 0（冷态零 LLM）', llmDelta === 0, `本次新增 LLM 调用 ${llmDelta} 次`);
     check('落盘次数 ≤ 50 次/1000 条', setDelta <= 50, `实际落盘 ${setDelta} 次（原实现为 ${N} 次）`);
     // 体积上界：用"灌两倍消息后 blob 是否仍近似不变"来证明**与消息总量解耦**（单纯比原文长度没有意义）
     const blob1 = storage.peek(`session_${sid}`).length;
-    const before2 = { compress: compressCounter.calls };
+    const before2 = { llm: llm.calls };
     for (let i = 0; i < N; i++) {
         await ctx.addUserMessage(makeCtx(sid), `追加第${i}条群聊消息，继续聊日常话题${'补充'.repeat(3)}`, `QQ:${1000 + (i % 20)}`, `more${i}`);
     }
     session.save();
     const blob2 = storage.peek(`session_${sid}`).length;
     check('再灌 1000 条后 session 体积仍近似不变（与消息总量解耦）',
-        blob2 <= blob1 * 1.5 && (compressCounter.calls - before2.compress) === 0,
-        `blob ${blob1} → ${blob2} 字（消息总量 1000 → 2000 条），期间压缩调用 ${compressCounter.calls - before2.compress} 次`);
+        blob2 <= blob1 * 1.5 && (llm.calls - before2.llm) === 0,
+        `blob ${blob1} → ${blob2} 字（消息总量 1000 → 2000 条），期间 LLM 调用 ${llm.calls - before2.llm} 次`);
     check('窗口移出确实生效（raw 分片存在）', (session as any).rawSeq > 0,
         `rawSeq=${(session as any).rawSeq}，raw 分片键 ${storage.keyLen(`session_${sid}:raw:`)} 个`);
 

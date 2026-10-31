@@ -334,14 +334,17 @@ export default class Model {
         return typeof dim === 'number' && dim > 0 ? dim : 0;
     }
 
-    /** 为某用途构建完整请求体：代码兜底默认 < 规则模板 body < 显式参数 */
-    static buildRequestBody(use: ModelUse, args: { [key: string]: any }): any {
-        return { ...bodyDefaultsFor(use), ...(args ?? {}) };
+    /**
+     * 为某用途构建完整请求体：代码兜底默认 < 逐模型通用规则 < models[].request.bodyByUse[use] < 显式参数。
+     * `modelRef` 传当前模型 id，才能匹配 models 定向规则（v5：模型 id，旧值兼容裸名/[i]:name）。
+     */
+    static buildRequestBody(use: ModelUse, args: { [key: string]: any }, modelRef?: string): any {
+        return { ...bodyDefaultsFor(use, modelRef), ...(args ?? {}) };
     }
 
     /** 某用途合并后的 body 默认（不含调用方显式参数）；供流式判定等读取 stream 等字段 */
-    static getBodyDefaultsFor(use: ModelUse): any {
-        return bodyDefaultsFor(use);
+    static getBodyDefaultsFor(use: ModelUse, modelRef?: string): any {
+        return bodyDefaultsFor(use, modelRef);
     }
 
     /** 请求期覆盖（[request] 模板，默认无）：headers / auth_header_name / content_type / timeout */

@@ -1,12 +1,10 @@
 export const DEFAULT_CHAT_MODEL_BODY = {
-    "max_tokens": 8192,
-    "stop": null,
-    "stream": false
+    "max_tokens": 65536,
+    "temperature": 1
 }
 export const DEFAULT_MULTIMODAL_MODEL_BODY = {
-    "max_tokens": 2048,
-    "stop": null,
-    "stream": false
+    "max_tokens": 65536,
+    "temperature": 1
 }
 export const DEFAULT_EMBEDDING_MODEL_BODY = {
     "encoding_format": "float",

@@ -5,14 +5,21 @@ import { CQ_TYPES_ALLOW } from "./config/static_config";
 import type { EventView } from "./event/trigger";
 import { JudgeManager } from "./judge/judge_manager";
 import { logger } from "./logger";
+import { decisionSchedule } from "./pipeline/decision_schedule";
 import { consumeDependencyTombstone, deleteCoreMessageState, filterOb11SupplementSegments, getCoreMessageState, getMessageKey, markCoreMessageRecorded, markDependencyFullRecorded, rememberCoreMessageByKey, waitForCoreEvent } from "./pipeline/dedup";
 import { resolveEndpointId } from "./pipeline/endpoint";
+import { hasChainEventRules } from "./pipeline/event_ingress";
 import { hasEventTriggerRules, maybeTriggerEvent } from "./pipeline/event_trigger";
 import { handleNativeNoticeEvent, handleOb11NoticeEvent, handleOb11RequestEvent } from "./pipeline/events";
 import { expandOb11Segments } from "./pipeline/inbound";
+import { runChain } from "./pipeline/trigger_rule";
+import { ensureRuleTimersForSession } from "./pipeline/trigger_timer_impl";
+import { wakeSession } from "./pipeline/wake";
+import type { Session } from "./session/session";
 import { getSession } from "./session/session_service";
 import { dispatchLocalCommandOutput } from "./tool/local_command_capture";
 import { triggerConditionMap } from "./tool/tools/core/tool_trigger";
+import { detectBotMention } from "./utils/mention";
 import { getRecordMessageId, transformMsgId } from "./utils/message_id";
 import { SYSTEM_NAME } from "./utils/protocol";
 import { createCtx, createMsg } from "./utils/seal";
@@ -20,6 +27,83 @@ import { expandMilkySegments, formatMessageSegmentsForMatching, transformTextToA
 import { getPlatform, normalizeUserId, platformOf } from "./utils/target_id";
 
 const log = logger.withTag('pipeline');
+
+/** 规则 timer 补注册节流（每会话 60s 最多一次；负责多会话 scope 规则在非创建会话的补齐） */
+function ensureSessionRuleTimers(session: Session, ctx: seal.MsgContext): void {
+    const now = Date.now();
+    if (now - session.lastRuleTimerEnsureAt < 60_000) return;
+    session.lastRuleTimerEnsureAt = now;
+    ensureRuleTimersForSession({ sid: session.sessionId, isPrivate: ctx.isPrivate, epId: ctx.endPoint.userId });
+}
+
+/** 忙时命中的强触发（轮末经 pendingQueue 补一轮）；wakeText 为空表示只起轮不写提示 */
+interface ParkedTrigger {
+    wakeText?: string;
+    systemName?: string;
+}
+
+/**
+ * 会话运行中到达的消息：只做「强触发」轻量判定（链规则/@/正则/AI 一次性条件），
+ * 命中则返回挂起信息；计数器/概率/延迟/评分忙时不推进（方案 §5.2 忙判前置）。
+ */
+async function parkStrongTriggers(
+    session: Session,
+    ctx: seal.MsgContext,
+    msg: seal.Message,
+    messageArray: any[],
+    messageText: string,
+    uid: string,
+    sid: string,
+    setting: Session['setting'],
+    triggerRegex: RegExp,
+    triggerCondition: string,
+): Promise<ParkedTrigger | null> {
+    // 1) 链规则：只求值不起轮（deferWake）。suspended 表示 delay 已自行续算；其余非 no-match 视为已处理。
+    try {
+        const chain = await runChain({
+            session,
+            ctx,
+            msg,
+            text: messageText,
+            userId: uid,
+            platform: getPlatform(ctx.endPoint.userId),
+            claimIdentity: msg.rawId ? String(msg.rawId) : undefined,
+            deferWake: true,
+        });
+        if (chain.status === 'parked') return { wakeText: chain.wakeText, systemName: SYSTEM_NAME.triggerRule };
+        if (chain.status !== 'no-match') return null;
+    } catch (e) {
+        log.exception('忙时链规则求值出错（已跳过）', e);
+    }
+    // 2) @ 触发
+    if (Config.trigger.AT_TRIGGER && detectBotMention(messageArray, ctx)) return {};
+    // 3) 正则触发
+    if (setting.regexTrigger && triggerRegex.test(messageText)) {
+        const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
+        if (fmtCondition === 1) return {};
+    }
+    // 4) AI 一次性触发条件（命中即消费，与不忙路径同语义）
+    const conditions = triggerConditionMap[sid];
+    if (Array.isArray(conditions) && conditions.length !== 0) {
+        for (let i = 0; i < conditions.length; i++) {
+            const condition = conditions[i];
+            let keywordMatched = true;
+            if (condition.keyword) {
+                try {
+                    keywordMatched = new RegExp(condition.keyword).test(messageText);
+                } catch (e) {
+                    log.exception('触发关键词正则错误，已忽略该条件: ' + condition.keyword, e);
+                    keywordMatched = false;
+                }
+            }
+            if (!keywordMatched) continue;
+            if (condition.uid && condition.uid !== uid) continue;
+            conditions.splice(i, 1);
+            return { wakeText: condition.reason, systemName: SYSTEM_NAME.trigger };
+        }
+    }
+    return null;
+}
 
 
 // 兼容旧引用：ob11 补收段筛选已拆到 ./pipeline/dedup（内部实现请直接引用叶子）
@@ -208,8 +292,10 @@ export class MessagePipeline {
         // 会话忙（正在运行或正在启动）时，新消息不直接入库/触发，改为挂起由 run 循环统一处理
         const sessionBusy = session.running || session.starting;
 
-        // 检查活跃时间定时器
+        // 检查活跃时间定时器 / timer 模式定时器（重载后首个带 ctx 的入口补齐）
         session.checkActiveTimer(ctx);
+        session.ensureModeTimers(ctx);
+        if (session.setting.enabled()) ensureSessionRuleTimers(session, ctx);
 
         const message = msg.message;
         // 核心消息优先：Milky 原生段 → 核心 OB11/CQ 字符串；依赖事件仅在显式传入时使用。
@@ -249,9 +335,9 @@ export class MessagePipeline {
             const supplementTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
             if (supplementTypes.some(type => !CQ_TYPES_ALLOW.includes(type))) return;
             if (sessionBusy) {
-                return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
+                return session.deferReceipt(ctx, msg, messageArray, 'record', undefined, undefined, { updateRef: false }).then(() => session.savePending());
             }
-            return session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true));
+            return session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true));
         }
 
         // 忽略条件（豹语表达式）命中时直接忽略
@@ -276,7 +362,9 @@ export class MessagePipeline {
 
             // poke 事件触发：poke 已被转换为内容部分（[CQ:poke] → poke 段 → [poke:ID]），
             // 先按消息口径入库，再按「事件触发规则」决定是否起轮；命中即跳过后续普通触发，避免双回复。
-            if (hasEventTriggerRules() && (session.setting.standby || Config.base.GLOBAL_STANDBY)) {
+            // 链事件规则与 v1 事件规则共用入口（maybeTriggerEvent 内部先跑链规则）。
+            // 事件触发闸 = aiEnabled（GLOBAL_STANDBY 只放开录制，不放开触发）
+            if ((hasEventTriggerRules() || hasChainEventRules()) && session.setting.enabled()) {
                 const pokeSeg = messageArray.find(item => item.type === 'poke');
                 if (pokeSeg) {
                     const targetRaw = String((pokeSeg.data && (pokeSeg.data.qq || pokeSeg.data.user_id)) || '');
@@ -287,7 +375,7 @@ export class MessagePipeline {
                     const view: EventView = {
                         source: 'poke',
                         postType: 'poke',
-                        eventType: 'notify.poke',
+                        eventType: 'poke',
                         noticeType: 'notify',
                         requestType: '',
                         subType: 'poke',
@@ -317,63 +405,85 @@ export class MessagePipeline {
                 }
             }
 
-            // 非指令消息触发（受会话开关控制）
-            if (session.setting.regexTrigger && triggerRegex.test(messageText)) {
-                const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
-                if (fmtCondition === 1) {
-                    markCoreMessageRecorded(coreMessageKey);
-                    if (sessionBusy) {
-                        return session.deferReceipt(ctx, msg, messageArray, 'trigger').then(() => session.savePending());
-                    }
-                    return session.handleReceipt(ctx, msg, messageArray)
-                        .then(() => session.chat(ctx, msg, '非指令'));
-                }
-            }
-
-            // AI自己设定的触发条件触发
-            if (Object.prototype.hasOwnProperty.call(triggerConditionMap, sid) && triggerConditionMap[sid].length !== 0) {
-                for (let i = 0; i < triggerConditionMap[sid].length; i++) {
-                    const condition = triggerConditionMap[sid][i];
-                    // 关键词正则非法时跳过该条件，避免解析异常中断整条消息处理
-                    let keywordMatched = true;
-                    if (condition.keyword) {
-                        try {
-                            keywordMatched = new RegExp(condition.keyword).test(messageText);
-                        } catch (e) {
-                            log.exception('触发关键词正则错误，已忽略该条件: ' + condition.keyword, e);
-                            keywordMatched = false;
-                        }
-                    }
-                    if (!keywordMatched) {
-                        continue;
-                    }
-                    if (condition.uid && condition.uid !== uid) {
-                        continue;
-                    }
-
-                    markCoreMessageRecorded(coreMessageKey);
-                    if (sessionBusy) {
-                        // 先消费一次性触发条件再挂起，避免条件残留导致下次重复触发
-                        triggerConditionMap[sid].splice(i, 1);
-                        return session.deferReceipt(ctx, msg, messageArray, 'trigger', condition.reason).then(() => session.savePending());
-                    }
-                    return session.handleReceipt(ctx, msg, messageArray)
-                        .then(() => session.context.addSystemUserMessage(condition.reason, SYSTEM_NAME.trigger))
-                        .then(() => triggerConditionMap[sid].splice(i, 1))
-                        .then(() => session.chat(ctx, msg, 'AI设定触发条件'));
-                }
-            }
-
-            // 开启任一模式时
+            // 触发域统一入口（M2）：录入门 = aiEnabled || GLOBAL_STANDBY（全局待机仍入库）；
+            // 触发闸 = aiEnabled（方案 C3：GLOBAL_STANDBY 只记录、不触发）。
+            // 顺序：链规则（AI 工具创建，含 delay 挂起）→ @ → 正则 → AI 一次性条件 → 计数器/概率/延迟 → 评分。
+            // 同一条消息最多一个触发对象：链规则命中（含挂起/认领）后不再走后面的单模式。
             const setting = session.setting;
-            if (setting.standby || Config.base.GLOBAL_STANDBY) {
+            if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
                 markCoreMessageRecorded(coreMessageKey);
+                const aiActive = setting.enabled();
                 if (sessionBusy) {
-                    // 运行中待机消息只挂起入库：计数/概率/计时器一律跳过，不推进、不触发
+                    // 运行中：先做「强触发」轻量判定，命中则挂起为 trigger（轮末补一轮）；
+                    // 计数器/概率/延迟/评分忙时不推进（方案 §5.2 忙判前置）。
+                    const parked = aiActive
+                        ? await parkStrongTriggers(session, ctx, msg, messageArray, messageText, uid, sid, setting, triggerRegex, triggerCondition)
+                        : null;
+                    if (parked) {
+                        return session.deferReceipt(ctx, msg, messageArray, 'trigger', parked.wakeText, parked.systemName).then(() => session.savePending());
+                    }
                     return session.deferReceipt(ctx, msg, messageArray, 'record').then(() => session.savePending());
                 }
                 return session.handleReceipt(ctx, msg, messageArray)
                     .then(async (): Promise<void> => {
+                        // 全局记录模式：只入库，不跑任何触发（避免提示污染与无效判定 LLM 调用）
+                        if (!aiActive) return;
+                        // 静默探针活动记录（默认 [probe] enabled=false ⇒ 零开销/零行为）
+
+                        // 1) 门控链规则（新）：命中即停止后续模式，保证"一条消息只触发一次"
+                        try {
+                            const chain = await runChain({
+                                session,
+                                ctx,
+                                msg,
+                                text: messageText,
+                                userId: uid,
+                                platform: getPlatform(ctx.endPoint.userId),
+                                claimIdentity: msg.rawId ? String(msg.rawId) : undefined,
+                            });
+                            if (chain.status !== 'no-match') return;
+                        } catch (e) {
+                            log.exception('门控链规则求值出错（已跳过）', e);
+                        }
+
+                        // 2) @ 触发（R17：触发页「被@触发」开关，默认开；私聊不触发）
+                        if (Config.trigger.AT_TRIGGER && detectBotMention(messageArray, ctx)) {
+                            await wakeSession(session, ctx, msg, { kind: 'mode', reason: '@', raw: { mode: 'at' } });
+                            return;
+                        }
+
+                        // 3) 正则触发（默认正则已去掉 at CQ，@ 由上面的 at 模式独立判定）
+                        if (setting.regexTrigger && triggerRegex.test(messageText)) {
+                            const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
+                            if (fmtCondition === 1) {
+                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '非指令' });
+                                return;
+                            }
+                        }
+
+                        // 4) AI 自己设定的触发条件（一次性，命中即消费）
+                        if (Object.prototype.hasOwnProperty.call(triggerConditionMap, sid) && triggerConditionMap[sid].length !== 0) {
+                            for (let i = 0; i < triggerConditionMap[sid].length; i++) {
+                                const condition = triggerConditionMap[sid][i];
+                                // 关键词正则非法时跳过该条件，避免解析异常中断整条消息处理
+                                let keywordMatched = true;
+                                if (condition.keyword) {
+                                    try {
+                                        keywordMatched = new RegExp(condition.keyword).test(messageText);
+                                    } catch (e) {
+                                        log.exception('触发关键词正则错误，已忽略该条件: ' + condition.keyword, e);
+                                        keywordMatched = false;
+                                    }
+                                }
+                                if (!keywordMatched) continue;
+                                if (condition.uid && condition.uid !== uid) continue;
+                                triggerConditionMap[sid].splice(i, 1);
+                                await wakeSession(session, ctx, msg, { kind: 'mode', wakeText: condition.reason, reason: 'AI设定触发条件' });
+                                return;
+                            }
+                        }
+
+                        // 5) 计数器 / 概率 / 延迟（旧单模式保留，行为不变；后续并入 trigger 叶）
                         if (setting.counter > -1) {
                             session.context.counter += 1;
                             if (session.context.counter >= setting.counter) {
@@ -394,17 +504,26 @@ export class MessagePipeline {
                         if (setting.timer > -1) {
                             session.context.timer = setTimeout(() => {
                                 session.context.timer = null;
-                                session.chat(ctx, msg, '计时器').catch((e: any) => {
-                                    log.exception('计时器触发对话出错', e);
+                                session.chat(ctx, msg, '延迟').catch((e: any) => {
+                                    log.exception('延迟触发对话出错', e);
                                 });
                             }, setting.timer * 1000 + Math.floor(Math.random() * 500));
                         }
 
+                        // 6) 评分触发：消息立即评估；同会话在飞去重/合并由 L4 调度负责。
                         if (setting.judge) {
-                            await JudgeManager.evaluate(ctx, msg, session, messageText);
+                            decisionSchedule.requestNow({
+                                session,
+                                ctx,
+                                msg,
+                                text: messageText,
+                                source: 'message',
+                                addressed: detectBotMention(messageArray, ctx),
+                                senderId: uid,
+                            });
                         }
                     })
-                    .then(() => session.save(true));   // 合并写：待机群每条消息都会走到这里
+                    .then(() => session.save(true));   // 合并写：开启 AI 的群每条消息都会走到这里
             }
         }
     }
@@ -421,6 +540,8 @@ export class MessagePipeline {
         const session = getSession(sid);
 
         session.checkActiveTimer(ctx);
+        session.ensureModeTimers(ctx);
+        if (session.setting.enabled()) ensureSessionRuleTimers(session, ctx);
 
         const message = msg.message;
         const milkySegments = (msg as any).segment;
@@ -430,10 +551,10 @@ export class MessagePipeline {
         const CQTypes = messageArray.filter(item => item.type !== 'text').map(item => item.type);
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
-            // 待机判定必须同时看全局待机（B3）：只判 setting.standby 会让"全局待机"下指令消息不入库，
+            // 待机判定必须同时看全局待机（B3）：只判 setting.aiEnabled 会让"全局待机"下指令消息不入库，
             // 与会话待机行为不一致（其余入库点如 handleGroupMessage 已是 `standby || GLOBAL_STANDBY`）。
-            if (setting.standby || Config.base.GLOBAL_STANDBY) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
+            if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
+                session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {
                     log.exception('指令消息入库出错', e);
                 });
             }
@@ -448,6 +569,8 @@ export class MessagePipeline {
         const session = getSession(sid);
 
         session.checkActiveTimer(ctx);
+        session.ensureModeTimers(ctx);
+        if (session.setting.enabled()) ensureSessionRuleTimers(session, ctx);
 
         const message = msg.message;
         const milkySegments = (msg as any).segment;
@@ -475,11 +598,21 @@ export class MessagePipeline {
         if (CQTypes.length === 0 || CQTypes.every(item => CQ_TYPES_ALLOW.includes(item))) {
             const setting = session.setting;
             // 同上（B3）：全局待机下机器人自身消息也应入库
-            if (setting.standby || Config.base.GLOBAL_STANDBY) {
-                session.handleReceipt(ctx, msg, messageArray).then(() => session.save(true)).catch((e: any) => {
+            if (setting.enabled() || Config.base.GLOBAL_STANDBY) {
+                session.handleReceipt(ctx, msg, messageArray, { updateRef: false }).then(() => session.save(true)).catch((e: any) => {
                     log.exception('机器人消息入库出错', e);
                 });
             }
         }
     }
 }
+
+// R2 治理装配：决策调度（L4）到期/在飞结束后进入判定内核（L2）。回调注册在 L4 模块加载时完成，
+// 避免 judge（L2）反向依赖 pipeline（L4）；未注册时调度器不产生任何回调（测试/裁剪场景安全）。
+decisionSchedule.setHandler(async (candidate) => {
+    await JudgeManager.evaluate(candidate.ctx, candidate.msg, candidate.session, candidate.text, {
+        source: candidate.source === 'wait' ? 'wait' : 'message',
+        addressed: candidate.addressed === true,
+        senderId: candidate.senderId,
+    });
+});

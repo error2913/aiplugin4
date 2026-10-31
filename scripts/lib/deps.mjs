@@ -121,6 +121,8 @@ const LAYER_RULES = [
     { layer: 1, name: 'L1 纯逻辑', test: (f) => /^src\/memory\/v2\/(types|storage|repository|bank_resolver|templates|prompt|ref|scoring|structured|migrate_v3|access|extract_prompt)\.ts$/.test(f) },
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/config\/(config\.ts|configs\/|apply\/)/.test(f) },
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/(model|resource|transport|memory|utils|web|pub|integration|media|judge|event)\//.test(f) },
+    // 触发域纯能力层（trigger_meta/types/rule/eval/pending/store），只读 utils/config 能力，不摸 session/timer
+    { layer: 2, name: 'L2 能力', test: (f) => /^src\/trigger\//.test(f) },
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/(usage|block|timer)\.ts$/.test(f) },
     { layer: 3, name: 'L3 领域', test: (f) => /^src\/(context|session|prompt|tool|agent|subagent)\//.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/(index|pipeline|trigger|changelog)\.ts$/.test(f) },

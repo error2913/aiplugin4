@@ -10,8 +10,8 @@ export const HOT_HOLD_MS = COLD_AFTER_MS - COOL_DOWN_MS;   // 热态保持 = 9 �
 export type SessionTemperature = 'HOT' | 'COOLING' | 'COLD';
 
 export interface TemperatureInput {
-    /** 本会话 standby 或全局 GLOBAL_STANDBY */
-    standby: boolean;
+    /** 本会话 AI 已开启或全局 GLOBAL_STANDBY（=冷态/仅记录） */
+    aiActive: boolean;
     /** running / starting / activeRuns > 0 */
     busy: boolean;
     lastRelevantAt: number;
@@ -31,7 +31,7 @@ export interface TemperatureInput {
  */
 export function computeSessionState(input: TemperatureInput, touch = true): { state: SessionTemperature; lastRelevantAt: number } {
     let lastRelevantAt = input.lastRelevantAt;
-    if (!input.standby) return { state: 'HOT', lastRelevantAt };
+    if (!input.aiActive) return { state: 'HOT', lastRelevantAt };
     if (input.busy) {
         if (touch) lastRelevantAt = input.now;
         return { state: 'HOT', lastRelevantAt };

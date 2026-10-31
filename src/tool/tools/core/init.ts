@@ -6,6 +6,7 @@ import { registerCoreCommandTool } from "./tool_core_command";
 import { registerDispatchTools } from "./tool_dispatch";
 import { registerTime } from "./tool_time";
 import { registerSetTrigger } from "./tool_trigger";
+import { registerTriggerRuleTools } from "./tool_trigger_rule";
 
 /** 注册 core 下全部核心基础工具（按分类批次包装，供 .ai tool 组概览与组开关使用） */
 export function registerCoreTools() {
@@ -14,4 +15,5 @@ export function registerCoreTools() {
     Tool.withCategory('Commands', registerCoreCommandTool);
     Tool.withCategory('Timers', registerTime);
     Tool.withCategory('Triggers', registerSetTrigger);
+    Tool.withCategory('Triggers', registerTriggerRuleTools);
 }

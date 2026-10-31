@@ -70,13 +70,29 @@ export function buildUserBlockMarker(count: number, totalLength: number, lastMes
     return `\n[${RAW_MARKER_COMPRESSED}: merged ${count} messages, ${totalLength} chars total; ${ref}]`;
 }
 
-/** 工具结果截断标记；完整原文按 tool_call_id 回查 */
+/** 工具结果截断标记；完整原文按 tool_call_id 回查（旧回退路径使用） */
 export function buildToolTruncateMarker(totalLength: number, shownLength: number, toolCallId: string): string {
     return `\n[${RAW_MARKER_TOOL_OUTPUT_TRUNCATED}: ${totalLength} chars, first ${shownLength} shown; ${buildReadRawRef('tool', toolCallId)}]`;
 }
 
+/** token 口径的工具结果截断标记；指针用 tool_call_id（旧回退路径使用） */
+export function buildToolTruncateMarkerTokens(totalTokens: number, shownTokens: number, toolCallId: string): string {
+    return `\n[${RAW_MARKER_TOOL_OUTPUT_TRUNCATED}: ${totalTokens} tokens, first ${shownTokens} shown; ${buildReadRawRef('tool', toolCallId)}]`;
+}
+
+/** token 口径的工具结果截断标记；指针用事件地址 `e:<seq>`（v2 事件账本使用） */
+export function buildToolTruncateMarkerV2(totalTokens: number, shownTokens: number, seq: number): string {
+    return `\n[${RAW_MARKER_TOOL_OUTPUT_TRUNCATED}: ${totalTokens} tokens, first ${shownTokens} shown; read_raw id=e:${seq}]`;
+}
+
+/** 子代理工具结果截断标记：子代理没有 read_raw，只能提示用工具自身分页/收窄查询 */
+export function buildChildToolTruncateMarker(totalTokens: number, shownTokens: number): string {
+    return `\n[${RAW_MARKER_TOOL_OUTPUT_TRUNCATED}: ${totalTokens} tokens, first ${shownTokens} shown; `
+        + `this result is not recoverable here - continue with the tool's own offset/start_index pagination or narrow the query]`;
+}
+
 /**
- * 用户消息"冷态纯代码截断"标记（待机时不调用压缩智能体，只留头留尾）。
+ * 用户消息"冷态纯代码截断"标记（待机时不调用 LLM，只留头留尾）。
  * @param totalLength 截断前原文长度
  * @param shownLength 实际展示（头+尾）长度
  * @param messageId 该条消息 ID（空时提示改用 grep_raw）
@@ -86,6 +102,14 @@ export function buildUserTruncateMarker(totalLength: number, shownLength: number
         ? buildReadRawRef('user', messageId)
         : 'no message id (use grep_raw kind=user)';
     return `\n[${RAW_MARKER_CONTENT_TRUNCATED}: ${totalLength} chars, head+tail ${shownLength} shown; ${ref}]`;
+}
+
+/** token 口径的用户消息截断标记（旧回退路径纯代码截断使用） */
+export function buildUserTruncateMarkerTokens(totalTokens: number, shownTokens: number, messageId: string): string {
+    const ref = messageId
+        ? buildReadRawRef('user', messageId)
+        : 'no message id (use grep_raw kind=user)';
+    return `\n[${RAW_MARKER_CONTENT_TRUNCATED}: ${totalTokens} tokens, head+tail ${shownTokens} shown; ${ref}]`;
 }
 
 /** 图片识别文本截断标记；完整原文按 image_id 回查 */
@@ -145,6 +169,8 @@ export const SYSTEM_NAME = {
     eventTrigger: 'event-trigger',
     /** 事件缺省兜底 */
     event: 'event',
+    /** 触发域统一提示（链规则/单模式/自主源/探针/判定，raw.kind 区分来源） */
+    triggerRule: 'trigger-rule',
 } as const;
 
 export type SystemName = typeof SYSTEM_NAME[keyof typeof SYSTEM_NAME];

@@ -1,7 +1,7 @@
 // 原文检索工具（通用）：读取「展示 ≠ 完整原文」条目的完整原文。
 // 覆盖四种 kind：
-//   tool  —— 工具回调结果超长被截断时保留的 rawText（tool 消息），id=tool_call_id
-//   user  —— 用户消息被压缩（LLM）时保留的 rawText（单条，id=msg_id）或 rawItems（合并块，id=blk:<末条msg_id>）；
+//   tool  —— 旧回退路径工具结果超长被截断时保留的 rawText（tool 消息），id=tool_call_id
+//   user  —— 旧回退路径用户消息截断时保留的 rawText（单条，id=msg_id）或历史合并压缩块的 rawItems（id=blk:<末条msg_id>）；
 //            以及已移出上下文的归档分片（id=arc:<三位序号>，键 session_<id>:arc:<seq>）
 //   image —— 图片识别文本超长被截断时保留的 Image.rawDescription（id=image_id）
 //   event —— 事件条目的完整原始数据 JSON（条目 raw），目录式读取
@@ -333,7 +333,7 @@ function grepUserOutput(session: Session, opts: { pattern?: string; count?: unkn
     const { entryLimit, cap } = capArgs(opts.count, 0, opts.maxChars);
     const entries = collectUserRawEntries(session);
     if (entries.length === 0) {
-        return '当前会话没有保留原文的用户消息（单条消息超过「消息压缩阈值」被压缩、或连续多条合并压缩后才会保留原文）';
+        return '当前会话没有保留原文的用户消息（旧回退路径超长截断、或历史压缩后才会保留原文）';
     }
 
     const output: string[] = [`以下是用户消息原文${EXTERNAL_NOTE}`];
@@ -534,7 +534,7 @@ function readUserById(session: Session, id: string, opts: { msgId?: unknown; sta
     if (block) {
         return `msg_id=${id} 属于用户消息块 ${block.id} 的内层消息：请用 read_raw kind=user id=${block.id} 查看块目录，再带 msg_id=${id} 精确读取`;
     }
-    return `未找到 msg_id=${id} 的用户消息原文（可能该消息未被压缩，或已随消息清理/归档失效）；可先 grep_raw kind=user 查看当前保留的原文条目`;
+    return `未找到 msg_id=${id} 的用户消息原文（可能该消息未被截断/压缩，或已随消息清理/归档失效）；可先 grep_raw kind=user 查看当前保留的原文条目`;
 }
 
 function readImageById(id: string, opts: { startLine?: unknown; maxLines?: unknown; maxChars?: unknown }): string {

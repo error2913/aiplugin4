@@ -1,28 +1,39 @@
 // .ai on：开启 AI 及计数器/计时器/概率/活跃时间模式
 import Config from "../../config/config";
+import { ensureRuleTimersForSession } from "../../pipeline/trigger_timer_impl";
+import type { Session } from "../../session/session";
 import { TimerManager } from "../../timer";
-import { parseActivityTime } from "../../utils/string";
 import { S } from "../privilege";
 import { SubCmd, SubCmdContext } from "../root_cmd";
+
+/** .ai on 按开关重建触发域定时器（§5.9：off 时移除、on 时按定义重建） */
+function rebuildTriggerTimers(session: Session, ctx: seal.MsgContext, sid: string): void {
+    session.checkActiveTimer(ctx);
+    session.ensureModeTimers(ctx);
+    ensureRuleTimersForSession({ sid, isPrivate: ctx.isPrivate, epId: ctx.endPoint.userId });
+}
 
 export function registerCmdOn() {
     const cmd = new SubCmd('on');
     cmd.desc = '开启AI';
     cmd.help = `帮助:
-【.ai on --<参数>=<数字>】
+【.ai on】开启 AI：强制开启正则 + 事件触发（其它模式开关不变）
+【.ai on --<参数>=<数字>】按模式开启
 
 <参数>:
 【r】非指令正则触发开关
 【e】事件触发开关，接收事件后按「事件触发规则」响应
 【c】计数器模式，接收消息数达到后触发
 单位/条，默认10条
-【t】计时器模式，最后一条消息后达到时限触发
+【t】延迟模式，最后一条消息后静默 N 秒触发
 单位/秒，默认60秒
 【p】概率模式，每条消息按概率触发
 单位/%，默认10%
-【a】活跃时间段和活跃次数
+【a】活跃时间段和活跃次数（参数为空时用「触发活跃时间」配置）
 格式为"开始时间-结束时间-活跃次数"(如"09:00-18:00-5")
 【j】评分触发开关，开启后由评分智能体判断是否插话（无参数）
+
+更多模式（at / timer / 链规则）见 .ai trg
 
 【.ai on --t --p=42】使用示例`;
     cmd.priv = { priv: S };
@@ -33,8 +44,11 @@ export function registerCmdOn() {
 
         const kwargs = cmdArgs.kwargs;
         if (kwargs.length == 0) {
+            // M2 语义：on 打开 AI 总闸，并只强制开启 regex/event（其它模式开关保持原值）
+            setting.aiEnabled = true;
             setting.regexTrigger = true;
             setting.eventTrigger = true;
+            rebuildTriggerTimers(session, ctx, sid);
             seal.replyToSender(ctx, msg, 'AI已开启：非指令正则触发、事件触发');
             session.save();
             return ret;
@@ -71,10 +85,13 @@ export function registerCmdOn() {
                     }
                 }
             } else if (name === 'a' || name === 'active') {
-                try {
-                    parseActivityTime(exist ? valStr : Config.trigger.ACTIVE_TIME);
-                } catch (e) {
-                    seal.replyToSender(ctx, msg, e instanceof Error ? e.message : String(e));
+                // C2：活跃时间参数已改为全局「触发活跃时间」，不再接受按会话自定义时段
+                if (exist) {
+                    seal.replyToSender(ctx, msg, '活跃时间已改为全局配置「触发活跃时间」：请用 .ai trg active on（不带值）');
+                    return ret;
+                }
+                if (Config.trigger.ACTIVE_TIME_SEGMENTS.length === 0) {
+                    seal.replyToSender(ctx, msg, '「触发活跃时间」为空，请先在触发页填写时段，再用 .ai trg active on');
                     return ret;
                 }
             }
@@ -85,7 +102,6 @@ export function registerCmdOn() {
             const exist = kwarg.valueExists;
             const valInt = parseInt(kwarg.value);
             const valFloat = parseFloat(kwarg.value);
-            const valStr = kwarg.value.trim();
 
             switch (name) {
                 case 'j':
@@ -129,35 +145,18 @@ export function registerCmdOn() {
                 }
                 case 'a':
                 case 'active': {
-                    try {
-                        // 未提供具体时间时，使用“触发”配置中的默认活跃时间
-                        const [start, end, segs] = parseActivityTime(exist ? valStr : Config.trigger.ACTIVE_TIME);
-
-                        TimerManager.removeTimers(sid, '', ['activeTime'], []);
-                        setting.activeTimeInfo = {
-                            start,
-                            end,
-                            segs,
-                        }
-
-                        text += `\n活跃时间段:${Math.floor(start / 60).toString().padStart(2, '0')}:${(start % 60).toString().padStart(2, '0')}至${Math.floor(end / 60).toString().padStart(2, '0')}:${(end % 60).toString().padStart(2, '0')}`;
-                        text += `\n活跃次数:${segs}`;
-
-                        const curSegIndex = session.curActiveTimeSegIndex;
-                        const nextTimePoint = session.getNextTimePoint(curSegIndex);
-                        if (nextTimePoint !== -1) {
-                            TimerManager.addActiveTimeTimer(ctx, session, nextTimePoint);
-                        }
-                        break;
-                    } catch (e) {
-                        seal.replyToSender(ctx, msg, e instanceof Error ? e.message : String(e));
-                        return ret;
-                    }
+                    // 全局多段活跃时间：开关按会话，参数只来自「触发活跃时间」
+                    setting.activeMode = true;
+                    TimerManager.removeTimers(sid, '', ['activeTime'], []);
+                    session.checkActiveTimer(ctx);
+                    text += `\n活跃时间模式: 开启（全局 ${Config.trigger.ACTIVE_TIME_SEGMENTS.length} 段）`;
+                    break;
                 }
             }
         };
 
-        setting.standby = true;
+        setting.aiEnabled = true;
+        rebuildTriggerTimers(session, ctx, sid);
 
         seal.replyToSender(ctx, msg, text);
         session.save();

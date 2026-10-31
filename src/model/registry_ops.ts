@@ -15,11 +15,13 @@ export interface ModelRegistryHost {
 }
 
 export function isEligible(e: ModelEntry, use: ModelUse): boolean {
+    // 决策模型（System One）只允许 judge 用途；chat/summarization/识图/嵌入/媒体都不选它。
+    if (e.tags.includes('decision')) return use === 'judge';
     if (use === 'text-embedding') return e.tags.includes('embed');
     if (use === 'image-understanding') return e.tags.includes('vision');
     if (use === 'image-generation') return e.tags.includes('gen');
     if (use === 'tts') return e.tags.includes('tts');
-    // chat / compression / summarization / judge：排除嵌入、生图与语音
+    // chat / summarization / judge：排除嵌入、生图与语音
     return !e.tags.includes('embed') && !e.tags.includes('gen') && !e.tags.includes('tts');
 }
 

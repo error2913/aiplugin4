@@ -14,7 +14,7 @@ export function registerCmdToken() {
        【.ai tk [y/m] (chart)】查看所有模型今年/这个月的token使用记录
        【.ai tk <模型名称>】查看模型的token使用记录
        【.ai tk <模型名称> [y/m] (chart)】查看模型今年/这个月的token使用记录
-       【.ai tk use】按**用途**查看用量（chat/compression/summarization/judge…）
+       【.ai tk use】按**用途**查看用量（chat/summarization/judge…）
        【.ai tk clr】清除token使用记录
        【.ai tk clr <模型名称>】清除token使用记录`;
     cmd.priv = {
@@ -268,7 +268,7 @@ export function registerCmdToken() {
        【.ai tk [y/m] (chart)】查看所有模型今年/这个月的token使用记录
        【.ai tk <模型名称>】查看模型的token使用记录
        【.ai tk <模型名称> [y/m] (chart)】查看模型今年/这个月的token使用记录
-       【.ai tk use】按**用途**查看用量（chat/compression/summarization/judge…）
+       【.ai tk use】按**用途**查看用量（chat/summarization/judge…）
        【.ai tk clr】清除token使用记录
        【.ai tk clr <模型名称>】清除token使用记录`);
                 return ret;

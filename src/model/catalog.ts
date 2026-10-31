@@ -11,7 +11,7 @@
 // 手动声明即最终答案，与自动判定冲突时不记日志。当前每条分支恰好产出 1 个标签（数组形态沿用历史结构）。
 // 纯模块：不依赖 seal / Config，便于单元测试。
 
-export type ModelTag = 'text' | 'vision' | 'embed' | 'gen' | 'tts';
+export type ModelTag = 'text' | 'vision' | 'embed' | 'gen' | 'tts' | 'decision';
 
 /**
  * 可手动声明的类型。
@@ -19,7 +19,7 @@ export type ModelTag = 'text' | 'vision' | 'embed' | 'gen' | 'tts';
  * 没有 /models 列表，其「模型名」通常是钉住的自定名，命名白名单识别不到，只能靠 [types] 声明。
  * reranker 仍由命名白名单判定为 gen（属终值语义，不开放声明）。
  */
-export type DeclarableModelTag = 'text' | 'vision' | 'embed' | 'gen' | 'tts';
+export type DeclarableModelTag = 'text' | 'vision' | 'embed' | 'gen' | 'tts' | 'decision';
 
 /** 分类外部证据：manual=手动声明（绝对优先）；vision/embed=接口自报能力位（只取正向证据） */
 export interface ClassifyExtra {
@@ -102,7 +102,8 @@ function matchAny(name: string, patterns: RegExp[]): boolean {
  *
  * 原则（v5）：只对**终值语义**下判断 —— 即"猜错后果严重"的四类
  * （嵌入 / 生图 / 语音 / rerank：误判成对话模型会直接报错或浪费钱）。
- * 视觉不再猜，一律 text，由配置显式声明。
+ * 视觉/决策模型不再猜，一律 text，由配置显式声明 kind。
+ * 决策模型（decision）是专用 System One 后端，只能 judge 用途使用。
  *
  * @param _provider 服务商标识（保留参数以兼容调用点；当前无按厂商的命名特例）
  * @param name      模型名（与平台一致）

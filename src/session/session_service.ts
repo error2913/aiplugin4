@@ -8,6 +8,7 @@ import { getHost } from "../core/host";
 import { getAgent } from "../core/ports/agent_registry";
 import { logger } from "../logger";
 import { revive, TypeDescriptor } from "../utils/revive";
+import { estimateEventTokens as estimateEventTokensShared } from "../utils/token_estimate";
 
 import { pendingKey, sessionStorageKey, writeSessionRecord } from "./persistence";
 import { Session } from "./session";
@@ -44,8 +45,12 @@ export class SessionService {
     getSession(sessionId: string): Session {
         if (!Object.prototype.hasOwnProperty.call(this.sessionMap, sessionId)) {
             let session = new Session();
+            // 旧存档只有 standby 字段：必须在 revive 前保留原始 setting（revive 会按新 validKeysMap 丢弃 standby，
+            // 之后再读恒 undefined，迁移会变成死代码）；真正迁移在 Setting.applyLegacyStandby 里做。
+            let rawSetting: unknown = null;
             try {
                 const data = JSON.parse(getHost().storage.get(sessionStorageKey(sessionId)) || '{}');
+                rawSetting = data?.setting ?? null;
                 session = revive(Session, data);
             } catch (error) {
                 logger.error(`加载会话${sessionId}失败: ${error}`);
@@ -70,6 +75,10 @@ export class SessionService {
             session.context.reviveMessages();
             if (session.memory) session.memory.reviveMemoryMap();
             if (session.setting) session.setting = revive(Setting, session.setting);
+            Setting.applyLegacyStandby(rawSetting, session.setting);
+            // timer 单模式的定时器随 timerQueue 持久化，重载后保留原有（正确）epId/isPrivate；
+            // 这里**不再**用 lastCtx 重建（加载阶段 lastCtx 必为 null，会把 epId 覆写成 sessionId 并自删条目）。
+            // 条目缺失时由首个带 ctx 的消息/指令入口经 session.ensureModeTimers(ctx) 幂等补齐。
             // 同步归属字段，确保 context/memory 能解析到正确的 agent/session
             session.context.agentName = session.agentName;
             session.context.sessionId = session.sessionId;
@@ -91,17 +100,14 @@ export class SessionService {
                             settledSeq: (session.context as unknown as { settledSeq?: number }).settledSeq,
                         }, {
                             parseText: (text) => parseText(text, 'model-output'),
-                            estimateEventTokens: (event: ConversationEvent) => {
-                                const parts = (event as { parts?: Array<{ type: string; text?: string }> }).parts;
-                                if (!parts) return 8;
-                                let chars = 0;
-                                for (const part of parts) if (part.type === 'text') chars += String(part.text || '').length;
-                                return Math.max(1, Math.ceil(chars / 3));
-                            },
+                            estimateEventTokens: (event: ConversationEvent) => estimateEventTokensShared(event),
                         });
                         logger.info(`会话${session.sessionId}上下文已迁移（旧 messages 保留）`);
                     }
-                    session.contextV2 = ContextService.openSync(session.sessionId);
+                    session.contextV2 = ContextService.openSync(session.sessionId, {
+                        // 事件账本/未摘要计数的 token 估算与编译/请求告警同口径（否则中文会话 pending 被低估）
+                        estimateEventTokens: (event: ConversationEvent) => estimateEventTokensShared(event),
+                    });
                 }
             } catch (error) {
                 session.contextV2 = null;

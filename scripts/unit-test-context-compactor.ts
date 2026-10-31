@@ -2,7 +2,7 @@
 // 纯逻辑：注入 summarizer/estimator/时钟；不依赖 seal/store/Config。
 import assert from 'node:assert/strict';
 
-import { Backoff, compactOnce, shouldCompact } from '../src/context/compact/compactor';
+import { Backoff, compactOnce } from '../src/context/compact/compactor';
 import type { CompactDeps, CompactOptions, CompactResult } from '../src/context/compact/compactor';
 import type {
     AssistantEvent,
@@ -207,7 +207,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const result = await runCompact(events, [], head, h);
         assert.equal(result.advanced, true);
         assert.ok(h.calls[0].includes('[unfinished tool calls: c1]'), '不完整组在摘要输入里显式标记');
-        assert.ok(h.calls[0].includes('孤儿结果'), '孤儿结果照常进摘要输入');
+        assert.ok(h.calls[0].includes('[tool result c9]') && h.calls[0].includes('read_raw id=e:2'),
+            '孤儿结果只进元信息 + read_raw 指针');
+        assert.ok(!h.calls[0].includes('孤儿结果'), '工具结果正文不进摘要输入（避免长工具输出被二次加工/挤占预算）');
     },
 
     async testCompactorEmptySummaryDoesNotAdvance() {
@@ -374,19 +376,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(ok.advanced, true);
         assert.equal(ok.record!.fromSeq, 1);
         assert.equal(ok.record!.toSeq, 5);
-    },
-
-    async testCompactorShouldCompact() {
-        const base = makeHead({ nextSeq: 5, summarizedThrough: 2, unsummarizedTokens: 9000 });
-        assert.equal(shouldCompact(base, 6000), true);
-        assert.equal(shouldCompact(base, 9000), true);
-        assert.equal(shouldCompact(base, 9001), false);
-        assert.equal(shouldCompact(base, 0), false, '水位 0 = 关闭');
-        assert.equal(shouldCompact(base, -1), false);
-        assert.equal(shouldCompact(makeHead({ nextSeq: 5, summarizedThrough: 4 }), 1), false, '没有未摘要事件');
-        assert.equal(shouldCompact(makeHead({ nextSeq: 5, summarizedThrough: 5 }), 1), false, '水位越界也不触发');
-        assert.equal(shouldCompact(makeHead({ nextSeq: 1 }), 1), false, '还没有事件');
-        assert.equal(shouldCompact(makeHead({ epochStartSeq: 10, nextSeq: 5 }), 1), false, 'epoch 起点晚于最后事件');
     },
 
     testCompactorBackoff() {

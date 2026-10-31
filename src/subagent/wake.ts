@@ -8,16 +8,16 @@ export interface WakeContext {
     noticeCount: number;
     /** 父会话当前是否有 run 在跑 */
     parentBusy: boolean;
-    /** 会话级待机（setting.standby） */
-    sessionStandby: boolean;
-    /** 全局待机（Config 是否开启全局待机） */
-    globalStandby: boolean;
+    /** 会话级 AI 总闸（setting.aiEnabled） */
+    sessionAiEnabled: boolean;
+    /** 全局待机（Config.base.GLOBAL_STANDBY） */
+    globalAiEnabled: boolean;
 }
 
 export function decideWake(ctx: WakeContext): WakeDecision {
     if (ctx.noticeCount <= 0) return 'defer';
     if (ctx.parentBusy) return 'defer'; // 父在跑：notice 由下一轮 flushNotices 呈现
-    if (ctx.sessionStandby || ctx.globalStandby) return 'defer';
+    if (ctx.sessionAiEnabled || ctx.globalAiEnabled) return 'defer';
     return 'wake';
 }
 

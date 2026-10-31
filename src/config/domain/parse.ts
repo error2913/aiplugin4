@@ -280,6 +280,16 @@ export function parseMcpConfig(text: string): DomainParseResult<McpConfig> {
                 imageRefs = rawCfg.imageRefs;
             }
         }
+        // capability：标准 mcpServers 的扩展字段（当前只认 image-host；非法值 WARN 后忽略，方案 §9.4）
+        let capability: 'image-host' | undefined;
+        if (rawCfg.capability !== undefined && rawCfg.capability !== null) {
+            const value = typeof rawCfg.capability === 'string' ? rawCfg.capability.trim() : '';
+            if (value === 'image-host') {
+                capability = 'image-host';
+            } else {
+                warnings.push(issue(`${path}.capability`, `capability 仅支持 "image-host"，已忽略：${JSON.stringify(rawCfg.capability)}`));
+            }
+        }
         // description：能力地图里的用途描述（可选；非字符串按空处理）
         let description = '';
         if (rawCfg.description !== undefined && rawCfg.description !== null) {
@@ -302,6 +312,7 @@ export function parseMcpConfig(text: string): DomainParseResult<McpConfig> {
             name, platforms, type, url, token, headers,
             ...(description ? { description } : {}),
             ...(imageRefs ? { imageRefs: true } : {}),
+            ...(capability ? { capability } : {}),
             ...(exposeInstructions ? { exposeInstructions: true } : {}),
         });
     }

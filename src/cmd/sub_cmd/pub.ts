@@ -79,7 +79,7 @@ export function registerCmdPub() {
                         addedBy: ctx.player ? ctx.player.userId : '',
                     });
                     seal.replyToSender(ctx, msg,
-                        `已公开当前会话到目录: ${entry.platform} | ${entry.botId} | ${entry.sid} | ${entry.title || '(无标题)'}`);
+                        `已公开当前会话到目录:\n平台: ${entry.platform}\nBot: ${entry.botId}\n会话: ${entry.sid}\n标题: ${entry.title || '(无标题)'}`);
                 } catch (e) {
                     seal.replyToSender(ctx, msg, `公开会话失败: ${e instanceof Error ? e.message : String(e)}`);
                 }

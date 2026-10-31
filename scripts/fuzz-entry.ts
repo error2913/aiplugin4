@@ -71,7 +71,6 @@ svc.agentName = 'default';
     return s;
 };
 Agent.get = ((name: string) => {
-    if (name === 'compress_agent') return { chat: async () => '压' };
     if (name === 'summarize_agent') return { chat: async () => '{"facts":[]}' };
     return { sessionService: svc, chat: async () => '回复' };
 }) as any;
@@ -275,7 +274,7 @@ async function runRound(seed: number, round: number) {
     const s = new Session();
     s.sessionId = sid; s.sessionType = 'group'; s.agentName = 'default';
     (s.context as any).sessionId = sid; (s.context as any).agentName = 'default';
-    s.setting.standby = rnd() < 0.7;
+    s.setting.aiEnabled = rnd() < 0.7;
     // 冷热混合：80% 概率"超过 10 分钟阈值"（冷态），20% 概率刚刚有活动（热态）
     s.lastRelevantAt = rnd() < 0.8
         ? Date.now() - (11 * 60_000 + Math.floor(rnd() * 20 * 60_000))
@@ -337,7 +336,7 @@ async function runRound(seed: number, round: number) {
                 await ctx.settleWindowIfNeeded(Date.now());
             } else if (action < 0.95) {
                 // 状态切换 / 冻结（时序扰动）
-                if (rnd() < 0.5) s.setting.standby = !s.setting.standby;
+                if (rnd() < 0.5) s.setting.aiEnabled = !s.setting.aiEnabled;
                 else s.running = !s.running;
             } else if (action < 0.97) {
                 s.save();

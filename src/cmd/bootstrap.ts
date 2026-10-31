@@ -21,13 +21,12 @@ import { registerCmdPrompt } from "./sub_cmd/prompt";
 import { registerCmdPub } from "./sub_cmd/pub";
 import { registerCmdRole } from "./sub_cmd/role";
 import { registerCmdSkill } from "./sub_cmd/skill";
-import { registerCmdStandby } from "./sub_cmd/standby";
 import { registerCmdStatus } from "./sub_cmd/status";
 import { registerCmdStop } from "./sub_cmd/stop";
 import { registerCmdSubAgent } from "./sub_cmd/subagent";
-import { registerCmdTimer } from "./sub_cmd/timer";
 import { registerCmdToken } from "./sub_cmd/token";
 import { registerCmdTool } from "./sub_cmd/tool";
+import { registerCmdTrg } from "./sub_cmd/trg";
 import { registerCmdTti } from "./sub_cmd/tti";
 import { registerCmdTts } from "./sub_cmd/tts";
 
@@ -42,9 +41,8 @@ export function registerSubCommands(): void {
     registerCmdStatus();
     registerCmdCtx();
     registerCmdLive();
-    registerCmdTimer();
+    registerCmdTrg();
     registerCmdOn();
-    registerCmdStandby();
     registerCmdOff();
     registerCmdRole();
     registerCmdImage();
